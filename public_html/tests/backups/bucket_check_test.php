@@ -70,7 +70,7 @@ check(!BucketCheck::same_bucket('photos', 'https://s3.us-east-005.backblazeb2.co
 check(BucketCheck::same_bucket('photos', '', 'photos', 'https://s3.us-east-005.backblazeb2.com'), 'a host nobody knows is taken as the same');
 check(!BucketCheck::same_bucket('photos', 'x', 'backups', 'x'), 'different names differ');
 check(!BucketCheck::same_bucket('', 'x', '', 'x'), 'two empty names are not a match');
-check(BucketCheck::host('s3.us-east-005.backblazeb2.com') === 's3.us-east-005.backblazeb2.com' && BucketCheck::host('') === '', 'host() takes a bare host and an empty one');
+check(StorageProvider::host('s3.us-east-005.backblazeb2.com') === 's3.us-east-005.backblazeb2.com' && StorageProvider::host('') === '', 'host() takes a bare host and an empty one');
 check(BucketCheck::is_b2('https://s3.us-east-005.backblazeb2.com') && !BucketCheck::is_b2('https://s3.eu-west-1.amazonaws.com'), 'is_b2() by host');
 
 // ── collision, both directions ──────────────────────────────────────

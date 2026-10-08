@@ -27,6 +27,8 @@
  * creates it. Nothing here stores one; the caller hands it straight to the job
  * being dispatched.
  *
+ * @version 1.2 - a minted key's region comes from the one Backblaze region rule (StorageProvider::b2_location());
+ *                deleteKey() and countKeys(), which nothing called, are gone
  * @version 1.1 - authorize() keeps what the key is allowed to do (capabilities, pinned bucket, prefix)
  * @version 1.0
  */
@@ -176,40 +178,16 @@ class B2Client {
 	}
 
 	/**
-	 * Delete a key by id. Best-effort by design: a minted key expires on its
-	 * own, so failing to delete one early is untidy rather than dangerous, and
-	 * a caller that treated it as fatal would fail a finished backup over
-	 * housekeeping.
-	 */
-	public function deleteKey(string $key_id): void {
-		$this->call('b2_delete_key', array('applicationKeyId' => $key_id));
-	}
-
-	/** How many application keys this account currently holds. */
-	public function countKeys(): int {
-		$auth = $this->authorize();
-		$data = $this->call('b2_list_keys', array(
-			'accountId'    => $auth['account_id'],
-			'maxKeyCount'  => 10000,
-		));
-		return count((array)($data['keys'] ?? array()));
-	}
-
-	/**
 	 * The credential array S3Signer takes, for a minted key. Region is derived
 	 * from the S3 endpoint the same way the target's own credential was.
 	 */
 	public function s3CredentialFor(array $minted): array {
-		$auth = $this->authorize();
-		$region = '';
-		if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $auth['s3_endpoint'], $m)) {
-			$region = $m[1];
-		}
+		$loc = StorageProvider::b2_location($this->authorize()['s3_endpoint']);
 		return array(
 			'access_key' => $minted['key_id'],
 			'secret_key' => $minted['application_key'],
-			'region'     => $region,
-			'endpoint'   => $auth['s3_endpoint'],
+			'region'     => $loc['region'],
+			'endpoint'   => $loc['endpoint'],
 		);
 	}
 

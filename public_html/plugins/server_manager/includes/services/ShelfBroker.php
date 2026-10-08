@@ -42,6 +42,7 @@
  * no upload is orphaned by a retry. The figure on the tenant row is the sum
  * of completed rows. The prune pass reconciles the ledger against a listing.
  *
+ * @version 1.3 - links are signed by S3Signer::presign(), the platform's one presigner
  * @version 1.2 - a taken-over row stays completed at its earlier size until
  *   the new run finishes it; a re-signed key aborts the upload its row held
  */
@@ -220,7 +221,7 @@ class ShelfBroker {
 			}
 			list($target, $creds, $bucket) = self::shelf();
 			$key = ($run_id > 0 ? (string)self::runOf($row, $run_id)->get('svr_base_key') : self::tenantPrefix($row, $target)) . $name;
-			return array('url' => ShelfPresigner::get($creds, $bucket, $key, $expires), 'key' => $key, 'expires_at' => $expires_at);
+			return array('url' => S3Signer::presign($creds, $bucket, $key, 'GET', array(), $expires), 'key' => $key, 'expires_at' => $expires_at);
 		}
 
 		$why = self::refusal($row);
@@ -234,11 +235,11 @@ class ShelfBroker {
 		switch ($operation) {
 			case 'put':
 				self::ledgerSigned($row, $run, $key, (int)($args['bytes'] ?? 0), null);
-				return array('url' => ShelfPresigner::put($creds, $bucket, $key, $expires), 'key' => $key, 'expires_at' => $expires_at);
+				return array('url' => S3Signer::presign($creds, $bucket, $key, 'PUT', array(), $expires), 'key' => $key, 'expires_at' => $expires_at);
 
 			case 'multipart_create':
 				self::ledgerSigned($row, $run, $key, (int)($args['bytes'] ?? 0), null);
-				return array('url' => ShelfPresigner::multipartCreate($creds, $bucket, $key, $expires), 'key' => $key, 'expires_at' => $expires_at);
+				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploads' => ''), $expires), 'key' => $key, 'expires_at' => $expires_at);
 
 			case 'multipart_parts':
 				$upload_id = self::uploadId($args);
@@ -253,14 +254,14 @@ class ShelfBroker {
 				self::ledgerUploadId($row, $run, $key, $upload_id);
 				$urls = array();
 				for ($n = $first; $n < $first + $count; $n++) {
-					$urls[$n] = ShelfPresigner::multipartPart($creds, $bucket, $key, $upload_id, $n, $expires);
+					$urls[$n] = S3Signer::presign($creds, $bucket, $key, 'PUT', array('partNumber' => (string)$n, 'uploadId' => $upload_id), $expires);
 				}
 				return array('urls' => $urls, 'key' => $key, 'expires_at' => $expires_at);
 
 			case 'multipart_complete':
 				$upload_id = self::uploadId($args);
 				self::ledgerUploadId($row, $run, $key, $upload_id);
-				return array('url' => ShelfPresigner::multipartComplete($creds, $bucket, $key, $upload_id, $expires), 'key' => $key, 'expires_at' => $expires_at);
+				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploadId' => $upload_id), $expires), 'key' => $key, 'expires_at' => $expires_at);
 		}
 		throw new ShelfBrokerException('Unreachable.');
 	}

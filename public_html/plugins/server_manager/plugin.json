@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.30",
+  "version": "1.30.31",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -586,12 +586,14 @@
       "helptext": "How long a self-hosted site keeps using our outbound mail and backup storage after its paid-through date passes. At the end mail's subaccount is closed and the backup storage broker refuses the site; backup storage is kept 90 days from that day and then pruned. Blank means 14."
     },
     {
-      "name": "server_manager_services_shelf_target_id",
-      "default": "",
+      "name": "server_manager_backup_target_id",
+      "default": "0",
       "group": "services",
-      "label": "Backup storage target",
-      "type": "text",
-      "helptext": "The id of the backup target row whose bucket is the services backup storage: the broker signs every tenant upload against that row's credential, and each tenant lives under its own prefix inside it. Blank means the one enabled target, which is the answer on a plane with exactly one."
+      "label": "Where new backups go",
+      "type": "select",
+      "options_from": "CoreSettingOptions::backupTargets",
+      "options_include": "includes/CoreSettingOptions.php",
+      "helptext": "The backup target every new node and every new customer of backup storage is given. A node keeps the target it was given until it is moved. Chosen on the Backup Targets page, which refuses a target that is switched off."
     },
     {
       "name": "server_manager_services_shelf_keep_chains",

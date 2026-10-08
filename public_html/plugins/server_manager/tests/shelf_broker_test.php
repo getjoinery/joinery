@@ -65,28 +65,28 @@ $creds = array('access_key' => 'AKIAHARNESS', 'secret_key' => 'harness-secret', 
 	'endpoint' => 'https://s3.us-east-005.backblazeb2.com');
 $a = $b = '';
 for ($try = 0; $try < 3; $try++) {
-	$a = ShelfPresigner::get($creds, 'bkt', 'joinery-backups/t1/site/chain-1/files 0.tar.gz.enc', 900);
+	$a = S3Signer::presign($creds, 'bkt', 'joinery-backups/t1/site/chain-1/files 0.tar.gz.enc', 'GET', array(), 900);
 	$b = S3Signer::presign_get($creds, 'bkt', '/joinery-backups/t1/site/chain-1/files 0.tar.gz.enc', 900);
 	if ($a === $b) { break; }
 }
 check($a === $b, 'a GET presigns exactly as S3Signer::presign_get', $a . "\n" . $b);
-$put = ShelfPresigner::put($creds, 'bkt', 'k/one', 900);
+$put = S3Signer::presign($creds, 'bkt', 'k/one', 'PUT', array(), 900);
 check(strpos($put, 'https://s3.us-east-005.backblazeb2.com/bkt/k/one?') === 0 && strpos($put, 'X-Amz-Signature=') !== false,
 	'a PUT URL names the key and carries a signature');
 check($put !== str_replace('X-Amz-Signature=', 'X-Amz-Signature=', $a), 'PUT and GET sign differently');
-$create = ShelfPresigner::multipartCreate($creds, 'bkt', 'k/big', 900);
+$create = S3Signer::presign($creds, 'bkt', 'k/big', 'POST', array('uploads' => ''), 900);
 check(strpos($create, '?X-Amz-Algorithm') !== false && strpos($create, '&uploads=') !== false, 'multipart create carries ?uploads', $create);
-$part = ShelfPresigner::multipartPart($creds, 'bkt', 'k/big', 'up-1', 3, 900);
+$part = S3Signer::presign($creds, 'bkt', 'k/big', 'PUT', array('partNumber' => '3', 'uploadId' => 'up-1'), 900);
 check(strpos($part, 'partNumber=3') !== false && strpos($part, 'uploadId=up-1') !== false, 'a part URL carries partNumber and uploadId');
-$complete = ShelfPresigner::multipartComplete($creds, 'bkt', 'k/big', 'up-1', 900);
+$complete = S3Signer::presign($creds, 'bkt', 'k/big', 'POST', array('uploadId' => 'up-1'), 900);
 check(strpos($complete, 'uploadId=up-1') !== false && strpos($complete, 'partNumber') === false, 'complete carries uploadId only');
 try {
-	ShelfPresigner::presign($creds, 'bkt', 'k/one', 'DELETE');
+	S3Signer::presign($creds, 'bkt', 'k/one', 'DELETE');
 	check(false, 'DELETE is refused');
-} catch (ShelfPresignerException $e) {
+} catch (S3SignerException $e) {
 	check(strpos($e->getMessage(), 'DELETE') !== false, 'the presigner refuses to sign a DELETE');
 }
-check(strpos(ShelfPresigner::put($creds, 'bkt', 'k/one', 10), 'X-Amz-Expires=60') !== false, 'expiry floors at 60 s');
+check(strpos(S3Signer::presign($creds, 'bkt', 'k/one', 'PUT', array(), 10), 'X-Amz-Expires=60') !== false, 'expiry floors at 60 s');
 
 // ── The fixture and the plane's backup storage target ────────────────────────────────
 $fx = s3fx_start();
@@ -107,7 +107,7 @@ $target->set('bkt_path_prefix', 'harness-backups');
 $target->set('bkt_credentials', json_encode($fx_creds));
 $target->save();
 $cleanup[] = array('bkt_backup_targets', 'bkt_backup_target_id', (int)$target->key);
-harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$target->key);
+harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 harness_set_setting_mem('server_manager_hosted_shelf_allowance_gb', '1');
 harness_set_setting_mem('server_manager_services_grace_days', '14');
 

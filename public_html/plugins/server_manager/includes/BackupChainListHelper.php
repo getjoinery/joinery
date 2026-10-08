@@ -11,6 +11,7 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.6 - chains are listed from the target the node names, switched off included; nothing is inferred
  * @version 1.5 - a chain carries its manifest version and each run the level of every artifact that records
  *                one (manifest version 2), so a reader can plan a restore per kind from the listing
  * @version 1.4 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
@@ -69,12 +70,8 @@ class BackupChainListHelper {
 	 * restore points" and "we could not ask" must not look the same.
 	 */
 	public static function for_node($node, $max_chains = 20) {
-		// Resolve backup storage the SAME way the job builder does, so a node that names
-		// no target still has the chains it wrote to the sole enabled backup storage listed
-		// here. Reading the raw mgn_bkt_backup_target_id returned an empty list for
-		// every such node — indistinguishable from "no restore points" when
-		// backups were in fact landing fine. get_target returns only an enabled
-		// target (or null), so no separate bkt_enabled check is needed.
+		// The target the node names, switched on or off: a switched-off target
+		// takes no new backups but its chains stay listable and restorable.
 		$target = JobCommandBuilder::get_target($node);
 		if (!$target) {
 			return ['chains' => [], 'objects' => [], 'error' => null];

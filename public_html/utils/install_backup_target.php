@@ -23,17 +23,19 @@
  *   JOINERY_BACKUP_BUCKET     required — the bucket name
  *   JOINERY_BACKUP_KEY_ID     required — access key id / Backblaze keyID
  *   JOINERY_BACKUP_KEY        required — secret key / Backblaze applicationKey
- *   JOINERY_BACKUP_PROVIDER   optional — b2 (default), s3 or linode
- *   JOINERY_BACKUP_REGION     optional — needed for s3 and linode; Backblaze
- *                             is asked for its own
- *   JOINERY_BACKUP_ENDPOINT   optional — derived from the region for s3 and
- *                             linode when blank
+ *   JOINERY_BACKUP_PROVIDER   optional — b2 (default), or any provider in
+ *                             StorageProvider's catalogue (s3, linode, r2, …)
+ *   JOINERY_BACKUP_REGION     optional — needed where the provider asks for
+ *                             it; Backblaze is asked for its own
+ *   JOINERY_BACKUP_ENDPOINT   optional — derived from the region when the
+ *                             provider names its endpoint that way
  *
  * Prints INSTALL_BACKUP_TARGET=ok or =error as the first line, then key=value
  * lines (reason= on error). Exits 0 on success, 2 on unusable input, 1 when
  * the bucket could not be reached or the write failed. A site that already
  * has a scheduled target is left alone and reports ok with already=1.
  *
+ * @version 1.1 - the providers, and how each names its endpoint, are StorageProvider's catalogue
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') {
@@ -61,23 +63,18 @@ $key      = trim((string)getenv('JOINERY_BACKUP_KEY'));
 $region   = trim((string)getenv('JOINERY_BACKUP_REGION'));
 $endpoint = trim((string)getenv('JOINERY_BACKUP_ENDPOINT'));
 
-if (!in_array($provider, array('b2', 's3', 'linode'), true)) {
-	install_backup_target_fail("'$provider' is not a backup provider this site knows (b2, s3 or linode).", 2);
+if (!StorageProvider::known($provider)) {
+	install_backup_target_fail("'$provider' is not a backup provider this site knows (" . implode(', ', StorageProvider::slugs()) . ').', 2);
 }
 if ($bucket === '' || $key_id === '' || $key === '') {
 	install_backup_target_fail('JOINERY_BACKUP_BUCKET, JOINERY_BACKUP_KEY_ID and JOINERY_BACKUP_KEY are all required.', 2);
 }
-if ($endpoint === '' && $region !== '') {
-	// The two providers whose S3 address is a function of the region. Backblaze
-	// is asked for its own by BackupTarget::complete_credentials.
-	if ($provider === 'linode') {
-		$endpoint = $region . '.linodeobjects.com';
-	} elseif ($provider === 's3') {
-		$endpoint = 's3.' . $region . '.amazonaws.com';
+// What the provider asks for must be here. The rest is filled from the catalogue
+// by BackupTarget::complete_credentials; Backblaze is asked for its own.
+foreach (StorageProvider::asks($provider) as $asked) {
+	if (($asked === 'region' && $region === '') || ($asked === 'endpoint' && $endpoint === '')) {
+		install_backup_target_fail('JOINERY_BACKUP_' . strtoupper($asked) . ' is required for ' . StorageProvider::label($provider) . '.', 2);
 	}
-}
-if ($provider !== 'b2' && ($region === '' || $endpoint === '')) {
-	install_backup_target_fail('JOINERY_BACKUP_REGION is required for ' . $provider . ' (the endpoint is derived from it).', 2);
 }
 
 $settings = Globalvars::get_instance();

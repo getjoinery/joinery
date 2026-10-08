@@ -6,6 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.11 - a saved backup target is made the scheduled one by save_target itself; the newest-enabled guess is gone
  * @version 2.10 - the Calendar step's protection level (action calendar_level)
  * @version 2.9.1
  * @changelog 2.9.1 - services_disconnect releases both services, mail and shelf
@@ -216,20 +217,8 @@ function setup_logic(array $input): LogicResult {
 	if (in_array($action, $backup_actions, true)) {
 		require_once(PathHelper::getIncludePath('adm/logic/admin_backups_logic.php'));
 		$result = admin_backups_logic(array_merge($input, array('return_to' => '/setup')));
-		if ($action === 'save_target') {
-			if ((int)$settings->get_setting('backup_target_id') === 0) {
-				// One-go: a first target becomes the scheduled target immediately,
-				// instead of leaving a second choice for later.
-				$targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_backup_target_id' => 'DESC'), 1);
-				foreach ($targets as $target) {
-					Setting::put('backup_target_id', (string)(int)$target->key);
-					break;
-				}
-			}
-			// The target may have been the last missing half (key already
-			// proven) — nightly runs need no button of their own.
-			BackupNightly::maybe_activate();
-		}
+		// A first target becomes the scheduled one inside save_target itself,
+		// named by the save that made it.
 		SetupSteps::invalidateSessionCache();
 		return $result;
 	}

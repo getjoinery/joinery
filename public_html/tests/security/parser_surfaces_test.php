@@ -47,7 +47,6 @@ $allowed = array(
 	'includes/ReleaseVerifier.php'                       => 'utils/verify_release.php only, a CLI never in a request: the agent binaries of a release it is checking against that release\'s statement',
 	'plugins/server_manager/includes/publish_upgrade.php' => 'the archive we are building',
 	'includes/EmailTemplateRenderer.php'                         => 'the deployment\'s own email templates',
-	'includes/TargetLister.php'                          => 'a provider API response under our own credentials',
 	'includes/dns/drivers/NamecheapDnsDriver.php'        => 'the DNS provider\'s API response under our own credentials',
 	'plugins/server_manager/includes/domain_registrar/NamecheapRegistrar.php' => 'the registrar\'s API response under our own credentials',
 	'plugins/mailbox/includes/import/ZipReader.php'      => 'an archive the owner uploaded to import, once, under their eye',

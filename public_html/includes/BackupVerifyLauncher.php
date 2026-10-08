@@ -19,6 +19,7 @@
  * level in the background the way Run now starts a backup, and the result
  * lands on the run's own history row where Recent backups shows it.
  *
+ * @version 1.3 - a run is verified on the target it went to (BackupRunner::plan_for_run()), not the one configured now
  * @version 1.2 - offloaded files travel with the request (specs/implemented/backup_offloaded_files.md § Verification):
  *                the run's index is read from backup storage, a link is signed for each epoch envelope it
  *                names, and a rehearsal's request also carries the sample — object_links() is the
@@ -137,8 +138,9 @@ class BackupVerifyLauncher {
 		if (!preg_match('/^chain-[0-9_]+$/', $chain_id)) {
 			throw new BackupVerifyLauncherException('That backup is not part of a set this site can verify.');
 		}
+		// The run is read where it went, never from the target configured now.
 		try {
-			$plan = BackupRunner::plan(array('profile' => BackupProfile::SITE));
+			$plan = BackupRunner::plan_for_run($run);
 		} catch (BackupRunnerException $e) {
 			throw new BackupVerifyLauncherException($e->getMessage());
 		}

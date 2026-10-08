@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.53 - the backup target select lists every target not deleted (the node's own even when switched
+ *                 off, so a save never clears it), blank says Local only and means it, and providers show
+ *                 by label (specs/storage_targets.md S10)
  * @version 1.52 - a node with no record of its cloud server has Adopt cloud server where Reverse DNS would be
  *                (test_cloud_account_and_prod_management WP9)
  * @version 1.51 - a Docker host's Site containers has Change a site's limits (memory, CPU ceiling, disk
@@ -1856,7 +1859,7 @@
 		try {
 			$target = new BackupTarget($target_id, TRUE);
 			$conn_row('Backup target',
-				'<a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars($target->get('bkt_provider')) . ')</span>'
+				'<a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars(StorageProvider::label($target->get('bkt_provider'))) . ($target->get('bkt_enabled') ? '' : ', switched off') . ')</span>'
 			);
 		} catch (Exception $e) {}
 	}
@@ -2157,23 +2160,25 @@
 
 	echo '<h6 class="text-muted mt-4 mb-3">Backup Settings</h6>';
 
-	// Target dropdown (manual since FormWriter doesn't have a model-aware FK dropdown)
-	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-	$all_targets = new MultiBackupTarget(['deleted' => false, 'enabled' => true], ['bkt_name' => 'ASC']);
-	$all_targets->load();
-	$current_target_id = $node->get('mgn_bkt_backup_target_id');
-
-	echo '<div class="mb-3">';
-	echo '<label class="form-label">Backup Target</label>';
-	echo '<select name="mgn_bkt_backup_target_id" class="form-select">';
-	echo '<option value="">Local only (no cloud upload)</option>';
-	foreach ($all_targets as $d) {
-		$sel = ($d->key == $current_target_id) ? ' selected' : '';
-		echo '<option value="' . $d->key . '"' . $sel . '>' . htmlspecialchars($d->get('bkt_name')) . ' (' . $d->get('bkt_provider') . ')</option>';
+	// Every target not deleted. The node's own is always listed, switched off
+	// or not, so saving the form never clears it; a switched-off target cannot
+	// be newly chosen (the save refuses it). Blank is exactly what it says:
+	// nothing is inferred from the enabled targets (specs/storage_targets.md R6).
+	$target_options = ['' => 'None (this management node takes no backups of it)'];
+	$current_target_id = (int)$node->get('mgn_bkt_backup_target_id');
+	foreach (new MultiBackupTarget(['deleted' => false], ['bkt_name' => 'ASC']) as $d) {
+		if (!$d->get('bkt_enabled') && (int)$d->key !== $current_target_id) {
+			continue;
+		}
+		$target_options[(string)(int)$d->key] = $d->get('bkt_name') . ' (' . StorageProvider::label($d->get('bkt_provider')) . ')'
+			. ($d->get('bkt_enabled') ? '' : ' — switched off');
 	}
-	echo '</select>';
-	echo '<small class="text-muted">Where to upload backups after creation. <a href="/admin/server_manager/targets">Manage targets</a></small>';
-	echo '</div>';
+	$formwriter->dropinput('mgn_bkt_backup_target_id', 'Backup target', [
+		'options'  => $target_options,
+		'value'    => $current_target_id ? (string)$current_target_id : '',
+		'helptext' => 'Where this node\'s backups go.',
+	]);
+	echo '<p class="small mb-3"><a href="/admin/server_manager/targets">Manage targets</a></p>';
 
 	$formwriter->checkboxinput('mgn_delete_local_after_upload', 'Delete local backup after upload', [
 		'checked' => $node->get('mgn_delete_local_after_upload'),

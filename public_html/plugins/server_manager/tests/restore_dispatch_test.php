@@ -207,7 +207,7 @@ try {
 		'profile'    => 'site',
 		'cloud_path' => 'joinery-backups/testnode/manager/db.sql.gz.enc'));
 } catch (Exception $e) { $mismatch = $e->getMessage(); }
-if (strpos($mismatch, 'no enabled cloud backup target') !== false) {
+if (strpos($mismatch, 'names no backup target') !== false) {
 	// Backup storage is resolved before the key is checked, so a box with no target
 	// configured cannot reach this. Reported as skipped rather than passing on
 	// the wrong refusal.

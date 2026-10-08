@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.68 - a comment names S3Signer::list() (TargetLister is folded into it)
  * @version 1.67 - host reports keep root_ssh (host_report 1.16): root's public keys and fingerprints; only bare keys are carryable
  * @version 1.66 - host reports keep up to 100 site containers and 100 sites' outbound figures
  *                 (HOST_REPORT_MAX_SITES, host_report 1.15), not 20: a multi-tenant host takes 50;
@@ -2124,7 +2125,7 @@ HTML;
 
 	/**
 	 * Parse list_backups output into a local-file list. Cloud listings are
-	 * fetched web-server-side at display time via TargetLister, merged by
+	 * fetched web-server-side at display time via S3Signer::list(), merged by
 	 * BackupListHelper.
 	 *
 	 * Handles both transports:

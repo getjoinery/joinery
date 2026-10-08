@@ -278,7 +278,7 @@ $target->set('bkt_credentials', json_encode(array('access_key' => 'AKIA-harness'
 	'region' => 'us-east-1', 'endpoint' => 'https://s3.example')));
 $target->save();
 $cleanup_bkt[] = (int)$target->key;
-harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$target->key);
+harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 
 $shelf = JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
 $shelf_row = $track(ServiceTenant::forKey($key_id, 'shelf'));
@@ -299,14 +299,14 @@ check(strpos($flat, 'AKIA-harness') === false && strpos($flat, 'harness-secret')
 check($shelf['allowance'] === 10 * 1073741824 && $shelf['allowance_label'] === '10 GB', 'backup storage allowance is in bytes');
 check(count($drain()) === 0, 'backup storage touches no mail provider');
 
-harness_set_setting_mem('server_manager_services_shelf_target_id', '999999999');
+harness_set_setting_mem('server_manager_backup_target_id', '999999999');
 try {
 	JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
 	check(false, 'a missing backup storage target refuses');
 } catch (JoineryServicesException $e) {
 	check(strpos($e->getMessage(), 'no backup storage target') !== false, 'a missing backup storage target refuses with a sentence');
 }
-harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$target->key);
+harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 
 // ---------------------------------------------------------------------------
 section('release: the subaccount closes, the retention clock starts');

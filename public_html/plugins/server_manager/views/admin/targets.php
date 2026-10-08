@@ -3,8 +3,14 @@
  * Server Manager - Backup Targets
  * URL: /admin/server_manager/targets
  *
- * CRUD page for managing backup storage targets (B2, S3, Linode).
+ * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.14 - Where new backups go is drawn by SettingsFieldRenderer from its declaration (a page may not
+ *                 draw a declared setting's field itself)
+ * @version 2.13 - Where new backups go (server_manager_backup_target_id), chosen here among the targets switched
+ *                 on; a delete is refused while the target is used (BackupTarget::delete_refusal())
+ * @version 2.12 - the form and its save are BackupTargetForm, the one target form the core Backups page and
+ *                 the setup wizard also draw; this page adds the node key and per-run key fields
  * @version 2.11 - a provider change, or a provider with no node key, drops the stored node key
  * @version 2.10 - a Linode endpoint is checked (BackupTarget::credential_problem) before the target is tested or saved
  * @version 2.9 - the Stored Backups sizes use BackupRunner::human() (decimal units, as the provider bills)
@@ -74,12 +80,44 @@ if ($post_action === 'test_target' && $is_edit) {
 
 if ($post_action === 'delete_target' && $is_edit) {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
-	$target->soft_delete();
 	$page_regex = '/\/admin\/server_manager/';
+	$refusal = $target->delete_refusal();
+	if ($refusal !== '') {
+		$session->save_message(new DisplayMessage(
+			'Not deleted. ' . $refusal, 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+		header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
+		exit;
+	}
+	$target->soft_delete();
 	$session->save_message(new DisplayMessage(
 		'Target deleted.', 'Success', $page_regex,
 		DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
+	header('Location: /admin/server_manager/targets');
+	exit;
+}
+
+// Where new backups go: the target every new node and every new customer of
+// backup storage is given. A choice, never inferred (specs/storage_targets.md R6).
+if ($post_action === 'save_default_target') {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	$page_regex = '/\/admin\/server_manager/';
+	$chosen = new BackupTarget((int)($_POST['server_manager_backup_target_id'] ?? 0), TRUE);
+	if (!$chosen->key || $chosen->get('bkt_delete_time') || !$chosen->get('bkt_enabled')) {
+		$session->save_message(new DisplayMessage(
+			'Not saved. New backups can only go to a target that is switched on.', 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	} else {
+		Setting::put('server_manager_backup_target_id', (string)(int)$chosen->key);
+		$session->save_message(new DisplayMessage(
+			'New nodes and new customers of backup storage now back up to "' . $chosen->get('bkt_name')
+				. '". Nodes already backing up stay where they are until they are moved.',
+			'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+		));
+	}
 	header('Location: /admin/server_manager/targets');
 	exit;
 }
@@ -129,7 +167,8 @@ if ($post_action === 'delete_backup_object' && $is_edit) {
 	exit;
 }
 
-// Handle form save
+// Handle form save: the one target form and save path (BackupTargetForm), with
+// this management node's node key and per-run key fields.
 $error = null;
 if ($_POST && isset($_POST['bkt_name'])) {
 	// Same CSRF gate as every other mutation on this page: this handler writes
@@ -138,213 +177,17 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	if (!$target) {
 		$target = new BackupTarget(NULL);
 	}
-
-	// A stored secret belongs to the provider it was saved under; switching
-	// provider starts that provider's fields from nothing.
-	$old_provider = $target->key ? $target->get('bkt_provider') : null;
-	$target->set('bkt_name', trim($_POST['bkt_name'] ?? ''));
-	$target->set('bkt_provider', trim($_POST['bkt_provider'] ?? 'b2'));
-	$target->set('bkt_bucket', trim($_POST['bkt_bucket'] ?? ''));
-	$target->set('bkt_path_prefix', trim($_POST['bkt_path_prefix'] ?? 'joinery-backups'));
-	$target->set('bkt_enabled', isset($_POST['bkt_enabled']) ? true : false);
-
-	// Secret fields are never prefilled (S-5): a stored one is a locked field,
-	// which is not posted and keeps the stored secret; after Reset, blank
-	// removes it and text replaces it (FormWriterV2Base::process_secretinput()).
-	// Undecryptable stored credentials mean there is nothing to keep — surface
-	// that instead of silently merging with nothing.
-	try {
-		$existing_creds = ($target->key ? $target->get_credentials() : []);
-	} catch (BackupTargetException $e) {
-		$existing_creds = [];
-		$error = $e->getMessage() . ' Re-enter BOTH the access key and the secret to replace them.';
-	}
-
-	// Build credentials JSON — canonical shape for all providers:
-	// {access_key, secret_key, region, endpoint}
-	$provider = $target->get('bkt_provider');
-	$secret_fields = ['b2' => 'cred_app_key', 's3' => 'cred_s3_secret_key', 'linode' => 'cred_linode_secret_key'];
-	$main_stored = !empty($existing_creds['secret_key']) && $old_provider === $provider;
-	list($main_what, $main_secret) = FormWriterV2Base::process_secretinput(
-		$_POST, $secret_fields[$provider] ?? '', $main_stored);
-	$keep_main = ($main_what === FormWriterV2Base::SECRET_KEEP && $main_stored);
-	$new_secret = ($main_what === FormWriterV2Base::SECRET_SET) ? $main_secret : '';
-	$creds = [];
-	if ($provider === 'b2') {
-		// User enters B2 applicationKeyId + applicationKey. Detect the S3-compat
-		// endpoint automatically via b2_authorize_account; store unified shape.
-		$key_id = trim($_POST['cred_key_id'] ?? '');
-		$app_key = $new_secret;
-		if ($keep_main) {
-			// Kept: preserve stored B2 credentials (and the detected
-			// region/endpoint) verbatim; do not re-authorize. A changed key ID
-			// with a kept secret still keeps the stored secret.
-			$creds = $existing_creds;
-			if ($key_id !== '') { $creds['access_key'] = $key_id; }
-		} else {
-			$b2_region = '';
-			$b2_endpoint = '';
-			if ($key_id !== '' && $app_key !== '') {
-				$ch = curl_init('https://api.backblazeb2.com/b2api/v3/b2_authorize_account');
-				curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-				curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . base64_encode($key_id . ':' . $app_key)]);
-				curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-				$body = curl_exec($ch);
-				$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-				if ($status === 200 && ($data = json_decode($body, true))) {
-					$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
-					if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {
-						$b2_region = $m[1];
-						$b2_endpoint = $s3_url;
-					}
-				}
-			}
-			$creds = [
-				'access_key' => $key_id,
-				'secret_key' => $app_key,
-				'region' => $b2_region,
-				'endpoint' => $b2_endpoint,
-			];
-		}
-	} elseif ($provider === 's3') {
-		$region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
-		$secret = $keep_main ? $existing_creds['secret_key'] : $new_secret;
-		$creds = [
-			'access_key' => trim($_POST['cred_s3_access_key'] ?? ''),
-			'secret_key' => $secret,
-			'region' => $region,
-			'endpoint' => 'https://s3.' . $region . '.amazonaws.com',
-		];
-	} elseif ($provider === 'linode') {
-		$linode_secret = $keep_main ? $existing_creds['secret_key'] : $new_secret;
-		$creds = [
-			'access_key' => trim($_POST['cred_linode_access_key'] ?? ''),
-			'secret_key' => $linode_secret,
-			'region' => trim($_POST['cred_linode_region'] ?? ''),
-			'endpoint' => trim($_POST['cred_linode_endpoint'] ?? ''),
-		];
-		$field_problem = BackupTarget::credential_problem('linode', $creds);
-		if ($field_problem !== '' && $error === null) {
-			$error = 'Not saved. ' . $field_problem;
-		}
-	}
-	$target->set('bkt_credentials', json_encode($creds));
-	// Only B2 can mint; anywhere else the flag is off whatever the box said,
-	// so a provider change does not leave a target claiming a capability its
-	// provider has not got.
-	$target->set('bkt_mint_run_keys', $provider === 'b2' && !empty($_POST['bkt_mint_run_keys']));
-
-	// Node (write-only) credential — an optional second key handed to nodes
-	// during a backup run in place of the delete-capable one above. A stored
-	// one is a locked field like the main secret; Reset and save blank removes
-	// it, and nodes go back to receiving the main credential.
-	try {
-		$existing_node = ($target->key ? $target->get_node_credentials() : []);
-	} catch (BackupTargetException $e) {
-		$existing_node = [];
-	}
-	$node_fields = ['b2' => 'node_cred_app_key', 's3' => 'node_cred_s3_secret_key'];
-	// A node key belongs to the provider it was made at. A provider change, or a
-	// provider with no node key at all (Linode), leaves none behind: a stale one
-	// fails the save's own connection test and would be handed to nodes.
-	if ($old_provider !== $provider || !isset($node_fields[$provider])) {
-		$target->set('bkt_node_credentials', null);
-	}
-	$node_stored = !empty($existing_node['secret_key']) && $old_provider === $provider;
-	$node_what = FormWriterV2Base::SECRET_KEEP;
-	$node_secret = '';
-	if (isset($node_fields[$provider])) {
-		list($node_what, $node_secret) = FormWriterV2Base::process_secretinput(
-			$_POST, $node_fields[$provider], $node_stored);
-	}
-	$keep_node = ($node_what === FormWriterV2Base::SECRET_KEEP && $node_stored);
-	if ($node_what === FormWriterV2Base::SECRET_CLEAR) {
-		$target->set('bkt_node_credentials', null);
-	} elseif ($provider === 'b2') {
-		$nk_id  = trim($_POST['node_cred_key_id'] ?? '');
-		$nk_key = (string)$node_secret;
-		if ($keep_node) {
-			$node_creds = $existing_node;
-			if ($nk_id !== '') { $node_creds['access_key'] = $nk_id; }
-			$target->set('bkt_node_credentials', json_encode($node_creds));
-		} elseif ($nk_id !== '' && $nk_key !== '') {
-			// Same bucket, so the endpoint detection matches the main key's.
-			$nb_region = '';
-			$nb_endpoint = '';
-			$ch = curl_init('https://api.backblazeb2.com/b2api/v3/b2_authorize_account');
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-			curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . base64_encode($nk_id . ':' . $nk_key)]);
-			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-			$body = curl_exec($ch);
-			$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-			if ($status === 200 && ($data = json_decode($body, true))) {
-				$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
-				if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {
-					$nb_region = $m[1];
-					$nb_endpoint = $s3_url;
-				}
-			}
-			$target->set('bkt_node_credentials', json_encode([
-				'access_key' => $nk_id,
-				'secret_key' => $nk_key,
-				'region'     => $nb_region,
-				'endpoint'   => $nb_endpoint,
-			]));
-		}
-	} elseif ($provider === 's3') {
-		$ns_access = trim($_POST['node_cred_s3_access_key'] ?? '');
-		$ns_secret = (string)$node_secret;
-		if ($keep_node) {
-			$node_creds = $existing_node;
-			if ($ns_access !== '') { $node_creds['access_key'] = $ns_access; }
-			$target->set('bkt_node_credentials', json_encode($node_creds));
-		} elseif ($ns_access !== '' && $ns_secret !== '') {
-			$ns_region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
-			$target->set('bkt_node_credentials', json_encode([
-				'access_key' => $ns_access,
-				'secret_key' => $ns_secret,
-				'region'     => $ns_region,
-				'endpoint'   => 'https://s3.' . $ns_region . '.amazonaws.com',
-			]));
-		}
-	}
-	// Linode: no node credential — its keys cannot express write-without-delete.
-
-	if (!isset($_POST['bkt_enabled'])) {
-		$target->set('bkt_enabled', false);
-	}
-
-	try {
-		if ($error !== null) {
-			throw new Exception($error); // undecryptable stored creds — do not save a silent merge-with-nothing
-		}
-		// Proven before it is saved: an enabled target that cannot do its job
-		// is not saved at all, and the form says why with the values kept. A
-		// disabled target is saved untested; enabling it is a save, and that
-		// save tests it.
-		$test_result = null;
-		if ($target->get('bkt_enabled')) {
-			$test_result = TargetTester::test($target);
-			if (!$test_result['success']) {
-				throw new Exception('Not saved. ' . $test_result['message']);
-			}
-		}
-		$target->prepare();
-		$target->save();
-		$target->load();
-
-		$page_regex = '/\/admin\/server_manager/';
+	$saved = BackupTargetForm::save($target, $_POST, ['node_credentials' => true]);
+	if ($saved['ok']) {
 		$session->save_message(new DisplayMessage(
-			'Target saved. ' . ($test_result ? $test_result['message'] : 'It is disabled, so it was not tested; enabling it tests it.'),
-			'Success', $page_regex,
+			$saved['message'], 'Success', '/\/admin\/server_manager/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 		));
 		header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
 		exit;
-	} catch (Exception $e) {
-		$error = $e->getMessage();
-		$is_edit = $target->key ? true : false;
 	}
+	$error = $saved['message'];
+	$is_edit = $target->key ? true : false;
 }
 
 // Load all targets for listing
@@ -449,8 +292,6 @@ if ($rk_rows) {
 }
 
 // ── Target List ──
-$provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
-
 $pageoptions = ['title' => 'Backup Targets', 'altlinks' => ['Add Target' => '/admin/server_manager/targets?action=add']];
 $page->begin_box($pageoptions);
 
@@ -461,8 +302,7 @@ echo '<tbody>';
 $target_count = 0;
 foreach ($all_targets as $t) {
 	$target_count++;
-	$prov = $t->get('bkt_provider');
-	$prov_label = $provider_labels[$prov] ?? $prov;
+	$prov_label = StorageProvider::label($t->get('bkt_provider'));
 	$enabled = $t->get('bkt_enabled');
 	echo '<tr>';
 	echo '<td><a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $t->key . '">' . htmlspecialchars($t->get('bkt_name')) . '</a></td>';
@@ -485,180 +325,51 @@ if ($target_count === 0) {
 }
 
 echo '</tbody></table>';
+
+// ── Where new backups go ──
+$default_id = (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true);
+$default_options = [];
+foreach ($all_targets as $t) {
+	if ($t->get('bkt_enabled') || (int)$t->key === $default_id) {
+		$default_options[(string)(int)$t->key] = $t->get('bkt_name') . ($t->get('bkt_enabled') ? '' : ' (switched off)');
+	}
+}
+if ($default_options) {
+	if (!isset($default_options[(string)$default_id])) {
+		echo '<div class="alert alert-warning">Choose where new backups go. Until you do, a new node backs up on its own disk only, '
+			. 'and backup storage for customers has nowhere to put anything.</div>';
+	}
+	$fdef = $page->getFormWriter('default_target_form');
+	$fdef->begin_form();
+	echo SmAdminCsrf::field();
+	$fdef->hiddeninput('action', '', ['value' => 'save_default_target']);
+	// A declared setting is drawn by its declaration; this page only narrows
+	// the choices to the targets switched on (and the current one).
+	$skip = [];
+	foreach ($all_targets as $t) {
+		if (!isset($default_options[(string)(int)$t->key])) { $skip[] = (string)(int)$t->key; }
+	}
+	if (isset($default_options[(string)$default_id])) { $skip[] = '0'; }
+	SettingsFieldRenderer::renderGroup($fdef, 'services', [
+		'source'        => 'server_manager',
+		'only'          => ['server_manager_backup_target_id'],
+		'values'        => ['server_manager_backup_target_id' => (string)$default_id],
+		'field_options' => ['server_manager_backup_target_id' => ['skip_options' => $skip]],
+	]);
+	$fdef->submitbutton('btn_default_target', 'Save', ['class' => 'btn btn-sm btn-outline-primary']);
+	$fdef->end_form();
+}
 $page->end_box();
 
 // ── Add/Edit Form ──
 if ($target !== null) {
-	try {
-		$creds = $target->key ? $target->get_credentials() : [];
-	} catch (BackupTargetException $e) {
-		$creds = [];
-		echo '<div class="alert alert-danger">' . htmlspecialchars($e->getMessage()) . ' Re-enter both credential fields to replace them.</div>';
-	}
-	$current_provider = $target->get('bkt_provider') ?: 'b2';
-
-	$has_node_creds = $is_edit && $target->has_node_credentials();
-	try {
-		$node_creds = $has_node_creds ? $target->get_node_credentials() : [];
-	} catch (BackupTargetException $e) {
-		$node_creds = [];
-	}
-
-	// Whether a secret is stored is read from the saved row, never from this
-	// request's unsaved copy: a refused save must not draw a typed key as saved.
-	$saved_target = $target->key ? new BackupTarget($target->key, TRUE) : null;
-	$saved_provider = $saved_target ? $saved_target->get('bkt_provider') : null;
-	try {
-		$main_secret_stored = $saved_target && !empty($saved_target->get_credentials()['secret_key']);
-	} catch (BackupTargetException $e) {
-		$main_secret_stored = false;
-	}
-	try {
-		$node_secret_stored = $saved_target && $saved_target->has_node_credentials()
-			&& !empty($saved_target->get_node_credentials()['secret_key']);
-	} catch (BackupTargetException $e) {
-		$node_secret_stored = false;
-	}
-	$secret_stored_for = function ($provider, $which) use ($saved_provider, $main_secret_stored, $node_secret_stored) {
-		if ($saved_provider !== $provider) return false;
-		return $which === 'node' ? $node_secret_stored : $main_secret_stored;
-	};
-
 	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
-	$pageoptions = ['title' => $form_title];
-	$page->begin_box($pageoptions);
+	$page->begin_box(['title' => $form_title]);
 
-	$formwriter = $page->getFormWriter('target_form', [
-		'values' => [
-			'bkt_name'               => $target->get('bkt_name') ?: '',
-			'bkt_provider'           => $current_provider,
-			'bkt_bucket'             => $target->get('bkt_bucket') ?: '',
-			'bkt_path_prefix'        => $target->get('bkt_path_prefix') ?: 'joinery-backups',
-			'cred_key_id'            => $creds['access_key'] ?? '',
-			'cred_s3_access_key'     => $current_provider === 's3' ? ($creds['access_key'] ?? '') : '',
-			'cred_s3_region'         => $current_provider === 's3' ? ($creds['region'] ?? 'us-east-1') : 'us-east-1',
-			'cred_linode_access_key' => $current_provider === 'linode' ? ($creds['access_key'] ?? '') : '',
-			'cred_linode_region'     => $current_provider === 'linode' ? ($creds['region'] ?? '') : '',
-			'cred_linode_endpoint'   => $current_provider === 'linode' ? ($creds['endpoint'] ?? '') : '',
-			'node_cred_key_id'        => $current_provider === 'b2' ? ($node_creds['access_key'] ?? '') : '',
-			'node_cred_s3_access_key' => $current_provider === 's3' ? ($node_creds['access_key'] ?? '') : '',
-		],
-	]);
-
+	$formwriter = $page->getFormWriter('target_form');
 	$formwriter->begin_form();
 	echo SmAdminCsrf::field();
-	if ($is_edit) {
-		$formwriter->hiddeninput('edit_primary_key_value', '', ['value' => $target->key]);
-	}
-
-	$formwriter->textinput('bkt_name', 'Name', [
-		'required'    => true,
-		'placeholder' => 'e.g., Production B2',
-	]);
-	$formwriter->dropinput('bkt_provider', 'Provider', [
-		'options'       => $provider_labels,
-		'custom_script' => "
-			var p = this.value;
-			document.getElementById('b2Fields').hidden       = p !== 'b2';
-			document.getElementById('s3Fields').hidden       = p !== 's3';
-			document.getElementById('linodeFields').hidden   = p !== 'linode';
-			document.getElementById('nodeCredB2').hidden     = p !== 'b2';
-			document.getElementById('nodeCredS3').hidden     = p !== 's3';
-			document.getElementById('nodeCredLinode').hidden = p !== 'linode';
-			document.getElementById('mintRunKeys').hidden   = p !== 'b2';
-		",
-	]);
-	$formwriter->textinput('bkt_bucket', 'Bucket Name', [
-		'placeholder' => 'my-backup-bucket',
-	]);
-	$formwriter->textinput('bkt_path_prefix', 'Path Prefix', [
-		'placeholder' => 'joinery-backups',
-		'helptext'    => 'Files stored at: bucket/prefix/node-slug/filename',
-	]);
-
-	// ── B2 Credentials ──
-	echo '<div id="b2Fields"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
-	echo '<p class="fw-semibold text-muted mt-2 mb-1">Backblaze B2 Credentials</p>';
-	$formwriter->textinput('cred_key_id', 'Application Key ID', [
-		'helptext' => 'A key for this bucket only, with listFiles, readFiles, writeFiles, deleteFiles. Add writeKeys, listKeys, deleteKeys to mint a key per run. The master account key will not work.',
-	]);
-	$formwriter->passwordinput('cred_app_key', 'Application Key', [
-		'stored'   => $secret_stored_for('b2', 'main'),
-		'helptext' => 'Region is auto-detected on save.',
-	]);
-	echo '</div>';
-
-	// ── S3 Credentials ──
-	echo '<div id="s3Fields"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
-	echo '<p class="fw-semibold text-muted mt-2 mb-1">Amazon S3 Credentials</p>';
-	$formwriter->textinput('cred_s3_access_key', 'Access Key', [
-		'helptext' => 'An IAM user with s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject on this bucket only.',
-	]);
-	$formwriter->passwordinput('cred_s3_secret_key', 'Secret Key', ['stored' => $secret_stored_for('s3', 'main')]);
-	$formwriter->textinput('cred_s3_region', 'Region', ['placeholder' => 'us-east-1']);
-	echo '</div>';
-
-	// ── Linode Credentials ──
-	echo '<div id="linodeFields"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
-	echo '<p class="fw-semibold text-muted mt-2 mb-1">Linode Object Storage Credentials</p>';
-	$formwriter->textinput('cred_linode_access_key', 'Access Key');
-	$formwriter->passwordinput('cred_linode_secret_key', 'Secret Key', ['stored' => $secret_stored_for('linode', 'main')]);
-	$formwriter->textinput('cred_linode_region', 'Region', ['placeholder' => 'us-east-1']);
-	$formwriter->textinput('cred_linode_endpoint', 'Endpoint URL', ['placeholder' => 'https://us-east-1.linodeobjects.com']);
-	echo '</div>';
-
-	// ── Node credential (write-only) ──
-	echo '<div id="nodeCredB2"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
-	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
-		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
-	$formwriter->textinput('node_cred_key_id', 'Node Application Key ID', [
-		'helptext' => 'Optional. A key for this bucket with writeFiles and not deleteFiles. Nodes are handed it for each run, so a compromised node cannot erase backups.',
-	]);
-	$formwriter->passwordinput('node_cred_app_key', 'Node Application Key', [
-		'stored'   => $secret_stored_for('b2', 'node'),
-		'helptext' => 'Without one, nodes are handed the main key during a run.',
-	]);
-	echo '</div>';
-
-	echo '<div id="nodeCredS3"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
-	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
-		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
-	$formwriter->textinput('node_cred_s3_access_key', 'Node Access Key', [
-		'helptext' => 'Optional second key from an IAM user allowed s3:PutObject but not s3:DeleteObject on this bucket. Nodes are handed this key during a backup run; the main key above never leaves this management node.',
-	]);
-	$formwriter->passwordinput('node_cred_s3_secret_key', 'Node Secret Key', [
-		'stored'   => $secret_stored_for('s3', 'node'),
-		'helptext' => 'Without one, nodes are handed the main key during a run.',
-	]);
-	echo '</div>';
-
-	echo '<div id="nodeCredLinode"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
-	echo '<p class="text-muted mt-2 mb-1">Linode Object Storage keys are read-only or read-write per bucket — write-without-delete is not expressible, so nodes are handed the main key during a run. B2 and S3 targets can hold a separate write-only node credential.</p>';
-	echo '</div>';
-
-	// ── Per-run minted keys ──
-	//
-	// The strongest of the three arrangements, and the default where the
-	// provider can do it. Both credentials above are shared: every node in the
-	// fleet is handed the same one, so a key read off any node opens the whole
-	// shelf. A minted key opens one node's own directory, write-only, for the
-	// length of one run.
-	echo '<div id="mintRunKeys"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
-	$formwriter->checkboxinput('bkt_mint_run_keys', 'Mint a key for each run', [
-		'checked' => (bool)($target->key ? $target->get('bkt_mint_run_keys') : false),
-		'helptext' => 'Each backup run is handed a key created for it, pinned to that node\'s own '
-			. 'directory in this bucket, write-only, expiring with the run — so a key read off a '
-			. 'machine somebody else administers opens their directory for an hour rather than the '
-			. 'whole fleet\'s backup storage forever. <strong>Check first that the main key above is allowed '
-			. 'to create keys</strong> (writeKeys, listKeys, deleteKeys): a key that cannot mint '
-			. 'fails every run rather than falling back, which is deliberate — a silent fall back to '
-			. 'the shared key would defeat the point. Off, runs use the node credential above.',
-	]);
-	echo '</div>';
-
-	$formwriter->checkboxinput('bkt_enabled', 'Enabled', [
-		'checked' => (bool)($target->key ? $target->get('bkt_enabled') : true),
-	]);
+	BackupTargetForm::render($formwriter, $target, ['node_credentials' => true]);
 	$formwriter->submitbutton('btn_submit', $is_edit ? 'Save Changes' : 'Add Target');
 	$formwriter->end_form();
 

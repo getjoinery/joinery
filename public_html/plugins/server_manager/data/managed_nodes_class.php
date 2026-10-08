@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.45 - assign_default_backup_target(): a new node is given the target Where new backups go names
  * @version 1.44 - mgn_agent_update_state / mgn_agent_update_offered: where the agent's own self-update
  *                 stands, as it reported on its last poll (spec release_transparency, O7)
  * @version 1.43 - is_fixture_name(): a node a test made, which the scheduled incident pass leaves alone; outside a
@@ -514,6 +515,29 @@ class ManagedNode extends SystemBase {
 			}
 		}
 		return parent::save($debug);
+	}
+
+	/**
+	 * A new node backs up where new backups go (server_manager_backup_target_id),
+	 * unless it already names a target. Called by each path that creates a real
+	 * node; the choice is then the node's own, changed only by moving it.
+	 */
+	public function assign_default_backup_target(): void {
+		if ($this->key || (int)$this->get('mgn_bkt_backup_target_id') > 0) {
+			return;
+		}
+		$id = (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true);
+		if ($id <= 0) {
+			return;
+		}
+		try {
+			$target = new BackupTarget($id, TRUE);
+		} catch (Exception $e) {
+			return;
+		}
+		if ($target->key && $target->get('bkt_enabled') && !$target->get('bkt_delete_time')) {
+			$this->set('mgn_bkt_backup_target_id', (int)$target->key);
+		}
 	}
 
 	/** The rule is_operational() applies, over anything that answers get() for the column. */

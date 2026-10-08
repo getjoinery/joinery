@@ -33,6 +33,11 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.27 - every run records where it went (bkh_destination, specs/storage_targets.md WP3); a chain
+ *                whose runs went to another target is not extended (destination_changed); retention
+ *                deletes each run from the target it went to, and offloaded files are pruned per target;
+ *                a kept epoch's envelope is put on a destination that lacks it; plan_for_run() points a
+ *                plan at the target a run went to, for every reader
  * @version 1.26 - a chosen target that is disabled or deleted is named in the refusal, not reported as none
  * @version 1.25 - a chain run archives the site as two parts, data and code (CHAIN_PARTS), each with its own
  *                snapshot, into version-2 chains (specs/backup_database_incrementals.md WP3). A part whose
@@ -282,6 +287,7 @@ class BackupRunner {
 		$history->set('bkh_profile', $plan['profile']);
 		$history->set('bkh_recovery_fpr', $plan['recovery_fpr']);
 		$history->set('bkh_encrypted', $plan['encrypt']);
+		$history->set('bkh_destination', $plan['destination']);
 		if ($plan['target']) {
 			// An ephemeral target has no id. The name is denormalised onto the row
 			// either way, which is what the history has to be able to say.
@@ -424,6 +430,9 @@ class BackupRunner {
 
 		return array(
 			'profile'      => BackupProfile::SITE,
+			// Where the run goes, recorded on its history row: one of this
+			// site's own targets, used directly.
+			'destination'  => 'target',
 			'type'         => $type,
 			'mode'         => $mode,
 			'full_days'    => max(0, (int)self::setting('backup_full_interval_days')),
@@ -558,6 +567,8 @@ class BackupRunner {
 
 		return array(
 			'profile'      => BackupProfile::MANAGER,
+			// A management node's storage, reached with what the run was handed.
+			'destination'  => 'service',
 			'type'         => $type,
 			'mode'         => $mode,
 			'full_days'    => max(0, (int)($m['full_interval_days'] ?? 7)),
@@ -722,8 +733,9 @@ class BackupRunner {
 	}
 
 	/**
-	 * The chain currently being extended: its id and its local manifest, or
-	 * nulls when there is nothing to extend.
+	 * The chain currently being extended: its id, its local manifest, and where
+	 * its newest run went ('target:{id}' for a site's own target, null when that
+	 * is not this profile's to know), or nulls when there is nothing to extend.
 	 *
 	 * Read from this site's own history rather than from the bucket. Listing
 	 * the bucket to decide what to append to would make every backup depend on
@@ -744,14 +756,18 @@ class BackupRunner {
 		$rows->load();
 
 		$chain_id = null;
-		foreach ($rows as $r) { $chain_id = (string)$r->get('bkh_chain_id'); }
+		$chain_destination = null;
+		foreach ($rows as $r) {
+			$chain_id = (string)$r->get('bkh_chain_id');
+			$chain_destination = self::destination_of_row($plan, $r);
+		}
 		if (!$chain_id) {
-			return array(null, null);
+			return array(null, null, null);
 		}
 
 		$manifest_path = self::chain_dir($plan, $chain_id) . '/' . BackupChain::MANIFEST_NAME;
 		try {
-			return array($chain_id, BackupChain::read($manifest_path));
+			return array($chain_id, BackupChain::read($manifest_path), $chain_destination);
 		} catch (BackupChainException $e) {
 			// The manifest is how a chain is extended AND restored. Without a
 			// readable one locally, appending would produce runs nothing could
@@ -759,8 +775,67 @@ class BackupRunner {
 			// degradation as losing the snapshot: one extra full, never a
 			// broken backup.
 			error_log('BackupRunner: chain manifest unreadable (' . $e->getMessage() . '); starting a new chain.');
-			return array(null, null);
+			return array(null, null, null);
 		}
+	}
+
+	/**
+	 * Where a run goes, as the chain rule compares it: 'target:{id}' for one of
+	 * this site's own targets. Null for the manager profile, whose storage is the
+	 * management node's to tell apart (specs/storage_targets.md WP5).
+	 */
+	private static function destination_of_plan(array $plan) {
+		if ($plan['profile'] !== BackupProfile::SITE || empty($plan['target']) || !$plan['target']->key) {
+			return null;
+		}
+		return 'target:' . (int)$plan['target']->key;
+	}
+
+	/** destination_of_plan() for a run already taken, from its history row. */
+	private static function destination_of_row(array $plan, BackupHistory $row) {
+		if ($plan['profile'] !== BackupProfile::SITE) {
+			return null;
+		}
+		return (string)$row->get('bkh_destination') === 'target'
+			? 'target:' . (int)$row->get('bkh_bkt_backup_target_id')
+			: (string)$row->get('bkh_destination');
+	}
+
+	/**
+	 * The site plan with its target replaced by the one a run went to, for
+	 * reading, verifying, restoring or pruning that run. Everything else in the
+	 * plan (slug, working directories, recipients) is this site's own.
+	 */
+	public static function plan_for_target(array $plan, BackupTarget $target) {
+		$plan['target'] = $target;
+		return $plan;
+	}
+
+	/**
+	 * The site plan pointed at the target one of its runs went to: the run named
+	 * by its chain id, or by its history row. Throws BackupRunnerException when
+	 * the run is not this site's or its target is gone.
+	 */
+	public static function plan_for_run($run) {
+		if (!($run instanceof BackupHistory)) {
+			$rows = new MultiBackupHistory(array('profile' => BackupProfile::SITE, 'chain_id' => (string)$run),
+				array('bkh_start_time' => 'DESC'), 1, 0);
+			$run = null;
+			foreach ($rows as $r) { $run = $r; }
+			if (!$run) {
+				throw new BackupRunnerException('This site has no record of that backup.');
+			}
+		}
+		$plan = self::plan(array('profile' => BackupProfile::SITE));
+		try {
+			$target = $run->stored_target();
+		} catch (BackupHistoryException $e) {
+			throw new BackupRunnerException($e->getMessage());
+		}
+		if (!$target) {
+			throw new BackupRunnerException('That backup was not sent to one of this site\'s own targets.');
+		}
+		return self::plan_for_target($plan, $target);
 	}
 
 	/**
@@ -815,10 +890,11 @@ class BackupRunner {
 		foreach ($snars as $s) {
 			$snars_present = $snars_present && is_file($s) && filesize($s) > 0;
 		}
-		list($chain_id, $manifest) = self::current_chain($plan);
+		list($chain_id, $manifest, $chain_destination) = self::current_chain($plan);
 
 		$reason = BackupChain::should_start_new($manifest, $snars_present,
-			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'], BackupChain::VERSION);
+			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'], BackupChain::VERSION,
+			$chain_destination, self::destination_of_plan($plan));
 		if ($reason === 'recovery_rotated') {
 			error_log('BackupRunner: the recovery key changed since chain ' . $chain_id
 				. ' started; starting a new chain sealed to the current key.');
@@ -1657,28 +1733,23 @@ class BackupRunner {
 			return 0;
 		}
 
-		if ($deletes) {
-			$target = $plan['target'];
-			$creds  = $target->get_credentials();
-			$bucket = trim((string)$target->get('bkt_bucket'));
-		}
-
+		$targets = array();
 		$pruned = 0;
 		foreach ($surplus as $cid) {
 			try {
-				// Read what this chain's indexes name BEFORE they go: the object
-				// family is pruned by exactly that (enforce_object_retention).
-				if ($deletes && $pruned_indexes !== null) {
-					$pruned_indexes += self::index_entries_of_rows($plan, $chains[$cid]);
-				}
+				// Each run is deleted from the target it went to, never "the
+				// current one": after a switch the old chains are still on the
+				// old target, and a 404 from the wrong bucket is not a deletion.
 				foreach ($deletes ? $chains[$cid] : array() as $row) {
-					foreach ($row->object_keys() as $key) {
-						$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-						$status = (int)($resp['status'] ?? 0);
-						if (($status < 200 || $status >= 300) && $status !== 404) {
-							throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key);
-						}
+					$rplan = self::row_plan($plan, $row, $targets);
+					// Read what this run's index names BEFORE it goes: the object
+					// family is pruned by exactly that, per target
+					// (enforce_object_retention).
+					if ($pruned_indexes !== null) {
+						$tid = (int)($rplan['target']->key ?? 0);
+						$pruned_indexes[$tid] = ($pruned_indexes[$tid] ?? array()) + self::index_entries_of_rows($rplan, array($row));
 					}
+					self::delete_row_objects($rplan, $row);
 				}
 				// Only once every object of the chain is gone are its rows
 				// marked deleted — a half-deleted chain must keep looking like
@@ -1989,6 +2060,20 @@ class BackupRunner {
 		$store = BackupObjects::store_missing($plan, $epoch_fn, $objects, $held,
 			self::OBJECT_STORE_BUDGET_BYTES, self::OBJECT_STORE_BUDGET_SECONDS, $picture['unhashed']);
 
+		// The current epoch's envelope belongs on this destination, so every
+		// object stored here opens from here alone. A site that switched targets
+		// keeps its epoch, and the offload tick may already have stored objects
+		// under it on the new target; the listing says which envelopes the
+		// destination holds, and a missing one is put there now.
+		if (is_array($picture['shelf'] ?? null)) {
+			// An epoch minted by this run put its own envelope there already.
+			$current = $epoch ?? BackupObjects::read_epoch($plan);
+			$minted = $epoch !== null && $epoch['reason'] !== '';
+			if ($current && !$minted && empty($picture['shelf']['envelopes'][$current['id']])) {
+				BackupObjects::upload_envelope($plan, $current['id'], $current['envelope']);
+			}
+		}
+
 		// Older epochs sealed to a previous recovery key are re-sealed to the
 		// current one: the site profile reads their envelopes off its backup storage,
 		// the manager profile reads the ones its request linked.
@@ -2154,12 +2239,29 @@ class BackupRunner {
 		if (empty($plan['prunes_cloud']) || empty($plan['objects']) || !$pruned_indexes) {
 			return 0;
 		}
-		try {
-			return BackupObjects::prune_site($plan, $pruned_indexes, self::retained_index_keys($plan));
-		} catch (\Throwable $e) {
-			error_log('BackupRunner: object retention failed: ' . $e->getMessage());
-			return 0;
+		// Per target: what the pruned runs on a target named, against what the
+		// retained runs on that same target still name. Objects are stored per
+		// target, so another target's runs can neither keep nor free them.
+		$deleted = 0;
+		foreach ($pruned_indexes as $tid => $candidates) {
+			if (!$candidates) { continue; }
+			try {
+				if ((int)$tid === 0) {
+					// Storage handed with the run, not a target row: the plan's own.
+					$deleted += BackupObjects::prune_site($plan, $candidates, self::retained_index_keys($plan));
+					continue;
+				}
+				$target = new BackupTarget((int)$tid, TRUE);
+				if (!$target->key || $target->get('bkt_delete_time')) {
+					continue;
+				}
+				$deleted += BackupObjects::prune_site(self::plan_for_target($plan, $target), $candidates,
+					self::retained_index_keys($plan, (int)$tid));
+			} catch (\Throwable $e) {
+				error_log('BackupRunner: object retention failed on target ' . (int)$tid . ': ' . $e->getMessage());
+			}
 		}
+		return $deleted;
 	}
 
 	/**
@@ -2167,13 +2269,16 @@ class BackupRunner {
 	 * retained chain first, then every standalone full's, then the older chain
 	 * runs — so a live object is usually cleared by the first few reads.
 	 */
-	private static function retained_index_keys(array $plan) {
+	private static function retained_index_keys(array $plan, $target_id = null) {
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
 			      'profile' => $plan['profile']),
 			array('bkh_start_time' => 'DESC'), 1500, 0);
 		$first = array(); $rest = array(); $seen_chain = array();
 		foreach ($rows as $r) {
+			if ($target_id !== null && (int)$r->get('bkh_bkt_backup_target_id') !== (int)$target_id) {
+				continue;
+			}
 			$key = '';
 			foreach ($r->artifacts() as $a) {
 				if (($a['kind'] ?? '') === 'objects' && !empty($a['key'])) { $key = (string)$a['key']; }
@@ -2229,26 +2334,18 @@ class BackupRunner {
 			return 0;
 		}
 
-		if ($deletes) {
-			$target = $plan['target'];
-			$creds  = $target->get_credentials();
-			$bucket = trim((string)$target->get('bkt_bucket'));
-		}
-
+		$targets = array();
 		$pruned = 0;
 		foreach ($surplus as $old) {
 			try {
-				if ($deletes && $pruned_indexes !== null) {
-					$pruned_indexes += self::index_entries_of_rows($plan, array($old));
-				}
-				foreach ($deletes ? $old->object_keys() : array() as $key) {
-					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-					$status = (int)($resp['status'] ?? 0);
-					// 404 is success for our purposes: the object is not there,
-					// which is the state we were asking for.
-					if (($status < 200 || $status >= 300) && $status !== 404) {
-						throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key);
+				if ($deletes) {
+					// From the target this run went to (see enforce_chain_retention).
+					$rplan = self::row_plan($plan, $old, $targets);
+					if ($pruned_indexes !== null) {
+						$tid = (int)($rplan['target']->key ?? 0);
+						$pruned_indexes[$tid] = ($pruned_indexes[$tid] ?? array()) + self::index_entries_of_rows($rplan, array($old));
 					}
+					self::delete_row_objects($rplan, $old);
 				}
 				$now = gmdate('Y-m-d H:i:s');
 				// Soft-deleted so every "what still exists" query stops counting it,
@@ -2265,6 +2362,44 @@ class BackupRunner {
 			}
 		}
 		return $deletes ? $pruned : 0;
+	}
+
+	/**
+	 * The plan pointed at the target a run went to, cached per target for one
+	 * retention pass. A site plan reaches each run on the target its row names,
+	 * and throws when that is gone; any other plan has only the storage it was
+	 * handed with the run, and uses that.
+	 */
+	private static function row_plan(array $plan, BackupHistory $row, array &$cache) {
+		if (($plan['destination'] ?? '') !== 'target') {
+			return $plan;
+		}
+		$target = $row->stored_target();
+		if (!$target) {
+			throw new BackupRunnerException('history ' . $row->key . ' did not go to one of this site\'s targets');
+		}
+		$tid = (int)$target->key;
+		if (!isset($cache[$tid])) {
+			$cache[$tid] = self::plan_for_target($plan, $target);
+		}
+		return $cache[$tid];
+	}
+
+	/**
+	 * Delete every object a run recorded, from the target in the plan, which is
+	 * the run's own. A 404 is success: the object is not there, which is the
+	 * state being asked for, and in the run's own bucket that means it is gone.
+	 */
+	private static function delete_row_objects(array $rplan, BackupHistory $row) {
+		$creds  = $rplan['target']->get_credentials();
+		$bucket = trim((string)$rplan['target']->get('bkt_bucket'));
+		foreach ($row->object_keys() as $key) {
+			$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+			$status = (int)($resp['status'] ?? 0);
+			if (($status < 200 || $status >= 300) && $status !== 404) {
+				throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key);
+			}
+		}
 	}
 
 	/**

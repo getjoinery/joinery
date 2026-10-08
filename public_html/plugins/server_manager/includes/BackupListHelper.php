@@ -4,12 +4,14 @@
  *
  * Local files come from the most recent completed `list_backups` job's result
  * (which parses `ls /backups/` on the node). Cloud files come from a live
- * TargetLister call against the configured BackupTarget. The two are merged
+ * S3Signer::list() call against the configured BackupTarget. The two are merged
  * by filename so that a file present in both locations reports `location: both`.
  *
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
+ * @version 1.4 - the cloud listing is S3Signer::list() of the node's named target (switched off included) under the node's own folder, so a node past the
+ *                first 500 objects of the whole target is listed
  * @version 1.3 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
  * @version 1.2 - cloud listing resolves backup storage via JobCommandBuilder::get_target(), so a node that
  *                names no target still has its remote backups listed (from the sole enabled backup storage)
@@ -20,7 +22,6 @@
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 
 class BackupListHelper {
@@ -54,48 +55,41 @@ class BackupListHelper {
 			}
 		}
 
-		// Live cloud listing via TargetLister.
+		// Live cloud listing, capped so a huge bucket cannot stall the page.
 		//
-		// Backup storage is resolved the SAME way the job builder resolves it — a node
-		// that names no target still backs up to the sole enabled one, so its
-		// cloud archives have to be listed here too rather than being invisible
-		// because mgn_bkt_backup_target_id happens to be blank. Reading the raw
-		// column left every such node's remote backups off this list. get_target
-		// already returns only an enabled target (or null), so there is no
-		// separate bkt_enabled check.
+		// The target the node names, switched on or off: a switched-off target
+		// takes no new backups but still holds these.
 		$cloud_files = [];
 		$cloud_error = null;
 		$target = JobCommandBuilder::get_target($node);
 		if ($target) {
 			try {
-				$listing = TargetLister::list_files($target, 500);
-				if ($listing['success']) {
-					$slug = $node->get('mgn_slug');
-					$prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
-					$node_prefix = $prefix . $slug . '/';
-					foreach ($listing['files'] as $f) {
-						// Only include files under this node's slug.
-						if (strpos($f['key'], $node_prefix) !== 0) continue;
-						// A chain's artifacts are not standalone backups. Listed
-						// flat they invite a restore of one incremental with no
-						// full under it, which restores nothing at all — chains
-						// are offered as chains, by BackupChainListHelper.
-						if (BackupChainListHelper::is_chain_object($f['key'])) continue;
-						$filename = basename($f['key']);
-						$mtime = $f['modified'] ? strtotime($f['modified']) : 0;
-						$cloud_files[$filename] = [
-							'filename' => $filename,
-							'size' => self::format_size($f['size']),
-							'size_bytes' => $f['size'],
-							'date' => $mtime ? gmdate('Y-m-d', $mtime) : '',
-							'mtime' => $mtime,
-							'local_path' => null,
-							'cloud_path' => $f['key'],
-							'location' => 'cloud',
-						];
-					}
-				} else {
-					$cloud_error = $listing['error'] ?? 'unknown error';
+				$slug = $node->get('mgn_slug');
+				$prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
+				$node_prefix = $prefix . $slug . '/';
+				// Listed under the node's own folder: listing the whole target and filtering
+				// afterwards showed nothing for a node past the first 500 objects.
+				$listing = S3Signer::list($target->get_credentials(), (string)$target->get('bkt_bucket'), $node_prefix, 500);
+				foreach ($listing as $f) {
+					// Only include files under this node's slug.
+					if (strpos($f['key'], $node_prefix) !== 0) continue;
+					// A chain's artifacts are not standalone backups. Listed
+					// flat they invite a restore of one incremental with no
+					// full under it, which restores nothing at all — chains
+					// are offered as chains, by BackupChainListHelper.
+					if (BackupChainListHelper::is_chain_object($f['key'])) continue;
+					$filename = basename($f['key']);
+					$mtime = $f['last_modified'] ? strtotime($f['last_modified']) : 0;
+					$cloud_files[$filename] = [
+						'filename' => $filename,
+						'size' => self::format_size($f['size']),
+						'size_bytes' => $f['size'],
+						'date' => $mtime ? gmdate('Y-m-d', $mtime) : '',
+						'mtime' => $mtime,
+						'local_path' => null,
+						'cloud_path' => $f['key'],
+						'location' => 'cloud',
+					];
 				}
 			} catch (Exception $e) {
 				$cloud_error = $e->getMessage();

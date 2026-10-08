@@ -19,6 +19,8 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.4 - one host parser (StorageProvider::host()) and one address for an object
+ *                (S3Signer::object_url(), which knows the provider's addressing style)
  * @version 1.3 - object_url() reads the endpoint through S3Signer::endpoint(), so a bare host probes over
  *                https; an anonymous request with no answer is a warning, not proof the bucket is private
  * @version 1.2 - file_store_buckets() is the one file store bucket; a collision names one deletion, not
@@ -51,8 +53,8 @@ class BucketCheck {
 		if ($bucket === '' || $bucket !== $other_bucket) {
 			return false;
 		}
-		$host = self::host($endpoint);
-		$other_host = self::host($other_endpoint);
+		$host = StorageProvider::host($endpoint);
+		$other_host = StorageProvider::host($other_endpoint);
 		if ($host === '' || $other_host === '') {
 			return true;
 		}
@@ -140,10 +142,9 @@ class BucketCheck {
 		return 0;
 	}
 
-	/** The path-style address of one object, the form the signer uses. */
+	/** The address of one object, the form the signer uses. */
 	public static function object_url(array $creds, $bucket, $key) {
-		list($scheme, $host) = S3Signer::endpoint($creds['endpoint']);
-		return $scheme . '://' . $host . '/' . rawurlencode($bucket) . '/' . ltrim(str_replace('%2F', '/', rawurlencode($key)), '/');
+		return S3Signer::object_url($creds['endpoint'], $bucket, $key);
 	}
 
 	/**
@@ -175,7 +176,7 @@ class BucketCheck {
 		if (array_key_exists('is_b2', self::$test_hooks)) {
 			return (bool)self::$test_hooks['is_b2'];
 		}
-		return (bool)preg_match('/\.backblazeb2\.com$/i', self::host($endpoint));
+		return StorageProvider::detect($endpoint) === 'b2';
 	}
 
 	/**
@@ -235,7 +236,7 @@ class BucketCheck {
 		} elseif ($pinned === '') {
 			$also = array();
 			foreach ($others as $other) {
-				if (self::host($other['endpoint']) === '' || self::is_b2($other['endpoint'])) {
+				if (StorageProvider::host($other['endpoint']) === '' || self::is_b2($other['endpoint'])) {
 					$also[] = $other['bucket'] . ' (' . $other['label'] . ')';
 				}
 			}
@@ -272,19 +273,6 @@ class BucketCheck {
 	}
 
 	// ── Helpers ─────────────────────────────────────────────────────────
-
-	/** The host of an endpoint, lower-cased, '' when none. */
-	public static function host($endpoint) {
-		$endpoint = trim((string)$endpoint);
-		if ($endpoint === '') {
-			return '';
-		}
-		if (strpos($endpoint, '://') === false) {
-			$endpoint = 'https://' . $endpoint;
-		}
-		$host = parse_url($endpoint, PHP_URL_HOST);
-		return strtolower((string)$host);
-	}
 
 	/** True when any step failed. */
 	public static function failed(array $steps) {

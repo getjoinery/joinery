@@ -6,6 +6,11 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.19 - a site's first enabled target becomes where its backups go when it is saved (the wizard
+ *                 inferred it afterwards as the newest enabled target)
+ * @version 1.18 - delete_target refuses with BackupTarget::delete_refusal(): not while new backups go there
+ *                 or it still holds backups
+ * @version 1.17 - save_target is BackupTargetForm::save(), the one save path every target form shares
  * @version 1.16 - save_target refuses a Linode endpoint that is not the cluster's bare https address, before the provider is asked
  * @version 1.15 - every scope's approve and decline actions reach the one handler through
  *                 ApprovalChallenge::for_action(), so a new scope needs no case label here
@@ -223,77 +228,17 @@ function _admin_backups_handle($action, array $input, $session) {
 			case 'save_target': {
 				$id = (int)($input['bkt_backup_target_id'] ?? 0);
 				$target = $id ? new BackupTarget($id, TRUE) : new BackupTarget(NULL);
-				$target->set('bkt_name', trim((string)($input['bkt_name'] ?? '')));
-				$target->set('bkt_provider', (string)($input['bkt_provider'] ?? ''));
-				$target->set('bkt_bucket', trim((string)($input['bkt_bucket'] ?? '')));
-				$target->set('bkt_path_prefix', trim((string)($input['bkt_path_prefix'] ?? '')) ?: 'joinery-backups');
-
-				// The secret is never rendered back into the form: stored, it is a
-				// locked field, not posted, and kept; after Reset, blank removes it
-				// and text replaces it. The key ID, region and endpoint are not
-				// secrets and come back with their values. The credentials are
-				// only recomputed (which asks Backblaze for the endpoint) when one
-				// of them changed.
-				try {
-					$existing = $id ? ($target->get_credentials() ?: array()) : array();
-				} catch (BackupTargetException $e) {
-					$existing = array();
+				$saved = BackupTargetForm::save($target, $input);
+				// A site's first target is where its backups go, named here by
+				// the save that made it, never inferred later from the list.
+				if ($saved['ok'] && $target->get('bkt_enabled')
+						&& (int)Globalvars::get_instance()->get_setting('backup_target_id') === 0) {
+					Setting::put('backup_target_id', (string)(int)$target->key);
+					// The target may have been the last missing half (the key
+					// already proven); nightly runs need no button of their own.
+					BackupNightly::maybe_activate();
 				}
-				$stored_secret = (string)($existing['secret_key'] ?? '');
-				list($secret_what, $typed_secret) = FormWriterV2Base::process_secretinput(
-					$input, 'secret_key', $stored_secret !== '');
-				$secret = ($secret_what === FormWriterV2Base::SECRET_SET) ? $typed_secret
-					: (($secret_what === FormWriterV2Base::SECRET_CLEAR) ? '' : $stored_secret);
-				$access   = trim((string)($input['access_key'] ?? ($existing['access_key'] ?? '')));
-				$region   = trim((string)($input['region'] ?? ($existing['region'] ?? '')));
-				$endpoint = trim((string)($input['endpoint'] ?? ($existing['endpoint'] ?? '')));
-				// Backblaze's region and endpoint belong to the key: a new key is
-				// asked for its own.
-				if ((string)$target->get('bkt_provider') === 'b2'
-						&& ($secret_what !== FormWriterV2Base::SECRET_KEEP || $access !== (string)($existing['access_key'] ?? ''))) {
-					$region = '';
-					$endpoint = '';
-				}
-				// The provider's own fields are checked before anything is asked of the provider.
-				$field_problem = BackupTarget::credential_problem((string)$target->get('bkt_provider'), array(
-					'region' => $region, 'endpoint' => $endpoint));
-				if ($field_problem !== '') {
-					$say('Not saved. ' . $field_problem, false);
-					return $url;
-				}
-				$changed = !$id || $secret_what !== FormWriterV2Base::SECRET_KEEP
-					|| $access !== (string)($existing['access_key'] ?? '')
-					|| $region !== (string)($existing['region'] ?? '')
-					|| $endpoint !== (string)($existing['endpoint'] ?? '');
-				if ($changed) {
-					$completed = BackupTarget::complete_credentials((string)$target->get('bkt_provider'), array(
-						'access_key' => $access,
-						'secret_key' => $secret,
-						'region'     => $region,
-						'endpoint'   => $endpoint,
-					));
-					if ($completed['note'] !== '') {
-						$b2_note = ' ' . $completed['note'];
-					}
-					$target->set('bkt_credentials', $completed['creds']);
-				}
-				$target->set('bkt_enabled', !empty($input['bkt_enabled']));
-				// Proven before it is saved: an enabled target that cannot do
-				// its job is not saved, and the message says why. A disabled
-				// target is saved untested; enabling it is a save, and that
-				// save tests it.
-				if ($target->get('bkt_enabled')) {
-					$test = TargetTester::test($target);
-					if (!$test['success']) {
-						$say('Not saved. ' . $test['message'] . ($b2_note ?? ''), false);
-						return $url;
-					}
-					$target->save();
-					$say('Target saved. ' . $test['message'], true);
-					return $url;
-				}
-				$target->save();
-				$say('Target saved. It is disabled, so it was not tested; enabling it tests it.' . ($b2_note ?? ''), true);
+				$say($saved['message'], $saved['ok']);
 				return $url;
 			}
 
@@ -306,14 +251,16 @@ function _admin_backups_handle($action, array $input, $session) {
 
 			case 'delete_target': {
 				$target = new BackupTarget((int)($input['bkt_backup_target_id'] ?? 0), TRUE);
-				// Deleting the target a schedule points at would leave the task
-				// skipping every night with a message nobody reads, so say so now.
-				if ((int)Globalvars::get_instance()->get_setting('backup_target_id') === (int)$target->key) {
-					$say('That target is the one scheduled backups use. Point the schedule somewhere else first.', false);
+				// Not while new backups go there, and not while it holds any:
+				// the history points at those objects, and retention prunes
+				// them there.
+				$refusal = $target->delete_refusal();
+				if ($refusal !== '') {
+					$say('Not deleted. ' . $refusal, false);
 					return $url;
 				}
 				$target->soft_delete();
-				$say('Target deleted. Backups already in its bucket are untouched.', true);
+				$say('Target deleted.', true);
 				return $url;
 			}
 

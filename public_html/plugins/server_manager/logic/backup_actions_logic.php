@@ -10,6 +10,7 @@
  * list_status). Everything but list_status creates a job; list_status returns
  * the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.8.1 - the target is the one the node names, switched off included; nothing is inferred
  * @version 1.8.0 - delete_file resolves the target as the listing does and refuses a key outside this
  *                  node's own folder; upload_file checks the pairing against the target and profile the
  *                  upload goes to, including a node on the sole enabled target
@@ -119,8 +120,8 @@ function backup_actions_logic(array $input): LogicResult {
 		if ($want_cloud) {
 			require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 			require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-			// The target is resolved the way the listing resolves it, so a node on
-			// the sole enabled target can delete what it was shown; and the key must
+			// The target is resolved the way the listing resolves it, so a node can
+			// delete what it was shown; and the key must
 			// be inside THIS node's own folder, so one node's page cannot delete
 			// another node's backups from the same bucket.
 			$tgt = JobCommandBuilder::get_target($node);
@@ -179,8 +180,7 @@ function backup_actions_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 		// The target is resolved the way build_upload_backup() resolves it, so the
-		// pairing is decided against the bucket the archive is actually going to,
-		// including a node on the sole enabled target with no target named.
+		// pairing is decided against the bucket the archive is actually going to.
 		$filename  = basename($local_path);
 		$profile   = BackupProfile::MANAGER;
 		$tgt       = JobCommandBuilder::get_target($node);

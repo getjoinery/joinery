@@ -2,6 +2,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.16 - the target form is BackupTargetForm, shared with the setup wizard and the management node;
+ *                 every provider in StorageProvider's catalogue, named by its label
  * @version 1.15 - one approval panel for every scope (ApprovalChallengePanel)
  * @version 1.14 - retention reads as days of backups kept offsite; Recent backups lists only backups that
  *                still exist
@@ -367,7 +369,7 @@ if ($rows) {
 	foreach ($rows as $t) {
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($t->get('bkt_name')) . '</td>';
-		echo '<td>' . htmlspecialchars(strtoupper($t->get('bkt_provider'))) . '</td>';
+		echo '<td>' . htmlspecialchars(StorageProvider::label($t->get('bkt_provider'))) . '</td>';
 		echo '<td>' . htmlspecialchars((string)$t->get('bkt_bucket')) . '</td>';
 		echo '<td>' . htmlspecialchars((string)$t->get('bkt_path_prefix')) . '</td>';
 		echo '<td>' . ($t->get('bkt_enabled') ? 'Yes' : 'No') . '</td>';
@@ -408,39 +410,7 @@ if ($editing || $adding) {
 	$fw->begin_form();
 	$fw->hiddeninput('action', '', array('value' => 'save_target'));
 	$fw->hiddeninput('bkt_backup_target_id', '', array('value' => $editing ? (int)$editing->key : ''));
-	$fw->textinput('bkt_name', 'Name', array('required' => true, 'value' => $editing ? $editing->get('bkt_name') : ''));
-	$fw->dropinput('bkt_provider', 'Provider', array(
-		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
-		'value'   => $editing ? $editing->get('bkt_provider') : 'b2',
-		// B2 needs neither: both are detected from the key at save time
-		// (b2_authorize_account), so the fields only invite wrong values.
-		'visibility_rules' => array(
-			'b2'     => array('hide' => array('region', 'endpoint')),
-			's3'     => array('show' => array('region', 'endpoint')),
-			'linode' => array('show' => array('region', 'endpoint')),
-		),
-	));
-	$fw->textinput('bkt_bucket', 'Bucket', array('value' => $editing ? (string)$editing->get('bkt_bucket') : '',
-		'helptext' => 'A private bucket used for nothing else.'));
-	$fw->textinput('bkt_path_prefix', 'Folder inside the bucket',
-		array('value' => $editing ? (string)$editing->get('bkt_path_prefix') : 'joinery-backups'));
-	// The key ID, region and endpoint are not secrets and show their values;
-	// the secret never does — stored, it is a locked field with Reset.
-	try {
-		$editing_creds = $editing ? ($editing->get_credentials() ?: array()) : array();
-	} catch (BackupTargetException $e) {
-		$editing_creds = array();
-	}
-	$fw->textinput('access_key', 'Access key ID',
-		array('autocomplete' => 'off', 'value' => (string)($editing_creds['access_key'] ?? ''),
-			'helptext' => 'A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. '
-			. 'Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.'));
-	$fw->passwordinput('secret_key', 'Secret key',
-		array('stored' => (string)($editing_creds['secret_key'] ?? '') !== ''));
-	$fw->textinput('region', 'Region', array('value' => (string)($editing_creds['region'] ?? '')));
-	$fw->textinput('endpoint', 'Endpoint hostname',
-		array('value' => (string)($editing_creds['endpoint'] ?? ''), 'helptext' => 'The provider\'s S3-compatible endpoint, e.g. s3.us-east-1.amazonaws.com.'));
-	$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $editing ? (bool)$editing->get('bkt_enabled') : true));
+	BackupTargetForm::render($fw, $editing);
 	$fw->submitbutton('btn_save_target', $editing ? 'Save target' : 'Add target');
 	$fw->end_form();
 	echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups">Cancel</a>';

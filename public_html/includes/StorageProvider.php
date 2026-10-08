@@ -14,6 +14,17 @@
  * posted, it returns the endpoint and region the store will use, or a
  * sentence saying what is missing.
  *
+ * This is the platform's only provider list. The backup target model's allowed
+ * providers, both bucket forms, the setup wizard, utils/install_backup_target.php
+ * and every label and console link read it; adding an S3 compatible provider is
+ * one entry here. Endpoints are stored in one form (normalise_endpoint():
+ * scheme and host, https unless a URL says otherwise), and how a bucket is
+ * addressed (path style, or the bucket as a host label) is a property of the
+ * provider (virtual_host()).
+ *
+ * @version 2.0 - the one provider list (specs/storage_targets.md WP1): Hetzner; each provider's console
+ *                sign-in, addressing style and region rule; the one Backblaze region rule (b2_location());
+ *                normalise_endpoint() and virtual_host()
  * @version 1.0 - specs/implemented/cloud_storage_provider_picker.md
  */
 
@@ -31,6 +42,9 @@ class StorageProvider {
 	 *   endpoint_help  help for the endpoint field, when asked
 	 *   region_help    help for the region field, when asked
 	 *   example        an example for the field that is asked
+	 *   region_rule    a pattern whose first group is the region, read from the endpoint's host
+	 *   addressing     'path' (https://host/bucket/key) or 'virtual' (https://bucket.host/key)
+	 *   console        where the provider's console sign-in lives
 	 */
 	private static $catalogue = array(
 		'generic' => array(
@@ -42,6 +56,9 @@ class StorageProvider {
 			'endpoint_help' => 'The service\'s S3 hostname, with or without https://.',
 			'region_help'   => 'What the service calls the bucket\'s region. Leave empty if it has none.',
 			'example'       => array('endpoint' => 's3.example.com', 'region' => 'us-east-1'),
+			'region_rule'   => '',
+			'addressing'    => 'path',
+			'console'       => '',
 		),
 		'b2' => array(
 			'label'         => 'Backblaze B2',
@@ -52,6 +69,9 @@ class StorageProvider {
 			'endpoint_help' => '',
 			'region_help'   => '',
 			'example'       => array(),
+			'region_rule'   => '/^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i',
+			'addressing'    => 'path',
+			'console'       => 'https://secure.backblaze.com/user_signin.htm',
 		),
 		's3' => array(
 			'label'         => 'Amazon S3',
@@ -62,6 +82,9 @@ class StorageProvider {
 			'endpoint_help' => '',
 			'region_help'   => 'The bucket\'s region, shown beside it in the S3 console.',
 			'example'       => array('region' => 'us-east-1'),
+			'region_rule'   => '/^s3[.-]([a-z0-9-]+)\.amazonaws\.com$/i',
+			'addressing'    => 'virtual',
+			'console'       => 'https://console.aws.amazon.com/',
 		),
 		'r2' => array(
 			'label'         => 'Cloudflare R2',
@@ -72,6 +95,9 @@ class StorageProvider {
 			'endpoint_help' => 'Your account\'s R2 endpoint, shown on the R2 overview page.',
 			'region_help'   => '',
 			'example'       => array('endpoint' => 'your-account-id.r2.cloudflarestorage.com'),
+			'region_rule'   => '',
+			'addressing'    => 'path',
+			'console'       => 'https://dash.cloudflare.com/',
 		),
 		'wasabi' => array(
 			'label'         => 'Wasabi',
@@ -82,6 +108,9 @@ class StorageProvider {
 			'endpoint_help' => '',
 			'region_help'   => 'The bucket\'s region, shown beside it in the Wasabi console.',
 			'example'       => array('region' => 'us-east-1'),
+			'region_rule'   => '/^s3\.([a-z0-9-]+)\.wasabisys\.com$/i',
+			'addressing'    => 'path',
+			'console'       => 'https://console.wasabisys.com/',
 		),
 		'digitalocean' => array(
 			'label'         => 'DigitalOcean Spaces',
@@ -92,6 +121,9 @@ class StorageProvider {
 			'endpoint_help' => '',
 			'region_help'   => 'The Space\'s datacenter.',
 			'example'       => array('region' => 'nyc3'),
+			'region_rule'   => '/^([a-z0-9-]+)\.digitaloceanspaces\.com$/i',
+			'addressing'    => 'path',
+			'console'       => 'https://cloud.digitalocean.com/login',
 		),
 		'linode' => array(
 			'label'         => 'Linode Object Storage',
@@ -102,6 +134,22 @@ class StorageProvider {
 			'endpoint_help' => '',
 			'region_help'   => 'The cluster the bucket is in.',
 			'example'       => array('region' => 'us-east-1'),
+			'region_rule'   => '/^([a-z0-9-]+)\.linodeobjects\.com$/i',
+			'addressing'    => 'path',
+			'console'       => 'https://login.linode.com/login',
+		),
+		'hetzner' => array(
+			'label'         => 'Hetzner Object Storage',
+			'asks'          => array('region'),
+			'endpoint'      => '{region}.your-objectstorage.com',
+			'region'        => '',
+			'host'          => '/\.your-objectstorage\.com$/i',
+			'endpoint_help' => '',
+			'region_help'   => 'The location the bucket is in.',
+			'example'       => array('region' => 'fsn1'),
+			'region_rule'   => '/^([a-z0-9-]+)\.your-objectstorage\.com$/i',
+			'addressing'    => 'path',
+			'console'       => 'https://console.hetzner.cloud/',
 		),
 	);
 
@@ -112,6 +160,11 @@ class StorageProvider {
 			$out[$slug] = $p['label'];
 		}
 		return $out;
+	}
+
+	/** Every provider slug, the generic choice first. What the backup target model allows. */
+	public static function slugs(): array {
+		return array_keys(self::$catalogue);
 	}
 
 	/** True for a slug the catalogue knows. */
@@ -126,6 +179,36 @@ class StorageProvider {
 
 	public static function label($slug): string {
 		return self::$catalogue[self::normalise($slug)]['label'];
+	}
+
+	/** Where the provider's console sign-in lives, '' when there is no one place (generic). */
+	public static function console_url($slug): string {
+		return self::$catalogue[self::normalise($slug)]['console'];
+	}
+
+	/**
+	 * A form's visibility rules for the region and endpoint fields, keyed by
+	 * slug: each provider shows the ones it asks for and hides the rest.
+	 * $names maps 'region' and 'endpoint' to the form's own field names.
+	 */
+	public static function visibility_rules(array $names = array('region' => 'region', 'endpoint' => 'endpoint')): array {
+		$rules = array();
+		foreach (self::$catalogue as $slug => $p) {
+			$show = array();
+			$hide = array();
+			foreach (array('region', 'endpoint') as $field) {
+				if (!isset($names[$field])) {
+					continue;
+				}
+				if (in_array($field, $p['asks'], true)) {
+					$show[] = $names[$field];
+				} else {
+					$hide[] = $names[$field];
+				}
+			}
+			$rules[$slug] = array('show' => $show, 'hide' => $hide);
+		}
+		return $rules;
 	}
 
 	/** Which of endpoint and region the form asks for. */
@@ -217,12 +300,12 @@ class StorageProvider {
 			} catch (Exception $e) {
 				return $fail('Backblaze refused the key (' . $e->getMessage() . '). Check the key id and application key.');
 			}
-			$host = self::host($allowed['s3_endpoint'] ?? '');
-			if (!preg_match('/^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i', $host, $m)) {
+			$loc = self::b2_location($allowed['s3_endpoint'] ?? '');
+			if ($loc['endpoint'] === '') {
 				return $fail('Backblaze did not name an S3 endpoint for this key.');
 			}
-			$opts['endpoint'] = $host;
-			$opts['region'] = $m[1];
+			$opts['endpoint'] = self::host($loc['endpoint']);
+			$opts['region'] = $loc['region'];
 			return array('ok' => true, 'opts' => $opts, 'message' => '');
 		}
 
@@ -244,6 +327,70 @@ class StorageProvider {
 			$opts['endpoint'] = self::endpoint_for($slug, $opts['region']);
 		}
 		return array('ok' => true, 'opts' => $opts, 'message' => '');
+	}
+
+	/**
+	 * The region a provider's endpoint names, by the provider's region rule:
+	 * us-east-005 from s3.us-east-005.backblazeb2.com. '' when the provider has
+	 * no rule or the host does not follow it.
+	 */
+	public static function region_from_endpoint($slug, $endpoint): string {
+		$rule = self::$catalogue[self::normalise($slug)]['region_rule'];
+		if ($rule === '' || !preg_match($rule, self::host($endpoint), $m)) {
+			return '';
+		}
+		return strtolower($m[1]);
+	}
+
+	/**
+	 * Backblaze names an S3 address per account cluster
+	 * (https://s3.us-east-005.backblazeb2.com); the region SigV4 wants is the
+	 * middle label. The forms ask for neither, so a save takes both from the
+	 * address Backblaze reports for the key. Pure: hand it that address.
+	 *
+	 * @return array{region:string, endpoint:string} both '' when the address is not a Backblaze S3 host
+	 */
+	public static function b2_location($s3_api_url): array {
+		$region = self::region_from_endpoint('b2', $s3_api_url);
+		if ($region === '') {
+			return array('region' => '', 'endpoint' => '');
+		}
+		return array('region' => $region, 'endpoint' => self::normalise_endpoint($s3_api_url));
+	}
+
+	/**
+	 * The one stored form of an endpoint: scheme and host (and a port, when one
+	 * is given), lower case, nothing after. A bare host is https, the scheme
+	 * every provider serves; a URL keeps its scheme, so a self-hosted http
+	 * endpoint stays http. '' stays ''. A value with no host is returned as
+	 * given, for the signer to refuse with its own message.
+	 */
+	public static function normalise_endpoint($endpoint): string {
+		$endpoint = trim((string)$endpoint);
+		if ($endpoint === '') {
+			return '';
+		}
+		$parts = parse_url(strpos($endpoint, '://') === false ? 'https://' . $endpoint : $endpoint);
+		if (!is_array($parts) || empty($parts['host'])) {
+			return $endpoint;
+		}
+		return strtolower($parts['scheme'] ?? 'https') . '://' . strtolower($parts['host'])
+			. (isset($parts['port']) ? ':' . (int)$parts['port'] : '');
+	}
+
+	/**
+	 * Whether a request to this bucket names it in the host (bucket.host/key)
+	 * rather than the path (host/bucket/key). Amazon is moving every bucket to
+	 * the first; the rest serve the second. A bucket name that cannot be a
+	 * host label under TLS (dots, capitals, odd length) stays path style,
+	 * which is what Amazon itself does with one.
+	 */
+	public static function virtual_host($endpoint, $bucket): bool {
+		$slug = self::detect($endpoint);
+		if (self::$catalogue[$slug]['addressing'] !== 'virtual') {
+			return false;
+		}
+		return (bool)preg_match('/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/', (string)$bucket);
 	}
 
 	/** The host of an endpoint given as a hostname or a URL. */

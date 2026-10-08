@@ -28,6 +28,7 @@
  *
  * No key and no credential is printed or written anywhere by this class.
  *
+ * @version 1.1.0 - a run's files are brought back from the target it went to (BackupRunner::plan_for_run())
  * @version 1.0.1 - in_progress() is the one rule for "one is running" (started, not reported, under
  *                  STALE_SECONDS), shared by start_newest() and the panel, so a run that died without
  *                  reporting stops hiding the button when it stops blocking a start; a run refused by
@@ -186,7 +187,8 @@ class BackupObjectRestoreLauncher {
 			if (!preg_match(BackupStaging::CHAIN_ID_PATTERN, $chain_id) || $seq < 0 || $seq > BackupStaging::MAX_SEQ) {
 				throw new BackupObjectRestoreLauncherException('the request names no run this site can read');
 			}
-			$plan = self::$plan_for_tests ?? BackupRunner::plan(array('profile' => BackupProfile::SITE));
+			// The run's index and objects are read where the run went.
+			$plan = self::$plan_for_tests ?? BackupRunner::plan_for_run($chain_id);
 			list($creds, $bucket, $base) = BackupObjects::destination($plan);
 
 			$lock = self::take_lock($plan);

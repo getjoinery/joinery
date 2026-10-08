@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.10 - a new node is given the target Where new backups go names
  * @version 2.9 - the retire job puts the provision's cvp_root_ssh_keys on root (none: root login off)
  * @version 2.8 - account_driver(): a connected account's driver, shared with MachineTransferWatch,
  *                which reads without marking a failed refresh
@@ -353,6 +354,7 @@ class ProvisionCustomerCloud {
 		}
 		$node->set('mgn_enabled',       true);
 		if (!$node->key) {
+			$node->assign_default_backup_target();
 			$node->prepare();
 		}
 		$node->save();

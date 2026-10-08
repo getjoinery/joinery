@@ -1,20 +1,28 @@
 <?php
 /**
- * BackupTarget - A configured storage target for backups (B2, S3, Linode).
+ * BackupTarget - A configured storage target for backups, at any provider in
+ * StorageProvider's catalogue.
  *
  * Credentials are stored as JSON in bkt_credentials with a unified shape for
  * every provider:
  *   {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
  *
  * All providers authenticate via SigV4 against their S3-compatible endpoint.
- * For B2, the endpoint is auto-detected at save time via b2_authorize_account
- * (its S3-compat URL format is https://s3.<region>.backblazeb2.com).
+ * The endpoint is stored in one form, https://host (StorageProvider::normalise_endpoint()).
+ * For B2, the endpoint and region are taken from b2_authorize_account at save time;
+ * a provider that names its endpoint from the region gets it from the catalogue.
  *
  * Credentials are encrypted at rest with SecretBox: the plaintext credential
  * JSON is sealed and stored as {"enc": "<blob>"} in the jsonb column. save()
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.0 - holdings(), location_refusal(), disable_refusal(), delete_refusal(): a target's location is
+ *                fixed once anything is stored in it, and it is not switched off or deleted while it is where
+ *                new backups go or still holds or serves anything (specs/storage_targets.md WP2)
+ * @version 2.9 - the allowed providers are StorageProvider's catalogue; complete_credentials() fills any
+ *                provider's endpoint and region from the catalogue (one Backblaze region rule, and a
+ *                Backblaze address the rule does not recognise is said); endpoints are normalised on save
  * @version 2.8 - credential_problem(): a Linode endpoint is checked before either save form asks the provider anything
  * @version 2.7 - a Backblaze credential is completed on READ as well as on save: a target saved
  *                before the save-time completion existed kept an empty region for good and every
@@ -51,7 +59,8 @@ class BackupTarget extends SystemBase {
 	public static $field_specifications = array(
 		'bkt_backup_target_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'bkt_name'            => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
-		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array('b2', 's3', 'linode')),
+		// allowed_values is StorageProvider::slugs(), set below the class: one provider list.
+		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array()),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
 		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
 		'bkt_credentials'      => array('type'=>'jsonb'),
@@ -74,16 +83,14 @@ class BackupTarget extends SystemBase {
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),
 	);
 
-	private static $valid_providers = ['b2', 's3', 'linode'];
-
 	function prepare() {
 		if (empty($this->get('bkt_name'))) {
 			throw new BackupTargetException('Target name is required.');
 		}
 
 		$provider = $this->get('bkt_provider');
-		if (!in_array($provider, self::$valid_providers)) {
-			throw new BackupTargetException('Invalid provider. Must be one of: ' . implode(', ', self::$valid_providers));
+		if (!StorageProvider::known($provider)) {
+			throw new BackupTargetException('Invalid provider. Must be one of: ' . implode(', ', StorageProvider::slugs()));
 		}
 
 		if (empty($this->get('bkt_bucket'))) {
@@ -99,9 +106,154 @@ class BackupTarget extends SystemBase {
 	 * before save()).
 	 */
 	function save($debug = false) {
+		$this->normalise_endpoint('bkt_credentials');
+		$this->normalise_endpoint('bkt_node_credentials');
 		$this->seal_credentials('bkt_credentials');
 		$this->seal_credentials('bkt_node_credentials');
 		return parent::save($debug);
+	}
+
+	/**
+	 * Store an unsealed credential's endpoint in the one form every reader
+	 * expects. A sealed value was normalised when it was set.
+	 */
+	private function normalise_endpoint($column) {
+		$arr = self::creds_to_array($this->get($column));
+		if (empty($arr) || self::looks_sealed($arr) || !isset($arr['endpoint'])) {
+			return;
+		}
+		$normal = StorageProvider::normalise_endpoint($arr['endpoint']);
+		if ($normal !== $arr['endpoint']) {
+			$arr['endpoint'] = $normal;
+			$this->set($column, $arr);
+		}
+	}
+
+	/** The settings that name the target new backups go to, on this deployment. */
+	const DEFAULT_SETTINGS = array('backup_target_id', 'server_manager_backup_target_id');
+
+	/** True when a declared setting names this target as where new backups go. */
+	public function is_default(): bool {
+		if (!$this->key) {
+			return false;
+		}
+		$settings = Globalvars::get_instance();
+		foreach (self::DEFAULT_SETTINGS as $name) {
+			if ((int)$settings->get_setting($name, false, true) === (int)$this->key) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * What this target holds or serves, read from the records that point at it
+	 * (specs/storage_targets.md §5). A site's own runs are its history rows; on
+	 * a management node, the nodes that back up to it and the customers' backup
+	 * storage kept in it. Counted with the target disabled or not.
+	 *
+	 * @return array{stored: int, ever: int, nodes: string[], customers: bool}
+	 *   stored: runs whose objects are still there; ever: runs ever uploaded there;
+	 *   nodes: names of the nodes that back up to it; customers: backup storage for
+	 *   customers is kept in it
+	 */
+	public function holdings(): array {
+		$out = array('stored' => 0, 'ever' => 0, 'nodes' => array(), 'customers' => false);
+		if (!$this->key) {
+			return $out;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT count(*) AS ever,
+				count(*) FILTER (WHERE bkh_delete_time IS NULL AND bkh_pruned_time IS NULL) AS stored
+			FROM bkh_backup_history WHERE bkh_bkt_backup_target_id = ? AND bkh_upload_time IS NOT NULL");
+		$q->execute(array((int)$this->key));
+		$row = $q->fetch(PDO::FETCH_ASSOC) ?: array();
+		$out['ever'] = (int)($row['ever'] ?? 0);
+		$out['stored'] = (int)($row['stored'] ?? 0);
+		if (class_exists('ManagedNode')) {
+			$q = $db->prepare("SELECT mgn_name FROM mgn_managed_nodes
+				WHERE mgn_bkt_backup_target_id = ? AND mgn_delete_time IS NULL ORDER BY mgn_name");
+			$q->execute(array((int)$this->key));
+			$out['nodes'] = array_map('strval', $q->fetchAll(PDO::FETCH_COLUMN));
+		}
+		if (class_exists('ServiceTenant') && (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true) === (int)$this->key) {
+			$has = $db->query("SELECT to_regclass('svo_shelf_objects') IS NOT NULL")->fetchColumn();
+			$out['customers'] = $has && (bool)$db->query("SELECT 1 FROM svo_shelf_objects LIMIT 1")->fetchColumn();
+		}
+		return $out;
+	}
+
+	/**
+	 * Why the location (provider, endpoint, region, bucket, folder) may not
+	 * change, or '' when it may: once anything is stored there, records point
+	 * at objects in that place (R1). A new place is a new target.
+	 */
+	public function location_refusal(): string {
+		$h = $this->holdings();
+		$why = array();
+		if ($h['ever'] > 0) {
+			$why[] = $h['ever'] . ' backup' . ($h['ever'] === 1 ? ' was' : 's were') . ' stored in it';
+		}
+		if ($h['nodes']) {
+			$why[] = self::name_list($h['nodes']) . ' back' . (count($h['nodes']) === 1 ? 's' : '') . ' up to it';
+		}
+		if ($h['customers']) {
+			$why[] = 'backup storage for customers is kept in it';
+		}
+		if (!$why) {
+			return '';
+		}
+		return 'The provider, endpoint, region, bucket and folder cannot change: ' . implode('; ', $why)
+			. '. The key and the name can. To use another bucket, add a target.';
+	}
+
+	/**
+	 * Why this target may not be switched off, or '' when it may. Disabled
+	 * means no new backups; reads, restores and pruning carry on. So what is
+	 * refused is switching off the place new backups are sent.
+	 */
+	public function disable_refusal(): string {
+		$why = array();
+		if ($this->is_default()) {
+			$why[] = 'it is where new backups go; choose another target for them first';
+		}
+		$nodes = $this->holdings()['nodes'];
+		if ($nodes) {
+			$why[] = self::name_list($nodes) . ' back' . (count($nodes) === 1 ? 's' : '') . ' up to it; move '
+				. (count($nodes) === 1 ? 'it' : 'them') . ' to another target first';
+		}
+		return $why ? 'It cannot be switched off: ' . implode('; ', $why) . '.' : '';
+	}
+
+	/** Why this target may not be deleted, or '' when nothing uses it. */
+	public function delete_refusal(): string {
+		$why = array();
+		if ($this->is_default()) {
+			$why[] = 'it is where new backups go; choose another target for them first';
+		}
+		$h = $this->holdings();
+		if ($h['nodes']) {
+			$why[] = self::name_list($h['nodes']) . ' back' . (count($h['nodes']) === 1 ? 's' : '') . ' up to it';
+		}
+		if ($h['stored'] > 0) {
+			$why[] = $h['stored'] . ' backup' . ($h['stored'] === 1 ? ' is' : 's are') . ' still stored in it, and retention prunes them there';
+		}
+		if ($h['customers']) {
+			$why[] = 'backup storage for customers is kept in it';
+		}
+		return $why ? 'It cannot be deleted: ' . implode('; ', $why) . '.' : '';
+	}
+
+	/** "a", "a and b", "a, b and 2 more". */
+	private static function name_list(array $names): string {
+		$names = array_values($names);
+		if (count($names) > 3) {
+			return $names[0] . ', ' . $names[1] . ' and ' . (count($names) - 2) . ' more nodes';
+		}
+		if (count($names) === 1) {
+			return $names[0];
+		}
+		return implode(', ', array_slice($names, 0, -1)) . ' and ' . end($names);
 	}
 
 	/**
@@ -236,32 +388,6 @@ class BackupTarget extends SystemBase {
 	}
 
 	/**
-	 * Every stored credential blob, for the sealed-secret reconciler. Its column
-	 * is a jsonb {"enc":"<blob>"} envelope, so the reconciler cannot reach the
-	 * blob from the code-free locator alone — this enumerator unwraps it.
-	 *
-	 * @return array<array{ref:string, blob:?string}>
-	 */
-	/**
-	 * Backblaze names an S3 endpoint per account cluster (s3.us-east-005.backblazeb2.com);
-	 * the region SigV4 wants is the middle label of that hostname. Both forms
-	 * hide region and endpoint for B2, so the save derives them from the
-	 * address Backblaze itself reports. Pure: hand it the s3ApiUrl.
-	 *
-	 * @return array{region:string, endpoint:string} both '' when the address is not a Backblaze S3 host
-	 */
-	/**
-	 * Fill what a form did not ask for. The forms hide region and endpoint
-	 * for Backblaze, so ask Backblaze: its authorize answer names the
-	 * account's S3 address, and the region is a label inside it. Without this
-	 * a B2 target cannot sign a request. Other providers' credentials pass
-	 * through untouched.
-	 *
-	 * @param array $creds {access_key, secret_key, region, endpoint}
-	 * @return array{creds: array, note: string} note is non-empty when
-	 *   Backblaze could not be asked; the connection test then says so.
-	 */
-	/**
 	 * How Backblaze is asked for the account's S3 address: a callable taking
 	 * (access_key, secret_key) and returning the authorize answer's s3_endpoint.
 	 * NULL means the real B2Client; a test sets a stand-in so completion runs
@@ -270,6 +396,19 @@ class BackupTarget extends SystemBase {
 	 */
 	public static $b2_locator = null;
 
+	/**
+	 * Fill what a form did not ask for, from the provider's catalogue entry.
+	 * Backblaze is asked: its authorize answer names the account's S3 address,
+	 * and the region is a label inside it (StorageProvider::b2_location()). A
+	 * provider that names its endpoint from the region gets it from there, and
+	 * one with a fixed region gets that. What was typed is never overwritten.
+	 * The endpoint comes back in the stored form.
+	 *
+	 * @param array $creds {access_key, secret_key, region, endpoint}
+	 * @return array{creds: array, note: string} note is non-empty when
+	 *   Backblaze could not be asked or named an address this site does not
+	 *   recognise; the connection test then says so.
+	 */
 	public static function complete_credentials(string $provider, array $creds): array {
 		$creds = array(
 			'access_key' => (string)($creds['access_key'] ?? ''),
@@ -278,33 +417,38 @@ class BackupTarget extends SystemBase {
 			'endpoint'   => trim((string)($creds['endpoint'] ?? '')),
 		);
 		$note = '';
-		if ($provider === 'b2' && ($creds['region'] === '' || $creds['endpoint'] === '')
-				&& $creds['access_key'] !== '' && $creds['secret_key'] !== '') {
-			try {
-				if (self::$b2_locator !== null) {
-					$s3_endpoint = (string)call_user_func(self::$b2_locator, $creds['access_key'], $creds['secret_key']);
-				} else {
-					$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
-					$s3_endpoint = (string)($auth['s3_endpoint'] ?? '');
+		if ($provider === 'b2') {
+			if (($creds['region'] === '' || $creds['endpoint'] === '')
+					&& $creds['access_key'] !== '' && $creds['secret_key'] !== '') {
+				try {
+					if (self::$b2_locator !== null) {
+						$s3_endpoint = (string)call_user_func(self::$b2_locator, $creds['access_key'], $creds['secret_key']);
+					} else {
+						$auth = (new B2Client($creds['access_key'], $creds['secret_key']))->authorize();
+						$s3_endpoint = (string)($auth['s3_endpoint'] ?? '');
+					}
+					$loc = StorageProvider::b2_location($s3_endpoint);
+					if ($loc['endpoint'] !== '') {
+						$creds['region'] = $creds['region'] !== '' ? $creds['region'] : $loc['region'];
+						$creds['endpoint'] = $creds['endpoint'] !== '' ? $creds['endpoint'] : $loc['endpoint'];
+					} else {
+						$note = 'Backblaze named the S3 address "' . $s3_endpoint . '", which this site does not recognise, so the region is unknown.';
+					}
+				} catch (\Throwable $e) {
+					$note = 'Backblaze could not be asked for the bucket\'s S3 address (' . $e->getMessage() . ').';
 				}
-				$loc = self::b2_s3_location($s3_endpoint);
-				if ($loc['endpoint'] !== '') {
-					$creds['region'] = $creds['region'] !== '' ? $creds['region'] : $loc['region'];
-					$creds['endpoint'] = $creds['endpoint'] !== '' ? $creds['endpoint'] : $loc['endpoint'];
-				}
-			} catch (\Throwable $e) {
-				$note = 'Backblaze could not be asked for the bucket\'s S3 address (' . $e->getMessage() . ').';
+			}
+		} elseif (StorageProvider::known($provider)) {
+			$fixed_region = (string)(StorageProvider::catalogue()[$provider]['region'] ?? '');
+			if ($creds['region'] === '' && $fixed_region !== '') {
+				$creds['region'] = $fixed_region;
+			}
+			if ($creds['endpoint'] === '') {
+				$creds['endpoint'] = StorageProvider::endpoint_for($provider, $creds['region']);
 			}
 		}
+		$creds['endpoint'] = StorageProvider::normalise_endpoint($creds['endpoint']);
 		return array('creds' => $creds, 'note' => $note);
-	}
-
-	public static function b2_s3_location(string $s3_api_url): array {
-		$host = (string)(parse_url(trim($s3_api_url), PHP_URL_HOST) ?: trim($s3_api_url));
-		if (!preg_match('/^s3\.([a-z]{2}-[a-z]+-\d{3})\.backblazeb2\.com$/i', $host, $m)) {
-			return array('region' => '', 'endpoint' => '');
-		}
-		return array('region' => strtolower($m[1]), 'endpoint' => 'https://' . strtolower($host));
 	}
 
 	/**
@@ -312,16 +456,24 @@ class BackupTarget extends SystemBase {
 	 * Both save forms run this before the provider is asked anything, so a mistyped
 	 * endpoint is named as a mistake rather than surfacing as a failed connection test.
 	 *
+	 * A provider that asks for the region (StorageProvider::asks()) needs one,
+	 * and a region is a short name such as us-east-1, never an address.
+	 *
 	 * Linode addresses a cluster by its host alone, {cluster}.linodeobjects.com, over
 	 * https. A bucket name in the host, a path after it and a plain-http scheme are refused.
-	 * Other providers have no rule here yet and always pass.
 	 */
 	public static function credential_problem(string $provider, array $creds): string {
-		if ($provider !== 'linode') {
-			return '';
-		}
 		$region = trim((string)($creds['region'] ?? ''));
 		$endpoint = trim((string)($creds['endpoint'] ?? ''));
+		if ($region !== '' && !preg_match('/^[a-z0-9-]+$/i', $region)) {
+			return 'The region is a short name such as us-east-1, not an address.';
+		}
+		if ($provider !== 'linode') {
+			if ($region === '' && $provider !== StorageProvider::GENERIC && in_array('region', StorageProvider::asks($provider), true)) {
+				return StorageProvider::label($provider) . ' needs the region the bucket is in.';
+			}
+			return '';
+		}
 		if ($region === '') {
 			return 'Linode needs the region the bucket is in, such as us-east-1.';
 		}
@@ -339,6 +491,13 @@ class BackupTarget extends SystemBase {
 		return '';
 	}
 
+	/**
+	 * Every stored credential blob, for the sealed-secret reconciler. Its column
+	 * is a jsonb {"enc":"<blob>"} envelope, so the reconciler cannot reach the
+	 * blob from the code-free locator alone — this enumerator unwraps it.
+	 *
+	 * @return array<array{ref:string, blob:?string}>
+	 */
 	public static function eachCredentialBlob(): array {
 		return self::each_column_blob('bkt_credentials');
 	}
@@ -376,6 +535,8 @@ class BackupTarget extends SystemBase {
 	}
 
 }
+
+BackupTarget::$field_specifications['bkt_provider']['allowed_values'] = StorageProvider::slugs();
 
 class MultiBackupTarget extends SystemMultiBase {
 	protected static $model_class = 'BackupTarget';

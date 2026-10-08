@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.37 - a node made by a join is given the target Where new backups go names
  * @version 1.36 - a credential slot naming a target switched off or deleted is refused at pickup:
  *                every slot is a write credential, and such a target takes no more writes
  * @version 1.35 - a claim carries update_state and update_offered, where the agent's own self-update
@@ -775,6 +776,7 @@ class AgentChannelEndpoint {
 			$node->set('mgn_web_root', PathHelper::getRootDir());
 			$node->set('mgn_notes', 'This management node itself. Its agent runs the plane-side jobs the local queue used to.');
 		}
+		$node->assign_default_backup_target();
 		$node->prepare();
 		$node->save();
 		$node->load();

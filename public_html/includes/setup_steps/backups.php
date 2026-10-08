@@ -9,6 +9,9 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.5 - the target form is BackupTargetForm (every catalogue provider); a wizard target is saved enabled
+ *                and becomes the scheduled one as it is saved; the step shows that target, never the newest enabled.
+ *                The form posted no Enabled box, so the target it saved was disabled and never scheduled
  * @version 2.4 - shows and tests the target backups go to (backup_target_id), not the first by name
  * @version 2.3 - on a site a management node backs up, the target section states that
  *                (as the Backups admin page does) instead of offering a bucket form
@@ -25,12 +28,6 @@ $setup_bk_chosen = (int)$settings->get_setting('backup_target_id');
 if ($setup_bk_chosen > 0) {
 	$setup_bk_row = new BackupTarget($setup_bk_chosen, TRUE);
 	if ($setup_bk_row->key && !$setup_bk_row->get('bkt_delete_time')) {
-		$setup_bk_target = $setup_bk_row;
-	}
-}
-if ($setup_bk_target === null) {
-	$setup_bk_targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_backup_target_id' => 'DESC'), 1);
-	foreach ($setup_bk_targets as $setup_bk_row) {
 		$setup_bk_target = $setup_bk_row;
 	}
 }
@@ -68,7 +65,7 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 		<p>
 			<span class="badge badge-success">Set</span>
 			<?php echo htmlspecialchars($setup_bk_target->get('bkt_name')); ?>
-			(<?php echo htmlspecialchars(strtoupper((string)$setup_bk_target->get('bkt_provider'))); ?>,
+			(<?php echo htmlspecialchars(StorageProvider::label((string)$setup_bk_target->get('bkt_provider'))); ?>,
 			bucket <code><?php echo htmlspecialchars((string)$setup_bk_target->get('bkt_bucket')); ?></code>)
 		</p>
 		<form method="POST" action="/setup">
@@ -83,21 +80,7 @@ $setup_bk_manager = $setup_bk_managed ? (string)ManagementNodeStatus::manager_ur
 	$setup_bk_form->hiddeninput('action', '', array('value' => 'save_target'));
 	$setup_bk_form->hiddeninput('step', '', array('value' => 'backups'));
 	$setup_bk_form->hiddeninput('bkt_backup_target_id', '', array('value' => ''));
-	$setup_bk_form->hiddeninput('bkt_name', '', array('value' => 'Backups'));
-	echo $setup_bk_form->dropinput('bkt_provider', 'Provider', array(
-		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
-		'value' => 'b2',
-		// B2 needs neither: its endpoint is detected at save time.
-		'visibility_rules' => array(
-			'b2'      => array('show' => array(), 'hide' => array('region', 'endpoint')),
-			'default' => array('show' => array('region', 'endpoint'), 'hide' => array()),
-		),
-	));
-	echo $setup_bk_form->textinput('bkt_bucket', 'Bucket name', array('required' => true));
-	echo $setup_bk_form->textinput('access_key', 'Access key ID', array('required' => true, 'autocomplete' => 'off'));
-	echo $setup_bk_form->passwordinput('secret_key', 'Secret key', array('required' => true, 'autocomplete' => 'new-password'));
-	echo $setup_bk_form->textinput('region', 'Region', array('helptext' => 'e.g. us-east-1'));
-	echo $setup_bk_form->textinput('endpoint', 'Endpoint hostname', array('helptext' => 'e.g. s3.us-east-1.amazonaws.com or us-east-1.linodeobjects.com'));
+	BackupTargetForm::render($setup_bk_form, null, array('wizard' => true));
 	echo $setup_bk_form->submitbutton('btn_save_target', 'Save and test', array('class' => 'btn btn-primary'));
 	$setup_bk_form->end_form();
 } ?>
