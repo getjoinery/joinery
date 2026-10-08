@@ -25,6 +25,7 @@
  * should use — 2 for a malformed request, 1 for a transfer, envelope or
  * integrity failure — and whose message is exactly what the script used to say.
  *
+ * @version 1.6 - fetch_object() places a namespaced object (offloaded mail) one folder down, as backup storage does
  * @version 1.5 - wanted() lists a plan's artifacts in restore order from BackupChain::plan_artifacts, so a
  *                version-2 chain's code, data and database kinds are staged as a version-1 chain's files are
  * @version 1.4 - an artifact the manifest needs with no link fails as `gone` (the links are a listing of
@@ -507,6 +508,10 @@ class BackupStaging {
 		$relname = BackupObjects::object_relname($epoch, $name);
 		if ($progress) { $progress('fetching', $relname); }
 		$path = $dir . '/' . $name . BackupObjects::OBJECT_SUFFIX;
+		if (dirname($path) !== $dir) {
+			// A namespaced name ('mailbox/12.eml') sits one folder down, as in backup storage.
+			self::prepare_workspace(dirname($path));
+		}
 		$got = self::fetch_link($url, $path, BackupFetch::size_ceiling((int)$entry['object_bytes']));
 		if (!$got['ok']) {
 			throw new BackupStagingException('could not bring back the offloaded file ' . $name . ': ' . $got['error']);

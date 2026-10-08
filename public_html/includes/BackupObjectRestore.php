@@ -37,6 +37,9 @@
  * it is handed; the two test hooks stand in for the file bucket and the
  * placement so a suite can run against scratch.
  *
+ * @version 1.1.0 - a stored object is restored by the row its profile names for it (backupRow()), so offloaded
+ *                  mail comes home as offloaded files do; whether the store still serves it is asked of the
+ *                  store the row records (specs/storage_targets.md WP6)
  * @version 1.0.2 - one file store: placement() and served() resolve it with no visibility
  * @version 1.0.1 - a survey's list is capped by bytes as well as by count (a name can be 255 bytes,
  *                  and the agent drops the middle of output past 64 KiB); in missing mode a row the
@@ -49,10 +52,6 @@ require_once(PathHelper::getIncludePath('includes/BackupStaging.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 require_once(PathHelper::getIncludePath('includes/BackupFetch.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfileRegistry.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 
 class BackupObjectRestoreException extends Exception {
 
@@ -97,8 +96,8 @@ class BackupObjectRestore {
 
 	/**
 	 * Test seams. 'store' => fn(): ?CloudStorageDriver, the file bucket a
-	 * blob is served from; 'placement' => fn(FileBlob): string,
-	 * where its original belongs on disk. Production leaves both unset.
+	 * row is served from; 'placement' => fn(array $row): string,
+	 * where its object belongs on disk. Production leaves both unset.
 	 */
 	public static $test_hooks = array();
 
@@ -289,42 +288,44 @@ class BackupObjectRestore {
 
 	// ------------------------------------------------------------ decisions
 
-	/** The blob row an index entry names, or null when the restored database has none. */
-	public static function blob_for($name) {
-		$blobs = new MultiFileBlob(array('fbb_stored_name' => (string)$name), null, 1);
-		foreach ($blobs as $blob) { return $blob; }
+	/**
+	 * The row an index entry names, from whichever storage profile owns the
+	 * name (StorageProfile::backupRow()), with the profile beside it; null when
+	 * the restored database has none. A row: id, label, driver, placement,
+	 * size, sha256 (0 / '' when the record keeps none), target_id, remote_key.
+	 */
+	public static function row_for($name) {
+		foreach (StorageProfileRegistry::all() as $profile) {
+			if (!method_exists($profile, 'backupRow')) { continue; }
+			$row = $profile->backupRow((string)$name);
+			if ($row !== null) {
+				return $row + array('profile' => $profile);
+			}
+		}
 		return null;
 	}
 
-	/** Where a blob's original belongs on disk: the storage profile's placement, or the test seam. */
-	public static function placement(FileBlob $blob) {
+	/** Where a row's object belongs on disk: its profile's placement, or the test seam. */
+	public static function placement(array $row) {
 		if (isset(self::$test_hooks['placement'])) {
-			return (string)call_user_func(self::$test_hooks['placement'], $blob);
+			return (string)call_user_func(self::$test_hooks['placement'], $row);
 		}
-		foreach (StorageProfileRegistry::all() as $profile) {
-			if ($profile->table() !== FileBlob::$tablename) { continue; }
-			$items = $profile->reverseItemsForRow((int)$blob->key);
-			if (!empty($items[0]['local_path'])) {
-				return (string)$items[0]['local_path'];
-			}
-		}
-		throw new BackupObjectRestoreException('no storage profile places files on this site, so '
-			. $blob->get('fbb_stored_name') . ' has nowhere to go');
+		return (string)$row['placement'];
 	}
 
-	/** Can the file bucket serve this blob's original, at its recorded size? */
-	public static function served(FileBlob $blob) {
+	/** Can the file store the row records serve its object, at its recorded size? */
+	public static function served(array $row) {
 		$driver = isset(self::$test_hooks['store'])
 			? call_user_func(self::$test_hooks['store'])
-			: CloudStorageDriverFactory::driverWithFallback();
-		if (!$driver) {
+			: CloudStorageDriverFactory::forTarget((int)$row['target_id']);
+		if (!$driver || (string)$row['remote_key'] === '') {
 			return false;
 		}
-		$head = $driver->head($blob->remote_key_for('original'));
+		$head = $driver->head((string)$row['remote_key']);
 		if ($head === null) {
 			return false;
 		}
-		$size = (int)$blob->get('fbb_size_bytes');
+		$size = (int)$row['size'];
 		return $size <= 0 || (int)($head['size'] ?? -1) === $size;
 	}
 
@@ -340,17 +341,17 @@ class BackupObjectRestore {
 	 * the offload tick already handles, and flipping it local would have the
 	 * tick upload the file again.
 	 */
-	public static function decide($mode, ?FileBlob $blob) {
-		if ($blob === null) {
+	public static function decide($mode, ?array $row) {
+		if ($row === null) {
 			return 'no_row';
 		}
-		if ((string)$blob->get('fbb_storage_driver') !== 'cloud') {
+		if ((string)$row['driver'] !== 'cloud') {
 			return 'local';
 		}
-		if ($mode === self::MODE_MISSING && self::served($blob)) {
+		if ($mode === self::MODE_MISSING && self::served($row)) {
 			return 'served';
 		}
-		if (is_file(self::placement($blob))) {
+		if (is_file(self::placement($row))) {
 			return 'kept';
 		}
 		return 'want';
@@ -375,7 +376,7 @@ class BackupObjectRestore {
 			if ($name === '') { continue; }
 			if (empty($e['stored'])) { $out['not_stored']++; continue; }
 			$out['indexed']++;
-			$decision = self::decide($mode, self::blob_for($name));
+			$decision = self::decide($mode, self::row_for($name));
 			if ($decision === 'want' || $decision === 'kept') {
 				$out['wanted']++;
 				$epoch = (string)($e['epoch'] ?? '');
@@ -436,10 +437,10 @@ class BackupObjectRestore {
 		foreach ($names as $name) {
 			$name  = (string)$name;
 			$entry = $entries[$name];
-			$blob  = self::blob_for($name);
-			$decision = self::decide($mode, $blob);
+			$row   = self::row_for($name);
+			$decision = self::decide($mode, $row);
 			if ($decision === 'kept') {
-				self::adopt($name, $blob);
+				self::adopt($name, $row);
 				$out['kept']++;
 				if ($progress) { $progress('kept', $name, 'already on disk; its record is set to local'); }
 				continue;
@@ -455,7 +456,7 @@ class BackupObjectRestore {
 			}
 			$got = $source($name, $entry);
 			try {
-				$bytes = self::bring($name, $entry, (string)$got['path'], $keys[$epoch], $blob);
+				$bytes = self::bring($name, $entry, (string)$got['path'], $keys[$epoch], $row);
 			} finally {
 				if (!empty($got['temporary'])) { @unlink((string)$got['path']); }
 			}
@@ -485,13 +486,13 @@ class BackupObjectRestore {
 	 * @return int plaintext bytes placed
 	 * @throws BackupObjectRestoreException
 	 */
-	public static function bring($name, array $entry, $ciphertext, $data_key, FileBlob $blob) {
+	public static function bring($name, array $entry, $ciphertext, $data_key, array $row) {
 		try {
 			BackupChain::verify_artifact($ciphertext, array('bytes' => (int)$entry['object_bytes'], 'sha256' => (string)$entry['object_sha256']));
 		} catch (Exception $ex) {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ': ' . str_replace('the manifest', 'its index', $ex->getMessage()));
 		}
-		$dest = self::placement($blob);
+		$dest = self::placement($row);
 		if (file_exists($dest)) {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ': a file is already at ' . $dest . '; nothing is overwritten');
 		}
@@ -507,7 +508,7 @@ class BackupObjectRestore {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ': ' . $ex->getMessage());
 		}
 		try {
-			self::check_against_row($name, $part, $blob);
+			self::check_against_row($name, $part, $row);
 		} catch (BackupObjectRestoreException $ex) {
 			@unlink($part);
 			throw $ex;
@@ -517,32 +518,32 @@ class BackupObjectRestore {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ': could not put it in place at ' . $dest);
 		}
 		@chmod($dest, 0666);
-		self::set_local($blob);
+		self::set_local($row);
 		return (int)$bytes;
 	}
 
 	/**
-	 * A file already at the placement becomes the blob's local copy when it
+	 * A file already at the placement becomes the row's local copy when it
 	 * matches the row; one that does not is left alone and refused by name.
 	 */
-	public static function adopt($name, FileBlob $blob) {
-		self::check_against_row($name, self::placement($blob), $blob, true);
-		self::set_local($blob);
+	public static function adopt($name, array $row) {
+		self::check_against_row($name, self::placement($row), $row, true);
+		self::set_local($row);
 	}
 
 	/**
-	 * The plaintext against the blob's own record: size always, hash where the
-	 * row holds one. $is_placed words the refusal for a file found on disk
+	 * The plaintext against the row's own record: size and hash where the
+	 * record keeps them. $is_placed words the refusal for a file found on disk
 	 * rather than one just decrypted.
 	 */
-	private static function check_against_row($name, $path, FileBlob $blob, $is_placed = false) {
+	private static function check_against_row($name, $path, array $row, $is_placed = false) {
 		$size = (int)@filesize($path);
-		$want = (int)$blob->get('fbb_size_bytes');
+		$want = (int)$row['size'];
 		if ($want > 0 && $size !== $want) {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ($is_placed ? ': the file already at ' . $path . ' is ' : ' decrypts to ')
 				. $size . ' bytes where its record says ' . $want . ($is_placed ? '; nothing is overwritten' : ''));
 		}
-		$sha = (string)$blob->get('fbb_sha256');
+		$sha = (string)$row['sha256'];
 		if ($sha !== '' && !hash_equals($sha, (string)hash_file('sha256', $path))) {
 			throw new BackupObjectRestoreException('offloaded file ' . $name . ($is_placed ? ': the file already at ' . $path . ' is not this file'
 				: ' decrypts to bytes whose hash is not the one its record holds') . ($is_placed ? '; nothing is overwritten' : ' — backup storage holds a different file'));
@@ -552,35 +553,38 @@ class BackupObjectRestore {
 	/**
 	 * The row to local, under the offload engine's per-row lock so the tick
 	 * and this never write one row at once. Only a row still marked cloud is
-	 * changed; the failure counters are cleared with it, as the drain does.
+	 * changed; the failure counters, the store and the key are cleared with
+	 * it, as the drain does.
 	 */
-	private static function set_local(FileBlob $blob) {
+	private static function set_local(array $row) {
 		$db = DbConnector::get_instance()->get_db_link();
-		$id = (int)$blob->key;
+		$id = (int)$row['id'];
+		$profile = $row['profile'];
 		$got = false;
 		for ($i = 0; $i < self::ROW_LOCK_TRIES; $i++) {
 			$q = $db->prepare('SELECT pg_try_advisory_lock(:k1, :k2) AS got');
-			$q->execute(array(':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => $id));
-			$row = $q->fetch(PDO::FETCH_ASSOC);
+			$q->execute(array(':k1' => CloudOffloadEngine::lockSpace($profile->table()), ':k2' => $id));
+			$lock = $q->fetch(PDO::FETCH_ASSOC);
 			$q->closeCursor();
-			if (!empty($row['got'])) { $got = true; break; }
+			if (!empty($lock['got'])) { $got = true; break; }
 			sleep(1);
 		}
 		if (!$got) {
-			throw new BackupObjectRestoreException('offloaded file ' . $blob->get('fbb_stored_name')
+			throw new BackupObjectRestoreException('offloaded file ' . $row['label']
 				. ' is being handled by the offload tick; run this again in a moment');
 		}
 		try {
-			$u = $db->prepare("UPDATE fbb_file_blobs SET fbb_storage_driver = 'local', fbb_sync_failed_count = 0,"
-				. " fbb_sync_last_attempt = now() WHERE fbb_file_blob_id = ? AND fbb_storage_driver = 'cloud'");
+			$u = $db->prepare("UPDATE {$profile->table()} SET {$profile->driverColumn()} = 'local',"
+				. " {$profile->targetColumn()} = NULL, {$profile->remoteKeyColumn()} = NULL,"
+				. " {$profile->failedCountColumn()} = 0, {$profile->lastAttemptColumn()} = now()"
+				. " WHERE {$profile->pkeyColumn()} = ? AND {$profile->driverColumn()} = 'cloud'");
 			$u->execute(array($id));
 			$u->closeCursor();
 		} finally {
 			$un = $db->prepare('SELECT pg_advisory_unlock(:k1, :k2)');
-			$un->execute(array(':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => $id));
+			$un->execute(array(':k1' => CloudOffloadEngine::lockSpace($profile->table()), ':k2' => $id));
 			$un->closeCursor();
 		}
-		$blob->set('fbb_storage_driver', 'local', false);
 	}
 
 	// -------------------------------------------------------------- sources

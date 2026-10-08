@@ -25,6 +25,7 @@
  *
  * Run: php plugins/mailbox/tests/inbound_raw_storage_test.php  (schema synced).
  *
+ * @version 2.3 - a cloud row is read from the file store and key it records (specs/storage_targets.md WP6)
  * @version 2.2 - the routing log's sender on a sealing mailbox is the bare address
  * @version 2.1 - one store: the mock is injected into the factory's single cache
  * @version 2.0
@@ -33,7 +34,6 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
@@ -290,18 +290,19 @@ class InboundRawStorageTest {
 
 		// Move the bytes to the mock private bucket and flip the row to 'cloud'.
 		$mock = new InMemoryBlobDriver();
-		$mock->objects[$key] = (string)file_get_contents($local_path);
+		$mock->objects['irs-site/' . $key] = (string)file_get_contents($local_path);
 		@unlink($local_path); // a cloud row keeps no local copy
-		$this->db->prepare("UPDATE iem_inbound_email_messages
-			SET iem_raw_storage_driver='cloud' WHERE iem_inbound_email_message_id=?")->execute(array($r['id']));
-		$this->injectPrivateDriver($mock);
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_raw_storage_driver='cloud',
+			iem_raw_bkt_backup_target_id=616161, iem_raw_remote_key=? WHERE iem_inbound_email_message_id=?")
+			->execute(array('irs-site/' . $key, $r['id']));
+		CloudStorageDriverFactory::$test_drivers[616161] = $mock;
 
 		$msg2 = new InboundEmailMessage($r['id'], TRUE);
 		$this->ok($msg2->getRawMessage() === $r['raw'], 'getRawMessage() pulls a cloud row through the private driver');
 		$part = $msg2->getRawMimePart('2');
 		$this->ok($part !== null && $part['content'] === $this->pdf_bytes, 'getRawMimePart(2) works on a cloud row');
 
-		CloudStorageDriverFactory::reset();
+		CloudStorageDriverFactory::$test_drivers = array();
 	}
 
 	private function testPermanentDeleteReclaimsFiles() {
@@ -402,17 +403,12 @@ class InboundRawStorageTest {
 		$this->db->exec("DELETE FROM iel_inbound_email_logs WHERE iel_iea_inbound_email_alias_id = " . intval($this->alias_id));
 	}
 
-	private function injectPrivateDriver($mock) {
-		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached');
-		$ref->setValue(null, $mock);
-	}
-
 	private function preClean() {
 		mailbox_purge_domains('irs-test-%');
 	}
 
 	private function tearDown() {
-		CloudStorageDriverFactory::reset();
+		CloudStorageDriverFactory::$test_drivers = array();
 		foreach ($this->written_paths as $p) { if (is_file($p)) @unlink($p); }
 		try {
 			foreach (array_unique($this->created_file_ids) as $fid) {

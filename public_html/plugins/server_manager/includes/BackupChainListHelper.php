@@ -11,6 +11,7 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.8 - the object store totals read keys through BackupObjects::location_of(), offloaded mail included
  * @version 1.7 - chains are listed from every live storage space of the node, each naming its space;
  *                chain_path() is a space's (specs/storage_targets.md WP4)
  * @version 1.6 - chains are listed from the target the node names, switched off included; nothing is inferred
@@ -128,10 +129,11 @@ class BackupChainListHelper {
 			list($profile, $dir) = $parts;
 			if ($dir === BackupObjects::DIR) {
 				// objects/{epoch}/{name}.enc, and one envelope.json per epoch.
-				if (count($parts) !== 4 || strpos($parts[2], BackupObjects::EPOCH_PREFIX) !== 0) { continue; }
+				$at = BackupObjects::location_of(implode('/', array_slice($parts, 2)));
+				if ($at === null) { continue; }
 				$objects[$profile] = $objects[$profile] ?? ['count' => 0, 'bytes' => 0, 'epochs' => []];
-				$objects[$profile]['epochs'][$parts[2]] = true;
-				if (substr($parts[3], -strlen(BackupObjects::OBJECT_SUFFIX)) === BackupObjects::OBJECT_SUFFIX) {
+				$objects[$profile]['epochs'][$at['epoch']] = true;
+				if (!$at['envelope']) {
 					$objects[$profile]['count']++;
 					$objects[$profile]['bytes'] += (int)$f['size'];
 				}

@@ -11,17 +11,17 @@
  *
  *  - The privacy gate verdict: an anonymous 2xx ⇒ FAIL (bucket public); any
  *    denied/unreachable status ⇒ PASS.
- *  - driver() is null until the bucket is configured AND the latch is on;
- *    driverUnlatched() needs the whole binding; driverWithFallback() answers
- *    while the store is paused.
  *  - The registry refuses a profile that is not private and keeps one that is.
  *  - Save refuses a bucket an anonymous read can see, and passes a private one,
  *    over the loopback S3 fixture (FIXTURE_ANON_READ).
  *
- * Settings are toggled only in the Globalvars in-memory cache (this process).
+ * Which store a row is read from, the latch and mode() are file_store_move's
+ * (db tier): the file store is a target row.
  *
  * Run: php tests/integration/cloud_private_store_test.php
  *
+ * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): the factory and mode()
+ *                checks moved to file_store_move; the probe lands in the store's folder
  * @version 2.1 - the latch-off case uses 0, and the empty-bucket checks skip on a box with a bucket stored
  * @version 2.0 - one store: the factory's single binding, the registry's refusal, the Save gate over the fixture
  * @version 1.0
@@ -31,10 +31,6 @@ require_once(__DIR__ . '/../lib/harness.php');
 require_once(__DIR__ . '/../lib/s3_fixtures.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfileRegistry.php'));
-require_once(PathHelper::getIncludePath('includes/BucketCheck.php'));
 
 section('Privacy gate verdict (the privacy-critical decision)');
 ok('anonymous 200 ⇒ gate FAILS (bucket public)', CloudStorageLifecycle::privacyVerdict(200)['pass'] === false);
@@ -47,55 +43,6 @@ ok('no answer (0) is a warning, never a pass', CloudStorageLifecycle::privacyVer
 ok('a denied read (403) is a pass step', CloudStorageLifecycle::privacyVerdict(403)['status'] === 'pass');
 ok('a failed verdict says to make the bucket private and save again', strpos(CloudStorageLifecycle::privacyVerdict(200)['message'], 'Make it private at the provider and save again') !== false);
 
-section('driver() is null until configured AND enabled');
-
-$bind = function ($endpoint, $bucket, $key, $secret) {
-	harness_set_setting_mem('cloud_storage_endpoint', $endpoint);
-	harness_set_setting_mem('cloud_storage_region', 'r');
-	harness_set_setting_mem('cloud_storage_bucket', $bucket);
-	harness_set_setting_mem('cloud_storage_access_key', $key);
-	harness_set_setting_mem('cloud_storage_secret_key', $secret);
-	CloudStorageDriverFactory::reset();
-};
-
-// Latch off ⇒ null regardless of bucket. ('0', not blank: a blank in memory
-// reads the stored row, and this box may have the store enabled.)
-harness_set_setting_mem('cloud_storage_enabled', '0');
-$bind('s3.example.com', 'some-bucket', 'k', 's');
-ok('latch off ⇒ driver null', CloudStorageDriverFactory::driver() === null);
-ok('latch off ⇒ unlatched driver still built from the binding', CloudStorageDriverFactory::driverUnlatched() !== null);
-ok('latch off ⇒ with-fallback answers (a paused store still serves)', CloudStorageDriverFactory::driverWithFallback() !== null);
-
-// Latch on but no bucket ⇒ null. A blank bucket cannot be forced in memory
-// on a box that has one stored, so the three checks skip there.
-harness_set_setting_mem('cloud_storage_enabled', '1');
-if (harness_stored_setting_is_blank('cloud_storage_bucket')) {
-	$bind('s3.example.com', '', 'k', 's');
-	ok('latch on + empty bucket ⇒ driver null', CloudStorageDriverFactory::driver() === null);
-	ok('empty bucket ⇒ unlatched driver null', CloudStorageDriverFactory::driverUnlatched() === null);
-	ok('empty bucket ⇒ with-fallback null (the store is unconfigured)', CloudStorageDriverFactory::driverWithFallback() === null);
-} else {
-	foreach (array('latch on + empty bucket ⇒ driver null', 'empty bucket ⇒ unlatched driver null', 'empty bucket ⇒ with-fallback null (the store is unconfigured)') as $label) {
-		harness_skip($label, 'this box has a bucket configured and a blank cannot be forced in memory');
-	}
-}
-
-// Latch on, whole binding ⇒ a driver.
-$bind('s3.example.com', 'some-bucket', 'k', 's');
-ok('latch on + whole binding ⇒ a driver', CloudStorageDriverFactory::driver() !== null);
-$b = CloudStorageDriverFactory::binding();
-ok('binding() is endpoint, region, bucket, access key, secret key and nothing else',
-	array_keys($b) === array('endpoint', 'region', 'bucket', 'access_key', 'secret_key'));
-
-section('mode() from the latch and the drain flag');
-harness_set_setting_mem('cloud_storage_enabled', '1');
-harness_set_setting_mem('cloud_storage_draining', '1');
-ok('enabled ⇒ offload (precedence over draining)', CloudStorageLifecycle::mode() === 'offload');
-harness_set_setting_mem('cloud_storage_enabled', '0');
-ok('disabled + draining ⇒ drain', CloudStorageLifecycle::mode() === 'drain');
-harness_set_setting_mem('cloud_storage_draining', '0');
-ok('disabled + not draining ⇒ idle', CloudStorageLifecycle::mode() === 'idle');
-
 section('The registry refuses a profile that is not private');
 
 $src = function ($cls, $visibility) {
@@ -106,6 +53,8 @@ $src = function ($cls, $visibility) {
 		. "  public function failedCountColumn(): string { return 'failed'; }\n"
 		. "  public function lastAttemptColumn(): string { return 'last_attempt'; }\n"
 		. "  public function lastErrorColumn(): string { return 'last_error'; }\n"
+		. "  public function targetColumn(): string { return 'target_id'; }\n"
+		. "  public function remoteKeyColumn(): string { return 'remote_key'; }\n"
 		. "  public function visibility(): string { return '$visibility'; }\n"
 		. "  public function eligibilityWhere(): string { return ''; }\n"
 		. "  public function rowExists(int \$id): bool { return false; }\n"
@@ -165,8 +114,10 @@ if ($fx === null) {
 } else {
 	harness_defer(function () use ($fx) { s3fx_stop($fx); });
 	BucketCheck::$test_hooks = array('backup_target_buckets' => $no_targets);
-	$r = CloudStorageLifecycle::testConnection(s3fx_creds($fx) + array('bucket' => 'files'));
+	$r = CloudStorageLifecycle::testConnection(s3fx_creds($fx) + array('bucket' => 'files', 'prefix' => 'site-a'));
 	ok('the Save check passes', $r['ok'] === true, json_encode($r['steps']));
+	$written = s3fx_put_keys($fx);
+	ok('the probe went into the store\'s folder', count($written) === 1 && strpos($written[0], 'files/site-a/_joinery_probe-') === 0, json_encode($written));
 	$p = $step($r['steps'], 'Private');
 	ok('the private step passed: nobody can read the bucket without a key', $p && $p['status'] === 'pass' && strpos($p['message'], 'Nobody can read this bucket without a key') !== false, json_encode($p));
 	ok('nothing is left in the bucket', s3fx_keys($fx) === array());

@@ -2,13 +2,18 @@
 /**
  * CloudStorageS3Driver
  *
- * S3-compatible cloud storage driver. Speaks the AWS S3 API, so it
- * works with AWS S3, Backblaze B2, Cloudflare R2, Wasabi, DigitalOcean
- * Spaces, MinIO, and similar services.
+ * The file store's driver over S3Signer, the one S3 client: AWS S3, Backblaze
+ * B2, Cloudflare R2, Wasabi, DigitalOcean Spaces, Linode, MinIO and the rest.
+ * Addressing (path style, or the bucket as a host label on Amazon) is the
+ * signer's, from the provider catalogue.
  *
- * Path-style vs virtual-hosted addressing is auto-detected from the
- * endpoint hostname (AWS → virtual-hosted, everything else → path-style).
+ * Keys are full object keys: the driver adds nothing to them. A row records
+ * the key its object was written under (CloudFileStore::key()), so a reader
+ * hands that key back unchanged.
  *
+ * @version 2.1 - a ranged get answered with the whole object (200) is cut to the span asked for
+ * @version 2.0 - on S3Signer instead of the AWS SDK; keys are full keys, the folder is the caller's
+ *                (specs/storage_targets.md WP6); putMany() is gone, the engine pushes one object at a time
  * @version 1.2 - one private store: no public base URL option; url() is the bucket's own address for an
  *                object, derived from endpoint + bucket (the endpoint's port kept), read only by the
  *                privacy gate's anonymous probe; the raw-host and CDN inspections are gone
@@ -16,171 +21,94 @@
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getComposerAutoloadPath());
-
-use Aws\S3\S3Client;
-use Aws\S3\Exception\S3Exception;
-use GuzzleHttp\Promise;
-
 class CloudStorageS3Driver implements CloudStorageDriver {
 
-	private $client;
+	/** @var array S3Signer credential: access_key, secret_key, region, endpoint */
+	private $creds;
 	private $bucket;
-	private $bucket_url;
-
-	public function __construct(array $opts = []) {
-		$settings = Globalvars::get_instance();
-		$endpoint   = $opts['endpoint']   ?? $settings->get_setting('cloud_storage_endpoint');
-		$region     = $opts['region']     ?? $settings->get_setting('cloud_storage_region');
-		$bucket     = $opts['bucket']     ?? $settings->get_setting('cloud_storage_bucket');
-		$access_key = $opts['access_key'] ?? $settings->get_setting('cloud_storage_access_key');
-		$secret_key = $opts['secret_key'] ?? $settings->get_setting('cloud_storage_secret_key');
-
-		if (!$endpoint || !$bucket || !$access_key || !$secret_key) {
-			throw new RuntimeException('CloudStorageS3Driver requires endpoint, bucket, access_key, secret_key.');
-		}
-
-		$this->bucket = $bucket;
-
-		$endpoint_url = self::normalizeEndpointUrl($endpoint);
-		$endpoint_host = parse_url($endpoint_url, PHP_URL_HOST) ?? $endpoint;
-
-		// AWS uses virtual-hosted addressing; everything else uses path-style.
-		$path_style = !preg_match('/\.amazonaws\.com$/i', $endpoint_host);
-
-		$this->client = new S3Client([
-			'version'                 => 'latest',
-			'region'                  => $region ?: 'us-east-1',
-			'endpoint'                => $endpoint_url,
-			'use_path_style_endpoint' => $path_style,
-			'credentials' => [
-				'key'    => $access_key,
-				'secret' => $secret_key,
-			],
-		]);
-
-		// The bucket's own address: the URL an object would be served from if
-		// the bucket were public. url() builds on it, and the privacy gate's
-		// anonymous probe is the only thing that fetches it.
-		$scheme = parse_url($endpoint_url, PHP_URL_SCHEME) ?: 'https';
-		$port   = parse_url($endpoint_url, PHP_URL_PORT);
-		$authority = $endpoint_host . ($port ? ':' . $port : '');
-		$this->bucket_url = $path_style
-			? $scheme . '://' . $authority . '/' . $bucket
-			: $scheme . '://' . $bucket . '.' . $authority;
-	}
 
 	/**
-	 * Push original + multiple variants concurrently in a single round trip.
-	 * Returns array of [remote_key => true|Exception]. Used by sync tasks
-	 * to avoid N sequential RTTs per row.
-	 *
-	 * @param array $items  Each item: ['local_path' => str, 'remote_key' => str, 'content_type' => str]
-	 * @return array        Map of remote_key → true on success or Exception on failure.
+	 * @param array $opts endpoint, region, bucket, access_key, secret_key
 	 */
-	public function putMany(array $items): array {
-		$promises = [];
-		foreach ($items as $item) {
-			$promises[$item['remote_key']] = $this->client->putObjectAsync([
-				'Bucket'      => $this->bucket,
-				'Key'         => self::pathPrefix() . '/' . ltrim($item['remote_key'], '/'),
-				'Body'        => fopen($item['local_path'], 'rb'),
-				'ContentType' => $item['content_type'] ?: 'application/octet-stream',
-			]);
+	public function __construct(array $opts) {
+		foreach (['endpoint', 'bucket', 'access_key', 'secret_key'] as $field) {
+			if (trim((string)($opts[$field] ?? '')) === '') {
+				throw new RuntimeException('CloudStorageS3Driver requires endpoint, bucket, access_key, secret_key.');
+			}
 		}
-		$results = Promise\Utils::settle($promises)->wait();
-		$out = [];
-		foreach ($results as $key => $r) {
-			$out[$key] = ($r['state'] === 'fulfilled') ? true : ($r['reason'] instanceof Throwable ? $r['reason'] : new RuntimeException('unknown error'));
-		}
-		return $out;
+		$this->bucket = (string)$opts['bucket'];
+		$this->creds = [
+			'access_key' => (string)$opts['access_key'],
+			'secret_key' => (string)$opts['secret_key'],
+			// A store with no region signs as us-east-1, which every
+			// S3-compatible service that ignores regions accepts.
+			'region'     => trim((string)($opts['region'] ?? '')) !== '' ? trim((string)$opts['region']) : 'us-east-1',
+			'endpoint'   => (string)$opts['endpoint'],
+		];
 	}
 
 	public function put(string $local_path, string $remote_key, string $content_type): void {
-		try {
-			$this->client->putObject([
-				'Bucket'      => $this->bucket,
-				'Key'         => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
-				'SourceFile'  => $local_path,
-				'ContentType' => $content_type ?: 'application/octet-stream',
-			]);
-		} catch (S3Exception $e) {
-			throw new RuntimeException('S3 put failed for ' . $remote_key . ': ' . $e->getAwsErrorMessage(), 0, $e);
+		$r = $this->call('put', $remote_key, function ($path) use ($local_path, $content_type) {
+			return S3Signer::put_file($this->creds, $this->bucket, $path, $local_path, $content_type ?: 'application/octet-stream');
+		});
+		if ($r['status'] < 200 || $r['status'] >= 300) {
+			throw new RuntimeException('S3 put failed for ' . $remote_key . ': ' . self::why($r));
 		}
 	}
 
 	public function get(string $remote_key, string $local_path): void {
-		$dir = dirname($local_path);
-		if (!is_dir($dir)) {
-			mkdir($dir, 0777, true);
-		}
-		try {
-			$this->client->getObject([
-				'Bucket' => $this->bucket,
-				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
-				'SaveAs' => $local_path,
-			]);
-		} catch (S3Exception $e) {
-			throw new RuntimeException('S3 get failed for ' . $remote_key . ': ' . $e->getAwsErrorMessage(), 0, $e);
+		self::ensure_parent($local_path);
+		$r = $this->call('get', $remote_key, function ($path) use ($local_path) {
+			return S3Signer::get_to_file($this->creds, $this->bucket, $path, $local_path);
+		});
+		if ($r['status'] !== 200) {
+			throw new RuntimeException('S3 get failed for ' . $remote_key . ': ' . self::why($r));
 		}
 	}
 
 	public function get_range(string $remote_key, string $local_path, int $start, int $end): void {
-		$dir = dirname($local_path);
-		if (!is_dir($dir)) {
-			mkdir($dir, 0777, true);
+		self::ensure_parent($local_path);
+		$r = $this->call('ranged get', $remote_key, function ($path) use ($local_path, $start, $end) {
+			return S3Signer::get_range_to_file($this->creds, $this->bucket, $path, $local_path, $start, $end);
+		});
+		if ($r['status'] !== 206 && $r['status'] !== 200) {
+			throw new RuntimeException('S3 ranged get failed for ' . $remote_key . ': ' . self::why($r));
 		}
-		try {
-			$this->client->getObject([
-				'Bucket' => $this->bucket,
-				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
-				'Range'  => 'bytes=' . (int)$start . '-' . (int)$end,
-				'SaveAs' => $local_path,
-			]);
-		} catch (S3Exception $e) {
-			throw new RuntimeException('S3 ranged get failed for ' . $remote_key . ': ' . $e->getAwsErrorMessage(), 0, $e);
+		// A provider that ignores the range answers 200 with the whole object;
+		// the caller asked for the span and is handed the span.
+		if ($r['status'] === 200 && (int)filesize($local_path) !== $end - $start + 1) {
+			self::cut_to_span($local_path, $start, $end);
 		}
+	}
+
+	/** Keep only bytes $start..$end of a downloaded file, read a chunk at a time. */
+	private static function cut_to_span(string $path, int $start, int $end): void {
+		$part = $path . '.span';
+		$in = fopen($path, 'rb');
+		$out = fopen($part, 'wb');
+		if (!$in || !$out || fseek($in, $start) !== 0) {
+			throw new RuntimeException('Could not cut the requested span out of ' . $path);
+		}
+		$left = $end - $start + 1;
+		while ($left > 0 && !feof($in)) {
+			$chunk = fread($in, min(1048576, $left));
+			if ($chunk === false || $chunk === '') { break; }
+			fwrite($out, $chunk);
+			$left -= strlen($chunk);
+		}
+		fclose($in);
+		fclose($out);
+		rename($part, $path);
 	}
 
 	public function delete(string $remote_key): void {
-		try {
-			$this->client->deleteObject([
-				'Bucket' => $this->bucket,
-				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
-			]);
-		} catch (S3Exception $e) {
-			$code = $e->getAwsErrorCode();
-			if ($code === 'NoSuchKey' || $code === 'NotFound') {
-				return;
-			}
-			throw new RuntimeException('S3 delete failed for ' . $remote_key . ': ' . $e->getAwsErrorMessage(), 0, $e);
+		$r = $this->call('delete', $remote_key, function ($path) {
+			return S3Signer::delete($this->creds, $this->bucket, $path);
+		});
+		// Deleting what is not there leaves it not there.
+		if (($r['status'] < 200 || $r['status'] >= 300) && $r['status'] !== 404) {
+			throw new RuntimeException('S3 delete failed for ' . $remote_key . ': ' . self::why($r));
 		}
-	}
-
-	public function url(string $remote_key): string {
-		return $this->bucket_url . '/' . self::pathPrefix() . '/' . ltrim($remote_key, '/');
-	}
-
-	public function ping(): array {
-		try {
-			$this->client->headBucket(['Bucket' => $this->bucket]);
-			return ['ok' => true, 'message' => 'HeadBucket OK'];
-		} catch (S3Exception $e) {
-			return ['ok' => false, 'message' => $e->getAwsErrorMessage() ?: $e->getMessage()];
-		} catch (Exception $e) {
-			return ['ok' => false, 'message' => $e->getMessage()];
-		}
-	}
-
-	/**
-	 * Byte size of a stored object via HeadObject — metadata only, no download.
-	 * Returns null when the object is missing or the head fails. Used by the
-	 * blob backfill to size cloud-resident rows without pulling their bytes.
-	 */
-	public function size(string $remote_key): ?int {
-		$head = $this->head($remote_key);
-		return $head === null ? null : (int)$head['size'];
 	}
 
 	/**
@@ -190,45 +118,64 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 	 */
 	public function head(string $remote_key): ?array {
 		try {
-			$r = $this->client->headObject([
-				'Bucket' => $this->bucket,
-				'Key'    => self::pathPrefix() . '/' . ltrim($remote_key, '/'),
-			]);
-			$len = $r['ContentLength'] ?? null;
-			if ($len === null) {
-				return null;
-			}
-			return ['size' => (int)$len, 'etag' => trim((string)($r['ETag'] ?? ''), '"')];
+			$r = S3Signer::head($this->creds, $this->bucket, '/' . ltrim($remote_key, '/'));
 		} catch (Exception $e) {
 			error_log('CloudStorageS3Driver::head failed for ' . $remote_key . ': ' . $e->getMessage());
 			return null;
 		}
+		if ((int)$r['status'] !== 200) {
+			if ((int)$r['status'] !== 404) {
+				error_log('CloudStorageS3Driver::head for ' . $remote_key . ' answered HTTP ' . (int)$r['status']);
+			}
+			return null;
+		}
+		$len = $r['headers']['content-length'] ?? null;
+		if ($len === null || $len === '') {
+			return null;
+		}
+		return ['size' => (int)$len, 'etag' => trim((string)($r['headers']['etag'] ?? ''), '"')];
+	}
+
+	public function url(string $remote_key): string {
+		return S3Signer::object_url($this->creds['endpoint'], $this->bucket, $remote_key);
+	}
+
+	/** Can the key list the bucket? One object asked for, nothing downloaded. */
+	public function ping(): array {
+		try {
+			S3Signer::list($this->creds, $this->bucket, '', 1);
+			return ['ok' => true, 'message' => 'The bucket answered'];
+		} catch (Exception $e) {
+			return ['ok' => false, 'message' => $e->getMessage()];
+		}
 	}
 
 	/**
-	 * Bucket key prefix derived from the site_template setting. Stable per
-	 * install — changing it would orphan every existing object in the bucket,
-	 * so the empty/slash guard hard-fails rather than silently re-deriving.
+	 * Byte size of a stored object — metadata only, no download. Null when the
+	 * object is missing or the head fails.
 	 */
-	private static function pathPrefix(): string {
-		$template = strtolower(Globalvars::get_instance()->get_setting('site_template') ?? '');
-		if ($template === '' || strpos($template, '/') !== false) {
-			throw new RuntimeException(
-				'site_template is empty or contains a slash; '
-				. 'refusing to derive cloud storage path prefix.');
-		}
-		$sanitized = preg_replace('/[^a-z0-9-]/', '-', $template);
-		return trim(preg_replace('/-+/', '-', $sanitized), '-');
+	public function size(string $remote_key): ?int {
+		$head = $this->head($remote_key);
+		return $head === null ? null : (int)$head['size'];
 	}
 
-	/**
-	 * Accept either a hostname (s3.us-west-002.backblazeb2.com) or a full URL
-	 * for the endpoint setting; always return a scheme-prefixed URL for the SDK.
-	 */
-	private static function normalizeEndpointUrl(string $endpoint): string {
-		if (preg_match('#^https?://#i', $endpoint)) {
-			return rtrim($endpoint, '/');
+	/** One signer call for a key, a transport failure turned into the driver's exception. */
+	private function call(string $what, string $remote_key, callable $fn): array {
+		try {
+			return $fn('/' . ltrim($remote_key, '/'));
+		} catch (S3SignerException $e) {
+			throw new RuntimeException('S3 ' . $what . ' failed for ' . $remote_key . ': ' . $e->getMessage(), 0, $e);
 		}
-		return 'https://' . rtrim($endpoint, '/');
+	}
+
+	private static function why(array $r): string {
+		return S3Signer::extract_error((string)($r['body'] ?? '')) ?: ('HTTP ' . (int)$r['status']);
+	}
+
+	private static function ensure_parent(string $local_path): void {
+		$dir = dirname($local_path);
+		if (!is_dir($dir)) {
+			mkdir($dir, 0777, true);
+		}
 	}
 }

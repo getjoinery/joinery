@@ -20,15 +20,25 @@
  *     options so one class serves the plain and the ownership-gated cases. It
  *     answers visibility() 'private', as every profile of the one store does.
  *
+ * @version 1.3 - the file store is a target row (specs/storage_targets.md WP6): ScratchTableProfile records
+ *                its store and key (target_id, remote_key columns), names forward items and reads its
+ *                recorded key back; cloud_test_store() is a CloudFileStore over a test driver, with no
+ *                folder unless given one, so a key is the item's name; putMany() is gone
  * @version 1.2 - ScratchTableProfile answers lastErrorColumn()
  * @version 1.1 - one private store: ScratchTableProfile answers private, with no visibility option
  * @version 1.0
  */
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
-
 if (!class_exists('RecordingMockDriver')) {
+
+/**
+ * A file store over a test driver: where syncBatch() writes in a test. The
+ * target id is whatever the test's rows should record (no row is needed);
+ * with no folder, an item's key is its name.
+ */
+function cloud_test_store(CloudStorageDriver $driver, int $target_id = 1, string $prefix = ''): CloudFileStore {
+	return new CloudFileStore($target_id, $prefix, $driver);
+}
 
 /**
  * Records ops; get() writes synthetic bytes; put failures are injectable.
@@ -37,29 +47,17 @@ if (!class_exists('RecordingMockDriver')) {
 class RecordingMockDriver implements CloudStorageDriver {
 	/** @var array ordered log of ['op'=>..., 'key'=>...] */
 	public $calls = [];
-	/** @var bool when true, every put/putMany item fails */
+	/** @var bool when true, every put fails */
 	public $fail_all = false;
-	/** @var string[] remote_keys whose put should fail (putMany) */
+	/** @var string[] remote_keys whose put should fail */
 	public $fail_keys = [];
 	/** @var callable|null closure(remote_key): void — a side effect during push */
 	public $on_put = null;
 
-	/** Bulk push. Returns [remote_key => true | RuntimeException]. */
-	public function putMany(array $items): array {
-		$out = [];
-		foreach ($items as $item) {
-			$this->calls[] = ['op' => 'put', 'key' => $item['remote_key']];
-			if ($this->on_put) { ($this->on_put)($item['remote_key']); }
-			$fails = $this->fail_all || in_array($item['remote_key'], $this->fail_keys, true);
-			$out[$item['remote_key']] = $fails ? new RuntimeException('mock put failure') : true;
-		}
-		return $out;
-	}
-
 	public function put(string $local_path, string $remote_key, string $content_type): void {
 		$this->calls[] = ['op' => 'put', 'key' => $remote_key];
 		if ($this->on_put) { ($this->on_put)($remote_key); }
-		if ($this->fail_all) { throw new RuntimeException('mock put failure'); }
+		if ($this->fail_all || in_array($remote_key, $this->fail_keys, true)) { throw new RuntimeException('mock put failure'); }
 	}
 
 	public function get(string $remote_key, string $local_path): void {
@@ -141,8 +139,9 @@ class InMemoryBlobDriver implements CloudStorageDriver {
  * A StorageProfile over a caller-owned scratch table + on-disk base dir.
  *
  * Options (all optional):
- *   pkey, driver_col, failed_col, last_attempt_col, last_error_col — column names
- *     (defaults 'id' / 'drv' / 'failed' / 'last_attempt' / 'last_error')
+ *   pkey, driver_col, failed_col, last_attempt_col, last_error_col, target_col,
+ *     key_col — column names (defaults 'id' / 'drv' / 'failed' / 'last_attempt' /
+ *     'last_error' / 'target_id' / 'remote_key'); the caller's table carries them
  *   eligibility_where        — forward-offload SQL gate (default 'TRUE')
  *   reverse_eligibility_where — reverse (restore) ownership gate; default ''
  *     means "no reverse gate", identical to a profile that omits the method
@@ -164,6 +163,8 @@ class ScratchTableProfile implements StorageProfile {
 			'failed_col'                => 'failed',
 			'last_attempt_col'          => 'last_attempt',
 			'last_error_col'            => 'last_error',
+			'target_col'                => 'target_id',
+			'key_col'                   => 'remote_key',
 			'eligibility_where'         => 'TRUE',
 			'reverse_eligibility_where' => '',
 			'is_eligible'               => null,
@@ -180,6 +181,8 @@ class ScratchTableProfile implements StorageProfile {
 	public function failedCountColumn(): string { return $this->opts['failed_col']; }
 	public function lastAttemptColumn(): string { return $this->opts['last_attempt_col']; }
 	public function lastErrorColumn(): string   { return $this->opts['last_error_col']; }
+	public function targetColumn(): string      { return $this->opts['target_col']; }
+	public function remoteKeyColumn(): string   { return $this->opts['key_col']; }
 	public function visibility(): string { return 'private'; }
 	public function eligibilityWhere(): string { return $this->opts['eligibility_where']; }
 	public function reverseEligibilityWhere(): string { return $this->opts['reverse_eligibility_where']; }
@@ -206,23 +209,38 @@ class ScratchTableProfile implements StorageProfile {
 	public function itemsForRow(int $id): ?array {
 		$path = $this->base . '/disk/' . $id . '/original';
 		if (!file_exists($path)) return null;
-		$items = [['local_path' => $path, 'remote_key' => $id . '/original', 'content_type' => 'application/octet-stream']];
+		$items = [['local_path' => $path, 'name' => $id . '/original', 'content_type' => 'application/octet-stream']];
 		foreach ($this->opts['variants'] as $variant) {
 			$items[] = [
 				'local_path'   => $this->base . '/disk/' . $id . '/' . $variant,
-				'remote_key'   => $id . '/' . $variant,
+				'name'         => $id . '/' . $variant,
 				'content_type' => 'application/octet-stream',
 			];
 		}
 		return $items;
 	}
 
+	/** The recorded key of the original; a variant sits beside it, as a blob's does. */
 	public function reverseItemsForRow(int $id): array {
-		return [[
-			'remote_key'   => $id . '/original',
+		$r = $this->_row($id);
+		$recorded = $r ? (string)($r[$this->opts['key_col']] ?? '') : '';
+		$key = $recorded !== '' ? $recorded : $id . '/original';
+		$folder = substr($key, 0, strlen($key) - strlen('original'));
+		$items = [[
+			'remote_key'   => $key,
+			'name'         => $id . '/original',
 			'local_path'   => $this->base . '/restore/' . $id . '/original',
 			'content_type' => 'application/octet-stream',
 		]];
+		foreach ($this->opts['variants'] as $variant) {
+			$items[] = [
+				'remote_key'   => $folder . $variant,
+				'name'         => $id . '/' . $variant,
+				'local_path'   => $this->base . '/restore/' . $id . '/' . $variant,
+				'content_type' => 'application/octet-stream',
+			];
+		}
+		return $items;
 	}
 }
 

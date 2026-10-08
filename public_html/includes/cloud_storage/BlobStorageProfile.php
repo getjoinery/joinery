@@ -15,6 +15,9 @@
  * served from the bucket. A cloud blob that is made public is pulled back
  * before its record flips (FileBlob::flipVisibility()).
  *
+ * @version 1.5 - targetColumn()/remoteKeyColumn(): the row records its store and the key of its original;
+ *                forward items are relative names, reverse items the recorded keys; a backup object
+ *                carries its target (specs/storage_targets.md WP6)
  * @version 1.4 - lastErrorColumn()
  * @version 1.3 - one private store: visibility() answers private, eligibility is fbb_is_private = TRUE,
  *                the public profile is gone (specs/implemented/cloud_storage_private_only.md)
@@ -38,6 +41,8 @@ class BlobStorageProfile implements StorageProfile {
 	public function failedCountColumn(): string { return 'fbb_sync_failed_count'; }
 	public function lastAttemptColumn(): string { return 'fbb_sync_last_attempt'; }
 	public function lastErrorColumn(): string   { return 'fbb_sync_last_error'; }
+	public function targetColumn(): string      { return 'fbb_bkt_backup_target_id'; }
+	public function remoteKeyColumn(): string   { return 'fbb_remote_key'; }
 	/** The column a row's size is read from, so the status can say how much sits where. */
 	public function sizeColumn(): string        { return 'fbb_size_bytes'; }
 
@@ -85,7 +90,7 @@ class BlobStorageProfile implements StorageProfile {
 		}
 		$items = [[
 			'local_path'   => $original_path,
-			'remote_key'   => $blob->remote_key_for('original'),
+			'name'         => $blob->remote_name_for('original'),
 			'content_type' => $content_type,
 		]];
 		foreach ($blob->variant_size_keys() as $size_key) {
@@ -93,7 +98,7 @@ class BlobStorageProfile implements StorageProfile {
 			if (file_exists($variant_path)) {
 				$items[] = [
 					'local_path'   => $variant_path,
-					'remote_key'   => $blob->remote_key_for($size_key),
+					'name'         => $blob->remote_name_for($size_key),
 					'content_type' => $content_type,
 				];
 			}
@@ -106,7 +111,8 @@ class BlobStorageProfile implements StorageProfile {
 	 * object store sees them: the immutable object name (fbb_stored_name), the
 	 * local path the original occupies while it waits for a shelf, every local
 	 * path original and variants occupy (the archive's exclude list), and how
-	 * to fetch the original from the file store when no local copy is left.
+	 * to fetch the original from the file store when no local copy is left:
+	 * its target and key.
 	 * One query; the placement is computed, never stat()ed here.
 	 */
 	public function backupObjects(): array {
@@ -127,6 +133,32 @@ class BlobStorageProfile implements StorageProfile {
 			return null;
 		}
 		return $this->describe_for_backup($blob);
+	}
+
+	/**
+	 * The row a backup object name belongs to, for a restore: where its
+	 * original goes on disk, what its record says of it, and where the store
+	 * holds it. A blob's name is its stored name, which never carries a slash;
+	 * null for any other name or when the restored database has no such blob.
+	 */
+	public function backupRow(string $name): ?array {
+		if ($name === '' || strpos($name, '/') !== false) {
+			return null;
+		}
+		$blobs = new MultiFileBlob(['fbb_stored_name' => $name], null, 1);
+		foreach ($blobs as $blob) {
+			return [
+				'id'         => (int)$blob->key,
+				'label'      => (string)$blob->get('fbb_stored_name'),
+				'driver'     => (string)$blob->get('fbb_storage_driver'),
+				'placement'  => self::home_dir($blob) . '/' . $blob->get('fbb_stored_name'),
+				'size'       => (int)$blob->get('fbb_size_bytes'),
+				'sha256'     => (string)$blob->get('fbb_sha256'),
+				'target_id'  => (int)$blob->get('fbb_bkt_backup_target_id'),
+				'remote_key' => (string)$blob->get('fbb_remote_key'),
+			];
+		}
+		return null;
 	}
 
 	private function describe_for_backup(FileBlob $blob): array {
@@ -151,11 +183,13 @@ class BlobStorageProfile implements StorageProfile {
 			if (is_file($candidate)) { $original = $candidate; break; }
 		}
 		return [
+			'table'        => $this->table(),
 			'id'           => (int)$blob->key,
 			'name'         => (string)$blob->get('fbb_stored_name'),
 			'original'     => $original,
 			'paths'        => $paths,
-			'remote_key'   => $blob->remote_key_for('original'),
+			'target_id'    => (int)$blob->get('fbb_bkt_backup_target_id'),
+			'remote_key'   => (string)$blob->get('fbb_remote_key'),
 			'content_type' => $blob->get('fbb_mime_type') ?: 'application/octet-stream',
 			'visibility'   => $this->visibility(),
 		];
@@ -169,13 +203,15 @@ class BlobStorageProfile implements StorageProfile {
 		return $this->placement($blob);
 	}
 
+	/** The directory a blob's bytes belong in on this server: placement follows its visibility class. */
+	private static function home_dir(FileBlob $blob): string {
+		$restricted_dir = (string)Globalvars::get_instance()->get_setting('upload_dir');
+		return $blob->is_private_bool() ? $restricted_dir : dirname($restricted_dir) . '/static_files/uploads';
+	}
+
 	/** The reverse enumeration for a blob already in hand: no second load per row. */
 	private function placement(FileBlob $blob): array {
-		$settings       = Globalvars::get_instance();
-		$restricted_dir = $settings->get_setting('upload_dir');
-		$fast_dir       = dirname($restricted_dir) . '/static_files/uploads';
-		// Placement follows the blob's own visibility class.
-		$target_dir   = $blob->is_private_bool() ? $restricted_dir : $fast_dir;
+		$target_dir   = self::home_dir($blob);
 		$stored_name  = $blob->get('fbb_stored_name');
 		$content_type = $blob->get('fbb_mime_type') ?: 'application/octet-stream';
 
@@ -188,6 +224,7 @@ class BlobStorageProfile implements StorageProfile {
 				: $target_dir . '/' . $size_key . '/' . $stored_name;
 			$items[] = [
 				'remote_key'   => $blob->remote_key_for($size_key),
+				'name'         => $blob->remote_name_for($size_key),
 				'local_path'   => $local_path,
 				'content_type' => $content_type,
 			];

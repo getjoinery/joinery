@@ -207,16 +207,19 @@ function sc_bucket(array $held) {
 $objs = array();
 for ($i = 0; $i < 30; $i++) { $objs[] = array('name' => "f$i.jpg", 'remote_key' => "k$i"); }
 $all = sc_bucket(array_column($objs, 'remote_key'));
-$o = SiteCensus::offloaded($objs, $all);
+$o = SiteCensus::offloaded($objs, function () use ($all) { return $all; });
 check($o['total'] === 30 && $o['sampled'] === SiteCensus::OFFLOAD_SAMPLE && $o['answered'] === $o['sampled'] && $all->asked === $o['sampled'],
 	'thirty offloaded files: a sample of them is asked about, one request each, and all answer', json_encode($o));
-$o = SiteCensus::offloaded(array_slice($objs, 0, 3), sc_bucket(array('k0', 'k2')));
+$some = sc_bucket(array('k0', 'k2'));
+$o = SiteCensus::offloaded(array_slice($objs, 0, 3), function () use ($some) { return $some; });
 check($o['sampled'] === 3 && $o['answered'] === 2 && $o['missing'] === array('f1.jpg'), 'one the bucket does not hold is named', json_encode($o));
 $r = SiteCensus::compare($census($fs), $census($fs, array('usr_users' => 3), array(), array('answered' => 1, 'missing' => array('f1.jpg'))), false);
 $d = $diff($r, 'offloaded files the copy reaches');
 check($d && $d['blocking'] && strpos((string)$d['copy'], 'f1.jpg') !== false, 'which blocks even while the source is live', json_encode($r));
 $o = SiteCensus::offloaded($objs, null);
 check($o['error'] !== '' && $o['sampled'] === 0, 'offloaded files with no file store to reach them is an error, not a pass', json_encode($o));
+$o = SiteCensus::offloaded($objs, function () { return null; });
+check($o['error'] !== '' && $o['sampled'] === 0, 'and so is a file store the records name that this site cannot reach', json_encode($o));
 $r = SiteCensus::compare($census($fs), $census($fs, array('usr_users' => 3), array(), array('sampled' => 0, 'answered' => 0, 'error' => $o['error'])), false);
 check($r['blocking'] === 1, 'and blocks', json_encode($r));
 check(SiteCensus::offloaded(array(), null) === array('total' => 0, 'sampled' => 0, 'answered' => 0, 'missing' => array(), 'error' => ''),

@@ -2,115 +2,119 @@
 /**
  * CloudStorageDriverFactory
  *
- * Resolves the driver for the file store: one private bucket, one binding.
- * Returns null when the store is disabled or unconfigured — callers must
- * check before use.
+ * Resolves the file store's drivers. The file store is a target row
+ * (bkt_purpose 'files'), and there can be more than one: the one
+ * file_store_target_id names takes new offloads; an older one keeps serving
+ * the files whose records name it until Move files carries them across.
  *
- * driver() honours the enabled latch (cloud_storage_enabled), so a non-null
- * answer is the single signal "there is a usable, proven-private store".
- * driverUnlatched() builds from the raw binding regardless, for the paths that
- * run while the store is paused or draining; driverWithFallback() is the one
- * every consumer uses for request-time byte I/O.
+ * - current() is where a new offload goes: the named store, while the
+ *   enabled latch (cloud_storage_enabled) is on. Null otherwise.
+ * - currentUnlatched() is the named store whatever the latch says, for the
+ *   page's health check and a move's destination.
+ * - forTarget() is the driver for the store a row names. Every read, delete,
+ *   pull-back and move follows the row, with the latch on or off.
  *
+ * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): current(), currentUnlatched(),
+ *                currentTarget(), forTarget(), fromTarget(); the binding settings, driver(),
+ *                driverUnlatched(), driverWithFallback() and binding() are gone
  * @version 2.0 - one binding: driver(), driverUnlatched(), driverWithFallback(), binding(); no visibility
  *                argument, no default(), no public_base_url (specs/implemented/cloud_storage_private_only.md)
  * @version 1.2
  */
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-
 class CloudStorageDriverFactory {
 
-	private static $cached = false; // tri-state: false = uncached, null = no driver, instance = driver
+	/** @var array target id => CloudStorageDriver|null, built once per process */
+	private static $by_target = [];
 
 	/**
-	 * The store's driver per current settings. Returns null when:
-	 * - cloud_storage_enabled is off, OR
-	 * - any required setting is missing.
+	 * Tests only: target id => a driver standing in for that store's bucket.
+	 * @var array
 	 */
-	public static function driver(): ?CloudStorageDriver {
-		if (self::$cached !== false) {
-			return self::$cached;
-		}
-		$settings = Globalvars::get_instance();
-		if (!$settings->get_setting('cloud_storage_enabled')) {
-			return self::$cached = null;
-		}
-		$binding = self::binding();
-		if (empty($binding['bucket'])) {
-			return self::$cached = null;
-		}
-		try {
-			self::$cached = self::fromOptions($binding);
-		} catch (Exception $e) {
-			error_log('CloudStorageDriverFactory: failed to construct driver — ' . $e->getMessage());
-			self::$cached = null;
-		}
-		return self::$cached;
-	}
+	public static $test_drivers = [];
 
-	/**
-	 * Build the store's driver from its raw binding, IGNORING the enabled latch.
-	 * Used by the reverse (pull-back) path, which runs right after an admin
-	 * disables the store — so the latched driver() would return null even
-	 * though the binding is still valid. Returns null only if required creds
-	 * are missing.
-	 */
-	public static function driverUnlatched(): ?CloudStorageDriver {
-		$binding = self::binding();
-		foreach (['endpoint', 'bucket', 'access_key', 'secret_key'] as $req) {
-			if (empty($binding[$req])) {
-				return null;
-			}
-		}
-		try {
-			return self::fromOptions($binding);
-		} catch (Exception $e) {
-			error_log('CloudStorageDriverFactory: failed to construct unlatched driver — ' . $e->getMessage());
+	/** The file store target file_store_target_id names, or null when none is set up. */
+	public static function currentTarget(): ?BackupTarget {
+		$id = (int)Globalvars::get_instance()->get_setting(BackupTarget::FILE_STORE_SETTING, false, true);
+		if ($id <= 0) {
 			return null;
 		}
+		$target = new BackupTarget($id, TRUE);
+		if (!$target->key || $target->get('bkt_delete_time') || !$target->is_file_store()) {
+			return null;
+		}
+		return $target;
+	}
+
+	/** Where a new offload goes: the named store while the latch is on, else null. */
+	public static function current(): ?CloudFileStore {
+		if (!Globalvars::get_instance()->get_setting('cloud_storage_enabled')) {
+			return null;
+		}
+		return self::currentUnlatched();
+	}
+
+	/** The named store whatever the latch says, or null when none is set up or it has no driver. */
+	public static function currentUnlatched(): ?CloudFileStore {
+		$target = self::currentTarget();
+		if (!$target) {
+			return null;
+		}
+		$driver = self::forTarget((int)$target->key);
+		return $driver ? new CloudFileStore((int)$target->key, $target->prefix(), $driver) : null;
 	}
 
 	/**
-	 * The driver to use for request-time byte I/O (read / write / delete /
-	 * pull-back): the latched driver when the store is enabled, otherwise the
-	 * unlatched binding so I/O still works while the store is paused or
-	 * mid-drain. This is the resolver every consumer should use for touching
-	 * bytes — driver() alone would go null during a drain and silently break
-	 * reads. Null only when the store is entirely unconfigured.
+	 * The driver for the store a row names, or null when the target is gone or
+	 * its key cannot be read. Built once per process.
 	 */
-	public static function driverWithFallback(): ?CloudStorageDriver {
-		return self::driver() ?? self::driverUnlatched();
+	public static function forTarget(?int $target_id): ?CloudStorageDriver {
+		$target_id = (int)$target_id;
+		if ($target_id <= 0) {
+			return null;
+		}
+		if (isset(self::$test_drivers[$target_id])) {
+			return self::$test_drivers[$target_id];
+		}
+		if (array_key_exists($target_id, self::$by_target)) {
+			return self::$by_target[$target_id];
+		}
+		$driver = null;
+		$target = new BackupTarget($target_id, TRUE);
+		if ($target->key && $target->is_file_store()) {
+			try {
+				$driver = self::fromTarget($target);
+			} catch (Exception $e) {
+				error_log('CloudStorageDriverFactory: no driver for file store "' . $target->get('bkt_name') . '" — ' . $e->getMessage());
+			}
+		}
+		return self::$by_target[$target_id] = $driver;
 	}
 
-	/**
-	 * The settings-resolved bucket binding. Single source of truth for which
-	 * settings make up the store. Nothing is read from the bucket by URL; the
-	 * driver derives the bucket URL from endpoint + bucket, used only by the
-	 * privacy gate's anonymous probe.
-	 */
-	public static function binding(): array {
-		$s = Globalvars::get_instance();
+	/** A driver for a target row, from its sealed credentials. */
+	public static function fromTarget(BackupTarget $target): CloudStorageDriver {
+		return self::fromOptions(self::options($target));
+	}
+
+	/** What a driver is built from, for a target: its credentials and bucket. */
+	public static function options(BackupTarget $target): array {
+		$creds = $target->get_credentials() ?: [];
 		return [
-			'endpoint'   => $s->get_setting('cloud_storage_endpoint'),
-			'region'     => $s->get_setting('cloud_storage_region'),
-			'bucket'     => $s->get_setting('cloud_storage_bucket'),
-			'access_key' => $s->get_setting('cloud_storage_access_key'),
-			'secret_key' => $s->get_setting('cloud_storage_secret_key'),
+			'endpoint'   => (string)($creds['endpoint'] ?? ''),
+			'region'     => (string)($creds['region'] ?? ''),
+			'bucket'     => (string)$target->get('bkt_bucket'),
+			'access_key' => (string)($creds['access_key'] ?? ''),
+			'secret_key' => (string)($creds['secret_key'] ?? ''),
 		];
 	}
 
-	/**
-	 * Build a driver instance from explicit options (used by the Save check
-	 * before settings are persisted, and by the resolvers above).
-	 */
+	/** Build a driver from explicit options (the Save check, before anything is stored). */
 	public static function fromOptions(array $opts): CloudStorageDriver {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageS3Driver.php'));
 		return new CloudStorageS3Driver($opts);
 	}
 
-	/** Reset the cached driver (used after settings change). */
+	/** Forget the built drivers (after a store's key changes). */
 	public static function reset(): void {
-		self::$cached = false;
+		self::$by_target = [];
 	}
 }

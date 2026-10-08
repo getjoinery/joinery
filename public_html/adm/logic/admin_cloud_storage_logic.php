@@ -2,15 +2,21 @@
 /**
  * Cloud Storage Admin Logic
  *
- * Thin caller over the shared CloudStorageLifecycle. The page manages the one
- * file store: a private bucket that holds private uploads, Drive files and
- * inbound mail. Save = check + persist + activate; the check stores nothing
- * on a fail. Pause, "Disable and Pull Files Back to Local" and Remove act on
- * the store. Offload itself runs through one platform task (CloudOffloadRun):
- * enabling the store sets it to offload mode and ensures that task is active;
- * the tick drives every profile from the registry, so the admin never names a
- * profile or a per-store task.
+ * Thin caller over the shared CloudStorageLifecycle. The page manages the file
+ * store: a private bucket that holds private uploads, Drive files and inbound
+ * mail, kept as a target row (bkt_purpose 'files') with its key sealed like
+ * every target's. Save = the shared target form read onto the row + the
+ * check + store; the check stores nothing on a fail. Pause, "Disable and Pull
+ * Files Back to Local" and Remove act on the store. Switching to another
+ * bucket saves a second store and makes it the one new offloads go to; the
+ * older store keeps serving the files whose records name it until Move files
+ * carries them across. Offload itself runs through one platform task
+ * (CloudOffloadRun).
  *
+ * @version 4.1 - an older store's key is replaced from its own row (edit_store): it still serves its files
+ * @version 4.0 - the file store is a target row (specs/storage_targets.md WP6): save and edit go through
+ *                BackupTargetForm and CloudStorageLifecycle::saveStore(); a key is replaced by editing the
+ *                store; switch to another bucket, Move files, stop a move, delete an emptied older store
  * @version 3.2 - the secret key is read through FormWriterV2Base::process_secretinput(): a locked field keeps
  *                the stored key, Reset and blank fails as required
  * @changelog 3.1 - replace_key: a rotated key is proved and stored on its own, leaving the enabled latch
@@ -19,235 +25,139 @@
  * @version 3.0.1 - Retry clears the recorded reason with the count
  * @version 3.0 - one private store (specs/implemented/cloud_storage_private_only.md): one Save, one binding, one
  *                pull-back; the private-store fields and disable_and_pull_private are gone
- * @version 2.6 - the provider picker: StorageProvider::complete() settles the endpoint and region a
- *                provider decides (Backblaze from the key) before the check runs; remove resets it
- * @version 2.5 - the page's shape (configured, locked, public_cloud, draining); a field the form did not
- *                post keeps its stored value, so Enable re-proves the stored settings and the locked
- *                form posts only what may change; the remove action forgets an empty store
- * @version 2.4 - objects_status (BackupObjectsStatus::compute()) for the waiting-for-backup count and
- *                size and the same-account line
- * @version 2.3 - the daily file-store check (inventory) and who brings a missing file back
- *                (objects_source) are handed to the page; the bring_back_objects action starts
- *                this site's own Bring them back in the background
  * @version 2.2
  */
 
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-
 function admin_cloud_storage_logic(array $input): LogicResult {
-	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-	require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
-	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventory.php'));
-	require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStoreInventoryPanel.php'));
-	require_once(PathHelper::getIncludePath('includes/BackupObjectRestoreLauncher.php'));
-	require_once(PathHelper::getIncludePath('includes/BackupObjectsStatus.php'));
-	require_once(PathHelper::getIncludePath('includes/ManagementNodeStatus.php'));
-
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
 
-	$settings = Globalvars::get_instance();
-	$profile  = new BlobStorageProfile();   // the file-blob profile, whose figures the page shows
+	$profile = new BlobStorageProfile();   // the file-blob profile, whose figures the page shows
 
 	$test_results = null;
 	$errors = array();
+	// The form drawn again after a refused save, with what was entered: the
+	// store being edited, or a new one.
+	$form_target = null;
+	$form_new = !empty($input['new_store']);
+	// An older store whose key is being replaced: it still serves the files
+	// whose records name it until they are moved, so its key must stay good.
+	$edit_store = null;
+	if (!empty($input['edit_store'])) {
+		$candidate = new BackupTarget((int)$input['edit_store'], TRUE);
+		if ($candidate->key && !$candidate->get('bkt_delete_time') && $candidate->is_file_store()) {
+			$edit_store = $candidate;
+		}
+	}
 
-	// A field the form did not post keeps its stored value. The page shows the
-	// locked fields (endpoint, region, bucket) read-only while files are in the
-	// bucket and posts only the ones that may change; Enable posts nothing and
-	// re-proves the stored settings.
-	$posted = function ($key) use ($input, $settings) {
-		return array_key_exists($key, $input) ? trim((string)$input[$key]) : trim((string)$settings->get_setting($key));
+	$say = function ($message, $title, $ok = true) use ($session) {
+		$session->save_message(new DisplayMessage($message, $title, '/\/admin\/admin_cloud_storage/',
+			$ok ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect('/admin/admin_cloud_storage');
 	};
-
-	$submitted_secret_key = function () use ($input, $settings) {
-		$stored = (string)$settings->get_setting('cloud_storage_secret_key');
-		list($action, $value) = FormWriterV2Base::process_secretinput($input, 'cloud_storage_secret_key', $stored !== '');
-		if ($action === FormWriterV2Base::SECRET_KEEP) return $stored;
-		if ($action === FormWriterV2Base::SECRET_CLEAR) return '';
-		return $value;
+	$store_of = function () use ($input) {
+		$target = new BackupTarget((int)($input['bkt_backup_target_id'] ?? 0), TRUE);
+		return ($target->key && !$target->get('bkt_delete_time') && $target->is_file_store()) ? $target : null;
 	};
 
 	if ($input && isset($input['action'])) {
 		$action = $input['action'];
-		if ($action === 'enable') {
-			$action = 'save';
-		}
 
-		if ($action === 'save') {
-			// The secret key never carries its stored value into the page; a
-			// stored one is a locked field, and the check below needs the real
-			// key, so "keep" reads it back. Removed, it fails as required: a
-			// bucket with no key is not a state this page stores.
-			$secret_key = $submitted_secret_key();
-			$opts = array(
-				'provider'   => $posted('cloud_storage_provider'),
-				'endpoint'   => $posted('cloud_storage_endpoint'),
-				'region'     => $posted('cloud_storage_region'),
-				'bucket'     => $posted('cloud_storage_bucket'),
-				'access_key' => $posted('cloud_storage_access_key'),
-				'secret_key' => $secret_key,
-			);
-			$saved = false;
-			foreach (['bucket', 'access_key', 'secret_key'] as $field) {
-				if ($opts[$field] === '') {
-					$errors[] = ucfirst(str_replace('_', ' ', $field)) . ' is required.';
-				}
+		if ($action === 'save_store') {
+			// A new store, or an edit of one. A new one becomes where new
+			// offloads go. An edit of a store that holds files may change its
+			// key and name only (the form draws the rest read-only and apply()
+			// refuses a change to it).
+			$editing = $store_of();
+			$target = $editing ?: new BackupTarget(NULL);
+			$saved = CloudStorageLifecycle::saveStore($target, $input, $editing === null);
+			$test_results = $saved['test_results'];
+			if ($saved['ok']) {
+				$note = $saved['message'] !== '' ? ' ' . $saved['message'] : '';
+				return $say(($editing
+					? 'File store saved. It keeps doing what it was doing.'
+					: 'File store saved. Private files start moving to it on the next cron tick.') . $note, 'Saved');
 			}
-			// The provider decides the endpoint and region it did not ask for:
-			// Amazon, Wasabi, DigitalOcean and Linode from the region, Cloudflare
-			// R2 a fixed region, Backblaze both from the key.
-			if (empty($errors)) {
-				$settled = StorageProvider::complete($opts);
-				$opts = $settled['opts'];
-				if (!$settled['ok']) {
-					$errors[] = $settled['message'];
-				}
+			if ($saved['message'] !== '') {
+				$errors[] = $saved['message'];
 			}
-			if (empty($errors)) {
-				$mutable = CloudStorageLifecycle::assertBindingMutable($opts);
-				if (!$mutable['ok']) {
-					$errors[] = $mutable['message'];
-				} else {
-					$test_results = CloudStorageLifecycle::testConnection($opts);
-					if ($test_results['ok']) {
-						$persist = CloudStorageLifecycle::persistSettings($opts, $session);
-						if ($persist['ok']) {
-							CloudStorageLifecycle::stopDrain($session); // enabling cancels any in-progress drain
-							CloudStorageLifecycle::ensureTickActive();
-							$saved = true;
-						} else {
-							$errors[] = $persist['message'];
-						}
-					}
-				}
+			$form_target = $target;
+			$form_new = $editing === null;
+			$current_id = (int)Globalvars::get_instance()->get_setting(BackupTarget::FILE_STORE_SETTING, false, true);
+			if ($editing !== null && (int)$editing->key !== $current_id) {
+				$edit_store = $editing;
 			}
-
-			// Redirect only when nothing needs inline diagnostics.
-			if (empty($errors) && $saved) {
-				$session->save_message(new DisplayMessage(
-					'Cloud storage enabled. Private files start moving to the bucket on the next cron tick.',
-					'Saved', '/\/admin\/admin_cloud_storage/',
-					DisplayMessage::MESSAGE_ANNOUNCEMENT,
-					DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-				));
-				return LogicResult::redirect('/admin/admin_cloud_storage');
-			}
-			// otherwise fall through and render diagnostics inline
 		}
-		elseif ($action === 'replace_key') {
-			// Rotate the key against the stored binding. The endpoint, region and
-			// bucket are read from settings and never from the post, so this path
-			// cannot repoint the store; and it writes the key alone, so a paused
-			// store stays paused and a drain in progress keeps draining with the
-			// new key.
-			$secret_key = $submitted_secret_key();
-			$opts = array(
-				'provider'   => (string)$settings->get_setting('cloud_storage_provider'),
-				'endpoint'   => (string)$settings->get_setting('cloud_storage_endpoint'),
-				'region'     => (string)$settings->get_setting('cloud_storage_region'),
-				'bucket'     => (string)$settings->get_setting('cloud_storage_bucket'),
-				'access_key' => trim((string)($input['cloud_storage_access_key'] ?? '')),
-				'secret_key' => $secret_key,
-			);
-			foreach (['access_key', 'secret_key'] as $field) {
-				if ($opts[$field] === '') {
-					$errors[] = ucfirst(str_replace('_', ' ', $field)) . ' is required.';
-				}
+		elseif ($action === 'enable') {
+			// Re-prove the stored store before offloading to it again.
+			$target = CloudStorageDriverFactory::currentTarget();
+			if ($target === null) {
+				return $say('There is no file store to enable.', 'Not enabled', false);
 			}
-			// Backblaze settles the endpoint and region from the key, so a key
-			// belonging to another endpoint shows up here; persistKey refuses it
-			// by name rather than storing it against objects it cannot reach.
-			if (empty($errors)) {
-				$settled = StorageProvider::complete($opts);
-				$opts = $settled['opts'];
-				if (!$settled['ok']) {
-					$errors[] = $settled['message'];
-				}
+			$test_results = CloudStorageLifecycle::testConnection(
+				CloudStorageDriverFactory::options($target) + array('prefix' => $target->prefix()));
+			if ($test_results['ok']) {
+				CloudStorageLifecycle::setEnabled(true);
+				CloudStorageLifecycle::stopDrain();
+				CloudStorageLifecycle::ensureTickActive();
+				return $say('Cloud storage enabled. Private files start moving to the file store on the next cron tick.', 'Enabled');
 			}
-			if (empty($errors)) {
-				$test_results = CloudStorageLifecycle::testConnection($opts);
-				if ($test_results['ok']) {
-					$persist = CloudStorageLifecycle::persistKey($opts, $session);
-					if ($persist['ok']) {
-						$session->save_message(new DisplayMessage(
-							'Key replaced. The store keeps doing what it was doing.',
-							'Saved', '/\/admin\/admin_cloud_storage/',
-							DisplayMessage::MESSAGE_ANNOUNCEMENT,
-							DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-						));
-						return LogicResult::redirect('/admin/admin_cloud_storage');
-					}
-					$errors[] = $persist['message'];
-				}
-			}
-			// otherwise fall through and render diagnostics inline
 		}
 		elseif ($action === 'remove') {
-			// Forget the bucket and the key. Only when nothing is in the bucket
-			// and nothing is on its way back: a binding that still names
-			// offloaded files is what the pull-back reads.
-			if (CloudStorageLifecycle::cloudRowCount() > 0 || $settings->get_setting('cloud_storage_draining')) {
-				$session->save_message(new DisplayMessage(
-					'Files are still in the bucket, or on their way back. Disable and pull them back first; remove once the count is zero.',
-					'Not removed', '/\/admin\/admin_cloud_storage/',
-					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-				return LogicResult::redirect('/admin/admin_cloud_storage');
-			}
-			CloudStorageLifecycle::setEnabled(false, $session, array(
-				'cloud_storage_provider' => StorageProvider::GENERIC,
-				'cloud_storage_endpoint' => '', 'cloud_storage_region' => '', 'cloud_storage_bucket' => '',
-				'cloud_storage_access_key' => '', 'cloud_storage_secret_key' => '',
-			));
-			CloudStorageLifecycle::stopDrain($session);
-			$session->save_message(new DisplayMessage(
-				'Cloud storage removed. Uploads stay on this server.',
-				'Removed', '/\/admin\/admin_cloud_storage/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-			return LogicResult::redirect('/admin/admin_cloud_storage');
+			$why = CloudStorageLifecycle::removeStore();
+			return $why === ''
+				? $say('Cloud storage removed. Uploads stay on this server.', 'Removed')
+				: $say($why, 'Not removed', false);
 		}
 		elseif ($action === 'pause') {
-			// Pause: stop offloading new files; keep existing cloud files serving
-			// (idle mode, not drain). The tick keeps running while those files
-			// exist, for the daily file-store check.
-			CloudStorageLifecycle::setEnabled(false, $session);
-			CloudStorageLifecycle::stopDrain($session);
-			$session->save_message(new DisplayMessage(
-				'Cloud storage paused. Files already in the bucket keep being served from it.',
-				'Paused', '/\/admin\/admin_cloud_storage/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT,
-				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
-			return LogicResult::redirect('/admin/admin_cloud_storage');
+			// Stop offloading new files; files already offloaded keep serving
+			// from their store (idle mode, not drain). The tick keeps running
+			// while those files exist, for the daily file-store check.
+			CloudStorageLifecycle::setEnabled(false);
+			CloudStorageLifecycle::stopDrain();
+			return $say('Cloud storage paused. Files already in the file store keep being served from it.', 'Paused');
 		}
 		elseif ($action === 'disable_and_pull') {
-			// Disable the latch and set the draining flag; the offload tick pulls
-			// every cloud file back to local until none remain, then clears the
-			// flag itself.
-			CloudStorageLifecycle::setEnabled(false, $session);
-			CloudStorageLifecycle::startDrain($session);
-			$session->save_message(new DisplayMessage(
-				'Pull-back started. Bucket-stored files will be returned to local disk over the next several cron ticks.',
-				'Pull-back queued', '/\/admin\/admin_cloud_storage/',
-				DisplayMessage::MESSAGE_ANNOUNCEMENT,
-				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-			));
-			return LogicResult::redirect('/admin/admin_cloud_storage');
+			// The offload tick pulls every offloaded file back to local, each
+			// from the store its record names, then clears the flag itself.
+			CloudStorageLifecycle::setEnabled(false);
+			CloudStorageLifecycle::startDrain();
+			return $say('Pull-back started. Offloaded files will be returned to local disk over the next several cron ticks.', 'Pull-back queued');
+		}
+		elseif ($action === 'move_files') {
+			$from = $store_of();
+			$why = $from ? CloudStorageLifecycle::startMove((int)$from->key) : 'That file store is gone.';
+			return $why === ''
+				? $say('Moving the files to the current file store, a batch on each cron tick.', 'Move started')
+				: $say($why, 'Not started', false);
+		}
+		elseif ($action === 'stop_move') {
+			CloudStorageLifecycle::stopMove();
+			return $say('Move stopped. Files already moved stay moved; the rest are served from where they are.', 'Stopped');
+		}
+		elseif ($action === 'delete_store') {
+			$store = $store_of();
+			if ($store === null) {
+				return $say('That file store is gone.', 'Not deleted', false);
+			}
+			$why = $store->delete_refusal();
+			if ($why !== '') {
+				return $say($why, 'Not deleted', false);
+			}
+			$store->soft_delete();
+			CloudStorageDriverFactory::reset();
+			return $say('File store "' . $store->get('bkt_name') . '" deleted. Nothing in its bucket was touched.', 'Deleted');
 		}
 		elseif ($action === CloudStoreInventoryPanel::ACTION) {
 			// Bring the offloaded files the file store has lost back from this
 			// site's own newest backup, in the background. Only what the file
 			// store cannot serve is touched.
 			try {
-				$message = BackupObjectRestoreLauncher::start_newest(BackupObjectRestore::MODE_MISSING);
-				$session->save_message(new DisplayMessage($message, 'Started', '/\/admin\/admin_cloud_storage/',
-					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $say(BackupObjectRestoreLauncher::start_newest(BackupObjectRestore::MODE_MISSING), 'Started');
 			} catch (Exception $e) {
-				$session->save_message(new DisplayMessage($e->getMessage(), 'Error', '/\/admin\/admin_cloud_storage/',
-					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $say($e->getMessage(), 'Error', false);
 			}
-			return LogicResult::redirect('/admin/admin_cloud_storage');
 		}
 		elseif ($action === 'retry_stuck' && isset($input['fbb_file_blob_id'])) {
 			$dblink = DbConnector::get_instance()->get_db_link();
@@ -257,45 +167,33 @@ function admin_cloud_storage_logic(array $input): LogicResult {
 		}
 	}
 
-	// On a failed save, repopulate from POST so the admin doesn't lose input.
-	$pick = function($key) use ($input, $settings) {
-		if (isset($input[$key])) return $input[$key];
-		return $settings->get_setting($key);
-	};
-
+	$settings = Globalvars::get_instance();
+	$current = CloudStorageDriverFactory::currentTarget();
 	$cloud_count = CloudStorageLifecycle::cloudRowCount();
+	$draining = (bool)$settings->get_setting('cloud_storage_draining');
 	$page_data = array(
-		'session'         => $session,
-		'settings_values' => array(
-			// A store saved before the picker existed shows as the provider its
-			// endpoint belongs to.
-			'provider'        => isset($input['cloud_storage_provider'])
-				? StorageProvider::normalise($input['cloud_storage_provider'])
-				: StorageProvider::effective($settings->get_setting('cloud_storage_provider'), $settings->get_setting('cloud_storage_endpoint')),
-			'endpoint'        => $pick('cloud_storage_endpoint'),
-			'region'          => $pick('cloud_storage_region'),
-			'bucket'          => $pick('cloud_storage_bucket'),
-			'access_key'      => $pick('cloud_storage_access_key'),
-			// Only whether one is stored: the field never shows the key.
-			'secret_key'      => (string)$settings->get_setting('cloud_storage_secret_key'),
-		),
-		'enabled'              => (bool)$settings->get_setting('cloud_storage_enabled'),
-		// The page's shape: the store is configured once a bucket, endpoint and
-		// key are stored; it is locked while files are in the bucket or on their
-		// way back, when only the key may change.
-		'configured'           => $settings->get_setting('cloud_storage_bucket') !== '' && $settings->get_setting('cloud_storage_endpoint') !== ''
-		                          && $settings->get_setting('cloud_storage_access_key') !== '',
-		'cloud_count'          => $cloud_count,
-		'draining'             => (bool)$settings->get_setting('cloud_storage_draining'),
-		'locked'               => $cloud_count > 0 || (bool)$settings->get_setting('cloud_storage_draining'),
-		'errors'               => $errors,
-		'test_results'         => $test_results,
-		'health'               => CloudStorageLifecycle::health($profile),
+		'session'       => $session,
+		// The store new offloads go to, and every store with what it holds.
+		'current'       => $current,
+		'current_count' => $current ? CloudStorageLifecycle::cloudRowCount((int)$current->key) : 0,
+		'stores'        => CloudStorageLifecycle::stores(),
+		'move'          => CloudStorageLifecycle::moveState(),
+		'enabled'       => (bool)$settings->get_setting('cloud_storage_enabled'),
+		'configured'    => $current !== null,
+		'cloud_count'   => $cloud_count,
+		'draining'      => $draining,
+		// The form drawn again after a refused save, and whether it is a new store's.
+		'form_target'   => $form_target,
+		'form_new'      => $form_new,
+		'edit_store'    => $edit_store,
+		'errors'        => $errors,
+		'test_results'  => $test_results,
+		'health'        => CloudStorageLifecycle::health($profile),
 		// The daily file-store check and who brings a missing file back.
-		'inventory'            => CloudStoreInventory::current(),
-		'objects_source'       => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
-		'objects_status'       => BackupObjectsStatus::compute(),
-		'manager_url'          => ManagementNodeStatus::manager_url(),
+		'inventory'      => CloudStoreInventory::current(),
+		'objects_source' => CloudStoreInventoryPanel::source(ManagementNodeStatus::is_managed()),
+		'objects_status' => BackupObjectsStatus::compute(),
+		'manager_url'    => ManagementNodeStatus::manager_url(),
 	);
 
 	return LogicResult::render($page_data);

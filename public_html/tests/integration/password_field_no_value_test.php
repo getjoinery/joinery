@@ -28,6 +28,7 @@
  *
  * Run: php tests/integration/password_field_no_value_test.php
  *
+ * @version 2.1 - the file store's key is sealed in its target row, not a setting
  * @version 2.0 - the locked-field contract: `stored`, Reset, process_secretinput()
  * @version 1.1 - a promotion code is credential-shaped (server_manager_namecheap_promotion_code)
  */
@@ -174,7 +175,7 @@ $must_be_secret = array(
 	'smtp_password', 'sendgrid_api_key', 'sendgrid_inbound_secret', 'mailgun_api_key',
 	'mailgun_webhook_signing_key', 'mailjet_api_secret', 'brevo_api_key',
 	'postmark_server_token', 'resend_api_key', 'ses_secret_access_key',
-	'mailchimp_api_key', 'cloud_storage_secret_key',
+	'mailchimp_api_key',
 	'oauth_google_client_secret', 'oauth_microsoft_client_secret',
 	'oauth_linode_client_secret', 'oauth_digitalocean_client_secret',
 	'oauth_dnsimple_client_secret',

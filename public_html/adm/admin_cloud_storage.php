@@ -2,14 +2,19 @@
 /**
  * Cloud Storage Admin Page
  *
- * Health status block at top. Then the store in one of three shapes: the setup
- * form when nothing is configured, headed by a provider picker that shows only
- * the fields the provider needs (StorageProvider); what is stored, read-only, with Pause or
- * Enable, Disable and Pull Files Back to Local, and Remove as the state
- * allows; and a form for what may change — Replace key while files are
- * in the bucket, everything otherwise. Either one runs the bucket and key check, the
- * privacy gate among its steps, and persists only when it passes.
+ * Health status block at top. Then the file store: the setup form when none
+ * is set up (the shared target form, BackupTargetForm, in its files mode);
+ * otherwise what is stored, read-only, with Pause or Enable, Disable and Pull
+ * Files Back to Local, and Remove as the state allows, and the form folded
+ * away — the key and name once files are in it, everything otherwise. Every
+ * save runs the bucket and key check, the privacy gate among its steps, and
+ * stores only when it passes. Switch to another bucket saves a second store
+ * new offloads go to; Older file stores lists the stores still serving files,
+ * with Move files and, once empty, Delete.
  *
+ * @version 3.1 - an older store that does not answer says so, and its key is replaced on its own row
+ * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): the shared target form,
+ *                Switch to another bucket, Older file stores with Move files, its progress and Stop
  * @version 2.2 - a stored secret key is a locked field with Reset
  * @changelog 2.1 - while files are in the bucket the key folds behind Replace key, which proves the key
  *                and stores it alone; it opens itself when the bucket stopped answering
@@ -30,8 +35,6 @@
  * @version 1.3
  */
 
-require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 require_once(PathHelper::getIncludePath('adm/logic/admin_cloud_storage_logic.php'));
 
 $page_vars = process_logic(admin_cloud_storage_logic(array_merge($_GET, $_POST)));
@@ -85,15 +88,15 @@ if (!$configured) {
 	$state('#999', '<strong>Not set up.</strong> ' . $files($c['pending'], $c['pending_bytes']) . ' on this server would move to a bucket once one is set up.');
 } elseif ($draining) {
 	$last = !empty($health['reverse_task']['last_run']) ? '; last run ' . $when($health['reverse_task']['last_run']) : '';
-	$state('#0d6efd', '<strong>Pulling files back.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' still in the bucket' . $last . '.'
+	$state('#0d6efd', '<strong>Pulling files back.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' still in a file store' . $last . '.'
 		. (!empty($health['reverse_task']['last_message']) ? '<br><small class="text-muted">' . htmlspecialchars($health['reverse_task']['last_message']) . '</small>' : ''));
 } elseif ($enabled) {
-	$state('#28a745', '<strong>Active.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' in the bucket, ' . $files($c['pending'], $c['pending_bytes']) . ' waiting to move, '
+	$state('#28a745', '<strong>Active.</strong> ' . $files($c['cloud'], $c['cloud_bytes']) . ' offloaded, ' . $files($c['pending'], $c['pending_bytes']) . ' waiting to move, '
 		. number_format((int)$c['migrated_this_week']) . ' moved this week' . $last_run . '.');
 } else {
 	$state('#999', '<strong>Off.</strong> ' . ((int)$c['cloud'] > 0
-		? $files($c['cloud'], $c['cloud_bytes']) . ' in the bucket keep serving from it; ' . $files($c['pending'], $c['pending_bytes']) . ' on this server would move once enabled.'
-		: $files($c['pending'], $c['pending_bytes']) . ' on this server would move to the bucket once enabled.'));
+		? $files($c['cloud'], $c['cloud_bytes']) . ' offloaded keep serving from their file store; ' . $files($c['pending'], $c['pending_bytes']) . ' on this server would move once enabled.'
+		: $files($c['pending'], $c['pending_bytes']) . ' on this server would move to the file store once enabled.'));
 }
 
 // What needs attention.
@@ -105,9 +108,9 @@ if (!$health['cron']['ok']) {
 // that stopped working — those stores still serve every offloaded file. A
 // store that is off and holds nothing says nothing: there is no file to lose.
 $driver_failed = !empty($health['driver']) && !$health['driver']['ok'];
-if ($driver_failed && ($enabled || $locked)) {
-	$problem('<strong>The bucket did not answer:</strong> ' . htmlspecialchars((string)($health['driver']['message'] ?? 'unknown'))
-		. ' If the key was revoked or has expired, replace it below; the files in the bucket cannot be served or pulled back until one works.');
+if ($driver_failed && ($enabled || (int)$cloud_count > 0 || $draining)) {
+	$problem('<strong>The file store did not answer:</strong> ' . htmlspecialchars((string)($health['driver']['message'] ?? 'unknown'))
+		. ' If the key was revoked or has expired, replace it below; the files in it cannot be served or pulled back until one works.');
 }
 if (!empty($health['sync_task']) && $health['sync_task']['is_active'] && $health['sync_task']['last_status'] === 'error') {
 	$problem('<strong>The last run failed:</strong> ' . htmlspecialchars((string)$health['sync_task']['last_message']));
@@ -206,71 +209,56 @@ if (!empty($test_results)) {
 }
 
 // =====================================================
-// THE STORE
+// THE FILE STORE
 // =====================================================
-// Three shapes. Nothing configured: the setup form. Configured: what is
-// stored, read-only, with the actions that fit its state. While files are in
-// the bucket (or on their way back) the endpoint, region and bucket are
-// locked — the records point at objects there — and only the key may
-// change. With nothing in the bucket the whole configuration may change or
-// be removed.
-$fields_in_order = array(
-	'cloud_storage_provider', 'cloud_storage_endpoint', 'cloud_storage_region', 'cloud_storage_bucket',
-	'cloud_storage_access_key', 'cloud_storage_secret_key',
-);
-$field_values = array(
-	'cloud_storage_provider'   => $settings_values['provider'],
-	'cloud_storage_endpoint'   => $settings_values['endpoint'],
-	'cloud_storage_region'     => $settings_values['region'],
-	'cloud_storage_bucket'     => $settings_values['bucket'],
-	'cloud_storage_access_key' => $settings_values['access_key'],
-	'cloud_storage_secret_key' => $settings_values['secret_key'],
-);
-// The fields come from the cloud_storage declarations, and this page is the
-// only one that draws them: a plain settings save would store a bucket and
-// key nobody proved. Drawn one at a time so the form reads
-// in the order a person fills it in, and so the locked form can draw a subset.
-// The provider's show_when rules ride on the picker whichever fields follow.
-$draw_fields = function ($formwriter, array $names) use ($field_values) {
-	foreach ($names as $name) {
-		SettingsFieldRenderer::renderGroup($formwriter, 'cloud_storage', array(
-			'source'        => 'core',
-			'only'          => array($name),
-			'values'        => $field_values,
-		));
-	}
+// Nothing set up: the setup form. Set up: what is stored, read-only, with the
+// actions that fit its state, then the form folded away — the whole store
+// while it holds nothing, the key and name once files are in it (their
+// records point at objects there). Switching to another bucket is a second
+// store; the older one keeps serving its files until Move files carries them.
+$draw_form = function (?BackupTarget $target, bool $is_new, string $submit) use ($page) {
+	$fw = $page->getFormWriter('file_store_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'file_store_form']);
+	$fw->begin_form();
+	$fw->hiddeninput('action', '', array('value' => 'save_store'));
+	$fw->hiddeninput('bkt_backup_target_id', '', array('value' => (!$is_new && $target && $target->key) ? (int)$target->key : ''));
+	BackupTargetForm::render($fw, $target, array('files' => true));
+	echo '<div style="margin-top: 12px;">';
+	$fw->submitbutton('btn_save_store', $submit, array('class' => 'btn btn-primary'));
+	echo '</div>';
+	echo $fw->end_form();
 };
 $save_failed = !empty($errors) || (!empty($test_results) && !$test_results['ok']);
+$show_new = $form_new && ($save_failed || !empty($_GET['new_store']));
 
 if (!$configured) {
 	$page->begin_box(array('title' => 'Set up cloud storage'));
 	echo '<p style="color:#666;">The bucket must be private: Save refuses one anyone can read.</p>';
-	$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
-	$formwriter->begin_form();
-	$formwriter->hiddeninput('action', '', array('value' => 'save'));
-	$draw_fields($formwriter, $fields_in_order);
-	echo '<div style="margin-top: 18px;">';
-	$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
-	echo '</div>';
-	echo $formwriter->end_form();
+	$draw_form($form_target, true, 'Save');
 	$page->end_box();
 } else {
 	// The state is said once, in the Status box above; this box is what is stored.
-	$page->begin_box(array('title' => 'Cloud storage'));
+	$page->begin_box(array('title' => 'File store'));
 
-	$stored = Globalvars::get_instance();
+	try {
+		$creds = $current->get_credentials() ?: array();
+	} catch (BackupTargetException $e) {
+		$creds = array();
+		echo '<div class="alert alert-danger">' . htmlspecialchars($e->getMessage()) . '</div>';
+	}
 	$show = function ($label, $value, $muted = '') {
 		echo '<tr><th style="width: 180px; font-weight: 600;">' . htmlspecialchars($label) . '</th><td>'
 			. ($value !== '' ? htmlspecialchars($value) : '<span class="text-muted">' . htmlspecialchars($muted) . '</span>') . '</td></tr>';
 	};
 	echo '<table class="table table-sm" style="max-width: 800px;"><tbody>';
-	$show('Provider', StorageProvider::label(StorageProvider::effective($stored->get_setting('cloud_storage_provider'), $stored->get_setting('cloud_storage_endpoint'))));
-	$show('Endpoint', (string)$stored->get_setting('cloud_storage_endpoint'));
-	$show('Region', (string)$stored->get_setting('cloud_storage_region'), 'none');
-	$show('Bucket', (string)$stored->get_setting('cloud_storage_bucket'));
-	$show('Access key', (string)$stored->get_setting('cloud_storage_access_key'));
-	$show('Secret key', '', $stored->get_setting('cloud_storage_secret_key') !== '' ? 'stored' : 'none');
-	$show('Files in the bucket', $files($cloud_count, $health['counts']['cloud_bytes']));
+	$show('Name', (string)$current->get('bkt_name'));
+	$show('Provider', StorageProvider::label((string)$current->get('bkt_provider')));
+	$show('Endpoint', (string)($creds['endpoint'] ?? ''));
+	$show('Region', (string)($creds['region'] ?? ''), 'none');
+	$show('Bucket', (string)$current->get('bkt_bucket'));
+	$show('Folder', $current->prefix());
+	$show('Access key', (string)($creds['access_key'] ?? ''));
+	$show('Secret key', '', (string)($creds['secret_key'] ?? '') !== '' ? 'stored' : 'none');
+	$show('Files in it', $files($current_count, $current_count === (int)$c['cloud'] ? $health['counts']['cloud_bytes'] : null));
 	echo '</tbody></table>';
 
 	// The actions that fit the state.
@@ -278,7 +266,7 @@ if (!$configured) {
 	if ($enabled) {
 		echo AdminPage::action_button('Pause', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'pause'),
-			'confirm' => 'Pause cloud storage? Files already in the bucket keep serving from it; new uploads stay on this server. Enable again at any time.',
+			'confirm' => 'Pause cloud storage? Files already offloaded keep serving from their file store; new uploads stay on this server. Enable again at any time.',
 			'class'   => 'btn btn-secondary',
 		));
 	} else {
@@ -292,115 +280,92 @@ if (!$configured) {
 		$free_label = $disk_free !== null ? round($disk_free / 1024 / 1024 / 1024, 1) . ' GB free' : 'unknown free space';
 		echo AdminPage::action_button('Disable and Pull Files Back to Local', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'disable_and_pull'),
-			'confirm' => 'Disable cloud storage and pull all ' . (int)$cloud_count . ' bucket-stored files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
+			'confirm' => 'Disable cloud storage and pull all ' . (int)$cloud_count . ' offloaded files back to this server? Local disk: ' . $free_label . '. Ensure several GB of free space before continuing.',
 			'class'   => 'btn btn-secondary',
 		));
 	}
-	if (!$locked && !$enabled) {
+	if ((int)$cloud_count === 0 && !$draining && !$enabled) {
 		echo AdminPage::action_button('Remove', '/admin/admin_cloud_storage', array(
 			'hidden'  => array('action' => 'remove'),
-			'confirm' => 'Forget this bucket and key? Nothing is in the bucket, so no file is affected. Uploads stay on this server.',
+			'confirm' => 'Forget this file store and its key? Nothing is in it, so no file is affected. Uploads stay on this server.',
 			'class'   => 'btn btn-outline-danger',
 		));
 	}
 	echo '</div>';
 
-	if ($locked) {
-		// Only the key may change while files are in the bucket, and it is
-		// folded away: a store doing its job is a set of facts and actions, not
-		// two credential boxes. It opens on its own when the bucket stopped
-		// answering — a revoked key is the one fault only this box can fix.
-		echo '<p class="text-muted small" style="margin-top: 14px; margin-bottom: 6px;">The provider, endpoint, region and bucket cannot change while files are in the bucket: their records point at objects there. '
-			. 'To move to another bucket, disable and pull the files back first.</p>';
-		echo '<details' . ($save_failed || $driver_failed ? ' open' : '') . '>';
-		echo '<summary style="cursor: pointer; font-weight: 600;">Replace key</summary>';
-		echo '<p class="text-muted small" style="margin-top: 8px;">Paste the replacement key — after rotating it at your provider, or after revoking one that leaked. '
-			. 'The new key is proved against this same bucket before it is stored, and storing it changes nothing else: '
-			. 'a paused store stays paused, and a pull-back in progress carries on with the new key.</p>';
-		$formwriter = $page->getFormWriter('cloud_storage_key_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_key_form']);
-		$formwriter->begin_form();
-		$formwriter->hiddeninput('action', '', array('value' => 'replace_key'));
-		$draw_fields($formwriter, array('cloud_storage_access_key', 'cloud_storage_secret_key'));
-		echo '<div style="margin-top: 12px;">';
-		$formwriter->submitbutton('btn_replace_key', 'Replace key', array('class' => 'btn btn-primary'));
-		echo '</div>';
-		echo $formwriter->end_form();
-		echo '</details>';
+	if ($edit_store !== null) {
+		echo '<h6 style="margin-top: 18px;">Replace key for ' . htmlspecialchars((string)$edit_store->get('bkt_name')) . '</h6>';
+		echo '<p class="text-muted small">This older store still serves the files whose records name it until they are moved, so its key has to work. '
+			. 'The new key is proved against its bucket before it is stored; nothing else about it changes.</p>';
+		$draw_form($form_target ?: $edit_store, false, 'Save');
+		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_cloud_storage">Cancel</a>';
+	} elseif ($show_new) {
+		echo '<h6 style="margin-top: 18px;">Switch to another bucket</h6>';
+		echo '<p class="text-muted small">Once it is saved, new offloaded files go to this new store. Files already offloaded keep being served from '
+			. htmlspecialchars((string)$current->get('bkt_name')) . ' until you move them with Move files, below.</p>';
+		$draw_form($form_target, true, 'Save and switch');
+		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_cloud_storage">Cancel</a>';
 	} else {
-		// Nothing is in the bucket, so everything may change. Folded away
-		// until asked for; open when a save just failed so the fix is in view.
-		echo '<details style="margin-top: 14px;"' . ($save_failed ? ' open' : '') . '>';
-		echo '<summary style="cursor: pointer; font-weight: 600;">Change settings</summary>';
-		echo '<p class="text-muted small" style="margin-top: 8px;">Nothing is in the bucket, so any of these may change. Save proves the bucket and the key before anything is stored.</p>';
-		$formwriter = $page->getFormWriter('cloud_storage_form', ['action' => '/admin/admin_cloud_storage', 'method' => 'post', 'id' => 'cloud_storage_form']);
-		$formwriter->begin_form();
-		$formwriter->hiddeninput('action', '', array('value' => 'save'));
-		$draw_fields($formwriter, $fields_in_order);
-		echo '<div style="margin-top: 12px;">';
-		$formwriter->submitbutton('btn_save', 'Save', array('class' => 'btn btn-primary'));
-		echo '</div>';
-		echo $formwriter->end_form();
+		// What may change is the form's to say: the whole store while it holds
+		// nothing, the key and the name once files are in it. It opens on its
+		// own when a save just failed or the bucket stopped answering — a
+		// revoked key is the one fault only this form can fix.
+		$holds = $current_count > 0 || $draining;
+		echo '<details style="margin-top: 14px;"' . ($save_failed || $driver_failed ? ' open' : '') . '>';
+		echo '<summary style="cursor: pointer; font-weight: 600;">' . ($holds ? 'Replace key' : 'Change settings') . '</summary>';
+		echo '<p class="text-muted small" style="margin-top: 8px;">' . ($holds
+			? 'Paste the replacement key — after rotating it at your provider, or after revoking one that leaked. It is proved against this same bucket before it is stored, and storing it changes nothing else: a paused store stays paused, and a pull-back carries on with the new key.'
+			: 'Nothing is in this file store, so any of these may change. Save proves the bucket and the key before anything is stored.') . '</p>';
+		$draw_form($form_target ?: $current, false, 'Save');
 		echo '</details>';
+		echo '<p style="margin-top: 12px;"><a href="/admin/admin_cloud_storage?new_store=1">Switch to another bucket</a></p>';
 	}
 	$page->end_box();
+
+	// Older stores: files whose records still name them are served from there
+	// until Move files carries them to the current store.
+	$older = array_filter($stores, function ($s) { return !$s['current']; });
+	if ($older) {
+		$page->begin_box(array('title' => 'Older file stores'));
+		echo '<p class="text-muted small">Files offloaded before the switch are still served from these. Move files carries them to '
+			. htmlspecialchars((string)$current->get('bkt_name')) . ' a batch at a time, checking each copy before its record moves and the old one is deleted. '
+			. 'A store that holds nothing can be deleted; nothing in its bucket is touched.</p>';
+		echo '<table class="table table-sm" style="max-width: 900px;"><thead><tr><th>Name</th><th>Bucket</th><th>Files in it</th><th></th></tr></thead><tbody>';
+		foreach ($older as $s) {
+			$t = $s['target'];
+			echo '<tr><td>' . htmlspecialchars((string)$t->get('bkt_name')) . '</td>';
+			echo '<td>' . htmlspecialchars((string)$t->get('bkt_bucket') . ' / ' . $t->prefix()) . '</td>';
+			echo '<td>' . $files($s['files']);
+			if ($s['answers'] !== null && empty($s['answers']['ok'])) {
+				echo '<div class="text-danger small"><strong>Did not answer:</strong> ' . htmlspecialchars((string)($s['answers']['message'] ?? 'unknown'))
+					. ' Its files cannot be served or moved until it does.</div>';
+			}
+			echo '</td><td>';
+			if ($move !== null && (int)$move['from'] === (int)$t->key) {
+				echo '<div><strong>Moving:</strong> ' . $files($s['files']) . ' of ' . number_format((int)$move['total']) . ' left'
+					. ($move['last'] !== '' ? '<br><small class="text-muted">' . htmlspecialchars((string)$move['last']) . '</small>' : '') . '</div>';
+				echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_cloud_storage?edit_store=' . (int)$t->key . '">Replace key</a> ';
+				echo AdminPage::action_button('Stop', '/admin/admin_cloud_storage', array(
+					'hidden' => array('action' => 'stop_move'), 'class' => 'btn btn-sm btn-outline-secondary'));
+			} elseif ($s['files'] > 0) {
+				echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_cloud_storage?edit_store=' . (int)$t->key . '">Replace key</a> ';
+				if ($move === null && !$draining) {
+					echo AdminPage::action_button('Move files', '/admin/admin_cloud_storage', array(
+						'hidden'  => array('action' => 'move_files', 'bkt_backup_target_id' => (int)$t->key),
+						'confirm' => 'Move ' . $files($s['files']) . ' to ' . $current->get('bkt_name') . '? Each is copied and checked before its record moves; the old copy is then deleted.',
+						'class'   => 'btn btn-sm btn-primary'));
+				}
+			} else {
+				echo AdminPage::action_button('Delete', '/admin/admin_cloud_storage', array(
+					'hidden'  => array('action' => 'delete_store', 'bkt_backup_target_id' => (int)$t->key),
+					'confirm' => 'Delete the file store ' . $t->get('bkt_name') . '? It holds no file. Nothing in its bucket is touched.',
+					'class'   => 'btn btn-sm btn-outline-danger'));
+			}
+			echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+		$page->end_box();
+	}
 }
-
-// =====================================================
-// CLIENT-SIDE: the provider's fields + region auto-fill
-// =====================================================
-?>
-<script>
-(function() {
-	// What each provider asks for and names, from StorageProvider. The picker's
-	// show/hide is FormWriter's; this fills each shown field's example and help.
-	var providers = <?php echo json_encode(StorageProvider::catalogue()); ?>;
-	var provider = document.getElementById('cloud_storage_provider');
-	function currentProvider() {
-		var p = provider ? provider.value : '';
-		return providers[p] ? p : 'generic';
-	}
-	function helpOf(id) {
-		var c = document.getElementById(id + '_container');
-		return c ? c.querySelector('.form-help') : null;
-	}
-	function hostnameOf(s) {
-		if (!s) return '';
-		try { return new URL(s.indexOf('://') === -1 ? 'https://' + s : s).hostname; }
-		catch (e) { return ''; }
-	}
-
-	var endpoint = document.getElementById('cloud_storage_endpoint');
-	var region   = document.getElementById('cloud_storage_region');
-
-	function applyProvider() {
-		var spec = providers[currentProvider()];
-		if (endpoint) {
-			endpoint.placeholder = spec.example.endpoint || '';
-			var eh = helpOf('cloud_storage_endpoint');
-			if (eh && spec.endpoint_help) eh.textContent = spec.endpoint_help;
-		}
-		if (region) {
-			region.placeholder = spec.example.region || '';
-			var rh = helpOf('cloud_storage_region');
-			if (rh && spec.region_help) rh.textContent = spec.region_help;
-		}
-	}
-	if (provider) provider.addEventListener('change', applyProvider);
-	applyProvider();
-
-	// Region auto-fill on endpoint blur, for a generic endpoint that says.
-	if (endpoint && region) {
-		endpoint.addEventListener('blur', function() {
-			if (region.value || currentProvider() !== 'generic') return;
-			var host = hostnameOf(endpoint.value);
-			// s3.<region>.backblazeb2.com  → us-west-002
-			// s3.<region>.amazonaws.com    → us-east-1
-			var m = host.match(/^s3[.-]([a-z0-9-]+)\.(amazonaws|backblazeb2|wasabisys|digitaloceanspaces)\.com$/);
-			if (m && m[1] && m[1] !== 's3') region.value = m[1];
-		});
-	}
-})();
-</script>
-<?php
 
 $page->admin_footer();

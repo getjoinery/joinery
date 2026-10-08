@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.3 - a raw reset to inline forgets its file store and key; the stored raw is deleted by its descriptor
  * @version 1.2 - both drains are ProtectionLevelChange::convergeBatch() passes; the byte budget is the platform's
  * @version 1.1 - the lowering count leaves out relay-sealed rows still waiting to be parsed (B45)
  * @version 1.0
@@ -277,9 +278,10 @@ class MailboxFortressLevel {
 
 			// 5. What the server derives from plaintext, sealed beside it; no raw kept.
 			InboundEmailMessage::sealFortressDerived($message_id, $mail_vault, $dek, $content, $manifest);
-			$raw = array('driver' => (string)$msg->get('iem_raw_storage_driver'), 'key' => (string)$msg->get('iem_raw_storage_key'));
+			$raw = RawMessageStore::descriptorOf($msg);
 			$db->prepare("UPDATE iem_inbound_email_messages
 				SET iem_raw_message = '', iem_raw_sealed = false, iem_raw_storage_driver = 'inline', iem_raw_storage_key = NULL,
+				    iem_raw_bkt_backup_target_id = NULL, iem_raw_remote_key = NULL,
 				    iem_fortress_move_attempt_time = NULL
 				WHERE iem_inbound_email_message_id = ?")->execute(array($message_id));
 			$db->commit();
@@ -306,7 +308,7 @@ class MailboxFortressLevel {
 		}
 		if ($raw['driver'] === 'local' || $raw['driver'] === 'cloud') {
 			try {
-				RawMessageStore::delete($raw['driver'], $raw['key']);
+				RawMessageStore::delete($raw);
 			} catch (\Throwable $e) {
 				error_log('MailboxFortressLevel: the stored raw of message ' . $message_id . ' was not removed: ' . $e->getMessage());
 			}

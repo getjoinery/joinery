@@ -215,11 +215,11 @@ unknown and the restore reconciles against the target regardless.
 
 ## Offloaded files in backup storage
 
-A site that offloads its uploaded files to a cloud file store
+A site that offloads its uploaded files and inbound mail to a cloud file store
 (`docs/cloud_storage.md`) serves them from that bucket, and its archives carry
 none of them: the runner hands the files engine an exclude list naming every
-`cloud` blob's local paths, original and variants. Each offloaded file is on
-the backup storage **once** instead — encrypted, content-addressed, kept for as
+offloaded row's local paths, a blob's original and variants, a message's
+`.eml`. Each offloaded file is on the backup storage **once** instead — encrypted, content-addressed, kept for as
 long as any retained run's index names it — so a restore point stays whole
 whatever the chain does, and a chain's incrementals never carry a day of
 photos backup storage already holds.
@@ -233,7 +233,17 @@ photos backup storage already holds.
         {epoch}/
             envelope.json             the epoch's sealed data key
             {fbb_stored_name}.enc     one object per offloaded blob
+            mailbox/{id}.eml.enc      one object per offloaded message
 ```
+
+An object's name is the blob's stored name, which never carries a slash, or
+one namespace segment and a file for a consumer that is not a blob (offloaded
+mail is `mailbox/{message id}.eml`), so the two can never collide.
+`BackupObjects::location_of()` is the one reading of this layout every listing
+uses. A restore asks every storage profile for the row a name belongs to
+(`StorageProfile::backupRow()`) and puts the object back at that row's
+placement. Whether the file store still serves an object is asked of the store
+the row records.
 
 **The index** is a manifest artifact of kind `objects` and names every
 offloaded blob the run knew: `name`, `epoch`, the **encrypted** object's
@@ -1573,6 +1583,13 @@ endpoint fields the provider asks for, and only those are read from the post.
 A site's first enabled target becomes where its backups go
 (`backup_target_id`) as it is saved. Nothing ever picks "the one enabled
 target" later.
+
+The file store is a target row too, of purpose files (`bkt_purpose`), set up on
+the Cloud Storage page through the same form in its files mode
+(`docs/cloud_storage.md`). It is never a place backups go: every list of targets
+is the backup targets unless it asks for file stores (`MultiBackupTarget`,
+`purpose`), and this form's save refuses one. Its location is fixed once an
+offloaded file records it.
 
 **A target's location is fixed once it is used.** Provider, endpoint, region,
 bucket and folder are drawn read-only, and refused on save, once anything was

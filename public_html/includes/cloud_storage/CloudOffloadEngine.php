@@ -2,18 +2,32 @@
 /**
  * CloudOffloadEngine — the one shared offload orchestration.
  *
- * The shared per-row offload logic, table-agnostic: it resolves its driver
- * from CloudStorageDriverFactory::driver() and reaches every consumer-specific
- * detail through the StorageProfile seam. The per-row logic — bounded batch,
- * per-row advisory lock, the PUT→reload→flip→delete ordering invariant, the
- * failure-count cap — is preserved exactly from the standalone tasks; only
- * $file-> became $profile-> of the same shape.
+ * The shared per-row offload logic, table-agnostic: it reaches every
+ * consumer-specific detail through the StorageProfile seam. The per-row
+ * logic — bounded batch, per-row advisory lock, the PUT→reload→flip→delete
+ * ordering invariant, the failure-count cap — is the same in every direction.
+ *
+ * Three directions:
+ *   - forward (syncBatch): local rows go to the file store new offloads go to
+ *     (CloudStorageDriverFactory::current()); each name is stored under the
+ *     store's folder, and the row records the store and the key it went to;
+ *   - reverse (reverseBatch): offloaded rows come home, each from the store
+ *     its row names;
+ *   - move (moveBatch): the rows on an older store are carried to the current
+ *     one, each object checked against its own bytes before the row is
+ *     re-pointed and the old copy deleted (Move files).
  *
  * A profile whose table also holds rows that are not its own (fbb_file_blobs
  * holds public blobs that never move) scopes the reverse/drain path to its own
  * cloud rows via the optional reverseEligibilityWhere() ownership gate, probed
- * with method_exists() — the same capability-probe style used for putMany().
+ * with method_exists().
  *
+ * @version 1.6 - a move refuses two stores in one place, and an ETag that is not the bytes' MD5 is checked by
+ *                reading the copy back; each table's row locks are a space of their own (lockSpace())
+ * @version 1.5 - the file store is a target row (specs/storage_targets.md WP6): a pushed row records the
+ *                store and its primary object's full key, a pull-back reads each row's own store and
+ *                clears both, and moveBatch() carries a store's rows to the current one
+
  * @version 1.4 - a row with no bytes on this server is parked at once with the reason, not counted as a
  *                failed push; every failure records why in the profile's last-error column
  * @version 1.3 - one store: the driver is resolved with no visibility argument
@@ -25,8 +39,6 @@
  * @version 1.1
  */
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 
 class CloudOffloadEngine {
 
@@ -36,20 +48,33 @@ class CloudOffloadEngine {
 	const FAILED_COUNT_CAP    = 5;
 	/** The reason recorded on a row that has nothing on this server to move. */
 	const MISSING_BYTES       = 'no bytes on this server';
-	/** First key of the per-row pg advisory lock — namespaces it away from
-	 *  runner-level locks. Exposed so a test can contend on the SAME namespace. */
+	/** First key of the per-row pg advisory lock for file blobs — namespaces it
+	 *  away from runner-level locks. Exposed so a test can contend on the SAME
+	 *  namespace. Every other table has a space of its own (lockSpace()). */
 	const ADVISORY_LOCK_NAMESPACE = -42;
+
+	/**
+	 * The first key of a table's per-row lock: blob 7 and message 7 are two
+	 * rows, so they hold two locks. File blobs keep ADVISORY_LOCK_NAMESPACE;
+	 * any other table gets a fixed negative number from its name.
+	 */
+	public static function lockSpace(string $table): int {
+		if ($table === 'fbb_file_blobs') {
+			return self::ADVISORY_LOCK_NAMESPACE;
+		}
+		return -1000 - (int)(crc32($table) % 1000000);
+	}
 
 	// ====================================================================
 	// FORWARD — local -> cloud
 	// ====================================================================
-	public static function syncBatch(StorageProfile $profile, ?CloudStorageDriver $driver = null): array {
-		// Production resolves the store's driver; tests may inject a mock
-		// driver to exercise the orchestration without a bucket.
-		if ($driver === null) {
-			$driver = CloudStorageDriverFactory::driver();
+	public static function syncBatch(StorageProfile $profile, ?CloudFileStore $store = null): array {
+		// Production resolves where new offloads go; tests may hand in a store
+		// over a mock driver to exercise the orchestration without a bucket.
+		if ($store === null) {
+			$store = CloudStorageDriverFactory::current();
 		}
-		if (!$driver) {
+		if (!$store) {
 			return ['status' => 'skipped', 'message' => 'store not enabled'];
 		}
 
@@ -80,9 +105,9 @@ class CloudOffloadEngine {
 			}
 			$id = (int)$id;
 
-			if (!self::_lock($dblink, $id)) { $skipped++; continue; }
+			if (!self::_lock($dblink, $profile, $id)) { $skipped++; continue; }
 			try {
-				$result = self::_sync_row($profile, $id, $driver);
+				$result = self::_sync_row($profile, $id, $store);
 				if ($result === 'pushed')      $pushed++;
 				elseif ($result === 'skipped') $skipped++;
 				elseif ($result === 'missing') $missing++;
@@ -91,7 +116,7 @@ class CloudOffloadEngine {
 				error_log('CloudOffload forward ' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
-				self::_unlock($dblink, $id);
+				self::_unlock($dblink, $profile, $id);
 			}
 		}
 
@@ -105,7 +130,8 @@ class CloudOffloadEngine {
 	 * Sync a single row. Returns 'pushed' | 'failed' | 'skipped' (no work) |
 	 * 'missing' (nothing on this server to move; parked with the reason).
 	 */
-	private static function _sync_row(StorageProfile $profile, int $id, CloudStorageDriver $driver): string {
+	private static function _sync_row(StorageProfile $profile, int $id, CloudFileStore $store): string {
+		$driver = $store->driver;
 		if (!$profile->rowExists($id)) {
 			return 'skipped';
 		}
@@ -114,39 +140,28 @@ class CloudOffloadEngine {
 			return 'skipped';
 		}
 
-		// Build the items to push: original + variants, filtered to what's on disk.
+		// Build the items to push: original + variants, filtered to what's on
+		// disk, each name stored under the store's folder.
 		$items = $profile->itemsForRow($id);
 		if ($items === null) {
 			self::_park_missing($profile, $id);
 			return 'missing';
 		}
+		foreach ($items as $i => $item) {
+			$items[$i]['remote_key'] = $store->key((string)$item['name']);
+		}
 
-		// Concurrent PUTs — single RTT instead of N. The S3 driver exposes putMany().
 		$pushed_keys = [];
 		$put_failed = false;
 		$put_err = null;
-		if (method_exists($driver, 'putMany')) {
-			$results = $driver->putMany($items);
-			foreach ($items as $item) {
-				$r = $results[$item['remote_key']] ?? null;
-				if ($r === true) {
-					$pushed_keys[] = $item['remote_key'];
-				} else {
-					$put_failed = true;
-					$put_err = $r instanceof Throwable ? $r->getMessage() : 'unknown error';
-					break;
-				}
-			}
-		} else {
-			foreach ($items as $item) {
-				try {
-					$driver->put($item['local_path'], $item['remote_key'], $item['content_type']);
-					$pushed_keys[] = $item['remote_key'];
-				} catch (Exception $e) {
-					$put_failed = true;
-					$put_err = $e->getMessage();
-					break;
-				}
+		foreach ($items as $item) {
+			try {
+				$driver->put($item['local_path'], $item['remote_key'], $item['content_type']);
+				$pushed_keys[] = $item['remote_key'];
+			} catch (Exception $e) {
+				$put_failed = true;
+				$put_err = $e->getMessage();
+				break;
 			}
 		}
 
@@ -169,17 +184,20 @@ class CloudOffloadEngine {
 			return 'skipped';
 		}
 
-		// Flip flag, reset failure counter, then delete local copies.
+		// Flip flag, record where the objects went, reset failure counter, then
+		// delete local copies.
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$upd = $dblink->prepare(
 			"UPDATE {$profile->table()}
 			 SET {$profile->driverColumn()} = 'cloud',
+			     {$profile->targetColumn()} = ?,
+			     {$profile->remoteKeyColumn()} = ?,
 			     {$profile->failedCountColumn()} = 0,
 			     {$profile->lastErrorColumn()} = NULL,
 			     {$profile->lastAttemptColumn()} = now()
 			 WHERE {$profile->pkeyColumn()} = ?"
 		);
-		$upd->execute([$id]);
+		$upd->execute([$store->target_id, $items[0]['remote_key'], $id]);
 
 		// Only now may the local bytes go — original + variants — and only if
 		// every backup storage that will hold this object already does. The store
@@ -217,18 +235,9 @@ class CloudOffloadEngine {
 			return ['status' => 'success', 'message' => 'No cloud rows remain; task deactivated.', 'deactivate' => true];
 		}
 
-		// Reverse runs against a *disabled* store (pull-back follows a disable),
-		// so driver() — which honours the enabled latch — is the wrong resolver
-		// here. Fall back to the unlatched binding so a draining store still has
-		// a driver with its latch off. Losing this fallback would silently no-op
-		// every pull-back. (Tests may inject a mock driver.)
-		if ($driver === null) {
-			$driver = CloudStorageDriverFactory::driverWithFallback();
-		}
-		if (!$driver) {
-			return ['status' => 'error', 'message' => 'driver unconfigured for the store'];
-		}
-
+		// Each row comes home from the store it names, whatever the enabled
+		// latch says: pull-back follows a disable. (Tests may inject one mock
+		// driver for every row.)
 		$batch_q = $dblink->prepare(
 			"SELECT {$profile->pkeyColumn()} FROM {$profile->table()}
 			 WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}
@@ -249,9 +258,15 @@ class CloudOffloadEngine {
 			}
 			$id = (int)$id;
 
-			if (!self::_lock($dblink, $id)) { $skipped++; continue; }
+			if (!self::_lock($dblink, $profile, $id)) { $skipped++; continue; }
 			try {
-				$result = self::_pull_row($profile, $id, $driver);
+				$row_driver = $driver ?? CloudStorageDriverFactory::forTarget(self::_target_of($profile, $id));
+				if (!$row_driver) {
+					self::_record_failure($profile, $id, 'no driver for the file store this row names');
+					$failed++;
+					continue;
+				}
+				$result = self::_pull_row($profile, $id, $row_driver);
 				if ($result === 'pulled')      $pulled++;
 				elseif ($result === 'skipped') $skipped++;
 				else                           $failed++;
@@ -259,7 +274,7 @@ class CloudOffloadEngine {
 				error_log('CloudOffload reverse ' . get_class($profile) . ' row ' . $id . ' fatal: ' . $e->getMessage());
 				$failed++;
 			} finally {
-				self::_unlock($dblink, $id);
+				self::_unlock($dblink, $profile, $id);
 			}
 		}
 
@@ -324,6 +339,8 @@ class CloudOffloadEngine {
 				$upd = $dblink->prepare(
 					"UPDATE {$profile->table()}
 					 SET {$profile->driverColumn()} = 'local',
+					     {$profile->targetColumn()} = NULL,
+					     {$profile->remoteKeyColumn()} = NULL,
 					     {$profile->failedCountColumn()} = 0,
 					     {$profile->lastErrorColumn()} = NULL,
 					     {$profile->lastAttemptColumn()} = now()
@@ -368,8 +385,195 @@ class CloudOffloadEngine {
 	}
 
 	// ====================================================================
+	// MOVE — one file store -> the current one (Move files)
+	// ====================================================================
+
+	/**
+	 * Carry a batch of the rows on store $from_id to $to. Per row, under the
+	 * row lock: every object is read from the old store, written to the new
+	 * one under the new folder, and checked there against the bytes read (size,
+	 * and the MD5 the provider reports as its ETag; an ETag that is not a plain
+	 * MD5 is checked by reading the object back). Only when every object of
+	 * the row checks is the row re-pointed; only then are the old copies
+	 * deleted. A row that fails keeps pointing at its old store, which still
+	 * holds it, and is tried again on a later tick. Resumable: what is left is
+	 * whatever still names the old store.
+	 *
+	 * @return array ['status', 'message', 'moved', 'failed', 'remaining']
+	 */
+	public static function moveBatch(StorageProfile $profile, int $from_id, CloudFileStore $to, ?CloudStorageDriver $from_driver = null): array {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		if ($from_id === $to->target_id) {
+			return ['status' => 'skipped', 'message' => 'the store to move from is the current one', 'moved' => 0, 'failed' => 0, 'remaining' => 0];
+		}
+		// Two stores in one place: a copy would land on the original, and the
+		// delete that follows would take the only copy.
+		$from_target = new BackupTarget($from_id, TRUE);
+		$to_target = new BackupTarget($to->target_id, TRUE);
+		if ($from_target->key && $to_target->key && $from_target->overlaps($to_target)) {
+			return ['status' => 'error', 'message' => 'the two stores share a bucket and folder; nothing is moved',
+				'moved' => 0, 'failed' => 0, 'remaining' => self::rowsOn($profile, $from_id)];
+		}
+		$from_driver = $from_driver ?? CloudStorageDriverFactory::forTarget($from_id);
+		if (!$from_driver) {
+			return ['status' => 'error', 'message' => 'no driver for the store to move from', 'moved' => 0, 'failed' => 0, 'remaining' => self::rowsOn($profile, $from_id)];
+		}
+
+		$q = $dblink->prepare(
+			"SELECT {$profile->pkeyColumn()} FROM {$profile->table()}
+			 WHERE {$profile->driverColumn()} = 'cloud' AND {$profile->targetColumn()} = :from
+			 ORDER BY {$profile->pkeyColumn()} ASC
+			 LIMIT :lim");
+		$q->bindValue(':from', $from_id, PDO::PARAM_INT);
+		$q->bindValue(':lim', self::REVERSE_BATCH_LIMIT, PDO::PARAM_INT);
+		$q->execute();
+		$rows = $q->fetchAll(PDO::FETCH_COLUMN, 0);
+
+		$moved = 0; $failed = 0;
+		$errors = [];
+		$started = time();
+		foreach ($rows as $id) {
+			if ((time() - $started) >= self::TIME_BUDGET_SECONDS) {
+				break;
+			}
+			$id = (int)$id;
+			if (!self::_lock($dblink, $profile, $id)) { continue; }
+			try {
+				self::_move_row($profile, $id, $from_id, $from_driver, $to);
+				$moved++;
+			} catch (Exception $e) {
+				$failed++;
+				$errors[] = $e->getMessage();
+				error_log('CloudOffload move ' . $profile->table() . ' id=' . $id . ': ' . $e->getMessage());
+			} finally {
+				self::_unlock($dblink, $profile, $id);
+			}
+		}
+		$remaining = self::rowsOn($profile, $from_id);
+		return ['status' => $failed > 0 ? 'error' : 'success',
+			'message' => "moved=$moved failed=$failed remaining=$remaining" . ($errors ? ' (' . $errors[0] . ')' : ''),
+			'moved' => $moved, 'failed' => $failed, 'remaining' => $remaining];
+	}
+
+	/**
+	 * One row from the store it names to $to. Throws, leaving the row on its
+	 * old store, when any object cannot be read, written or checked.
+	 */
+	private static function _move_row(StorageProfile $profile, int $id, int $from_id, CloudStorageDriver $from, CloudFileStore $to): void {
+		if (self::_driver_flag($profile, $id) !== 'cloud' || self::_target_of($profile, $id) !== $from_id) {
+			return; // moved, pulled back or deleted since the batch was read
+		}
+		$items = $profile->reverseItemsForRow($id);
+		if (!$items) {
+			throw new RuntimeException('no objects enumerated');
+		}
+		$tmp_dir = sys_get_temp_dir() . '/cloud_move_' . $id . '_' . uniqid();
+		if (!mkdir($tmp_dir, 0700, true)) {
+			throw new RuntimeException('could not make a temp dir');
+		}
+		$written = [];
+		try {
+			foreach ($items as $i => $item) {
+				$tmp = $tmp_dir . '/' . $i;
+				try {
+					$from->get((string)$item['remote_key'], $tmp);
+				} catch (Exception $e) {
+					if ($i === 0) {
+						throw $e;
+					}
+					// A variant the old store does not have is regenerated on
+					// demand; the original is what the row is.
+					unset($items[$i]);
+					continue;
+				}
+				$new_key = $to->key((string)$item['name']);
+				$to->driver->put($tmp, $new_key, (string)($item['content_type'] ?? 'application/octet-stream'));
+				$written[] = $new_key;
+				self::_check_copy($to->driver, $new_key, $tmp, $tmp_dir . '/' . $i . '.check');
+				$items[$i]['new_key'] = $new_key;
+				@unlink($tmp);
+			}
+			// Re-point the row only if it still names the old store.
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$upd = $dblink->prepare(
+				"UPDATE {$profile->table()}
+				 SET {$profile->targetColumn()} = ?, {$profile->remoteKeyColumn()} = ?
+				 WHERE {$profile->pkeyColumn()} = ? AND {$profile->driverColumn()} = 'cloud' AND {$profile->targetColumn()} = ?");
+			$upd->execute([$to->target_id, $items[0]['new_key'], $id, $from_id]);
+			if ($upd->rowCount() !== 1) {
+				throw new RuntimeException('the row changed while it was being moved');
+			}
+		} catch (Exception $e) {
+			foreach ($written as $k) {
+				try { $to->driver->delete($k); } catch (Exception $ignored) { /* the old copy is still the row's */ }
+			}
+			self::_drop_dir($tmp_dir);
+			throw $e;
+		}
+		self::_drop_dir($tmp_dir);
+
+		// The row names the new copies; the old ones go.
+		$orphans = [];
+		foreach ($items as $item) {
+			try { $from->delete((string)$item['remote_key']); }
+			catch (Exception $e) { $orphans[] = $item['remote_key']; }
+		}
+		if ($orphans) {
+			error_log('CLOUD_STORAGE_ORPHAN: target=' . $from_id . ' keys=' . implode(',', $orphans));
+		}
+	}
+
+	/**
+	 * Is the object at $key in $driver the bytes of $local? Size first; then
+	 * the ETag, when it is the MD5 of the bytes (a single-part upload to most
+	 * providers). An ETag that is not, whatever its shape (a multipart upload,
+	 * or a 32-hex ETag from a bucket encrypted with its own keys), proves
+	 * nothing either way, so the object is read back and its SHA-256 compared.
+	 */
+	private static function _check_copy(CloudStorageDriver $driver, string $key, string $local, string $readback): void {
+		$head = $driver->head($key);
+		$size = filesize($local);
+		if ($head === null || (int)$head['size'] !== (int)$size) {
+			throw new RuntimeException('the copy of ' . $key . ' is not the size of the original');
+		}
+		$etag = strtolower(trim((string)($head['etag'] ?? ''), '"'));
+		if (preg_match('/^[0-9a-f]{32}$/', $etag) && hash_equals($etag, md5_file($local))) {
+			return;
+		}
+		$driver->get($key, $readback);
+		$same = hash_equals(hash_file('sha256', $local), (string)hash_file('sha256', $readback));
+		@unlink($readback);
+		if (!$same) {
+			throw new RuntimeException('the copy of ' . $key . ' does not hash to the original');
+		}
+	}
+
+	/** How many of a profile's offloaded rows name a store. */
+	public static function rowsOn(StorageProfile $profile, int $target_id): int {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare("SELECT COUNT(*) FROM {$profile->table()}
+			WHERE {$profile->driverColumn()} = 'cloud' AND {$profile->targetColumn()} = ?");
+		$q->execute([$target_id]);
+		return (int)$q->fetchColumn();
+	}
+
+	// ====================================================================
 	// shared helpers
 	// ====================================================================
+
+	/** The store a row names, or 0. */
+	private static function _target_of(StorageProfile $profile, int $id): int {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"SELECT {$profile->targetColumn()} FROM {$profile->table()} WHERE {$profile->pkeyColumn()} = ?");
+		$q->execute([$id]);
+		return (int)$q->fetchColumn();
+	}
+
+	private static function _drop_dir(string $dir): void {
+		foreach (glob($dir . '/*') ?: [] as $f) { if (is_file($f)) @unlink($f); }
+		@rmdir($dir);
+	}
 
 	/** Read the row's raw driver flag generically. */
 	private static function _driver_flag(StorageProfile $profile, int $id): ?string {
@@ -413,16 +617,16 @@ class CloudOffloadEngine {
 		error_log('CloudOffload ' . $profile->table() . ' id=' . $id . ': ' . self::MISSING_BYTES . '; parked');
 	}
 
-	/** Per-row advisory lock; ADVISORY_LOCK_NAMESPACE namespaces it from runner-level locks. */
-	private static function _lock($dblink, int $id): bool {
+	/** Per-row advisory lock, in the table's own space (lockSpace()). */
+	private static function _lock($dblink, StorageProfile $profile, int $id): bool {
 		$q = $dblink->prepare("SELECT pg_try_advisory_lock(:k1, :k2) AS got");
-		$q->execute([':k1' => self::ADVISORY_LOCK_NAMESPACE, ':k2' => $id]);
+		$q->execute([':k1' => self::lockSpace($profile->table()), ':k2' => $id]);
 		$got = $q->fetch(PDO::FETCH_ASSOC);
 		return !empty($got['got']);
 	}
 
-	private static function _unlock($dblink, int $id): void {
+	private static function _unlock($dblink, StorageProfile $profile, int $id): void {
 		$q = $dblink->prepare("SELECT pg_advisory_unlock(:k1, :k2)");
-		$q->execute([':k1' => self::ADVISORY_LOCK_NAMESPACE, ':k2' => $id]);
+		$q->execute([':k1' => self::lockSpace($profile->table()), ':k2' => $id]);
 	}
 }

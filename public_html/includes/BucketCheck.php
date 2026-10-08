@@ -19,6 +19,8 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.5 - the file store's buckets are its target rows (specs/storage_targets.md WP6); a backup target's
+ *                buckets are the backup targets only
  * @version 1.4 - one host parser (StorageProvider::host()) and one address for an object
  *                (S3Signer::object_url(), which knows the provider's addressing style)
  * @version 1.3 - object_url() reads the endpoint through S3Signer::endpoint(), so a bare host probes over
@@ -61,17 +63,13 @@ class BucketCheck {
 		return $host === $other_host;
 	}
 
-	/** The file store's bucket: [['bucket', 'endpoint', 'label']] when one is set, else []. */
+	/** Every file store's bucket, the current one and any still holding files: [['bucket', 'endpoint', 'label'], …]. */
 	public static function file_store_buckets() {
 		if (isset(self::$test_hooks['file_store_buckets'])) {
 			return call_user_func(self::$test_hooks['file_store_buckets']);
 		}
-		$settings = Globalvars::get_instance();
-		$bucket = trim((string)$settings->get_setting('cloud_storage_bucket'));
-		if ($bucket === '') {
-			return array();
-		}
-		return array(array('bucket' => $bucket, 'endpoint' => (string)$settings->get_setting('cloud_storage_endpoint'), 'label' => 'the file store'));
+		return self::buckets_of(new MultiBackupTarget(array('deleted' => false, 'purpose' => BackupTarget::PURPOSE_FILES)), null,
+			function ($target) { return 'the file store "' . $target->get('bkt_name') . '"'; });
 	}
 
 	/** Every backup target's bucket, except the one being edited: [['bucket', 'endpoint', 'label'], …]. */
@@ -79,8 +77,14 @@ class BucketCheck {
 		if (isset(self::$test_hooks['backup_target_buckets'])) {
 			return call_user_func(self::$test_hooks['backup_target_buckets'], $except_id);
 		}
+		return self::buckets_of(new MultiBackupTarget(array('deleted' => false)), $except_id,
+			function ($target) { return 'the backup target "' . $target->get('bkt_name') . '"'; });
+	}
+
+	/** The buckets of some targets, except one: [['bucket', 'endpoint', 'label'], …]. */
+	private static function buckets_of($targets, $except_id, callable $label) {
 		$out = array();
-		foreach (new MultiBackupTarget(array('deleted' => false)) as $target) {
+		foreach ($targets as $target) {
 			if ($except_id !== null && (int)$target->key === (int)$except_id) {
 				continue;
 			}
@@ -94,7 +98,7 @@ class BucketCheck {
 			$out[] = array(
 				'bucket'   => (string)$target->get('bkt_bucket'),
 				'endpoint' => $endpoint,
-				'label'    => 'the backup target "' . $target->get('bkt_name') . '"',
+				'label'    => $label($target),
 			);
 		}
 		return $out;

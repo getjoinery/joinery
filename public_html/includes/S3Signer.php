@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.11 - head() and get_range_to_file(): the file store's presence check and ranged read
+ *                 (specs/storage_targets.md WP6, the file store's driver on this signer)
  * @version 1.10 - abort_upload(): one multipart abort that answers the provider's response, so a caller
  *                 can tell an abort that landed from one that did not
  * @version 1.9 - the one presigner and lister (specs/storage_targets.md WP1): presign() signs any verb but
@@ -109,6 +111,30 @@ class S3Signer {
 	 */
 	public static function delete($creds, $bucket, $path) {
 		return self::request('DELETE', $creds, $bucket, $path, []);
+	}
+
+	/**
+	 * Execute a signed HEAD against a bucket object (or '/' for the bucket):
+	 * whether it is there, and its size and ETag, without its bytes.
+	 * Returns ['status' => int, 'body' => '', 'headers' => array].
+	 */
+	public static function head($creds, $bucket, $path) {
+		return self::request('HEAD', $creds, $bucket, $path, []);
+	}
+
+	/**
+	 * Execute a signed ranged GET that streams one byte span of an object to a
+	 * local file. A resuming download asks for the tail of a file it already
+	 * half has; the provider answers the span itself (206). Success returns
+	 * ['status' => 206, 'body' => ''] (or 200 from a provider that sends the
+	 * whole object for a span covering it).
+	 *
+	 * @param int $start First byte offset, inclusive.
+	 * @param int $end   Last byte offset, inclusive.
+	 */
+	public static function get_range_to_file($creds, $bucket, $path, $local_path, $start, $end) {
+		return self::request('GET', $creds, $bucket, $path, [], null, 0, null, $local_path,
+			['range' => 'bytes=' . (int)$start . '-' . (int)$end]);
 	}
 
 	/**
@@ -653,8 +679,11 @@ class S3Signer {
 	 * and no way to retry short of running the whole backup again; see is_retryable()
 	 * for what counts as transient and MAX_ATTEMPTS/RETRY_WINDOW_SECONDS for the
 	 * bound. Returns ['status','body','headers','attempts','retry_log'].
+	 *
+	 * $extra_headers (lowercase names) are signed and sent: a Range on a ranged
+	 * download. A HEAD asks for no body.
 	 */
-	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null) {
+	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null, array $extra_headers = []) {
 		self::validate_creds($creds);
 
 		$region = $creds['region'];
@@ -697,7 +726,7 @@ class S3Signer {
 
 			$result = self::attempt(
 				$method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
-				$body, $body_size, $content_type, $sink_file, $attempt_timeout
+				$body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers
 			);
 
 			if (!$result['retryable']) {
@@ -760,7 +789,7 @@ class S3Signer {
 	 * Returns the raw outcome plus a 'retryable' verdict; the caller owns the loop.
 	 */
 	private static function attempt($method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
-	                                $body, $body_size, $content_type, $sink_file, $attempt_timeout) {
+	                                $body, $body_size, $content_type, $sink_file, $attempt_timeout, array $extra_headers = []) {
 
 		$amz_date = gmdate('Ymd\THis\Z');
 		$date_stamp = gmdate('Ymd');
@@ -788,6 +817,9 @@ class S3Signer {
 		}
 		if ($body !== null && $body_size > 0) {
 			$headers['content-length'] = (string)$body_size;
+		}
+		foreach ($extra_headers as $k => $v) {
+			$headers[strtolower((string)$k)] = (string)$v;
 		}
 
 		// Canonical headers (sorted, lowercase keys, trimmed values)
@@ -829,6 +861,9 @@ class S3Signer {
 		curl_setopt($ch, CURLOPT_HTTPHEADER, $curl_headers);
 		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, self::TIMEOUT_SECONDS);
 		curl_setopt($ch, CURLOPT_TIMEOUT, $attempt_timeout);
+		if ($method === 'HEAD') {
+			curl_setopt($ch, CURLOPT_NOBODY, true);
+		}
 
 		$sink = null;
 		if ($sink_file !== null) {
@@ -867,7 +902,10 @@ class S3Signer {
 		$resp_headers = [];
 
 		if ($sink_file !== null) {
-			if ($transport_failed || $status !== 200) {
+			// A ranged download is answered 206; a provider that sends the
+			// whole object for a span covering it answers 200.
+			$sink_ok = $status === 200 || ($status === 206 && isset($extra_headers['range']));
+			if ($transport_failed || !$sink_ok) {
 				// Error responses are small XML — hand them back, then drop the
 				// file so a failed download never leaves a bogus archive behind.
 				if (!$transport_failed) {

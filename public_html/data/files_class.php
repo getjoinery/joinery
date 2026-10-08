@@ -45,6 +45,8 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.16.0 - remote_key_for() and cloud_driver() are the blob's: an offloaded file is read from the store
+ *                   and key its blob records (specs/storage_targets.md WP6)
  * @version 1.15.0 - variant_refusal(): why the blob's last resize was refused (specs/image_decode_memory.md)
  * @version 1.14.0
  * @changelog 1.14.0 - fil_level_attempt_time: a folder's level change passes a file that failed
@@ -1332,17 +1334,22 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
-	 * Bucket object key (without the driver-applied path prefix) for a size
-	 * variant — resolved through the blob (keyed on fbb_stored_name), so files
-	 * sharing a blob share its keys. Falls back to fil_name for a blob-less row.
+	 * The full key a size variant of this offloaded file is at, in the store
+	 * its blob records — files sharing a blob share its keys. Throws when the
+	 * file has no blob or the blob is not offloaded.
 	 */
 	function remote_key_for($size_key = 'original') {
 		$blob = $this->_blob();
-		if ($blob) {
-			return $blob->remote_key_for($size_key);
+		if (!$blob) {
+			throw new FileBlobException('File ' . $this->key . ' has no blob, so nothing of it is offloaded.');
 		}
-		$filename = $this->get('fil_name');
-		return ($size_key === 'original') ? $filename : $size_key . '/' . $filename;
+		return $blob->remote_key_for($size_key);
+	}
+
+	/** The driver for the file store this file's blob is in, or null. */
+	function cloud_driver() {
+		$blob = $this->_blob();
+		return $blob ? $blob->cloud_driver() : null;
 	}
 
 	/**

@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.12.0 — an offloaded file streams from the file store its record names (specs/storage_targets.md WP6).
 // @version 1.11.0 — /plugins/{plugin}/admin/* 404s while the plugin is inactive, like every other /plugins/* path.
 // @version 1.10.0 — /mail/forward-confirm: the mailbox plugin's forwarding confirmation page
 // (specs/relay_receive_only_forwarding.md).
@@ -394,13 +395,13 @@ $routes = [
             // existence — same as the local restricted path), then stream
             // the bytes through this server; a bucket URL is never exposed.
             if ($file_obj && $file_obj->storage_driver() === 'cloud') {
-                require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
                 if (!$signed_ok && !$file_obj->is_viewable($session)) {
                     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
                     LibraryFunctions::display_404_page();
                     return true;
                 }
-                $driver = CloudStorageDriverFactory::driverWithFallback();
+                // Read from the store the file's record names, never the one new offloads go to.
+                $driver = $file_obj->cloud_driver();
                 if ($driver) {
                     // A Range request is answered by the bucket, not by
                     // pulling the object down and throwing most of it away.

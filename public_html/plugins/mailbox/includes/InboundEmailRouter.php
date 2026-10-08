@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.50 - a raw reset to inline forgets its file store and key; a stored raw is deleted by its row's descriptor
  * @version 1.49 - stores nothing at the site's disk allowance (DiskAllowance): the message is deferred
  *                 for retry on every path, the spam-held copy included, and the deferral logged once
  *                 a window like the store cap. MailboxStoreDeclined is the parent of every "try again
@@ -2024,11 +2025,10 @@ class InboundEmailRouter {
 	public function destroyRawAfterBackfill(int $message_id): void {
 		$msg = new InboundEmailMessage($message_id, TRUE);
 		$driver = (string)$msg->get('iem_raw_storage_driver');
-		$key = (string)$msg->get('iem_raw_storage_key');
 		if ($driver === 'local' || $driver === 'cloud') {
 			try {
 				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
-				RawMessageStore::delete($driver, $key);
+				RawMessageStore::delete(RawMessageStore::descriptorOf($msg));
 			} catch (\Throwable $e) {
 				error_log('InboundEmailRouter: backfill raw reclaim failed for message ' . $message_id . ': ' . $e->getMessage());
 			}
@@ -2036,7 +2036,8 @@ class InboundEmailRouter {
 		$db = DbConnector::get_instance()->get_db_link();
 		$db->prepare(
 			"UPDATE iem_inbound_email_messages
-			 SET iem_raw_message = '', iem_raw_storage_driver = 'inline', iem_raw_storage_key = NULL
+			 SET iem_raw_message = '', iem_raw_storage_driver = 'inline', iem_raw_storage_key = NULL,
+			     iem_raw_bkt_backup_target_id = NULL, iem_raw_remote_key = NULL
 			 WHERE iem_inbound_email_message_id = ?")
 			->execute([$message_id]);
 	}

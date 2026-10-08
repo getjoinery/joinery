@@ -13,6 +13,10 @@
  * Implementations must have a no-argument constructor: the registry
  * instantiates each declared class with `new $class()`.
  *
+ * @version 1.2 - targetColumn() and remoteKeyColumn(): an offloaded row records the file store target and the
+ *                full key its object went to, and every reader follows them (specs/storage_targets.md WP6);
+ *                forward items carry a relative 'name', composed into a key under the store's folder by
+ *                the engine; reverse items carry the recorded 'remote_key' and the 'name' beside it
  * @version 1.1 - lastErrorColumn(): why a row did not move, so a record with no bytes is told apart from a failed push
  * @version 1.0
  */
@@ -38,6 +42,16 @@ interface StorageProfile {
 
 	/** Column holding why the last attempt on a row did not move it (NULL once it does). */
 	public function lastErrorColumn(): string;
+
+	/** Column recording the file store target (bkt_backup_target_id) an offloaded row's object is in. */
+	public function targetColumn(): string;
+
+	/**
+	 * Column recording the full object key of an offloaded row's primary
+	 * object (the first item itemsForRow() names), as written. Any other
+	 * object of the row is named from it.
+	 */
+	public function remoteKeyColumn(): string;
 
 	// --- visibility — the only public/private signal a consumer gives ------
 
@@ -66,17 +80,20 @@ interface StorageProfile {
 
 	/**
 	 * FORWARD enumeration: the objects to push for this row, each
-	 * ['local_path', 'remote_key', 'content_type'], filtered to what is present
-	 * on disk. Returns null when the row's required bytes are missing on disk
-	 * (the engine records a failure).
+	 * ['local_path', 'name', 'content_type'], filtered to what is present on
+	 * disk, the primary object first. 'name' is relative; the engine stores it
+	 * under the file store's folder. Returns null when the row's required
+	 * bytes are missing on disk (the engine records a failure).
 	 */
 	public function itemsForRow(int $id): ?array;
 
 	/**
-	 * REVERSE enumeration: the objects to pull back for this row, each
-	 * ['remote_key', 'local_path', 'content_type'], computed from the row's key
-	 * scheme + placement WITHOUT requiring local bytes (on pull-back none exist
-	 * yet). local_path is the final on-disk destination.
+	 * REVERSE enumeration: every object of an offloaded row, each
+	 * ['remote_key', 'name', 'local_path', 'content_type'], from the key the
+	 * row recorded and its placement, WITHOUT requiring local bytes (on
+	 * pull-back none exist yet). remote_key is the full key in the row's own
+	 * store; name is the relative name a move stores it under elsewhere;
+	 * local_path is the final on-disk destination. The primary object first.
 	 */
 	public function reverseItemsForRow(int $id): array;
 }

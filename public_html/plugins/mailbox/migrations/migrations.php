@@ -1376,4 +1376,45 @@ return [
 			return true;
 		},
 	],
+	[
+		// Offloaded mail records its file store and full key
+		// (specs/storage_targets.md WP6). A raw offloaded before the file store
+		// was a target row went to the first file store — the one the core
+		// migration made from the old binding — under its folder, at
+		// {folder}/{relative key}. Nothing in the bucket moves. Waits for the
+		// columns and for that store; stamps only rows still unstamped.
+		'id' => 'iem_019_raw_records_its_file_store',
+		'version' => '1.136.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$q = $db->prepare(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'iem_inbound_email_messages'
+				   AND column_name IN ('iem_raw_bkt_backup_target_id', 'iem_raw_remote_key')");
+			$q->execute();
+			if ((int)$q->fetchColumn() < 2) {
+				echo "iem_019: the raw store columns are not on iem_inbound_email_messages yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			$unstamped = (int)$db->query("SELECT COUNT(*) FROM iem_inbound_email_messages
+				WHERE iem_raw_storage_driver = 'cloud' AND iem_raw_bkt_backup_target_id IS NULL")->fetchColumn();
+			if ($unstamped === 0) {
+				echo "iem_019: no offloaded raw message to stamp.\n";
+				return true;
+			}
+			$first = $db->query("SELECT bkt_backup_target_id FROM bkt_backup_targets
+				WHERE bkt_purpose = 'files' ORDER BY bkt_backup_target_id ASC LIMIT 1")->fetchColumn();
+			if (!$first) {
+				echo "iem_019: " . $unstamped . " offloaded raw message(s) wait for the file store's target row - deferred.\n";
+				return 'defer';
+			}
+			$target = new BackupTarget((int)$first, TRUE);
+			$u = $db->prepare("UPDATE iem_inbound_email_messages
+				SET iem_raw_bkt_backup_target_id = ?, iem_raw_remote_key = ? || '/' || iem_raw_storage_key
+				WHERE iem_raw_storage_driver = 'cloud' AND iem_raw_bkt_backup_target_id IS NULL");
+			$u->execute(array((int)$target->key, $target->prefix()));
+			echo "iem_019: " . $u->rowCount() . " offloaded raw message(s) record their file store and key.\n";
+			return true;
+		},
+	],
 ];

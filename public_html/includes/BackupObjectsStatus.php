@@ -28,6 +28,7 @@
  * admin page can afford it. Pure over what it reads: the same facts give the
  * same figures, and the test hooks hand the facts in.
  *
+ * @version 1.1 - the file store's key is read from its target row (specs/storage_targets.md WP6)
  * @version 1.0
  */
 
@@ -268,7 +269,11 @@ class BackupObjectsStatus {
 	private static function keys() {
 		$keys = array('store' => '', 'target' => null);
 		try {
-			$keys['store'] = (string)Globalvars::get_instance()->get_setting('cloud_storage_access_key');
+			$store = CloudStorageDriverFactory::currentTarget();
+			if ($store !== null) {
+				$store_creds = $store->get_credentials();
+				$keys['store'] = is_array($store_creds) ? (string)($store_creds['access_key'] ?? '') : '';
+			}
 			$target = BackupRunner::site_target();
 			if ($target !== null) {
 				$creds = $target->get_credentials();

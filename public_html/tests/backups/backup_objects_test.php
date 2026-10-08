@@ -145,6 +145,23 @@ check($shelf['objects']['beach.jpg']['epoch'] === 'epoch-20260901_000000' && (in
 check(array_keys($shelf['envelopes']) === array('epoch-20260901_000000', 'epoch-20260915_000000'), 'envelopes are listed by epoch');
 check(!isset($shelf['objects']['stray']) && !isset($shelf['objects']['notes.txt']), 'anything not objects/{epoch}/{name}.enc is ignored');
 
+// Offloaded mail is named in a namespace no stored file name can be in.
+$listing[] = array('key' => $prefix . 'epoch-20260915_000000/mailbox/12.eml.enc', 'size' => 77, 'last_modified' => '');
+$listing[] = array('key' => $prefix . 'epoch-20260915_000000/Mail Box/13.eml.enc', 'size' => 1, 'last_modified' => '');
+$listing[] = array('key' => $prefix . 'epoch-20260915_000000/mailbox/deeper/14.eml.enc', 'size' => 1, 'last_modified' => '');
+$shelf = BackupObjects::parse_listing($listing, $prefix);
+check(isset($shelf['objects']['mailbox/12.eml']) && (int)$shelf['objects']['mailbox/12.eml']['object_bytes'] === 77,
+	'a namespaced object reads back under its namespaced name', json_encode(array_keys($shelf['objects'])));
+check(count($shelf['objects']) === 3, 'one namespace segment only, and a namespace is a plain lowercase word', json_encode(array_keys($shelf['objects'])));
+check(BackupObjects::location_of('epoch-20260915_000000/mailbox/12.eml.enc') === array('epoch' => 'epoch-20260915_000000', 'envelope' => false, 'name' => 'mailbox/12.eml')
+	&& BackupObjects::location_of('epoch-20260915_000000/envelope.json')['envelope'] === true
+	&& BackupObjects::location_of('epoch-20260915_000000/.enc') === null,
+	'location_of() is the one reading of the layout');
+check(BackupObjects::object_relname('epoch-20260915_000000', 'mailbox/12.eml') === 'objects/epoch-20260915_000000/mailbox/12.eml.enc',
+	'and a namespaced object is stored one folder down');
+$fleet = FleetBackupRetention::object_store(array(array('key' => 'base/objects/epoch-20260915_000000/mailbox/12.eml.enc', 'size' => 77)), 'base');
+check(isset($fleet['objects']['epoch-20260915_000000/mailbox/12.eml']), 'the management node\'s retention reads it the same way', json_encode(array_keys($fleet['objects'])));
+
 $index = array('version' => 1, 'objects' => array(
 	array('name' => 'beach.jpg', 'epoch' => 'epoch-20260901_000000', 'object_bytes' => 4194352, 'object_sha256' => str_repeat('1', 64), 'stored' => true),
 	array('name' => 'waiting.jpg', 'epoch' => '', 'object_bytes' => 0, 'object_sha256' => '', 'stored' => false),

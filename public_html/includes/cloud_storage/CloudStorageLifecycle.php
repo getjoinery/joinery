@@ -2,13 +2,12 @@
 /**
  * CloudStorageLifecycle — the one shared admin lifecycle for the file store.
  *
- * The admin save/test/activate/health helpers over the one store: a private
- * bucket, one binding, every declared profile. It owns the
- * binding-immutability guard:
- *
- *   Guard 1 (binding immutability): the (endpoint, bucket) identity of the
- *   store is immutable while it holds any 'cloud' row — to switch, disable +
- *   pull back to local first. Access-key rotation (same binding) stays allowed.
+ * The file store is a target row (bkt_purpose 'files'), sealed like every
+ * target, chosen by file_store_target_id. Offloaded rows record the store and
+ * key they went to, so there may be older stores still serving the files whose
+ * records name them; Move files carries those across. A store's location is
+ * fixed once a file is in it (BackupTarget::location_refusal()); its key may
+ * change.
  *
  * testConnection() is the Save check, in order, storing nothing on a fail:
  * its own bucket and what the key may do (BucketCheck), reach, write, the
@@ -17,16 +16,22 @@
  *
  * Offload is driven by ONE scheduled task (CloudOffloadRun) for the whole
  * platform. The store's direction each tick is its MODE — offload / drain /
- * idle — derived from the enabled latch + draining flag (mode()).
- * runOffloadTick() walks every declared profile (the registry) and dispatches
- * by mode, so a new consumer adds a StorageProfile and zero tasks. There is no
- * forward/reverse mutual-exclusion to enforce: the store has one mode per tick.
+ * idle — derived from the enabled latch + draining flag (mode()), with a
+ * Move files batch beside it while a move is running. runOffloadTick() walks
+ * every declared profile (the registry) and dispatches by mode, so a new
+ * consumer adds a StorageProfile and zero tasks. There is no forward/reverse
+ * mutual-exclusion to enforce: the store has one mode per tick.
  *
  * A profile whose table also holds rows that are not its own (fbb_file_blobs
- * holds public blobs, which never move) scopes the binding-immutability count
- * and the health cloud-side counts to its own rows via its optional
+ * holds public blobs, which never move) scopes the cloud-row counts and the
+ * health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): saveStore(), removeStore(),
+ *                stores(), cloudRowCount() per store, Move files (startMove(), moveState(), stopMove(),
+ *                a batch per tick); settings are written through Setting::put(), which refuses a name
+ *                nothing declares; the binding settings, the binding guard and persistKey() are gone
+
  * @version 2.3 - privacyVerdict() carries a step status: an anonymous request with no answer is a
  *                warning that says the check could not run, not a pass
  * @version 2.2 - persistKey() stores a replacement key alone, leaving the enabled latch and the
@@ -119,12 +124,14 @@ class CloudStorageLifecycle {
 			return ['ok' => false, 'steps' => $steps];
 		}
 
-		// Step 2: write — a probe object lands.
+		// Step 2: write — a probe object lands, in the store's folder.
 		$probe_name = '_joinery_probe-' . bin2hex(random_bytes(4)) . '.txt';
+		$folder = trim((string)($opts['prefix'] ?? ''), '/');
+		$probe_key = ($folder !== '' ? $folder . '/' : '') . $probe_name;
 		$probe_local = sys_get_temp_dir() . '/' . $probe_name;
 		file_put_contents($probe_local, "joinery-cloud-storage-test\n");
 		try {
-			$driver->put($probe_local, $probe_name, 'text/plain');
+			$driver->put($probe_local, $probe_key, 'text/plain');
 			$steps[] = ['label' => self::STEP_WRITE, 'status' => 'pass', 'message' => 'A probe object was written.'];
 		} catch (Exception $e) {
 			@unlink($probe_local);
@@ -137,7 +144,7 @@ class CloudStorageLifecycle {
 		// the exact URL a public bucket would serve; it is fetched anonymously,
 		// no credentials, and a 2xx refuses the Save.
 		$ok = true;
-		$verdict = self::privacyVerdict(BucketCheck::anonymous_status($driver->url($probe_name)));
+		$verdict = self::privacyVerdict(BucketCheck::anonymous_status($driver->url($probe_key)));
 		if (!$verdict['pass']) {
 			$ok = false;
 		}
@@ -145,7 +152,7 @@ class CloudStorageLifecycle {
 
 		// Step 4: delete — the probe goes, so permanent delete and retention work.
 		try {
-			$driver->delete($probe_name);
+			$driver->delete($probe_key);
 			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'pass', 'message' => 'The probe object was deleted.'];
 		} catch (Exception $e) {
 			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'warn',
@@ -180,156 +187,239 @@ class CloudStorageLifecycle {
 	}
 
 	// ====================================================================
-	// Guard 1 — binding immutability.
+	// The store as a target row.
 	// ====================================================================
+
 	/**
-	 * Reject a Save that changes (endpoint, bucket) while the store holds any
-	 * 'cloud' row (summed across every profile). Same binding ⇒ key rotation
-	 * allowed. Returns ['ok'=>true] or ['ok'=>false,'message'=>..].
+	 * Save a file store target from the page's form: read the fields onto it
+	 * (BackupTargetForm::apply(), which refuses a location change once files
+	 * are stored there), run the Save check against what was entered, and
+	 * only on a pass store it. A store saved as new becomes the one new
+	 * offloads go to, and offloading is switched on.
+	 *
+	 * @return array ['ok' => bool, 'message' => string, 'test_results' => array|null]
 	 */
-	public static function assertBindingMutable(array $opts): array {
-		$stored = CloudStorageDriverFactory::binding();
-		$same_endpoint = trim((string)($opts['endpoint'] ?? '')) === trim((string)$stored['endpoint']);
-		$same_bucket   = trim((string)($opts['bucket'] ?? ''))   === trim((string)$stored['bucket']);
-		if ($same_endpoint && $same_bucket) {
-			return ['ok' => true];
+	public static function saveStore(BackupTarget $target, array $input, bool $make_current): array {
+		$target->set('bkt_purpose', BackupTarget::PURPOSE_FILES);
+		$applied = BackupTargetForm::apply($target, $input + array('bkt_enabled' => '1'), array('files' => true));
+		if (!$applied['ok']) {
+			return array('ok' => false, 'message' => $applied['message'], 'test_results' => null);
 		}
-		$cloud_rows = self::cloudRowCount();
-		if ($cloud_rows > 0) {
-			return ['ok' => false,
-				'message' => 'The bucket holds ' . $cloud_rows
-					. ' offloaded file(s); pull them back to local before changing the endpoint or bucket.'];
+		try {
+			$target->prepare();
+		} catch (BackupTargetException $e) {
+			return array('ok' => false, 'message' => 'Not saved. ' . $e->getMessage(), 'test_results' => null);
 		}
-		return ['ok' => true];
+		$overlap = $target->file_store_overlap();
+		if ($overlap !== '') {
+			return array('ok' => false, 'message' => 'Not saved. ' . $overlap, 'test_results' => null);
+		}
+		$opts = CloudStorageDriverFactory::options($target) + array('prefix' => $target->prefix());
+		$test = self::testConnection($opts);
+		if (!$test['ok']) {
+			return array('ok' => false, 'message' => '', 'test_results' => $test);
+		}
+		$target->save();
+		CloudStorageDriverFactory::reset();
+		if ($make_current) {
+			Setting::put(BackupTarget::FILE_STORE_SETTING, (string)(int)$target->key);
+			self::setEnabled(true);
+			self::stopDrain();
+			self::ensureTickActive();
+		}
+		return array('ok' => true, 'message' => $applied['note'], 'test_results' => $test);
 	}
 
 	/**
-	 * Sum of 'cloud' rows across every profile. A profile whose table also
-	 * holds rows that are not its own is scoped to the cloud rows that are, via
-	 * the optional reverseEligibilityWhere() ownership gate.
+	 * Forget the current file store: only while no file is offloaded to any
+	 * store and nothing is on its way back. The target row is deleted with it.
+	 *
+	 * @return string '' when removed, otherwise why not
 	 */
-	public static function cloudRowCount(): int {
+	public static function removeStore(): string {
+		$target = CloudStorageDriverFactory::currentTarget();
+		if ($target === null) {
+			return '';
+		}
+		// Any offloaded file at all, not only this store's: an older store's
+		// files are moved to the current one, so the current one stays until
+		// nothing is offloaded anywhere.
+		if (self::cloudRowCount() > 0 || self::mode() === 'drain') {
+			return 'Offloaded files are still in a file store, or on their way back. Pull them back first.';
+		}
+		Setting::put(BackupTarget::FILE_STORE_SETTING, '');
+		self::setEnabled(false);
+		$target->soft_delete();
+		CloudStorageDriverFactory::reset();
+		return '';
+	}
+
+	/**
+	 * Sum of 'cloud' rows across every profile, in one store or in all. A
+	 * profile whose table also holds rows that are not its own is scoped to
+	 * the cloud rows that are, via the optional reverseEligibilityWhere()
+	 * ownership gate.
+	 */
+	public static function cloudRowCount(?int $target_id = null): int {
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$total = 0;
 		foreach (StorageProfileRegistry::all() as $profile) {
+			$columns = self::columnsOf($profile->table());
+			if ($columns === array()) {
+				continue; // the table does not exist yet: it holds nothing
+			}
 			$own = (method_exists($profile, 'reverseEligibilityWhere'))
 				? trim($profile->reverseEligibilityWhere()) : '';
 			$own_sql = $own !== '' ? " AND ($own)" : '';
-			try {
-				$q = $dblink->query(
-					"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}");
-				$total += (int)$q->fetch(PDO::FETCH_ASSOC)['c'];
-			} catch (Exception $e) { /* table may not exist yet */ }
+			$params = array();
+			// A table that does not record a row's store yet (a plugin whose
+			// columns are still to come) cannot say which store its offloaded
+			// rows are in, so every one of them counts for every store: a
+			// store is never taken for empty on a count that could not look.
+			if ($target_id !== null && in_array($profile->targetColumn(), $columns, true)) {
+				$own_sql .= " AND {$profile->targetColumn()} = ?";
+				$params[] = $target_id;
+			}
+			$q = $dblink->prepare(
+				"SELECT COUNT(*) AS c FROM {$profile->table()} WHERE {$profile->driverColumn()} = 'cloud'{$own_sql}");
+			$q->execute($params);
+			$total += (int)$q->fetch(PDO::FETCH_ASSOC)['c'];
 		}
 		return $total;
 	}
 
-	// ====================================================================
-	// Persist settings — guard 1 first; latch the enabled flag.
-	// ====================================================================
-	public static function persistSettings(array $opts, $session): array {
-		$mutable = self::assertBindingMutable($opts);
-		if (!$mutable['ok']) {
-			return ['ok' => false, 'message' => $mutable['message']];
+	/** A table's column names, or [] when the table does not exist. Asked once per process. */
+	private static function columnsOf(string $table): array {
+		static $seen = array();
+		if (!isset($seen[$table])) {
+			$q = DbConnector::get_instance()->get_db_link()->prepare(
+				"SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?");
+			$q->execute(array($table));
+			$seen[$table] = $q->fetchAll(PDO::FETCH_COLUMN);
 		}
-		self::_write_settings(self::_settings_map($opts), $session);
-		CloudStorageDriverFactory::reset();
-		return ['ok' => true];
+		return $seen[$table];
 	}
 
 	/**
-	 * Store a replacement key against the store's existing binding.
-	 *
-	 * Writes the key and nothing else. The enabled latch and the draining flag
-	 * say what the store is doing; replacing a key says nothing about either,
-	 * so a paused store stays paused and a drain in progress keeps draining
-	 * with the new key. That last case is the reason the key stays editable at
-	 * all: the pull-back reads every object out of the bucket with this key, so
-	 * a revoked key with no way to replace it would strand the files it was
-	 * meant to rescue.
-	 *
-	 * The binding is the caller's stored one; a key that names a different
-	 * endpoint (Backblaze settles the endpoint from the key) is refused here
-	 * rather than stored against objects it cannot reach.
+	 * Every file store target, current first, then by name; each with how many
+	 * files it holds and, for an older store still serving files, whether it
+	 * answers: ['ok' => bool, 'message'] or null when not asked (the current
+	 * store's answer is health()'s).
 	 */
-	public static function persistKey(array $opts, $session): array {
-		$stored = CloudStorageDriverFactory::binding();
-		$endpoint = StorageProvider::host($opts['endpoint'] ?? '');
-		$stored_endpoint = StorageProvider::host($stored['endpoint']);
-		if ($endpoint !== '' && $stored_endpoint !== '' && $endpoint !== $stored_endpoint) {
-			return ['ok' => false,
-				'message' => 'This key belongs to ' . $endpoint . ', and the store is on ' . $stored_endpoint
-					. '. A key that moves the store is a new store: disable and pull the files back first.'];
-		}
-		if (trim((string)($opts['bucket'] ?? '')) !== trim((string)$stored['bucket'])) {
-			return ['ok' => false, 'message' => 'The bucket cannot change while replacing a key.'];
-		}
-		self::_write_settings(self::keySettingsMap($opts), $session);
-		CloudStorageDriverFactory::reset();
-		return ['ok' => true];
-	}
-
-	/**
-	 * The settings a key replacement writes: the key, and nothing else. Set
-	 * against _settings_map(), which a full Save uses and which carries the
-	 * enabled latch — the difference between the two maps is the whole of what
-	 * "replacing a key changes nothing else" means.
-	 */
-	public static function keySettingsMap(array $opts): array {
-		return [
-			'cloud_storage_access_key' => $opts['access_key'] ?? '',
-			'cloud_storage_secret_key' => $opts['secret_key'] ?? '',
-		];
-	}
-
-	/** The setting map a Save writes: the binding, and the enabled latch. */
-	private static function _settings_map(array $opts): array {
-		return [
-			'cloud_storage_provider'   => StorageProvider::normalise($opts['provider'] ?? ''),
-			'cloud_storage_endpoint'   => $opts['endpoint'] ?? '',
-			'cloud_storage_region'     => $opts['region'] ?? '',
-			'cloud_storage_bucket'     => $opts['bucket'] ?? '',
-			'cloud_storage_access_key' => $opts['access_key'] ?? '',
-			'cloud_storage_secret_key' => $opts['secret_key'] ?? '',
-			'cloud_storage_enabled'    => '1',
-		];
-	}
-
-	/**
-	 * Set the enabled latch, with any other settings to write beside it (a
-	 * Remove blanks the binding). Used by the pause / disable / remove flows.
-	 */
-	public static function setEnabled(bool $enabled, $session, array $extra = []): void {
-		$map = ['cloud_storage_enabled' => $enabled ? '1' : '0'];
-		foreach ($extra as $k => $v) {
-			$map[$k] = $v;
-		}
-		self::_write_settings($map, $session);
-		CloudStorageDriverFactory::reset();
-	}
-
-	private static function _write_settings(array $map, $session): void {
-		$user_id = $session ? $session->get_user_id() : null;
-		$multi = new MultiSetting([], null, null, null, null);
-		$multi->load();
-		$existing = [];
-		foreach ($multi as $row) {
-			$existing[$row->get('stg_name')] = $row;
-		}
-		foreach ($map as $name => $value) {
-			if (isset($existing[$name])) {
-				$existing[$name]->set('stg_value', $value);
-				$existing[$name]->set('stg_update_time', 'NOW()');
-				if ($user_id !== null) {
-					$existing[$name]->set('stg_usr_user_id', $user_id);
+	public static function stores(): array {
+		$current = CloudStorageDriverFactory::currentTarget();
+		$out = array();
+		foreach (new MultiBackupTarget(array('deleted' => false, 'purpose' => BackupTarget::PURPOSE_FILES), array('bkt_name' => 'ASC')) as $t) {
+			$is_current = $current !== null && (int)$current->key === (int)$t->key;
+			$files = self::cloudRowCount((int)$t->key);
+			$answers = null;
+			if (!$is_current && $files > 0) {
+				$driver = CloudStorageDriverFactory::forTarget((int)$t->key);
+				try {
+					$answers = $driver ? $driver->ping() : array('ok' => false, 'message' => 'its key cannot be read');
+				} catch (Exception $e) {
+					$answers = array('ok' => false, 'message' => $e->getMessage());
 				}
-				$existing[$name]->prepare();
-				$existing[$name]->save();
+			}
+			$out[] = array('target' => $t, 'current' => $is_current, 'files' => $files, 'answers' => $answers);
+		}
+		usort($out, function ($a, $b) { return (int)$b['current'] - (int)$a['current']; });
+		return $out;
+	}
+
+	/**
+	 * Set the enabled latch: whether new offloads go to the current store.
+	 * Used by the pause / enable / remove flows.
+	 */
+	public static function setEnabled(bool $enabled): void {
+		Setting::put('cloud_storage_enabled', $enabled ? '1' : '0');
+	}
+
+	// ====================================================================
+	// Move files — an older store's files to the current one.
+	// ====================================================================
+
+	const MOVE_SETTING = 'cloud_storage_move';
+
+	/**
+	 * Start carrying every file on store $from_id to the current store, in
+	 * batches on the offload tick. One move at a time.
+	 *
+	 * @return string '' when started, otherwise why not
+	 */
+	public static function startMove(int $from_id): string {
+		$to = CloudStorageDriverFactory::currentUnlatched();
+		if ($to === null) {
+			return 'There is no file store to move the files to.';
+		}
+		if ($to->target_id === $from_id) {
+			return 'These files are already in the current file store.';
+		}
+		if (self::mode() === 'drain') {
+			return 'Files are being pulled back to this server; a move waits until that is done.';
+		}
+		$total = self::cloudRowCount($from_id);
+		if ($total === 0) {
+			return 'This file store holds no files.';
+		}
+		$from = new BackupTarget($from_id, TRUE);
+		$current = new BackupTarget($to->target_id, TRUE);
+		if ($from->overlaps($current)) {
+			return 'These files are in the same bucket and folder as the current file store, so there is nothing to move them to.';
+		}
+		Setting::put(self::MOVE_SETTING, json_encode(array(
+			'from' => $from_id, 'to' => $to->target_id, 'total' => $total, 'started' => gmdate('Y-m-d H:i:s'),
+			'last' => '', 'failed' => 0)));
+		self::ensureTickActive();
+		return '';
+	}
+
+	/** The move in progress, or null: from, to, total, started, last (the last batch's words), failed. */
+	public static function moveState(): ?array {
+		$raw = (string)Globalvars::get_instance()->get_setting(self::MOVE_SETTING);
+		$state = $raw !== '' ? json_decode($raw, true) : null;
+		return is_array($state) && (int)($state['from'] ?? 0) > 0 ? $state : null;
+	}
+
+	/** Stop a move. Files already moved stay moved; the rest stay where they are. */
+	public static function stopMove(): void {
+		Setting::put(self::MOVE_SETTING, '');
+	}
+
+	/**
+	 * One tick of the move: a batch of every profile's rows on the old store
+	 * to the current one. The move ends itself when the old store holds no
+	 * file, or when the current store is no longer the one it moves to.
+	 */
+	private static function moveTick(): ?string {
+		$state = self::moveState();
+		if ($state === null) {
+			return null;
+		}
+		$to = CloudStorageDriverFactory::currentUnlatched();
+		if ($to === null || $to->target_id !== (int)$state['to']) {
+			self::stopMove();
+			return 'move stopped: the file store it moved to is no longer the current one';
+		}
+		$from = (int)$state['from'];
+		$words = array();
+		$failed = 0;
+		foreach (StorageProfileRegistry::all() as $profile) {
+			$r = CloudOffloadEngine::moveBatch($profile, $from, $to);
+			$failed += (int)($r['failed'] ?? 0);
+			if ((int)($r['moved'] ?? 0) > 0 || (int)($r['failed'] ?? 0) > 0) {
+				$words[] = get_class($profile) . ': ' . $r['message'];
 			}
 		}
-		// No in-memory settings refresh here: the admin Save redirects, so the
-		// next request re-reads settings fresh; the driver cache is busted by the
-		// CloudStorageDriverFactory::reset() the callers run after persisting.
+		$left = self::cloudRowCount($from);
+		if ($left === 0) {
+			self::stopMove();
+			return 'move finished: every file is in the current file store';
+		}
+		$state['last'] = $words ? implode('; ', $words) : 'nothing moved this tick';
+		$state['failed'] = $failed;
+		Setting::put(self::MOVE_SETTING, json_encode($state));
+		return 'moving files: ' . number_format($left) . ' left' . ($words ? ' (' . $state['last'] . ')' : '');
 	}
 
 	// ====================================================================
@@ -354,7 +444,7 @@ class CloudStorageLifecycle {
 	/** The store's current offload mode: 'offload' | 'drain' | 'idle'. */
 	public static function mode(): string {
 		$s = Globalvars::get_instance();
-		if ($s->get_setting('cloud_storage_enabled')) {
+		if ($s->get_setting('cloud_storage_enabled') && CloudStorageDriverFactory::currentTarget() !== null) {
 			return 'offload';
 		}
 		if ($s->get_setting('cloud_storage_draining')) {
@@ -368,17 +458,20 @@ class CloudStorageLifecycle {
 		self::_activate_task(self::TICK_TASK);
 	}
 
-	/** Begin draining the store back to local (Disable-and-Pull-Back). */
-	public static function startDrain($session): void {
-		self::_write_settings(['cloud_storage_draining' => '1'], $session);
-		CloudStorageDriverFactory::reset();
+	/**
+	 * Begin draining every offloaded file back to local (Disable-and-Pull-Back),
+	 * each from the store its record names. A move in progress stops: the
+	 * files are coming home instead.
+	 */
+	public static function startDrain(): void {
+		Setting::put('cloud_storage_draining', '1');
+		self::stopMove();
 		self::ensureTickActive();
 	}
 
 	/** Stop draining (drain finished, or store re-enabled). */
-	public static function stopDrain($session): void {
-		self::_write_settings(['cloud_storage_draining' => '0'], $session);
-		CloudStorageDriverFactory::reset();
+	public static function stopDrain(): void {
+		Setting::put('cloud_storage_draining', '0');
 	}
 
 	/**
@@ -404,13 +497,25 @@ class CloudStorageLifecycle {
 			$msgs[] = get_class($profile) . ': ' . ($r['message'] ?? '');
 		}
 
+		// Move files: an older store's files to the current one, a batch a
+		// tick, whatever the mode but a drain (startDrain() ends a move).
+		if ($mode !== 'drain') {
+			try {
+				$moved = self::moveTick();
+				if ($moved !== null) { $msgs[] = $moved; }
+			} catch (\Throwable $e) {
+				$had_error = true;
+				$msgs[] = 'move: ' . $e->getMessage();
+			}
+		}
+
 		// The store finishes draining when no cloud rows remain across every profile.
 		$cloud_rows = self::cloudRowCount();
 		if ($mode === 'drain' && $cloud_rows === 0) {
-			self::stopDrain(null);
+			self::stopDrain();
 			$mode = 'idle';
 		}
-		$in_motion = ($mode !== 'idle');
+		$in_motion = ($mode !== 'idle') || self::moveState() !== null;
 
 		// While any offloaded file exists, the daily file-store check takes its
 		// slice: every offloaded file HEADed once a day, the ones the bucket
@@ -501,7 +606,8 @@ class CloudStorageLifecycle {
 		// draining one still reads every object back out of it, so a key that
 		// stopped working matters just as much off the latch as on it.
 		$h['driver'] = null;
-		$driver = CloudStorageDriverFactory::driverWithFallback();
+		$current = CloudStorageDriverFactory::currentUnlatched();
+		$driver = $current ? $current->driver : null;
 		if ($driver) {
 			try {
 				$start = microtime(true);

@@ -19,6 +19,8 @@
  *
  * Run: php tests/integration/cloud_storage_characterization_test.php
  *
+ * @version 3.2 - a push goes to a file store under its folder and the blob records the store and the key;
+ *                a pull-back reads that key and forgets both (specs/storage_targets.md WP6)
  * @version 3.1 - a record with no bytes is parked with the reason; a failed push records why; health tells them apart
  * @version 3.0 - one private store: the fixtures are private blobs; a public blob is never eligible
  * @version 2.0
@@ -27,13 +29,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageLifecycle.php'));
-require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver
+require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, cloud_test_store
 
 
 $settings  = Globalvars::get_instance();
@@ -57,6 +53,10 @@ function make_blob_row(array $overrides = []) {
 	$b->set('fbb_reference_count', 1);
 	$b->set('fbb_storage_driver', $overrides['fbb_storage_driver'] ?? 'local');
 	$b->set('fbb_sync_failed_count', $overrides['fbb_sync_failed_count'] ?? 0);
+	if (($overrides['fbb_storage_driver'] ?? 'local') === 'cloud') {
+		$b->set('fbb_bkt_backup_target_id', 9001);
+		$b->set('fbb_remote_key', 'chartest/' . $name);
+	}
 	$b->save();
 	$created_blob_ids[] = $b->key;
 	return $b;
@@ -81,11 +81,13 @@ try {
 	$temp_paths[] = $orig_path;
 
 	$driver = new RecordingMockDriver();
-	$res = $sync_row->invoke(null, $profile, (int)$b->key, $driver);
+	$res = $sync_row->invoke(null, $profile, (int)$b->key, cloud_test_store($driver, 9001, 'chartest'));
 	$reloaded = new FileBlob($b->key, true);
 	ok('forward: returns pushed', $res === 'pushed');
-	ok('forward: pushed original key', count($driver->ops('put')) === 1 && $driver->calls[0]['key'] === $b->get('fbb_stored_name'));
+	ok('forward: pushed the original under the store\'s folder', count($driver->ops('put')) === 1 && $driver->calls[0]['key'] === 'chartest/' . $b->get('fbb_stored_name'));
 	ok('forward: row flipped to cloud', $reloaded->get('fbb_storage_driver') === 'cloud');
+	ok('forward: the blob records the store and the key', (int)$reloaded->get('fbb_bkt_backup_target_id') === 9001
+		&& $reloaded->get('fbb_remote_key') === 'chartest/' . $b->get('fbb_stored_name') && $reloaded->remote_key_for('thumbnail') === 'chartest/thumbnail/' . $b->get('fbb_stored_name'));
 	ok('forward: failed_count reset to 0', (int)$reloaded->get('fbb_sync_failed_count') === 0);
 	ok('forward: local original deleted after flip', !file_exists($orig_path));
 
@@ -94,7 +96,7 @@ try {
 	// -------------------------------------------------------------------
 	$b2 = make_blob_row();   // no file placed on disk
 	$driver2 = new RecordingMockDriver();
-	$res2 = $sync_row->invoke(null, $profile, (int)$b2->key, $driver2);
+	$res2 = $sync_row->invoke(null, $profile, (int)$b2->key, cloud_test_store($driver2));
 	$reloaded2 = new FileBlob($b2->key, true);
 	ok('missing: returns missing, not failed', $res2 === 'missing');
 	ok('missing: nothing pushed', count($driver2->ops('put')) === 0);
@@ -116,7 +118,7 @@ try {
 	file_put_contents($origp, "public-bytes\n");
 	$temp_paths[] = $origp;
 	$driverp = new RecordingMockDriver();
-	$resp = $sync_row->invoke(null, $profile, (int)$bp->key, $driverp);
+	$resp = $sync_row->invoke(null, $profile, (int)$bp->key, cloud_test_store($driverp));
 	$reloadedp = new FileBlob($bp->key, true);
 	ok('public blob: not eligible (isEligibleRow false)', $profile->isEligibleRow((int)$bp->key) === false);
 	ok('public blob: returns skipped', $resp === 'skipped');
@@ -139,7 +141,7 @@ try {
 		$u = $dblink->prepare("UPDATE fbb_file_blobs SET fbb_is_private = FALSE WHERE fbb_file_blob_id = ?");
 		$u->execute([$fid3]);
 	};
-	$res3 = $sync_row->invoke(null, $profile, $fid3, $driver3);
+	$res3 = $sync_row->invoke(null, $profile, $fid3, cloud_test_store($driver3));
 	$reloaded3 = new FileBlob($b3->key, true);
 	ok('midflight: returns skipped', $res3 === 'skipped');
 	ok('midflight: pushed keys were deleted (undo)', count($driver3->ops('delete')) === count($driver3->ops('put')) && count($driver3->ops('put')) > 0);
@@ -157,6 +159,8 @@ try {
 	$temp_paths[] = $local4;
 	ok('reverse: returns pulled', $res4 === 'pulled');
 	ok('reverse: row flipped to local', $reloaded4->get('fbb_storage_driver') === 'local');
+	ok('reverse: read from the key the row recorded', ($driver4->ops('get')[0]['key'] ?? '') === 'chartest/' . $b4->get('fbb_stored_name'));
+	ok('reverse: the row forgets the store and the key', $reloaded4->get('fbb_bkt_backup_target_id') === null && $reloaded4->get('fbb_remote_key') === null);
 	ok('reverse: bytes placed in the restricted dir', file_exists($local4));
 	$ops4 = array_map(fn($c) => $c['op'], $driver4->calls);
 	$first_get = array_search('get', $ops4, true);
@@ -192,14 +196,14 @@ try {
 	// -------------------------------------------------------------------
 	$bm = make_blob_row();   // no file is written for it
 	$dm = new RecordingMockDriver();
-	$rm = $sync_row->invoke(null, $profile, (int)$bm->key, $dm);
+	$rm = $sync_row->invoke(null, $profile, (int)$bm->key, cloud_test_store($dm));
 	ok('missing bytes: the row answers missing, not failed', $rm === 'missing');
 	ok('missing bytes: nothing was pushed', count($dm->ops('put')) === 0);
 	$bm_row = $dblink->query("SELECT fbb_storage_driver, fbb_sync_failed_count, fbb_sync_last_error FROM fbb_file_blobs WHERE fbb_file_blob_id = " . (int)$bm->key)->fetch(PDO::FETCH_ASSOC);
 	ok('missing bytes: the row stays local', $bm_row['fbb_storage_driver'] === 'local');
 	ok('missing bytes: parked at the cap in one step', (int)$bm_row['fbb_sync_failed_count'] === CloudOffloadEngine::FAILED_COUNT_CAP);
 	ok('missing bytes: the reason is recorded', $bm_row['fbb_sync_last_error'] === CloudOffloadEngine::MISSING_BYTES);
-	$rm2 = $sync_row->invoke(null, $profile, (int)$bm->key, $dm);
+	$rm2 = $sync_row->invoke(null, $profile, (int)$bm->key, cloud_test_store($dm));
 	ok('missing bytes: a second look is the same answer', $rm2 === 'missing');
 
 	$bf = make_blob_row();
@@ -208,7 +212,7 @@ try {
 	$temp_paths[] = $bf_path;
 	$df = new RecordingMockDriver();
 	$df->fail_all = true;
-	$rf = $sync_row->invoke(null, $profile, (int)$bf->key, $df);
+	$rf = $sync_row->invoke(null, $profile, (int)$bf->key, cloud_test_store($df));
 	ok('failed push: the row answers failed', $rf === 'failed');
 	$bf_row = $dblink->query("SELECT fbb_sync_failed_count, fbb_sync_last_error FROM fbb_file_blobs WHERE fbb_file_blob_id = " . (int)$bf->key)->fetch(PDO::FETCH_ASSOC);
 	ok('failed push: one failure counted', (int)$bf_row['fbb_sync_failed_count'] === 1);

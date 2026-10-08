@@ -17,6 +17,11 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.4 - overlaps(): two targets in one bucket whose folders are the same or nested hold one set of
+ *                objects; file_store_overlap() names the file store a file store would share a place with
+ * @version 3.3 - bkt_purpose: a target holds backups or is a file store (specs/storage_targets.md WP6); a file
+ *                store's holdings are the offloaded files recorded on it, and file_store_target_id names one;
+ *                collections list backup targets unless asked for a purpose
  * @version 3.2 - a draining space's refusal says its backups age out or are deleted from Stored Backups
  * @version 3.1 - no two targets share a name (a node's chain follows its target's name); holdings() reads the management node's storage spaces (active and draining owners); the folder
  *                is stored in one form (normalise_prefix(), prefix()) (specs/storage_targets.md WP4, S11)
@@ -59,9 +64,18 @@ class BackupTarget extends SystemBase {
 
 	public static $json_vars = array('bkt_credentials', 'bkt_node_credentials');
 
+	// A collection lists the backup targets unless asked for another purpose,
+	// so the generated rows are backup targets for the filters to find.
+	public static $test_fixture = array(
+		'values' => array('bkt_purpose' => 'backups'),
+	);
+
 	public static $field_specifications = array(
 		'bkt_backup_target_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'bkt_name'            => array('type'=>'varchar(100)', 'required'=>true, 'is_nullable'=>false),
+		// What the target is for: backups, or the file store that offloaded
+		// private files live in. A file store is chosen by file_store_target_id.
+		'bkt_purpose'         => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'backups', 'allowed_values'=>array('backups', 'files')),
 		// allowed_values is StorageProvider::slugs(), set below the class: one provider list.
 		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array()),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
@@ -85,6 +99,14 @@ class BackupTarget extends SystemBase {
 		'bkt_update_time'     => array('type'=>'timestamp(6)'),
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),
 	);
+
+	const PURPOSE_BACKUPS = 'backups';
+	const PURPOSE_FILES = 'files';
+
+	/** True for a file store target: it holds offloaded files, not backups. */
+	public function is_file_store(): bool {
+		return (string)$this->get('bkt_purpose') === self::PURPOSE_FILES;
+	}
 
 	function prepare() {
 		if (empty($this->get('bkt_name'))) {
@@ -111,7 +133,11 @@ class BackupTarget extends SystemBase {
 	 */
 	function save($debug = false) {
 		$this->assert_own_name();
-		$this->set('bkt_path_prefix', self::normalise_prefix((string)$this->get('bkt_path_prefix')));
+		if ((string)$this->get('bkt_purpose') === '') {
+			$this->set('bkt_purpose', self::PURPOSE_BACKUPS);
+		}
+		$this->set('bkt_path_prefix', self::normalise_prefix((string)$this->get('bkt_path_prefix'),
+			$this->is_file_store() ? CloudFileStore::default_prefix() : self::DEFAULT_PREFIX));
 		$this->normalise_endpoint('bkt_credentials');
 		$this->normalise_endpoint('bkt_node_credentials');
 		$this->seal_credentials('bkt_credentials');
@@ -150,7 +176,7 @@ class BackupTarget extends SystemBase {
 		}
 	}
 
-	/** The folder used when a target names none. */
+	/** The folder used when a backup target names none. */
 	const DEFAULT_PREFIX = 'joinery-backups';
 
 	/**
@@ -159,32 +185,45 @@ class BackupTarget extends SystemBase {
 	 * target starts with this, so a folder entered as '/backups/' and one
 	 * entered as 'backups' are the same place.
 	 */
-	public static function normalise_prefix(string $prefix): string {
+	public static function normalise_prefix(string $prefix, string $default = self::DEFAULT_PREFIX): string {
 		$segments = array_filter(explode('/', trim($prefix)), function ($s) { return trim($s) !== ''; });
 		$normal = implode('/', array_map('trim', $segments));
-		return $normal !== '' ? $normal : self::DEFAULT_PREFIX;
+		return $normal !== '' ? $normal : $default;
 	}
 
 	/** This target's folder inside its bucket, normalised (no trailing slash). */
 	public function prefix(): string {
-		return self::normalise_prefix((string)$this->get('bkt_path_prefix'));
+		return self::normalise_prefix((string)$this->get('bkt_path_prefix'),
+			$this->is_file_store() ? CloudFileStore::default_prefix() : self::DEFAULT_PREFIX);
 	}
 
-	/** The settings that name the target new backups go to, on this deployment. */
+	/**
+	 * The settings that name the target new backups go to, on this deployment,
+	 * and the one that names the file store new offloads go to.
+	 */
 	const DEFAULT_SETTINGS = array('backup_target_id', 'server_manager_backup_target_id');
+	const FILE_STORE_SETTING = 'file_store_target_id';
 
-	/** True when a declared setting names this target as where new backups go. */
+	/** True when a declared setting names this target as where new backups, or new offloaded files, go. */
 	public function is_default(): bool {
 		if (!$this->key) {
 			return false;
 		}
 		$settings = Globalvars::get_instance();
-		foreach (self::DEFAULT_SETTINGS as $name) {
+		$names = $this->is_file_store() ? array(self::FILE_STORE_SETTING) : self::DEFAULT_SETTINGS;
+		foreach ($names as $name) {
 			if ((int)$settings->get_setting($name, false, true) === (int)$this->key) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/** What a default target is for, in the refusals' words. */
+	private function default_words(): string {
+		return $this->is_file_store()
+			? 'it is the file store new offloaded files go to; set up another file store first'
+			: 'it is where new backups go; choose another target for them first';
 	}
 
 	/**
@@ -194,13 +233,20 @@ class BackupTarget extends SystemBase {
 	 * go there (active) and the owners whose older backups are still kept there
 	 * while they age out (draining). Counted with the target disabled or not.
 	 *
-	 * @return array{stored: int, ever: int, active: string[], draining: string[]}
+	 * A file store holds the offloaded files whose records name it.
+	 *
+	 * @return array{stored: int, ever: int, active: string[], draining: string[], files: int}
 	 *   stored: runs whose objects are still there; ever: runs ever uploaded there;
-	 *   active / draining: the owners of its spaces in that state, by name
+	 *   active / draining: the owners of its spaces in that state, by name;
+	 *   files: offloaded files whose records say they are there
 	 */
 	public function holdings(): array {
-		$out = array('stored' => 0, 'ever' => 0, 'active' => array(), 'draining' => array());
+		$out = array('stored' => 0, 'ever' => 0, 'active' => array(), 'draining' => array(), 'files' => 0);
 		if (!$this->key) {
+			return $out;
+		}
+		if ($this->is_file_store()) {
+			$out['files'] = CloudStorageLifecycle::cloudRowCount((int)$this->key);
 			return $out;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
@@ -225,6 +271,9 @@ class BackupTarget extends SystemBase {
 	public function location_refusal(): string {
 		$h = $this->holdings();
 		$why = array();
+		if ($h['files'] > 0) {
+			$why[] = self::files_words($h['files']) . ' stored in it';
+		}
 		if ($h['ever'] > 0) {
 			$why[] = $h['ever'] . ' backup' . ($h['ever'] === 1 ? ' was' : 's were') . ' stored in it';
 		}
@@ -238,7 +287,9 @@ class BackupTarget extends SystemBase {
 			return '';
 		}
 		return 'The provider, endpoint, region, bucket and folder cannot change: ' . implode('; ', $why)
-			. '. The key and the name can. To use another bucket, add a target.';
+			. '. The key and the name can. ' . ($this->is_file_store()
+				? 'To use another bucket, set up another file store and move the files to it.'
+				: 'To use another bucket, add a target.');
 	}
 
 	/**
@@ -249,7 +300,7 @@ class BackupTarget extends SystemBase {
 	public function disable_refusal(): string {
 		$why = array();
 		if ($this->is_default()) {
-			$why[] = 'it is where new backups go; choose another target for them first';
+			$why[] = $this->default_words();
 		}
 		$active = $this->holdings()['active'];
 		if ($active) {
@@ -262,9 +313,13 @@ class BackupTarget extends SystemBase {
 	public function delete_refusal(): string {
 		$why = array();
 		if ($this->is_default()) {
-			$why[] = 'it is where new backups go; choose another target for them first';
+			$why[] = $this->default_words();
 		}
 		$h = $this->holdings();
+		if ($h['files'] > 0) {
+			$why[] = self::files_words($h['files']) . ' still stored in it'
+				. ($this->is_default() ? '' : '; Move files carries them to the current file store');
+		}
 		if ($h['active']) {
 			$why[] = self::backs_up($h['active']);
 		}
@@ -276,6 +331,52 @@ class BackupTarget extends SystemBase {
 			$why[] = $h['stored'] . ' backup' . ($h['stored'] === 1 ? ' is' : 's are') . ' still stored in it, and retention prunes them there';
 		}
 		return $why ? 'It cannot be deleted: ' . implode('; ', $why) . '.' : '';
+	}
+
+	/**
+	 * Do this target and $other hold objects in one place? The same bucket on
+	 * the same host (BucketCheck::same_bucket()) with folders that are the
+	 * same or one inside the other: every key one composes, the other could.
+	 */
+	public function overlaps(BackupTarget $other): bool {
+		$endpoint = function (BackupTarget $t) {
+			try {
+				return (string)(($t->get_credentials() ?: array())['endpoint'] ?? '');
+			} catch (BackupTargetException $e) {
+				return '';
+			}
+		};
+		if (!BucketCheck::same_bucket((string)$this->get('bkt_bucket'), $endpoint($this), (string)$other->get('bkt_bucket'), $endpoint($other))) {
+			return false;
+		}
+		$a = $this->prefix() . '/';
+		$b = $other->prefix() . '/';
+		return strpos($a, $b) === 0 || strpos($b, $a) === 0;
+	}
+
+	/**
+	 * Why this file store may not be saved where it is, or '' when it may:
+	 * another file store already holds that bucket and folder (or a folder
+	 * inside it, or around it). Two stores in one place are one set of
+	 * objects under two names, and moving files from one to the other would
+	 * delete each file it copied onto itself.
+	 */
+	public function file_store_overlap(): string {
+		foreach (new MultiBackupTarget(array('deleted' => false, 'purpose' => self::PURPOSE_FILES)) as $other) {
+			if ($this->key && (int)$other->key === (int)$this->key) {
+				continue;
+			}
+			if ($this->overlaps($other)) {
+				return 'The file store "' . $other->get('bkt_name') . '" already uses the bucket "' . $other->get('bkt_bucket')
+					. '" with the folder "' . $other->prefix() . '". A new file store needs a bucket, or a folder in it, of its own.';
+			}
+		}
+		return '';
+	}
+
+	/** "1 offloaded file is", "12 offloaded files are". */
+	private static function files_words(int $n): string {
+		return number_format($n) . ' offloaded file' . ($n === 1 ? ' is' : 's are');
 	}
 
 	/** "acme backs up to it", "acme and t5 back up to it". */
@@ -548,7 +649,7 @@ class BackupTarget extends SystemBase {
 
 	private static function each_column_blob(string $column): array {
 		$out = array();
-		$targets = new MultiBackupTarget(array('deleted' => false));
+		$targets = new MultiBackupTarget(array('deleted' => false, 'purpose' => MultiBackupTarget::ANY_PURPOSE));
 		$targets->load();
 		foreach ($targets as $target) {
 			$arr = self::creds_to_array($target->get($column));
@@ -580,8 +681,18 @@ BackupTarget::$field_specifications['bkt_provider']['allowed_values'] = StorageP
 class MultiBackupTarget extends SystemMultiBase {
 	protected static $model_class = 'BackupTarget';
 
+	/** 'purpose' => ANY_PURPOSE lists every target; without it, a collection is the backup targets. */
+	const ANY_PURPOSE = 'any';
+
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = [];
+
+		// A file store is never a place backups go, so every list of targets
+		// is the backup targets unless it asks for another purpose.
+		$purpose = $this->options['purpose'] ?? BackupTarget::PURPOSE_BACKUPS;
+		if ($purpose !== self::ANY_PURPOSE) {
+			$filters['bkt_purpose'] = [(string)$purpose, PDO::PARAM_STR];
+		}
 
 		if (isset($this->options['provider'])) {
 			$filters['bkt_provider'] = [$this->options['provider'], PDO::PARAM_STR];

@@ -39,6 +39,7 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.2 - offloaded() asks each sampled file of the file store its record names
  * @version 1.1 - check(): one machine's census judged alone, for a copy from backups (site_copy.md WP10)
  * @version 1.0
  */
@@ -80,7 +81,7 @@ class SiteCensus {
 			'tables'    => self::tables(DbConnector::get_instance()->get_db_link()),
 			'files'     => self::files($root, $names, $paths),
 			'secrets'   => SecretReconciler::census(),
-			'offloaded' => self::offloaded($objects, $objects ? CloudStorageDriverFactory::driverUnlatched() : null),
+			'offloaded' => self::offloaded($objects, function ($target_id) { return CloudStorageDriverFactory::forTarget((int)$target_id); }),
 		);
 	}
 
@@ -89,15 +90,17 @@ class SiteCensus {
 	 * them answers from it: the largest few and the rest drawn at random, one
 	 * metadata request each.
 	 *
-	 * @param array                   $objects BackupObjects::cloud_objects()
-	 * @param CloudStorageDriver|null $driver  the file store's driver; null when it has none
+	 * @param array         $objects   BackupObjects::cloud_objects()
+	 * @param callable|null $driver_for fn(int $target_id): ?CloudStorageDriver, the driver for the
+	 *                                  file store a record names; null when the site has none
 	 * @return array{total:int, sampled:int, answered:int, missing:string[], error:string}
 	 */
-	public static function offloaded(array $objects, ?CloudStorageDriver $driver, int $sample = self::OFFLOAD_SAMPLE): array {
+	public static function offloaded(array $objects, ?callable $driver_for, int $sample = self::OFFLOAD_SAMPLE): array {
 		$out = array('total' => count($objects), 'sampled' => 0, 'answered' => 0, 'missing' => array(), 'error' => '');
 		if (!$objects) { return $out; }
-		if ($driver === null) {
-			$out['error'] = 'files are offloaded, and this site has no file store configured to reach them';
+		$no_store = 'files are offloaded, and this site has no file store configured to reach them';
+		if ($driver_for === null) {
+			$out['error'] = $no_store;
 			return $out;
 		}
 		$picked = $objects;
@@ -106,6 +109,11 @@ class SiteCensus {
 			$picked = array_slice($picked, 0, $sample);
 		}
 		foreach ($picked as $obj) {
+			$driver = $driver_for((int)($obj['target_id'] ?? 0));
+			if ($driver === null) {
+				$out['error'] = $no_store;
+				return $out;
+			}
 			$out['sampled']++;
 			if ($driver->head((string)$obj['remote_key']) !== null) {
 				$out['answered']++;

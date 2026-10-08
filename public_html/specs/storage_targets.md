@@ -1,14 +1,26 @@
 # Storage targets — every stored object knows where it lives
 
 **Status:** Building — 2026-10-08. No open owner decisions; build order in §10.
-WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces). The reviewer1 review
-of WP1–WP4 (10-08) is fixed, uncommitted: retention orders points newest first across spaces;
-a draining space is released only by evidence (a passed verify, a finished run with something
-stored) newer than the active space's latest opening; a removed node's or released customer's
-space drains; a draining space takes no write; one unreadable space no longer stops shelf_list;
-a space is retired only when its whole folder is empty; Delete all is refused on an active
-space's folder. A browser look at the target forms, the node Move form, Who backs up here and Adopt
-is owed. WP4 notes, decided while building:
+WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces), and the
+reviewer1 review of WP1–WP4 committed (de6202d4). **WP6 built, uncommitted (10-08):** dev migrated by
+migration 210 (the file store is target row 2550, 824 blobs stamped; the binding settings are gone) and
+`iem_019`; the live B2 test passes against dev's bucket. A browser look at the target forms, the node Move
+form, Who backs up here and Adopt is owed, and now the Cloud Storage page's Switch to another bucket and
+Move files on a real second bucket. WP6 notes, decided while building:
+- A row records its store and the full key of its **primary** object (`fbb_remote_key`,
+  `iem_raw_remote_key`); a blob's variants sit beside it (`FileBlob::remote_key_for()`).
+- The file store's own on/off is still `cloud_storage_enabled` (Pause); `bkt_enabled` stays on for a file
+  store. Disable-and-pull stays, beside Move files.
+- Offloaded mail's backup object is `mailbox/{id}.eml`: one namespace segment, which no stored file name
+  can carry (`BackupObjects::location_of()`). Restore finds a row through its profile (`backupRow()`).
+- A move checks each copy by size and the ETag when it is the bytes' MD5, otherwise by reading it back.
+- reviewer2's review (10-08, 1 high, 3 medium, 4 low) is fixed: two file stores in one place (bucket and
+  same or nested folder) are refused at save, at Move files and in the move batch; an MD5-shaped ETag that
+  is not the MD5 falls back to reading back; the per-store file count no longer drops a table on an error;
+  an older store is pinged and has its own Replace key; each table's row locks are their own space; a
+  whole-object answer to a ranged read is cut to the span; the migration and docs say the rest.
+
+WP4 notes, decided while building:
 - A node's chain follows the **name** of the target the management node sends: a run to a target of
   another name starts a new chain (`BackupRunner` 1.28), so target names are unique. Until WP5 gives
   runs a broker id, that is how a moved node starts fresh. A node must run this core before a Move
@@ -17,7 +29,7 @@ is owed. WP4 notes, decided while building:
   "verified" half joins with WP7's `svr_verified_time` (F1). A node's needs a passed verify of a
   chain in the active space (the verify job names `space_id`).
 - `svr_mgn_managed_node_id` (runs with a node owner) is left to WP5, which is its first user.
-WP6 next.
+WP7 next.
 **Takes over:** item 2b (the object-store seam) and the shelf-target parts of item 2a in
 `services_phase2_platform.md`, which stays the owner of the services themselves
 (enrolment, metering, the lapse ladder, the site side).
@@ -552,11 +564,11 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 | S10 | The node target dropdown's blank option says "Local only" but means "the one enabled target", and re-saving while the target is disabled clears it (`overview.php`) | WP2 (built) |
 | S11 | Path prefix trimmed four different ways, so a leading `/` breaks minted-key scoping | **WP4** (built): one normalisation, stored on the target and composed into the space |
 | S12 | Three different B2 region regexes; a rejected cluster leaves the endpoint empty with no note | WP1 (built) |
-| S13 | `CloudStorageLifecycle::_write_settings` silently skips a missing setting row | WP6 (settings retire) |
-| S14 | File-store binding guard compares endpoints as raw strings in one place and as hosts in another | WP6 |
-| S15 | Changing `site_template` re-points every offloaded file's key with no warning | WP6 |
-| S16 | The file store's secret key is stored in plain text | WP6 |
-| S17 | Offloaded mail is not in backups; the bucket holds the only copy | WP6 |
+| S13 | `CloudStorageLifecycle::_write_settings` silently skips a missing setting row | **WP6** (built): the settings are gone; the page writes through `Setting::put()` |
+| S14 | File-store binding guard compares endpoints as raw strings in one place and as hosts in another | **WP6** (built): the store is a target row; R1 compares locations in one form |
+| S15 | Changing `site_template` re-points every offloaded file's key with no warning | **WP6** (built): every row records its full key |
+| S16 | The file store's secret key is stored in plain text | **WP6** (built): sealed in the target row |
+| S17 | Offloaded mail is not in backups; the bucket holds the only copy | **WP6** (built): `RawMessageStore` declares its backup objects |
 | S18 | Dead code and stale text: `B2Client::deleteKey`/`countKeys`, the "bkt claimed by BookingType" comment, misplaced docblocks in `backup_targets_class.php`, `creds.go` and "target override" comments, `__SM_RUN_CREDS_` missing from the overview doc | WP1 part built (the first three); WP5 the rest |
 | S19 | Backup storage: no target on customer, run or object rows; `shelf_of()` skips silently; reconcile against the wrong bucket wipes the ledger and zeroes the figure; a read with a run id signs the old key against the current bucket; abort uses the current target and drops the row on failure; `t{id}` can collide with a node slug; the target setting is free text; completeness checks differ; unpaid customers can list | **WP4** (built; the setting was WP2) |
 | S20 | Site targets: retention after a switch deletes from the wrong bucket and counts 404 as success; chains continue across a switch; verify and *Bring files back* use the current target; no epoch envelope on a new target; `bkh_bkt_backup_target_id` is never read; location editable in place | WP2 and WP3 (built) |

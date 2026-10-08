@@ -106,6 +106,8 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.44 - an offloaded raw records its file store and full key (iem_raw_bkt_backup_target_id,
+ *                 iem_raw_remote_key); reads and deletes follow them (specs/storage_targets.md WP6)
  * @version 1.43 - save() refuses a new row at the site's disk allowance (MailboxAtDiskAllowance)
  * @version 1.42 - iem_spam_synced_time: the correction a two-way IMAP feed last carried to the
  *   source's Junk folder (ImapSyncer::pushSpam)
@@ -332,6 +334,9 @@ class InboundEmailMessage extends SystemBase {
 		// is what Undo is for, and it is an explicit choice. Losing the tag only
 		// costs the ability to reverse the run later.
 		'iem_mir_mail_import_run_id'      => ['action' => 'null'],
+		// The file store an offloaded raw is in: never removed for good under it.
+		'iem_raw_bkt_backup_target_id'    => ['action' => 'prevent', 'source_table' => 'bkt_backup_targets',
+			'message' => 'offloaded mail is still stored in this file store; move it or pull it back first'],
 	];
 
 	public static $field_specifications = array(
@@ -433,7 +438,9 @@ class InboundEmailMessage extends SystemBase {
 		'iem_direct_verified'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
 		'iem_raw_storage_driver'    => array('type'=>'varchar(16)', 'default'=>'inline'), // inline | local | cloud | remote
-		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote
+		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // relative key (local/cloud); null for inline/remote
+		'iem_raw_bkt_backup_target_id' => array('type'=>'int8'),                          // cloud: the file store the raw is in
+		'iem_raw_remote_key'        => array('type'=>'varchar(1024)'),                    // cloud: the full key it was written under
 		'iem_raw_sync_failed_count' => array('type'=>'int4', 'default'=>0),               // offload retry counter (engine failure cap)
 		'iem_raw_sync_last_attempt' => array('type'=>'timestamp(6)'),                     // offload breadcrumb
 		'iem_raw_sync_last_error'   => array('type'=>'varchar(255)'),                     // why the last offload attempt did not move it
@@ -1981,7 +1988,6 @@ class InboundEmailMessage extends SystemBase {
 	 */
 	function getRawMessage(): ?string {
 		$driver = (string)$this->get('iem_raw_storage_driver') ?: 'inline';
-		$key    = (string)$this->get('iem_raw_storage_key');
 
 		$raw = null;
 		if ($driver === 'inline') {
@@ -1990,7 +1996,7 @@ class InboundEmailMessage extends SystemBase {
 		} elseif ($driver === 'local' || $driver === 'cloud') {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
 			try {
-				$raw = RawMessageStore::read($driver, $key);
+				$raw = RawMessageStore::read(RawMessageStore::descriptorOf($this));
 			} catch (Throwable $e) {
 				error_log('InboundEmailMessage::getRawMessage failed (driver=' . $driver
 					. ', id=' . $this->key . '): ' . $e->getMessage());
@@ -2094,11 +2100,10 @@ class InboundEmailMessage extends SystemBase {
 
 		// Fallback path: reclaim the stored raw object if one was persisted.
 		$driver = (string)$this->get('iem_raw_storage_driver');
-		$key    = (string)$this->get('iem_raw_storage_key');
 		if ($driver === 'local' || $driver === 'cloud') {
 			try {
 				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStore.php'));
-				RawMessageStore::delete($driver, $key);
+				RawMessageStore::delete(RawMessageStore::descriptorOf($this));
 			} catch (Throwable $e) {
 				// Best-effort: never let a reclaim failure block the row delete.
 				error_log('InboundEmailMessage: raw object reclaim on purge failed (id=' . $this->key

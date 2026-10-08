@@ -202,7 +202,9 @@ function harness_unmet_needs(array $needs) {
 					$cache[$need] = trim((string)$settings->get_setting('mailgun_api_key')) !== '';
 					break;
 				case 'b2':
-					$cache[$need] = trim((string)$settings->get_setting('cloud_storage_access_key')) !== '';
+					// A file store on Backblaze to run against: its target row.
+					$store = CloudStorageDriverFactory::currentTarget();
+					$cache[$need] = $store !== null && $store->get('bkt_provider') === 'b2';
 					break;
 				case 'host-converger':
 					// The root actor. Without one, a root request is never

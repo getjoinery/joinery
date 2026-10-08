@@ -18,11 +18,14 @@
  *     Backblaze takes the endpoint and region from the key, and says so when
  *     the key is refused or names no endpoint; an unknown provider is generic
  *   - effective(): what a stored binding shows as
- *   - the declarations: the endpoint and region fields show for the providers
- *     that ask for them, and the rules ride on the picker even when a page
- *     draws the group one field at a time
+ *   - the file store's form (the shared target form in its files mode): the
+ *     endpoint and region fields show for the providers that ask for them, no
+ *     Enabled box, the folder defaulting to this site's name
  *
  * Run: php tests/cloud_storage/storage_provider_test.php
+ *
+ * @version 2.0 - the file store is drawn by BackupTargetForm (specs/storage_targets.md WP6); the
+ *                cloud_storage settings declarations are gone
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -135,20 +138,15 @@ check(StorageProvider::effective('generic', 'minio.example.com') === 'generic', 
 check(StorageProvider::effective('', '') === 'generic', 'nothing stored with no endpoint is generic');
 check(StorageProvider::label('dropbox') === 'Generic S3 compatible bucket', 'the label of an unknown slug is the generic one');
 
-// ── The declarations ─────────────────────────────────────────────────────
-section('The declarations: the picker shows only what a provider asks for');
+// ── The file store's form ──────────────────────────────────────────────────
+section('The file store\'s form: the shared target form, showing only what a provider asks for');
 
-$render = function (array $only) {
-	$form = new FormWriterV2HTML5('provider_probe');
-	ob_start();
-	$form->begin_form();
-	SettingsFieldRenderer::renderGroup($form, 'cloud_storage', array(
-		'source' => 'core', 'only' => $only,
-		'values' => array('cloud_storage_provider' => 'generic', 'cloud_storage_endpoint' => '', 'cloud_storage_region' => ''),
-	));
-	echo $form->end_form();
-	return ob_get_clean();
-};
+$fw = new FormWriterV2HTML5('provider_probe');
+ob_start();
+$fw->begin_form();
+BackupTargetForm::render($fw, null, array('files' => true));
+echo $fw->end_form();
+$html = ob_get_clean();
 $rules_of = function ($html) {
 	// The rules FormWriter's script carries for the picker.
 	if (!preg_match('/const visibilityRules\w+ = (\{.*?\});\n/', $html, $m)) {
@@ -156,25 +154,23 @@ $rules_of = function ($html) {
 	}
 	return json_decode($m[1], true);
 };
-
-$html = $render(array('cloud_storage_provider'));
-check(strpos($html, 'name="cloud_storage_provider"') !== false && strpos($html, '<select') !== false, 'the picker draws as a select');
-check(preg_match('/<option[^>]*value="generic"[^>]*>Generic S3 compatible bucket</', $html) === 1
-	&& strpos($html, 'value="b2"') !== false && strpos($html, 'value="r2"') !== false, 'the picker offers every provider, the generic one first');
+check(strpos($html, 'name="bkt_provider"') !== false && strpos($html, '<select') !== false, 'the picker draws as a select');
+check(strpos($html, 'value="b2"') !== false && strpos($html, 'value="r2"') !== false && strpos($html, 'value="generic"') !== false, 'the picker offers every provider');
+check(strpos($html, 'name="bkt_enabled"') === false, 'no Enabled box: the page\'s Pause says whether files move');
+check(strpos($html, 'value="' . htmlspecialchars(CloudFileStore::default_prefix()) . '"') !== false, 'the folder defaults to this site\'s name');
+check(preg_match('/name="bkt_name"[^>]*value="File store( \d+)?"/', $html) === 1, 'and the name to File store, or the first free File store N');
 $rules = $rules_of($html);
-check(is_array($rules), 'the picker carries its show/hide rules when drawn on its own', is_array($rules) ? '' : substr($html, 0, 200));
+check(is_array($rules), 'the picker carries its show/hide rules', is_array($rules) ? '' : substr($html, 0, 200));
 if (is_array($rules)) {
-	check(in_array('cloud_storage_endpoint', $rules['generic']['show']) && in_array('cloud_storage_region', $rules['generic']['show']), 'generic shows the endpoint and the region');
-	check(in_array('cloud_storage_endpoint', $rules['b2']['hide']) && in_array('cloud_storage_region', $rules['b2']['hide']) && empty($rules['b2']['show']), 'Backblaze hides both');
-	check(in_array('cloud_storage_region', $rules['s3']['show']) && in_array('cloud_storage_endpoint', $rules['s3']['hide']), 'Amazon shows the region and hides the endpoint');
-	check(in_array('cloud_storage_endpoint', $rules['r2']['show']) && in_array('cloud_storage_region', $rules['r2']['hide']), 'R2 shows the endpoint and hides the region');
+	check(in_array('endpoint', $rules['generic']['show']) && in_array('region', $rules['generic']['show']), 'generic shows the endpoint and the region');
+	check(in_array('endpoint', $rules['b2']['hide']) && in_array('region', $rules['b2']['hide']) && empty($rules['b2']['show']), 'Backblaze hides both');
+	check(in_array('region', $rules['s3']['show']) && in_array('endpoint', $rules['s3']['hide']), 'Amazon shows the region and hides the endpoint');
+	check(in_array('endpoint', $rules['r2']['show']) && in_array('region', $rules['r2']['hide']), 'R2 shows the endpoint and hides the region');
 	foreach (array('wasabi', 'digitalocean', 'linode') as $slug) {
-		check(in_array('cloud_storage_region', $rules[$slug]['show']) && in_array('cloud_storage_endpoint', $rules[$slug]['hide']), "$slug shows the region and hides the endpoint");
+		check(in_array('region', $rules[$slug]['show']) && in_array('endpoint', $rules[$slug]['hide']), "$slug shows the region and hides the endpoint");
 	}
 	check(count($rules) === count(StorageProvider::options()), 'every provider has a rule');
 }
-
-$html = $render(array('cloud_storage_endpoint'));
-check($rules_of($html) === null && strpos($html, 'name="cloud_storage_endpoint"') !== false, 'the endpoint drawn on its own carries no rules of its own');
+check(CloudFileStore::default_prefix() !== '' && strpos(CloudFileStore::default_prefix(), '/') === false, 'the default folder is one plain segment');
 
 harness_finish();

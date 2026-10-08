@@ -27,6 +27,8 @@
  * the last completed pass, and what the last Bring them back did. No schema.
  * It carries names, sizes and counts; never a key or a credential.
  *
+ * @version 1.2 - each file is checked in the file store its record names, each store pinged once per tick
+ *                (specs/storage_targets.md WP6)
  * @version 1.1 - one file store: one driver per tick, one "did not answer" state; a row carries no visibility
  * @version 1.0
  */
@@ -59,7 +61,7 @@ class CloudStoreInventory {
 	 * Test seams. Keys:
 	 *   rows    callable(int $after_id, int $limit): array   the cloud rows past a cursor, each
 	 *           ['id','name','remote_key','size'], instead of fbb_file_blobs
-	 *   driver  callable(): ?CloudStorageDriver   the file store's driver, instead of the factory
+	 *   driver  callable(int $target_id): ?CloudStorageDriver   a file store's driver, instead of the factory
 	 *   record  array|null   the record, held here instead of the setting (array_key_exists decides)
 	 */
 	public static $test_hooks = array();
@@ -143,8 +145,8 @@ class CloudStoreInventory {
 
 		$started_at = microtime(true);
 		$checked_this_tick = 0;
-		$driver = false;   // false: not yet asked; null: no store configured; a driver: answered its ping
-		$stalled = false;  // the store did not answer its ping this tick
+		$drivers = array(); // target id => null (no driver for it) | a driver that answered its ping
+		$stalled = false;   // a store did not answer its ping this tick
 
 		$exhausted = false;
 		while (!$exhausted && !$stalled) {
@@ -157,17 +159,20 @@ class CloudStoreInventory {
 				if ($checked_this_tick >= $max_rows || (microtime(true) - $started_at) >= $budget) {
 					break 2;
 				}
-				if ($driver === false) {
-					$driver = self::driver();
-					if ($driver !== null) {
+				$target_id = (int)($row['target_id'] ?? 0);
+				if (!array_key_exists($target_id, $drivers)) {
+					$asked = self::driver($target_id);
+					if ($asked !== null) {
 						try {
-							$ping = $driver->ping();
+							$ping = $asked->ping();
 							if (empty($ping['ok'])) { $stalled = true; }
 						} catch (\Throwable $e) {
 							$stalled = true;
 						}
 					}
+					$drivers[$target_id] = $asked;
 				}
+				$driver = $drivers[$target_id];
 				if ($stalled) {
 					// The store did not answer its ping this tick: nothing is
 					// called missing on its word; the cursor stays here.
@@ -209,7 +214,7 @@ class CloudStoreInventory {
 			return array('status' => 'finished', 'checked' => $checked_this_tick,
 				'message' => 'file store check finished: ' . number_format((int)$pass['checked']) . ' offloaded file'
 					. ((int)$pass['checked'] === 1 ? '' : 's') . ' checked, ' . ($n === 0 ? 'none missing' : number_format($n) . ' missing')
-					. ($pass['unchecked'] > 0 ? ', ' . number_format((int)$pass['unchecked']) . ' not checked (no store configured)' : ''));
+					. ($pass['unchecked'] > 0 ? ', ' . number_format((int)$pass['unchecked']) . ' not checked (no driver for their file store)' : ''));
 		}
 
 		$record['pass'] = $pass;
@@ -263,18 +268,19 @@ class CloudStoreInventory {
 			$out[] = array(
 				'id'         => (int)$blob->key,
 				'name'       => (string)$blob->get('fbb_stored_name'),
-				'remote_key' => $blob->remote_key_for('original'),
+				'target_id'  => (int)$blob->get('fbb_bkt_backup_target_id'),
+				'remote_key' => (string)$blob->get('fbb_remote_key'),
 				'size'       => (int)$blob->get('fbb_size_bytes'),
 			);
 		}
 		return $out;
 	}
 
-	private static function driver() {
+	private static function driver(int $target_id) {
 		if (isset(self::$test_hooks['driver'])) {
-			return call_user_func(self::$test_hooks['driver']);
+			return call_user_func(self::$test_hooks['driver'], $target_id);
 		}
-		return CloudStorageDriverFactory::driverWithFallback();
+		return CloudStorageDriverFactory::forTarget($target_id);
 	}
 
 	// ---------------------------------------------------------- bring back
