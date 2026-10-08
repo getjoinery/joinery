@@ -34,6 +34,9 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.11 - the disk-space check before download asks for room measured from the live code tree
+ *                (a staged copy and the archives where it stages, a failed copy in the deploy root,
+ *                added up when they share a disk), never less than 500MB per disk
 	 * @version 1.10 - every command-line run that takes the upgrade lock is recorded in the site's install
  *                history (ReleaseInstall), with the commits and log entry of a release it installed, or why
  *                it stopped; a browser is sent to the Updates page (/admin/admin_updates), which asks for
@@ -884,17 +887,36 @@
 			}
 		}
 
-		// Check disk space before download (require at least 500MB free), where
-		// the upgrade writes: the deploy volume, or uploads/ without one.
-		$free_space = disk_free_space(rtrim($stage_location, '/') === $full_site_dir.'/uploads/upgrades' ? $full_site_dir.'/uploads/' : $deploy_root);
-		$min_required = 500 * 1024 * 1024; // 500MB
-		if ($free_space !== false && $free_space < $min_required) {
-			$free_mb = round($free_space / 1024 / 1024);
-			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-			echo "<strong>❌ Insufficient Disk Space:</strong> Only {$free_mb}MB available, need at least 500MB.<br>";
-			echo 'Free up disk space before upgrading.<br>';
-			echo '</div>';
-			exit(1);
+		// Check disk space before download. Where it stages (the deploy volume,
+		// or uploads/ without one) the upgrade writes the downloaded archives
+		// and a staged copy of the code; in the deploy root a rollback keeps a
+		// copy of the failed code. Each is about the size of the live code
+		// tree, so the need is measured from it, never less than 500MB per
+		// disk (migrations and logs need room too). Two places on one disk
+		// add up.
+		$du_out = array();
+		exec('du -sk ' . escapeshellarg($live_directory) . ' 2>/dev/null', $du_out);
+		$live_bytes = (int)($du_out[0] ?? 0) * 1024;
+		$stage_disk = rtrim($stage_location, '/') === $full_site_dir.'/uploads/upgrades' ? $full_site_dir.'/uploads/' : $deploy_root;
+		$space_needs = array();
+		foreach (array(array($stage_disk, 2 * $live_bytes), array($deploy_root, $live_bytes)) as list($space_path, $space_bytes)) {
+			$space_stat = @stat($space_path);
+			$space_dev = $space_stat ? $space_stat['dev'] : $space_path;
+			$space_needs[$space_dev]['path'] = $space_needs[$space_dev]['path'] ?? $space_path;
+			$space_needs[$space_dev]['bytes'] = ($space_needs[$space_dev]['bytes'] ?? 0) + $space_bytes;
+		}
+		foreach ($space_needs as $space_need) {
+			$min_required = max(500 * 1024 * 1024, $space_need['bytes']);
+			$free_space = disk_free_space($space_need['path']);
+			if ($free_space !== false && $free_space < $min_required) {
+				$free_mb = round($free_space / 1024 / 1024);
+				$need_mb = round($min_required / 1024 / 1024);
+				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+				echo "<strong>❌ Insufficient Disk Space:</strong> Only {$free_mb}MB available at " . htmlspecialchars($space_need['path']) . ", need at least {$need_mb}MB.<br>";
+				echo 'Free up disk space before upgrading.<br>';
+				echo '</div>';
+				exit(1);
+			}
 		}
 
 		// Download core + individual themes/plugins

@@ -120,6 +120,29 @@ node on a managed node) with downtime proportional to data size:
 `joinery_data_root.sh migrate` does 1–5 and refuses to start if the root
 disk cannot hold both copies for the duration.
 
+### D6. Upgrades stay on the code's disk
+
+An upgrade duplicates only the code, never data. It unpacks the new code
+beside the live tree, then swaps them by moving; on one filesystem each move
+is a rename and costs nothing. Today a bare-metal site without a deploy
+volume stages in `uploads/upgrades/` and downloads into `uploads/`. Once
+`uploads` lives on the data root, that would unpack the code on one
+filesystem and move it onto another: every file copied instead of renamed,
+a slower, less atomic swap, and the free-space check measuring the wrong
+disk.
+
+So staging and the downloaded archives move out of `uploads/` to the site
+root (`/var/www/html/<site>/upgrades/`), next to `public_html` and
+`public_html_last`, on the root disk. Code is not data. A site container is
+unchanged: it stages on its `deploy` volume, which already holds
+`public_html_last`. `utils/upgrade.php` and `DeploymentHelper::deployRoot()`
+change together, and the change ships in a release before any node is
+migrated, so no upgrade ever stages on the data root.
+
+The data root therefore does not make upgrades smaller or larger: they need
+about two copies of the code tree plus the archives on the root disk,
+before and after.
+
 ## Work packages
 
 - **WP1 — `joinery_data_root.sh`** with `create / check / grow / status`, the
@@ -127,7 +150,8 @@ disk cannot hold both copies for the duration.
   `installer_contract_test` pins the layout; `host_converger_gate.sh` pins
   that the converger refuses to run installers when `check` fails.
 - **WP2 — New installs born on it:** `install.sh`, `_site_init.sh`, the
-  Docker host path.
+  Docker host path. Upgrade staging moves to the site root (D6), released
+  before WP3 runs anywhere.
 - **WP3 — `migrate`** for the three existing shapes, proven on a scratch box
   of each.
 - **WP4 — Fleet:** managed nodes migrated one at a time from the management
