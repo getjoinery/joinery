@@ -18,6 +18,7 @@
  * `running`, and past STALE_RUN_HOURS it is named as the run that never
  * finished.
  *
+ * @version 1.2 - the notice names the site by its address (webDir), not "this site"
  * @version 1.1 - a `running` row older than STALE_RUN_HOURS reads as a run that never finished
  * @version 1.0
  */
@@ -39,10 +40,23 @@ class SiteBackupNotice {
 			return '';
 		}
 		if ((string)$last->get('bkh_outcome') === 'running') {
-			return self::forStaleRun((string)$last->get('bkh_start_time'), (string)$last->get('bkh_target_name'));
+			return self::forStaleRun((string)$last->get('bkh_start_time'), (string)$last->get('bkh_target_name'), self::siteName());
 		}
 		return self::forRun((string)$last->get('bkh_outcome'), (string)$last->get('bkh_message'),
-			(string)$last->get('bkh_finish_time'), (string)$last->get('bkh_target_name'));
+			(string)$last->get('bkh_finish_time'), (string)$last->get('bkh_target_name'), self::siteName());
+	}
+
+	/**
+	 * The site's address, so a notice read beside another site's admin, or
+	 * forwarded, says which site it is about. '' when none is configured.
+	 */
+	public static function siteName(): string {
+		return trim((string)Globalvars::get_instance()->get_setting('webDir'), " /");
+	}
+
+	/** Who the backup belongs to, as the start of a sentence. */
+	private static function whose(string $site): string {
+		return $site !== '' ? 'The site backup of ' . $site : 'This site\'s own backup';
 	}
 
 	/**
@@ -79,10 +93,10 @@ class SiteBackupNotice {
 	}
 
 	/** The notice for a run that started and never recorded an end. Public and pure. */
-	public static function forStaleRun(string $start_time, string $target_name): string {
+	public static function forStaleRun(string $start_time, string $target_name, string $site = ''): string {
 		$started = strtotime($start_time . ' UTC');
 		$when = $started !== false ? gmdate('Y-m-d H:i', $started) . ' UTC' : 'an unknown time';
-		$lead = 'This site\'s own backup started at ' . $when . ' and never finished.';
+		$lead = self::whose($site) . ' started at ' . $when . ' and never finished.';
 		$body = ($target_name !== '' ? 'Target: ' . $target_name . '. ' : '')
 			. 'The process stopped without recording why — a full disk or a lost database connection are the usual causes. '
 			. 'Nothing new is offsite until a run succeeds; the next scheduled run clears this if it does.';
@@ -95,12 +109,12 @@ class SiteBackupNotice {
 	}
 
 	/** The notice for one run. Public and pure so the wording can be tested. */
-	public static function forRun(string $outcome, string $message, string $finish_time, string $target_name): string {
+	public static function forRun(string $outcome, string $message, string $finish_time, string $target_name, string $site = ''): string {
 		if ($outcome !== 'failed') {
 			return '';
 		}
 		$when = $finish_time !== '' ? gmdate('Y-m-d H:i', strtotime($finish_time . ' UTC')) . ' UTC' : 'its last run';
-		$lead = 'This site\'s own backup failed at ' . $when . '.';
+		$lead = self::whose($site) . ' failed at ' . $when . '.';
 		$last_line = trim($message) !== '' ? trim($message) : 'The run recorded no message.';
 		// The engine's message can be long (a tar listing joined with " | ", with
 		// the shell's colour codes in it); the header shows its last line, the

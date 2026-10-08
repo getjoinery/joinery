@@ -77,6 +77,13 @@ section('Wording, pure');
 check(SiteBackupNotice::forRun('success', 'x', '2026-01-01 00:00:00', 't') === '', 'success renders nothing');
 check(SiteBackupNotice::forRun('failed', '', '2026-01-01 00:00:00', '') !== '', 'a failure with no message still renders');
 check(strpos(SiteBackupNotice::forRun('failed', '<b>x</b>', '2026-01-01 00:00:00', ''), '<b>') === false, 'the message is escaped');
+check(strpos(SiteBackupNotice::forRun('failed', 'x', '2026-01-01 00:00:00', 't', 'dev.example.com'), 'The site backup of dev.example.com failed at') !== false,
+	'the notice names the site by its address');
+check(strpos(SiteBackupNotice::forStaleRun('2026-09-22 04:00:00', 't', 'dev.example.com'), 'The site backup of dev.example.com started at') !== false,
+	'so does the never-finished notice');
+check(strpos(SiteBackupNotice::forRun('failed', 'x', '2026-01-01 00:00:00', 't', '<s>'), '<s>') === false, 'the site name is escaped');
+check(strpos(SiteBackupNotice::forRun('failed', 'x', '2026-01-01 00:00:00', 't'), 'This site&#039;s own backup failed') !== false,
+	'with no address configured it falls back to this site');
 
 section('The run window, pure');
 $now = strtotime('2026-09-22 12:00:00 UTC');
