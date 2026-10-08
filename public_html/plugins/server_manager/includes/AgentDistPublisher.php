@@ -25,6 +25,11 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.4 - manifest.json records source_commit, the agent commit the binaries were built from.
+ *                A bundle whose recorded commit is not the source's HEAD is rebuilt and compared:
+ *                the same bytes record HEAD, different bytes at the same version refuse the publish,
+ *                so the commit the release statement names always builds the shipped binaries
+ *                (release_transparency D3; a verifier rebuilds from that commit)
  * @version 2.3 - each binary is built with the repository's statement and log keys compiled in, which hold
  *                its own self-updates to the public log (release_transparency WP5); manifest.json
  *                records them as baked_keys, the build inputs a verifier needs to rebuild the binary
@@ -148,6 +153,29 @@ class AgentDistPublisher {
 						json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
 					$say('Agent artifact: manifest.json key lists refreshed from release_keys/');
 				}
+
+				// The release statement names the agent source's HEAD as the
+				// commit the binaries are built from, and a verifier rebuilds
+				// them from it. A bundle built from an earlier commit at the
+				// same version is only that commit's build if the source
+				// still builds the same bytes: rebuild and compare, and record
+				// HEAD when they match. Different bytes at the same version
+				// would ship a binary nobody can rebuild from the named
+				// commit, so the version has to move first.
+				$head = ReleaseCommit::head($src);
+				if ($head !== null && ($manifest['source_commit'] ?? null) !== $head) {
+					$rebuild_required = true;
+					$changed = self::rebuildDiffers($src, $agent_version, $manifest, $dist_dir . '.check');
+					if ($changed !== array()) {
+						throw new Exception('the agent source at ' . substr($head, 0, 12) . ' builds a different binary for '
+							. implode(', ', $changed) . " than the bundled v{$agent_version}, and the version did not change. "
+							. 'Raise the version in main.go so nodes take the new binary, then publish again');
+					}
+					$manifest['source_commit'] = $head;
+					file_put_contents($dist_dir . '/manifest.json',
+						json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
+					$say('Agent artifact: v' . $agent_version . ' rebuilt from ' . substr($head, 0, 12) . ' to the same bytes; recorded as its source commit');
+				}
 				$msg = "Agent artifact: v{$agent_version} already bundled - unchanged";
 				$say($msg);
 				return $result(self::STATUS_SKIPPED, $msg, $agent_version, $bundled_version);
@@ -214,7 +242,8 @@ class AgentDistPublisher {
 			}
 
 			$manifest_json = json_encode(
-				array('version' => $agent_version, 'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
+				array('version' => $agent_version, 'source_commit' => ReleaseCommit::head($src),
+				      'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
 				      'signing_public_key' => $keys['public_b64'],
 				      // What the binaries above were built with. The lists beside
 				      // them follow release_keys/ on every publish; these stay as
@@ -451,6 +480,37 @@ class AgentDistPublisher {
 			$log[] = $pair['origin'] . ':' . $pair['key'];
 		}
 		return array('statement' => implode(',', $key_lists['statement_keys'] ?? array()), 'log' => implode(',', $log));
+	}
+
+	/**
+	 * Build the source again with the inputs the bundle records (its version,
+	 * signing key and baked keys) and return the platforms whose binary is not
+	 * the bundled one. Empty when the source still builds the bundle's bytes.
+	 */
+	private static function rebuildDiffers($src, $version, array $manifest, $scratch) {
+		$go = self::findGo();
+		if ($go === null) {
+			throw new Exception('Go toolchain not found');
+		}
+		GoBinaryPublisher::assertToolchain($go, $src);
+		self::rrmdir($scratch);
+		if (!mkdir($scratch, 0755, true)) {
+			throw new Exception("cannot create {$scratch}");
+		}
+		$changed = array();
+		try {
+			foreach ($manifest['binaries'] ?? array() as $platform => $bin) {
+				$out = $scratch . '/' . $platform;
+				self::buildBinary($go, $src, substr($platform, strlen('linux-')), $version,
+					(string)($manifest['signing_public_key'] ?? ''), (array)($manifest['baked_keys'] ?? array()), $out);
+				if (hash_file('sha256', $out) !== ($bin['sha256'] ?? null)) {
+					$changed[] = $platform;
+				}
+			}
+		} finally {
+			self::rrmdir($scratch);
+		}
+		return $changed;
 	}
 
 	/** Cross-compile one arch with the version, update public key and release-log keys baked in. */

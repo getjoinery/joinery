@@ -56,6 +56,8 @@
  * could not be reached or read, ReleaseLogShardAheadException when a listed
  * future shard is the problem, plain ReleaseLogException for every other rule.
  *
+ * @version 1.2 - trustedRoot() and rootListsKey(): Sigstore's trusted root on its own, for
+ *                utils/verify_release.php
  * @version 1.1 - ReleaseLogBlindException and ReleaseLogShardAheadException, so the watch can tell
  *                "cannot see Sigstore" and "the next log is coming" from the other refusals; a future
  *                shard whose key Sigstore has not published yet is reported (waiting), not refused;
@@ -148,6 +150,40 @@ class ReleaseLogClient {
 	 * ReleaseLogException on any refusal.
 	 */
 	public function discover() {
+		$targets = $this->tufTargets();
+		$config = json_decode($this->fetchTarget($targets, self::SIGNING_CONFIG_TARGET), true);
+		$root   = $this->rootFrom($targets);
+		if (!is_array($config) || ($config['mediaType'] ?? null) !== self::SIGNING_CONFIG_TYPE) {
+			throw new ReleaseLogBlindException('Sigstore\'s signing config is not the ' . self::SIGNING_CONFIG_TYPE . ' format');
+		}
+		return $this->chooseShard($config, $root);
+	}
+
+	/**
+	 * Sigstore's trusted root: every log Sigstore runs, with its checkpoint
+	 * key. What utils/verify_release.php compares a release's log keys with.
+	 */
+	public function trustedRoot() {
+		return $this->rootFrom($this->tufTargets());
+	}
+
+	/**
+	 * Whether Sigstore's trusted root lists exactly this checkpoint key for the
+	 * log at $origin, at any time in its life.
+	 */
+	public static function rootListsKey(array $root, $origin, $der) {
+		foreach (is_array($root['tlogs'] ?? null) ? $root['tlogs'] : array() as $tlog) {
+			if (strtolower((string)parse_url((string)($tlog['baseUrl'] ?? ''), PHP_URL_HOST)) !== $origin) { continue; }
+			$raw = base64_decode((string)($tlog['publicKey']['rawBytes'] ?? ''), true);
+			if ($raw !== false && $raw !== '' && hash_equals($raw, (string)$der)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The first three TUF fetches: timestamp, snapshot, targets. */
+	private function tufTargets() {
 		$timestamp = $this->fetchJson(self::TUF_BASE . '/timestamp.json');
 		$snap_v = $timestamp['signed']['meta']['snapshot.json']['version'] ?? null;
 		if (!is_int($snap_v)) {
@@ -158,16 +194,15 @@ class ReleaseLogClient {
 		if (!is_int($targets_v)) {
 			throw new ReleaseLogBlindException("Sigstore TUF {$snap_v}.snapshot.json names no targets version");
 		}
-		$targets = $this->fetchJson(self::TUF_BASE . "/{$targets_v}.targets.json");
-		$config = json_decode($this->fetchTarget($targets, self::SIGNING_CONFIG_TARGET), true);
-		$root   = json_decode($this->fetchTarget($targets, self::TRUSTED_ROOT_TARGET), true);
-		if (!is_array($config) || ($config['mediaType'] ?? null) !== self::SIGNING_CONFIG_TYPE) {
-			throw new ReleaseLogBlindException('Sigstore\'s signing config is not the ' . self::SIGNING_CONFIG_TYPE . ' format');
-		}
+		return $this->fetchJson(self::TUF_BASE . "/{$targets_v}.targets.json");
+	}
+
+	private function rootFrom(array $targets) {
+		$root = json_decode($this->fetchTarget($targets, self::TRUSTED_ROOT_TARGET), true);
 		if (!is_array($root) || !is_array($root['tlogs'] ?? null)) {
 			throw new ReleaseLogBlindException('Sigstore\'s trusted root lists no logs');
 		}
-		return $this->chooseShard($config, $root);
+		return $root;
 	}
 
 	/**

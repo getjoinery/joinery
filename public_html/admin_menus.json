@@ -239,6 +239,14 @@
             "parent": "system"
         },
         {
+            "slug": "system-updates",
+            "title": "Updates",
+            "url": "admin_updates",
+            "order": 3,
+            "permission": 10,
+            "parent": "system"
+        },
+        {
             "slug": "system-marketplace",
             "title": "Marketplace",
             "url": "admin_marketplace",

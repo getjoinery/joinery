@@ -264,6 +264,51 @@ check(file_get_contents($dist_c . '/manifest.json') === $before_c,
 	'failed rebuild leaves the previous agent_dist in place');
 check(!is_dir($dist_c . '.staging'), 'failed rebuild cleans up its staging directory');
 
+// -- the bundle was built from another commit at the same version ----------
+// The release statement names the source's HEAD as the commit the binaries
+// are built from (release_transparency D3), so a bundle whose recorded commit
+// is not HEAD is rebuilt and compared: the same bytes record HEAD, different
+// bytes at the same version refuse the publish.
+$go = AgentDistPublisher::findGo();
+$go_version = $go ? (preg_match('/go version (go[0-9.]+)/', (string)shell_exec(escapeshellarg($go) . ' version'), $gm) ? $gm[1] : '') : '';
+if ($go_version === '') {
+	check(false, 'a Go toolchain is available for the same-version rebuild cases');
+} else {
+	$git_src = $tmp_root . '/agent_src_git';
+	mkdir($git_src, 0777, true);
+	file_put_contents($git_src . '/go.mod', "module joinery-agent-fixture\n\ngo 1.22\n\ntoolchain {$go_version}\n");
+	file_put_contents($git_src . '/main.go', "package main\n\nvar version = \"3.0.0\"\n\nfunc main() { println(\"one\") }\n");
+	$git = 'git -C ' . escapeshellarg($git_src) . ' -c user.name=t -c user.email=t@example.com ';
+	exec($git . 'init -q && ' . $git . 'add -A && ' . $git . 'commit -qm one');
+	$first = trim((string)shell_exec($git . 'rev-parse HEAD'));
+	harness_set_setting_mem('server_manager_agent_source_path', $git_src);
+
+	list($site_d, $dist_d) = $make_site('same_bytes', '3.0.0');
+	$fixture = json_decode(file_get_contents($dist_d . '/manifest.json'), true);
+	$fixture['signing_public_key'] = AgentDistPublisher::ensureKeys($site_d . '/config')['public_b64'];
+	$fixture['source_commit'] = str_repeat('0', 40);
+	$built = $tmp_root . '/fixture_build';
+	exec('cd ' . escapeshellarg($git_src) . ' && env GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 ' . escapeshellarg($go)
+		. ' build -buildvcs=false -trimpath -ldflags ' . escapeshellarg('-X main.version=3.0.0 -X main.updatePubKeyB64=' . $fixture['signing_public_key']
+		. ' -X main.releaseStatementKeysB64= -X main.releaseLogKeysB64=') . ' -o ' . escapeshellarg($built) . ' . 2>&1');
+	$fixture['binaries']['linux-amd64']['sha256'] = hash_file('sha256', $built);
+	file_put_contents($dist_d . '/manifest.json', json_encode($fixture));
+
+	$res = AgentDistPublisher::publish($site_d, null);
+	$after = json_decode(file_get_contents($dist_d . '/manifest.json'), true);
+	check($res['status'] === AgentDistPublisher::STATUS_SKIPPED && ($after['source_commit'] ?? '') === $first,
+		'a bundle from another commit that HEAD rebuilds byte for byte is kept, and HEAD recorded as its commit',
+		'got ' . var_export($res['status'], true) . ' ' . $res['message']);
+
+	file_put_contents($git_src . '/main.go', "package main\n\nvar version = \"3.0.0\"\n\nfunc main() { println(\"two\") }\n");
+	exec($git . 'commit -qam two');
+	$before_d = file_get_contents($dist_d . '/manifest.json');
+	$res = AgentDistPublisher::publish($site_d, null);
+	check($res['status'] === AgentDistPublisher::STATUS_FAILED && strpos($res['message'], 'Raise the version') !== false,
+		'source that builds different bytes at the same version refuses the publish', $res['message']);
+	check(file_get_contents($dist_d . '/manifest.json') === $before_d, 'and leaves the bundle as it was');
+}
+
 
 section('install_agent.sh installs forward only, never backward');
 
