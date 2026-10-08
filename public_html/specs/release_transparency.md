@@ -8,7 +8,7 @@ WP2 built and released (0.8.465). WP3-WP5 committed; 0.8.466 was the
 genesis logged release (log2025-1 index 142718338). WP1's live test changed D4's key: see D-C.
 WP1 committed (8e14752a). Where the statement goes changed while WP3 was
 built, see D-F. WP6 under way: what ships was found wider than the commit and
-cut back first (D2). Stands on `implemented/package_signing.md` and
+cut back first (D2); the Updates page and `verify_release.php` built 2026-10-08. Stands on `implemented/package_signing.md` and
 `implemented/agent_release_channel.md`; independent of any disk-encryption
 work.
 
@@ -37,7 +37,7 @@ node through an upgrade, a marketplace install or an agent self-update.
   anyway") is not the release channel either: it is the site owner's own act,
   behind a second factor, announced to every superadmin and marked on the
   node. It stays possible; D6 says how the log check treats it, and the
-  node's provenance page lists it apart from what was logged.
+  node's Updates page lists it apart from what was logged.
 
 Customer-facing wording follows the scope: "every release installed on your
 machine is public and logged" is true everywhere; "we cannot reach your data"
@@ -453,8 +453,11 @@ from a release published before logging began.
   Sigstore's trusted root. Then it prints the Rekor entry it expects and
   compares it with the log. A customer runs it on a laptop. This is what turns
   "the code is public" into "the code on my machine is that code".
-- **The pointer, on the node.** `/admin/admin_release_provenance`
-  (superadmin) shows: running version, core commit, agent commit, each
+- **The pointer, on the node.** The Updates page, `/admin/admin_updates`
+  (superadmin; decided with the owner 2026-10-08: one page for everything
+  about updates, and the place a site with no management node updates
+  from, taking over the browser upgrade `/utils/upgrade` used to serve)
+  shows: running version, core commit, agent commit, each
   artifact's manifest hash, the Rekor log index and checkpoint origin, the
   agent binary's sha256, the verdict the node reached when it installed and
   when — each linked to the public commit and the public log entry — and,
@@ -653,8 +656,33 @@ genesis build happens after the statement key is committed, so it carries it.
 **WP6 — The customer's view.** First, what ships was cut back to what git
 knows (D2, found in this package's survey; `ReleaseCommit` 1.1,
 `TreeManifestPublisher` 1.6, `publish_theme.php` 1.6.0, `release_commit` test
-78). Then: `utils/verify_release.php`;
-`/admin/admin_release_provenance`, listing sideloaded extensions apart (D7); the public releases page on getjoinery
+78). Then the Updates page (D7; built 2026-10-08): `ReleaseProvenance` reads
+the running statement, `ReleaseInstall` (`rin_release_installs`) records every
+upgrade run's outcome, written by `upgrade.php` 1.10 as it exits; Update now
+is the root request the browser upgrade was, offered only to a site with no
+management node; `MultiPlugin` binds column filters by type (a bool false went
+to Postgres as ''); the Refresh Themes links, which nothing handled, are gone;
+`updates_page` test 37. Then `utils/verify_release.php` (built 2026-10-08:
+`ReleaseVerifier`, `LogTileReader`, `ReleaseLogClient` 1.2 `trustedRoot()`;
+0.8.467 verified end to end from GitHub and the live log, agent and relay
+sealer rebuilt byte for byte; plugin and theme manifests are rebuilt from `C`,
+so their archives are not needed, and the core archive is checked line by
+line; `verify_release` 8, `log_tile_reader` 17). Found while building it:
+publish carried an agent bundle forward whenever the agent version was
+unchanged, while the statement named the agent repo's HEAD, so a commit that
+changed the agent without a version bump would ship binaries not built from
+the named commit. `AgentDistPublisher` 2.4 records `source_commit`, rebuilds
+and compares when it is not HEAD, and refuses different bytes at the same
+version (`agent_release_channel` 56). Reviewed by reviewer2 2026-10-08: B1 the
+Updates page queued a root upgrade on a GET (fixed: POST only); B2 "the commit
+is in the public repo" was only "fetchable by hash", which GitHub allows for
+any commit in the fork network (fixed: the commit must be an ancestor of the
+public main, as `ReleaseCommit::onRemote()` requires at publish); Q1 the live
+log check compares bytes and is worded so; Q2 a partial entry bundle falls
+back to the full one; Q3 a run that never learned its target records none.
+Re-checked by reviewer2 2026-10-08: VALID.
+Then: the log watch on
+the management node (O5); the refused-agent-update incident (O7); the public releases page on getjoinery
 with the trusted-root comparison; the upgrade source serving archives
 publicly for the verifier.
 
@@ -801,6 +829,16 @@ nodes hold cannot be known from here.
   `release_keys/statement/` (what Sigstore's `rekor-monitor` does). WP6's
   public page needs that tail to make the canary fire on its own rather than
   only when a node or customer goes looking.
+
+  DECIDED 2026-10-08 (owner): the watch runs on the management node only.
+  It reads every new tile (about 1.5M entries and 2 GB a day, paid by the
+  management node; nodes never download the log) and raises an incident for
+  an entry under one of our statement keys that the release ledger
+  (`rle_release_log_entries`) does not account for. No customer-run watcher
+  ships. Instead the public releases page shows the watch's state (how far
+  through the log it has read, when, and every entry under our keys with the
+  release it belongs to) and links each entry to the log, so anyone can
+  check an entry themselves.
 - **O6. The missed shard window — DECIDED 2026-10-07 (owner): don't miss
   it.** Sigstore rotates its Rekor shard about yearly and published
   log2025-1's key about three months before the shard went live. If no
@@ -853,4 +891,5 @@ nodes hold cannot be known from here.
   node whose agent refuses an update shows only as an agent version behind on
   its row. By the incidents-only rule this belongs in an `IncidentSource`
   fed by the state the agent reports over the channel. Predates this spec
-  (true of `verify_failed` today); open for the owner.
+  (true of `verify_failed` today). DECIDED 2026-10-08 (owner): a refused
+  agent update is an incident, built in WP6.

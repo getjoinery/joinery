@@ -325,14 +325,7 @@ Universal installer for Docker and bare-metal deployments. Supports `--themes` f
 
 **Location:** `/utils/upgrade.php`
 
-**Web Usage:**
-```
-# Check for upgrades
-https://yoursite.com/utils/upgrade?serve-upgrade=1
-
-# Perform upgrade (verbose)
-https://yoursite.com/utils/upgrade?verbose=1
-```
+**Web Usage:** an upgrade source answers `?serve-upgrade=1` (what it offers, as JSON) and `?serve-verify-key=1` (its release verification keys). Any other browser request is sent to the Updates page (`/admin/admin_updates`, below), where an update is asked for and watched.
 
 **CLI Usage:**
 ```bash
@@ -350,7 +343,8 @@ php /var/www/html/joinerytest/public_html/utils/upgrade.php --verbose
 - Preserves extensions marked `receives_upgrades: false`
 - Enhanced rollback (preserves failed deployments with timestamps)
 - Database migrations and composer integration
-- **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Then runs the core host installers and every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy. Both need root: an agent-run upgrade has it, and so does a Docker `docker exec`. A browser upgrade runs as the web user and cannot; on a box with the **host converger** (below) the output says so and root finishes that half within a minute, and on a box without one the output names the one command that installs it.
+- **Install history** — every command-line run that takes the upgrade lock writes a `ReleaseInstall` row (`rin_release_installs`) as it exits: the version it started from, the version it was installing, and the outcome — `installed` (with the core and agent commits and the log entry the release's statement names), `refused` (a verification refusal: every `upgrade_abort` title that starts `Upgrade refused`), `rolled_back` (with the step), or `stopped` (anything else, with the reason). The Updates page lists them. Recording never changes a run's outcome; a failure to record is one line in the transcript.
+- **Declared-dependency install** — after the file swap, installs any PHP extension the new code declares (root `composer.json` `ext-*` + plugin `requires.extensions`, resolved by `utils/list_dependencies.php --apt`) and reloads web PHP. Then runs the core host installers and every active plugin's declared `host_installer` via `_plugin_installers_start.sh` so new host requirements land with the deploy. Both need root, which every run has: the agent's `apply_update`, a `docker exec`, an operator's shell, and the Updates page's request, which the **host converger** (below) carries out as root.
 - **The host converger** (`specs/implemented/host_converger.md`) — a root timer every site install leaves behind (`install_host_converger.sh`, a core host installer: a systemd timer where PID 1 is systemd, a `cron.d` entry otherwise) that runs `_plugin_installers_start.sh --when-changed` every minute. Nothing runs until the deployed `VERSION`, the runner, its installers or the set of active plugins changes, then everything converges; once a day regardless. Every run records `cache/host_converger.last`; a converger silent for a day is named in the admin header (`HostConvergerNotice`) and in VaultHealth with the reinstall command. On a managed node the same job any `apply_update` or `run_plugin_installers` runs reinstalls it; an unmanaged box that will not open a shell can pair to a management node for that one job.
 - **One runner at a time** — whatever invoked it (the timer, a cron tick, `install.sh`, `upgrade.php`, an agent job, an operator's `sudo`), the runner holds a kernel `flock` from before its first change to the host until it exits: as root on `/run/joinery/host-installers.<site>.lock`, a file only root can create, so nothing the web user can do blocks the run that takes the tree back from the web user. After taking it the holder writes its pid and start time (UTC unix) into the file. A run that finds the lock held waits for it, ten minutes at most (`flock -w`; long enough for a full converge or an upgrade's installer run, far under the service timeout below), then takes it and does its own work, its record replacing the holder's; the timer's tick holds the lock for about a second, so a run that lands on a tick waits a moment and runs. Only when the wait runs out does it print one line — `another run holds the lock (pid N since T) - waited 600s`, or `holder unknown` when the record is unreadable — record nothing, and exit 0. The lock cannot go stale (a kernel flock dies with its holders, and every child the runner starts inherits it), but a hung installer holds it for as long as it lives; the timer's oneshot service carries `TimeoutStartSec=1h`, and systemd's default `KillMode=control-group` kills the installer and its children together, releasing the lock.
 - **One installer** — `_plugin_installers_start.sh --only=<name>` runs that one core installer (a name from `CORE_INSTALLERS`; anything else is refused with exit 2 before the lock is taken) under the same lock and after the ownership assertion, and nothing else: no converge stamp, no `host_converger.last`, no PHP extensions, no plugin installers, no root requests. It prints the same transcript lines as the full run, and an installer that fails still exits 0, so a caller reads the transcript and checks the host, never the exit code. This is the path an agent's `host_converge` word takes on a site.
@@ -772,6 +766,34 @@ anything. The record is the answer once it exists: `--dev` and `--production`
 decide only what is written the first time, so a tool that passes a mode without
 knowing the box — `upgrade.php` passes `--production` everywhere — cannot change
 whose a tree is.
+
+### The Updates page
+
+`/admin/admin_updates` (System > Updates, superadmin) is a site's one page about updates. It shows:
+
+- **What this site runs**, from the release's own `RELEASE_STATEMENT` at the top of the code tree (`ReleaseProvenance`): the version, the public core and agent commits (linked to `getjoinery/joinery` and `getjoinery/joinery-agent`), the public log entry, and the `utils/verify_release.php` command that checks them from another computer (below). It says whether the site installs only logged releases (`PackageSignature::nodeLog()`). The page is served by the machine it describes, so it points rather than proves.
+- **Update**: the running version, the upgrade source and the version it offers (asked live), and **Update now**, which queues an `upgrade` root request and shows its transcript. A site with a management node (`ManagementNodeStatus::is_managed()`) is told its updates come from there and gets no button; the origin publishes releases and gets none either.
+- **Install history**: the last 25 `ReleaseInstall` rows.
+- **Installed with Install anyway**: every plugin and theme whose trust is `unsigned` or `unlogged`, with who approved it and when, from the `unsigned_package_installed` event log row the installer writes. Said plainly as not logged.
+- **Kept out of updates**: every local copy (`receives_upgrades: false`) and the version the source ships. Allow upgrade stays on the Plugins and Themes pages.
+
+### Verifying a release
+
+`utils/verify_release.php` checks, from any computer, that a release is built from the public code and is in the public log. It runs from a clone of the public repository with no site, settings or database (`ReleaseVerifier`, which resolves core classes with `ClassAutoloader::restrictToCore()` and loads the four plugin classes it reuses by path):
+
+```bash
+php utils/verify_release.php 0.8.467 --source=https://getjoinery.com
+```
+
+It downloads the core archive from the upgrade source (`/static_files/joinery-core-<version>.tar.gz`, served without a credential) and reads the release statement in it. The core and agent commits the statement names must each be on the `main` branch of `getjoinery/joinery` and `getjoinery/joinery-agent` on GitHub: the branch's history is fetched (commits only) and the commit must be an ancestor of its tip, the test publish applies (`ReleaseCommit::onRemote()`). A commit GitHub serves by hash is not enough, since it serves any commit in a repository's fork network that way. Each commit's files are then read from GitHub, or from a local clone when one is named. Then:
+
+- **The statement**: signed by a statement key the core commit lists, its log entry proven under a log key the commit lists, its key chain walked from genesis, and the keys it installs exactly the commit's `release_keys/` (`ReleaseStatementPublisher::verifyDocument()`).
+- **Sigstore**: every log key the commit lists is in Sigstore's trusted root (`ReleaseLogClient::trustedRoot()`); the log serves the statement's entry bytes at its index today, and the checkpoint it serves today is signed by its key (`LogTileReader`, which reads Rekor v2's checkpoint and entry bundles). The served bytes are compared, not proven under today's checkpoint; the entry's place in the log is proven by the statement's inclusion proof under its signed checkpoint.
+- **Plugins and themes**: each manifest is rebuilt from the core commit and must be the one the statement records. The relay sealer's binaries in the mailbox plugin are taken from the statement and its source stamp from the commit.
+- **The core archive**: signed by a release key the commit lists, carrying exactly what its manifest lists, with that manifest the one the statement records; and every manifest line is either the commit's own file with the same bytes or a file publish builds that passes its check: the agent binaries (decompressed, against the statement), `manifest.json` (its signatures verify, its keys are the commit's, its `source_commit` is the statement's agent commit), the systemd unit (the agent commit's file), the support bundle (the statement's hash, its own signed manifest, every file the commit's or a relay sealer the statement records) and its index, the license copies (the commit's files), and every `RELEASE_STATEMENT` (the statement itself).
+- **Rebuilds**: with the Go version the statement names, the agent is rebuilt from the agent commit with the inputs `manifest.json` records, and the relay sealer from the core commit, and each must be byte-identical. Without that Go version the two are reported as not run.
+
+`--offline` fetches nothing: the commits come from `--core-repo` and `--agent-repo`, and the checks that need GitHub or Sigstore are reported as not run. `--core-archive`, `--statement`, `--core-repo` and `--agent-repo` read local copies instead of fetching; `--no-rebuild` skips the builds; `--keep` keeps the working files. It exits 0 when every check that ran passed and 1 when one failed. The Updates page prints the command for the release a site runs, with that site's upgrade source.
 
 ### Root requests
 

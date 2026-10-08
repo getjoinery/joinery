@@ -34,7 +34,11 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
-	 * @version 1.9 - the release log (spec release_transparency, WP4): every archive is verified as a
+	 * @version 1.10 - every command-line run that takes the upgrade lock is recorded in the site's install
+ *                history (ReleaseInstall), with the commits and log entry of a release it installed, or why
+ *                it stopped; a browser is sent to the Updates page (/admin/admin_updates), which asks for
+ *                and watches an upgrade, and the web-only pages here are gone
+ * @version 1.9 - the release log (spec release_transparency, WP4): every archive is verified as a
 	 *                fresh archive, and on a node that requires the log, `signed` needs a public log
 	 *                entry too (`unlogged` refuses); keys the release's chain proves are persisted;
 	 *                TransparencyProof is loaded from staging when the live tree lacks it
@@ -120,9 +124,6 @@
 
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
-	if (!$is_cli) {
-		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-	}
 	require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
@@ -198,8 +199,68 @@
 			if (count($r['plugins']) > 0)        { array_pop($r['plugins']); continue; }
 			break;
 		}
+		upgrade_record_install($r);
 		echo "\nAPPLY_RESULT: " . json_encode($r) . "\n";
 	}
+
+	// The site's own install history (ReleaseInstall, shown on the Updates
+	// page): one row per run that got as far as holding the upgrade lock. The
+	// class and its table arrive with the release that introduces them, so a
+	// run on a site without them yet records nothing, and a failure to record
+	// is said in the transcript, never allowed to change the run's outcome.
+	function upgrade_record_install(array $r) {
+		if (empty($GLOBALS['UPGRADE_RECORD']) || !class_exists('ReleaseInstall')) {
+			return;
+		}
+		try {
+			$running = ($r['outcome'] === 'completed' && class_exists('ReleaseProvenance')) ? ReleaseProvenance::running() : null;
+			$row = new ReleaseInstall(NULL);
+			foreach (upgrade_install_fields($r, $GLOBALS['UPGRADE_STOP'] ?? null,
+					$GLOBALS['decode_response']['system_version'] ?? null, $running) as $field => $value) {
+				$row->set($field, $value);
+			}
+			$row->save();
+		} catch (Throwable $e) {
+			echo "Warning: this run could not be added to the install history: " . $e->getMessage() . "\n";
+		}
+	}
+
+	/**
+	 * The install history row for a run: its APPLY_RESULT, why it stopped (what
+	 * upgrade_abort() recorded, or null), the version it was installing, and the
+	 * running release's statement fields when it installed one. The outcomes
+	 * are ReleaseInstall's constants, spelled out because this file runs
+	 * against a core that may not have the class yet.
+	 */
+	function upgrade_install_fields(array $r, $stop, $to_version, $running) {
+		$why = is_array($stop) ? mb_substr(trim(upgrade_plain_text($stop['detail'])), 0, 4000) : '';
+		// A run that stopped before the source named a version leaves it
+		// empty, rather than reading as an update to the version it ran.
+		$row = array(
+			'rin_from_version' => $r['version_before'],
+			'rin_to_version'   => $to_version ?: ($r['outcome'] === 'completed' ? $r['version_after'] : null),
+		);
+		if ($r['outcome'] === 'completed') {
+			$row['rin_outcome'] = 'installed';
+			if (is_array($running)) {
+				$row['rin_core_commit']  = $running['core_commit'] ?: null;
+				$row['rin_agent_commit'] = $running['agent_commit'] ?: null;
+				$row['rin_log_origin']   = $running['log_origin'] ?: null;
+				$row['rin_log_index']    = $running['log_index'];
+			}
+		} elseif (!empty($r['rolled_back']['rolled_back'])) {
+			$row['rin_outcome'] = 'rolled_back';
+			$row['rin_detail']  = 'Rolled back at the ' . $r['rolled_back']['step'] . ' step' . ($why !== '' ? '. ' . $why : '.');
+		} elseif (is_array($stop)) {
+			$row['rin_outcome'] = $stop['outcome'] === 'refused' ? 'refused' : 'stopped';
+			$row['rin_detail']  = $why;
+		} else {
+			$row['rin_outcome'] = 'stopped';
+			$row['rin_detail']  = 'The run ended before finishing; its transcript says why.';
+		}
+		return $row;
+	}
+
 	$GLOBALS['APPLY_RESULT'] = array(
 		'version_before'   => upgrade_read_version(__DIR__ . '/../VERSION'),
 		'version_after'    => null,
@@ -336,6 +397,11 @@
 	// Post-deployment failures should use DeploymentHelper::performRollback() instead.
 	function upgrade_abort($title, $detail = '', $clear_staging = true) {
 		global $is_cli, $stage_location;
+		// For the install record: a verification refusal says so in its title.
+		$GLOBALS['UPGRADE_STOP'] = array(
+			'outcome' => strpos($title, 'Upgrade refused') === 0 ? 'refused' : 'stopped',
+			'detail'  => $title . ($detail !== '' ? ': ' . $detail : ''),
+		);
 		if ($is_cli) {
 			echo "ERROR: $title\n";
 			if ($detail !== '') echo "  $detail\n";
@@ -485,119 +551,6 @@
 		exit(1);
 	}
 
-	/**
-	 * The browser's whole view of upgrading, now that upgrading is a request.
-	 *
-	 * The pool cannot write the code tree, so this page's job is to say what
-	 * version is running, what the source is offering, whether this machine has
-	 * anything that will act on a request, and then to watch one
-	 * (specs/read_only_tree.md). The work itself is this same script run as
-	 * root by the host converger.
-	 */
-	function upgrade_browser_page($request_id, $live_directory) {
-		$settings = Globalvars::get_instance();
-		$session  = SessionControl::get_instance();
-
-		$here   = trim((string)LibraryFunctions::get_joinery_version());
-		$source = trim((string)$settings->get_setting('upgrade_source'));
-
-		// What the source is offering. A source that cannot be reached is a
-		// fact worth showing, not an error worth stopping for: the operator may
-		// be here to read the transcript of a request already running.
-		$there = '';
-		$source_error = '';
-		if ($source === '') {
-			$source_error = 'No upgrade source is configured for this site.';
-		} else {
-			$curl = curl_init();
-			curl_setopt_array($curl, array(
-				CURLOPT_URL => rtrim($source, '/') . '/utils/upgrade?serve-upgrade=1',
-				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_FOLLOWLOCATION => true,
-				CURLOPT_TIMEOUT => 15,
-				CURLOPT_CONNECTTIMEOUT => 8,
-			));
-			$body = curl_exec($curl);
-			$err  = curl_error($curl);
-			curl_close($curl);
-			if ($body === false || $err !== '') {
-				$source_error = 'Could not reach ' . htmlspecialchars($source) . ': ' . htmlspecialchars($err);
-			} else {
-				$decoded = json_decode((string)$body, true);
-				// system_version is the key the serve-upgrade branch emits
-				// (see $response['system_version'] below); 'version' was never
-				// in the response, so this said "unknown" on every healthy box
-				// and the re-deploy branch was unreachable.
-				$there = is_array($decoded) ? trim((string)($decoded['system_version'] ?? '')) : '';
-				if ($there === '') {
-					$source_error = 'The upgrade source answered, but named no version.';
-				}
-			}
-		}
-
-		$page = new AdminPage();
-		$page->admin_header(array(
-			'breadcrumbs' => array('System' => '', 'Upgrade' => ''),
-			'session'     => $session,
-		));
-
-		echo '<div style="max-width:52rem;">';
-		echo '<h2>Upgrade</h2>';
-
-		echo '<table style="margin-bottom:1rem;border-collapse:collapse;">';
-		foreach (array(
-			'Running here'    => $here !== '' ? $here : 'unknown',
-			'Upgrade source'  => $source !== '' ? $source : 'none configured',
-			'Available there' => $there !== '' ? $there : 'unknown',
-		) as $label => $value) {
-			echo '<tr><th style="text-align:left;padding:.25rem 1rem .25rem 0;font-weight:600;">'
-				. htmlspecialchars($label) . '</th><td style="padding:.25rem 0;">'
-				. htmlspecialchars((string)$value) . '</td></tr>';
-		}
-		echo '</table>';
-
-		if ($source_error !== '') {
-			echo '<div class="alert alert-warning" role="status">' . $source_error . '</div>';
-		}
-
-		// Every upgrade goes through the root actor, so a machine without one
-		// cannot upgrade at all until it has one back. Said before the button,
-		// not after it is pressed.
-		echo AdminPage::root_actor_notice();
-
-		if ($request_id !== '') {
-			echo '<p>This upgrade is being carried out by the host converger. The transcript below '
-				. 'is the same output a command-line upgrade prints.</p>';
-			echo AdminPage::root_request_panel($request_id);
-			echo '<p style="margin-top:1rem;"><a class="jy-btn" href="/utils/upgrade">Back</a></p>';
-		} else {
-			$same = ($here !== '' && $there !== '' && $here === $there);
-			if ($same) {
-				echo '<p>This site is running the version its source is offering. Upgrading again '
-					. 're-deploys the same release, which is harmless and occasionally useful.</p>';
-			}
-			// A single-button action form: no fields, one server action. The
-			// one shape CLAUDE.md exempts from FormWriter, and a POST rather
-			// than a link because a link is a GET and a browser performs a GET
-			// whenever it is told to, including by another site.
-			echo AdminPage::action_button(
-				$same ? 'Re-deploy this version' : 'Upgrade now',
-				'/utils/upgrade',
-				array(
-					'hidden'  => array('queue_upgrade' => '1'),
-					'class'   => 'btn btn-primary',
-					'confirm' => $same
-						? 'Re-deploy the version already running?'
-						: 'Upgrade this site to ' . ($there !== '' ? $there : 'the available version') . '?',
-				));
-			echo '<p style="margin-top:.75rem;color:#71717a;font-size:.9rem;">The upgrade runs as root, '
-				. 'from this machine\'s own copy of the code. Nothing is downloaded until it starts.</p>';
-		}
-
-		echo '</div>';
-		$page->admin_footer();
-	}
-
 	// One upgrade at a time. Staging (uploads/upgrades/) is shared state: a second
 	// run's staging-clear wipes the first run's extraction mid-flight, and whichever
 	// run swaps first deploys a broken tree. flock is kernel-held, so a killed run
@@ -722,30 +675,11 @@
 
 	$session = SessionControl::get_instance();
 	if (!$is_cli) {
-		$session->check_permission(8);
-
-		// The code tree belongs to root and the PHP pool cannot write it
-		// (specs/read_only_tree.md), so a browser upgrade is a REQUEST: this
-		// page asks, the host converger runs this same script as root, and the
-		// operator watches its transcript here. The CLI branch below — the
-		// agent's apply_update, a scripted deploy, the converger itself — is
-		// the one that does the work, and is unchanged.
-		$upgrade_request = (string)($_GET['request'] ?? $_POST['request'] ?? '');
-
-		if (isset($_POST['queue_upgrade'])) {
-			try {
-				$upgrade_request = RootRequest::submit('upgrade', array(), (int)$session->get_user_id());
-			} catch (Throwable $e) {
-				$upgrade_request = '';
-				out_alert('danger', 'The upgrade could not be queued', htmlspecialchars($e->getMessage()));
-			}
-			if ($upgrade_request !== '') {
-				header('Location: /utils/upgrade?request=' . urlencode($upgrade_request));
-				exit;
-			}
-		}
-
-		upgrade_browser_page($upgrade_request, $live_directory);
+		// A browser upgrade is asked for, and watched, on the Updates page; the
+		// code tree belongs to root, so the work is this script run by root
+		// (specs/read_only_tree.md).
+		$upgrade_request = (string)($_GET['request'] ?? '');
+		header('Location: /admin/admin_updates' . ($upgrade_request !== '' ? '?request=' . urlencode($upgrade_request) : ''));
 		exit;
 	}
 
@@ -823,7 +757,8 @@
 	// Validate required fields in response
 	$sourceFile = $decode_response['upgrade_location'] ?? null;
 
-	if (($_POST && $_POST['confirm']) || $is_cli){
+	// Only the command line gets here: a browser was sent to the Updates page above.
+	if ($is_cli) {
 
 		// Abort without clearing staging: the concurrent run owns it.
 		$upgrade_lock_path = $full_site_dir . '/uploads/.upgrade.lock';
@@ -833,11 +768,11 @@
 				'A concurrent run holds ' . htmlspecialchars($upgrade_lock_path) . '. Wait for it to finish, then retry.',
 				false);
 		}
+		$GLOBALS['UPGRADE_RECORD'] = true;
 
 		// Abort if upgrade server connection failed
 		if ($upgrade_server_error) {
-			echo '<div class="alert alert-danger"><strong>Connection Error:</strong> ' . $upgrade_server_error . '</div>';
-			exit(1);
+			upgrade_abort('Could not reach the upgrade source', $upgrade_server_error, false);
 		}
 
 		if($decode_response['system_version']){
@@ -2275,97 +2210,6 @@
 		$GLOBALS['APPLY_RESULT']['outcome'] = 'completed';
 		upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
 		upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
-	}
-	else{
-
-		$session = SessionControl::get_instance();
-
-		$page = new AdminPage();
-		$page->admin_header(
-		array(
-			'menu-id'=> 'users-list',
-			'page_title' => 'Upgrade',
-			'readable_title' => 'Upgrade',
-			'breadcrumbs' => array(
-				'Settings'=>'/admin/admin_settings',
-				'Upgrade' => '',
-			),
-			'session' => $session,
-		)
-		);
-
-		// Show upgrade server error if connection failed
-		if ($upgrade_server_error) {
-			echo '<div class="alert alert-danger"><strong>Connection Error:</strong> ' . $upgrade_server_error . '</div>';
-		}
-
-		$pageoptions['title'] = 'System Upgrades';
-		$page->begin_box($pageoptions);
-
-		// Get FormWriter from AdminPage (which loads the correct theme-specific FormWriter)
-		$formwriter = $page->getFormWriter('form1', ['action' => '/utils/upgrade', 'method' => 'post']);
-		$formwriter->begin_form();
-
-		echo 'Local system Version: '.$settings->get_setting('system_version').'<br>';
-
-		echo '<fieldset><h4>Confirm Upgrade</h4>';
-			echo '<div class="fields full">';
-			echo '<p><b>Checking upgrade source: '.htmlspecialchars($settings->get_setting('upgrade_source')).'</b></p>';
-			if(!$decode_response || !isset($decode_response['system_version']) || !$decode_response['system_version']){
-				echo '<div class="alert alert-danger">Unable to get the latest upgrade from the server.</div>';
-			}
-			else if(version_compare($decode_response['system_version'], $settings->get_setting('system_version'), '>')){
-				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
-				echo '<div class="alert alert-info"><strong>Upgrade available:</strong> '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</div>';
-				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
-
-				$formwriter->submitbutton('btn_submit', 'Submit');
-
-			}
-			else if(version_compare($decode_response['system_version'], $settings->get_setting('system_version'), '==')){
-				$friendly_date = date('F j, Y', strtotime($decode_response['release_date']));
-				echo '<div class="alert alert-success"><strong>Up to date.</strong> Version '. htmlspecialchars($settings->get_setting('system_version')). ' is the latest version.</div>';
-				echo '<p>Latest release: '. htmlspecialchars($decode_response['system_version']) . ' ('.htmlspecialchars($decode_response['upgrade_name']).') released on '. $friendly_date .' — '.htmlspecialchars($decode_response['release_notes']).'</p>';
-				$formwriter->hiddeninput("confirm", '', ['value' => 1]);
-
-				$formwriter->submitbutton('btn_submit', 'Upgrade anyway');
-
-			}
-			else{
-				echo '<div class="alert alert-success"><strong>Up to date.</strong> Version '. htmlspecialchars($settings->get_setting('system_version')). ' is current.</div>';
-			}
-
-			echo '</div>';
-		echo '</fieldset>';
-		echo $formwriter->end_form();
-
-		// Add JavaScript to disable submit button after click to prevent double submission
-		echo '<script>
-		document.addEventListener("DOMContentLoaded", function() {
-			var form = document.getElementById("form");
-			if (form) {
-				form.addEventListener("submit", function(e) {
-					var submitButton = form.querySelector("button[type=\'submit\'], input[type=\'submit\']");
-					if (submitButton && !submitButton.disabled) {
-						submitButton.disabled = true;
-						submitButton.style.opacity = "0.6";
-						submitButton.style.cursor = "not-allowed";
-						var originalText = submitButton.textContent || submitButton.value;
-						if (submitButton.textContent !== undefined) {
-							submitButton.textContent = "Processing...";
-						} else {
-							submitButton.value = "Processing...";
-						}
-					}
-				});
-			}
-		});
-		</script>';
-
-		$page->end_box();
-
-		$page->admin_footer();
-
 	}
 
 	function is_dir_empty($dir) {

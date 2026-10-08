@@ -123,8 +123,19 @@ check(!$threw, 'a declared option key passes enforcement');
 
 // A pass-through collection (iterates its options generically, every key maps
 // to a column) is exempt — it has no fixed vocabulary and a bogus key already
-// fails loudly in SQL.
-$passthrough = new MultiPlugin(array('plg_name' => 'no_such_plugin_zz'));
+// fails loudly in SQL. No collection in the estate is one, so the test brings
+// its own.
+class MultiPassThroughPlugin extends SystemMultiBase {
+	protected static $model_class = 'Plugin';
+	protected function getMultiResults($only_count = false, $debug = false) {
+		$filters = array();
+		foreach ($this->options as $field => $value) {
+			$filters[$field] = array($value, PDO::PARAM_STR);
+		}
+		return $this->_get_resultsv2('plg_plugins', $filters, $this->order_by, $only_count, $debug);
+	}
+}
+$passthrough = new MultiPassThroughPlugin(array('plg_name' => 'no_such_plugin_zz'));
 $threw = false;
 try {
 	$passthrough->count_all();
@@ -132,5 +143,18 @@ try {
 	$threw = true;
 }
 check(!$threw, 'a pass-through collection is exempt from enforcement');
+
+// A filter on a declared column binds with the column's type. A bool false
+// bound as text is '' and Postgres refuses it as a boolean (the Updates page
+// asks MultiPlugin for plg_receives_upgrades = false).
+section('A column filter binds with the column\'s declared type');
+$expected = (int)DbConnector::get_instance()->get_db_link()
+	->query('SELECT count(*) FROM plg_plugins WHERE plg_receives_upgrades = false')->fetchColumn();
+try {
+	$got = count(new MultiPlugin(array('plg_receives_upgrades' => false)));
+	check($got === $expected, 'MultiPlugin filters a bool column on false', "$got rows, SQL says $expected");
+} catch (Throwable $e) {
+	check(false, 'MultiPlugin filters a bool column on false', $e->getMessage());
+}
 
 harness_finish();

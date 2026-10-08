@@ -302,17 +302,10 @@ function authenticate_write($data) {
 class MultiPlugin extends SystemMultiBase {
 	protected static $model_class = 'Plugin';
 
+	// Every option names a column (plg_active, plg_trust, ...), and core binds
+	// each with its declared type: a bool column gets a bool.
 	protected function getMultiResults($only_count = false, $debug = false) {
-        $filters = [];
-        
-        // Apply search criteria filters
-        foreach ($this->options as $field => $value) {
-            if ($value !== null) {
-                $filters[$field] = [$value, PDO::PARAM_STR];
-            }
-        }
-        
-        return $this->_get_resultsv2('plg_plugins', $filters, $this->order_by, $only_count, $debug);
+        return $this->_get_resultsv2('plg_plugins', array(), $this->order_by, $only_count, $debug);
     }
 
     /**
