@@ -17,6 +17,7 @@
  * no release row carrying the same statement was logged and never shipped;
  * this row, with its statement, is what explains it (O5's canary reads this).
  *
+ * @version 1.1 - rle_seen_in_log_time: when ReleaseLogTail, reading the log, found this entry there (O5)
  * @version 1.0
  */
 
@@ -44,6 +45,9 @@ class ReleaseLogEntry extends SystemBase {
 		'rle_log_index'  => array('type'=>'int8', 'is_nullable'=>false),
 		// The RELEASE_STATEMENT document as logged.
 		'rle_statement'  => array('type'=>'text', 'is_nullable'=>false),
+		// When ReleaseLogTail, reading the log in order, found this entry
+		// there leaf for leaf. Empty until it has read that far.
+		'rle_seen_in_log_time' => array('type'=>'timestamp(6)'),
 		'rle_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 

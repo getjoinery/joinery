@@ -14,8 +14,11 @@
  * entry's bytes behind a two-byte big-endian length.
  *
  * Used by utils/verify_release.php to compare a release's stored entry with
- * what the log serves at its index. A node never reads the log.
+ * what the log serves at its index, and by server_manager's ReleaseLogTail to
+ * read every new entry for ones under our statement keys. A node never reads
+ * the log.
  *
+ * @version 1.1 - bundle() and bundleRaw(): a whole entry bundle, for reading the log in order
  * @version 1.0
  */
 class LogTileReader {
@@ -51,7 +54,25 @@ class LogTileReader {
 			throw new TransparencyProofException("entry {$index} is past the end of {$origin}'s tree ({$tree_size} entries)");
 		}
 		$tile = intdiv($index, self::ENTRIES_PER_TILE);
+		$entries = $this->bundle($origin, $tile, $tree_size);
+		$at = $index % self::ENTRIES_PER_TILE;
+		if (!isset($entries[$at])) {
+			throw new TransparencyProofException("{$origin}'s entry bundle {$tile} holds " . count($entries) . " entries, not entry {$index}");
+		}
+		return $entries[$at];
+	}
+
+	/**
+	 * The entries of bundle $tile in a tree of $tree_size entries, in order:
+	 * all 256, or as many as the tree holds when it is the newest bundle.
+	 * The raw bytes are returned beside them, for a caller that searches the
+	 * whole bundle before splitting it: {bytes, entries}.
+	 */
+	public function bundleRaw($origin, $tile, $tree_size) {
 		$in_tile = min(self::ENTRIES_PER_TILE, $tree_size - $tile * self::ENTRIES_PER_TILE);
+		if ($tile < 0 || $in_tile <= 0) {
+			throw new TransparencyProofException("entry bundle {$tile} is past the end of {$origin}'s tree ({$tree_size} entries)");
+		}
 		$full = self::base($origin) . '/api/v2/tile/entries/' . self::tilePath($tile);
 		if ($in_tile < self::ENTRIES_PER_TILE) {
 			// The newest bundle is partial. The tree may have filled it since
@@ -62,12 +83,12 @@ class LogTileReader {
 		} else {
 			$bytes = $this->get($full);
 		}
-		$entries = self::bundleEntries($bytes);
-		$at = $index % self::ENTRIES_PER_TILE;
-		if (!isset($entries[$at])) {
-			throw new TransparencyProofException("{$origin}'s entry bundle {$tile} holds " . count($entries) . " entries, not entry {$index}");
-		}
-		return $entries[$at];
+		return array('bytes' => $bytes, 'entries' => self::bundleEntries($bytes));
+	}
+
+	/** The entries of bundle $tile, as bundleRaw() reads them. */
+	public function bundle($origin, $tile, $tree_size) {
+		return $this->bundleRaw($origin, $tile, $tree_size)['entries'];
 	}
 
 	/** A tile number as C2SP writes it in a path: 557493 is x557/493, 5 is 005. */

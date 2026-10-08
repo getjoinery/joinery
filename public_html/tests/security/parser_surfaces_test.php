@@ -22,6 +22,7 @@
  *
  * Run: php tests/security/parser_surfaces_test.php
  *
+ * @version 1.2 - ReleaseVerifier: verify_release.php's CLI unzips the agent binaries of the release it checks
  * @version 1.1 - BackupObjects reads this site's own gzipped objects index back off its backup storage
  * @version 1.0
  */
@@ -43,6 +44,7 @@ $allowed = array(
 	'utils/extract_document_text.php'                    => 'the extraction subprocess itself',
 	'includes/AbstractExtensionManager.php'              => 'a theme or plugin package the owner installed or we signed (S9)',
 	'utils/upgrade.php'                                  => 'our own signed release archive',
+	'includes/ReleaseVerifier.php'                       => 'utils/verify_release.php only, a CLI never in a request: the agent binaries of a release it is checking against that release\'s statement',
 	'plugins/server_manager/includes/publish_upgrade.php' => 'the archive we are building',
 	'includes/EmailTemplateRenderer.php'                         => 'the deployment\'s own email templates',
 	'includes/TargetLister.php'                          => 'a provider API response under our own credentials',

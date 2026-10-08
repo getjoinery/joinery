@@ -29,6 +29,7 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.9 - a claim's update_state and update_offered are closed sets (release_transparency O7)
  * @version 1.8 - a join carries the site's web root: the spec takes it, and a node made from a join that
  *                names one hosts a site; a malformed one is dropped and the join still stands
  * @version 1.7 - a result is folded as it arrives through record_result, failed and refused as much as
@@ -419,6 +420,19 @@ foreach (array('true', '1', 'Active', 'active,inactive') as $v) {
 	$with = $claim; $with['server_manager'] = $v;
 	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
 		"server_manager '$v' is outside the closed set and refused");
+}
+
+// Where the agent's own self-update stands rides the claim as a closed set of
+// verdicts and a version (release_transparency O7: a refusal is an incident).
+foreach (array(array('unlogged', '1.66.0'), array('verify_failed', ''), array('none', ''), array('current', '1.65.0')) as $v) {
+	$with = $claim; $with['update_state'] = $v[0]; $with['update_offered'] = $v[1];
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null,
+		"A claim reporting update_state '{$v[0]}' for '{$v[1]}' is accepted", (string)AgentChannelEndpoint::validation_error($with, $claim_spec));
+}
+foreach (array(array('', '1.66.0'), array('refused', '1.66.0'), array('unlogged', '1.66.0; rm'), array('unlogged', 'v1.66')) as $v) {
+	$with = $claim; $with['update_state'] = $v[0]; $with['update_offered'] = $v[1];
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null,
+		"update_state '{$v[0]}' with update_offered '{$v[1]}' is refused");
 }
 
 // ---------------------------------------------------------------------------
