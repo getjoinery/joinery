@@ -1,0 +1,7 @@
+{
+  "name": "Tail Release Log",
+  "description": "On the site that publishes releases, reads every new entry of the public Sigstore logs nodes trust, looking for entries signed with our release statement key. Each one must be a release this site published (the release ledger); one that is not is a release nodes would install that nobody here published, and Reconcile Incidents raises it as critical. Reads for at most four minutes a run and carries on next run; a log not read up to date for a day is its own incident.",
+  "activate_on_install": true,
+  "default_frequency": "hourly",
+  "config_fields": {}
+}

@@ -266,13 +266,63 @@ this node only:
   days, or the task missing or turned off (warning; critical after two weeks).
   A run that cannot conclude never clears `plane:release_log`.
 
+**Reading the log for entries under our key.** A node installs any release
+whose statement is logged under a statement key it holds, so a release signed
+in secret still has to be logged to reach a node. Rekor v2 has no search, so
+the **Tail Release Log** task (hourly, at most four minutes a run, carrying on
+where it stopped) reads every new entry of each log nodes trust
+(`release_keys/log/` and the logs the last logged release installed). It
+starts on each log at our first logged entry there, or where the log stood
+when it was first read. It reads only up to a checkpoint seen at least ten
+minutes earlier, so a publish has always recorded its entry first. Each entry
+bundle is searched for the base64 of every statement key (`release_keys/statement/`
+and the keys nodes hold); an entry whose verifier is one of them is checked
+against the release ledger (`rle_release_log_entries`). The same index with
+the same leaf bytes is ours, and the ledger row gets `rle_seen_in_log_time`;
+anything else is unaccounted for. The state (how far each log has been read,
+when it last caught up, and every unaccounted entry) is the
+`server_manager_release_log_tail` setting. Reconcile Incidents raises, on this
+node only:
+
+- `plane:release_log_entry` — an entry under our key that the ledger does not
+  hold, or holds with other bytes; it names each entry's log, index and entry
+  bundle (critical);
+- `plane:release_log_tail_blind` — a log nodes trust not read up to a settled
+  checkpoint for a day, no completed check against Sigstore's trusted root for
+  three days, or the task missing or turned off (warning; critical after a
+  week).
+
+Once a day the same task fetches Sigstore's trusted root and checks every log
+key any logged release installed on nodes (each statement's `keys_installed`)
+against the key Sigstore lists for that log. A key it does not list is raised
+by `plane:release_log_entry` too. No completed check for three days is
+`plane:release_log_tail_blind`.
+
+The reader checks each checkpoint's signature but does not hash the entries it
+reads back to the checkpoint's root: a log showing it different entries than
+it proves to nodes is a split view, which only witnesses catch.
+
+**The public releases page.** The site that logs releases serves
+`/server_manager/releases`, with no login: every logged statement, newest
+first (version, date, both commits linked to GitHub, its log entry, when the
+reader saw it, whether it shipped, and the keys it installs on nodes, each log
+key marked with whether Sigstore's trusted root lists it), how far each log nodes trust has been
+read and when it last caught up, any unaccounted entry or unlisted key at the top, and the
+`verify_release` command for the newest release with this site as its source.
+Any other site answers that it does not publish releases. Its logic
+(`releases_logic`) is also an API action that needs no session. Test:
+`plugins/server_manager/tests/releases_page_test.php`.
+
 Tests: `tests/unit/release_log_client_test.php` (discovery, the shard rules,
 the recorded log answer), `tests/unit/release_statement_test.php` (the
 listed statement, the payload, the key chain and its walk, the statement key,
 logging end to end against a log built in the test, the watch and its
 incidents, the publisher's order) and
 `plugins/server_manager/tests/release_log_entries_test.php` (the record of
-logged statements, spent versions, the unfinished-row guard).
+logged statements, spent versions, the unfinished-row guard) and
+`plugins/server_manager/tests/release_log_tail_test.php` (reading a log built
+in the test: where it starts, the settled checkpoint, our entry matched, a
+stranger and a changed entry unaccounted for, the budget, blind).
 
 ### Distribution Architecture
 

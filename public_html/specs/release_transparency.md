@@ -7,8 +7,10 @@ Q8, Q9 from the re-review; reviewer2 VALID 2026-10-07 with those folded in).
 WP2 built and released (0.8.465). WP3-WP5 committed; 0.8.466 was the
 genesis logged release (log2025-1 index 142718338). WP1's live test changed D4's key: see D-C.
 WP1 committed (8e14752a). Where the statement goes changed while WP3 was
-built, see D-F. WP6 under way: what ships was found wider than the commit and
-cut back first (D2); the Updates page and `verify_release.php` built 2026-10-08. Stands on `implemented/package_signing.md` and
+built, see D-F. WP6 built 2026-10-08: what ships cut back to the commit (D2),
+the Updates page, `verify_release.php`, the refused-agent-update incident (O7),
+the log reader (O5), and the public releases page with the trusted-root check.
+WP7 (live proof) is next. Stands on `implemented/package_signing.md` and
 `implemented/agent_release_channel.md`; independent of any disk-encryption
 work.
 
@@ -473,7 +475,9 @@ from a release published before logging began.
   customer what to verify and how, in plain words first ("This machine is
   running release 0.8.470, which is public commit abc123, logged publicly on
   2026-10-08. To check this yourself, run …").
-- **Over time.** A public page on getjoinery lists every release: version,
+- **Over time.** (Built 2026-10-08 as `/server_manager/releases` on the box
+  that publishes releases, linked from getjoinery: owner, simplest possible.)
+  A public page lists every release: version,
   commit, log index, and the keys it installs, with every checkpoint key
   checked against Sigstore's root. An entry there that was never announced, a
   log entry with no release page, or a key the root does not know is the
@@ -684,10 +688,37 @@ public main, as `ReleaseCommit::onRemote()` requires at publish); Q1 the live
 log check compares bytes and is worded so; Q2 a partial entry bundle falls
 back to the full one; Q3 a run that never learned its target records none.
 Re-checked by reviewer2 2026-10-08: VALID.
-Then: the log watch on
-the management node (O5); the refused-agent-update incident (O7); the public releases page on getjoinery
-with the trusted-root comparison; the upgrade source serving archives
-publicly for the verifier.
+Then the refused-agent-update incident (O7, built 2026-10-08): agent 1.65.0
+reports `update_state` and `update_offered` on every poll once a check has
+concluded; the management node stores them (`mgn_agent_update_state`,
+`mgn_agent_update_offered`) and `IncidentSourceAgentUpdateRefused`
+(`plane:agent_update_refused`) opens on `unlogged` and `verify_failed`
+(critical) and `version_rejected` (warning); `incident_sources` 65,
+`agent_channel` 207, agent `update_report_test.go`.
+Then the log watch (O5, built 2026-10-08): `ReleaseLogTail` and the hourly
+Tail Release Log task, on the box that logs releases, read every new entry
+bundle of each log nodes trust (`LogTileReader` 1.1 `bundleRaw()`), from our
+first logged entry, up to a checkpoint seen ten minutes earlier, searching for
+the base64 of each statement key; an entry under one is ours only if the
+ledger holds its index with the same leaf bytes (`rle_seen_in_log_time`,
+`ReleaseLogEntry` 1.1), otherwise `plane:release_log_entry` (critical);
+`plane:release_log_tail_blind` when a log is a day behind or the task is off.
+State in `server_manager_release_log_tail` for the public page;
+`release_log_tail` 20, `incident_sources` 67. Not checked: that the entries
+served hash to the checkpoint's root (a split view; witnesses, D8).
+Then the public releases page (built 2026-10-08, owner: simplest possible): served by
+the box that logs releases at `/server_manager/releases` (`releases_logic`, also an
+API action with no session), reading the ledger and the tail's state directly;
+getjoinery links to it. Then the trusted-root comparison (D7, "a key the root
+does not know is the canary firing"): `ReleaseLogTail` 1.1 fetches Sigstore's
+trusted root daily and checks every log key any logged statement installed
+(`checkRoot()`, `installedLogKeys()`); an unlisted key is raised by
+`plane:release_log_entry` 1.1, no check for three days by the tail's blind
+incident; the page lists each release's keys with Sigstore's answer
+(`release_log_tail` 25, `releases_page` 12; live: log2025-1's key listed).
+The upgrade source already serves archives publicly: dev and getjoinery both
+answer 200 for `static_files/joinery-core-<version>.tar.gz` without a
+credential, and `verify_release` reads them from there. WP6 is complete.
 
 **WP7 — Live proof.** One real publish from a clean commit; one node upgrades
 and its page shows the log entry; a second machine runs `verify_release.php`
@@ -842,7 +873,9 @@ nodes hold cannot be known from here.
   ships. Instead the public releases page shows the watch's state (how far
   through the log it has read, when, and every entry under our keys with the
   release it belongs to) and links each entry to the log, so anyone can
-  check an entry themselves.
+  check an entry themselves. BUILT 2026-10-08 on the box that logs
+  releases (`ReleaseLogTail`), which is where the ledger is; the public page
+  reads its state from there.
 - **O6. The missed shard window — DECIDED 2026-10-07 (owner): don't miss
   it.** Sigstore rotates its Rekor shard about yearly and published
   log2025-1's key about three months before the shard went live. If no
@@ -896,4 +929,5 @@ nodes hold cannot be known from here.
   its row. By the incidents-only rule this belongs in an `IncidentSource`
   fed by the state the agent reports over the channel. Predates this spec
   (true of `verify_failed` today). DECIDED 2026-10-08 (owner): a refused
-  agent update is an incident, built in WP6.
+  agent update is an incident, built in WP6. BUILT 2026-10-08
+  (`plane:agent_update_refused`).

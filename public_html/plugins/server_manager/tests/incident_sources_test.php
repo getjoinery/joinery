@@ -19,6 +19,8 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.3 - plane:release_log_entry and plane:release_log_tail_blind (release_transparency O5)
+ * @version 1.2 - plane:agent_update_refused (release_transparency O7)
  * @version 1.1 - plane:machine_transfer is registered (its conditions: machine_transfer_test)
  * @version 1.0
  */
@@ -62,13 +64,15 @@ section('Every source is registered');
 $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
-	'plane:release_log', 'plane:release_log_blind') as $want) {
+	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
+	'plane:release_log_entry', 'plane:release_log_tail_blind') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
 // The release-log watch belongs to this management node's own node only
 // (its conditions are release_statement_test's).
-check((new IncidentSourceReleaseLog())->evaluate($node) === null && (new IncidentSourceReleaseLogBlind())->evaluate($node) === null,
+check((new IncidentSourceReleaseLog())->evaluate($node) === null && (new IncidentSourceReleaseLogBlind())->evaluate($node) === null
+	&& (new IncidentSourceReleaseLogEntry())->evaluate($node) === null && (new IncidentSourceReleaseLogTailBlind())->evaluate($node) === null,
 	'The release-log sources say nothing about any other node');
 
 // ---------------------------------------------------------------------------
@@ -121,6 +125,30 @@ $set(array('mgn_agent_quiet_time' => gmdate('Y-m-d H:i:s', time() - 2 * 3600)));
 check($silent->evaluate($node) === null && $silent->cleared_text($node) === 'Its owner switched the agent off.',
 	'Switched off by its owner after its last check-in: nothing, and the clear says why');
 $set(array('mgn_agent_quiet_time' => null, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_agent_public_key' => null));
+
+// ---------------------------------------------------------------------------
+section('Agent update refused');
+
+$refused = new IncidentSourceAgentUpdateRefused();
+$set(array('mgn_agent_update_state' => 'unlogged', 'mgn_agent_update_offered' => '1.66.0', 'mgn_agent_version' => '1.65.0'));
+check($refused->evaluate($node) === null, 'An unpaired node: nothing, whatever it last said');
+$set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
+$v = $refused->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'not in the public log') !== false
+	&& $v['detail']['Version refused'] === '1.66.0' && $v['detail']['Running'] === '1.65.0',
+	'A release not in the public log: critical, naming both versions', json_encode($v));
+$set(array('mgn_agent_update_state' => 'verify_failed', 'mgn_agent_update_offered' => ''));
+$v = $refused->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['detail']['Version refused'], 'not named') === 0,
+	'A failed verification: critical, and an unreadable manifest names no version', json_encode($v));
+$set(array('mgn_agent_update_state' => 'version_rejected', 'mgn_agent_update_offered' => '1.66.0'));
+check(($refused->evaluate($node)['severity'] ?? '') === 'warning', 'A version that failed to start here: a warning');
+foreach (array('', 'none', 'current', 'update_pending', 'fetch_failed', 'unsigned_build', 'no_binary') as $state) {
+	$set(array('mgn_agent_update_state' => $state));
+	check($refused->evaluate($node) === null, "Update state '{$state}': nothing");
+}
+check(strpos($refused->cleared_text($node), 'v1.66.0') !== false, 'The clear names the version now on offer');
+$set(array('mgn_agent_update_state' => null, 'mgn_agent_update_offered' => null, 'mgn_agent_version' => null, 'mgn_agent_public_key' => null));
 
 // ---------------------------------------------------------------------------
 section('Unmanageable');

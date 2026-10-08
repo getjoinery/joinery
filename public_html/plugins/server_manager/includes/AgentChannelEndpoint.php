@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.35 - a claim carries update_state and update_offered, where the agent's own self-update
+ *                stands; a refusal is raised as an incident (release_transparency O7)
  * @version 1.34 - the artifact endpoint serves agent_statement, the release statement beside the agent
  *                manifest, so a machine with no site tree can check its next binary against the
  *                public log (release_transparency WP5)
@@ -1041,6 +1043,12 @@ class AgentChannelEndpoint {
 			'server_manager' => ['type' => 'string', 'max' => 8, 'pattern' => '/^(active|inactive)?$/'],
 		];
 	}
+			// Where the agent's own self-update stands: its verdict on the
+			// version on offer, and that version. A closed set of verdicts;
+			// absent for an agent before 1.65.0 and before its first check.
+			'update_state'   => ['type' => 'string', 'max' => 24,
+				'pattern' => '/^(none|current|update_pending|verify_failed|fetch_failed|unsigned_build|no_binary|version_rejected|unlogged)$/'],
+			'update_offered' => ['type' => 'string', 'max' => 20, 'pattern' => '/^([0-9]+\.[0-9]+\.[0-9]+)?$/'],
 
 	/**
 	 * A claim with the fields this plane does not know set aside, before the
@@ -1131,6 +1139,20 @@ class AgentChannelEndpoint {
 
 		// The node saying, unprompted, whether it can verify its own scripts.
 		//
+		// Where its own self-update stands. A refused update is otherwise seen
+		// only on the machine, as an agent version that never moves; stored
+		// here, it is raised as an incident (IncidentSourceAgentUpdateRefused).
+		// Absent leaves the last answer standing: an older agent, or one that
+		// has not finished its first check since it started.
+		if (array_key_exists('update_state', $in)) {
+			foreach (array('mgn_agent_update_state' => 'update_state', 'mgn_agent_update_offered' => 'update_offered') as $column => $field) {
+				$value = (string)($in[$field] ?? '');
+				if ($value !== (string)$node->get($column)) {
+					$node->set($column, $value);
+				}
+			}
+		}
+
 		// This is the case a refusal cannot cover: a node that is refusing but
 		// has no job dispatched to it never gets to say so, and the poll is the
 		// one moment it speaks for itself. An ABSENT field is an older agent or

@@ -559,6 +559,12 @@
       "helptext": "The release-log watch's last conclusion about Sigstore's public log, as JSON. Written by the Watch Release Log task; read by the release-log incidents."
     },
     {
+      "name": "server_manager_release_log_tail",
+      "default": "",
+      "managed": true,
+      "helptext": "How far the release-log reader has read each public log nodes trust, and any entry under our release keys no publish here wrote, as JSON. Written by the Tail Release Log task; read by the release-log entry incidents."
+    },
+    {
       "name": "server_manager_hosted_transfer_alerted_time",
       "default": "",
       "managed": true,

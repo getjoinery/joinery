@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.44 - mgn_agent_update_state / mgn_agent_update_offered: where the agent's own self-update
+ *                 stands, as it reported on its last poll (spec release_transparency, O7)
  * @version 1.43 - is_fixture_name(): a node a test made, which the scheduled incident pass leaves alone; outside a
  *                 test process no node is created or renamed with that name (the harness reclaims such rows)
  * @version 1.42 - install state 'held' (Held stopped) and fold_container_holds(): a container site held stopped
@@ -378,6 +380,14 @@ class ManagedNode extends SystemBase {
 		// node (is_management_node()); the check_status report carries the
 		// same fact and is the fallback for an agent that polls without it.
 		'mgn_agent_server_manager' => array('type'=>'varchar(8)'),
+
+		// Where the agent's own self-update stands, as it reported on its last
+		// poll: the verdict on the version on offer (current, update_pending,
+		// verify_failed, unlogged, version_rejected, ... or none when nothing
+		// is on offer) and that version. Empty for an agent before 1.65.0.
+		// A refusal here is an incident (IncidentSourceAgentUpdateRefused).
+		'mgn_agent_update_state'   => array('type'=>'varchar(24)'),
+		'mgn_agent_update_offered' => array('type'=>'varchar(20)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
