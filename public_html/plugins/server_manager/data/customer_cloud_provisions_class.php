@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.18 - cvp_expected_site_key / cvp_expected_host_key / cvp_keys_captured_time and site_agent_name():
+ *                 the keys the install showed, for automatic join approval (the auto_approve_provisioned_joins spec)
  * @version 1.17 - host_agent_name(): the site name and -host, the name install.sh's host agent joins as
  * @version 1.16 - install mode 'adopted': a running server this plane did not create, recorded by Adopt cloud
  *                 server so reverse DNS and an IP-swap switch-over reach it (test_cloud_account_and_prod_management WP9)
@@ -193,6 +195,11 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_domain_quote_time'      => array('type'=>'timestamp(6)'),
 		'cvp_registrant_sealed'      => array('type'=>'text'),
 		'cvp_error'                  => array('type'=>'text'),
+		// The agents' keys as this plane watched the install produce them (16 hex): what a join is matched
+		// against for automatic approval, and consumed when it is approved (JoinAutoApproval).
+		'cvp_expected_site_key'      => array('type'=>'varchar(16)'),
+		'cvp_expected_host_key'      => array('type'=>'varchar(16)'),
+		'cvp_keys_captured_time'     => array('type'=>'timestamp(6)'),
 		'cvp_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'cvp_update_time'            => array('type'=>'timestamp(6)'),
 		'cvp_delete_time'            => array('type'=>'timestamp(6)'),
@@ -502,6 +509,11 @@ class CustomerCloudProvision extends SystemBase {
 		}
 		$site = trim((string)$this->get('cvp_sitename')) ?: trim((string)$this->get('cvp_slug'));
 		return $site !== '' ? $site . '-host' : null;
+	}
+
+	/** The name the site agent asks to join as: the site name, else the slug (install.sh's --node-name). */
+	public function site_agent_name(): string {
+		return trim((string)$this->get('cvp_sitename')) ?: trim((string)$this->get('cvp_slug'));
 	}
 
 	public function is_operator_hosted(): bool {

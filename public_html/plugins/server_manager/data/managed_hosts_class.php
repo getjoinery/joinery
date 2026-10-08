@@ -37,7 +37,9 @@ class ManagedHost extends SystemBase {
 		'mgh_ssh_user'             => array('type'=>'varchar(50)', 'is_nullable'=>false, 'default'=>'root'),
 		'mgh_ssh_key_path'         => array('type'=>'varchar(500)'),
 		'mgh_ssh_port'             => array('type'=>'int4', 'default'=>'22'),
-		'mgh_max_sites'            => array('type'=>'int4', 'default'=>'50'),
+		// How many sites this box can hold, set by the operator from its memory and disk. Null = not set;
+		// a host with provisioning on must have one (prepare()), and pick_for_provisioning skips a null.
+		'mgh_max_sites'            => array('type'=>'int4'),
 		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// The host's own agent identity: the paired ManagedNode that host-scope
 		// primitives (decommission_site, later certs and container install) are
@@ -66,6 +68,9 @@ class ManagedHost extends SystemBase {
 		}
 		if (empty($this->get('mgh_host'))) {
 			throw new ManagedHostException('Host IP/hostname is required.');
+		}
+		if ($this->get('mgh_provisioning_enabled') && (int)$this->get('mgh_max_sites') < 1) {
+			throw new ManagedHostException('Set Max Sites before turning provisioning on: it is how many sites this host can hold, and new sites are only placed up to it.');
 		}
 
 		$existing = new MultiManagedHost(array('slug' => $slug, 'deleted' => false));

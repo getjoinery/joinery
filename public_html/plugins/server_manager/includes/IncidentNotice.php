@@ -68,7 +68,7 @@ class IncidentNotice {
 			$links[] = '<a href="/plugins/bug_reports/admin/admin_bug_reports" class="alert-link">Read ' . ($reports === 1 ? 'it' : 'them') . '</a>';
 		}
 		$cls = $critical > 0 ? 'alert-danger' : ($need > 0 ? 'alert-warning' : 'alert-info');
-		return '<div class="alert ' . $cls . '" role="' . ($critical > 0 ? 'alert' : 'status') . '"><div><strong>'
+		return '<div class="alert ' . $cls . '" role="' . ($critical > 0 ? 'alert' : 'status') . '"><div class="alert-body"><strong>'
 			. htmlspecialchars(implode(' ', $parts), ENT_QUOTES, 'UTF-8') . '</strong> ' . implode(' · ', $links) . '</div></div>';
 	}
 }

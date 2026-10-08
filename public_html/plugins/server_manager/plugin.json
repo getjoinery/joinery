@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.32",
+  "version": "1.30.33",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -609,6 +609,14 @@
         }
       },
       "helptext": "How many backup chains (restore points) the plane keeps in backup storage for each tenant site, per profile. Older chains are pruned whole by the reconcile; a chain still being written is never touched. Blank means 4."
+    },
+    {
+      "name": "server_manager_auto_approve_joins",
+      "default": "1",
+      "group": "provisioning",
+      "label": "Auto-approve joins from machines this plane built",
+      "type": "checkbox",
+      "helptext": "A join from a provisioned machine is approved automatically when its address, name and key match what the install showed and the provider confirms the instance. Turn off to approve every join by hand."
     }
   ],
   "sealed_secrets": [

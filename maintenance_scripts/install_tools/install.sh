@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.06 - install.sh site (--enable-agent --management-node) prints SITE_AGENT_KEY=<16 hex>: the site agent's key once it has
+#               staged it (waits up to 90s; absent if it does not appear), so the plane can recognise that agent's join
+#               (the auto_approve_provisioned_joins spec WP1)
 #VERSION 3.05 - install.sh site-limits SITENAME [--memory] [--cpus] [--disk] changes a site's limits
 #               without a rebuild (sysadmin_tools/site_limits.sh, WP6). install.sh docker --disk-pool=SIZE puts /var/lib/docker on a disk pool of its own
 #               (docker_disk_pool.sh: an XFS file system with project quotas, in a file of SIZE
@@ -777,6 +780,27 @@ print_step() {
 print_info() {
     [ "$QUIET_MODE" -eq 1 ] && return
     echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+# The site agent's key, for the plane that built this machine. The agent stages its
+# key a moment after it is switched on and the join is lodged; agent_control.php
+# --status prints it as "key fingerprint:" in groups of four. Waits up to 90
+# seconds, prints SITE_AGENT_KEY=<16 hex> when it appears, nothing when it does
+# not. A missing line only costs the automation of that join, never the install.
+# Arguments: the command that runs agent_control.php --status.
+emit_site_agent_key() {
+    local waited=0 line key
+    while [ "$waited" -lt 90 ]; do
+        line=$("$@" 2>/dev/null | grep -i '^ *key fingerprint:' | head -1) || line=""
+        key=$(printf '%s' "$line" | sed 's/^[^:]*://; s/[[:space:]]//g' | tr 'A-F' 'a-f')
+        if printf '%s' "$key" | grep -Eq '^[0-9a-f]{16}$'; then
+            echo "SITE_AGENT_KEY=$key"
+            return 0
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+    return 0
 }
 
 print_warning() {
@@ -5215,6 +5239,9 @@ EOF
         print_step "Enabling the Joinery agent inside the container..."
         if docker exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
             print_success "Agent enabled inside $SITENAME${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL}"
+            if [ -n "$MANAGEMENT_NODE_URL" ]; then
+                emit_site_agent_key docker exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
+            fi
         else
             print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
         fi
@@ -5443,6 +5470,9 @@ do_site_baremetal() {
     # agent installer is the core one, and matters when cloning from a site with
     # active plugins that need host services)
     bash "$SCRIPT_DIR/_plugin_installers_start.sh" "$SITENAME" || true
+    if [ "$ENABLE_AGENT" = true ] && [ -n "$MANAGEMENT_NODE_URL" ]; then
+        emit_site_agent_key php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
+    fi
 
     # Create test site if requested
     if [ "$WITH_TEST_SITE" = true ]; then

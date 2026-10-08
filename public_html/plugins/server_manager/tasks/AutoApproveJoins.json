@@ -1,0 +1,7 @@
+{
+  "name": "Auto-Approve Provisioned Joins",
+  "description": "Approves a join from a machine this plane built when its address, name and key match what the install showed and the provider confirms the instance is running there. Anything else is left for a person in Agents asking to join.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}
