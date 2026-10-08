@@ -30,6 +30,7 @@
  *
  * Run: php tests/backups/backup_bring_back_test.php
  *
+ * @version 1.3 - the placement seam takes the row a profile names for an object (specs/storage_targets.md WP6)
  * @version 1.2 - the run dumps a scratch database, not the site's
  * @version 1.1 - one file store: the cloud rows are private blobs, the store seam takes no argument
  * @version 1.0
@@ -100,10 +101,12 @@ foreach ($plain as $name => $bytes) {
 	$blob->set('fbb_mime_type', 'application/octet-stream');
 	$blob->set('fbb_is_private', true);
 	$blob->set('fbb_storage_driver', 'cloud');
+	$blob->set('fbb_bkt_backup_target_id', 1);
+	$blob->set('fbb_remote_key', 'store/' . $name);
 	$blob->save();
 	$ids[$name] = (int)$blob->key;
 	$blobs[$name] = array('id' => (int)$blob->key, 'name' => $name, 'original' => $up . '/' . $name, 'paths' => array($up . '/' . $name),
-		'remote_key' => $name, 'content_type' => 'application/octet-stream', 'visibility' => 'private');
+		'target_id' => 1, 'remote_key' => 'store/' . $name, 'content_type' => 'application/octet-stream', 'visibility' => 'private');
 }
 harness_defer(function () use ($pdo, $ids) {
 	$q = $pdo->prepare('DELETE FROM fbb_file_blobs WHERE fbb_file_blob_id = ?');
@@ -115,16 +118,17 @@ $row = function ($name) use ($pdo, $ids) {
 	return (string)$q->fetchColumn();
 };
 $set_cloud = function ($name) use ($pdo, $ids) {
-	$q = $pdo->prepare("UPDATE fbb_file_blobs SET fbb_storage_driver = 'cloud' WHERE fbb_file_blob_id = ?");
+	$q = $pdo->prepare("UPDATE fbb_file_blobs SET fbb_storage_driver = 'cloud', fbb_bkt_backup_target_id = 1,
+		fbb_remote_key = 'store/' || fbb_stored_name WHERE fbb_file_blob_id = ?");
 	$q->execute(array($ids[$name]));
 };
 
 // The file bucket still serves big.jpg and nothing else.
 $store = new InMemoryBlobDriver();
-$store->objects[$tag . 'big.jpg'] = $plain[$tag . 'big.jpg'];
+$store->objects['store/' . $tag . 'big.jpg'] = $plain[$tag . 'big.jpg'];
 BackupObjectRestore::$test_hooks = array(
 	'store'     => function () use ($store) { return $store; },
-	'placement' => function (FileBlob $b) use ($home) { return $home . '/' . $b->get('fbb_stored_name'); },
+	'placement' => function (array $row) use ($home) { return $home . '/' . $row['label']; },
 );
 BackupObjects::$test_hooks = array('enumerator' => function () use (&$blobs) { return array_values($blobs); });
 BackupProfile::$enabled_for_tests = array();

@@ -407,8 +407,8 @@ if (!$grp_id) {
 		require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfile.php'));
 		$profile = new BlobStorageProfile();
 		$listed = array();
-		foreach ((array)$profile->itemsForRow((int)$blob->key) as $item) { $listed[] = $item['remote_key']; }
-		check(in_array($blob->remote_key_for($thumb_key), $listed, true), 'offload enumerator lists the encrypted thumb variant');
+		foreach ((array)$profile->itemsForRow((int)$blob->key) as $item) { $listed[] = $item['name']; }
+		check(in_array($blob->remote_name_for($thumb_key), $listed, true), 'offload enumerator lists the encrypted thumb variant');
 	} else {
 		harness_skip('blob variant inventory (encrypted thumbnail lifecycle)',
 			'no image size configured on this install');

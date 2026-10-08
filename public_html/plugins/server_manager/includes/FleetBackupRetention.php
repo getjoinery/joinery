@@ -22,6 +22,7 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.10 - object_store() reads object keys through BackupObjects::location_of(), so offloaded mail is kept and pruned like files
  * @version 1.9 - prune() orders every space's points newest first before the window is applied; a draining space
  *                is released only by a verify sent after the active space was (re)opened
  * @version 1.8 - prune() works across every storage space of the node, each point deleted from its own space's
@@ -578,16 +579,15 @@ class FleetBackupRetention {
 			if (!is_array($obj)) { continue; }
 			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
 			if ($key === '' || strpos($key, $base . BackupObjects::DIR . '/') !== 0) { continue; }
-			$parts = explode('/', substr($key, strlen($base . BackupObjects::DIR . '/')));
-			if (count($parts) !== 2 || strpos($parts[0], BackupObjects::EPOCH_PREFIX) !== 0 || $parts[1] === '') { continue; }
-			list($epoch, $file) = $parts;
+			$at = BackupObjects::location_of(substr($key, strlen($base . BackupObjects::DIR . '/')));
+			if ($at === null) { continue; }
+			$epoch = $at['epoch'];
 			$size = $obj['size'] ?? $obj['Size'] ?? null;
-			if ($file === BackupObjects::ENVELOPE_NAME) {
+			if ($at['envelope']) {
 				$out['envelopes'][$epoch] = $key;
 				continue;
 			}
-			if (substr($file, -strlen(BackupObjects::OBJECT_SUFFIX)) !== BackupObjects::OBJECT_SUFFIX) { continue; }
-			$name = substr($file, 0, -strlen(BackupObjects::OBJECT_SUFFIX));
+			$name = $at['name'];
 			$out['objects'][$epoch . '/' . $name] = array(
 				'key'           => $key,
 				'size'          => is_numeric($size) ? (int)$size : null,

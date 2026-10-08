@@ -41,6 +41,10 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.4.0 - an object's row lock is its table's (CloudOffloadEngine::lockSpace()); an object is fetched from the file store its row records; a name may carry one namespace
+ *                  segment (offloaded mail is 'mailbox/{id}.eml', which no stored file name can be), read
+ *                  back from a listing as such; temporaries are named by a hash of the object's name
+ *                  (specs/storage_targets.md WP6)
  * @version 1.3.0 - upload_envelope() is public: a run puts the kept epoch's envelope on a destination that
  *                  lacks it (a site that switched targets)
  * @version 1.2.2 - decrypt_file() says plainly that padding catches a wrong key only usually
@@ -77,6 +81,8 @@ class BackupObjects {
 	const TMP_DIR = 'tmp';
 	const ENVELOPE_NAME = 'envelope.json';
 	const OBJECT_SUFFIX = '.enc';
+	/** The one namespace segment an object name may carry, as in 'mailbox/12.eml'. */
+	const NAMESPACE_PATTERN = '/^[a-z][a-z0-9_-]*$/';
 	const EPOCH_PREFIX = 'epoch-';
 	const INDEX_VERSION = 1;
 	const HELD_VERSION = 1;
@@ -551,23 +557,25 @@ class BackupObjects {
 		return self::parse_listing(S3Signer::list($creds, $bucket, ltrim($prefix, '/')), ltrim($prefix, '/'));
 	}
 
-	/** Backup storage picture from a raw listing. Pure. Anything not objects/{epoch}/{name} is ignored. */
+	/**
+	 * Backup storage picture from a raw listing. Pure. Anything not
+	 * objects/{epoch}/{name} is ignored, where a name is a stored file name
+	 * (no slash) or one namespace segment and a file ('mailbox/12.eml').
+	 */
 	public static function parse_listing(array $objects, $prefix) {
 		$out = array('objects' => array(), 'envelopes' => array());
 		$prefix = ltrim((string)$prefix, '/');
 		foreach ($objects as $obj) {
 			$key = ltrim((string)($obj['key'] ?? ''), '/');
 			if ($prefix !== '' && strpos($key, $prefix) !== 0) { continue; }
-			$rel = substr($key, strlen($prefix));
-			$parts = explode('/', $rel);
-			if (count($parts) !== 2 || strpos($parts[0], self::EPOCH_PREFIX) !== 0 || $parts[1] === '') { continue; }
-			list($epoch, $file) = $parts;
-			if ($file === self::ENVELOPE_NAME) {
+			$at = self::location_of(substr($key, strlen($prefix)));
+			if ($at === null) { continue; }
+			$epoch = $at['epoch'];
+			if ($at['envelope']) {
 				$out['envelopes'][$epoch] = true;
 				continue;
 			}
-			if (substr($file, -strlen(self::OBJECT_SUFFIX)) !== self::OBJECT_SUFFIX) { continue; }
-			$name = substr($file, 0, -strlen(self::OBJECT_SUFFIX));
+			$name = $at['name'];
 			$out['objects'][$name] = array(
 				'epoch'         => $epoch,
 				'object_bytes'  => (int)($obj['size'] ?? 0),
@@ -575,6 +583,31 @@ class BackupObjects {
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * What a key under objects/ is, from the part after 'objects/': an epoch's
+	 * envelope, ['epoch', 'envelope' => true, 'name' => ''], or an object,
+	 * ['epoch', 'envelope' => false, 'name'] where the name is a stored file
+	 * name or one namespace segment and a file ('mailbox/12.eml'). Null for
+	 * anything else. The one reading of the layout every listing uses. Pure.
+	 */
+	public static function location_of($rel) {
+		$parts = explode('/', ltrim((string)$rel, '/'));
+		if (count($parts) === 3 && preg_match(self::NAMESPACE_PATTERN, $parts[1])) {
+			$parts = array($parts[0], $parts[1] . '/' . $parts[2]);
+		}
+		if (count($parts) !== 2 || strpos($parts[0], self::EPOCH_PREFIX) !== 0 || $parts[1] === '' || substr($parts[1], -1) === '/') {
+			return null;
+		}
+		list($epoch, $file) = $parts;
+		if ($file === self::ENVELOPE_NAME) {
+			return array('epoch' => $epoch, 'envelope' => true, 'name' => '');
+		}
+		if (substr($file, -strlen(self::OBJECT_SUFFIX)) !== self::OBJECT_SUFFIX || strlen($file) === strlen(self::OBJECT_SUFFIX)) {
+			return null;
+		}
+		return array('epoch' => $epoch, 'envelope' => false, 'name' => substr($file, 0, -strlen(self::OBJECT_SUFFIX)));
 	}
 
 	/**
@@ -1004,12 +1037,13 @@ class BackupObjects {
 	public static function store_object(array $plan, array $epoch, array $obj, $source) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare('SELECT pg_try_advisory_lock(:k1, :k2) AS got');
-		$q->execute(array(':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => (int)$obj['id']));
+		$space = CloudOffloadEngine::lockSpace((string)($obj['table'] ?? 'fbb_file_blobs'));
+		$q->execute(array(':k1' => $space, ':k2' => (int)$obj['id']));
 		$got = $q->fetch(PDO::FETCH_ASSOC);
 		if (empty($got['got'])) {
 			return null;
 		}
-		$tmp = self::tmp_dir($plan) . '/' . $obj['name'] . self::OBJECT_SUFFIX;
+		$tmp = self::tmp_dir($plan) . '/' . self::tmp_name((string)$obj['name']) . self::OBJECT_SUFFIX;
 		try {
 			$enc = self::encrypt_file($source, $tmp, $epoch['data_key']);
 			self::put($plan, self::object_relname($epoch['id'], $obj['name']), $tmp);
@@ -1017,7 +1051,7 @@ class BackupObjects {
 		} finally {
 			@unlink($tmp);
 			$u = $db->prepare('SELECT pg_advisory_unlock(:k1, :k2)');
-			$u->execute(array(':k1' => CloudOffloadEngine::ADVISORY_LOCK_NAMESPACE, ':k2' => (int)$obj['id']));
+			$u->execute(array(':k1' => $space, ':k2' => (int)$obj['id']));
 		}
 	}
 
@@ -1077,7 +1111,7 @@ class BackupObjects {
 			$result['attempted']++;
 			$plain_tmp = '';
 			if (!$is_local) {
-				$plain_tmp = self::tmp_dir($plan) . '/' . $obj['name'] . '.plain';
+				$plain_tmp = self::tmp_dir($plan) . '/' . self::tmp_name((string)$obj['name']) . '.plain';
 				try {
 					self::fetch_from_store($obj, $plain_tmp);
 				} catch (\Throwable $e) {
@@ -1126,15 +1160,23 @@ class BackupObjects {
 		return $result;
 	}
 
-	/** Bring one original down from the file store. */
+	/**
+	 * A temporary's file name for an object: flat and of fixed length, so a
+	 * namespaced name needs no directory and a long one fits.
+	 */
+	private static function tmp_name($name) {
+		return hash('sha256', (string)$name);
+	}
+
+	/** Bring one original down from the file store its row records. */
 	private static function fetch_from_store(array $obj, $sink) {
 		if (isset(self::$test_hooks['catchup'])) {
 			$driver = self::$test_hooks['catchup'];
 		} else {
-			$driver = CloudStorageDriverFactory::driverWithFallback();
+			$driver = CloudStorageDriverFactory::forTarget((int)($obj['target_id'] ?? 0));
 		}
 		if (!$driver) {
-			throw new BackupObjectsException('no local copy and the file store is not configured');
+			throw new BackupObjectsException('no local copy, and no driver for the file store its record names');
 		}
 		$driver->get((string)$obj['remote_key'], $sink);
 		if (!is_file($sink)) {

@@ -18,14 +18,15 @@
  *
  * Run: php plugins/mailbox/tests/raw_message_store_test.php  (schema synced).
  *
+ * @version 1.2 - the file store is a target row: read()/delete() take the row's descriptor, a cloud raw is
+ *                read from the store and key it records, and offloaded mail is a backup object
+ *                (specs/storage_targets.md WP6)
  * @version 1.1 - one store: the mock is injected into the factory's single cache
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domains_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_messages_class.php'));
@@ -115,7 +116,7 @@ class RawMessageStoreTest {
 		$path = RawMessageStore::localPathForKey($descriptor['key']);
 		$this->written_paths[] = $path;
 		$this->ok(is_file($path), 'write() created the local .eml file');
-		$this->ok(RawMessageStore::read('local', $descriptor['key']) === $raw, 'read(local) returns identical bytes');
+		$this->ok(RawMessageStore::read(array('driver' => 'local', 'key' => $descriptor['key'])) === $raw, 'read(local) returns identical bytes');
 
 		// Persist the descriptor so the profile enumeration reads the real key.
 		$this->db->prepare("UPDATE iem_inbound_email_messages
@@ -134,11 +135,31 @@ class RawMessageStoreTest {
 		$fwd = $profile->itemsForRow($this->message_id);
 		$this->ok(is_array($fwd) && count($fwd) === 1, 'itemsForRow enumerates exactly one object');
 		$this->ok($fwd[0]['content_type'] === 'message/rfc822', 'forward item is message/rfc822');
-		$this->ok(substr($fwd[0]['remote_key'], -4) === '.eml', 'forward remote_key is the .eml key');
+		$this->ok(substr($fwd[0]['name'], -4) === '.eml', 'forward name is the .eml key');
+		$this->ok($profile->reverseItemsForRow($this->message_id) === array(), 'a local row has nothing to pull back');
 
+		// Offloaded: the row records its store and full key, and the reverse
+		// item reads that key back, with the relative name beside it.
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_raw_storage_driver='cloud',
+			iem_raw_bkt_backup_target_id=515151, iem_raw_remote_key=? WHERE iem_inbound_email_message_id=?")
+			->execute(array('mail-site/' . $fwd[0]['name'], $this->message_id));
 		$rev = $profile->reverseItemsForRow($this->message_id);
-		$this->ok(count($rev) === 1 && $rev[0]['remote_key'] === $fwd[0]['remote_key'],
-			'reverseItemsForRow mirrors the same single object');
+		$this->ok(count($rev) === 1 && $rev[0]['remote_key'] === 'mail-site/' . $fwd[0]['name'] && $rev[0]['name'] === $fwd[0]['name'],
+			'reverseItemsForRow reads the recorded key, the same single object');
+
+		$objects = array_values(array_filter($profile->backupObjects(), function ($o) { return $o['id'] === $this->message_id; }));
+		$this->ok(count($objects) === 1 && $objects[0]['name'] === 'mailbox/' . $this->message_id . '.eml'
+			&& $objects[0]['target_id'] === 515151 && $objects[0]['remote_key'] === 'mail-site/' . $fwd[0]['name'],
+			'offloaded mail is a backup object, named so no stored file name can be it', json_encode($objects));
+		$this->ok($profile->backupObject($this->message_id) == $objects[0], 'backupObject() describes the one row the same way');
+		$row = $profile->backupRow('mailbox/' . $this->message_id . '.eml');
+		$this->ok($row !== null && $row['driver'] === 'cloud' && $row['placement'] === RawMessageStore::localPathForKey($fwd[0]['name']),
+			'a restore finds the message by its object name, and where its raw goes', json_encode($row));
+		$this->ok($profile->backupRow('photo.png') === null && $profile->backupRow('mailbox/x.eml') === null, 'a name that is not mail is not its');
+
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_raw_storage_driver='local',
+			iem_raw_bkt_backup_target_id=NULL, iem_raw_remote_key=NULL WHERE iem_inbound_email_message_id=?")
+			->execute(array($this->message_id));
 	}
 
 	private function testMissingObject() {
@@ -151,7 +172,7 @@ class RawMessageStoreTest {
 		$this->ok($profile->itemsForRow($this->message_id) === null, 'itemsForRow null when the file is missing');
 
 		$threw = false;
-		try { RawMessageStore::read('local', 'mailbox/2026/03/missing.eml'); }
+		try { RawMessageStore::read(array('driver' => 'local', 'key' => 'mailbox/2026/03/missing.eml')); }
 		catch (RawMessageStoreException $e) { $threw = true; }
 		$this->ok($threw, 'read(local) throws cleanly on a missing file');
 
@@ -167,13 +188,18 @@ class RawMessageStoreTest {
 		$mock = new InMemoryBlobDriver();
 		$key = RawMessageStore::keyFor($this->message_id);
 		$raw = "From: c@d\r\nSubject: cloud\r\n\r\ncloud bytes " . $this->suffix;
-		$mock->objects[$key] = $raw;
-		$this->injectPrivateDriver($mock);
+		$mock->objects['mail-site/' . $key] = $raw;
+		CloudStorageDriverFactory::$test_drivers[515151] = $mock;
+		$descriptor = array('driver' => 'cloud', 'key' => $key, 'target_id' => 515151, 'remote_key' => 'mail-site/' . $key);
 
-		$this->ok(RawMessageStore::read('cloud', $key) === $raw, 'read(cloud) pulls identical bytes via the private driver');
+		$this->ok(RawMessageStore::read($descriptor) === $raw, 'read(cloud) pulls identical bytes from the store and key the row records');
+		$threw = false;
+		try { RawMessageStore::read(array('target_id' => 999999998) + $descriptor); }
+		catch (RawMessageStoreException $e) { $threw = true; }
+		$this->ok($threw, 'a store this site has no driver for is a clean refusal');
 
-		RawMessageStore::delete('cloud', $key);
-		$this->ok(!array_key_exists($key, $mock->objects), 'delete(cloud) removes the private object');
+		RawMessageStore::delete($descriptor);
+		$this->ok(!array_key_exists('mail-site/' . $key, $mock->objects), 'delete(cloud) removes the private object');
 
 		$this->resetFactory();
 	}
@@ -183,19 +209,14 @@ class RawMessageStoreTest {
 		// inline / remote own no platform object — delete must not throw or touch fs.
 		$threw = false;
 		try {
-			RawMessageStore::delete('inline', '');
-			RawMessageStore::delete('remote', 'inbound_email/whatever.eml');
+			RawMessageStore::delete(array('driver' => 'inline', 'key' => ''));
+			RawMessageStore::delete(array('driver' => 'remote', 'key' => 'inbound_email/whatever.eml'));
 		} catch (\Throwable $e) { $threw = true; }
 		$this->ok(!$threw, 'delete() is a silent no-op for inline and remote');
 	}
 
-	/** Force CloudStorageDriverFactory::driver() to return $mock. */
-	private function injectPrivateDriver($mock) {
-		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached');
-		$ref->setValue(null, $mock);
-	}
-
 	private function resetFactory() {
+		CloudStorageDriverFactory::$test_drivers = array();
 		CloudStorageDriverFactory::reset();
 	}
 

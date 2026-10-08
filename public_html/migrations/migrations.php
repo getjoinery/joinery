@@ -1686,3 +1686,15 @@
 		WHERE bkh_destination = 'local'
 		AND (bkh_bkt_backup_target_id IS NOT NULL OR (bkh_profile = 'manager' AND coalesce(bkh_target_name, '') <> ''))";
 	$migrations[] = $migration;
+
+	// The file store is a target row (specs/storage_targets.md WP6): its six
+	// binding settings become one sealed bkt_backup_targets row of purpose
+	// files, and every offloaded blob records that store and its full key.
+	$migration = array();
+	$migration['database_version'] = '210';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM stg_settings WHERE stg_name IN ('cloud_storage_provider',
+		'cloud_storage_endpoint', 'cloud_storage_region', 'cloud_storage_bucket', 'cloud_storage_access_key',
+		'cloud_storage_secret_key')) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'file_store_target_row.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

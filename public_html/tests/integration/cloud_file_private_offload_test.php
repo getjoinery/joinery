@@ -26,6 +26,8 @@
  *
  * Run: php tests/integration/cloud_file_private_offload_test.php
  *
+ * @version 2.2 - the file store is a target row: the scratch table records store and key, a flipped blob is
+ *                read from the store it records and forgets it (specs/storage_targets.md WP6)
  * @version 2.1 - the scratch table carries last_error
  * @version 2.0 - one private store: get_url() is always local; the flip-to-public invariant
  * @version 1.0
@@ -34,11 +36,6 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-require_once(PathHelper::getIncludePath('data/files_class.php'));
-require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, InMemoryBlobDriver, ScratchTableProfile
 
 $TABLE = 'cloud_file_private_test_rows';
@@ -66,7 +63,7 @@ try {
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");
 	$dblink->exec("CREATE TABLE $TABLE (
 		id BIGSERIAL PRIMARY KEY, drv VARCHAR(32), failed INT DEFAULT 0,
-		last_attempt TIMESTAMP, last_error VARCHAR(255), kind VARCHAR(8))");
+		last_attempt TIMESTAMP, last_error VARCHAR(255), target_id BIGINT, remote_key VARCHAR(1024), kind VARCHAR(8))");
 	$ins = function($drv, $kind) use ($dblink, $TABLE) {
 		$q = $dblink->prepare("INSERT INTO $TABLE (drv, kind) VALUES (?, ?) RETURNING id");
 		$q->execute([$drv, $kind]); return (int)$q->fetchColumn();
@@ -130,20 +127,16 @@ try {
 	// A file with no restrictions is public; its URL is a local one whatever
 	// the store's state — a public file is a local file.
 	harness_set_setting_mem('cloud_storage_enabled', '1');
-	harness_set_setting_mem('cloud_storage_endpoint', 's3.example.com');
-	harness_set_setting_mem('cloud_storage_bucket', 'some-bucket');
-	harness_set_setting_mem('cloud_storage_access_key', 'k');
-	harness_set_setting_mem('cloud_storage_secret_key', 's');
-	CloudStorageDriverFactory::reset();
 	$pub_file = new File(NULL);
 	$pub_file->set('fil_name', 'open.png', false);
 	ok('unrestricted file is_public() == true', $pub_file->is_public() === true);
 	$purl = $pub_file->get_url('original', 'short');
-	ok('public file get_url: a local /uploads URL, with a store configured and enabled', strpos($purl, 'http') !== 0 && strpos($purl, 'some-bucket') === false && strpos($purl, 'open.png') !== false, $purl);
+	ok('public file get_url: a local /uploads URL, with the store enabled', strpos($purl, 'http') !== 0 && strpos($purl, 'open.png') !== false, $purl);
 
 	section('C. A private cloud blob made public is local before its record says public');
-	// The store's driver is the in-memory double, injected into the factory's
-	// cache: the bytes live there under the blob's keys, as in a real bucket.
+	// The store the blob records is the in-memory double, put in the factory
+	// for that target: the bytes live there under the blob's keys, as in a
+	// real bucket.
 	$mock = new InMemoryBlobDriver();
 	$flip_name = '_fliptest_' . bin2hex(random_bytes(4)) . '.bin';
 	$flip_blob = new FileBlob(NULL);
@@ -153,12 +146,12 @@ try {
 	$flip_blob->set('fbb_is_private', true);
 	$flip_blob->set('fbb_reference_count', 1);
 	$flip_blob->set('fbb_storage_driver', 'cloud');
+	$flip_blob->set('fbb_bkt_backup_target_id', 424242);
+	$flip_blob->set('fbb_remote_key', 'flip-site/' . $flip_name);
 	$flip_blob->save();
 	$blob_fixture_ids[] = $flip_blob->key;
-	$mock->objects[$flip_blob->remote_key_for('original')] = "secret bytes\n";
-	$cache = new ReflectionProperty('CloudStorageDriverFactory', 'cached');
-	$cache->setAccessible(true);
-	$cache->setValue(null, $mock);
+	$mock->objects['flip-site/' . $flip_name] = "secret bytes\n";
+	CloudStorageDriverFactory::$test_drivers[424242] = $mock;
 	$fast_dir = dirname(Globalvars::get_instance()->get_setting('upload_dir')) . '/static_files/uploads';
 	$home = $fast_dir . '/' . $flip_name;
 	try {
@@ -167,10 +160,11 @@ try {
 		ok('flip to public: the record reads local', $after->get('fbb_storage_driver') === 'local');
 		ok('flip to public: the record reads public', $after->is_private_bool() === false);
 		ok('flip to public: the bytes are on this server, in the fast-serve dir', is_file($home) && file_get_contents($home) === "secret bytes\n");
-		ok('flip to public: the bucket no longer holds the object', !array_key_exists($flip_blob->remote_key_for('original'), $mock->objects));
+		ok('flip to public: the bucket no longer holds the object', !array_key_exists('flip-site/' . $flip_name, $mock->objects));
+		ok('flip to public: the record forgets the store and the key', $after->get('fbb_bkt_backup_target_id') === null && $after->get('fbb_remote_key') === null);
 	} finally {
 		@unlink($home);
-		CloudStorageDriverFactory::reset();
+		CloudStorageDriverFactory::$test_drivers = array();
 	}
 
 } finally {

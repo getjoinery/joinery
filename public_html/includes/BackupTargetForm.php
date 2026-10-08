@@ -3,10 +3,11 @@
  * BackupTargetForm — the one form that adds or edits a backup target, and the
  * one save path behind it.
  *
- * Three places draw it: the Backups page, the setup wizard's Backups step, and
- * on a management node the server_manager Backup Targets page. All three write
- * the same row (bkt_backup_targets), so they draw the same fields and save them
- * the same way. The provider list, which fields each provider asks for, and how
+ * Four places draw it: the Backups page, the setup wizard's Backups step, on a
+ * management node the server_manager Backup Targets page, and the Cloud
+ * Storage page for the file store (a target with bkt_purpose 'files'). All
+ * write the same row (bkt_backup_targets), so they draw the same fields and
+ * read them the same way. The provider list, which fields each provider asks for, and how
  * the rest is filled in come from StorageProvider's catalogue.
  *
  * A save reads the posted fields onto the target (apply()), checks the
@@ -24,7 +25,13 @@
  *                           per-run key switch (management node only)
  *   wizard            bool  the setup wizard's short form: no name, folder or
  *                           Enabled box; the target is named Backups and enabled
+ *   files             bool  the file store's form: no Enabled box (the page's
+ *                           Pause says whether files move), the folder defaults
+ *                           to this site's name; saved by CloudStorageLifecycle,
+ *                           whose check proves the bucket private
  *
+ * @version 1.2 - the files option: the file store is a target row drawn and read by this form
+ *                (specs/storage_targets.md WP6)
  * @version 1.1 - WP2: the location is drawn read-only and refused once anything is stored there, and a
  *                target that is where new backups go, or that a node backs up to, is not switched off
  * @version 1.0 - specs/storage_targets.md WP1: one target form
@@ -45,6 +52,7 @@ class BackupTargetForm {
 	public static function render($fw, ?BackupTarget $target, array $opts = array()): void {
 		$node = !empty($opts['node_credentials']);
 		$wizard = !empty($opts['wizard']);
+		$files = !empty($opts['files']);
 		$editing = $target !== null && $target->key;
 
 		try {
@@ -85,7 +93,8 @@ class BackupTargetForm {
 			$fw->hiddeninput('bkt_enabled', '', array('value' => '1'));
 		} else {
 			$fw->textinput('bkt_name', 'Name', array('required' => true,
-				'value' => $target ? (string)$target->get('bkt_name') : '', 'placeholder' => 'e.g. Backblaze backups'));
+				'value' => $target ? (string)$target->get('bkt_name') : ($files ? self::free_name('File store') : ''),
+				'placeholder' => $files ? 'e.g. Backblaze files' : 'e.g. Backblaze backups'));
 		}
 
 		// Once anything is stored, the location is fixed (R1): drawn read-only,
@@ -101,22 +110,25 @@ class BackupTargetForm {
 			'disabled' => $locked !== '',
 			'visibility_rules' => self::visibility_rules($node),
 		));
-		$fw->textinput('bkt_bucket', 'Bucket', array('required' => $wizard, 'readonly' => $locked !== '',
+		$fw->textinput('bkt_bucket', 'Bucket', array('required' => $wizard || $files, 'readonly' => $locked !== '',
 			'value' => $target ? (string)$target->get('bkt_bucket') : '',
-			'helptext' => 'A private bucket used for nothing else.'));
+			'helptext' => $files
+				? 'A private bucket used for nothing else; not a backup bucket. Save refuses a bucket anyone can read.'
+				: 'A private bucket used for nothing else.'));
 		if (!$wizard) {
+			$default_folder = $files ? CloudFileStore::default_prefix() : BackupTarget::DEFAULT_PREFIX;
 			$fw->textinput('bkt_path_prefix', 'Folder inside the bucket', array('readonly' => $locked !== '',
-				'value' => $target ? ((string)$target->get('bkt_path_prefix') ?: 'joinery-backups') : 'joinery-backups',
-				'helptext' => 'Backups are stored under this folder.'));
+				'value' => $target ? ((string)$target->get('bkt_path_prefix') ?: $default_folder) : $default_folder,
+				'helptext' => $files ? 'Offloaded files are stored under this folder.' : 'Backups are stored under this folder.'));
 		}
 
-		$fw->textinput('access_key', 'Access key ID', array('required' => $wizard, 'autocomplete' => 'off',
+		$fw->textinput('access_key', 'Access key ID', array('required' => $wizard || $files, 'autocomplete' => 'off',
 			'value' => (string)($creds['access_key'] ?? ''),
 			'helptext' => 'A key for this bucket only, that can list, read, write and delete. '
 				. 'Backblaze: listFiles, readFiles, writeFiles, deleteFiles'
 				. ($node ? ' (add writeKeys, listKeys, deleteKeys to make a key for each run)' : '')
 				. '. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.'));
-		$fw->passwordinput('secret_key', 'Secret key', array('required' => $wizard && !$main_stored,
+		$fw->passwordinput('secret_key', 'Secret key', array('required' => ($wizard || $files) && !$main_stored,
 			'autocomplete' => 'new-password',
 			'stored' => $main_stored && $saved_provider === $provider));
 		$fw->textinput('region', 'Region', array('value' => (string)($creds['region'] ?? ''), 'readonly' => $locked !== '',
@@ -148,8 +160,21 @@ class BackupTargetForm {
 			));
 		}
 
-		if (!$wizard) {
+		if (!$wizard && !$files) {
 			$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $target ? (bool)$target->get('bkt_enabled') : true));
+		}
+	}
+
+	/** $base, or "$base 2", "$base 3"… — the first no live target is called. Names are never shared. */
+	private static function free_name(string $base): string {
+		$taken = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT 1 FROM bkt_backup_targets WHERE lower(bkt_name) = lower(?) AND bkt_delete_time IS NULL');
+		for ($n = 1; ; $n++) {
+			$name = $n === 1 ? $base : $base . ' ' . $n;
+			$taken->execute(array($name));
+			if (!$taken->fetchColumn()) {
+				return $name;
+			}
 		}
 	}
 
@@ -209,7 +234,8 @@ class BackupTargetForm {
 		$target->set('bkt_provider', $provider);
 		$target->set('bkt_bucket', trim((string)($input['bkt_bucket'] ?? '')));
 		if (array_key_exists('bkt_path_prefix', $input) || !$target->key) {
-			$target->set('bkt_path_prefix', trim((string)($input['bkt_path_prefix'] ?? '')) ?: 'joinery-backups');
+			$target->set('bkt_path_prefix', trim((string)($input['bkt_path_prefix'] ?? ''))
+				?: ($target->is_file_store() ? CloudFileStore::default_prefix() : BackupTarget::DEFAULT_PREFIX));
 		}
 		$target->set('bkt_enabled', !empty($input['bkt_enabled']));
 
@@ -366,6 +392,10 @@ class BackupTargetForm {
 	 * @return array{ok: bool, message: string} the sentence to show either way
 	 */
 	public static function save(BackupTarget $target, array $input, array $opts = array()): array {
+		if ($target->is_file_store()) {
+			// A file store is proved private before it is stored, by its own page.
+			return array('ok' => false, 'message' => 'Not saved. This is a file store; it is changed on the Cloud Storage page.');
+		}
 		$applied = self::apply($target, $input, $opts);
 		if (!$applied['ok']) {
 			return array('ok' => false, 'message' => $applied['message']);

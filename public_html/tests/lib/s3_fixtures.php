@@ -32,6 +32,8 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.4 - a ranged GET is answered 206 with the span; every key written is logged in order
+ *                (s3fx_put_keys())
  * @version 1.3 - bodies stream to disk: a part or an object is copied from the request to its file, and a
  *                multipart complete joins the parts on disk, so the stand-in holds no more than one request
  *                in memory (php -S buffers that). Joining them in a string held a 450 MB archive twice over
@@ -96,6 +98,12 @@ function s3fx_count($fixture, $name) {
 function s3fx_object($fixture, $bucket, $path) {
 	$v = @file_get_contents(s3fx_object_file($fixture['dir'], $bucket, $path));
 	return ($v === false) ? null : $v;
+}
+
+/** Every key a single PUT wrote ('bucket/key'), in the order written, deleted ones included. */
+function s3fx_put_keys($fixture) {
+	$raw = (string)@file_get_contents($fixture['dir'] . '/put.keys');
+	return $raw === '' ? array() : explode("\n", rtrim($raw, "\n"));
 }
 
 /** Every stored key ('bucket/key'), sorted. */
@@ -215,6 +223,7 @@ if ($method === "PUT") {
 	}
 	$sink($file);
 	file_put_contents($file . ".key", $full);
+	file_put_contents($dir . "/put.keys", $full . "\n", FILE_APPEND);
 	header("ETag: \"" . md5_file($file) . "\"");
 	return true;
 }
@@ -246,6 +255,15 @@ if ($method === "GET") {
 		return true;
 	}
 	header("Content-Type: application/octet-stream");
+	if (preg_match("#^bytes=(\\d+)-(\\d+)$#", (string)($_SERVER["HTTP_RANGE"] ?? ""), $rm)) {
+		$bytes = (string)file_get_contents($file);
+		$span = substr($bytes, (int)$rm[1], (int)$rm[2] - (int)$rm[1] + 1);
+		http_response_code(206);
+		header("Content-Range: bytes " . (int)$rm[1] . "-" . ((int)$rm[1] + strlen($span) - 1) . "/" . strlen($bytes));
+		header("Content-Length: " . strlen($span));
+		echo $span;
+		return true;
+	}
 	header("Content-Length: " . filesize($file));
 	readfile($file);
 	return true;

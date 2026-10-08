@@ -18,24 +18,31 @@
  *      ingest never blocks on bucket I/O; the engine offloads later, the same
  *      posture as the public-files path.
  *
- * One relative key, two tier bases. iem_raw_storage_key is tier-invariant:
+ * One relative key, two tiers. iem_raw_storage_key is the relative name:
  *
  *     mailbox/{yyyy}/{mm}/{message_id}.eml
  *
- *   - local: base {site_root}/storage/  (via PathHelper::getSiteRoot())
- *   - cloud: the {site_template}/ prefix the shared S3 driver applies itself
+ *   - local: under {site_root}/storage/  (via PathHelper::getSiteRoot())
+ *   - cloud: under the file store's folder; the row records the store
+ *     (iem_raw_bkt_backup_target_id) and the full key it went to
+ *     (iem_raw_remote_key), and every read and delete follows them
  *
- * so offload is a flag flip + byte copy with NO key rewrite. The local store is
- * outside the web root; the cloud tier is the verified-private bucket reached
- * only through the shared driver's server-side get() — never a public URL.
+ * The local store is outside the web root; the cloud tier is a verified-private
+ * bucket reached only through the driver's server-side get() — never a public
+ * URL.
  *
+ * Offloaded mail is in backups the way offloaded files are: backupObjects()
+ * names each cloud row as the object 'mailbox/{id}.eml' (BackupObjects), and
+ * backupRow() is what a restore puts it back by.
+ *
+ * @version 1.6 - the row records its store and full key; read()/delete() take the row's descriptor
+ *                (descriptorOf()); backupObjects()/backupObject()/backupRow(): offloaded mail is in
+ *                backups (specs/storage_targets.md WP6)
  * @version 1.5 - lastErrorColumn()
  * @version 1.4 - one store: the driver is resolved with no visibility argument
  * @version 1.3
  */
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/StorageProfile.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
 
 class RawMessageStoreException extends Exception {}
 
@@ -53,6 +60,8 @@ class RawMessageStore implements StorageProfile {
 	public function failedCountColumn(): string { return 'iem_raw_sync_failed_count'; }
 	public function lastAttemptColumn(): string { return 'iem_raw_sync_last_attempt'; }
 	public function lastErrorColumn(): string   { return 'iem_raw_sync_last_error'; }
+	public function targetColumn(): string      { return 'iem_raw_bkt_backup_target_id'; }
+	public function remoteKeyColumn(): string   { return 'iem_raw_remote_key'; }
 
 	public function visibility(): string { return 'private'; }
 
@@ -94,26 +103,105 @@ class RawMessageStore implements StorageProfile {
 		}
 		return [[
 			'local_path'   => $local_path,
-			'remote_key'   => $key,
+			'name'         => $key,
 			'content_type' => self::CONTENT_TYPE,
 		]];
 	}
 
 	/**
-	 * REVERSE: the same single .eml, computed from the key scheme WITHOUT
+	 * REVERSE: the same single .eml at the key the row recorded, WITHOUT
 	 * needing local bytes (on pull-back none exist yet). local_path is the
 	 * final on-disk destination the engine writes to before flipping to 'local'.
 	 */
 	public function reverseItemsForRow(int $id): array {
-		$key = $this->_storageKey($id);
-		if ($key === '') {
+		$row = $this->_row($id);
+		if (!$row || (string)$row['iem_raw_storage_key'] === '' || (string)$row['iem_raw_remote_key'] === '') {
 			return [];
 		}
 		return [[
-			'remote_key'   => $key,
-			'local_path'   => self::localPathForKey($key),
+			'remote_key'   => (string)$row['iem_raw_remote_key'],
+			'name'         => (string)$row['iem_raw_storage_key'],
+			'local_path'   => self::localPathForKey((string)$row['iem_raw_storage_key']),
 			'content_type' => self::CONTENT_TYPE,
 		]];
+	}
+
+	// =====================================================================
+	// Backup — offloaded mail is stored in backups like offloaded files
+	// =====================================================================
+
+	/** The backup object name for a message: namespaced so it can never be a file's stored name. */
+	public static function backupName(int $message_id): string {
+		return 'mailbox/' . $message_id . '.eml';
+	}
+
+	/**
+	 * Every offloaded message, as the backup's object store sees it: its
+	 * name, the local path its raw occupies while it waits for backup
+	 * storage, and where to fetch it from the file store when no local copy
+	 * is left (BlobStorageProfile::backupObjects() is the same shape).
+	 */
+	public function backupObjects(): array {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->query(
+			"SELECT iem_inbound_email_message_id, iem_raw_storage_key, iem_raw_bkt_backup_target_id, iem_raw_remote_key
+			   FROM " . self::TABLE . " WHERE iem_raw_storage_driver = 'cloud'
+			  ORDER BY iem_inbound_email_message_id ASC");
+		$out = [];
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$out[] = $this->describe_for_backup($row);
+		}
+		return $out;
+	}
+
+	/** One message in the shape backupObjects() lists, or null when it is gone or not offloaded. */
+	public function backupObject(int $id): ?array {
+		$row = $this->_row($id);
+		if (!$row || $row['iem_raw_storage_driver'] !== 'cloud') {
+			return null;
+		}
+		return $this->describe_for_backup($row);
+	}
+
+	private function describe_for_backup(array $row): array {
+		$local = self::localPathForKey((string)$row['iem_raw_storage_key']);
+		return [
+			'table'        => $this->table(),
+			'id'           => (int)$row['iem_inbound_email_message_id'],
+			'name'         => self::backupName((int)$row['iem_inbound_email_message_id']),
+			'original'     => $local,
+			'paths'        => [$local],
+			'target_id'    => (int)$row['iem_raw_bkt_backup_target_id'],
+			'remote_key'   => (string)$row['iem_raw_remote_key'],
+			'content_type' => self::CONTENT_TYPE,
+			'visibility'   => $this->visibility(),
+		];
+	}
+
+	/**
+	 * The row a backup object name belongs to, for a restore: where its raw
+	 * goes on disk and what the store holds of it. Null when the name is not
+	 * mail or the restored database has no such message. Mail records no size
+	 * or hash of its raw; the index's hash of the ciphertext is the check.
+	 */
+	public function backupRow(string $name): ?array {
+		if (!preg_match('#^mailbox/(\d+)\.eml$#', $name, $m)) {
+			return null;
+		}
+		$row = $this->_row((int)$m[1]);
+		if (!$row || (string)$row['iem_raw_storage_key'] === '') {
+			return null;
+		}
+		return [
+			'id'         => (int)$row['iem_inbound_email_message_id'],
+			'label'      => 'message ' . (int)$row['iem_inbound_email_message_id'],
+			'driver'     => (string)$row['iem_raw_storage_driver'],
+			'placement'  => self::localPathForKey((string)$row['iem_raw_storage_key']),
+			'size'       => 0,
+			'sha256'     => '',
+			'target_id'  => (int)$row['iem_raw_bkt_backup_target_id'],
+			'remote_key' => (string)$row['iem_raw_remote_key'],
+		];
 	}
 
 	// =====================================================================
@@ -143,13 +231,30 @@ class RawMessageStore implements StorageProfile {
 	}
 
 	/**
-	 * Read the raw bytes for a stored-raw driver. 'local' reads the file;
-	 * 'cloud' pulls the private object to a unique temp, returns its bytes, and
-	 * unlinks the temp. Throws RawMessageStoreException on any failure (callers
-	 * — the message accessor — catch and degrade to "temporarily unavailable").
-	 * inline / remote are resolved by the accessor, not here.
+	 * A message's raw-storage descriptor: driver, relative key, and for an
+	 * offloaded raw the store and full key the row recorded. What read() and
+	 * delete() take.
 	 */
-	public static function read(string $driver, string $key): string {
+	public static function descriptorOf($msg): array {
+		return [
+			'driver'     => (string)$msg->get('iem_raw_storage_driver'),
+			'key'        => (string)$msg->get('iem_raw_storage_key'),
+			'target_id'  => (int)$msg->get('iem_raw_bkt_backup_target_id'),
+			'remote_key' => (string)$msg->get('iem_raw_remote_key'),
+		];
+	}
+
+	/**
+	 * Read the raw bytes for a stored-raw descriptor. 'local' reads the file;
+	 * 'cloud' pulls the private object from the store the row names to a
+	 * unique temp, returns its bytes, and unlinks the temp. Throws
+	 * RawMessageStoreException on any failure (callers — the message accessor
+	 * — catch and degrade to "temporarily unavailable"). inline / remote are
+	 * resolved by the accessor, not here.
+	 */
+	public static function read(array $raw): string {
+		$driver = (string)($raw['driver'] ?? '');
+		$key = (string)($raw['key'] ?? '');
 		if ($driver === 'local') {
 			$local_path = self::localPathForKey($key);
 			if (!is_file($local_path)) {
@@ -163,16 +268,17 @@ class RawMessageStore implements StorageProfile {
 		}
 
 		if ($driver === 'cloud') {
-			$cloud = self::privateDriver();
-			if (!$cloud) {
-				throw new RawMessageStoreException('The private store is not reachable for a cloud raw read.');
+			$cloud = CloudStorageDriverFactory::forTarget((int)($raw['target_id'] ?? 0));
+			$remote_key = (string)($raw['remote_key'] ?? '');
+			if (!$cloud || $remote_key === '') {
+				throw new RawMessageStoreException('The file store this message is in is not reachable for a cloud raw read.');
 			}
 			$tmp = tempnam(sys_get_temp_dir(), 'iem_raw_');
 			if ($tmp === false) {
 				throw new RawMessageStoreException('Could not allocate a temp file for a cloud raw read.');
 			}
 			try {
-				$cloud->get($key, $tmp);
+				$cloud->get($remote_key, $tmp);
 				$bytes = @file_get_contents($tmp);
 				if ($bytes === false) {
 					throw new RawMessageStoreException('Could not read the pulled cloud raw message.');
@@ -187,12 +293,15 @@ class RawMessageStore implements StorageProfile {
 	}
 
 	/**
-	 * Best-effort delete of the stored object (the message hard-delete hook).
-	 * 'local' unlinks the file; 'cloud' deletes the private object. inline and
+	 * Best-effort delete of the stored object (the message hard-delete hook),
+	 * for a descriptor (descriptorOf()). 'local' unlinks the file; 'cloud'
+	 * deletes the private object from the store the row names. inline and
 	 * remote are no-ops (no platform-owned object to reclaim). Cloud-delete
 	 * failures are logged as orphans — the row is removed regardless.
 	 */
-	public static function delete(string $driver, string $key): void {
+	public static function delete(array $raw): void {
+		$driver = (string)($raw['driver'] ?? '');
+		$key = (string)($raw['key'] ?? '');
 		if ($driver === 'local') {
 			$local_path = self::localPathForKey($key);
 			if (is_file($local_path)) {
@@ -201,17 +310,19 @@ class RawMessageStore implements StorageProfile {
 			return;
 		}
 		if ($driver === 'cloud') {
-			$cloud = self::privateDriver();
-			if (!$cloud) {
-				error_log('CLOUD_STORAGE_ORPHAN: visibility=private table=' . self::TABLE
-					. ' keys=' . $key . ' (private driver unconfigured at delete)');
+			$target_id = (int)($raw['target_id'] ?? 0);
+			$remote_key = (string)($raw['remote_key'] ?? '');
+			$cloud = CloudStorageDriverFactory::forTarget($target_id);
+			if (!$cloud || $remote_key === '') {
+				error_log('CLOUD_STORAGE_ORPHAN: table=' . self::TABLE . ' target=' . $target_id
+					. ' keys=' . ($remote_key !== '' ? $remote_key : $key) . ' (no driver for its file store at delete)');
 				return;
 			}
 			try {
-				$cloud->delete($key);
+				$cloud->delete($remote_key);
 			} catch (Exception $e) {
-				error_log('CLOUD_STORAGE_ORPHAN: visibility=private table=' . self::TABLE
-					. ' keys=' . $key . ' (' . $e->getMessage() . ')');
+				error_log('CLOUD_STORAGE_ORPHAN: table=' . self::TABLE . ' target=' . $target_id
+					. ' keys=' . $remote_key . ' (' . $e->getMessage() . ')');
 			}
 			return;
 		}
@@ -254,13 +365,16 @@ class RawMessageStore implements StorageProfile {
 	// internals
 	// =====================================================================
 
-	/**
-	 * The private-store driver for reads/deletes. Uses the with-fallback
-	 * resolver so a still-cloud row stays readable during a disable/drain window
-	 * — not a band-aid: the binding is valid and the bytes are private either way.
-	 */
-	private static function privateDriver() {
-		return CloudStorageDriverFactory::driverWithFallback();
+	/** The row's storage columns, or null. */
+	private function _row(int $id): ?array {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			'SELECT iem_inbound_email_message_id, iem_raw_storage_driver, iem_raw_storage_key,
+			        iem_raw_bkt_backup_target_id, iem_raw_remote_key
+			   FROM ' . self::TABLE . ' WHERE iem_inbound_email_message_id = ?');
+		$q->execute([$id]);
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		return $row ?: null;
 	}
 
 	private function _driverFlag(int $id): ?string {

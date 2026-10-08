@@ -33,7 +33,6 @@
     "problem_reports": "Problem reports",
     "backups": "Backups",
     "upgrade": "Upgrade settings",
-    "cloud_storage": "Cloud storage",
     "oauth": "OAuth providers",
     "mobile_apps": "Mobile apps",
     "tier_gating": "Tier gating",
@@ -1021,70 +1020,6 @@
       "helptext": "DEAD. No reader. Comment spam control is use_captcha_comments. Declared so the surviving row is not an orphan. Safe to purge."
     },
     {
-      "name": "cloud_storage_provider",
-      "default": "generic",
-      "group": "cloud_storage",
-      "label": "Provider",
-      "type": "select",
-      "options_from": "StorageProvider::options",
-      "helptext": "Only the fields the provider needs are shown. Generic fits MinIO and any other S3 compatible service."
-    },
-    {
-      "name": "cloud_storage_endpoint",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Endpoint hostname",
-      "type": "text",
-      "helptext": "The provider's S3 hostname, with or without https://.",
-      "show_when": {
-        "cloud_storage_provider": [
-          "generic",
-          "r2"
-        ]
-      }
-    },
-    {
-      "name": "cloud_storage_region",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Region",
-      "type": "text",
-      "helptext": "What the provider calls the bucket's region or datacenter.",
-      "show_when": {
-        "cloud_storage_provider": [
-          "generic",
-          "s3",
-          "wasabi",
-          "digitalocean",
-          "linode"
-        ]
-      }
-    },
-    {
-      "name": "cloud_storage_bucket",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Bucket name",
-      "type": "text",
-      "helptext": "A private bucket used for nothing else. Not the backup bucket. Save refuses a bucket anyone can read."
-    },
-    {
-      "name": "cloud_storage_access_key",
-      "default": "",
-      "group": "cloud_storage",
-      "label": "Access key",
-      "type": "text",
-      "helptext": "A key for this bucket only, with list, read, write and delete. Backblaze: listFiles, readFiles, writeFiles, deleteFiles. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject."
-    },
-    {
-      "name": "cloud_storage_secret_key",
-      "default": "",
-      "secret": true,
-      "group": "cloud_storage",
-      "label": "Secret key",
-      "helptext": "Rotate it with the bucket provider if you suspect it has been exposed."
-    },
-    {
       "name": "cloud_storage_public_base_url",
       "default": "",
       "managed": true,
@@ -1095,6 +1030,18 @@
       "default": "",
       "managed": true,
       "helptext": "DEAD. No reader. The file store is one private bucket, cloud_storage_bucket. Declared so a surviving row is not an orphan. Safe to purge."
+    },
+    {
+      "name": "file_store_target_id",
+      "default": "",
+      "managed": true,
+      "helptext": "Written by the cloud storage page. The file store target (a backup target row of purpose files) new offloaded files go to. Files already offloaded are read from the store their own record names."
+    },
+    {
+      "name": "cloud_storage_move",
+      "default": "",
+      "managed": true,
+      "helptext": "Written by the cloud storage page's Move files and by the offload tick. The move in progress, as JSON: the file store moved from and to, how many files, and the last batch. Blank when no move runs."
     },
     {
       "name": "cloud_storage_draining",

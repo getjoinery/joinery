@@ -29,6 +29,7 @@
  *
  * Run: php tests/cloud_storage/store_inventory_test.php
  *
+ * @version 1.2 - a file with no driver for its file store is counted unchecked, in those words
  * @version 1.1 - one file store: one driver, rows carry no visibility
  * @version 1.0
  */
@@ -152,13 +153,13 @@ check(array_keys($rec['last']['missing']) === array('e.bin') && $flaky->asked['a
 	'a first "absent" is asked again; only the file the bucket really lacks or holds wrong is missing', json_encode($flaky->asked));
 $driver = $store;
 
-// With no store configured nothing can be checked, and every row is counted.
+// With no driver for the rows' file store nothing can be checked, and every row is counted.
 $driver = null;
 $rec = $record(); $rec['last']['finished'] = '2026-09-20 00:00:00'; CloudStoreInventory::write($rec);
 $r = CloudStoreInventory::tick('2026-09-22 05:00:00', 60);
 $rec = $record();
 check($r['status'] === 'finished' && $rec['last']['checked'] === 0 && $rec['last']['unchecked'] === 7, 'all seven rows are unchecked', json_encode($rec['last']));
-check(strpos($r['message'], '7 not checked (no store configured)') !== false, 'and the line says so', $r['message']);
+check(strpos($r['message'], '7 not checked (no driver for their file store)') !== false, 'and the line says so', $r['message']);
 $html = CloudStoreInventoryPanel::render(CloudStoreInventory::summary($rec, array()), CloudStoreInventoryPanel::SOURCE_SITE, '/admin/admin_backups');
 check(strpos($html, '7 could not be checked (no store is configured)') !== false, 'the panel says how many could not be checked', $html);
 $driver = $store;

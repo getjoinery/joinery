@@ -28,6 +28,9 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.4.0 - an offloaded blob records its file store target and the full key of its original
+ *                  (fbb_bkt_backup_target_id, fbb_remote_key); every cloud read, write and delete follows
+ *                  the row, and a variant's key sits beside the original's (specs/storage_targets.md WP6)
  * @version 1.3.1 - a transient decode refusal (the site out of memory just then) is not recorded
  * @version 1.3.0 - one decode per resize: ImageDecoder opens the original once, shrunk and upright,
  *                  every size is cut from it under one ImageWorkLock hold, and a decode the
@@ -50,6 +53,14 @@ class FileBlob extends SystemBase {
 	// Physical storage: not user-facing, not API-exposed, not AI-readable. A
 	// blob never soft-deletes — release() reclaims it directly at refcount 0.
 
+	// A file store holding a blob's objects is refused deletion
+	// (BackupTarget::delete_refusal()); a target removed for good under a
+	// blob would leave the row naming nothing, so that is refused too.
+	protected static $foreign_key_actions = array(
+		'fbb_bkt_backup_target_id' => array('action' => 'prevent',
+			'message' => 'offloaded files are still stored in this file store; move them or pull them back first'),
+	);
+
 	public static $field_specifications = array(
 		'fbb_file_blob_id'      => array('type'=>'int8','is_nullable'=>false,'serial'=>true),
 		'fbb_stored_name'       => array('type'=>'varchar(255)','is_nullable'=>false,'required'=>true,'unique'=>true),
@@ -59,6 +70,11 @@ class FileBlob extends SystemBase {
 		'fbb_is_private'        => array('type'=>'bool','is_nullable'=>false,'default'=>'false'),
 		'fbb_reference_count'   => array('type'=>'int4','is_nullable'=>false,'default'=>1),
 		'fbb_storage_driver'    => array('type'=>'varchar(32)','is_nullable'=>false,'default'=>'local'),
+		// Where an offloaded blob's objects are: the file store target, and the
+		// full key its original was written under. Its variants sit beside it
+		// (remote_key_for()). Null while the blob is local.
+		'fbb_bkt_backup_target_id' => array('type'=>'int8','is_nullable'=>true,'index'=>true),
+		'fbb_remote_key'        => array('type'=>'varchar(1024)','is_nullable'=>true),
 		// Size key written by store_encrypted_variant (a ciphertext blob's
 		// client-produced thumbnail). Durable variant inventory: cloud-side
 		// lifecycle ops can't scan a disk, and the value must survive later
@@ -138,13 +154,43 @@ class FileBlob extends SystemBase {
 	}
 
 	/**
-	 * Bucket object key (without the driver-applied prefix) for a size variant.
-	 * 'original' → "<stored_name>"; otherwise "<size>/<stored_name>". Variants
-	 * are shared by every file referencing this blob.
+	 * The relative name a size variant is offloaded under, inside the file
+	 * store's folder: 'original' → "<stored_name>"; otherwise
+	 * "<size>/<stored_name>". Variants are shared by every file referencing
+	 * this blob.
 	 */
-	public function remote_key_for($size_key = 'original') {
+	public function remote_name_for($size_key = 'original') {
 		$name = $this->get('fbb_stored_name');
 		return $size_key === 'original' ? $name : $size_key . '/' . $name;
+	}
+
+	/**
+	 * The full key a size variant of this offloaded blob is at, in the store
+	 * the row names: the recorded key for the original, and beside it for a
+	 * variant. Read from the row, never from the store chosen now.
+	 *
+	 * @throws FileBlobException when the blob records no key (it is not offloaded)
+	 */
+	public function remote_key_for($size_key = 'original') {
+		$recorded = (string)$this->get('fbb_remote_key');
+		if ($recorded === '') {
+			throw new FileBlobException('Blob ' . $this->key . ' records no file store key.');
+		}
+		return self::key_beside($recorded, (string)$this->get('fbb_stored_name'), (string)$size_key);
+	}
+
+	/**
+	 * A variant's key beside its original's: "{folder}/{name}" →
+	 * "{folder}/{size}/{name}". Pure.
+	 */
+	public static function key_beside(string $original_key, string $name, string $size_key): string {
+		if ($size_key === 'original') {
+			return $original_key;
+		}
+		if ($name === '' || substr($original_key, -strlen($name)) !== $name) {
+			throw new FileBlobException('The recorded key ' . $original_key . ' does not end in the stored name ' . $name . '.');
+		}
+		return substr($original_key, 0, strlen($original_key) - strlen($name)) . $size_key . '/' . $name;
 	}
 
 	/**
@@ -204,9 +250,13 @@ class FileBlob extends SystemBase {
 	// whether the store is enabled, paused or draining.
 	// ------------------------------------------------------------------
 
+	/** The driver for the file store this blob's record names, or null. */
+	public function cloud_driver() {
+		return CloudStorageDriverFactory::forTarget((int)$this->get('fbb_bkt_backup_target_id'));
+	}
+
 	private function _cloud_driver() {
-		require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriverFactory.php'));
-		return CloudStorageDriverFactory::driverWithFallback();
+		return $this->cloud_driver();
 	}
 
 	// ==================================================================
@@ -545,15 +595,20 @@ class FileBlob extends SystemBase {
 	 * for manual cleanup and the row is removed regardless.
 	 */
 	private function _delete_cloud_bytes() {
-		$driver = $this->_cloud_driver();
-		if (!$driver) {
-			error_log('CLOUD_STORAGE_ORPHAN: bucket=unknown keys=' . $this->remote_key_for('original') . ' (driver unconfigured)');
+		$target_id = (int)$this->get('fbb_bkt_backup_target_id');
+		try {
+			$keys = array($this->remote_key_for('original'));
+			foreach ($this->variant_size_keys() as $size_key) {
+				$keys[] = $this->remote_key_for($size_key);
+			}
+		} catch (FileBlobException $e) {
+			error_log('CLOUD_STORAGE_ORPHAN: target=' . $target_id . ' name=' . $this->get('fbb_stored_name') . ' (' . $e->getMessage() . ')');
 			return;
 		}
-
-		$keys = array($this->remote_key_for('original'));
-		foreach ($this->variant_size_keys() as $size_key) {
-			$keys[] = $this->remote_key_for($size_key);
+		$driver = $this->_cloud_driver();
+		if (!$driver) {
+			error_log('CLOUD_STORAGE_ORPHAN: target=' . $target_id . ' keys=' . implode(',', $keys) . ' (no driver for its file store)');
+			return;
 		}
 
 		$failed_keys = array();
@@ -570,8 +625,7 @@ class FileBlob extends SystemBase {
 			}
 		}
 		if (!empty($failed_keys)) {
-			$bucket = Globalvars::get_instance()->get_setting('cloud_storage_bucket') ?: 'unknown';
-			error_log('CLOUD_STORAGE_ORPHAN: bucket=' . $bucket . ' keys=' . implode(',', $failed_keys));
+			error_log('CLOUD_STORAGE_ORPHAN: target=' . $target_id . ' keys=' . implode(',', $failed_keys));
 		}
 	}
 
@@ -921,7 +975,8 @@ class FileBlob extends SystemBase {
 			$dblink->beginTransaction();
 			try {
 				$q = $dblink->prepare(
-					"UPDATE fbb_file_blobs SET fbb_storage_driver = 'local', fbb_is_private = :priv WHERE fbb_file_blob_id = :id");
+					"UPDATE fbb_file_blobs SET fbb_storage_driver = 'local', fbb_is_private = :priv,
+					 fbb_bkt_backup_target_id = NULL, fbb_remote_key = NULL WHERE fbb_file_blob_id = :id");
 				$q->bindValue(':priv', $to_private, PDO::PARAM_BOOL);
 				$q->bindValue(':id', $this->key, PDO::PARAM_INT);
 				$q->execute();
@@ -933,6 +988,8 @@ class FileBlob extends SystemBase {
 
 			$this->set('fbb_storage_driver', 'local', false);
 			$this->set('fbb_is_private', $to_private, false);
+			$this->set('fbb_bkt_backup_target_id', null, false);
+			$this->set('fbb_remote_key', null, false);
 		} catch (Exception $e) {
 			foreach ($copied_paths as $p) @unlink($p);
 			foreach ($keys as $size_key) {

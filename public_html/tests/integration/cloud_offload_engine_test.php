@@ -18,6 +18,8 @@
  *
  * Run: php tests/integration/cloud_offload_engine_test.php
  *
+ * @version 1.2 - a push goes to a file store (CloudFileStore) and the row records its store and key; a
+ *                pull-back clears both; keys sit under the store's folder
  * @version 1.1 - a missing-on-disk row is parked with the reason, and the batch is a success
  * @version 1.0
  */
@@ -25,9 +27,7 @@
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudStorageDriver.php'));
-require_once(PathHelper::getIncludePath('includes/cloud_storage/CloudOffloadEngine.php'));
-require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, ScratchTableProfile
+require_once(__DIR__ . '/../lib/cloud_fixtures.php'); // RecordingMockDriver, ScratchTableProfile, cloud_test_store
 
 $TABLE = 'cloud_offload_engine_test_rows';
 $BASE  = sys_get_temp_dir() . '/cloud_engine_test_' . bin2hex(random_bytes(4));
@@ -58,6 +58,8 @@ try {
 		failed INT DEFAULT 0,
 		last_attempt TIMESTAMP,
 		last_error VARCHAR(255),
+		target_id BIGINT,
+		remote_key VARCHAR(1024),
 		eligible BOOLEAN DEFAULT TRUE
 	)");
 
@@ -88,13 +90,17 @@ try {
 			$dblink->prepare("UPDATE $TABLE SET eligible = false WHERE id = ?")->execute([$mid]);
 		}
 	};
-	$res = CloudOffloadEngine::syncBatch($profile, $fwd);
+	$res = CloudOffloadEngine::syncBatch($profile, cloud_test_store($fwd, 77));
 
 	// A missing-on-disk row is parked, not failed: the batch is a success and
 	// says missing=1, so a record with no bytes never turns the run red.
 	ok('forward: status success (the missing row is parked, not failed)', $res['status'] === 'success');
 	ok('forward: message reports pushed=2 failed=0 missing=1', strpos($res['message'], 'pushed=2') !== false && strpos($res['message'], 'failed=0') !== false && strpos($res['message'], 'missing=1') !== false);
 	ok('forward: ok rows flipped to cloud', $drvflag($ok1) === 'cloud' && $drvflag($ok2) === 'cloud');
+	$placed = $dblink->query("SELECT target_id, remote_key FROM $TABLE WHERE id = " . (int)$ok1)->fetch(PDO::FETCH_ASSOC);
+	ok('forward: the row records the store and the key it went to',
+		(int)$placed['target_id'] === 77 && $placed['remote_key'] === $ok1 . '/original', json_encode($placed));
+	ok('forward: an un-pushed row records no store', $dblink->query("SELECT target_id FROM $TABLE WHERE id = " . (int)$mid)->fetchColumn() === null);
 	ok('forward: ok local bytes deleted', !file_exists("$BASE/disk/$ok1/original") && !file_exists("$BASE/disk/$ok2/original"));
 	ok('forward: missing-on-disk stays local', $drvflag($miss) === 'local');
 	ok('forward: missing-on-disk parked at the cap', $failcount($miss) === CloudOffloadEngine::FAILED_COUNT_CAP);
@@ -111,6 +117,8 @@ try {
 	$rres = CloudOffloadEngine::reverseBatch($profile, $rev);
 	ok('reverse: status success', $rres['status'] === 'success');
 	ok('reverse: rows flipped to local', $drvflag($ok1) === 'local' && $drvflag($ok2) === 'local');
+	ok('reverse: the rows forget the store and the key',
+		(int)$dblink->query("SELECT count(*) FROM $TABLE WHERE id IN ($ok1, $ok2) AND target_id IS NULL AND remote_key IS NULL")->fetchColumn() === 2);
 	ok('reverse: bytes restored to local_path', file_exists("$BASE/restore/$ok1/original") && file_exists("$BASE/restore/$ok2/original"));
 	$ops = array_map(fn($c) => $c['op'], $rev->calls);
 	$g = array_search('get', $ops, true); $d = array_search('delete', $ops, true);
@@ -139,7 +147,7 @@ try {
 	$pdriver = new RecordingMockDriver();
 	$pdriver->fail_keys = [$pf . '/thumb'];                      // the 2nd object PUT fails
 	$sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
-	$pres = $sync_row->invoke(null, $multi_profile, $pf, $pdriver);
+	$pres = $sync_row->invoke(null, $multi_profile, $pf, cloud_test_store($pdriver));
 	ok('partial-push: row reported failed', $pres === 'failed');
 	ok('partial-push: the already-pushed original was deleted (rollback)',
 		count(array_filter($pdriver->ops('delete'), function ($c) use ($pf) { return $c['key'] === $pf . '/original'; })) === 1);
@@ -148,6 +156,21 @@ try {
 	ok('partial-push: row stays local', $drvflag($pf) === 'local');
 	ok('partial-push: failure counter incremented', $failcount($pf) === 1);
 	ok('partial-push: local bytes NOT deleted', file_exists("$BASE/disk/$pf/original"));
+
+	// --- KEYS UNDER THE STORE'S FOLDER ------------------------------------
+	section('A push stores each name under the store\'s folder');
+	$fk = $ins('local');
+	make_disk_file($BASE, $fk);
+	$fdriver = new RecordingMockDriver();
+	$sync_row->invoke(null, $profile, $fk, cloud_test_store($fdriver, 78, 'site-a/files'));
+	$puts = array_column($fdriver->ops('put'), 'key');
+	ok('folder: the object is put at {folder}/{name}', $puts === array('site-a/files/' . $fk . '/original'), json_encode($puts));
+	ok('folder: and that full key is what the row records',
+		$dblink->query("SELECT remote_key FROM $TABLE WHERE id = " . (int)$fk)->fetchColumn() === 'site-a/files/' . $fk . '/original');
+	$rdriver = new RecordingMockDriver();
+	CloudOffloadEngine::reverseBatch($profile, $rdriver);
+	ok('folder: a pull-back reads the key the row recorded',
+		in_array('site-a/files/' . $fk . '/original', array_column($rdriver->ops('get'), 'key'), true));
 
 } finally {
 	$dblink->exec("DROP TABLE IF EXISTS $TABLE");

@@ -31,6 +31,7 @@
  *
  * Run: php tests/cloud_storage/offload_release_test.php
  *
+ * @version 1.2 - pushed to a file store (cloud_test_store), as the engine now takes one
  * @version 1.1 - one private store: the blobs are private, in the restricted directory
  * @version 1.0
  */
@@ -125,7 +126,7 @@ BackupProfile::$enabled_for_tests = array();
 BackupObjects::$test_hooks = array('site_plan' => $plan);
 list($b0, $p0) = $make_blob('none', "bytes zero\n");
 $driver = new RecordingMockDriver();
-$r = $sync_row->invoke(null, $profile, (int)$b0->key, $driver);
+$r = $sync_row->invoke(null, $profile, (int)$b0->key, cloud_test_store($driver));
 check($r === 'pushed', 'the row is pushed', (string)$r);
 check((new FileBlob($b0->key, true))->get('fbb_storage_driver') === 'cloud', 'and flipped to cloud');
 check(!is_file($p0), 'the local bytes are gone');
@@ -139,7 +140,7 @@ BackupProfile::$enabled_for_tests = array(BackupProfile::SITE);
 $bytes1 = random_bytes(5000);
 list($b1, $p1, $n1) = $make_blob('site', $bytes1);
 $driver = new RecordingMockDriver();
-$r = $sync_row->invoke(null, $profile, (int)$b1->key, $driver);
+$r = $sync_row->invoke(null, $profile, (int)$b1->key, cloud_test_store($driver));
 check($r === 'pushed', 'the row is pushed', (string)$r);
 check((new FileBlob($b1->key, true))->get('fbb_storage_driver') === 'cloud', 'and flipped to cloud');
 $objs = $shelf_objects();
@@ -162,7 +163,7 @@ check(json_decode(file_get_contents($out . '/objects/epoch.json'), true)['id'] =
 
 // A second row in the same epoch: no second envelope.
 list($b1b, $p1b, $n1b) = $make_blob('site2', random_bytes(100));
-$sync_row->invoke(null, $profile, (int)$b1b->key, new RecordingMockDriver());
+$sync_row->invoke(null, $profile, (int)$b1b->key, cloud_test_store(new RecordingMockDriver()));
 $objs = $shelf_objects();
 check(count($objs) === 3 && in_array($epoch . '/' . $n1b . '.enc', $objs, true), 'a second object joins the same epoch', json_encode($objs));
 check(!is_file($p1b), 'and is released');
@@ -173,7 +174,7 @@ section('Manager profile enabled too: bytes wait until its held set names the ob
 BackupProfile::$enabled_for_tests = array(BackupProfile::SITE, BackupProfile::MANAGER);
 $bytes2 = random_bytes(700);
 list($b2, $p2, $n2) = $make_blob('wait', $bytes2);
-$r = $sync_row->invoke(null, $profile, (int)$b2->key, new RecordingMockDriver());
+$r = $sync_row->invoke(null, $profile, (int)$b2->key, cloud_test_store(new RecordingMockDriver()));
 check($r === 'pushed', 'the row is pushed', (string)$r);
 check((new FileBlob($b2->key, true))->get('fbb_storage_driver') === 'cloud', 'and flipped to cloud');
 check(in_array($epoch . '/' . $n2 . '.enc', $shelf_objects(), true), 'the site\'s backup storage holds it');
@@ -193,7 +194,7 @@ check($released === 1 && !is_file($p2), 'once both held sets name it, the releas
 
 // A row whose manager held set lacks it stays through a release pass.
 list($b3, $p3, $n3) = $make_blob('still', random_bytes(64));
-$sync_row->invoke(null, $profile, (int)$b3->key, new RecordingMockDriver());
+$sync_row->invoke(null, $profile, (int)$b3->key, cloud_test_store(new RecordingMockDriver()));
 $released = BackupObjects::release_waiting(array($profile->backupObject((int)$b3->key)), BackupProfile::enabled(), $out);
 check($released === 0 && is_file($p3), 'a row the manager set lacks keeps its bytes through a release pass');
 
@@ -212,7 +213,7 @@ if ($fx_fail === null) {
 	BackupObjects::$test_hooks = array('site_plan' => $fail_plan);
 	$bytes4 = random_bytes(300);
 	list($b4, $p4, $n4) = $make_blob('fail', $bytes4);
-	$r = $sync_row->invoke(null, $profile, (int)$b4->key, new RecordingMockDriver());
+	$r = $sync_row->invoke(null, $profile, (int)$b4->key, cloud_test_store(new RecordingMockDriver()));
 	check($r === 'pushed', 'the offload itself succeeds', (string)$r);
 	check((new FileBlob($b4->key, true))->get('fbb_storage_driver') === 'cloud', 'the row is cloud');
 	check(is_file($p4) && file_get_contents($p4) === $bytes4, 'the local bytes stay');
