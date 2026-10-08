@@ -30,6 +30,8 @@
  *                grant is reported as reconnect by setQuietly
  * @version 1.4 - the buyer origin and its pre-payment states (specs/managed_hosting_phase1_purchase.md §5)
  * @version 1.3 - dismiss rules: which provisions can be cleared off the board, and what blocks the rest
+ * @version 1.3 - every node the pipeline makes is renamed into the fixture name as soon as it exists, so a run that
+ *                dies before its teardown leaves nothing the next boot does not reclaim
  * @version 1.2 - node fixtures carry the HarnessTest prefix so a killed run's rows self-reclaim at the next db boot
  * @version 1.1
  */
@@ -211,6 +213,7 @@ class CustomerCloudProvisioningTest {
 		$prov->load();
 
 		$node_id = (int)$prov->get('cvp_mgn_managed_node_id');
+		$this->fixture_name($node_id);
 		$node = new ManagedNode($node_id, TRUE);
 		check($node_id > 0 && (int)$node->get('mgn_mgh_managed_host_id') > 0,
 			'the container node is given a placement record (mgn_mgh_managed_host_id)');
@@ -319,6 +322,7 @@ class CustomerCloudProvisioningTest {
 		$probe->probeBooting($prov);
 		$prov->load();
 		$site_id = (int)$prov->get('cvp_mgn_managed_node_id');
+		$this->fixture_name($site_id);
 		$site = new ManagedNode($site_id, TRUE);
 		check($site_id > 0 && $prov->get('cvp_status') === 'installing', 'the install is dispatched', (string)$probe->lastFailReason);
 		check(CustomerCloudProvision::for_machine_address($ip) !== null
@@ -394,6 +398,8 @@ class CustomerCloudProvisioningTest {
 		$adopted = AgentChannelEndpoint::adoptJoin($hjr);
 		AgentChannelEndpoint::$provisioner = null;
 		$host_node = $adopted['node'];
+		$this->fixture_name((int)$host_node->key);
+		$host_node->load();
 		$hjr->load();
 		check($host_node->get('mgn_host') === $ip, 'the host node is made at the instance\'s IPv4, not the IPv6 the join came from', (string)$host_node->get('mgn_host'));
 		check($adopted['host'] !== null && (int)$adopted['host']->get('mgh_mgn_managed_node_id') === (int)$host_node->key,
@@ -1029,6 +1035,20 @@ class CustomerCloudProvisioningTest {
 	}
 
 	private $rdns_node_ids = [];
+
+	/**
+	 * A node the pipeline made is named for its domain, so a run that dies
+	 * before its teardown would leave it on the dashboard for good. Named as a
+	 * fixture, the next harness boot reclaims it (ManagedNode::FIXTURE_NAME_PREFIX).
+	 */
+	private function fixture_name(int $node_id) {
+		if ($node_id <= 0) { return; }
+		$node = new ManagedNode($node_id, TRUE);
+		if ($node->key && !ManagedNode::is_fixture_name((string)$node->get('mgn_name'))) {
+			$node->set('mgn_name', ManagedNode::FIXTURE_NAME_PREFIX . $node->get('mgn_name'));
+			$node->save();
+		}
+	}
 
 	private function cleanup() {
 		$ids = [$this->user_id, $this->user_id + 20000];
