@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.5.1 - config/release_statement_key (the release-log signing key, root-only like
+#                  agent_signing_key) is also left out of an unprivileged run, and said; the two
+#                  root-only keys are one named list. Any other unreadable file still fails the run.
 # Version: 1.5.0 - `--part code|data`: the code (public_html, rooted at public_html) and the site's
 #                  data (the site directory less public_html, public_html_* and uploads/upgrades)
 #                  are archived separately, each with its own snapshot and identity, so an upgrade
@@ -335,16 +338,23 @@ if [ -n "$SNAR" ]; then
     TAR_ARGS+=(--listed-incremental="$SNAR")
 fi
 
-# The release signing key on a publishing box is readable by root only, on
-# purpose (specs/agent_local_queue_retirement.md, "G1 — decided"): the web user
-# must never be able to sign code. An unprivileged run therefore cannot carry
-# it, and that is not the silent partial backup the doctrine forbids — it is
-# one named file, left out on purpose and said out loud. The root-run manager
-# backup of this same box carries it, as does the agent_signing escrow row.
-SIGNING_KEY="${PROJECT_DIR}/config/agent_signing_key"
-if [ "$(id -u)" -ne 0 ] && [ -e "$SIGNING_KEY" ] && [ ! -r "$SIGNING_KEY" ]; then
-    print_warning "config/agent_signing_key is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
-    TAR_ARGS+=(--exclude='agent_signing_key')
+# The signing keys on a publishing box are readable by root only, on purpose:
+# the web user must never be able to sign code (agent_signing_key,
+# specs/agent_local_queue_retirement.md, "G1 — decided") or a release
+# statement (release_statement_key, release_transparency). An unprivileged run
+# therefore cannot carry them, and that is not the silent partial backup the
+# doctrine forbids — each is one named file, left out on purpose and said out
+# loud. The root-run manager backup of this same box carries them. Any other
+# unreadable file still fails the run.
+ROOT_ONLY_KEYS=(agent_signing_key release_statement_key)
+if [ "$(id -u)" -ne 0 ]; then
+    for KEY_NAME in "${ROOT_ONLY_KEYS[@]}"; do
+        KEY_PATH="${PROJECT_DIR}/config/${KEY_NAME}"
+        if [ -e "$KEY_PATH" ] && [ ! -r "$KEY_PATH" ]; then
+            print_warning "config/${KEY_NAME} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
+            TAR_ARGS+=(--exclude="$KEY_NAME")
+        fi
+    done
 fi
 
 # The tree holds files the invoking account is not meant to read (config/ keys
