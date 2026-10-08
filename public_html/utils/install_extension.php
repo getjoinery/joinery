@@ -55,6 +55,7 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.8 - keys a package proves that cannot be recorded stop the install
  * @version 1.7 - the release log (spec release_transparency, D6, WP4): a staged package is verified
  *                as a fresh archive; a package signed by us but not shown to be logged is
  *                `unlogged`, handled like unsigned and recorded plg_trust/thm_trust = 'unlogged';
@@ -180,7 +181,11 @@ function install_extension_persist_keys(PackageVerdict $verdict): void {
 			echo "key proven by the release log chain: $line\n";
 		}
 	} catch (Throwable $e) {
-		fwrite(STDERR, 'warning: ' . $e->getMessage() . "\n");
+		// The keys first, or nothing (the agent's self-update and upgrade.php
+		// refuse the same way): an install whose keys were not kept lowers the
+		// bar the next release is checked against.
+		fwrite(STDERR, 'not installed: the release-log keys this package proved could not be recorded: ' . $e->getMessage() . "\n");
+		exit(1);
 	}
 }
 

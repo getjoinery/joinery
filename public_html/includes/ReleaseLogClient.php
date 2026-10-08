@@ -56,6 +56,9 @@
  * could not be reached or read, ReleaseLogShardAheadException when a listed
  * future shard is the problem, plain ReleaseLogException for every other rule.
  *
+ * @version 1.3 - several pinned and held keys per log (repoLogKeys() reads one per line, keySets(), holdsKey()),
+ *                and a key Sigstore names for the live log ahead of its start is pinned and shipped first, as a
+ *                new log's is (WP7 review B7)
  * @version 1.2 - trustedRoot() and rootListsKey(): Sigstore's trusted root on its own, for
  *                utils/verify_release.php
  * @version 1.1 - ReleaseLogBlindException and ReleaseLogShardAheadException, so the watch can tell
@@ -116,9 +119,10 @@ class ReleaseLogClient {
 	private $now;
 
 	/**
-	 * @param array         $shipping   origin => Ed25519 DER: self::repoLogKeys() of the tree being published
-	 * @param array|null    $held       origin => Ed25519 DER: the log_keys of the last release that carried
-	 *                                  a statement; null when none ever has (genesis)
+	 * @param array         $shipping   origin => Ed25519 DER, or a list of them: self::repoLogKeys() of the tree
+	 *                                  being published (a log may pin more than one key, for a key it rotates in place)
+	 * @param array|null    $held       origin => DER or list: the log_keys of the last release that carried a
+	 *                                  statement; null when none ever has (genesis)
 	 * @param callable|null $transport  HTTP, injected by tests; curl by default
 	 * @param int|null      $now        unix time, injected by tests
 	 */
@@ -126,8 +130,8 @@ class ReleaseLogClient {
 		if ($held !== null && !is_array($held)) {
 			throw new InvalidArgumentException('held log keys are an array, or null before any release carried a statement');
 		}
-		$this->shipping = $shipping;
-		$this->held = $held;
+		$this->shipping = self::keySets($shipping);
+		$this->held = $held === null ? null : self::keySets($held);
 		$this->transport = $transport ?: array(__CLASS__, 'curlTransport');
 		$this->now = $now ?? time();
 	}
@@ -258,22 +262,34 @@ class ReleaseLogClient {
 			throw new ReleaseLogException("Sigstore's trusted root does not list the live log {$live['url']}");
 		}
 		$this->assertShipping($origin, $key, "{$live['url']} is the live log");
+		// A key the live log rotates to in place, named ahead of its start: it
+		// must be pinned and shipped before it takes over, as a new log's must.
+		$rotations = array();
+		foreach ($this->rootKeysAhead($root, $live['url']) as $next) {
+			try {
+				$this->assertShipping($origin, $next['key'], "the live log {$live['url']} changes its checkpoint key on "
+					. gmdate('Y-m-d', $next['start']));
+			} catch (ReleaseLogException $e) {
+				throw new ReleaseLogShardAheadException($e->getMessage(), $origin, $next['start']);
+			}
+			$rotations[] = array('origin' => $origin, 'start' => $next['start'], 'key' => $next['key']);
+		}
 		if ($this->held !== null) {
-			$held = $this->held[$origin] ?? null;
-			if ($held === null) {
+			$held = $this->held[$origin] ?? array();
+			if ($held === array()) {
 				throw new ReleaseLogException("{$live['url']} is the live log and its key is pinned, but not yet shipped: nodes do not hold it, "
 					. 'so every node would refuse a release logged there. Publish once on the old log first, so the key reaches nodes');
 			}
-			if (!hash_equals($held, $key)) {
+			if (!self::holdsKey($held, $key)) {
 				throw new ReleaseLogException("{$live['url']} is the live log, but nodes hold a different checkpoint key for {$origin} "
 					. 'than Sigstore\'s trusted root gives. Nothing is logged until the difference is understood');
 			}
 		}
 		return array('url' => rtrim($live['url'], '/'), 'origin' => $origin, 'key' => $key,
 			'ahead' => array_values(array_map(function ($n) { return self::originOf($n['url']); }, $ahead)),
-			'ahead_detail' => array_values(array_map(function ($n) use ($root) {
+			'ahead_detail' => array_merge(array_values(array_map(function ($n) use ($root) {
 				return array('origin' => self::originOf($n['url']), 'start' => $n['start'], 'key' => $this->rootKey($root, $n['url'], $n['start']));
-			}, $ahead)),
+			}, $ahead)), $rotations),
 			'waiting' => $waiting,
 			'genesis' => $this->held === null);
 	}
@@ -440,21 +456,52 @@ class ReleaseLogClient {
 		return $keys;
 	}
 
-	/** The checkpoint keys under release_keys/log/, origin => DER; malformed files are skipped. */
+	/**
+	 * The checkpoint keys under release_keys/log/, origin => list of DER: one
+	 * file per log, holding one key per line. A log that rotates its key in
+	 * place has both pinned while Sigstore names the next one ahead of its
+	 * start, so a release can carry it to nodes before it takes over.
+	 * Malformed lines are skipped.
+	 */
 	public static function repoLogKeys($full_site_dir) {
 		$keys = array();
 		foreach (glob(rtrim($full_site_dir, '/') . '/' . self::KEYS_DIR . '/log/*.pub') ?: array() as $file) {
-			$der = base64_decode(trim((string)file_get_contents($file)), true);
-			if ($der === false) { continue; }
-			try {
-				TransparencyProof::ed25519Raw($der);
-			} catch (TransparencyProofException $e) {
-				continue;
+			foreach (preg_split('/\R/', trim((string)file_get_contents($file))) as $line) {
+				$der = base64_decode(trim($line), true);
+				if ($der === false || $der === '') { continue; }
+				try {
+					TransparencyProof::ed25519Raw($der);
+				} catch (TransparencyProofException $e) {
+					continue;
+				}
+				if (!self::holdsKey($keys[basename($file, '.pub')] ?? array(), $der)) {
+					$keys[basename($file, '.pub')][] = $der;
+				}
 			}
-			$keys[basename($file, '.pub')] = $der;
 		}
 		ksort($keys);
 		return $keys;
+	}
+
+	/** origin => DER or list of DER, as origin => list of DER. */
+	public static function keySets(array $keys) {
+		$out = array();
+		foreach ($keys as $origin => $ders) {
+			foreach (is_array($ders) ? $ders : array($ders) as $der) {
+				if (is_string($der) && $der !== '' && !self::holdsKey($out[$origin] ?? array(), $der)) {
+					$out[$origin][] = $der;
+				}
+			}
+		}
+		return $out;
+	}
+
+	/** Whether $set (a list of DER) holds $der. */
+	public static function holdsKey(array $set, $der) {
+		foreach ($set as $one) {
+			if (is_string($one) && hash_equals($one, (string)$der)) { return true; }
+		}
+		return false;
 	}
 
 	/** A log's checkpoint origin: the host of its URL. */
@@ -532,6 +579,26 @@ class ReleaseLogClient {
 	 * appear more than once when its key rotates in place; the entry whose
 	 * validity covers $at is the one, and several at once is refused.
 	 */
+	/**
+	 * The Ed25519 keys Sigstore's trusted root lists for $url whose validity
+	 * starts after now: a key the log will rotate to in place.
+	 *
+	 * @return array<int, array{start:int, key:string}>
+	 */
+	private function rootKeysAhead(array $root, $url) {
+		$out = array();
+		foreach ($root['tlogs'] as $tlog) {
+			if (rtrim((string)($tlog['baseUrl'] ?? ''), '/') !== rtrim($url, '/')) { continue; }
+			$from = self::time($tlog['publicKey']['validFor']['start'] ?? null);
+			if ($from === null || $from <= $this->now || ($tlog['publicKey']['keyDetails'] ?? null) !== 'PKIX_ED25519') { continue; }
+			$der = base64_decode((string)($tlog['publicKey']['rawBytes'] ?? ''), true);
+			if ($der !== false && $der !== '') {
+				$out[] = array('start' => $from, 'key' => $der);
+			}
+		}
+		return $out;
+	}
+
 	private function rootKey(array $root, $url, $at) {
 		$matched = 0;
 		$valid = array();
@@ -560,16 +627,17 @@ class ReleaseLogClient {
 
 	/** Refuse unless the tree being published pins exactly this checkpoint key for this origin. */
 	private function assertShipping($origin, $key, $why) {
-		$pinned = $this->shipping[$origin] ?? null;
+		$pinned = $this->shipping[$origin] ?? array();
 		$file = self::KEYS_DIR . "/log/{$origin}.pub";
-		if ($pinned === null) {
+		if ($pinned === array()) {
 			throw new ReleaseLogException("{$why}, and its checkpoint key is not pinned. Add {$file} containing "
 				. base64_encode($key) . ' (Sigstore\'s trusted root), commit it, and publish; a release logged on a log '
 				. 'whose key nodes lack would be refused by every node');
 		}
-		if (!hash_equals($pinned, $key)) {
-			throw new ReleaseLogException("{$why}, but Sigstore's trusted root gives a different checkpoint key for {$origin} "
-				. "than {$file} pins. Nothing is logged until the difference is understood");
+		if (!self::holdsKey($pinned, $key)) {
+			throw new ReleaseLogException("{$why}, but Sigstore's trusted root gives a checkpoint key for {$origin} that "
+				. "{$file} does not pin: " . base64_encode($key) . ". If Sigstore is rotating the log's key, check it from a second "
+				. "computer and add it to that file as a line of its own; nothing is logged until the difference is understood");
 		}
 	}
 

@@ -1,6 +1,6 @@
 # Release transparency: the code on a node is the public code, and the node checks
 
-**Status:** DRAFT 2026-10-07. Written from the owner's goal (below) after a
+**Status:** IMPLEMENTED 2026-10-08. Drafted 2026-10-07, written from the owner's goal (below) after a
 code survey the same day; revised the same day after reviewer2's design review
 (verdict NOT VALID as first written; B1–B7 and Q1–Q7 folded in, then B8, B9,
 Q8, Q9 from the re-review; reviewer2 VALID 2026-10-07 with those folded in).
@@ -10,7 +10,7 @@ WP1 committed (8e14752a). Where the statement goes changed while WP3 was
 built, see D-F. WP6 built 2026-10-08: what ships cut back to the commit (D2),
 the Updates page, `verify_release.php`, the refused-agent-update incident (O7),
 the log reader (O5), and the public releases page with the trusted-root check.
-WP7 (live proof) is next. Stands on `implemented/package_signing.md` and
+WP7 (live proof) run 2026-10-08: passed, with B6-B8 fixed. Full review of WP1-WP7 by reviewer2: valid after B1 (the support bundle held to the log), B1a, B4-B8 and B7a, all fixed and re-verified. IMPLEMENTED 2026-10-08. Still to see live, in the live verification queue: the next publish re-proves the Go binaries byte for byte from another machine, and the fleet on agent 1.66.0 reports bundle_state. Stands on `implemented/package_signing.md` and
 `implemented/agent_release_channel.md`; independent of any disk-encryption
 work.
 
@@ -177,6 +177,22 @@ Go, and the build runs with `GOTOOLCHAIN=local` so a mismatch fails instead of
 silently downloading another compiler. With `-trimpath`, `CGO_ENABLED=0`, a
 pinned toolchain and `go.sum`, a Go build is bit-identical across machines.
 The release statement records the toolchain version.
+
+**Found in WP7 (2026-10-08), changed:** a version string does not name a
+compiler. Dev built with Ubuntu's `golang-1.22-go 1.22.2-2ubuntu0.4`, which
+reports `go1.22.2` but carries Ubuntu's patches; `verify_release` of 0.8.470 on
+another machine with the official go1.22.2 matched every check but the four
+binaries, and a clean Ubuntu container with that package reproduced dev's
+bytes exactly. So the build never uses the box's own Go: it asks it for the
+pinned version with `GOTOOLCHAIN=goX.Y.Z`, Go fetches the official toolchain as
+the `golang.org/toolchain` module, checked against Go's public checksum
+database, and the build runs that one (`GoBinaryPublisher::officialGo`); a
+local Go that is itself the pinned version is refused. The verifier does the
+same, so any Go fetches the publisher's compiler. The pin moved to go1.27.2
+(owner, Q2): the official go1.22.2 lacks the security fixes Ubuntu's build
+carried, and is long out of support. Proven before building: the agent built
+this way on dev and in a fresh container elsewhere is byte-identical on both
+architectures.
 
 ### D4. One release statement, logged once
 
@@ -729,6 +745,70 @@ archive carrying a logged statement's proof over a different payload
 O6 drill on the management node — discovery pointed at a doctored signing
 config naming an unpinned future shard opens the incident, pinning keeps it
 open as "pinned, not yet shipped", and a logged publish closes it.
+
+Run 2026-10-08 on 0.8.470 (core 5c463dfd, agent 74febb4, log2025-1 #143637585):
+- **Publish and nodes: passed.** Every node took 0.8.470 and agent 1.65.0,
+  each reporting `update_state` current. Galactictribune's installed
+  statement, read by the Updates page's own reader, names the log entry.
+- **Second machine: passed after B6.** `verify_release` in a fresh container
+  on the drive-test VPS passed the statement, the key chain, the live entry,
+  Sigstore's trusted root, all 20 plugin and theme manifests and the core
+  archive, but not the four Go binaries (D3 note: dev's Go was Ubuntu's
+  patched build). Fixed by building with the official toolchain; proven
+  byte-identical across the two machines before the fix was built. The
+  binaries are re-proven by the first publish carrying it.
+- **Refusal drills: passed** on a throwaway node (test account), through a
+  real `apply_update` from the plane, the node's upgrade source pointed at a
+  drill source: the signed but unlogged 0.8.465 core was refused `unlogged`
+  (no RELEASE_STATEMENT); 0.8.470 re-signed with the real release key around
+  its genuine logged statement and one changed file was refused `unlogged`
+  (the logged statement does not record this package); the same with a
+  member under `cache/` was refused `extra_file` (a path no manifest lists).
+  Nothing was deployed in any of the three.
+- **O6 drill: passed** on dev against real Sigstore with a doctored signing
+  config and trusted root: an unpinned future log opened a warning incident,
+  pinning kept it open as unshipped, and a release holding the key (held set
+  simulated: a real publish would ship a fake log key to every node) closed it.
+- Found on the way: B7 (a provisioned docker host's agent was never admitted
+  when the slug and the site name differ, so its install password was never
+  retired) and B8 (the retire job dropped the last root key: `read` loses an
+  unterminated last line), both fixed.
+
+Full review of WP1-WP7 (reviewer2, 2026-10-08): valid, one gap, all fixed:
+- **B1, the support bundle was a fourth channel with no log check.** A
+  siteless machine (relay, Docker host) installed it on the release
+  signature alone and ran host_converge from it as root. Agent 1.66.0 holds
+  it to the log as it holds the binary: with the log keys, the release
+  statement must record the bundle's bytes (artifact `support_bundle`), the
+  proven keys are kept before the swap, a failed fetch is retried and a
+  refusal holds. The verdict rides the claim as `bundle_state`, and a refusal
+  raises `plane:agent_bundle_refused`. D8's promise now holds on siteless
+  machines too.
+- B2 (B8's fix landed in 3e90d348, the storage-space commit), B3 (the relay
+  sealer and jail stamps heal on the next publish): noted, nothing to change.
+- B4: the PHP install paths kept installing when proven keys could not be
+  recorded; they now refuse, as Go does.
+- B5: `verify_release` also checks that every file the core commit ships is
+  listed, so an archive that drops one does not verify.
+- B6: the toolchain fetch names Go's proxy and checksum database itself.
+- B7: a log may pin several keys (one per line); a future key Sigstore names
+  for the live log is pinned and shipped before it takes over, as a new
+  log's is, and the watch reports it.
+- B8: the unpinned Fix tells the operator to check the new key against
+  Sigstore's trusted root from a second computer before committing it.
+- Also: publish adds its release files before committing them, so a file new
+  to git (a first jail binary) is committed too.
+
+Re-verification (reviewer2) found two more, both fixed:
+- B1a: publish writes the bundle (and the agent binaries) before the
+  statement that records them. A machine asking in between refused the new
+  bundle for good. An unlogged bundle is now retried whenever the statement
+  beside it changes. An unlogged verdict, for the bundle or the binary, is
+  reported only once it has stood 15 minutes, so a publish does not open a
+  critical incident on every machine that polled mid-publish.
+- B7a: the publish-time statement check kept one log key per origin; with two
+  pinned during a rotation, the release that ships the new key would have
+  failed after logging. It checks against every key the release installs.
 
 ## Decisions
 

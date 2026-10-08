@@ -185,7 +185,7 @@ $make_site = function ($label, $bundled_version) use ($tmp_root) {
 	mkdir($dist, 0777, true);
 	mkdir($site . '/config', 0777, true);
 	// A publishing site lists its own release key in the repository
-	// (specs/release_transparency.md D5); the publisher refuses to sign with
+	// (spec release_transparency D5); the publisher refuses to sign with
 	// one that is not listed, so the fixture mints the key and lists it.
 	$fixture_keys = AgentDistPublisher::ensureKeys($site . '/config');
 	mkdir($site . '/maintenance_scripts/install_tools/release_keys/release', 0777, true);
@@ -283,8 +283,10 @@ check($res['status'] === AgentDistPublisher::STATUS_FAILED && strpos($res['messa
 // are built from (release_transparency D3), so a bundle whose recorded commit
 // is not HEAD is rebuilt and compared: the same bytes record HEAD, different
 // bytes at the same version refuse the publish.
+// The fixture pins the real agent's toolchain: the build fetches that
+// official toolchain (GoBinaryPublisher::officialGo) with this box's Go.
 $go = AgentDistPublisher::findGo();
-$go_version = $go ? (preg_match('/go version (go[0-9.]+)/', (string)shell_exec(escapeshellarg($go) . ' version'), $gm) ? $gm[1] : '') : '';
+$go_version = $go ? (string)GoBinaryPublisher::pinnedToolchain($real_src) : '';
 if ($go_version === '') {
 	check(false, 'a Go toolchain is available for the same-version rebuild cases');
 } else {
@@ -302,7 +304,8 @@ if ($go_version === '') {
 	$fixture['signing_public_key'] = AgentDistPublisher::ensureKeys($site_d . '/config')['public_b64'];
 	$fixture['source_commit'] = str_repeat('0', 40);
 	$built = $tmp_root . '/fixture_build';
-	exec('cd ' . escapeshellarg($git_src) . ' && env GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 ' . escapeshellarg($go)
+	$official = GoBinaryPublisher::officialGo($go, $git_src, AgentDistPublisher::BUILD_CACHE . '/gomodcache', AgentDistPublisher::BUILD_CACHE)['go'];
+	exec('cd ' . escapeshellarg($git_src) . ' && env GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 ' . escapeshellarg($official)
 		. ' build -buildvcs=false -trimpath -ldflags ' . escapeshellarg('-X main.version=3.0.0 -X main.updatePubKeyB64=' . $fixture['signing_public_key']
 		. ' -X main.releaseStatementKeysB64= -X main.releaseLogKeysB64=') . ' -o ' . escapeshellarg($built) . ' . 2>&1');
 	$fixture['binaries']['linux-amd64']['sha256'] = hash_file('sha256', $built);

@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * A release is a commit (specs/release_transparency.md D1, D2, D3):
+ * A release is a commit (spec release_transparency D1, D2, D3):
  *
  *  - which untracked files stop a publish: the ones that would ship, and only
  *    those (ReleaseCommit::joineryPathShips)
@@ -20,7 +20,7 @@
  *  - what publish commits itself (ReleaseCommit::publishWrite, commitRelease):
  *    its own files only, never what else is staged, and pushed
  *  - the Go toolchain pin is read from go.mod and an unpinned tree is refused
- *    (GoBinaryPublisher::pinnedToolchain, assertToolchain)
+ *    (GoBinaryPublisher::pinnedToolchain, officialGo)
  *  - the repository's key lists are read from release_keys/ and a signing
  *    key not listed there is refused (AgentDistPublisher)
  *
@@ -262,11 +262,16 @@ file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": 
 // Another session's work sits staged in the shared index; it must not go
 // into the release commit.
 rc_git($repo, array('add', 'public_html/includes/Mine.php'));
-$made = ReleaseCommit::commitRelease($repo, array('public_html/VERSION', 'public_html/plugins/p/plugin.json'), 'Release 0.8.471');
+// And one release file git has never seen: a first jail binary.
+@mkdir($repo . '/maintenance_scripts/install_tools/joinery_jail/bin', 0755, true);
+file_put_contents($repo . '/maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-x86_64', "\x7fELF new\n");
+$made = ReleaseCommit::commitRelease($repo, array('public_html/VERSION', 'public_html/plugins/p/plugin.json',
+	'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-x86_64'), 'Release 0.8.471');
 $files = rc_git($repo, array('show', '--name-only', '--format=%s', 'HEAD'))['out'];
 check($made['ok'] && $made['commit'] === ReleaseCommit::head($repo), 'the release files are committed', $made['reason']);
-check($files === array('Release 0.8.471', '', 'public_html/VERSION', 'public_html/plugins/p/plugin.json'),
-	'exactly those files, under the release\'s name', json_encode($files));
+check($files === array('Release 0.8.471', '', 'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-x86_64',
+	'public_html/VERSION', 'public_html/plugins/p/plugin.json'),
+	'exactly those files, under the release\'s name, a file new to git among them', json_encode($files));
 check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('public_html/includes/Mine.php'),
 	'what else was staged stays staged, uncommitted');
 check(ReleaseCommit::onRemote($repo, $made['commit'])['on_remote'], 'and the commit is pushed');
@@ -284,23 +289,51 @@ $src = $tmp . '/gosrc';
 mkdir($src, 0755, true);
 file_put_contents($src . '/go.mod', "module x\n\ngo 1.22\n");
 check(GoBinaryPublisher::pinnedToolchain($src) === null, 'no toolchain line: no pin');
+$mod = $tmp . '/gomod';
 $refused = null;
-try { GoBinaryPublisher::assertToolchain('/usr/bin/true', $src); } catch (Exception $e) { $refused = $e->getMessage(); }
+try { GoBinaryPublisher::officialGo('/usr/bin/true', $src, $mod, $tmp); } catch (Exception $e) { $refused = $e->getMessage(); }
 check($refused !== null && strpos($refused, 'no toolchain line') !== false, 'an unpinned tree is refused', (string)$refused);
 
-file_put_contents($src . '/go.mod', "module x\n\ngo 1.22\n\ntoolchain go1.22.2\n");
-check(GoBinaryPublisher::pinnedToolchain($src) === 'go1.22.2', 'the pin is read from go.mod');
+file_put_contents($src . '/go.mod', "module x\n\ngo 1.22\n\ntoolchain go1.27.2\n");
+check(GoBinaryPublisher::pinnedToolchain($src) === 'go1.27.2', 'the pin is read from go.mod');
 
+// A fake downloader: answers `go env GOROOT GOVERSION` as $script says, and
+// records the GOTOOLCHAIN it was asked for.
 $fake_go = $tmp . '/go';
-file_put_contents($fake_go, "#!/bin/sh\necho 'go version go1.23.0 linux/amd64'\n");
-chmod($fake_go, 0755);
+$fake = function ($script) use ($fake_go, $tmp) {
+	file_put_contents($fake_go, "#!/bin/sh\necho \"\$GOTOOLCHAIN \$GOMODCACHE \$GOSUMDB \$GOPROXY [\$GONOSUMDB\$GOINSECURE]\" > " . escapeshellarg($tmp . '/asked') . "\n" . $script);
+	chmod($fake_go, 0755);
+};
+// A caller that turned the checksum database off does not turn it off here.
+putenv('GOSUMDB=off'); putenv('GONOSUMDB=golang.org'); putenv('GOINSECURE=*');
 $refused = null;
-try { GoBinaryPublisher::assertToolchain($fake_go, $src); } catch (Exception $e) { $refused = $e->getMessage(); }
-check($refused !== null && strpos($refused, 'go.mod pins go1.22.2 but') !== false,
-	'a newer compiler is refused too, not only an older one', (string)$refused);
+$fake("echo 'go: download go1.27.2: not found'; exit 1\n");
+try { GoBinaryPublisher::officialGo($fake_go, $src, $mod, $tmp); } catch (Exception $e) { $refused = $e->getMessage(); }
+check($refused !== null && strpos($refused, 'could not fetch the official go1.27.2') !== false, 'a fetch that fails is refused', (string)$refused);
+check(trim((string)@file_get_contents($tmp . '/asked')) === 'go1.27.2 ' . $mod . ' sum.golang.org https://proxy.golang.org []',
+	'the downloader is asked for the pinned version, into the module cache, through Go\'s proxy and checksum database',
+	(string)@file_get_contents($tmp . '/asked'));
 
-file_put_contents($fake_go, "#!/bin/sh\necho 'go version go1.22.2 linux/amd64'\n");
-check(GoBinaryPublisher::assertToolchain($fake_go, $src) === 'go1.22.2', 'the pinned compiler passes');
+$refused = null;
+$fake("echo /usr/lib/go-1.27; echo go1.27.2\n");
+try { GoBinaryPublisher::officialGo($fake_go, $src, $mod, $tmp); } catch (Exception $e) { $refused = $e->getMessage(); }
+check($refused !== null && strpos($refused, 'is itself go1.27.2') !== false,
+	'a local Go that only reports the pinned version (a distribution build) is refused', (string)$refused);
+
+$root = realpath($mod) . '/golang.org/toolchain@v0.0.1-go1.27.2.linux-amd64';
+mkdir($root . '/bin', 0755, true);
+file_put_contents($root . '/bin/go', "#!/bin/sh\n");
+chmod($root . '/bin/go', 0755);
+$fake('echo ' . escapeshellarg($root) . "; echo go1.27.2\n");
+check(GoBinaryPublisher::officialGo($fake_go, $src, $mod, $tmp) === array('go' => $root . '/bin/go', 'toolchain' => 'go1.27.2'),
+	'the official toolchain, unpacked by Go in the module cache, is the one built with');
+
+$pins = array();
+foreach (array(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/joinery_jail',
+		PathHelper::getIncludePath('plugins/mailbox/provisioning/relay-sealer')) as $tree) {
+	$pins[] = GoBinaryPublisher::pinnedToolchain($tree);
+}
+check(count(array_unique($pins)) === 1 && $pins[0] !== null, 'every Go tree core ships pins the same toolchain', json_encode($pins));
 
 // ---------------------------------------------------------------------------
 section('The repository key lists');

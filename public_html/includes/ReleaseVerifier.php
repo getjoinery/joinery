@@ -46,6 +46,10 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.2 - the core check runs both ways: every file the core commit ships must be listed, so an archive
+ *                that drops one is refused (WP7 review B5)
+ * @version 1.1 - rebuilds with the official toolchain each go.mod pins, fetched checksum-verified by any
+ *                local Go (GoBinaryPublisher::officialGo); the statement's go_toolchain must be the agent's pin
  * @version 1.0
  */
 class ReleaseVerifier {
@@ -381,9 +385,56 @@ class ReleaseVerifier {
 				$bad[] = "{$rel}: {$why}";
 			}
 		}
+		// And the other direction: every file the commit ships into the core
+		// archive is listed. A listing can only be checked line by line; an
+		// archive that left a file out (a gate, a verifier helper) would
+		// otherwise pass.
+		$dropped = array();
+		foreach ($this->coreFilesOfCommit() as $rel) {
+			if (!isset($listed[$rel])) {
+				$dropped[] = $rel;
+			}
+		}
+		$this->check($dropped === array(), 'Every file the core commit ships is in the core manifest',
+			'The core manifest leaves out ' . count($dropped) . ' file(s) the commit ships: ' . implode(', ', array_slice($dropped, 0, 10))
+			. (count($dropped) > 10 ? ', and ' . (count($dropped) - 10) . ' more' : ''));
+
 		$this->check($bad === array(), "Every line of the core manifest derives from the commits: {$from_commit} files are the commit's own, "
 			. count($built) . ' are built by publish and pass their checks', implode('; ', array_slice($bad, 0, 10))
 			. (count($bad) > 10 ? '; and ' . (count($bad) - 10) . ' more' : ''));
+	}
+
+	/**
+	 * The files of commit C that publish puts in the core archive: public_html
+	 * as publish copies it (its rsync exclusions; plugins/ and theme/ ship as
+	 * their own archives; agent_dist is built and checked as built files), and
+	 * maintenance_scripts/install_tools and sysadmin_tools, less what no
+	 * manifest lists. Publish ships only files git knows, which is exactly the
+	 * commit's own list.
+	 */
+	private function coreFilesOfCommit() {
+		$out = array();
+		exec('git -C ' . escapeshellarg($this->c_dir) . ' ls-files -z 2>/dev/null', $lines);
+		$skip_names = array('specs', 'uploads', 'cache', 'logs', 'backups', '.playwright-mcp', 'theme-sources', '.claude', '.git', '.gitignore',
+			'CLAUDE.md', 'GEMINI.md', 'AGENTS.md');
+		foreach (explode("\0", implode("\n", $lines)) as $rel) {
+			$rel = trim($rel, "\n");
+			if ($rel === '') { continue; }
+			if (strpos($rel, 'public_html/') === 0) {
+				$parts = explode('/', substr($rel, strlen('public_html/')));
+				if (in_array($parts[0], array('theme', 'plugins'), true) || strpos($parts[0], 'agent_dist') === 0
+						|| array_intersect($parts, $skip_names)) {
+					continue;
+				}
+			} elseif (strpos($rel, 'maintenance_scripts/install_tools/') === 0 || strpos($rel, 'maintenance_scripts/sysadmin_tools/') === 0) {
+				if (array_intersect(explode('/', $rel), array('.git', '.gitignore'))) { continue; }
+			} else {
+				continue;
+			}
+			if (TreeManifestPublisher::excluded($rel)) { continue; }
+			$out[] = $rel;
+		}
+		return $out;
 	}
 
 	/** sha256 of a path in commit C, or null when C has no such file. */
@@ -502,38 +553,43 @@ class ReleaseVerifier {
 			$this->skip('Rebuilding the binaries was turned off (--no-rebuild)');
 			return;
 		}
-		$go = (string)($this->opts['go'] ?? '') ?: trim((string)shell_exec('command -v go 2>/dev/null'));
-		$have = $go !== '' ? (preg_match('/go version (go[0-9.]+)/', (string)shell_exec(escapeshellarg($go) . ' version 2>/dev/null'), $m) ? $m[1] : '') : '';
+		// Any Go fetches the official toolchain each go.mod pins
+		// (GoBinaryPublisher::officialGo), the one publish builds with.
+		$downloader = (string)($this->opts['go'] ?? '') ?: trim((string)shell_exec('command -v go 2>/dev/null'));
+		$cache = $this->work . '/gocache';
+		$official = function ($src, $what) use ($downloader, $cache) {
+			try {
+				return GoBinaryPublisher::officialGo($downloader, $src, $cache . '/mod', $cache);
+			} catch (Exception $e) {
+				$this->skip("{$what} was not rebuilt: " . $e->getMessage());
+				return null;
+			}
+		};
 
 		$agent_manifest = json_decode((string)@file_get_contents($this->core_dir . '/public_html/agent_dist/manifest.json'), true);
 		$want = (string)($this->payload['go_toolchain'] ?? '');
-		if ($have !== $want) {
-			$this->skip("The agent was not rebuilt: it needs Go {$want}" . ($have !== '' ? ", and {$go} is {$have}" : ', and no Go was found')
-				. '. Install that version (or pass --go=PATH) to compare the binaries byte for byte');
-		} elseif (!is_array($agent_manifest)) {
+		if (!is_array($agent_manifest)) {
 			$this->fail('The agent cannot be rebuilt: the core archive has no agent bundle manifest');
-		} else {
+		} elseif (GoBinaryPublisher::pinnedToolchain($this->a_dir) !== $want) {
+			$this->fail("The statement says the agent was built with {$want}, and the agent commit's go.mod pins "
+				. (GoBinaryPublisher::pinnedToolchain($this->a_dir) ?? 'no toolchain'));
+		} elseif (($go = $official($this->a_dir, 'The agent')) !== null) {
 			$baked = AgentDistPublisher::bakedKeyFlags((array)($agent_manifest['baked_keys'] ?? array()));
 			$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s -X main.releaseStatementKeysB64=%s -X main.releaseLogKeysB64=%s',
 				$agent_manifest['version'] ?? '', $agent_manifest['signing_public_key'] ?? '', $baked['statement'], $baked['log']);
 			foreach (array_keys($agent_manifest['binaries'] ?? array()) as $platform) {
 				$goarch = substr($platform, strlen('linux-'));
-				$this->compareBuild($go, $this->a_dir, $goarch, $ldflags, $this->payload['artifacts']['agent/' . $platform] ?? '',
+				$this->compareBuild($go['go'], $this->a_dir, $goarch, $ldflags, $this->payload['artifacts']['agent/' . $platform] ?? '',
 					"The agent for {$platform}, built from the agent commit");
 			}
 		}
 
 		$src = $this->c_dir . '/' . RelaySealerPublisher::SOURCE_SUBDIR;
-		if (!is_dir($src)) {
-			return;
-		}
-		$pinned = (string)GoBinaryPublisher::pinnedToolchain($src);
-		if ($have === '' || $have !== $pinned) {
-			$this->skip("The relay sealer was not rebuilt: it needs Go {$pinned}" . ($have !== '' ? ", and {$go} is {$have}" : ', and no Go was found'));
+		if (!is_dir($src) || ($go = $official($src, 'The relay sealer')) === null) {
 			return;
 		}
 		foreach (RelaySealerPublisher::ARCHES as $machine => $goarch) {
-			$this->compareBuild($go, $src, $goarch, '-s -w', $this->payload['artifacts']['relay-sealer/' . $machine] ?? '',
+			$this->compareBuild($go['go'], $src, $goarch, '-s -w', $this->payload['artifacts']['relay-sealer/' . $machine] ?? '',
 				"The relay sealer for {$machine}, built from the core commit");
 		}
 	}

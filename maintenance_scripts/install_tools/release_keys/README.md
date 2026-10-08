@@ -1,7 +1,7 @@
 # Release keys
 
 Every public key a node will ever trust, in the repository, so that a key
-rotation is a commit diff anyone can see (specs/release_transparency.md D5).
+rotation is a commit diff anyone can see (spec release_transparency D5).
 
 ```
 release/<name>.pub   Ed25519 release keys, base64, one per file. Every manifest
@@ -9,9 +9,12 @@ release/<name>.pub   Ed25519 release keys, base64, one per file. Every manifest
 statement/<name>.pub P-256 statement keys, base64 PKIX DER, one per file. Every
                      release statement is signed by one of these, and its
                      public-log entry is written under it.
-log/<origin>.pub     one checkpoint key per transparency-log origin, base64
-                     PKIX DER exactly as Sigstore's trusted root publishes it,
-                     e.g. log/log2025-1.rekor.sigstore.dev.pub
+log/<origin>.pub     the checkpoint keys of one transparency-log origin, one per
+                     line, base64 PKIX DER exactly as Sigstore's trusted root
+                     publishes it, e.g. log/log2025-1.rekor.sigstore.dev.pub.
+                     Usually one line; while Sigstore rotates a log's key in
+                     place, the old and the new, so a release can carry the
+                     new one to nodes before it takes over.
 ```
 
 The publisher refuses to build when its own signing key is not listed under

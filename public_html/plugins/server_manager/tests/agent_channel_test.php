@@ -436,6 +436,17 @@ foreach (array(array('', '1.66.0'), array('refused', '1.66.0'), array('unlogged'
 		"update_state '{$v[0]}' with update_offered '{$v[1]}' is refused");
 }
 
+// A siteless machine's verdict on the support bundle rides the claim too, as a
+// closed set (release_transparency WP7 review: a refused bundle is an incident).
+foreach (array('current', 'unlogged', 'verify_failed') as $state) {
+	$with = $claim; $with['bundle_state'] = $state;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) === null, "A claim reporting bundle_state '{$state}' is accepted");
+}
+foreach (array('', 'none', 'refused', 'unlogged; rm') as $state) {
+	$with = $claim; $with['bundle_state'] = $state;
+	check(AgentChannelEndpoint::validation_error($with, $claim_spec) !== null, "bundle_state '{$state}' is refused");
+}
+
 // ---------------------------------------------------------------------------
 section('A refusal is countable, not just readable');
 

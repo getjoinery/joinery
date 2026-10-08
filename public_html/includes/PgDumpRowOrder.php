@@ -4,7 +4,7 @@
  *
  * pg_dump writes a table's rows in the order they sit on disk, and an updated
  * row moves. The install SQL is committed and compared across publishes
- * (specs/release_transparency.md D2), so a row merely updated on the
+ * (spec release_transparency D2), so a row merely updated on the
  * publishing site showed as a change in the file. Sorting each COPY block by
  * the table's primary key makes the dump a function of the rows alone.
  *

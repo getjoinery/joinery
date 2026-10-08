@@ -151,6 +151,27 @@ check(strpos($refused->cleared_text($node), 'v1.66.0') !== false, 'The clear nam
 $set(array('mgn_agent_update_state' => null, 'mgn_agent_update_offered' => null, 'mgn_agent_version' => null, 'mgn_agent_public_key' => null));
 
 // ---------------------------------------------------------------------------
+section('Support bundle refused');
+
+$bundle = new IncidentSourceAgentBundleRefused();
+$set(array('mgn_agent_bundle_state' => 'unlogged', 'mgn_agent_bundle_version' => 'abc123'));
+check($bundle->evaluate($node) === null, 'An unpaired node: nothing, whatever it last said');
+$set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
+$v = $bundle->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'not in the public log') !== false
+	&& $v['detail']['Bundle installed'] === 'abc123',
+	'A bundle not in the public log: critical, naming the bundle the machine keeps', json_encode($v));
+$set(array('mgn_agent_bundle_state' => 'verify_failed', 'mgn_agent_bundle_version' => ''));
+$v = $bundle->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['detail']['Bundle installed'] === 'none',
+	'A bundle that failed verification: critical', json_encode($v));
+foreach (array('', 'current') as $state) {
+	$set(array('mgn_agent_bundle_state' => $state));
+	check($bundle->evaluate($node) === null, "Bundle state '{$state}': nothing");
+}
+$set(array('mgn_agent_bundle_state' => null, 'mgn_agent_bundle_version' => null, 'mgn_agent_public_key' => null));
+
+// ---------------------------------------------------------------------------
 section('Unmanageable');
 
 $um = new IncidentSourceUnmanageable();

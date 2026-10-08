@@ -35,6 +35,7 @@
  *   inclusion_proof   {tree_size, root_hash (base64), hashes (base64[])}
  *   checkpoint        the signed note, verbatim
  *
+ * @version 1.1 - verifyCheckpoint() takes several keys for a log and accepts a note signed by any (WP7 review B7)
  * @version 1.0
  */
 
@@ -160,7 +161,7 @@ class TransparencyProof {
 	 * Returns {origin, tree_size, root_hash (raw)}. Other signers on the note
 	 * (witnesses) are allowed and ignored.
 	 *
-	 * @param array $log_keys  origin => Ed25519 SubjectPublicKeyInfo DER
+	 * @param array $log_keys  origin => Ed25519 SubjectPublicKeyInfo DER, or a list of them
 	 */
 	public static function verifyCheckpoint($note, array $log_keys) {
 		$split = is_string($note) ? strpos($note, "\n\n") : false;
@@ -177,17 +178,21 @@ class TransparencyProof {
 		if ($root === false || strlen($root) !== 32) {
 			throw new TransparencyProofException('the checkpoint root hash is malformed');
 		}
-		if (!isset($log_keys[$origin])) {
+		if (!isset($log_keys[$origin]) || $log_keys[$origin] === array()) {
 			throw new TransparencyProofException("the checkpoint is from {$origin}, a log this machine holds no key for");
 		}
-		$pk = self::ed25519Raw($log_keys[$origin]);
-		$key_hash = substr(hash('sha256', $origin . "\n\x01" . $pk, true), 0, 4);
-		foreach (explode("\n", rtrim(substr($note, $split + 2), "\n")) as $line) {
-			if (!preg_match('/^\x{2014} (\S+) (\S+)$/u', $line, $m) || $m[1] !== $origin) { continue; }
-			$raw = base64_decode($m[2], true);
-			if ($raw === false || strlen($raw) !== 68 || substr($raw, 0, 4) !== $key_hash) { continue; }
-			if (sodium_crypto_sign_verify_detached(substr($raw, 4), $body, $pk)) {
-				return array('origin' => $origin, 'tree_size' => (int)$lines[1], 'root_hash' => $root);
+		// One key, or several: a log that rotates its key in place is held by
+		// both while the change is under way.
+		foreach (is_array($log_keys[$origin]) ? $log_keys[$origin] : array($log_keys[$origin]) as $der) {
+			$pk = self::ed25519Raw($der);
+			$key_hash = substr(hash('sha256', $origin . "\n\x01" . $pk, true), 0, 4);
+			foreach (explode("\n", rtrim(substr($note, $split + 2), "\n")) as $line) {
+				if (!preg_match('/^\x{2014} (\S+) (\S+)$/u', $line, $m) || $m[1] !== $origin) { continue; }
+				$raw = base64_decode($m[2], true);
+				if ($raw === false || strlen($raw) !== 68 || substr($raw, 0, 4) !== $key_hash) { continue; }
+				if (sodium_crypto_sign_verify_detached(substr($raw, 4), $body, $pk)) {
+					return array('origin' => $origin, 'tree_size' => (int)$lines[1], 'root_hash' => $root);
+				}
 			}
 		}
 		throw new TransparencyProofException("the checkpoint is not signed by {$origin}'s key");

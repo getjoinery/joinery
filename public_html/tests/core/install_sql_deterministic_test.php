@@ -8,7 +8,7 @@
  */
 /**
  * The install SQL a release ships is a function of the schema and the version
- * and nothing else (specs/release_transparency.md D2, O1): two runs of
+ * and nothing else (spec release_transparency D2, O1): two runs of
  * utils/create_install_sql.php against the same database are the same bytes.
  *
  * The three things that used to differ between runs — a timestamp line, pg_dump's

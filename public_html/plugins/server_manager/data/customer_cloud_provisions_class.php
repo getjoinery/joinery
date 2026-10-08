@@ -39,6 +39,7 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.17 - host_agent_name(): the site name and -host, the name install.sh's host agent joins as
  * @version 1.16 - install mode 'adopted': a running server this plane did not create, recorded by Adopt cloud
  *                 server so reverse DNS and an IP-swap switch-over reach it (test_cloud_account_and_prod_management WP9)
  * @version 1.15 - cvp_root_ssh_keys: the public keys put on the machine's root account when its install password
@@ -487,6 +488,22 @@ class CustomerCloudProvision extends SystemBase {
 	}
 
 	/** Is this provision's instance created on the operator's own account? */
+	/**
+	 * The name a docker provision's host agent asks to join as: the site name
+	 * and "-host", as JobCommandBuilder::build_install_node gives it to
+	 * install.sh. The site name, not the slug: the install form takes them
+	 * separately, and they often differ (slug wp7-scratch, site wp7scratch).
+	 * Null for a bare instance, whose one agent takes the site name and is
+	 * approved from the provision's node.
+	 */
+	public function host_agent_name(): ?string {
+		if (($this->get('cvp_install_mode') ?: 'fresh') === 'bare') {
+			return null;
+		}
+		$site = trim((string)$this->get('cvp_sitename')) ?: trim((string)$this->get('cvp_slug'));
+		return $site !== '' ? $site . '-host' : null;
+	}
+
 	public function is_operator_hosted(): bool {
 		return ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator';
 	}

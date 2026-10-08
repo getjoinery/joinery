@@ -119,7 +119,7 @@ check($r !== null && strpos($r, 'release_keys/log/' . $origin . '.pub') !== fals
 
 $other = array($origin => TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32));
 $r = rl_refusal(function () use ($fx, $other, $pins, $now) { (new ReleaseLogClient($other, $pins, rl_transport($fx), $now))->discover(); });
-check($r !== null && strpos($r, 'different checkpoint key') !== false, 'a pin the trusted root disagrees with: refused', (string)$r);
+check($r !== null && strpos($r, 'does not pin') !== false, 'a pin the trusted root disagrees with: refused', (string)$r);
 
 $r = rl_refusal(function () use ($fx, $pins) { (new ReleaseLogClient($pins, $pins, rl_transport($fx), strtotime('2025-12-01T00:00:00Z')))->discover(); });
 check($r !== null && strpos($r, 'no Rekor v2 log that is taking entries now') !== false, 'before the shard\'s start nothing is live: refused', (string)$r);
@@ -155,7 +155,27 @@ $rot = array($origin => $rotated_key);
 $s = (new ReleaseLogClient($rot, $rot, null, $now))->chooseShard($sc, $tr_rot);
 check($s['key'] === $rotated_key, 'a key rotated in place: the entry valid now is the one checked');
 $r = rl_refusal(function () use ($pins, $now, $sc, $tr_rot) { (new ReleaseLogClient($pins, $pins, null, $now))->chooseShard($sc, $tr_rot); });
-check($r !== null && strpos($r, 'different checkpoint key') !== false, 'and a pin of the retired key is refused', (string)$r);
+check($r !== null && strpos($r, 'does not pin') !== false, 'and a pin of the retired key alone is refused', (string)$r);
+$s = (new ReleaseLogClient(array($origin => array($log_key, $rotated_key)), $rot, null, $now))->chooseShard($sc, $tr_rot);
+check($s['key'] === $rotated_key, 'both keys pinned for the log: the one valid now is the one checked');
+
+// A key the live log rotates to in place, named ahead of its start (review B7):
+// it is pinned and shipped before it takes over, as a new log's key is.
+$future_key = TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32);
+$tr_next = $tr;
+$tr_next['tlogs'][] = array('baseUrl' => $shard_url, 'hashAlgorithm' => 'SHA2_256',
+	'publicKey' => array('rawBytes' => base64_encode($future_key), 'keyDetails' => 'PKIX_ED25519', 'validFor' => array('start' => '2027-03-01T00:00:00Z')));
+$r = null;
+try { (new ReleaseLogClient($pins, $pins, null, $now))->chooseShard($sc, $tr_next); }
+catch (ReleaseLogShardAheadException $e) { $r = $e; }
+check($r !== null && $r->origin === $origin && $r->starts_at === strtotime('2027-03-01T00:00:00Z')
+	&& strpos($r->getMessage(), 'changes its checkpoint key') !== false && strpos($r->getMessage(), base64_encode($future_key)) !== false,
+	'the live log\'s next key, unpinned: refused as a changeover ahead, naming the key and the date', $r ? $r->getMessage() : 'no refusal');
+$both_keys = array($origin => array($log_key, $future_key));
+$s = (new ReleaseLogClient($both_keys, $pins, null, $now))->chooseShard($sc, $tr_next);
+$ahead_keys = array_column($s['ahead_detail'], 'key');
+check($s['key'] === $log_key && in_array($future_key, $ahead_keys, true),
+	'pinned beside the current key: it passes, the current key is checked, and the next is reported ahead for the watch');
 $tr_both = $tr_rot;
 foreach ($tr_both['tlogs'] as &$tl) { unset($tl['publicKey']['validFor']['end']); }
 unset($tl);
@@ -327,7 +347,11 @@ check(ReleaseLogClient::repoStatementKeys($site) === array($der), 'a non-P-256 f
 
 file_put_contents($site . '/' . ReleaseLogClient::KEYS_DIR . "/log/{$origin}.pub", base64_encode($log_key) . "\n");
 file_put_contents($site . '/' . ReleaseLogClient::KEYS_DIR . '/log/junk.pub', base64_encode($der) . "\n");
-check(ReleaseLogClient::repoLogKeys($site) === $pins, 'log pins are read origin => key, a non-Ed25519 file ignored');
+check(ReleaseLogClient::repoLogKeys($site) === array($origin => array($log_key)), 'log pins are read origin => keys, a non-Ed25519 file ignored');
+$second = TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32);
+file_put_contents($site . '/' . ReleaseLogClient::KEYS_DIR . "/log/{$origin}.pub", base64_encode($log_key) . "\n" . base64_encode($second) . "\n" . base64_encode($log_key) . "\n");
+check(ReleaseLogClient::repoLogKeys($site) === array($origin => array($log_key, $second)), 'one key per line, a log may pin two, each once');
+file_put_contents($site . '/' . ReleaseLogClient::KEYS_DIR . "/log/{$origin}.pub", base64_encode($log_key) . "\n");
 
 // The repository's own pins: every file under release_keys/log/ must be read
 // as a key, or the publisher silently does not pin it and refuses to log.

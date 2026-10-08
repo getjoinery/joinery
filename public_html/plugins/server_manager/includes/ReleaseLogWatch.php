@@ -34,6 +34,8 @@
  * Runs only on the box that logs releases: the one that mints release
  * versions and signs its own tree. Everywhere else it has nothing to watch.
  *
+ * @version 1.2 - a release holds a log key when it is among the keys installed for that log (WP7 review B7)
+ * @version 1.1 - the unpinned Fix says to check the new log key against Sigstore's trusted root from a second computer first
  * @version 1.0
  */
 class ReleaseLogWatch {
@@ -123,7 +125,7 @@ class ReleaseLogWatch {
 					'live' => $shard['origin'], 'ahead' => $shard['ahead']), $now);
 			}
 			foreach ($shard['ahead_detail'] as $a) {
-				if ($held !== null && !(isset($held[$a['origin']]) && hash_equals($held[$a['origin']], $a['key']))) {
+				if ($held !== null && !ReleaseLogClient::holdsKey(ReleaseLogClient::keySets($held)[$a['origin']] ?? array(), $a['key'])) {
 					return self::conclude($state, array('result' => 'ahead', 'stage' => 'unshipped', 'origin' => $a['origin'], 'starts_at' => $a['start'],
 						'message' => "{$a['origin']}'s key is pinned in this repository, but no logged release has carried it to nodes yet.",
 						'live' => $shard['origin'], 'ahead' => $shard['ahead']), $now);
@@ -173,8 +175,10 @@ class ReleaseLogWatch {
 			$days = (int)floor(($starts - $now) / 86400);
 			$stage = $state['stage'] ?? 'unpinned';
 			$fix = array(
-				'unpinned'    => 'Add the key file the message names to the repository, commit it, and publish once before ' . $date
-					. '. That release, logged on the current log, hands every node the new key.',
+				'unpinned'    => 'From a second computer, check the key the message names against Sigstore\'s trusted root '
+					. '(targets/trusted_root.json in github.com/sigstore/root-signing): this site read it over its own connection, '
+					. 'and a release hands that key to every node for good. Then add the key file to the repository, commit it, '
+					. 'and publish once before ' . $date . '. That release, logged on the current log, hands every node the new key.',
 				'unshipped'   => 'Publish once before ' . $date . '. That release, logged on the current log, hands every node the new key; '
 					. 'this clears when it has.',
 				'unpublished' => 'Nothing to add yet: Sigstore has not published the new log\'s key. Releases still publish meanwhile. '

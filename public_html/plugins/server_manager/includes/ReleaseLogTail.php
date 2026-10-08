@@ -44,6 +44,7 @@
  * The state, which the public releases page shows: how far each log has been
  * read, when, every unaccounted entry, and the last key check.
  *
+ * @version 1.3 - every key pinned or held for a log reads its checkpoint (WP7 review B7)
  * @version 1.2 - a checkpoint smaller than one already seen is refused; the run reports only entries the ledger
  *                still does not account for
  * @version 1.1 - the daily check of installed log keys against Sigstore's trusted root (D7)
@@ -101,7 +102,7 @@ class ReleaseLogTail {
 		}
 		$root = PathHelper::getSiteRoot();
 		$statement_keys = array_values(array_unique(array_merge(ReleaseLogClient::repoStatementKeys($root), $held['statement'] ?? array())));
-		$log_keys = ReleaseLogClient::repoLogKeys($root) + ($held['log'] ?? array());
+		$log_keys = ReleaseLogClient::keySets(array_merge_recursive(ReleaseLogClient::repoLogKeys($root), $held['log'] ?? array()));
 		if (!$statement_keys) {
 			return array('status' => 'success', 'message' => 'No release statement key exists yet, so nothing can be logged under one.');
 		}
@@ -152,7 +153,7 @@ class ReleaseLogTail {
 	 * reader's HTTP, so tests drive it with a log of their own.
 	 *
 	 * @param string[] $statement_keys DER of every statement key to look for
-	 * @param array    $log_keys       origin => Ed25519 DER of every log to read
+	 * @param array    $log_keys       origin => Ed25519 DER, or a list of them, of every log to read
 	 * @param array    $ledger         "origin#index" => {id, leaf} for every entry this site logged
 	 * @return array the new state; 'seen' lists the ledger ids found in the log this run
 	 */

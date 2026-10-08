@@ -14,6 +14,7 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.5 - keys a package proves that cannot be recorded stop the refresh before the live copy is replaced
  * @version 1.4 - a downloaded package is verified as a fresh archive, with the release log where the
  *                node requires it; a key its chain proves is persisted when root runs this
  * @version 1.3 - the fork model (specs/package_replace_on_upload.md WP3):
@@ -433,7 +434,10 @@ abstract class AbstractExtensionManager {
             try {
                 PackageSignature::persistProvenKeys($verdict->keys_proven);
             } catch (Throwable $e) {
-                error_log('refreshFromUpstream: ' . $e->getMessage());
+                // The keys first, or nothing: a refresh whose keys were not
+                // kept lowers the bar the next release is checked against.
+                $rmtree($work);
+                throw new Exception('Not refreshed: the release-log keys this package proved could not be recorded: ' . $e->getMessage());
             }
         }
 
