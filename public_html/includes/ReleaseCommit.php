@@ -2,7 +2,7 @@
 /**
  * ReleaseCommit - a release is a commit, and this is how the publisher knows.
  *
- * specs/release_transparency.md D1: publish refuses to build unless the trees
+ * spec release_transparency D1: publish refuses to build unless the trees
  * it ships from are committed and on the public remote. "A release is a commit"
  * is what makes the archive reproducible by anyone: a verifier with the commit
  * can regenerate every manifest line, which an archive built from an uncommitted
@@ -42,6 +42,7 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.3 - commitRelease() adds its paths before committing them, so a file new to git is committed too
  * @version 1.2 - publishWrite() and commitRelease(): publish commits and pushes the files it writes; git runs
  *                with the repository owner's home, so the owner's identity and key are the ones used
  * @version 1.1 - knownFiles() and joineryFileShips(): only a file git knows, or one publish builds, ships
@@ -346,6 +347,14 @@ class ReleaseCommit {
 	 * @return array{ok:bool, commit:?string, reason:string}
 	 */
 	public static function commitRelease($repo_root, array $paths, $message, $remote = 'origin', $branch = 'main') {
+		// Added first: a path git does not know yet (a new jail binary, a first
+		// statement key's .pub) is refused by a commit that names it. Naming
+		// the paths on the commit still commits only them; whatever else sits
+		// staged in the shared index stays staged.
+		$add = self::git($repo_root, array_merge(array('add', '--'), $paths));
+		if ($add['exit'] !== 0) {
+			return array('ok' => false, 'commit' => null, 'reason' => 'git add failed: ' . trim(implode(' | ', array_slice($add['out'], -3))));
+		}
 		$commit = self::git($repo_root, array_merge(array('commit', '--quiet', '-m', $message, '--'), $paths));
 		if ($commit['exit'] !== 0) {
 			return array('ok' => false, 'commit' => null, 'reason' => 'git commit failed: ' . trim(implode(' | ', array_slice($commit['out'], -3))));

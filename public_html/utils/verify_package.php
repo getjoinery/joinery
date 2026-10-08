@@ -25,6 +25,7 @@
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.2 - keys a package proves that cannot be recorded exit 1, so the host installer waits for the next converge
  * @version 1.1 - the release log: `unlogged`, and proven keys persisted by root
  * @version 1.0
  */
@@ -60,7 +61,10 @@ if ($verdict->signed() && $verdict->keys_proven && $keys_file === null
 			echo 'key proven by the release log chain: ' . $line . "\n";
 		}
 	} catch (Throwable $e) {
-		fwrite(STDERR, 'warning: ' . $e->getMessage() . "\n");
+		// The keys first, or nothing: the converger runs the host installer
+		// only on exit 0, so this tick skips it and the next tries again.
+		echo 'keys not recorded: ' . $e->getMessage() . "\n";
+		exit(1);
 	}
 }
 exit($verdict->signed() ? 0 : 1);

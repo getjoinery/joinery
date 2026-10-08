@@ -80,6 +80,12 @@ check($cp['tree_size'] === $tree_size, 'the checkpoint verifies against the log\
 check(ltr_refusal(function () use ($reader, $origin) {
 	$reader->checkpoint($origin, array($origin => sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())));
 }) !== null, 'a checkpoint is refused under any other key');
+$stranger = TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32);
+$cp2 = $reader->checkpoint($origin, array($origin => array($stranger, $log_key)));
+check($cp2['tree_size'] === $tree_size, 'a log held by two keys (rotating in place): a checkpoint signed by either verifies');
+check(ltr_refusal(function () use ($reader, $origin, $stranger) {
+	$reader->checkpoint($origin, array($origin => array($stranger)));
+}) !== null, 'and a set holding none of its keys refuses it');
 
 check($reader->entry($origin, $index, $tree_size) === $leaf, 'the entry comes from the bundle that holds it');
 check(substr(end($asked), -strlen(".p/{$in_tile}")) === ".p/{$in_tile}", 'the newest bundle of the tree is read as a partial one', end($asked));

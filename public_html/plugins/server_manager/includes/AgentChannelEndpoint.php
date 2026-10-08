@@ -42,6 +42,10 @@
  * store verbatim and later parse as its own.
  *
  * @version 1.39 - a joined node is given its storage space on the target Where new backups go names, once saved
+ * @version 1.39 - a claim carries bundle_state, a siteless machine's verdict on the support bundle, stored as
+ *                mgn_agent_bundle_state and raised as plane:agent_bundle_refused (release_transparency, WP7 review)
+ * @version 1.38 - a provision's host agent is recognised by CustomerCloudProvision::host_agent_name() (the site
+ *                name and -host, as install.sh names it), not the slug, which the install form sets apart
  * @version 1.37 - a node made by a join is given the target Where new backups go names
  * @version 1.36 - a credential slot naming a target switched off or deleted is refused at pickup:
  *                every slot is a write credential, and such a target takes no more writes
@@ -740,7 +744,7 @@ class AgentChannelEndpoint {
 			// provider check ties the machine to the provision before anything
 			// is made; the fingerprint the human compared is the identity.
 			$claimed = trim((string)$request->get('ajr_claimed_name'));
-			$is_host_claim = ($claimed !== '' && $claimed === trim((string)$provision->get('cvp_slug')) . '-host');
+			$is_host_claim = ($claimed !== '' && $claimed === $provision->host_agent_name());
 			if (!$is_host_claim) {
 				throw new Exception('This join comes from provision #' . (int)$provision->key . '\'s machine ('
 					. $provision->get('cvp_domain') . '). Approve it from that provision\'s node, where the claim is checked with the provider first.');
@@ -1052,6 +1056,10 @@ class AgentChannelEndpoint {
 			'update_state'   => ['type' => 'string', 'max' => 24,
 				'pattern' => '/^(none|current|update_pending|verify_failed|fetch_failed|unsigned_build|no_binary|version_rejected|unlogged)$/'],
 			'update_offered' => ['type' => 'string', 'max' => 20, 'pattern' => '/^([0-9]+\.[0-9]+\.[0-9]+)?$/'],
+			// A siteless machine's verdict on the support bundle on offer,
+			// held to the public log as the binary is. Absent on a machine with
+			// a site, and before the first check.
+			'bundle_state'   => ['type' => 'string', 'max' => 24, 'pattern' => '/^(current|unlogged|verify_failed)$/'],
 		];
 	}
 
@@ -1154,6 +1162,10 @@ class AgentChannelEndpoint {
 					$node->set($column, $value);
 				}
 			}
+		}
+
+		if (array_key_exists('bundle_state', $in) && (string)$in['bundle_state'] !== (string)$node->get('mgn_agent_bundle_state')) {
+			$node->set('mgn_agent_bundle_state', (string)$in['bundle_state']);
 		}
 
 		// The node saying, unprompted, whether it can verify its own scripts.

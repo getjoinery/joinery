@@ -23,6 +23,7 @@
  * sealed. Building a bundle opens no sealed content: settings are compared as
  * stored, never decrypted.
  *
+ * @version 1.2 - clean() also drops the directory the install lives in, so a log line cut short mid-path does not show it
  * @version 1.1.0 - automatic(): the bundle a site sends on its own; fingerprint(): the same-fault key
  * @version 1.0.1
  */
@@ -218,9 +219,13 @@ class ProblemReportBundle {
 	 */
 	public static function clean($value): string {
 		$text = (string)$value;
+		// The directory the install lives in goes too: a log line cut short
+		// by the server ends a path partway ("/var/www/html/j..."), where the
+		// full site root no longer matches.
 		$text = str_replace(array(
 			rtrim(PathHelper::getRootDir(), '/') . '/',
 			rtrim(PathHelper::getSiteRoot(), '/') . '/',
+			rtrim(dirname(rtrim(PathHelper::getSiteRoot(), '/')), '/') . '/',
 		), '', $text);
 		$text = LogRedactor::text($text);
 		if (mb_strlen($text) > self::VALUE_CAP) {

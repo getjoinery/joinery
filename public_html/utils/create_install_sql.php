@@ -21,7 +21,7 @@
  * @version 1.4 - deterministic output: no timestamp line, a fixed pg_dump restrict
  *                key, a locked ("!") seed admin hash, gzip -n. The same schema
  *                yields the same bytes, so the file can be committed and compared
- *                (specs/release_transparency.md D2)
+ *                (spec release_transparency D2)
  * @version 1.3 - every failure exits 1 (die() with a message exits 0)
  * @version 1.2 - the database name comes from the dbname bootstrap key
  * @version 1.1
@@ -220,7 +220,7 @@ function pg_dump_or_die(array $args, ?string $password, string $what) {
     // pg_dump 16.10+ wraps its output in \restrict <token> ... \unrestrict
     // <token> with a random token per run (alphanumeric only). A fixed token keeps the dump a
     // function of the schema alone, which is what lets the committed file be
-    // compared across publishes (specs/release_transparency.md D2).
+    // compared across publishes (spec release_transparency D2).
     $args[] = '--restrict-key=joineryinstall';
     foreach ($args as $arg) {
         $cmd .= ' ' . (preg_match('/^--[a-z-]+$/', $arg) ? $arg : escapeshellarg($arg));
@@ -348,7 +348,7 @@ echo "[7/10] Generating default users...\n";
 // for it — password_verify() and the phpass fallback both refuse it for every
 // input — so it is not a shared credential, and it is the same bytes on every
 // run, which a random-salted hash was not (the install SQL is committed and
-// compared across publishes, specs/release_transparency.md D2).
+// compared across publishes, spec release_transparency D2).
 //
 // _site_init.sh gives the account a real password at install time (generated per
 // site, or the one the owner chose on a deploy form). Anything that restores this
@@ -449,7 +449,7 @@ if (!$output_handle) {
 
 // Write header with metadata. No timestamp: the file is a function of the
 // schema and the version, nothing else, so two runs against the same schema
-// are the same bytes (specs/release_transparency.md D2).
+// are the same bytes (spec release_transparency D2).
 $header = <<<SQL
 --
 -- PostgreSQL database dump

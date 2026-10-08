@@ -146,7 +146,7 @@ check(!isset($chain4[1]['key_chain']), 'links carry envelope and entry only, nev
 
 $held = ReleaseStatementPublisher::held(rs_doc(array('release_keys' => array(), 'statement_keys' => array(base64_encode('S')),
 	'log_keys' => array(array('origin' => 'log-a', 'key' => base64_encode('L'))))));
-check($held === array('log' => array('log-a' => 'L'), 'statement' => array('S')), 'held keys are read from the last logged release');
+check($held === array('log' => array('log-a' => array('L')), 'statement' => array('S')), 'held keys are read from the last logged release');
 check(ReleaseStatementPublisher::held(null) === array('log' => null, 'statement' => null), 'and are null at genesis');
 
 // ---------------------------------------------------------------------------
@@ -236,6 +236,16 @@ check($r !== null && strpos($r, 'does not record plugin/demo as it ships') !== f
 $fewer = $installed; $fewer['release_keys'][] = base64_encode(random_bytes(32));
 $r = rs_refusal(function () use ($doc, $fewer, $subjects) { ReleaseStatementPublisher::verifyDocument($doc, $fewer, $subjects); });
 check($r !== null && strpos($r, 'different keys') !== false, 'a key list that differs from the one logged is refused', (string)$r);
+
+// A release that ships the key its log rotates to in place (review B7a): two
+// keys for one log, current one first, entry under the current one.
+$rotating = $installed;
+$rotating['log_keys'][] = array('origin' => $origin, 'key' => base64_encode(TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32)));
+$rot_payload = ReleaseStatementPublisher::payload(array_merge($facts, array('artifacts' => $subjects + array('agent/linux-amd64' => str_repeat('f', 64)),
+	'keys_installed' => $rotating)));
+$rot_doc = ReleaseStatementPublisher::log($client, $shard, $rot_payload, $sk['pem'], null);
+$r = rs_refusal(function () use ($rot_doc, $rotating, $subjects) { ReleaseStatementPublisher::verifyDocument($rot_doc, $rotating, $subjects); });
+check($r === null, 'a release installing two keys for its log verifies against the one its entry is under', (string)$r);
 // The chain, walked as a node holding only genesis keys would: genesis
 // logged here, then a release logged under its keys.
 $g_payload = ReleaseStatementPublisher::payload(array_merge($facts, array('artifacts' => $subjects, 'keys_installed' => $installed)));
@@ -244,7 +254,7 @@ $next_doc = ReleaseStatementPublisher::log($client, $shard, $payload, $sk['pem']
 check(count(json_decode($next_doc, true)['key_chain']) === 1, 'the release after a logged genesis carries genesis as its chain');
 check(ReleaseStatementPublisher::verifyDocument($next_doc, $installed, $subjects)['version'] === '0.8.470', 'and the chain walks: genesis verifies on its own keys, the statement on what genesis installed');
 $walked = ReleaseStatementPublisher::walkChain(json_decode($next_doc, true)['key_chain']);
-check($walked['statement'] === array($sk['der']) && $walked['log'] === array($origin => $log_der), 'the walk ends holding the keys genesis installed');
+check($walked['statement'] === array($sk['der']) && $walked['log'] === array($origin => array($log_der)), 'the walk ends holding the keys genesis installed');
 $bad_chain = json_decode($next_doc, true);
 $bad_chain['key_chain'][] = $bad_chain['key_chain'][0];
 $bad_chain['key_chain'][1]['envelope']['payload'] = base64_encode('{"keys_installed":{"release_keys":[],"statement_keys":[],"log_keys":[]}}');
@@ -366,7 +376,7 @@ check(strpos((string)ReleaseLogWatch::conditions($s2, array('active' => false, '
 $other = array($origin => TransparencyProof::ED25519_SPKI_PREFIX . random_bytes(32));
 $s6 = $watch($other, rs_sigstore($fx), array(), $now);
 $cond = ReleaseLogWatch::conditions($s6, $task, $now);
-check($s6['result'] === 'refused' && $cond['refused']['severity'] === 'critical' && strpos($cond['refused']['detail']['Why'], 'different checkpoint key') !== false,
+check($s6['result'] === 'refused' && $cond['refused']['severity'] === 'critical' && strpos($cond['refused']['detail']['Why'], 'does not pin') !== false,
 	'a pin Sigstore disagrees with: critical, publishing is refused now');
 
 // ---------------------------------------------------------------------------

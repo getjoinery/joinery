@@ -29,6 +29,7 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.4 - the agent's support-bundle verdict moves with the machine
  * @version 1.3 - the agent's self-update state moves with the machine
  * @version 1.2 - the other row is renamed with what it holds: (old container) or (old server) once retired,
  *                (copy) again on the way back; it kept (copy) on the old machine (B6)
@@ -49,7 +50,7 @@ class SiteCopySwap {
 		'mgn_last_host_report', 'mgn_last_host_report_time',
 		'mgn_agent_public_key', 'mgn_agent_paired_time', 'mgn_agent_quiet_time', 'mgn_agent_last_poll',
 		'mgn_agent_version', 'mgn_agent_primitives', 'mgn_agent_recipes', 'mgn_agent_bundle_version',
-		'mgn_agent_log_access', 'mgn_agent_server_manager', 'mgn_agent_update_state', 'mgn_agent_update_offered',
+		'mgn_agent_log_access', 'mgn_agent_server_manager', 'mgn_agent_update_state', 'mgn_agent_update_offered', 'mgn_agent_bundle_state',
 		'mgn_script_trust', 'mgn_script_trust_since', 'mgn_script_trust_reason', 'mgn_script_trust_job_type',
 	);
 

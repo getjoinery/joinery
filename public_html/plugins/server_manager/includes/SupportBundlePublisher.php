@@ -41,7 +41,7 @@
  * nothing to keep in step.
  *
  * @version 1.16 - the tarball is deterministic (sorted, epoch mtimes, no owner, normalised modes,
- *                 gzip -n): one staging tree is one byte string (specs/release_transparency.md D2)
+ *                 gzip -n): one staging tree is one byte string (spec release_transparency D2)
  * @version 1.15 - carries site_limits.sh and docker_disk_pool.sh: the site_limits word, which changes a
  *                 site's memory, CPU ceiling and disk allowance on its host (multi_tenant_docker_hosts WP6)
  * @version 1.14 - carries outbound_limits.sh and _site_run_spec.sh: the outbound_limits word, and host
@@ -293,7 +293,7 @@ class SupportBundlePublisher {
 			// normalised modes, and gzip without a name or timestamp. The bundle
 			// is hashed into the core manifest and named in the release
 			// statement, so a verifier rebuilding it from the commit must get
-			// these bytes (specs/release_transparency.md D2).
+			// these bytes (spec release_transparency D2).
 			$cmd = sprintf('set -o pipefail; tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --mode=u+rwX,go+rX,go-w -cf - -C %s . | gzip -n > %s',
 				escapeshellarg($staging), escapeshellarg($temp_tar));
 			$tar_out = array();

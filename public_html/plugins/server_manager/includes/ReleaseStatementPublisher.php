@@ -35,6 +35,8 @@
  * Runs on the publisher only, from publish_upgrade.php. A republishing site
  * never writes one: it carries what it received, as a listed file.
  *
+ * @version 1.2 - verifyDocument() checks the entry against every key the release installs for its log (review B7a)
+ * @version 1.1 - held() keeps every log key a release installed, origin => list (WP7 review B7)
  * @version 1.0
  */
 class ReleaseStatementPublisher {
@@ -95,7 +97,8 @@ class ReleaseStatementPublisher {
 
 	/**
 	 * What nodes hold now, from the newest logged release: its log keys
-	 * (origin => DER) and statement keys (DER). Both null at genesis.
+	 * (origin => list of DER: a log rotating its key in place is held by both)
+	 * and statement keys (DER). Both null at genesis.
 	 *
 	 * @return array{log:?array, statement:?array}
 	 */
@@ -106,13 +109,13 @@ class ReleaseStatementPublisher {
 		$keys = self::payloadOf($previous)['keys_installed'];
 		$log = array();
 		foreach ($keys['log_keys'] ?? array() as $pair) {
-			$log[(string)($pair['origin'] ?? '')] = (string)base64_decode((string)($pair['key'] ?? ''), true);
+			$log[(string)($pair['origin'] ?? '')][] = (string)base64_decode((string)($pair['key'] ?? ''), true);
 		}
 		$statement = array();
 		foreach ($keys['statement_keys'] ?? array() as $b64) {
 			$statement[] = (string)base64_decode((string)$b64, true);
 		}
-		return array('log' => $log, 'statement' => $statement);
+		return array('log' => ReleaseLogClient::keySets($log), 'statement' => $statement);
 	}
 
 	/**
@@ -327,7 +330,9 @@ class ReleaseStatementPublisher {
 		$statement_keys = array_map(function ($b64) { return (string)base64_decode($b64, true); }, $keys_installed['statement_keys']);
 		$log_keys = array();
 		foreach ($keys_installed['log_keys'] as $pair) {
-			$log_keys[$pair['origin']] = (string)base64_decode($pair['key'], true);
+			// Every key the release installs for a log: while a log rotates its
+			// key in place, the entry is under the current one of the two.
+			$log_keys[$pair['origin']][] = (string)base64_decode($pair['key'], true);
 		}
 		try {
 			TransparencyProof::verifyEntry($doc['envelope'], $doc['entry'], $statement_keys, $log_keys);

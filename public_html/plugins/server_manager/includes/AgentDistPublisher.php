@@ -25,6 +25,9 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.7 - every key pinned for a log ships, so a key the log rotates to reaches nodes first (WP7 review B7)
+ * @version 2.6 - builds with the official toolchain go.mod pins (GoBinaryPublisher::officialGo), never the
+ *                box's own Go, so anyone can rebuild the same bytes
  * @version 2.5 - a source version that is not X.Y.Z refuses the publish (VERSION_PATTERN)
  * @version 2.4 - manifest.json records source_commit, the agent commit the binaries were built from.
  *                A bundle whose recorded commit is not the source's HEAD is rebuilt and compared:
@@ -40,13 +43,13 @@
  *                SubjectPublicKeyInfo form is listed, the same rule the log client pins by
  * @version 2.0 - manifest.json carries release_keys and log_keys, read from the repository's
  *                release_keys/ directory; the publisher refuses to sign with a key not listed
- *                there (specs/release_transparency.md D5). signing_public_key stays for the
+ *                there (spec release_transparency D5). signing_public_key stays for the
  *                converger that reads it today
  * @version 1.9 - the build refuses any Go but the one the agent's go.mod pins
  *                (GoBinaryPublisher::assertToolchain, GOTOOLCHAIN=local), and
  *                manifest.json records which (go_toolchain), so a verifier
  *                rebuilding from the commit uses the same compiler
- *                (specs/release_transparency.md D3)
+ *                (spec release_transparency D3)
  * @version 1.8 - manifest.json records the public key the bundle was built with (signing_public_key),
  *                stamped onto an unchanged bundle too where the source is here, and bundleSigningKey()
  *                reads it back: it is how a publish knows whether this site may sign a tree manifest
@@ -82,6 +85,9 @@ class AgentDistPublisher {
 	const STATUS_CARRIED = 'carried';
 	/** A rebuild was required and did not happen. The bundle is stale. */
 	const STATUS_FAILED = 'failed';
+
+	/** Build caches, and the official toolchain's module cache, shared by root and user runs. */
+	const BUILD_CACHE = '/var/tmp/joinery-agent-build';
 
 	/** The only shape an agent version takes: three numbers. */
 	const VERSION_PATTERN = '/^[0-9]+\.[0-9]+\.[0-9]+$/';
@@ -201,15 +207,13 @@ class AgentDistPublisher {
 			$key_lists = self::assertOwnKeyListed($full_site_dir, $keys['public_b64']);
 			$say("Agent artifact: building v{$agent_version} (was " . ($bundled_version ?: 'none') . ") - signing key read from config/agent_signing_key, listed in release_keys/");
 
-			$go = self::findGo();
-			if ($go === null) {
-				// A box holding agent source newer than the bundle is a
-				// publishing management node; a missing toolchain there is a
-				// broken box, not a reason to ship the old agent.
-				throw new Exception('Go toolchain not found');
-			}
-			$go_toolchain = GoBinaryPublisher::assertToolchain($go, $src);
-			$say("Agent artifact: toolchain {$go_toolchain}");
+			// A box holding agent source newer than the bundle is a publishing
+			// management node; a missing toolchain there is a broken box, not a
+			// reason to ship the old agent.
+			$official = self::officialGo($src);
+			$go = $official['go'];
+			$go_toolchain = $official['toolchain'];
+			$say("Agent artifact: toolchain {$go_toolchain} (official, checksum-verified)");
 
 			$staging = $dist_dir . '.staging';
 			self::rrmdir($staging);
@@ -321,7 +325,7 @@ class AgentDistPublisher {
 	}
 
 	/**
-	 * The key lists the repository publishes (specs/release_transparency.md
+	 * The key lists the repository publishes (spec release_transparency
 	 * D5): every Ed25519 release key under release_keys/release/, every P-256
 	 * statement key under release_keys/statement/ and every checkpoint key
 	 * under release_keys/log/, read from the tree so that a rotation is a
@@ -345,8 +349,10 @@ class AgentDistPublisher {
 		// shipped either.
 		$statement = array_map('base64_encode', ReleaseLogClient::repoStatementKeys($full_site_dir));
 		$log = array();
-		foreach (ReleaseLogClient::repoLogKeys($full_site_dir) as $origin => $der) {
-			$log[] = array('origin' => $origin, 'key' => base64_encode($der));
+		foreach (ReleaseLogClient::repoLogKeys($full_site_dir) as $origin => $ders) {
+			foreach ($ders as $der) {
+				$log[] = array('origin' => $origin, 'key' => base64_encode($der));
+			}
 		}
 		sort($release);
 		sort($statement);
@@ -469,7 +475,12 @@ class AgentDistPublisher {
 		return array('secret' => $secret, 'public' => $public, 'public_b64' => $public_b64);
 	}
 
-	/** Locate the Go toolchain. */
+	/** The official toolchain the agent's go.mod pins (GoBinaryPublisher::officialGo), fetched into the build cache. */
+	private static function officialGo($src) {
+		return GoBinaryPublisher::officialGo(self::findGo(), $src, self::BUILD_CACHE . '/gomodcache', self::BUILD_CACHE);
+	}
+
+	/** Locate the Go that fetches the official toolchain. */
 	public static function findGo() {
 		foreach (array('/usr/bin/go', '/usr/local/go/bin/go') as $candidate) {
 			if (is_executable($candidate)) { return $candidate; }
@@ -500,11 +511,7 @@ class AgentDistPublisher {
 	 * the bundled one. Empty when the source still builds the bundle's bytes.
 	 */
 	private static function rebuildDiffers($src, $version, array $manifest, $scratch) {
-		$go = self::findGo();
-		if ($go === null) {
-			throw new Exception('Go toolchain not found');
-		}
-		GoBinaryPublisher::assertToolchain($go, $src);
+		$go = self::officialGo($src)['go'];
 		self::rrmdir($scratch);
 		if (!mkdir($scratch, 0755, true)) {
 			throw new Exception("cannot create {$scratch}");
@@ -529,7 +536,7 @@ class AgentDistPublisher {
 	private static function buildBinary($go, $src, $arch, $version, $public_b64, array $key_lists, $out_path) {
 		// Persistent caches so repeat publishes are fast and root/user1 runs
 		// do not depend on either account's home directory.
-		$cache_root = '/var/tmp/joinery-agent-build';
+		$cache_root = self::BUILD_CACHE;
 		@mkdir($cache_root . '/gocache', 0777, true);
 		@mkdir($cache_root . '/gomodcache', 0777, true);
 

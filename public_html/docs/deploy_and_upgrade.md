@@ -174,19 +174,25 @@ rather than from a directory. The rest is generated deterministically:
   password), and compresses with `gzip -n`. Two runs against one schema are
   one byte string, and the file is committed.
 - **Go binaries** (agent, relay sealer, parser-jail launcher) — each `go.mod`
-  pins `toolchain goX.Y.Z`; the builders refuse any other compiler, older or
-  newer (`GoBinaryPublisher::assertToolchain`), and run with
-  `GOTOOLCHAIN=local` so Go never fetches one. With `-trimpath`,
-  `CGO_ENABLED=0` and `-buildvcs=false` a build is bit-identical across
-  machines. `agent_dist/manifest.json` records the toolchain.
+  pins `toolchain goX.Y.Z`, and the build uses the official toolchain of that
+  version and nothing else (`GoBinaryPublisher::officialGo`). The box's own Go
+  only fetches it: asked with `GOTOOLCHAIN=goX.Y.Z`, Go downloads the
+  `golang.org/toolchain` module, checks it against Go's public checksum
+  database and unpacks it in the build's module cache; a Go that is itself the
+  pinned version, such as a distribution's patched build, is refused, because
+  it compiles different bytes. The build then runs that toolchain with
+  `GOTOOLCHAIN=local`. With `-trimpath`, `CGO_ENABLED=0` and `-buildvcs=false`
+  a build is bit-identical on any machine. `agent_dist/manifest.json` records
+  the toolchain.
 - **Support bundle** — `tar --sort=name --mtime=@0 --owner=0 --group=0
   --numeric-owner`, normalised modes, `gzip -n`: one staging tree, one
   tarball.
 
 **Release keys live in the repository.** `maintenance_scripts/install_tools/release_keys/release/*.pub`
 holds every Ed25519 release public key, `release_keys/statement/*.pub` every
-P-256 release statement key, and `release_keys/log/<origin>.pub` every
-transparency-log checkpoint key. The publisher refuses to sign with a key not
+P-256 release statement key, and `release_keys/log/<origin>.pub` the
+checkpoint keys of each transparency log, one per line (two while Sigstore
+rotates a log's key in place). The publisher refuses to sign with a key not
 listed, and `agent_dist/manifest.json` carries the three lists
 (`release_keys`, `statement_keys`, `log_keys`) beside `signing_public_key`, so
 a rotation is a commit diff.
@@ -207,7 +213,8 @@ relay sealer hashes, and every key the release installs.
   (`ReleaseLogClient::discover()`: four fetches from Sigstore's TUF CDN). It
   refuses when the live log's key is not pinned under `release_keys/log/`,
   when the last logged release did not install it, or when Sigstore lists a
-  future log whose key is not pinned yet. Each refusal names the file to add.
+  future log, or a future key for the live log, that is not pinned yet. Each
+  refusal names the file and the key to add.
   A future log whose key Sigstore has not published yet is printed, not
   refused; the watch below tracks it. It also refuses when a release row newer
   than the last logged one carries no statement: a publish that stopped
@@ -852,8 +859,8 @@ It downloads the core archive from the upgrade source (`/static_files/joinery-co
 - **The statement**: signed by a statement key the core commit lists, its log entry proven under a log key the commit lists, its key chain walked from genesis, and the keys it installs exactly the commit's `release_keys/` (`ReleaseStatementPublisher::verifyDocument()`).
 - **Sigstore**: every log key the commit lists is in Sigstore's trusted root (`ReleaseLogClient::trustedRoot()`); the log serves the statement's entry bytes at its index today, and the checkpoint it serves today is signed by its key (`LogTileReader`, which reads Rekor v2's checkpoint and entry bundles). The served bytes are compared, not proven under today's checkpoint; the entry's place in the log is proven by the statement's inclusion proof under its signed checkpoint.
 - **Plugins and themes**: each manifest is rebuilt from the core commit and must be the one the statement records. The relay sealer's binaries in the mailbox plugin are taken from the statement and its source stamp from the commit.
-- **The core archive**: signed by a release key the commit lists, carrying exactly what its manifest lists, with that manifest the one the statement records; and every manifest line is either the commit's own file with the same bytes or a file publish builds that passes its check: the agent binaries (decompressed, against the statement), `manifest.json` (its signatures verify, its keys are the commit's, its `source_commit` is the statement's agent commit), the systemd unit (the agent commit's file), the support bundle (the statement's hash, its own signed manifest, every file the commit's or a relay sealer the statement records) and its index, the license copies (the commit's files), and every `RELEASE_STATEMENT` (the statement itself).
-- **Rebuilds**: with the Go version the statement names, the agent is rebuilt from the agent commit with the inputs `manifest.json` records, and the relay sealer from the core commit, and each must be byte-identical. Without that Go version the two are reported as not run.
+- **The core archive**: signed by a release key the commit lists, carrying exactly what its manifest lists, with that manifest the one the statement records; and every manifest line is either the commit's own file with the same bytes or a file publish builds that passes its check: the agent binaries (decompressed, against the statement), `manifest.json` (its signatures verify, its keys are the commit's, its `source_commit` is the statement's agent commit), the systemd unit (the agent commit's file), the support bundle (the statement's hash, its own signed manifest, every file the commit's or a relay sealer the statement records) and its index, the license copies (the commit's files), and every `RELEASE_STATEMENT` (the statement itself). And the other way round: every file the core commit ships into the core archive (its `public_html` less what publish leaves out, and `maintenance_scripts/install_tools` and `sysadmin_tools`) must be listed, so an archive that drops one does not verify.
+- **Rebuilds**: the agent is rebuilt from the agent commit with the inputs `manifest.json` records, and the relay sealer from the core commit, each with the official toolchain its `go.mod` pins (the statement's `go_toolchain` must be the agent's pin), and each must be byte-identical. Any Go 1.21 or later fetches that toolchain, checksum-verified, as publish does (`--go=PATH` names which Go); without one, or with one that is itself the pinned version, the two are reported as not run.
 
 `--offline` fetches nothing: the commits come from `--core-repo` and `--agent-repo`, and the checks that need GitHub or Sigstore are reported as not run. `--core-archive`, `--statement`, `--core-repo` and `--agent-repo` read local copies instead of fetching; `--no-rebuild` skips the builds; `--keep` keeps the working files. It exits 0 when every check that ran passed and 1 when one failed. The Updates page prints the command for the release a site runs, with that site's upgrade source.
 

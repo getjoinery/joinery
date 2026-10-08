@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.48 - removing a node drains its active storage space: it takes no new backups and keeps what it holds
+ * @version 1.47 - mgn_agent_bundle_state: a siteless machine's verdict on the support bundle on offer
  * @version 1.46 - mgn_bkt_backup_target_id is gone: a node's backups go to its active storage space
  *                (backup_space(), open_default_backup_space()) (specs/storage_targets.md WP4)
  * @version 1.45 - assign_default_backup_target(): a new node is given the target Where new backups go names
@@ -389,6 +391,9 @@ class ManagedNode extends SystemBase {
 		// A refusal here is an incident (IncidentSourceAgentUpdateRefused).
 		'mgn_agent_update_state'   => array('type'=>'varchar(24)'),
 		'mgn_agent_update_offered' => array('type'=>'varchar(20)'),
+		// A siteless machine's verdict on the support bundle on offer
+		// (current, unlogged, verify_failed); empty where none was reported.
+		'mgn_agent_bundle_state' => array('type'=>'varchar(24)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
@@ -844,6 +849,12 @@ class ManagedNode extends SystemBase {
 			$withdrawn = $this->withdraw_open_jobs();
 			if ($withdrawn > 0) {
 				$this->removal_notes[] = $withdrawn . ' unfinished job' . ($withdrawn === 1 ? ' was' : 's were') . ' cancelled.';
+			}
+			// No new backups go anywhere for a node that is gone; what it has
+			// stays where it is until someone deletes it from the target.
+			$drained = StorageSpace::drain_owner(StorageSpace::OWNER_NODE, (int)$this->key);
+			if ($drained && ($t = $drained->target())) {
+				$this->removal_notes[] = 'Its backups stay on "' . $t->get('bkt_name') . '"; delete them from that target\'s Stored Backups when they are no longer wanted.';
 			}
 		}
 		return parent::soft_delete();

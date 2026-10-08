@@ -5,9 +5,11 @@
  * release_transparency, D7).
  *
  * Run it from a clone of the public repository (github.com/getjoinery/joinery),
- * with PHP 8 (curl, sodium, openssl), git and tar. Go, at the version the
- * release names, lets it also rebuild the binaries and compare them byte for
- * byte; without it those two checks are reported as not run.
+ * with PHP 8 (curl, sodium, openssl), git and tar. With any Go 1.21 or later
+ * it also rebuilds the binaries and compares them byte for byte: Go fetches the
+ * official toolchain the release pins, checked against Go's public checksum
+ * database, which is the compiler publish used. Without Go those two checks
+ * are reported as not run.
  *
  *   php utils/verify_release.php 0.8.467 --source=https://getjoinery.com
  *
@@ -16,7 +18,7 @@
  *   --statement=F      check this RELEASE_STATEMENT instead of the core archive's
  *   --core-repo=DIR    read the core commit from this clone instead of GitHub
  *   --agent-repo=DIR   read the agent commit from this clone instead of GitHub
- *   --go=PATH          the Go to rebuild with
+ *   --go=PATH          the Go that fetches the pinned toolchain
  *   --no-rebuild       do not rebuild the binaries
  *   --offline          fetch nothing: read the commits from --core-repo and --agent-repo, and skip
  *                      the checks that need GitHub or Sigstore
@@ -25,6 +27,7 @@
  * It needs no site, no settings and no database. Exit code 0 when every check
  * that ran passed, 1 when one failed, 2 for a usage error.
  *
+ * @version 1.1 - any Go fetches the official pinned toolchain to rebuild with
  * @version 1.0
  */
 

@@ -31,10 +31,14 @@
  * publish() never throws — a broken build must not abort an unrelated platform
  * publish by exception; it reports a status and the caller decides.
  *
+ * @version 1.3 - officialGo() names Go's proxy and checksum database itself rather than inheriting them
+ * @version 1.2 - builds with the official toolchain go.mod pins, fetched by Go's checksum-verified
+ *                download (officialGo()); the box's own Go only fetches it. A distribution's build of
+ *                the pinned version compiles other bytes (spec release_transparency D3)
  * @version 1.1 - the build is pinned to the toolchain go.mod names: assertToolchain()
  *                refuses any other Go, and GOTOOLCHAIN=local keeps go from fetching
  *                one. A reproducible binary needs one compiler, not "a" compiler
- *                (specs/release_transparency.md D3)
+ *                (spec release_transparency D3)
  * @version 1.0 - generalised from the relay sealer's publisher
  *
  * Test seam: $go_locator, so the no-toolchain refusal can be exercised without
@@ -144,14 +148,12 @@ abstract class GoBinaryPublisher {
 					: 'source changed');
 			$say($label . ': building for ' . implode(', ', array_keys(static::ARCHES)) . " ({$why})");
 
-			$go = static::findGo();
-			if ($go === null) {
-				// A box publishing a release owns the source it ships. A missing
-				// toolchain here is a broken publishing box, not a reason to ship
-				// a consumer with nothing to run.
-				throw new Exception('Go toolchain not found (install golang-go on the publishing box)');
-			}
-			$say($label . ': toolchain ' . static::assertToolchain($go, $src));
+			// A box publishing a release owns the source it ships. A missing
+			// toolchain here is a broken publishing box, not a reason to ship a
+			// consumer with nothing to run.
+			$official = static::officialGo(static::findGo(), $src, static::CACHE_ROOT . '/gomodcache', static::CACHE_ROOT);
+			$go = $official['go'];
+			$say($label . ': toolchain ' . $official['toolchain'] . ' (official, checksum-verified)');
 
 			$staging = $bin . '.staging';
 			static::rrmdir($staging);
@@ -268,27 +270,52 @@ abstract class GoBinaryPublisher {
 	}
 
 	/**
-	 * Refuse to build with anything but the pinned toolchain. Go itself only
-	 * refuses an OLDER compiler than go.mod asks for and silently accepts a
-	 * newer one, so the version is compared exactly here: two publishers with
-	 * different compilers would ship two different binaries for one commit,
-	 * and a verifier rebuilding from the commit could match neither.
+	 * The official Go toolchain go.mod pins, as the path of its go binary.
 	 *
-	 * @return string the toolchain version, e.g. "go1.22.2"
+	 * A version string does not name a compiler: a distribution's go1.22.2
+	 * (Ubuntu's golang-1.22-go carries its own patches) compiles different
+	 * bytes from the go1.22.2 the Go project publishes, and a verifier on
+	 * another machine could match neither. So the build never uses the box's
+	 * own Go. $downloader, any Go 1.21 or later, is asked for the pinned
+	 * version with GOTOOLCHAIN; Go fetches the official toolchain as the
+	 * golang.org/toolchain module, checks it against its public checksum
+	 * database, and unpacks it in $modcache. That is the only place it can
+	 * come from, so a GOROOT anywhere else - a downloader that is itself the
+	 * pinned version, which Go then uses as it is - is refused.
+	 *
+	 * @return array{go:string, toolchain:string} the go binary and the version, e.g. "go1.27.2"
 	 */
-	public static function assertToolchain($go, $src) {
+	public static function officialGo($downloader, $src, $modcache, $home) {
 		$pinned = static::pinnedToolchain($src);
 		if ($pinned === null) {
 			throw new Exception('go.mod in ' . $src . ' has no toolchain line; add "toolchain goX.Y.Z" so the build is reproducible');
 		}
-		$reported = trim((string)shell_exec('env GOTOOLCHAIN=local ' . escapeshellarg($go) . ' version 2>/dev/null'));
-		if (!preg_match('/^go version (go\S+) /', $reported, $m)) {
-			throw new Exception('could not read the Go version from ' . $go);
+		if ($downloader === null || $downloader === '') {
+			throw new Exception("no Go found to fetch {$pinned} with (any Go 1.21 or later can)");
 		}
-		if ($m[1] !== $pinned) {
-			throw new Exception("go.mod pins {$pinned} but {$go} is {$m[1]}; install {$pinned} on the publishing box (or move the pin, deliberately)");
+		@mkdir($modcache, 0777, true);
+		// The checksum database is named here, not inherited: a caller whose
+		// environment turned it off (GOSUMDB=off, GONOSUMDB=golang.org, a
+		// GOPROXY that is not Go's) would otherwise fetch an unverified
+		// toolchain and nothing would say so.
+		$cmd = sprintf('cd %s && env HOME=%s GOMODCACHE=%s GOFLAGS=-modcacherw GOSUMDB=sum.golang.org GONOSUMDB= '
+			. 'GOPRIVATE= GONOPROXY= GOINSECURE= GOPROXY=https://proxy.golang.org GOTOOLCHAIN=%s %s env GOROOT GOVERSION 2>&1',
+			escapeshellarg($src), escapeshellarg($home), escapeshellarg($modcache), escapeshellarg($pinned), escapeshellarg($downloader));
+		exec($cmd, $out, $code);
+		$goroot = (string)($out[count($out) - 2] ?? '');
+		$version = (string)($out[count($out) - 1] ?? '');
+		if ($code !== 0 || $version !== $pinned) {
+			throw new Exception("could not fetch the official {$pinned} with {$downloader}: " . implode(' | ', array_slice($out, -3)));
 		}
-		return $pinned;
+		$official = rtrim((string)realpath($modcache), '/') . '/golang.org/toolchain@v0.0.1-' . $pinned . '.';
+		if (strpos($goroot, $official) !== 0) {
+			throw new Exception("{$downloader} is itself {$pinned} ({$goroot}), so Go builds with it instead of fetching the official "
+				. "{$pinned}, and another build of the same version compiles different bytes; fetch with a Go of any other version");
+		}
+		if (!is_executable($goroot . '/bin/go')) {
+			throw new Exception("the official {$pinned} at {$goroot} has no runnable bin/go");
+		}
+		return array('go' => $goroot . '/bin/go', 'toolchain' => $pinned);
 	}
 
 	/** Locate the Go toolchain. */

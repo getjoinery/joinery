@@ -306,4 +306,21 @@ check(substr_count($pub, '$unlisted = publish_unlisted_members(') === 2,
 	'the publisher refuses a plugin or theme holding a file on a path no manifest lists, rather than dropping it (review Q5)');
 
 exec('rm -rf ' . escapeshellarg($tmp));
+section('Keys a release proves are kept, or nothing is installed (WP7 review B4)');
+
+// The agent refuses its own update when it cannot record the keys a release
+// proved; every PHP install path does the same. Persisting runs only as root,
+// so the rule is read from each caller: the catch around persistProvenKeys
+// stops the install, never warns and carries on.
+foreach (array('utils/upgrade.php' => 'upgrade_abort(', 'utils/install_extension.php' => 'exit(1)',
+		'includes/AbstractExtensionManager.php' => 'throw new Exception(', 'utils/verify_package.php' => 'exit(1)') as $rel => $stop) {
+	$src = (string)file_get_contents(PathHelper::getIncludePath($rel));
+	$at = strpos($src, 'persistProvenKeys(');
+	$catch = $at === false ? false : strpos($src, 'catch (Throwable $e)', $at);
+	$block = $catch === false ? '' : substr($src, $catch, (int)strpos($src, "\n\t}", $catch + 1) - $catch + 200);
+	$block = substr($block, 0, (int)strpos($block, '}', (int)strpos($block, $stop)) + 1);
+	check($catch !== false && strpos($block, $stop) !== false && stripos($block, 'warning') === false,
+		"{$rel}: a key that cannot be recorded stops the install ({$stop})", $block);
+}
+
 harness_finish();

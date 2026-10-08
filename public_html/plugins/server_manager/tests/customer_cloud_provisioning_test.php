@@ -344,7 +344,9 @@ class CustomerCloudProvisioningTest {
 			'the dashboard line says the password is held and what it waits for');
 
 		// The host's own agent asks to join — from the box's IPv6, as keyless10
-		// did on 2026-09-07 — claiming <slug>-host. The dashboard adopts it: the
+		// did on 2026-09-07 — claiming <site name>-host, the name install.sh is
+		// given (CustomerCloudProvision::host_agent_name(); the slug differs:
+		// retire-N, site retireN). The dashboard adopts it: the
 		// provider check ties the address to the instance first, and the
 		// machine-posture node is made at the instance's IPv4, where the
 		// placement record lives, so approval links the two.
@@ -353,7 +355,8 @@ class CustomerCloudProvisioningTest {
 		$hpair = sodium_crypto_sign_keypair();
 		$hpub  = sodium_crypto_sign_publickey($hpair);
 		$hjr = new AgentJoinRequest();
-		$hjr->set('ajr_claimed_name', 'retire-' . $suffix . '-host');
+		$hjr->set('ajr_claimed_name', 'retire' . $suffix . '-host');
+		check($prov->host_agent_name() === 'retire' . $suffix . '-host', 'the host agent is named for the site, as the install names it, not the slug');
 		$hjr->set('ajr_public_key', base64_encode($hpub));
 		$hjr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($hpub));
 		$hjr->set('ajr_source_ip', $ip6);

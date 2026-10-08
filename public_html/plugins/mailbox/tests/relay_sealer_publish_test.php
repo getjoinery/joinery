@@ -179,6 +179,7 @@ $fake_src = $fake_site . '/' . RelaySealerPublisher::SOURCE_SUBDIR;
 $fake_bin = $fake_site . '/' . RelaySealerPublisher::BIN_SUBDIR;
 @mkdir($fake_src, 0755, true);
 file_put_contents($fake_src . '/main.go', "package main\nfunc main() {}\n");
+file_put_contents($fake_src . '/go.mod', "module relay-sealer\n\ngo 1.22\n\ntoolchain go1.27.2\n");
 
 $saved_locator = RelaySealerPublisher::$go_locator;
 RelaySealerPublisher::$go_locator = function () { return null; };
@@ -188,7 +189,7 @@ RelaySealerPublisher::$go_locator = $saved_locator;
 ok('a build owed with no toolchain is a FAILURE',
     $r['status'] === RelaySealerPublisher::STATUS_FAILED, $r['status']);
 ok('  and the message names the toolchain',
-    strpos($r['message'], 'Go toolchain not found') !== false, $r['message']);
+    strpos($r['message'], 'no Go found to fetch go1.27.2') !== false, $r['message']);
 ok('  and no empty bin/ is left behind for the tar to ship',
     !is_dir($fake_bin), $fake_bin);
 ok('  and no staging directory is left behind',

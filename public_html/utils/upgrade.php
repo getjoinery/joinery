@@ -34,6 +34,7 @@
 	 * lives under uploads/ and could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.12 - keys a release proves that cannot be recorded stop the upgrade before anything is deployed
 	 * @version 1.11 - the disk-space check before download asks for room measured from the live code tree
  *                (a staged copy and the archives where it stages, a failed copy in the deploy root,
  *                added up when they share a disk), never less than 500MB per disk
@@ -524,7 +525,11 @@
 					upgrade_echo('Key proven by the release log chain: ' . htmlspecialchars($line) . '<br>');
 				}
 			} catch (Throwable $e) {
-				upgrade_echo('Warning: ' . htmlspecialchars($e->getMessage()) . '<br>');
+				// The keys first, or nothing: they hold the next release to the
+				// log, and a deploy whose keys were not kept lowers the bar it was
+				// checked against. The agent refuses its own update the same way.
+				upgrade_abort('Upgrade stopped: the release-log keys this release proved could not be recorded',
+					htmlspecialchars($e->getMessage()) . '<br>Nothing has been deployed. Fix the key files and run the upgrade again.');
 			}
 		}
 		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed'

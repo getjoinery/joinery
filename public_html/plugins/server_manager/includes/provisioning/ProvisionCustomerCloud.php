@@ -61,6 +61,7 @@
  * @version 2.12 - a provisioned node is given its storage space on the target Where new backups go names, once
  *                 saved; the provision is linked to its node as soon as the node is saved, and a retried pass takes
  *                 up its own node instead of failing it as a duplicate (B9)
+ * @version 2.11 - the host agent's name in the waiting message is CustomerCloudProvision::host_agent_name()
  * @version 2.10 - a new node is given the target Where new backups go names
  * @version 2.9 - the retire job puts the provision's cvp_root_ssh_keys on root (none: root login off)
  * @version 2.8 - account_driver(): a connected account's driver, shared with MachineTransferWatch,
@@ -863,7 +864,7 @@ class ProvisionCustomerCloud {
 			$host = $host_id ? new ManagedHost($host_id, TRUE) : null;
 			$host_node = ($host && $host->key) ? $host->host_node() : null;
 			if (!$host_node) {
-				return ['ready' => false, 'reason' => 'waiting for the host\'s own agent to be admitted (its join names the machine as ' . $provision->get('cvp_slug') . '-host)'];
+				return ['ready' => false, 'reason' => 'waiting for the host\'s own agent to be admitted (its join names the machine as ' . $provision->host_agent_name() . ')'];
 			}
 			$required[] = ['node' => $host_node, 'role' => 'the host\'s own agent'];
 		} else {
