@@ -5,11 +5,11 @@
  *
  * Shows a target's metadata and a listing of its bucket contents grouped by node slug.
  *
+ * @version 1.1 - the listing is S3Signer::list() (capped at 500); the provider label is the catalogue's
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -26,7 +26,17 @@ if (!$target->key) {
 }
 
 $prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
-$list = TargetLister::list_files($target, 500);
+$list = array('success' => true, 'files' => array(), 'truncated' => false, 'error' => null);
+try {
+	$truncated = false;
+	foreach (S3Signer::list($target->get_credentials(), (string)$target->get('bkt_bucket'), $prefix, 500, $truncated) as $f) {
+		$list['files'][] = array('key' => $f['key'], 'size' => $f['size'], 'modified' => $f['last_modified']);
+	}
+	$list['truncated'] = $truncated;
+} catch (Exception $e) {
+	$list['success'] = false;
+	$list['error'] = $e->getMessage();
+}
 
 // Group files by node slug (first path segment after prefix)
 $by_slug = [];
@@ -53,7 +63,6 @@ function format_bytes($bytes) {
 	return round($bytes / 1024 / 1024 / 1024, 2) . ' GB';
 }
 
-$provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
 $provider = $target->get('bkt_provider');
 
 $page = new AdminPage();
@@ -76,7 +85,7 @@ $page->begin_box([
 ]);
 echo '<table class="table table-sm mb-0 svm-mw600">';
 echo '<tbody>';
-echo '<tr><th class="svm-w40">Provider</th><td>' . htmlspecialchars($provider_labels[$provider] ?? $provider) . '</td></tr>';
+echo '<tr><th class="svm-w40">Provider</th><td>' . htmlspecialchars(StorageProvider::label($provider)) . '</td></tr>';
 echo '<tr><th>Bucket</th><td><code>' . htmlspecialchars($target->get('bkt_bucket')) . '</code></td></tr>';
 echo '<tr><th>Path Prefix</th><td><code>' . htmlspecialchars($target->get('bkt_path_prefix') ?: '-') . '</code></td></tr>';
 echo '<tr><th>Status</th><td><span class="badge bg-' . ($target->get('bkt_enabled') ? 'success' : 'secondary') . '">' . ($target->get('bkt_enabled') ? 'Enabled' : 'Disabled') . '</span></td></tr>';

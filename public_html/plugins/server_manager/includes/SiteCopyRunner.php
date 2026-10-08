@@ -98,6 +98,7 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.12 - a copy's node is given the target Where new backups go names
  * @version 1.11 - source_root_keys(): the root SSH keys the source's last host report lists; start_new_server carries them to
  *                 the copy (cvp_root_ssh_keys) when asked and the fingerprints the operator saw still match (WP15)
  * @version 1.10 - cleanup_left(): each kept switch-over's old container not yet removed, or removed with its
@@ -736,6 +737,7 @@ class SiteCopyRunner {
 			$node->set('mgn_uptime_enabled', false);
 			$node->set('mgn_install_state', 'copy');
 			$node->set('mgn_copy_of_node_id', (int)$source->key);
+			$node->assign_default_backup_target();
 			$node->prepare();
 			$node->save();
 			$node->load();

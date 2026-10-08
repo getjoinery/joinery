@@ -68,17 +68,22 @@ foreach ($refused as $label => $case) {
 	check($problem !== '' && stripos($problem, $case[2]) !== false, 'refused: ' . $label, $problem);
 }
 
-section('Other providers are not checked here');
-check(BackupTarget::credential_problem('s3', array('region' => '', 'endpoint' => '')) === '', 'an S3 target with no endpoint passes this check');
-check(BackupTarget::credential_problem('b2', array()) === '', 'a B2 target passes this check');
+section('Every provider: a region is a short name, and one that asks for it needs it');
+check(BackupTarget::credential_problem('s3', array('region' => 'us-east-1', 'endpoint' => '')) === '', 'an S3 target with a region passes; its endpoint comes from the catalogue');
+check(BackupTarget::credential_problem('s3', array('region' => '', 'endpoint' => '')) !== '', 'an S3 target with no region is refused');
+check(stripos(BackupTarget::credential_problem('wasabi', array('region' => 's3.us-east-1.wasabisys.com')), 'short name') !== false, 'an address typed as the region is refused');
+check(BackupTarget::credential_problem('b2', array()) === '', 'a B2 target passes: Backblaze names its own region');
+check(BackupTarget::credential_problem('generic', array('region' => '', 'endpoint' => 'minio.example.com')) === '', 'a generic target may leave the region for the test to judge');
 
 // ── both save paths run the check ───────────────────────────────────
-section('Both save paths run the check');
+section('Every target form saves through the one path, which runs the check');
 
-$core = (string)file_get_contents(__DIR__ . '/../../adm/logic/admin_backups_logic.php');
-check(strpos($core, 'BackupTarget::credential_problem(') !== false, 'the core Backups save runs the check');
-$sm = (string)file_get_contents(__DIR__ . '/../../plugins/server_manager/views/admin/targets.php');
-check(strpos($sm, "BackupTarget::credential_problem('linode'") !== false, 'the server_manager Backup Targets save runs the check');
+$form = (string)file_get_contents(__DIR__ . '/../../includes/BackupTargetForm.php');
+check(strpos($form, 'BackupTarget::credential_problem(') !== false, 'the shared save runs the check');
+foreach (array('adm/logic/admin_backups_logic.php' => 'the core Backups save', 'plugins/server_manager/views/admin/targets.php' => 'the server_manager Backup Targets save') as $rel => $label) {
+	$src = (string)file_get_contents(__DIR__ . '/../../' . $rel);
+	check(strpos($src, 'BackupTargetForm::save(') !== false, $label . ' is the shared save');
+}
 
 // ── the endpoint the form accepts is one the signers can use ────────
 section('A bare cluster host signs as https');
@@ -91,7 +96,7 @@ try {
 	check(false, 'S3Signer signs a bare host', $e->getMessage());
 }
 try {
-	$url = ShelfPresigner::put($bare, 'lin', 'joinery-backups/t1/x.enc');
+	$url = S3Signer::presign($bare, 'lin', 'joinery-backups/t1/x.enc', 'PUT');
 	check(strpos($url, 'https://us-east-1.linodeobjects.com/lin/joinery-backups/t1/x.enc?') === 0, 'the backup storage presigner signs a bare host', $url);
 } catch (Exception $e) {
 	check(false, 'the backup storage presigner signs a bare host', $e->getMessage());

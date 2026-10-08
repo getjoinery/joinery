@@ -344,4 +344,49 @@ return [
 			$dblink->exec("UPDATE inc_incident_records SET inc_triage = 'new' WHERE inc_triage = 'looking'");
 		},
 	],
+	[
+		// Every choice of backup target is explicit (specs/storage_targets.md
+		// R6). Two paths fell back to "the one enabled target": a node that
+		// named none, and backup storage for customers with its setting blank.
+		// Where new backups go takes over the customers' setting, and each node
+		// the fallback was serving is given that target by name, so nothing
+		// changes where any backup goes today.
+		'id' => 'sm_014_backup_targets_named_not_inferred',
+		'version' => '1.30.31',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$ready = $dblink->query("SELECT to_regclass('bkt_backup_targets') IS NOT NULL
+				AND to_regclass('mgn_managed_nodes') IS NOT NULL")->fetchColumn();
+			if (!$ready) {
+				return;   // a fresh install: nothing was ever inferred
+			}
+			$enabled = $dblink->query("SELECT bkt_backup_target_id FROM bkt_backup_targets
+				WHERE bkt_enabled AND bkt_delete_time IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+			$sole = count($enabled) === 1 ? (int)$enabled[0] : 0;
+
+			$old = $dblink->query("SELECT stg_value FROM stg_settings
+				WHERE stg_name = 'server_manager_services_shelf_target_id' LIMIT 1")->fetchColumn();
+			$chosen = ((int)$old > 0 && in_array((string)(int)$old, array_map('strval', $enabled), true)) ? (int)$old : $sole;
+
+			$current = $dblink->query("SELECT stg_value FROM stg_settings
+				WHERE stg_name = 'server_manager_backup_target_id' LIMIT 1")->fetchColumn();
+			if ($chosen > 0 && (int)$current === 0) {
+				if ($current === false) {
+					$q = $dblink->prepare("INSERT INTO stg_settings (stg_name, stg_value, stg_create_time, stg_update_time, stg_group_name)
+						VALUES ('server_manager_backup_target_id', ?, now(), now(), 'services')");
+				} else {
+					$q = $dblink->prepare("UPDATE stg_settings SET stg_value = ?, stg_update_time = now()
+						WHERE stg_name = 'server_manager_backup_target_id'");
+				}
+				$q->execute(array((string)$chosen));
+			}
+			$dblink->exec("DELETE FROM stg_settings WHERE stg_name = 'server_manager_services_shelf_target_id'");
+
+			if ($sole > 0) {
+				$q = $dblink->prepare("UPDATE mgn_managed_nodes SET mgn_bkt_backup_target_id = ?
+					WHERE mgn_bkt_backup_target_id IS NULL AND mgn_delete_time IS NULL");
+				$q->execute(array($sole));
+			}
+		},
+	],
 ];

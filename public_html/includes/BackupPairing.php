@@ -30,6 +30,7 @@
  *     there. Otherwise the envelope travels with it, and where it cannot, the
  *     operator is told BEFORE the upload rather than on the day of the restore.
  *
+ * @version 1.3 - a comment names S3Signer::list() (TargetLister is folded into it)
  * @version 1.2 - cloud_state() and upload_verdict() take the profile: the archive is looked for at
  *                {prefix}/{slug}/{profile}/{name}, the key upload_backup.php writes
  * @version 1.1 - cloud_state() accepts a listing the caller already has, so the check
@@ -118,7 +119,7 @@ class BackupPairing {
 	 * $complete_listing lets a caller that has ALREADY listed this node's
 	 * objects answer from what it holds, with no second request. Pass it only
 	 * when the listing is complete for this node's prefix: a truncated one — a
-	 * capped listing such as TargetLister's 500-object limit — would report a
+	 * capped listing such as a page's 500-object S3Signer::list() cap — would report a
 	 * stored envelope as absent, turning a safety check into a source of false
 	 * alarms. When in doubt, pass nothing and let this make its own request.
 	 *

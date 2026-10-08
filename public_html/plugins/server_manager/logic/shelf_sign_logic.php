@@ -12,6 +12,7 @@
  * multipart_parts (upload_id, first, count ≤ 10), multipart_complete
  * (upload_id). Each URL is good for one hour.
  *
+ * @version 1.2 - a signing failure is S3Signer's (the one presigner)
  * @version 1.1 - a get needs no run and stands until the prune
  */
 function shelf_sign_logic(array $input): LogicResult {
@@ -32,7 +33,7 @@ function shelf_sign_logic(array $input): LogicResult {
 			));
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
-	} catch (ShelfPresignerException $e) {
+	} catch (S3SignerException $e) {
 		return LogicResult::error('Backup storage could not sign that request: ' . $e->getMessage());
 	}
 	return LogicResult::render($data);

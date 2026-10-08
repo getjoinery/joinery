@@ -14,6 +14,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.4.0 - the provider's name and console sign-in come from StorageProvider, the one provider list
  * @version 1.3.0 - a console item for every target not deleted; a switched-off target still holds backups
  * @version 1.2.0 - the recovery-key card warns when offloaded files in backup storage open only with a
  *                  retired recovery key: "N objects (X GB) open only with a retired recovery key"
@@ -100,13 +101,6 @@ class RecoveryReadinessItems {
 			. implode(', ', $summary['epochs']) . '). Keep that key where you keep this one; nothing copies them again under the current key.';
 	}
 
-	/** Where each provider's console sign-in lives (for the guided attestation). */
-	private static $console_urls = array(
-		'b2'     => 'https://secure.backblaze.com/user_signin.htm',
-		's3'     => 'https://console.aws.amazon.com/',
-		'linode' => 'https://login.linode.com/login',
-	);
-
 	private static function targetItems() {
 		$items = array();
 		// Every target not deleted, switched on or off: a target switched off
@@ -116,7 +110,7 @@ class RecoveryReadinessItems {
 		$targets->load();
 		foreach ($targets as $target) {
 			$provider_key = strtolower((string)$target->get('bkt_provider'));
-			$provider = strtoupper($provider_key);
+			$provider = StorageProvider::label($provider_key);
 			$bucket = (string)$target->get('bkt_bucket');
 			$items[] = array(
 				'key'      => 'bucket_console_' . (int)$target->key,
@@ -132,7 +126,7 @@ class RecoveryReadinessItems {
 				'instructions' => 'Open the ' . $provider . ' console in another tab and confirm the login saved in your '
 					. 'password manager still gets you in. The platform holds no console credentials, so it cannot '
 					. 'check this for you — recording it here just timestamps that you did.',
-				'action_url'   => isset(self::$console_urls[$provider_key]) ? self::$console_urls[$provider_key] : '',
+				'action_url'   => StorageProvider::console_url($provider_key),
 				'action_url_label' => 'Open the ' . $provider . ' console',
 				'attest_label' => 'Record it — I just signed in',
 			);

@@ -41,6 +41,8 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.3.0 - upload_envelope() is public: a run puts the kept epoch's envelope on a destination that
+ *                  lacks it (a site that switched targets)
  * @version 1.2.2 - decrypt_file() says plainly that padding catches a wrong key only usually
  * @version 1.2.1 - fetch_from_store() reads the one file store; an object's visibility field only ever
  *                  reads private
@@ -407,8 +409,13 @@ class BackupObjects {
 		@chmod($path, 0664);
 	}
 
-	/** Put an epoch envelope in backup storage (a new epoch, or one re-sealed on rotation). */
-	private static function upload_envelope(array $plan, $id, array $envelope) {
+	/**
+	 * Put an epoch envelope in backup storage: a new epoch, one re-sealed on
+	 * rotation, or the current epoch's on a destination that lacks it (a site
+	 * that switched targets keeps its epoch, and the new target needs the
+	 * envelope that opens what is stored there).
+	 */
+	public static function upload_envelope(array $plan, $id, array $envelope) {
 		$tmp = self::tmp_dir($plan) . '/' . $id . '-' . self::ENVELOPE_NAME . '.' . getmypid();
 		if (@file_put_contents($tmp, BackupEnvelope::encode($envelope)) === false) {
 			throw new BackupObjectsException('Could not write the epoch envelope for upload.');

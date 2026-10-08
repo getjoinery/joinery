@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.50 - a node is not newly pointed at a switched-off or deleted backup target; keeping its own is fine
  * @version 1.49 - adopt_cloud_server: record the running cloud server a joined node runs on
  *                 (test_cloud_account_and_prod_management WP9)
  * @version 1.48 - copy_new_server passes the ticked root SSH keys and the fingerprints shown (specs/site_copy.md WP15)
@@ -1148,8 +1149,16 @@ class NodeDetailActions {
 				if ($field === 'mgn_ssh_port' && $value === '') {
 					$value = 22;
 				}
-				if ($field === 'mgn_bkt_backup_target_id' && $value === '') {
-					$value = null;
+				if ($field === 'mgn_bkt_backup_target_id') {
+					$value = ($value === '') ? null : (int)$value;
+					// A switched-off target takes no new backups, so a node is
+					// not newly pointed at one; keeping the one it has is fine.
+					if ($value !== null && $value !== (int)$node->get('mgn_bkt_backup_target_id')) {
+						$chosen = new BackupTarget($value, TRUE);
+						if (!$chosen->key || $chosen->get('bkt_delete_time') || !$chosen->get('bkt_enabled')) {
+							throw new DisplayableUserException('That backup target is switched off or deleted, so new backups cannot go there. Choose another.');
+						}
+					}
 				}
 				if (($field === 'mgn_uptime_tcp_port' || $field === 'mgn_uptime_interval_seconds') && $value === '') {
 					$value = $field === 'mgn_uptime_interval_seconds' ? 300 : 0;

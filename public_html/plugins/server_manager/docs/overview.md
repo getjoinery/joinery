@@ -192,7 +192,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager/incident?id=N` | **Incident** -- one incident: its state, its timeline, its evidence, triage and notes |
 | `/admin/server_manager/node_detail?mgn_managed_node_id=N` | **Node Detail** -- tabbed page for a single node (see tabs below) |
 | `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
-| `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (B2, S3, Linode) |
+| `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (any provider in `StorageProvider`), and Where new backups go |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
 | `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
 | `/admin/server_manager/domains` | **Domains** -- managed domain registrations: hand-overs waiting for a registrar push, failures, and the full ledger |
@@ -1330,12 +1330,12 @@ broker actions below. `JoineryServices` is the operator side of all of them.
   so the broker refuses it; backup storage is kept 90 days from that day
   (`svt_prune_after_time`) and then pruned. Idempotent.
 
-**The backup storage broker** (`ShelfBroker`, `ShelfPresigner`): no box ever holds a
+**The backup storage broker** (`ShelfBroker`, signing with `S3Signer::presign()`): no box ever holds a
 storage credential. For every object it writes or reads a site asks the plane
 for a presigned URL — one request, one key, one operation, good for an hour,
 SigV4-signed with the plane's own credential for its backup storage target
-(`server_manager_services_shelf_target_id`, or the one enabled backup target
-when blank). Presigned URLs are the S3 standard, so backup storage is any
+(the one **Where new backups go** names, `server_manager_backup_target_id`;
+nothing is inferred when it is blank). Presigned URLs are the S3 standard, so backup storage is any
 S3-compatible store by construction. Five actions: `shelf_begin_run`
 (profile, chain, artifacts with sizes → a run id and base key
 `{prefix}/{slug}/{profile}/`, refused with the sentence the site's run history
@@ -1421,26 +1421,24 @@ usernames and moves that tenant's figure.
 
 ## Backup Targets
 
-Backup targets define where backup files are uploaded after creation. Each node can optionally have a backup target assigned. If no target is set, backups remain local only on the remote server.
+Backup targets define where the backups this management node takes are stored. Each node names its own target (`mgn_bkt_backup_target_id`); a node that names none has no backups taken from here. Nothing is inferred from "the one enabled target".
+
+**Where new backups go** (`server_manager_backup_target_id`, chosen on the Targets page among the targets switched on) is the target every new node is given when it is created (`ManagedNode::assign_default_backup_target()`, called by each path that creates a node), and the target backup storage for customers uses. A node keeps its target until it is moved on its own page.
+
+The node's target select lists every target not deleted; its own is listed even when switched off, so a save never clears it, and a switched-off target cannot be newly chosen. `JobCommandBuilder::get_target()` returns the named target switched on or off, for listings, restores, downloads and pruning; `write_target()` returns it only while switched on, for new backups and uploads.
 
 ### Supported Providers
 
-| Provider | Credentials (UI fields) |
-|----------|-------------------------|
-| **Backblaze B2** | Application Key ID + Application Key (region/endpoint auto-detected via `b2_authorize_account` at save time) |
-| **Amazon S3** | Access Key + Secret Key + Region |
-| **Linode Object Storage** | Access Key + Secret Key + Region + Endpoint URL |
+Every provider in `StorageProvider` (Backblaze B2, Amazon S3, Linode, Cloudflare R2, Wasabi, DigitalOcean Spaces, Hetzner, generic S3-compatible). The form is `BackupTargetForm`, the same one the core Backups page draws, with the node key fields added here; each provider shows the region and endpoint fields it asks for, and Backblaze's are read from the key at save time. A target's location, how it is switched off and when it may be deleted follow [Backups § Saving a target](../../../docs/backups.md#saving-a-target).
 
-All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls, from the management node (web tier) or from the node's own agent. New S3-compatible providers can be added by configuration alone, no script changes.
-
-Nodes with no backup target leave backups local-only on the remote server.
+All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls, from the management node (web tier) or from the node's own agent.
 
 ### Configuration
 
 1. Go to `/admin/server_manager/targets` and click **Add Target**
 2. Select a provider, enter bucket name, path prefix, and credentials
-3. Go to a node's Overview tab, expand **Edit Connection Settings**, and select the target from the **Backup Target** dropdown
-4. Save — backups for this node will now auto-upload after creation
+3. Choose it under **Where new backups go**, so new nodes are given it
+4. For a node that already exists, go to its Overview tab, expand **Edit Connection Settings**, and select the target from the **Backup target** dropdown
 
 ### Upload Path Structure
 
@@ -1498,7 +1496,7 @@ Every restore job ends with two gates: the site's identity must match the machin
 
 What gets reconciled, and why each item is on the list, is in [Backups](../../../docs/backups.md#what-a-restore-reconciles).
 
-Cloud listings are fetched live via `TargetLister` on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
+Cloud listings are fetched live via `S3Signer::list()` (capped at 500 objects, under the node's own folder) on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
 
 ### Stored Backups (target-side)
 
@@ -2119,7 +2117,7 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_web_root` -- Path to `public_html` inside the server/container. Empty means the node hosts no site (no backup, no recovery-key report). The node's agent reports it at join and in every `check_status`; a report fills an empty one (an absolute path ending `/public_html`) and never replaces a set one — a difference is logged.
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
-- `mgn_bkt_backup_target_id` -- FK to backup target (null = local only)
+- `mgn_bkt_backup_target_id` -- FK to backup target (null = no backups taken from this management node)
 
 ### CustomerCloudAccount (`cca_customer_cloud_accounts`)
 
@@ -2405,8 +2403,9 @@ Used by the backup browser on the Backups tab.
 | `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the configure page and the taken-name alternate |
 | `includes/JobCommandBuilder.php` | Command generation for all job types |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
-| `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
-| `includes/TargetLister.php` | Web-tier paginated bucket listing using S3Signer |
+| `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage: requests, the one presigner, and paginated listing |
+| `includes/StorageProvider.php` | The one provider catalogue: labels, endpoint patterns, region rules, addressing, console links |
+| `includes/BackupTargetForm.php` | The one backup target form and save path, drawn here with the node key fields |
 | `includes/TargetTester.php` | Connection test on Save for Backup Targets |
 | `includes/BackupListHelper.php` | Merges latest local list_backups job output with live cloud listing into a unified file table |
 | `ajax/job_status.php` | Live job output polling |

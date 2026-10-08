@@ -9,6 +9,10 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.9 - the one presigner and lister (specs/storage_targets.md WP1): presign() signs any verb but
+ *                DELETE (ShelfPresigner folded in), list() takes a cap and says when it stopped short
+ *                (TargetLister folded in); a provider whose catalogue entry addresses buckets as host
+ *                labels (Amazon) is spoken to that way, by every request and every presigned URL
  * @version 1.8 - endpoint(): one reading of an endpoint for every signer; a bare host is https,
  *                so a Linode cluster host entered as the form asks for signs instead of failing
  * @version 1.7 - MULTIPART_PART_BYTES is 32 MiB, and put_stream() builds each part in one string
@@ -114,14 +118,22 @@ class S3Signer {
 	 * Returns a flat array of ['key' => string, 'size' => int, 'last_modified' => string].
 	 * Throws S3SignerException on a non-200 status (with the provider's error message).
 	 *
-	 * @param string $prefix Key prefix to scope the listing (e.g. 'joinery-backups/slug/').
+	 * @param string $prefix    Key prefix to scope the listing (e.g. 'joinery-backups/slug/').
+	 * @param int    $max       Stop after this many objects; 0 lists everything. A page view
+	 *                          passes a cap so a huge bucket cannot stall it.
+	 * @param bool   $truncated Set to true when $max stopped the listing short.
 	 */
-	public static function list($creds, $bucket, $prefix = '') {
+	public static function list($creds, $bucket, $prefix = '', $max = 0, &$truncated = null) {
 		$objects = [];
 		$token = null;
+		$truncated = false;
+		$max = (int)$max;
 		// Hard page cap: a runaway loop guard, far above any real backup count.
 		for ($page = 0; $page < 10000; $page++) {
 			$params = ['list-type' => '2', 'prefix' => $prefix];
+			if ($max > 0) {
+				$params['max-keys'] = (string)min(1000, $max - count($objects));
+			}
 			if ($token !== null && $token !== '') {
 				$params['continuation-token'] = $token;
 			}
@@ -135,6 +147,10 @@ class S3Signer {
 			}
 			$token = self::parse_next_token($resp['body']);
 			if ($token === null) {
+				break;
+			}
+			if ($max > 0 && count($objects) >= $max) {
+				$truncated = true;
 				break;
 			}
 		}
@@ -632,10 +648,7 @@ class S3Signer {
 		self::validate_creds($creds);
 
 		$region = $creds['region'];
-		list($scheme, $host) = self::endpoint($creds['endpoint']);
-
-		// Canonical URI is "/{bucket}{path}" path-style. Encode bucket but leave "/" in path unescaped.
-		$canonical_uri = '/' . rawurlencode($bucket) . self::encode_path($path);
+		list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, $path);
 
 		// Sorted querystring
 		ksort($params);
@@ -921,45 +934,60 @@ class S3Signer {
 	 * nothing else.
 	 *
 	 * This exists so that a node fetching a backup back out of the bucket never
-	 * receives a bucket credential. The standing rule for the fleet is that a
-	 * node holds a WRITE-ONLY credential — it may add to backup storage and may not
-	 * read from it or clear it — because a node that could read backup storage is a
-	 * node whose compromise reaches every other node's backups. A restore needs
-	 * a read, and the honest way to grant exactly one read is to sign one, here,
-	 * on the machine that already holds the credential, and hand over the
-	 * signature rather than the key.
+	 * receives a bucket credential. What the node gets is not a narrower
+	 * credential; it is not a credential. It names one object key, it expires,
+	 * and it cannot be re-pointed: the object key is inside the signature.
 	 *
-	 * What the node gets is therefore not a narrower credential; it is not a
-	 * credential. It names one object key, it expires, and it cannot be
-	 * re-pointed: the object key is inside the signature.
+	 * @param string $path    Object path after the bucket, leading slash required.
+	 * @param int    $expires Seconds the URL stays valid; see presign().
+	 */
+	public static function presign_get($creds, $bucket, $path, $expires = 3600) {
+		return self::presign($creds, $bucket, $path, 'GET', [], $expires);
+	}
+
+	/**
+	 * Presign one request: SigV4 query-string form, valid for minutes, signed
+	 * with a credential the requester never sees. This is the platform's one
+	 * presigner. A node fetching a backup back and the backup storage broker
+	 * handing a site a link for every object it writes or reads both use it, so
+	 * no machine but the target's owner ever holds a storage credential. The
+	 * standard is honoured the same way by every provider in StorageProvider.
 	 *
-	 * SigV4 query-string form. The payload hash is UNSIGNED-PAYLOAD because a
-	 * GET has no payload and every S3-compatible provider accepts that here;
-	 * host is the only signed header, so the fetching side needs to set nothing
-	 * but the URL.
+	 * The verb and the query vary: GET for a read, PUT for a single upload,
+	 * POST ?uploads to open a multipart upload, PUT ?partNumber&uploadId for
+	 * each part, POST ?uploadId to complete. The payload is UNSIGNED-PAYLOAD
+	 * (the URL is signed before the bytes exist) and only the host header is
+	 * signed, so the fetching side sets nothing but the URL. A URL signs one key
+	 * and one verb. DELETE is refused by construction: nothing hands out a link
+	 * that removes an object.
 	 *
 	 * @param array  $creds   ['access_key','secret_key','region','endpoint']
 	 * @param string $bucket  Bucket name.
-	 * @param string $path    Object path after the bucket, leading slash required.
-	 * @param int    $expires Seconds the URL stays valid. Clamped to the SigV4
-	 *                        maximum of seven days; callers should pass the
+	 * @param string $path    The object key, with or without a leading slash.
+	 * @param string $method  GET | PUT | POST | HEAD
+	 * @param array  $query   Extra query parameters, signed with the URL
+	 *                        (['uploads' => ''], ['partNumber' => '3', 'uploadId' => '…']).
+	 * @param int    $expires Seconds the URL stays valid, clamped to 60 and to the
+	 *                        SigV4 ceiling of seven days; callers pass the
 	 *                        smallest window the transfer can finish in.
 	 */
-	public static function presign_get($creds, $bucket, $path, $expires = 3600) {
+	public static function presign($creds, $bucket, $path, $method = 'GET', array $query = [], $expires = 3600) {
 		self::validate_creds($creds);
 
+		$method = strtoupper(trim((string)$method));
+		if (!in_array($method, ['GET', 'PUT', 'POST', 'HEAD'], true)) {
+			throw new S3SignerException('Refusing to presign a ' . $method . ' request.');
+		}
 		$expires = (int)$expires;
 		if ($expires < 60) { $expires = 60; }
 		if ($expires > 604800) { $expires = 604800; }   // SigV4 ceiling: 7 days
 
-		list($scheme, $host) = self::endpoint($creds['endpoint']);
+		list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, '/' . ltrim((string)$path, '/'));
 
 		$region     = $creds['region'];
 		$amz_date   = gmdate('Ymd\THis\Z');
 		$date_stamp = gmdate('Ymd');
 		$scope      = "{$date_stamp}/{$region}/" . self::SERVICE . "/aws4_request";
-
-		$canonical_uri = '/' . rawurlencode($bucket) . self::encode_path($path);
 
 		$params = [
 			'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
@@ -968,7 +996,10 @@ class S3Signer {
 			'X-Amz-Expires'       => (string)$expires,
 			'X-Amz-SignedHeaders' => 'host',
 		];
-		ksort($params);
+		foreach ($query as $k => $v) {
+			$params[(string)$k] = (string)$v;
+		}
+		ksort($params, SORT_STRING);
 		$canonical_qs = '';
 		foreach ($params as $k => $v) {
 			if ($canonical_qs !== '') { $canonical_qs .= '&'; }
@@ -976,7 +1007,7 @@ class S3Signer {
 		}
 
 		$canonical_headers = "host:{$host}\n";
-		$canonical_request = "GET\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\nhost\nUNSIGNED-PAYLOAD";
+		$canonical_request = "{$method}\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\nhost\nUNSIGNED-PAYLOAD";
 		$string_to_sign    = "AWS4-HMAC-SHA256\n{$amz_date}\n{$scope}\n" . hash('sha256', $canonical_request);
 
 		$k_date    = hash_hmac('sha256', $date_stamp, 'AWS4' . $creds['secret_key'], true);
@@ -987,6 +1018,30 @@ class S3Signer {
 
 		return $scheme . '://' . $host . $canonical_uri . '?' . $canonical_qs
 			. '&X-Amz-Signature=' . $signature;
+	}
+
+	/**
+	 * The unsigned address of one object, the form every request uses. The
+	 * bucket-privacy check fetches it anonymously.
+	 */
+	public static function object_url($endpoint, $bucket, $key) {
+		list($scheme, $host, $uri) = self::locate($endpoint, $bucket, '/' . ltrim((string)$key, '/'));
+		return $scheme . '://' . $host . $uri;
+	}
+
+	/**
+	 * Where a request for one object goes: [scheme, host, canonical URI]. Path
+	 * style puts the bucket first in the path (host/bucket/key); a provider
+	 * whose catalogue entry addresses buckets as host labels gets
+	 * bucket.host/key (StorageProvider::virtual_host()). The bucket is
+	 * encoded, the slashes in the key are kept.
+	 */
+	private static function locate($endpoint, $bucket, $path) {
+		list($scheme, $host) = self::endpoint($endpoint);
+		if (StorageProvider::virtual_host($endpoint, $bucket)) {
+			return [$scheme, $bucket . '.' . $host, self::encode_path($path)];
+		}
+		return [$scheme, $host, '/' . rawurlencode($bucket) . self::encode_path($path)];
 	}
 
 	/**

@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.106 - get_target() is the target a node names, switched on or off, for reads; write_target() is
+ *                  that target only while switched on, for new backups; nothing is inferred from the enabled
+ *                  targets (specs/storage_targets.md R6); comments name S3Signer::list()
  * @version 1.105 - get_target() never returns a soft-deleted target, named or not
  * @version 1.104 - build_retire_install_password($node, $root_keys): root login is off (PermitRootLogin no) unless keys are
  *                 given, which are put in root's authorized_keys and keep key login (specs/site_copy.md WP15)
@@ -1091,18 +1094,11 @@ class JobCommandBuilder {
 	private static function backup_run_config($node, $params = []) {
 		self::assert_node_can_be_backed_up($node);
 
-		$target = self::get_target($node);
+		$target = self::write_target($node);
 		if (!$target) {
-			$enabled_count = self::enabled_target_count();
-			$why = ($enabled_count === 0)
-				? 'this management node has no enabled backup target at all'
-				: ($enabled_count > 1
-					? "this management node has {$enabled_count} enabled backup targets and this node names "
-						. 'none, so which one to use is a real choice — assign one to the node'
-					: 'the backup target this node names is missing or switched off');
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this management node takes: "
-				. $why . '.');
+				. self::write_target_refusal($node) . '.');
 		}
 
 		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
@@ -2914,58 +2910,48 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Load the backup target for a node, if configured.
-	 * Returns BackupTarget or null.
+	 * The backup target a node names, switched on or off, or null when it names
+	 * none or the one it named is deleted. What reads, restores, listings and
+	 * pruning use: a target that is switched off takes no new backups but still
+	 * holds the ones it has. Nothing is inferred: a node that names no target
+	 * backs up locally only (specs/storage_targets.md R6).
 	 */
 	public static function get_target($node) {
-		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-
-		// A node that names a shelf gets that shelf, and only that shelf. If the
-		// named one is gone, deleted or switched off, this returns null rather than
-		// quietly redirecting the archive somewhere the operator did not choose.
-		$target_id = $node->get('mgn_bkt_backup_target_id');
-		if ($target_id) {
-			try {
-				$target = new BackupTarget($target_id, TRUE);
-				if ($target->get('bkt_enabled') && !$target->get('bkt_delete_time')) {
-					return $target;
-				}
-			} catch (Exception $e) {}
+		$target_id = (int)$node->get('mgn_bkt_backup_target_id');
+		if ($target_id <= 0) {
 			return null;
 		}
-
-		// Nothing named. Everything the run needs — bucket, write-only
-		// credential, recovery key — is supplied by this management node anyway,
-		// so the only open question is which shelf; and with exactly one enabled
-		// target there is no question to ask. Requiring the answer anyway is how
-		// a node ends up silently un-backed-up from the moment it is registered.
-		//
-		// Two or more, and the choice is real: refuse and let the operator make
-		// it, rather than guess which bucket a site's data belongs in.
-		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
-		$enabled->load();
-		$sole = null;
-		$count = 0;
-		foreach ($enabled as $candidate) {
-			$count++;
-			if ($count > 1) return null;
-			$sole = $candidate;
+		try {
+			$target = new BackupTarget($target_id, TRUE);
+		} catch (Exception $e) {
+			return null;
 		}
-		return $sole;
+		return ($target->key && !$target->get('bkt_delete_time')) ? $target : null;
 	}
 
 	/**
-	 * How many enabled shelves this management node has, for the refusal message
-	 * that tells an operator which problem they actually have: none configured,
-	 * or several and no choice recorded for this node.
+	 * The target a node's new backups go to: get_target() when it is switched
+	 * on, else null. A named target that is gone or switched off gives null
+	 * rather than quietly sending the archive somewhere the operator did not
+	 * choose.
 	 */
-	private static function enabled_target_count() {
-		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
-		$enabled->load();
-		$count = 0;
-		foreach ($enabled as $ignored) { $count++; }
-		return $count;
+	public static function write_target($node) {
+		$target = self::get_target($node);
+		return ($target && $target->get('bkt_enabled')) ? $target : null;
+	}
+
+	/** Why write_target() gave nothing, as a clause for a refusal. */
+	private static function write_target_refusal($node) {
+		$target_id = (int)$node->get('mgn_bkt_backup_target_id');
+		if ($target_id <= 0) {
+			return 'it names no backup target; choose one on its page';
+		}
+		$target = self::get_target($node);
+		if (!$target) {
+			return 'the backup target it named has been deleted; choose another on its page';
+		}
+		return 'the backup target "' . $target->get('bkt_name') . '" it names is switched off; '
+			. 'switch it on or move the node to another target';
 	}
 
 	/**
@@ -3016,9 +3002,9 @@ class JobCommandBuilder {
 	 * ignored — an ignored parameter is a lie the sender believes.
 	 */
 	public static function build_upload_backup_primitive($node, $params = []) {
-		$target = self::get_target($node);
+		$target = self::write_target($node);
 		if (!$target) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot upload: " . self::write_target_refusal($node) . '.');
 		}
 		$primitive_params = [
 			'filename'        => basename(trim((string)($params['filename'] ?? ''))),
@@ -3114,7 +3100,7 @@ class JobCommandBuilder {
 
 		$target = self::get_target($node);
 		if (!$target) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target, "
+			throw new Exception("Node '{$node->get('mgn_slug')}' names no backup target, "
 				. 'so there is no backup storage to fetch from.');
 		}
 
@@ -3456,7 +3442,7 @@ class JobCommandBuilder {
 		$owner = ManagedNode::backup_node_of($node);
 		$target = self::get_target($owner);
 		if (!$target) {
-			throw new Exception("Node '{$owner->get('mgn_slug')}' has no enabled cloud backup target.");
+			throw new Exception("Node '{$owner->get('mgn_slug')}' names no backup target.");
 		}
 		$creds = $target->get_credentials();
 		if (empty($creds)) {
@@ -3667,7 +3653,7 @@ class JobCommandBuilder {
 
 	/**
 	 * List backup files on a node. Local only — cloud listings are done
-	 * web-server-side via TargetLister when the Backups tab renders.
+	 * web-server-side via S3Signer::list() when the Backups tab renders.
 	 * Routes primitive first, then the management API.
 	 */
 	public static function build_list_backups($node) {

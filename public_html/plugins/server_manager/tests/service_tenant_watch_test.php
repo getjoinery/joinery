@@ -105,7 +105,7 @@ $target->set('bkt_path_prefix', 'hb');
 $target->set('bkt_credentials', json_encode($fx_creds));
 $target->save();
 $cleanup[] = array('bkt_backup_targets', 'bkt_backup_target_id', (int)$target->key);
-harness_set_setting_mem('server_manager_services_shelf_target_id', (string)$target->key);
+harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 harness_set_setting_mem('server_manager_hosted_shelf_allowance_gb', '1');
 harness_set_setting_mem('server_manager_hosted_send_allowance', '1000');
 harness_set_setting_mem('server_manager_services_grace_days', '14');

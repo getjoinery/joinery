@@ -39,6 +39,8 @@
  * run where the others increment. A run's own level is 0 exactly when every
  * kind in it is: "this run restores on its own".
  *
+ * @version 1.8 - should_start_new: destination_changed, when the chain's runs went somewhere other than where
+ *                this run goes (specs/storage_targets.md WP3)
  * @version 1.7 - should_start_new: a swapped tree no longer starts a chain (the runner re-bases that kind
  *                inside it); layout_split does — a version-1 chain is not extended by a runner that writes
  *                version 2 — and is checked before snar_lost, whose snapshots it would read as lost
@@ -212,6 +214,10 @@ class BackupChain {
 	 *
 	 * Reasons, in the order they are checked:
 	 *   no_chain          nothing to extend
+	 *   destination_changed  the chain's runs went somewhere other than where this
+	 *                     run goes (a site switched targets): its full is in the
+	 *                     other place, so nothing here could be restored from
+	 *                     an incremental on top of it
 	 *   layout_split      the chain is in a layout this runner does not write (a
 	 *                     version-1 chain, one files archive a run, under a runner
 	 *                     that archives code and data apart). Checked before
@@ -236,9 +242,15 @@ class BackupChain {
 	public static function should_start_new(?array $manifest = null, $snar_exists = false,
 	                                        $full_interval_days = 7, $max_incrementals = 30,
 	                                        $now_utc = null, $current_recovery_fpr = null,
-	                                        $writes_version = 1) {
+	                                        $writes_version = 1, $chain_destination = null, $run_destination = null) {
 		if (!$manifest || empty($manifest['runs'])) {
 			return 'no_chain';
+		}
+		// Where the chain's runs went and where this one goes, as the caller
+		// names them ('target:3'); null when the caller does not know.
+		if ($chain_destination !== null && $run_destination !== null
+				&& (string)$chain_destination !== (string)$run_destination) {
+			return 'destination_changed';
 		}
 		if ((int)($manifest['version'] ?? 1) !== (int)$writes_version) {
 			return 'layout_split';

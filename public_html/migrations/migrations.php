@@ -1671,3 +1671,18 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE ntf_notifications SET ntf_create_time = now() AT TIME ZONE 'UTC' WHERE ntf_create_time IS NULL";
 	$migrations[] = $migration;
+
+	// Every backup history row says where its run went (specs/storage_targets.md
+	// WP3): a row naming one of the site's targets went there; a manager-profile
+	// row naming a target went to its management node's storage; the rest were
+	// kept locally. Readers use this, never the target configured now.
+	$migration = array();
+	$migration['database_version'] = '209';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM bkh_backup_history WHERE bkh_destination = 'local'
+		AND (bkh_bkt_backup_target_id IS NOT NULL OR (bkh_profile = 'manager' AND coalesce(bkh_target_name, '') <> ''))) THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE bkh_backup_history SET bkh_destination = CASE
+		WHEN bkh_bkt_backup_target_id IS NOT NULL THEN 'target' ELSE 'service' END
+		WHERE bkh_destination = 'local'
+		AND (bkh_bkt_backup_target_id IS NOT NULL OR (bkh_profile = 'manager' AND coalesce(bkh_target_name, '') <> ''))";
+	$migrations[] = $migration;

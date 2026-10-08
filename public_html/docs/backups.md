@@ -428,7 +428,10 @@ matters.
 **The database is dumped in full on every run.** A dump is the small part, and a
 half-applied database is not something anyone wants to restore.
 
-A run starts a **new chain** when there is nothing to extend, when the chain is a
+A run starts a **new chain** when there is nothing to extend, when the chain's
+runs went to another target than this run goes to (`destination_changed`: a
+site that switched targets starts a full chain on the new one, and switching
+back starts another rather than extending the old), when the chain is a
 version-1 chain (`layout_split`: it is not extended by a run that archives code
 and data apart, and its single `.{slug}.snar` is deleted), when a snapshot file
 is missing or empty, when the chain is older than the configured interval
@@ -836,18 +839,35 @@ and say so on its dashboard — see
 ## Uploads
 
 Artifacts reach the bucket through `S3Signer` — hand-rolled SigV4 against any
-S3-compatible endpoint, so the backup path carries no SDK dependency. A
-Backblaze credential needs the account's region and S3 endpoint to sign, and
-the forms hide both: `BackupTarget::complete_credentials()` fills them from
-Backblaze's own authorize answer at save time, and `get_credentials()` fills
-them on read for a row that still lacks either, writing the completed
-credential back once (a server-initiated reconciliation) so the signer never
-sees an incomplete B2 credential.
+S3-compatible endpoint, so the backup path carries no SDK dependency. It is
+also the one presigner (`S3Signer::presign()`, every verb but DELETE) and the
+one lister (`S3Signer::list()`, with an optional cap).
 
-A Linode credential is the bucket's region and its cluster endpoint, typed in:
-`BackupTarget::credential_problem()` refuses anything other than the cluster's
-bare https host (`us-east-1.linodeobjects.com`), before either save form asks
-the provider anything. Linode targets never mint a per-run key.
+**Providers are data.** `StorageProvider` is the platform's only provider list:
+Backblaze B2, Amazon S3, Linode, Cloudflare R2, Wasabi, DigitalOcean Spaces,
+Hetzner and a generic S3-compatible service. Each entry is a label, which of
+region and endpoint the form asks for, the endpoint pattern a region fills in,
+the rule that reads the region out of an endpoint, the addressing style
+(Amazon names the bucket in the host; the rest put it in the path) and the
+console sign-in link. The target model's allowed providers, every target form,
+the setup wizard, `utils/install_backup_target.php` and every label read it, so
+another S3-compatible provider is one catalogue entry. Endpoints are stored in
+one form, `https://host` (`StorageProvider::normalise_endpoint()`, on save).
+
+`BackupTarget::complete_credentials()` fills what the provider decides: the
+endpoint from the region where the provider names it that way, a fixed region
+(R2's `auto`), and for Backblaze both, from Backblaze's own authorize answer at
+save time (`StorageProvider::b2_location()`, the one Backblaze region rule; an
+address the rule does not recognise is said in the save message).
+`get_credentials()` fills a Backblaze row on read when it still lacks either,
+writing the completed credential back once (a server-initiated reconciliation)
+so the signer never sees an incomplete B2 credential.
+
+`BackupTarget::credential_problem()` checks the provider's own fields before the
+provider is asked anything: a provider that asks for the region needs one, a
+region is a short name (`us-east-1`), never an address, and a Linode endpoint
+is the cluster's bare https host (`us-east-1.linodeobjects.com`). Linode targets
+never mint a per-run key.
 
 **Streamed artifacts** — the data and code archives, the standalone archive, the
 database dump — go through `S3Signer::put_stream()`: an engine's stdout,
@@ -941,6 +961,31 @@ the check — it makes the check report success. The test is on the mode, not on
 the owner: backups legitimately run as root on a managed node and as the site
 user elsewhere. `fix_permissions.sh` pins the directory out of its sweep to
 match.
+
+## Where each run went
+
+Every history row records where its run went (`bkh_destination`, never null):
+
+| `bkh_destination` | Meaning | Where it points |
+|---|---|---|
+| `local` | kept on this machine only | nothing |
+| `target` | one of this site's own targets, used directly | `bkh_bkt_backup_target_id` |
+| `service` | a management node's storage (a Managed run) | `bkh_target_name`; `bkh_remote_run_id` once the management node records a run id |
+
+Every reader of a run's objects uses the target its row names, never the one
+configured now (`BackupHistory::stored_target()`, `BackupRunner::plan_for_run()`):
+retention deletes each run from its own bucket, a verify signs its links there,
+and **Bring them back** reads the run's index and files there. A target holding
+runs cannot be deleted, so a row's target is always reachable.
+
+**Switching targets moves nothing.** The next run starts a full chain on the new
+target; the old runs stay listable, verifiable and restorable where they are, and
+retention prunes them there by the same window until the old target holds
+nothing. Offloaded files are stored per target: the first run on a new target
+stores every one again, and puts there the envelope of the epoch they are sealed
+under, so each target's objects open from that target alone. Object retention
+runs per target too: an object is removed from a target when no kept run on that
+target names it.
 
 ## Retention
 
@@ -1510,12 +1555,36 @@ node's runs stop.
 
 ### Saving a target
 
-A target is proven before it is saved. Both forms (the site's Backups page
-and the fleet's Targets page) run `TargetTester::test()` on Save of an
-enabled target and refuse the save when it fails, printing why with the
-values kept; the separate **Test** button runs the same check on a saved
-target. A disabled target is saved untested, and enabling it is a save. The
-steps, in order, stopping where the rest would be meaningless:
+One form adds and edits a target: `BackupTargetForm`, drawn by the site's
+Backups page, the setup wizard (a short form: no name, folder or Enabled box)
+and, on a management node, the Targets page, which adds the node key and the
+per-run key switch. One save path sits behind all three
+(`BackupTargetForm::save()`). The provider select shows only the region and
+endpoint fields the provider asks for, and only those are read from the post.
+
+A site's first enabled target becomes where its backups go
+(`backup_target_id`) as it is saved. Nothing ever picks "the one enabled
+target" later.
+
+**A target's location is fixed once it is used.** Provider, endpoint, region,
+bucket and folder are drawn read-only, and refused on save, once anything was
+stored in the target (a history row points at it) or, on a management node, a
+node backs up to it (`BackupTarget::location_refusal()`). The name and the key
+stay editable. To use another bucket, add a target.
+
+**Switching off and deleting.** A switched-off target takes no new backups;
+listings, restores and pruning carry on. It is not switched off while it is
+where new backups go or, on a management node, a node backs up to it
+(`disable_refusal()`). It is not deleted while either holds, while it still
+holds backups (runs not yet pruned), or while backup storage for customers is
+kept in it (`delete_refusal()`). Each refusal is a sentence naming what still
+uses the target.
+
+A target is proven before it is saved: the save runs `TargetTester::test()` on
+an enabled target and refuses when it fails, printing why with the values
+kept; the separate **Test** button runs the same check on a saved target. A
+disabled target is saved untested, and enabling it is a save. The steps, in
+order, stopping where the rest would be meaningless:
 
 1. **Its own bucket.** Not the file store's bucket
    (`BucketCheck::collision_step`, by name and endpoint host). Refused
@@ -1555,7 +1624,9 @@ recovery key is never created here — it is shown once to a human — so nightl
 runs still wait on the wizard's key ceremony, exactly as they do for a target
 saved on the Backups page. Inputs are environment variables
 (`JOINERY_BACKUP_BUCKET`, `JOINERY_BACKUP_KEY_ID`, `JOINERY_BACKUP_KEY`,
-optional `JOINERY_BACKUP_PROVIDER` b2/s3/linode and `JOINERY_BACKUP_REGION`);
+optional `JOINERY_BACKUP_PROVIDER`, any provider in `StorageProvider`, default
+b2, with `JOINERY_BACKUP_REGION` or `JOINERY_BACKUP_ENDPOINT` where the provider
+asks for one);
 the first output line is `INSTALL_BACKUP_TARGET=ok` or `=error`.
 
 ## Artifact naming

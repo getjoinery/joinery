@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.17 - the provider label is StorageProvider's; the target line is the one the node names (nothing
+ *                 inferred), and a switched-off target is named as such
  * @version 1.16 - each run shows its newest verify (passed or failed, when, how deep), from the verify jobs sent
  * @version 1.15 - the Verify room is worked out from a listing that carries the manifest version and each
  *                artifact's level, so a version-2 chain is planned per kind as the node plans it
@@ -52,29 +54,24 @@
  * @version 1.0
  */
 
-	// Where this node's backups actually go — resolved the SAME way the job
-	// builder resolves it, so the tab never says "Local only" about a node that
-	// is in fact uploading to the management node's sole enabled backup storage. Reading the
-	// raw mgn_bkt_backup_target_id here was how a working, cloud-backed node
-	// showed as local-only whenever it named no target of its own.
+	// Where this node's backups go: the target it names, and nothing else
+	// (specs/storage_targets.md R6). A switched-off target still holds the
+	// backups already there, so it is named, with what that means.
 	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 	$cloud_target  = JobCommandBuilder::get_target($node);
 	$names_own     = (bool) $node->get('mgn_bkt_backup_target_id');
-	$target_name   = 'Local only';
+	$target_name   = 'None: this management node takes no backups of it';
 	$target_provider = 'local';
 	if ($cloud_target) {
-		$provider_labels = ['local' => 'Local', 'b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
 		$target_provider = $cloud_target->get('bkt_provider');
-		$target_name = htmlspecialchars($cloud_target->get('bkt_name')) . ' (' . ($provider_labels[$target_provider] ?? $target_provider) . ')';
-		// Make the fallback legible rather than silent: this node named no shelf,
-		// so it is using the only one this management node has.
-		if (!$names_own) {
-			$target_name .= ' &mdash; <span class="text-muted">the management node\'s only backup storage (this node names none)</span>';
+		$target_name = htmlspecialchars($cloud_target->get('bkt_name')) . ' (' . htmlspecialchars(StorageProvider::label($target_provider)) . ')';
+		if (!$cloud_target->get('bkt_enabled')) {
+			$target_name .= ' &mdash; <span class="text-muted">switched off: the backups already there stay readable, and no new backup is taken until the node is moved or the target switched on</span>';
 		}
 	} elseif ($names_own) {
-		// It named a shelf, but that shelf is gone or switched off — not the same
-		// thing as choosing local-only, and worth saying so.
-		$target_name = 'Local only (backup storage this node named is missing or switched off)';
+		// It named a target that has since been deleted — not the same thing
+		// as choosing local-only, and worth saying so.
+		$target_name = 'None: the backup target this node named has been deleted';
 	}
 
 	echo '<div class="alert alert-light border mb-3">';
@@ -144,6 +141,16 @@
 		   . 'backup target set. ';
 		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Choose one</a> '
 		   . 'to start backing it up.';
+		echo '</div>';
+	} elseif (!$cloud_target->get('bkt_enabled')) {
+		// A switched-off target keeps what it holds and takes nothing new, so
+		// a run would be refused; say so instead of offering one.
+		echo '<div class="alert alert-light border mb-0">';
+		echo '<strong>No new backups are taken of this node.</strong> ';
+		echo 'Its backup target, ' . htmlspecialchars($cloud_target->get('bkt_name')) . ', is switched off. '
+		   . 'The backups already there stay readable and restorable. ';
+		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Move the node</a> '
+		   . 'or switch the target on to start again.';
 		echo '</div>';
 	} elseif (!$recovery_ready) {
 		// A backup nobody can decrypt is not a backup, so the run is refused —

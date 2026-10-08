@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.2 - shelfTarget() is the target Where new backups go names, never inferred from the enabled targets
  * @version 1.1 - node-linked rows: backup storage acts on the node's fleet backups (NodeBackupShelf)
  * @version 1.0
  */
@@ -78,27 +79,21 @@ class JoineryServices {
 	}
 
 	/**
-	 * The plane's backup storage target: the row the setting names, else the one
-	 * enabled target. Null when there is none or the choice is ambiguous.
+	 * The plane's backup storage target: the one Where new backups go names
+	 * (server_manager_backup_target_id), when it exists and is switched on.
+	 * Null otherwise; nothing is inferred (specs/storage_targets.md R6).
 	 */
 	public static function shelfTarget(): ?BackupTarget {
-		$id = (int)Globalvars::get_instance()->get_setting('server_manager_services_shelf_target_id', false, true);
-		if ($id > 0) {
-			try {
-				$target = new BackupTarget($id, TRUE);
-				return ($target->key && $target->get('bkt_enabled') && !$target->get('bkt_delete_time')) ? $target : null;
-			} catch (\Throwable $e) {
-				return null;
-			}
+		$id = (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true);
+		if ($id <= 0) {
+			return null;
 		}
-		$sole = null;
-		$count = 0;
-		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
-		foreach ($enabled as $candidate) {
-			$count++;
-			$sole = $candidate;
+		try {
+			$target = new BackupTarget($id, TRUE);
+			return ($target->key && $target->get('bkt_enabled') && !$target->get('bkt_delete_time')) ? $target : null;
+		} catch (\Throwable $e) {
+			return null;
 		}
-		return $count === 1 ? $sole : null;
 	}
 
 	/** Backup storage's path prefix (no trailing slash); every tenant lives under {prefix}/{slug}/. */

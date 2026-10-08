@@ -14,6 +14,9 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.8 - bkh_destination (local | target | service, never null) and bkh_remote_run_id; stored_target()
+ *                is the target a run's objects are in, for every reader (specs/storage_targets.md WP3)
+ * @version 1.7 - a stale comment about a shared 'bkt' prefix is gone (BookingType is bty)
  * @version 1.6 - the 'verify_attempted' collection filter selects runs whose newest verify proved
  *                nothing either way (a skip or a refusal stamps the message only)
  * @version 1.5 - bkh_verify_time / _level / _outcome / _message: when this run was last proven
@@ -70,6 +73,18 @@ class BackupHistory extends SystemBase {
 		                             'foreign_key'=>array('table'=>'bkt_backup_targets', 'column'=>'bkt_backup_target_id',
 		                                                  'on_delete'=>'SET NULL')),
 		'bkh_target_name'   => array('type'=>'varchar(100)'),
+
+		// Where this run went, never null (specs/storage_targets.md §3):
+		//   local    kept on this machine only; there is nothing to point at
+		//   target   this site's own target, used directly: bkh_bkt_backup_target_id
+		//   service  a management node's storage (a Managed run, or a customer of
+		//            backup storage): bkh_remote_run_id is the management node's run
+		//            id once the broker records one, bkh_target_name says which
+		// Every reader of a run's objects (retention, verify, Bring files back,
+		// restore) uses the target recorded here, never "the current one".
+		'bkh_destination'   => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'local',
+		                             'allowed_values'=>array('local', 'target', 'service')),
+		'bkh_remote_run_id' => array('type'=>'int8'),
 		'bkh_slug'          => array('type'=>'varchar(255)'),
 
 		// Every object this run produced: [{name, key, bytes, kind}] where kind
@@ -138,8 +153,6 @@ class BackupHistory extends SystemBase {
 	// target name is denormalised onto the row precisely so the history still
 	// reads correctly once the target is gone. Hence 'null', not 'cascade'.
 	protected static $foreign_key_actions = array(
-		// 'bkt' is claimed by both BackupTarget and BookingType; the full
-		// entity in the column name is what picks bkt_backup_targets.
 		'bkh_bkt_backup_target_id' => array('action' => 'null'),
 	);
 
@@ -153,6 +166,25 @@ class BackupHistory extends SystemBase {
 		if (trim((string)$this->get('bkh_profile')) === '') {
 			$this->set('bkh_profile', BackupProfile::SITE);
 		}
+	}
+
+	/**
+	 * The target this run's objects are in, when it went to one of this site's
+	 * own targets: that row, switched on or off. Null for a run kept locally or
+	 * sent to a management node. Throws when the target it went to has been
+	 * deleted, which a target holding runs refuses (BackupTarget::delete_refusal()).
+	 */
+	public function stored_target(): ?BackupTarget {
+		if ((string)$this->get('bkh_destination') !== 'target') {
+			return null;
+		}
+		$id = (int)$this->get('bkh_bkt_backup_target_id');
+		$target = $id ? new BackupTarget($id, TRUE) : null;
+		if (!$target || !$target->key || $target->get('bkt_delete_time')) {
+			throw new BackupHistoryException('This backup went to "' . $this->get('bkh_target_name')
+				. '", a backup target that has since been deleted, so its objects cannot be reached from here.');
+		}
+		return $target;
 	}
 
 	/** Whose backup this was. Rows predating profiles are the site's own. */
