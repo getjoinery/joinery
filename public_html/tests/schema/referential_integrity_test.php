@@ -25,11 +25,13 @@
  *
  * This file stays a pure read (tier safe promises that). What CLEANS stale
  * strays is harness_cleanup_stale_fixtures(), which every db-tier suite runs
- * at boot: debris older than an hour — a killed run's leftovers — is
- * reclaimed there, through the models so cascades hold. So a red in check 4
- * means a SAME-RUN leak (a teardown bug in a suite that just ran) or debris
- * younger than the floor, both worth a human look now — never last week's
- * kill nobody remembers.
+ * at boot, through the models so cascades hold. Fixture users are judged by
+ * whether the run that made them is alive: every run holds a lock on its
+ * token while it lives, so another run's users in flight are passed over
+ * here and reclaimed there the moment that run is dead. A red on users in
+ * check 4 is therefore a leak from a run that has ended — a teardown bug
+ * worth a human look now. The 'HarnessTest ...' families carry no token and
+ * are judged by the one-hour floor there.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
@@ -162,10 +164,33 @@ section('No stray harness fixtures');
 // Domain-agnostic on purpose: a harnesstest_ user is a leak wherever it lives,
 // and fixtures have used more than one domain over time. Matching the current
 // domain only would quietly stop detecting the older strays.
-$q = $dblink->prepare("SELECT count(*) FROM usr_users WHERE usr_email LIKE 'harnesstest\\_%'");
+//
+// Another agent's run may be mid-suite on this box, and its fixture users are
+// in use, not leaked. Each address carries its run's token; a run whose lock is
+// still held is alive (harness_run_token_state()), so its users are noted and
+// passed over. Every other user is a leak at any age. A user whose run died
+// between the read and the lock check is read again, so a run that finished
+// cleanly in that moment is not called a leak.
+$q = $dblink->prepare("SELECT usr_user_id, usr_email FROM usr_users WHERE usr_email LIKE 'harnesstest\\_%'");
 $q->execute();
-$stray_users = (int)$q->fetchColumn();
-check($stray_users === 0, 'no leftover harnesstest_% users', "$stray_users row(s)");
+$stray_users = array();
+$in_flight = 0;
+foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+	if (harness_run_token_live(harness_fixture_email_token($row['usr_email']))) {
+		$in_flight++;
+		continue;
+	}
+	$still = $dblink->prepare("SELECT 1 FROM usr_users WHERE usr_user_id = ?");
+	$still->execute(array((int)$row['usr_user_id']));
+	if ($still->fetchColumn()) {
+		$stray_users[] = $row['usr_email'];
+	}
+}
+if ($in_flight > 0) {
+	echo "  NOTE: {$in_flight} harnesstest_% user(s) belong to a run still in progress; not counted\n";
+}
+check(count($stray_users) === 0, 'no leftover harnesstest_% users',
+	count($stray_users) . ' row(s): ' . implode(', ', array_slice($stray_users, 0, 5)));
 
 if (isset($existing_tables['pkc_passkey_credentials'])) {
 	$q = $dblink->prepare("SELECT count(*) FROM pkc_passkey_credentials WHERE pkc_credential_id LIKE 'vault-test-%'");

@@ -6,6 +6,7 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.16 - save_target refuses a Linode endpoint that is not the cluster's bare https address, before the provider is asked
  * @version 1.15 - every scope's approve and decline actions reach the one handler through
  *                 ApprovalChallenge::for_action(), so a new scope needs no case label here
  * @version 1.14 - approval answers go through ApprovalChallenge, one handler for every scope
@@ -252,6 +253,13 @@ function _admin_backups_handle($action, array $input, $session) {
 						&& ($secret_what !== FormWriterV2Base::SECRET_KEEP || $access !== (string)($existing['access_key'] ?? ''))) {
 					$region = '';
 					$endpoint = '';
+				}
+				// The provider's own fields are checked before anything is asked of the provider.
+				$field_problem = BackupTarget::credential_problem((string)$target->get('bkt_provider'), array(
+					'region' => $region, 'endpoint' => $endpoint));
+				if ($field_problem !== '') {
+					$say('Not saved. ' . $field_problem, false);
+					return $url;
 				}
 				$changed = !$id || $secret_what !== FormWriterV2Base::SECRET_KEEP
 					|| $access !== (string)($existing['access_key'] ?? '')

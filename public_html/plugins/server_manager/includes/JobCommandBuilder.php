@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.105 - get_target() never returns a soft-deleted target, named or not
  * @version 1.104 - build_retire_install_password($node, $root_keys): root login is off (PermitRootLogin no) unless keys are
  *                 given, which are put in root's authorized_keys and keep key login (specs/site_copy.md WP15)
  * @version 1.103 - build_site_limits: change a site's memory, CPU ceiling and disk allowance on its
@@ -2920,13 +2921,13 @@ class JobCommandBuilder {
 		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
 		// A node that names a shelf gets that shelf, and only that shelf. If the
-		// named one is gone or switched off, this returns null rather than
+		// named one is gone, deleted or switched off, this returns null rather than
 		// quietly redirecting the archive somewhere the operator did not choose.
 		$target_id = $node->get('mgn_bkt_backup_target_id');
 		if ($target_id) {
 			try {
 				$target = new BackupTarget($target_id, TRUE);
-				if ($target->get('bkt_enabled')) {
+				if ($target->get('bkt_enabled') && !$target->get('bkt_delete_time')) {
 					return $target;
 				}
 			} catch (Exception $e) {}
@@ -3005,8 +3006,9 @@ class JobCommandBuilder {
 	 * from-every-node, wearing a backup's clothes. That is not narrowed by this
 	 * change, it is unsayable: there is no parameter of the shape.
 	 *
-	 * The object key is composed on the node from prefix/slug/filename, matching
-	 * the REMOTE_KEY the shell built, so existing objects keep their addresses.
+	 * The object key is composed on the node from prefix/slug/profile/filename,
+	 * beside the backup run's own archives for that profile, so retention prunes
+	 * a re-upload and the stored-bytes figure counts it.
 	 *
 	 * provider and target_name are deliberately NOT sent. backup_run declares
 	 * them because the backup engine writes history rows keyed on them; an

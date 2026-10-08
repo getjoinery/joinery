@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.36 - a credential slot naming a target switched off or deleted is refused at pickup:
+ *                every slot is a write credential, and such a target takes no more writes
  * @version 1.35 - a claim carries update_state and update_offered, where the agent's own self-update
  *                stands; a refusal is raised as an incident (release_transparency O7)
  * @version 1.34 - the artifact endpoint serves agent_statement, the release statement beside the agent
@@ -1265,6 +1267,12 @@ class AgentChannelEndpoint {
 			$target = new BackupTarget((int)$m[2], TRUE);
 			if (!$target->key) {
 				throw new Exception('backup target ' . (int)$m[2] . ' does not exist');
+			}
+			// Every slot is a write credential. A target switched off or deleted
+			// after the job was built takes no more writes, whatever the job says.
+			if (!$target->get('bkt_enabled') || $target->get('bkt_delete_time')) {
+				throw new Exception('backup target "' . $target->get('bkt_name')
+					. '" is switched off or deleted, so it takes no backups');
 			}
 			if ($m[1] === 'RUN_') {
 				$params[$key] = base64_encode(json_encode(self::mint_run_credentials($target, $params, $job)));

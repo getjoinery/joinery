@@ -30,6 +30,8 @@
  *     there. Otherwise the envelope travels with it, and where it cannot, the
  *     operator is told BEFORE the upload rather than on the day of the restore.
  *
+ * @version 1.2 - cloud_state() and upload_verdict() take the profile: the archive is looked for at
+ *                {prefix}/{slug}/{profile}/{name}, the key upload_backup.php writes
  * @version 1.1 - cloud_state() accepts a listing the caller already has, so the check
  *                costs nothing on a page that has just listed the target
  * @version 1.0
@@ -129,9 +131,10 @@ class BackupPairing {
 	 * control mode used by every interactive path — belongs in S3Signer rather
 	 * than here, where it would only ever cover one caller.
 	 */
-	public static function cloud_state($target, $slug, $artifact_name, ?array $complete_listing = null) {
+	public static function cloud_state($target, $slug, $profile, $artifact_name, ?array $complete_listing = null) {
 		$artifact_name = basename((string)$artifact_name);
-		$key = TargetBackups::base_prefix($target) . $slug . '/' . $artifact_name;
+		// Where upload_backup.php puts it: {prefix}/{slug}/{profile}/{name}.
+		$key = TargetBackups::base_prefix($target) . $slug . '/' . BackupProfile::path_segment($profile) . '/' . $artifact_name;
 
 		$state = array(
 			'checked'          => false,
@@ -230,9 +233,9 @@ class BackupPairing {
 	}
 
 	/** cloud_state() and verdict() in one call, for a caller with a live target. */
-	public static function upload_verdict($target, $slug, $artifact_name, $envelope_on_node = null,
+	public static function upload_verdict($target, $slug, $profile, $artifact_name, $envelope_on_node = null,
 	                                      ?array $complete_listing = null) {
-		$state = self::cloud_state($target, $slug, $artifact_name, $complete_listing);
+		$state = self::cloud_state($target, $slug, $profile, $artifact_name, $complete_listing);
 		$out = self::verdict($state, $artifact_name, $envelope_on_node);
 		$out['cloud'] = $state;
 		$out['envelope_name'] = BackupEnvelope::sidecar_name(basename((string)$artifact_name));

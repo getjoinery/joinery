@@ -883,6 +883,8 @@ check(($ph_built['params']['credentials_b64'] ?? '') === $token,
 $ph_json = (string)json_encode($ph_built);
 check(strpos($ph_json, "'application_key'") === false && strpos($ph_json, 'secret_key') === false,
 	'no credential data appears anywhere in the payload', substr($ph_json, 0, 300));
+check(($ph_built['params']['profile'] ?? '') === 'manager',
+	'a re-upload names the manager profile, so it lands beside the profile\'s own backups');
 check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'),
 	'the inline-credentials fallback (and its heartbeat gate) is gone entirely');
 
@@ -974,6 +976,21 @@ check(JobCommandBuilder::get_target(jcb_node(array(
 	'mgn_web_root' => '/var/www/html/offtarget/public_html',
 	'mgn_bkt_backup_target_id' => $off->key))) === null,
 	'a node naming a disabled target is refused, not redirected');
+
+// A deleted target vanishes from every list, so nothing may still write to it.
+$gone = new BackupTarget(NULL);
+$gone->set('bkt_name', 'HarnessTest Deleted ' . bin2hex(random_bytes(3)));
+$gone->set('bkt_provider', 'b2');
+$gone->set('bkt_bucket', 'harness-deleted-bucket');
+$gone->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$gone->set('bkt_enabled', true);
+$gone->save();
+harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $gone->key);
+$gone->soft_delete();
+check(JobCommandBuilder::get_target(jcb_node(array(
+	'mgn_web_root' => '/var/www/html/gonetarget/public_html',
+	'mgn_bkt_backup_target_id' => $gone->key))) === null,
+	'a node naming a deleted target is refused, not handed the deleted target');
 
 $threw = false;
 try {

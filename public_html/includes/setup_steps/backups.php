@@ -9,6 +9,7 @@
  * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
  * views/setup.php with $page, $settings in scope.
  *
+ * @version 2.4 - shows and tests the target backups go to (backup_target_id), not the first by name
  * @version 2.3 - on a site a management node backs up, the target section states that
  *                (as the Backups admin page does) instead of offering a bucket form
  * @version 2.2
@@ -16,11 +17,20 @@
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
-$setup_bk_targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
-$setup_bk_targets->load();
+// The target the step shows and tests is the one backups go to: the
+// backup_target_id setting. Before one is chosen, it is the newest enabled
+// target, which is the one setup_logic chooses when the step is saved.
 $setup_bk_target = null;
-foreach ($setup_bk_targets as $setup_bk_row) {
-	if ($setup_bk_target === null) {
+$setup_bk_chosen = (int)$settings->get_setting('backup_target_id');
+if ($setup_bk_chosen > 0) {
+	$setup_bk_row = new BackupTarget($setup_bk_chosen, TRUE);
+	if ($setup_bk_row->key && !$setup_bk_row->get('bkt_delete_time')) {
+		$setup_bk_target = $setup_bk_row;
+	}
+}
+if ($setup_bk_target === null) {
+	$setup_bk_targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_backup_target_id' => 'DESC'), 1);
+	foreach ($setup_bk_targets as $setup_bk_row) {
 		$setup_bk_target = $setup_bk_row;
 	}
 }

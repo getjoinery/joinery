@@ -14,6 +14,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.3.0 - a console item for every target not deleted; a switched-off target still holds backups
  * @version 1.2.0 - the recovery-key card warns when offloaded files in backup storage open only with a
  *                  retired recovery key: "N objects (X GB) open only with a retired recovery key"
  *                  (specs/implemented/backup_offloaded_files.md § Key model), from the record the run keeps
@@ -108,7 +109,10 @@ class RecoveryReadinessItems {
 
 	private static function targetItems() {
 		$items = array();
-		$targets = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
+		// Every target not deleted, switched on or off: a target switched off
+		// takes no new backups but still holds the ones it has, and reaching
+		// those after a server loss takes the same console sign-in.
+		$targets = new MultiBackupTarget(array('deleted' => false));
 		$targets->load();
 		foreach ($targets as $target) {
 			$provider_key = strtolower((string)$target->get('bkt_provider'));

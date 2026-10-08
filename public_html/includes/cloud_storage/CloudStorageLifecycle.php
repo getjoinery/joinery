@@ -27,6 +27,8 @@
  * and the health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 2.3 - privacyVerdict() carries a step status: an anonymous request with no answer is a
+ *                warning that says the check could not run, not a pass
  * @version 2.2 - persistKey() stores a replacement key alone, leaving the enabled latch and the
  *                draining flag as they were; health() pings through driverWithFallback(), so a paused
  *                or draining store reports a key that stopped working
@@ -139,7 +141,7 @@ class CloudStorageLifecycle {
 		if (!$verdict['pass']) {
 			$ok = false;
 		}
-		$steps[] = ['label' => self::STEP_PRIVATE, 'status' => $verdict['pass'] ? 'pass' : 'fail', 'message' => $verdict['message']];
+		$steps[] = ['label' => self::STEP_PRIVATE, 'status' => $verdict['status'], 'message' => $verdict['message']];
 
 		// Step 4: delete — the probe goes, so permanent delete and retention work.
 		try {
@@ -157,18 +159,24 @@ class CloudStorageLifecycle {
 	/**
 	 * The privacy hard-gate verdict from an anonymous read's HTTP status. An
 	 * anonymous 2xx means the bytes are world-readable ⇒ the bucket is public
-	 * ⇒ gate FAILS. Any non-2xx (401/403/404/connection refused, status 0)
-	 * means anonymous read is denied ⇒ gate PASSES. Separated from the network
-	 * probe so the privacy-critical decision is unit-testable.
+	 * ⇒ gate FAILS. Any other answer (401/403/404) means anonymous read is denied
+	 * ⇒ gate PASSES. No answer at all (status 0) proves nothing: the gate does
+	 * not block on it, and the step is a warning that says so. Separated from the
+	 * network probe so the privacy-critical decision is unit-testable.
+	 * Returns ['pass' => bool, 'status' => 'pass'|'fail'|'warn', 'message'].
 	 */
 	public static function privacyVerdict(int $status): array {
 		if ($status >= 200 && $status < 300) {
-			return ['pass' => false,
+			return ['pass' => false, 'status' => 'fail',
 				'message' => 'This bucket is publicly readable (an anonymous request got HTTP ' . $status
 					. '); it cannot hold private files. Make it private at the provider and save again.'];
 		}
-		$shown = $status > 0 ? 'HTTP ' . $status : 'connection refused';
-		return ['pass' => true, 'message' => 'Nobody can read this bucket without a key (' . $shown . ').'];
+		if ($status === 0) {
+			return ['pass' => true, 'status' => 'warn',
+				'message' => 'Could not check whether this bucket is private: an anonymous request got no answer. '
+					. 'Check at the provider that the bucket is private.'];
+		}
+		return ['pass' => true, 'status' => 'pass', 'message' => 'Nobody can read this bucket without a key (HTTP ' . $status . ').'];
 	}
 
 	// ====================================================================

@@ -42,7 +42,9 @@ ok('anonymous 204 ⇒ gate FAILS', CloudStorageLifecycle::privacyVerdict(204)['p
 ok('anonymous 403 ⇒ gate PASSES (denied)', CloudStorageLifecycle::privacyVerdict(403)['pass'] === true);
 ok('anonymous 401 ⇒ gate PASSES', CloudStorageLifecycle::privacyVerdict(401)['pass'] === true);
 ok('anonymous 404 ⇒ gate PASSES', CloudStorageLifecycle::privacyVerdict(404)['pass'] === true);
-ok('connection refused (0) ⇒ gate PASSES', CloudStorageLifecycle::privacyVerdict(0)['pass'] === true);
+ok('no answer (0) does not block the save', CloudStorageLifecycle::privacyVerdict(0)['pass'] === true);
+ok('no answer (0) is a warning, never a pass', CloudStorageLifecycle::privacyVerdict(0)['status'] === 'warn');
+ok('a denied read (403) is a pass step', CloudStorageLifecycle::privacyVerdict(403)['status'] === 'pass');
 ok('a failed verdict says to make the bucket private and save again', strpos(CloudStorageLifecycle::privacyVerdict(200)['message'], 'Make it private at the provider and save again') !== false);
 
 section('driver() is null until configured AND enabled');

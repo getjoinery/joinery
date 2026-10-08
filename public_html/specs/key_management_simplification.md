@@ -153,5 +153,5 @@ One superadmin page (core): every platform-level key from the inventory above â€
 1. **Phase B scope**: seal all `isSecret()` settings in one migration (recommended), or exclude any the owner wants greppable in the DB?
 2. **`usr_totp_secret` sealing** â€” recommended yes; confirm (it invalidates any external tooling that reads the column directly).
 3. **DR card contents**: include per-site `secret_box_key` on the card (single sheet recovers everything, but the sheet becomes more sensitive), or exclude it (config recovery then depends on restoring a backup first)? Recommended: include, since the card lives in the password manager next to the recovery key anyway.
-4. **Second recovery-key copy**: accept the single password-manager copy, or add one offline copy (printed/HSM/safe)? The key is the one true SPOF by design.
+4. **Second recovery-key copy** (options written up as `storage_targets.md` F6, deferred by the owner 2026-10-08): accept the single password-manager copy, or add one offline copy (printed/HSM/safe)? The key is the one true SPOF by design.
 5. Confirm deletion of `config/cloudflare_dns_token`.

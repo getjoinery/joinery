@@ -29,6 +29,7 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
+require_once(__DIR__ . '/../lib/s3_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
@@ -131,5 +132,30 @@ check($g['count'] === 0 && $g['unchecked'] === array(),
 	var_export($g, true));
 $g2 = TargetBackups::slug_backup_count('');
 check($g2['count'] === 0, 'an empty slug yields count 0');
+
+// A switched-off target still holds what it stored. Switching it off must not
+// let a node record be deleted while its backups sit there.
+$fx = s3fx_start();
+if ($fx === null) {
+	harness_skip('switched-off target counted', 'no loopback S3 fixture could start');
+} else {
+	harness_defer(function () use ($fx) { s3fx_stop($fx); });
+	$off_slug = 'harnessoff' . bin2hex(random_bytes(3));
+	$off = new BackupTarget(NULL);
+	$off->set('bkt_name', 'HarnessTest Off ' . bin2hex(random_bytes(3)));
+	$off->set('bkt_provider', 's3');
+	$off->set('bkt_bucket', 'tbk');
+	$off->set('bkt_path_prefix', 'joinery-backups');
+	$off->set('bkt_credentials', s3fx_creds($fx));
+	$off->set('bkt_enabled', false);
+	$off->save();
+	harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $off->key);
+	$tmp = tempnam(sys_get_temp_dir(), 'tbk');
+	file_put_contents($tmp, 'x');
+	S3Signer::put_file(s3fx_creds($fx), 'tbk', '/joinery-backups/' . $off_slug . '/manager/x.sql.gz.enc', $tmp);
+	@unlink($tmp);
+	$g3 = TargetBackups::slug_backup_count($off_slug);
+	check($g3['count'] === 1, 'a switched-off target\'s backups still count against deleting the node', var_export($g3, true));
+}
 
 harness_finish();

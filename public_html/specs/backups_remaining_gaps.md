@@ -28,6 +28,10 @@ a deliberate act, not a default.
 
 ## 2. Install-from-backup cannot open an envelope minted by another site
 
+**For targets with object lock, closed by `storage_targets.md` F7 (WP9)**: the
+ledger handover comes from locked ledger files and the data key is resealed in
+the browser. Unlocked targets keep the shell procedure.
+
 A restore onto a *different* node has no recipient it holds a private half for.
 
 This is **pre-existing and not introduced by the envelope model** — the old

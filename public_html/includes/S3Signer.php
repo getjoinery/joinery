@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.8 - endpoint(): one reading of an endpoint for every signer; a bare host is https,
+ *                so a Linode cluster host entered as the form asks for signs instead of failing
  * @version 1.7 - MULTIPART_PART_BYTES is 32 MiB, and put_stream() builds each part in one string
  *                (read_up_to() takes the carried byte as its prefix) and drops the sent part before reading
  *                the next: an upload held two parts at once and peaked at 248 MB at 100 MiB parts, which
@@ -629,18 +631,8 @@ class S3Signer {
 	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null) {
 		self::validate_creds($creds);
 
-		$endpoint = $creds['endpoint'];
 		$region = $creds['region'];
-		$parsed = parse_url($endpoint);
-		if (empty($parsed['host'])) {
-			throw new S3SignerException('Invalid endpoint: ' . $endpoint);
-		}
-		$scheme = $parsed['scheme'] ?? 'https';
-		// A non-default port belongs in the host, for the URL and for the signature
-		// alike: curl sends `Host: host:port`, and SigV4 signs the host header, so
-		// dropping the port here produces a signature the provider rejects. Matters
-		// for self-hosted endpoints (MinIO and friends), which are usually host:port.
-		$host = $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
+		list($scheme, $host) = self::endpoint($creds['endpoint']);
 
 		// Canonical URI is "/{bucket}{path}" path-style. Encode bucket but leave "/" in path unescaped.
 		$canonical_uri = '/' . rawurlencode($bucket) . self::encode_path($path);
@@ -960,15 +952,7 @@ class S3Signer {
 		if ($expires < 60) { $expires = 60; }
 		if ($expires > 604800) { $expires = 604800; }   // SigV4 ceiling: 7 days
 
-		$parsed = parse_url($creds['endpoint']);
-		if (empty($parsed['host'])) {
-			throw new S3SignerException('Invalid endpoint: ' . $creds['endpoint']);
-		}
-		$scheme = $parsed['scheme'] ?? 'https';
-		// The port belongs in the host for the signature as well as the URL —
-		// same reason request() gives: SigV4 signs the host header and curl
-		// sends host:port.
-		$host = $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
+		list($scheme, $host) = self::endpoint($creds['endpoint']);
 
 		$region     = $creds['region'];
 		$amz_date   = gmdate('Ymd\THis\Z');
@@ -1003,6 +987,24 @@ class S3Signer {
 
 		return $scheme . '://' . $host . $canonical_uri . '?' . $canonical_qs
 			. '&X-Amz-Signature=' . $signature;
+	}
+
+	/**
+	 * An endpoint as [scheme, host], where host carries a non-default port. A bare
+	 * host (us-east-1.linodeobjects.com) is read as https, the scheme every provider
+	 * serves; a stored endpoint may be either shape, so every signer reads it here.
+	 */
+	public static function endpoint($endpoint) {
+		$endpoint = trim((string)$endpoint);
+		$parsed = parse_url(strpos($endpoint, '://') === false ? 'https://' . $endpoint : $endpoint);
+		if (empty($parsed['host'])) {
+			throw new S3SignerException('Invalid endpoint: ' . $endpoint);
+		}
+		// The port belongs in the host for the URL and for the signature alike:
+		// curl sends `Host: host:port`, and SigV4 signs the host header. Matters for
+		// self-hosted endpoints (MinIO and friends), which are usually host:port.
+		return [strtolower($parsed['scheme'] ?? 'https'),
+			$parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '')];
 	}
 
 	private static function validate_creds($creds) {

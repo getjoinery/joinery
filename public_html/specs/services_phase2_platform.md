@@ -401,7 +401,10 @@ bounce or complaint enforcement, per the 2026-09-06 decision.
    node credential and `bkt_mint_run_keys`. The credential check (E9): the
    shelf target's Test exercises list, read, write and delete; the hosted
    card's `ready` reads one SMTP2GO probe.
-2b. The object-store seam in the engine: one interface (`put_file`,
+2b. **Carried by `storage_targets.md` (2026-10-08)**, together with the
+   shelf target, which becomes a storage space per tenant there. The text
+   below is the original scope; that spec's §6 and WP5 govern.
+   The object-store seam in the engine: one interface (`put_file`,
    `put_stream`, `get`, `get_to_file`, `list`) with a direct implementation
    (today's `S3Signer` calls with a credential) and a brokered one (asks
    the broker, performs the HTTP itself). `BackupRunner`,

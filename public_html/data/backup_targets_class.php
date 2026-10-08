@@ -15,6 +15,7 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.8 - credential_problem(): a Linode endpoint is checked before either save form asks the provider anything
  * @version 2.7 - a Backblaze credential is completed on READ as well as on save: a target saved
  *                before the save-time completion existed kept an empty region for good and every
  *                run signed with nothing (specs/post_release_fleet_defects.md B3). The completed
@@ -304,6 +305,38 @@ class BackupTarget extends SystemBase {
 			return array('region' => '', 'endpoint' => '');
 		}
 		return array('region' => strtolower($m[1]), 'endpoint' => 'https://' . strtolower($host));
+	}
+
+	/**
+	 * What is wrong with a provider's own fields, as one sentence, or '' when they will do.
+	 * Both save forms run this before the provider is asked anything, so a mistyped
+	 * endpoint is named as a mistake rather than surfacing as a failed connection test.
+	 *
+	 * Linode addresses a cluster by its host alone, {cluster}.linodeobjects.com, over
+	 * https. A bucket name in the host, a path after it and a plain-http scheme are refused.
+	 * Other providers have no rule here yet and always pass.
+	 */
+	public static function credential_problem(string $provider, array $creds): string {
+		if ($provider !== 'linode') {
+			return '';
+		}
+		$region = trim((string)($creds['region'] ?? ''));
+		$endpoint = trim((string)($creds['endpoint'] ?? ''));
+		if ($region === '') {
+			return 'Linode needs the region the bucket is in, such as us-east-1.';
+		}
+		if ($endpoint === '') {
+			return 'Linode needs the endpoint, such as us-east-1.linodeobjects.com.';
+		}
+		$url = strpos($endpoint, '://') === false ? 'https://' . $endpoint : $endpoint;
+		$parts = parse_url($url) ?: array();
+		$host = strtolower((string)($parts['host'] ?? ''));
+		$scheme = strtolower((string)($parts['scheme'] ?? ''));
+		if ($scheme !== 'https' || !preg_match('/^[a-z0-9-]+\.linodeobjects\.com$/', $host) || trim((string)($parts['path'] ?? ''), '/') !== '') {
+			return 'The Linode endpoint is the cluster\'s address alone over https, such as us-east-1.linodeobjects.com. '
+				. 'Leave out the bucket name and any path.';
+		}
+		return '';
 	}
 
 	public static function eachCredentialBlob(): array {

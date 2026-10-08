@@ -10,6 +10,9 @@
  * list_status). Everything but list_status creates a job; list_status returns
  * the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.8.0 - delete_file resolves the target as the listing does and refuses a key outside this
+ *                  node's own folder; upload_file checks the pairing against the target and profile the
+ *                  upload goes to, including a node on the sole enabled target
  * @version 1.7.0 - verify_backup records the recovery key it is sent under (FleetBackupPolicy::note_verify_sent)
  * @version 1.6.0 - restore_objects: Bring them back — the node's offloaded files the file store has lost,
  *                  brought home from backup storage by pages of signed links (FleetObjectRestore::start, the
@@ -116,12 +119,19 @@ function backup_actions_logic(array $input): LogicResult {
 		if ($want_cloud) {
 			require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 			require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-			$target_id = (int) $node->get('mgn_bkt_backup_target_id');
-			if (!$target_id) {
+			// The target is resolved the way the listing resolves it, so a node on
+			// the sole enabled target can delete what it was shown; and the key must
+			// be inside THIS node's own folder, so one node's page cannot delete
+			// another node's backups from the same bucket.
+			$tgt = JobCommandBuilder::get_target($node);
+			if (!$tgt) {
 				return LogicResult::render(['success' => false, 'message' => 'This node has no cloud backup target configured.']);
 			}
+			$node_prefix = TargetBackups::base_prefix($tgt) . $node->get('mgn_slug') . '/';
+			if ((string)$node->get('mgn_slug') === '' || strpos($cloud_path, $node_prefix) !== 0 || strlen($cloud_path) === strlen($node_prefix)) {
+				return LogicResult::render(['success' => false, 'message' => 'That file is not one of this node\'s backups.']);
+			}
 			try {
-				$tgt = new BackupTarget($target_id, TRUE);
 				TargetBackups::delete_object($tgt, $cloud_path);
 			} catch (Exception $e) {
 				return LogicResult::render(['success' => false, 'message' => 'Cloud delete failed: ' . $e->getMessage()]);
@@ -168,20 +178,23 @@ function backup_actions_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('includes/BackupPairing.php'));
 		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
 
+		// The target is resolved the way build_upload_backup() resolves it, so the
+		// pairing is decided against the bucket the archive is actually going to,
+		// including a node on the sole enabled target with no target named.
 		$filename  = basename($local_path);
-		$target_id = (int) $node->get('mgn_bkt_backup_target_id');
+		$profile   = BackupProfile::MANAGER;
+		$tgt       = JobCommandBuilder::get_target($node);
 		$verdict   = ['verdict' => BackupPairing::PROCEED, 'message' => ''];
 
-		if ($target_id) {
+		if ($tgt) {
 			try {
-				$tgt = new BackupTarget($target_id, TRUE);
 				// The node's own last scan says whether the envelope is on disk.
 				// Read from the cached list, NOT from BackupListHelper: that one
 				// also makes a live cloud listing capped at 500 objects, and a
 				// truncated listing reports a stored envelope as absent — turning
 				// a safety check into a false alarm that blocks good uploads.
 				$verdict = BackupPairing::upload_verdict(
-					$tgt, (string)$node->get('mgn_slug'), $filename,
+					$tgt, (string)$node->get('mgn_slug'), $profile, $filename,
 					backup_actions_envelope_on_node($node, $filename));
 			} catch (Exception $e) {
 				// Unreadable target is its own fact and must not read as
@@ -201,7 +214,9 @@ function backup_actions_logic(array $input): LogicResult {
 		}
 
 		try {
-			$params = ['filename' => $filename];
+			// The same profile the pairing was checked under, so the archive lands
+			// where the check looked.
+			$params = ['filename' => $filename, 'profile' => $profile];
 			if ($verdict['verdict'] === BackupPairing::PAIR) {
 				$params['include_envelope'] = true;
 			}

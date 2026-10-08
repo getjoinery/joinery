@@ -33,6 +33,7 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.26 - a chosen target that is disabled or deleted is named in the refusal, not reported as none
  * @version 1.25 - a chain run archives the site as two parts, data and code (CHAIN_PARTS), each with its own
  *                snapshot, into version-2 chains (specs/backup_database_incrementals.md WP3). A part whose
  *                tree was swapped under its snapshot starts over alone inside the chain (rebased_because
@@ -389,6 +390,16 @@ class BackupRunner {
 		}
 
 		if (!$target) {
+			// A chosen target that is disabled or deleted is not "none configured":
+			// say which one, so the fix is the obvious one.
+			$chosen = (int)self::setting('backup_target_id');
+			$named = $chosen ? new BackupTarget($chosen, TRUE) : null;
+			if ($named && $named->key) {
+				throw new BackupRunnerException(
+					'Backups go to "' . $named->get('bkt_name') . '", which is '
+					. ($named->get('bkt_delete_time') ? 'deleted' : 'disabled')
+					. ', so there is nowhere to put a backup. Enable it or choose another target on the Backups page.');
+			}
 			throw new BackupRunnerException(
 				'No backup target is configured, so there is nowhere to put a backup. Set one up on the Backups page.');
 		}

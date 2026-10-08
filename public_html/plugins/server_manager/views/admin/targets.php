@@ -5,6 +5,8 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.11 - a provider change, or a provider with no node key, drops the stored node key
+ * @version 2.10 - a Linode endpoint is checked (BackupTarget::credential_problem) before the target is tested or saved
  * @version 2.9 - the Stored Backups sizes use BackupRunner::human() (decimal units, as the provider bills)
  * @version 2.8 - stored secrets are locked fields with Reset (FormWriter 'stored' +
  *                process_secretinput()); Reset and save blank removes the node credential, and
@@ -221,6 +223,10 @@ if ($_POST && isset($_POST['bkt_name'])) {
 			'region' => trim($_POST['cred_linode_region'] ?? ''),
 			'endpoint' => trim($_POST['cred_linode_endpoint'] ?? ''),
 		];
+		$field_problem = BackupTarget::credential_problem('linode', $creds);
+		if ($field_problem !== '' && $error === null) {
+			$error = 'Not saved. ' . $field_problem;
+		}
 	}
 	$target->set('bkt_credentials', json_encode($creds));
 	// Only B2 can mint; anywhere else the flag is off whatever the box said,
@@ -238,6 +244,12 @@ if ($_POST && isset($_POST['bkt_name'])) {
 		$existing_node = [];
 	}
 	$node_fields = ['b2' => 'node_cred_app_key', 's3' => 'node_cred_s3_secret_key'];
+	// A node key belongs to the provider it was made at. A provider change, or a
+	// provider with no node key at all (Linode), leaves none behind: a stale one
+	// fails the save's own connection test and would be handed to nodes.
+	if ($old_provider !== $provider || !isset($node_fields[$provider])) {
+		$target->set('bkt_node_credentials', null);
+	}
 	$node_stored = !empty($existing_node['secret_key']) && $old_provider === $provider;
 	$node_what = FormWriterV2Base::SECRET_KEEP;
 	$node_secret = '';

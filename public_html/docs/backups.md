@@ -844,6 +844,11 @@ them on read for a row that still lacks either, writing the completed
 credential back once (a server-initiated reconciliation) so the signer never
 sees an incomplete B2 credential.
 
+A Linode credential is the bucket's region and its cluster endpoint, typed in:
+`BackupTarget::credential_problem()` refuses anything other than the cluster's
+bare https host (`us-east-1.linodeobjects.com`), before either save form asks
+the provider anything. Linode targets never mint a per-run key.
+
 **Streamed artifacts** — the data and code archives, the standalone archive, the
 database dump — go through `S3Signer::put_stream()`: an engine's stdout,
 unknown length, never re-readable. The stream is read one part at a time,
