@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.3 - performRollback() keeps only the newest failed deployment, removing older
+ *                public_html_failed_* trees before preserving the current one.
  * @version 1.2 - performRollback() sets the restored tree's permissions through fix_permissions.sh.
  *                It ran chown -R www-data:user1 and chmod -R 775 over public_html: the pool
  *                owned every file it executes where user1 exists, and the chown failed
@@ -885,6 +887,19 @@ class DeploymentHelper {
         // directory itself, because public_html is commonly a Docker bind
         // mount and rename()/mv across filesystems would fail.
         if ($preserve_failed && is_dir($public_html)) {
+            // Only the newest failure is kept: each preserved tree is a full
+            // copy of the code, and a run of failed upgrades with no success
+            // between them (which is what removes these) would otherwise park
+            // one per attempt.
+            foreach (array_unique(array_merge(
+                glob("/var/www/html/$target_site/public_html_failed_*", GLOB_ONLYDIR) ?: [],
+                glob("$deploy_root/public_html_failed_*", GLOB_ONLYDIR) ?: []
+            )) as $older_failed_dir) {
+                exec('rm -rf ' . escapeshellarg($older_failed_dir) . ' 2>&1');
+                if ($verbose) {
+                    echo "  Removed older failed deployment: " . basename($older_failed_dir) . "\n";
+                }
+            }
             $failed_dir = "$deploy_root/public_html_failed_" . date('Ymd_His');
             if ($verbose) {
                 echo "  Preserving failed deployment to: $failed_dir\n";

@@ -603,17 +603,20 @@ If ANY step fails → Automatic rollback
 ```
 /var/www/html/{site}/
 ├── public_html/              # Current live installation
-├── public_html_last/         # Backup (for rollback)
-├── public_html_stage/        # Staging area for validation
-├── public_html_failed_*/     # Preserved failed deployments (timestamped)
+├── public_html_last/         # The previous code, during an upgrade (for rollback)
+├── public_html_failed_*/     # The most recent failed deployment (timestamped)
 ├── static_files/             # Published upgrade packages
-│   ├── joinery-core-X.XX.upg.zip
-│   ├── theme-THEMENAME-X.XX.upg.zip
-│   └── plugin-PLUGINNAME-X.XX.upg.zip
-└── uploads/upgrades/         # Downloaded packages (client sites)
+│   ├── joinery-core-X.X.X.tar.gz
+│   ├── themes/THEMENAME-X.X.X.tar.gz
+│   └── plugins/PLUGINNAME-X.X.X.tar.gz
+└── uploads/upgrades/         # Staging: the downloaded release, extracted
 ```
 
-A container site has a `deploy` volume, mounted at `/var/www/html/{site}/deploy/`. Where it exists, an upgrade keeps its staging (`deploy/upgrades/`), the previous code (`deploy/public_html_last/`) and a failed deployment's code (`deploy/public_html_failed_*`) there instead, and checks for 500 MB free there. The volume is outside the site's disk allowance on a shared host, so a site at its allowance can still be upgraded, and none of it lands on the container's capped writable layer (`DeploymentHelper::deployRoot()`; `utils/upgrade.php` applies the same rule itself, since it updates ahead of that class).
+The code is swapped by moving, not copying: the live tree's contents move into `public_html_last/` and the staged tree's contents move into `public_html/`. On one filesystem each move is a rename. A successful upgrade removes `public_html_last/` and every `public_html_failed_*`; a rollback keeps only the newest failed tree, removing older ones. User data (uploads, static_files, backups, cache, logs, config, vendor) lives beside `public_html/`, never in it, so an upgrade never copies it.
+
+Before downloading, an upgrade checks for free space measured from the size of the live code tree: twice that where it stages (the archives and the staged copy) and once that in the deploy root (a failed copy, if it rolls back), added up when both are on one disk, and never less than 500 MB per disk.
+
+A container site has a `deploy` volume, mounted at `/var/www/html/{site}/deploy/`. Where it exists, an upgrade keeps its staging (`deploy/upgrades/`), the previous code (`deploy/public_html_last/`) and a failed deployment's code (`deploy/public_html_failed_*`) there instead, and checks for free space there. The volume is outside the site's disk allowance on a shared host, so a site at its allowance can still be upgraded, and none of it lands on the container's capped writable layer (`DeploymentHelper::deployRoot()`; `utils/upgrade.php` applies the same rule itself, since it updates ahead of that class).
 
 **Archive Naming Convention:**
 - `joinery-core-X.XX.upg.zip` - Core application (no themes/plugins)
@@ -992,7 +995,7 @@ sudo bash /var/www/html/{site}/maintenance_scripts/install_tools/fix_permissions
 ```
 
 **Validation Failures:**
-- Failed deployment preserved in `public_html_failed_*` directory
+- The most recent failed deployment is preserved in a `public_html_failed_*` directory
 - Inspect for syntax errors or missing dependencies
 - Fix and redeploy
 
