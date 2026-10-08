@@ -238,7 +238,7 @@ class ApiAuth {
 	private static function authenticateBrowserSession(array $headers) {
 		// No session cookie → plain anonymous keyless request; fail as always.
 		if (empty($_COOKIE[session_name()])) {
-			self::auth_failure(400, 'Missing public/secret key headers', 'Public/secret keys not present');
+			self::no_credential('Missing public/secret key headers');
 		}
 
 		// Starting the session is safe here: this branch is only reached with
@@ -254,7 +254,7 @@ class ApiAuth {
 		if (!$user_id && $csrf_header === '') {
 			// Stale/anonymous session cookie with no CSRF attempt — same shape
 			// as no credential at all.
-			self::auth_failure(400, 'Browser session not logged in', 'Public/secret keys not present');
+			self::no_credential('Browser session not logged in');
 		}
 
 		if (!$session_token || $csrf_header === '' || !hash_equals($session_token, $csrf_header)) {
@@ -314,6 +314,24 @@ class ApiAuth {
 			'note'        => $note,
 		]);
 		api_error($message, 'AuthenticationError', $status_code);
+	}
+
+	/**
+	 * Refuse a request that presented no credential at all, and exit via
+	 * api_error() with the same 400 a bad key gets (no oracle for whether
+	 * sessions are accepted). It guessed nothing, so it is not a failed
+	 * sign-in: counted there, a signed-out app or page calling a member
+	 * action a few times would lock every caller at its address out of
+	 * signing in. It is logged to the general api feature instead, whose
+	 * per-address limit bounds a stranger's flood. Always exits.
+	 */
+	private static function no_credential($note) {
+		RequestLogger::log('api', 'no_credential', false, [
+			'status_code' => 400,
+			'error_type'  => 'AuthenticationError',
+			'note'        => $note,
+		]);
+		api_error('Public/secret keys not present', 'AuthenticationError', 400);
 	}
 
 	// ====================================================================

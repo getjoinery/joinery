@@ -776,6 +776,8 @@ Who is counted depends on the credential:
 
 A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. Key-based and keyless traffic is metered by address before authentication.
 
+A failed auth attempt is a credential that did not verify: a wrong password, an unknown, expired or revoked key, a bad CSRF token. A request that presents no credential at all (no key headers, and either no session cookie or a signed-out one with no `X-Joinery-Csrf` header) gets the same 400 but guessed nothing, so it counts against the general address limit, not the failed-auth one.
+
 When a limit is exceeded the API returns HTTP 429 `RateLimitError` with a `Retry-After` header and a message that says what was counted, the limit, and how long until the next request will be accepted — the wait is until the oldest of the requests that put the caller over the limit leaves the window, not the whole window. The same numbers are in `data`:
 
 ```json

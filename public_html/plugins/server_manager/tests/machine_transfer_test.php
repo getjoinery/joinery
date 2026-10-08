@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/machine_transfer_test.php
  *
+ * @version 1.2 - a connected account the provider answers 401 is marked revoked; an outage and the operator token mark nothing
  * @version 1.1 - review R2, R5: one machine per node (host over join, newest of equals); a new month's
  *                first figure no lower than last month's is held for the first two days
  * @version 1.0
@@ -131,6 +132,43 @@ $result = MachineTransferWatch::run(array('harness' => $account), $no_dns, $now 
 check($result['status'] === 'error', 'the failure is reported: ' . $result['message']);
 check((int)$reload($solo)->get('mgn_mtr_machine_transfer_id') === (int)$row_b->key, 'the node keeps its machine');
 $account->fail_listing = false;
+
+// ---------------------------------------------------------------------------
+section('A connected account the provider rejects is marked revoked');
+
+$make_cca = function () {
+	$cca = new CustomerCloudAccount(NULL);
+	$cca->set('cca_usr_user_id', 990000 + random_int(0, 9999));
+	$cca->set('cca_provider', 'linode');
+	$cca->set('cca_status', 'active');
+	$cca->save();
+	$cca->load();
+	harness_register_row('cca_customer_cloud_accounts', 'cca_customer_cloud_account_id', $cca->key);
+	return $cca;
+};
+$rejecting = new class(array(), array()) extends FakeMachineAccount {
+	public $code = 401;
+	public function listInstances(): array {
+		throw new CloudComputeException('unauthorized: Invalid Token', $this->code);
+	}
+};
+$status_of = function ($cca) { return (string)(new CustomerCloudAccount((int)$cca->key, TRUE))->get('cca_status'); };
+
+$cca = $make_cca();
+$result = MachineTransferWatch::run(array('cca:' . $cca->key => $rejecting), $no_dns, $now);
+check($status_of($cca) === 'revoked', 'a 401 marks the connected account revoked');
+check($result['status'] === 'error' && strpos($result['message'], 'marked revoked') !== false,
+	'the run says so once: ' . $result['message']);
+
+$outage = $make_cca();
+$rejecting->code = 503;
+MachineTransferWatch::run(array('cca:' . $outage->key => $rejecting), $no_dns, $now);
+check($status_of($outage) === 'active', 'a provider outage leaves the account as it was');
+
+$rejecting->code = 401;
+$result = MachineTransferWatch::run(array('operator' => $rejecting), $no_dns, $now);
+check($result['status'] === 'error' && strpos($result['message'], 'could not be listed') !== false,
+	'the operator token\'s 401 stays a problem: there is no account to mark');
 
 // ---------------------------------------------------------------------------
 section('The rate window');

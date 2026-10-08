@@ -25,8 +25,8 @@
  *     endpoint including auth/login; requests with no client headers are
  *     unaffected.
  *
- * USAGE (CLI only — the rate-limit test deliberately locks out the caller's
- * IP for the api_auth feature and then cleans up its own log rows):
+ * USAGE (CLI only — the rate-limit test locks out a loopback address of its
+ * own for the api_auth feature, then removes its own log rows):
  *   php tests/functional/api/session_keys_test.php [base_url] [origin_ip]
  *
  * Default base_url: https://dev.getjoinery.com, pinned to the origin IP so
@@ -365,19 +365,32 @@ try {
 
 	// ------------------------------------------------------------------
 	section('Failed-auth rate limit lockout (acceptance #5 — runs LAST)');
+	// The bad logins come from a loopback address of this run's own, so the
+	// lockout they earn falls on an address no other suite, session or
+	// browser on this box sends from.
 	$auth_limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
-	$locked_out = false;
-	for ($i = 0; $i < $auth_limit + 2; $i++) {
-		$r = api_request('POST', '/api/v1/auth/login', array(), array(
-			'email' => $user_b_after->get('usr_email'),
-			'password' => 'wrong-' . $i,
+	$lockout_ip = harness_http_loopback_source();
+	$bad_login = function ($n) use ($user_b_after, $lockout_ip) {
+		return harness_request('POST', '/api/v1/auth/login', array(
+			'body' => array('email' => $user_b_after->get('usr_email'), 'password' => 'wrong-' . $n),
+			'encode' => 'json',
+			'from' => $lockout_ip,
 		));
-		if ($r['status'] === 429) {
-			$locked_out = true;
-			break;
+	};
+	$answered = 0;
+	for ($i = 0; $i < $auth_limit; $i++) {
+		$r = $bad_login($i);
+		if ($r['status'] === 401) {
+			$answered++;
 		}
 	}
-	check($locked_out, "repeated bad logins lock the IP out (429) within " . ($auth_limit + 2) . " attempts");
+	check($answered === $auth_limit, "the first $auth_limit bad logins are answered 401", "$answered answered");
+	$r = $bad_login($auth_limit);
+	check($r['status'] === 429, 'the next is refused 429: the address is locked out at ' . $auth_limit, $r['raw']);
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs
+		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address = ?");
+	$q->execute([$lockout_ip]);
+	check((int)$q->fetchColumn() === $auth_limit, 'the failures were counted against the loopback address, not the suites\' shared one');
 
 } catch (\Throwable $e) {
 	// Record the crash as a failing check so it reaches the result contract.
@@ -393,11 +406,11 @@ try {
 
 	$db = DbConnector::get_instance()->get_db_link();
 
-	// Remove the failed-auth log rows this test created so the lockout does
-	// not bleed into subsequent runs or other API use from this IP.
+	// Remove the failed-auth log rows this run created, from its own two
+	// addresses only: a concurrent run's rows are that run's to count.
 	$q = $db->prepare("DELETE FROM rql_request_logs
-		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_create_time >= ?");
-	$q->execute([$TEST_START_UTC]);
+		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address IN (?, ?)");
+	$q->execute([(string)$GLOBALS['__harness_http']['from'], isset($lockout_ip) ? $lockout_ip : '']);
 	echo "  Removed " . $q->rowCount() . " failed-auth log rows from this run\n";
 
 	harness_teardown_data();

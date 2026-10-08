@@ -7,6 +7,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_user_logic — the user detail page.
  *
+ * @version 1.4 - Resend activation email and Activate User are POST actions here (resend_activation, activate),
+ *   not links to pages that sent mail or activated on GET
  * @version 1.3 - the Security card carries no mail fact: no mail protection level or
  *   add-on requires a second factor
  * @version 1.2 - the sign-in history reads through MultiLogin; the table is a model
@@ -88,6 +90,28 @@ function admin_user_logic(array $input): LogicResult {
 			$groupmember->remove();
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
+		else if($input['action'] == 'activate'){
+			$session->check_permission(9);
+			$act_code = Activation::getTempCode($user->key, '30 day', 2, NULL, NULL);
+			if (Activation::ActivateUser($act_code)) {
+				admin_user_say($session, 'User activated.', true);
+			} else {
+				admin_user_say($session, 'Unable to activate user.', false);
+			}
+			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
+		}
+		else if($input['action'] == 'resend_activation'){
+			// A POST: it sends mail, and a link would send it whenever anything
+			// fetched the URL.
+			$session->check_permission(8);
+			if ($user->get('usr_email_is_verified')) {
+				admin_user_say($session, 'This user is already verified.', false);
+			} else {
+				Activation::email_activate_send($user);
+				admin_user_say($session, 'Activation email sent to ' . $user->get('usr_email') . '.', true);
+			}
+			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
+		}
 
 		// ---- Administrative second-factor reset (specs/admin_second_factor_management.md) ----
 		// A superadmin's recovery lever for a user who lost a factor. Every one
@@ -115,7 +139,7 @@ function admin_user_logic(array $input): LogicResult {
 				catch (PasskeyRevocationVetoException $e) {
 					error_log('[ADMIN_2FA_RESET] action=admin_remove_passkey admin=' . (int)$acting->key
 						. ' target=' . (int)$user->key . ' credential=' . $credential_id . ' result=vetoed');
-					admin_user_second_factor_say($session,
+					admin_user_say($session,
 						$e->getMessage() . ' This would permanently strand the user\'s encrypted data. There is no override.',
 						FALSE);
 					return LogicResult::redirect($back);
@@ -123,7 +147,7 @@ function admin_user_logic(array $input): LogicResult {
 				catch (Exception $e) {
 					error_log('[ADMIN_2FA_RESET] action=admin_remove_passkey admin=' . (int)$acting->key
 						. ' target=' . (int)$user->key . ' credential=' . $credential_id . ' result=error');
-					admin_user_second_factor_say($session, $e->getMessage(), FALSE);
+					admin_user_say($session, $e->getMessage(), FALSE);
 					return LogicResult::redirect($back);
 				}
 
@@ -132,12 +156,12 @@ function admin_user_logic(array $input): LogicResult {
 				VaultUnlock::lockAll($user->key);
 				$user->rotate_second_factor_hmac_key();
 				admin_user_second_factor_alert($user, 'A site administrator removed a passkey from your account.');
-				admin_user_second_factor_say($session, 'Passkey removed.', TRUE);
+				admin_user_say($session, 'Passkey removed.', TRUE);
 				return LogicResult::redirect($back);
 			}
 			else if($input['action'] == 'admin_disable_totp'){
 				if(!$user->has_totp_enabled()){
-					admin_user_second_factor_say($session, 'This user does not have an authenticator app enabled.', FALSE);
+					admin_user_say($session, 'This user does not have an authenticator app enabled.', FALSE);
 					return LogicResult::redirect($back);
 				}
 				// No confirmation code is asked for - the user lost it, which is
@@ -147,7 +171,7 @@ function admin_user_logic(array $input): LogicResult {
 				error_log('[ADMIN_2FA_RESET] action=admin_disable_totp admin=' . (int)$acting->key
 					. ' target=' . (int)$user->key . ' credential=- result=done');
 				admin_user_second_factor_alert($user, 'A site administrator disabled two-factor authentication on your account.');
-				admin_user_second_factor_say($session, 'Two-factor authentication disabled.', TRUE);
+				admin_user_say($session, 'Two-factor authentication disabled.', TRUE);
 				return LogicResult::redirect($back);
 			}
 			else {
@@ -156,7 +180,7 @@ function admin_user_logic(array $input): LogicResult {
 				error_log('[ADMIN_2FA_RESET] action=admin_revoke_trusted_devices admin=' . (int)$acting->key
 					. ' target=' . (int)$user->key . ' credential=- result=done');
 				admin_user_second_factor_alert($user, 'A site administrator signed out your trusted devices.');
-				admin_user_second_factor_say($session, 'Trusted devices signed out.', TRUE);
+				admin_user_say($session, 'Trusted devices signed out.', TRUE);
 				return LogicResult::redirect($back);
 			}
 		}
@@ -206,7 +230,7 @@ function admin_user_logic(array $input): LogicResult {
 				$options['altlinks']['Payment Methods'] = '/plugins/store/admin/admin_user_payment_methods?usr_user_id='.$user->key;
 			}
 			if(!$user->get('usr_email_is_verified')){
-				$options['altlinks']['Resend activation email'] = '/admin/admin_email_verify?usr_user_id='.$user->key;
+				$options['altlinks']['Resend activation email'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'resend_activation', 'usr_user_id' => $user->key));
 			}
 			$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
 
@@ -214,7 +238,7 @@ function admin_user_logic(array $input): LogicResult {
 			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'delete', 'usr_user_id' => $user->key));
 
 			if(!$user->get('usr_is_activated')) {
-				$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
+				$options['altlinks']['Activate User'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'activate', 'usr_user_id' => $user->key));
 			}
 			if ($_SESSION['permission'] == 10) {
 				$options['altlinks']['Log in as user'] = '/admin/admin_user_login_as?usr_user_id='.$user->key;
@@ -388,7 +412,7 @@ function admin_user_second_factor_gate($session, $user) {
 
 	$acting = new User($session->get_user_id(), TRUE);
 	if (!$session->user_has_second_factor($acting)) {
-		admin_user_second_factor_say($session,
+		admin_user_say($session,
 			'Enroll a second factor on your own account before resetting anyone else\'s.', FALSE);
 		return LogicResult::redirect($back);
 	}
@@ -399,7 +423,7 @@ function admin_user_second_factor_gate($session, $user) {
 	}
 
 	if ($user->get('usr_delete_time')) {
-		admin_user_second_factor_say($session,
+		admin_user_say($session,
 			'This user is deleted. Undelete the account before changing its sign-in factors.', FALSE);
 		return LogicResult::redirect($back);
 	}
@@ -408,7 +432,7 @@ function admin_user_second_factor_gate($session, $user) {
 }
 
 /** Save a success/error message scoped to the admin user page. */
-function admin_user_second_factor_say($session, $message, $ok) {
+function admin_user_say($session, $message, $ok) {
 	$session->save_message(new DisplayMessage(
 		$message,
 		$ok ? 'Success' : 'Error',

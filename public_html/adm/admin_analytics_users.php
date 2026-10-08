@@ -79,6 +79,12 @@ echo $formwriter->end_form();
 	);
 	$page->tableheader($headers, $box_vars);
 
+// A share of nothing has no percentage: every domain can fall under the
+// minimum, and a site can have no users in the window at all.
+$percent = function ($part, $whole) {
+	return $whole > 0 ? number_format(($part / $whole) * 100, 2) . '%' : '—';
+};
+
 $grandtotal = 0;
 $grandtotalv = 0;
 
@@ -98,7 +104,7 @@ foreach ($page_vars['domaincounts'] as $domain => $values)
 	array_push($rowvalues, $domain);
 	array_push($rowvalues, $values['total']);
 	array_push($rowvalues, $values['vtotal']);
-	array_push($rowvalues, number_format(($values['vtotal']/$values['total'])*100, 2) . '%');
+	array_push($rowvalues, $percent($values['vtotal'], $values['total']));
 
 	$grandtotalf += $values['total'];
 	$grandtotalvf+= $values['vtotal'];
@@ -110,14 +116,14 @@ $rowtotals = array();
 array_push($rowtotals, '<b>Totals</b>');
 array_push($rowtotals, number_format($grandtotal));
 array_push($rowtotals, number_format($grandtotalv));
-array_push($rowtotals, number_format(($grandtotalv/$grandtotal)*100, 2) . '%');
+array_push($rowtotals, $percent($grandtotalv, $grandtotal));
 $page->disprow($rowtotals);
 
 $rowtotals = array();
 array_push($rowtotals, '<b>Totals (Excluding Domains Under Minimum)</b>');
 array_push($rowtotals, number_format($grandtotalf));
 array_push($rowtotals, number_format($grandtotalvf));
-array_push($rowtotals, number_format(($grandtotalvf/$grandtotalf)*100, 2) . '%');
+array_push($rowtotals, $percent($grandtotalvf, $grandtotalf));
 $page->disprow($rowtotals);
 
 $page->endtable();

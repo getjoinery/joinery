@@ -49,6 +49,15 @@ function session_login($email, $password) {
 	return key_headers($pub, $r['json']['data']['secret_key']);
 }
 
+// The checks below are written against messaging and subscriptions switched
+// on, and switch each off where they test the gate; the site's own values
+// come back at teardown, whatever they were.
+$was_features = array();
+foreach (array('messaging_active', 'subscriptions_active') as $feature) {
+	$was_features[$feature] = get_setting_raw($feature);
+	set_setting_raw($feature, '1');
+}
+
 try {
 	$suffix = strtoupper(LibraryFunctions::random_string(6));
 	echo "Base URL: $BASE_URL\nTest suffix: $suffix\n";
@@ -73,10 +82,15 @@ try {
 	section('Auth: every new action requires a session credential');
 	foreach ($new_actions as $action) {
 		// No key headers and no session cookie: 400, per ApiAuth::authenticateBrowserSession
-		// ("no oracle for whether sessions are accepted" — see includes/ApiAuth.php).
+		// ("no oracle for whether sessions are accepted" — see includes/ApiAuth.php). It guessed
+		// nothing, so it is not a failed sign-in and locks nobody out.
 		$r = api_request('POST', '/api/v1/action/' . $action, array(), array());
 		check($r['status'] === 400, "$action: 400 without any credentials", 'got ' . $r['status']);
 	}
+	$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT COUNT(*) FROM rql_request_logs
+		WHERE rql_feature = 'api_auth' AND rql_note = 'Missing public/secret key headers' AND rql_create_time >= ?");
+	$q->execute([$TEST_START_UTC]);
+	check((int)$q->fetchColumn() === 0, 'a request with no credential is not counted as a failed sign-in');
 
 	// ------------------------------------------------------------------
 	section('profile_dashboard: payload shape + settings gating');
@@ -233,7 +247,7 @@ try {
 
 	// Compose-mode dedup: `to` resolves to the existing conversation, not a new one.
 	$r = api_request('POST', '/api/v1/action/conversation_thread', $headers_a, array('to' => $user_b->key));
-	check(($r['json']['data']['conversation_id'] ?? null) === (int)$conversation->key, 'compose dedup finds the existing A/B conversation');
+	check(($r['json']['data']['conversation_id'] ?? null) === (int)$conversation->key, 'compose dedup finds the existing A/B conversation', $r['raw']);
 
 	// ------------------------------------------------------------------
 	section('security_overview: payload shape + is_current');
@@ -251,15 +265,9 @@ try {
 } finally {
 	echo "\n== Teardown ==\n";
 
-	// The "no credentials" auth loop above counts as failed-auth attempts
-	// against the shared api_auth rate limiter — remove them so this run does
-	// not lock out this IP for other test suites (same pattern as
-	// session_keys_test.php).
-	$db = DbConnector::get_instance()->get_db_link();
-	$q = $db->prepare("DELETE FROM rql_request_logs
-		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_create_time >= ?");
-	$q->execute([$TEST_START_UTC]);
-	echo "  Removed " . $q->rowCount() . " failed-auth log rows from this run\n";
+	foreach ($was_features as $feature => $value) {
+		set_setting_raw($feature, $value);
+	}
 
 	harness_teardown_data();
 }
