@@ -4,6 +4,7 @@
  * URL: /admin/server_manager/host_add
  *      /admin/server_manager/host_add?mgh_managed_host_id=N  (edit mode)
  *
+ * @version 1.2 - Max Sites has no invented default: blank means not set, and provisioning needs it
  * @version 1.1 - host agent link (mgh_mgn_managed_node_id) and a delete action; a host is
  *                deleted last, after its container sites and its own node identity
  */
@@ -67,7 +68,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 		} elseif ($field === 'mgh_ssh_port' && $value === '') {
 			$value = 22;
 		} elseif ($field === 'mgh_max_sites' && $value === '') {
-			$value = 50;
+			$value = null;
 		} elseif ($field === 'mgh_mgn_managed_node_id') {
 			$value = $value === '' ? null : (int)$value;
 		}
@@ -160,8 +161,8 @@ $formwriter->numberinput('mgh_ssh_port', 'SSH Port', [
 echo '<h6 class="text-muted mt-4 mb-3">Provisioning</h6>';
 
 $formwriter->numberinput('mgh_max_sites', 'Max Sites', [
-	'placeholder' => '50',
-	'helptext' => 'Hard cap on auto-provisioned sites for this host.',
+	'placeholder' => 'e.g. 12',
+	'helptext' => 'How many sites this machine can hold, judged from its memory and disk (a 4 GB box might take about 12). New sites are placed on it only up to this number. Required to turn provisioning on.',
 	'min' => 1,
 ]);
 

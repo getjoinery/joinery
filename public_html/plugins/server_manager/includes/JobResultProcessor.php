@@ -6,6 +6,7 @@
  * from raw command output and updates related records.
  *
  * @version 1.68 - a comment names S3Signer::list() (TargetLister is folded into it)
+ * @version 1.68 - process_install_node records the agents' keys the install printed (JoinAutoApproval::record_from_install)
  * @version 1.67 - host reports keep root_ssh (host_report 1.16): root's public keys and fingerprints; only bare keys are carryable
  * @version 1.66 - host reports keep up to 100 site containers and 100 sites' outbound figures
  *                 (HOST_REPORT_MAX_SITES, host_report 1.15), not 20: a multi-tenant host takes 50;
@@ -1638,6 +1639,14 @@ class JobResultProcessor {
 				}
 			}
 			$node->save();
+			// What this install showed of its agents' keys, for automatic approval of
+			// their joins (the auto_approve_provisioned_joins spec). Best effort: a
+			// miss only leaves those joins for a person.
+			try {
+				JoinAutoApproval::record_from_install($node, $output);
+			} catch (Throwable $e) {
+				error_log('record_from_install: ' . $e->getMessage());
+			}
 			// Send welcome email for auto-provisioned orders
 			if ($job->get('mjb_external_order_item_id')) {
 				self::send_provisioning_welcome_email($job, $node);

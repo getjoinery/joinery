@@ -73,7 +73,7 @@ return [
 					INSERT INTO mgh_managed_hosts
 						(mgh_slug, mgh_name, mgh_host, mgh_ssh_user, mgh_ssh_key_path,
 						 mgh_ssh_port, mgh_max_sites, mgh_provisioning_enabled, mgh_create_time)
-					VALUES (?, ?, ?, ?, ?, ?, 50, false, now())
+					VALUES (?, ?, ?, ?, ?, ?, NULL, false, now())
 					RETURNING mgh_managed_host_id
 				");
 				$ins->execute([

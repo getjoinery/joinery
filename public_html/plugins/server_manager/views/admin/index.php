@@ -3,6 +3,34 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.49 - a join that matches a provision says why a person still has it (or that it is about to be auto-approved);
+ *                 a key that differs from the install's is flagged; provisions show when their agents were auto-approved
+ *                 (the auto_approve_provisioned_joins spec WP3)
+ * @version 1.48 - a cloud provision's domain links to its site node, and a "host" link opens its host group on the board
+ * @version 1.47 - Recent Jobs is a collapsible card like the join and provision lists; All Jobs is a link at its foot
+ * @version 1.46 - a host's header carries a health dot: red if any node on it is red, amber if any is amber, green only when all
+ *                 are green (kept current as the page refreshes node status); the status strip is flat, not a card
+ * @version 1.45 - a host's own agent shows its state: waiting for approval, turned away, request expired, not linked, unpaired,
+ *                 not checked in yet, offline, or not heard from; nothing when it is linked and checking in
+ * @version 1.44 - machines (bare metal, one-site installs) are flat gray bars with name, domain and IP: no Machines group, nothing to expand
+ * @version 1.43 - a value is shown once: a host named by its address does not repeat it, and a machine row shows its domain and IP
+ *                 unless the name already is one of them
+ * @version 1.42 - the sites-of-max badge appears only on hosts that take new sites, and shows the max the operator set
+ *                 (no invented 50); other hosts show a plain count
+ * @version 1.41 - the find box and expand/collapse icons live in the Hosts & Sites header, beside the Options dropdown
+ * @version 1.40 - the notes at the top are the theme's standard .alert boxes (warning / danger / info), no custom shades
+ * @version 1.39 - every box is the theme's card (header strip with an h6 title, body); the join and provision panels are
+ *                 collapsible cards with a count badge, not separately coloured boxes
+ * @version 1.38 - cloud provisions moved to the sidebar, one compact entry each (domain, status, Dismiss; detail only when there is something to act on)
+ * @version 1.37 - a join from a provisioned machine's site agent can be approved from the panel (provider-checked, bound to the
+ *                 provision's site node); every entry has Approve
+ * @version 1.36 - agents asking to join moved to the sidebar above Recent Jobs, one compact entry each
+ * @version 1.35 - the host Actions menu can queue an upgrade for every enabled site on that host
+ * @version 1.34 - Recent Jobs are two-line rows, so the sidebar never overflows
+ * @version 1.33 - Install Site / Edit Host sit in an Actions menu on each host's header bar
+ * @version 1.32 - vanilla markup throughout (no Bootstrap): hosts are <details> groups, closed by default past six
+ *                 nodes and remembered per browser, with find / expand-all / collapse-all; join requests are one
+ *                 light-blue collapsible table with a one-line note per row; node rows are one line in a grid
  * @version 1.31 - the agent status bar names an update refused as unlogged (release_transparency WP5)
  * @version 1.30 - no banners for broken monitoring, backups from here not happening, or a node that can no
  *                 longer be managed: each is an incident, triaged in the one inbox
@@ -63,7 +91,7 @@ $session->set_return();
 // Approve or reject a join request from the banner. Approval makes the node
 // record from the request and binds the key to it — the same act as approval
 // on a node's API Keys tab, without the hand-typed record first.
-if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 'reopen_join'], true)) {
+if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'adopt_provision_join', 'reject_join', 'reopen_join'], true)) {
 	$page_regex = '/\/admin\/server_manager/';
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
 	$jr = new AgentJoinRequest((int)($_POST['ajr_agent_join_request_id'] ?? 0), TRUE);
@@ -90,6 +118,21 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 're
 			'Rejected', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		header('Location: /admin/server_manager'); exit;
 	}
+	if ($_POST['action'] === 'adopt_provision_join') {
+		try {
+			$adopted = AgentChannelEndpoint::approveProvisionSiteJoin($jr);
+			$session->save_message(new DisplayMessage(
+				'Agent connected. ' . $jr->get('ajr_claimed_name') . ' (key '
+				. AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint')) . ') is now the agent of '
+				. $adopted['node']->get('mgn_name') . '; it will pick the approval up on its next check.'
+				. ($adopted['host'] ? ' It is this host\'s own agent, so host-scope work routes to it.' : ''),
+				'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		} catch (Exception $e) {
+			$session->save_message(new DisplayMessage('Join not approved. ' . $e->getMessage(), 'Error', $page_regex,
+				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		}
+		header('Location: /admin/server_manager'); exit;
+	}
 	try {
 		$adopted = AgentChannelEndpoint::adoptJoin($jr);
 		$node_url = '/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$adopted['node']->key;
@@ -106,6 +149,49 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'reject_join', 're
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		header('Location: /admin/server_manager'); exit;
 	}
+}
+
+// Queue an upgrade job for every enabled site on a host (the host's Actions menu).
+// Same rules as the node page's "Upgrade All Sites on This Host": one independent
+// job per site, the host's own agent node is not a site, and a live site at the
+// host's address that is not grouped under it is a refusal, not a silent skip —
+// "all sites" must never quietly mean "some".
+if ($_POST && ($_POST['action'] ?? '') === 'upgrade_host_sites') {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$fail = function (string $msg) use ($session, $page_regex) {
+		$session->save_message(new DisplayMessage($msg, 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		header('Location: /admin/server_manager'); exit;
+	};
+	$up_host = new ManagedHost((int)($_POST['mgh_managed_host_id'] ?? 0), TRUE);
+	if (!$up_host->key || $up_host->get('mgh_delete_time')) { $fail('That host no longer exists.'); }
+	$ungrouped = [];
+	foreach (new MultiManagedNode(['host' => (string)$up_host->get('mgh_host'), 'enabled' => true, 'deleted' => false], ['mgn_slug' => 'ASC']) as $other) {
+		if ($other->hosts_site() && (int)$other->get('mgn_mgh_managed_host_id') !== (int)$up_host->key) {
+			$ungrouped[] = $other->get('mgn_slug');
+		}
+	}
+	if ($ungrouped) {
+		$fail('Some sites at this address are not grouped under ' . $up_host->get('mgh_name') . ' (' . implode(', ', $ungrouped)
+			. '). Assign them on their node pages first, so this action covers every site.');
+	}
+	$queued = 0;
+	foreach (new MultiManagedNode(['host_id' => (int)$up_host->key, 'enabled' => true, 'deleted' => false], ['mgn_slug' => 'ASC']) as $site) {
+		if (!$site->hosts_site()) { continue; } // the machine's own agent node: nothing to upgrade
+		try {
+			$built = JobCommandBuilder::build_apply_update($site);
+			ManagementJob::createFromBuild($site->key, 'apply_update', $built, [], $session->get_user_id());
+			$queued++;
+		} catch (Exception $e) {
+			error_log("upgrade_host_sites: failed to queue node {$site->key}: " . $e->getMessage());
+		}
+	}
+	if ($queued === 0) { $fail('No upgrade jobs were queued for ' . $up_host->get('mgh_name') . '.'); }
+	$session->save_message(new DisplayMessage(
+		"Queued {$queued} upgrade " . ($queued === 1 ? 'job' : 'jobs') . ' for sites on ' . $up_host->get('mgh_name') . '.',
+		'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	header('Location: /admin/server_manager/jobs'); exit;
 }
 
 // Clear a dead provision off the board. A provision that never brought
@@ -296,162 +382,85 @@ if ($agent_online) {
 }
 ?>
 
-<!-- Agent Status Bar -->
-<div class="card mb-4">
-	<div class="card-body d-flex justify-content-between align-items-center">
-		<div>
-			<strong>Agent Status:</strong>
-			<span class="badge bg-<?php echo $agent_class; ?> ms-1"><?php echo $agent_label; ?></span>
+<?php
+// A node-detail link for an agentless node, used by the join-request notes.
+$node_links = function (array $cands): string {
+	$out = [];
+	foreach ($cands as $cand) {
+		$out[] = '<a href="/admin/server_manager/node_detail?mgn_managed_node_id=' . (int)$cand->key . '&amp;tab=api_keys">'
+			. htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')) . '</a>';
+	}
+	return implode(', ', $out);
+};
+$confirm_submit = function (string $form_id, string $message): string {
+	return 'JoineryModal.confirm(' . htmlspecialchars(json_encode($message), ENT_QUOTES)
+		. ', function(){ document.getElementById(\'' . $form_id . '\').submit(); })';
+};
+?>
+
+<!-- Agent status strip -->
+<div class="svm-strip">
+	<div class="svm-strip-facts">
+		<span><strong>Agent</strong> <span class="badge badge-<?php echo $agent_class; ?>"><?php echo $agent_label; ?></span>
 			<?php if ($agent): ?>
-				<?php if ($agent->get('ahb_agent_version')): ?>
-					<span class="text-muted ms-2">v<?php echo htmlspecialchars($agent->get('ahb_agent_version')); ?></span>
-				<?php endif; ?>
-				<span class="text-muted ms-2">
-					Last heartbeat: <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>
-				</span>
+				<?php if ($agent->get('ahb_agent_version')): ?><span class="svm-muted">v<?php echo htmlspecialchars($agent->get('ahb_agent_version')); ?></span><?php endif; ?>
+				<span class="svm-muted">heartbeat <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?></span>
 			<?php else: ?>
-				<span class="text-muted ms-2">No agent has connected yet</span>
+				<span class="svm-muted">none has connected yet</span>
 			<?php endif; ?>
-		</div>
-		<div class="d-flex align-items-center gap-3">
-			<div>
-				<strong>Cron:</strong>
-				<span class="badge bg-<?php echo $cron_is_active ? 'success' : 'danger'; ?> ms-1"><?php echo $cron_is_active ? 'Active' : 'Not detected'; ?></span>
-				<?php if ($last_cron_run): ?>
-					<span class="text-muted ms-2">Last run: <?php echo LibraryFunctions::time_ago_or_time($last_cron_run, 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?></span>
-				<?php endif; ?>
-			</div>
-			<?php if (PluginHelper::isPluginActive('mailbox')): ?>
-				<a href="/plugins/mailbox/admin/admin_mailbox_fleet" class="btn btn-sm btn-outline-secondary">Relay Fleet</a>
-			<?php endif; ?>
-			<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
-		</div>
+		</span>
+		<span><strong>Cron</strong> <span class="badge badge-<?php echo $cron_is_active ? 'success' : 'danger'; ?>"><?php echo $cron_is_active ? 'Active' : 'Not detected'; ?></span>
+			<?php if ($last_cron_run): ?><span class="svm-muted">last run <?php echo LibraryFunctions::time_ago_or_time($last_cron_run, 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?></span><?php endif; ?>
+		</span>
 	</div>
-	<?php if ($agent_update_alert): ?>
-		<div class="card-footer text-<?php echo $agent_update_class; ?>">
-			<small><?php echo htmlspecialchars($agent_update_alert); ?></small>
-		</div>
-	<?php endif; ?>
-	<?php if (!$agent_online): ?>
-		<div class="card-footer">
-			<small class="text-muted">
-				<?php if (!$agent): ?>
-					The joinery-agent service runs on the management node and services all connected sites.
-					Install it here: <code>cd /home/user1/joinery-agent &amp;&amp; make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
-				<?php else: ?>
-					The agent was last seen <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
-					Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
-				<?php endif; ?>
-			</small>
-		</div>
-	<?php endif; ?>
+	<div class="svm-strip-actions">
+		<?php if (PluginHelper::isPluginActive('mailbox')): ?>
+			<a href="/plugins/mailbox/admin/admin_mailbox_fleet" class="btn btn-sm btn-outline-secondary">Relay Fleet</a>
+		<?php endif; ?>
+		<a href="/admin/server_manager/publish_upgrade" class="btn btn-sm btn-primary">Publish New Upgrade</a>
+	</div>
 </div>
+<?php if ($agent_update_alert): ?>
+	<div class="alert alert-<?php echo $agent_update_class === 'danger' ? 'danger' : 'warning'; ?>" role="alert"><div class="alert-body"><?php echo htmlspecialchars($agent_update_alert); ?></div></div>
+<?php endif; ?>
+<?php if (!$agent_online): ?>
+	<div class="alert alert-info" role="status"><div class="alert-body">
+		<?php if (!$agent): ?>
+			The joinery-agent service runs on the management node and services all connected sites.
+			Install it here: <code>cd /home/user1/joinery-agent &amp;&amp; make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
+		<?php else: ?>
+			The agent was last seen <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
+			Check: <code>sudo systemctl status joinery-agent</code> &mdash; <code>journalctl -u joinery-agent -f</code>
+		<?php endif; ?>
+	</div></div>
+<?php endif; ?>
 
 <?php // Backup recovery is not set up, so encrypted backups cannot run.
       // A backup you cannot restore is as silent as monitoring that cannot alert,
       // so it is surfaced the same way. ?>
 <?php if (!empty($recovery_problems)): ?>
-<div class="alert alert-warning" role="alert">
+<div class="alert alert-warning" role="alert"><div class="alert-body">
 	<strong>Backups cannot be recovered yet.</strong>
-	<ul class="mb-0 mt-2">
+	<ul>
 		<?php foreach ($recovery_problems as $p): ?>
 			<li>
 				<?php if ((int)$p['id'] > 0): ?>
-					<a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+					<a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$p['id']; ?>&amp;tab=backups"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
 				<?php else: // management-node-level problem (recovery setup, agent signing key) ?>
 					<strong><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></strong>
 				<?php endif; ?>
 				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
 				<?php if (!empty($p['link'])): ?>
-					<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link">Set it up</a>.
+					<a href="<?php echo htmlspecialchars($p['link']); ?>">Set it up</a>.
 				<?php endif; ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>
-</div>
-<?php endif; ?>
-
-<?php // An agent is waiting to be let in. Above the failures because it is the
-      // one thing here that is waiting on a person, and it expires. ?>
-<?php if (!empty($pending_joins)): ?>
-<div class="alert alert-warning" role="alert">
-	<strong><?php echo count($pending_joins) === 1 ? 'An agent is asking to join.' : count($pending_joins) . ' agents are asking to join.'; ?></strong>
-	Approving here creates the node record from the request and binds the agent to it.
-	Approve <strong>only</strong> if the fingerprint is exactly the one the machine printed &mdash; the name and address are claims, the fingerprint is the identity.
-	<ul class="mb-0 mt-2">
-		<?php foreach ($pending_joins as $jr):
-			$jr_age = max(0, (int)floor((time() - strtotime($jr->get('ajr_create_time') . ' UTC')) / 60));
-			$jr_left = max(0, (int)floor((AgentJoinRequest::TTL_SECONDS - (time() - strtotime($jr->get('ajr_create_time') . ' UTC'))) / 60)); ?>
-			<li>
-				<strong><?php echo htmlspecialchars($jr->get('ajr_claimed_name')); ?></strong>
-				<span class="text-muted small">(<?php echo htmlspecialchars((string)$jr->get('ajr_source_ip')); ?>,
-					agent v<?php echo htmlspecialchars((string)$jr->get('ajr_agent_version')); ?>,
-					<?php echo $jr_age === 0 ? 'just now' : $jr_age . ' min ago'; ?>; expires in <?php echo $jr_left; ?> min)</span>
-				&mdash; key <code><?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'))); ?></code>
-				<?php $jr_fpr = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));
-				      $jr_self = AgentChannelEndpoint::isThisMachine((string)$jr->get('ajr_source_ip'));
-				      $jr_prov = AgentChannelEndpoint::provisionForAddress((string)$jr->get('ajr_source_ip'));
-				      $jr_host_claim = $jr_prov && trim((string)$jr->get('ajr_claimed_name')) === trim((string)$jr_prov->get('cvp_slug')) . '-host'; ?>
-				<div class="small mt-1">
-					<?php if ($jr_self): ?>
-						<strong>This is this management node's own machine</strong> asking to be managed like any other node.
-						Approving names the record after this site and lets its agent take over the plane-side work.
-					<?php elseif ($jr_host_claim): ?>
-						This is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong>'s host agent (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>), the machine's own agent beside the site's.
-						Approving asks the provider to confirm the instance is running at this address, then makes the host node at <?php echo htmlspecialchars((string)$jr_prov->get('cvp_instance_ip')); ?> and names it on the placement record, so host-scope work (certificates, site removal) has somewhere to go.
-					<?php elseif ($jr_prov): ?>
-						This address is <strong>provision #<?php echo (int)$jr_prov->key; ?></strong> (<?php echo htmlspecialchars($jr_prov->get('cvp_domain')); ?>).
-						Approve it from that provision's node, where the claim is checked with the provider first
-						<?php if ($agentless_nodes): ?>&mdash;
-							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?><?php endif; ?>.
-					<?php else: ?>
-						Approving makes a node record named <strong><?php echo htmlspecialchars($jr->get('ajr_claimed_name')); ?></strong> at <?php echo htmlspecialchars((string)$jr->get('ajr_source_ip')); ?>; the site URL and the rest can be filled in on the node afterwards.
-						<?php if ($agentless_nodes): ?>To bind it to a record that already exists instead, approve from that node's API Keys tab:
-							<?php $first = true; foreach ($agentless_nodes as $cand): ?><?php echo $first ? '' : ', '; $first = false; ?><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo (int)$cand->key; ?>&amp;tab=api_keys" class="alert-link"><?php echo htmlspecialchars($cand->get('mgn_name') ?: $cand->get('mgn_slug')); ?></a><?php endforeach; ?>.<?php endif; ?>
-					<?php endif; ?>
-				</div>
-				<div class="mt-2">
-					<?php if (!$jr_prov || $jr_host_claim): ?>
-					<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" style="display:inline;margin-right:6px;">
-						<input type="hidden" name="action" value="adopt_join">
-						<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
-						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode(($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr->get('ajr_claimed_name')) . '? Confirm the fingerprint ' . $jr_fpr . ' matches what the machine printed first.'), ENT_QUOTES); ?>, function(){ document.getElementById('adopt_join_<?php echo (int)$jr->key; ?>').submit(); })">Approve</button>
-					</form>
-					<?php endif; ?>
-					<form method="post" action="/admin/server_manager" id="reject_join_<?php echo (int)$jr->key; ?>" style="display:inline;">
-						<input type="hidden" name="action" value="reject_join">
-						<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
-						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES); ?>, function(){ document.getElementById('reject_join_<?php echo (int)$jr->key; ?>').submit(); })">Reject</button>
-					</form>
-				</div>
-			</li>
-		<?php endforeach; ?>
-	</ul>
-</div>
-<?php endif; ?>
-<?php // A rejection can be a mis-click. The machine keeps asking with the same
-      // key; reopening the row lets that ask be answered. Kept for a day. ?>
-<?php if (!empty($rejected_joins)): ?>
-<div class="alert alert-secondary small" role="status">
-	<strong>Rejected in the last day:</strong>
-	<?php foreach ($rejected_joins as $rj): ?>
-		<span class="ms-2"><?php echo htmlspecialchars($rj->get('ajr_claimed_name')); ?>
-			(<?php echo htmlspecialchars((string)$rj->get('ajr_source_ip')); ?>, key <?php echo htmlspecialchars(AgentJoinRequest::display_fingerprint((string)$rj->get('ajr_fingerprint'))); ?>)
-			<form method="post" action="/admin/server_manager" style="display:inline;">
-				<input type="hidden" name="action" value="reopen_join">
-				<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$rj->key; ?>">
-				<?php echo SmAdminCsrf::field(); ?>
-				<button type="submit" class="btn btn-sm btn-outline-secondary py-0 px-2">Reopen</button>
-			</form>
-		</span>
-	<?php endforeach; ?>
-</div>
+</div></div>
 <?php endif; ?>
 
 <?php if ($readiness_attention['never'] + $readiness_attention['stale'] + $readiness_attention['warnings'] > 0): ?>
-<div class="alert alert-warning" role="alert">
+<div class="alert alert-warning" role="alert"><div class="alert-body">
 	<strong>Recovery readiness needs attention.</strong>
 	<?php
 	$bits = [];
@@ -460,244 +469,373 @@ if ($agent_online) {
 	if ($readiness_attention['warnings']) { $bits[] = $readiness_attention['warnings'] . ' ' . ($readiness_attention['warnings'] === 1 ? 'carries' : 'carry') . ' warnings'; }
 	echo htmlspecialchars(implode('; ', $bits)) . '.';
 	?>
-	<a href="/admin/admin_recovery_readiness" class="alert-link">Review and verify</a>.
-</div>
+	<a href="/admin/admin_recovery_readiness">Review and verify</a>.
+</div></div>
 <?php endif; ?>
 
-<?php if (count($inflight_provisions)): ?>
-<!-- Cloud provisions in flight -->
-<div class="card mb-4">
-	<div class="card-body py-2">
-		<strong>Cloud provisions:</strong>
-		<table class="table table-sm mb-0 mt-2">
-			<thead><tr><th>Domain</th><th>Origin</th><th>Status</th><th>Instance</th><th>Install password</th><th>Detail</th><th></th></tr></thead>
-			<tbody>
-			<?php foreach ($inflight_provisions as $prov):
-				$pstatus = $prov->get('cvp_status');
-				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
-				$pw_state = (string)$prov->get('cvp_install_password');
-				$pw_class = ($pw_state === 'retired') ? 'text-success' : (($pw_state === 'retire_failed') ? 'text-danger' : 'text-muted');
-				$dismiss_blockers = $prov->dismiss_blockers();
-			?>
-				<tr>
-					<td><?php echo htmlspecialchars($prov->get('cvp_domain')); ?></td>
-					<td><?php echo htmlspecialchars($prov->get('cvp_origin') ?: 'order'); ?></td>
-					<td><span class="badge bg-<?php echo $badge; ?>"><?php echo htmlspecialchars($pstatus); ?></span></td>
-					<td><?php echo htmlspecialchars(trim(($prov->get('cvp_instance_type') ?: '') . ' ' . ($prov->get('cvp_region') ?: '')) ?: '—'); ?></td>
-					<td class="<?php echo $pw_class; ?> small"><?php echo htmlspecialchars(ProvisionCustomerCloud::install_password_summary($prov)); ?></td>
-					<td class="text-muted"><?php echo htmlspecialchars(mb_substr((string)$prov->get('cvp_error'), 0, 120) ?: '—'); ?></td>
-					<td>
-						<?php if (!$dismiss_blockers): ?>
-							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" style="display:inline;">
-								<input type="hidden" name="action" value="dismiss_provision">
-								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
-								<?php echo SmAdminCsrf::field(); ?>
-								<button type="button" class="btn btn-sm btn-outline-secondary"
-									onclick="JoineryModal.confirm(<?php echo htmlspecialchars(json_encode('Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'), ENT_QUOTES); ?>, function(){ document.getElementById('dismiss_prov_<?php echo (int)$prov->key; ?>').submit(); })">Dismiss</button>
-							</form>
-						<?php else: ?>
-							<span class="text-muted small" title="<?php echo htmlspecialchars('Cannot be dismissed: ' . implode('; ', $dismiss_blockers) . '.'); ?>">&mdash;</span>
-						<?php endif; ?>
-					</td>
-				</tr>
-			<?php endforeach; ?>
-			</tbody>
-		</table>
-	</div>
-</div>
-<?php endif; ?>
-
-<!-- Two-column layout: Hosts & Sites (left) | Recent Jobs (right) -->
-<div class="row">
-	<!-- LEFT: Hosts & Sites accordion -->
-	<div class="col-md-8 mb-4">
+<?php
+// A host with more sites than this starts closed; a choice the operator has
+// made (remembered in this browser) overrides it.
+$host_default_open_max = 6;
+$total_nodes = count($machines);
+foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
+?>
+<!-- Hosts & Sites (left) | Recent Jobs (right) -->
+<div class="svm-board">
+	<div class="svm-board-main">
 		<?php
-		$pageoptions = [
-			'title' => 'Hosts & Sites',
-			'altlinks' => [
-				'Add Host'       => '/admin/server_manager/host_add',
-				'Connect Site'   => '/admin/server_manager/node_add',
-				'Remote Install' => '/admin/server_manager/install_node_form',
-			],
+		// The box header is written out (not begin_box) so the find box and the
+		// expand/collapse icons can sit beside the standard Options dropdown.
+		$board_links = [
+			'Add Host'       => '/admin/server_manager/host_add',
+			'Connect Site'   => '/admin/server_manager/node_add',
+			'Remote Install' => '/admin/server_manager/install_node_form',
 		];
-		$page->begin_box($pageoptions);
 		?>
+		<div class="card-header bg-body-tertiary">
+			<h6 class="mb-0">Hosts &amp; Sites</h6>
+			<div class="card-header-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;margin-left:auto;">
+				<?php if (count($hosts) > 0 || !empty($machines)): ?>
+					<input type="search" class="svm-filter" id="svm-node-filter" placeholder="Find a site or host" aria-label="Find a site or host">
+					<span class="svm-muted svm-count" id="svm-node-count"><?php echo (int)$total_nodes; ?> nodes</span>
+					<button type="button" class="svm-icon-btn" id="svm-expand-all" title="Expand all" aria-label="Expand all">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8l5-5 5 5"/><path d="M7 16l5 5 5-5"/></svg>
+					</button>
+					<button type="button" class="svm-icon-btn" id="svm-collapse-all" title="Collapse all" aria-label="Collapse all">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3l5 5 5-5"/><path d="M7 21l5-5 5 5"/></svg>
+					</button>
+				<?php endif; ?>
+				<div class="dropdown d-inline-block">
+					<button class="btn btn-soft-default btn-sm" type="button" data-toggle="dropdown">Options <svg width="10" height="6" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:middle;margin-left:2px;"><path d="M1 1l4 4 4-4"/></svg></button>
+					<div class="dropdown-menu">
+						<?php foreach ($board_links as $link_label => $link_url): ?>
+							<?php echo AdminPage::renderActionEntry($link_label, $link_url, 'dropdown-item'); ?>
+						<?php endforeach; ?>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div class="card-body">
 
 		<?php if (count($hosts) === 0 && empty($machines)): ?>
-			<div class="alert alert-info mb-0">
+			<div class="alert alert-info" role="status"><div class="alert-body">
 				<strong>No hosts configured yet.</strong>
-				<a href="/admin/server_manager/host_add" class="alert-link">Add your first host</a> or
-				<a href="/admin/server_manager/node_add" class="alert-link">connect a site directly</a>.
-			</div>
+				<a href="/admin/server_manager/host_add">Add your first host</a> or
+				<a href="/admin/server_manager/node_add">connect a site directly</a>.
+			</div></div>
 		<?php else: ?>
-			<div class="accordion accordion-flush host-accordion" id="hostsAccordion">
+			<div class="svm-groups" id="svm-groups">
 
 				<?php foreach ($hosts as $host):
 					$host_nodes = $nodes_by_host[$host->key] ?? [];
 					$site_count = count($host_nodes);
-					$max_sites  = (int)$host->get('mgh_max_sites') ?: 50;
-					$capacity_pct = $max_sites > 0 ? min(100, round($site_count / $max_sites * 100)) : 0;
-					$capacity_color = $capacity_pct >= 90 ? 'danger' : ($capacity_pct >= 70 ? 'warning' : 'secondary');
+					$max_sites  = (int)$host->get('mgh_max_sites'); // 0 = never set
 					$prov_enabled = (bool)$host->get('mgh_provisioning_enabled');
+					// Capacity only means something on a host that takes new sites. 100% full is red,
+					// 80% amber; a host taking sites with no max set is called out, not given a made-up one.
+					$capacity_pct = $max_sites > 0 ? $site_count / $max_sites * 100 : 0;
+					$capacity_color = !$max_sites ? 'danger' : ($capacity_pct >= 100 ? 'danger' : ($capacity_pct >= 80 ? 'warning' : 'secondary'));
 					$host_node  = $host->host_node();
+					$start_open = ($site_count + ($host_node ? 1 : 0)) <= $host_default_open_max;
 				?>
-				<div class="accordion-item">
-					<h2 class="accordion-header" id="hdr-<?php echo $host->key; ?>">
-						<button class="accordion-button" type="button"
-							data-bs-toggle="collapse"
-							data-bs-target="#hc-<?php echo $host->key; ?>"
-							aria-expanded="true"
-							aria-controls="hc-<?php echo $host->key; ?>">
-							<div class="d-flex justify-content-between align-items-center w-100 me-3">
-								<div>
-									<strong><?php echo htmlspecialchars($host->get('mgh_name')); ?></strong>
-									<small class="text-muted ms-2"><?php echo htmlspecialchars($host->get('mgh_host')); ?></small>
-									<?php if (!$host_node): ?>
-										<div><small class="text-muted">No host agent paired — certificates and site removal on this box have no path until one joins.</small></div>
+				<details class="svm-group" id="host-<?php echo (int)$host->key; ?>" data-group="host-<?php echo (int)$host->key; ?>" <?php echo $start_open ? 'open' : ''; ?>>
+					<summary>
+						<span class="svm-chev" aria-hidden="true"></span>
+						<?php // Red if any node on this host is red, amber if any is amber, green only when every node is green.
+						$colors = [];
+						foreach (array_merge($host_node ? [$host_node] : [], $host_nodes) as $hn_check) {
+							if ($hn_check->get('mgn_delete_time')) { continue; } // a removed site is history, not health
+							$colors[] = node_status_color($hn_check, $db);
+						}
+						$host_color = in_array('danger', $colors, true) ? 'danger'
+							: (in_array('warning', $colors, true) ? 'warning'
+							: ($colors && count(array_unique($colors)) === 1 && $colors[0] === 'success' ? 'success' : 'secondary')); ?>
+						<span class="svm-dot svm-dot-<?php echo $host_color; ?> svm-host-dot" title="<?php echo $host_color === 'danger' ? 'A node on this host is red' : ($host_color === 'warning' ? 'A node on this host needs attention' : ($host_color === 'success' ? 'Every node on this host is green' : 'No node on this host is reporting green yet')); ?>"></span>
+						<strong><?php echo htmlspecialchars($host->get('mgh_name')); ?></strong>
+						<?php if (strcasecmp(trim((string)$host->get('mgh_name')), trim((string)$host->get('mgh_host'))) !== 0): // a host named by its address shows it once ?>
+							<span class="svm-muted"><?php echo htmlspecialchars($host->get('mgh_host')); ?></span>
+						<?php endif; ?>
+						<?php $ha = host_agent_state($host, $host_node, $site_count);
+						      if ($ha): ?>
+							<span class="badge badge-subtle-<?php echo $ha['color']; ?>" title="<?php echo htmlspecialchars($ha['hint']); ?>"><?php echo htmlspecialchars($ha['label']); ?></span>
+						<?php endif; ?>
+						<span class="svm-summary-end">
+							<?php if ($prov_enabled): ?>
+								<span class="badge badge-<?php echo $capacity_color; ?>" title="<?php echo $max_sites ? 'This host takes new sites up to ' . $max_sites . '.' : 'Edit the host and set how many sites it can hold.'; ?>"><?php echo $max_sites ? $site_count . ' / ' . $max_sites . ' sites' : $site_count . ' sites, no max set'; ?></span>
+							<?php else: ?>
+								<span class="svm-muted svm-count"><?php echo $site_count; ?> <?php echo $site_count === 1 ? 'site' : 'sites'; ?></span>
+							<?php endif; ?>
+							<span class="svm-menu">
+								<button type="button" class="btn btn-sm btn-outline-secondary svm-menu-btn" aria-haspopup="true" aria-expanded="false">Actions <span class="svm-caret" aria-hidden="true"></span></button>
+								<div class="svm-menu-list" role="menu" hidden>
+									<a href="/admin/server_manager/install_node_form" role="menuitem">Install Site</a>
+									<a href="/admin/server_manager/host_add?mgh_managed_host_id=<?php echo (int)$host->key; ?>" role="menuitem">Edit Host</a>
+									<?php if ($site_count > 0): ?>
+									<form method="post" action="/admin/server_manager" id="upgrade_host_<?php echo (int)$host->key; ?>" class="svm-menu-form">
+										<input type="hidden" name="action" value="upgrade_host_sites">
+										<input type="hidden" name="mgh_managed_host_id" value="<?php echo (int)$host->key; ?>">
+										<?php echo SmAdminCsrf::field(); ?>
+										<button type="button" role="menuitem"
+											onclick="<?php echo $confirm_submit('upgrade_host_' . (int)$host->key, 'Queue an upgrade job for every enabled site on ' . $host->get('mgh_name') . '? Each site upgrades independently; disable a site first to skip it.'); ?>">Upgrade all host sites</button>
+									</form>
 									<?php endif; ?>
 								</div>
-								<div class="d-flex align-items-center gap-2">
-									<span class="badge bg-<?php echo $capacity_color; ?>"><?php echo $site_count; ?> / <?php echo $max_sites; ?> sites</span>
-									<?php if ($prov_enabled): ?>
-										<span class="badge bg-success">provisioning on</span>
-									<?php else: ?>
-										<span class="badge bg-light text-dark border">provisioning off</span>
-									<?php endif; ?>
-								</div>
-							</div>
-						</button>
-					</h2>
-					<div id="hc-<?php echo $host->key; ?>" class="accordion-collapse collapse show"
-						aria-labelledby="hdr-<?php echo $host->key; ?>">
-						<div class="accordion-body">
-							<div class="list-group list-group-flush">
-								<?php if ($host_node): ?>
-									<?php echo render_node_row($host_node, $db, $session, 'host agent'); ?>
-								<?php endif; ?>
-								<?php foreach ($host_nodes as $node): ?>
-									<?php echo render_node_row($node, $db, $session); ?>
-								<?php endforeach; ?>
-								<?php if (empty($host_nodes)): ?>
-									<div class="text-muted small p-3">No sites on this host.</div>
-								<?php endif; ?>
-							</div>
-							<div class="p-2 border-top bg-light d-flex gap-2">
-								<a href="/admin/server_manager/install_node_form" class="btn btn-sm btn-outline-primary">Install Site</a>
-								<a href="/admin/server_manager/host_add?mgh_managed_host_id=<?php echo $host->key; ?>" class="btn btn-sm btn-outline-secondary">Edit Host</a>
-							</div>
+							</span>
+						</span>
+					</summary>
+					<div class="svm-group-body">
+						<div class="svm-nodes">
+							<?php if ($host_node): ?>
+								<?php echo render_node_row($host_node, $db, $session, 'host agent'); ?>
+							<?php endif; ?>
+							<?php foreach ($host_nodes as $node): ?>
+								<?php echo render_node_row($node, $db, $session); ?>
+							<?php endforeach; ?>
 						</div>
+						<?php if (empty($host_nodes)): ?>
+							<div class="svm-muted svm-empty">No sites on this host.</div>
+						<?php endif; ?>
 					</div>
+				</details>
+				<?php endforeach; ?>
+
+				<?php // A machine (bare metal, or a one-site install) is not a box with sites to fold away:
+				      // it is one gray bar carrying its name, domain and IP, not collapsible. ?>
+				<?php foreach ($machines as $node): ?>
+				<div class="svm-group svm-machine" data-group="machine-<?php echo (int)$node->key; ?>">
+					<?php echo render_node_row($node, $db, $session, '', true); ?>
 				</div>
 				<?php endforeach; ?>
 
-				<?php if (!empty($machines)): ?>
-				<!-- Machines: every node that is not a container placed on a host -->
-				<div class="accordion-item">
-					<h2 class="accordion-header" id="hdr-machines">
-						<button class="accordion-button" type="button"
-							data-bs-toggle="collapse"
-							data-bs-target="#hc-machines"
-							aria-expanded="true"
-							aria-controls="hc-machines">
-							<div class="d-flex justify-content-between align-items-center w-100 me-3">
-								<div>
-									<strong>Machines</strong>
-									<small class="text-muted ms-2">each runs its own site or service; nothing else is placed on it</small>
-								</div>
-								<span class="badge bg-secondary"><?php echo count($machines); ?></span>
-							</div>
-						</button>
-					</h2>
-					<div id="hc-machines" class="accordion-collapse collapse show"
-						aria-labelledby="hdr-machines">
-						<div class="accordion-body p-0">
-							<div class="list-group list-group-flush">
-								<?php foreach ($machines as $node): ?>
-									<?php echo render_node_row($node, $db, $session); ?>
-								<?php endforeach; ?>
-							</div>
-						</div>
-					</div>
-				</div>
-				<?php endif; ?>
-
 			</div>
+			<div class="svm-empty svm-muted" id="svm-no-match" hidden>Nothing matches.</div>
 		<?php endif; ?>
-		<div class="p-2 border-top small">
+		<div class="svm-box-foot">
 			<?php if ($show_all): ?>
 				<a href="/admin/server_manager">Hide removed sites</a>
-				<span class="text-muted ms-2">Showing all sites, including removed ones.</span>
+				<span class="svm-muted">Showing all sites, including removed ones.</span>
 			<?php else: ?>
 				<a href="/admin/server_manager?show_all=1">Show all sites (including removed)</a>
 			<?php endif; ?>
 		</div>
-		<?php $page->end_box(); ?>
+		</div>
 	</div>
 
 	<!-- RIGHT: Recent Jobs -->
-	<div class="col-md-4 mb-4">
-		<?php
-		$pageoptions = ['title' => 'Recent Jobs', 'altlinks' => ['All Jobs' => '/admin/server_manager/jobs']];
-		$page->begin_box($pageoptions);
-		?>
-		<table class="table table-striped table-sm mb-0">
-			<thead>
-				<tr>
-					<th>ID</th>
-					<th>Site</th>
-					<th>Type</th>
-					<th>Status</th>
-					<th>Started</th>
-				</tr>
-			</thead>
-			<tbody>
-				<?php foreach ($recent_jobs as $job): ?>
-					<?php
-					$status_class = match($job->get('mjb_status')) {
-						'completed' => 'success',
-						'failed' => 'danger',
-						'running' => 'primary',
-						'cancelled' => 'secondary',
-						default => 'warning',
-					};
+	<div class="svm-board-side">
+	<?php // Agents waiting to be let in. A line when closed; compact entries when
+	      // open, in a scroll-box, so 50-100 asks a day stay one panel tall. ?>
+	<?php if (!empty($pending_joins) || !empty($rejected_joins)): ?>
+	<details class="card svm-card" <?php echo !empty($pending_joins) ? 'open' : ''; ?> id="svm-joins">
+		<summary class="card-header">
+			<span class="svm-chev" aria-hidden="true"></span>
+			<h6>Agents asking to join</h6>
+			<?php $jn = count($pending_joins); ?>
+			<span class="badge <?php echo $jn ? 'badge-primary' : 'badge-subtle-secondary'; ?> svm-card-count"><?php echo $jn ?: 'none'; ?></span>
+		</summary>
+		<div class="svm-card-body">
+			<?php if ($jn): ?>
+			<p class="svm-joins-warn">Approve only if the key matches what the machine printed.</p>
+			<?php if ($jn > 6): ?>
+				<input type="search" class="svm-filter svm-joins-filter" placeholder="Filter by name, address or key"
+					aria-label="Filter join requests" data-filter-rows=".svm-join-row">
+			<?php endif; ?>
+			<div class="svm-joins-scroll">
+			<?php foreach ($pending_joins as $jr):
+				$jr_since = time() - strtotime($jr->get('ajr_create_time') . ' UTC');
+				$jr_age  = max(0, (int)floor($jr_since / 60));
+				$jr_fpr  = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));
+				$jr_ip   = (string)$jr->get('ajr_source_ip');
+				$jr_name = (string)$jr->get('ajr_claimed_name');
+				$jr_self = AgentChannelEndpoint::isThisMachine($jr_ip);
+				$jr_prov = AgentChannelEndpoint::provisionForAddress($jr_ip);
+				$jr_host_claim = $jr_prov && trim($jr_name) === trim((string)$jr_prov->get('cvp_slug')) . '-host';
+				$jr_site_claim = $jr_prov && !$jr_host_claim;
+				$jr_verdict = JoinAutoApproval::verdict($jr); // why this one is still here for a person
+				if ($jr_self) {
+					$jr_tag = ['this machine', 'primary', 'This management node\'s own machine, asking to be managed like any other. Approving names the record after this site.'];
+				} elseif ($jr_host_claim) {
+					$jr_tag = ['host agent', 'primary', 'Host agent of provision #' . (int)$jr_prov->key . ' (' . $jr_prov->get('cvp_domain') . '). Approving confirms with the provider that the instance is running, then makes the host node at ' . $jr_prov->get('cvp_instance_ip') . '.'];
+				} elseif ($jr_prov) {
+					$jr_tag = ['provision', 'warning', 'Address belongs to provision #' . (int)$jr_prov->key . ' (' . $jr_prov->get('cvp_domain') . '). Approving asks the provider to confirm the instance is running at this address, then binds the agent to the provision\'s site node.'];
+				} else {
+					$jr_tag = ['new node', 'success', 'Approving makes a node record named ' . $jr_name . ' at ' . $jr_ip . '.'];
+				}
+				if ($jr_verdict['key_mismatch']) {
+					$jr_tag = ['key mismatch', 'danger', 'This address is a machine this plane provisioned, but the key is not the one its install showed. Do not approve unless you know why.'];
+				}
+			?>
+				<div class="svm-join-row" data-filter-text="<?php echo htmlspecialchars(strtolower($jr_name . ' ' . $jr_ip . ' ' . $jr_fpr)); ?>">
+					<div class="svm-join-top">
+						<strong class="svm-join-name" title="<?php echo htmlspecialchars($jr_name); ?>"><?php echo htmlspecialchars($jr_name); ?></strong>
+						<span class="badge badge-subtle-<?php echo $jr_tag[1]; ?>" title="<?php echo htmlspecialchars($jr_tag[2]); ?>"><?php echo htmlspecialchars($jr_tag[0]); ?></span>
+						<span class="svm-muted svm-join-age"><?php echo $jr_age === 0 ? 'now' : $jr_age . 'm'; ?></span>
+					</div>
+					<div class="svm-join-sub svm-muted"><?php echo htmlspecialchars($jr_ip); ?> &middot; <code><?php echo htmlspecialchars($jr_fpr); ?></code></div>
+					<?php if ($jr_verdict['provision'] && $jr_verdict['eligible']): ?>
+						<div class="svm-join-sub svm-muted">Matches what the install showed; approving automatically within a minute.</div>
+					<?php elseif ($jr_verdict['provision']): ?>
+						<div class="svm-join-sub <?php echo $jr_verdict['key_mismatch'] ? 'svm-bad' : 'svm-muted'; ?>" title="<?php echo htmlspecialchars(ucfirst($jr_verdict['reason'])); ?>"><?php echo $jr_verdict['key_mismatch'] ? '<strong>Key does not match what the install showed.</strong>' : htmlspecialchars(ucfirst($jr_verdict['reason'])) . '.'; ?></div>
+					<?php endif; ?>
+					<div class="svm-join-actions">
+						<form method="post" action="/admin/server_manager" id="adopt_join_<?php echo (int)$jr->key; ?>" class="svm-inline-form">
+							<input type="hidden" name="action" value="<?php echo $jr_site_claim ? 'adopt_provision_join' : 'adopt_join'; ?>">
+							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="btn btn-sm btn-primary"
+								onclick="<?php echo $confirm_submit('adopt_join_' . (int)$jr->key, ($jr_self ? 'Connect this management node\'s own agent' : 'Connect ' . $jr_name) . '? Confirm the key ' . $jr_fpr . ' matches what the machine printed first.'); ?>">Approve</button>
+						</form>
+						<form method="post" action="/admin/server_manager" id="reject_join_<?php echo (int)$jr->key; ?>" class="svm-inline-form">
+							<input type="hidden" name="action" value="reject_join">
+							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$jr->key; ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="btn btn-sm btn-outline-danger"
+								onclick="<?php echo $confirm_submit('reject_join_' . (int)$jr->key, 'Reject the join request from ' . $jr_name . '?'); ?>">Reject</button>
+						</form>
+					</div>
+				</div>
+			<?php endforeach; ?>
+			</div>
+			<?php endif; ?>
 
-					$node_name = '-';
-					$node_id = $job->get('mjb_mgn_managed_node_id');
-					if ($node_id) {
-						try {
-							$job_node = new ManagedNode($node_id, TRUE);
-							$node_name = $job_node->get('mgn_name');
-						} catch (Exception $e) {
-							$node_name = "Node #{$node_id}";
-						}
-					}
-					?>
-					<tr>
-						<td><a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a></td>
-						<td class="text-truncate svm-w90" title="<?php echo htmlspecialchars($node_name); ?>"><?php echo htmlspecialchars($node_name); ?></td>
-						<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
-						<td><span class="badge bg-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
-						<td><?php echo $job->get('mjb_started_time') ? LibraryFunctions::time_ago_or_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : '-'; ?></td>
-					</tr>
+			<?php // A rejection can be a mis-click. The machine keeps asking with the same
+			      // key; reopening the row lets that ask be answered. Kept for a day. ?>
+			<?php if (!empty($rejected_joins)): ?>
+			<details class="svm-rejected">
+				<summary>Rejected in the last day (<?php echo count($rejected_joins); ?>)</summary>
+				<ul>
+				<?php foreach ($rejected_joins as $rj): ?>
+					<li>
+						<span><strong><?php echo htmlspecialchars($rj->get('ajr_claimed_name')); ?></strong>
+						<span class="svm-muted"><?php echo htmlspecialchars((string)$rj->get('ajr_source_ip')); ?></span></span>
+						<form method="post" action="/admin/server_manager" class="svm-inline-form">
+							<input type="hidden" name="action" value="reopen_join">
+							<input type="hidden" name="ajr_agent_join_request_id" value="<?php echo (int)$rj->key; ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="submit" class="btn btn-sm btn-outline-secondary">Reopen</button>
+						</form>
+					</li>
 				<?php endforeach; ?>
-				<?php if (count($recent_jobs) === 0): ?>
-					<tr><td colspan="5" class="text-muted text-center">No jobs yet</td></tr>
-				<?php endif; ?>
-			</tbody>
-		</table>
-		<?php $page->end_box(); ?>
+				</ul>
+			</details>
+			<?php endif; ?>
+		</div>
+	</details>
+	<?php endif; ?>
+
+	<?php if (count($inflight_provisions)): ?>
+	<?php // A provision's machine is a host on this board when a host record carries its address.
+	$host_by_addr = [];
+	foreach ($hosts as $h) { $host_by_addr[strtolower(trim((string)$h->get('mgh_host')))] = (int)$h->key; }
+	?>
+	<!-- Cloud provisions in flight -->
+	<details class="card svm-card" open>
+		<summary class="card-header">
+			<span class="svm-chev" aria-hidden="true"></span>
+			<h6>Cloud provisions</h6>
+			<span class="badge badge-primary svm-card-count"><?php echo count($inflight_provisions); ?></span>
+		</summary>
+		<div class="svm-card-body svm-prov-list">
+			<?php foreach ($inflight_provisions as $prov):
+				$pstatus = $prov->get('cvp_status');
+				$badge = ($pstatus === 'failed') ? 'danger' : (($pstatus === 'pending_connect') ? 'warning' : (($pstatus === 'done') ? 'success' : 'info'));
+				$pw_state = (string)$prov->get('cvp_install_password');
+				$pw_summary = ProvisionCustomerCloud::install_password_summary($prov);
+				$perr = trim((string)$prov->get('cvp_error'));
+				// One line of detail, only when there is something to act on: the error,
+				// else an install password that has not been retired.
+				$pdetail = $perr !== '' ? $perr : (($pw_state !== 'retired' && $pw_summary !== '') ? $pw_summary : '');
+				$dismiss_blockers = $prov->dismiss_blockers();
+			?>
+				<div class="svm-prov">
+					<div class="svm-prov-top">
+						<?php $prov_node_id = (int)$prov->get('cvp_mgn_managed_node_id');
+						      $prov_host_id = $host_by_addr[strtolower(trim((string)$prov->get('cvp_instance_ip')))] ?? 0; ?>
+						<strong class="svm-prov-name" title="<?php echo htmlspecialchars($prov->get('cvp_domain')); ?>"><?php
+							if ($prov_node_id): ?><a href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo $prov_node_id; ?>"><?php echo htmlspecialchars($prov->get('cvp_domain')); ?></a><?php
+							else: echo htmlspecialchars($prov->get('cvp_domain')); endif; ?></strong>
+						<span class="badge badge-<?php echo $badge; ?>"><?php echo htmlspecialchars($pstatus); ?></span>
+						<?php $prov_auto = 0;
+						foreach ($prov->machine_addresses() as $maddr) {
+							foreach (new MultiAgentJoinRequest(['source_ip' => $maddr, 'deleted' => false], ['ajr_create_time' => 'DESC'], 10) as $mjr) {
+								if ($mjr->get('ajr_decided_by') === 'auto') { $prov_auto++; }
+							}
+						}
+						if ($prov_auto): ?><span class="badge badge-subtle-success" title="<?php echo $prov_auto; ?> agent<?php echo $prov_auto === 1 ? '' : 's'; ?> on this machine approved automatically, matched against the keys its install showed.">auto-approved</span><?php endif; ?>
+						<?php if ($prov_host_id): ?><a href="#host-<?php echo $prov_host_id; ?>" class="svm-host-jump" title="Show this machine's host on the board">host</a><?php endif; ?>
+						<?php if (!$dismiss_blockers): ?>
+							<form method="post" action="/admin/server_manager" id="dismiss_prov_<?php echo (int)$prov->key; ?>" class="svm-inline-form">
+								<input type="hidden" name="action" value="dismiss_provision">
+								<input type="hidden" name="cvp_customer_cloud_provision_id" value="<?php echo (int)$prov->key; ?>">
+								<?php echo SmAdminCsrf::field(); ?>
+								<button type="button" class="btn btn-sm btn-outline-secondary"
+									onclick="<?php echo $confirm_submit('dismiss_prov_' . (int)$prov->key, 'Dismiss ' . $prov->get('cvp_domain') . '? It created nothing, so this only clears the record off this board.'); ?>">Dismiss</button>
+							</form>
+						<?php endif; ?>
+					</div>
+					<?php if ($pdetail !== ''): ?>
+						<div class="svm-prov-detail <?php echo ($perr !== '' || $pw_state === 'retire_failed') ? 'svm-bad' : 'svm-muted'; ?>"
+							title="<?php echo htmlspecialchars($pdetail . ($pw_summary !== '' ? ' — install password: ' . $pw_summary : '')); ?>"><?php echo htmlspecialchars(mb_substr($pdetail, 0, 90)); ?></div>
+					<?php endif; ?>
+				</div>
+			<?php endforeach; ?>
+		</div>
+	</details>
+	<?php endif; ?>
+
+		<details class="card svm-card" open>
+			<summary class="card-header">
+				<span class="svm-chev" aria-hidden="true"></span>
+				<h6>Recent Jobs</h6>
+			</summary>
+			<div class="svm-card-body svm-jobs">
+			<?php foreach ($recent_jobs as $job): ?>
+				<?php
+				$status_class = match($job->get('mjb_status')) {
+					'completed' => 'success',
+					'failed' => 'danger',
+					'running' => 'primary',
+					'cancelled' => 'secondary',
+					default => 'warning',
+				};
+
+				$node_name = '-';
+				$node_id = $job->get('mjb_mgn_managed_node_id');
+				if ($node_id) {
+					try {
+						$job_node = new ManagedNode($node_id, TRUE);
+						$node_name = $job_node->get('mgn_name');
+					} catch (Exception $e) {
+						$node_name = "Node #{$node_id}";
+					}
+				}
+				?>
+				<div class="svm-job">
+					<div class="svm-job-top">
+						<a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a>
+						<span class="svm-job-site" title="<?php echo htmlspecialchars($node_name); ?>"><?php echo htmlspecialchars($node_name); ?></span>
+						<span class="badge badge-<?php echo $status_class; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span>
+					</div>
+					<div class="svm-job-sub svm-muted">
+						<?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?>
+						&middot; <?php echo $job->get('mjb_started_time') ? LibraryFunctions::time_ago_or_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') : 'not started'; ?>
+					</div>
+				</div>
+			<?php endforeach; ?>
+			<?php if (count($recent_jobs) === 0): ?>
+				<div class="svm-empty svm-muted">No jobs yet</div>
+			<?php endif; ?>
+				<div class="svm-card-foot"><a href="/admin/server_manager/jobs">All jobs</a></div>
+			</div>
+		</details>
 	</div>
 </div>
 
 <?php
-/**
- * Render a single node row (used in each host panel and the ungrouped section).
- */
-function render_node_row($node, $db, $session, $role_badge = '') {
+/** The colour of a node's status dot: what JobCommandBuilder says of its stored status and last status job. */
+function node_status_color($node, $db) {
 	$status_data = $node->get('mgn_last_status_data');
 	if (is_string($status_data)) $status_data = json_decode($status_data, true);
-	$last_check = $node->get('mgn_last_status_check');
-
 	$last_job_failed = false;
 	$last_job_q = $db->prepare(
 		"SELECT mjb_status FROM mjb_management_jobs " .
@@ -709,9 +847,89 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 	if ($last_job_row && $last_job_row['mjb_status'] === 'failed') {
 		$last_job_failed = true;
 	}
+	return JobCommandBuilder::status_color_for_node($node, $status_data, $last_job_failed);
+}
+?>
 
+<?php
+/**
+ * What the server manager can say about a host's own (machine-level) agent. The host agent does
+ * what a site's agent cannot do for itself: remove sites, renew certificates, install containers.
+ * Only what has contacted this plane is knowable, so "no agent exists" and "an agent exists
+ * but has never reached us" are the same state (nothing heard).
+ *
+ * Returns ['label', 'color', 'hint'] for a state worth showing, or null when the agent is
+ * linked and checking in (or the host has nothing for an agent to do yet).
+ */
+function host_agent_state($host, $host_node, int $site_count): ?array {
+	if ($host_node) {
+		if (trim((string)$host_node->get('mgn_agent_public_key')) === '') {
+			return ['label' => 'host agent unpaired', 'color' => 'warning',
+				'hint' => 'The host agent record exists but is not paired. Removing sites and renewing certificates on this server wait for it to join again.'];
+		}
+		if (trim((string)$host_node->get('mgn_agent_last_poll')) === '') {
+			return ['label' => 'host agent not checked in yet', 'color' => 'warning',
+				'hint' => 'The host agent was approved but has not checked in yet.'];
+		}
+		if ((new IncidentSourceAgentSilent())->evaluate($host_node) !== null) {
+			return ['label' => 'host agent offline', 'color' => 'danger',
+				'hint' => 'The host agent has not checked in for over ' . (int)(IncidentSourceAgentSilent::SILENT_AFTER / 3600)
+					. ' hours (last: ' . $host_node->get('mgn_agent_last_poll') . ' UTC). Removing sites and renewing certificates here wait until it returns.'];
+		}
+		return null; // linked and checking in
+	}
+
+	$addr = trim((string)$host->get('mgh_host'));
+	$norm = function ($ip) {
+		$ip = trim((string)$ip);
+		return class_exists('CustomerCloudProvision') ? CustomerCloudProvision::normalize_address($ip) : strtolower($ip);
+	};
+
+	// An agent that asked to join from this box and has not been let in. Waiting beats turned away.
+	$waiting = $turned_away = $expired = false;
+	foreach (new MultiAgentJoinRequest(['source_ip' => $addr, 'deleted' => false], ['ajr_create_time' => 'DESC'], 10) as $jr) {
+		if ($norm($jr->get('ajr_source_ip')) !== $norm($addr)) { continue; }
+		$status = $jr->get('ajr_status');
+		if ($status === AgentJoinRequest::STATUS_REJECTED) { $turned_away = true; }
+		elseif ($status === AgentJoinRequest::STATUS_PENDING) { if ($jr->is_expired()) { $expired = true; } else { $waiting = true; } }
+	}
+	if ($waiting) {
+		return ['label' => 'host agent waiting for approval', 'color' => 'primary',
+			'hint' => 'An agent on this server asked to join and is waiting for you. Approve it in "Agents asking to join".'];
+	}
+
+	// A machine-level node at this address that is paired but not named on the host record.
+	foreach (new MultiManagedNode(['host' => $addr, 'deleted' => false]) as $n) {
+		if (trim((string)$n->get('mgn_container_name')) === '' && trim((string)$n->get('mgn_web_root')) === ''
+				&& trim((string)$n->get('mgn_agent_public_key')) !== '') {
+			return ['label' => 'host agent not linked', 'color' => 'warning',
+				'hint' => $n->get('mgn_name') . ' joined from this server but this host record does not point to it. Edit Host and choose it as the host agent.'];
+		}
+	}
+
+	if ($turned_away) {
+		return ['label' => 'host agent turned away', 'color' => 'warning',
+			'hint' => 'An agent on this server asked to join and was rejected. It can be reopened for a day under "Rejected in the last day".'];
+	}
+	if ($expired) {
+		return ['label' => 'host agent request expired', 'color' => 'warning',
+			'hint' => 'An agent on this server asked to join, nobody answered in time, and the request expired. Run the join again on the machine.'];
+	}
+	if ($site_count === 0) { return null; } // nothing here for a host agent to do yet
+	return ['label' => 'host agent not heard from', 'color' => 'secondary',
+		'hint' => 'No host agent has contacted this plane from this server, so there is nothing to tell an agent that is not installed from one that has not reached us. Removing sites and renewing certificates here have no path until one joins.'];
+}
+?>
+
+<?php
+/**
+ * Render a single node row (used in each host panel and the ungrouped section).
+ * One line: status dot, name, badges, site URL pushed right.
+ */
+function render_node_row($node, $db, $session, $role_badge = '', $show_ip = false) {
+	$last_check = $node->get('mgn_last_status_check');
 	$install_state = $node->get('mgn_install_state');
-	$status_color = JobCommandBuilder::status_color_for_node($node, $status_data, $last_job_failed);
+	$status_color = node_status_color($node, $db);
 
 	$node_version = $node->get('mgn_joinery_version');
 	$version_cmp  = null;
@@ -727,65 +945,73 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 		&& !$node->get('mgn_delete_time'); // never poll a removed site
 
 	$ssl_state = $node->get('mgn_ssl_state');
+	$name = (string)$node->get('mgn_name');
+	$url  = (string)$node->get('mgn_site_url');
+	// The small text after the name: the site's domain and, on a machine of its own
+	// (not a container sharing its host's address), the IP. Each value once: a domain
+	// the name already is, or an IP the name already is, is not repeated.
+	$shown = [strtolower(trim($name))];
+	$where = [];
+	$url_host = (string)(parse_url($url, PHP_URL_HOST) ?: '');
+	foreach (array_filter([$url_host, $show_ip ? trim((string)$node->get('mgn_host')) : '']) as $piece) {
+		if (!in_array(strtolower($piece), $shown, true)) { $shown[] = strtolower($piece); $where[] = $piece; }
+	}
 
 	ob_start();
 	?>
-	<div class="list-group-item node-row d-flex justify-content-between align-items-center"
+	<div class="svm-node node-row"<?php echo $node->get('mgn_delete_time') ? ' data-removed="1"' : ''; ?>
 		data-href="/admin/server_manager/node_detail?mgn_managed_node_id=<?php echo $node->key; ?>"
 		data-node-id="<?php echo $node->key; ?>"
+		data-filter-text="<?php echo htmlspecialchars(strtolower($name . ' ' . $url . ' ' . $node->get('mgn_host'))); ?>"
 		data-api-refreshable="<?php echo $api_refreshable ? '1' : '0'; ?>"
 		onclick="if(!event.target.closest('form,button,input,a')) window.location=this.dataset.href">
-		<div class="d-flex align-items-center svm-flex1">
-			<span class="badge bg-<?php echo $status_color; ?> me-2 js-status-badge">&bull;</span>
-			<div class="svm-minw0">
-				<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
-				<?php if ($role_badge !== ''): ?>
-					<span class="badge bg-primary ms-1"><?php echo htmlspecialchars($role_badge); ?></span>
-				<?php endif; ?>
-				<?php if ($node->get('mgn_delete_time')): ?>
-					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
-				<?php endif; ?>
-				<?php if (!$node->is_operational()): ?>
-					<span class="badge bg-<?php echo JobCommandBuilder::install_state_color($install_state); ?> ms-1"><?php echo htmlspecialchars($node->install_state_label()); ?></span>
-				<?php endif; ?>
-				<?php if ($ssl_state === 'pending'): ?>
-					<span class="badge bg-warning ms-1">SSL pending</span>
-				<?php elseif ($ssl_state === 'failed'): ?>
-					<span class="badge bg-danger ms-1">SSL failed</span>
-				<?php endif; ?>
-				<span class="js-version-indicator">
-					<?php if ($version_cmp === -1): ?>
-						<span class="badge bg-warning ms-1" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">upgrade available</span>
-					<?php elseif ($version_cmp === 1): ?>
-						<span class="badge bg-danger ms-1" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">ahead of management node</span>
-					<?php endif; ?>
-				</span>
-				<?php
-				// Agent version spread (specs/agent_recipes_and_vocabulary.md,
-				// Different agent versions): each node's agent, how far behind
-				// the agent this management node ships, and whether it is below
-				// the oldest this management node supports — where the only job
-				// it is offered is Apply Update.
-				$spread = AgentVocabulary::spread($node);
-				if ($spread !== null):
-					if ($spread['below_floor']): ?>
-						<span class="badge bg-danger ms-1" title="Below <?php echo htmlspecialchars(AgentVocabulary::FLOOR); ?>, the oldest agent this management node supports. Apply an update to this node; nothing else is offered until then."><?php echo htmlspecialchars($spread['label']); ?> — below minimum</span>
-					<?php elseif ((int)$spread['behind'] > 0): ?>
-						<span class="badge bg-light text-dark border ms-1" title="This management node ships agent <?php echo htmlspecialchars((string)AgentVocabulary::newest()); ?>"><?php echo htmlspecialchars($spread['label']); ?></span>
-					<?php else: ?>
-						<small class="text-muted ms-1"><?php echo htmlspecialchars($spread['label']); ?></small>
-					<?php endif;
-				endif; ?>
-				<small class="text-muted ms-1 js-last-check"><?php
-					if ($last_check) {
-						echo '(' . htmlspecialchars(LibraryFunctions::time_ago_or_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')) . ')';
-					}
-				?></small>
-				<?php if ($node->get('mgn_site_url')): ?>
-					<div><small class="text-muted"><?php echo htmlspecialchars($node->get('mgn_site_url')); ?></small></div>
-				<?php endif; ?>
-			</div>
-		</div>
+		<span class="svm-dot svm-dot-<?php echo htmlspecialchars($status_color); ?> js-status-badge"></span>
+		<span class="svm-node-name"><?php echo htmlspecialchars($name); ?></span>
+		<?php if ($role_badge !== ''): ?>
+			<span class="badge badge-primary"><?php echo htmlspecialchars($role_badge); ?></span>
+		<?php endif; ?>
+		<?php if ($node->get('mgn_delete_time')): ?>
+			<span class="badge badge-secondary" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
+		<?php endif; ?>
+		<?php if (!$node->is_operational()): ?>
+			<span class="badge badge-<?php echo htmlspecialchars(JobCommandBuilder::install_state_color($install_state)); ?>"><?php echo htmlspecialchars($node->install_state_label()); ?></span>
+		<?php endif; ?>
+		<?php if ($ssl_state === 'pending'): ?>
+			<span class="badge badge-warning">SSL pending</span>
+		<?php elseif ($ssl_state === 'failed'): ?>
+			<span class="badge badge-danger">SSL failed</span>
+		<?php endif; ?>
+		<span class="js-version-indicator">
+			<?php if ($version_cmp === -1): ?>
+				<span class="badge badge-warning" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">upgrade available</span>
+			<?php elseif ($version_cmp === 1): ?>
+				<span class="badge badge-danger" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">ahead of management node</span>
+			<?php endif; ?>
+		</span>
+		<?php
+		// Agent version spread (specs/agent_recipes_and_vocabulary.md,
+		// Different agent versions): each node's agent, how far behind
+		// the agent this management node ships, and whether it is below
+		// the oldest this management node supports — where the only job
+		// it is offered is Apply Update.
+		$spread = AgentVocabulary::spread($node);
+		if ($spread !== null):
+			if ($spread['below_floor']): ?>
+				<span class="badge badge-danger" title="Below <?php echo htmlspecialchars(AgentVocabulary::FLOOR); ?>, the oldest agent this management node supports. Apply an update to this node; nothing else is offered until then."><?php echo htmlspecialchars($spread['label']); ?> — below minimum</span>
+			<?php elseif ((int)$spread['behind'] > 0): ?>
+				<span class="badge badge-subtle-secondary" title="This management node ships agent <?php echo htmlspecialchars((string)AgentVocabulary::newest()); ?>"><?php echo htmlspecialchars($spread['label']); ?></span>
+			<?php else: ?>
+				<small class="svm-muted"><?php echo htmlspecialchars($spread['label']); ?></small>
+			<?php endif;
+		endif; ?>
+		<small class="svm-muted js-last-check"><?php
+			if ($last_check) {
+				echo '(' . htmlspecialchars(LibraryFunctions::time_ago_or_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')) . ')';
+			}
+		?></small>
+		<?php if ($where): ?>
+			<small class="svm-muted svm-node-url" title="<?php echo htmlspecialchars($url !== '' ? $url : implode(' · ', $where)); ?>"><?php echo htmlspecialchars(implode(' · ', $where)); ?></small>
+		<?php endif; ?>
 	</div>
 	<?php
 	return ob_get_clean();
@@ -793,31 +1019,48 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 ?>
 
 <?php echo SmAssets::script_tag(); ?>
+<?php echo SmAssets::script_tag('server_manager_board.js'); ?>
 <script>
 // Auto-refresh status for nodes with API credentials. Fires once on page load
 // in parallel, bypassing the agent/job pipeline. Silent on failure — the
-// pre-rendered badge (from last stored status) stays as the fallback.
+// pre-rendered dot (from last stored status) stays as the fallback.
 (function() {
 	var rows = document.querySelectorAll('.node-row[data-api-refreshable="1"]');
 	if (!rows.length) return;
 
-	var colorClasses = ['bg-secondary','bg-success','bg-warning','bg-danger','bg-info','bg-primary'];
+	var colors = ['secondary','success','warning','danger','info','primary'];
+
+	// A host's dot follows its nodes: red if any is red, amber if any is amber, green only if all are green.
+	function refreshHostDot(row) {
+		var group = row.closest('.svm-group');
+		var hostDot = group && group.querySelector('.svm-host-dot');
+		if (!hostDot) return;
+		var seen = [];
+		group.querySelectorAll('.svm-node:not([data-removed]) .svm-dot').forEach(function(d) {
+			colors.forEach(function(c) { if (d.classList.contains('svm-dot-' + c)) seen.push(c); });
+		});
+		var color = seen.indexOf('danger') !== -1 ? 'danger'
+			: (seen.indexOf('warning') !== -1 ? 'warning'
+			: (seen.length && seen.every(function(c) { return c === 'success'; }) ? 'success' : 'secondary'));
+		colors.forEach(function(c) { hostDot.classList.remove('svm-dot-' + c); });
+		hostDot.classList.add('svm-dot-' + color);
+	}
 
 	rows.forEach(function(row) {
 		var nodeId = row.getAttribute('data-node-id');
-		var badge = row.querySelector('.js-status-badge');
+		var dot = row.querySelector('.js-status-badge');
 		var versionSpan = row.querySelector('.js-version-indicator');
 		var lastCheckSpan = row.querySelector('.js-last-check');
-		if (badge) badge.style.opacity = '0.4';
+		if (dot) dot.style.opacity = '0.4';
 
 		smApiPost('refresh_node_status', { node_id: nodeId })
 			.then(function(j) {
-				if (badge) badge.style.opacity = '';
+				if (dot) dot.style.opacity = '';
 				if (!j.ok) return;
 
-				if (badge && j.status_color) {
-					colorClasses.forEach(function(c) { badge.classList.remove(c); });
-					badge.classList.add('bg-' + j.status_color);
+				if (dot && j.status_color) {
+					colors.forEach(function(c) { dot.classList.remove('svm-dot-' + c); });
+					dot.classList.add('svm-dot-' + j.status_color);
 				}
 
 				// Only update the version badge when the response includes definitive
@@ -827,20 +1070,21 @@ function render_node_row($node, $db, $session, $role_badge = '') {
 				if (versionSpan && 'version_cmp' in j && j.version_cmp !== null) {
 					versionSpan.innerHTML = '';
 					if (j.version_cmp === -1) {
-						versionSpan.innerHTML = ' <span class="badge bg-warning ms-1" title="Management node is at ' +
-							(j.cp_version || '') + '">upgrade available</span>';
+						versionSpan.innerHTML = '<span class="badge badge-warning" title="Management node is at ' +
+							smEsc(j.cp_version || '') + '">upgrade available</span>';
 					} else if (j.version_cmp === 1) {
-						versionSpan.innerHTML = ' <span class="badge bg-danger ms-1" title="Management node is at ' +
-							(j.cp_version || '') + '">ahead of management node</span>';
+						versionSpan.innerHTML = '<span class="badge badge-danger" title="Management node is at ' +
+							smEsc(j.cp_version || '') + '">ahead of management node</span>';
 					}
 				}
 
 				if (lastCheckSpan && j.last_check) {
 					lastCheckSpan.textContent = '(' + j.last_check + ')';
 				}
+				refreshHostDot(row);
 			})
 			.catch(function() {
-				if (badge) badge.style.opacity = '';
+				if (dot) dot.style.opacity = '';
 			});
 	});
 })();

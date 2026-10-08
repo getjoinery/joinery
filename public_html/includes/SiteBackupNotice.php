@@ -18,6 +18,7 @@
  * `running`, and past STALE_RUN_HOURS it is named as the run that never
  * finished.
  *
+ * @version 1.3 - the notice is the theme's standard danger alert (no notice-specific CSS), so it matches the other alerts
  * @version 1.2 - the notice names the site by its address (webDir), not "this site"
  * @version 1.1 - a `running` row older than STALE_RUN_HOURS reads as a run that never finished
  * @version 1.0
@@ -100,11 +101,10 @@ class SiteBackupNotice {
 		$body = ($target_name !== '' ? 'Target: ' . $target_name . '. ' : '')
 			. 'The process stopped without recording why — a full disk or a lost database connection are the usual causes. '
 			. 'Nothing new is offsite until a run succeeds; the next scheduled run clears this if it does.';
-		return self::css()
-			. '<div class="jy-site-backup-notice" role="status">'
-			. '<div class="jy-site-backup-notice__text"><strong>' . htmlspecialchars($lead, ENT_QUOTES, 'UTF-8') . '</strong> '
+		return '<div class="alert alert-danger" role="alert">'
+			. '<div class="alert-body"><strong>' . htmlspecialchars($lead, ENT_QUOTES, 'UTF-8') . '</strong> '
 			. htmlspecialchars($body, ENT_QUOTES, 'UTF-8')
-			. ' <a href="/admin/admin_backups">Backups</a></div>'
+			. ' <a href="/admin/admin_backups" class="alert-link">Backups</a></div>'
 			. '</div>';
 	}
 
@@ -127,23 +127,11 @@ class SiteBackupNotice {
 		}
 		$body = ($target_name !== '' ? 'Target: ' . $target_name . '. ' : '')
 			. 'Nothing new is offsite until a run succeeds; the next scheduled run clears this if it does.';
-		return self::css()
-			. '<div class="jy-site-backup-notice" role="status">'
-			. '<div class="jy-site-backup-notice__text"><strong>' . htmlspecialchars($lead, ENT_QUOTES, 'UTF-8') . '</strong> '
+		return '<div class="alert alert-danger" role="alert">'
+			. '<div class="alert-body"><strong>' . htmlspecialchars($lead, ENT_QUOTES, 'UTF-8') . '</strong> '
 			. htmlspecialchars($body, ENT_QUOTES, 'UTF-8')
-			. ' <code class="jy-site-backup-notice__line">' . htmlspecialchars($last_line, ENT_QUOTES, 'UTF-8') . '</code>'
-			. ' <a href="/admin/admin_backups">Backups</a></div>'
+			. ' <code>' . htmlspecialchars($last_line, ENT_QUOTES, 'UTF-8') . '</code>'
+			. ' <a href="/admin/admin_backups" class="alert-link">Backups</a></div>'
 			. '</div>';
-	}
-
-	private static function css(): string {
-		static $sent = false;
-		if ($sent) return '';
-		$sent = true;
-		return '<style>'
-			. '.jy-site-backup-notice{margin:0 0 1rem;padding:.75rem 1rem;border:1px solid #fca5a5;border-radius:6px;background:#fef2f2;color:#7f1d1d;font-size:.95rem}'
-			. '.jy-site-backup-notice__line{display:inline-block;margin-top:.25rem;padding:.15rem .4rem;border-radius:4px;background:#fee2e2;font-size:.9em;overflow-wrap:anywhere}'
-			. '.jy-site-backup-notice a{color:inherit;text-decoration:underline}'
-			. '</style>';
 	}
 }

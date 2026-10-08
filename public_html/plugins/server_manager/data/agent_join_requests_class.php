@@ -13,6 +13,7 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.5 - ajr_decided_by: 'auto' for a join JoinAutoApproval approved (the auto_approve_provisioned_joins spec)
  * @version 1.4 - ajr_web_root: the public_html directory the joining agent's site lives in, when it has one
  *                (agent 1.44.0), validated by ManagedNode::valid_web_root() on intake
  * @version 1.3 - ajr_addresses: every address the machine says it answers on, so approval can match
@@ -64,6 +65,8 @@ class AgentJoinRequest extends SystemBase {
 		'ajr_web_root'      => array('type'=>'varchar(500)'),
 		'ajr_status'        => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'pending', 'allowed_values'=>array('pending', 'approved', 'rejected')),
 		'ajr_mgn_managed_node_id'   => array('type'=>'int8'),
+		// 'auto' when JoinAutoApproval approved it; empty when a person did.
+		'ajr_decided_by'    => array('type'=>'varchar(12)'),
 		'ajr_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ajr_update_time'   => array('type'=>'timestamp(6)'),
 		'ajr_delete_time'   => array('type'=>'timestamp(6)'),

@@ -367,6 +367,22 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 The general limit (`api_agent_rate_limit_requests` per window) is counted in two buckets, one request-log row per request written at shutdown with the outcome. A request the node's **signature** proves (a result, a manifest fetch, a leave) counts toward that node's own bucket (`api_agent_node`, keyed `node:ID`); one that proves no node (a join, a missing or wrong signature, an unknown path) counts toward its address's (`api_agent`). A multi-tenant host's sites and a fleet behind one NAT share an address, so an address over its limit refuses only what proves no node: a neighbour whose signature verifies still gets in. A refused request is not recorded, so a bucket drains while it is over. The one request it does not count is a claim that succeeded: a fleet polls on a seconds cadence, which is tens of thousands of requests a day against a few hundred of everything else, and the rate-limit check counts rows with a query. A claim that fails does count, since an unsigned or mis-signed flood looks exactly like that. `AgentChannelEndpoint::meterOutcome()` is the rule.
 
+## Join approval
+
+An agent joins a plane by asking: it sends its name, public key and address, and a join request waits on the dashboard's **Agents asking to join** panel. A person approves it there after checking the key against what the machine printed, or a join from a machine this plane provisioned is approved automatically.
+
+**Automatic approval** (`JoinAutoApproval`, run each minute by the *Auto-Approve Provisioned Joins* scheduled task) approves a pending request only when all of these hold:
+
+1. its source address (IPv4 or IPv6) belongs to a provision that is installing or done;
+2. its claimed name is exactly that provision's site name (the site agent) or `<site name>-host` (the host agent);
+3. its key equals the one the provision's install showed for that agent — recorded when the install job finishes (`cvp_expected_site_key`, `cvp_expected_host_key`), read from the host agent's `Key fingerprint:` line and the site agent's `SITE_AGENT_KEY=` line in the install output — and not yet used;
+4. the cloud provider reports the instance running at that address;
+5. the site node has no agent yet, or no host agent is paired on the machine.
+
+The first three and the fifth are database reads and run before the provider is asked, so a request from a stranger never causes a provider call. Any doubt leaves the request pending for a person; automatic approval never rejects anything. An approved key is consumed, and the request is marked `ajr_decided_by = auto`.
+
+The panel shows, for a request that matches a provision, why it is still there ("no key was recorded from this provision's install", "the key does not match the one the install showed", and so on); a key that differs from the install's is flagged in red. Joins from machines this plane did not provision are always approved by a person. Site copies approve their own agent. Setting `server_manager_auto_approve_joins` switches the automatic approval off.
+
 ## Machines with no site
 
 Some machines a management node manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.

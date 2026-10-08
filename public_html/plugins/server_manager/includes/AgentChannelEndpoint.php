@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.40 - approveProvisionSiteJoin(): a provisioned machine's site-agent join approved against the provision's site node (dashboard, JoinAutoApproval)
  * @version 1.39 - a joined node is given its storage space on the target Where new backups go names, once saved
  * @version 1.39 - a claim carries bundle_state, a siteless machine's verdict on the support bundle, stored as
  *                mgn_agent_bundle_state and raised as plane:agent_bundle_refused (release_transparency, WP7 review)
@@ -859,6 +860,46 @@ class AgentChannelEndpoint {
 	/** The provision whose machine a join's address belongs to, or null. */
 	public static function provisionForAddress(string $ip) {
 		return class_exists('CustomerCloudProvision') ? CustomerCloudProvision::for_machine_address($ip) : null;
+	}
+
+	/**
+	 * Approve a join from a provisioned machine's SITE agent against the node the
+	 * provisioner made for it — the dashboard's way of doing what the node's API
+	 * Keys tab does. The same checks stand: that node must not already have an
+	 * agent (first join wins), and the provider must confirm the instance is
+	 * running at the join's address (ProvisionCustomerCloud::join_approval_check).
+	 * Returns ['node' => ManagedNode, 'host' => ManagedHost|null]; throws with a
+	 * sentence for the operator when the approval is refused.
+	 */
+	public static function approveProvisionSiteJoin($request): array {
+		if ($request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING) {
+			throw new Exception('That join request is no longer pending.');
+		}
+		if ($request->is_expired()) {
+			throw new Exception('That join request has expired. Run the join again on the machine.');
+		}
+		$ip = (string)$request->get('ajr_source_ip');
+		$provision = self::provisionForAddress($ip);
+		if (!$provision) {
+			throw new Exception('That address is not a machine this plane provisioned.');
+		}
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+		$node = $node_id ? new ManagedNode($node_id, TRUE) : null;
+		if (!$node || !$node->key || $node->get('mgn_delete_time')) {
+			throw new Exception('Provision #' . (int)$provision->key . ' (' . $provision->get('cvp_domain')
+				. ') has no site node yet. Approve once the provision has made one.');
+		}
+		if ($node->get('mgn_agent_public_key')) {
+			error_log('ALARM agent join: a second join request from provisioned address ' . $ip . ' for node #' . $node->key
+				. ' (' . $node->get('mgn_name') . '), which already has a connected agent. Request #' . $request->key . ' refused.');
+			throw new Exception($node->get('mgn_name') . ' already has a connected agent. Disconnect it first if you mean to replace it.');
+		}
+		$checker = (self::$provisioner instanceof ProvisionCustomerCloud) ? self::$provisioner : new ProvisionCustomerCloud();
+		$check = $checker->join_approval_check($ip, $node);
+		if (!$check['ok']) {
+			throw new Exception($check['reason']);
+		}
+		return ['node' => $node, 'host' => self::approveJoin($request, $node)];
 	}
 
 	/** A slug no live node holds, derived from a name. */
