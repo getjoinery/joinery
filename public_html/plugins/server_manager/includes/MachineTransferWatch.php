@@ -16,6 +16,7 @@
  * passed. One node speaks for each machine, so a server of twelve sites raises
  * one incident.
  *
+ * @version 1.3 - a connected account the provider answers 401 is marked revoked instead of failing every day
  * @version 1.2 - accounts(), node_addresses() and nodes_on() are public: adopting a node's cloud server
  *                and the test-account cleanup match by the same rule (test_cloud_account_and_prod_management)
  * @version 1.1 - review R2-R5: a node is on one machine (host match over a join's report, newest of
@@ -81,6 +82,11 @@ class MachineTransferWatch {
 			try {
 				$instances = $driver->listInstances();
 			} catch (Exception $e) {
+				if (self::revoke_rejected((string)$key, $e)) {
+					$problems[] = 'Account ' . $key . ': the provider rejected its permission (' . $e->getMessage()
+						. '), so it is marked revoked and no longer read. Its owner re-connects it from their profile.';
+					continue;
+				}
 				$problems[] = 'Account ' . $key . ': its machines could not be listed (' . $e->getMessage() . ').';
 				continue;
 			}
@@ -248,6 +254,26 @@ class MachineTransferWatch {
 
 	private static function gb(float $gb): string {
 		return ($gb >= 100 ? number_format($gb, 0) : number_format($gb, 1)) . ' GB';
+	}
+
+	/**
+	 * A connected account the provider answered 401 is marked revoked, as the
+	 * provisioning pipeline marks it: the grant is gone, not passing through
+	 * an outage, so reading it again tomorrow cannot succeed. The operator
+	 * token is a setting, not an account; its 401 stays a problem until it is
+	 * replaced. True when an account was marked.
+	 */
+	private static function revoke_rejected(string $key, Exception $e): bool {
+		if (!preg_match('/^cca:(\d+)$/', $key, $m) || (int)$e->getCode() !== 401) {
+			return false;
+		}
+		$account = new CustomerCloudAccount((int)$m[1], TRUE);
+		if (!$account->key || $account->get('cca_status') !== 'active') {
+			return false;
+		}
+		$account->set('cca_status', 'revoked');
+		$account->save();
+		return true;
 	}
 
 	/**

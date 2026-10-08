@@ -54,21 +54,23 @@ function api_test_boot($argv) {
 	$meta = ($caller[0]['file'] ?? '') ? (harness_parse_metadata($caller[0]['file']) ?: array()) : array();
 	harness_boot($meta);
 
-	// The API's limiters count requests per IP in a shared window, and every
-	// suite here shares one IP with every other suite and every earlier run.
-	// 'api_auth' fills because suites probe credential-less paths deliberately;
-	// 'api' and 'api_upload' fill because a gate run makes hundreds of
-	// authenticated calls, so running the tier twice in an hour turned every
-	// later check into a 429 that looked like a broken endpoint. Each suite
-	// starts with clean counters.
+	// The API's limiters count requests per address. Each run sends from a
+	// loopback address of its own, so what one suite earns there (a failed-auth
+	// lockout that a suite provokes on purpose, a gate run's hundreds of calls)
+	// touches no other suite, session or browser on this box, and a run starts
+	// with clean counters without deleting anyone's.
+	harness_http_send_from(harness_http_loopback_source());
+
+	// Helpers that pin to $ORIGIN_IP themselves still send from the box's own
+	// address, whose counters fill across runs; they start clean.
 	//
 	// Guarded on debug, the platform's own dev discriminator, because this is a
 	// delete pass: a suite declaring env any must never wipe a customer's
 	// request history.
-	if (Globalvars::get_instance()->get_setting('debug')) {
+	if (Globalvars::get_instance()->get_setting('debug') && $ORIGIN_IP) {
 		$db = DbConnector::get_instance()->get_db_link();
 		$db->prepare("DELETE FROM rql_request_logs
-			WHERE rql_feature IN ('api_auth', 'api', 'api_upload')")->execute();
+			WHERE rql_feature IN ('api_auth', 'api', 'api_upload') AND rql_ip_address = ?")->execute([$ORIGIN_IP]);
 	}
 }
 

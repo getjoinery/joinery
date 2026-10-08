@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.11.0 — /plugins/{plugin}/admin/* 404s while the plugin is inactive, like every other /plugins/* path.
 // @version 1.10.0 — /mail/forward-confirm: the mailbox plugin's forwarding confirmation page
 // (specs/relay_receive_only_forwarding.md).
 // @version 1.9.0 — /uploads/* never redirects to a bucket: a cloud file is a
@@ -245,6 +246,12 @@ $routes = [
             $plugin = $params[2] ?? '';
             $admin_page = $params[4] ?? 'index';
             $admin_file = "plugins/{$plugin}/admin/{$admin_page}.php";
+
+            // An inactive plugin's pages 404 like every other /plugins/* path:
+            // its tables may never have been made, and its classes do not resolve.
+            if (!PluginHelper::isPluginActive($plugin)) {
+                return false;
+            }
 
             if (file_exists($admin_file)) {
                 $is_valid_page = true;

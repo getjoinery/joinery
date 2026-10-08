@@ -315,6 +315,16 @@ if (!PluginHelper::isPluginActive('mailbox')) {
 		fed_test_set('joinery_direct_enabled', $enabled_before === false ? null : (string)$enabled_before);
 	});
 
+	// The picker is a messaging screen: both messaging switches are on for
+	// this run, and go back as found.
+	foreach (array('messaging_active', 'messenger_active') as $switch) {
+		$switch_before = $db->query("SELECT stg_value FROM stg_settings WHERE stg_name = " . $db->quote($switch))->fetchColumn();
+		harness_defer(function () use ($switch, $switch_before) {
+			fed_test_set($switch, $switch_before === false ? null : (string)$switch_before);
+		});
+		fed_test_set($switch, '1');
+	}
+
 	// A mailbox of Bob's own to hold the contact.
 	$domain = new InboundEmailDomain(NULL);
 	$domain->set('ied_domain', 'picker-' . strtolower($suffix) . '.example');

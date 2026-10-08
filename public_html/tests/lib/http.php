@@ -33,6 +33,7 @@ if (!defined('JOINERY_HARNESS_HTTP_LOADED')) {
 	$GLOBALS['__harness_http'] = array(
 		'base_url'  => null,   // null = derive from webDir on first use
 		'origin_ip' => null,   // null = probe on first use; false = unavailable
+		'from'      => null,   // loopback address every pinned request is sent from; null = the origin's own
 	);
 }
 
@@ -92,6 +93,26 @@ function harness_http_origin_ip() {
 }
 
 /**
+ * A loopback address of this run's own, for the 'from' option of
+ * harness_request(). The whole of 127.0.0.0/8 is this machine, so the server
+ * answers on it and sees the caller as this address; nothing else sends from
+ * it, so whatever the server counts against it (a lockout) touches no other
+ * suite, session or browser. 127.0.0.1 and 127.0.1.1 are never chosen.
+ */
+function harness_http_loopback_source() {
+	return '127.' . random_int(2, 254) . '.' . random_int(0, 255) . '.' . random_int(1, 254);
+}
+
+/**
+ * Send every request this process pins to this box from $ip (a loopback
+ * address from harness_http_loopback_source()), unless a request names its
+ * own 'from'. Null goes back to the origin's own address.
+ */
+function harness_http_send_from($ip) {
+	$GLOBALS['__harness_http']['from'] = $ip;
+}
+
+/**
  * Override the derived target. Pass null for either to leave it derived.
  */
 function harness_http_configure($base_url = null, $origin_ip = null) {
@@ -139,6 +160,10 @@ function harness_http_boot($argv) {
  *   follow      mixed   false (default) | true | int max redirects
  *   timeout     int     seconds, default 30
  *   pin         bool    force origin pinning on/off (default: auto)
+ *   from        string  a loopback address (harness_http_loopback_source()) to send from;
+ *                       default: harness_http_send_from()'s. Applies only to a
+ *                       request pinned to this box: it goes to 127.0.0.1 and the
+ *                       server sees this address as the caller.
  *   user_agent  string
  *   insecure    bool    skip TLS verification
  *
@@ -247,7 +272,11 @@ function harness_request($method, $url, array $opts = array()) {
 		// pointed at another host resolving through DNS.
 		$pin = ($host === parse_url(harness_http_base_url(), PHP_URL_HOST));
 	}
-	if ($pin) {
+	$from = !empty($opts['from']) ? $opts['from'] : $GLOBALS['__harness_http']['from'];
+	if ($pin && $from) {
+		curl_setopt($ch, CURLOPT_INTERFACE, $from);
+		curl_setopt($ch, CURLOPT_RESOLVE, array($host . ':443:127.0.0.1', $host . ':80:127.0.0.1'));
+	} elseif ($pin) {
 		$origin = harness_http_origin_ip();
 		if ($origin) {
 			curl_setopt($ch, CURLOPT_RESOLVE, array(

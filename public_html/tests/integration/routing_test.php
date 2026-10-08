@@ -602,7 +602,21 @@ class HttpRoutingTestRunner {
             // Admin page that doesn't exist
             ['/admin/definitely-fake-admin-page', [302, 404, 401, 403], 'Admin page (does not exist)'],
         ];
-        
+
+        // Every plugin's admin pages: behind sign-in while it is active, 404
+        // while it is not (its tables may never have been made).
+        foreach (glob(PathHelper::getIncludePath('plugins') . '/*/admin/*.php') ?: array() as $file) {
+            $plugin = basename(dirname(dirname($file)));
+            if (isset($seen_plugin_admin[$plugin])) {
+                continue;
+            }
+            $seen_plugin_admin[$plugin] = true;
+            $active = PluginHelper::isPluginActive($plugin);
+            $test_cases[] = ['/plugins/' . $plugin . '/admin/' . basename($file, '.php'),
+                $active ? [301, 302, 401, 403] : 404,
+                'Plugin admin page (' . $plugin . ' ' . ($active ? 'active: needs sign-in' : 'inactive: 404') . ')'];
+        }
+
         foreach ($test_cases as [$path, $expected_status, $description]) {
             $result = HttpTester::testUrl($path, $expected_status, $description);
             
