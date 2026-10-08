@@ -8,6 +8,12 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.108 - build_retire_install_password writes every root key (the last line of the list had no
+ *                 newline and `read` dropped it: a single key was never written) and fails unless each is on root
+ * @version 1.107 - a node's backups are in its storage spaces (specs/storage_targets.md WP4): new backups and
+ *                  uploads go to its active space, its folder there as the space names it; downloads, staging,
+ *                  verify and object restore read the space a backup is in (space_id, the active one when
+ *                  absent); node_space(), write_space()
  * @version 1.106 - get_target() is the target a node names, switched on or off, for reads; write_target() is
  *                  that target only while switched on, for new backups; nothing is inferred from the enabled
  *                  targets (specs/storage_targets.md R6); comments name S3Signer::list()
@@ -1094,30 +1100,29 @@ class JobCommandBuilder {
 	private static function backup_run_config($node, $params = []) {
 		self::assert_node_can_be_backed_up($node);
 
-		$target = self::write_target($node);
-		if (!$target) {
+		$space = self::write_space($node);
+		if (!$space) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this management node takes: "
 				. self::write_target_refusal($node) . '.');
 		}
+		$target = $space->target();
 
 		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
 		if ($web_root === '') {
 			throw new Exception("Node '{$node->get('mgn_slug')}' hosts no Joinery site to back up.");
 		}
 
-		$slug = trim((string)$node->get('mgn_slug'));
-		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
-			throw new Exception(
-				"Node slug '{$slug}' cannot be used as a bucket path segment; it may only contain "
-				. 'letters, numbers, hyphens and underscores.');
-		}
-
+		// The node composes every key as {path_prefix}/{slug}/{profile}/…, so
+		// the two are the space's own: its target's folder and the node's
+		// folder in it. The target's name tells the node where its chain
+		// went; a new name starts a new chain there.
+		$slug = $space->folder();
 		$config = [
 			'target_name'               => (string)$target->get('bkt_name'),
 			'provider'                  => (string)$target->get('bkt_provider'),
 			'bucket'                    => (string)$target->get('bkt_bucket'),
-			'path_prefix'               => (string)($target->get('bkt_path_prefix') ?: 'joinery-backups'),
+			'path_prefix'               => $space->prefix_part(),
 			'credentials_b64'           => self::creds_token($target),
 			'slug'                      => $slug,
 			'type'                      => (($params['type'] ?? 'project') === 'database') ? 'database' : 'project',
@@ -1136,7 +1141,7 @@ class JobCommandBuilder {
 		if ($config['type'] === 'project') {
 			$links = $params['objects_links'] ?? null;
 			if (!is_array($links)) {
-				$links = self::shelf_index_links($node, $target, $slug);
+				$links = self::shelf_index_links($space);
 			}
 			$expires = self::signed_link_seconds('backup_run');
 			$sign = function ($key) use ($target, $expires) {
@@ -1162,11 +1167,11 @@ class JobCommandBuilder {
 		return $config;
 	}
 
-	/** The newest index and every epoch envelope in the node's manager-profile backup storage, by key, from a fresh listing. */
-	private static function shelf_index_links($node, $target, $slug) {
+	/** The newest index and every epoch envelope in the space's manager-profile backups, by key, from a fresh listing. */
+	private static function shelf_index_links(StorageSpace $space) {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupRetention.php'));
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-		$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+		$base = $space->base() . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+		$target = $space->target();
 		$listing = (self::$shelf_listing_for_tests !== null)
 			? self::$shelf_listing_for_tests
 			: S3Signer::list($target->get_credentials(), $target->get('bkt_bucket'), $base);
@@ -2910,47 +2915,70 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The backup target a node names, switched on or off, or null when it names
-	 * none or the one it named is deleted. What reads, restores, listings and
-	 * pruning use: a target that is switched off takes no new backups but still
-	 * holds the ones it has. Nothing is inferred: a node that names no target
-	 * backs up locally only (specs/storage_targets.md R6).
+	 * One of a node's storage spaces (specs/storage_targets.md §3): the one
+	 * $space_id names when it is this node's, else, for 0, its active space.
+	 * Null when the node has none, or the id is not one of its own. Nothing is
+	 * inferred: a node with no space backs up on its own disk only (R6).
 	 */
-	public static function get_target($node) {
-		$target_id = (int)$node->get('mgn_bkt_backup_target_id');
-		if ($target_id <= 0) {
+	public static function node_space($node, $space_id = 0) {
+		if (!$node || !$node->key) {
 			return null;
 		}
-		try {
-			$target = new BackupTarget($target_id, TRUE);
-		} catch (Exception $e) {
-			return null;
+		return StorageSpace::owned(StorageSpace::OWNER_NODE, (int)$node->key, (int)$space_id);
+	}
+
+	/** A node's space to read a backup from, or an exception naming why there is none. */
+	private static function read_space($node, $space_id) {
+		$space = self::node_space($node, $space_id);
+		if (!$space) {
+			throw new Exception((int)$space_id > 0
+				? "That backup storage is not node '{$node->get('mgn_slug')}''s."
+				: "Node '{$node->get('mgn_slug')}' has no backup storage to read from.");
 		}
-		return ($target->key && !$target->get('bkt_delete_time')) ? $target : null;
+		if (!$space->target()) {
+			throw new Exception('The backup target holding ' . $space->describe() . ' has been deleted.');
+		}
+		return $space;
 	}
 
 	/**
-	 * The target a node's new backups go to: get_target() when it is switched
-	 * on, else null. A named target that is gone or switched off gives null
-	 * rather than quietly sending the archive somewhere the operator did not
-	 * choose.
+	 * The target of a node's active space, switched on or off, or null. What a
+	 * read with no space named uses: a target that is switched off takes no
+	 * new backups but still holds the ones it has.
 	 */
-	public static function write_target($node) {
-		$target = self::get_target($node);
-		return ($target && $target->get('bkt_enabled')) ? $target : null;
+	public static function get_target($node) {
+		$space = self::node_space($node);
+		return $space ? $space->target() : null;
 	}
 
-	/** Why write_target() gave nothing, as a clause for a refusal. */
+	/**
+	 * The space a node's new backups go to: its active space while that
+	 * space's target is switched on, else null — never somewhere the operator
+	 * did not choose.
+	 */
+	public static function write_space($node) {
+		$space = self::node_space($node);
+		$target = $space ? $space->target() : null;
+		return ($target && $target->get('bkt_enabled')) ? $space : null;
+	}
+
+	/** The target of write_space(), or null. */
+	public static function write_target($node) {
+		$space = self::write_space($node);
+		return $space ? $space->target() : null;
+	}
+
+	/** Why write_space() gave nothing, as a clause for a refusal. */
 	private static function write_target_refusal($node) {
-		$target_id = (int)$node->get('mgn_bkt_backup_target_id');
-		if ($target_id <= 0) {
-			return 'it names no backup target; choose one on its page';
+		$space = self::node_space($node);
+		if (!$space) {
+			return 'it has no backup storage; move it to a backup target on its page';
 		}
-		$target = self::get_target($node);
+		$target = $space->target();
 		if (!$target) {
-			return 'the backup target it named has been deleted; choose another on its page';
+			return 'the backup target it backs up to has been deleted; move it to another on its page';
 		}
-		return 'the backup target "' . $target->get('bkt_name') . '" it names is switched off; '
+		return 'the backup target "' . $target->get('bkt_name') . '" it backs up to is switched off; '
 			. 'switch it on or move the node to another target';
 	}
 
@@ -3002,10 +3030,11 @@ class JobCommandBuilder {
 	 * ignored — an ignored parameter is a lie the sender believes.
 	 */
 	public static function build_upload_backup_primitive($node, $params = []) {
-		$target = self::write_target($node);
-		if (!$target) {
+		$space = self::write_space($node);
+		if (!$space) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' cannot upload: " . self::write_target_refusal($node) . '.');
 		}
+		$target = $space->target();
 		$primitive_params = [
 			'filename'        => basename(trim((string)($params['filename'] ?? ''))),
 			// WHOSE backup, not where it is. This plane takes manager-profile
@@ -3014,8 +3043,8 @@ class JobCommandBuilder {
 			'profile'         => in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
 				? $params['profile'] : 'manager',
 			'bucket'          => $target->get('bkt_bucket'),
-			'path_prefix'     => $target->get('bkt_path_prefix') ?: 'joinery-backups',
-			'slug'            => $node->get('mgn_slug'),
+			'path_prefix'     => $space->prefix_part(),
+			'slug'            => $space->folder(),
 			// The placeholder, not the secret. AgentChannelEndpoint substitutes
 			// it when the job is handed out, so the credential never rests in
 			// the job row. creds_token() prefers the write-only node slot, and
@@ -3098,15 +3127,12 @@ class JobCommandBuilder {
 			throw new Exception('No backup filename given.');
 		}
 
-		$target = self::get_target($node);
-		if (!$target) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' names no backup target, "
-				. 'so there is no backup storage to fetch from.');
-		}
+		$space = self::read_space($node, (int)($params['space_id'] ?? 0));
+		$target = $space->target();
 
 		$profile = in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
 			? $params['profile'] : 'manager';
-		$key = self::node_object_key($node, $target, $params['cloud_path'] ?? '', $profile);
+		$key = self::node_object_key($node, $space, $params['cloud_path'] ?? '', $profile);
 
 		$creds = $target->get_credentials();
 		if (empty($creds)) {
@@ -3437,31 +3463,41 @@ class JobCommandBuilder {
 			throw new Exception('Staging a chain needs the chain id (for example chain-20260807_231507).');
 		}
 
-		// A dormant copy's chain is its source's: under the source's slug, on
-		// the source's target. Every other row is its own backup node.
+		// A dormant copy's chain is its source's: in the source's spaces. Every
+		// other row is its own backup node.
 		$owner = ManagedNode::backup_node_of($node);
-		$target = self::get_target($owner);
-		if (!$target) {
-			throw new Exception("Node '{$owner->get('mgn_slug')}' names no backup target.");
-		}
-		$creds = $target->get_credentials();
-		if (empty($creds)) {
-			throw new Exception('The backup target has no stored credentials, so no download can be signed.');
-		}
-
-		$slug = trim((string)$owner->get('mgn_slug'));
-		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
-			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
-		}
 		// normalize('') means the SITE profile, a different backup storage — so an unset
 		// parameter defaults to manager rather than falling through to it, the
 		// same rule the restore builders follow.
-		$profile   = BackupProfile::normalize(trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
-		$chain_key = BackupChainListHelper::chain_path($target, $slug, $profile, $chain_id);
+		$profile = BackupProfile::normalize(trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
 
-		$listing = (self::$shelf_listing_for_tests !== null)
-			? self::$shelf_listing_for_tests
-			: S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
+		// The space named, or else the one that holds the chain: the active
+		// space first, then any the node was moved away from. A chain is in
+		// exactly one space; its id is when it started.
+		$space_id = (int)($params['space_id'] ?? 0);
+		$spaces = $space_id > 0 ? [self::read_space($owner, $space_id)]
+			: StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$owner->key);
+		if (!$spaces) {
+			throw new Exception("Node '{$owner->get('mgn_slug')}' has no backup storage to read from.");
+		}
+		$listing = [];
+		foreach ($spaces as $space) {
+			$target = $space->target();
+			if (!$target) {
+				continue;
+			}
+			$creds = $target->get_credentials();
+			if (empty($creds)) {
+				throw new Exception('The backup target "' . $target->get('bkt_name') . '" has no stored credentials, so no download can be signed.');
+			}
+			$chain_key = BackupChainListHelper::chain_path($space, $profile, $chain_id);
+			$listing = (self::$shelf_listing_for_tests !== null)
+				? self::$shelf_listing_for_tests
+				: S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
+			if (!empty($listing) && is_array($listing)) {
+				break;
+			}
+		}
 		if (empty($listing) || !is_array($listing)) {
 			throw new Exception("Nothing is stored under {$chain_id} in this node's backup storage, so there is "
 				. 'nothing to stage.');
@@ -3522,7 +3558,7 @@ class JobCommandBuilder {
 		// Whether the links fit the job is the sending builder's question
 		// (assert_chain_job_fits): restore_objects signs the same set to find
 		// one index in it and sends none of them.
-		return ['params' => $primitive_params, 'chain_key' => $chain_key, 'target' => $target];
+		return ['params' => $primitive_params, 'chain_key' => $chain_key, 'target' => $target, 'space' => $space];
 	}
 
 	/**
@@ -3572,7 +3608,7 @@ class JobCommandBuilder {
 	 * handed another's backup and, with a matching ledger entry absent, at least
 	 * waste a transfer — and at worst, on a slug typo, restore the wrong site.
 	 */
-	private static function node_object_key($node, $target, $cloud_path, $profile = null) {
+	private static function node_object_key($node, StorageSpace $space, $cloud_path, $profile = null) {
 		$key = ltrim(trim((string)$cloud_path), '/');
 		if ($key === '') {
 			throw new Exception('No cloud object was named for this download.');
@@ -3581,9 +3617,8 @@ class JobCommandBuilder {
 			throw new Exception('That is not a usable object key.');
 		}
 		$slug = trim((string)$node->get('mgn_slug'));
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-		$node_prefix = $prefix . '/' . $slug . '/';
-		if (strpos($key, $node_prefix) !== 0) {
+		$node_prefix = $space->base();
+		if (!$space->holds_key($key)) {
 			throw new Exception("That backup is not in node '{$slug}' backup storage, so it will not be sent there.");
 		}
 
@@ -4990,8 +5025,15 @@ class JobCommandBuilder {
 			$lines[] = 'install -d -m 700 /root/.ssh';
 			$lines[] = 'touch /root/.ssh/authorized_keys';
 			$lines[] = 'chmod 600 /root/.ssh/authorized_keys';
-			$lines[] = "base64 -d <<<'" . base64_encode(implode("\n", $keys)) . "' | while IFS= read -r k; do"
+			// Every key ends in a newline, and the loop also takes a last line
+			// without one: `read` fails on an unterminated last line, and the
+			// one key a single-key list sent was silently never written.
+			$payload = base64_encode(implode("\n", $keys) . "\n");
+			$lines[] = "base64 -d <<<'" . $payload . "' | while IFS= read -r k || [ -n \"\$k\" ]; do"
 				. ' grep -qxF -- "$k" /root/.ssh/authorized_keys || printf \'%s\\n\' "$k" >> /root/.ssh/authorized_keys; done';
+			// And the job says so only when every key is on root.
+			$lines[] = "base64 -d <<<'" . $payload . "' | while IFS= read -r k || [ -n \"\$k\" ]; do"
+				. ' grep -qxF -- "$k" /root/.ssh/authorized_keys || { echo "RETIRE_FAILED=a key to keep root login with is not in /root/.ssh/authorized_keys"; exit 1; }; done';
 		}
 		$lines[] = 'install -d -m 755 /etc/ssh/sshd_config.d';
 		$lines[] = "printf '%s\\n'"

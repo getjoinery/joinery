@@ -58,7 +58,10 @@ if (!$has_table) {
 $cleanup_svt = array();
 $cleanup_bkt = array();
 harness_defer(function () use (&$cleanup_svt, &$cleanup_bkt, $db) {
-	foreach ($cleanup_svt as $id) { $db->exec("DELETE FROM svt_service_tenants WHERE svt_service_tenant_id = " . (int)$id); }
+	foreach ($cleanup_svt as $id) {
+		$db->exec("DELETE FROM sps_storage_spaces WHERE sps_svt_service_tenant_id = " . (int)$id);
+		$db->exec("DELETE FROM svt_service_tenants WHERE svt_service_tenant_id = " . (int)$id);
+	}
 	foreach ($cleanup_bkt as $id) { $db->exec("DELETE FROM bkt_backup_targets WHERE bkt_backup_target_id = " . (int)$id); }
 });
 $track = function (ServiceTenant $row) use (&$cleanup_svt) {
@@ -300,11 +303,19 @@ check($shelf['allowance'] === 10 * 1073741824 && $shelf['allowance_label'] === '
 check(count($drain()) === 0, 'backup storage touches no mail provider');
 
 harness_set_setting_mem('server_manager_backup_target_id', '999999999');
+// A site already enrolled keeps its storage space: Where new backups go is
+// where NEW customers are put, and a customer moves only when moved.
+$again = JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
+check(($again['shelf']['prefix'] ?? '') === 'harness-backups/' . $slug . '/',
+	'an enrolled site keeps its storage space whatever Where new backups go names now');
+// A new site has none to keep, and nowhere to be put.
+$fresh = $track(JoineryServices::tenant($owner->key, 900000000 + random_int(0, 99999), 'shelf', 'fresh-' . $host2));
+JoineryServices::grant($fresh, '2030-06-30 12:00:00', $client);
 try {
-	JoineryServices::enrol($owner->key, $key_id, 'shelf', $host2, $client);
+	JoineryServices::enrol($owner->key, (int)$fresh->get('svt_apk_api_key_id'), 'shelf', 'fresh-' . $host2, $client);
 	check(false, 'a missing backup storage target refuses');
 } catch (JoineryServicesException $e) {
-	check(strpos($e->getMessage(), 'no backup storage target') !== false, 'a missing backup storage target refuses with a sentence');
+	check(strpos($e->getMessage(), 'no backup storage target') !== false, 'a missing backup storage target refuses a new site with a sentence');
 }
 harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 

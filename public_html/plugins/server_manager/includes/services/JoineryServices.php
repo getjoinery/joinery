@@ -32,6 +32,8 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.3 - backup storage for a customer lives in its storage space: enrol opens one on the target
+ *                Where new backups go names, and the coordinates a site writes are that space's
  * @version 1.2 - shelfTarget() is the target Where new backups go names, never inferred from the enabled targets
  * @version 1.1 - node-linked rows: backup storage acts on the node's fleet backups (NodeBackupShelf)
  * @version 1.0
@@ -94,11 +96,6 @@ class JoineryServices {
 		} catch (\Throwable $e) {
 			return null;
 		}
-	}
-
-	/** Backup storage's path prefix (no trailing slash); every tenant lives under {prefix}/{slug}/. */
-	public static function shelfPathPrefix(BackupTarget $target): string {
-		return rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
 	}
 
 	// ── The row ───────────────────────────────────────────────────────────────
@@ -281,10 +278,20 @@ class JoineryServices {
 		}
 	}
 
-	/** Backup storage: nothing minted. A slug and a prefix, and the broker signs inside them. */
+	/**
+	 * Backup storage: nothing minted. A storage space — the customer's folder
+	 * on the target Where new backups go names, opened on first enrol and kept
+	 * after — and the broker signs inside it.
+	 */
 	private static function enrolShelf(ServiceTenant $row): array {
-		$target = self::shelfTarget();
-		if ($target === null) {
+		try {
+			$space = StorageSpace::open_default(StorageSpace::OWNER_TENANT, (int)$row->key);
+		} catch (StorageSpaceException $e) {
+			$row->set('svt_notice', $e->getMessage());
+			$row->save();
+			throw new JoineryServicesException('Backup storage could not be set up for this site: ' . $e->getMessage());
+		}
+		if ($space === null) {
 			$row->set('svt_notice', 'No backup storage target is configured on this plane.');
 			$row->save();
 			throw new JoineryServicesException('Backup storage is not available from this operator yet: no backup storage target is configured.');
@@ -292,11 +299,15 @@ class JoineryServices {
 		$row->set('svt_state', ServiceTenant::STATE_ACTIVE);
 		$row->set('svt_notice', null);
 		$row->save();
-		return array('shelf' => self::shelfCoordinates($row, $target));
+		return array('shelf' => self::shelfCoordinates($row, $space));
 	}
 
-	/** What the site writes into its `managed` target row: no credential in it. */
-	public static function shelfCoordinates(ServiceTenant $row, BackupTarget $target): array {
+	/** What the site writes into its `managed` target row: its active space, no credential in it. */
+	public static function shelfCoordinates(ServiceTenant $row, StorageSpace $space): array {
+		$target = $space->target();
+		if ($target === null) {
+			throw new JoineryServicesException('The backup storage target for this site has been deleted.');
+		}
 		$creds = array();
 		try {
 			$creds = (array)$target->get_credentials();
@@ -305,12 +316,10 @@ class JoineryServices {
 			// to notice (the target's Test button); the site still gets its
 			// coordinates and the broker says so when it is asked to sign.
 		}
-		$path_prefix = self::shelfPathPrefix($target);
-		$slug = (string)$row->get('svt_slug');
 		return array(
-			'slug'           => $slug,
-			'path_prefix'    => $path_prefix,
-			'prefix'         => $path_prefix . '/' . $slug . '/',
+			'slug'           => $space->folder(),
+			'path_prefix'    => $space->prefix_part(),
+			'prefix'         => $space->base(),
 			'retention_days' => ServiceTenant::RETENTION_DAYS,
 			'provider'       => (string)$target->get('bkt_provider'),
 			'bucket'         => (string)$target->get('bkt_bucket'),

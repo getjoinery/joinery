@@ -229,6 +229,8 @@ $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$shelf->
 JoineryServices::grant($shelf, '2036-10-01', $client);
 JoineryServices::enrol($owner->key, $key_id, 'shelf', $host, $client);
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
+$shelf_space = StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$shelf->key);
+$cleanup[] = array('sps_storage_spaces', 'sps_storage_space_id', $shelf_space ? (int)$shelf_space->key : 0);
 $slug = (string)$shelf->get('svt_slug');
 $base = 'hb/' . $slug . '/';
 
@@ -285,8 +287,11 @@ $db->exec("UPDATE svo_shelf_objects SET svo_key = '" . $base . "site/chain-20260
 $watch->watch($shelf, '2036-09-22 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)(new ShelfRun((int)$open['run_id'], TRUE))->get('svr_state') === 'aborted', 'a run open 48 hours is aborted');
-check(ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/vanished') === null, 'a ledger row backup storage does not have is dropped');
-$stray = ShelfObject::forKey((int)$shelf->key, $base . 'site/chain-20260920_010000/stray');
+$space = StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$shelf->key);
+check(ShelfObject::forKey((int)$space->key, $base . 'site/chain-20260920_010000/vanished') === null, 'a ledger row backup storage does not have leaves the live count');
+$gone = new MultiShelfObject(array('space_id' => (int)$space->key, 'key' => $base . 'site/chain-20260920_010000/vanished', 'pruned' => true));
+check(count($gone) === 1 && (string)$gone->get(0)->get('svo_pruned_cause') === 'reconcile', 'and is kept, marked pruned by the reconcile');
+$stray = ShelfObject::forKey((int)$space->key, $base . 'site/chain-20260920_010000/stray');
 check($stray !== null && (int)$stray->get('svo_bytes') === 7 && $stray->get('svo_completed_time') !== null
 	&& (string)$stray->get('svo_chain') === 'chain-20260920_010000', 'an object the ledger did not have is adopted at its listed size');
 // db of 0910 was renamed away in the ledger and is in backup storage → adopted back (10); the aborted run's db (1) adopted too.

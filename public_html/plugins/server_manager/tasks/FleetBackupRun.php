@@ -34,6 +34,9 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.10 - retention prunes across every storage space of the node (FleetBackupRetention::prune); the
+ *                 scheduled verify names the space of the chain it reads, which is how a moved node's old space
+ *                 learns its successor holds a verified chain
  * @version 1.9 - a verify that is due checks its own node's work under its own name, so it no longer replaces the
  *                pass's map of busy machines (the next sibling started beside the verify, or the pass died)
  * @version 1.8 - one backup at a time per machine, counting only claimed work, replaces the fleet-wide cap
@@ -205,17 +208,17 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				// than once per tick, and everything it counts is already
 				// confirmed present in the bucket, so a run that failed part-way
 				// can never be counted as a restore point.
-				$target = JobCommandBuilder::get_target($node);
 				$pruned = null;   // this node's listing, never a previous node's
-				if ($target) {
-					$pruned = FleetBackupRetention::prune($node, $target,
+				if (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key)) {
+					$pruned = FleetBackupRetention::prune($node,
 						FleetBackupPolicy::retention_days($policy, $node));
 					if ($pruned['error'] !== '') {
 						// Worth saying, never worth stopping for: too many restore
 						// points is a bill, no backup is an outage.
 						$problems[] = $slug . ' backup storage: ' . $pruned['error'];
 					}
-					if (!empty($pruned['listed'])) {
+					if (!empty($pruned['listed']) && $pruned['space']) {
+						$active_target = $pruned['space']->target();
 						// The bucket's testimony, stamped beside the node's own
 						// claim so the health check can compare the two. In its
 						// own guard: a stamp that cannot be written is a health
@@ -238,7 +241,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							// backup nor clears a real one found last time.
 							$shelf = FleetBackupRetention::check_shelf(
 								(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''),
-								$target->get_credentials(), (string)$target->get('bkt_bucket'));
+								$active_target->get_credentials(), (string)$active_target->get('bkt_bucket'));
 							if ($shelf['unread'] !== '') {
 								$problems[] = $slug . ' backup storage: ' . $shelf['unread'];
 							} else {
@@ -324,6 +327,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		}
 		$params = array(
 			'chain_id' => $newest['chain_id'],
+			'space_id' => (int)$newest['space_id'],
 			'profile'  => BackupProfile::MANAGER,
 			'level'    => BackupVerifier::LEVEL_READ,
 		);
@@ -348,10 +352,10 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		$checked = trim((string)$node->get('mgn_backup_shelf_checked_time'));
 		if ($checked !== '' && strtotime($checked . ' UTC') > strtotime($claimed . ' UTC')) { return ''; }
 
-		$target = JobCommandBuilder::get_target($node);
-		if (!$target) { return ''; }
+		$space = JobCommandBuilder::node_space($node);
+		if (!$space) { return ''; }
 		try {
-			$newest = FleetBackupRetention::newest_landed($node, $target);
+			$newest = FleetBackupRetention::newest_landed($space);
 			$node->set('mgn_backup_shelf_checked_time', $now);
 			$node->set('mgn_backup_shelf_newest_time', $newest !== '' ? $newest : null);
 			$node->save();

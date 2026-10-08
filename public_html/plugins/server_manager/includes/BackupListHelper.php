@@ -4,12 +4,14 @@
  *
  * Local files come from the most recent completed `list_backups` job's result
  * (which parses `ls /backups/` on the node). Cloud files come from a live
- * S3Signer::list() call against the configured BackupTarget. The two are merged
+ * S3Signer::list() of each storage space that holds the node's backups. The two are merged
  * by filename so that a file present in both locations reports `location: both`.
  *
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
+ * @version 1.5 - the cloud listing covers every live storage space of the node; each file names its space_id
+ *                (specs/storage_targets.md WP4)
  * @version 1.4 - the cloud listing is S3Signer::list() of the node's named target (switched off included) under the node's own folder, so a node past the
  *                first 500 objects of the whole target is listed
  * @version 1.3 - format_size() is BackupRunner::human(): decimal units, one format for every backup size
@@ -55,24 +57,22 @@ class BackupListHelper {
 			}
 		}
 
-		// Live cloud listing, capped so a huge bucket cannot stall the page.
-		//
-		// The target the node names, switched on or off: a switched-off target
-		// takes no new backups but still holds these.
+		// Live cloud listing of every space that still holds the node's backups
+		// (switched-off targets included), each capped so a huge bucket cannot
+		// stall the page. A file names the space it is in, so a download or a
+		// delete reaches the right bucket. The newest space's copy wins a name
+		// found in two.
 		$cloud_files = [];
-		$cloud_error = null;
-		$target = JobCommandBuilder::get_target($node);
-		if ($target) {
+		$cloud_errors = [];
+		foreach (array_reverse(StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key)) as $space) {
 			try {
-				$slug = $node->get('mgn_slug');
-				$prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
-				$node_prefix = $prefix . $slug . '/';
+				list($target, $creds, $bucket) = $space->reach();
+				$node_prefix = $space->base();
 				// Listed under the node's own folder: listing the whole target and filtering
 				// afterwards showed nothing for a node past the first 500 objects.
-				$listing = S3Signer::list($target->get_credentials(), (string)$target->get('bkt_bucket'), $node_prefix, 500);
+				$listing = S3Signer::list($creds, $bucket, $node_prefix, 500);
 				foreach ($listing as $f) {
-					// Only include files under this node's slug.
-					if (strpos($f['key'], $node_prefix) !== 0) continue;
+					if (!$space->holds_key((string)$f['key'])) continue;
 					// A chain's artifacts are not standalone backups. Listed
 					// flat they invite a restore of one incremental with no
 					// full under it, which restores nothing at all — chains
@@ -88,13 +88,16 @@ class BackupListHelper {
 						'mtime' => $mtime,
 						'local_path' => null,
 						'cloud_path' => $f['key'],
+						'space_id' => (int)$space->key,
+						'target_name' => (string)$target->get('bkt_name'),
 						'location' => 'cloud',
 					];
 				}
 			} catch (Exception $e) {
-				$cloud_error = $e->getMessage();
+				$cloud_errors[] = $space->describe() . ': ' . $e->getMessage();
 			}
 		}
+		$cloud_error = $cloud_errors ? implode('; ', $cloud_errors) : null;
 
 		// Merge by filename
 		$merged = [];
@@ -105,6 +108,8 @@ class BackupListHelper {
 			if ($has_local && $has_cloud) {
 				$entry = $local_files[$fn];
 				$entry['cloud_path'] = $cloud_files[$fn]['cloud_path'];
+				$entry['space_id'] = $cloud_files[$fn]['space_id'];
+				$entry['target_name'] = $cloud_files[$fn]['target_name'];
 				$entry['location'] = 'both';
 			} elseif ($has_local) {
 				$entry = $local_files[$fn];

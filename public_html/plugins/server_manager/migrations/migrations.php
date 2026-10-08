@@ -382,10 +382,108 @@ return [
 			}
 			$dblink->exec("DELETE FROM stg_settings WHERE stg_name = 'server_manager_services_shelf_target_id'");
 
-			if ($sole > 0) {
+			// The node column is gone from a deployment built after storage
+			// spaces (sm_015 reads it once, where it exists).
+			$has_column = (bool)$dblink->query("SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'mgn_managed_nodes' AND column_name = 'mgn_bkt_backup_target_id')")->fetchColumn();
+			if ($sole > 0 && $has_column) {
 				$q = $dblink->prepare("UPDATE mgn_managed_nodes SET mgn_bkt_backup_target_id = ?
 					WHERE mgn_bkt_backup_target_id IS NULL AND mgn_delete_time IS NULL");
 				$q->execute(array($sole));
+			}
+		},
+	],
+	[
+		// Storage spaces (specs/storage_targets.md WP4): every stored backup on
+		// this management node is in one owner's folder on one target, and every
+		// reader reaches it through that record. This writes the records for
+		// what exists today; no bytes move. Each working node with a target
+		// gets an active space for {folder}/{slug}/ there; each customer of
+		// backup storage gets one for {folder}/t{id}/ on the target Where new
+		// backups go names; every ledger row and run joins its customer's
+		// space. A folder that would overlap another owner's is left unclaimed
+		// and said in the log: the target page offers it for adoption.
+		'id' => 'sm_015_storage_spaces',
+		'version' => '1.30.32',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$ready = $dblink->query("SELECT to_regclass('sps_storage_spaces') IS NOT NULL
+				AND to_regclass('bkt_backup_targets') IS NOT NULL
+				AND to_regclass('mgn_managed_nodes') IS NOT NULL")->fetchColumn();
+			if (!$ready) {
+				return;   // a fresh install: nothing stored yet
+			}
+
+			// The folder in its one stored form.
+			foreach ($dblink->query("SELECT bkt_backup_target_id, bkt_path_prefix FROM bkt_backup_targets")->fetchAll(PDO::FETCH_ASSOC) as $t) {
+				$normal = BackupTarget::normalise_prefix((string)$t['bkt_path_prefix']);
+				if ($normal !== (string)$t['bkt_path_prefix']) {
+					$dblink->prepare("UPDATE bkt_backup_targets SET bkt_path_prefix = ? WHERE bkt_backup_target_id = ?")
+						->execute(array($normal, (int)$t['bkt_backup_target_id']));
+				}
+			}
+			$prefix_of = array();
+			foreach ($dblink->query("SELECT bkt_backup_target_id, bkt_path_prefix FROM bkt_backup_targets
+					WHERE bkt_delete_time IS NULL")->fetchAll(PDO::FETCH_ASSOC) as $t) {
+				$prefix_of[(int)$t['bkt_backup_target_id']] = (string)$t['bkt_path_prefix'];
+			}
+
+			$open = function (int $target_id, string $folder, string $column, int $owner_id) use ($dblink, $prefix_of) {
+				if (!isset($prefix_of[$target_id]) || !preg_match('/^[A-Za-z0-9_-]+$/', $folder)) {
+					return;
+				}
+				$base = $prefix_of[$target_id] . '/' . $folder . '/';
+				$q = $dblink->prepare("SELECT sps_base_key, sps_mgn_managed_node_id, sps_svt_service_tenant_id
+					FROM sps_storage_spaces WHERE sps_bkt_backup_target_id = ? AND sps_state IN ('active', 'draining')");
+				$q->execute(array($target_id));
+				foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $other) {
+					$mine = (int)($other[$column] ?? 0) === $owner_id;
+					if ($other['sps_base_key'] === $base && $mine) {
+						return;   // already there: run twice, write once
+					}
+					if (strpos($base, $other['sps_base_key']) === 0 || strpos($other['sps_base_key'], $base) === 0) {
+						error_log('sm_015: ' . $base . ' on target ' . $target_id . ' overlaps ' . $other['sps_base_key']
+							. '; left unclaimed for adoption.');
+						return;
+					}
+				}
+				$dblink->prepare("INSERT INTO sps_storage_spaces (sps_bkt_backup_target_id, sps_base_key, $column, sps_state,
+						sps_opened_time, sps_update_time) VALUES (?, ?, ?, 'active', now(), now())")
+					->execute(array($target_id, $base, $owner_id));
+			};
+
+			$has_column = (bool)$dblink->query("SELECT EXISTS (SELECT 1 FROM information_schema.columns
+				WHERE table_name = 'mgn_managed_nodes' AND column_name = 'mgn_bkt_backup_target_id')")->fetchColumn();
+			if ($has_column) {
+				$nodes = $dblink->query("SELECT mgn_managed_node_id, mgn_slug, mgn_bkt_backup_target_id FROM mgn_managed_nodes
+					WHERE mgn_delete_time IS NULL AND mgn_bkt_backup_target_id IS NOT NULL
+					  AND COALESCE(mgn_install_state, '') <> 'copy'
+					ORDER BY mgn_managed_node_id")->fetchAll(PDO::FETCH_ASSOC);
+				foreach ($nodes as $n) {
+					$open((int)$n['mgn_bkt_backup_target_id'], trim((string)$n['mgn_slug']), 'sps_mgn_managed_node_id',
+						(int)$n['mgn_managed_node_id']);
+				}
+			}
+
+			$tenants_ready = $dblink->query("SELECT to_regclass('svt_service_tenants') IS NOT NULL")->fetchColumn();
+			$shelf = (int)$dblink->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'server_manager_backup_target_id' LIMIT 1")->fetchColumn();
+			if ($tenants_ready && $shelf > 0) {
+				$rows = $dblink->query("SELECT svt_service_tenant_id, svt_slug FROM svt_service_tenants
+					WHERE svt_service = 'shelf' AND svt_mgn_managed_node_id IS NULL AND svt_delete_time IS NULL
+					  AND svt_state <> 'unpaid' ORDER BY svt_service_tenant_id")->fetchAll(PDO::FETCH_ASSOC);
+				foreach ($rows as $r) {
+					$open($shelf, trim((string)$r['svt_slug']), 'sps_svt_service_tenant_id', (int)$r['svt_service_tenant_id']);
+				}
+				foreach (array('svo_shelf_objects' => array('svo', 'svo_key'), 'svr_shelf_runs' => array('svr', 'svr_base_key')) as $table => $c) {
+					if (!$dblink->query("SELECT to_regclass('$table') IS NOT NULL")->fetchColumn()) {
+						continue;
+					}
+					list($p, $key) = $c;
+					$dblink->exec("UPDATE $table SET {$p}_sps_storage_space_id = s.sps_storage_space_id
+						FROM sps_storage_spaces s
+						WHERE {$p}_sps_storage_space_id IS NULL AND s.sps_svt_service_tenant_id = {$p}_svt_service_tenant_id
+						  AND s.sps_state IN ('active', 'draining') AND $key LIKE s.sps_base_key || '%'");
+				}
 			}
 		},
 	],

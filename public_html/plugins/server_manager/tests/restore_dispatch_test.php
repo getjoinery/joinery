@@ -207,12 +207,12 @@ try {
 		'profile'    => 'site',
 		'cloud_path' => 'joinery-backups/testnode/manager/db.sql.gz.enc'));
 } catch (Exception $e) { $mismatch = $e->getMessage(); }
-if (strpos($mismatch, 'names no backup target') !== false) {
-	// Backup storage is resolved before the key is checked, so a box with no target
-	// configured cannot reach this. Reported as skipped rather than passing on
-	// the wrong refusal.
+if (strpos($mismatch, 'has no backup storage') !== false) {
+	// Backup storage (the node's storage space) is resolved before the key is
+	// checked, so a stand-in node with no space cannot reach this. Reported as
+	// skipped rather than passing on the wrong refusal.
 	harness_skip('a profile that disagrees with the object\'s own backup storage is refused here',
-		'this box has no enabled backup target to resolve');
+		'the stand-in node has no storage space to resolve');
 } else {
 	check(strpos($mismatch, "'manager' backup storage") !== false && strpos($mismatch, "'site' one") !== false,
 		'a profile that disagrees with the object\'s own backup storage is refused here', $mismatch);

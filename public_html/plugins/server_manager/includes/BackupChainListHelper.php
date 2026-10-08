@@ -11,6 +11,8 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.7 - chains are listed from every live storage space of the node, each naming its space;
+ *                chain_path() is a space's (specs/storage_targets.md WP4)
  * @version 1.6 - chains are listed from the target the node names, switched off included; nothing is inferred
  * @version 1.5 - a chain carries its manifest version and each run the level of every artifact that records
  *                one (manifest version 2), so a reader can plan a restore per kind from the listing
@@ -45,53 +47,67 @@ class BackupChainListHelper {
 	}
 
 	/**
-	 * The bucket path a chain lives at.
+	 * The bucket path a chain lives at, in the storage space that holds it.
 	 *
-	 * `{prefix}/{slug}/{profile}/{chain_id}/`. The profile segment is not
+	 * `{space base}{profile}/{chain_id}`. The profile segment is not
 	 * decoration: a site backs itself up and a management node takes its own
 	 * copies, and those are two parties' backups under two recovery keys. A
 	 * restore that guessed the segment would look for a management node's chain
 	 * in the own backup storage.
 	 */
-	public static function chain_path($target, $slug, $profile, $chain_id) {
-		$prefix = rtrim((string)($target->get('bkt_path_prefix') ?: 'joinery-backups'), '/');
-		return $prefix . '/' . $slug . '/' . BackupProfile::path_segment($profile) . '/' . $chain_id;
+	public static function chain_path(StorageSpace $space, $profile, $chain_id) {
+		return $space->base() . BackupProfile::path_segment($profile) . '/' . $chain_id;
 	}
 
 	/**
-	 * Chains in this node's backup storage, newest first.
+	 * Chains in this node's backup storage, newest first, across every space
+	 * that still holds its backups: the one new backups go to, and any it was
+	 * moved away from (switched-off targets included), each chain naming its
+	 * space.
 	 *
-	 * Each: ['chain_id', 'created', 'updated', 'runs' => [['seq','level','time','bytes',
-	 * 'artifacts' => [kind => bytes]]], 'bytes'].
+	 * Each: ['chain_id', 'space_id', 'space_state', 'target_name', 'created', 'updated',
+	 * 'runs' => [['seq','level','time','bytes', 'artifacts' => [kind => bytes]]], 'bytes'].
 	 * Returns ['chains' => [...], 'objects' => [profile => ['count', 'bytes', 'epochs']],
 	 * 'error' => ?string]. 'objects' is the object store — the offloaded files
-	 * each profile keeps once under objects/ — as the listing shows it.
-	 * An unreachable shelf is an error to report, never an empty list — "no
-	 * restore points" and "we could not ask" must not look the same.
+	 * each profile keeps once under objects/ — as the listings show it.
+	 * A space that cannot be listed is named in 'error'; the others still list.
 	 */
 	public static function for_node($node, $max_chains = 20) {
-		// The target the node names, switched on or off: a switched-off target
-		// takes no new backups but its chains stay listable and restorable.
-		$target = JobCommandBuilder::get_target($node);
-		if (!$target) {
-			return ['chains' => [], 'objects' => [], 'error' => null];
+		$chains = [];
+		$objects = [];
+		$errors = [];
+		foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key) as $space) {
+			$one = self::for_space($space, $max_chains);
+			if ($one['error'] !== null) {
+				$errors[] = $one['error'];
+			}
+			foreach ($one['chains'] as $c) { $chains[] = $c; }
+			foreach ($one['objects'] as $profile => $o) {
+				$objects[$profile] = $objects[$profile] ?? ['count' => 0, 'bytes' => 0, 'epochs' => 0];
+				$objects[$profile]['count']  += $o['count'];
+				$objects[$profile]['bytes']  += $o['bytes'];
+				$objects[$profile]['epochs'] += $o['epochs'];
+			}
 		}
+		usort($chains, function ($a, $b) { return strcmp($b['chain_id'], $a['chain_id']); });
+		return ['chains' => array_slice($chains, 0, $max_chains), 'objects' => $objects,
+			'error' => $errors ? implode('; ', $errors) : null];
+	}
 
-		$slug   = (string)$node->get('mgn_slug');
-		$prefix = rtrim((string)($target->get('bkt_path_prefix') ?: 'joinery-backups'), '/') . '/';
-		$node_prefix = $prefix . $slug . '/';
-
-		$creds  = $target->get_credentials();
-		$bucket = $target->get('bkt_bucket');
-		if (trim((string)$bucket) === '' || $slug === '') {
-			return ['chains' => [], 'objects' => [], 'error' => 'No bucket configured.'];
+	/** for_node() for one space. */
+	public static function for_space(StorageSpace $space, $max_chains = 20) {
+		try {
+			list($target, $creds, $bucket) = $space->reach();
+		} catch (StorageSpaceException $e) {
+			return ['chains' => [], 'objects' => [], 'error' => $e->getMessage()];
 		}
-		// This node's prefix only, every page of it: backup storage holds one object
+		$node_prefix = $space->base();
+		// This space only, every page of it: backup storage holds one object
 		// per offloaded file, and a cap on the whole target would fill with them.
 		try {
 			$files = S3Signer::list($creds, $bucket, $node_prefix);
 		} catch (Exception $e) {
-			return ['chains' => [], 'objects' => [], 'error' => $e->getMessage()];
+			return ['chains' => [], 'objects' => [], 'error' => $space->describe() . ': ' . $e->getMessage()];
 		}
 
 		// Gather the manifests, the byte total of each chain's objects, and the
@@ -169,6 +185,9 @@ class BackupChainListHelper {
 
 			$chains[] = [
 				'chain_id' => (string)$chain_id,
+				'space_id' => (int)$space->key,
+				'space_state' => (string)$space->get('sps_state'),
+				'target_name' => (string)$target->get('bkt_name'),
 				'version'  => (int)($m['version'] ?? 1),
 				'profile'  => (string)($profiles[$chain_id] ?? BackupProfile::MANAGER),
 				'created'  => (string)($m['created'] ?? ''),

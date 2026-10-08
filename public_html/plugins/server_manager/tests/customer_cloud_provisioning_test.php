@@ -241,9 +241,22 @@ class CustomerCloudProvisioningTest {
 		check($node->get('mgn_container_name') === 'keyless' . $suffix,
 			'the container name is recorded at dispatch — it is the site name this plane chose');
 
+		// B9 — the provision is linked to its node the moment the node is
+		// saved, so a pass that died after that is retried on the same node,
+		// not failed by the duplicate-slug guard as somebody else's.
+		$prov->set('cvp_status', 'booting');
+		$prov->save();
+		$probe->lastFailReason = null;
+		$probe->probeBooting($prov);
+		$prov->load();
+		check($probe->lastFailReason === null && (int)$prov->get('cvp_mgn_managed_node_id') === $node_id
+			&& $prov->get('cvp_status') === 'installing',
+			'a retried pass takes up the provision\'s own node instead of failing it as a duplicate', (string)$probe->lastFailReason);
+
 		// Cleanup: node first (its FK points at the host), then host, job, provision.
 		$db = $this->db;
 		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$node_id]);
+		$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id = ?')->execute([$node_id]);
 		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$node_id]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
 		$db->prepare('DELETE FROM cvp_customer_cloud_provisions WHERE cvp_customer_cloud_provision_id = ?')->execute([$prov->key]);
@@ -484,6 +497,7 @@ class CustomerCloudProvisioningTest {
 
 		// Cleanup: jobs, then the nodes (site first: its FK points at the host record), host record, provision.
 		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
+		$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
 		$db->prepare('UPDATE mgh_managed_hosts SET mgh_mgn_managed_node_id = NULL WHERE mgh_host = ?')->execute([$ip]);
 		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id IN (?, ?, ?)')->execute([$site_id, $host_node->key, $stranger->key]);
 		$db->prepare('DELETE FROM mgh_managed_hosts WHERE mgh_host = ?')->execute([$ip]);
@@ -1020,6 +1034,7 @@ class CustomerCloudProvisioningTest {
 		$q = $this->db->prepare("DELETE FROM cca_customer_cloud_accounts WHERE cca_usr_user_id IN (?, ?)");
 		$q->execute($ids);
 		foreach ($this->rdns_node_ids as $node_id) {
+			$this->db->prepare("DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id = ?")->execute([$node_id]);
 			$q = $this->db->prepare("DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?");
 			$q->execute([$node_id]);
 		}

@@ -165,6 +165,12 @@ JoineryServices::grant($row, '2030-01-01');
 JoineryServices::enrol($owner->key, $key_id, 'shelf', (string)$row->get('svt_host'));
 $row = ServiceTenant::forKey($key_id, 'shelf');
 check(ShelfBroker::refusal($row) === '' && $row->usable(), 'granted and enrolled: writable');
+// Enrolling opened the site's storage space: its folder on the target Where
+// new backups go names. Every ledger row is in it.
+$space = StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$row->key);
+$cleanup[] = array('sps_storage_spaces', 'sps_storage_space_id', $space ? (int)$space->key : 0);
+check($space !== null && (int)$space->get('sps_bkt_backup_target_id') === (int)JoineryServices::shelfTarget()->key,
+	'enrolling opens the site\'s storage space on the target Where new backups go names');
 
 // ── begin_run ───────────────────────────────────────────────────────────────
 section('begin_run: the base key, the allowance, the names');
@@ -215,7 +221,7 @@ $signed = ShelfBroker::sign($row, $run_id, 'chain-20260920_010000/db.sql.gz.enc'
 check(strpos($signed['url'], $fx_creds['endpoint'] . '/shelf/' . $base . 'chain-20260920_010000/db.sql.gz.enc?') === 0,
 	'a put URL names the key inside the base', $signed['url']);
 check($signed['key'] === $base . 'chain-20260920_010000/db.sql.gz.enc' && $signed['expires_at'] > gmdate('Y-m-d H:i:s'), 'the key and expiry come back');
-$ledger = ShelfObject::forKey((int)$row->key, $signed['key']);
+$ledger = ShelfObject::forKey((int)$space->key, $signed['key']);
 check($ledger !== null && (int)$ledger->get('svo_bytes') === 400 && $ledger->get('svo_completed_time') === null
 	&& (string)$ledger->get('svo_chain') === 'chain-20260920_010000', 'a signed put is a ledger row, uncompleted');
 $again = ShelfBroker::sign($row, $run_id, 'chain-20260920_010000/db.sql.gz.enc', 'put', array('bytes' => 400));
@@ -265,6 +271,8 @@ $cleanup[] = array('svt_service_tenants', 'svt_service_tenant_id', (int)$srow->k
 JoineryServices::grant($srow, '2030-01-01');
 JoineryServices::enrol($stranger->key, $skey_id, 'shelf', (string)$srow->get('svt_host'));
 $srow = ServiceTenant::forKey($skey_id, 'shelf');
+$sspace = StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$srow->key);
+$cleanup[] = array('sps_storage_spaces', 'sps_storage_space_id', $sspace ? (int)$sspace->key : 0);
 try {
 	ShelfBroker::sign($srow, $run_id, 'chain-20260920_010000/x', 'put');
 	check(false, 'another tenant cannot sign against this run');
@@ -293,7 +301,7 @@ $etags = array();
 $r1 = $perform('PUT', $parts['urls'][1], str_repeat('A', 300)); $etags[1] = $r1['etag'];
 $r2 = $perform('PUT', $parts['urls'][2], str_repeat('B', 300)); $etags[2] = $r2['etag'];
 check($r1['status'] === 200 && $r2['status'] === 200 && $etags[1] !== '' && $etags[2] !== '', 'both parts land with ETags');
-$ledger = ShelfObject::forKey((int)$row->key, $create['key']);
+$ledger = ShelfObject::forKey((int)$space->key, $create['key']);
 check((string)$ledger->get('svo_upload_id') === $upload_id, 'the ledger holds the open upload id');
 $done = ShelfBroker::sign($row, $run_id, 'chain-20260920_010000/files-0000.tar.gz.enc', 'multipart_complete', array('upload_id' => $upload_id));
 $r = $perform('POST', $done['url'], S3Signer::build_complete_xml($etags));
@@ -316,8 +324,8 @@ $fin = ShelfBroker::finishRun($row, $run_id, array(
 check($fin['completed'] === 2 && $fin['cancelled'] === 1 && $fin['figure'] === 1000, 'two signed objects complete; an unsigned name is ignored; the one not named is cancelled', json_encode($fin));
 $row = ServiceTenant::forKey($key_id, 'shelf');
 check((int)$row->get('svt_figure') === 1000 && $row->get('svt_figure_time') !== null, 'the tenant figure is the ledger sum');
-check(ShelfObject::forKey((int)$row->key, $extra['key']) === null, 'the object signed but not named is dropped from the ledger');
-check(ShelfObject::forKey((int)$row->key, $create['key'])->get('svo_upload_id') === null, 'a completed multipart drops its upload id');
+check(ShelfObject::forKey((int)$space->key, $extra['key']) === null, 'the object signed but not named is dropped from the ledger');
+check(ShelfObject::forKey((int)$space->key, $create['key'])->get('svo_upload_id') === null, 'a completed multipart drops its upload id');
 check((string)(new ShelfRun($run_id, TRUE))->get('svr_state') === 'finished', 'the run is finished');
 try {
 	ShelfBroker::sign($row, $run_id, 'chain-20260920_010000/late', 'put');
@@ -348,7 +356,10 @@ $aborts_before = s3fx_count($fx, 'abort');
 $fin = ShelfBroker::finishRun($row, (int)$bm['run_id'], array(array('name' => 'chain-m/small', 'bytes' => 3)));
 check($fin['completed'] === 1 && $fin['cancelled'] === 1, 'the small object completes; the multipart is cancelled', json_encode($fin));
 check(s3fx_count($fx, 'abort') === $aborts_before + 1, 'the open multipart is aborted at the provider before the run closes');
-check(ShelfObject::forKey((int)$row->key, $cm['key']) === null, 'its ledger row is gone');
+check(ShelfObject::forKey((int)$space->key, $cm['key']) === null, 'its ledger row leaves the live count');
+$kept_row = new MultiShelfObject(array('space_id' => (int)$space->key, 'key' => $cm['key'], 'pruned' => true));
+check(count($kept_row) === 1 && (string)$kept_row->get(0)->get('svo_pruned_cause') === 'abort',
+	'and is kept, marked pruned by an abort');
 check(ShelfObject::completedBytes((int)$row->key) === 1003, 'the figure counts only what completed');
 
 // ── one ledger row per tenant and key ───────────────────────────────────────
@@ -363,7 +374,7 @@ check(ShelfObject::completedBytes((int)$row->key) === 1023, 'the first run count
 $b2m = ShelfBroker::beginRun($row, 'site', 'chain-m', array(array('name' => $manifest, 'bytes' => 30)));
 $cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$b2m['run_id']);
 $s2 = ShelfBroker::sign($row, (int)$b2m['run_id'], $manifest, 'put', array('bytes' => 30));
-$moved = ShelfObject::forKey((int)$row->key, $s2['key']);
+$moved = ShelfObject::forKey((int)$space->key, $s2['key']);
 check((int)$moved->get('svo_svr_shelf_run_id') === (int)$b2m['run_id'] && $moved->get('svo_completed_time') !== null && (int)$moved->get('svo_bytes') === 20,
 	'the row moves to the second run and stays completed at its first size until that run finishes it');
 check(ShelfObject::completedBytes((int)$row->key) === 1023, 'the figure is unchanged by the takeover alone');
@@ -407,7 +418,7 @@ $aborts_before = s3fx_count($fx, 'abort');
 $dropped = ShelfBroker::abortRun(new ShelfRun((int)$b2['run_id'], TRUE), 'harness: the site never finished');
 check($dropped === 2, 'both unfinished ledger rows are dropped');
 check(s3fx_count($fx, 'abort') === $aborts_before + 1, 'the open multipart upload is aborted at the provider by the plane');
-check(ShelfObject::forKey((int)$row->key, $c2['key']) === null, 'nothing of the aborted run remains in the ledger');
+check(ShelfObject::forKey((int)$space->key, $c2['key']) === null, 'nothing of the aborted run remains in the ledger');
 $r2 = new ShelfRun((int)$b2['run_id'], TRUE);
 check((string)$r2->get('svr_state') === 'aborted' && strpos((string)$r2->get('svr_cause'), 'never finished') !== false, 'the run records its cause');
 check(ShelfObject::completedBytes((int)$row->key) === 1033, 'the figure is untouched by the abort');
@@ -420,7 +431,7 @@ $c3 = ShelfBroker::sign($row, (int)$b3['run_id'], $manifest, 'multipart_create',
 $r = $perform('POST', $c3['url']);
 preg_match('#<UploadId>([^<]+)</UploadId>#', $r['body'], $m3);
 ShelfBroker::sign($row, (int)$b3['run_id'], $manifest, 'multipart_parts', array('upload_id' => $m3[1], 'first' => 1, 'count' => 1));
-$held = ShelfObject::forKey((int)$row->key, $c3['key']);
+$held = ShelfObject::forKey((int)$space->key, $c3['key']);
 check((int)$held->get('svo_svr_shelf_run_id') === (int)$b3['run_id'] && $held->get('svo_completed_time') !== null
 	&& (int)$held->get('svo_bytes') === 30 && (string)$held->get('svo_upload_id') === $m3[1],
 	'the completed row is the new run\'s, still completed at 30 bytes, and holds the upload it opened');
@@ -428,7 +439,7 @@ $aborts_before = s3fx_count($fx, 'abort');
 $dropped = ShelfBroker::abortRun(new ShelfRun((int)$b3['run_id'], TRUE), 'harness: the incremental died');
 check($dropped === 0, 'nothing is dropped: the row was completed by an earlier run');
 check(s3fx_count($fx, 'abort') === $aborts_before + 1, 'the upload the aborted run opened on the manifest is cancelled at the provider');
-$kept = ShelfObject::forKey((int)$row->key, $c3['key']);
+$kept = ShelfObject::forKey((int)$space->key, $c3['key']);
 check($kept !== null && $kept->get('svo_completed_time') !== null && (int)$kept->get('svo_bytes') === 30 && $kept->get('svo_upload_id') === null,
 	'the row stays, completed at its earlier size, with no upload id');
 check(ShelfObject::completedBytes((int)$row->key) === 1033, 'the manifest stays counted at the size the earlier run gave it');
@@ -444,7 +455,7 @@ ShelfBroker::sign($row, (int)$b4['run_id'], 'chain-4/big', 'multipart_parts', ar
 $aborts_before = s3fx_count($fx, 'abort');
 ShelfBroker::sign($row, (int)$b4['run_id'], 'chain-4/big', 'multipart_create', array('bytes' => 100));
 check(s3fx_count($fx, 'abort') === $aborts_before + 1, 'two creates for one key: one abort, the upload the row held');
-$retried = ShelfObject::forKey((int)$row->key, $c4['key']);
+$retried = ShelfObject::forKey((int)$space->key, $c4['key']);
 check($retried !== null && $retried->get('svo_upload_id') === null && (int)$retried->get('svo_svr_shelf_run_id') === (int)$b4['run_id'],
 	'the row is one, holds no upload id, and is still the run\'s');
 $rows_for_key = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'key' => $c4['key'], 'deleted' => false));

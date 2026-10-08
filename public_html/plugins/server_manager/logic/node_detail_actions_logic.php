@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.51 - move_backup_storage: a node's new backups move to another target (a new storage space) and
+ *                its old space drains; the hard-delete guard counts what the node's spaces hold; the target is
+ *                no longer a connection setting
  * @version 1.50 - a node is not newly pointed at a switched-off or deleted backup target; keeping its own is fine
  * @version 1.49 - adopt_cloud_server: record the running cloud server a joined node runs on
  *                 (test_cloud_account_and_prod_management WP9)
@@ -165,6 +168,7 @@ class NodeDetailActions {
 		'restore_chain'            => 'backups',
 		'backup_run'               => 'backups',
 		'save_backup_policy'       => 'backups',
+		'move_backup_storage'      => 'backups',
 		'apply_update'             => 'updates',
 		'apply_update_all_on_host' => 'updates',
 		'publish_upgrade'          => 'updates',
@@ -435,6 +439,22 @@ class NodeDetailActions {
 					'Backup schedule saved.', 'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
+				return $base_url . '&tab=backups';
+			}
+
+			case 'move_backup_storage': {
+				// New backups go to the chosen target; the backups already taken
+				// stay where they are, readable and restorable, and age out
+				// there once the new target holds a verified one
+				// (specs/storage_targets.md R3). Nothing is copied.
+				$to = new BackupTarget((int)($_POST['bkt_backup_target_id'] ?? 0), TRUE);
+				$before = JobCommandBuilder::get_target($node);
+				StorageSpace::move(StorageSpace::OWNER_NODE, (int)$node->key, $to);
+				self::ok($session, $page_regex, 'New backups of this node now go to "' . $to->get('bkt_name') . '". '
+					. ($before && (int)$before->key !== (int)$to->key
+						? 'Its backups on "' . $before->get('bkt_name') . '" stay there, readable and restorable, and age out '
+							. 'once the new target holds a verified backup.'
+						: 'Its next backup starts a full backup there.'));
 				return $base_url . '&tab=backups';
 			}
 
@@ -1091,12 +1111,11 @@ class NodeDetailActions {
 					));
 					return $base_url . '&tab=overview';
 				}
-				// Refuse while offsite backups still exist for this slug: hard-deleting the
-				// record would orphan them from the node they belong to. Delete them from the
-				// target's Stored Backups panel first. Fail safe — if a target can't be
-				// listed we cannot confirm zero, so we also refuse.
-				require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
-				$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
+				// Refuse while its storage spaces still hold backups: hard-deleting the
+				// record would leave them unclaimed. Delete them from the target's
+				// Stored Backups panel first. Fail safe — if a space can't be listed we
+				// cannot confirm zero, so we also refuse.
+				$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
 				if ($bk['count'] > 0) {
 					$session->save_message(new DisplayMessage(
 						'This site still has ' . $bk['count'] . ' offsite backup' . ($bk['count'] === 1 ? '' : 's')
@@ -1132,7 +1151,7 @@ class NodeDetailActions {
 		$editable_fields = [
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
-			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
+			'mgn_site_url', 'mgn_notes', 'mgn_enabled',
 			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
 			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds',
@@ -1148,17 +1167,6 @@ class NodeDetailActions {
 				$value = trim($_POST[$field]);
 				if ($field === 'mgn_ssh_port' && $value === '') {
 					$value = 22;
-				}
-				if ($field === 'mgn_bkt_backup_target_id') {
-					$value = ($value === '') ? null : (int)$value;
-					// A switched-off target takes no new backups, so a node is
-					// not newly pointed at one; keeping the one it has is fine.
-					if ($value !== null && $value !== (int)$node->get('mgn_bkt_backup_target_id')) {
-						$chosen = new BackupTarget($value, TRUE);
-						if (!$chosen->key || $chosen->get('bkt_delete_time') || !$chosen->get('bkt_enabled')) {
-							throw new DisplayableUserException('That backup target is switched off or deleted, so new backups cannot go there. Choose another.');
-						}
-					}
 				}
 				if (($field === 'mgn_uptime_tcp_port' || $field === 'mgn_uptime_interval_seconds') && $value === '') {
 					$value = $field === 'mgn_uptime_interval_seconds' ? 300 : 0;

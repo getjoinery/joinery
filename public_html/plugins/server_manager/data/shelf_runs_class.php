@@ -29,16 +29,20 @@ class ShelfRun extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		'svr_svt_service_tenant_id' => array('action' => 'cascade'),
+		'svr_sps_storage_space_id'  => array('action' => 'null'),
 	);
 
 	public static $test_fixture = array(
-		'values'       => array('svr_profile' => 'site', 'svr_state' => 'open'),
+		// A new run is taken in a storage space; the generator only fills NOT NULL columns.
+		'values'       => array('svr_profile' => 'site', 'svr_state' => 'open', 'svr_sps_storage_space_id' => 1),
 		'update_field' => 'svr_chain',
 	);
 
 	public static $field_specifications = array(
 		'svr_shelf_run_id'          => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'svr_svt_service_tenant_id' => array('type'=>'int8', 'is_nullable'=>false),
+		// The space the run was taken in, and so the target that holds it.
+		'svr_sps_storage_space_id'  => array('type'=>'int8'),
 		'svr_profile'               => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'site'),
 		'svr_chain'                 => array('type'=>'varchar(64)'),
 		// The boundary: every key signed for this run starts with it.
@@ -63,11 +67,23 @@ class ShelfRun extends SystemBase {
 		if (!(int)$this->get('svr_svt_service_tenant_id')) {
 			throw new ShelfRunException('A backup storage run belongs to a tenant.');
 		}
+		if (!$this->key && !(int)$this->get('svr_sps_storage_space_id')) {
+			throw new ShelfRunException('A backup storage run is taken in a storage space.');
+		}
 		if (trim((string)$this->get('svr_base_key')) === '') {
 			throw new ShelfRunException('A backup storage run has a base key.');
 		}
 		$this->set('svr_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
+	}
+
+	/** The space the run was taken in. */
+	public function space(): StorageSpace {
+		$space = new StorageSpace((int)$this->get('svr_sps_storage_space_id'), TRUE);
+		if (!$space->key) {
+			throw new ShelfRunException('This backup storage run records no storage space.');
+		}
+		return $space;
 	}
 
 	/** The artifact names the run declared. */
@@ -85,6 +101,9 @@ class MultiShelfRun extends SystemMultiBase {
 		$filters = array();
 		if (isset($this->options['tenant_id'])) {
 			$filters['svr_svt_service_tenant_id'] = array((int)$this->options['tenant_id'], PDO::PARAM_INT);
+		}
+		if (isset($this->options['space_id'])) {
+			$filters['svr_sps_storage_space_id'] = array((int)$this->options['space_id'], PDO::PARAM_INT);
 		}
 		if (isset($this->options['state'])) {
 			$filters['svr_state'] = array((string)$this->options['state'], PDO::PARAM_STR);

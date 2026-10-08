@@ -8,7 +8,8 @@
  * the machine that made them is gone.
  *
  * Objects are grouped by their slug segment. Classifying those slugs needs to
- * know who owns them, and only the caller knows that: a standalone site owns
+ * know who owns them, and only the caller knows that (a map entry may name the
+ * status, the owner and its storage space outright): a standalone site owns
  * exactly one slug, while a management node owns a whole fleet. So the ownership
  * map is passed IN (see group_objects), and server_manager's FleetBackups supplies
  * the fleet-wide one. Nothing here reads the node table.
@@ -17,6 +18,9 @@
  *   decommissioned — a former owner had this slug (the site is gone; its backups remain)
  *   orphaned       — nothing in the map matches this slug
  *
+ * @version 2.2 - the folder is the target's normalised prefix (BackupTarget::prefix()); a caller's map may
+ *                name a folder's status, owner and storage space; slug_backup_count() is gone (a node's
+ *                backups are counted from its storage spaces)
  * @version 2.1 - slug_backup_count() counts switched-off targets too: they still hold backups
  * @version 2.0 - moved to core; slug ownership is supplied by the caller rather than
  *                read from the fleet node table
@@ -31,9 +35,7 @@ class TargetBackups {
 
 	/** The target's base key prefix, always normalized to a single trailing slash. */
 	public static function base_prefix($target) {
-		$p = trim((string)$target->get('bkt_path_prefix'));
-		if ($p === '') { $p = 'joinery-backups'; }
-		return rtrim($p, '/') . '/';
+		return BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix')) . '/';
 	}
 
 	/**
@@ -72,10 +74,13 @@ class TargetBackups {
 			if ($slug === '') { continue; }
 			if (!isset($groups[$slug])) {
 				$known  = is_array($node_map[$slug] ?? null) ? $node_map[$slug] : null;
-				$status = $known === null ? 'orphaned' : (!empty($known['deleted']) ? 'decommissioned' : 'live');
+				$status = $known === null ? 'orphaned'
+					: (string)($known['status'] ?? (!empty($known['deleted']) ? 'decommissioned' : 'live'));
 				$groups[$slug] = [
 					'slug' => $slug, 'status' => $status,
 					'node_id' => $known === null ? null : ($known['node_id'] ?? null),
+					'owner' => $known === null ? '' : (string)($known['owner'] ?? ''),
+					'space_id' => $known === null ? null : ($known['space_id'] ?? null),
 					'objects' => [], 'count' => 0, 'bytes' => 0,
 				];
 			}
@@ -129,41 +134,6 @@ class TargetBackups {
 		$n = 0;
 		self::delete_key($creds, $bucket, $key, $n);
 		return true;
-	}
-
-	/**
-	 * Count the offsite backups stored under a node slug across every target
-	 * not deleted, switched on or off. Used to block hard-deleting a node record while its backups still
-	 * exist (deleting the record orphans them from the node they belong to).
-	 *
-	 * Returns ['count' => int, 'unchecked' => string[]] where 'unchecked' names any
-	 * target that could not be listed (bad credentials, unreachable). A caller that
-	 * wants to fail safe should treat a non-empty 'unchecked' as "cannot confirm zero".
-	 */
-	public static function slug_backup_count($slug) {
-		if (!preg_match('/^[A-Za-z0-9_-]+$/', (string)$slug)) {
-			return ['count' => 0, 'unchecked' => []]; // no valid prefix → no prefixed backups
-		}
-		// Switched-off targets count: switching one off stops new backups, it does
-		// not remove the ones it holds, and those still belong to this slug.
-		$targets = new MultiBackupTarget(['deleted' => false]);
-		$targets->load();
-
-		$count = 0;
-		$unchecked = [];
-		foreach ($targets as $t) {
-			$bucket = trim((string)$t->get('bkt_bucket'));
-			if ($bucket === '') { continue; } // nothing configured → nothing stored here
-			try {
-				$creds = $t->get_credentials();
-				if (empty($creds)) { continue; }
-				$prefix = self::base_prefix($t) . $slug . '/';
-				$count += count(S3Signer::list($creds, $bucket, $prefix));
-			} catch (Exception $e) {
-				$unchecked[] = (string)$t->get('bkt_name');
-			}
-		}
-		return ['count' => $count, 'unchecked' => $unchecked];
 	}
 
 	// ── internals ──

@@ -170,8 +170,8 @@ try {
         DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
     ok('single-owner prefix: bkn_bty_booking_type_id resolves to bty_booking_types',
         DeletionRule::getSourceTableFromColumn('bkn_bty_booking_type_id', 'bkn') === 'bty_booking_types');
-    ok('single-owner prefix: mgn_bkt_backup_target_id resolves to bkt_backup_targets',
-        DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
+    ok('single-owner prefix: sps_bkt_backup_target_id resolves to bkt_backup_targets',
+        DeletionRule::getSourceTableFromColumn('sps_bkt_backup_target_id', 'sps') === 'bkt_backup_targets');
     ok('abbreviated entity under a single-owner prefix: bkh_bkt_target_id resolves by prefix alone',
         DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === 'bkt_backup_targets');
     ok('the full entity: bkh_bkt_backup_target_id resolves to bkt_backup_targets',

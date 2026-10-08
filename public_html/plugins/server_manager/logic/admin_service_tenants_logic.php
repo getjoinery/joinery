@@ -12,11 +12,16 @@
  *            later. A stopped row with a date ahead comes back in place now.
  *   release  stop the service from the operator's side: the same path the
  *            customer's own release and the reconcile use.
+ *   move     backup storage only: the customer's new backups go to another
+ *            target (a new storage space); its backups already stored stay
+ *            where they are, readable, until they age out
+ *            (specs/storage_targets.md §5).
  *
  * Managed sites are invisible here by construction: they have no tenant row.
  * A Managed site that moved to its customer's own cloud account has two —
  * node-linked, reached only from here and the reconcile.
  *
+ * @version 1.1 - move: a customer's backup storage moves to another target; each row carries its spaces
  * @version 1.0
  */
 
@@ -56,6 +61,20 @@ function admin_service_tenants_logic(array $input): LogicResult {
 						. '. The site sees it on its next enrol or status call.';
 				} catch (\Throwable $e) {
 					$error = 'The date was not written: ' . $e->getMessage();
+				}
+			}
+		} elseif ($action === 'move' && (string)$row->get('svt_service') === ServiceTenant::SERVICE_SHELF && !$row->is_node_linked()) {
+			$formwriter = new FormWriterV2HTML5('move_' . (int)$row->key);
+			if (!$formwriter->validateCSRF($input)) {
+				$error = 'That request token has expired. Try again.';
+			} else {
+				try {
+					$to = new BackupTarget((int)($input['bkt_backup_target_id'] ?? 0), TRUE);
+					StorageSpace::move(StorageSpace::OWNER_TENANT, (int)$row->key, $to);
+					$message = $row->get('svt_host') . ': new backups go to "' . $to->get('bkt_name') . '". The backups already '
+						. 'stored stay where they are, readable, and age out once the new target holds a finished backup.';
+				} catch (\Throwable $e) {
+					$error = 'Not moved: ' . $e->getMessage();
 				}
 			}
 		} elseif ($action === 'release') {
@@ -99,6 +118,8 @@ function admin_service_tenants_logic(array $input): LogicResult {
 			'status'      => JoineryServices::statusOf($row),
 			'account'     => $account,
 			'grace_ends'  => ServiceTenantLadder::graceEnds($row, 'svt_lapse_time', $grace_days),
+			'spaces'      => ((string)$row->get('svt_service') === ServiceTenant::SERVICE_SHELF && !$row->is_node_linked())
+				? StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key) : array(),
 		);
 	}
 
@@ -109,6 +130,7 @@ function admin_service_tenants_logic(array $input): LogicResult {
 		'limit'         => ADMIN_SERVICE_TENANTS_LIMIT,
 		'grace_days'    => $grace_days,
 		'shelf_target'  => JoineryServices::shelfTarget(),
+		'move_targets'  => new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_name' => 'ASC')),
 		'mail_ready'    => Smtp2GoClient::fromSettings() !== null,
 		'page_url'      => $page_url,
 	));

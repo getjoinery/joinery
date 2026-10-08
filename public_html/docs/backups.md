@@ -987,6 +987,14 @@ under, so each target's objects open from that target alone. Object retention
 runs per target too: an object is removed from a target when no kept run on that
 target names it.
 
+A `service` run goes to the management node's target for this site, which sends
+the target's name with every run. A run sent to a target of another name starts
+a new chain (`destination_changed`): a management node that moves a site to
+another target gets a full backup there on the next run, and the old chain is
+never extended into the new bucket. On the management node each site's backups
+are in its **storage space** on a target, and a move drains the old space until
+its backups age out ([Server Manager § Storage spaces](../plugins/server_manager/docs/overview.md#storage-spaces)).
+
 ## Retention
 
 - **Cloud** — keep `backup_retention_days` days of restore points (default
@@ -1569,16 +1577,19 @@ target" later.
 **A target's location is fixed once it is used.** Provider, endpoint, region,
 bucket and folder are drawn read-only, and refused on save, once anything was
 stored in the target (a history row points at it) or, on a management node, a
-node backs up to it (`BackupTarget::location_refusal()`). The name and the key
-stay editable. To use another bucket, add a target.
+storage space on it is still live (`BackupTarget::location_refusal()`). The name
+and the key stay editable. To use another bucket, add a target. The folder is
+stored in one form — no leading or trailing slash, no empty segment
+(`BackupTarget::normalise_prefix()`) — and no two targets share a name, since a
+name says which target a backup went to.
 
 **Switching off and deleting.** A switched-off target takes no new backups;
 listings, restores and pruning carry on. It is not switched off while it is
-where new backups go or, on a management node, a node backs up to it
-(`disable_refusal()`). It is not deleted while either holds, while it still
-holds backups (runs not yet pruned), or while backup storage for customers is
-kept in it (`delete_refusal()`). Each refusal is a sentence naming what still
-uses the target.
+where new backups go or, on a management node, an owner's new backups go to it
+(an active storage space; `disable_refusal()`). It is not deleted while either
+holds, while it still holds backups (runs not yet pruned), or while it keeps an
+owner's older backups (a draining space; `delete_refusal()`). Each refusal is a
+sentence naming what still uses the target.
 
 A target is proven before it is saved: the save runs `TargetTester::test()` on
 an enabled target and refuses when it fails, printing why with the values

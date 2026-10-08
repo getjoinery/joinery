@@ -17,6 +17,8 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.1 - no two targets share a name (a node's chain follows its target's name); holdings() reads the management node's storage spaces (active and draining owners); the folder
+ *                is stored in one form (normalise_prefix(), prefix()) (specs/storage_targets.md WP4, S11)
  * @version 3.0 - holdings(), location_refusal(), disable_refusal(), delete_refusal(): a target's location is
  *                fixed once anything is stored in it, and it is not switched off or deleted while it is where
  *                new backups go or still holds or serves anything (specs/storage_targets.md WP2)
@@ -96,6 +98,7 @@ class BackupTarget extends SystemBase {
 		if (empty($this->get('bkt_bucket'))) {
 			throw new BackupTargetException('Bucket name is required.');
 		}
+		$this->assert_own_name();
 
 		$this->set('bkt_update_time', gmdate('Y-m-d H:i:s'));
 	}
@@ -106,11 +109,28 @@ class BackupTarget extends SystemBase {
 	 * before save()).
 	 */
 	function save($debug = false) {
+		$this->assert_own_name();
+		$this->set('bkt_path_prefix', self::normalise_prefix((string)$this->get('bkt_path_prefix')));
 		$this->normalise_endpoint('bkt_credentials');
 		$this->normalise_endpoint('bkt_node_credentials');
 		$this->seal_credentials('bkt_credentials');
 		$this->seal_credentials('bkt_node_credentials');
 		return parent::save($debug);
+	}
+
+	/**
+	 * A name says which target a backup went to: a management node sends it
+	 * with every run, and a node's chain starts again when it changes. Two
+	 * targets of one name would read as one, so a name is never shared.
+	 */
+	private function assert_own_name(): void {
+		$name = trim((string)$this->get('bkt_name'));
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT 1 FROM bkt_backup_targets
+			WHERE lower(bkt_name) = lower(?) AND bkt_delete_time IS NULL AND bkt_backup_target_id <> ? LIMIT 1");
+		$q->execute(array($name, (int)$this->key));
+		if ($q->fetchColumn()) {
+			throw new BackupTargetException('Another backup target is already called "' . $name . '". Give this one its own name.');
+		}
 	}
 
 	/**
@@ -127,6 +147,26 @@ class BackupTarget extends SystemBase {
 			$arr['endpoint'] = $normal;
 			$this->set($column, $arr);
 		}
+	}
+
+	/** The folder used when a target names none. */
+	const DEFAULT_PREFIX = 'joinery-backups';
+
+	/**
+	 * A folder inside a bucket in its one form: no leading or trailing slash,
+	 * no empty segment, the default when blank. Every key composed from a
+	 * target starts with this, so a folder entered as '/backups/' and one
+	 * entered as 'backups' are the same place.
+	 */
+	public static function normalise_prefix(string $prefix): string {
+		$segments = array_filter(explode('/', trim($prefix)), function ($s) { return trim($s) !== ''; });
+		$normal = implode('/', array_map('trim', $segments));
+		return $normal !== '' ? $normal : self::DEFAULT_PREFIX;
+	}
+
+	/** This target's folder inside its bucket, normalised (no trailing slash). */
+	public function prefix(): string {
+		return self::normalise_prefix((string)$this->get('bkt_path_prefix'));
 	}
 
 	/** The settings that name the target new backups go to, on this deployment. */
@@ -149,16 +189,16 @@ class BackupTarget extends SystemBase {
 	/**
 	 * What this target holds or serves, read from the records that point at it
 	 * (specs/storage_targets.md §5). A site's own runs are its history rows; on
-	 * a management node, the nodes that back up to it and the customers' backup
-	 * storage kept in it. Counted with the target disabled or not.
+	 * a management node, the storage spaces on it: the owners whose new backups
+	 * go there (active) and the owners whose older backups are still kept there
+	 * while they age out (draining). Counted with the target disabled or not.
 	 *
-	 * @return array{stored: int, ever: int, nodes: string[], customers: bool}
+	 * @return array{stored: int, ever: int, active: string[], draining: string[]}
 	 *   stored: runs whose objects are still there; ever: runs ever uploaded there;
-	 *   nodes: names of the nodes that back up to it; customers: backup storage for
-	 *   customers is kept in it
+	 *   active / draining: the owners of its spaces in that state, by name
 	 */
 	public function holdings(): array {
-		$out = array('stored' => 0, 'ever' => 0, 'nodes' => array(), 'customers' => false);
+		$out = array('stored' => 0, 'ever' => 0, 'active' => array(), 'draining' => array());
 		if (!$this->key) {
 			return $out;
 		}
@@ -170,15 +210,8 @@ class BackupTarget extends SystemBase {
 		$row = $q->fetch(PDO::FETCH_ASSOC) ?: array();
 		$out['ever'] = (int)($row['ever'] ?? 0);
 		$out['stored'] = (int)($row['stored'] ?? 0);
-		if (class_exists('ManagedNode')) {
-			$q = $db->prepare("SELECT mgn_name FROM mgn_managed_nodes
-				WHERE mgn_bkt_backup_target_id = ? AND mgn_delete_time IS NULL ORDER BY mgn_name");
-			$q->execute(array((int)$this->key));
-			$out['nodes'] = array_map('strval', $q->fetchAll(PDO::FETCH_COLUMN));
-		}
-		if (class_exists('ServiceTenant') && (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true) === (int)$this->key) {
-			$has = $db->query("SELECT to_regclass('svo_shelf_objects') IS NOT NULL")->fetchColumn();
-			$out['customers'] = $has && (bool)$db->query("SELECT 1 FROM svo_shelf_objects LIMIT 1")->fetchColumn();
+		if (class_exists('StorageSpace')) {
+			$out = array_merge($out, StorageSpace::holdings_of((int)$this->key));
 		}
 		return $out;
 	}
@@ -194,11 +227,11 @@ class BackupTarget extends SystemBase {
 		if ($h['ever'] > 0) {
 			$why[] = $h['ever'] . ' backup' . ($h['ever'] === 1 ? ' was' : 's were') . ' stored in it';
 		}
-		if ($h['nodes']) {
-			$why[] = self::name_list($h['nodes']) . ' back' . (count($h['nodes']) === 1 ? 's' : '') . ' up to it';
+		if ($h['active']) {
+			$why[] = self::backs_up($h['active']);
 		}
-		if ($h['customers']) {
-			$why[] = 'backup storage for customers is kept in it';
+		if ($h['draining']) {
+			$why[] = 'it still holds older backups of ' . self::name_list($h['draining']);
 		}
 		if (!$why) {
 			return '';
@@ -210,17 +243,16 @@ class BackupTarget extends SystemBase {
 	/**
 	 * Why this target may not be switched off, or '' when it may. Disabled
 	 * means no new backups; reads, restores and pruning carry on. So what is
-	 * refused is switching off the place new backups are sent.
+	 * refused is switching off a place new backups are sent.
 	 */
 	public function disable_refusal(): string {
 		$why = array();
 		if ($this->is_default()) {
 			$why[] = 'it is where new backups go; choose another target for them first';
 		}
-		$nodes = $this->holdings()['nodes'];
-		if ($nodes) {
-			$why[] = self::name_list($nodes) . ' back' . (count($nodes) === 1 ? 's' : '') . ' up to it; move '
-				. (count($nodes) === 1 ? 'it' : 'them') . ' to another target first';
+		$active = $this->holdings()['active'];
+		if ($active) {
+			$why[] = self::backs_up($active) . '; move ' . (count($active) === 1 ? 'it' : 'them') . ' to another target first';
 		}
 		return $why ? 'It cannot be switched off: ' . implode('; ', $why) . '.' : '';
 	}
@@ -232,23 +264,28 @@ class BackupTarget extends SystemBase {
 			$why[] = 'it is where new backups go; choose another target for them first';
 		}
 		$h = $this->holdings();
-		if ($h['nodes']) {
-			$why[] = self::name_list($h['nodes']) . ' back' . (count($h['nodes']) === 1 ? 's' : '') . ' up to it';
+		if ($h['active']) {
+			$why[] = self::backs_up($h['active']);
+		}
+		if ($h['draining']) {
+			$why[] = 'it still holds older backups of ' . self::name_list($h['draining']) . ', kept until they age out';
 		}
 		if ($h['stored'] > 0) {
 			$why[] = $h['stored'] . ' backup' . ($h['stored'] === 1 ? ' is' : 's are') . ' still stored in it, and retention prunes them there';
 		}
-		if ($h['customers']) {
-			$why[] = 'backup storage for customers is kept in it';
-		}
 		return $why ? 'It cannot be deleted: ' . implode('; ', $why) . '.' : '';
+	}
+
+	/** "acme backs up to it", "acme and t5 back up to it". */
+	private static function backs_up(array $names): string {
+		return self::name_list($names) . ' back' . (count($names) === 1 ? 's' : '') . ' up to it';
 	}
 
 	/** "a", "a and b", "a, b and 2 more". */
 	private static function name_list(array $names): string {
 		$names = array_values($names);
 		if (count($names) > 3) {
-			return $names[0] . ', ' . $names[1] . ' and ' . (count($names) - 2) . ' more nodes';
+			return $names[0] . ', ' . $names[1] . ' and ' . (count($names) - 2) . ' more';
 		}
 		if (count($names) === 1) {
 			return $names[0];

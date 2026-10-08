@@ -68,12 +68,8 @@ foreach ($held as $state => $n) {
 }
 
 section('Pruning, called directly');
-$target = new class {
-	public function get_credentials() { return array('key' => 'x'); }
-	public function get($f) { return $f === 'bkt_bucket' ? 'harness-bucket' : ''; }
-};
 foreach ($not_working as $state) {
-	$r = FleetBackupRetention::prune(nis_node($state), $target, 7);
+	$r = FleetBackupRetention::prune(nis_node($state), 7);
 	check(!$r['listed'] && strpos($r['error'], 'not a working node') === 0,
 		"a $state node's storage is never listed or pruned from here", $r['error']);
 }

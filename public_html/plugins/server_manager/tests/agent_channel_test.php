@@ -77,6 +77,7 @@ $made_hosts = [];
 $db->exec("DELETE FROM mgh_managed_hosts WHERE mgh_slug LIKE 'agtest-host-%'");
 foreach ($db->query("SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'agtest-%'")->fetchAll(PDO::FETCH_COLUMN) as $stale_id) {
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$stale_id]);
+	$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id = ?')->execute([$stale_id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$stale_id]);
 }
 $db->exec("DELETE FROM ajr_agent_join_requests WHERE ajr_claimed_name LIKE 'agtest-%'");
@@ -972,6 +973,7 @@ foreach ($made_hosts as $id) {
 }
 foreach ($made_nodes as $id) {
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute([$id]);
+	$db->prepare('DELETE FROM sps_storage_spaces WHERE sps_mgn_managed_node_id = ?')->execute([$id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute([$id]);
 }
 foreach ($made_join_requests as $id) {

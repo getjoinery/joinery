@@ -6,6 +6,7 @@
  * Every self-hosted site renting this plane's outbound mail or backup storage,
  * one row per service, with the grant (a date) and release acts.
  *
+ * @version 1.2 - a backup storage row says which target holds it (and any it was moved away from) and moves
  * @version 1.1 - a node-linked row (a site moved off Managed) names its node instead of a key
  * @version 1.0 - specs/services_phase2_platform.md §10 item 5
  */
@@ -86,7 +87,34 @@ its node's fleet backups.</p>
 			<td><?php echo htmlspecialchars($s['service']); ?>
 				<?php if ($s['service'] === 'mail' && $s['domain'] !== ''): ?><br>
 					<small class="text-muted"><?php echo htmlspecialchars($s['domain'] . ' · ' . $s['domain_state']); ?></small>
-				<?php endif; ?></td>
+				<?php endif; ?>
+				<?php
+				// Backup storage: the target its new backups go to, any it was
+				// moved away from, and Move.
+				$active_target = null;
+				foreach ($t['spaces'] as $sp):
+					$sp_target = $sp->target();
+					if ($sp->is_active()) { $active_target = $sp_target; } ?>
+					<br><small class="text-muted"><?php echo $sp->is_active() ? 'on ' : 'older on ';
+						echo htmlspecialchars($sp_target ? $sp_target->get('bkt_name') : 'a deleted target'); ?></small>
+				<?php endforeach;
+				if ($t['spaces'] || ($s['service'] === 'shelf' && !$row->is_node_linked() && $s['state'] !== 'unpaid')) {
+					$move_options = array();
+					foreach ($move_targets as $mt) {
+						if (!$active_target || (int)$mt->key !== (int)$active_target->key) {
+							$move_options[(string)(int)$mt->key] = $mt->get('bkt_name');
+						}
+					}
+					if ($move_options) {
+						$fwm = $page->getFormWriter('move_' . $id, array('action' => $page_url, 'method' => 'POST'));
+						$fwm->begin_form();
+						$fwm->hiddeninput('action', '', array('value' => 'move'));
+						$fwm->hiddeninput('svt_service_tenant_id', '', array('value' => $id));
+						$fwm->dropinput('bkt_backup_target_id', '', array('options' => $move_options));
+						$fwm->submitbutton('btn_move_' . $id, 'Move', array('class' => 'btn btn-sm btn-outline-primary'));
+						$fwm->end_form();
+					}
+				} ?></td>
 			<td><?php echo htmlspecialchars($state_labels[$s['state']] ?? $s['state']); ?>
 				<?php if ($s['notice'] !== ''): ?><br><small class="text-muted"><?php echo htmlspecialchars($s['notice']); ?></small><?php endif; ?></td>
 			<td><?php echo htmlspecialchars($s['used_label'] . ' of ' . $s['allowance_label']); ?>

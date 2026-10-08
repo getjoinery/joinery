@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.28 - a manager-profile chain belongs to the target the management node named: a run sent to a
+ *                 target of another name starts a new chain (specs/storage_targets.md WP4); a target's
+ *                 folder is read in its one form (BackupTarget::normalise_prefix())
  * @version 1.27 - every run records where it went (bkh_destination, specs/storage_targets.md WP3); a chain
  *                whose runs went to another target is not extended (destination_changed); retention
  *                deletes each run from the target it went to, and offloaded files are pruned per target;
@@ -734,8 +737,9 @@ class BackupRunner {
 
 	/**
 	 * The chain currently being extended: its id, its local manifest, and where
-	 * its newest run went ('target:{id}' for a site's own target, null when that
-	 * is not this profile's to know), or nulls when there is nothing to extend.
+	 * its newest run went ('target:{id}' for a site's own target, 'service:{name}'
+	 * for the target a management node named), or nulls when there is nothing
+	 * to extend.
 	 *
 	 * Read from this site's own history rather than from the bucket. Listing
 	 * the bucket to decide what to append to would make every backup depend on
@@ -785,16 +789,22 @@ class BackupRunner {
 	 * management node's to tell apart (specs/storage_targets.md WP5).
 	 */
 	private static function destination_of_plan(array $plan) {
-		if ($plan['profile'] !== BackupProfile::SITE || empty($plan['target']) || !$plan['target']->key) {
+		if (empty($plan['target'])) {
 			return null;
 		}
-		return 'target:' . (int)$plan['target']->key;
+		if ($plan['profile'] !== BackupProfile::SITE) {
+			// A management node's storage is named by the target it sends;
+			// moving the node to another target names another, and the chain
+			// starts again there.
+			return 'service:' . (string)$plan['target']->get('bkt_name');
+		}
+		return $plan['target']->key ? 'target:' . (int)$plan['target']->key : null;
 	}
 
 	/** destination_of_plan() for a run already taken, from its history row. */
 	private static function destination_of_row(array $plan, BackupHistory $row) {
 		if ($plan['profile'] !== BackupProfile::SITE) {
-			return null;
+			return 'service:' . (string)$row->get('bkh_target_name');
 		}
 		return (string)$row->get('bkh_destination') === 'target'
 			? 'target:' . (int)$row->get('bkh_bkt_backup_target_id')
@@ -1963,7 +1973,7 @@ class BackupRunner {
 		if ($bucket === '') {
 			throw new BackupRunnerException('The backup target has no bucket configured.');
 		}
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$prefix = BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix'));
 		$base_key = $prefix . '/' . $plan['slug'] . '/' . BackupProfile::path_segment($plan['profile']) . '/';
 		return array($creds, $bucket, $base_key);
 	}

@@ -32,6 +32,14 @@
  * The plane never deletes anything a box asked it to: every delete here is
  * the plane's own act under the service's retention promise.
  *
+ * Every pass works STORAGE SPACE BY SPACE (specs/storage_targets.md §3, §5):
+ * each space is listed, reconciled and pruned against its own target, and a
+ * space that cannot be reached is reported and left alone, never read as
+ * empty. A space the tenant was moved away from (draining) is kept whole
+ * until the active space holds a finished run, then ages out by the same
+ * chain retention; once nothing is left in it, it is retired. An object
+ * that goes keeps its ledger row, marked with when and why.
+ *
  * A NODE-LINKED ROW is a Managed site that moved to its customer's own cloud
  * account (specs/managed_to_self_hosted_transfer.md §5a). It has no key, so
  * nothing on the box ever polls its status: the banner is composed here from
@@ -41,6 +49,9 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.3 - reconcile, retention and the lapse prune work space by space against each space's own
+ *                target; pruned ledger rows are kept with their cause; a draining space is kept whole until
+ *                the active one holds a finished run, then retired once empty
  * @version 1.2 - node-linked rows (a site moved off Managed): fleet-backup figure, allowance and prune;
  *                the banner pushed over the agent; grace and suspension emails
  * @version 1.1 - the reconcile aborts an open multipart at the provider before dropping its row
@@ -415,27 +426,22 @@ class ServiceTenantWatch {
 	}
 
 	/**
-	 * The ledger against a listing, daily. What is in backup storage is the truth;
-	 * the ledger is brought to it in both directions, and the figure follows.
+	 * The ledger against a listing, daily, space by space. What is in backup
+	 * storage is the truth; each space's rows are brought to its own listing
+	 * in both directions, and the figure follows. A space that cannot be
+	 * listed is reported and its rows left as they are.
 	 */
 	private function reconcile_shelf(ServiceTenant $row, string $now): int {
 		$last = trim((string)$row->get('svt_reconciled_time'));
 		if ($last !== '' && (strtotime($now . ' UTC') - strtotime($last . ' UTC')) < self::SHELF_RECONCILE_SECONDS) {
 			return 0;
 		}
-		list($target, $creds, $bucket, $base) = $this->shelf_of($row);
-		if ($target === null) {
+		$spaces = StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key);
+		if (!$spaces) {
 			return 0;
 		}
 		$row->set('svt_reconciled_time', $now);
 		$row->save();
-		$listed = array();
-		foreach (S3Signer::list($creds, $bucket, $base) as $object) {
-			$key = (string)($object['key'] ?? '');
-			if ($key !== '' && strpos($key, $base) === 0) {
-				$listed[$key] = (int)($object['size'] ?? 0);
-			}
-		}
 
 		// Keys with an open run are in flight: neither dropped nor adopted.
 		$in_flight = array();
@@ -445,48 +451,77 @@ class ServiceTenantWatch {
 		}
 
 		$changed = 0;
-		$ledger = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'deleted' => false));
-		$known = array();
-		foreach ($ledger as $object) {
-			$key = (string)$object->get('svo_key');
-			$known[$key] = true;
-			if (isset($in_flight[(int)$object->get('svo_svr_shelf_run_id')])) {
+		foreach ($spaces as $space) {
+			$listed = $this->listing($row, $space);
+			if ($listed === null) {
 				continue;
 			}
-			if (!isset($listed[$key])) {
-				// Signed (or once completed) and not in backup storage: nothing to
-				// count. A multipart still open at the provider is aborted
-				// there before the row goes.
-				ShelfBroker::abortObject($object);
-				$changed++;
-				continue;
+			$known = array();
+			$ledger = new MultiShelfObject(array('space_id' => (int)$space->key, 'pruned' => false, 'deleted' => false));
+			foreach ($ledger as $object) {
+				$key = (string)$object->get('svo_key');
+				$known[$key] = true;
+				if (isset($in_flight[(int)$object->get('svo_svr_shelf_run_id')])) {
+					continue;
+				}
+				if (!isset($listed[$key])) {
+					// Signed (or once completed) and not in backup storage:
+					// nothing to count. A multipart still open at the provider
+					// is aborted there; the row is kept, marked.
+					if (ShelfBroker::abortObject($object, ShelfObject::PRUNED_RECONCILE, $now)) {
+						$changed++;
+					}
+					continue;
+				}
+				if ($object->get('svo_completed_time') === null || (int)$object->get('svo_bytes') !== $listed[$key]) {
+					$object->set('svo_bytes', $listed[$key]);
+					$object->set('svo_completed_time', $object->get('svo_completed_time') ?? $now);
+					$object->set('svo_upload_id', null);
+					$object->save();
+					$changed++;
+				}
 			}
-			if ($object->get('svo_completed_time') === null || (int)$object->get('svo_bytes') !== $listed[$key]) {
-				$object->set('svo_bytes', $listed[$key]);
-				$object->set('svo_completed_time', $object->get('svo_completed_time') ?? $now);
-				$object->set('svo_upload_id', null);
+			foreach ($listed as $key => $size) {
+				if (isset($known[$key])) {
+					continue;
+				}
+				// In backup storage and unknown to the ledger: it occupies the
+				// tenant's allowance whoever wrote it, so it is counted.
+				$object = new ShelfObject(NULL);
+				$object->set('svo_svt_service_tenant_id', (int)$row->key);
+				$object->set('svo_sps_storage_space_id', (int)$space->key);
+				$object->set('svo_key', $key);
+				$object->set('svo_bytes', $size);
+				$object->set('svo_chain', self::chain_of_key($key, $space->base()));
+				$object->set('svo_signed_time', $now);
+				$object->set('svo_completed_time', $now);
 				$object->save();
 				$changed++;
 			}
 		}
-		foreach ($listed as $key => $size) {
-			if (isset($known[$key])) {
-				continue;
-			}
-			// In backup storage and unknown to the ledger: it occupies the tenant's
-			// allowance whoever wrote it, so it is counted.
-			$object = new ShelfObject(NULL);
-			$object->set('svo_svt_service_tenant_id', (int)$row->key);
-			$object->set('svo_key', $key);
-			$object->set('svo_bytes', $size);
-			$object->set('svo_chain', self::chain_of_key($key, $base));
-			$object->set('svo_signed_time', $now);
-			$object->set('svo_completed_time', $now);
-			$object->save();
-			$changed++;
-		}
 		ShelfBroker::refreshFigure($row);
 		return $changed ? 1 : 0;
+	}
+
+	/**
+	 * One space's listing as [key => bytes], or null (said in the run's
+	 * problems) when its target cannot be reached or listed.
+	 */
+	private function listing(ServiceTenant $row, StorageSpace $space): ?array {
+		try {
+			list($target, $creds, $bucket) = $space->reach();
+			$listed = array();
+			foreach (S3Signer::list($creds, $bucket, $space->base()) as $object) {
+				$key = (string)($object['key'] ?? '');
+				if ($space->holds_key($key)) {
+					$listed[$key] = (int)($object['size'] ?? 0);
+				}
+			}
+			return $listed;
+		} catch (\Throwable $e) {
+			$this->errors[] = $this->label($row) . ': ' . $space->describe() . ' could not be listed: ' . $e->getMessage();
+			return null;
+		}
 	}
 
 	// ── 4. Abandoned runs ────────────────────────────────────────────────────
@@ -505,23 +540,43 @@ class ServiceTenantWatch {
 
 	// ── 5. Retention ─────────────────────────────────────────────────────────
 
-	/** The newest N chains per profile stay; older ones go whole. */
+	/**
+	 * The newest N chains per profile stay, counted across the tenant's
+	 * spaces; older ones go whole, each from its own space's target. A space
+	 * the tenant moved away from is kept whole until the active space holds a
+	 * finished run, so there is never a night with no copy to restore. A
+	 * draining space left empty is retired.
+	 */
 	private function retain_chains(ServiceTenant $row): int {
 		$keep = self::keep_chains();
-		list($target, $creds, $bucket, $base) = $this->shelf_of($row);
-		if ($target === null) {
+		$spaces = array();
+		$active = null;
+		foreach (StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key) as $space) {
+			$spaces[(int)$space->key] = $space;
+			if ($space->is_active()) { $active = $space; }
+		}
+		if (!$spaces) {
 			return 0;
 		}
-		$objects = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'completed' => true, 'deleted' => false));
-		$families = array();   // profile => chain => [ShelfObject]
+		$hold_draining = !self::holds_finished_run($active);
+
+		$objects = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'completed' => true, 'pruned' => false,
+			'deleted' => false));
+		$families = array();   // profile => "chain|space" => ['chain', 'space', 'objects' => [ShelfObject]]
 		foreach ($objects as $object) {
+			$space = $spaces[(int)$object->get('svo_sps_storage_space_id')] ?? null;
+			if ($space === null) {
+				continue;
+			}
 			$key = (string)$object->get('svo_key');
-			$rel = substr($key, strlen($base));
-			$parts = explode('/', $rel);
-			if (count($parts) < 3) {
+			$parts = explode('/', substr($key, strlen($space->base())));
+			if (!$space->holds_key($key) || count($parts) < 3) {
 				continue; // not {profile}/{chain}/{object}: not a chain's
 			}
-			$families[$parts[0]][$parts[1]][] = $object;
+			$id = $parts[1] . '|' . (int)$space->key;
+			$families[$parts[0]][$id]['chain'] = $parts[1];
+			$families[$parts[0]][$id]['space'] = $space;
+			$families[$parts[0]][$id]['objects'][] = $object;
 		}
 		$busy = array();
 		$open = new MultiShelfRun(array('tenant_id' => (int)$row->key, 'state' => ShelfRun::STATE_OPEN, 'deleted' => false));
@@ -531,35 +586,72 @@ class ServiceTenantWatch {
 
 		$pruned = 0;
 		foreach ($families as $profile => $chains) {
-			krsort($chains, SORT_STRING);   // chain-YYYYMMDD_HHMMSS: newest first
-			$surplus = array_slice(array_keys($chains), $keep);
-			foreach ($surplus as $chain) {
-				if (isset($busy[$chain])) {
+			krsort($chains, SORT_STRING);   // chain-YYYYMMDD_HHMMSS|space: newest first
+			foreach (array_slice($chains, $keep, null, true) as $family) {
+				$space = $family['space'];
+				if (isset($busy[$family['chain']]) || ($space->is_draining() && $hold_draining)) {
 					continue;
 				}
 				try {
-					foreach ($chains[$chain] as $object) {
+					list($target, $creds, $bucket) = $space->reach();
+					foreach ($family['objects'] as $object) {
 						$this->delete_object($creds, $bucket, (string)$object->get('svo_key'));
 					}
-					// Only once every object is gone do the rows go: a half-deleted
-					// chain must keep looking like one that still needs deleting.
-					foreach ($chains[$chain] as $object) {
-						$object->permanent_delete();
+					// Only once every object is gone are the rows marked: a
+					// half-deleted chain must keep looking like one that still
+					// needs deleting.
+					foreach ($family['objects'] as $object) {
+						$object->markPruned(ShelfObject::PRUNED_RETENTION);
 					}
 					$pruned++;
 				} catch (\Throwable $e) {
-					$this->errors[] = $this->label($row) . ': retention of ' . $profile . '/' . $chain . ' failed: ' . $e->getMessage();
-					error_log('ServiceTenantWatch: retention of ' . $chain . ' for ' . $this->label($row) . ' failed: ' . $e->getMessage());
+					$this->errors[] = $this->label($row) . ': retention of ' . $profile . '/' . $family['chain'] . ' in '
+						. $space->describe() . ' failed: ' . $e->getMessage();
+					error_log('ServiceTenantWatch: retention of ' . $family['chain'] . ' for ' . $this->label($row) . ' failed: ' . $e->getMessage());
 				}
 			}
 		}
 		if ($pruned) {
 			ShelfBroker::refreshFigure($row);
 		}
+		foreach ($spaces as $space) {
+			if ($space->is_draining() && !$hold_draining) {
+				$pruned += $this->retire_if_empty($row, $space);
+			}
+		}
 		return $pruned;
 	}
 
-	/** The prune-after day has come for a stopped tenant: the whole prefix goes, once. */
+	/** Has the space taken a run that finished? A space that has not holds no complete chain yet. */
+	public static function holds_finished_run(?StorageSpace $space): bool {
+		if ($space === null) {
+			return false;
+		}
+		$runs = new MultiShelfRun(array('space_id' => (int)$space->key, 'state' => ShelfRun::STATE_FINISHED,
+			'deleted' => false), array('svr_shelf_run_id' => 'DESC'), 1);
+		return count($runs) > 0;
+	}
+
+	/** A draining space whose ledger and listing are both empty is retired. 1 when it was. */
+	private function retire_if_empty(ServiceTenant $row, StorageSpace $space): int {
+		$live = new MultiShelfObject(array('space_id' => (int)$space->key, 'pruned' => false, 'deleted' => false));
+		if (count($live) > 0) {
+			return 0;
+		}
+		$listed = $this->listing($row, $space);
+		if ($listed === null || $listed) {
+			return 0;
+		}
+		$space->retire();
+		return 1;
+	}
+
+	/**
+	 * The prune-after day has come for a stopped tenant: everything in every
+	 * one of its spaces goes, once, each from its own target, and the ledger
+	 * rows are kept, marked as a lapse. A space that cannot be reached leaves
+	 * the prune undone (said in the run's problems) for the next pass.
+	 */
 	private function prune_if_due(ServiceTenant $row, string $now): int {
 		$after = trim((string)$row->get('svt_prune_after_time'));
 		if ($after === '' || $after > $now || $row->get('svt_pruned_time') !== null) {
@@ -569,22 +661,32 @@ class ServiceTenantWatch {
 		if ($state !== ServiceTenant::STATE_SUSPENDED && $state !== ServiceTenant::STATE_RELEASED) {
 			return 0;
 		}
-		list($target, $creds, $bucket, $base) = $this->shelf_of($row);
-		if ($target === null) {
-			return 0;
-		}
+		$spaces = StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key);
 		$deleted = 0;
-		foreach (S3Signer::list($creds, $bucket, $base) as $object) {
-			$key = (string)($object['key'] ?? '');
-			if ($key === '' || strpos($key, $base) !== 0) {
-				continue;
+		foreach ($spaces as $space) {
+			try {
+				list($target, $creds, $bucket) = $space->reach();
+				foreach (S3Signer::list($creds, $bucket, $space->base()) as $object) {
+					$key = (string)($object['key'] ?? '');
+					if (!$space->holds_key($key)) {
+						continue;
+					}
+					$this->delete_object($creds, $bucket, $key);
+					$deleted++;
+				}
+			} catch (\Throwable $e) {
+				$this->errors[] = $this->label($row) . ': the lapse prune of ' . $space->describe() . ' failed: ' . $e->getMessage();
+				return 0;
 			}
-			$this->delete_object($creds, $bucket, $key);
-			$deleted++;
 		}
-		$ledger = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'deleted' => false));
+		$ledger = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'pruned' => false, 'deleted' => false));
 		foreach ($ledger as $object) {
-			$object->permanent_delete();
+			$object->markPruned(ShelfObject::PRUNED_LAPSE, $now);
+		}
+		foreach ($spaces as $space) {
+			if ($space->is_draining()) {
+				$space->retire();
+			}
 		}
 		$row->set('svt_figure', 0);
 		$row->set('svt_figure_time', $now);
@@ -616,25 +718,6 @@ class ServiceTenantWatch {
 		if (($status < 200 || $status >= 300) && $status !== 404) {
 			throw new RuntimeException('HTTP ' . $status . ' deleting ' . $key);
 		}
-	}
-
-	/** [target, creds, bucket, tenant prefix], or [null, …] when the plane has no usable shelf. */
-	private function shelf_of(ServiceTenant $row): array {
-		$target = JoineryServices::shelfTarget();
-		if ($target === null) {
-			return array(null, array(), '', '');
-		}
-		try {
-			$creds = (array)$target->get_credentials();
-		} catch (\Throwable $e) {
-			$this->errors[] = 'the backup storage credential cannot be read: ' . $e->getMessage();
-			return array(null, array(), '', '');
-		}
-		$bucket = trim((string)$target->get('bkt_bucket'));
-		if ($bucket === '' || empty($creds['access_key'])) {
-			return array(null, array(), '', '');
-		}
-		return array($target, $creds, $bucket, ShelfBroker::tenantPrefix($row, $target));
 	}
 
 	private function mail_client(): ?Smtp2GoClient {

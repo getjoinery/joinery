@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.54 - the backup target is shown with a Move link to the Backups tab; it is no longer a field of the
+ *                connection form (storage spaces, specs/storage_targets.md WP4); the delete guard counts what the
+ *                node's spaces hold
  * @version 1.53 - the backup target select lists every target not deleted (the node's own even when switched
  *                 off, so a save never clears it), blank says Local only and means it, and providers show
  *                 by label (specs/storage_targets.md S10)
@@ -257,9 +260,8 @@
 	// host SSH probe, so it is safe to run on render — only for a removed node.
 	$purge_block = null; // null = allowed; string = reason it is blocked
 	if ($is_removed) {
-		require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 		try {
-			$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
+			$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
 			if ($bk['count'] > 0) {
 				$purge_block = 'This site still has ' . $bk['count'] . ' offsite backup'
 					. ($bk['count'] === 1 ? '' : 's')
@@ -1853,15 +1855,12 @@
 	if ($node->get('mgn_web_root')) {
 		$conn_row('Web root', '<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>');
 	}
-	$target_id = $node->get('mgn_bkt_backup_target_id');
-	if ($target_id) {
-		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-		try {
-			$target = new BackupTarget($target_id, TRUE);
-			$conn_row('Backup target',
-				'<a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars(StorageProvider::label($target->get('bkt_provider'))) . ($target->get('bkt_enabled') ? '' : ', switched off') . ')</span>'
-			);
-		} catch (Exception $e) {}
+	$target = JobCommandBuilder::get_target($node);
+	if ($target) {
+		$conn_row('Backup target',
+			'<a href="/admin/server_manager/target_info?bkt_backup_target_id=' . $target->key . '">' . htmlspecialchars($target->get('bkt_name')) . '</a> <span class="text-muted">(' . htmlspecialchars(StorageProvider::label($target->get('bkt_provider'))) . ($target->get('bkt_enabled') ? '' : ', switched off') . ')</span>'
+			. ' <a href="' . $base_url . '&tab=backups" class="small ms-1">Move</a>'
+		);
 	}
 	if ($node->get('mgn_notes')) {
 		$conn_row('Notes', nl2br(htmlspecialchars($node->get('mgn_notes'))));
@@ -2160,25 +2159,9 @@
 
 	echo '<h6 class="text-muted mt-4 mb-3">Backup Settings</h6>';
 
-	// Every target not deleted. The node's own is always listed, switched off
-	// or not, so saving the form never clears it; a switched-off target cannot
-	// be newly chosen (the save refuses it). Blank is exactly what it says:
-	// nothing is inferred from the enabled targets (specs/storage_targets.md R6).
-	$target_options = ['' => 'None (this management node takes no backups of it)'];
-	$current_target_id = (int)$node->get('mgn_bkt_backup_target_id');
-	foreach (new MultiBackupTarget(['deleted' => false], ['bkt_name' => 'ASC']) as $d) {
-		if (!$d->get('bkt_enabled') && (int)$d->key !== $current_target_id) {
-			continue;
-		}
-		$target_options[(string)(int)$d->key] = $d->get('bkt_name') . ' (' . StorageProvider::label($d->get('bkt_provider')) . ')'
-			. ($d->get('bkt_enabled') ? '' : ' — switched off');
-	}
-	$formwriter->dropinput('mgn_bkt_backup_target_id', 'Backup target', [
-		'options'  => $target_options,
-		'value'    => $current_target_id ? (string)$current_target_id : '',
-		'helptext' => 'Where this node\'s backups go.',
-	]);
-	echo '<p class="small mb-3"><a href="/admin/server_manager/targets">Manage targets</a></p>';
+	// Where the node's backups go is not a connection setting: it is moved
+	// from the Backups tab, which keeps the old backups readable where they are.
+	echo '<p class="small mb-3">Backup target: moved on the <a href="' . $base_url . '&tab=backups">Backups tab</a>.</p>';
 
 	$formwriter->checkboxinput('mgn_delete_local_after_upload', 'Delete local backup after upload', [
 		'checked' => $node->get('mgn_delete_local_after_upload'),

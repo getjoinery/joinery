@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.10 - abort_upload(): one multipart abort that answers the provider's response, so a caller
+ *                 can tell an abort that landed from one that did not
  * @version 1.9 - the one presigner and lister (specs/storage_targets.md WP1): presign() signs any verb but
  *                DELETE (ShelfPresigner folded in), list() takes a cap and says when it stopped short
  *                (TargetLister folded in); a provider whose catalogue entry addresses buckets as host
@@ -607,9 +609,17 @@ class S3Signer {
 	 * real error and the bucket's cancel-unfinished-multipart lifecycle rule is
 	 * the backstop for an abort that never lands.
 	 */
+	/**
+	 * Abort one multipart upload and answer the provider's response: 2xx, or
+	 * 404 for an upload already gone, is done. Throws on a transport failure.
+	 */
+	public static function abort_upload($creds, $bucket, $path, $upload_id) {
+		return self::request('DELETE', $creds, $bucket, $path, ['uploadId' => $upload_id]);
+	}
+
 	private static function abort_multipart($creds, $bucket, $path, $upload_id) {
 		try {
-			self::request('DELETE', $creds, $bucket, $path, ['uploadId' => $upload_id]);
+			self::abort_upload($creds, $bucket, $path, $upload_id);
 		} catch (\Throwable $e) {
 			error_log('S3Signer: could not abort multipart upload ' . $upload_id . ': ' . $e->getMessage());
 		}

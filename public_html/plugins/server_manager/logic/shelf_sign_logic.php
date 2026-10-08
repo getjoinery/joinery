@@ -6,12 +6,14 @@
  * (specs/services_phase2_platform.md §3). A write names an open run and a
  * key inside its base key; anything outside it is refused, as is any
  * operation the broker does not know — there is no delete. A get needs no
- * run: with run_id 0 the name is relative to the site's own prefix, as
- * shelf_list answers it, and it is signed for a suspended or released site
- * for as long as its copies exist. Operations: put, get, multipart_create,
+ * run: with run_id 0 the name is relative to one of the site's storage spaces
+ * (space_id, as shelf_list answers it; the space new backups go to when
+ * absent), and it is signed for a suspended or released site for as long as
+ * its copies exist. Operations: put, get, multipart_create,
  * multipart_parts (upload_id, first, count ≤ 10), multipart_complete
  * (upload_id). Each URL is good for one hour.
  *
+ * @version 1.3 - space_id: a get names the storage space it reads from (specs/storage_targets.md WP4)
  * @version 1.2 - a signing failure is S3Signer's (the one presigner)
  * @version 1.1 - a get needs no run and stands until the prune
  */
@@ -30,6 +32,7 @@ function shelf_sign_logic(array $input): LogicResult {
 				'upload_id' => (string)($input['upload_id'] ?? ''),
 				'first'     => intval($input['first'] ?? 1),
 				'count'     => intval($input['count'] ?? ShelfBroker::PARTS_PER_BATCH),
+				'space_id'  => intval($input['space_id'] ?? 0),
 			));
 	} catch (ShelfBrokerException $e) {
 		return LogicResult::error($e->getMessage());
@@ -41,12 +44,13 @@ function shelf_sign_logic(array $input): LogicResult {
 
 function shelf_sign_logic_descriptor(): array {
 	return array(
-		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside the site\'s own prefix (run_id 0) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete.',
+		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside one of the site\'s storage spaces (run_id 0, space_id from shelf_list) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
 			'run_id'    => array('type' => 'integer', 'required' => false, 'label' => 'Run id (a write needs an open one; a get may pass 0)'),
-			'name'      => array('type' => 'string',  'required' => true,  'label' => 'Object name, relative to the run\'s base key (to the site\'s prefix for a get with run_id 0)'),
+			'name'      => array('type' => 'string',  'required' => true,  'label' => 'Object name, relative to the run\'s base key (to the storage space for a get with run_id 0)'),
+			'space_id'  => array('type' => 'integer', 'required' => false, 'label' => 'Storage space of a get with run_id 0, as shelf_list answers it (the space new backups go to when absent)'),
 			'operation' => array('type' => 'string',  'required' => true,  'label' => 'put | get | multipart_create | multipart_parts | multipart_complete'),
 			'bytes'     => array('type' => 'integer', 'required' => false, 'label' => 'Size, for put and multipart_create'),
 			'upload_id' => array('type' => 'string',  'required' => false, 'label' => 'Multipart upload id'),

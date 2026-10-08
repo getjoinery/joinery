@@ -1,9 +1,18 @@
 # Storage targets — every stored object knows where it lives
 
 **Status:** Building — 2026-10-08. No open owner decisions; build order in §10.
-WP1, WP2 and WP3 are built, uncommitted (tests `storage_provider_catalogue`, `target_location_rules`,
-`destination_switch`; dev migrated by `sm_014` and core migration 209). A browser look at the three
-target forms is owed. WP4 next.
+WP1–WP3 committed (7b6d7f0b). WP4 built, uncommitted (test `storage_spaces`; dev migrated by `sm_015`,
+19 node spaces). A browser look at the target forms, the node Move form, Who backs up here and Adopt
+is owed. WP4 notes, decided while building:
+- A node's chain follows the **name** of the target the management node sends: a run to a target of
+  another name starts a new chain (`BackupRunner` 1.28), so target names are unique. Until WP5 gives
+  runs a broker id, that is how a moved node starts fresh. A node must run this core before a Move
+  restarts its chain; an older one extends its chain into the new bucket.
+- A customer's draining space is released when the active space holds a **finished** run; the
+  "verified" half joins with WP7's `svr_verified_time` (F1). A node's needs a passed verify of a
+  chain in the active space (the verify job names `space_id`).
+- `svr_mgn_managed_node_id` (runs with a node owner) is left to WP5, which is its first user.
+WP6 next.
 **Takes over:** item 2b (the object-store seam) and the shelf-target parts of item 2a in
 `services_phase2_platform.md`, which stays the owner of the services themselves
 (enrolment, metering, the lapse ladder, the site side).
@@ -536,7 +545,7 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 | S21 | The node hard-delete guard and the recovery-readiness list ignore disabled targets that still hold backups | **Now** |
 | S23 | `referential_integrity` counts another concurrent test run's in-flight users as leaks | **Now**: liveness lock per run |
 | S10 | The node target dropdown's blank option says "Local only" but means "the one enabled target", and re-saving while the target is disabled clears it (`overview.php`) | WP2 (built) |
-| S11 | Path prefix trimmed four different ways, so a leading `/` breaks minted-key scoping | WP4 (one normalisation, on the space) |
+| S11 | Path prefix trimmed four different ways, so a leading `/` breaks minted-key scoping | **WP4** (built): one normalisation, stored on the target and composed into the space |
 | S12 | Three different B2 region regexes; a rejected cluster leaves the endpoint empty with no note | WP1 (built) |
 | S13 | `CloudStorageLifecycle::_write_settings` silently skips a missing setting row | WP6 (settings retire) |
 | S14 | File-store binding guard compares endpoints as raw strings in one place and as hosts in another | WP6 |
@@ -544,9 +553,9 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 | S16 | The file store's secret key is stored in plain text | WP6 |
 | S17 | Offloaded mail is not in backups; the bucket holds the only copy | WP6 |
 | S18 | Dead code and stale text: `B2Client::deleteKey`/`countKeys`, the "bkt claimed by BookingType" comment, misplaced docblocks in `backup_targets_class.php`, `creds.go` and "target override" comments, `__SM_RUN_CREDS_` missing from the overview doc | WP1 part built (the first three); WP5 the rest |
-| S19 | Backup storage: no target on customer, run or object rows; `shelf_of()` skips silently; reconcile against the wrong bucket wipes the ledger and zeroes the figure; a read with a run id signs the old key against the current bucket; abort uses the current target and drops the row on failure; `t{id}` can collide with a node slug; the target setting is free text; completeness checks differ; unpaid customers can list | WP4 |
+| S19 | Backup storage: no target on customer, run or object rows; `shelf_of()` skips silently; reconcile against the wrong bucket wipes the ledger and zeroes the figure; a read with a run id signs the old key against the current bucket; abort uses the current target and drops the row on failure; `t{id}` can collide with a node slug; the target setting is free text; completeness checks differ; unpaid customers can list | **WP4** (built; the setting was WP2) |
 | S20 | Site targets: retention after a switch deletes from the wrong bucket and counts 404 as success; chains continue across a switch; verify and *Bring files back* use the current target; no epoch envelope on a new target; `bkh_bkt_backup_target_id` is never read; location editable in place | WP2 and WP3 (built) |
-| S22 | `NodeBackupShelf::prune` deletes every profile under the node's folder, including a site-profile target sharing that bucket and prefix | WP4 (prune by the space's own runs) |
+| S22 | `NodeBackupShelf::prune` deletes every profile under the node's folder, including a site-profile target sharing that bucket and prefix | **WP4** (built): it empties `{space}manager/` only |
 | S24 | A write-only key can overwrite a manifest; a copy from a dead source, shell disaster recovery and the management node's listings trust the bucket's manifest | WP5 |
 | S25 | Linode Managed nodes are handed the delete-capable main key | WP5 |
 | S26 | The setup wizard's target form posted no Enabled box, so the target it saved was disabled, never tested and never scheduled | **WP1**: the wizard draws the shared form, which saves it enabled |
