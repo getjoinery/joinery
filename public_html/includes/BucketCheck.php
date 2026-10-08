@@ -19,6 +19,8 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.3 - object_url() reads the endpoint through S3Signer::endpoint(), so a bare host probes over
+ *                https; an anonymous request with no answer is a warning, not proof the bucket is private
  * @version 1.2 - file_store_buckets() is the one file store bucket; a collision names one deletion, not
  *                a public read, since both kinds of bucket are private
  * @version 1.1 - b2_allowed() also carries the S3 endpoint Backblaze names for the key
@@ -140,23 +142,30 @@ class BucketCheck {
 
 	/** The path-style address of one object, the form the signer uses. */
 	public static function object_url(array $creds, $bucket, $key) {
-		return rtrim((string)$creds['endpoint'], '/') . '/' . rawurlencode($bucket) . '/' . ltrim(str_replace('%2F', '/', rawurlencode($key)), '/');
+		list($scheme, $host) = S3Signer::endpoint($creds['endpoint']);
+		return $scheme . '://' . $host . '/' . rawurlencode($bucket) . '/' . ltrim(str_replace('%2F', '/', rawurlencode($key)), '/');
 	}
 
 	/**
 	 * The step that says whether a bucket meant to be private is. An anonymous
 	 * read that succeeds is a fail: backups are encrypted, but nobody outside
-	 * should be able to fetch them at all.
+	 * should be able to fetch them at all. No answer at all proves nothing either
+	 * way, so it is a warning, never a pass.
 	 */
 	public static function private_read_step($url) {
 		$status = self::anonymous_status($url);
+		if ($status === 0) {
+			return array('label' => 'Private', 'status' => 'warn',
+				'message' => 'Could not check whether the bucket is private: an anonymous request got no answer. '
+					. 'Check at the provider that the bucket is private.');
+		}
 		if ($status >= 200 && $status < 300) {
 			return array('label' => 'Private', 'status' => 'fail',
 				'message' => 'Anyone can read this bucket without a key (an anonymous request got HTTP ' . $status . '). '
 					. 'Backups belong in a private bucket. Set the bucket to private at the provider and save again.');
 		}
 		return array('label' => 'Private', 'status' => 'pass',
-			'message' => 'Nobody can read this bucket without a key' . ($status > 0 ? ' (anonymous request got HTTP ' . $status . ')' : '') . '.');
+			'message' => 'Nobody can read this bucket without a key (anonymous request got HTTP ' . $status . ').');
 	}
 
 	// ── What a Backblaze key may do ─────────────────────────────────────

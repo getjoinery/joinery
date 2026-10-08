@@ -17,6 +17,7 @@
  * signs one key and one verb: a site handed a PUT URL for one key can write
  * exactly that key and nothing else; nothing signs a DELETE.
  *
+ * @version 1.1 - reads the endpoint through S3Signer::endpoint(), so a bare host signs as https
  * @version 1.0
  */
 class ShelfPresignerException extends Exception {}
@@ -54,14 +55,11 @@ class ShelfPresigner {
 		if ($expires < 60) { $expires = 60; }
 		if ($expires > self::MAX_EXPIRES) { $expires = self::MAX_EXPIRES; }
 
-		$parsed = parse_url((string)$creds['endpoint']);
-		if (empty($parsed['host'])) {
-			throw new ShelfPresignerException('Invalid endpoint: ' . $creds['endpoint']);
+		try {
+			list($scheme, $host) = S3Signer::endpoint($creds['endpoint']);
+		} catch (S3SignerException $e) {
+			throw new ShelfPresignerException($e->getMessage());
 		}
-		$scheme = $parsed['scheme'] ?? 'https';
-		// The port belongs in the host for the signature as well as the URL:
-		// SigV4 signs the host header and the client sends host:port.
-		$host = $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
 
 		$region     = (string)$creds['region'];
 		$amz_date   = gmdate('Ymd\THis\Z');

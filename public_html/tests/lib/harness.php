@@ -175,6 +175,10 @@ function harness_boot(array $overrides = array()) {
 
 	harness_enforce_env();
 
+	// Before any fixture exists: the lock that tells other runs this one is
+	// alive. See harness_hold_run_lock().
+	harness_hold_run_lock();
+
 	// Mark this process for cheap password hashing. Argon2id at production
 	// parameters is 64 MB and ~0.5s PER HASH on the dev box, and suites paid
 	// it for every fixture user, sign-in attempt, and 2FA backup-code set (ten
@@ -488,6 +492,63 @@ function harness_fixture_email($label) {
 }
 
 /**
+ * The run token a fixture address carries, or '' when it carries none.
+ * Inverse of harness_fixture_email(): the token is the 8 hex characters
+ * before the '@'.
+ */
+function harness_fixture_email_token($email) {
+	return preg_match('/_([0-9a-f]{8})@/', (string)$email, $m) ? $m[1] : '';
+}
+
+/**
+ * Every run holds a lock on cache/tests/live/<run_token> for as long as its
+ * process lives. The kernel releases it on any exit, SIGKILL included, so
+ * "is the lock held?" is a true answer to "is that run still alive?" —
+ * which is how another run tells a fixture still in use from one a dead run
+ * left behind. Taken at boot, before the suite can make a fixture; the file
+ * stays after the run so its fixtures read as dead, not unknown.
+ */
+function harness_hold_run_lock() {
+	$h = &$GLOBALS['__harness'];
+	if (!empty($h['run_lock'])) return;
+	try {
+		$file = harness_scratch_dir('live') . '/' . $h['run_token'];
+		$fh = @fopen($file, 'c');
+		if ($fh && flock($fh, LOCK_EX | LOCK_NB)) {
+			$h['run_lock'] = $fh;   // kept open for the life of the process
+			return;
+		}
+		harness_boot_note("  WARNING: could not hold the run lock at {$file}; other runs will treat this run's fixtures by age\n");
+	} catch (\Throwable $e) {
+		harness_boot_note('  WARNING: no run lock: ' . $e->getMessage() . "\n");
+	}
+}
+
+/**
+ * Whether the run that minted $token is alive: 'live' (its lock is held, or
+ * it is this run), 'dead' (its lock file is there and nobody holds it), or
+ * 'unknown' (no lock file — a run from before the lock existed, or one whose
+ * file was swept). Callers treat 'unknown' by age.
+ */
+function harness_run_token_state($token) {
+	$h = &$GLOBALS['__harness'];
+	if (!preg_match('/^[0-9a-f]{8}$/', (string)$token)) return 'unknown';
+	if ($token === $h['run_token']) return 'live';
+	$file = PathHelper::getSiteRoot() . '/cache/tests/live/' . $token;
+	// 'r' never creates the file; flock(2) needs no write access.
+	$fh = @fopen($file, 'r');
+	if (!$fh) return 'unknown';
+	$held = !flock($fh, LOCK_EX | LOCK_NB);
+	if (!$held) flock($fh, LOCK_UN);
+	fclose($fh);
+	return $held ? 'live' : 'dead';
+}
+
+function harness_run_token_live($token) {
+	return harness_run_token_state($token) === 'live';
+}
+
+/**
  * May this process delete delivered test mail at all?
  *
  * Three conditions, and the first is the one that matters: THIS IS A DELETE
@@ -763,16 +824,19 @@ function make_machine_key($user_id, $name, $permission = 4) {
  * what its own run made; this boot-time pass takes what earlier KILLED runs
  * left.
  *
- * The one-hour floor is what makes it safe beside live runs: no suite
- * process outlives the runner's 1800-second timeout cap, so anything older
- * belongs to no live run, however many agents are working. Deletion goes
- * through each model's permanent_delete(), so declared cascades run and
- * nothing is orphaned. Gated like the mail sweep: never without debug
- * (production), and never from a tier that promises no side effects — which
- * keeps referential_integrity (tier safe) a pure read. A red there now means
- * a SAME-RUN leak (a teardown bug in the suite that just ran) or debris
- * younger than the floor; the old kind of red — week-old kill debris nobody
- * remembered making — reclaims itself here instead.
+ * Several agents run suites on this box at once, so what makes it safe is
+ * knowing which run is alive. A fixture user's address carries its run's
+ * token, and every run holds a lock for its token while it lives
+ * (harness_hold_run_lock()): a user whose run is dead is reclaimed at once,
+ * one whose run is live is never touched, and one whose token has no lock
+ * file is reclaimed only past the one-hour floor (no suite process outlives
+ * the runner's 1800-second timeout cap). The other families carry no token
+ * in their names and go by the floor alone. Deletion goes through each
+ * model's permanent_delete(), so declared cascades run and nothing is
+ * orphaned. Gated like the mail sweep: never without debug (production), and
+ * never from a tier that promises no side effects — which keeps
+ * referential_integrity (tier safe) a pure read; it applies the same
+ * liveness rule, so another run's fixtures in flight are not a red there.
  */
 function harness_cleanup_stale_fixtures() {
 	$h = &$GLOBALS['__harness'];
@@ -832,14 +896,20 @@ function harness_cleanup_stale_fixtures() {
 		}
 	}
 
-	// Users. Every make_user_row() fixture stamps usr_terms_accepted_time at
-	// creation, which doubles as its birth time here; the rare fixture whose
-	// suite cleared it is left for referential_integrity to name.
+	// Users, by their run's liveness. A run whose lock is free is dead, so its
+	// users go now whatever their age. A token with no lock file falls back to
+	// the floor, judged by usr_terms_accepted_time, which every make_user_row()
+	// fixture stamps at creation; the rare fixture whose suite cleared it is
+	// left for referential_integrity to name.
 	try {
-		$q = $db->prepare("SELECT usr_user_id, usr_email FROM usr_users
-			WHERE usr_email LIKE 'harnesstest\\_%' AND usr_terms_accepted_time < ?");
+		$q = $db->prepare("SELECT usr_user_id, usr_email,
+				(usr_terms_accepted_time IS NOT NULL AND usr_terms_accepted_time < ?) AS past_floor
+			FROM usr_users WHERE usr_email LIKE 'harnesstest\\_%'");
 		$q->execute(array($floor));
 		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$state = harness_run_token_state(harness_fixture_email_token($row['usr_email']));
+			if ($state === 'live') continue;
+			if ($state === 'unknown' && !$row['past_floor']) continue;
 			try {
 				harness_reclaim_sole_held_mailboxes((int)$row['usr_user_id']);
 				$u = new User((int)$row['usr_user_id'], TRUE);
@@ -851,6 +921,19 @@ function harness_cleanup_stale_fixtures() {
 		}
 	} catch (\Throwable $e) {
 		harness_boot_note("  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n");
+	}
+
+	// Lock files of runs dead a day or more. Removed only while this process
+	// holds the lock, so a live run's file can never go.
+	foreach ((array)glob(PathHelper::getSiteRoot() . '/cache/tests/live/*') as $file) {
+		if (!is_file($file) || filemtime($file) > time() - 86400) continue;
+		$fh = @fopen($file, 'r');
+		if (!$fh) continue;
+		if (flock($fh, LOCK_EX | LOCK_NB)) {
+			@unlink($file);
+			flock($fh, LOCK_UN);
+		}
+		fclose($fh);
 	}
 }
 

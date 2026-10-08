@@ -1444,9 +1444,9 @@ Nodes with no backup target leave backups local-only on the remote server.
 
 ### Upload Path Structure
 
-All providers use: `{prefix}/{node_slug}/{filename}`
+All providers use: `{prefix}/{node_slug}/{profile}/…`, where the profile is `manager` for the backups this management node schedules and `site` for the site's own. Chains sit in `chain-*/` folders, offloaded files in `objects/`, and a standalone archive (a single run, or one re-uploaded from a node's Backups tab) directly in the profile folder beside its `.keys.json`.
 
-Example: `joinery-backups/empoweredhealthtn/empoweredhealthtn-04_11_2026.sql.gz.enc`
+Example: `joinery-backups/empoweredhealthtn/manager/empoweredhealthtn-04_11_2026.sql.gz.enc`
 
 ### Credential Storage
 

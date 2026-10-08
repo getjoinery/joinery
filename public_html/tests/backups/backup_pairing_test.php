@@ -115,21 +115,29 @@ section('The check costs nothing when the caller has already listed the target')
 // to answer a question that listing already contains. Keys or listing rows both
 // work, because callers hold both shapes.
 $listing = array(
-	array('key' => 'joinery-backups/nodeslug/site-2026-08-01.tar.gz.enc', 'size' => 10),
-	array('key' => 'joinery-backups/nodeslug/site-2026-08-01.tar.gz.enc.keys.json', 'size' => 1),
+	array('key' => 'joinery-backups/nodeslug/manager/site-2026-08-01.tar.gz.enc', 'size' => 10),
+	array('key' => 'joinery-backups/nodeslug/manager/site-2026-08-01.tar.gz.enc.keys.json', 'size' => 1),
 );
-$state = BackupPairing::cloud_state(new BackupTarget(), 'nodeslug', 'site-2026-08-01.tar.gz.enc', $listing);
+$state = BackupPairing::cloud_state(new BackupTarget(), 'nodeslug', 'manager', 'site-2026-08-01.tar.gz.enc', $listing);
 check($state['checked'] === true, 'an injected listing counts as checked');
 check($state['artifact_present'] === true && $state['envelope_present'] === true,
 	'both halves are found in the listing the caller supplied');
 check(BackupPairing::verdict($state, 'site-2026-08-01.tar.gz.enc', false)['verdict'] === BackupPairing::PROCEED,
 	'and an already-paired archive uploads on its own');
 
-$state = BackupPairing::cloud_state(new BackupTarget(), 'nodeslug', 'db-2026-08-02.sql.gz.enc', $listing);
+$state = BackupPairing::cloud_state(new BackupTarget(), 'nodeslug', 'manager', 'db-2026-08-02.sql.gz.enc', $listing);
 check($state['checked'] === true && $state['envelope_present'] === false,
 	'an archive absent from the listing has no envelope there either');
 check(BackupPairing::verdict($state, 'db-2026-08-02.sql.gz.enc', false)['verdict'] === BackupPairing::BLOCKED,
 	'and with no key on the node either, it is refused');
+
+// The archive is looked for where upload_backup.php writes it: under the
+// profile, beside the backup run's own archives.
+check($state['artifact_key'] === 'joinery-backups/nodeslug/manager/db-2026-08-02.sql.gz.enc',
+	'the archive is looked for under its profile', $state['artifact_key']);
+$elsewhere = BackupPairing::cloud_state(new BackupTarget(), 'nodeslug', 'site', 'site-2026-08-01.tar.gz.enc', $listing);
+check($elsewhere['artifact_present'] === false,
+	'a copy under another profile is not this profile\'s copy');
 
 // The envelope key is the archive key plus the suffix — if these two ever
 // disagree the check would silently answer about the wrong object.

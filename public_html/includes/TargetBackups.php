@@ -17,6 +17,7 @@
  *   decommissioned — a former owner had this slug (the site is gone; its backups remain)
  *   orphaned       — nothing in the map matches this slug
  *
+ * @version 2.1 - slug_backup_count() counts switched-off targets too: they still hold backups
  * @version 2.0 - moved to core; slug ownership is supplied by the caller rather than
  *                read from the fleet node table
  */
@@ -131,8 +132,8 @@ class TargetBackups {
 	}
 
 	/**
-	 * Count the offsite backups stored under a node slug across every enabled
-	 * target. Used to block hard-deleting a node record while its backups still
+	 * Count the offsite backups stored under a node slug across every target
+	 * not deleted, switched on or off. Used to block hard-deleting a node record while its backups still
 	 * exist (deleting the record orphans them from the node they belong to).
 	 *
 	 * Returns ['count' => int, 'unchecked' => string[]] where 'unchecked' names any
@@ -143,7 +144,9 @@ class TargetBackups {
 		if (!preg_match('/^[A-Za-z0-9_-]+$/', (string)$slug)) {
 			return ['count' => 0, 'unchecked' => []]; // no valid prefix → no prefixed backups
 		}
-		$targets = new MultiBackupTarget(['deleted' => false, 'enabled' => true]);
+		// Switched-off targets count: switching one off stops new backups, it does
+		// not remove the ones it holds, and those still belong to this slug.
+		$targets = new MultiBackupTarget(['deleted' => false]);
 		$targets->load();
 
 		$count = 0;

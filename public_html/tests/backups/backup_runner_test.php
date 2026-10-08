@@ -233,6 +233,27 @@ check($shelf_after === $shelf_before, 'backup storage is untouched — no chain 
 $hist_after = (int)$db->query('SELECT count(*) FROM bkh_backup_history')->fetchColumn();
 check($hist_after === $hist_before, 'and no history row was written');
 
+// A chosen target that is disabled is named, not reported as "none configured".
+$disabled_target = new BackupTarget(NULL);
+$disabled_target->set('bkt_name', 'HarnessTest disabled target');
+$disabled_target->set('bkt_provider', 's3');
+$disabled_target->set('bkt_bucket', 'harnesstest-disabled');
+$disabled_target->set('bkt_credentials', array('access_key' => 'k', 'secret_key' => 's', 'region' => 'us-east-1', 'endpoint' => 'https://s3.us-east-1.amazonaws.com'));
+$disabled_target->set('bkt_enabled', false);
+$disabled_target->prepare();
+$disabled_target->save();
+harness_defer(function () use ($disabled_target) { $disabled_target->permanent_delete(); });
+$settings_row('backup_target_id', (string)(int)$disabled_target->key);
+$result = BackupRunner::run(array());
+if ($original_target === false) {
+	$db->exec("DELETE FROM stg_settings WHERE stg_name = 'backup_target_id'");
+} else {
+	$settings_row('backup_target_id', $original_target);
+}
+check($result['status'] === 'skipped', 'a disabled chosen target is SKIPPED', $result['status']);
+check(strpos($result['message'], 'HarnessTest disabled target') !== false && strpos($result['message'], 'disabled') !== false,
+	'and the refusal names the target and says it is disabled', $result['message']);
+
 // ── Staged chain restores nobody came back for ──────────────────────────────
 section('A staged chain restore is swept as a unit');
 

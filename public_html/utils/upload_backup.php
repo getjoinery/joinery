@@ -43,7 +43,9 @@
  * is no ordering of these two uploads where a partial failure is invisible, but
  * there is one where a partial failure is harmless.
  *   - It cannot be told where in the bucket to write. It composes the object key
- *     from the prefix, the slug and the file's own name.
+ *     from the prefix, the slug, the profile and the file's own name —
+ *     {prefix}/{slug}/{profile}/{file}, where the backup run writes the same
+ *     profile's archives, so a re-upload is listed, counted and pruned with them.
  *
  * Configuration arrives as JSON **on stdin**, and only on stdin:
  *
@@ -65,6 +67,8 @@
  *
  * Exits 0 on success, 1 on a transfer failure, 2 on a malformed request.
  *
+ * @version 1.3 - the object key carries the profile segment, {prefix}/{slug}/{profile}/{file}, as the
+ *                 backup run's own keys do; a re-upload is pruned and counted with the profile's backups
  * @version 1.2 - resolves the backup directory from the node's own configured working
  *                 directory and the named profile, instead of assuming the BACKUP_DIR
  *                 constant. On a node using the computed default, the constant names a
@@ -202,7 +206,8 @@ if (!is_array($creds)) {
 // handler or a shutdown function.
 unset($config);
 
-$remote_key = $prefix . '/' . $slug . '/' . $filename;
+$remote_dir = $prefix . '/' . $slug . '/' . BackupProfile::path_segment($profile) . '/';
+$remote_key = $remote_dir . $filename;
 $size = filesize($local_path);
 
 // ── The key first, when it was asked for ────────────────────────────────────
@@ -225,7 +230,7 @@ if ($include_envelope) {
 		fwrite(STDERR, 'ENVELOPE_ABSENT: ' . $envelope_name
 			. " is not on this node, so the uploaded archive cannot be decrypted from the cloud copy alone\n");
 	} else {
-		$envelope_key = $prefix . '/' . $slug . '/' . $envelope_name;
+		$envelope_key = $remote_dir . $envelope_name;
 		$put = upload_backup_put($creds, $bucket, $envelope_key, $envelope_path);
 		if (!$put['ok']) {
 			// Stop before the archive. Uploading it now would produce exactly
