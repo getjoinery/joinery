@@ -1041,14 +1041,14 @@ class AgentChannelEndpoint {
 			// Plugin::is_active()'s rule. A closed set; absent for an agent
 			// before 1.37.0, or one whose database did not answer.
 			'server_manager' => ['type' => 'string', 'max' => 8, 'pattern' => '/^(active|inactive)?$/'],
-		];
-	}
 			// Where the agent's own self-update stands: its verdict on the
 			// version on offer, and that version. A closed set of verdicts;
 			// absent for an agent before 1.65.0 and before its first check.
 			'update_state'   => ['type' => 'string', 'max' => 24,
 				'pattern' => '/^(none|current|update_pending|verify_failed|fetch_failed|unsigned_build|no_binary|version_rejected|unlogged)$/'],
 			'update_offered' => ['type' => 'string', 'max' => 20, 'pattern' => '/^([0-9]+\.[0-9]+\.[0-9]+)?$/'],
+		];
+	}
 
 	/**
 	 * A claim with the fields this plane does not know set aside, before the
@@ -1137,8 +1137,6 @@ class AgentChannelEndpoint {
 			$node->set('mgn_agent_server_manager', (string)$in['server_manager']);
 		}
 
-		// The node saying, unprompted, whether it can verify its own scripts.
-		//
 		// Where its own self-update stands. A refused update is otherwise seen
 		// only on the machine, as an agent version that never moves; stored
 		// here, it is raised as an incident (IncidentSourceAgentUpdateRefused).
@@ -1153,6 +1151,8 @@ class AgentChannelEndpoint {
 			}
 		}
 
+		// The node saying, unprompted, whether it can verify its own scripts.
+		//
 		// This is the case a refusal cannot cover: a node that is refusing but
 		// has no job dispatched to it never gets to say so, and the poll is the
 		// one moment it speaks for itself. An ABSENT field is an older agent or
