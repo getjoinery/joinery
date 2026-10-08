@@ -264,6 +264,20 @@ check(file_get_contents($dist_c . '/manifest.json') === $before_c,
 	'failed rebuild leaves the previous agent_dist in place');
 check(!is_dir($dist_c . '.staging'), 'failed rebuild cleans up its staging directory');
 
+// -- a version that is not X.Y.Z ----------------------------------------------
+// Nodes compare agent versions as three numbers and the management node refuses
+// a claim naming any other shape, so the publish refuses before it builds.
+$rc_src = $tmp_root . '/agent_src_rc';
+mkdir($rc_src, 0777, true);
+file_put_contents($rc_src . '/main.go', "package main\n\nvar version = \"1.66.0-rc1\"\n");
+harness_set_setting_mem('server_manager_agent_source_path', $rc_src);
+list($site_rc, $dist_rc) = $make_site('rc', '1.0.0');
+$before_rc = file_get_contents($dist_rc . '/manifest.json');
+$res = AgentDistPublisher::publish($site_rc, null);
+check($res['status'] === AgentDistPublisher::STATUS_FAILED && strpos($res['message'], 'is not X.Y.Z') !== false
+	&& file_get_contents($dist_rc . '/manifest.json') === $before_rc,
+	'a source version that is not X.Y.Z refuses the publish and leaves the bundle alone', $res['message']);
+
 // -- the bundle was built from another commit at the same version ----------
 // The release statement names the source's HEAD as the commit the binaries
 // are built from (release_transparency D3), so a bundle whose recorded commit

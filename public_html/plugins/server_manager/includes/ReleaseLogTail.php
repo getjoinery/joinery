@@ -44,6 +44,8 @@
  * The state, which the public releases page shows: how far each log has been
  * read, when, every unaccounted entry, and the last key check.
  *
+ * @version 1.2 - a checkpoint smaller than one already seen is refused; the run reports only entries the ledger
+ *                still does not account for
  * @version 1.1 - the daily check of installed log keys against Sigstore's trusted root (D7)
  * @version 1.0
  */
@@ -129,8 +131,9 @@ class ReleaseLogTail {
 			$parts[] = "{$origin} read to {$log['next']}" . ($log['target'] > $log['next'] ? ' of ' . $log['target'] : '');
 		}
 		$message = implode('; ', $parts) ?: 'No log to read.';
-		if ($state['unaccounted']) {
-			return array('status' => 'error', 'message' => count($state['unaccounted']) . ' entry(ies) under our key no publish here wrote. ' . $message);
+		$unaccounted = self::unaccounted($state, $ledger);
+		if ($unaccounted) {
+			return array('status' => 'error', 'message' => count($unaccounted) . ' entry(ies) under our key no publish here wrote. ' . $message);
 		}
 		if (!empty($state['root']['unknown'])) {
 			return array('status' => 'error', 'message' => count($state['root']['unknown']) . ' installed log key(s) Sigstore does not list. ' . $message);
@@ -180,6 +183,13 @@ class ReleaseLogTail {
 				$log = array('from' => $from, 'next' => $from, 'heads' => array(), 'target' => $from, 'caught_up_at' => null, 'read_at' => null);
 			}
 			$last_head = end($log['heads']);
+			if ($last_head !== false && $size < $last_head[0]) {
+				// A log only grows. A smaller tree under the log's own key is a
+				// rollback or a second view of the log: nothing is read and the
+				// log is not called caught up, so the tail goes blind on it.
+				$state['last_error'] = "{$origin} signed a checkpoint of {$size} entries after one of {$last_head[0]}; a log never shrinks.";
+				continue;
+			}
 			if ($last_head === false || $size > $last_head[0]) {
 				$log['heads'][] = array($size, $now);
 				$log['heads'] = array_slice($log['heads'], -self::HEADS_KEPT);
