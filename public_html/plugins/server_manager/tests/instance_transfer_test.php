@@ -150,8 +150,7 @@ function xfer_node(string $slug): ManagedNode {
 	$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 	$node->set('mgn_agent_primitives', 'hosted_mail_settings,hosted_plan_notice,backup_run');
 	$node->set('mgn_backup_shelf_bytes', 2 * 1073741824);
-	// Named but not real: nothing here may reach a real bucket.
-	$node->set('mgn_bkt_backup_target_id', 2000000000);
+	// No storage space: nothing here may reach a real bucket.
 	$node->save();
 	$node->load();
 	return $node;

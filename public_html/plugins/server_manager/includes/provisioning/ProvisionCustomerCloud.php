@@ -58,6 +58,9 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.12 - a provisioned node is given its storage space on the target Where new backups go names, once
+ *                 saved; the provision is linked to its node as soon as the node is saved, and a retried pass takes
+ *                 up its own node instead of failing it as a duplicate (B9)
  * @version 2.10 - a new node is given the target Where new backups go names
  * @version 2.9 - the retire job puts the provision's cvp_root_ssh_keys on root (none: root login off)
  * @version 2.8 - account_driver(): a connected account's driver, shared with MachineTransferWatch,
@@ -306,11 +309,18 @@ class ProvisionCustomerCloud {
 		}
 
 		// Same duplicate-slug rule as shared-host fulfillment: an existing
-		// non-failed node with this slug needs manual resolution.
+		// non-failed node with this slug needs manual resolution — unless it is
+		// this provision's own, made by an earlier pass of this step that did
+		// not finish, which the step takes up again.
 		$existing_multi = new MultiManagedNode(['slug' => $slug, 'deleted' => false]);
 		$existing_multi->load();
 		$node = null;
+		$own_id = (int)$provision->get('cvp_mgn_managed_node_id');
 		foreach ($existing_multi as $ex) {
+			if ($own_id > 0 && (int)$ex->key === $own_id) {
+				$node = $ex;
+				break;
+			}
 			if ($ex->get('mgn_install_state') !== 'install_failed') {
 				$this->alert_and_fail($provision, "Domain '{$domain}' is already provisioned (slug: {$slug}) — manual resolution required.");
 				return 1;
@@ -354,11 +364,21 @@ class ProvisionCustomerCloud {
 		}
 		$node->set('mgn_enabled',       true);
 		if (!$node->key) {
-			$node->assign_default_backup_target();
 			$node->prepare();
 		}
 		$node->save();
 		$node->load();
+		// Linked the moment the node exists, so a failure anywhere below
+		// leaves a provision that finds its own node on the next pass, never
+		// one the duplicate guard takes for somebody else's.
+		$provision->set('cvp_mgn_managed_node_id', $node->key);
+		$provision->save();
+		// Its backups go where new backups go: a node without its space is
+		// given one, on this pass or a retried one. A copy's backups are its
+		// source's (ManagedNode::backup_node_of), so it is given none.
+		if (!$copy_source) {
+			$node->open_default_backup_space();
+		}
 
 		// A container on a shared host needs its placement record now. It is the
 		// only sibling identity (mgn_mgh_managed_host_id), the port pool unions siblings

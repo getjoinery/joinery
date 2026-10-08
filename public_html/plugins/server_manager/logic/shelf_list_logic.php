@@ -3,10 +3,13 @@
  * shelf_list - what is in backup storage under a prefix of the tenant's own.
  *
  * (specs/services_phase2_platform.md §3). The plane lists with its own
- * credential and answers from inside the tenant's prefix only; keys come
- * back relative to it. What the site's verify and rehearsal use to find a
- * chain before asking for get URLs.
+ * credential and answers from inside the tenant's storage spaces only: the
+ * one new backups go to and any it was moved away from that still hold
+ * backups. Each object comes back with its space_id and its key relative to
+ * that space. What the site's verify and rehearsal use to find a chain
+ * before asking for get URLs.
  *
+ * @version 1.1 - every live storage space is listed; each object names its space (specs/storage_targets.md WP4)
  * @version 1.0
  */
 function shelf_list_logic(array $input): LogicResult {
@@ -29,7 +32,7 @@ function shelf_list_logic(array $input): LogicResult {
 
 function shelf_list_logic_descriptor(): array {
 	return array(
-		'description'      => 'List the objects under a prefix of this site\'s own backup storage. Keys are relative to the site\'s prefix.',
+		'description'      => 'List the objects under a prefix of this site\'s own backup storage, in every storage space it still holds backups in. Each object names its space_id; keys are relative to that space.',
 		'requires_session' => true,
 		'mutates'          => false,
 		'input'            => array(

@@ -12,6 +12,7 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
+ * @version 1.4 - a provisioned node is given its storage space on the target Where new backups go names, once saved
  * @version 1.3 - a provisioned node is given the target Where new backups go names
  * @version 1.2 - port allocation delegates to JobCommandBuilder::next_container_port (single allocator)
  * @version 1.1
@@ -218,10 +219,10 @@ class PollHostingOrders {
 				$node->set('mgn_ssl_state',    'pending');
 				$node->set('mgn_port',         $port);
 				$node->set('mgn_enabled',      true);
-				$node->assign_default_backup_target();
 				$node->prepare();
 				$node->save();
 				$node->load();
+				$node->open_default_backup_space();
 			}
 
 			// Build install_node job steps

@@ -10,6 +10,8 @@
  * list_status). Everything but list_status creates a job; list_status returns
  * the cached backup list. Superadmin only (floor 10).
  *
+ * @version 1.9.0 - every cloud action names the storage space its backup is in (space_id); delete is
+ *                  checked against that space, upload pairs against the space new backups go to
  * @version 1.8.1 - the target is the one the node names, switched off included; nothing is inferred
  * @version 1.8.0 - delete_file resolves the target as the listing does and refuses a key outside this
  *                  node's own folder; upload_file checks the pairing against the target and profile the
@@ -120,16 +122,16 @@ function backup_actions_logic(array $input): LogicResult {
 		if ($want_cloud) {
 			require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 			require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-			// The target is resolved the way the listing resolves it, so a node can
-			// delete what it was shown; and the key must
-			// be inside THIS node's own folder, so one node's page cannot delete
-			// another node's backups from the same bucket.
-			$tgt = JobCommandBuilder::get_target($node);
+			// The space is the one the listing named, so a node can delete what it
+			// was shown; and the key must be inside that space, THIS node's own
+			// folder, so one node's page cannot delete another node's backups
+			// from the same bucket.
+			$space = JobCommandBuilder::node_space($node, (int)($input['space_id'] ?? 0));
+			$tgt = $space ? $space->target() : null;
 			if (!$tgt) {
-				return LogicResult::render(['success' => false, 'message' => 'This node has no cloud backup target configured.']);
+				return LogicResult::render(['success' => false, 'message' => 'This node has no backup storage holding that file.']);
 			}
-			$node_prefix = TargetBackups::base_prefix($tgt) . $node->get('mgn_slug') . '/';
-			if ((string)$node->get('mgn_slug') === '' || strpos($cloud_path, $node_prefix) !== 0 || strlen($cloud_path) === strlen($node_prefix)) {
+			if (!$space->holds_key($cloud_path) || strlen($cloud_path) === strlen($space->base())) {
 				return LogicResult::render(['success' => false, 'message' => 'That file is not one of this node\'s backups.']);
 			}
 			try {
@@ -183,10 +185,10 @@ function backup_actions_logic(array $input): LogicResult {
 		// pairing is decided against the bucket the archive is actually going to.
 		$filename  = basename($local_path);
 		$profile   = BackupProfile::MANAGER;
-		$tgt       = JobCommandBuilder::get_target($node);
+		$space     = JobCommandBuilder::write_space($node);
 		$verdict   = ['verdict' => BackupPairing::PROCEED, 'message' => ''];
 
-		if ($tgt) {
+		if ($space) {
 			try {
 				// The node's own last scan says whether the envelope is on disk.
 				// Read from the cached list, NOT from BackupListHelper: that one
@@ -194,7 +196,7 @@ function backup_actions_logic(array $input): LogicResult {
 				// truncated listing reports a stored envelope as absent — turning
 				// a safety check into a false alarm that blocks good uploads.
 				$verdict = BackupPairing::upload_verdict(
-					$tgt, (string)$node->get('mgn_slug'), $profile, $filename,
+					$space->target(), $space->folder(), $profile, $filename,
 					backup_actions_envelope_on_node($node, $filename));
 			} catch (Exception $e) {
 				// Unreadable target is its own fact and must not read as
@@ -255,6 +257,7 @@ function backup_actions_logic(array $input): LogicResult {
 		$params = [
 			'filename'   => $filename,
 			'cloud_path' => $cloud_path,
+			'space_id'   => (int)($input['space_id'] ?? 0),
 			'profile'    => in_array((string)($input['profile'] ?? ''), ['site', 'manager'], true)
 				? (string)$input['profile'] : 'manager',
 			// An encrypted archive without its envelope is not a restore point,
@@ -283,6 +286,7 @@ function backup_actions_logic(array $input): LogicResult {
 	if ($action === 'stage_chain') {
 		$params = [
 			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'space_id' => (int)($input['space_id'] ?? 0),
 			'profile'  => trim((string)($input['profile'] ?? '')),
 		];
 		if (isset($input['seq']) && $input['seq'] !== '') {
@@ -308,6 +312,7 @@ function backup_actions_logic(array $input): LogicResult {
 	if ($action === 'verify_backup') {
 		$params = [
 			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'space_id' => (int)($input['space_id'] ?? 0),
 			'profile'  => trim((string)($input['profile'] ?? '')),
 			'level'    => (int)($input['level'] ?? 0),
 		];
@@ -338,6 +343,7 @@ function backup_actions_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetObjectRestore.php'));
 		$params = [
 			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'space_id' => (int)($input['space_id'] ?? 0),
 			'profile'  => trim((string)($input['profile'] ?? '')),
 			'mode'     => trim((string)($input['mode'] ?? '')) ?: BackupObjectRestore::MODE_MISSING,
 		];
@@ -413,6 +419,7 @@ function backup_actions_logic_descriptor(): array {
 			'local_path' => ['type' => 'string', 'required' => false, 'label' => 'Local path'],
 			'cloud_path' => ['type' => 'string', 'required' => false, 'label' => 'Cloud path'],
 			'chain_id'   => ['type' => 'string', 'required' => false, 'label' => 'Backup set (stage_chain / verify_backup)'],
+			'space_id'   => ['type' => 'int',    'required' => false, 'label' => 'Storage space the backup is in, as the listing names it (default: found, or where new backups go)'],
 			'profile'    => ['type' => 'string', 'required' => false, 'label' => 'Whose backup storage: site or manager'],
 			'seq'        => ['type' => 'int',    'required' => false, 'label' => 'Run within the set (default newest)'],
 			'level'      => ['type' => 'int',    'required' => false, 'label' => 'Verify level: 2 open and read, 3 rehearse (verify_backup)'],

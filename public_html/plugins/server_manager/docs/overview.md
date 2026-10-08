@@ -1333,28 +1333,35 @@ broker actions below. `JoineryServices` is the operator side of all of them.
 **The backup storage broker** (`ShelfBroker`, signing with `S3Signer::presign()`): no box ever holds a
 storage credential. For every object it writes or reads a site asks the plane
 for a presigned URL — one request, one key, one operation, good for an hour,
-SigV4-signed with the plane's own credential for its backup storage target
-(the one **Where new backups go** names, `server_manager_backup_target_id`;
-nothing is inferred when it is blank). Presigned URLs are the S3 standard, so backup storage is any
+SigV4-signed with the plane's own credential for the target of the storage
+space it is signed in (see [Storage spaces](#storage-spaces)): a run is taken
+in the tenant's active space and every link signed for it stays there; a read
+names a run, or a space (`space_id`, the active one when absent). Presigned URLs are the S3 standard, so backup storage is any
 S3-compatible store by construction. Five actions: `shelf_begin_run`
-(profile, chain, artifacts with sizes → a run id and base key
-`{prefix}/{slug}/{profile}/`, refused with the sentence the site's run history
+(profile, chain, artifacts with sizes → a run id, its space and base key
+`{space}{profile}/`, refused with the sentence the site's run history
 records when the ledger's bytes plus the declared sizes would cross the
-allowance, or when the tenant is not usable); `shelf_sign` (run id, name,
+allowance, when the tenant is not usable, or when the chain's objects are in
+a space the tenant was moved away from); `shelf_sign` (run id, name,
 operation — `put`, `multipart_create`, `multipart_parts` in batches of ten
 and `multipart_complete` need an open run and a key inside its base key;
-`get` needs no run: with run id 0 the name is relative to the tenant's own
-prefix, as `shelf_list` answers it; nothing signs a delete); `shelf_list` (a
-prefix inside the tenant's own; keys answered relative to it);
+`get` needs no run: with run id 0 the name is relative to one of the
+tenant's spaces, as `shelf_list` answers it; nothing signs a delete);
+`shelf_list` (a prefix inside every live space of the tenant; each object
+names its `space_id`, its key relative to that space);
 `shelf_finish_run` (the objects completed; the ledger marks them, and
 everything else the run signed is cancelled — an open multipart aborted at
-the provider with the plane's credential, a row never completed dropped);
+the provider with the plane's credential, a row never completed marked
+pruned);
 `shelf_status`
 (the C2 fields plus `writable` and `readable`). Writes need a usable tenant;
 reads (`shelf_list`, a `get`) are allowed to a suspended or released tenant
-until `svt_pruned_time` is set, so the retention promise is a readable one.
-The ledger (`svo_shelf_objects`, `ShelfObject`) holds one row per tenant and
-key — tenant, run, key, bytes, chain, signed and completed times; a key a
+until `svt_pruned_time` is set, so the retention promise is a readable one; a
+tenant never entitled reads nothing.
+The ledger (`svo_shelf_objects`, `ShelfObject`) holds one live row per space and
+key — tenant, space, run, key, bytes, chain, signed and completed times. An
+object that goes keeps its row, with `svo_pruned_time` and the cause
+(`retention`, `lapse`, `abort`, `reconcile`); every count reads live rows only; a key a
 later run signs again (a chain's manifest, rewritten by every incremental)
 moves its row to that run and is counted once: the row stays completed at
 the size the earlier run finished it, whatever the later run does, until
@@ -1372,14 +1379,18 @@ every pass and the row walked down the ladder — `server_manager_services_grace
 the backup storage broker refusing) and the retention clock starts, and a new date at
 any point before the prune reactivates in place; an act the provider refused
 (unreachable) is retried next pass. Mail's figure is read from the provider
-hourly. The backup storage ledger is reconciled against a real listing daily (an
-object backup storage lacks is dropped, a multipart still open at the provider
-aborted first; one the ledger lacks is adopted at its listed size); a run open longer than 36 hours is aborted on the plane's side,
+hourly. The backup storage ledger is reconciled daily, space by space, against
+a listing of that space's own target (an object it lacks is marked pruned, a
+multipart still open at the provider aborted first; one the ledger lacks is
+adopted at its listed size; a space that cannot be listed is reported and left
+alone); a run open longer than 36 hours is aborted on the plane's side,
 its open multipart cancelled with the plane's credential; every active
 tenant's backup storage is pruned to the newest `server_manager_services_shelf_keep_chains`
-(4) chains per profile, chains whole, a chain with an open run never
-touched; a suspended or released tenant whose prune-after day has come loses
-its whole prefix once, and the row says so.
+(4) chains per profile across its spaces, chains whole, each from its own
+target, a chain with an open run never touched, and a draining space kept
+whole until the active space holds a finished run, then retired once empty;
+a suspended or released tenant whose prune-after day has come loses
+everything in its spaces once, and the row says so.
 
 **Node-linked rows: a site moved off Managed.** A hosted site handed to its
 customer's own Linode account ([Hosted tier § Moving a site](hosted_tier.md#moving-a-site-to-its-customers-own-linode-account))
@@ -1388,11 +1399,13 @@ keeps its mail and backups through two rows linked to its node
 the site itself cannot call enrol, status or release. Only the reconcile and the
 operator reach them. The mail row is the Managed leg's subaccount, SMTP user,
 sender domain and records, carried over; from there the meter, suspend and close
-work as for any tenant. Backup storage is the node's own fleet backups under
-`{prefix}/{mgn_slug}/`, not the broker: the figure is what they occupy
+work as for any tenant. Backup storage is the node's own fleet backups in its storage spaces, not the
+broker: the figure is what they occupy
 (`mgn_backup_shelf_bytes`), the allowance pauses them and lifts its own pause,
 suspend and release switch them off with a marker and reactivate switches them
-back on (`NodeBackupShelf`), and the prune empties the node's prefix; the
+back on (`NodeBackupShelf`), and the prune empties what this management node
+took in each of the node's spaces (`{space}manager/`), never the site's own
+backups beside them; the
 ledger, stale-run and chain-retention passes do not apply. With no status poll
 on the box, the reconcile composes the site's `services` banner from the node's
 rows and pushes it over the agent when it changes, and the customer gets one
@@ -1421,11 +1434,25 @@ usernames and moves that tenant's figure.
 
 ## Backup Targets
 
-Backup targets define where the backups this management node takes are stored. Each node names its own target (`mgn_bkt_backup_target_id`); a node that names none has no backups taken from here. Nothing is inferred from "the one enabled target".
+Backup targets define where the backups this management node takes, and the backups it keeps for customers, are stored. Nothing is inferred from "the one enabled target".
 
-**Where new backups go** (`server_manager_backup_target_id`, chosen on the Targets page among the targets switched on) is the target every new node is given when it is created (`ManagedNode::assign_default_backup_target()`, called by each path that creates a node), and the target backup storage for customers uses. A node keeps its target until it is moved on its own page.
+### Storage spaces
 
-The node's target select lists every target not deleted; its own is listed even when switched off, so a save never clears it, and a switched-off target cannot be newly chosen. `JobCommandBuilder::get_target()` returns the named target switched on or off, for listings, restores, downloads and pruning; `write_target()` returns it only while switched on, for new backups and uploads.
+Every stored backup on this management node is in a **storage space** (`sps_storage_spaces`, `StorageSpace`): one owner's folder on one target — a node's (`{target folder}/{node slug}/`) or a backup storage customer's (`{target folder}/t{id}/`). Every reader reaches a backup through its space, never through "the target in use now".
+
+| State | Meaning |
+|---|---|
+| `active` | takes the owner's new backups; an owner has at most one |
+| `draining` | the owner was moved elsewhere: read, restored and pruned only, kept whole until the owner's active space holds a verified chain (a node) or a finished run (a customer), then aged out by the owner's normal retention |
+| `retired` | a draining space with nothing left in it |
+
+On one target no live space's folder equals or contains another's, so a customer `t5` and a node slugged `t5` can never list, prune or adopt each other's objects. The target's folder is stored in one form (`BackupTarget::normalise_prefix()`), and no two targets share a name: a node's chain follows the name of the target it is sent to (below).
+
+**Where new backups go** (`server_manager_backup_target_id`, chosen on the Targets page among the targets switched on) is where every new node (`ManagedNode::open_default_backup_space()`, called by each path that creates a node, once it is saved) and every new customer of backup storage (at enrol) opens its first space. A node with no space has no backups taken from here.
+
+**Moving.** *Move* on a node's Backups tab, or on a customer's row of the Service Tenants page, sends the owner's new backups to another switched-on target: that target opens (or gives back) the owner's space there and the old one starts draining (`StorageSpace::move()`). *Move everyone* on a target's page does the same for every owner whose new backups go there (`move_everyone_off()`). Nothing is copied: the next backup starts a full one on the new target — a node's run carries the new target's name, and the node starts a new chain when the name changes; the broker refuses to extend a customer's chain whose objects are in a draining space — and the old backups stay readable and restorable where they are until they age out.
+
+`JobCommandBuilder::node_space()` returns a node's space by id, or its active one; `get_target()` is the active space's target switched on or off; `write_space()` / `write_target()` return it only while its target is switched on, for new backups and uploads. Downloads, Prepare, Verify and Bring them back name the space a backup is in (`space_id`, from the listing), and a chain named without one is found in whichever space holds it.
 
 ### Supported Providers
 
@@ -1438,11 +1465,11 @@ All providers authenticate against their S3-compatible endpoint via AWS SigV4 si
 1. Go to `/admin/server_manager/targets` and click **Add Target**
 2. Select a provider, enter bucket name, path prefix, and credentials
 3. Choose it under **Where new backups go**, so new nodes are given it
-4. For a node that already exists, go to its Overview tab, expand **Edit Connection Settings**, and select the target from the **Backup target** dropdown
+4. For a node that already exists, choose the target under **Move new backups to** on its Backups tab
 
 ### Upload Path Structure
 
-All providers use: `{prefix}/{node_slug}/{profile}/…`, where the profile is `manager` for the backups this management node schedules and `site` for the site's own. Chains sit in `chain-*/` folders, offloaded files in `objects/`, and a standalone archive (a single run, or one re-uploaded from a node's Backups tab) directly in the profile folder beside its `.keys.json`.
+All providers use: `{space}{profile}/…` — `{target folder}/{node slug}/{profile}/…` — where the profile is `manager` for the backups this management node schedules and `site` for the site's own. Chains sit in `chain-*/` folders, offloaded files in `objects/`, and a standalone archive (a single run, or one re-uploaded from a node's Backups tab) directly in the profile folder beside its `.keys.json`.
 
 Example: `joinery-backups/empoweredhealthtn/manager/empoweredhealthtn-04_11_2026.sql.gz.enc`
 
@@ -1482,7 +1509,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the management node would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
-- **Backups** — one row per backup run in the node's backup storage, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`, which lists the node's own prefix in backup storage, every page of it, so ten thousand offloaded-file objects under one node never push a manifest off the end of the list. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all. **Last verified restorable** is stated with the three facts (level name, date, the node's own counts, or the reason it failed), and each run's **Verify** button opens a dialog with two choices, *Open and read* and *Rehearse a restore (needs about N free on the node)*, the room worked out from the runs' recorded sizes the way the node works it out before downloading. Either creates a `verify_backup` job; the poller reports what the node said, and a reload shows it above and on the node's card. An **Offloaded files in backup storage** row totals the object store from the same listing — "N objects, X GB by this management node; last indexed at the run of …" — and, when a run in backup storage carries an offloaded-files index, offers **Bring them back**: the `restore_objects` survey job in `missing` mode, whose pages follow as their own jobs; the node's own Backups page says what its file store is missing, the plane only asks
+- **Backups** — one row per backup run in the node's backup storage, newest first (when, full or incremental, who took it, size), with the last backup, the last full backup and the oldest backup held stated above the list; read from each chain's `manifest.json` by `BackupChainListHelper`, which lists the node's own folder in every live storage space, every page of it (a run kept on a target the node was moved away from says so), so ten thousand offloaded-file objects under one node never push a manifest off the end of the list. Restoring a run replays the last full before it and every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all. **Last verified restorable** is stated with the three facts (level name, date, the node's own counts, or the reason it failed), and each run's **Verify** button opens a dialog with two choices, *Open and read* and *Rehearse a restore (needs about N free on the node)*, the room worked out from the runs' recorded sizes the way the node works it out before downloading. Either creates a `verify_backup` job; the poller reports what the node said, and a reload shows it above and on the node's card. An **Offloaded files in backup storage** row totals the object store from the same listing — "N objects, X GB by this management node; last indexed at the run of …" — and, when a run in backup storage carries an offloaded-files index, offers **Bring them back**: the `restore_objects` survey job in `missing` mode, whose pages follow as their own jobs; the node's own Backups page says what its file store is missing, the plane only asks
 
 ### What a restore asks, and what it decides
 
@@ -1496,15 +1523,17 @@ Every restore job ends with two gates: the site's identity must match the machin
 
 What gets reconciled, and why each item is on the list, is in [Backups](../../../docs/backups.md#what-a-restore-reconciles).
 
-Cloud listings are fetched live via `S3Signer::list()` (capped at 500 objects, under the node's own folder) on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
+Cloud listings are fetched live via `S3Signer::list()` (capped at 500 objects per storage space, under the node's own folder in each) on every page render (one SigV4 HTTP GET per space, ~200–500ms each). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
 
 ### Stored Backups (target-side)
 
-The **Backup Targets** edit page has a **Stored Backups** panel that lists the target's objects directly from the bucket and groups them by site. It runs entirely on the management node via `TargetBackups` (which lists through `S3Signer::list`, a continuation-token-paged ListObjectsV2), so it needs no live node — the authoritative view of what is actually stored offsite. Each group is tagged against the node table:
+The **Backup Targets** edit page shows **Who backs up here** — every live storage space on the target, its owner and folder, new backups or older backups aging out — with **Move everyone** to another switched-on target.
 
-- **live** — a current node owns the slug; a link jumps to that node's Backups tab for granular local+cloud management
-- **decommissioned** — a soft-deleted node owned the slug; the site is gone but its offsite backups remain here, reachable and deletable
-- **orphaned** — no node, present or deleted, matches the slug
+Below it, a **Stored Backups** panel lists the target's objects directly from the bucket and groups them by folder. It runs entirely on the management node via `TargetBackups` (which lists through `S3Signer::list`, a continuation-token-paged ListObjectsV2), so it needs no live node — the authoritative view of what is actually stored offsite. Each folder is tagged by the target's spaces (`FleetBackups::folder_map()`):
+
+- **new backups go here** — an active space owns the folder; a node's links to its Backups tab
+- **older backups, aging out** — a draining space owns it
+- **unclaimed** — no space claims it (left by an earlier switch, or a deleted node, which is named). **Adopt as older backups of** gives it to a node or a customer as a draining space, so its backups are listable, restorable and pruned again
 
 Delete acts through `S3Signer` from the management node: a single object (guarded so the key must sit under the target's own prefix), or a whole site's prefix (type-to-confirm the slug). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
 
@@ -1530,7 +1559,7 @@ Removed sites are hidden from the dashboard by default. The **Show all sites (in
 Opening a removed node's detail page offers two follow-up actions in its Danger Zone:
 
 - **Permanently Delete Site** — the same `decommission_site` teardown on the host's agent, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this management node once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page never probes the host directly. A `decommission_site` that reaches a host with no vhost for the named site is refused by the host, naming the site and the path it looked for, and the job fails: a request naming a site the host does not know is never reported as a verified removal, so a stale entry or a mistyped name cannot be "verified" away. Asking again after a site is gone therefore fails on purpose; the dashboard entry is closed with **Permanently Delete Entry**.) The consent rule holds here too: the site must still approve on its own admin, so a container too broken to render its own approval is not removable this way — it is recovered by rebuild-and-restore instead.
-- **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's slug still has offsite backups on any enabled target (or while a target cannot be listed to confirm): deleting the record would orphan those backups from the node they belong to, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched and the job history survives the purge (cascade rules null the references).
+- **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's storage spaces still hold backups (or while one cannot be listed to confirm): deleting the record would leave them unclaimed, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched and the job history survives the purge (cascade rules null the references).
 
 ## Backup Encryption and Key Custody
 
@@ -1719,8 +1748,10 @@ Two provider notes:
 #### Scheduling
 
 The **Fleet Backups** task (`plugins/server_manager/tasks/FleetBackupRun.php`)
-runs every cron tick, finds due nodes, prunes each one's backup storage, and dispatches
-one `backup_run` per node.
+runs every cron tick, finds due nodes, prunes each one's backup storage across its
+storage spaces (`FleetBackupRetention::prune()`, each point deleted from its own
+space's target; a draining space kept whole until a verify of a chain in the
+active space has passed), and dispatches one `backup_run` per node.
 
 `FleetBackupPolicy` resolves each node's schedule: the declared fleet settings,
 then that node's own `mgn_backup_policy` overrides. **The fleet default is
@@ -2117,7 +2148,6 @@ Represents a remote Joinery instance. Key fields:
 - `mgn_web_root` -- Path to `public_html` inside the server/container. Empty means the node hosts no site (no backup, no recovery-key report). The node's agent reports it at join and in every `check_status`; a report fills an empty one (an absolute path ending `/public_html`) and never replaces a set one — a difference is logged.
 - `mgn_last_status_data` -- JSON from last status check (disk, memory, load, etc.)
 - `mgn_joinery_version` -- Last known version string
-- `mgn_bkt_backup_target_id` -- FK to backup target (null = no backups taken from this management node)
 
 ### CustomerCloudAccount (`cca_customer_cloud_accounts`)
 

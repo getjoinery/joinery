@@ -18,13 +18,14 @@
  *     new backups go names one
  *   - a switched-off target is still read (listings, restores, pruning); only
  *     new backups need it switched on
- *   - a new node is given the target Where new backups go names
+ *   - a new node is given its storage space on the target Where new backups go names
+ *   - no two targets share a name
  *
  * Fixture rows only; the deployment's real targets are untouched.
  *
  * Run: php tests/backups/target_location_rules_test.php
  *
- * @version 1.0
+ * @version 1.1 - nodes back up through storage spaces; target names are unique
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -133,9 +134,10 @@ if (class_exists('ManagedNode')) {
 	$node->set('mgn_name', 'HarnessTest Node ' . $suffix);
 	$node->set('mgn_slug', 'harnesstest-' . $suffix);
 	$node->set('mgn_host', '192.0.2.10');
-	$node->set('mgn_bkt_backup_target_id', (int)$nt->key);
 	$node->save();
 	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+	$space = StorageSpace::open($nt, StorageSpace::OWNER_NODE, (int)$node->key, 'harnesstest-' . $suffix);
+	harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $space->key);
 
 	$why = $nt->disable_refusal();
 	check(strpos($why, 'HarnessTest Node ' . $suffix) !== false && strpos($why, 'move it') !== false,
@@ -157,27 +159,41 @@ if (class_exists('ManagedNode')) {
 	$bare->set('mgn_host', '192.0.2.11');
 	$bare->save();
 	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $bare->key);
-	check(JobCommandBuilder::get_target($bare) === null, 'a node naming no target has none, however many are enabled');
+	check(JobCommandBuilder::get_target($bare) === null, 'a node with no storage space has no target, however many are enabled');
 	check(JoineryServices::shelfTarget() === null, 'backup storage for customers has no target until Where new backups go names one');
+	check($bare->open_default_backup_space() === null, 'nor is a new node given one');
 
 	$def = $make_target('Default');
 	harness_set_setting_mem('server_manager_backup_target_id', (string)$def->key);
 	check(JoineryServices::shelfTarget() && (int)JoineryServices::shelfTarget()->key === (int)$def->key,
 		'Where new backups go is the backup storage target');
-	$born = new ManagedNode(NULL);
-	$born->assign_default_backup_target();
-	check((int)$born->get('mgn_bkt_backup_target_id') === (int)$def->key, 'a new node is given the target Where new backups go names');
-	$named = new ManagedNode(NULL);
-	$named->set('mgn_bkt_backup_target_id', (int)$nt->key);
-	$named->assign_default_backup_target();
-	check((int)$named->get('mgn_bkt_backup_target_id') === (int)$nt->key, 'a new node that already names a target keeps it');
+	$born = $bare->open_default_backup_space();
+	if ($born) { harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $born->key); }
+	check($born && (int)$born->get('sps_bkt_backup_target_id') === (int)$def->key
+		&& $born->base() === 'joinery-backups/harnesstest-bare-' . $suffix . '/',
+		'a new node is given its own folder on the target Where new backups go names');
+	$again = $node->open_default_backup_space();
+	check($again && (int)$again->key === (int)$space->key, 'a node that already has a space keeps it');
 	$db->prepare("UPDATE bkt_backup_targets SET bkt_enabled = false WHERE bkt_backup_target_id = ?")->execute(array((int)$def->key));
-	$born = new ManagedNode(NULL);
-	$born->assign_default_backup_target();
-	check(!$born->get('mgn_bkt_backup_target_id'), 'a switched-off default is not given to a new node');
+	$late = new ManagedNode(NULL);
+	$late->set('mgn_name', 'HarnessTest Late ' . $suffix);
+	$late->set('mgn_slug', 'harnesstest-late-' . $suffix);
+	$late->set('mgn_host', '192.0.2.12');
+	$late->save();
+	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $late->key);
+	check($late->open_default_backup_space() === null, 'a switched-off default is not given to a new node');
 	check(JoineryServices::shelfTarget() === null, 'nor used for backup storage');
 } else {
 	harness_skip('A target nodes back up to', 'server_manager is not active here');
 }
+
+section('One name per target');
+$dup = new BackupTarget(NULL);
+$dup->set('bkt_name', 'HarnessTest Fresh ' . $suffix);
+$dup->set('bkt_provider', 's3');
+$dup->set('bkt_bucket', 'harness-dup-' . $suffix);
+$threw = '';
+try { $dup->save(); } catch (BackupTargetException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'already called') !== false, 'a second target may not take a name in use: a name says where a backup went', $threw);
 
 harness_finish();

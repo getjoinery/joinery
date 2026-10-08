@@ -5,6 +5,9 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.15 - storage spaces (specs/storage_targets.md WP4): who backs up to this target and whose older
+ *                 backups it keeps, Move everyone off to another target, Stored Backups classified by space,
+ *                 and an unclaimed folder adopted as a node's or a customer's draining space
  * @version 2.14 - Where new backups go is drawn by SettingsFieldRenderer from its declaration (a page may not
  *                 draw a declared setting's field itself)
  * @version 2.13 - Where new backups go (server_manager_backup_target_id), chosen here among the targets switched
@@ -122,6 +125,51 @@ if ($post_action === 'save_default_target') {
 	exit;
 }
 
+// Move everyone off: every owner whose new backups go here is moved to another
+// target. Their backups already here stay, readable and restorable, and age out
+// once the new target holds a verified backup (R3). Nothing is copied.
+if ($post_action === 'move_everyone_off' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	$page_regex = '/\/admin\/server_manager/';
+	try {
+		$to = new BackupTarget((int)($_POST['to_target_id'] ?? 0), TRUE);
+		$moved = StorageSpace::move_everyone_off($target, $to);
+		$msg = count($moved['moved']) . ' moved to "' . $to->get('bkt_name') . '".';
+		foreach ($moved['refused'] as $name => $why) {
+			$msg .= ' ' . $name . ' was not moved: ' . $why;
+		}
+		$session->save_message(new DisplayMessage($msg, $moved['refused'] ? 'Error' : 'Success', $page_regex,
+			$moved['refused'] ? DisplayMessage::MESSAGE_ERROR : DisplayMessage::MESSAGE_ANNOUNCEMENT,
+			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage($e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	}
+	header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
+	exit;
+}
+
+// Adopt an unclaimed folder: a folder on this target no storage space claims
+// (left by an earlier switch, or by a deleted node) becomes the chosen owner's
+// draining space, so its backups are listable, restorable and pruned again.
+if ($post_action === 'adopt_folder' && $is_edit) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
+	$page_regex = '/\/admin\/server_manager/';
+	try {
+		$owner = explode(':', (string)($_POST['owner'] ?? ''), 2);
+		$kind = $owner[0] === 'tenant' ? StorageSpace::OWNER_TENANT : StorageSpace::OWNER_NODE;
+		$space = StorageSpace::adopt($target, trim((string)($_POST['folder'] ?? '')), $kind, (int)($owner[1] ?? 0));
+		$session->save_message(new DisplayMessage(
+			'The folder ' . $space->base() . ' is now ' . $space->owner_name() . '\'s, kept while its backups age out.',
+			'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage('Not adopted. ' . $e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	}
+	header('Location: /admin/server_manager/targets?bkt_backup_target_id=' . $target->key);
+	exit;
+}
+
 // Recovery key setup lives in one place — the core Backups page, which draws
 // RecoveryKeySetupPanel. This page shows the standing state and links there.
 
@@ -134,6 +182,11 @@ if ($post_action === 'delete_backup_prefix' && $is_edit) {
 	$slug = trim($_POST['slug'] ?? '');
 	try {
 		$n = TargetBackups::delete_prefix($target, $slug);
+		// A space kept only for its old backups has nothing left to keep.
+		$emptied = StorageSpace::for_base((int)$target->key, TargetBackups::base_prefix($target) . $slug . '/');
+		if ($emptied && $emptied->is_draining()) {
+			$emptied->retire();
+		}
 		$session->save_message(new DisplayMessage(
 			'Deleted ' . $n . ' backup object' . ($n === 1 ? '' : 's') . ' for "' . $slug . '".',
 			'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
@@ -384,10 +437,65 @@ if ($target !== null) {
 
 	$page->end_box();
 
+	// ── Who backs up here ──
+	if ($is_edit) {
+		$spaces_here = StorageSpace::on_target((int)$target->key);
+		$page->begin_box(['title' => 'Who backs up here']);
+		if (!$spaces_here) {
+			echo '<p class="text-muted mb-0">Nothing backs up to this target, and it keeps nobody\'s older backups.</p>';
+		} else {
+			echo '<table class="table table-sm"><thead><tr><th>Owner</th><th>Folder</th><th>Since</th></tr></thead><tbody>';
+			$any_active = false;
+			foreach ($spaces_here as $sp) {
+				$any_active = $any_active || $sp->is_active();
+				echo '<tr><td>' . htmlspecialchars($sp->owner_name()) . ' <span class="badge bg-'
+					. ($sp->is_active() ? 'success">new backups go here' : 'secondary">older backups, aging out') . '</span></td>';
+				echo '<td><code>' . htmlspecialchars($sp->base()) . '</code></td>';
+				echo '<td class="small text-muted">' . htmlspecialchars(substr((string)($sp->is_active()
+					? $sp->get('sps_opened_time') : $sp->get('sps_draining_time')), 0, 10)) . '</td></tr>';
+			}
+			echo '</tbody></table>';
+			$off_options = [];
+			foreach ($all_targets as $t) {
+				if ($t->get('bkt_enabled') && (int)$t->key !== (int)$target->key) {
+					$off_options[(string)(int)$t->key] = $t->get('bkt_name');
+				}
+			}
+			if ($any_active && $off_options) {
+				$fmove = $page->getFormWriter('move_everyone_off_form');
+				$fmove->begin_form();
+				echo SmAdminCsrf::field();
+				$fmove->hiddeninput('action', '', ['value' => 'move_everyone_off']);
+				$fmove->dropinput('to_target_id', 'Move everyone off this target to', [
+					'options'  => $off_options,
+					'helptext' => 'Each owner\'s next backup starts a full backup there. The backups already here stay, '
+						. 'readable and restorable, and age out once the new target holds a verified backup.',
+				]);
+				$fmove->submitbutton('btn_move_everyone_off', 'Move everyone', ['class' => 'btn btn-sm btn-outline-primary']);
+				$fmove->end_form();
+			}
+		}
+		$page->end_box();
+	}
+
 	// ── Stored Backups (management-node view of the bucket) ──
 	if ($is_edit) {
 		$fmt_bytes = function ($b) { return BackupRunner::human((int)$b); };
-		$badge_for = ['live' => 'success', 'decommissioned' => 'warning', 'orphaned' => 'secondary'];
+		$badge_for = ['live' => 'success', 'draining' => 'secondary', 'unclaimed' => 'warning', 'orphaned' => 'warning'];
+		$status_words = ['live' => 'new backups go here', 'draining' => 'older backups, aging out',
+			'unclaimed' => 'unclaimed', 'orphaned' => 'unclaimed'];
+		// Who an unclaimed folder can be given to: every node, and every
+		// customer of backup storage.
+		$adopt_owners = [];
+		foreach (new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC']) as $n) {
+			$adopt_owners['node:' . (int)$n->key] = $n->get('mgn_name');
+		}
+		foreach (new MultiServiceTenant(['service' => ServiceTenant::SERVICE_SHELF, 'deleted' => false],
+				['svt_service_tenant_id' => 'ASC']) as $row) {
+			if ($row->is_node_linked()) { continue; }
+			$adopt_owners['tenant:' . (int)$row->key] = 'customer ' . $row->get('svt_slug')
+				. ($row->get('svt_host') ? ' (' . $row->get('svt_host') . ')' : '');
+		}
 
 		$page->begin_box(['title' => 'Stored Backups']);
 		try {
@@ -406,10 +514,26 @@ if ($target !== null) {
 					echo '<div class="d-flex justify-content-between align-items-start">';
 
 					echo '<div><strong>' . htmlspecialchars($slug) . '</strong> ';
-					echo '<span class="badge bg-' . $badge . '">' . htmlspecialchars($g['status']) . '</span>';
-					if ($g['status'] === 'live' && $g['node_id']) {
+					echo '<span class="badge bg-' . $badge . '">' . htmlspecialchars($status_words[$g['status']] ?? $g['status']) . '</span>';
+					if (($g['owner'] ?? '') !== '') {
+						echo ' <span class="small text-muted">' . htmlspecialchars($g['owner']) . '</span>';
+					}
+					if (in_array($g['status'], ['live', 'draining'], true) && $g['node_id']) {
 						echo ' <a class="small ms-1" href="/admin/server_manager/node_detail?mgn_managed_node_id='
 							. (int)$g['node_id'] . '&tab=backups">manage on node</a>';
+					}
+					if (in_array($g['status'], ['unclaimed', 'orphaned'], true) && $adopt_owners) {
+						$fad = $page->getFormWriter('adopt_' . md5($slug));
+						$fad->begin_form();
+						echo SmAdminCsrf::field();
+						$fad->hiddeninput('action', '', ['value' => 'adopt_folder']);
+						$fad->hiddeninput('folder', '', ['value' => $slug]);
+						$fad->dropinput('owner', 'Adopt as older backups of', [
+							'options' => $adopt_owners,
+							'value'   => $g['node_id'] ? 'node:' . (int)$g['node_id'] : '',
+						]);
+						$fad->submitbutton('btn_adopt_' . md5($slug), 'Adopt', ['class' => 'btn btn-sm btn-outline-primary']);
+						$fad->end_form();
 					}
 					echo '<div class="text-muted small">' . $g['count'] . ' object'
 						. ($g['count'] === 1 ? '' : 's') . ', ' . $fmt_bytes($g['bytes']) . '</div>';

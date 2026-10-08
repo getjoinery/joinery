@@ -10,6 +10,7 @@
  * on someone else's machine (specs/ssh_single_bootstrap.md).
  * After save, redirects to node_detail.
  *
+ * @version 1.8 - a new node is given its storage space on the target Where new backups go names, once saved
  * @version 1.7 - a new node is given the target Where new backups go names
  * @version 1.6 - the placement record is minted only for a container node (ManagedHost::place_node)
  * @version 1.5 - the auto-detect (SSH discovery) panel is gone; enrollment starts on the node
@@ -76,10 +77,10 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			&& (int)$node->get('mgn_uptime_tcp_port') < 1) {
 			throw new Exception('A TCP port is required when the check type is TCP port.');
 		}
-		$node->assign_default_backup_target();
 		$node->prepare();
 		$node->save();
 		$node->load();
+		$node->open_default_backup_space();
 
 		// A container names its placement record (minted here if none exists);
 		// sibling grouping and host-scope routing read nothing else. A bare

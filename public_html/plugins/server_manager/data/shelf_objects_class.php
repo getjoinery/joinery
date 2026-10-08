@@ -15,6 +15,14 @@
  * A multipart upload's id is kept while it is open so the plane can abort it
  * itself — the plane's own call, not a delete the box could make.
  *
+ * Every row is in one storage space (svo_sps_storage_space_id), the run's,
+ * and so on one target. A row whose object is gone is KEPT, not deleted: it
+ * gains svo_pruned_time and the cause (retention, lapse, abort, reconcile), so
+ * the ledger answers "what happened to this object" for as long as the space
+ * is remembered (specs/storage_targets.md §4). Every count and every lookup of
+ * a live object reads unpruned rows only.
+ *
+ * @version 1.1 - svo_sps_storage_space_id; pruned rows are kept with their time and cause
  * @version 1.0
  */
 
@@ -30,10 +38,18 @@ class ShelfObject extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'svo_svt_service_tenant_id' => array('action' => 'cascade'),
 		'svo_svr_shelf_run_id'      => array('action' => 'null'),
+		'svo_sps_storage_space_id'  => array('action' => 'null'),
 	);
 
+	/** Why an object left the ledger's live count. */
+	const PRUNED_RETENTION = 'retention';
+	const PRUNED_LAPSE     = 'lapse';
+	const PRUNED_ABORT     = 'abort';
+	const PRUNED_RECONCILE = 'reconcile';
+
 	public static $test_fixture = array(
-		'values'       => array('svo_key' => 'harness/key'),
+		// A new ledger row is in a storage space; the generator only fills NOT NULL columns.
+		'values'       => array('svo_key' => 'harness/key', 'svo_sps_storage_space_id' => 1),
 		'update_field' => 'svo_chain',
 	);
 
@@ -41,6 +57,8 @@ class ShelfObject extends SystemBase {
 		'svo_shelf_object_id'       => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'svo_svt_service_tenant_id' => array('type'=>'int8', 'is_nullable'=>false),
 		'svo_svr_shelf_run_id'      => array('type'=>'int8'),
+		// The space the object is in, and so the target that holds it.
+		'svo_sps_storage_space_id'  => array('type'=>'int8'),
 		'svo_key'                   => array('type'=>'varchar(1024)', 'is_nullable'=>false),
 		'svo_bytes'                 => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
 		'svo_chain'                 => array('type'=>'varchar(64)'),
@@ -48,6 +66,10 @@ class ShelfObject extends SystemBase {
 		'svo_upload_id'             => array('type'=>'varchar(255)'),
 		'svo_signed_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'svo_completed_time'        => array('type'=>'timestamp(6)'),
+		// Gone from backup storage, and why. The row stays.
+		'svo_pruned_time'           => array('type'=>'timestamp(6)'),
+		'svo_pruned_cause'          => array('type'=>'varchar(16)',
+			'allowed_values'=>array('retention', 'lapse', 'abort', 'reconcile')),
 		'svo_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'svo_update_time'           => array('type'=>'timestamp(6)'),
 		'svo_delete_time'           => array('type'=>'timestamp(6)'),
@@ -64,27 +86,39 @@ class ShelfObject extends SystemBase {
 		if (trim((string)$this->get('svo_key')) === '') {
 			throw new ShelfObjectException('A ledger row names a key.');
 		}
+		if (!$this->key && !(int)$this->get('svo_sps_storage_space_id')) {
+			throw new ShelfObjectException('A ledger row is in a storage space.');
+		}
 		$this->set('svo_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
 	}
 
-	/** The tenant's completed bytes: the figure in its backup storage row. */
+	/** The tenant's completed bytes across its spaces: the figure in its backup storage row. */
 	public static function completedBytes(int $tenant_id): int {
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare("SELECT COALESCE(SUM(svo_bytes), 0) FROM svo_shelf_objects
-			WHERE svo_svt_service_tenant_id = ? AND svo_completed_time IS NOT NULL AND svo_delete_time IS NULL");
+			WHERE svo_svt_service_tenant_id = ? AND svo_completed_time IS NOT NULL
+			  AND svo_pruned_time IS NULL AND svo_delete_time IS NULL");
 		$q->execute(array($tenant_id));
 		return (int)$q->fetchColumn();
 	}
 
-	/** The row for one key of one tenant, newest first, or null. */
-	public static function forKey(int $tenant_id, string $key): ?ShelfObject {
-		$rows = new MultiShelfObject(array('tenant_id' => $tenant_id, 'key' => $key, 'deleted' => false),
+	/** The live (unpruned) row for one key in one space, newest first, or null. */
+	public static function forKey(int $space_id, string $key): ?ShelfObject {
+		$rows = new MultiShelfObject(array('space_id' => $space_id, 'key' => $key, 'pruned' => false, 'deleted' => false),
 			array('svo_shelf_object_id' => 'DESC'), 1);
 		foreach ($rows as $row) {
 			return $row;
 		}
 		return null;
+	}
+
+	/** Gone from backup storage: the row is kept with when and why. */
+	public function markPruned(string $cause, ?string $now = null): void {
+		$this->set('svo_pruned_time', $now ?? gmdate('Y-m-d H:i:s'));
+		$this->set('svo_pruned_cause', $cause);
+		$this->set('svo_upload_id', null);
+		$this->save();
 	}
 }
 
@@ -95,6 +129,12 @@ class MultiShelfObject extends SystemMultiBase {
 		$filters = array();
 		if (isset($this->options['tenant_id'])) {
 			$filters['svo_svt_service_tenant_id'] = array((int)$this->options['tenant_id'], PDO::PARAM_INT);
+		}
+		if (isset($this->options['space_id'])) {
+			$filters['svo_sps_storage_space_id'] = array((int)$this->options['space_id'], PDO::PARAM_INT);
+		}
+		if (isset($this->options['pruned'])) {
+			$filters['svo_pruned_time'] = $this->options['pruned'] ? 'IS NOT NULL' : 'IS NULL';
 		}
 		if (isset($this->options['run_id'])) {
 			$filters['svo_svr_shelf_run_id'] = array((int)$this->options['run_id'], PDO::PARAM_INT);

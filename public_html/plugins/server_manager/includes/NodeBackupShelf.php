@@ -9,7 +9,7 @@
  * node-linked Services row — a Managed site that moved to its customer's own
  * cloud account and kept its backups with us
  * (specs/managed_to_self_hosted_transfer.md §5a). Both write the node's fleet
- * backups under {target prefix}/{mgn_slug}/ with a per-run key; neither goes
+ * backups in the node's storage spaces with a per-run key; neither goes
  * through the broker. So the acts live here once.
  *
  * NOTHING HERE DELETES A BACKUP FOR BEING OVER AN ALLOWANCE. Over the cap,
@@ -22,6 +22,8 @@
  * what lets a switch-on undo exactly what this did and never an operator's own
  * deliberate off.
  *
+ * @version 1.2 - prune() empties what this management node took in each of the node's storage spaces
+ *                ({space}/manager/), never a site's own backups beside them (S22)
  * @version 1.1 - prune() is quiet about a target it cannot reach and throws on a listing that fails, as the
  *                hosted watch did before the lift
  * @version 1.0 - lifted from HostedTrialWatch
@@ -98,43 +100,50 @@ class NodeBackupShelf {
 	}
 
 	/**
-	 * The node's whole prefix in backup storage, gone: everything under
-	 * {target prefix}/{mgn_slug}/, both profiles. Returns how many objects were
-	 * deleted, or null when there is no usable target to reach (none named or
-	 * enabled, no bucket, no credential) — the caller tries again later,
-	 * quietly, since a target can come back. A listing that FAILS throws: that
-	 * is a fault somebody should see. Either way nothing is recorded as pruned.
+	 * The node's backups in backup storage, gone: in every storage space it
+	 * has, everything this management node took ({space}/manager/), and
+	 * nothing else. A site that backs itself up to the same bucket and folder
+	 * keeps its own {space}/site/ backups: those are not ours to empty
+	 * (specs/storage_targets.md S22). Spaces the node had been moved away from
+	 * are retired once emptied; the active one stays, empty, for the node's
+	 * next backup.
+	 *
+	 * Returns how many objects were deleted, or null when the node has no
+	 * space to empty — the caller tries again later, quietly. A space that
+	 * cannot be reached or listed THROWS: that is a fault somebody should see,
+	 * and nothing is recorded as pruned.
 	 *
 	 * Emptying is not trimming: retention's prune() keeps at least one chain on
 	 * purpose, so this is done here, explicitly, with the plane's own credential.
 	 */
 	public static function prune($node): ?int {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-		$target = JobCommandBuilder::get_target($node);
-		if (!$target) {
+		$spaces = StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key);
+		if (!$spaces) {
 			return null;
-		}
-		$creds  = $target->get_credentials();
-		$bucket = trim((string)$target->get('bkt_bucket'));
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-		$slug   = trim((string)$node->get('mgn_slug'));
-		if ($bucket === '' || empty($creds) || $slug === '') {
-			return null;
-		}
-		$base = $prefix . '/' . $slug . '/';
-		$objects = S3Signer::list($creds, $bucket, $base);
-		if (!is_array($objects)) {
-			throw new RuntimeException('backup storage could not be listed under ' . $base);
 		}
 		$deleted = 0;
-		foreach ($objects as $object) {
-			$key = is_array($object) ? (string)($object['key'] ?? '') : (string)$object;
-			if ($key === '' || strpos($key, $base) !== 0) { continue; }
-			$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-			$status = (int)($resp['status'] ?? 0);
-			if (($status >= 200 && $status < 300) || $status === 404) {
-				$deleted++;
+		foreach ($spaces as $space) {
+			try {
+				list($target, $creds, $bucket) = $space->reach();
+			} catch (StorageSpaceException $e) {
+				throw new RuntimeException('backup storage cannot be reached: ' . $e->getMessage());
+			}
+			$base = $space->base() . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+			$objects = S3Signer::list($creds, $bucket, $base);
+			if (!is_array($objects)) {
+				throw new RuntimeException('backup storage could not be listed under ' . $base);
+			}
+			foreach ($objects as $object) {
+				$key = is_array($object) ? (string)($object['key'] ?? '') : (string)$object;
+				if ($key === '' || strpos($key, $base) !== 0) { continue; }
+				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+				$status = (int)($resp['status'] ?? 0);
+				if (($status >= 200 && $status < 300) || $status === 404) {
+					$deleted++;
+				}
+			}
+			if ($space->is_draining()) {
+				$space->retire();
 			}
 		}
 		$node->set('mgn_backup_shelf_bytes', 0);

@@ -22,6 +22,9 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.8 - prune() works across every storage space of the node, each point deleted from its own space's
+ *                target; a draining space is kept whole until the active space holds a verified chain, then ages
+ *                out and is retired once empty; newest_landed() reads one space (specs/storage_targets.md WP4)
  * @version 1.7 - prune() refuses a node in an install state: a copy's row names its source's storage
  *                (site_copy.md WP5)
  * @version 1.6 - prune() keeps $keep_days days of restore points by BackupRunner::surplus(), the rule a
@@ -60,151 +63,222 @@ require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 class FleetBackupRetention {
 
 	/**
-	 * Prune one node's manager-profile backup storage to $keep_days days of restore
-	 * points — the rule is BackupRunner::surplus(), the one a site's own retention
-	 * uses: every point started inside the window, plus the newest one started
-	 * before it.
+	 * Prune one node's manager-profile backups to $keep_days days of restore
+	 * points, across every storage space that holds them — the rule is
+	 * BackupRunner::surplus(), the one a site's own retention uses: every
+	 * point started inside the window, plus the newest one started before it.
+	 * Each point is deleted from its own space's target.
+	 *
+	 * A space the node was moved away from (draining) is kept whole until the
+	 * node's active space holds a chain a verify has passed, so there is never
+	 * a night with no restorable copy anywhere (specs/storage_targets.md §5).
+	 * After that its points age out by the same rule; once none is left, the
+	 * rest of it (offloaded files no kept run names) goes too, and an empty
+	 * draining space is retired.
 	 *
 	 * Called immediately BEFORE dispatching that node's next run, which is the
 	 * right moment for two reasons: it is once per backup cycle rather than once
 	 * per scheduler tick, and everything it counts is already confirmed present
 	 * in the bucket.
 	 *
-	 * The result also carries what the listing SAW — `listed` and
-	 * `newest_object_time` — because the listing is the bucket's own testimony
-	 * about this node's backup storage, taken with this management node's credential. The
-	 * scheduler stamps it on the node, and the health check compares it against
-	 * what the node claims: a node that reports success while nothing new lands
-	 * in backup storage is the one failure the node's own reporting can never admit
-	 * to.
+	 * The result also carries what the listing of the ACTIVE space SAW —
+	 * `listed` and `newest_object_time` — because the listing is the bucket's
+	 * own testimony about where this node's backups land, taken with this
+	 * management node's credential. The scheduler stamps it on the node, and
+	 * the health check compares it against what the node claims: a node that
+	 * reports success while nothing new lands in backup storage is the one
+	 * failure the node's own reporting can never admit to.
 	 *
-	 * It also SIZES backup storage, from the same listing. That figure is what the
-	 * hosted tier's storage allowance is measured against, and taking it here
-	 * is why the allowance needs no meter of its own: the pass already walks the
-	 * whole prefix and the provider already returns each object's size, so the
-	 * number is free, is taken with the one credential that can see the whole
-	 * shelf, and is measured AFTER the prune — which is what the customer is
-	 * actually keeping.
+	 * It also SIZES backup storage, from the same listings: `bytes` is what is
+	 * left in every space after the prune, what the customer is keeping, and
+	 * what the hosted tier's storage allowance is measured against.
 	 *
-	 * The listing itself comes back too (`objects`, less what was pruned, and
-	 * the `base` it was taken under) so the backup storage check can read from the same
-	 * testimony without listing again.
+	 * The active space's listing comes back too (`objects`, less what was
+	 * pruned, the `base` it was taken under and the `space`) so the backup
+	 * storage check and the run request read from the same testimony without
+	 * listing again.
 	 *
 	 * @return array{kept:int, pruned:int, deleted_objects:int, error:string,
 	 *               listed:bool, newest_object_time:string, bytes:int,
-	 *               objects:array, base:string}
+	 *               objects:array, base:string, space:?StorageSpace, retired:int}
 	 */
-	public static function prune($node, $target, $keep_days, $read = null, $now = null) {
+	public static function prune($node, $keep_days, $read = null, $now = null) {
 		$now = ($now === null) ? time() : (int)$now;
 		$result = array('kept' => 0, 'pruned' => 0, 'deleted_objects' => 0, 'error' => '',
-			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '');
+			'listed' => false, 'newest_object_time' => '', 'bytes' => 0, 'objects' => array(), 'base' => '',
+			'space' => null, 'retired' => 0);
 
 		// A node in an install state is never pruned from here. A dormant
-		// copy's row names its source's storage, and pruning it would delete
-		// the source's restore points under the copy's schedule.
+		// copy's backups are its source's, and pruning them would delete the
+		// source's restore points under the copy's schedule.
 		if (!ManagedNode::is_operational_from($node)) {
 			$result['error'] = 'not a working node (' . $node->get('mgn_install_state') . '), so its storage is not pruned';
 			return $result;
 		}
 
-		try {
-			$creds  = $target->get_credentials();
-			$bucket = trim((string)$target->get('bkt_bucket'));
-			$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-			$slug   = trim((string)$node->get('mgn_slug'));
-
-			if ($bucket === '' || $slug === '' || empty($creds)) {
-				$result['error'] = 'no bucket, slug or credentials';
-				return $result;
-			}
-
-			$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
-			$objects = S3Signer::list($creds, $bucket, $base);
-			if (!is_array($objects)) {
-				$result['error'] = 'backup storage could not be listed';
-				return $result;
-			}
-			$result['listed'] = true;
-			$result['newest_object_time'] = self::newest_object_time($objects);
-
-			$groups = self::group($objects, $base);
-			$points = array();
-			foreach ($groups as $name => $group) {
-				$points[] = array('item' => $name, 'time' => self::start_time_of($name));
-			}
-			$surplus_names = array_flip(BackupRunner::surplus($points, $keep_days, $now));
-			$result['kept'] = count($groups) - count($surplus_names);
-
-			$delete = function ($key) use ($creds, $bucket) {
-				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
-				$status = (int)($resp['status'] ?? 0);
-				// 404 is the state we were asking for.
-				if (($status < 200 || $status >= 300) && $status !== 404) {
-					throw new Exception('HTTP ' . $status . ' deleting ' . $key);
+		$errors = array();
+		$segment = BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+		$spaces = array();     // space id => [space, creds, bucket, base, objects, groups]
+		$active = null;
+		foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key) as $space) {
+			try {
+				list($target, $creds, $bucket) = $space->reach();
+				$base = $space->base() . $segment;
+				$objects = S3Signer::list($creds, $bucket, $base);
+				if (!is_array($objects)) {
+					throw new Exception('backup storage could not be listed');
 				}
+				$spaces[(int)$space->key] = array('space' => $space, 'creds' => $creds, 'bucket' => $bucket,
+					'base' => $base, 'objects' => $objects, 'groups' => self::group($objects, $base));
+				if ($space->is_active()) { $active = (int)$space->key; }
+			} catch (Throwable $e) {
+				// A space that cannot be listed is left alone this pass: its
+				// points are unknown, so nothing is judged surplus against it.
+				$errors[] = $space->describe() . ': ' . $e->getMessage();
+			}
+		}
+		if ($active !== null) {
+			$result['listed'] = true;
+			$result['space'] = $spaces[$active]['space'];
+			$result['base'] = $spaces[$active]['base'];
+			$result['newest_object_time'] = self::newest_object_time($spaces[$active]['objects']);
+		}
+		$hold_draining = !self::active_verified($node, $active !== null ? $spaces[$active]['space'] : null);
+
+		try {
+			// One window across every space: a point's age is its name's stamp,
+			// wherever it lives.
+			$points = array();
+			foreach ($spaces as $id => $sp) {
+				foreach ($sp['groups'] as $name => $group) {
+					$points[] = array('item' => $id . '|' . $name, 'time' => self::start_time_of($name));
+				}
+			}
+			$surplus_items = array_flip(BackupRunner::surplus($points, $keep_days, $now));
+			$result['kept'] = count($points) - count($surplus_items);
+
+			$deleter = function (array $sp) {
+				return function ($key) use ($sp) {
+					$resp = S3Signer::delete($sp['creds'], $sp['bucket'], '/' . ltrim($key, '/'));
+					$status = (int)($resp['status'] ?? 0);
+					// 404 is the state we were asking for.
+					if (($status < 200 || $status >= 300) && $status !== 404) {
+						throw new Exception('HTTP ' . $status . ' deleting ' . $key);
+					}
+				};
 			};
 
-			$surplus = array_intersect_key($groups, $surplus_names);
-			$pruned_keys = array();
-			foreach ($surplus as $group) {
-				foreach ($group['keys'] as $key) {
-					$delete($key);
-					$result['deleted_objects']++;
-					$pruned_keys[$key] = true;
+			foreach ($spaces as $id => &$sp) {
+				$held = $sp['space']->is_draining() && $hold_draining;
+				$delete = $deleter($sp);
+				$sp['pruned_keys'] = array();
+				$kept_groups = array();
+				foreach ($sp['groups'] as $name => $group) {
+					if (!isset($surplus_items[$id . '|' . $name]) || $held) {
+						$kept_groups[] = $group;
+						continue;
+					}
+					foreach ($group['keys'] as $key) {
+						$delete($key);
+						$result['deleted_objects']++;
+						$sp['pruned_keys'][$key] = true;
+					}
+					$result['pruned']++;
 				}
-				$result['pruned']++;
+				if ($held) {
+					continue;
+				}
+				if ($sp['space']->is_draining() && !$kept_groups) {
+					// No run of this space is kept, so nothing left in it is
+					// needed: the offloaded files and envelopes go with it.
+					foreach ($sp['objects'] as $obj) {
+						$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : '';
+						if ($key === '' || isset($sp['pruned_keys'][$key]) || strpos($key, $sp['base']) !== 0) { continue; }
+						$delete($key);
+						$result['deleted_objects']++;
+						$sp['pruned_keys'][$key] = true;
+					}
+				} else {
+					// The third family: offloaded files no retained run names any
+					// more. Judged from the runs that are LEFT, so it runs after
+					// the groups.
+					$reader = $read ?? self::shelf_reader($sp['creds'], $sp['bucket']);
+					foreach (self::prune_objects($sp['objects'], $sp['base'], $kept_groups, $reader, $delete) as $key) {
+						$result['deleted_objects']++;
+						$sp['pruned_keys'][$key] = true;
+					}
+				}
 			}
-
-			// The third family: offloaded files no retained run names any more.
-			// Judged from the runs that are LEFT, so it runs after the groups.
-			$kept_groups = array_values(array_diff_key($groups, $surplus_names));
-			if ($read === null) {
-				$read = self::shelf_reader($creds, $bucket);
-			}
-			foreach (self::prune_objects($objects, $base, $kept_groups, $read, $delete) as $key) {
-				$result['deleted_objects']++;
-				$pruned_keys[$key] = true;
-			}
-			// Sized from what is LEFT, so the figure is what this node is
-			// keeping rather than what it briefly held. Objects the provider
-			// reported no size for count as nothing: an under-count trips an
-			// allowance late, and an invented number trips it wrongly.
-			$result['bytes'] = self::total_bytes($objects, $pruned_keys);
-			$result['base']  = $base;
-			foreach ($objects as $obj) {
-				$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : '';
-				if ($key === '' || isset($pruned_keys[$key])) { continue; }
-				$result['objects'][] = $obj;
-			}
+			unset($sp);
 		} catch (Throwable $e) {
 			// A shelf that could not be pruned is not a reason to skip the backup
 			// that was about to run. Too many restore points is a bill; no backup
 			// is an outage.
-			$result['error'] = $e->getMessage();
+			$errors[] = $e->getMessage();
 			error_log('FleetBackupRetention: pruning failed for node '
 				. $node->get('mgn_slug') . ': ' . $e->getMessage());
 		}
 
+		// Sized from what is LEFT in every space, so the figure is what this
+		// node is keeping rather than what it briefly held. Objects the
+		// provider reported no size for count as nothing: an under-count trips
+		// an allowance late, and an invented number trips it wrongly.
+		foreach ($spaces as $id => $sp) {
+			$pruned_keys = $sp['pruned_keys'] ?? array();
+			$result['bytes'] += self::total_bytes($sp['objects'], $pruned_keys);
+			$left = 0;
+			foreach ($sp['objects'] as $obj) {
+				$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : '';
+				if ($key === '' || isset($pruned_keys[$key])) { continue; }
+				$left++;
+				if ($id === $active) { $result['objects'][] = $obj; }
+			}
+			if ($left === 0 && $sp['space']->is_draining() && !$hold_draining) {
+				$sp['space']->retire();
+				$result['retired']++;
+			}
+		}
+		$result['error'] = implode('; ', $errors);
 		return $result;
 	}
 
 	/**
-	 * When something last landed in one node's manager-profile backup storage,
-	 * listed with this management node's credential — UTC 'Y-m-d H:i:s', or ''
-	 * for an empty prefix. Throws when the prefix cannot be listed.
+	 * Does the node's active space hold a chain a verify has passed? The
+	 * verify job names the space it read (space_id); a pass for any chain
+	 * there means the space holds a complete restore point of its own.
+	 */
+	public static function active_verified($node, ?StorageSpace $active) {
+		if ($active === null) {
+			return false;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_parameters, mjb_result FROM mjb_management_jobs
+			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'verify_backup' AND mjb_status = 'completed'
+			  AND mjb_delete_time IS NULL
+			ORDER BY mjb_management_job_id DESC LIMIT 50");
+		$q->execute(array((int)$node->key));
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$params = json_decode((string)$row['mjb_parameters'], true);
+			$res = json_decode((string)$row['mjb_result'], true);
+			if (is_array($params) && (int)($params['space_id'] ?? 0) === (int)$active->key
+					&& is_array($res) && ($res['verify_status'] ?? '') === 'pass') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * When something last landed in one space's manager-profile backups,
+	 * listed with this management node's credential — UTC 'Y-m-d H:i:s', or
+	 * '' for an empty prefix. Throws when the space cannot be listed.
 	 *
 	 * prune()'s listing runs before a run is dispatched, so it cannot see that
 	 * run's upload; this is the same testimony taken after the node reports.
 	 */
-	public static function newest_landed($node, $target) {
-		$creds  = $target->get_credentials();
-		$bucket = trim((string)$target->get('bkt_bucket'));
-		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
-		$slug   = trim((string)$node->get('mgn_slug'));
-		if ($bucket === '' || $slug === '' || empty($creds)) {
-			throw new Exception('no bucket, slug or credentials');
-		}
-		$base = $prefix . '/' . $slug . '/' . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
+	public static function newest_landed(StorageSpace $space) {
+		list($target, $creds, $bucket) = $space->reach();
+		$base = $space->base() . BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
 		$objects = S3Signer::list($creds, $bucket, $base);
 		if (!is_array($objects)) {
 			throw new Exception('backup storage could not be listed');

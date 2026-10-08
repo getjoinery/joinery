@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.13 - a chain's manifest is read from whichever of the source's storage spaces holds it;
+ *                 a copy's node is given no storage space of its own: its backups are its source's (backup_node_of)
  * @version 1.12 - a copy's node is given the target Where new backups go names
  * @version 1.11 - source_root_keys(): the root SSH keys the source's last host report lists; start_new_server carries them to
  *                 the copy (cvp_root_ssh_keys) when asked and the fingerprints the operator saw still match (WP15)
@@ -737,7 +739,6 @@ class SiteCopyRunner {
 			$node->set('mgn_uptime_enabled', false);
 			$node->set('mgn_install_state', 'copy');
 			$node->set('mgn_copy_of_node_id', (int)$source->key);
-			$node->assign_default_backup_target();
 			$node->prepare();
 			$node->save();
 			$node->load();
@@ -1202,19 +1203,26 @@ class SiteCopyRunner {
 		);
 	}
 
+	/** The chain's manifest, from whichever of the source's storage spaces holds the chain. */
 	private static function read_manifest(ManagedNode $source, string $chain_id): string {
-		$target = JobCommandBuilder::get_target($source);
-		$creds = $target ? $target->get_credentials() : null;
-		if (empty($creds)) {
-			throw new SiteCopyException('This management node holds no credentials for the source\'s backup storage.');
+		$status = 0;
+		foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$source->key) as $space) {
+			try {
+				list($target, $creds, $bucket) = $space->reach();
+			} catch (StorageSpaceException $e) {
+				throw new SiteCopyException('The source\'s backup storage cannot be read: ' . $e->getMessage());
+			}
+			$path = '/' . BackupChainListHelper::chain_path($space, BackupProfile::MANAGER, $chain_id) . '/' . BackupChain::MANIFEST_NAME;
+			$got = S3Signer::get($creds, $bucket, $path);
+			$status = (int)($got['status'] ?? 0);
+			if ($status === 200) {
+				return (string)$got['body'];
+			}
 		}
-		$path = '/' . ltrim(BackupChainListHelper::chain_path($target, (string)$source->get('mgn_slug'), BackupProfile::MANAGER, $chain_id), '/')
-			. '/' . BackupChain::MANIFEST_NAME;
-		$got = S3Signer::get($creds, $target->get('bkt_bucket'), $path);
-		if ((int)($got['status'] ?? 0) !== 200) {
-			throw new SiteCopyException("chain {$chain_id}'s manifest could not be fetched from backup storage (HTTP " . (int)($got['status'] ?? 0) . ')');
+		if ($status === 0) {
+			throw new SiteCopyException('This management node keeps no backup storage for the source.');
 		}
-		return (string)$got['body'];
+		throw new SiteCopyException("chain {$chain_id}'s manifest could not be fetched from backup storage (HTTP " . $status . ')');
 	}
 
 	/** The job of the first step with this op that has one, or null. */

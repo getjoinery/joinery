@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.46 - mgn_bkt_backup_target_id is gone: a node's backups go to its active storage space
+ *                (backup_space(), open_default_backup_space()) (specs/storage_targets.md WP4)
  * @version 1.45 - assign_default_backup_target(): a new node is given the target Where new backups go names
  * @version 1.44 - mgn_agent_update_state / mgn_agent_update_offered: where the agent's own self-update
  *                 stands, as it reported on its last poll (spec release_transparency, O7)
@@ -111,7 +113,6 @@ class ManagedNode extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_managed_host_id' => ['action' => 'null'],
-		'mgn_bkt_backup_target_id' => ['action' => 'null'],
 		'mgn_mtr_machine_transfer_id' => ['action' => 'null'],
 	];
 
@@ -141,7 +142,6 @@ class ManagedNode extends SystemBase {
 		'mgn_api_public_key'      => array('type'=>'varchar(255)'),
 		'mgn_api_secret_key'      => array('type'=>'varchar(255)'),
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'mgn_bkt_backup_target_id' => array('type'=>'int8'),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Fingerprint of the backup recovery public key this node is holding, as
 		// the status check last found it. Stored so the fleet view can show which
@@ -518,26 +518,28 @@ class ManagedNode extends SystemBase {
 	}
 
 	/**
-	 * A new node backs up where new backups go (server_manager_backup_target_id),
-	 * unless it already names a target. Called by each path that creates a real
-	 * node; the choice is then the node's own, changed only by moving it.
+	 * A new node backs up where new backups go (server_manager_backup_target_id):
+	 * it is given its storage space there, its own folder on that target.
+	 * Called by each path that creates a real node, once it is saved; from
+	 * then on the node's backups move only when it is moved. Null when no
+	 * target is named, or when the folder cannot be opened (said in the log;
+	 * the node page's Move says why).
 	 */
-	public function assign_default_backup_target(): void {
-		if ($this->key || (int)$this->get('mgn_bkt_backup_target_id') > 0) {
-			return;
-		}
-		$id = (int)Globalvars::get_instance()->get_setting('server_manager_backup_target_id', false, true);
-		if ($id <= 0) {
-			return;
+	public function open_default_backup_space(): ?StorageSpace {
+		if (!$this->key) {
+			throw new Exception('A node is given its backup storage once it is saved.');
 		}
 		try {
-			$target = new BackupTarget($id, TRUE);
-		} catch (Exception $e) {
-			return;
+			return StorageSpace::open_default(StorageSpace::OWNER_NODE, (int)$this->key);
+		} catch (StorageSpaceException $e) {
+			error_log('ManagedNode: no backup storage space for node ' . $this->get('mgn_slug') . ': ' . $e->getMessage());
+			return null;
 		}
-		if ($target->key && $target->get('bkt_enabled') && !$target->get('bkt_delete_time')) {
-			$this->set('mgn_bkt_backup_target_id', (int)$target->key);
-		}
+	}
+
+	/** The node's active storage space: where its new backups go, or null (its own disk only). */
+	public function backup_space(): ?StorageSpace {
+		return $this->key ? StorageSpace::active_for(StorageSpace::OWNER_NODE, (int)$this->key) : null;
 	}
 
 	/** The rule is_operational() applies, over anything that answers get() for the column. */

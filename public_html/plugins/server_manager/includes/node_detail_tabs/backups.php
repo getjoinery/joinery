@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.18 - the node's storage spaces: where new backups go, older backups kept on a target it was moved
+ *                away from, and Move; every cloud action names the space its backup is in; one unreadable
+ *                space no longer hides the chains of the others (specs/storage_targets.md WP4)
  * @version 1.17 - the provider label is StorageProvider's; the target line is the one the node names (nothing
  *                 inferred), and a switched-off target is named as such
  * @version 1.16 - each run shows its newest verify (passed or failed, when, how deep), from the verify jobs sent
@@ -54,29 +57,52 @@
  * @version 1.0
  */
 
-	// Where this node's backups go: the target it names, and nothing else
-	// (specs/storage_targets.md R6). A switched-off target still holds the
-	// backups already there, so it is named, with what that means.
+	// Where this node's backups go: its active storage space, and nothing
+	// else (specs/storage_targets.md R6). A switched-off target still holds
+	// the backups already there, so it is named, with what that means. Any
+	// space the node was moved away from is listed too: its backups stay
+	// readable and restorable there until they age out.
 	require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
+	$node_spaces   = StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key);
 	$cloud_target  = JobCommandBuilder::get_target($node);
-	$names_own     = (bool) $node->get('mgn_bkt_backup_target_id');
 	$target_name   = 'None: this management node takes no backups of it';
-	$target_provider = 'local';
 	if ($cloud_target) {
-		$target_provider = $cloud_target->get('bkt_provider');
-		$target_name = htmlspecialchars($cloud_target->get('bkt_name')) . ' (' . htmlspecialchars(StorageProvider::label($target_provider)) . ')';
+		$target_name = htmlspecialchars($cloud_target->get('bkt_name')) . ' (' . htmlspecialchars(StorageProvider::label($cloud_target->get('bkt_provider'))) . ')';
 		if (!$cloud_target->get('bkt_enabled')) {
 			$target_name .= ' &mdash; <span class="text-muted">switched off: the backups already there stay readable, and no new backup is taken until the node is moved or the target switched on</span>';
 		}
-	} elseif ($names_own) {
-		// It named a target that has since been deleted — not the same thing
-		// as choosing local-only, and worth saying so.
-		$target_name = 'None: the backup target this node named has been deleted';
 	}
 
 	echo '<div class="alert alert-light border mb-3">';
 	echo '<strong>Backup target:</strong> ' . $target_name;
-	echo ' <a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="ms-2 small">Change</a>';
+	foreach ($node_spaces as $sp) {
+		if (!$sp->is_draining()) { continue; }
+		$old = $sp->target();
+		echo '<div class="small text-muted mt-1">Older backups are kept on '
+			. htmlspecialchars($old ? $old->get('bkt_name') : 'a deleted target')
+			. ' since ' . htmlspecialchars(substr((string)$sp->get('sps_draining_time'), 0, 10))
+			. ': readable and restorable, kept whole until the new target holds a verified backup, then aged out.</div>';
+	}
+	// Move: new backups go to another target, which starts a full backup
+	// there; nothing is copied (R3).
+	$move_options = [];
+	foreach (new MultiBackupTarget(['deleted' => false], ['bkt_name' => 'ASC']) as $t) {
+		if ($t->get('bkt_enabled') && (!$cloud_target || (int)$t->key !== (int)$cloud_target->key)) {
+			$move_options[(string)(int)$t->key] = $t->get('bkt_name') . ' (' . StorageProvider::label($t->get('bkt_provider')) . ')';
+		}
+	}
+	if ($move_options) {
+		$fw_move = $page->getFormWriter('move_backup_storage_form');
+		$fw_move->begin_form();
+		$fw_move->hiddeninput('action', '', ['value' => 'move_backup_storage']);
+		$fw_move->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+		$fw_move->dropinput('bkt_backup_target_id', $cloud_target ? 'Move new backups to' : 'Back up to', [
+			'options'  => $move_options,
+			'helptext' => 'The next backup starts a full backup there. Backups already taken stay where they are until they age out.',
+		]);
+		$fw_move->submitbutton('btn_move_backup_storage', $cloud_target ? 'Move' : 'Start', ['class' => 'btn btn-sm btn-outline-primary']);
+		$fw_move->end_form();
+	}
 	echo '</div>';
 
 	// Whether backups of this node can be recovered at all — which is a question
@@ -139,8 +165,7 @@
 		echo '<strong>No backups are taken of this node from here.</strong> ';
 		echo 'Backups this management node takes go to its own cloud storage, and this node has no '
 		   . 'backup target set. ';
-		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Choose one</a> '
-		   . 'to start backing it up.';
+		echo 'Choose one above to start backing it up.';
 		echo '</div>';
 	} elseif (!$cloud_target->get('bkt_enabled')) {
 		// A switched-off target keeps what it holds and takes nothing new, so
@@ -149,8 +174,7 @@
 		echo '<strong>No new backups are taken of this node.</strong> ';
 		echo 'Its backup target, ' . htmlspecialchars($cloud_target->get('bkt_name')) . ', is switched off. '
 		   . 'The backups already there stay readable and restorable. ';
-		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Move the node</a> '
-		   . 'or switch the target on to start again.';
+		echo 'Move the node above, or switch the target on, to start again.';
 		echo '</div>';
 	} elseif (!$recovery_ready) {
 		// A backup nobody can decrypt is not a backup, so the run is refused —
@@ -465,9 +489,10 @@
 		$page->begin_box($pageoptions);
 
 		if ($chain_list['error']) {
-			echo '<div class="alert alert-warning mb-0">Could not read the backup listing: '
+			echo '<div class="alert alert-warning">Could not read all of the backup listing: '
 			   . htmlspecialchars($chain_list['error']) . '</div>';
-		} else {
+		}
+		if (!empty($chain_list['chains'])) {
 			$profile_labels = ['manager' => 'This management node', 'site' => 'The site itself'];
 			$shelf_runs = [];
 			foreach ($chain_list['chains'] as $c) {
@@ -567,7 +592,10 @@
 				$c = $entry['chain']; $r = $entry['run'];
 				echo '<tr>';
 				echo '<td>' . htmlspecialchars($run_when($r)) . '</td>';
-				echo '<td>' . ($r['level'] === 0 ? 'Full' : 'Incremental') . '</td>';
+				echo '<td>' . ($r['level'] === 0 ? 'Full' : 'Incremental')
+				   . (($c['space_state'] ?? '') === StorageSpace::STATE_DRAINING
+						? ' <span class="text-muted small">on ' . htmlspecialchars($c['target_name']) . ', moved away from</span>' : '')
+				   . '</td>';
 				echo '<td><small>' . htmlspecialchars($profile_labels[$c['profile']] ?? $c['profile']) . '</small></td>';
 				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($r['bytes'])) . '</td>';
 				$v = $verified_runs[$c['chain_id'] . '/' . (int)$r['seq']] ?? null;
@@ -777,6 +805,21 @@ $bk_last = ManagementJob::latestForNode($node->key, 'list_backups');
 $backup_last_attempt_failed = ($bk_last && $bk_last->get('mjb_status') === 'failed');
 ?>
 var backupLastAttemptFailed = <?php echo $backup_last_attempt_failed ? 'true' : 'false'; ?>;
+// The storage space each listed backup is in, so every action reaches the
+// bucket that holds it (a node moved to another target keeps its older
+// backups where they were).
+<?php
+$space_of_path = [];
+foreach (($files ?? []) as $f) {
+	if (!empty($f['cloud_path']) && !empty($f['space_id'])) { $space_of_path[(string)$f['cloud_path']] = (int)$f['space_id']; }
+}
+$space_of_chain = [];
+foreach ((($chain_list ?? [])['chains'] ?? []) as $c) {
+	$space_of_chain[(string)$c['chain_id']] = (int)($c['space_id'] ?? 0);
+}
+?>
+var backupSpaceOfPath = <?php echo json_encode((object)$space_of_path); ?>;
+var backupSpaceOfChain = <?php echo json_encode((object)$space_of_chain); ?>;
 // Cap on how many times polling retries after a transport error before it gives
 // up and shows a reload notice — without this the poll retried forever, and a
 // {}-swallowed error looked like "complete" and reloaded, minting a new scan job.
@@ -987,7 +1030,7 @@ function downloadBackup(filename, cloudPath, btn) {
 		+ smEsc(filename) + ' back onto the node...</span>';
 
 	smApiPost('backup_actions', { action: 'download_file', node_id: backupNodeId,
-			filename: filename, cloud_path: cloudPath })
+			filename: filename, cloud_path: cloudPath, space_id: backupSpaceOfPath[cloudPath] || 0 })
 		.then(function(data) {
 			if (!data.success) {
 				downloadBackupFailed(btn, smEsc(data.message));
@@ -1019,7 +1062,7 @@ function stageChain(chainId, profile, btn) {
 		+ smEsc(chainId) + ' onto the node and recovering its key there...</span>';
 
 	smApiPost('backup_actions', { action: 'stage_chain', node_id: backupNodeId,
-			chain_id: chainId, profile: profile })
+			chain_id: chainId, profile: profile, space_id: backupSpaceOfChain[chainId] || 0 })
 		.then(function(data) {
 			if (!data.success) {
 				stageChainFailed(btn, smEsc(data.message));
@@ -1063,7 +1106,7 @@ function submitVerifyModal(level) {
 		+ (level === 3 ? 'Rehearsing a restore of ' : 'Opening and reading ') + 'the backup on the node...</span>';
 
 	smApiPost('backup_actions', { action: 'verify_backup', node_id: backupNodeId,
-			chain_id: v.chainId, profile: v.profile, seq: v.seq, level: level })
+			chain_id: v.chainId, profile: v.profile, seq: v.seq, level: level, space_id: backupSpaceOfChain[v.chainId] || 0 })
 		.then(function(data) {
 			if (!data.success) {
 				verifyBackupFailed(btn, smEsc(data.message));
@@ -1090,7 +1133,7 @@ function bringBackObjects(chainId, profile, seq, when, btn) {
 		status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> '
 			+ 'Asking the node which offloaded files its file store cannot serve...</span>';
 		smApiPost('backup_actions', { action: 'restore_objects', node_id: backupNodeId,
-				chain_id: chainId, profile: profile, seq: seq, mode: 'missing' })
+				chain_id: chainId, profile: profile, seq: seq, mode: 'missing', space_id: backupSpaceOfChain[chainId] || 0 })
 			.then(function(data) {
 				if (!data.success) {
 					if (btn) { btn.disabled = false; btn.textContent = 'Bring them back'; }
@@ -1189,7 +1232,7 @@ function deleteBackup(target, filename, localPath, cloudPath) {
 	JoineryModal.confirm('Delete ' + filename + '? This will remove ' + locations + '. This cannot be undone.', function() {
 		smApiPost('backup_actions', {
 			action: 'delete_file', node_id: backupNodeId, target: target,
-			local_path: localPath, cloud_path: cloudPath
+			local_path: localPath, cloud_path: cloudPath, space_id: backupSpaceOfPath[cloudPath] || 0
 		})
 			.then(function(data) {
 				if (!data.success) {

