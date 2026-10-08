@@ -17,7 +17,8 @@
  *    (ReleaseCommit::knownFiles, joineryFileShips); the manifest built with
  *    that rule, and the archive cut from the manifest's listing
  *    (TreeManifestPublisher::archiveMembers) verifies as a fresh archive
- *  - the command the owner is shown quotes every path and never runs here
+ *  - what publish commits itself (ReleaseCommit::publishWrite, commitRelease):
+ *    its own files only, never what else is staged, and pushed
  *  - the Go toolchain pin is read from go.mod and an unpinned tree is refused
  *    (GoBinaryPublisher::pinnedToolchain, assertToolchain)
  *  - the repository's key lists are read from release_keys/ and a signing
@@ -237,12 +238,44 @@ $pushed = ReleaseCommit::onRemote($repo, ReleaseCommit::head($repo));
 check($pushed['on_remote'] === true, 'a pushed commit is on the remote', $pushed['reason']);
 
 // ---------------------------------------------------------------------------
-section('The command the owner is shown');
+section('What publish commits itself');
 
-$cmd = ReleaseCommit::commitCommand('/srv/x', array('public_html/VERSION', 'a b.php'), "Release 0.8.470");
-check(strpos($cmd, "git add -A -- 'public_html/VERSION' 'a b.php'") !== false, 'every path is quoted', $cmd);
-check(strpos($cmd, "git commit -m 'Release 0.8.470'") !== false, 'the message is quoted', $cmd);
-check(strpos($cmd, 'git push origin main') !== false, 'it ends with the push', $cmd);
+file_put_contents($repo . '/public_html/VERSION', "0.8.470\n");
+mkdir($repo . '/public_html/plugins/p', 0755, true);
+file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": \"p\",\n  \"version\": \"1.0.0\"\n}\n");
+file_put_contents($repo . '/public_html/includes/Mine.php', "<?php\n");
+rc_git($repo, array('add', '-A'));
+rc_git($repo, array('commit', '-q', '-m', 'third'));
+rc_git($repo, array('push', '-q', 'origin', 'main'));
+
+file_put_contents($repo . '/public_html/VERSION', "0.8.471\n");
+file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": \"p\",\n  \"version\": \"1.0.1\"\n}\n");
+check(ReleaseCommit::publishWrite($repo, 'public_html/VERSION'), 'VERSION is publish\'s to commit');
+check(ReleaseCommit::publishWrite($repo, 'public_html/plugins/p/plugin.json'), 'a manifest whose only change is its version is publish\'s');
+check(ReleaseCommit::publishWrite($repo, 'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-x86_64'), 'a rebuilt parser jail binary is publish\'s');
+file_put_contents($repo . '/public_html/includes/Mine.php', "<?php // the owner's\n");
+check(!ReleaseCommit::publishWrite($repo, 'public_html/includes/Mine.php'), 'any other file is the owner\'s');
+file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": \"q\",\n  \"version\": \"1.0.1\"\n}\n");
+check(!ReleaseCommit::publishWrite($repo, 'public_html/plugins/p/plugin.json'), 'a manifest with any other change is the owner\'s');
+file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": \"p\",\n  \"version\": \"1.0.1\"\n}\n");
+
+// Another session's work sits staged in the shared index; it must not go
+// into the release commit.
+rc_git($repo, array('add', 'public_html/includes/Mine.php'));
+$made = ReleaseCommit::commitRelease($repo, array('public_html/VERSION', 'public_html/plugins/p/plugin.json'), 'Release 0.8.471');
+$files = rc_git($repo, array('show', '--name-only', '--format=%s', 'HEAD'))['out'];
+check($made['ok'] && $made['commit'] === ReleaseCommit::head($repo), 'the release files are committed', $made['reason']);
+check($files === array('Release 0.8.471', '', 'public_html/VERSION', 'public_html/plugins/p/plugin.json'),
+	'exactly those files, under the release\'s name', json_encode($files));
+check(rc_git($repo, array('diff', '--cached', '--name-only'))['out'] === array('public_html/includes/Mine.php'),
+	'what else was staged stays staged, uncommitted');
+check(ReleaseCommit::onRemote($repo, $made['commit'])['on_remote'], 'and the commit is pushed');
+
+rc_git($repo, array('remote', 'set-url', 'origin', $tmp . '/no-such-remote.git'));
+file_put_contents($repo . '/public_html/VERSION', "0.8.472\n");
+$failed = ReleaseCommit::commitRelease($repo, array('public_html/VERSION'), 'Release 0.8.472');
+check(!$failed['ok'] && $failed['commit'] !== null && strpos($failed['reason'], 'git push') !== false,
+	'a push that fails is reported, naming the commit it made', $failed['reason']);
 
 // ---------------------------------------------------------------------------
 section('The Go toolchain pin');

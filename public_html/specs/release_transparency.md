@@ -99,12 +99,15 @@ public remote:
 - `getjoinery/joinery` at the publishing site root, and
 - `getjoinery/joinery-agent` at `AgentDistPublisher::DEFAULT_SOURCE_PATH`.
 
-**Publish never runs `git commit` or `git push` (Q2).** The owner commits. The
-sequence is: publish writes the generated files (D2), finds the tree dirty,
-refuses, and prints the files and the commit command; the owner commits and
-pushes; publish runs again, finds both trees clean and both HEADs ancestors of
-the public `main`, and builds. The refusal names the dirty files. There is no
-`--allow-dirty`.
+**Who commits what (owner, 2026-10-08, replacing Q2's "publish never
+commits").** The owner commits and pushes their own work; publish refuses,
+before writing anything, while any of it is uncommitted or unpushed. Publish
+then writes the files every release carries (VERSION, the install SQL, version
+bumps, rebuilt launcher binaries), commits exactly those as `Release <V>`,
+pushes, and builds from that commit, in one run. The owner publishes from the
+Server Manager button, so a release that needs a second run by hand is a
+release that does not happen. As first built, the check ran after the writes
+and every release refused once on its own files.
 
 A release is then: core commit `C`, agent commit `A`, version `V`.
 
@@ -747,10 +750,11 @@ second key adds nothing a person has to hold or protect.
 install on a node with `release_log_required`. The value of the spec is
 exactly the absence of that flag.
 
-**D-E. Publish never commits.** The owner commits; publish refuses a dirty
-tree and says what to commit (Q2). This matches the standing rule that the
-owner runs `git commit`, and it means nothing ships that a human did not sign
-off as a commit.
+**D-E. Publish commits only what it writes (revised 2026-10-08).** The owner
+commits their own work; publish refuses before writing anything while it is
+uncommitted, and commits and pushes only the files it generated itself (D1).
+Nothing ships that the owner did not commit, apart from those generated files,
+each of which a verifier regenerates or checks (D2).
 
 **D-F. The statement is a listed file — found while building WP3,
 2026-10-07.** As first written, `RELEASE_STATEMENT` sat in every archive and

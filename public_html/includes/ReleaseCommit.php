@@ -34,9 +34,16 @@
  * the component tree hash and the archive listing all read it.
  *
  * "On the remote" means the commit is an ancestor of origin/main after a fetch.
- * Nothing here commits, pushes or stages: the owner does that, with the command
- * this class prints (D-E).
  *
+ * WHO COMMITS WHAT. The owner commits their own work; publish refuses before
+ * writing anything while it is uncommitted or unpushed. Publish then writes
+ * the files every release carries (publishWrite(): VERSION, the install SQL,
+ * the plugin and theme version bumps, the parser jail binaries it rebuilds)
+ * and commits and pushes exactly those itself (commitRelease()), as
+ * 'Release <version>', so one run goes from a committed tree to a release.
+ *
+ * @version 1.2 - publishWrite() and commitRelease(): publish commits and pushes the files it writes; git runs
+ *                with the repository owner's home, so the owner's identity and key are the ones used
  * @version 1.1 - knownFiles() and joineryFileShips(): only a file git knows, or one publish builds, ships
  * @version 1.0
  */
@@ -78,9 +85,13 @@ class ReleaseCommit {
 		// root-owned files inside the owner's .git and break their next git
 		// command. Every git call therefore runs as the account that owns the
 		// repository, whoever started the publish.
+		// With the owner's home too: a commit is authored by the owner's git
+		// identity and a push uses the owner's key, both read from there.
 		$owner = self::repoOwner($repo_root);
 		if ($owner !== null && function_exists('posix_geteuid') && posix_geteuid() === 0) {
-			$cmd = 'runuser -u ' . escapeshellarg($owner) . ' -- sh -c ' . escapeshellarg($cmd);
+			$home = function_exists('posix_getpwnam') ? (string)(posix_getpwnam($owner)['dir'] ?? '') : '';
+			$cmd = 'runuser -u ' . escapeshellarg($owner) . ' -- sh -c '
+				. escapeshellarg(($home !== '' ? 'HOME=' . escapeshellarg($home) . ' ' : '') . $cmd);
 		}
 		$out = array();
 		$exit = 0;
@@ -292,17 +303,60 @@ class ReleaseCommit {
 		return array('on_remote' => false, 'reason' => 'git merge-base failed: ' . trim(implode(' | ', array_slice($anc['out'], -3))));
 	}
 
+	/** Repository-relative files every release writes into the core (D2). */
+	const JOINERY_RELEASE_FILES = array('public_html/VERSION', 'maintenance_scripts/install_tools/joinery-install.sql.gz');
+
 	/**
-	 * The one-line command the owner runs to make a dirty tree a release.
-	 * Paths are quoted one by one; nothing is staged or committed here.
+	 * Whether an uncommitted path is one a publish writes, and so one a
+	 * publish may commit: VERSION, the install SQL, a file in the parser
+	 * jail's prebuilt binary directory, or a plugin or theme manifest whose
+	 * only change from HEAD is its version line. Anything else is the owner's
+	 * work.
 	 */
-	public static function commitCommand($repo_root, array $paths, $message) {
-		$quoted = array();
-		foreach ($paths as $p) {
-			$quoted[] = escapeshellarg($p);
+	public static function publishWrite($repo_root, $rel) {
+		$rel = ltrim(str_replace('\\', '/', $rel), '/');
+		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0) {
+			return true;
 		}
-		return 'cd ' . escapeshellarg($repo_root) . ' && git add -A -- ' . implode(' ', $quoted)
-			. ' && git commit -m ' . escapeshellarg($message) . ' && git push origin main';
+		if (!preg_match('~^public_html/(plugins/[^/]+/plugin|theme/[^/]+/theme)\.json$~', $rel)) {
+			return false;
+		}
+		$diff = self::git($repo_root, array('diff', '--no-color', '--unified=0', 'HEAD', '--', $rel));
+		if ($diff['exit'] !== 0) {
+			return false;
+		}
+		$changed = 0;
+		foreach ($diff['out'] as $line) {
+			if (preg_match('/^(\+\+\+|---) /', $line) || !preg_match('/^[+-]/', $line)) {
+				continue;
+			}
+			if (!preg_match('/^[+-]\s*"version"\s*:\s*"[^"]*",?\s*$/', $line)) {
+				return false;
+			}
+			$changed++;
+		}
+		return $changed > 0;
+	}
+
+	/**
+	 * Commit exactly $paths as $message and push the branch. The paths are
+	 * named on the commit, so nothing else staged in the index (another
+	 * session's work in a shared tree) goes with them.
+	 *
+	 * @return array{ok:bool, commit:?string, reason:string}
+	 */
+	public static function commitRelease($repo_root, array $paths, $message, $remote = 'origin', $branch = 'main') {
+		$commit = self::git($repo_root, array_merge(array('commit', '--quiet', '-m', $message, '--'), $paths));
+		if ($commit['exit'] !== 0) {
+			return array('ok' => false, 'commit' => null, 'reason' => 'git commit failed: ' . trim(implode(' | ', array_slice($commit['out'], -3))));
+		}
+		$head = self::head($repo_root);
+		$push = self::git($repo_root, array('push', '--quiet', $remote, 'HEAD:' . $branch));
+		if ($push['exit'] !== 0) {
+			return array('ok' => false, 'commit' => $head, 'reason' => "committed {$head}, but git push to {$remote} {$branch} failed: "
+				. trim(implode(' | ', array_slice($push['out'], -3))));
+		}
+		return array('ok' => true, 'commit' => $head, 'reason' => '');
 	}
 }
 ?>

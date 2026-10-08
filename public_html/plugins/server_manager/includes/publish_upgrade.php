@@ -498,6 +498,18 @@
 		}
 
 		// =====================================================
+		// The owner's work is committed and public (D1)
+		// =====================================================
+		// Checked before anything is written. What the owner changed has to be
+		// committed and pushed by the owner; what this publish writes (VERSION,
+		// the install SQL, version bumps, rebuilt binaries) it commits and
+		// pushes itself, below, once it has written it. Leftovers of an earlier
+		// run that stopped are publish's own files and are written again.
+		if (!$republish) {
+			publish_require_committed(publish_release_repos($full_site_dir), $version, false);
+		}
+
+		// =====================================================
 		// The public log this release will be written to
 		// =====================================================
 		// Every release this site authors is logged on Sigstore's public Rekor
@@ -775,9 +787,11 @@
 		// this point the publish reads the tree and never writes it, so the
 		// commit the check names is the commit the archives are built from.
 		//
-		// Publish never commits or pushes. A tree that is not committed and on
-		// the public remote is refused with the command the owner runs; the
-		// next publish finds it clean and builds. There is no --allow-dirty.
+		// Publish commits and pushes exactly what it wrote, as 'Release
+		// <version>', and builds from that commit. Anything else uncommitted
+		// is the owner's work and refuses the release; it was checked before
+		// anything was written, so it can only appear here if something
+		// changed the tree while this publish ran. There is no --allow-dirty.
 		//
 		// What ships is what git knows plus what publish builds
 		// (ReleaseCommit::joineryFileShips()): the manifests, the component
@@ -799,45 +813,7 @@
 		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output', $ships);
 		$release_commits = array('core' => null, 'agent' => null);
 		if (!$republish) {
-			$agent_src = AgentDistPublisher::sourcePath();
-			$repos = array(
-				'core'  => array('root' => $full_site_dir, 'blockers' => ReleaseCommit::joineryBlockers($full_site_dir)),
-				'agent' => array('root' => $agent_src,
-					'blockers' => (is_dir($agent_src . '/.git') ? ReleaseCommit::agentBlockers($agent_src) : null)),
-			);
-			$refused = false;
-			foreach ($repos as $name => $repo) {
-				if ($repo['blockers'] === null) {
-					publish_output("\nRefusing to publish {$version} — the {$name} repository at {$repo['root']} could not be read by git"
-						. ($name === 'agent' ? ' (a release names the agent commit it was built from, so the agent source must be a checkout on the publishing box)' : '') . '.');
-					$refused = true;
-					continue;
-				}
-				if (!empty($repo['blockers'])) {
-					publish_output("\nRefusing to publish {$version} — the {$name} repository is not committed. These files would ship uncommitted:");
-					foreach ($repo['blockers'] as $path) {
-						publish_output("  - {$path}");
-					}
-					publish_output('Commit them (publish never commits for you), then publish again:');
-					publish_output('  ' . ReleaseCommit::commitCommand($repo['root'], $repo['blockers'], 'Release ' . $version));
-					$refused = true;
-					continue;
-				}
-				$head = ReleaseCommit::head($repo['root']);
-				$remote = $head === null ? array('on_remote' => false, 'reason' => 'no HEAD commit') : ReleaseCommit::onRemote($repo['root'], $head);
-				if (!$remote['on_remote']) {
-					publish_output("\nRefusing to publish {$version} — the {$name} repository's commit is not on the public remote: {$remote['reason']}.");
-					publish_output("  cd " . escapeshellarg($repo['root']) . ' && git push origin main');
-					$refused = true;
-					continue;
-				}
-				$release_commits[$name] = $head;
-				publish_output("{$name} commit {$head} is committed and public");
-			}
-			if ($refused) {
-				publish_output("\nNothing has been built. VERSION and the install SQL were written so they can be committed with the release.");
-				exit(1);
-			}
+			$release_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, true);
 		}
 
 		// =====================================================
@@ -1694,6 +1670,85 @@
 	 * @param string|null $manifest_filename Top-level manifest name to version-strip
 	 * @return string Lowercase hex sha256
 	 */
+	/** The two repositories a release names: this site's tree, and the agent source. */
+	function publish_release_repos($full_site_dir) {
+		return array('core' => $full_site_dir, 'agent' => AgentDistPublisher::sourcePath());
+	}
+
+	/**
+	 * Refuse unless both repositories are committed and on the public remote
+	 * (spec release_transparency D1), and return the commit of each.
+	 *
+	 * Before anything is written ($commit_own_writes false), every
+	 * uncommitted change but publish's own leftovers is the owner's and
+	 * refuses. After the writes ($commit_own_writes true), publish's own
+	 * files in the core are committed and pushed as 'Release <version>'
+	 * (ReleaseCommit::commitRelease()) before the HEAD is checked, and
+	 * anything else still refuses.
+	 *
+	 * @return array{core:?string, agent:?string}
+	 */
+	function publish_require_committed(array $repos, $version, $commit_own_writes) {
+		$commits = array('core' => null, 'agent' => null);
+		$refused = false;
+		foreach ($repos as $name => $root) {
+			if ($name === 'agent' && !is_dir($root . '/.git')) {
+				$blockers = null;
+			} else {
+				$blockers = $name === 'core' ? ReleaseCommit::joineryBlockers($root) : ReleaseCommit::agentBlockers($root);
+			}
+			if ($blockers === null) {
+				publish_output("\nRefusing to publish {$version} — the {$name} repository at {$root} could not be read by git"
+					. ($name === 'agent' ? ' (a release names the agent commit it was built from, so the agent source must be a checkout on the publishing box)' : '') . '.');
+				$refused = true;
+				continue;
+			}
+			$own = array();
+			$owners = array();
+			foreach ($blockers as $path) {
+				if ($name === 'core' && ReleaseCommit::publishWrite($root, $path)) {
+					$own[] = $path;
+				} else {
+					$owners[] = $path;
+				}
+			}
+			if ($owners !== array()) {
+				publish_output("\nRefusing to publish {$version} — the {$name} repository has changes that are not committed"
+					. ($commit_own_writes ? ' (made while this publish was running)' : '') . ':');
+				foreach ($owners as $path) {
+					publish_output("  - {$path}");
+				}
+				publish_output('Commit and push them, then publish again. Publish commits only the files it writes itself.');
+				$refused = true;
+				continue;
+			}
+			if ($commit_own_writes && $own !== array()) {
+				$result = ReleaseCommit::commitRelease($root, $own, 'Release ' . $version);
+				if (!$result['ok']) {
+					publish_output("\nRefusing to publish {$version} — the release files could not be committed and pushed: {$result['reason']}");
+					$refused = true;
+					continue;
+				}
+				publish_output("Committed and pushed the release files as {$result['commit']}: " . implode(', ', $own));
+			}
+			$head = ReleaseCommit::head($root);
+			$remote = $head === null ? array('on_remote' => false, 'reason' => 'no HEAD commit') : ReleaseCommit::onRemote($root, $head);
+			if (!$remote['on_remote']) {
+				publish_output("\nRefusing to publish {$version} — the {$name} repository's commit is not on the public remote: {$remote['reason']}.");
+				publish_output("  cd " . escapeshellarg($root) . ' && git push origin main');
+				$refused = true;
+				continue;
+			}
+			$commits[$name] = $head;
+			publish_output("{$name} commit {$head} is committed and public");
+		}
+		if ($refused) {
+			publish_output("\nNothing has been built" . ($commit_own_writes ? '.' : ', and nothing has been written.'));
+			exit(1);
+		}
+		return $commits;
+	}
+
 	/**
 	 * Every theme's and plugin's version decision for this release, made once,
 	 * BEFORE the commit check, so an auto-bump is committed with the release

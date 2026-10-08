@@ -127,25 +127,34 @@ cat ARCHIVE_ROOT/public_html/VERSION
 ### A release is a commit
 
 `publish_upgrade.php` builds only from a committed, pushed tree, so a release
-is a public commit anyone can regenerate the archives from. Before it builds
-anything it:
+is a public commit anyone can regenerate the archives from. One run goes from
+a committed tree to a release:
 
-1. Writes the files a release generates — `public_html/VERSION`, the install
+1. Before writing anything, it checks both repositories — the platform at the
+   site root and the agent source at `server_manager_agent_source_path` — with
+   `ReleaseCommit`. A tree is clean when no tracked file is modified or deleted
+   and no untracked file sits on a path that ships (anything the release
+   manifest would list: `public_html/` and `maintenance_scripts/` minus
+   `specs/`, `uploads/`, `cache/`, `logs/`, `backups/`, `.claude/`), and its
+   HEAD must be an ancestor of `origin/main` after a fetch. Uncommitted or
+   unpushed work refuses the release, naming every file, with nothing written:
+   the owner commits and pushes their own work. Uncommitted changes publish
+   writes itself (`ReleaseCommit::publishWrite()`: `VERSION`, the install SQL,
+   the parser jail binaries, a plugin or theme manifest whose only change is
+   its version), left by an earlier run that stopped, do not count; they are
+   written again, and a `VERSION` that names a version with no release row is
+   published as-is rather than bumped.
+2. Writes the files a release generates — `public_html/VERSION`, the install
    SQL at `maintenance_scripts/install_tools/joinery-install.sql.gz`, any
    rebuilt launcher binaries, and the patch bumps of every theme or plugin
    whose content changed since the last release (`plugin.json` / `theme.json`).
-2. Checks both repositories — the platform at the site root and the agent
-   source at `server_manager_agent_source_path` — with `ReleaseCommit`. A tree
-   is clean when no tracked file is modified or deleted and no untracked file
-   sits on a path that ships (anything the release manifest would list:
-   `public_html/` and `maintenance_scripts/` minus `specs/`, `uploads/`,
-   `cache/`, `logs/`, `backups/`, `.claude/`). The commit must be an ancestor
-   of `origin/main` after a fetch.
-3. Refuses, naming every blocking file and printing the `git add … && git
-   commit … && git push` line, when either tree is dirty or unpushed. Publish
-   never commits or pushes. On the next run the generated files are
-   unchanged, the tree is clean, and the build proceeds; a `VERSION` that
-   names a version with no release row is published as-is rather than bumped.
+3. Commits exactly those files as `Release <version>` and pushes
+   (`ReleaseCommit::commitRelease()`). The paths are named on the commit, so
+   nothing else staged in the shared index goes with them. Git runs as the
+   repository's owner with the owner's home, so the commit carries the
+   owner's identity and the push uses the owner's key, whoever started the
+   publish. Any other change found at this point (made while the publish ran)
+   refuses the release.
 4. Records both commits on the release row (`upg_core_commit`,
    `upg_agent_commit`).
 
