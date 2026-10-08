@@ -232,4 +232,21 @@ check(strpos($helper_src, 'function isOriginNode') !== false,
     'DeploymentHelper owns the origin predicate, so upgrade.php can ask it');
 
 
+section('One publish goes from a committed tree to a release');
+
+// The owner's work is checked before publish writes anything, and publish
+// commits and pushes the files it writes itself. As first built, the check
+// ran after the writes, so every release refused once on its own VERSION,
+// install SQL and version bumps and needed a second run by hand.
+$at = function ($needle) use ($publisher_src) { $p = strpos($publisher_src, $needle); return $p === false ? -1 : $p; };
+$owner_check = $at('publish_require_committed(publish_release_repos($full_site_dir), $version, false)');
+$own_commit  = $at('publish_require_committed(publish_release_repos($full_site_dir), $version, true)');
+check($owner_check > 0 && $owner_check < $at('publish_output("Wrote version') && $owner_check < $at('AgentDistPublisher::publish($full_site_dir'),
+    'the owner\'s work is checked before anything is written');
+check($own_commit > $at('Updated on-disk install SQL') && $own_commit > $at('$component_plan = publish_plan_components('),
+    'publish\'s own files are committed after the last of them is written');
+check($own_commit < $at('Create CORE archive'), 'and before anything is built from the commit');
+check(strpos($publisher_src, 'ReleaseCommit::commitRelease(') !== false, 'publish commits and pushes its own files');
+
+
 harness_finish();
