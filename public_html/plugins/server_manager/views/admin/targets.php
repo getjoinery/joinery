@@ -5,6 +5,7 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.16 - Delete all is refused for the folder an owner's new backups go to
  * @version 2.15 - storage spaces (specs/storage_targets.md WP4): who backs up to this target and whose older
  *                 backups it keeps, Move everyone off to another target, Stored Backups classified by space,
  *                 and an unclaimed folder adopted as a node's or a customer's draining space
@@ -181,6 +182,11 @@ if ($post_action === 'delete_backup_prefix' && $is_edit) {
 	$page_regex = '/\/admin\/server_manager/';
 	$slug = trim($_POST['slug'] ?? '');
 	try {
+		$live = StorageSpace::for_base((int)$target->key, TargetBackups::base_prefix($target) . $slug . '/');
+		if ($live && $live->is_active()) {
+			throw new Exception('New backups of ' . $live->owner_name() . ' go to this folder. Move '
+				. $live->owner_name() . ' to another target first; its backups here then age out, or can be deleted.');
+		}
 		$n = TargetBackups::delete_prefix($target, $slug);
 		// A space kept only for its old backups has nothing left to keep.
 		$emptied = StorageSpace::for_base((int)$target->key, TargetBackups::base_prefix($target) . $slug . '/');
@@ -563,16 +569,20 @@ if ($target !== null) {
 					echo '</div>'; // left column
 
 					// Delete-all-for-this-site (whole prefix), type-to-confirm the slug.
-					$pid = 'delpfx_' . md5($slug);
-					echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="' . $pid . '" style="margin:0;">';
-					echo '<input type="hidden" name="action" value="delete_backup_prefix">';
-					echo '<input type="hidden" name="slug" value="' . htmlspecialchars($slug) . '">';
-					echo SmAdminCsrf::field();
-					$pfx_msg = 'Delete all ' . $g['count'] . ' backup object' . ($g['count'] === 1 ? '' : 's')
-						. ' for this site? This cannot be undone.';
-					echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="JoineryModal.confirmTyped('
-						. json_encode($pfx_msg) . ', ' . json_encode($slug) . ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })">Delete all</button>';
-					echo '</form>';
+					// Not where an owner's new backups go: its next run would extend
+					// a chain whose full is gone. Move the owner first.
+					if ($g['status'] !== 'live') {
+						$pid = 'delpfx_' . md5($slug);
+						echo '<form method="post" action="/admin/server_manager/targets?bkt_backup_target_id=' . $target->key . '" id="' . $pid . '" style="margin:0;">';
+						echo '<input type="hidden" name="action" value="delete_backup_prefix">';
+						echo '<input type="hidden" name="slug" value="' . htmlspecialchars($slug) . '">';
+						echo SmAdminCsrf::field();
+						$pfx_msg = 'Delete all ' . $g['count'] . ' backup object' . ($g['count'] === 1 ? '' : 's')
+							. ' for this site? This cannot be undone.';
+						echo '<button type="button" class="btn btn-sm btn-outline-danger ms-2" onclick="JoineryModal.confirmTyped('
+							. json_encode($pfx_msg) . ', ' . json_encode($slug) . ', function(){ document.getElementById(' . json_encode($pid) . ').submit(); })">Delete all</button>';
+						echo '</form>';
+					}
 
 					echo '</div>'; // d-flex
 					echo '</div></div>'; // card-body, card

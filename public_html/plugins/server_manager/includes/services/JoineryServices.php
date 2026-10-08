@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.4 - releasing backup storage drains the customer's space; reactivating gives it one again
  * @version 1.3 - backup storage for a customer lives in its storage space: enrol opens one on the target
  *                Where new backups go names, and the coordinates a site writes are that space's
  * @version 1.2 - shelfTarget() is the target Where new backups go names, never inferred from the enabled targets
@@ -514,6 +515,10 @@ class JoineryServices {
 			if ($node !== null) {
 				NodeBackupShelf::suspend($node);
 			}
+		} elseif ($state === ServiceTenant::STATE_RELEASED) {
+			// The customer left: its space takes nothing new and keeps its
+			// copies, readable, until the prune-after day.
+			StorageSpace::drain_owner(StorageSpace::OWNER_TENANT, (int)$row->key);
 		}
 		$row->set('svt_state', $state);
 		$row->set('svt_revoked_time', $now);
@@ -543,6 +548,14 @@ class JoineryServices {
 			$node = $row->linked_node();
 			if ($node !== null) {
 				NodeBackupShelf::reactivate($node);
+			}
+		} else {
+			// Back in place: a space again where new backups go (its old one,
+			// when that is still where they go).
+			try {
+				StorageSpace::open_default(StorageSpace::OWNER_TENANT, (int)$row->key);
+			} catch (StorageSpaceException $e) {
+				error_log('JoineryServices: no backup storage space for ' . $row->get('svt_slug') . ': ' . $e->getMessage());
 			}
 		}
 		$row->set('svt_state', ServiceTenant::STATE_ACTIVE);

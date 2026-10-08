@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.4 - the keep-period prune empties what this operator took in each storage space, and a refused
+ *                delete is reported with its reason
  * @version 1.3 - sold sites only (CustomerCloudProvision::is_sold): a site copy on the operator's account
  *                is never put on a trial (specs/site_copy.md B39)
  * @version 1.2 - the allowance pause and backup-storage prune are NodeBackupShelf's, shared with the
@@ -552,12 +554,12 @@ class HostedTrialWatch {
 		if ($node === null) {
 			return 0;
 		}
-		// The whole slug prefix, both profiles: everything under it is on this
-		// operator's backup storage and was kept under this operator's promise.
+		// Everything this operator took of the site, in each of its storage
+		// spaces: kept under this operator's promise, and now due to go.
 		try {
 			$deleted = NodeBackupShelf::prune($node);
 		} catch (RuntimeException $e) {
-			$this->errors[] = $provision->get('cvp_domain') . ': backup storage could not be listed for pruning.';
+			$this->errors[] = $provision->get('cvp_domain') . ': backup storage could not be emptied (' . $e->getMessage() . ').';
 			return 0;
 		}
 		if ($deleted === null) {
