@@ -21,7 +21,8 @@
 # and runs nothing; --only=<core installer> runs exactly that one, prints its
 # transcript, and touches neither the converge stamp nor the last-run file;
 # a full run still carries out queued root requests under the one lock; and
-# the timer's oneshot service bounds a hung run with TimeoutStartSec.
+# the timer's oneshot service bounds a hung run with TimeoutStartSec; and a
+# --when-changed tick does nothing while the site's upgrade holds its lock.
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -79,8 +80,9 @@ chk "before the entry-point refresh" "$( [ "$LOCK_AT" -lt "$REFRESH_AT" ] && ech
 chk "and before the permissions sweep" "$( [ "$LOCK_AT" -lt "$PERMS_AT" ] && echo yes )" "yes"
 chk "--only runs after the ownership assertion" "$( [ -n "$ONLY_AT" ] && [ "$ONLY_AT" -gt "$ASSERT_AT" ] && echo yes )" "yes"
 chk "and before the entry-point refresh, which it must not do" "$( [ "$ONLY_AT" -lt "$REFRESH_AT" ] && echo yes )" "yes"
-# One flock in the file: the queue's own is gone, descriptor 9 is already held.
-chk "exactly one flock in the runner" "$(grep -c '^[^#]*flock ' "$RUNNER")" "1"
+# One lock the runner holds: the queue's own is gone, descriptor 9 is already
+# held. The only other flock is a non-blocking probe of the upgrade's lock.
+chk "exactly one lock the runner holds" "$(grep '^[^#]*flock ' "$RUNNER" | grep -c -v 'flock -n 8 8<"\${SITE_ROOT}/uploads/.upgrade.lock"')" "1"
 chk "and it waits, bounded" "$(grep -c '^if ! flock -w "\${LOCK_WAIT_SECONDS}" 9; then$' "$RUNNER")" "1"
 # The wait is compiled: minutes, long enough for a full converge or an
 # upgrade's installer run, and far under the service's hour.
@@ -336,6 +338,21 @@ chk "and the permissions pass" "$(sed -n '/^apply_tree_permissions() {/,/^}$/p' 
 chk "and the ownership assertion" "$(sed -n '/^assert_tree_ownership() {/,/^}$/p' "$RUNNER" | grep -c '\[\[ "\${MACHINE}" == "0" \]\] || return 0')" "1"
 chk "and the release key" "$(grep -B4 'host_files_write_release_verify_keys "\${SITE_ROOT}"' "$RUNNER" | grep -c 'if \[\[ "\${MACHINE}" == "0" \]\]; then')" "1"
 chk "a site run still finds a plugins directory before it does anything" "$(grep -c '^if \[\[ "\${MACHINE}" == "0" \]\] && \[\[ ! -d "\${PUBLIC_HTML}/plugins" \]\]; then$' "$RUNNER")" "1"
+
+echo "== a timer tick leaves a site that is upgrading alone =="
+mkdir -p "$T/uploads"
+: > "$T/uploads/.upgrade.lock"
+starts_before="$(wc -l < "$T/agent.starts" 2>/dev/null || echo 0)"
+flock "$T/uploads/.upgrade.lock" sleep 6 &
+holder=$!
+sleep 1
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"; rc=$?
+chk "a --when-changed tick while upgrade.php holds the lock says so and exits 0" \
+    "$rc:$(printf '%s\n' "$out" | grep -c 'is upgrading - leaving this tick to the upgrade')" "0:1"
+chk "and runs no installer" "$(wc -l < "$T/agent.starts" 2>/dev/null || echo 0)" "$starts_before"
+wait "$holder"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
+chk "once the upgrade lets go, the next tick runs" "$(printf '%s\n' "$out" | grep -c 'is upgrading')" "0"
 
 echo
 echo "host_runner_lock gate: $passed passed, $failed failed"

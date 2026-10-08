@@ -3,6 +3,8 @@
 # install_parser_jail.sh - install or converge the parser jail's launcher on
 # this machine (specs/parser_jail.md, docs/document_text.md).
 #
+# Version: 1.2 - the grant on public_html and vendor states group r-x, mask and defaults, so it can
+#              never leave the executable set group-writable; a wider grant made earlier is narrowed.
 # Version: 1.1 - checks for util-linux prlimit, which the launcher uses to apply
 #              the address-space cap as the last hop before the command.
 #          1.0
@@ -92,6 +94,31 @@ can_read() {
 }
 
 PUBLIC_HTML="${SITE_ROOT}/public_html"
+
+# The ACL that grants the jail read access to one directory. public_html and
+# vendor are the executable set, 755/644 and writable by their owner alone
+# (fix_permissions.sh), so their grant states the group, the mask and the
+# defaults outright: setfacl otherwise recalculates the mask from the group
+# entry, and a tree that was 770 when the grant landed came out group-writable
+# (775), the state read_only_tree exists to refuse. cache is data, the web
+# user's 0770, and keeps the ordinary grant.
+jail_acl() {
+    local acl="u:${JAIL_USER}:rX,d:u:${JAIL_USER}:rX"
+    [[ "$1" == "cache" ]] || acl="${acl},g::rX,m::rX,d:g::rX,d:m::rX,d:o::rX"
+    printf '%s' "${acl}"
+}
+
+# A grant made before jail_acl, on a tree that was 770 at the time, left the
+# executable set's mask or defaults group-writable. Put them right wherever
+# they are, whether or not a grant is needed now.
+for d in public_html vendor; do
+    [[ -d "${SITE_ROOT}/${d}" ]] && command -v getfacl >/dev/null 2>&1 || continue
+    if getfacl -p "${SITE_ROOT}/${d}" 2>/dev/null | grep -q -E '^(mask|default:group|default:mask)::rw'; then
+        setfacl -R -m "$(jail_acl "${d}")" "${SITE_ROOT}/${d}" 2>/dev/null \
+            && echo "parser jail: closed group write the jail grant had opened on ${SITE_ROOT}/${d}" \
+            || echo "parser jail: WARNING - could not close group write on ${SITE_ROOT}/${d}" >&2
+    fi
+done
 PROBE_CODE="${PUBLIC_HTML}/utils/extract_document_text.php"
 if [[ ! -f "${PROBE_CODE}" ]]; then
     echo "parser jail: ${PROBE_CODE} not found under ${SITE_ROOT} - skipping" >&2
@@ -118,7 +145,7 @@ if [[ "${grant_needed}" == "1" ]]; then
     setfacl -m "u:${JAIL_USER}:x" "${SITE_ROOT}" 2>/dev/null || true
     for d in public_html vendor cache; do
         [[ -d "${SITE_ROOT}/${d}" ]] || continue
-        setfacl -R -m "u:${JAIL_USER}:rX" -m "d:u:${JAIL_USER}:rX" "${SITE_ROOT}/${d}" 2>/dev/null \
+        setfacl -R -m "$(jail_acl "${d}")" "${SITE_ROOT}/${d}" 2>/dev/null \
             || echo "parser jail: WARNING - setfacl failed on ${SITE_ROOT}/${d}" >&2
     done
     echo "parser jail: granted ${JAIL_USER} read access under ${SITE_ROOT}"
