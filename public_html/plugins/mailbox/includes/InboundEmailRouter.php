@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.53 - comments: a never_spam rule does not lift a message the From domain disowned
  * @version 1.52 - authFromRelayMeta() takes the policy from the line that gave the dmarc verdict; readAuthResults' provider branch passes it through (relay path)
  * @version 1.51 - the DMARC policy rides with the verdicts (readAuthResults, iem_dmarc_policy): a fail under p=none is not spam by the auth rule and is a dmarc_monitored_fail meta token for the corpus
  * @version 1.50 - a raw reset to inline forgets its file store and key; a stored raw is deleted by its row's descriptor
@@ -984,7 +985,9 @@ class InboundEmailRouter {
 		// received today (specs/mail_archive_import.md § Deliberately not doing).
 		//
 		// It runs AFTER the spam verdict is set, so a filter's
-		// never_spam/mark_spam is the last word on disposition. Best-effort: a filter
+		// never_spam/mark_spam is the last word on disposition — except that
+		// never_spam does not lift a message the From domain disowned
+		// (InboundEmailFilter::applyActionSet). Best-effort: a filter
 		// failure is logged but never aborts ingest (the message is already stored).
 		//
 		// Filters match on the plaintext this method already has in hand, NEVER on
@@ -3307,7 +3310,10 @@ class InboundEmailRouter {
 	 * step 2: a score rspamd itself would reject at is spam even from a contact,
 	 * because a compromised correspondent passes DMARC and thread-hijack phishing
 	 * replays real Message-IDs. The Spam view's "Always allow sender" rule is the
-	 * deliberate way past both. Mail rules run after this and are final.
+	 * deliberate way past both, with one exception no rule lifts: a DMARC fail
+	 * under an enforcing policy, where the From domain has disowned the message
+	 * (InboundEmailMessage::senderDomainDisowns). Mail rules run after this and are
+	 * otherwise final.
 	 *
 	 * Relationships other than `reply` count only when DMARC passed, so a spammer
 	 * cannot borrow a contact's address; `reply` needs no DMARC, because knowing a

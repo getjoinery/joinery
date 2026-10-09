@@ -20,6 +20,8 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.8 - a message its From domain disowned (DMARC fail, enforcing policy):
+ *                allowSender, a never_spam rule and Not spam all leave it in Spam
  * @version 1.7 - allowSender: the Spam view's "always allow this sender"
  *                writes the never_spam filter, clears only the mail it was
  *                given, does not duplicate, and refuses out of scope
@@ -584,6 +586,49 @@ class MailboxReaderTest {
 		$this->ok($bob_try['count'] === 0, 'bob cannot allow a sender on a mailbox he has no grant for');
 		$this->ok($this->allowRuleCount($sender_addr) === $before,
 			'the refused attempt wrote no filter');
+
+		// --- A message its From domain disowned (DMARC fail under an enforcing
+		// policy) is past every allow: a rule keyed on the address would let any
+		// forger of it through. A p=none fail is not a disowning.
+		section('nothing lifts a message its sender\'s domain disowned');
+		$forged_addr = 'forged_' . $this->suffix . '@out.test';
+		$forged = $this->insertMsg($this->beth_alias, '<disowned1@x>', 'looks like your bank', false, false, 7);
+		$monitored = $this->insertMsg($this->beth_alias, '<monitored1@x>', 'a ghost newsletter', false, false, 6);
+		$this->msg_ids['disowned'] = $forged;
+		$this->msg_ids['monitored'] = $monitored;
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_sender = ?, iem_spam_verdict = 'spam',
+			iem_dmarc_result = 'fail', iem_dmarc_policy = 'reject' WHERE iem_inbound_email_message_id = ?")
+			->execute([$forged_addr, $forged]);
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_spam_verdict = 'spam',
+			iem_dmarc_result = 'fail', iem_dmarc_policy = 'none' WHERE iem_inbound_email_message_id = ?")
+			->execute([$monitored]);
+
+		$refused = $beth->allowSender(array($forged));
+		$this->ok($refused['count'] === 0 && $refused['disowned'] === 1,
+			'allowSender refuses a disowned message and says so');
+		$this->ok($this->scalar($forged, 'iem_spam_verdict') === 'spam', 'the disowned message stays in Spam');
+		$this->ok($this->allowRuleCount($forged_addr) === 0, 'and no rule is written for its address');
+
+		$applied = InboundEmailFilter::applyActionSet(new InboundEmailMessage($forged, TRUE),
+			array('never_spam' => true, 'mark_spam' => false), false);
+		$this->ok(in_array('never_spam_refused', $applied, true) && !in_array('never_spam', $applied, true),
+			'a never_spam rule matching it is refused (live and backfill share this path)');
+		$this->ok($this->scalar($forged, 'iem_spam_verdict') === 'spam', 'still in Spam after the rule');
+
+		$this->ok($beth->setSpamVerdict(array($forged), InboundEmailMessage::SPAM_VERDICT_HAM) === 0
+			&& $this->scalar($forged, 'iem_spam_verdict') === 'spam',
+			'Not spam does not lift it either');
+		$this->ok($beth->setSpamVerdict(array($forged), InboundEmailMessage::SPAM_VERDICT_SPAM) === 1,
+			'Mark as spam on it still works');
+
+		$applied = InboundEmailFilter::applyActionSet(new InboundEmailMessage($monitored, TRUE),
+			array('never_spam' => true, 'mark_spam' => false), false);
+		$this->ok(in_array('never_spam', $applied, true) && $this->scalar($monitored, 'iem_spam_verdict') === 'ham',
+			'a fail under p=none is not a disowning: the rule lifts it');
+		$this->db->exec("UPDATE iem_inbound_email_messages SET iem_spam_verdict = 'spam' WHERE iem_inbound_email_message_id = " . intval($monitored));
+		$this->ok($beth->setSpamVerdict(array($forged, $monitored), InboundEmailMessage::SPAM_VERDICT_HAM) === 1
+			&& $this->scalar($monitored, 'iem_spam_verdict') === 'ham' && $this->scalar($forged, 'iem_spam_verdict') === 'spam',
+			'Not spam on a mixed selection lifts only the message that was not disowned');
 	}
 
 	/** The never_spam rule for one address, or null. */
@@ -629,8 +674,8 @@ class MailboxReaderTest {
 		// The allow-sender rules this run wrote (they hang off the alias with no
 		// cascade to lean on, and a leftover would match a later run's fixtures).
 		try {
-			$this->db->prepare("DELETE FROM ief_inbound_email_filters WHERE ief_match_from = ?")
-				->execute(['sender_' . $this->suffix . '@out.test']);
+			$this->db->prepare("DELETE FROM ief_inbound_email_filters WHERE ief_match_from IN (?, ?)")
+				->execute(['sender_' . $this->suffix . '@out.test', 'forged_' . $this->suffix . '@out.test']);
 		} catch (\Throwable $e) {}
 		// Grants don't cascade on raw alias delete (no DB FK), so clean them first.
 		$aids = array_filter(array_map('intval', [$this->beth_alias, $this->legal_alias, $this->other_alias]));

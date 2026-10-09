@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.58 - allowSender() and Not spam (setSpamVerdict ham) refuse a message its sender's domain disowns; the reader carries spam_disowned
  * @version 1.57 - allowSender's SELECT carries the verdict columns decryptThreadRow() reads
  * @version 1.56 - the reader's spam_auth_rule reads iem_dmarc_policy: a fail under p=none is not an auth-rule filing
  * @version 1.55 - setSpamVerdict stamps the correction to the microsecond, so a two-way IMAP feed (which
@@ -1731,6 +1732,9 @@ class MailboxService {
 										'dkim'         => (string)$r['iem_dkim_result'],
 										'dmarc'        => (string)$r['iem_dmarc_result'],
 										'dmarc_policy' => (string)($r['iem_dmarc_policy'] ?? ''))),
+				// The From domain disowned it (DMARC fail under an enforcing policy): no
+				// allow rule lifts it, so the reader explains instead of offering one.
+				'spam_disowned'     => InboundEmailMessage::rowSenderDomainDisowns($r),
 				// How the message reached the box, and whether it earned the
 				// verified-direct mark. The mark asserts exactly two things: the
 				// sending instance was cryptographically verified, and the sender
@@ -1850,6 +1854,9 @@ class MailboxService {
 									'dkim'         => (string)$r['iem_dkim_result'],
 									'dmarc'        => (string)$r['iem_dmarc_result'],
 									'dmarc_policy' => (string)($r['iem_dmarc_policy'] ?? ''))),
+			// The From domain disowned it (DMARC fail under an enforcing policy): no
+			// allow rule lifts it, so the reader explains instead of offering one.
+			'spam_disowned'     => InboundEmailMessage::rowSenderDomainDisowns($r),
 			'transport'         => (string)($r['iem_transport'] ?? ''),
 			'direct_verified'   => (bool)$this->pgBool($r['iem_direct_verified']),
 			'size_bytes'        => intval($r['iem_size_bytes']),
@@ -2517,7 +2524,8 @@ class MailboxService {
 	/**
 	 * Manual spam correction (specs/inbound_email_spam_filtering.md): set the verdict
 	 * on in-scope rows — 'spam' (Mark as spam) moves them to the Spam view, 'ham'
-	 * (Not spam) returns them to the inbox. Rejects any other value.
+	 * (Not spam) returns them to the inbox. Rejects any other value. 'ham' skips a
+	 * message its From domain disowned (InboundEmailMessage::senderDomainDisowns).
 	 * @return int rows affected
 	 */
 	public function setSpamVerdict(array $message_ids, string $verdict): int {
@@ -2529,6 +2537,22 @@ class MailboxService {
 				InboundEmailMessage::SPAM_VERDICT_SPAM,
 				InboundEmailMessage::SPAM_VERDICT_HAM), true)) {
 			return 0;
+		}
+		// "Not spam" never lifts a message its From domain disowned (DMARC fail under
+		// an enforcing policy, InboundEmailMessage::senderDomainDisowns): nothing on
+		// this side overrides the sender domain's own word that the mail is not theirs.
+		if ($verdict === InboundEmailMessage::SPAM_VERDICT_HAM) {
+			$rows = $this->db()->query("SELECT iem_inbound_email_message_id, iem_dmarc_result, iem_dmarc_policy
+					FROM iem_inbound_email_messages
+					WHERE iem_inbound_email_message_id IN (" . implode(',', $ids) . ")")->fetchAll(PDO::FETCH_ASSOC);
+			foreach ($rows as $r) {
+				if (InboundEmailMessage::rowSenderDomainDisowns($r)) {
+					$ids = array_values(array_diff($ids, array(intval($r['iem_inbound_email_message_id']))));
+				}
+			}
+			if (!count($ids)) {
+				return 0;
+			}
 		}
 		$in = implode(',', $ids);
 		$now = microtime(true);
@@ -2558,7 +2582,11 @@ class MailboxService {
 	 * (specs/mailbox_contact_spam_bypass.md).
 	 *
 	 * This is the ONE way a sender whose domain fails authentication reaches the
-	 * inbox. It is deliberately not something the address book can do on its own —
+	 * inbox — except a message the From domain itself has disowned (a DMARC fail
+	 * under quarantine or reject, InboundEmailMessage::senderDomainDisowns): that
+	 * one is left in Spam, cleared of nothing and given no rule, because a rule
+	 * keyed on the From address would let anyone forging it through. It is
+	 * deliberately not something the address book can do on its own —
 	 * a DMARC failure means the From header is unattested, so "this address is a
 	 * contact" is a claim about an address nobody verified, and anyone spoofing it
 	 * would inherit the same pass. Making it a filter the user creates means the
@@ -2577,12 +2605,13 @@ class MailboxService {
 	 * clears the messages in hand.
 	 *
 	 * @param array $message_ids
-	 * @return array{count:int,addresses:string[]} rows cleared, and the addresses allowed
+	 * @return array{count:int,addresses:string[],disowned:int} rows cleared, the addresses
+	 *         allowed, and how many named messages were refused as disowned
 	 */
 	public function allowSender(array $message_ids): array {
 		$ids = $this->intList($message_ids);
 		if (!count($ids)) {
-			return array('count' => 0, 'addresses' => array());
+			return array('count' => 0, 'addresses' => array(), 'disowned' => 0);
 		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filters_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
@@ -2600,7 +2629,12 @@ class MailboxService {
 
 		$addresses = array();
 		$cleared = array();
+		$disowned = 0;
 		foreach ($rows as $r) {
+			if (InboundEmailMessage::rowSenderDomainDisowns($r)) {
+				$disowned++;
+				continue;
+			}
 			$alias_id = intval($r['iem_iea_inbound_email_alias_id']);
 			if ($alias_id <= 0) {
 				continue; // catch-all store row: no mailbox to hang a filter on
@@ -2628,7 +2662,7 @@ class MailboxService {
 
 		$count = count($cleared)
 			? $this->setSpamVerdict($cleared, InboundEmailMessage::SPAM_VERDICT_HAM) : 0;
-		return array('count' => $count, 'addresses' => array_keys($addresses));
+		return array('count' => $count, 'addresses' => array_keys($addresses), 'disowned' => $disowned);
 	}
 
 	/**

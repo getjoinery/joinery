@@ -28,6 +28,7 @@
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
+ * @version 2.1 - senderDomainDisowns(): which auth filings no allow rule lifts
  * @version 2.0 - the verdict order of spam learning in core; the ingest re-scan tests are gone
  * @version 1.5
  */
@@ -121,6 +122,21 @@ class SpamFilteringTest {
 			'authRuleSaysSpam: p=none does not fall through to the SPF+DKIM fallback either');
 		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'none', 'spf' => 'fail', 'dkim' => 'fail')) === true,
 			'authRuleSaysSpam: no DMARC verdict, SPF and DKIM both fail → still true');
+
+		section('senderDomainDisowns: the filings no allow rule lifts');
+		foreach (array(
+			array(array('dmarc' => 'fail', 'dmarc_policy' => 'reject'), true, 'fail under p=reject'),
+			array(array('dmarc' => 'fail', 'dmarc_policy' => 'Quarantine'), true, 'fail under p=quarantine'),
+			array(array('dmarc' => 'fail'), true, 'fail with the policy unknown'),
+			array(array('dmarc' => 'fail', 'dmarc_policy' => 'none'), false, 'fail under p=none (Ghost)'),
+			array(array('dmarc' => 'none', 'spf' => 'fail', 'dkim' => 'fail'), false, 'the no-DMARC fallback'),
+			array(array('dmarc' => 'pass', 'dmarc_policy' => 'reject'), false, 'a pass'),
+		) as $c) {
+			check(InboundEmailMessage::senderDomainDisowns($c[0]) === $c[1], 'senderDomainDisowns: ' . $c[2]);
+		}
+		check(InboundEmailMessage::rowSenderDomainDisowns(array('iem_dmarc_result' => 'fail', 'iem_dmarc_policy' => 'reject')) === true
+			&& InboundEmailMessage::rowSenderDomainDisowns(array('iem_dmarc_result' => 'fail', 'iem_dmarc_policy' => 'none')) === false,
+			'rowSenderDomainDisowns reads a stored row\'s columns');
 
 		section('step 2: SCANNER_FLOOR beats relationships, for rspamd scores only');
 		$this->eq('spam/scanner', $this->verdict(array('scanner' => $this->rspamd(15.0), 'contact' => true)),

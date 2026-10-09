@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.8 - never_spam does not lift a message its sender's domain disowns (InboundEmailMessage::senderDomainDisowns)
  * @version 1.7 - a rule that sets the spam verdict records iem_spam_reason = rule
  * @version 1.6 - device-run rules: deviceRule(), applyDeviceMatches() (a rule of the message's own scope switched
  *   off mid-drain is skipped, not refused), requestApplyExisting(), ief_device_backlog_requested_time (each owner's
@@ -585,7 +586,10 @@ class InboundEmailFilter extends SystemBase {
 	 * Apply a (possibly merged) action set to a message, in the fixed order that
 	 * makes multi-filter interactions well-defined regardless of filter order:
 	 *
-	 *   1. never_spam — clear the verdict to 'ham' (an explicit allow always wins).
+	 *   1. never_spam — clear the verdict to 'ham' (an explicit allow wins over
+	 *                   every filing EXCEPT a DMARC fail under an enforcing policy:
+	 *                   the From domain has disowned the message, and a rule keyed on
+	 *                   the From address would let any forger of it through).
 	 *   2. mark_spam  — only if no never_spam fired.
 	 *   3. label / star / mark_read / archive — independent flag/membership writes.
 	 *   4. forward_to — relay a copy (best-effort; failures logged, never fatal).
@@ -602,7 +606,13 @@ class InboundEmailFilter extends SystemBase {
 
 		// 1/2. Spam disposition — never_spam beats mark_spam.
 		// The rule is the deciding reason (iem_spam_reason), which the timeline shows.
-		if (!empty($a['never_spam'])) {
+		$disowned = !empty($a['never_spam']) && InboundEmailMessage::senderDomainDisowns(array(
+			'dmarc'        => (string)$msg->get('iem_dmarc_result'),
+			'dmarc_policy' => (string)$msg->get('iem_dmarc_policy'),
+		));
+		if ($disowned) {
+			$done[] = 'never_spam_refused';
+		} elseif (!empty($a['never_spam'])) {
 			$db->prepare("UPDATE iem_inbound_email_messages SET iem_spam_verdict = ?, iem_spam_reason = 'rule'
 				WHERE iem_inbound_email_message_id = ?")
 				->execute(array(InboundEmailMessage::SPAM_VERDICT_HAM, $mid));

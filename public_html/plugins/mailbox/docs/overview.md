@@ -4117,7 +4117,8 @@ down, and the first that answers wins. The deciding step is stored in
 | 8 | Otherwise | ham | `none` |
 
 Mail rules run after the verdict and are final (`never_spam` / `mark_spam`, reason
-`rule`). Joinery Direct's verified-contact path files as ham with reason `contact`.
+`rule`), with one exception: `never_spam` does not lift a message its sender's domain
+disowned (below). Joinery Direct's verified-contact path files as ham with reason `contact`.
 
 **The auth rule.** The router acts on the SPF/DKIM/DMARC verdicts it already records
 (it never computes them — see [Inbound authentication](#inbound-authentication-spf--dkim--dmarc)):
@@ -4132,8 +4133,17 @@ Mail rules run after the verdict and are final (`never_spam` / `mark_spam`, reas
   fail: raw SPF/DKIM lack DMARC's alignment, so a single failure has too many
   legitimate causes.
 
-Nothing overrides it: a DMARC failure means the `From` is unattested, so no claim about
-the sender can rescue it.
+No relationship overrides it: a failure means the `From` is unattested, so no claim
+about the sender can rescue it.
+
+**A disowned message.** A DMARC `fail` under `p=quarantine` or `p=reject` (or a policy
+that could not be read) means the `From` domain's owner has said the message is not
+theirs (`InboundEmailMessage::senderDomainDisowns()`). Nothing lifts it out of Spam: not
+*Always allow*, not any `never_spam` rule (live or in the backfill), and not *Not spam*
+(`setSpamVerdict` skips it; the reader offers no *Not spam* on a conversation made only of
+such messages). The message stays readable in Spam. A rule keyed on the
+`From` address would let anyone forging that address through. When such a rule matches,
+the filter log records `never_spam_refused`.
 
 **The floor.** A score high enough that rspamd itself would reject is spam whatever
 else is known. Bayes cannot rescue it — good phishing looks like normal mail — and
@@ -4143,9 +4153,11 @@ compromised contact's account passes DMARC.
 **Always allow a sender.** The Spam view's *Always allow `<address>`* writes an
 explicit `never_spam` filter scoped to that mailbox, flagged for the "also apply to
 existing" backfill, and clears the messages in hand. It is the deliberate way past
-steps 1 and 2: visible on the Filters page and reversible by deleting the rule. A
-message filed by the auth rule carries a banner offering it; any other filing shows
-one line in the Spam view saying which step decided.
+steps 1 and 2, except for a disowned message: visible on the Filters page and
+reversible by deleting the rule. A message filed by the auth rule carries a banner
+offering it. A disowned message's banner explains instead (`spam_disowned` on the
+reader row), and `allow_sender` refuses it, writing no rule and reporting it in
+`disowned`. Any other filing shows one line in the Spam view saying which step decided.
 
 **Forward suppression.** A judged-`spam` message is **never relayed** — forwarding
 spam burns the platform's sending reputation and can relay abuse. The forward is
