@@ -28,6 +28,8 @@
  *                           to this site's name; saved by CloudStorageLifecycle,
  *                           whose check proves the bucket private
  *
+ * @version 1.5 - a new target's lock days start at the suggested figure (retention plus full-backup interval, 35 at the
+ *                shipped settings) instead of 0; a provider that takes no lock still saves 0
  * @version 1.4 - lock days for a backup target on a provider that takes object lock, part of the location (F8)
  * @version 1.3 - one key per target: the node key and the per-run key switch are gone, since a Managed node
  *                writes through the management node's broker and is handed no key (specs/storage_targets.md WP5)
@@ -124,9 +126,9 @@ class BackupTargetForm {
 		if (!$wizard && !$files) {
 			$suggest = BackupTarget::suggested_lock_days();
 			$fw->numberinput('bkt_lock_days', 'Lock each backup for (days)', array(
-				'value' => $target ? (int)$target->get('bkt_lock_days') : 0, 'min' => 0, 'max' => 3650,
+				'value' => $target ? (int)$target->get('bkt_lock_days') : $suggest, 'min' => 0, 'max' => 3650,
 				'readonly' => $locked !== '',
-				'helptext' => '0 is off. Every object written here is locked in compliance mode for this many days: '
+				'helptext' => 'Set to 0 for a bucket without object lock. Every object written here is locked in compliance mode for this many days: '
 					. 'nobody can delete or replace it before then, the key\'s owner included, so a break-in on this '
 					. 'machine cannot erase backups. The bucket must have object lock turned on (it can only be turned on '
 					. 'when the bucket is created). Storage for a locked object is paid until its date even if it is '
