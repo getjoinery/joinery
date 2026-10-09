@@ -301,7 +301,17 @@ fn reconcile_summary(detail: &str) -> String {
     if detail.starts_with("ConflictResolved") {
         return "Changed in two places at once. Both versions were kept — the other one is beside it, marked as a conflicted copy.".into();
     }
+    // Said by half: where only one half was contested, the other half this
+    // device changed still stands, and saying the whole move was undone would
+    // send the user looking for a file that is where they put it. A detail
+    // with no half recorded says what it always said.
     if detail.starts_with("MoveRaceServerWon") {
+        if detail.contains("lost: Name") {
+            return "Renamed in two places at once. The server's name was used, so this device's rename was undone.".into();
+        }
+        if detail.contains("lost: Folder") {
+            return "Moved to two different folders at once. The server's folder was used, so this device's move to another folder was undone.".into();
+        }
         return "Moved in two places at once. The server's location was used, so this device's move was undone.".into();
     }
     if detail.starts_with("DeleteLostToEdit") {
@@ -358,6 +368,20 @@ mod tests {
             last_pass_ms: None,
             cursor: 0,
         }
+    }
+
+    /// A move race is described by the half it lost: the whole move only
+    /// when both halves (or no halves on record) went to the server.
+    #[test]
+    fn a_lost_move_race_says_which_half_was_undone() {
+        let name = reconcile_summary("MoveRaceServerWon { local_wanted: Placement { parent: Some(2), name: \"b\" }, lost: Name }");
+        let folder = reconcile_summary("MoveRaceServerWon { local_wanted: Placement { parent: Some(2), name: \"b\" }, lost: Folder }");
+        let both = reconcile_summary("MoveRaceServerWon { local_wanted: Placement { parent: Some(2), name: \"b\" }, lost: Both }");
+        let unrecorded = reconcile_summary("MoveRaceServerWon { local_wanted: Placement { parent: Some(2), name: \"b\" } }");
+        assert!(name.contains("rename was undone") && !name.contains("move"), "{name}");
+        assert!(folder.contains("move to another folder was undone"), "{folder}");
+        assert!(both.contains("this device's move was undone"), "{both}");
+        assert_eq!(both, unrecorded);
     }
 
     #[test]

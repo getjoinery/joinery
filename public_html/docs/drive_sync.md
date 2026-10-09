@@ -206,12 +206,15 @@ lands in the issues panel. The copy is named after what the file is called on
 the server, unless that is the scratch name a peer's swap holds it under for a
 moment (`.jd-swap-...`); then it is named after what the file is called here.
 
-A file or folder moved on both sides keeps both changes when they do not
-overlap: if one side changed only its name and the other only its folder, it
-ends in the new folder under the new name, on every device. Any other pair of
-moves (both changed the folder, both changed the name, or one changed both) is
-settled by the server's placement, and the issues panel says the local move
-lost.
+A file or folder moved on both sides is judged half by half against the
+placement both sides last agreed: its folder and its name. A half only one side
+changed takes that side's value, and a half both sides changed to the same
+value takes it, so a rename on one side and a move on the other both survive,
+and two devices making the same rename keep any move only one of them made. A
+half both sides changed to different values is settled by the server's value,
+and the issues panel says which half of the local move lost. Every device ends
+at the same placement. With no agreement to measure against, the server's
+placement settles the whole move.
 
 ### The mass-delete guard
 
