@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.70 - process_move_to_plane keeps the move's management node, name and fingerprint for the job page
  * @version 1.69 - process_decommission_node stamps mgn_site_removed_time on the victim when the host verifies it gone
  * @version 1.68 - a comment names S3Signer::list() (TargetLister is folded into it)
  * @version 1.68 - process_install_node records the agents' keys the install printed (JoinAutoApproval::record_from_install)
@@ -3038,6 +3039,29 @@ HTML;
 	 * well as on the node. Never text: warnings are a type and a file:line,
 	 * assets a /theme or /plugins path.
 	 */
+	/**
+	 * A move_to_plane job's result: which management node the machine asked to
+	 * adopt it, under what name, and the fingerprint to compare before approving
+	 * it there. The word answers these fields itself; only they are kept.
+	 */
+	private static function process_move_to_plane($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !preg_match('/^[0-9a-f]{16}$/', (string)($data['fingerprint'] ?? ''))) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$url = function ($v) { $v = (string)$v; return preg_match('#^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$#', $v) ? $v : ''; };
+		$job->set('mjb_result', json_encode([
+			'management_node' => $url($data['management_node'] ?? ''),
+			'claimed_name'    => substr(preg_replace('/[^A-Za-z0-9._-]/', '', (string)($data['claimed_name'] ?? '')), 0, 100),
+			'fingerprint'     => (string)$data['fingerprint'],
+			'status'          => in_array($data['status'] ?? '', ['pending', 'approved', 'rejected', 'expired'], true) ? $data['status'] : '',
+			'managed_by'      => $url($data['managed_by'] ?? ''),
+		]));
+		$job->save();
+	}
+
 	private static function process_page_probe($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
 		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';

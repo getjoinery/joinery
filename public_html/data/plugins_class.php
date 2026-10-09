@@ -11,6 +11,8 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.5 - get_status_badge() says Active or Inactive from plg_active (is_active()), as the row's actions
+ *               do; a plugin left at plg_status 'inactive' by a failed install and a repair read Inactive while it ran
  * @version 1.4 - is_active() reads plg_active, the flag the loaders read; plg_status can say stale
  *                while the plugin runs
  * @version 1.3 - save() forgets PluginHelper's per-request active set
@@ -134,9 +136,18 @@ function authenticate_write($data) {
 			return '<span class="badge bg-danger">Error</span>';
 		}
 
-		switch ($status) {
-			case 'active':
+		// Switched on or off is plg_active, as every loader and the row's actions
+		// read it; plg_status can still say 'inactive' for a plugin that runs.
+		if ($status !== self::STATUS_UNINSTALLED) {
+			if ($this->is_active()) {
 				return '<span class="badge bg-success">Active</span>';
+			}
+			if ($status === 'active') {
+				return '<span class="badge bg-secondary">Inactive</span>';
+			}
+		}
+
+		switch ($status) {
 			case 'inactive':
 				return '<span class="badge bg-secondary">Inactive</span>';
 			case 'installed':
