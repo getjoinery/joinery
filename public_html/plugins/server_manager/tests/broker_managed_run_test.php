@@ -25,9 +25,13 @@
  *     space takes nothing, and a chain stored there is not extended
  *   - the backup engine's manager plan takes the slot as a broker run, and a
  *     chain follows the space the broker answers
+ *   - in a space whose target locks, every link the broker signs carries the
+ *     lock, so what the node writes and the run's ledger file land locked; a
+ *     node too old to send the lock is refused, naming the release
  *
  * Run: php plugins/server_manager/tests/broker_managed_run_test.php
  *
+ * @version 1.2 - a locking space (F8): links sign the lock, the node's writes and the ledger file land locked
  * @version 1.1 - the review's pins: a lost finish reply at the engine, a manifest or envelope already in the
  *                bucket, an adopted row left as it was, the recorded manifest preferred, ledger-only spaces
  *                empty, a failed ledger file waiting a day, a re-claimed job replacing its run
@@ -40,7 +44,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('tests/lib/s3_fixtures.php'));
 
-$fx = s3fx_start();
+$fx = s3fx_start(array('FIXTURE_LOCK' => 1));
 if ($fx === null) {
 	harness_skip('broker managed run', 'could not start a local PHP HTTP server on 127.0.0.1');
 	harness_finish();
@@ -360,6 +364,46 @@ ShelfBroker::writeMissingLedgerFiles(500);
 check($tried !== '' && (string)(new ShelfRun($dead->key, TRUE))->get('svr_ledger_tried_time') === $tried, 'it is not tried again on the next pass, but a day later');
 $c->set('bkt_credentials', $creds);
 $c->save();
+
+section('In a space that locks, everything the node writes is locked');
+$lk = $make_target('Lk', 'bkl');
+$lk->set('bkt_lock_days', 3);
+$lk->save();
+$lk = new BackupTarget($lk->key, TRUE);
+$sl = StorageSpace::open($lk, StorageSpace::OWNER_NODE, (int)$node->key, (string)$node->get('mgn_slug'));
+harness_register_row('sps_storage_spaces', 'sps_storage_space_id', $sl->key);
+$takes_lock = new ReflectionMethod('JobCommandBuilder', 'assert_node_takes_lock');
+$takes_lock->setAccessible(true);
+$why = '';
+try { $takes_lock->invoke(null, $node, $sl, 'back up'); } catch (Exception $e) { $why = $e->getMessage(); }
+check(strpos($why, 'locks every backup') !== false && strpos($why, JobCommandBuilder::LOCK_MIN_CORE_VERSION) !== false,
+	'a node too old to send the lock is refused, naming the release', $why);
+$newer = new ManagedNode($node->key, TRUE);
+$newer->set('mgn_joinery_version', JobCommandBuilder::LOCK_MIN_CORE_VERSION);
+$why = '';
+try { $takes_lock->invoke(null, $newer, $sl, 'back up'); $takes_lock->invoke(null, $node, $space, 'back up'); } catch (Exception $e) { $why = $e->getMessage(); }
+check($why === '', 'one on that release is not, and a space that does not lock asks nothing', $why);
+list($slot11) = $open_slot($node, $sl, 'backup');
+$broker11 = new BackupBroker($slot11);
+$broker11->begin();
+$lbase = $sl->base() . 'manager/';
+$lchain = 'chain-20261009_050000';
+$link = $broker11->link('PUT', '/' . $lbase . $lchain . '/probe.bin', array(), 10);
+check(is_array($link) && ($link['headers']['x-amz-object-lock-mode'] ?? '') === 'COMPLIANCE'
+	&& strpos((string)$link['url'], 'x-amz-object-lock-mode') !== false, 'the broker\'s link signs the lock and names it', json_encode($link));
+$resp = S3Signer::put_file($broker11, 'ignored', '/' . $lbase . $lchain . '/manifest-0000.json', $small);
+check((int)$resp['status'] === 200 && s3fx_lock($fx, 'bkl', '/' . $lbase . $lchain . '/manifest-0000.json') !== null,
+	'a file the node sends lands locked', (string)$resp['status']);
+$fh = fopen('php://memory', 'w+'); fwrite($fh, $stream_bytes); rewind($fh);
+$sresp = S3Signer::put_stream($broker11, 'ignored', '/' . $lbase . $lchain . '/data-0000.tar.gz.enc', $fh, 'application/octet-stream', true, 700);
+fclose($fh);
+check((int)$sresp['status'] === 200 && s3fx_lock($fx, 'bkl', '/' . $lbase . $lchain . '/data-0000.tar.gz.enc') !== null,
+	'and so does a stream sent in parts', (string)$sresp['status']);
+$broker11->finish($lchain);
+check(s3fx_lock($fx, 'bkl', '/' . $sl->base() . 'ledger/' . (int)$slot11['run_id'] . '.json') !== null,
+	'the run\'s ledger file is locked too, so nobody can replace it');
+$d = S3Signer::delete($creds, 'bkl', '/' . $lbase . $lchain . '/data-0000.tar.gz.enc');
+check((int)$d['status'] === S3Signer::LOCKED, 'and the management node\'s own key cannot delete what was written', (string)$d['status']);
 
 section('A job handed out again replaces the run it opened');
 list($slot10, $job10) = $open_slot($node, $moved, 'backup');

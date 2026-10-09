@@ -1799,10 +1799,16 @@ the link it is given:
   completed answers `exists` with its recorded size and sha256 — nothing is
   written twice, so a node can replace nothing it wrote. A chain manifest or an
   epoch envelope is never signed over one already in the bucket, even one
-  written before runs went through the broker (it is looked for first);
+  written before runs went through the broker (it is looked for first). On a
+  target that locks (`bkt_lock_days`), a put's or multipart create's link signs
+  the COMPLIANCE lock headers (`ShelfBroker::lockHeaders()`) and the answer
+  names them, so a node cannot write unlocked; a node older than
+  `JobCommandBuilder::LOCK_MIN_CORE_VERSION` is refused such a job, naming the
+  release (core `docs/backups.md` § Object lock);
 - **finish**: every object written, with bytes and sha256; the ledger records
   them, cancels the rest, and writes the run's ledger file
-  (`{space}ledger/{run id}.json`, outside every run's base key). Asked again
+  (`{space}ledger/{run id}.json`, outside every run's base key; locked with the
+  run's objects on a target that locks). Asked again
   for a finished run — a lost reply — it answers what was recorded;
 - **abort**: the run failed; what it signed is cancelled.
 

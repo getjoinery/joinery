@@ -45,6 +45,9 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.5.1 - written through the target's write credential (object lock, F8); a delete prune_site() could not
+ *                  make (lock still holds it, or refused) is remembered per target in unpruned.json and offered
+ *                  again, through the retained-index check, by every pass once its date has passed
  * @version 1.5.0 - a re-seal writes envelope-{fpr}.json beside the epoch's envelope.json instead of over it, so
  *                  no key in backup storage is written twice (specs/storage_targets.md WP5); location_of()
  *                  reads both names, and a listing records every envelope of an epoch
@@ -85,6 +88,7 @@ class BackupObjects {
 	const EPOCH_FILE = 'epoch.json';
 	const HELD_FILE = 'held.json';
 	const RETIRED_FILE = 'retired-epochs.json';
+	const UNPRUNED_FILE = 'unpruned.json';
 	const TMP_DIR = 'tmp';
 	const ENVELOPE_NAME = 'envelope.json';
 	/** A re-sealed envelope: envelope-{first 16 hex of the recovery fingerprint}.json. */
@@ -1352,15 +1356,35 @@ class BackupObjects {
 
 	/**
 	 * Site shelf: delete every object the pruned runs' indexes name that no
-	 * retained index names, and the envelope of any epoch left empty. A
-	 * retained index that cannot be read ends the pass with nothing deleted.
+	 * retained index names, and the envelopes of any epoch left with nothing
+	 * else. A retained index that cannot be read ends the pass with nothing
+	 * deleted.
+	 *
+	 * What could not be deleted — object lock still holds it (F8), or the
+	 * provider refused — is remembered for this target (unpruned.json) and
+	 * offered again by every later pass once its date has passed, through the
+	 * same retained-index check, so an object a later run named again is kept
+	 * and nothing is forgotten in the bucket.
 	 *
 	 * @param array $candidates epoch/name => entry (name, epoch, object_bytes, object_sha256), from the pruned indexes
 	 * @param array $retained_keys bucket keys of the retained runs' indexes, newest first
 	 * @return int objects deleted
 	 */
-	public static function prune_site(array $plan, array $candidates, array $retained_keys) {
-		if (!$candidates) {
+	public static function prune_site(array $plan, array $candidates, array $retained_keys, $now = null) {
+		$now = ($now === null) ? time() : (int)$now;
+		$record = self::read_unpruned($plan);
+		$tid = self::unpruned_target($plan);
+		$mine = $record[$tid] ?? array('objects' => array(), 'epochs' => array());
+		foreach ($mine['objects'] as $loc => $e) {
+			if ((int)($e['until'] ?? 0) <= $now && !isset($candidates[$loc])) {
+				$candidates[$loc] = $e;
+			}
+		}
+		$due_epochs = array();
+		foreach ($mine['epochs'] as $epoch => $until) {
+			if ((int)$until <= $now) { $due_epochs[(string)$epoch] = true; }
+		}
+		if (!$candidates && !$due_epochs) {
 			return 0;
 		}
 		// The newest index of each retained chain first; only a candidate absent
@@ -1372,34 +1396,48 @@ class BackupObjects {
 				// A retained run's index that cannot be read may be the only
 				// one naming what remains: nothing goes this pass.
 				error_log('BackupObjects: the objects index ' . $key . ' could not be read; no offloaded file is pruned this run.');
+				// The pruned runs that named these are gone from the records:
+				// they are remembered, and the next pass offers them again.
+				foreach ($candidates as $loc => $e) {
+					$mine['objects'][$loc] = array('name' => (string)($e['name'] ?? substr($loc, strpos($loc, '/') + 1)),
+						'epoch' => (string)$e['epoch'], 'until' => (int)min((int)($e['until'] ?? $now), $now));
+				}
+				$record[$tid] = $mine;
+				self::write_unpruned($plan, $record);
 				return 0;
 			}
 			foreach (array_keys(self::index_locations($index)) as $loc) {
 				unset($candidates[$loc]);
+				unset($mine['objects'][$loc]);   // named again: kept, no longer owed a delete
 			}
-		}
-		if (!$candidates) {
-			return 0;
 		}
 		list($creds, $bucket, $base) = self::destination($plan);
 		$deleted = 0;
-		$epochs = array();
+		$epochs = $due_epochs;
 		foreach ($candidates as $loc => $e) {
 			$name = (string)($e['name'] ?? substr($loc, strpos($loc, '/') + 1));
 			$key = $base . self::object_relname((string)$e['epoch'], $name);
+			$until = $now;
 			try {
 				$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 				$status = (int)($resp['status'] ?? 0);
+				if ($status === S3Signer::LOCKED) {
+					$until = (int)$resp['locked_until'];
+					throw new BackupObjectsException('object lock holds it until ' . gmdate('Y-m-d H:i', $until) . ' UTC');
+				}
 				if (($status < 200 || $status >= 300) && $status !== 404) {
 					throw new BackupObjectsException('HTTP ' . $status);
 				}
 				$deleted++;
+				unset($mine['objects'][$loc]);
 				$epochs[(string)$e['epoch']] = true;
 			} catch (\Throwable $ex) {
-				error_log('BackupObjects: could not delete object ' . $name . ': ' . $ex->getMessage());
+				$mine['objects'][$loc] = array('name' => $name, 'epoch' => (string)$e['epoch'], 'until' => $until);
+				error_log('BackupObjects: could not delete object ' . $name . ' yet (' . $ex->getMessage() . '); a later pass tries again.');
 			}
 		}
 		foreach (array_keys($epochs) as $epoch) {
+			unset($mine['epochs'][$epoch]);
 			try {
 				$left = S3Signer::list($creds, $bucket, ltrim($base . self::DIR . '/' . $epoch . '/', '/'));
 				$envelopes = array();
@@ -1410,14 +1448,64 @@ class BackupObjects {
 				}
 				if ($only_envelope) {
 					foreach ($envelopes as $key) {
-						S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+						$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+						$status = (int)($resp['status'] ?? 0);
+						if (($status < 200 || $status >= 300) && $status !== 404) {
+							// A re-sealed envelope is written later than the runs:
+							// its lock can outlast theirs. The epoch is tidied again.
+							$mine['epochs'][$epoch] = max((int)($mine['epochs'][$epoch] ?? 0),
+								$status === S3Signer::LOCKED ? (int)$resp['locked_until'] : $now);
+						}
 					}
 				}
 			} catch (\Throwable $ex) {
+				$mine['epochs'][$epoch] = $now;
 				error_log('BackupObjects: could not tidy epoch ' . $epoch . ': ' . $ex->getMessage());
 			}
 		}
+		if ($mine['objects'] || $mine['epochs']) {
+			$record[$tid] = $mine;
+		} else {
+			unset($record[$tid]);
+		}
+		self::write_unpruned($plan, $record);
 		return $deleted;
+	}
+
+	/** Target ids with deletes still owed (unpruned.json), for the retention pass to offer again. */
+	public static function unpruned_targets(array $plan): array {
+		return array_map('intval', array_keys(self::read_unpruned($plan)));
+	}
+
+	/** The key a plan's target is remembered under in unpruned.json: its id, or 0 for storage handed with the run. */
+	private static function unpruned_target(array $plan): string {
+		$t = $plan['target'] ?? null;
+		return (string)(($t instanceof BackupTarget) ? (int)$t->key : 0);
+	}
+
+	/** target id => ['objects' => loc => [name, epoch, until], 'epochs' => epoch => until]. */
+	private static function read_unpruned(array $plan): array {
+		$raw = @file_get_contents(self::dir($plan) . '/' . self::UNPRUNED_FILE);
+		$data = is_string($raw) ? json_decode($raw, true) : null;
+		$out = array();
+		foreach ((is_array($data) ? (array)($data['targets'] ?? array()) : array()) as $tid => $t) {
+			$out[(string)$tid] = array('objects' => (array)($t['objects'] ?? array()), 'epochs' => (array)($t['epochs'] ?? array()));
+		}
+		return $out;
+	}
+
+	private static function write_unpruned(array $plan, array $record) {
+		$path = self::dir($plan) . '/' . self::UNPRUNED_FILE;
+		if (!$record) {
+			@unlink($path);
+			return;
+		}
+		$tmp = $path . '.' . getmypid() . '.tmp';
+		if (@file_put_contents($tmp, json_encode(array('version' => 1, 'targets' => $record), JSON_UNESCAPED_SLASHES) . "\n") === false
+				|| !@rename($tmp, $path)) {
+			@unlink($tmp);
+			error_log('BackupObjects: could not write ' . $path . '; deletes owed this pass are not remembered.');
+		}
 	}
 
 	// ---------------------------------------------------------------- sweep
@@ -1453,7 +1541,8 @@ class BackupObjects {
 	 */
 	public static function destination(array $plan) {
 		$target = $plan['target'];
-		$creds  = $target->get_credentials();
+		// What is written here is locked when the target says so (F8).
+		$creds  = ($target instanceof BackupTarget) ? $target->write_credentials() : $target->get_credentials();
 		if (empty($creds)) {
 			throw new BackupObjectsException('The backup target has no stored credentials.');
 		}

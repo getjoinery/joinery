@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.32 - a site target that locks is written through its write credential; retention leaves a run or chain object
+ *                lock still holds whole, for the first pass after its date (specs/storage_targets.md F8); a pruned
+ *                chain takes everything in its folder, a failed run's leftovers included
  * @version 1.31 - a site run finishes what earlier deletes only hid in its own folder on each target it prunes
  *                (HiddenVersionSweep, daily; specs/storage_targets.md S28)
  * @version 1.30 - a manager run writes through the management node's broker when its slot names a broker run
@@ -1373,7 +1376,12 @@ class BackupRunner {
 				if (empty($a['key']) || !empty($a['path'])) { continue; }
 				try {
 					list($creds, $bucket) = self::destination($plan);
-					S3Signer::delete($creds, $bucket, '/' . ltrim($a['key'], '/'));
+					$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($a['key'], '/'));
+					if ((int)($resp['status'] ?? 0) === S3Signer::LOCKED) {
+						// Goes with its chain: chain retention empties the chain's folder.
+						error_log('BackupRunner: ' . $a['key'] . ' of the failed run is held by object lock until '
+							. gmdate('Y-m-d H:i', (int)$resp['locked_until']) . ' UTC; it is deleted with its chain.');
+					}
 				} catch (\Throwable $e) {
 					error_log('BackupRunner: could not delete ' . $a['key'] . ' after a failed run: ' . $e->getMessage());
 				}
@@ -1854,6 +1862,15 @@ class BackupRunner {
 		$pruned = 0;
 		foreach ($surplus as $cid) {
 			$folders = array();
+			// A chain is deleted whole or not at all: while object lock holds
+			// any of its runs it stays surplus for a pass after that date (F8).
+			$held = 0;
+			foreach ($deletes ? $chains[$cid] : array() as $row) {
+				$held = max($held, $row->held_until());
+			}
+			if ($held > $now || ($deletes && self::chain_folder_held($plan, $chains[$cid], $cid, $targets, $now))) {
+				continue;
+			}
 			try {
 				// Each run is deleted from the target it went to, never "the
 				// current one": after a switch the old chains are still on the
@@ -1874,16 +1891,24 @@ class BackupRunner {
 						}
 					}
 				}
-				// A run that failed after its manifest went up and was never
-				// retried at that number left a manifest no row names: every
-				// manifest in the chain's folder goes with the chain.
+				// A run that failed and was never retried at that number left
+				// objects no row names — a manifest, an artifact a lock kept
+				// from being discarded: everything in the chain's folder goes
+				// with the chain. One still locked keeps the chain for a later
+				// pass, so nothing is left behind unnamed.
 				foreach ($folders as $folder => $rplan) {
 					$creds = $rplan['target']->get_credentials();
 					$bucket = trim((string)$rplan['target']->get('bkt_bucket'));
 					foreach (S3Signer::list($creds, $bucket, ltrim($folder, '/')) as $o) {
 						$key = (string)($o['key'] ?? '');
-						if (BackupChain::is_manifest_name(basename($key)) && dirname($key) . '/' === ltrim($folder, '/')) {
-							S3Signer::delete($creds, $bucket, '/' . $key);
+						if (dirname($key) . '/' !== ltrim($folder, '/')) {
+							continue;
+						}
+						$resp = S3Signer::delete($creds, $bucket, '/' . $key);
+						$status = (int)($resp['status'] ?? 0);
+						if (($status < 200 || $status >= 300) && $status !== 404) {
+							throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key . ' from the chain\'s folder: '
+								. (S3Signer::extract_error((string)($resp['body'] ?? '')) ?: 'refused'));
 						}
 					}
 				}
@@ -1905,6 +1930,46 @@ class BackupRunner {
 			}
 		}
 		return $deletes ? $pruned : 0;
+	}
+
+	/**
+	 * Whether object lock still holds anything in a chain's folder on a target
+	 * that locks — a failed run's leftover is written after the last run that
+	 * succeeded, so the rows alone can say free too early. Judged from the
+	 * listing's newest LastModified (BackupTarget::held_until()); a chain held
+	 * waits quietly, surplus, as one its rows hold does.
+	 */
+	private static function chain_folder_held(array $plan, array $rows, $cid, array &$targets, $now) {
+		$folders = array();
+		foreach ($rows as $row) {
+			try {
+				$rplan = self::row_plan($plan, $row, $targets);
+			} catch (\Throwable $e) {
+				return false;   // the delete path reports it
+			}
+			if (!($rplan['target'] instanceof BackupTarget) || $rplan['target']->lock_days() <= 0) {
+				continue;
+			}
+			foreach ($row->object_keys() as $key) {
+				if (basename(dirname($key)) === $cid) {
+					$folders[dirname($key) . '/'] = $rplan['target'];
+				}
+			}
+		}
+		foreach ($folders as $folder => $target) {
+			try {
+				$newest = 0;
+				foreach (S3Signer::list($target->get_credentials(), trim((string)$target->get('bkt_bucket')), ltrim($folder, '/')) as $o) {
+					$newest = max($newest, (int)strtotime((string)($o['last_modified'] ?? '')));
+				}
+				if ($newest && $target->held_until($newest) > (int)$now) {
+					return true;
+				}
+			} catch (\Throwable $e) {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -2161,7 +2226,9 @@ class BackupRunner {
 	 */
 	private static function destination(array $plan) {
 		$target = $plan['target'];
-		$creds  = $target->get_credentials();
+		// A site's own target writes through its write credential, which locks
+		// what it puts when the target says so (F8); a broker run is its own.
+		$creds  = ($target instanceof BackupTarget) ? $target->write_credentials() : $target->get_credentials();
 		if (empty($creds)) {
 			throw new BackupRunnerException('The backup target has no stored credentials.');
 		}
@@ -2513,7 +2580,15 @@ class BackupRunner {
 	 * other retention is. Returns objects deleted.
 	 */
 	public static function enforce_object_retention(array $plan, array $pruned_indexes) {
-		if (empty($plan['prunes_cloud']) || empty($plan['objects']) || !$pruned_indexes) {
+		if (empty($plan['prunes_cloud']) || empty($plan['objects'])) {
+			return 0;
+		}
+		// A target owed a delete an earlier pass could not make (object lock,
+		// a refusal) is offered again with nothing new (BackupObjects::prune_site).
+		foreach (BackupObjects::unpruned_targets($plan) as $tid) {
+			$pruned_indexes[$tid] = $pruned_indexes[$tid] ?? array();
+		}
+		if (!$pruned_indexes) {
 			return 0;
 		}
 		// Per target: what the pruned runs on a target named, against what the
@@ -2521,7 +2596,6 @@ class BackupRunner {
 		// target, so another target's runs can neither keep nor free them.
 		$deleted = 0;
 		foreach ($pruned_indexes as $tid => $candidates) {
-			if (!$candidates) { continue; }
 			try {
 				if ((int)$tid === 0) {
 					// Storage handed with the run, not a target row: the plan's own.
@@ -2614,6 +2688,11 @@ class BackupRunner {
 		$pruned = 0;
 		foreach ($surplus as $item) {
 			$old = $runs[$item][0];
+			if ($deletes && $old->held_until() > $now) {
+				// Object lock still holds it: surplus, kept whole, and deleted
+				// by the first pass after its date (F8).
+				continue;
+			}
 			try {
 				if ($deletes) {
 					// From the target this run went to (see enforce_chain_retention).

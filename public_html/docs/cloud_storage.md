@@ -427,6 +427,12 @@ version and delete marker by id. The offload tick also sweeps each store's
 folder daily for anything a delete left hidden ([Backups § Uploads](backups.md#uploads)),
 and stays active while a sweep has work left.
 
+A file store never takes object lock, as a backup target can
+([Backups § Object lock](backups.md#object-lock)): a member's deleted file has to
+go. Save refuses a bucket that locks every new object by default (object lock
+with a default retention): the Delete step's probe cannot be deleted, and says
+why.
+
 ## Settings
 
 The store itself is a target row (`bkt_backup_targets`, `bkt_purpose = 'files'`):

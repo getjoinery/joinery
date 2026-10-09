@@ -22,6 +22,7 @@
  * what lets a switch-on undo exactly what this did and never an operator's own
  * deliberate off.
  *
+ * @version 1.4 - a refused delete says the provider's reason: object lock names the date it holds the object until (F8)
  * @version 1.3 - prune() throws on a delete the provider refused, and retires a draining space only once its
  *                whole folder is empty
  * @version 1.2 - prune() empties what this management node took in each of the node's storage spaces
@@ -142,7 +143,9 @@ class NodeBackupShelf {
 				$status = (int)($resp['status'] ?? 0);
 				if (($status < 200 || $status >= 300) && $status !== 404) {
 					// Half emptied is not emptied: nothing is recorded as pruned.
-					throw new RuntimeException('HTTP ' . $status . ' deleting ' . $key . ' after ' . $deleted . ' deleted');
+					// A key object lock holds says until when (F8).
+					throw new RuntimeException((S3Signer::extract_error((string)($resp['body'] ?? '')) ?: 'HTTP ' . $status)
+						. ' (' . $key . ', after ' . $deleted . ' deleted)');
 				}
 				$deleted++;
 			}

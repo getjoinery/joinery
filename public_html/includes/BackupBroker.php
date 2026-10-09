@@ -25,6 +25,7 @@
  * management node signs into the job (download, verify, restore), never
  * through this.
  *
+ * @version 1.2 - a link the broker signed an object lock into carries its headers (F8)
  * @version 1.1 - a lost reply is asked again: every call is safe to repeat, and the test transport takes the
  *                same retry path as HTTP
  * @version 1.0
@@ -103,7 +104,7 @@ class BackupBroker implements S3LinkSource {
 
 	// ------------------------------------------------------------- S3LinkSource
 
-	public function link(string $method, string $path, array $query, int $bytes): string {
+	public function link(string $method, string $path, array $query, int $bytes) {
 		$name = $this->name_of($path);
 		$method = strtoupper($method);
 		if ($method === 'PUT' && !$query) {
@@ -159,7 +160,11 @@ class BackupBroker implements S3LinkSource {
 
 	// ------------------------------------------------------------------ helpers
 
-	/** A link for one write, or S3ObjectExistsException for a key already written. */
+	/**
+	 * A link for one write — with the headers the broker signed into it, an
+	 * object lock the write must carry — or S3ObjectExistsException for a key
+	 * already written.
+	 */
 	private function signed($name, $operation, array $args) {
 		$data = $this->call('sign', array('name' => $name, 'operation' => $operation) + $args);
 		if (!empty($data['exists'])) {
@@ -168,7 +173,13 @@ class BackupBroker implements S3LinkSource {
 		if (empty($data['url'])) {
 			throw new S3SignerException('The backup broker signed no link for ' . $name . '.');
 		}
-		return (string)$data['url'];
+		$headers = array();
+		foreach ((array)($data['headers'] ?? array()) as $k => $v) {
+			if (preg_match('/^x-amz-object-lock-(mode|retain-until-date)$/i', (string)$k)) {
+				$headers[strtolower((string)$k)] = (string)$v;
+			}
+		}
+		return $headers ? array('url' => (string)$data['url'], 'headers' => $headers) : (string)$data['url'];
 	}
 
 	/** A key named relative to the run's base key, or a refusal: nothing outside it is the run's to write. */

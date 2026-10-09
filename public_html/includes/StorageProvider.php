@@ -22,6 +22,7 @@
  * addressed (path style, or the bucket as a host label) is a property of the
  * provider (virtual_host()).
  *
+ * @version 2.1 - object_lock: whether a provider takes COMPLIANCE object lock (b2, s3, linode; F8)
  * @version 2.0 - the one provider list (specs/storage_targets.md WP1): Hetzner; each provider's console
  *                sign-in, addressing style and region rule; the one Backblaze region rule (b2_location());
  *                normalise_endpoint() and virtual_host()
@@ -59,6 +60,8 @@ class StorageProvider {
 			'region_rule'   => '',
 			'addressing'    => 'path',
 			'console'       => '',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => false,
 		),
 		'b2' => array(
 			'label'         => 'Backblaze B2',
@@ -72,6 +75,8 @@ class StorageProvider {
 			'region_rule'   => '/^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i',
 			'addressing'    => 'path',
 			'console'       => 'https://secure.backblaze.com/user_signin.htm',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => true,
 		),
 		's3' => array(
 			'label'         => 'Amazon S3',
@@ -85,6 +90,8 @@ class StorageProvider {
 			'region_rule'   => '/^s3[.-]([a-z0-9-]+)\.amazonaws\.com$/i',
 			'addressing'    => 'virtual',
 			'console'       => 'https://console.aws.amazon.com/',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => true,
 		),
 		'r2' => array(
 			'label'         => 'Cloudflare R2',
@@ -98,6 +105,8 @@ class StorageProvider {
 			'region_rule'   => '',
 			'addressing'    => 'path',
 			'console'       => 'https://dash.cloudflare.com/',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => false,
 		),
 		'wasabi' => array(
 			'label'         => 'Wasabi',
@@ -111,6 +120,8 @@ class StorageProvider {
 			'region_rule'   => '/^s3\.([a-z0-9-]+)\.wasabisys\.com$/i',
 			'addressing'    => 'path',
 			'console'       => 'https://console.wasabisys.com/',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => false,
 		),
 		'digitalocean' => array(
 			'label'         => 'DigitalOcean Spaces',
@@ -124,6 +135,8 @@ class StorageProvider {
 			'region_rule'   => '/^([a-z0-9-]+)\.digitaloceanspaces\.com$/i',
 			'addressing'    => 'path',
 			'console'       => 'https://cloud.digitalocean.com/login',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => false,
 		),
 		'linode' => array(
 			'label'         => 'Linode Object Storage',
@@ -137,6 +150,8 @@ class StorageProvider {
 			'region_rule'   => '/^([a-z0-9-]+)\.linodeobjects\.com$/i',
 			'addressing'    => 'path',
 			'console'       => 'https://login.linode.com/login',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => true,
 		),
 		'hetzner' => array(
 			'label'         => 'Hetzner Object Storage',
@@ -150,8 +165,19 @@ class StorageProvider {
 			'region_rule'   => '/^([a-z0-9-]+)\.your-objectstorage\.com$/i',
 			'addressing'    => 'path',
 			'console'       => 'https://console.hetzner.cloud/',
+			// Object lock in COMPLIANCE mode, checked against this provider (F8).
+			'object_lock'   => false,
 		),
 	);
+
+	/**
+	 * Whether a provider holds objects under object lock in COMPLIANCE mode, as
+	 * checked against it (specs/storage_targets.md F8): b2, s3 and linode. The
+	 * others stay false until each is checked.
+	 */
+	public static function object_lock($slug): bool {
+		return !empty(self::$catalogue[self::normalise($slug)]['object_lock']);
+	}
 
 	/** slug => label, the generic choice first. For the provider select's options_from. */
 	public static function options(): array {

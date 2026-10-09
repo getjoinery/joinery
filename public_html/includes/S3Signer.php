@@ -14,6 +14,10 @@
  * management node's backup broker), and every finished write is reported to
  * it with its bytes and sha256. The request paths are the same either way.
  *
+ * @version 1.14 - object lock (specs/storage_targets.md F8): with_lock() makes a write credential that holds
+ *                 every object it puts in COMPLIANCE mode for its days, with the body's MD5 a locked PUT needs;
+ *                 presign() signs headers the request must carry; a link source's answer may name headers;
+ *                 delete() answers LOCKED (423, with locked_until) for a version the lock still holds
  * @version 1.13 - delete() removes every version of the key and its delete markers: on a versioned bucket
  *                 (every Backblaze one) a plain DELETE only hid the object, so nothing deleted was ever gone
  *                 (specs/storage_targets.md S28); versions_of(), list_versions()
@@ -160,12 +164,41 @@ class S3Signer {
 			$resp = self::request_delete_version($creds, $bucket, $key, $version_id);
 			$status = (int)($resp['status'] ?? 0);
 			if (($status < 200 || $status >= 300) && $status !== 404) {
-				return $resp;
+				return self::locked_answer($creds, $bucket, $key, $version_id) ?? $resp;
 			}
 			$last = $resp;
 		}
 		$last['status'] = 204;
 		return $last;
+	}
+
+	/**
+	 * Status of a delete refused because object lock still holds the version
+	 * (HTTP's own "Locked"). The answer carries 'locked_until' (a timestamp)
+	 * and a body whose message says so; a pruner leaves the object for a pass
+	 * after that date rather than counting it a failure (F8).
+	 */
+	const LOCKED = 423;
+
+	/**
+	 * The LOCKED answer for a version whose retain-until date has not passed,
+	 * or null when the version is not held by a lock (the refusal was
+	 * something else, or the key may not read retention).
+	 */
+	private static function locked_answer($creds, $bucket, $key, $version_id) {
+		try {
+			$h = self::request('HEAD', $creds, $bucket, '/' . ltrim((string)$key, '/'), ['versionId' => (string)$version_id]);
+		} catch (\Throwable $e) {
+			return null;
+		}
+		$until = strtotime((string)($h['headers']['x-amz-object-lock-retain-until-date'] ?? ''));
+		if (!$until || $until <= time()) {
+			return null;
+		}
+		$when = gmdate('Y-m-d H:i', $until) . ' UTC';
+		return ['status' => self::LOCKED, 'locked_until' => $until, 'headers' => [], 'attempts' => 1, 'retry_log' => [],
+			'body' => '<Error><Code>ObjectLocked</Code><Message>Locked until ' . $when
+				. ': object lock keeps it until then, and it can be deleted after.</Message></Error>'];
 	}
 
 	/** Delete one version (or one delete marker) of a key, for good. */
@@ -356,17 +389,73 @@ class S3Signer {
 			return self::put_file_multipart($creds, $bucket, $path, $local_path, $content_type);
 		}
 		$sha256 = ($creds instanceof S3LinkSource) ? (string)hash_file('sha256', $local_path) : '';
+		// A locked write carries the body's MD5: Backblaze refuses one without.
+		// A link source may be signing a lock, which only its answer says.
+		$extra = (self::locks($creds) || $creds instanceof S3LinkSource)
+			? ['content-md5' => base64_encode((string)hash_file('md5', $local_path, true))] : [];
 		$fh = fopen($local_path, 'rb');
 		if (!$fh) {
 			throw new S3SignerException('Cannot open local file: ' . $local_path);
 		}
 		try {
-			$resp = self::request('PUT', $creds, $bucket, $path, [], $fh, $size, $content_type);
+			$resp = self::request('PUT', $creds, $bucket, $path, [], $fh, $size, $content_type, null, $extra);
 		} finally {
 			fclose($fh);
 		}
 		self::report_write($creds, $path, $resp, $size, $sha256);
 		return $resp;
+	}
+
+	/**
+	 * A write credential that locks what it writes: every object put through
+	 * it is held under object lock in COMPLIANCE mode until $days from the
+	 * moment it is written, and nobody can delete or overwrite it before then,
+	 * the key's owner included (specs/storage_targets.md F8). Reads, lists and
+	 * deletes through it are unchanged. $days 0 is no lock.
+	 */
+	public static function with_lock(array $creds, $days) {
+		$days = (int)$days;
+		if ($days > 0) {
+			$creds['object_lock'] = ['mode' => 'COMPLIANCE', 'days' => $days];
+		} else {
+			unset($creds['object_lock']);
+		}
+		return $creds;
+	}
+
+	/** Whether a credential locks what it writes. */
+	public static function locks($creds) {
+		return is_array($creds) && !empty($creds['object_lock']['days']);
+	}
+
+	/** The date a lock of $days taken now holds until, in the form the lock header takes. */
+	public static function lock_until($days, $now = null) {
+		return gmdate('Y-m-d\TH:i:s\Z', (int)($now ?? time()) + (int)$days * 86400);
+	}
+
+	/**
+	 * The headers a write through a locking credential carries: the lock on a
+	 * whole-object PUT and on CreateMultipartUpload (a part takes its upload's
+	 * lock), and, on a PUT whose body is a string, its MD5 — Backblaze refuses
+	 * a locked PUT without one. Empty for anything else.
+	 */
+	private static function lock_headers($creds, $method, array $params, $body) {
+		if (!self::locks($creds)) {
+			return [];
+		}
+		$whole_put = ($method === 'PUT' && !isset($params['partNumber']) && !isset($params['uploadId']));
+		$create = ($method === 'POST' && array_key_exists('uploads', $params));
+		if (!$whole_put && !$create) {
+			return [];
+		}
+		$headers = [
+			'x-amz-object-lock-mode'              => (string)$creds['object_lock']['mode'],
+			'x-amz-object-lock-retain-until-date' => self::lock_until($creds['object_lock']['days']),
+		];
+		if ($whole_put && is_string($body)) {
+			$headers['content-md5'] = base64_encode(md5($body, true));
+		}
+		return $headers;
 	}
 
 	/** A write that finished is told to the link source it was made through. */
@@ -837,12 +926,22 @@ class S3Signer {
 	 */
 	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null, array $extra_headers = []) {
 		// A link source signs; this machine only sends. One link per request,
-		// reused by its retries: it is good for longer than they take.
+		// reused by its retries: it is good for longer than they take. The
+		// link may require headers signed into it (an object lock): sent as
+		// given, and a locked string body also carries its MD5.
 		$link = null;
 		if ($creds instanceof S3LinkSource) {
-			$link = $creds->link((string)$method, (string)$path, (array)$params, (int)$body_size);
+			$answer = $creds->link((string)$method, (string)$path, (array)$params, (int)$body_size);
+			$link = is_array($answer) ? (string)$answer['url'] : (string)$answer;
+			foreach ((array)(is_array($answer) ? ($answer['headers'] ?? []) : []) as $k => $v) {
+				$extra_headers[strtolower((string)$k)] = (string)$v;
+			}
+			if (isset($extra_headers['x-amz-object-lock-mode']) && is_string($body) && !isset($extra_headers['content-md5'])) {
+				$extra_headers['content-md5'] = base64_encode(md5($body, true));
+			}
 			$region = $scheme = $host = $canonical_uri = '';
 		} else {
+			$extra_headers = self::lock_headers($creds, (string)$method, (array)$params, $body) + $extra_headers;
 			self::validate_creds($creds);
 			$region = $creds['region'];
 			list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, $path);
@@ -1203,8 +1302,11 @@ class S3Signer {
 	 * @param int    $expires Seconds the URL stays valid, clamped to 60 and to the
 	 *                        SigV4 ceiling of seven days; callers pass the
 	 *                        smallest window the transfer can finish in.
+	 * @param array  $headers Headers signed into the URL, which the request must
+	 *                        then carry exactly ([name => value]): an object lock,
+	 *                        which the holder of the link cannot leave out.
 	 */
-	public static function presign($creds, $bucket, $path, $method = 'GET', array $query = [], $expires = 3600) {
+	public static function presign($creds, $bucket, $path, $method = 'GET', array $query = [], $expires = 3600, array $headers = []) {
 		self::validate_creds($creds);
 
 		$method = strtoupper(trim((string)$method));
@@ -1217,6 +1319,12 @@ class S3Signer {
 
 		list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, '/' . ltrim((string)$path, '/'));
 
+		$signed = ['host' => $host];
+		foreach ($headers as $k => $v) {
+			$signed[strtolower(trim((string)$k))] = trim((string)$v);
+		}
+		ksort($signed);
+
 		$region     = $creds['region'];
 		$amz_date   = gmdate('Ymd\THis\Z');
 		$date_stamp = gmdate('Ymd');
@@ -1227,7 +1335,7 @@ class S3Signer {
 			'X-Amz-Credential'    => $creds['access_key'] . '/' . $scope,
 			'X-Amz-Date'          => $amz_date,
 			'X-Amz-Expires'       => (string)$expires,
-			'X-Amz-SignedHeaders' => 'host',
+			'X-Amz-SignedHeaders' => implode(';', array_keys($signed)),
 		];
 		foreach ($query as $k => $v) {
 			$params[(string)$k] = (string)$v;
@@ -1239,8 +1347,11 @@ class S3Signer {
 			$canonical_qs .= rawurlencode($k) . '=' . rawurlencode($v);
 		}
 
-		$canonical_headers = "host:{$host}\n";
-		$canonical_request = "{$method}\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\nhost\nUNSIGNED-PAYLOAD";
+		$canonical_headers = '';
+		foreach ($signed as $k => $v) {
+			$canonical_headers .= $k . ':' . $v . "\n";
+		}
+		$canonical_request = "{$method}\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\n" . implode(';', array_keys($signed)) . "\nUNSIGNED-PAYLOAD";
 		$string_to_sign    = "AWS4-HMAC-SHA256\n{$amz_date}\n{$scope}\n" . hash('sha256', $canonical_request);
 
 		$k_date    = hash_hmac('sha256', $date_stamp, 'AWS4' . $creds['secret_key'], true);

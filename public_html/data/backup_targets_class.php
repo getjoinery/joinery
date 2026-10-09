@@ -17,6 +17,8 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.7 - bkt_lock_days, lock_days(), write_credentials(), lock_refusal(): a backup target can hold what is
+ *                written to it under COMPLIANCE object lock; the lock is part of the location (F8)
  * @version 3.6 - bkt_hidden_sweep: what HiddenVersionSweep last found in each folder this machine sweeps
  *                (specs/storage_targets.md S28)
  * @version 3.5 - one credential, the main one, which never leaves the machine that owns the target: the node
@@ -90,6 +92,12 @@ class BackupTarget extends SystemBase {
 		// links with it for its Managed nodes and customers (R4).
 		'bkt_credentials'      => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
+		// Days every object written here is held under object lock in
+		// COMPLIANCE mode: nobody can delete or overwrite it before then, the
+		// key's owner included (specs/storage_targets.md F8). 0 is off. Part of
+		// the location: fixed once anything is stored here. A backup target on
+		// a provider that takes object lock only; never a file store.
+		'bkt_lock_days'       => array('type'=>'int4', 'default'=>0, 'is_nullable'=>false),
 		// What HiddenVersionSweep last found in each folder of this target that
 		// this machine sweeps: prefix => {time, keys, left, refused, problem}.
 		'bkt_hidden_sweep'    => array('type'=>'jsonb'),
@@ -131,6 +139,10 @@ class BackupTarget extends SystemBase {
 	 */
 	function save($debug = false) {
 		$this->assert_own_name();
+		$lock = $this->lock_refusal();
+		if ($lock !== '') {
+			throw new BackupTargetException($lock);
+		}
 		if ((string)$this->get('bkt_purpose') === '') {
 			$this->set('bkt_purpose', self::PURPOSE_BACKUPS);
 		}
@@ -260,9 +272,67 @@ class BackupTarget extends SystemBase {
 	}
 
 	/**
-	 * Why the location (provider, endpoint, region, bucket, folder) may not
-	 * change, or '' when it may: once anything is stored there, records point
-	 * at objects in that place (R1). A new place is a new target.
+	 * The lock that covers every object of a backup for as long as its set can
+	 * be restored from: this site's retention plus its full-backup interval.
+	 */
+	public static function suggested_lock_days(): int {
+		$settings = Globalvars::get_instance();
+		return max(1, (int)$settings->get_setting('backup_retention_days')) + max(1, (int)$settings->get_setting('backup_full_interval_days'));
+	}
+
+	/** Days what is written here is locked for; 0 when nothing is. */
+	public function lock_days(): int {
+		return $this->is_file_store() ? 0 : max(0, (int)$this->get('bkt_lock_days'));
+	}
+
+	/**
+	 * When what was written here at $written (a timestamp) can be deleted:
+	 * 0 when this target does not lock, else the lock's end with a margin for
+	 * the clock difference between this machine and the provider — fifteen
+	 * minutes, the most a signed request tolerates. A pruner
+	 * leaves a backup whose newest object is still held, whole, for a later
+	 * pass, so it never deletes half of one (F8).
+	 */
+	public function held_until(int $written): int {
+		$days = $this->lock_days();
+		return $days > 0 ? $written + $days * 86400 + 900 : 0;
+	}
+
+	/**
+	 * The credential to WRITE with: get_credentials(), locking every object it
+	 * puts for lock_days() (S3Signer::with_lock()). Reads, lists and deletes
+	 * use get_credentials().
+	 */
+	public function write_credentials(): array {
+		return S3Signer::with_lock($this->get_credentials() ?: array(), $this->lock_days());
+	}
+
+	/**
+	 * Why these lock days cannot be saved, or '' when they can: a file store
+	 * is never locked (deleting a member's file has to delete it), and only a
+	 * provider that takes object lock may lock (StorageProvider::object_lock()).
+	 */
+	public function lock_refusal(): string {
+		$days = (int)$this->get('bkt_lock_days');
+		if ($days < 0 || $days > 3650) {
+			return 'Lock days are between 0 and 3650.';
+		}
+		if ($days === 0) {
+			return '';
+		}
+		if ($this->is_file_store()) {
+			return 'A file store is never locked: deleting a member\'s file has to delete it.';
+		}
+		if (!StorageProvider::object_lock((string)$this->get('bkt_provider'))) {
+			return StorageProvider::label((string)$this->get('bkt_provider')) . ' is not checked for object lock, so backups there cannot be locked.';
+		}
+		return '';
+	}
+
+	/**
+	 * Why the location (provider, endpoint, region, bucket, folder, lock days)
+	 * may not change, or '' when it may: once anything is stored there, records
+	 * point at objects in that place (R1). A new place is a new target.
 	 */
 	public function location_refusal(): string {
 		$h = $this->holdings();
@@ -282,7 +352,7 @@ class BackupTarget extends SystemBase {
 		if (!$why) {
 			return '';
 		}
-		return 'The provider, endpoint, region, bucket and folder cannot change: ' . implode('; ', $why)
+		return 'The provider, endpoint, region, bucket, folder and lock cannot change: ' . implode('; ', $why)
 			. '. The key and the name can. ' . ($this->is_file_store()
 				? 'To use another bucket, set up another file store and move the files to it.'
 				: 'To use another bucket, add a target.');

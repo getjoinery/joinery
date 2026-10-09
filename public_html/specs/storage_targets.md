@@ -10,11 +10,45 @@ through the live endpoint, and the shell recovery by hand with the recorded mani
 owed: the first fleet night through the broker, the move test in §13 (B2 → Linode → B2, restored from
 each), and the node Backups tab seen in a browser; they are in the live verification queue. S28 (a delete
 on a versioned bucket only hid the object) is fixed ahead of WP8, and the passes cleared dev's 128 GB backlog.
-WP8 and WP9 remain. The Linode half of F5 waits for a Linode backup target. A browser look at the target
+**WP8 built and reviewed (10-09; reviewer2 VALID, staged for commit):** `object_lock` (33 checks), `object_lock_live` (14 checks against real
+Backblaze and Linode lock buckets), the broker, spaces and customer suites' lock sections, and the 269
+suites `db --changed` reaches all pass; a live node backup to a locking target after release, a browser look
+at the lock field and the probe cleanup are in the live verification queue; notes below. WP9 remains. The Linode half of F5 passed (10-09) on a
+test-account Linode bucket. A browser look at the target
 forms, the node Move form, Who backs up here, Adopt, the Cloud Storage page's Switch to another bucket and
 Move files, the Backups page's two safety warnings, and now the node Backups tab's manifest hashes is owed.
 
-WP8 preparation (10-09, nothing built):
+WP8 notes, decided while building (10-09):
+- Test buckets: Backblaze `joinery-test-bucket2` (owner-made, target 3316) and Linode `joinery-wp8-lock-f265ac`
+  on the test Linode account (us-ord; target 3315, switched off). Both take COMPLIANCE lock; Backblaze
+  refuses a locked PUT without `Content-MD5` (Linode does not), and a part of a locked multipart upload
+  needs none. Both refuse a presigned PUT missing a header the link signed.
+- A delete the lock refuses answers `S3Signer::LOCKED` (423, with `locked_until`), read from the version's
+  retain-until with a HEAD after the refusal, so every caller can tell a locked object from a failure.
+- Retention never deletes half a point: it skips a point while its newest write plus the lock days (and
+  fifteen minutes for clocks) is in the future — history times on a site, `LastModified` and `svo_completed_time`
+  on the management node — so the provider's refusal is a backstop, not the mechanism. The point stays
+  recorded surplus, and the first pass after its date deletes it.
+- A node too old to send the lock headers would be refused by the provider on every write; it is refused at
+  job build instead, naming `LOCK_MIN_CORE_VERSION` (0.8.474, the release that ships this).
+- Found while building: a bucket with a **default retention** locks every object, so its connection-test
+  probe cannot be deleted. The backup target test already failed Prune with a misleading "use a key that
+  can delete", and the file store test only warned, letting a file store be saved where no member's
+  deleted file could go. Both now fail, saying the bucket locks every new object. The "Saving a target"
+  docs still described the node key and minting retired in WP5; rewritten.
+- reviewer2 review (10-09, NOT VALID): B1 the lapse prune marked a customer pruned and never came back while
+  locked objects remained — it now finishes (rows, notice) only once nothing locked is left, a held space
+  waiting whole; B2 the site's offloaded-files prune dropped a locked or refused object (and a locked
+  re-sealed envelope) for good — it now remembers each in `unpruned.json` per target and offers it again
+  through the retained-index check once its date passes. N1: margin 15 minutes, and a lock refusal inside a
+  point stops that point quietly for a later pass instead of an error every pass. N2 documented; N3 a failed
+  run's locked object is logged. Not taken: N4 customer sites have no version gate (the broker cannot see
+  a customer's release; an old one fails loudly at the provider), N9 the hidden-version sweep's raw 403 text.
+  Re-review VALID (10-09); its N11 (a failed run's later leftover made chain retention report an error
+  until its date — a chain now also waits on its folder's newest LastModified) and N12 (a pass that could
+  not read a retained index dropped its candidates — they are remembered) fixed after, object_lock 41.
+
+WP8 preparation (10-09):
 - **Found while preparing (B32): a delete on a versioned bucket only hides the object.** Backblaze keeps every
   version, and dev's buckets have no lifecycle rule, so every prune so far hid what it deleted: dev's backup
   bucket holds 4,641 current objects (220.9 GB) and 1,633 non-current versions (128.1 GB) under 1,270 delete
