@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.46 - senderDomainDisowns(): a DMARC fail under an enforcing policy, which no allow rule lifts
  * @version 1.45 - iem_dmarc_policy: the DMARC policy the verifier read; authRuleSaysSpam() exempts a fail under p=none
  * @version 1.44 - an offloaded raw records its file store and full key (iem_raw_bkt_backup_target_id,
  *                 iem_raw_remote_key); reads and deletes follow them (specs/storage_targets.md WP6)
@@ -747,7 +748,7 @@ class InboundEmailMessage extends SystemBase {
 	public static function authRuleSaysSpam(array $auth): bool {
 		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
 		if ($dmarc === 'fail') {
-			return strtolower(trim((string)($auth['dmarc_policy'] ?? ''))) !== 'none';
+			return self::senderDomainDisowns($auth);
 		}
 		if ($dmarc === '' || $dmarc === 'none' || $dmarc === 'unverified') {
 			$spf  = strtolower(trim((string)($auth['spf'] ?? '')));
@@ -755,6 +756,32 @@ class InboundEmailMessage extends SystemBase {
 			return ($spf === 'fail' && $dkim === 'fail');
 		}
 		return false;
+	}
+
+	/**
+	 * Has the domain in the From address disowned this message?
+	 *
+	 * True when DMARC failed and the domain publishes an enforcing policy
+	 * (quarantine or reject), or a policy we could not read. The domain's owner has
+	 * said that mail failing its checks is not theirs, so no choice on this side —
+	 * an "Always allow" rule, any never_spam filter — can lift it out of Spam: an
+	 * allow keyed on the From address would let anyone forging that address through.
+	 * A fail under p=none is not a disowning (the owner asked for no action), and
+	 * neither is the no-DMARC fallback in authRuleSaysSpam(); the user may allow those.
+	 *
+	 * @param array{dmarc?:string,dmarc_policy?:?string} $auth
+	 */
+	public static function senderDomainDisowns(array $auth): bool {
+		return strtolower(trim((string)($auth['dmarc'] ?? ''))) === 'fail'
+			&& strtolower(trim((string)($auth['dmarc_policy'] ?? ''))) !== 'none';
+	}
+
+	/** senderDomainDisowns() asked of a stored row's own columns. */
+	public static function rowSenderDomainDisowns(array $row): bool {
+		return self::senderDomainDisowns(array(
+			'dmarc'        => (string)($row['iem_dmarc_result'] ?? ''),
+			'dmarc_policy' => (string)($row['iem_dmarc_policy'] ?? ''),
+		));
 	}
 
 	/**

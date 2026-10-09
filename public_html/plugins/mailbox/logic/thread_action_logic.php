@@ -18,6 +18,7 @@
  * (specs/mailbox_trash_folder.md), so they expand a thread_key under the Trash
  * scope; every other action refuses a discarded row by scope.
  *
+ * @version 1.3.2 - allow_sender reports how many messages were refused as disowned by their From domain
  * @version 1.3.1
  */
 
@@ -106,12 +107,14 @@ function thread_action_logic(array $input): LogicResult {
 		case 'allow_sender':
 			// "Always allow this sender" from the Spam view: write the explicit
 			// never_spam filter and clear the messages in hand. The only route past
-			// an authentication failure, and deliberately a deliberate act — see
+			// an authentication failure, and deliberately a deliberate act; a
+			// message its From domain disowned is refused — see
 			// MailboxService::allowSender().
 			$allowed = $service->allowSender($ids);
 			return LogicResult::render(array(
 				'count'     => $allowed['count'],
 				'addresses' => $allowed['addresses'],
+				'disowned'  => $allowed['disowned'],
 			));
 		case 'restore':
 			$count = $service->restoreFromTrash($ids);

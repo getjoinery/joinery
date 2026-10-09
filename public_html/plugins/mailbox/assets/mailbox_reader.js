@@ -1,6 +1,8 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
+ * No framework. @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
+ * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
  * @version 2.91 — the Spam view says which step filed a message (spam_reason_text)
  * @version 2.90 — "Load more" no longer repeats the notes above the list
@@ -1099,8 +1101,10 @@
 	function bulkRemoves(action) {
 		switch (action) {
 			case 'delete': case 'purge': case 'restore':
-			case 'mark_spam': case 'mark_not_spam':
+			case 'mark_spam':
 				return true;
+			case 'mark_not_spam':
+				return false;             // a disowned message stays in Spam: re-read the list
 			case 'archive':
 				return state.inboxView;   // in All Mail an archived row stays put
 			default:
@@ -1905,12 +1909,23 @@
 			}));
 		}
 		// Spam correction: in the Spam view, restore to the inbox; elsewhere, mark spam.
-		actions.appendChild(toolBtn(state.spamView ? 'notspam' : 'spam',
-			state.spamView ? 'Not spam' : 'Report spam', false, function () {
-			apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',
-				threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
-		}));
+		// A message its sender's domain disowned (spam_disowned) never leaves Spam, so
+		// a conversation made only of those offers no "Not spam"; one that mixes them
+		// re-reads the list, since the disowned part stays behind.
+		var inbound = (messages || []).filter(function (m) { return m.direction !== 'outbound'; });
+		var disowned = inbound.filter(function (m) { return m.spam_disowned; }).length;
+		if (!(state.spamView && inbound.length && disowned === inbound.length)) {
+			actions.appendChild(toolBtn(state.spamView ? 'notspam' : 'spam',
+				state.spamView ? 'Not spam' : 'Report spam', false, function () {
+				apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',
+					threadKey: t.thread_key, aliasId: state.aliasId })
+					.then(function () {
+						closeThread(); refreshMailboxes();
+						if (state.spamView && disowned) { refreshThreads(); }
+						else { removeThreadRows([t.thread_key]); }
+					});
+			}));
+		}
 		actions.appendChild(toolBtn('trash', 'Delete', true, function () {
 			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
 				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
@@ -2312,7 +2327,10 @@
 	//
 	// It says that in plain words and offers the deliberate act instead — an
 	// explicit "always allow" filter the user can see and undo on the Filters
-	// page. Any other filing gets one line saying which step decided
+	// page. Not when the From domain has disowned the message (spam_disowned: a
+	// DMARC fail under quarantine or reject): no rule lifts that, because a rule
+	// keyed on the address would let anyone forging it through, so the banner
+	// only explains. Any other filing gets one line saying which step decided
 	// (spam_reason_text, the same words the message timeline uses): "Not spam"
 	// already teaches the filter, and adding the sender to contacts lifts them.
 	function spamReasonBanner(m, threadKey) {
@@ -2324,11 +2342,24 @@
 			return line;
 		}
 		var addr = senderAddress(m.sender);
+		var domain = addr && addr.indexOf('@') > 0 ? addr.slice(addr.indexOf('@') + 1) : '';
 		var banner = el('div', 'mbx-spam-reason');
+		if (m.spam_disowned) {
+			banner.appendChild(el('div', 'mbx-spam-reason-head',
+				'This is in Spam because ' + (domain || 'the sender\u2019s domain')
+				+ ' says it did not send it'));
+			banner.appendChild(el('div', null,
+				'The owner of ' + (domain || 'that domain') + ' publishes a rule saying mail '
+				+ 'that fails its checks is not from them, and this message failed. It may be '
+				+ 'forged. If you expected mail from them, their setup is broken; ask them to '
+				+ 'fix it. It cannot be allowed from here, because a rule letting '
+				+ (addr || 'that address') + ' through would let forgeries through too.'));
+			return banner;
+		}
 		banner.appendChild(el('div', 'mbx-spam-reason-head',
 			'This is in Spam because the sender\u2019s domain failed authentication'));
 		banner.appendChild(el('div', null,
-			senderName(m.sender) + ' has a misconfigured DMARC record, so their mail '
+			senderName(m.sender) + '\u2019s mail failed its authentication checks, so it '
 			+ 'cannot be proved to come from them. Anyone can put ' + (addr || 'that address')
 			+ ' on a message. If you know this sender and trust them anyway, you can let '
 			+ 'their mail through from now on.'));

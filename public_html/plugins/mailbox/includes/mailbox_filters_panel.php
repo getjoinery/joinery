@@ -11,6 +11,7 @@
  * Everything is FormWriter, and every mutation is a POST: Edit is the one GET,
  * because it only opens the form.
  *
+ * @version 1.1 - "Never send it to Spam" says what it cannot lift (mail the sender's domain disowned)
  * @version 1.0
  */
 
@@ -141,7 +142,10 @@ function mailbox_render_filter_form($page, array $vars, string $base, array $pag
 		$formwriter->checkboxinput('ief_action_mark_read', 'Mark as read', array('checked' => $v['ief_action_mark_read']));
 		$formwriter->checkboxinput('ief_action_archive', 'Skip the Inbox (Archive it)', array('checked' => $v['ief_action_archive']));
 		$formwriter->checkboxinput('ief_action_mark_spam', 'Mark it as spam', array('checked' => $v['ief_action_mark_spam']));
-		$formwriter->checkboxinput('ief_action_never_spam', 'Never send it to Spam', array('checked' => $v['ief_action_never_spam']));
+		$formwriter->checkboxinput('ief_action_never_spam', 'Never send it to Spam', array(
+			'checked'  => $v['ief_action_never_spam'],
+			'helptext' => 'Except mail the sender\'s own domain says it did not send: that stays in Spam, because it may be forged.',
+		));
 		$formwriter->textinput('ief_action_forward_to', 'Forward it to', array(
 			'value' => $v['ief_action_forward_to'],
 			'helptext' => 'A single email address. Historical mail is never re-forwarded.',
