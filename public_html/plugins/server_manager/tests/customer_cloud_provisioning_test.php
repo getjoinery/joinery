@@ -24,6 +24,8 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.8 - teardown names every node this run's provisions made as a fixture, so a provisioner that
+ *                failed before the test could rename its node leaves nothing nameless
  * @version 1.7 - the token's own scopes (X-OAuth-Scopes) and what a grant covers
  * @version 1.6 - the account's own name and the list of accounts a server is created on (B47)
  * @version 1.5 - reverse DNS reaches a hosted instance with the operator token, and a dead customer
@@ -1052,6 +1054,15 @@ class CustomerCloudProvisioningTest {
 
 	private function cleanup() {
 		$ids = [$this->user_id, $this->user_id + 20000];
+		// A provisioner that failed after making its node returned before the
+		// test could rename it; the provision still names it.
+		$q = $this->db->prepare("SELECT mgn_managed_node_id FROM mgn_managed_nodes
+			JOIN cvp_customer_cloud_provisions ON cvp_mgn_managed_node_id = mgn_managed_node_id
+			WHERE cvp_usr_user_id IN (?, ?)");
+		$q->execute($ids);
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $node_id) {
+			$this->fixture_name((int)$node_id);
+		}
 		$q = $this->db->prepare("DELETE FROM cvp_customer_cloud_provisions WHERE cvp_usr_user_id IN (?, ?)");
 		$q->execute($ids);
 		$q = $this->db->prepare("DELETE FROM cca_customer_cloud_accounts WHERE cca_usr_user_id IN (?, ?)");
