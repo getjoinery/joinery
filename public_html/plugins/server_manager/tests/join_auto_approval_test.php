@@ -21,8 +21,11 @@
  *  - the kill switch stops it all;
  *  - what the install printed is read into keys for the right agent only.
  *
+ *  - a host approval that fails partway leaves no node behind and the request pending.
+ *
  * Run: php plugins/server_manager/tests/join_auto_approval_test.php
  *
+ * @version 1.1 - a host approval that fails at its last write rolls its node back
  * @version 1.0
  */
 
@@ -57,6 +60,16 @@ class JaaFakeProvisioner extends ProvisionCustomerCloud {
 	protected function resolve_driver($provision): array { return ['driver' => $this->fakeDriver, 'reason' => '', 'park' => false]; }
 }
 
+/** A join request whose approval is refused at the last write, as a failure after the node exists would be. */
+class JaaRefusingRequest extends AgentJoinRequest {
+	function save($debug = false) {
+		if ($this->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED) {
+			throw new Exception('refused by the test');
+		}
+		return parent::save($debug);
+	}
+}
+
 class JoinAutoApprovalTest {
 	private $driver;
 	private $user_id;
@@ -75,6 +88,7 @@ class JoinAutoApprovalTest {
 			$this->test_install_output();
 			$this->test_site_agent();
 			$this->test_host_agent_over_ipv6();
+			$this->test_failed_host_approval();
 			$this->test_held_cases();
 			$this->test_kill_switch();
 		} catch (Throwable $e) {
@@ -246,6 +260,31 @@ class JoinAutoApprovalTest {
 		}
 		$prov = new CustomerCloudProvision((int)$p['prov']->key, TRUE);
 		check(trim((string)$prov->get('cvp_expected_host_key')) === '', 'the host key is consumed');
+	}
+
+	private function test_failed_host_approval() {
+		section('A host approval that fails partway leaves nothing behind');
+
+		$p = $this->provision('done');
+		[$jr] = $this->join($p['prov']->host_agent_name(), $p['ip']);
+		$this->running($p);
+		$nodes_at = function () use ($p) {
+			$n = 0;
+			foreach (new MultiManagedNode(['mgn_host' => $p['ip'], 'deleted' => false]) as $node) { $n++; }
+			return $n;
+		};
+		$before = $nodes_at();
+		$refusing = new JaaRefusingRequest((int)$jr->key, TRUE);
+		$threw = false;
+		try {
+			AgentChannelEndpoint::adoptJoin($refusing);
+		} catch (Exception $e) {
+			$threw = strpos($e->getMessage(), 'refused by the test') !== false;
+		}
+		check($threw, 'the approval fails at its last write');
+		check($nodes_at() === $before, 'the host node it made is rolled back with it', $nodes_at() . ' node(s) at the address, ' . $before . ' before');
+		check($this->status($jr) === AgentJoinRequest::STATUS_PENDING, 'the request stays pending for a retry');
+		$this->reject($jr);
 	}
 
 	private function test_held_cases() {

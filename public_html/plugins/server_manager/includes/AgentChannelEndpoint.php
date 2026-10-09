@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.42 - adoptJoin() makes the node and approves the join in one transaction: a step that fails
+ *                 leaves no node without its key behind, and the request stays pending for a retry
  * @version 1.40 - approveProvisionSiteJoin(): a provisioned machine's site-agent join approved against the provision's site node (dashboard, JoinAutoApproval)
  * @version 1.39 - a joined node is given its storage space on the target Where new backups go names, once saved
  * @version 1.39 - a claim carries bundle_state, a siteless machine's verdict on the support bundle, stored as
@@ -766,6 +768,31 @@ class AgentChannelEndpoint {
 		$name = $self && $own_host !== '' ? $own_host : $claimed;
 		if ($name === '') { $name = 'node-' . substr((string)$request->get('ajr_fingerprint'), 0, 8); }
 
+		// The node, its storage space, its placement and the approval are one
+		// step: a failure partway rolls the node back with the rest, so a retry
+		// of the still-pending request starts clean instead of beside a keyless
+		// node nothing points at.
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = !$db->inTransaction();
+		if ($own) {
+			$db->beginTransaction();
+		}
+		try {
+			$result = self::adoptJoinNode($request, $name, $self, $own_url, $own_host, $host_of_provision, $ip);
+			if ($own) {
+				$db->commit();
+			}
+		} catch (Throwable $e) {
+			if ($own && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+		return $result;
+	}
+
+	/** adoptJoin()'s writes, inside its transaction. */
+	private static function adoptJoinNode($request, string $name, bool $self, string $own_url, string $own_host, $host_of_provision, string $ip): array {
 		$node = new ManagedNode(NULL);
 		$node->set('mgn_name', mb_substr($name, 0, 100));
 		$node->set('mgn_slug', self::freeSlug($name));

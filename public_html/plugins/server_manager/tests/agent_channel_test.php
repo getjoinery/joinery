@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.10 - host addresses are drawn from those no live node, placement record or provision has, so a
+ *                 run never links its node to another fixture's placement record
  * @version 1.9 - a claim's update_state and update_offered are closed sets (release_transparency O7)
  * @version 1.8 - a join carries the site's web root: the spec takes it, and a node made from a join that
  *                names one hosts a site; a malformed one is dropped and the join still stands
@@ -66,6 +68,26 @@ function agent_channel_node($slug) {
 	$node->set('mgn_uptime_enabled', false);
 	$node->save();
 	return $node;
+}
+
+/**
+ * A documentation-range IPv4 nothing on this plane has. Other suites leave
+ * placement records at random addresses in the same range, and a host join at
+ * one of those links to it, not to the record this test made.
+ */
+function agent_channel_free_v4() {
+	$db = DbConnector::get_instance()->get_db_link();
+	$taken = $db->prepare("SELECT 1 FROM mgh_managed_hosts WHERE mgh_host = :a AND mgh_delete_time IS NULL
+		UNION ALL SELECT 1 FROM mgn_managed_nodes WHERE mgn_host = :a AND mgn_delete_time IS NULL
+		UNION ALL SELECT 1 FROM cvp_customer_cloud_provisions WHERE cvp_instance_ip = :a LIMIT 1");
+	for ($i = 0; $i < 100; $i++) {
+		$addr = '198.51.100.' . random_int(10, 250);
+		$taken->execute([':a' => $addr]);
+		if ($taken->fetchColumn() === false) {
+			return $addr;
+		}
+	}
+	throw new Exception('No free address in 198.51.100.10-250: clean the placement records other suites left there.');
 }
 
 $made_nodes = [];
@@ -576,7 +598,7 @@ section('Approving a host agent names it as the host node');
 // (ensure_for_node minted it) with no host node yet. Approving the host's own
 // agent join must fill mgh_mgn_managed_node_id, or host-scope work
 // (decommission_site, certificates) is routed to the host by nothing.
-$host_addr = '198.51.100.' . random_int(10, 250);
+$host_addr = agent_channel_free_v4();
 $host_rec = new ManagedHost(NULL);
 $host_rec->set('mgh_slug', 'agtest-host-' . substr(bin2hex(random_bytes(3)), 0, 6));
 $host_rec->set('mgh_name', 'agtest host');
@@ -636,7 +658,7 @@ section('A dual-stack host joining over one family lands on the placement keyed 
 // approval minted a second placement for the same machine and linked the host
 // node to that. The machine now says every address it has, and approval
 // matches the record by any of them.
-$ds_v4 = '198.51.100.' . random_int(10, 250);
+$ds_v4 = agent_channel_free_v4();
 $ds_v6 = '2001:db8:' . dechex(random_int(1, 65535)) . '::' . dechex(random_int(1, 65535));
 $ds_rec = new ManagedHost(NULL);
 $ds_rec->set('mgh_slug', 'agtest-ds-' . substr(bin2hex(random_bytes(3)), 0, 6));
@@ -705,7 +727,7 @@ check((int)$ds_rec->get('mgh_mgn_managed_node_id') === (int)$ds_node->key, 'whic
 
 // No placement anywhere: the node is keyed by its first public IPv4, the
 // convention placement records use, and the record is minted under that.
-$ds2_v4 = '198.51.100.' . random_int(10, 250);
+$ds2_v4 = agent_channel_free_v4();
 $ds2_v6 = '2001:db8:' . dechex(random_int(1, 65535)) . '::' . dechex(random_int(1, 65535));
 $ds2_jr = new AgentJoinRequest();
 $ds2_jr->set('ajr_source_ip', $ds2_v6);
