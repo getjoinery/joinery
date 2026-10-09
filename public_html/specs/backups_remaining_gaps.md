@@ -28,9 +28,13 @@ a deliberate act, not a default.
 
 ## 2. Install-from-backup cannot open an envelope minted by another site
 
-**For targets with object lock, closed by `storage_targets.md` F7 (WP9)**: the
-ledger handover comes from locked ledger files and the data key is resealed in
-the browser. Unlocked targets keep the shell procedure.
+**Closed by `site_copy.md`'s copy from backups (WP10) and `storage_targets.md` F7
+(WP9), on every target.** The new machine is installed as a dormant copy; its
+owner opens the chain's data key with the recovery key on the new machine's own
+page, and the copy's vouch takes the place of the ledger handover. The new
+machine reads the chain's manifest at the storage provider itself and shows the
+date the provider stored it, so the vouch does not rest on the management
+node's word.
 
 A restore onto a *different* node has no recipient it holds a private half for.
 

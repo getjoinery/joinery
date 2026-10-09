@@ -1185,7 +1185,9 @@ Steps 2, 4, 5, 9 and 10, without `copy_export` and the freeze. Built as WP10 (se
   rotated key does.
 - **Trust.** The ceremony's statement names the chain, its date and its manifest hash, and stands in
   for the ledger check. The owner is the authority, because no machine that made the archive is
-  left to vouch for it.
+  left to vouch for it. Since `storage_targets.md` WP9 (10-09), T reads the manifest at the provider
+  itself, holds the statement to it, and shows the date the provider stored it, so the statement no
+  longer rests on M's word (agent 1.68.0, `manifest_url`).
 - **Age.** The backup's age is the data lost. The ceremony shows it as an age, above the key box.
 - **Address.** By IP swap when S's instance still exists at the same provider and account; through
   the proxy for a proxied site; otherwise the owner changes DNS (`manual`): there is no S left to

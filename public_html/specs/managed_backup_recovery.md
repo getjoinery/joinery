@@ -50,6 +50,12 @@ construction rather than designing a second one.
   refreshed.
 - **Passkey PRF derivation** is built (vault capability); wrappings under
   it are additive.
+- **The browser unlock on a fresh machine is built** (`site_copy.md` WP10,
+  `storage_targets.md` F7): a copy from backups shows its owner the chain on
+  its own `/copy-key` page, and the browser works out from the recovery key
+  the one X25519 value that opens the chain's sealed data key; the key never
+  leaves the browser. The recovery page here hands the unwrapped key to that
+  step rather than building a second one.
 - **The write-only tenant credential** can upload the blob beside the
   backups; it cannot delete, so updates write new versions and the newest
   wins.

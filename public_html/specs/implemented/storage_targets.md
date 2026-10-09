@@ -1,6 +1,8 @@
 # Storage targets — every stored object knows where it lives
 
-**Status:** Building — 2026-10-09. No open owner decisions; build order in §10.
+**Status:** Implemented — 2026-10-09. Every work package built (F6 deferred by the owner); WP9 reviewed by
+reviewer2 (VALID). Live steps still owed are in the live verification queue under 'Storage targets WP8' and
+'Storage targets WP9'.
 WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces), and the
 reviewer1 review of WP1–WP4 committed (de6202d4). WP6 committed (c10c7f1b; dev migrated by migration 210
 and `iem_019`). WP7 committed (fd391509; dev migrated by migration 211 and `sm_017`). **WP5 committed (025e70a7)
@@ -13,7 +15,12 @@ on a versioned bucket only hid the object) is fixed ahead of WP8, and the passes
 **WP8 built and reviewed (10-09; reviewer2 VALID, staged for commit):** `object_lock` (33 checks), `object_lock_live` (14 checks against real
 Backblaze and Linode lock buckets), the broker, spaces and customer suites' lock sections, and the 269
 suites `db --changed` reaches all pass; a live node backup to a locking target after release, a browser look
-at the lock field and the probe cleanup are in the live verification queue; notes below. WP9 remains. The Linode half of F5 passed (10-09) on a
+at the lock field and the probe cleanup are in the live verification queue; notes below. WP8 committed (1f9faf02)
+and released in 0.8.474; a live node backup to the Linode lock target passed (every object and the ledger file
+locked COMPLIANCE, a delete answered LOCKED). **WP9 built (10-09):** F7 as revised below, on site copy's copy
+from backups; agent 1.68.0. `site_copy_from_backups` 55, `job_command_builder` 480, the agent's
+`copy_take_key` and stored-manifest tests, and `copy_manifest_live` (the agent's read against a real Backblaze
+and a real Linode chain) pass; a copy from backups run end to end is in the live verification queue. The Linode half of F5 passed (10-09) on a
 test-account Linode bucket. A browser look at the target
 forms, the node Move form, Who backs up here, Adopt, the Cloud Storage page's Switch to another bucket and
 Move files, the Backups page's two safety warnings, and now the node Backups tab's manifest hashes is owed.
@@ -47,6 +54,45 @@ WP8 notes, decided while building (10-09):
   Re-review VALID (10-09); its N11 (a failed run's later leftover made chain retention report an error
   until its date — a chain now also waits on its folder's newest LastModified) and N12 (a pass that could
   not read a retained index dropped its candidates — they are remembered) fixed after, object_lock 41.
+
+WP9 notes, decided while building (10-09):
+- **F7 already existed as site copy's copy from backups** (`site_copy.md` WP10, built 10-03): the new machine
+  is installed as a dormant copy, its owner opens the chain's key with the recovery key on the copy's own
+  `/copy-key` page (the browser works out the one X25519 value that opens the sealed key, so no reseal is
+  needed), and the copy restores and switches over under the node's id. WP9 improves that flow rather than
+  building a second one (owner 10-09). The browser unlock `managed_backup_recovery.md` names is that page's.
+- **What it lacked was a check of its own.** The manifest hash it showed came from the management node.
+  WP9 has the copy read the manifest at the provider itself (`copy_take_key` takes `manifest_url`, a link
+  `SiteCopyRunner::key_request()` signs), and refuse it unless it hashes to the hash named, is the chain's,
+  seals the key named to the recovery key named, and names no run after the provider stored it.
+- **The protection is the provider's date, not the lock** (found while building; owner agreed 10-09). A
+  provider stamps `Last-Modified` when an object arrives, and no request sets or backdates it; a chain made
+  up after the server died carries a later date, on any bucket. The lock does not change the date a GET
+  answers (a newer version can still be written over a locked one), so the spec's "only on locked targets"
+  rested on the wrong property. So the flow runs on every target and **the "not offered on an unlocked
+  target" rule is dropped**; the owner's Q1 answer (keep it on unlocked targets, marked for retirement)
+  was overtaken by this and nothing is marked. The date is believed only from a provider's own storage
+  host (an allowlist in the agent, `storageProviders`, one pattern per catalogue provider's API host and
+  none for website, CDN, access point or Object Lambda hosts, whose answers a bucket's owner can write);
+  elsewhere the page says it could not be checked. The upload record is not rebuilt: the copy's vouch and
+  `CopyStaging` already check every artifact against the manifest.
+- The page flags a backup stored two days or more after its run (copied or rewritten since). Not refused:
+  an owner who copied a bucket by hand would otherwise be locked out.
+- A copy installs its source's release, so a copy of a source older than this release gets the agent's
+  checks without the page's date line. Not gated: refusing to restore a dead site for its age is worse.
+  The Copy tab says so for a copy below `COPY_KEY_DATE_MIN_VERSION` (0.8.475), and shows the date the copy
+  read once the key is taken.
+- reviewer2 review (10-09): VALID, no bugs. Taken: the manifest link lasts as long as the step may wait (it
+  had expired in the step's last five minutes and on any second claim), and a 403 says the link may have
+  expired; Cloudflare R2 jurisdiction hosts; the Copy tab note and date (above); the docs name what the
+  date does not prove; a provider clock ahead no longer reads as negative hours. Recorded for later (§12):
+  a forged chain stored while the site ran, and rollback to an older genuine manifest. Not taken: dropping
+  the ignored `run_time` parameter waits until the agent floor passes 1.68.0.
+- Found while building: **four site copy suites had been skipping since storage spaces landed**
+  (`site_copy_from_backups`, `site_copy_runner`, `site_copy_switch`, `site_copy_ip_swap`): each looked for
+  the source's target, which a node now has only through a space. They now give the source a space on a
+  target of their own (`plugins/server_manager/tests/lib/node_space_fixture.php`), and two fixtures moved
+  to the broker's release floor; all pass. `restore_dispatch`'s one skip for the same reason is fixed too.
 
 WP8 preparation (10-09):
 - **Found while preparing (B32): a delete on a versioned bucket only hides the object.** Backblaze keeps every
@@ -575,7 +621,12 @@ The leaning when deferred was (a), with (b) only if a second person needs
 independent access. Customers' keys are covered separately by
 `managed_backup_recovery.md`.
 
-### F7. Restore onto a new machine — only from a locked target
+### F7. Restore onto a new machine
+
+**Revised while building WP9 (10-09); see the WP9 notes in the status.** As built: the guided flow is site
+copy's copy from backups, on every target; the new machine reads the newest manifest at the provider itself
+and shows the provider's stored date; nothing is resealed and no upload record is rebuilt. The text below is
+the design as first written.
 
 When a machine dies, the one-click restore from the management node refuses
 on the replacement. The new machine has no upload record (ledger) for those
@@ -670,7 +721,7 @@ Each work package is self-contained and leaves the system working.
 | **WP6** | File store on target rows, blob and mail rows record target and key, Move files, the driver onto `S3Signer`, mail in backups | WP1, WP2 |
 | **WP7** | Backup safety: keep the last good backup (F1), keep local copies that never went offsite (F2), prune confirms before deleting (F3), the live retention test (F5) | WP3, WP4 |
 | **WP8** | Object lock (F8): catalogue flag, `bkt_lock_days`, lock headers signed by the broker, version-aware prune, connection-test check | WP5 |
-| **WP9** | Restore onto a new machine (F7): upload record rebuilt from locked ledger files, the browser unlock and reseal (shared with `managed_backup_recovery.md`), offered only on locked targets | WP8 |
+| **WP9** | Restore onto a new machine (F7, revised): site copy's copy from backups reads the newest manifest at the provider itself, holds the key request to it, and shows the provider's stored date on the key page; every target | WP8 |
 
 F6 (a second recovery key) is deferred and in no work package.
 
@@ -739,6 +790,17 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 - **A second simultaneous copy** (mirroring one owner to two targets). The
   model allows it later as two active spaces with different roles. This spec
   keeps one.
+- **What the provider's date does not settle** (reviewer2, WP9 review 10-09). It proves a chain was stored
+  before the site died, not that the site made it: a management node compromised while the site ran can
+  store a forged chain sealed to the public recovery key, and its date passes. Closing that needs
+  something the node signs (its ledger entries, checked by the copy against a node key the owner holds).
+  And the copy reads the manifest it is sent, so M can send a genuine older one (rollback): on a locked
+  target a signed LIST of the chain folder would let the copy find the newest itself, since nothing newer
+  can have been deleted. Both are future hardening.
+- **Object lock required on every backup target** (owner direction, 10-09; not built). A target without
+  lock lets anyone holding its key delete the backups, a compromised management node included. Requiring
+  it would retire the providers without lock from backup targets and needs its own spec: existing
+  unlocked targets, the providers that lack it, and the file store.
 - **Signing manifests with a new key** (§6 explains why). The accepted cost: on
   a target without object lock, the ledger file in the bucket (F4) is only as
   trustworthy as the key that wrote it; with lock (F8) nobody can replace it.
@@ -777,12 +839,14 @@ date. "Now" means fixed in this session, outside this spec's work packages.
   lock on): a locked object refuses delete and overwrite with the target's own
   key; the prune skips it before its date; the connection test refuses lock on
   an unlocked bucket (F8).
-- `plugins/server_manager/tests/restore_new_machine_test.php` (db, loopback
-  fixture standing in for a locked target): the upload record is rebuilt from
-  the ledger files; a ledger file that differs from its recorded hash is
-  refused; the flow is not offered on an unlocked target; the resealed data key
-  opens the chain on the replacement (F7). Its live counterpart runs in the
-  object-lock live test against a real locked bucket.
+- F7 as built: the agent's `copy_take_key_test.go` (the copy reads the manifest
+  at its provider, and refuses one whose hash differs, another chain's, one
+  sealing another key, one stored before its newest run, a 404 and a redirect;
+  a host not a provider's gives no date) and `TestStorageProviderHosts`;
+  `site_copy_from_backups_test.php` (the key request carries the signed link,
+  the page handoff carries the stored date); `job_command_builder_test.php` (an
+  agent before 1.68.0 is refused). Live: `tests/backups/copy_manifest_live_test.php`
+  runs the agent's read against a real chain at each provider here.
 - A live gate before WP5 ships: one Managed node moved B2 → Linode → B2 on dev,
   with each step restored from.
 
@@ -790,8 +854,8 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 
 - `docs/backups.md`: targets, destinations, spaces and moving; the safety rules
   (last good backup kept, prune confirmation, ledger files, one manifest per
-  run, object lock); restore onto a new machine and when it is offered. Present
-  tense.
+  run, object lock); restore onto a new machine (a copy from backups, and what
+  the new machine checks at the provider). Present tense.
 - `docs/cloud_storage.md`: the file store as a target and Move files.
 - `plugins/server_manager/docs/overview.md`: Where new backups go, the move
   actions, Managed runs through the broker.

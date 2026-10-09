@@ -7,6 +7,7 @@
  * never part of anything posted; assets/js/copy-key.js works out the one value
  * that opens this backup's sealed key and puts that in the form.
  *
+ * @version 1.2 - the date the backup's storage provider says it was stored, or that it could not be checked
  * @version 1.1 - after an answer, a page with no request left says the key opened the backup, not "not waiting"; the
  *               intro no longer says the source cannot be reached
  * @version 1.0
@@ -42,12 +43,18 @@
 		<p class="text-muted">This server is not waiting for a backup's key. When a copy is made from a site's backups, its
 			management node's Copy tab says when to open this page.</p>
 <?php else:
-	$age = '';
-	$when = strtotime($pending['run_time']);
-	if ($when) {
-		$hours = (int)floor((time() - $when) / 3600);
-		$age = $hours >= 48 ? floor($hours / 24) . ' days ago' : $hours . ' hours ago';
-	}
+	$ago = function ($when) {
+		if (!$when) {
+			return '';
+		}
+		$hours = max(0, (int)floor((time() - $when) / 3600));
+		return $hours >= 48 ? floor($hours / 24) . ' days ago' : $hours . ' hours ago';
+	};
+	$run_when = strtotime($pending['run_time']);
+	$stored_when = $pending['stored_at'] !== '' ? strtotime($pending['stored_time']) : false;
+	$age = $ago($run_when);
+	// A backup is stored as it runs; one stored days later was copied or written again since.
+	$late_days = ($run_when && $stored_when) ? (int)floor(($stored_when - $run_when) / 86400) : 0;
 ?>
 		<p>This server is becoming a copy of <strong><?php echo $h($pending['site']); ?></strong>, made from its backups. Its
 			newest backup is locked with the site's backup recovery key. Paste that key here:
@@ -56,6 +63,21 @@
 			<tr><th>Backup</th><td><code><?php echo $h($pending['chain_id']); ?></code></td></tr>
 			<tr><th>Newest run</th><td><?php echo $h($pending['run_time']); ?> UTC<?php echo $age !== '' ? ' (' . $h($age) . ')' : ''; ?><br>
 				<span class="small text-muted">Anything written on the site after this is not in the copy.</span></td></tr>
+<?php if ($stored_when): ?>
+			<tr><th>Stored</th><td><?php echo $h(gmdate('Y-m-d H:i', $stored_when)); ?> UTC (<?php echo $h($ago($stored_when)); ?>), by <?php echo $h($pending['stored_at']); ?><br>
+				<span class="small text-muted">This server read the backup at <?php echo $h($pending['stored_at']); ?> itself. The provider set
+					this date when the backup arrived, and nobody can set it earlier. If it is after the site's server stopped, this is
+					not the site's backup: decline.</span>
+<?php if ($late_days >= 2): ?>
+				<div class="alert alert-warning mt-2 mb-0">It was stored <?php echo (int)$late_days; ?> days after its run. A backup is stored
+					as it runs, so this one was copied or written again since. Decline unless you know why.</div>
+<?php endif; ?>
+			</td></tr>
+<?php else: ?>
+			<tr><th>Stored</th><td>Not checked<br>
+				<span class="small text-muted">This backup's storage is not at a provider this server knows, so it cannot check when
+					the backup was stored. Only the management node vouches for it.</span></td></tr>
+<?php endif; ?>
 			<tr><th>Backup fingerprint</th><td><code><?php echo $h(substr($pending['manifest_sha256'], 0, 16)); ?></code></td></tr>
 			<tr><th>Recovery key fingerprint</th><td><code><?php echo $h(substr($pending['recovery_fingerprint'], 0, 16)); ?></code></td></tr>
 		</table>

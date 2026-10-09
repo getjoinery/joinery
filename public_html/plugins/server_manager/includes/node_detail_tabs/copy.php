@@ -18,6 +18,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.12 - the key page's note asks the owner to check the date the backup's provider says it was stored, says
+ *               when a copy's release is too old for its page to show it, and the taken key's step shows the date the
+ *               copy read
  * @version 1.11 - the source's root SSH keys are listed by fingerprint with a tick to carry them to the copy (WP15)
  * @version 1.10 - a kept switch-over's old container is named until it is removed and its host holds no
  *                  certificate of it, with Remove it from the host here (B5); no longer for a week only
@@ -371,8 +374,13 @@ if ($copy_steps) {
 			$copy_ip = (string)$copy_node->get('mgn_host');
 			$copy_ip_host = filter_var($copy_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $copy_ip . ']' : $copy_ip;
 			$look_url = 'https://' . $copy_ip_host . $site_copy->get('scp_look_path');
-			$key_note = 'check the backup and the key\'s fingerprint it names, and paste the recovery key. It stays in your '
-				. 'browser; this management node never sees it.';
+			$key_note = 'check the backup, the date its storage provider says it was stored, and the key\'s fingerprint it '
+				. 'names, and paste the recovery key. It stays in your browser; this management node never sees it.';
+			if (version_compare((string)$site_copy->get('scp_release'), JobCommandBuilder::COPY_KEY_DATE_MIN_VERSION, '<')) {
+				// The page comes with the source's release.
+				$key_note .= ' This copy\'s release is older than its page\'s stored date, so the page will not show when the '
+					. 'backup was stored. The copy still checks the backup at its provider, and the date shows here once the key is taken.';
+			}
 			if (version_compare((string)$site_copy->get('scp_release'), JobCommandBuilder::COPY_KEY_LOOK_MIN_VERSION, '>=')) {
 				// One link: the key look path sets the look cookie and lands on
 				// the key page. The copy's home page has no accounts yet.
@@ -385,6 +393,25 @@ if ($copy_steps) {
 					. 'warning (the copy has no certificate of its own yet). Close that page: the copy has no accounts yet.</li>'
 					. '<li><a href="' . $copy_h('https://' . $copy_ip_host . '/copy-key') . '" target="_blank" rel="noopener">Open its key '
 					. 'page</a>, ' . $key_note . '</li></ol></td></tr>';
+			}
+		}
+		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'passed' && !empty($s['job_id'])) {
+			// What the copy read at the backup's provider, relayed through this
+			// management node: a record of the run, not the proof (that was the
+			// copy's own page).
+			try {
+				$take_job = new ManagementJob((int)$s['job_id'], TRUE);
+				$taken = json_decode((string)$take_job->get('mjb_result'), true);
+			} catch (Exception $e) {
+				$taken = null;
+			}
+			if (is_array($taken) && ($taken['stored_at'] ?? '') !== '' && ($taken['stored_time'] ?? '') !== '') {
+				echo '<tr><td colspan="4" class="small text-muted">The copy read the backup at ' . $copy_h($taken['stored_at'])
+					. ': stored ' . $copy_h(gmdate('Y-m-d H:i', strtotime($taken['stored_time']))) . ' UTC, newest run '
+					. $copy_h(gmdate('Y-m-d H:i', strtotime((string)$taken['run_time']))) . ' UTC (as the copy reported it).</td></tr>';
+			} elseif (is_array($taken) && ($taken['run_time'] ?? '') !== '') {
+				echo '<tr><td colspan="4" class="small text-muted">The copy could not check when the backup was stored: its storage '
+					. 'is not at a provider the copy knows.</td></tr>';
 			}
 		}
 		if ($s['op'] === 'copy_export' && $s['verdict'] === 'running') {

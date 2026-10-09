@@ -2678,15 +2678,28 @@ check(JobResultProcessor::vouch_of($cp_vjob) === null, 'a failed vouch keeps not
 check(JobCommandBuilder::build_copy_look_primitive($cp_copy) === array('primitive' => 'copy_look', 'params' => array()),
 	'asking a copy for its look path takes nothing');
 $cp_req = array('chain_id' => 'chain-20260930_010203', 'manifest_sha256' => str_repeat('a', 64), 'run_time' => '2026-09-30T01:02:03Z',
-	'recovery_fingerprint' => str_repeat('b', 64), 'recovery_sealed' => base64_encode(random_bytes(92)), 'site' => 'scp.example.org');
+	'recovery_fingerprint' => str_repeat('b', 64), 'recovery_sealed' => base64_encode(random_bytes(92)), 'site' => 'scp.example.org',
+	'manifest_url' => 'https://s3.us-west-004.backblazeb2.com/b/x/manager/chain-20260930_010203/manifest-0001.json?X-Amz-Signature=1');
 check(JobCommandBuilder::build_copy_take_key_primitive($cp_copy, $cp_req) === array('primitive' => 'copy_take_key', 'params' => $cp_req),
-	'taking a key from backups names the chain, its manifest, its newest run and the sealed key, and nothing else');
+	'taking a key from backups names the chain, its manifest and a link to it, its newest run and the sealed key, and nothing else');
+// The copy reads the backup at its provider itself (storage_targets.md F7): an
+// agent that cannot is refused here, naming the update.
+$threw = '';
+try { JobCommandBuilder::build_copy_take_key($cp_copy, $cp_req); } catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, JobCommandBuilder::COPY_TAKE_KEY_MIN_AGENT_VERSION) !== false,
+	'a copy whose agent predates the provider read is refused, naming the agent it needs', $threw);
+$cp_copy->set('mgn_agent_version', JobCommandBuilder::COPY_TAKE_KEY_MIN_AGENT_VERSION);
+$cp_copy->save();
+check(JobCommandBuilder::build_copy_take_key($cp_copy, $cp_req)['params']['manifest_url'] === $cp_req['manifest_url'],
+	'and one that can is sent the link');
 check(!in_array('copy_take_key', JobCommandBuilder::DESTRUCTIVE_PRIMITIVES, true),
 	'it is not a destructive word: the owner answers on the copy\'s own page, in the word itself');
 foreach (array('a working node' => array($cp_source, $cp_req), 'a bad chain id' => array($cp_copy, array_merge($cp_req, array('chain_id' => '../x'))),
 	'no sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => ''))),
 	'an oversized sealed key' => array($cp_copy, array_merge($cp_req, array('recovery_sealed' => str_repeat('A', 600)))),
-	'a bad fingerprint' => array($cp_copy, array_merge($cp_req, array('recovery_fingerprint' => 'abc')))) as $what => $args) {
+	'a bad fingerprint' => array($cp_copy, array_merge($cp_req, array('recovery_fingerprint' => 'abc'))),
+	'no link to the manifest' => array($cp_copy, array_merge($cp_req, array('manifest_url' => ''))),
+	'a plain http link' => array($cp_copy, array_merge($cp_req, array('manifest_url' => 'http://s3.example.com/m.json')))) as $what => $args) {
 	$threw = false;
 	try { JobCommandBuilder::build_copy_take_key_primitive($args[0], $args[1]); } catch (Exception $e) { $threw = true; }
 	check($threw, "a key request for {$what} is not sent");
