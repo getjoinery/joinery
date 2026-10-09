@@ -16,6 +16,8 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.4.0 - allowPlugin()/forgetPlugin(): a plugin's own install lets its classes resolve while its
+ *   migrations run, before it is active; nothing is cached, and every other caller keeps the rule
  * @version 1.3.0 - a lookup miss no longer rebuilds the map on every request:
  *   the cached map carries a fingerprint of the scanned tree (file count and
  *   mtimes, a 6 ms stat walk), and a miss rebuilds only when the tree has
@@ -51,6 +53,10 @@ class ClassAutoloader {
 	private static $rebuilt = false;
 	private static $resolving_theme_chain = false;
 	private static $core_only = false;
+	/** class => filepath for plugins allowed in before activation (allowPlugin), never cached. */
+	private static $allowed = array();
+	/** plugin name => the classes allowPlugin() added for it. */
+	private static $allowed_by_plugin = array();
 
 	/**
 	 * Register the autoloader. Safe to call repeatedly.
@@ -77,6 +83,40 @@ class ClassAutoloader {
 		self::$map = null;
 		self::$prefixes = null;
 		self::$stamp = null;
+	}
+
+	/**
+	 * Let one plugin's classes resolve before it is active, for this process,
+	 * until forgetPlugin(). The one caller is the plugin's own install: its
+	 * migrations run before activation and use its classes. Everything else
+	 * keeps the rule that an inactive plugin's classes do not resolve.
+	 *
+	 * @param string $plugin the plugin's directory name
+	 */
+	public static function allowPlugin($plugin) {
+		$plugin = basename((string)$plugin);
+		if ($plugin === '' || isset(self::$allowed_by_plugin[$plugin])) {
+			return;
+		}
+		$map = array();
+		$prefixes = array();
+		foreach (array('includes', 'data') as $sub) {
+			$dir = PathHelper::getIncludePath('plugins/' . $plugin . '/' . $sub);
+			if (is_dir($dir)) {
+				self::scan_directory($dir, $map, $prefixes);
+			}
+		}
+		self::$allowed_by_plugin[$plugin] = array_keys($map);
+		self::$allowed = array_merge(self::$allowed, $map);
+	}
+
+	/** End allowPlugin() for this plugin. Classes already loaded stay loaded. */
+	public static function forgetPlugin($plugin) {
+		$plugin = basename((string)$plugin);
+		foreach (self::$allowed_by_plugin[$plugin] ?? array() as $class) {
+			unset(self::$allowed[$class]);
+		}
+		unset(self::$allowed_by_plugin[$plugin]);
 	}
 
 	/**
@@ -112,6 +152,14 @@ class ClassAutoloader {
 		$map = self::map();
 		if (isset($map[$class]) && is_file($map[$class])) {
 			require_once($map[$class]);
+			if (self::defined_now($class)) {
+				return;
+			}
+		}
+
+		// A plugin let in before activation (allowPlugin): its own install.
+		if (isset(self::$allowed[$class]) && is_file(self::$allowed[$class])) {
+			require_once(self::$allowed[$class]);
 			if (self::defined_now($class)) {
 				return;
 			}

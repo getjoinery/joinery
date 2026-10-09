@@ -5,6 +5,7 @@
  * Provides a minimal-friction cookie consent system that enables compliance
  * with major privacy regulations while minimizing disruption to users.
  *
+ * @version 1.1 - an unset privacy-policy link or webDir reads as empty (no trim(null) deprecation)
  * @version 1.0
  */
 
@@ -149,10 +150,10 @@ class ConsentHelper {
     public function getJsConfig() {
         $settings = Globalvars::get_instance();
 
-        $privacyPath = trim($settings->get_setting('cookie_privacy_policy_link'));
+        $privacyPath = trim((string)$settings->get_setting('cookie_privacy_policy_link'));
         $privacyUrl = '';
         if (!empty($privacyPath)) {
-            $webDir = rtrim($settings->get_setting('webDir'), '/');
+            $webDir = rtrim((string)$settings->get_setting('webDir'), '/');
 
             // Check if already a full URL (starts with http:// or https://)
             if (preg_match('#^https?://#i', $privacyPath)) {

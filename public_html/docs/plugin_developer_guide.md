@@ -1217,6 +1217,8 @@ Rules:
 - Execution is tracked in `plm_plugin_migrations`; each file runs exactly once per site.
 - Write idempotent SQL (`WHERE NOT EXISTS`, `ON CONFLICT DO NOTHING`) so a file that partially applied can be safely re-run after the tracking row is cleared.
 
+A PHP migration (`migrations/migrations.php`, an array of `id` / `version` / `up` entries) may use the plugin's own classes. On a first install the migrations run before the plugin is activated, when its classes would not otherwise resolve, so `PluginManager` lets them resolve for the length of the run (`ClassAutoloader::allowPlugin()`).
+
 ### Plugin Settings on Your Own Admin Page
 
 A plugin's settings appear on the **Plugin Settings** tab automatically. When a

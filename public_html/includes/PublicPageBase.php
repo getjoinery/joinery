@@ -13,6 +13,13 @@ abstract class PublicPageBase {
 
 	protected $rowcount;
 
+	/** The signed-in viewer, loaded when the page is built; null for a visitor. */
+	protected $user = null;
+
+	/** The open table's options and column labels, from tableheader() until endtable(). */
+	protected $current_table_options = array();
+	protected $current_table_headers = array();
+
 	/**
 	 * Whether this render includes the vault lock chip (set during
 	 * global_includes_top for signed-in users with any vault, or on a page that
