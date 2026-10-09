@@ -420,6 +420,13 @@ The bucket must be **private**. The customer applies that policy at bucket
 creation; the platform never tries to set it, and Save refuses a bucket that
 is not.
 
+A file deleted from the store is deleted from the bucket, every version of it:
+on a versioned bucket (every Backblaze bucket) a plain delete would only hide
+it, so the driver's delete goes through `S3Signer::delete()`, which removes each
+version and delete marker by id. The offload tick also sweeps each store's
+folder daily for anything a delete left hidden ([Backups § Uploads](backups.md#uploads)),
+and stays active while a sweep has work left.
+
 ## Settings
 
 The store itself is a target row (`bkt_backup_targets`, `bkt_purpose = 'files'`):

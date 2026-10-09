@@ -33,6 +33,8 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.31 - a site run finishes what earlier deletes only hid in its own folder on each target it prunes
+ *                (HiddenVersionSweep, daily; specs/storage_targets.md S28)
  * @version 1.30 - a manager run writes through the management node's broker when its slot names a broker run
  *                (BackupBroker): begun before the chain is chosen, finished with every object's hash before the
  *                run is committed, aborted when the run fails; a manager chain follows the broker's storage space
@@ -1182,6 +1184,7 @@ class BackupRunner {
 		$pruned = self::enforce_chain_retention($plan, $pruned_indexes) + self::enforce_cloud_retention($plan, $pruned_indexes);
 		$objects_pruned = self::enforce_object_retention($plan, $pruned_indexes);
 		$swept  = self::sweep_local($plan);
+		$hidden = self::sweep_hidden_versions($plan);
 
 		// The size a person reads is the whole run — every artifact it put in
 		// backup storage — with the parts that make it up named beside it, and
@@ -1201,6 +1204,7 @@ class BackupRunner {
 		if ($pruned) { $msg .= "; pruned {$pruned} old backup" . ($pruned === 1 ? '' : 's'); }
 		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
+		if ($hidden !== '') { $msg .= '; ' . $hidden; }
 
 		$figures = array('level' => $level, 'bytes' => $total);
 		if ($warning !== '') {
@@ -2032,6 +2036,7 @@ class BackupRunner {
 		$pruned = self::enforce_cloud_retention($plan, $pruned_indexes) + self::enforce_chain_retention($plan, $pruned_indexes);
 		$objects_pruned = self::enforce_object_retention($plan, $pruned_indexes);
 		$swept  = self::sweep_local($plan);
+		$hidden = self::sweep_hidden_versions($plan);
 
 		$msg = 'Backed up ' . $archive_name . ' (' . self::human($archive_bytes) . ')'
 			. ' to ' . $plan['target']->get('bkt_name');
@@ -2039,6 +2044,7 @@ class BackupRunner {
 		if ($pruned) { $msg .= "; pruned {$pruned} old restore point" . ($pruned === 1 ? '' : 's'); }
 		if ($objects_pruned) { $msg .= "; removed {$objects_pruned} offloaded file" . ($objects_pruned === 1 ? '' : 's') . ' no kept backup names'; }
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
+		if ($hidden !== '') { $msg .= '; ' . $hidden; }
 
 		// A standalone archive is whole by construction: level 0.
 		return array('status' => 'success', 'message' => $msg, 'level' => 0, 'bytes' => $archive_bytes);
@@ -2671,6 +2677,40 @@ class BackupRunner {
 				throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key);
 			}
 		}
+	}
+
+	/**
+	 * Finish what earlier deletes only hid, in this site's own folder on every
+	 * target it prunes (HiddenVersionSweep: daily, within a budget). A plan that
+	 * does not prune the bucket sweeps nothing: the management node sweeps its
+	 * own. Returns the sentence for the run's message, '' when nothing was done.
+	 */
+	private static function sweep_hidden_versions(array $plan) {
+		if (empty($plan['prunes_cloud']) || empty($plan['target']) || !($plan['target'] instanceof BackupTarget)) {
+			return '';
+		}
+		$targets = array((int)$plan['target']->key => $plan['target']);
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT DISTINCT bkh_bkt_backup_target_id FROM bkh_backup_history
+			WHERE bkh_slug = ? AND bkh_destination = 'target' AND bkh_bkt_backup_target_id IS NOT NULL");
+		$q->execute(array($plan['slug']));
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+			if (!isset($targets[(int)$id])) {
+				$t = new BackupTarget((int)$id, TRUE);
+				if ($t->key) { $targets[(int)$id] = $t; }
+			}
+		}
+		$said = array();
+		foreach ($targets as $t) {
+			try {
+				$folder = BackupTarget::normalise_prefix((string)$t->get('bkt_path_prefix')) . '/' . $plan['slug'] . '/';
+				$line = HiddenVersionSweep::sentence(HiddenVersionSweep::run($t, $folder), (string)$t->get('bkt_name'));
+				if ($line !== '') { $said[] = $line; }
+			} catch (\Throwable $e) {
+				error_log('BackupRunner: the hidden-version sweep of ' . $t->get('bkt_name') . ' failed: ' . $e->getMessage());
+			}
+		}
+		return implode('; ', $said);
 	}
 
 	/**

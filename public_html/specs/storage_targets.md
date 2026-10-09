@@ -3,14 +3,43 @@
 **Status:** Building — 2026-10-09. No open owner decisions; build order in §10.
 WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces), and the
 reviewer1 review of WP1–WP4 committed (de6202d4). WP6 committed (c10c7f1b; dev migrated by migration 210
-and `iem_019`). WP7 committed (fd391509; dev migrated by migration 211 and `sm_017`). **WP5 built and
-reviewed VALID by reviewer1 (10-09):** dev migrated (new columns; migration 212 emptied the one stored node key); every
-suite the change reaches passes, and the new `broker_managed_run_test` drives a Managed run end to end
-through broker links over the loopback fixture. Owed before it ships: the live gate in §13 (one Managed
-node moved B2 → Linode → B2, restored from each), which needs a node on the release that carries WP5.
+and `iem_019`). WP7 committed (fd391509; dev migrated by migration 211 and `sm_017`). **WP5 committed (025e70a7)
+and released in 0.8.472 (10-09):** live on dev, a node backup through the broker (301 MB full, a hash for
+every object, its ledger file in the bucket, one manifest per run), a level 2 verify of it, a re-upload
+through the live endpoint, and the shell recovery by hand with the recorded manifest hash all passed. Still
+owed: the first fleet night through the broker, the move test in §13 (B2 → Linode → B2, restored from
+each), and the node Backups tab seen in a browser; they are in the live verification queue. S28 (a delete
+on a versioned bucket only hid the object) is fixed ahead of WP8, and the passes cleared dev's 128 GB backlog.
 WP8 and WP9 remain. The Linode half of F5 waits for a Linode backup target. A browser look at the target
 forms, the node Move form, Who backs up here, Adopt, the Cloud Storage page's Switch to another bucket and
 Move files, the Backups page's two safety warnings, and now the node Backups tab's manifest hashes is owed.
+
+WP8 preparation (10-09, nothing built):
+- **Found while preparing (B32): a delete on a versioned bucket only hides the object.** Backblaze keeps every
+  version, and dev's buckets have no lifecycle rule, so every prune so far hid what it deleted: dev's backup
+  bucket holds 4,641 current objects (220.9 GB) and 1,633 non-current versions (128.1 GB) under 1,270 delete
+  markers. The file store bucket does the same, so a member's deleted file stays in the bucket as a hidden
+  version. Every `S3Signer::delete` caller is affected: site retention (`BackupRunner` ×3), offloaded-file
+  prune (`BackupObjects` ×2), node prune (`FleetBackupRetention`), customer prune (`ServiceTenantWatch`),
+  Stored Backups delete (`TargetBackups`, `NodeBackupShelf`), the file store (`CloudStorageS3Driver`) and the
+  connection-test probe (`TargetTester`). **Fixed 10-09, ahead of WP8:** `S3Signer::delete()` itself lists the
+  key's versions and deletes each version and delete marker by id, so every caller above deletes for good on
+  every target, with nothing for a caller to forget. What is already hidden is invisible to every listing
+  and record the pruners read, so the passes that prune also sweep (`HiddenVersionSweep`, owner 10-09: a
+  standing step, not a one-off script): a site's backup run its own folder per target, the fleet pass each
+  backup target's whole folder, the offload tick each file store; daily per folder, within a budget, recorded
+  on `bkt_hidden_sweep`. On dev the first passes remove 1,054 keys (128 GB) from the backup bucket and 2,449
+  (42.8 MB) from the file store. WP8's lock work builds on this delete: a version still locked is refused by
+  the provider, counted, and tried again the next day.
+- Lock pieces: catalogue `object_lock` (b2, s3, linode); `bkt_lock_days` (part of the location, fixed once
+  used); lock headers on every put and multipart create, signed into the broker's links as signed headers the
+  node must send (the link answer carries them; `S3Signer` link mode sends them); a direct site target sends
+  them itself; `GetObjectLockConfiguration` and a one-day locked probe in `TargetTester`; prune skips a version
+  whose retain-until has not passed and leaves the point surplus for the next pass (F3 record kept).
+- Needed from the owner before the live test (`object_lock_test`): a Backblaze bucket with object lock on and a
+  key with readBucketRetentions, writeBucketRetentions, readFileRetentions and writeFileRetentions (dev's key
+  has none, so `?object-lock` answers 403 "not entitled"); a Linode bucket with object lock, which must be
+  enabled when the bucket is created.
 
 WP5 notes, decided while building:
 - Owner (10-09): a Managed node on an older core is **refused** a backup or a re-upload until it is
@@ -663,6 +692,7 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 | S25 | Linode Managed nodes are handed the delete-capable main key | **WP5** (built): no node is handed any key |
 | S26 | The setup wizard's target form posted no Enabled box, so the target it saved was disabled, never tested and never scheduled | **WP1**: the wizard draws the shared form, which saves it enabled |
 | S27 | The node Backups tab listed the whole target capped at 500 objects and then filtered to the node, so a node past the first 500 showed no cloud backups | **WP1**: listed under the node's own folder |
+| S28 (B32) | A delete on a versioned bucket (every Backblaze bucket) only hides the object: pruned backups (128 GB on dev) and deleted member files stay in the bucket | **Now** (10-09, ahead of WP8): `S3Signer::delete()` removes every version, so every caller deletes for good; the passes that prune also sweep what is already hidden (`HiddenVersionSweep`) |
 
 ## 12. Out of scope, deliberately
 
