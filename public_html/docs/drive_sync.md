@@ -106,7 +106,10 @@ the file to another record.
 - **The executor acts only on the file it planned for.** On a strong volume a
   move, a park, a trash or a conflict copy of a file stands down
   (`Overtaken`) when the file at the path is not the record's own, and the
-  next scan decides from where that file is. An upload or an adoption opens
+  next scan decides from where that file is. A park whose record's own file
+  stands elsewhere on the disk stands down too, record untouched, rather than
+  give the record up: the user moved the file, and the move the next scan finds
+  ends the clash naming judged. An upload or an adoption opens
   the file once (`Vfs::open_file`) and reads its identity, its hash and the
   bytes it sends from that one handle, so a file renamed over the path part
   way through cannot go up as this record's. On a weak volume every op acts

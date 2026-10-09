@@ -918,6 +918,15 @@ pub fn run_pass(
                     // back to its source, with another record's file moved in
                     // after, stood on at that name and vetoed the other's
                     // upload for ever, as it vetoed its (plat3 75400).
+                    //
+                    // Owned as the scan reads ownership, the server's deleted
+                    // records included: a record owns its file until it is
+                    // forgotten (scan.rs, kill2 75129). Counting only live
+                    // owners, a file the server had just deleted -- and this
+                    // device had edited, so it goes up again as new -- read as
+                    // nobody's, the never-sent record stood on at its path,
+                    // and each vetoed the other's upload every pass for ever
+                    // (rig run 1864).
                     EntityType::File => match env.vfs.root() {
                         Some(root) => match env.vfs.fingerprint(&root.join(&path))? {
                             None => !observed.iter().any(|o| o.path == path),
@@ -927,7 +936,7 @@ pub fn run_pass(
                             // it handed this record the file, and its agreement
                             // still names it.
                             Some(fp) => {
-                                let owners = crate::execute::owners_here(env, &root.join(&path), fp, true)?;
+                                let owners = crate::execute::owners_here(env, &root.join(&path), fp, false)?;
                                 !owners.iter().any(|o| o.id == entry.id)
                                     && owners.iter().any(|o| Some(o.id) != entry.replaces)
                             }
