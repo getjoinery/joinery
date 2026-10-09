@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.8.1 - a dry run with --skip-database says the database is left as it is, instead of naming a dump
+#                  it would not restore
 # Version: 1.8.0 - reads manifest version 3, whose runs each write their own manifest-NNNN.json:
 #                  --artifacts may hold manifest.json or the chain's run manifests, and the newest
 #                  is read (specs/storage_targets.md F9). --manifest-sha256 refuses a manifest that is
@@ -337,7 +339,11 @@ if [ "$DRY_RUN" = true ]; then
     print_dry "Would apply, in order:"
     for a in "${FILES_ARCHIVES[@]}"; do print_dry "  $(basename "$a")"; done
     for a in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do print_dry "  $(basename "$a") (into the site directory)"; done
-    [ -n "$DB_ARCHIVE" ] && print_dry "Then restore database from $(basename "$DB_ARCHIVE")"
+    if [ "$SKIP_DATABASE" = true ]; then
+        print_dry "The database is left as it is (--skip-database)"
+    elif [ -n "$DB_ARCHIVE" ]; then
+        print_dry "Then restore database from $(basename "$DB_ARCHIVE")"
+    fi
     [ -n "$OBJECTS_DIR" ] && print_dry "Then bring offloaded files home from ${OBJECTS_DIR} (${OBJECTS_MODE})"
     echo "RESTORE_PLAN_OK"
     exit 0

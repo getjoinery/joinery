@@ -27,6 +27,8 @@
  * health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 3.1 - the tick finishes what earlier deletes only hid in each file store's folder
+ *                (HiddenVersionSweep; specs/storage_targets.md S28), and stays active while a sweep has work left
  * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): saveStore(), removeStore(),
  *                stores(), cloudRowCount() per store, Move files (startMove(), moveState(), stopMove(),
  *                a batch per tick); settings are written through Setting::put(), which refuses a name
@@ -533,6 +535,22 @@ class CloudStorageLifecycle {
 			}
 		}
 
+		// What earlier deletes only hid in each file store's folder: a deleted
+		// file is gone from its bucket, every version (HiddenVersionSweep, daily
+		// per store, within a budget).
+		$hidden_left = false;
+		foreach (new MultiBackupTarget(array('deleted' => false, 'purpose' => BackupTarget::PURPOSE_FILES)) as $store) {
+			try {
+				$folder = BackupTarget::normalise_prefix((string)$store->get('bkt_path_prefix')) . '/';
+				$swept = HiddenVersionSweep::run($store, $folder, 60);
+				$hidden_left = $hidden_left || ($swept !== null && $swept['left'] > 0);
+				$line = HiddenVersionSweep::sentence($swept, (string)$store->get('bkt_name'));
+				if ($line !== '') { $msgs[] = $line; }
+			} catch (\Throwable $e) {
+				$msgs[] = 'hidden-version sweep of ' . $store->get('bkt_name') . ': ' . $e->getMessage();
+			}
+		}
+
 		if (!$msgs) {
 			$msgs[] = $cloud_rows > 0
 				? 'not offloading or draining; ' . number_format($cloud_rows) . ' offloaded file' . ($cloud_rows === 1 ? '' : 's') . ' under the daily check'
@@ -542,7 +560,7 @@ class CloudStorageLifecycle {
 			'status'  => $had_error ? 'error' : 'success',
 			'message' => implode('; ', $msgs),
 		];
-		if (!$in_motion && $cloud_rows === 0) {
+		if (!$in_motion && $cloud_rows === 0 && !$hidden_left) {
 			$out['deactivate'] = true; // nothing to move and nothing to check → scheduler deactivates this task
 		}
 		return $out;

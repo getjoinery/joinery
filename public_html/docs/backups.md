@@ -942,6 +942,26 @@ because an abort can itself be lost (the process can die), the bucket should
 carry a cancel-unfinished-multipart lifecycle rule (B2: cancel unfinished
 large files after 7 days) as the backstop.
 
+**A delete is a delete on every bucket.** A versioned bucket (every Backblaze
+bucket, and any with versioning on) answers a delete that names no version by
+hiding the object behind a delete marker, and keeps its bytes. So
+`S3Signer::delete()` lists the key's versions and deletes each one and every
+delete marker by id; a provider that keeps no versions and says so takes the
+plain delete. Retention, Stored Backups, the offloaded-files prune and the
+file store all delete through it.
+
+What can still be hidden — a delete the provider cut off between two versions,
+or one made some other way — drops out of every listing the pruners read, so
+the passes that prune also sweep (`HiddenVersionSweep`): a site's backup run
+sweeps its own folder on each target it prunes, the management node's fleet
+pass sweeps the whole folder of each of its backup targets, and the offload
+tick sweeps each file store's folder. A sweep lists the folder's versions and
+deletes every version of each key whose newest entry is a delete marker,
+never touching a key whose newest entry is a live object. Each folder is swept
+daily, within a time budget; what a pass runs out of time for is taken up on
+the next call, and what each folder last found is kept on the target row
+(`bkt_hidden_sweep`). The pass's message says what a sweep removed.
+
 `sha256` and `bytes` are the hash and count of the bytes that went up — taken
 from the stream by the process that pushed them, or from the local file for a
 file artifact. A restore verifies against them and cannot tell how the object

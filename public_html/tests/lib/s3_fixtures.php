@@ -21,6 +21,14 @@
  *                              without it such a read is refused with 403
  *   FIXTURE_WRITE_ONLY_KEY=1   a DELETE signed by a key id starting "wo-" is
  *                              refused with 403 (a write-only key)
+ *   FIXTURE_VERSIONED=1        the bucket keeps versions, as every Backblaze
+ *                              bucket does: a DELETE with no versionId only
+ *                              hides the object behind a delete marker, and
+ *                              its bytes stay (s3fx_hidden())
+ *
+ * ListObjectVersions (?versions) answers every object as one version; a hidden
+ * one as a non-current version under a delete marker. A DELETE naming a
+ * versionId removes that version for good.
  *
  * Keep request bodies under 1 KB: above that curl sends `Expect: 100-continue`,
  * which the built-in server never answers, costing a second of dead wait each.
@@ -32,6 +40,7 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.5 - ListObjectVersions and DELETE by versionId; FIXTURE_VERSIONED, where a plain DELETE only hides
  * @version 1.4 - a ranged GET is answered 206 with the span; every key written is logged in order
  *                (s3fx_put_keys())
  * @version 1.3 - bodies stream to disk: a part or an object is copied from the request to its file, and a
@@ -111,6 +120,23 @@ function s3fx_keys($fixture) {
 	$out = array();
 	foreach (glob($fixture['dir'] . '/objects/*.key') ?: array() as $k) {
 		$out[] = (string)file_get_contents($k);
+	}
+	sort($out);
+	return $out;
+}
+
+/** Hide an object as a delete that named no version did, on a versioned bucket: its bytes stay. */
+function s3fx_hide($fixture, $bucket, $path) {
+	$f = s3fx_object_file($fixture['dir'], $bucket, $path);
+	if (is_file($f)) { rename($f, $f . '.hidden'); @unlink($f . '.key'); }
+	file_put_contents($f . '.marker', $bucket . '/' . ltrim($path, '/'));
+}
+
+/** Keys ('bucket/key') whose bytes are hidden behind a delete marker, sorted (FIXTURE_VERSIONED). */
+function s3fx_hidden($fixture) {
+	$out = array();
+	foreach (glob($fixture['dir'] . '/objects/*.marker') ?: array() as $m) {
+		$out[] = (string)file_get_contents($m);
 	}
 	sort($out);
 	return $out;
@@ -204,7 +230,7 @@ if ($method === "POST" && isset($q["uploadId"])) {
 		unlink($dir . "/parts/" . $q["uploadId"] . "." . $i);
 	}
 	fclose($out);
-	file_put_contents($file . ".key", $full);
+	file_put_contents($file . ".key", $full); @unlink($file . ".marker");
 	echo "<?xml version=\"1.0\"?><CompleteMultipartUploadResult><ETag>\"final\"</ETag></CompleteMultipartUploadResult>";
 	return true;
 }
@@ -222,9 +248,36 @@ if ($method === "PUT") {
 		return true;
 	}
 	$sink($file);
-	file_put_contents($file . ".key", $full);
+	file_put_contents($file . ".key", $full); @unlink($file . ".marker");
 	file_put_contents($dir . "/put.keys", $full . "\n", FILE_APPEND);
 	header("ETag: \"" . md5_file($file) . "\"");
+	return true;
+}
+if ($method === "GET" && $key === "" && array_key_exists("versions", $q)) {
+	$bump("versions");
+	$prefix = (string)($q["prefix"] ?? "");
+	$xml = "<?xml version=\"1.0\"?><ListVersionsResult><IsTruncated>false</IsTruncated>";
+	$rows = array();
+	foreach (glob($dir . "/objects/*.key") ?: array() as $k) {
+		$rows[(string)file_get_contents($k)][] = array("Version", "v0", "true", substr($k, 0, -4));
+	}
+	foreach (glob($dir . "/objects/*.marker") ?: array() as $m) {
+		$stored = (string)file_get_contents($m);
+		$f = substr($m, 0, -7);
+		$rows[$stored][] = array("DeleteMarker", "m1", "true", "");
+		if (is_file($f . ".hidden")) { $rows[$stored][] = array("Version", "v1", "false", $f . ".hidden"); }
+	}
+	ksort($rows);
+	foreach ($rows as $stored => $list) {
+		if (strpos($stored, $bucket . "/") !== 0) { continue; }
+		$rel = substr($stored, strlen($bucket) + 1);
+		if ($prefix !== "" && strpos($rel, $prefix) !== 0) { continue; }
+		foreach ($list as $v) {
+			$xml .= "<" . $v[0] . "><Key>" . htmlspecialchars($rel, ENT_XML1) . "</Key><VersionId>" . $v[1] . "</VersionId><IsLatest>" . $v[2] . "</IsLatest>"
+				. ($v[0] === "Version" ? "<Size>" . filesize($v[3]) . "</Size>" : "") . "</" . $v[0] . ">";
+		}
+	}
+	echo $xml . "</ListVersionsResult>";
 	return true;
 }
 if ($method === "GET" && $key === "" && isset($q["list-type"])) {
@@ -286,6 +339,16 @@ if ($method === "DELETE") {
 		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>this key cannot delete</Message></Error>";
 		return true;
 	}
+	$vid = isset($q["versionId"]) ? (string)$q["versionId"] : null;
+	if ($vid === null && (int)getenv("FIXTURE_VERSIONED") === 1) {
+		// A versioned bucket hides: the bytes stay as a non-current version.
+		if (is_file($file)) { @rename($file, $file . ".hidden"); @unlink($file . ".key"); }
+		file_put_contents($file . ".marker", $full);
+		http_response_code(204);
+		return true;
+	}
+	if ($vid === "m1") { @unlink($file . ".marker"); http_response_code(204); return true; }
+	if ($vid === "v1") { @unlink($file . ".hidden"); http_response_code(204); return true; }
 	@unlink($file);
 	@unlink($file . ".key");
 	http_response_code(204);

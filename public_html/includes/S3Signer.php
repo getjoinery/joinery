@@ -14,6 +14,9 @@
  * management node's backup broker), and every finished write is reported to
  * it with its bytes and sha256. The request paths are the same either way.
  *
+ * @version 1.13 - delete() removes every version of the key and its delete markers: on a versioned bucket
+ *                 (every Backblaze one) a plain DELETE only hid the object, so nothing deleted was ever gone
+ *                 (specs/storage_targets.md S28); versions_of(), list_versions()
  * @version 1.12 - an S3LinkSource in place of a credential: each request asks it for a signed link and is
  *                 made on that link, retries included; finished writes are reported to it with their bytes
  *                 and sha256; S3ObjectExistsException when the source says a key is written already
@@ -131,11 +134,113 @@ class S3Signer {
 	}
 
 	/**
-	 * Execute a signed DELETE against a bucket object.
-	 * Returns ['status' => int, 'body' => string, 'headers' => array].
+	 * Delete an object for good: every version of the key, and every delete
+	 * marker. A plain DELETE on a versioned bucket (every Backblaze bucket, and
+	 * any bucket with versioning on) only hides the object behind a delete
+	 * marker; its bytes stay, billed, and readable by version. So the key's
+	 * versions are listed and each is deleted by its id. A provider that keeps
+	 * no versions and does not answer the versions call (NotImplemented) takes
+	 * the plain DELETE, which there is a real one.
+	 *
+	 * Returns ['status' => int, 'body' => string, 'headers' => array]: 204 when
+	 * every version is gone, 404 when the key had none, else the first
+	 * refusal (a version still locked, say), whose caller reports it.
 	 */
 	public static function delete($creds, $bucket, $path) {
-		return self::request('DELETE', $creds, $bucket, $path, []);
+		$key = ltrim((string)$path, '/');
+		$versions = self::versions_of($creds, $bucket, $key);
+		if ($versions === null) {
+			return self::request('DELETE', $creds, $bucket, $path, []);
+		}
+		if (!$versions) {
+			return ['status' => 404, 'body' => '', 'headers' => [], 'attempts' => 1, 'retry_log' => []];
+		}
+		$last = null;
+		foreach ($versions as $version_id) {
+			$resp = self::request_delete_version($creds, $bucket, $key, $version_id);
+			$status = (int)($resp['status'] ?? 0);
+			if (($status < 200 || $status >= 300) && $status !== 404) {
+				return $resp;
+			}
+			$last = $resp;
+		}
+		$last['status'] = 204;
+		return $last;
+	}
+
+	/** Delete one version (or one delete marker) of a key, for good. */
+	public static function request_delete_version($creds, $bucket, $key, $version_id) {
+		return self::request('DELETE', $creds, $bucket, '/' . ltrim((string)$key, '/'), ['versionId' => (string)$version_id]);
+	}
+
+	/**
+	 * Every version id of exactly this key — versions and delete markers alike
+	 * — or null when the provider keeps no versions and says so.
+	 */
+	public static function versions_of($creds, $bucket, $key) {
+		$list = self::list_versions($creds, $bucket, $key);
+		if ($list === null) {
+			return null;
+		}
+		$ids = [];
+		foreach ($list as $v) {
+			// The listing is by prefix: only this exact key is ours.
+			if ($v['key'] === $key) {
+				$ids[] = $v['version_id'];
+			}
+		}
+		return $ids;
+	}
+
+	/**
+	 * Every version and delete marker under a prefix (ListObjectVersions,
+	 * paged): [['key', 'version_id', 'latest' => bool, 'marker' => bool,
+	 * 'size' => int], ...] in the provider's order (by key, newest first).
+	 * Null when the provider keeps no versions and says so (NotImplemented).
+	 */
+	public static function list_versions($creds, $bucket, $prefix = '') {
+		$out = [];
+		$key_marker = null;
+		$version_marker = null;
+		for ($page = 0; $page < 10000; $page++) {
+			$params = ['versions' => '', 'prefix' => (string)$prefix];
+			if ($key_marker !== null) {
+				$params['key-marker'] = $key_marker;
+				$params['version-id-marker'] = (string)$version_marker;
+			}
+			$resp = self::request('GET', $creds, $bucket, '/', $params);
+			$status = (int)$resp['status'];
+			if ($status === 501 || ($status >= 400 && preg_match('#<Code>\s*NotImplemented\s*</Code>#i', (string)$resp['body']))) {
+				return null;
+			}
+			if ($status !== 200) {
+				$msg = self::extract_error($resp['body']) ?: ('HTTP ' . $status);
+				throw new S3SignerException('Listing the versions under ' . $prefix . ' failed: ' . $msg);
+			}
+			if (preg_match_all('#<(Version|DeleteMarker)>(.*?)</\1>#s', (string)$resp['body'], $blocks, PREG_SET_ORDER)) {
+				foreach ($blocks as $b) {
+					if (!preg_match('#<Key>(.*?)</Key>#s', $b[2], $km) || !preg_match('#<VersionId>(.*?)</VersionId>#s', $b[2], $vm)) {
+						continue;
+					}
+					$out[] = [
+						'key'        => html_entity_decode($km[1], ENT_XML1 | ENT_QUOTES, 'UTF-8'),
+						'version_id' => html_entity_decode(trim($vm[1]), ENT_XML1 | ENT_QUOTES, 'UTF-8'),
+						'latest'     => (bool)preg_match('#<IsLatest>\s*true\s*</IsLatest>#i', $b[2]),
+						'marker'     => $b[1] === 'DeleteMarker',
+						'size'       => preg_match('#<Size>(\d+)</Size>#', $b[2], $sm) ? (int)$sm[1] : 0,
+					];
+				}
+			}
+			if (!preg_match('#<IsTruncated>\s*true\s*</IsTruncated>#i', (string)$resp['body'])) {
+				break;
+			}
+			$key_marker = preg_match('#<NextKeyMarker>(.*?)</NextKeyMarker>#s', $resp['body'], $a) ? html_entity_decode($a[1], ENT_XML1 | ENT_QUOTES, 'UTF-8') : null;
+			$version_marker = preg_match('#<NextVersionIdMarker>(.*?)</NextVersionIdMarker>#s', $resp['body'], $c) ? html_entity_decode($c[1], ENT_XML1 | ENT_QUOTES, 'UTF-8') : '';
+			if ($key_marker === null) {
+				break;
+			}
+		}
+		return $out;
 	}
 
 	/**

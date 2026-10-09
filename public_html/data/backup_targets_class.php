@@ -17,6 +17,8 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.6 - bkt_hidden_sweep: what HiddenVersionSweep last found in each folder this machine sweeps
+ *                (specs/storage_targets.md S28)
  * @version 3.5 - one credential, the main one, which never leaves the machine that owns the target: the node
  *                credential (bkt_node_credentials) and per-run key minting (bkt_mint_run_keys) are gone, since a
  *                Managed node writes through the management node's backup broker (specs/storage_targets.md WP5)
@@ -65,7 +67,7 @@ class BackupTarget extends SystemBase {
 	public static $tablename = 'bkt_backup_targets';
 	public static $pkey_column = 'bkt_backup_target_id';
 
-	public static $json_vars = array('bkt_credentials');
+	public static $json_vars = array('bkt_credentials', 'bkt_hidden_sweep');
 
 	// A collection lists the backup targets unless asked for another purpose,
 	// so the generated rows are backup targets for the filters to find.
@@ -88,6 +90,9 @@ class BackupTarget extends SystemBase {
 		// links with it for its Managed nodes and customers (R4).
 		'bkt_credentials'      => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
+		// What HiddenVersionSweep last found in each folder of this target that
+		// this machine sweeps: prefix => {time, keys, left, refused, problem}.
+		'bkt_hidden_sweep'    => array('type'=>'jsonb'),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkt_update_time'     => array('type'=>'timestamp(6)'),
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),

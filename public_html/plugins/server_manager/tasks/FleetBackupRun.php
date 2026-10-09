@@ -34,6 +34,8 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.12 - the pass finishes what earlier deletes only hid in each backup target's folder
+ *                 (HiddenVersionSweep; specs/storage_targets.md S28)
  * @version 1.11 - the pass aborts node broker runs whose token expired and writes any run ledger file that did not
  *                 reach backup storage (specs/storage_targets.md WP5)
  * @version 1.10 - retention prunes across every storage space of the node (FleetBackupRetention::prune); the
@@ -300,6 +302,23 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 			}
 		}
 
+		// What earlier deletes only hid, in the whole folder of every backup
+		// target this management node keeps: every node's and every customer's
+		// backups (HiddenVersionSweep, daily per target, within a budget).
+		$hidden_said = array();
+		if (!$dry) {
+			foreach (new MultiBackupTarget(array('deleted' => false)) as $target) {
+				try {
+					$folder = BackupTarget::normalise_prefix((string)$target->get('bkt_path_prefix')) . '/';
+					$r = HiddenVersionSweep::run($target, $folder, 120);
+					$line = HiddenVersionSweep::sentence($r, (string)$target->get('bkt_name'));
+					if ($line !== '') { $hidden_said[] = $line; }
+				} catch (Throwable $e) {
+					$problems[] = 'hidden-version sweep of ' . $target->get('bkt_name') . ': ' . $e->getMessage();
+				}
+			}
+		}
+
 		$parts = array();
 		$parts[] = ($dry ? 'Would back up ' : 'Backing up ')
 			. ($dispatched ? count($dispatched) . ' node' . (count($dispatched) === 1 ? '' : 's')
@@ -312,6 +331,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				. implode(', ', $verified) . ')';
 		}
 		if ($verify_skipped) { $parts[] = 'verification skipped ' . implode(', ', $verify_skipped); }
+		foreach ($hidden_said as $line) { $parts[] = $line; }
 		if ($problems) { $parts[] = 'problems: ' . implode('; ', $problems); }
 
 		return array(
