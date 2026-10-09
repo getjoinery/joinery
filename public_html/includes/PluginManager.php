@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.8 - a plugin's PHP migrations run with its own classes resolvable (ClassAutoloader::allowPlugin),
+ *               so a first install, which migrates before activation, can use them
  * @version 1.7 - a dependency or conflict is judged active by plg_active (Plugin::is_active()),
  *                never plg_status, which can read 'stale' while the plugin runs
  * @version 1.6 - uninstall() prunes the deletion rules that named the tables it
@@ -289,10 +291,17 @@ class PluginManager extends AbstractExtensionManager {
             return $results;
         }
 
-        // Run PHP migrations (migrations.php with return [] format)
+        // Run PHP migrations (migrations.php with return [] format). They run
+        // before the plugin is activated on its first install, and they use
+        // the plugin's own classes, so those resolve for the length of the run.
         $php_migration_file = $migration_dir . '/migrations.php';
         if (file_exists($php_migration_file)) {
-            $php_results = $this->runPhpMigrations($plugin_name, $php_migration_file);
+            ClassAutoloader::allowPlugin($plugin_name);
+            try {
+                $php_results = $this->runPhpMigrations($plugin_name, $php_migration_file);
+            } finally {
+                ClassAutoloader::forgetPlugin($plugin_name);
+            }
             $results = array_merge($results, $php_results);
         }
 
