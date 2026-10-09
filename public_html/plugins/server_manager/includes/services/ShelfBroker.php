@@ -51,6 +51,8 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.6 - verifiedRun(): the site reports a finished run's chain verified restorable through it; retention
+ *                keeps the newest verified chain and everything newer (specs/storage_targets.md F1)
  * @version 1.5 - a draining space takes no write, even for a run opened before the move; one space that
  *                cannot be read no longer stops shelf_list listing the others
  * @version 1.4 - every link is signed in the run's or the read's storage space; a chain left in a draining
@@ -410,6 +412,25 @@ class ShelfBroker {
 		self::refreshFigure($row);
 		return array('run_id' => (int)$run->key, 'completed' => $marked, 'cancelled' => $cancelled,
 			'figure' => (int)$row->get('svt_figure'));
+	}
+
+	/**
+	 * The site opened and read its chain through this finished run, and it
+	 * passed. Stamped on the run, never on an open or aborted one: retention
+	 * keeps the customer's newest verified chain and everything newer.
+	 */
+	public static function verifiedRun(ServiceTenant $row, int $run_id): array {
+		$run = new ShelfRun($run_id, TRUE);
+		if (!$run->key || (int)$run->get('svr_svt_service_tenant_id') !== (int)$row->key || $run->get('svr_delete_time')) {
+			throw new ShelfBrokerException('No such run.');
+		}
+		if ((string)$run->get('svr_state') !== ShelfRun::STATE_FINISHED) {
+			throw new ShelfBrokerException('Only a finished run can be verified.');
+		}
+		$now = gmdate('Y-m-d H:i:s');
+		$run->set('svr_verified_time', $now);
+		$run->save();
+		return array('run_id' => (int)$run->key, 'chain' => (string)$run->get('svr_chain'), 'verified_time' => $now);
 	}
 
 	/** The tenant's figure is the ledger's completed bytes. */

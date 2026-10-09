@@ -124,7 +124,7 @@
     },
     {
       "name": "backup_verify_every_days",
-      "default": "30",
+      "default": "7",
       "group": "backups",
       "label": "Days between backup verifications (0 = never)",
       "type": "text",

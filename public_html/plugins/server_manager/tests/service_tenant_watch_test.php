@@ -28,6 +28,8 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.2 - retention waits a day before deleting a surplus chain, and keeps the newest verified chain and
+ *                everything newer (specs/storage_targets.md F1, F3)
  * @version 1.1 - its timeline runs in 2036-2037: a grant is judged against the real clock, so a paid-through date
  *                in 2026 failed the suite once that day had passed
  * @version 1.0
@@ -250,7 +252,20 @@ $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((int)$shelf->get('svt_figure') === 90, 'three chains: 90 bytes on the ledger');
 
 section('shelf: retention keeps the newest chains per profile, whole');
+$oldest_db = 'shelf/' . $base . 'site/chain-20260901_010000/db';
 $watch->watch($shelf, '2036-09-21 00:00:00');
+check(in_array($oldest_db, s3fx_keys($fx), true), 'the first pass that finds the oldest chain surplus deletes nothing');
+$listed_now = (new StorageSpace((int)$shelf_space->key, TRUE))->surplus_listed();
+check(isset($listed_now['site/chain-20260901_010000']), 'its space records it as found surplus', json_encode($listed_now));
+// The site reports the oldest chain verified: it and everything newer stay, however many.
+ShelfBroker::verifiedRun($shelf, $run_ids[0]);
+$watch->watch($shelf, '2036-09-21 21:00:00');
+check(in_array($oldest_db, s3fx_keys($fx), true), 'a day on, the oldest chain stays: it is the newest one verified');
+// A newer chain verified: the oldest is surplus again, found so now, and goes a day later.
+ShelfBroker::verifiedRun($shelf, $run_ids[1]);
+$watch->watch($shelf, '2036-09-21 21:05:00');
+check(in_array($oldest_db, s3fx_keys($fx), true), 'once a newer chain is verified, the oldest is surplus again and waits a day');
+$watch->watch($shelf, '2036-09-22 18:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 $keys = s3fx_keys($fx);
 check(!in_array('shelf/' . $base . 'site/chain-20260901_010000/db', $keys, true)
@@ -259,7 +274,8 @@ check(!in_array('shelf/' . $base . 'site/chain-20260901_010000/db', $keys, true)
 check(in_array('shelf/' . $base . 'site/chain-20260910_010000/db', $keys, true)
 	&& in_array('shelf/' . $base . 'site/chain-20260920_010000/files', $keys, true), 'the newest two stay');
 check((int)$shelf->get('svt_figure') === 60 && ShelfObject::completedBytes((int)$shelf->key) === 60, 'the figure follows: 60 bytes');
-check(substr((string)$shelf->get('svt_reconciled_time'), 0, 19) === '2036-09-21 00:00:00', 'the first pass reconciled against the listing');
+check(substr((string)$shelf->get('svt_reconciled_time'), 0, 19) === '2036-09-22 18:00:00',
+	'the reconcile ran against the listing once a day: last on the pass a day and more after the first');
 
 // A chain with an open run is never touched, and a manager chain is its own family.
 $open = ShelfBroker::beginRun($shelf, 'site', 'chain-20260830_010000', array(array('name' => 'chain-20260830_010000/db', 'bytes' => 1)));
@@ -271,7 +287,7 @@ $cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$m['run_id']);
 ShelfBroker::sign($shelf, (int)$m['run_id'], 'chain-20260801_010000/db', 'put', array('bytes' => 5));
 $put_raw($base . 'manager/chain-20260801_010000/db', 'xxxxx');
 ShelfBroker::finishRun($shelf, (int)$m['run_id'], array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5)));
-$watch->watch($shelf, '2036-09-21 00:10:00');
+$watch->watch($shelf, '2036-09-22 18:10:00');
 $keys = s3fx_keys($fx);
 check(in_array('shelf/' . $base . 'site/chain-20260830_010000/db', $keys, true), 'an older chain with an open run is left alone');
 check(in_array('shelf/' . $base . 'manager/chain-20260801_010000/db', $keys, true), 'the manager family is aged on its own');
@@ -284,7 +300,7 @@ $shelf->save();
 // Something in backup storage the ledger never saw, and a ledger row for something gone.
 $put_raw($base . 'site/chain-20260920_010000/stray', str_repeat('s', 7));
 $db->exec("UPDATE svo_shelf_objects SET svo_key = '" . $base . "site/chain-20260920_010000/vanished' WHERE svo_key = '" . $base . "site/chain-20260910_010000/db'");
-$watch->watch($shelf, '2036-09-22 00:00:00');
+$watch->watch($shelf, '2036-09-23 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((string)(new ShelfRun((int)$open['run_id'], TRUE))->get('svr_state') === 'aborted', 'a run open 48 hours is aborted');
 $space = StorageSpace::active_for(StorageSpace::OWNER_TENANT, (int)$shelf->key);

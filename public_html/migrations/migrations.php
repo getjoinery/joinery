@@ -1698,3 +1698,16 @@
 	$migration['migration_file'] = 'file_store_target_row.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// A site verifies its newest backup weekly (specs/storage_targets.md F1):
+	// retention keeps the newest verified backup and everything newer, and a
+	// site with none verified in eight days says so. A row still at the old
+	// shipped interval moves to the new one.
+	$migration = array();
+	// No test: a row an operator sets to 30 later must stay 30. The update is
+	// idempotent and its hash record makes it run once.
+	$migration['database_version'] = '211';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '7' WHERE stg_name = 'backup_verify_every_days' AND stg_value = '30'";
+	$migrations[] = $migration;

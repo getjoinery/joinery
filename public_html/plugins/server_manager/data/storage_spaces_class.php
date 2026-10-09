@@ -22,6 +22,8 @@
  * Exactly one owner column is set: a Managed node, or a customer of backup
  * storage (a service tenant).
  *
+ * @version 1.2 - sps_surplus: what retention found surplus in the space and since when, so a point is
+ *                deleted only once a pass CONFIRM_HOURS later still finds it so (specs/storage_targets.md F3)
  * @version 1.1 - a space given back to its owner is stamped opened again, so evidence from before does not
  *                release the space it replaced; drain_owner() for an owner that leaves
  * @version 1.0
@@ -74,6 +76,10 @@ class StorageSpace extends SystemBase {
 		'sps_opened_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'sps_draining_time'         => array('type'=>'timestamp(6)'),
 		'sps_retired_time'          => array('type'=>'timestamp(6)'),
+		// JSON: each restore point retention found surplus here (its name
+		// under the space, as the pruner names it) => when it was first found
+		// so, UTC. BackupSafety::confirm() reads and rewrites it every pass.
+		'sps_surplus'               => array('type'=>'text'),
 		'sps_update_time'           => array('type'=>'timestamp(6)'),
 	);
 
@@ -241,6 +247,32 @@ class StorageSpace extends SystemBase {
 		} catch (\Throwable $e) {
 			return false;
 		}
+	}
+
+	/** What retention found surplus here: point name => unix time first found. */
+	public function surplus_listed(): array {
+		$map = json_decode((string)$this->get('sps_surplus'), true);
+		$out = array();
+		foreach (is_array($map) ? $map : array() as $name => $when) {
+			$t = strtotime((string)$when . ' UTC');
+			if ($t !== false) { $out[(string)$name] = (int)$t; }
+		}
+		return $out;
+	}
+
+	/** Store this pass's surplus listing (point name => unix time); saved only when it changed. */
+	public function record_surplus(array $listed): void {
+		$map = array();
+		foreach ($listed as $name => $t) {
+			$map[(string)$name] = gmdate('Y-m-d H:i:s', (int)$t);
+		}
+		ksort($map);
+		$json = $map ? json_encode($map) : null;
+		if ($json === ($this->get('sps_surplus') ?: null)) {
+			return;
+		}
+		$this->set('sps_surplus', $json);
+		$this->save();
 	}
 
 	/** A draining space with nothing left in it. */

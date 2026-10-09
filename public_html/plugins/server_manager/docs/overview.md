@@ -503,6 +503,7 @@ An incident **needs you** when it is new, or snoozed and its time has come (`Inc
 | `plane:backup_failed` | the last backup this management node ran of the node failed | critical |
 | `plane:backups_stopped` | backups from here are not happening (no verified recovery key, never, not landing, overdue) | critical |
 | `plane:backup_unverified` | a backup was taken but is not proven whole (suspiciously small, incomplete in storage, verification failed, stale or never done) | warning |
+| `plane:customer_backups` | this node only: a customer of backup storage has had no run finish here for two nights, or no run it reported verified for eight days (`IncidentSourceCustomerBackups`, the rule a site's Backups page applies to itself); one incident names every such customer | warning |
 | `plane:failed_units` | the latest host report names failed systemd units | warning |
 | `plane:certificate` | the served certificate has a problem (`mgn_cert_problem`, see *Certificate monitoring*) | warning; critical under seven days |
 | `plane:agent_silent` | a paired agent has not checked in for two hours, and its owner did not switch it off | critical |
@@ -1380,6 +1381,9 @@ names its `space_id`, its key relative to that space);
 everything else the run signed is cancelled — an open multipart aborted at
 the provider with the plane's credential, a row never completed marked
 pruned);
+`shelf_verified_run` (a finished run whose chain the site opened and read and
+found sound: `svr_verified_time`, which retention and the draining release
+read);
 `shelf_status`
 (the C2 fields plus `writable` and `readable`). Writes need a usable tenant;
 reads (`shelf_list`, a `get`) are allowed to a suspended or released tenant
@@ -1414,8 +1418,12 @@ alone); a run open longer than 36 hours is aborted on the plane's side,
 its open multipart cancelled with the plane's credential; every active
 tenant's backup storage is pruned to the newest `server_manager_services_shelf_keep_chains`
 (4) chains per profile across its spaces, chains whole, each from its own
-target, a chain with an open run never touched, and a draining space kept
-whole until the active space holds a finished run, then retired once empty;
+target, a chain with an open run never touched, and only as `BackupSafety`
+allows (the newest verified chain and everything newer stay, the newest stays,
+and a chain goes a day after a pass first found it surplus — see *What
+retention will not delete* in `docs/backups.md`); a draining space is kept
+whole until the active space holds a run the site reported verified, then
+retired once empty;
 a suspended or released tenant whose prune-after day has come loses
 everything in its spaces once, and the row says so.
 
@@ -1470,7 +1478,7 @@ Every stored backup on this management node is in a **storage space** (`sps_stor
 | State | Meaning |
 |---|---|
 | `active` | takes the owner's new backups; an owner has at most one |
-| `draining` | the owner was moved elsewhere, removed from the dashboard (a node) or released the service (a customer): read, restored and pruned only, takes no write, kept whole until the owner's active space holds a chain a verify has passed (a node) or a finished run with something stored (a customer) since it became active, then aged out by the owner's normal retention |
+| `draining` | the owner was moved elsewhere, removed from the dashboard (a node) or released the service (a customer): read, restored and pruned only, takes no write, kept whole until the owner's active space holds a chain a verify has passed (a node) or a run with something stored that the site reported verified (a customer) since it became active, then aged out by the owner's normal retention |
 | `retired` | a draining space whose whole folder is empty |
 
 On one target no live space's folder equals or contains another's, so a customer `t5` and a node slugged `t5` can never list, prune or adopt each other's objects. The target's folder is stored in one form (`BackupTarget::normalise_prefix()`), and no two targets share a name: a node's chain follows the name of the target it is sent to (below).
@@ -1759,8 +1767,13 @@ window to erase its history. A node that has not reported a window is read at th
 site default of 28 days (`FleetBackupPolicy::retention_days()`). Within the window
 the rule is the one a site's own retention uses (`BackupRunner::surplus()`): every
 group started inside it, dated by the stamp in its name, and the newest one started
-before it. The site removes its own records of manager runs outside its window by
-the same rule, so its Backups page lists what is kept.
+before it. What that finds surplus goes only as `BackupSafety` allows: the
+newest chain a `verify_backup` job passed (`FleetBackupRetention::verified_chains()`)
+and everything newer stay, the newest stays, and a point goes a day after a pass
+first found it surplus, recorded on its storage space (`sps_surplus`; see *What
+retention will not delete* in `docs/backups.md`). The site removes its own records
+of manager runs outside its window by the window alone, so its Backups page lists
+what is kept.
 
 Two provider notes:
 
@@ -1851,7 +1864,7 @@ in [Verifying backups](../../../docs/backups.md#verifying-backups):
 - **Opened and read** is dispatched as a `verify_backup` job (level 2, of the
   newest backup in backup storage) when `FleetBackupPolicy::is_verify_due()` says
   so: the policy's `verify_every_days` is above zero (fleet default
-  `server_manager_fleet_backup_verify_every_days`, 30; 0 means never, stored
+  `server_manager_fleet_backup_verify_every_days`, 7; 0 means never, stored
   as a decision), the node has a successful backup from here, and either no
   verify has ever been attempted, or the last attempt is older than the
   interval and a newer backup exists. The last attempt is the later of the
@@ -1935,10 +1948,12 @@ the job's `VERIFY_*` lines, and adopted from the node's own status report when
 the node verified itself and that is newer — `adopt_reported_verify`).
 `NodeMonitorHealth::verify_state()` gives four answers: a backup storage problem (above)
 is a problem; a verify that failed is a problem, in the node's own words, with
-the note that nothing is retried automatically; a pass older than 60 days is
-**stale**, a problem; and never verified is information on a healthy card
-("Not yet verified restorable") until 45 days after the first backup from
-here, after which it is **"Backups never verified restorable"**. A verify that
+the note that nothing is retried automatically; a pass older than a day past
+the node's verify interval (`FleetBackupPolicy::verify_alarm_days()`, 8 days at
+the weekly default) is **stale**, a problem; and never verified is information
+on a healthy card ("Not yet verified restorable") for the same number of days
+after the first backup from here, after which it is **"Backups never verified
+restorable"**. A verify that
 was skipped (not enough disk — "needs N free, has M" — or a busy machine)
 records only its reason, beside the last real result.
 

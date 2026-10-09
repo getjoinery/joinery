@@ -6,6 +6,9 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.20 - safety: what the site's own backups are missing (BackupSafety::site_warnings, no run off-site
+ *                 for two nights, nothing verified for a day past the interval); the verify interval's
+ *                 shipped default is BackupSafety's
  * @version 1.19 - a site's first enabled target becomes where its backups go when it is saved (the wizard
  *                 inferred it afterwards as the newest enabled target)
  * @version 1.18 - delete_target refuses with BackupTarget::delete_refusal(): not while new backups go there
@@ -112,6 +115,7 @@ function admin_backups_logic($input = array()) {
 		'milestones'    => _admin_backups_milestones(),
 		'ceremony'      => _admin_backups_ceremony_time(),
 		'verify_every'  => _admin_backups_verify_every_days(),
+		'safety'        => _admin_backups_safety(),
 		'recovery'      => BackupRecoveryKey::setup_state(),
 		'plan'          => $plan,
 		'plan_problem'  => $plan_problem,
@@ -447,12 +451,33 @@ function _admin_backups_milestones() {
 }
 
 /**
+ * What this site's own backups are missing (BackupSafety::site_warnings), read
+ * from its site-profile runs. A management node's copies are watched by that
+ * management node.
+ */
+function _admin_backups_safety() {
+	$time = function (array $filters, $order, $field) {
+		$rows = new MultiBackupHistory(array_merge(array('profile' => BackupProfile::SITE), $filters), $order, 1, 0);
+		foreach ($rows as $r) {
+			$t = strtotime((string)$r->get($field) . ' UTC');
+			return $t === false ? null : (int)$t;
+		}
+		return null;
+	};
+	return BackupSafety::site_warnings(
+		$time(array(), array('bkh_start_time' => 'ASC'), 'bkh_start_time'),
+		$time(array('outcome' => 'success', 'offsite' => true, 'deleted' => false), array('bkh_upload_time' => 'DESC'), 'bkh_upload_time'),
+		$time(array('bkh_verify_outcome' => 'pass', 'deleted' => false), array('bkh_verify_time' => 'DESC'), 'bkh_verify_time'),
+		_admin_backups_verify_every_days(), time());
+}
+
+/**
  * Days between scheduled verifications of the newest backup: the setting, or
- * its declared default (30) where the row has not been seeded yet.
+ * its declared default where the row has not been seeded yet.
  */
 function _admin_backups_verify_every_days() {
 	$v = Globalvars::get_instance()->get_setting('backup_verify_every_days', true, true);
-	return ($v === null || $v === '') ? 30 : (int)$v;
+	return ($v === null || $v === '') ? BackupSafety::DEFAULT_VERIFY_EVERY_DAYS : (int)$v;
 }
 
 /**

@@ -104,7 +104,26 @@ $new_sidecar  = $make('site-new.tar.gz.enc' . BackupEnvelope::SIDECAR_SUFFIX, 1)
 $old_snapshot = $make('auto_pre_restore_20260101.sql.gz', 30);
 $unrelated    = $make('notes.txt', 90);
 
-$plan = array('output_dir' => $work, 'keep_local' => 7);
+
+// The sweep takes a backup file only once a run of its kind has finished
+// off-site after it (F2): one did, two days ago.
+$sweep_upload = function ($slug, $profile, $chain_id = null) {
+	$h = new BackupHistory(NULL);
+	if ($chain_id !== null) { $h->set('bkh_chain_id', $chain_id); $h->set('bkh_chain_seq', 0); }
+	$h->set('bkh_type', 'project');
+	$h->set('bkh_outcome', 'success');
+	$h->set('bkh_slug', $slug);
+	$h->set('bkh_profile', $profile);
+	$h->set('bkh_destination', 'target');
+	$h->set('bkh_start_time', gmdate('Y-m-d H:i:s', time() - 2 * 86400 - 600));
+	$h->set('bkh_upload_time', gmdate('Y-m-d H:i:s', time() - 2 * 86400));
+	$h->save();
+	harness_register_row('bkh_backup_history', 'bkh_backup_history_id', $h->key);
+};
+$sweep_slug = 'runner-sweep-' . getmypid();
+$sweep_upload($sweep_slug, 'site');
+$sweep_upload($sweep_slug, 'site', BackupChain::DIR_PREFIX . '20260101_030000');
+$plan = array('output_dir' => $work, 'keep_local' => 7, 'slug' => $sweep_slug, 'profile' => 'site');
 $swept = BackupRunner::sweep_local($plan);
 
 check(!file_exists($old_archive), 'an archive past the window is swept');
@@ -150,7 +169,7 @@ $chain_new_files = $make_in('files-0009.tar.gz.enc', 1);
 $chain_manifest  = $make_in(BackupChain::MANIFEST_NAME, 30);
 $chain_snapshot  = $make('.site.snar', 30);
 
-$swept_chain = BackupRunner::sweep_local(array('output_dir' => $work, 'keep_local' => 7));
+$swept_chain = BackupRunner::sweep_local(array('output_dir' => $work, 'keep_local' => 7, 'slug' => $sweep_slug, 'profile' => 'site'));
 
 check(!file_exists($chain_old_files), 'a chain archive past the window is swept');
 check(!file_exists($chain_old_db) && !file_exists($chain_old_meta),

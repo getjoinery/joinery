@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.35",
+  "version": "1.30.36",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -370,7 +370,7 @@
     },
     {
       "name": "server_manager_fleet_backup_verify_every_days",
-      "default": "30",
+      "default": "7",
       "group": "backups",
       "label": "Days between backup verifications (0 = never)",
       "type": "number",

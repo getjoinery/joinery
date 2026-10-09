@@ -33,6 +33,10 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.29 - retention deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the newest
+ *                verified restore point and everything newer stay, the newest stays, and a point goes only once
+ *                a pass CONFIRM_HOURS earlier found it surplus (bkh_surplus_time); the local sweep keeps every
+ *                backup file written after the newest run of its own kind that finished off-site (F2)
  * @version 1.28 - a manager-profile chain belongs to the target the management node named: a run sent to a
  *                 target of another name starts a new chain (specs/storage_targets.md WP4); a target's
  *                 folder is read in its one form (BackupTarget::normalise_prefix())
@@ -1707,38 +1711,35 @@ class BackupRunner {
 	 * backup, it is no backup, and it would look like a restore point right up
 	 * until someone needed it.
 	 *
+	 * What the window finds surplus goes only as BackupSafety allows: the
+	 * newest verified restore point and everything newer stay, the newest
+	 * chain stays, and a chain is deleted only once a pass CONFIRM_HOURS
+	 * earlier found it surplus too (bkh_surplus_time on its rows).
+	 *
 	 * A plan that does not prune the bucket (the manager profile) removes the
-	 * records only, by the same rule and window: the management node deletes
-	 * the objects, so this site's list must stop naming them. Records removed
-	 * that way are not counted as pruned — this machine deleted nothing.
+	 * records only, by the window alone: the management node deletes the
+	 * objects under its own rules, so this site's list must stop naming them.
+	 * Records removed that way are not counted as pruned — this machine
+	 * deleted nothing.
+	 *
+	 * $now is the clock the decision reads, for a test that runs two passes a
+	 * day apart.
 	 */
-	public static function enforce_chain_retention(array $plan, ?array &$pruned_indexes = null) {
+	public static function enforce_chain_retention(array $plan, ?array &$pruned_indexes = null, $now = null) {
 		if (empty($plan['keep_days'])) {
 			return 0;
 		}
+		$now = ($now === null) ? time() : (int)$now;
 		$deletes = !empty($plan['prunes_cloud']);
-		$rows = new MultiBackupHistory(
-			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
-			      'chained' => true, 'profile' => $plan['profile']),
-			array('bkh_start_time' => 'DESC'), 1000, 0);
-		$rows->load();
-
-		// Newest chain first, preserving the order rows came back in.
-		$chains = array();
-		foreach ($rows as $r) {
-			$cid = (string)$r->get('bkh_chain_id');
-			if ($cid === '') { continue; }
-			if (!isset($chains[$cid])) { $chains[$cid] = array(); }
-			$chains[$cid][] = $r;
+		list($points, $chains) = self::retention_points($plan, true);
+		$surplus = self::surplus($points, $plan['keep_days'], $now);
+		if ($deletes) {
+			list($other) = self::retention_points($plan, false);
+			$decision = BackupSafety::confirm($points, $surplus, self::listed_before($chains), $now,
+				BackupSafety::protect_since($other));
+			self::stamp_surplus($chains, $decision['listed']);
+			$surplus = $decision['delete'];
 		}
-
-		// A chain started when its oldest run did; rows came back newest first.
-		$points = array();
-		foreach ($chains as $cid => $chain_rows) {
-			$points[] = array('item' => $cid,
-				'time' => (int)strtotime(end($chain_rows)->get('bkh_start_time') . ' UTC'));
-		}
-		$surplus = self::surplus($points, $plan['keep_days'], time());
 		if (!$surplus) {
 			return 0;
 		}
@@ -1766,10 +1767,10 @@ class BackupRunner {
 				// a chain that still needs deleting, not like one that is done.
 				// Pruned as well as deleted so the history shows a cleaned-up
 				// chain rather than dropping it (a manual hide sets only delete).
-				$now = gmdate('Y-m-d H:i:s');
+				$stamp = gmdate('Y-m-d H:i:s');
 				foreach ($chains[$cid] as $row) {
-					$row->set('bkh_pruned_time', $now);
-					$row->set('bkh_delete_time', $now);
+					$row->set('bkh_pruned_time', $stamp);
+					$row->set('bkh_delete_time', $stamp);
 					$row->save();
 				}
 				self::rmtree(self::chain_dir($plan, $cid));
@@ -1779,6 +1780,72 @@ class BackupRunner {
 			}
 		}
 		return $deletes ? $pruned : 0;
+	}
+
+	/**
+	 * One family of this plan's offsite restore points, newest first, for
+	 * retention: chains (each point a chain, started when its oldest run
+	 * did, verified when any of its runs passed a verify) or standalone runs
+	 * (each point one row). Returns [points, item => rows].
+	 */
+	private static function retention_points(array $plan, $chained) {
+		$rows = new MultiBackupHistory(
+			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
+			      'chained' => (bool)$chained, 'profile' => $plan['profile']),
+			array('bkh_start_time' => 'DESC'), $chained ? 1000 : 500, 0);
+		$groups = array();
+		foreach ($rows as $r) {
+			$item = $chained ? (string)$r->get('bkh_chain_id') : (string)$r->key;
+			if ($item === '') { continue; }
+			$groups[$item][] = $r;
+		}
+		$points = array();
+		foreach ($groups as $item => $group) {
+			$verified = false;
+			foreach ($group as $r) {
+				if ((string)$r->get('bkh_verify_outcome') === 'pass') { $verified = true; }
+			}
+			// Rows came back newest first: the last is where the point started.
+			$points[] = array('item' => (string)$item, 'verified' => $verified,
+				'time' => (int)strtotime(end($group)->get('bkh_start_time') . ' UTC'));
+		}
+		return array($points, $groups);
+	}
+
+	/** When each point was first found surplus, from its rows: item => unix time. */
+	private static function listed_before(array $groups) {
+		$listed = array();
+		foreach ($groups as $item => $rows) {
+			foreach ($rows as $r) {
+				$t = trim((string)$r->get('bkh_surplus_time'));
+				if ($t !== '') {
+					$listed[$item] = (int)strtotime($t . ' UTC');
+					break;
+				}
+			}
+		}
+		return $listed;
+	}
+
+	/**
+	 * Write this pass's surplus listing onto the rows: a point still surplus
+	 * keeps (or gets) its first-found time, and any other point loses one.
+	 */
+	private static function stamp_surplus(array $groups, array $listed) {
+		foreach ($groups as $item => $rows) {
+			$want = isset($listed[$item]) ? gmdate('Y-m-d H:i:s', (int)$listed[$item]) : null;
+			foreach ($rows as $r) {
+				$have = trim((string)$r->get('bkh_surplus_time'));
+				if ($want === null && $have === '') { continue; }
+				if ($want !== null && $have !== '') { continue; }
+				try {
+					$r->set('bkh_surplus_time', $want);
+					$r->save();
+				} catch (\Throwable $e) {
+					error_log('BackupRunner: could not record history ' . $r->key . ' as surplus: ' . $e->getMessage());
+				}
+			}
+		}
 	}
 
 	// ------------------------------------------------------------------ full
@@ -2322,31 +2389,31 @@ class BackupRunner {
 	 * its incrementals, leaving restore points that look fine and restore
 	 * nothing. Chains are pruned whole by enforce_chain_retention.
 	 */
-	public static function enforce_cloud_retention(array $plan, ?array &$pruned_indexes = null) {
+	public static function enforce_cloud_retention(array $plan, ?array &$pruned_indexes = null, $now = null) {
 		if (empty($plan['keep_days'])) {
 			return 0;
 		}
-		// Records only for a plan that does not prune the bucket, as for chains.
+		$now = ($now === null) ? time() : (int)$now;
+		// Records only for a plan that does not prune the bucket, as for chains;
+		// what may go is BackupSafety's decision, as for chains.
 		$deletes = !empty($plan['prunes_cloud']);
-		$rows = new MultiBackupHistory(
-			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
-			      'chained' => false, 'profile' => $plan['profile']),
-			array('bkh_start_time' => 'DESC'), 500, 0);
-		$rows->load();
-
-		$points = array();
-		foreach ($rows as $r) {
-			$points[] = array('item' => $r, 'time' => (int)strtotime($r->get('bkh_start_time') . ' UTC'));
+		list($points, $runs) = self::retention_points($plan, false);
+		$surplus = self::surplus($points, $plan['keep_days'], $now);
+		if ($deletes) {
+			list($other) = self::retention_points($plan, true);
+			$decision = BackupSafety::confirm($points, $surplus, self::listed_before($runs), $now,
+				BackupSafety::protect_since($other));
+			self::stamp_surplus($runs, $decision['listed']);
+			$surplus = $decision['delete'];
 		}
-
-		$surplus = self::surplus($points, $plan['keep_days'], time());
 		if (!$surplus) {
 			return 0;
 		}
 
 		$targets = array();
 		$pruned = 0;
-		foreach ($surplus as $old) {
+		foreach ($surplus as $item) {
+			$old = $runs[$item][0];
 			try {
 				if ($deletes) {
 					// From the target this run went to (see enforce_chain_retention).
@@ -2357,12 +2424,12 @@ class BackupRunner {
 					}
 					self::delete_row_objects($rplan, $old);
 				}
-				$now = gmdate('Y-m-d H:i:s');
+				$stamp = gmdate('Y-m-d H:i:s');
 				// Soft-deleted so every "what still exists" query stops counting it,
 				// and stamped pruned so the history can still show it as cleaned up
 				// rather than let it vanish (a manual hide sets only delete_time).
-				$old->set('bkh_pruned_time', $now);
-				$old->set('bkh_delete_time', $now);
+				$old->set('bkh_pruned_time', $stamp);
+				$old->set('bkh_delete_time', $stamp);
 				$old->save();
 				$pruned++;
 			} catch (\Throwable $e) {
@@ -2472,6 +2539,13 @@ class BackupRunner {
 	 * finished is enforce_chain_retention()'s job and belongs in one place.
 	 *
 	 * A window of 0 means never sweep.
+	 *
+	 * A backup file written after the newest run of its own kind that
+	 * finished uploading is kept whatever its age (specs/storage_targets.md
+	 * F2): while uploads are failing, it may be the only copy there is. A
+	 * failed run records no artifacts, so this goes by time, not by row:
+	 * everything older than that upload either went offsite with a run or
+	 * belongs to one a newer off-site run of the same kind supersedes.
 	 */
 	public static function sweep_local(array $plan) {
 		// Temporaries of the object store — one object's ciphertext a budget or
@@ -2486,10 +2560,22 @@ class BackupRunner {
 		$cutoff = time() - ($days * 86400);
 		$dir = $plan['output_dir'];
 
-		$candidates = BackupNaming::list_dir($dir);
-		// A standalone run's objects index ages out with the archive it names.
+		// Backup files, each with the kind of run that would have taken it
+		// offsite: a standalone run's archives by their type, and its objects
+		// index, which ages out with the project archive it names; then every
+		// chain's files.
+		$backups = array();
+		foreach (BackupNaming::list_dir($dir) as $p) {
+			$backups[$p] = array('chained' => false, 'type' => BackupNaming::restore_type(basename($p)));
+		}
 		foreach (glob($dir . '/*' . BackupNaming::INDEX_SUFFIX) ?: array() as $p) {
-			if (is_file($p)) { $candidates[] = $p; }
+			if (is_file($p)) { $backups[$p] = array('chained' => false, 'type' => 'project'); }
+		}
+		foreach (glob($dir . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $chain_d) {
+			foreach (BackupNaming::list_dir($chain_d) as $p) { $backups[$p] = array('chained' => true); }
+			foreach (glob($chain_d . '/objects-*.json.gz') ?: array() as $p) {
+				if (is_file($p)) { $backups[$p] = array('chained' => true); }
+			}
 		}
 		// Pre-restore dumps. NOTHING WRITES THESE ANY MORE — a restore keeps
 		// nothing of what it replaces (owner, 2026-08-30; see
@@ -2500,22 +2586,28 @@ class BackupRunner {
 		//
 		// `auto_pre_*` is the older dashboard-prepended kind;
 		// `*-pre-restore.sql.gz[.enc]` is the one the engine briefly wrote.
+		$dumps = array();
 		foreach (array('/auto_pre_*', '/*-pre-restore.sql.gz', '/*-pre-restore.sql.gz.enc') as $pattern) {
 			foreach (glob($dir . $pattern) ?: array() as $p) {
-				if (is_file($p)) { $candidates[] = $p; }
+				if (is_file($p)) { $dumps[] = $p; }
 			}
 		}
-		foreach (glob($dir . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $chain_d) {
-			foreach (BackupNaming::list_dir($chain_d) as $p) { $candidates[] = $p; }
-			foreach (glob($chain_d . '/objects-*.json.gz') ?: array() as $p) {
-				if (is_file($p)) { $candidates[] = $p; }
-			}
-		}
+		$proven = array();   // kind => time, read once per kind
 
 		$swept += self::sweep_staged_restores($plan, $cutoff) + self::sweep_verify_work($plan);
-		foreach (array_unique($candidates) as $path) {
+		$candidates = $backups;
+		// A pre-restore dump also carries a backup suffix; it is still not a backup.
+		foreach (array_unique($dumps) as $p) { $candidates[$p] = null; }
+		foreach ($candidates as $path => $kind) {
 			if (!is_file($path) || filemtime($path) >= $cutoff) {
 				continue;
+			}
+			if ($kind !== null) {
+				$k = json_encode($kind);
+				if (!isset($proven[$k])) { $proven[$k] = self::offsite_until($plan, $kind); }
+				if (filemtime($path) > $proven[$k]) {
+					continue;
+				}
 			}
 			// An archive and its envelope go together. Deleting the archive and
 			// leaving the envelope accumulates files that look like restore
@@ -2527,6 +2619,31 @@ class BackupRunner {
 			}
 		}
 		return $swept;
+	}
+
+	/**
+	 * The time up to which local backup files of one kind are proven offsite:
+	 * the upload time of the newest run of that kind that finished off-site,
+	 * or PHP_INT_MIN when none ever did. A file is judged by runs of its own
+	 * kind — a chain's files by chain runs, a standalone archive by standalone
+	 * runs of its type — so a database run uploading never vouches for a
+	 * project archive that did not.
+	 */
+	private static function offsite_until(array $plan, array $kind) {
+		// A plan that names no site cannot ask about its own runs, and another
+		// site's upload vouches for nothing here.
+		if (trim((string)($plan['slug'] ?? '')) === '' || trim((string)($plan['profile'] ?? '')) === '') {
+			return PHP_INT_MIN;
+		}
+		$rows = new MultiBackupHistory(array_merge(
+			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
+			      'profile' => $plan['profile']), $kind),
+			array('bkh_upload_time' => 'DESC'), 1, 0);
+		foreach ($rows as $r) {
+			$t = strtotime((string)$r->get('bkh_upload_time') . ' UTC');
+			if ($t !== false) { return (int)$t; }
+		}
+		return PHP_INT_MIN;
 	}
 
 	/**

@@ -131,16 +131,21 @@ $mgr_out  = BackupProfile::output_dir(BackupProfile::MANAGER, $tmp);
 mkdir($mgr_out, 0700, true);
 
 $old = time() - (30 * 86400);
-$site_file = $site_out . '/demo-20260101_000000.tar.gz.enc';
-$mgr_file  = $mgr_out  . '/demo-20260101_000000.tar.gz.enc';
+// Pre-restore dumps: the sweep takes them by age alone, so which directory
+// each sweep reaches is the only thing deciding here. (A backup archive also
+// waits for an off-site run of its kind, which this read-only test cannot
+// record.)
+$site_file = $site_out . '/auto_pre_demo_20260101.sql.gz';
+$mgr_file  = $mgr_out  . '/auto_pre_demo_20260101.sql.gz';
 file_put_contents($site_file, 'x');
 file_put_contents($mgr_file, 'x');
 touch($site_file, $old);
 touch($mgr_file, $old);
 
+
 $swept = BackupRunner::sweep_local(array('output_dir' => $site_out, 'keep_local' => 7));
 
-check($swept === 1, 'the site sweep takes its own stale archive', (string)$swept);
+check($swept === 1, 'the site sweep takes its own stale file', (string)$swept);
 check(!is_file($site_file), 'which is gone');
 check(is_file($mgr_file), 'and the management node\'s copy is untouched');
 

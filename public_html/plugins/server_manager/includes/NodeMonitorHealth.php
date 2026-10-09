@@ -13,6 +13,8 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.24 - verify_state(): never verified and stale are problems a day past the node's verify interval
+ *                 (FleetBackupPolicy::verify_alarm_days(), 8 days at the weekly default), not 45 and 60 days
  * @version 1.23 - problems(), fleet_backup_problems() and script_trust_problems() are gone with the
  *                dashboard banners they fed; each condition is an incident (IncidentSource*)
  * @version 1.22 - unpublished_file also covers an edit in progress on this management node: a refused file
@@ -802,11 +804,12 @@ class NodeMonitorHealth {
 	 *                   to the end, or a rehearsal did not restore. A problem,
 	 *                   in the node's own words, surfaced exactly like a failed
 	 *                   backup and never acted on automatically.
-	 *   stale           the last pass is older than VERIFY_STALE_DAYS. A problem:
-	 *                   the schedule should have verified again by now.
-	 *   never           information for NEVER_VERIFIED_GRACE_DAYS after the
-	 *                   first backup from here, a problem after that — a node
-	 *                   the schedule has had six weeks to verify and has not.
+	 *   stale           the last pass is older than a day past the verify
+	 *                   interval (FleetBackupPolicy::verify_alarm_days()). A
+	 *                   problem: the schedule should have verified again by now,
+	 *                   and retention is keeping every backup since that pass.
+	 *   never           information for the same number of days after the
+	 *                   first backup from here, a problem after that.
 	 *
 	 * A verify that was SKIPPED (not enough disk, a busy machine) stamps only
 	 * the message, so the last real result still stands and the skip's reason
@@ -834,7 +837,8 @@ class NodeMonitorHealth {
 
 		if ($time === false) {
 			$first = ($first_backup === null) ? self::first_backup_time($node) : $first_backup;
-			$grace = FleetBackupPolicy::NEVER_VERIFIED_GRACE_DAYS * 86400;
+			$alarm_days = FleetBackupPolicy::verify_alarm_days($policy);
+			$grace = $alarm_days * 86400;
 			$every = (int)($policy['verify_every_days'] ?? 0);
 			if ($every <= 0) {
 				return array('is_problem' => false, 'label' => 'Not verified',
@@ -844,7 +848,7 @@ class NodeMonitorHealth {
 			if ($first !== false && (time() - $first) > $grace) {
 				return array('is_problem' => true, 'label' => 'Backups never verified restorable',
 					'detail' => 'This node has been backed up from here for more than '
-						. FleetBackupPolicy::NEVER_VERIFIED_GRACE_DAYS . ' days and no backup has ever been '
+						. $alarm_days . ' days and no backup has ever been '
 						. 'opened and read to prove it restorable.' . ($message !== '' ? ' Last attempt: ' . $message : ''));
 			}
 			return array('is_problem' => false, 'label' => 'Not yet verified',
@@ -860,11 +864,13 @@ class NodeMonitorHealth {
 					. ($message !== '' ? $message : 'no reason given')
 					. ' Nothing is retried automatically; verify again from the Backups tab once the cause is fixed.');
 		}
-		if ($since > FleetBackupPolicy::VERIFY_STALE_DAYS * 86400) {
+		$alarm_days = FleetBackupPolicy::verify_alarm_days($policy);
+		if ($alarm_days > 0 && $since > $alarm_days * 86400) {
 			return array('is_problem' => true, 'label' => 'Backup verification is stale',
 				'detail' => 'The last backup verified restorable (' . $level_words . ') was '
-					. self::humanize($since) . ' ago, longer than ' . FleetBackupPolicy::VERIFY_STALE_DAYS
-					. ' days; the schedule should have verified again by now.');
+					. self::humanize($since) . ' ago, longer than ' . $alarm_days
+					. ' days; the schedule should have verified again by now. Every backup since then is kept '
+					. 'until a newer one passes.');
 		}
 		return array('is_problem' => false, 'label' => 'Verified restorable',
 			'detail' => 'Verified restorable ' . self::humanize($since) . ' ago (' . $level_words . ').'

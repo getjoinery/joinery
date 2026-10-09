@@ -1,12 +1,41 @@
 # Storage targets — every stored object knows where it lives
 
-**Status:** Building — 2026-10-08. No open owner decisions; build order in §10.
+**Status:** Building — 2026-10-09. No open owner decisions; build order in §10.
 WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces), and the
-reviewer1 review of WP1–WP4 committed (de6202d4). **WP6 built, uncommitted (10-08):** dev migrated by
-migration 210 (the file store is target row 2550, 824 blobs stamped; the binding settings are gone) and
-`iem_019`; the live B2 test passes against dev's bucket. A browser look at the target forms, the node Move
-form, Who backs up here and Adopt is owed, and now the Cloud Storage page's Switch to another bucket and
-Move files on a real second bucket. WP6 notes, decided while building:
+reviewer1 review of WP1–WP4 committed (de6202d4). WP6 committed (c10c7f1b; dev migrated by migration 210
+and `iem_019`). **WP7 built, uncommitted (10-09):** dev migrated by migration 211 and `sm_017`; the live
+retention test (F5) passes against dev's B2 bucket, and its Linode half waits for a Linode backup target.
+A browser look at the target forms, the node Move form, Who backs up here, Adopt, and the Cloud Storage
+page's Switch to another bucket and Move files on a real second bucket is owed, and now the Backups page's
+two safety warnings. WP7 notes, decided while building:
+- Owner Q1 (10-08): verification is weekly by default, for sites (`backup_verify_every_days`) and nodes
+  (`server_manager_fleet_backup_verify_every_days`), and "not verified" is a problem a day past the
+  interval (8 days). Migration 211 and `sm_017` move settings and node policies still at the old 30.
+- One rule, `BackupSafety::confirm()`, decides for every pruner: site chains and standalone runs,
+  `FleetBackupRetention::prune()` and the customer `retain_chains()`.
+- A site chain is verified when any of its runs carries `bkh_verify_outcome` pass; no new column.
+- "Found surplus" is `bkh_surplus_time` on a site and `sps_surplus` on the storage space on the
+  management node (not `svr_surplus_time`): a node's chains have no run rows until WP5, and a chain the
+  reconcile adopted has no run.
+- F2 goes by time: a failed run records no artifacts (a chain run already discards its files), so the
+  sweep keeps every backup file written after the newest run of its own kind (chain, or standalone of
+  its type) that finished uploading.
+- reviewer1's review (10-09: 1 medium, 1 low-medium, 1 low, 2 notes) is fixed: F2 judges a file by runs of
+  its own kind; the verified floor is read from the verify jobs and verified runs, never from a listing, so
+  a space that cannot be listed cannot let what is newer than its verified chain go; migration 211 has no
+  test, so an operator's later 30 stays; the unreachable local-plan branch is gone. Its note N2 stands as
+  written below (customers alarm and hold draining spaces until the site half reports verifies). reviewer1
+  verified the fixes (10-09).
+- Customers: `svr_verified_time` is stamped by the new `shelf_verified_run` action
+  (`ServicesClient::shelfVerifiedRun()`); the site half calls it when the services site side is built.
+  Until then no customer chain is verified: customers alarm as never verified, and a customer's draining
+  space (released now by a verified run, not a finished one) is held. Owner (10-09): kept as built, so the
+  gap cannot go unnoticed when customers arrive.
+- Incidents: a Managed node's two-night gap and verify gap are the existing `plane:backups_stopped` and
+  `plane:backup_unverified` (now 8 days); customers get `plane:customer_backups` on this node.
+- §13's `backup_safety_test` covers F1–F3; its F4 and F9 checks come with WP5.
+
+WP6 notes, decided while building:
 - A row records its store and the full key of its **primary** object (`fbb_remote_key`,
   `iem_raw_remote_key`); a blob's variants sit beside it (`FileBlob::remote_key_for()`).
 - The file store's own on/off is still `cloud_storage_enabled` (Pause); `bkt_enabled` stays on for a file
@@ -29,7 +58,7 @@ WP4 notes, decided while building:
   "verified" half joins with WP7's `svr_verified_time` (F1). A node's needs a passed verify of a
   chain in the active space (the verify job names `space_id`).
 - `svr_mgn_managed_node_id` (runs with a node owner) is left to WP5, which is its first user.
-WP7 next.
+WP8 waits for WP5; WP5 waits for `backup_database_incrementals.md`'s `BackupRunner` work.
 **Takes over:** item 2b (the object-store seam) and the shelf-target parts of item 2a in
 `services_phase2_platform.md`, which stays the owner of the services themselves
 (enrolment, metering, the lapse ladder, the site side).

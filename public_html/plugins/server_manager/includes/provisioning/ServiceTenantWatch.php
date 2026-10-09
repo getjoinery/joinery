@@ -25,7 +25,9 @@
  *      plane's credential, its unfinished ledger rows dropped).
  *   5. Retention. Every active tenant's backup storage is pruned to the newest
  *      server_manager_services_shelf_keep_chains chains per profile, chains
- *      whole, a chain with an open run never touched. A suspended or released
+ *      whole, a chain with an open run never touched, and only as
+ *      BackupSafety allows (the newest verified chain and everything newer
+ *      stay; a chain goes a day after it was first found surplus). A suspended or released
  *      tenant whose prune-after day has come loses its whole prefix, once,
  *      and the row says so.
  *
@@ -36,7 +38,7 @@
  * each space is listed, reconciled and pruned against its own target, and a
  * space that cannot be reached is reported and left alone, never read as
  * empty. A space the tenant was moved away from (draining) is kept whole
- * until the active space holds a finished run, then ages out by the same
+ * until the active space holds a verified run, then ages out by the same
  * chain retention; once nothing is left in it, it is retired. An object
  * that goes keeps its ledger row, marked with when and why.
  *
@@ -49,6 +51,10 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.5 - retention deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the newest
+ *                verified chain and everything newer stay, the newest stays, and a chain goes only once a pass
+ *                CONFIRM_HOURS earlier found it surplus (sps_surplus); a draining space is released by a verified
+ *                run in the active space, not a finished one
  * @version 1.4 - a draining space is released only by a run finished with something stored since the active
  *                space was (re)opened
  * @version 1.3 - reconcile, retention and the lapse prune work space by space against each space's own
@@ -184,7 +190,7 @@ class ServiceTenantWatch {
 			$acted += $this->prune_if_due($row, $now);
 			if ((string)$row->get('svt_state') === ServiceTenant::STATE_ACTIVE) {
 				$acted += $this->reconcile_shelf($row, $now);
-				$acted += $this->retain_chains($row);
+				$acted += $this->retain_chains($row, (int)strtotime($now . ' UTC'));
 			}
 		}
 		return $acted;
@@ -544,12 +550,16 @@ class ServiceTenantWatch {
 
 	/**
 	 * The newest N chains per profile stay, counted across the tenant's
-	 * spaces; older ones go whole, each from its own space's target. A space
-	 * the tenant moved away from is kept whole until the active space holds a
-	 * finished run, so there is never a night with no copy to restore. A
-	 * draining space left empty is retired.
+	 * spaces; older ones go whole, each from its own space's target, and only
+	 * as BackupSafety allows: the newest verified chain and everything newer
+	 * stay, the newest stays, and a chain goes only once a pass CONFIRM_HOURS
+	 * earlier found it surplus too (recorded on its space). A space the tenant
+	 * moved away from is kept whole until the active space holds a verified
+	 * run, so there is never a night with no copy to restore. A draining space
+	 * left empty is retired.
 	 */
-	private function retain_chains(ServiceTenant $row): int {
+	private function retain_chains(ServiceTenant $row, ?int $now = null): int {
+		$now = $now ?? time();
 		$keep = self::keep_chains();
 		$spaces = array();
 		$active = null;
@@ -560,7 +570,7 @@ class ServiceTenantWatch {
 		if (!$spaces) {
 			return 0;
 		}
-		$hold_draining = !self::holds_finished_run($active);
+		$hold_draining = !self::holds_verified_run($active);
 
 		$objects = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'completed' => true, 'pruned' => false,
 			'deleted' => false));
@@ -581,15 +591,54 @@ class ServiceTenantWatch {
 			$families[$parts[0]][$id]['objects'][] = $object;
 		}
 		$busy = array();
-		$open = new MultiShelfRun(array('tenant_id' => (int)$row->key, 'state' => ShelfRun::STATE_OPEN, 'deleted' => false));
-		foreach ($open as $run) {
-			$busy[(string)$run->get('svr_chain')] = true;
+		$verified = array();
+		$floor = array();   // profile => start of its newest verified chain, from the runs alone
+		$runs = new MultiShelfRun(array('tenant_id' => (int)$row->key, 'deleted' => false));
+		foreach ($runs as $run) {
+			if ((string)$run->get('svr_state') === ShelfRun::STATE_OPEN) {
+				$busy[(string)$run->get('svr_chain')] = true;
+			}
+			if ($run->get('svr_verified_time')) {
+				$verified[(string)$run->get('svr_chain') . '|' . (int)$run->get('svr_sps_storage_space_id')] = true;
+				$profile = (string)$run->get('svr_profile');
+				$t = FleetBackupRetention::start_time_of((string)$run->get('svr_chain'));
+				if ($t > 0 && $t > ($floor[$profile] ?? 0)) { $floor[$profile] = $t; }
+			}
+		}
+
+		// Each space's surplus listing, by "profile/chain".
+		$listed_before = array();
+		foreach ($spaces as $sid => $space) {
+			foreach ($space->surplus_listed() as $name => $first) {
+				$listed_before[$sid][$name] = $first;
+			}
+		}
+		$listed = array();
+		$deleting = array();   // profile => [id]
+		foreach ($families as $profile => $chains) {
+			krsort($chains, SORT_STRING);   // chain-YYYYMMDD_HHMMSS|space: newest first
+			$points = array();
+			$before = array();
+			foreach ($chains as $id => $family) {
+				$sid = (int)$family['space']->key;
+				$points[] = array('item' => $id, 'time' => FleetBackupRetention::start_time_of($family['chain']),
+					'verified' => isset($verified[$id]));
+				if (isset($listed_before[$sid][$profile . '/' . $family['chain']])) {
+					$before[$id] = $listed_before[$sid][$profile . '/' . $family['chain']];
+				}
+			}
+			$surplus = array_keys(array_slice($chains, $keep, null, true));
+			$decision = BackupSafety::confirm($points, $surplus, $before, $now, $floor[$profile] ?? null);
+			foreach ($decision['listed'] as $id => $first) {
+				$listed[(int)$chains[$id]['space']->key][$profile . '/' . $chains[$id]['chain']] = $first;
+			}
+			$deleting[$profile] = $decision['delete'];
 		}
 
 		$pruned = 0;
-		foreach ($families as $profile => $chains) {
-			krsort($chains, SORT_STRING);   // chain-YYYYMMDD_HHMMSS|space: newest first
-			foreach (array_slice($chains, $keep, null, true) as $family) {
+		foreach ($deleting as $profile => $ids) {
+			foreach ($ids as $id) {
+				$family = $families[$profile][$id];
 				$space = $family['space'];
 				if (isset($busy[$family['chain']]) || ($space->is_draining() && $hold_draining)) {
 					continue;
@@ -605,12 +654,20 @@ class ServiceTenantWatch {
 					foreach ($family['objects'] as $object) {
 						$object->markPruned(ShelfObject::PRUNED_RETENTION);
 					}
+					unset($listed[(int)$space->key][$profile . '/' . $family['chain']]);
 					$pruned++;
 				} catch (\Throwable $e) {
 					$this->errors[] = $this->label($row) . ': retention of ' . $profile . '/' . $family['chain'] . ' in '
 						. $space->describe() . ' failed: ' . $e->getMessage();
 					error_log('ServiceTenantWatch: retention of ' . $family['chain'] . ' for ' . $this->label($row) . ' failed: ' . $e->getMessage());
 				}
+			}
+		}
+		foreach ($spaces as $sid => $space) {
+			try {
+				$space->record_surplus($listed[$sid] ?? array());
+			} catch (\Throwable $e) {
+				$this->errors[] = $this->label($row) . ': ' . $space->describe() . ' could not record what is surplus: ' . $e->getMessage();
 			}
 		}
 		if ($pruned) {
@@ -625,18 +682,18 @@ class ServiceTenantWatch {
 	}
 
 	/**
-	 * Has the space, since it became active, taken a run that finished with
-	 * something stored? A space that has not holds no complete chain yet: an
-	 * empty run, or one from an earlier time the tenant was here, proves
+	 * Has the space, since it became active, taken a run the site has since
+	 * verified restorable? A space that has not holds no proven chain yet: an
+	 * unverified run, or one from an earlier time the tenant was here, proves
 	 * nothing about now.
 	 */
-	public static function holds_finished_run(?StorageSpace $space): bool {
+	public static function holds_verified_run(?StorageSpace $space): bool {
 		if ($space === null) {
 			return false;
 		}
 		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT 1 FROM svr_shelf_runs r
 			WHERE r.svr_sps_storage_space_id = ? AND r.svr_state = 'finished' AND r.svr_delete_time IS NULL
-			  AND r.svr_create_time >= ?
+			  AND r.svr_verified_time IS NOT NULL AND r.svr_create_time >= ?
 			  AND EXISTS (SELECT 1 FROM svo_shelf_objects o WHERE o.svo_svr_shelf_run_id = r.svr_shelf_run_id
 			              AND o.svo_completed_time IS NOT NULL AND o.svo_delete_time IS NULL)
 			LIMIT 1");

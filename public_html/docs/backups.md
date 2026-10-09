@@ -1013,7 +1013,8 @@ its backups age out ([Server Manager § Storage spaces](../plugins/server_manage
   replays from. The window is days rather than a count because chains differ in
   length (the configured interval, a key rotation, a lost snapshot), so a count
   of chains covers an unpredictable span. The rule is `BackupRunner::surplus()`, shared
-  with the management node's retention. Older restore points are deleted,
+  with the management node's retention. Older restore points are deleted as
+  [What retention will not delete](#what-retention-will-not-delete) allows,
   driven by this site's own run history rather than by a
   bucket listing, so it can only ever delete objects this site recorded writing.
   Retention runs last in a backup, and only after an upload is confirmed: a run
@@ -1057,6 +1058,46 @@ its backups age out ([Server Manager § Storage spaces](../plugins/server_manage
   part of pruning the bucket, and a managed node does not prune the bucket —
   backup storage belongs to the management node, and the credential the node is
   handed cannot delete.
+
+  A backup file written after the newest run of its own kind that finished
+  uploading is kept whatever its age: while uploads are failing it may be the
+  only copy. A chain's files are judged by chain runs, a standalone archive by
+  standalone runs of its type, so a database run uploading never vouches for a
+  project archive that did not. A failed run records no files, so this goes by
+  time — everything older either went offsite with its run or belongs to one a
+  newer off-site run of the same kind supersedes.
+
+### What retention will not delete
+
+Retention picks what is surplus, by age on a site and for a Managed node, by
+count for a customer of backup storage. `BackupSafety` decides which of that
+may go, for every pruner alike — a site's own retention and the management
+node's prune of its nodes and its customers:
+
+- **The newest verified backup stays, and everything newer.** A restore point
+  a verify passed (a pass on any of its runs) is kept however old, with every
+  point newer than it, until a newer one passes. Backups that upload fine but
+  do not open can never age the last good one out; verification is weekly by
+  default for that reason, and storage grows while nothing passes.
+- **The newest backup stays**, whatever the rule says.
+- **Nothing goes the first time it is surplus.** A pass that finds a point
+  surplus records when — `bkh_surplus_time` on its rows on a site,
+  `sps_surplus` on its storage space on the management node — and deletes
+  nothing. A later pass at least 20 hours on (`BackupSafety::CONFIRM_HOURS`)
+  that still finds it surplus deletes it; a pass that keeps it clears the
+  record, so a point that becomes surplus again waits again. A wrong rule shows
+  as a day of waiting deletions before anything goes.
+
+A plan that removes records only (the manager profile on a managed site)
+follows the window alone; the management node applies these rules to the
+objects.
+
+The site's Backups page says when no backup of its own has finished going
+offsite for two nights, and when none has passed verification for a day past
+the verify interval (`BackupSafety::site_warnings()`; nothing before the
+site's first run is that old). The management node raises the same two as
+incidents for its nodes (`plane:backups_stopped`, `plane:backup_unverified`)
+and for its customers of backup storage (`plane:customer_backups`).
 
 ## Restoring
 
@@ -1325,15 +1366,16 @@ skip's reason is `disk` (with both numbers, so the card can say "needs N free,
 has M"), `createdb`, or `busy`. An object retention deleted from under a verify
 in flight fails with reason `gone`, naming the object — an archive, an epoch
 envelope or a sampled offloaded file alike; the next pass verifies the newer
-backup, and the retention pass never holds a deletion for a verify — a verify
-must not be able to keep a backup alive.
+backup, and the retention pass never holds a deletion for a verify in flight.
+What keeps a backup is a verify that passed ([What retention will not
+delete](#what-retention-will-not-delete)).
 
 ### The site's own backups
 
 A site verifies its own backups the same way: the **Backup verification**
 scheduled task (`tasks/BackupVerify.php`, switched on together with **Backup**
 by `BackupNightly`) opens and reads the site's newest own backup every
-`backup_verify_every_days` (30 by default; 0 never), signing the links from
+`backup_verify_every_days` (7 by default; 0 never), signing the links from
 the site's own target through `S3Signer::presign_get` — no credential reaches
 the script. It is due when the interval has passed since the last verify (pass
 or fail) and a newer backup exists, or when nothing has ever been verified. A
@@ -1676,7 +1718,7 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_type` | `project` | Whole site, or database only |
 | `backup_mode` | `chain` | Incremental chains, or a full every time |
 | `backup_full_interval_days` | `7` | Days before a chain rolls to a fresh full |
-| `backup_verify_every_days` | `30` | Days between verifications of the newest backup by opening and reading it; 0 never |
+| `backup_verify_every_days` | `7` | Days between verifications of the newest backup by opening and reading it; 0 never |
 | `backup_retention_days` | `28` | Days of restore points kept offsite; blank reads as 28 |
 | `backup_output_dir` | `/backups` | Working directory backups are built in |
 | `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |
