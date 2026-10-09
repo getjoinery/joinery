@@ -3511,6 +3511,87 @@ fn a_folder_parked_while_its_directory_stands_elsewhere_keeps_it() {
     assert!(after.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap-")), "{:?}", after.local_name);
 }
 
+/// A file parked off a contested name while its own file stands at another
+/// path is not disowned: the user moved it, the park stands down with the
+/// record untouched, and the next scan re-derives the move by the file's
+/// identity. Two ways the agreed path can be empty of it: nothing there, or
+/// another record's file there. Disowned, the moved file stood on with no
+/// record, a rotation carried it onto another record's path, and the scan
+/// read it as that record's edit -- one file's bytes uploaded as a version
+/// of another (rig run 1873). RED without `keep_a_moved_file`.
+#[test]
+fn a_file_parked_while_its_own_file_stands_elsewhere_keeps_it() {
+    for anothers_file_at_the_name in [false, true] {
+        let label = if anothers_file_at_the_name { "another's file at the name" } else { "nothing at the name" };
+        let (_clock, _server, device) = world();
+        let body = b"this record's own bytes, moved by the user";
+        device.fs.user_write("slot-2.dat", body);
+        let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+        let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("slot-2.dat")).unwrap().expect("the moved file");
+        assert!(mine.identity().is_strong(), "construction: a volume with births");
+        let id = EntityId::file(1_873);
+        let mut entry = fresh(id, None, "slot-1 (conflicted copy).dat", LocalStatus::Synced);
+        entry.synced_placement = Some(Placement { parent: None, name: "slot-3.dat".into() });
+        entry.synced_fingerprint = Some(mine);
+        entry.own_file = Some(mine.identity());
+        entry.synced_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+        entry.last_seen_sha = Some(sha256_hex(body));
+        device.store.put_entry(&entry).unwrap();
+        if anothers_file_at_the_name {
+            let theirs_body = b"the other record's bytes, agreed at slot-3";
+            device.fs.user_write("slot-3.dat", theirs_body);
+            let theirs_fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("slot-3.dat")).unwrap().expect("their file");
+            let mut theirs = fresh(EntityId::file(1_874), None, "slot-3.dat", LocalStatus::Synced);
+            theirs.synced_placement = Some(theirs.remote.clone());
+            theirs.synced_fingerprint = Some(theirs_fp);
+            theirs.own_file = Some(theirs_fp.identity());
+            theirs.synced_content = Some(ContentId { sha256: sha256_hex(theirs_body), size: theirs_body.len() as u64 });
+            theirs.last_seen_sha = Some(sha256_hex(theirs_body));
+            device.store.put_entry(&theirs).unwrap();
+        }
+
+        let report = do_one(
+            &device,
+            id,
+            Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "slot-3.dat".into() } },
+        );
+        assert_eq!((report.done, report.overtaken), (0, 1), "{label}: {report:?}");
+        let after = device.store.get_entry(id).unwrap().unwrap();
+        assert_eq!(after.own_file, Some(mine.identity()), "{label}: the record forgot its own file");
+        assert_eq!(after, entry, "{label}: the park stands down and changes nothing");
+        assert_eq!(device.fs.peek("slot-2.dat").as_deref(), Some(&body[..]), "{label}: the moved file is untouched");
+    }
+}
+
+/// The other side of the same rule: a record whose own file stands nowhere on
+/// this disk has nothing to keep, and the park disowns it as it always did.
+#[test]
+fn a_file_parked_whose_own_file_stands_nowhere_is_disowned() {
+    let (_clock, _server, device) = world();
+    let body = b"bytes that left this disk";
+    device.fs.user_write("gone.dat", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let was = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("gone.dat")).unwrap().expect("the file");
+    device.fs.user_remove("gone.dat");
+    let id = EntityId::file(1_875);
+    let mut entry = fresh(id, None, "slot-1 (conflicted copy).dat", LocalStatus::Synced);
+    entry.synced_placement = Some(Placement { parent: None, name: "slot-3.dat".into() });
+    entry.synced_fingerprint = Some(was);
+    entry.own_file = Some(was.identity());
+    entry.synced_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "slot-3.dat".into() } },
+    );
+    assert_eq!(report.done, 1, "{report:?}");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert!(matches!(after.status, LocalStatus::Unsyncable(_)), "{:?}", after.status);
+    assert!(after.synced_placement.is_none() && after.own_file.is_none(), "{after:?}");
+}
+
 /// The same on a USB stick, where neither a file nor a directory has an id:
 /// the aside's folder is found by the records' paths, and the held record
 /// follows its file there. Asked of the directory id alone, nothing followed,

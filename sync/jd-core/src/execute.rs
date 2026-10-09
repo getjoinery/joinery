@@ -5691,6 +5691,11 @@ fn unmaterialize_and_park(
             // alone would throw away work nobody has sent, which is the one
             // thing this operation exists to refuse.
             if the_file_here_is_another_entrys(env, &entry, &path, now)? {
+                // Not this record's file, and not this record's to give up
+                // either if its own file stands elsewhere: the user moved it.
+                if let Some(kept) = keep_a_moved_file(env, &entry, &path)? {
+                    return Ok(kept);
+                }
                 entry.synced_placement = None;
                 entry.synced_fingerprint = None;
                 entry.own_file = None;
@@ -5737,6 +5742,10 @@ fn unmaterialize_and_park(
             Err(jd_vfs::VfsError::NotFound(_)) => {}
             Err(e) => return Err(e.into()),
         }
+    } else if let Some(kept) = keep_a_moved_file(env, &entry, &path)? {
+        // Nothing at the agreed path, and the record's own file standing
+        // elsewhere: the user moved it, and there is no copy to give up.
+        return Ok(kept);
     }
     let told = entry
         .synced_placement
@@ -7045,6 +7054,74 @@ fn record_a_file_found_landing(
     }
     env.store.put_entry(&found)?;
     Ok(())
+}
+
+/// The park's row 4 for a file, as the folder arm above asks it of a
+/// directory: nothing of this record's stands at the agreed path, but does
+/// its own file stand somewhere else on this disk? Then the user moved it,
+/// and the clash naming judged is against an agreement the disk has left
+/// behind. The park stands down and changes nothing: the next scan finds the
+/// file by its identity and the move it plans rewrites the agreement, which
+/// ends the clash. Disowned instead, the file stood on with no record, the
+/// user's next rename carried it onto another record's path, and the scan
+/// read it there as that record's edit: one file's bytes went up as a
+/// version of another (rig run 1873).
+///
+/// Not a scratch name, as the folder arm writes: a file record wearing one
+/// with no operation open is an abandoned park to naming, which parks it
+/// again for the reserved prefix.
+///
+/// `None` when the question cannot be asked (a folder, or a volume whose ids
+/// are not identity) or the answer is no: the caller disowns as before.
+fn keep_a_moved_file(
+    env: &ExecEnv,
+    entry: &Entry,
+    agreed: &std::path::Path,
+) -> Result<Option<OpOutcome>, ExecError> {
+    let Some(own) = trusted_own_file(env, entry) else {
+        return Ok(None);
+    };
+    match where_file_stands(env, own)? {
+        Some(stands) if stands != agreed => Ok(Some(OpOutcome::Overtaken(format!(
+            "its own file stands at {}; deciding again from what is there now",
+            stands.display(),
+        )))),
+        _ => Ok(None),
+    }
+}
+
+/// Where on this disk the file with this identity stands, if anywhere. The
+/// engine's scratch names count -- a file standing under one stands -- but
+/// a scratch directory is not walked into, as `observed_dirs` does not.
+fn where_file_stands(
+    env: &ExecEnv,
+    own: jd_vfs::FileIdentity,
+) -> Result<Option<std::path::PathBuf>, ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(None);
+    };
+    let mut queue = vec![root];
+    let mut guard = 0;
+    while let Some(dir) = queue.pop() {
+        guard += 1;
+        if guard > 100_000 {
+            return Err(ExecError::Contract("the local walk does not end".into()));
+        }
+        for child in env.vfs.read_dir_all(&dir)? {
+            match child.kind {
+                jd_vfs::EntryKind::File => {
+                    if child.fingerprint.is_some_and(|fp| fp.identity() == own) {
+                        return Ok(Some(dir.join(&child.name)));
+                    }
+                }
+                jd_vfs::EntryKind::Directory if !jd_vfs::is_internal(&child.name) => {
+                    queue.push(dir.join(&child.name));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Is the file at this path the one both sides agreed on: unchanged since, or

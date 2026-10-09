@@ -18261,3 +18261,133 @@ fn a_traced_pass_plans_and_does_exactly_what_an_untraced_one_does() {
         assert_eq!(p, t, "pass {n} differs with the trace on");
     }
 }
+
+/// Rig run 1873. A record's move to the name the server gave it is overtaken
+/// by the user moving its file, so its agreement is left on a name another
+/// record has just been agreed at; naming parks it for the clash. The park
+/// asked only whether the agreed path held its copy, found none, and
+/// disowned the record while its own file stood one name over. Then the
+/// user's rotation put that file on the other record's path, the scan read
+/// it there as the other record's edit, and one file's bytes went up as a
+/// version of another -- with the other file re-sent as a duplicate. Without
+/// the rotation the disowned file went up as a duplicate of itself. RED
+/// without `keep_a_moved_file`, both arms.
+#[test]
+fn a_park_never_lets_a_moved_file_go_up_as_another_files_version() {
+    for rotation in [false, true] {
+        let world = World::of(1_873, &[("a", jd_sim::Platform::Linux), ("b", jd_sim::Platform::Linux)]);
+        let (a, b) = (world.device("a"), world.device("b"));
+        let (x, y) = (b"X: device-a's own bytes".to_vec(), b"Y: the other file's bytes".to_vec());
+        a.fs.user_write("slot-3.dat", &x);
+        a.fs.user_write("y.dat", &y);
+        assert!(world.settle().is_some(), "rotation={rotation}: both files go up first");
+        // b's user: X to another name, Y onto X's old name.
+        b.fs.user_rename("slot-3.dat", "x-renamed.dat");
+        b.fs.user_rename("y.dat", "slot-3.dat");
+        world.pass(b);
+        // a's user moves X's file, and moves it again during a's pass, at the
+        // engine's first rename: X's move to the server's name is overtaken.
+        a.fs.user_rename("slot-3.dat", "slot-2.dat");
+        let disk = a.fs.clone();
+        let mut once = false;
+        a.fs.while_renaming(move |_, _| {
+            if !std::mem::replace(&mut once, true) {
+                disk.user_rename("slot-2.dat", "slot-1.dat");
+            }
+        });
+        world.pass(a);
+        // The rotation, in the pass that parks X: Y's file aside, X's file
+        // onto Y's name.
+        let rotated = std::sync::Arc::new(std::sync::Mutex::new(false));
+        if rotation {
+            let (disk, done) = (a.fs.clone(), rotated.clone());
+            a.fs.while_renaming(move |_, _| {
+                let mut done = done.lock().unwrap();
+                if !*done && disk.peek("slot-3.dat").is_some() && disk.peek("slot-1.dat").is_some() {
+                    *done = true;
+                    disk.user_rename("slot-3.dat", "slot-2.dat");
+                    disk.user_rename("slot-1.dat", "slot-3.dat");
+                }
+            });
+        }
+        world.pass(a);
+        if rotation && !*rotated.lock().unwrap() {
+            a.fs.user_rename("slot-3.dat", "slot-2.dat");
+            a.fs.user_rename("slot-1.dat", "slot-3.dat");
+        }
+        assert!(world.settle().is_some(), "rotation={rotation}: never settled");
+
+        let (xs, ys) = (jd_sim::sha256_hex(&x), jd_sim::sha256_hex(&y));
+        let versions = world.server.all_versions();
+        for f in world.server.files() {
+            let history: Vec<&str> = versions.iter().filter(|v| v.file_id == f.id).map(|v| v.sha256.as_str()).collect();
+            assert!(
+                !(history.contains(&xs.as_str()) && history.contains(&ys.as_str())),
+                "rotation={rotation}: {} ({}) holds both files' bytes",
+                f.id,
+                f.name
+            );
+        }
+        let live: Vec<String> = world.server.files().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+        assert_eq!(live.len(), 2, "rotation={rotation}: a file went up twice: {live:?}");
+    }
+}
+
+/// Rig run 1864. A never-sent file whose own file left before a peer's
+/// same-named file landed in the empty slot; the peer then deletes that file
+/// on the server and this device's editor rewrites it in place, both before
+/// this device's next pass. The never-sent record's gone check asked for the
+/// LIVE owners of the file at its path, found none -- its only owner was the
+/// server-deleted record -- and kept the never-sent record, which then vetoed
+/// the re-upload of the edit while its own upload was vetoed because the file
+/// was not its own: a loop every pass for ever. RED without the deleted owner
+/// counted (`owners_here(.., false)` in the gone check), delete-first arm.
+#[test]
+fn a_never_sent_record_gives_way_to_a_deleted_owners_edited_file() {
+    for delete_arrives_first in [true, false] {
+        let label = if delete_arrives_first { "delete first" } else { "a pass between" };
+        let world = World::of(1_864, &[("a", jd_sim::Platform::Linux), ("b", jd_sim::Platform::Linux)]);
+        let (a, b) = (world.device("a"), world.device("b"));
+        a.fs.user_mkdir("E");
+        assert!(world.settle().is_some(), "{label}: the folder goes up first");
+        // The same bytes elsewhere, so the harness's no-loss check accepts the
+        // user removing the swap mid-pass (the editor did on the rig).
+        a.fs.user_write("E/keep", b"a's swap");
+        assert!(world.settle().is_some(), "{label}: the keeper goes up");
+        b.fs.user_write("E/.n.swp", b"b's swap");
+        world.pass(b);
+        a.fs.user_write("E/.n.swp", b"a's swap");
+        // a's editor removes its swap after a's scan, as b's lands in the slot.
+        let fired = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let (f, disk) = (fired.clone(), a.fs.clone());
+        a.fs.while_a_spool_opens(move |_| {
+            let mut done = f.lock().unwrap();
+            if !*done {
+                *done = true;
+                disk.user_remove("E/.n.swp");
+            }
+        });
+        world.pass(a);
+        assert!(*fired.lock().unwrap(), "{label}: construction: a's swap went in the landing window");
+        let edited = b"a's swap, edited in place";
+        if delete_arrives_first {
+            b.fs.user_remove("E/.n.swp");
+            world.pass(b);
+            a.fs.user_write("E/.n.swp", edited);
+        } else {
+            a.fs.user_write("E/.n.swp", edited);
+            world.pass(a);
+            b.fs.user_remove("E/.n.swp");
+            world.pass(b);
+        }
+        assert!(world.settle().is_some(), "{label}: never settled");
+        let live: Vec<String> = world
+            .server
+            .files()
+            .into_iter()
+            .filter(|f| !f.trashed && f.name == ".n.swp" && f.sha256 == jd_sim::sha256_hex(edited))
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(live.len(), 1, "{label}: a's edit is not on the server: {:?}", world.server.files());
+    }
+}
