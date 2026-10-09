@@ -642,9 +642,8 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 | `list_backups` | List backup files on local server and cloud target | No |
 | `upload_backup` | Push one existing backup file from the node to its cloud target; keeps the local copy | No |
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
-| `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
-| `restore_project` | Restore a full project `.tar.gz` (files + DB) in place on an existing node, then reconcile it to that machine. Runs `restore_project.sh --force --domain <domain>`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
+| `restore_project` | Restore a full project `.tar.gz` (files + DB) in place on an existing node, then reconcile it to that machine. Runs `restore_project.sh --force --domain <domain>`, which cascades `--non-interactive` into `restore_database.sh`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
 | `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on the node. The node's `upgrade.php` ends every run with one `APPLY_RESULT:` line, which `JobResultProcessor::apply_result` reads into the job's result as `apply`: `version_before`, `version_after`, whether the pipeline updated itself and re-ran, each migration with its outcome and rows affected, each schema change, each plugin synced with its version before and after, the deploy tier's verdict with any failed test names, whether and at which step it rolled back and whether the schema was left ahead of the code, and the duration — counts and names, never row data. The job page renders it as a card above the transcript, which stays for forensics. A node whose `upgrade.php` predates the line records `apply: null` (not reported) | **Yes** |
 | `restart_unit` | Restart one of the host's expected units (`fail2ban`, `apache2`, `php-fpm` — the versioned unit the host runs — `cron`, `postgresql`), as the `restart_unit` **operate primitive**: never the agent (which restarts only through `restart_agent` and its proof) and never sshd. The node runs `restart_unit.sh`, which re-validates the unit, restarts it (no stop, disable or mask), and returns `{unit, absent, before, restarted, after}`. A restart the node did not accept is a failed job; an accepted one queues a `host_report`. The repair of recipe `service_health`. Mirrored in `JobCommandBuilder::RESTART_UNIT_UNITS` | No |
@@ -683,7 +682,7 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 | `moved_site_check` | Ask the Docker host whether the old machine of a switch-over (state `retired`) still holds its domain: `decommission_moved_site`'s proof, reported instead of enforced, removing nothing (agent 1.56.0). Filed against the **host's** node with `victim_node_id`; the answer lands on the victim's `mgn_moved_check_*` (see [Removing a container site](#removing-a-container-site-decommission)) | No |
 | `moved_site_reach` | Place a one-time token on the **new** server of a switch-over (`ssl_probe_place`) and fetch it over the domain, to show the domain reaches the site's new home. Filed against the new server's node with `victim_node_id` (the old row) and `domain`; the answer lands on the old row's `mgn_moved_reach_*`, and `moved_site_reach_clear` (`ssl_probe_clear`) empties the file after the fetch | No |
 
-Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
+Destructive operations take no safety copy of the state they replace: a restore happens because the current state is wrong, and the operator approves a statement that anything written since the archive was taken is gone. The UI requires explicit confirmation checkboxes.
 
 **Note on bare-metal nodes:** `install.sh server` disables root SSH during the bootstrap; the session that ran it is the last one the plane opens. Everything after it — backups, restores, certificates, upgrades — runs on the node's own agent, which is root.
 
@@ -2203,7 +2202,7 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 | `type` | Yes | `ssh`, `scp`, `local`, or `api` |
 | `label` | Yes | Human-readable description (shown in UI and output) |
 | `cmd` | ssh/local | Shell command to execute |
-| `node_id` | No | Override target node (defaults to job's node). Used for multi-node operations like `copy_database` |
+| `node_id` | No | Override target node (defaults to job's node). |
 | `on_host` | No | If `true`, run on the SSH host directly, not inside the Docker container. Used for `docker stats`, etc. |
 | `direction` | scp | `upload` (local to remote) or `download` (remote to local) |
 | `remote_path` | scp | File path on the remote host |
@@ -2441,9 +2440,9 @@ This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **prov
 
 ## Safety Constraints
 
-1. **Auto-backup before destructive operations** -- `copy_database`, `restore_database`, and `restore_project` automatically prepend backup steps. `restore_project` snapshots both the current database (`auto_pre_project_restore_*.sql.gz`) and the current project tree (`auto_pre_project_restore_*.tar.gz`) to `/backups/` before overwriting; either can be skipped if the corresponding component is unchecked in the form. If any pre-backup step fails, the destructive steps never run.
+1. **No safety copy before a restore** -- `restore_database` and `restore_project` replace the node's database (and, for `restore_project`, its project tree) with the archive, and nothing is saved of what they replace. The operator approves the destructive job on the node itself, and the approval states that anything written since the archive was taken is gone.
 
-2. **Database restores replace** -- A database restore leaves the target equal to the snapshot. Every restore site (`restore_database`, both copy jobs) verifies the archive with `gunzip -t` before anything is destroyed, drops and recreates the `public` schema so target-only objects are removed too, and loads with `psql -v ON_ERROR_STOP=1` so the first load error fails the job instead of completing a partial restore. Dumps are plain `pg_dump` snapshots -- the restore step owns the replacement guarantee, so it holds for any file it is fed. Job-internal dumps (copy jobs) add `--no-owner --no-acl` because they are restored as the *target* site's DB user; backup files restore onto the site that made them, where the role matches.
+2. **Database restores replace** -- A database restore leaves the target equal to the snapshot. Every restore verifies the archive with `gunzip -t` before anything is destroyed, drops and recreates the `public` schema so target-only objects are removed too, and loads with `psql -v ON_ERROR_STOP=1` so the first load error fails the job instead of completing a partial restore. Dumps are plain `pg_dump` snapshots -- the restore step owns the replacement guarantee, so it holds for any file it is fed. Backup files restore onto the site that made them, where the database role matches.
 
 3. **Per-node concurrency lock** -- The agent skips jobs if another job is already running on the same node, preventing conflicts.
 

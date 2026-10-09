@@ -12,7 +12,7 @@
 	$session->check_permission(8);
 	$session->set_return();
 
-	$message = new Message($_GET['msg_message_id'], TRUE);
+	$message = new Message($_REQUEST['msg_message_id'], TRUE);
 	$sender = new User($message->get('msg_usr_user_id_sender'), TRUE);
 	if($message->get('msg_usr_user_id_recipient')){
 		$recipient = new User($message->get('msg_usr_user_id_recipient'), TRUE);
@@ -22,18 +22,18 @@
 		$context = MessageContextRegistry::resolve($message->get('msg_context_type'), (int)$message->get('msg_context_id'));
 	}
 
-	if($_REQUEST['action'] == 'delete'){
+	if(isset($_POST['action']) && $_POST['action'] == 'delete'){
 		$message->assert_can_write($session);
 		$message->soft_delete();
 
-		header("Location: /admin/admin_posts");
+		header("Location: /admin/admin_message?msg_message_id=".$message->key);
 		exit();
 	}
-	else if($_REQUEST['action'] == 'undelete'){
+	else if(isset($_POST['action']) && $_POST['action'] == 'undelete'){
 		$message->assert_can_write($session);
-		$message->soft_delete();
+		$message->undelete();
 
-		header("Location: /admin/admin_posts");
+		header("Location: /admin/admin_message?msg_message_id=".$message->key);
 		exit();
 	}
 
@@ -52,6 +52,9 @@
 
 	if(!$message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_message', 'hidden' => array('action' => 'delete', 'msg_message_id' => $message->key));
+	}
+	else if($message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_message', 'hidden' => array('action' => 'undelete', 'msg_message_id' => $message->key));
 	}
 	$page->begin_box($options);
 
