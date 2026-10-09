@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.49 - mgn_cloud_account: which cloud account a machine not placed on a host is in; stamped when first saved
  * @version 1.48 - removing a node drains its active storage space: it takes no new backups and keeps what it holds
  * @version 1.47 - mgn_agent_bundle_state: a siteless machine's verdict on the support bundle on offer
  * @version 1.46 - mgn_bkt_backup_target_id is gone: a node's backups go to its active storage space
@@ -259,6 +260,8 @@ class ManagedNode extends SystemBase {
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Which cloud account the machine lives in: main or test (CloudAccounts). A node on a host takes the host's.
+		'mgn_cloud_account'       => array('type'=>'varchar(16)'),
 		// Whether the node detail Console tab may run an ad-hoc command here.
 		// Default off: the management node holds SSH keys to every node, so being
 		// reachable from a browser form is a decision made per node rather than
@@ -518,6 +521,10 @@ class ManagedNode extends SystemBase {
 				throw new DisplayableUserException("A node's name may not start '" . self::FIXTURE_NAME_PREFIX
 					. "': that name marks the test suites' own nodes, which nothing watches and the tests delete.");
 			}
+		}
+		// Every path that makes a node saves it, so the stamp lives here, not in prepare().
+		if (!$this->key) {
+			CloudAccounts::stamp_new($this, 'mgn_cloud_account');
 		}
 		return parent::save($debug);
 	}

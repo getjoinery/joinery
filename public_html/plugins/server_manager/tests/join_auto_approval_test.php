@@ -92,7 +92,7 @@ class JoinAutoApprovalTest {
 		$ip6 = '2600:3c02::' . dechex(random_int(0x1000, 0xffff)) . ':e6ff:fea7:' . dechex(random_int(0x1000, 0xffff));
 
 		$site = new ManagedNode(NULL);
-		$site->set('mgn_name', ManagedNode::FIXTURE_NAME_PREFIX . 'jaa site ' . $sfx);
+		$site->set('mgn_name', 'HarnessTest jaa site ' . $sfx);
 		$site->set('mgn_slug', 'jaa-' . $sfx);
 		$site->set('mgn_host', $ip);
 		$site->set('mgn_uptime_enabled', false);
@@ -180,7 +180,7 @@ class JoinAutoApprovalTest {
 		check($prov->get('cvp_expected_host_key') === 'f2716c8b2d4c52b5' && $prov->get('cvp_expected_site_key') === '07eeae82b00ce63e'
 			&& $prov->get('cvp_keys_captured_time') !== null, 'recording stores both keys on the provision of that site node');
 		$stranger = new ManagedNode(NULL);
-		$stranger->set('mgn_name', ManagedNode::FIXTURE_NAME_PREFIX . 'jaa stranger');
+		$stranger->set('mgn_name', 'HarnessTest jaa stranger');
 		$stranger->set('mgn_slug', 'jaa-stranger-' . $p['sfx']);
 		$stranger->set('mgn_host', '203.0.113.9');
 		$stranger->set('mgn_uptime_enabled', false);
@@ -240,7 +240,7 @@ class JoinAutoApprovalTest {
 		if ($node_id > 0) {
 			harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $node_id);
 			$node = new ManagedNode($node_id, TRUE);
-			$node->set('mgn_name', ManagedNode::FIXTURE_NAME_PREFIX . $node->get('mgn_name'));
+			$node->set('mgn_name', 'HarnessTest ' . $node->get('mgn_name'));
 			$node->save();
 			check($node->get('mgn_host') === $p['ip'], 'at the instance\'s IPv4, not the IPv6 the join came from', (string)$node->get('mgn_host'));
 		}

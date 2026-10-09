@@ -10,6 +10,7 @@
  * on someone else's machine (specs/ssh_single_bootstrap.md).
  * After save, redirects to node_detail.
  *
+ * @version 1.9 - a cloud account choice (main or test) decides which dashboard tab the site is listed under
  * @version 1.8 - a new node is given its storage space on the target Where new backups go names, once saved
  * @version 1.7 - a new node is given the target Where new backups go names
  * @version 1.6 - the placement record is minted only for a container node (ManagedHost::place_node)
@@ -38,7 +39,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 		'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 		'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 		'mgn_site_url', 'mgn_health_check_url', 'mgn_notes', 'mgn_enabled', 'mgn_skip_joinery_checks',
-		'mgn_uptime_enabled', 'mgn_uptime_check_type', 'mgn_uptime_tcp_port',
+		'mgn_uptime_enabled', 'mgn_uptime_check_type', 'mgn_uptime_tcp_port', 'mgn_cloud_account',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -46,6 +47,9 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			$value = trim($_POST[$field]);
 			if ($field === 'mgn_enabled' || $field === 'mgn_skip_joinery_checks' || $field === 'mgn_uptime_enabled') {
 				$value = isset($_POST[$field]) ? true : false;
+			}
+			if ($field === 'mgn_cloud_account') {
+				$value = CloudAccounts::normalize($value);
 			}
 			if ($field === 'mgn_ssh_port' && $value === '') {
 				$value = 22;
@@ -151,6 +155,12 @@ $formwriter->textinput('mgn_slug', 'Slug *', [
 $formwriter->textinput('mgn_host', 'SSH Host *', [
 	'placeholder' => 'e.g., 23.239.11.53',
 	'validation' => ['required' => true, 'maxlength' => 255],
+]);
+
+$formwriter->dropinput('mgn_cloud_account', 'Cloud Account', [
+	'options' => CloudAccounts::LABELS,
+	'value' => CloudAccounts::MAIN,
+	'helptext' => 'Which dashboard tab this site is listed under (a site placed on a host follows its host).',
 ]);
 
 $formwriter->textinput('mgn_ssh_user', 'SSH User', [

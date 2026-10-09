@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.9 - sm_016 marks the boxes a test-account plane made since the token swap as test boxes
  * @version 1.8 - sm_013 moves incidents marked Looking to New (Looking is no longer a triage)
  * @version 1.7 - sm_011 drops the fleet-wide backup cap setting; sm_012 cancels the unfinished jobs of nodes
  *                removed before ManagedNode 1.36
@@ -491,6 +492,36 @@ return [
 						  AND left($key, length(s.sps_base_key)) = s.sps_base_key");
 				}
 			}
+		},
+	],
+	[
+		'id' => 'sm_016_cloud_account_backfill',
+		'version' => '1.0.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			// The columns come from the data classes; this runs after update_database added them.
+			foreach (array('mgh_managed_hosts' => 'mgh_cloud_account', 'mgn_managed_nodes' => 'mgn_cloud_account') as $table => $column) {
+				$has = (bool)$dblink->query("SELECT EXISTS (SELECT 1 FROM information_schema.columns
+					WHERE table_name = '$table' AND column_name = '$column')")->fetchColumn();
+				if (!$has) {
+					error_log('sm_016: ' . $table . ' has no ' . $column . ' column yet; no box was marked.');
+					return;
+				}
+			}
+			// This plane's own account, read from the provider once when the setting was never saved.
+			$company = trim((string)Globalvars::get_instance()->get_setting(CloudAccounts::COMPANY_SETTING));
+			$token = ProvisionCustomerCloud::operator_compute_token();
+			if ($company === '' && $token !== '') {
+				try {
+					$company = trim((new LinodeComputeDriver($token))->accountCompany());
+					ProvisioningSetup::writeSetting(CloudAccounts::COMPANY_SETTING, $company);
+				} catch (Throwable $e) {
+					error_log('sm_016: the operator token could not read its account company (' . $e->getMessage() . '); no box was marked.');
+					return;
+				}
+			}
+			$marked = CloudAccounts::backfill($dblink, $company);
+			error_log('sm_016: ' . $marked . ' box(es) marked as test-account boxes.');
 		},
 	],
 ];
