@@ -31,6 +31,8 @@
  * publish() never throws — a broken build must not abort an unrelated platform
  * publish by exception; it reports a status and the caller decides.
  *
+ * @version 1.4 - built binaries are written 0644: no installer runs one from the tree, and a 755 file
+ *                under a converger that holds the tree at 644 is a permanent mode-only git diff
  * @version 1.3 - officialGo() names Go's proxy and checksum database itself rather than inheriting them
  * @version 1.2 - builds with the official toolchain go.mod pins, fetched by Go's checksum-verified
  *                download (officialGo()); the box's own Go only fetches it. A distribution's build of
@@ -165,7 +167,12 @@ abstract class GoBinaryPublisher {
 				$out_path = $staging . '/' . static::BINARY . '-' . $machine;
 				static::buildBinary($go, $src, $goarch, $out_path);
 				static::assertUsable($out_path, $machine);
-				chmod($out_path, 0755);
+				// Not executable in the tree: nothing runs a binary from here. Each
+				// installer copies it into place and sets the mode it needs (the
+				// jail's install -m 4755, the relay's chmod 755). A 755 file in
+				// git stays dirty forever on a box whose converger holds the tree
+				// at 644, and would be committed as a mode change on every publish.
+				chmod($out_path, 0644);
 				$say('  - ' . static::BINARY . '-' . $machine . ' ('
 					. round(filesize($out_path) / 1048576, 1) . ' MB)');
 			}

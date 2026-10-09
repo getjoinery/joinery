@@ -47,18 +47,22 @@ class RelayPingProbe {
 		$machine = trim((string)php_uname('m'));
 		$prebuilt = PathHelper::getIncludePath('plugins/mailbox/provisioning/bin/relay-sealer-' . $machine);
 		$src = PathHelper::getIncludePath('plugins/mailbox/provisioning/relay-sealer');
+		$out = sys_get_temp_dir() . '/joinery-relay-sealer-test-' . getmyuid() . '/relay-sealer';
 		// The shipped binary, but only when it was built from THIS source: a
-		// stale bin/ would make the test pass against yesterday's relay.
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php'));
-		if (is_executable($prebuilt)
+		// stale bin/ would make the test pass against yesterday's relay. It is
+		// not executable in the tree (GoBinaryPublisher writes it 0644; the
+		// relay's installer sets the mode), so run a private copy.
+		if (is_file($prebuilt)
 				&& RelaySealerPublisher::readStamp(dirname($prebuilt)) === RelaySealerPublisher::sourceHash($src)) {
-			return $prebuilt;
+			if (!is_dir(dirname($out))) { mkdir(dirname($out), 0700, true); }
+			if (copy($prebuilt, $out) && chmod($out, 0700)) {
+				return $out;
+			}
 		}
 		$go = trim((string)shell_exec('command -v go 2>/dev/null'));
 		if ($go === '') {
 			return null;
 		}
-		$out = sys_get_temp_dir() . '/joinery-relay-sealer-test-' . getmyuid() . '/relay-sealer';
 		// Rebuilt when any source is newer than the binary, so a stale build can
 		// never make a test pass against yesterday's relay.
 		$stale = !is_file($out);
