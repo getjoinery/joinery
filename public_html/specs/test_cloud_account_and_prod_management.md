@@ -4,8 +4,11 @@
 WP9. Built: WP1, WP3 and WP9 (committed). WP2 done 2026-10-07: dev holds
 the test account's token, Delete Old Test Servers is on and its first run
 passed the safety catch. WP4 step 1 done (getjoinery's live token, all
-permissions present). Open: WP4 steps 2–5, WP5–WP7; getjoinery needs a
-release with server_manager 1.30.28 before it can adopt its own server.
+permissions present). WP4 step 3 done 2026-10-08 except Fleet Backups.
+WP5 rehearsal started 2026-10-09 (below); the host move word docker-prod
+needs (`move_to_plane`, agent 1.67.0) is built, uncommitted. Open: WP4
+steps 2, 4, 5 (step 2 waits on the owner's Backblaze key), the rest of WP5
+(waits on the next release), WP6, WP7.
 
 ## What this does
 
@@ -195,6 +198,19 @@ SSHing.
 
 WP3 deletes the rehearsal boxes afterwards.
 
+**Rehearsal so far (2026-10-09, test account, wp5-mgr / wp5-node.joinerytest.com):**
+- Proven: a management node that is not the origin leaves dev and pairs to
+  itself (WP4 item 4); a container site leaves dev and joins it, with its slug,
+  site address and upgrade source set by hand (WP6 steps 1-3, 5); WP9 adopts
+  the new management node's own server, and reverse DNS then works on it.
+- Join names, read from the code: seven production nodes keep their slugs.
+  jeremytunnell.com joins as `jeremytunnell` and getjoinery joins itself as
+  `getjoinery-com`, both fixed by hand at step 3; docker-prod moves with
+  `move_to_plane`, which carries its slug.
+- Waiting on the next release: the new management node updates itself from
+  dev and republishes, the node upgrades from it, a node backup through the
+  broker, and docker-prod's move word (agent 1.67.0) on the practice host.
+
 ### WP6 — Move the production nodes
 
 One node at a time, lowest stakes first: getjoinery-developers, phillyzouk,
@@ -208,7 +224,8 @@ Per node:
 1. On the node's Management Node page, **Disconnect** (a signed goodbye to dev).
    This also clears the node's marker for management-node backups.
 2. **Join** getjoinery from the same page, and approve it on getjoinery.
-3. **Match its slug to dev's** (Overview tab, edit). The slug is the node's
+3. **Match its slug and site address to dev's** (Overview tab, edit). A join
+   leaves the site address empty until a status check fills it; set it here. The slug is the node's
    folder in the backup bucket, and a join names it from the hostname, so it
    can differ from dev's (jeremytunnell-vps will). With the same slug,
    getjoinery's backups land next to dev's and its retention prunes both
@@ -231,7 +248,11 @@ Node-specific steps:
   (the connected-cloud OAuth flow) so getjoinery holds its own grant.
   Dev's grant is then disconnected.
 - **docker-prod host agent:** moves after every container on it has moved
-  (getjoinery is not one of them).
+  (getjoinery is not one of them). It has no site page, so it moves with
+  **Move to another management node** on its API Keys tab on dev (agent
+  1.67.0, `move_to_plane`): the agent files the join with getjoinery under
+  its slug `docker-prod`, stays with dev until getjoinery approves, then says
+  goodbye to dev itself. Needs the release carrying agent 1.67.0 first.
 
 **Done when:** dev's live node list holds only dev itself, test nodes, and
 the uptime row for getjoinery. Every production node shows green on

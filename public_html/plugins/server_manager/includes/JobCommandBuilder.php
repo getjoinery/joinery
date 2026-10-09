@@ -8,7 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
- * @version 1.109 - a backup run and a re-upload carry a broker run in the credential slot (__SM_BROKER_<space>_<kind>__,
+ * @version 1.111 - build_move_to_plane: ask another management node to adopt this node's machine (agent 1.67.0),
+ *                  under this node's slug; the machine stays here until that is approved
+ * @version 1.110 - an install carrying the buyer's admin password exports JOINERY_ADMIN_PASSWORD_SHOWN=1: the plane's
+ *                  password is shown on a page, so the site asks for a new one at first sign-in
+ * @version 1.109 - a backup run and a re-upload carry a broker run in the credential slot (__SM_BROKER_<space>_<kind>__),
  *                  never a bucket key, and are refused for a node below BROKER_MIN_CORE_VERSION; a chain job
  *                  signs the chain's newest manifest and none of its older run manifests (specs/storage_targets.md WP5)
  * @version 1.108 - build_retire_install_password writes every root key (the last line of the list had no
@@ -1871,6 +1875,39 @@ class JobCommandBuilder {
 	 * is its SITENAME; the node refuses any other). PRIMITIVE ONLY, to the
 	 * host's own machine-posture agent.
 	 */
+	/**
+	 * Ask another management node to adopt this node's machine (move_to_plane,
+	 * agent 1.67.0). The machine stages a key for that management node, files
+	 * the join there under this node's slug (so an approval there gives it the
+	 * same name and its backups keep their folder), and answers the fingerprint
+	 * to compare before approving. It stays with this management node until the
+	 * other one approves; then it says goodbye here and restarts onto the new
+	 * one. For a machine with no site this is the only way to move it without a
+	 * shell; a site can also move from its own Management Node page.
+	 */
+	public static function build_move_to_plane($node, $url) {
+		if (!self::has_primitive($node, 'move_to_plane')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be moved to another management node from here. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['move_to_plane']));
+		}
+		return self::build_move_to_plane_primitive($node, $url);
+	}
+
+	public static function build_move_to_plane_primitive($node, $url) {
+		$url = rtrim(trim((string)$url), '/');
+		if (!preg_match('#^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$#', $url)) {
+			throw new Exception('Give the other management node\'s address: https, a host name and an optional port, nothing after it (https://manage.example.com).');
+		}
+		if (strcasecmp(parse_url($url, PHP_URL_HOST) ?: '', parse_url(ProvisioningSetup::selfApiUrl(), PHP_URL_HOST) ?: '') === 0) {
+			throw new Exception('That is this management node. Give the address of the one the machine is moving to.');
+		}
+		return ['primitive' => 'move_to_plane', 'params' => [
+			'management_node' => $url,
+			'name'            => (string)$node->get('mgn_slug'),
+		]];
+	}
+
 	public static function build_restart_container($node, $name) {
 		if (!self::has_primitive($node, 'restart_container')) {
 			throw new Exception(
@@ -4916,6 +4953,10 @@ class JobCommandBuilder {
 			$lines[] = 'IFS= read -r JOINERY_ADMIN_PASSWORD';
 			$lines[] = 'test -n "$JOINERY_ADMIN_PASSWORD"';
 			$lines[] = 'export JOINERY_ADMIN_PASSWORD';
+			// This password is the plane's, shown once on the buyer's page, so
+			// the site asks for a new one at first sign-in. A deploy form's
+			// password the owner chose themselves is not marked (_site_init.sh).
+			$lines[] = 'export JOINERY_ADMIN_PASSWORD_SHOWN=1';
 		}
 		$lines[] = 'command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl; }';
 		$lines[] = "rm -rf {$remote_install_dir} && mkdir -p {$remote_install_dir}";

@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.13 - a move_to_plane result renders as a card: which management node was asked, the name and the fingerprint
  * @version 1.12 - a page_probe that could not run shows the node's reason instead of "no report"
  * @version 1.11 - an apply_update job renders its structured apply result (versions, migrations, schema
  *                changes, plugins, deploy tier, rollback); restart_unit/_container, run_installer,
@@ -413,6 +414,17 @@ if ($result) {
 			. '<div>Before: ' . $state($result_data['before'] ?? null) . '</div>'
 			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
 			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
+			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'move_to_plane' && !empty($result_data['fingerprint'])) {
+		$fp = (string)$result_data['fingerprint'];
+		echo '<div class="card mb-3"><div class="card-header"><strong>Asked '
+			. htmlspecialchars((string)($result_data['management_node'] ?? '')) . ' to adopt this machine</strong>'
+			. ' <small class="text-muted">— as ' . htmlspecialchars((string)($result_data['claimed_name'] ?? '')) . '</small></div>'
+			. '<div class="card-body">'
+			. '<div>Key fingerprint: <code>' . htmlspecialchars(trim(chunk_split($fp, 4, ' '))) . '</code></div>'
+			. '<small class="text-muted">Approve the request on that management node only if it shows exactly this fingerprint. '
+			. 'Until then the machine stays here; once it is approved it says goodbye here and restarts onto the new one.</small>'
 			. '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && in_array($job_type, array('restart_unit', 'restart_container'), true) && !empty($result_data['read'])) {

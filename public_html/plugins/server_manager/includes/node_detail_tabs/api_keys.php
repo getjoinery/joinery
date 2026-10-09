@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.8 - Move to another management node: the agent asks the other one to adopt the machine (move_to_plane)
  * @version 1.7 - a stored secret is a locked field with Reset; the separate Clear form is gone (clearing
  *                the public key removes the pair)
  * @version 1.6 - a join from a machine this plane provisioned names its provision, instance and age on
@@ -215,6 +216,29 @@
 		$fw_unpair->hiddeninput('action', '', ['value' => 'unpair_agent']);
 		$fw_unpair->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
 		$fw_unpair->end_form();
+
+		// Moving the machine to another management node. A site can also do it
+		// from its own Management Node page; a machine with no site has only this.
+		echo '<h6 class="mt-4">Move to another management node</h6>';
+		if (JobCommandBuilder::has_primitive($node, 'move_to_plane')) {
+			echo '<p class="text-muted small">The machine asks the other management node to adopt it as <code>'
+			   . htmlspecialchars((string)$node->get('mgn_slug')) . '</code>, the name it has here, so its backups keep their folder. '
+			   . 'It stays with this management node until the other one approves it; then it leaves here on its own. '
+			   . 'The job shows the key fingerprint to compare before approving it there.</p>';
+			$fw_move = $page->getFormWriter('move_to_plane_form');
+			$fw_move->begin_form();
+			$fw_move->hiddeninput('action', '', ['value' => 'move_to_plane']);
+			$fw_move->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+			$fw_move->textinput('management_node', 'Other management node', [
+				'required'    => true,
+				'placeholder' => 'https://manage.example.com',
+				'helptext'    => 'Just the address. The approval happens on that management node.',
+			]);
+			$fw_move->submitbutton('btn_move_to_plane', 'Ask it to adopt this machine', ['class' => 'btn btn-sm btn-outline-secondary']);
+			$fw_move->end_form();
+		} else {
+			echo '<p class="text-muted small">' . htmlspecialchars(AgentVocabulary::needs_newer_agent_text($node, ['move_to_plane'])) . '</p>';
+		}
 	}
 	$page->end_box();
 

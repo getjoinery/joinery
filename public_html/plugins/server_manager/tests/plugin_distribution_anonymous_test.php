@@ -28,6 +28,8 @@
  *
  * Run: php plugins/server_manager/tests/plugin_distribution_anonymous_test.php
  *
+ * @version 1.4.0 - the fixture is published before the listing checks: the catalog lists only published
+ *                 extensions, so its audience is what is under test
  * @version 1.3.0 - a download serves only the published archive; the fixture archive is cleaned from the
  *                 directory the endpoint reads, not the static_files_dir setting
  */
@@ -123,6 +125,15 @@ if ($fixture_made) {
 check($fixture_made, 'fixture theme directory created', $fixture_dir);
 
 if ($fixture_made) {
+	// The catalog lists only what has been published, so the fixture is
+	// published first: what keeps it out of a listing below is its audience.
+	$publish_fixture = function () use ($fixture_archive, $fixture_dir) {
+		exec(sprintf('tar -czf %s -C %s audience_fixture_theme 2>&1', escapeshellarg($fixture_archive),
+			escapeshellarg(dirname($fixture_dir))), $tar_out, $tar_exit);
+		return $tar_exit === 0 && is_file($fixture_archive);
+	};
+	check($publish_fixture(), 'fixture archive written where publish puts archives');
+
 	$r = harness_request('GET', '/admin/server_manager/publish_theme?list=themes');
 	$anon_names = array_column($r['json']['themes'] ?? array(), 'directory_name');
 	check(!in_array('audience_fixture_theme', $anon_names, true),
@@ -181,9 +192,7 @@ if ($fixture_made) {
 
 	// Listing visibility is not access control: once published, the download
 	// stays open by name, which is what clone/restore reconciliation depends on.
-	exec(sprintf('tar -czf %s -C %s audience_fixture_theme 2>&1', escapeshellarg($fixture_archive),
-		escapeshellarg(dirname($fixture_dir))), $tar_out, $tar_exit);
-	check($tar_exit === 0 && is_file($fixture_archive), 'fixture archive written where publish puts archives');
+	check($publish_fixture(), 'published again');
 	$published_bytes = (string)@file_get_contents($fixture_archive);
 	$r = harness_request('GET', '/admin/server_manager/publish_theme?download=audience_fixture_theme',
 		array('accept' => null, 'timeout' => 120));

@@ -13,6 +13,8 @@ if (!class_exists('PublicPage', false)) {
 /**
  * AdminPage — the admin interface's page object.
  *
+ * @version 1.4 - the root request panel polls /api/v1/action/root_request_status; the bare /api/v1/ path is the
+ *                model API, so every panel answered 400 and sat at Queued whatever the request did
  * @version 1.3 - readable_title is optional (BeginPage's own default)
  * @version 1.2 - an error flash message carries a "Report a problem" link
  * @version 1.1 - root_request_panel() takes the URL to open when an
@@ -128,7 +130,7 @@ class AdminPage extends PublicPage {
 	var words   = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed' };
 
 	function tick() {
-		fetch('/api/v1/root_request_status', {
+		fetch('/api/v1/action/root_request_status', {
 			method: 'POST',
 			credentials: 'same-origin',
 			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': meta ? meta.content : '' },

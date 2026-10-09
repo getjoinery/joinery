@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.07 - JOINERY_ADMIN_PASSWORD_SHOWN reaches _site_init.sh (the container env file included): a supplied
+#               password a management node shows its owner is replaced at first sign-in
 #VERSION 3.06 - install.sh site (--enable-agent --management-node) prints SITE_AGENT_KEY=<16 hex>: the site agent's key once it has
 #               staged it (waits up to 90s; absent if it does not appear), so the plane can recognise that agent's join
 #               (the auto_approve_provisioned_joins spec WP1)
@@ -630,7 +632,7 @@ POSTGRES_PASSWORD_RECORDED=0
 # admin and database passwords are the same visibility trade as before: the
 # file is mode 600 and removed once the container has read it.
 SITE_INIT_ENV_INPUTS=(
-    JOINERY_ADMIN_EMAIL JOINERY_ADMIN_PASSWORD JOINERY_INSTALL_BUNDLE
+    JOINERY_ADMIN_EMAIL JOINERY_ADMIN_PASSWORD JOINERY_ADMIN_PASSWORD_SHOWN JOINERY_INSTALL_BUNDLE
     JOINERY_DNS_CREDENTIAL
     JOINERY_MAIL_API_KEY JOINERY_MAIL_PROVIDER JOINERY_MAIL_FROM
     JOINERY_BACKUP_BUCKET JOINERY_BACKUP_KEY_ID JOINERY_BACKUP_KEY
@@ -4008,6 +4010,7 @@ do_site_create() {
                 echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
                 echo "  Environment (optional, secrets never on argv):"
                 echo "    JOINERY_ADMIN_PASSWORD   the admin password the owner chose (else generated)"
+                echo "    JOINERY_ADMIN_PASSWORD_SHOWN=1  that password is shown to the owner elsewhere: ask for a new one at first sign-in"
                 echo "    JOINERY_INSTALL_BUNDLE   plugin bundle, default personal; none skips it"
                 echo "    JOINERY_MAIL_API_KEY     sending key: email is set up during the install"
                 echo "    JOINERY_MAIL_PROVIDER    which provider the key is for (blank: detected from the key)"
