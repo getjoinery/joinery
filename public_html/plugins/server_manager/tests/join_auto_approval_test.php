@@ -73,6 +73,8 @@ class JaaRefusingRequest extends AgentJoinRequest {
 class JoinAutoApprovalTest {
 	private $driver;
 	private $user_id;
+	/** IPv4s already handed to a provision this run; their site nodes stay until the suite ends. */
+	private $used_ips = [];
 
 	function __construct() {
 		$this->driver = new JaaFakeDriver();
@@ -102,7 +104,11 @@ class JoinAutoApprovalTest {
 	/** A provision, its site node, and the addresses it answers on. */
 	private function provision(string $status = 'done', array $keys = []): array {
 		$sfx = substr(bin2hex(random_bytes(4)), 0, 8);
-		$ip = '198.51.100.' . random_int(2, 250);
+		// Machine matching keys on the IPv4, so two provisions may not share one in a run.
+		do {
+			$ip = '198.51.100.' . random_int(2, 250);
+		} while (isset($this->used_ips[$ip]));
+		$this->used_ips[$ip] = true;
 		$ip6 = '2600:3c02::' . dechex(random_int(0x1000, 0xffff)) . ':e6ff:fea7:' . dechex(random_int(0x1000, 0xffff));
 
 		$site = new ManagedNode(NULL);
