@@ -7,6 +7,7 @@
  * never part of anything posted; assets/js/copy-key.js works out the one value
  * that opens this backup's sealed key and puts that in the form.
  *
+ * @version 1.3 - the newest run reads as the stored date does (2026-10-04 23:15 UTC), not the agent's RFC 3339 text
  * @version 1.2 - the date the backup's storage provider says it was stored, or that it could not be checked
  * @version 1.1 - after an answer, a page with no request left says the key opened the backup, not "not waiting"; the
  *               intro no longer says the source cannot be reached
@@ -61,7 +62,7 @@
 			your browser uses it to unlock this one backup, and the key itself never leaves this page.</p>
 		<table class="table table-sm">
 			<tr><th>Backup</th><td><code><?php echo $h($pending['chain_id']); ?></code></td></tr>
-			<tr><th>Newest run</th><td><?php echo $h($pending['run_time']); ?> UTC<?php echo $age !== '' ? ' (' . $h($age) . ')' : ''; ?><br>
+			<tr><th>Newest run</th><td><?php echo $h($run_when ? gmdate('Y-m-d H:i', $run_when) : $pending['run_time']); ?> UTC<?php echo $age !== '' ? ' (' . $h($age) . ')' : ''; ?><br>
 				<span class="small text-muted">Anything written on the site after this is not in the copy.</span></td></tr>
 <?php if ($stored_when): ?>
 			<tr><th>Stored</th><td><?php echo $h(gmdate('Y-m-d H:i', $stored_when)); ?> UTC (<?php echo $h($ago($stored_when)); ?>), by <?php echo $h($pending['stored_at']); ?><br>
