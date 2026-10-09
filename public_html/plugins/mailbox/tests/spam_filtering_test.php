@@ -99,6 +99,29 @@ class SpamFilteringTest {
 		$this->eq('ham/none', $this->verdict(array('auth' => $this->auth('fail', 'pass', 'none'))),
 			'no DMARC + one failing → not the auth rule');
 
+		section('step 1: a DMARC fail under p=none is a signal, not the auth rule');
+		$monitored = $this->auth('pass', 'pass', 'fail') + array('dmarc_policy' => 'none');
+		$this->eq('ham/none', $this->verdict(array('auth' => $monitored, 'scanner' => $this->rspamd(2.19))),
+			'a p=none fail with a low rspamd score (Gil Duran, 2.19) → ham');
+		$this->eq('spam/auth', $this->verdict(array('auth' => $this->auth('pass', 'pass', 'fail') + array('dmarc_policy' => 'reject'))),
+			'p=reject fail → still the auth rule');
+		$this->eq('spam/auth', $this->verdict(array('auth' => $this->auth('pass', 'pass', 'fail') + array('dmarc_policy' => 'quarantine'))),
+			'p=quarantine fail → still the auth rule');
+		$this->eq('spam/auth', $this->verdict(array('auth' => $this->auth('pass', 'pass', 'fail'))),
+			'a fail with the policy unknown → still the auth rule (fail-safe)');
+		$this->eq('spam/scanner', $this->verdict(array('auth' => $monitored, 'scanner' => $this->rspamd(15.0))),
+			'a p=none fail is not spam by itself, but rspamd\'s floor still files it');
+		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'fail', 'dmarc_policy' => 'none')) === false,
+			'authRuleSaysSpam: fail under p=none → false');
+		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'fail', 'dmarc_policy' => 'NONE ')) === false,
+			'authRuleSaysSpam: the policy compares case- and space-insensitively');
+		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'fail')) === true,
+			'authRuleSaysSpam: fail with no policy → true');
+		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'fail', 'spf' => 'fail', 'dkim' => 'fail', 'dmarc_policy' => 'none')) === false,
+			'authRuleSaysSpam: p=none does not fall through to the SPF+DKIM fallback either');
+		check(InboundEmailMessage::authRuleSaysSpam(array('dmarc' => 'none', 'spf' => 'fail', 'dkim' => 'fail')) === true,
+			'authRuleSaysSpam: no DMARC verdict, SPF and DKIM both fail → still true');
+
 		section('step 2: SCANNER_FLOOR beats relationships, for rspamd scores only');
 		$this->eq('spam/scanner', $this->verdict(array('scanner' => $this->rspamd(15.0), 'contact' => true)),
 			'an rspamd score at the floor beats a contact');
@@ -215,6 +238,16 @@ class SpamFilteringTest {
 			check(in_array($t, $meta, true), 'meta ' . $t, json_encode($meta));
 		}
 		check(!in_array('catch_all', $meta, true), 'a mailbox → not catch_all');
+		$meta = $router->spamMetaTokens(7, $this->auth('pass', 'pass', 'fail') + array('dmarc_policy' => 'none'), $this->rspamd(2.19), null);
+		check(in_array('dmarc_monitored_fail', $meta, true) && in_array('dmarc:fail', $meta, true),
+			'a p=none DMARC fail is tagged dmarc_monitored_fail, and still counts as dmarc:fail');
+		foreach (array(array('dmarc' => 'fail', 'dmarc_policy' => 'reject'), array('dmarc' => 'fail'),
+				array('dmarc' => 'pass', 'dmarc_policy' => 'none')) as $auth) {
+			$auth += array('spf' => 'pass', 'dkim' => 'pass');
+			check(!in_array('dmarc_monitored_fail', $router->spamMetaTokens(7, $auth,
+					array('signal' => 'none', 'score' => null, 'source' => null), null), true),
+				'no dmarc_monitored_fail for ' . json_encode($auth));
+		}
 		$meta = $router->spamMetaTokens(0, $this->auth('pass', 'pass', 'pass'),
 			array('signal' => 'spam', 'score' => 7.3, 'source' => 'mailgun'), array('messages' => 4));
 		check(in_array('scanner:mailgun:6', $meta, true) && !in_array('scanner:rspamd:6', $meta, true),
@@ -232,6 +265,10 @@ class SpamFilteringTest {
 		$this->eq(array('dmarc:other', 'spf:unverified', 'dkim:pass', 'scanner:other:2'), $canon,
 			'odd values are canonical at ingest, so teaching reads back the same tokens');
 		$this->eq($canon, SpamMeta::decode(SpamMeta::encode($canon, 'off'))['tokens'], 'and round-trip');
+		$monitored_meta = array('dmarc:fail', 'dmarc_monitored_fail', 'spf:pass');
+		$this->eq(array('tokens' => $monitored_meta, 'bayes' => 'spam'),
+			SpamMeta::decode(SpamMeta::encode($monitored_meta, 'spam')),
+			'the monitored-fail flag round-trips through the stored form');
 
 		section('readSpamHeader');
 		$r = $this->readSpamHeader("From: a@b.com\nX-Spam: Yes\nX-Spam-Status: Yes, score=7.31 required=6.00\n\nbody");

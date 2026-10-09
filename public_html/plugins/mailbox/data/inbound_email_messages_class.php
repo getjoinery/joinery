@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.45 - iem_dmarc_policy: the DMARC policy the verifier read; authRuleSaysSpam() exempts a fail under p=none
  * @version 1.44 - an offloaded raw records its file store and full key (iem_raw_bkt_backup_target_id,
  *                 iem_raw_remote_key); reads and deletes follow them (specs/storage_targets.md WP6)
  * @version 1.43 - save() refuses a new row at the site's disk allowance (MailboxAtDiskAllowance)
@@ -464,6 +465,10 @@ class InboundEmailMessage extends SystemBase {
 		'iem_dkim_result'         => array('type'=>'varchar(16)'),
 		'iem_spf_result'          => array('type'=>'varchar(16)', 'default'=>'unverified'),
 		'iem_dmarc_result'        => array('type'=>'varchar(16)', 'default'=>'unverified'),
+		// The DMARC policy the sender's domain published (none | quarantine | reject), as the
+		// verifier read it. NULL when the verifier did not say. The auth rule needs it: a fail
+		// under p=none is a signal, not a verdict (authRuleSaysSpam).
+		'iem_dmarc_policy'        => array('type'=>'varchar(16)', 'is_nullable'=>true),
 		'iem_auth_source'         => array('type'=>'varchar(20)', 'default'=>'none'),
 		// Spam disposition (specs/inbound_email_spam_filtering.md): 'ham' | 'spam';
 		// NULL = not evaluated (filtering disabled). Drives the reader's inbox/Spam split.
@@ -722,8 +727,12 @@ class InboundEmailMessage extends SystemBase {
 	 * explain WHY a message is sitting in Spam, so the two can never drift into
 	 * saying different things about the same message.
 	 *
-	 *   - DMARC fail → spam. DMARC is alignment-based and already subsumes
-	 *     SPF/DKIM, so it is the one signal worth acting on directly.
+	 *   - DMARC fail → spam, unless the domain publishes p=none. DMARC is
+	 *     alignment-based and already subsumes SPF/DKIM, so it is the one signal
+	 *     worth acting on directly. A p=none domain has asked for no action on
+	 *     failures, so its failure is not a verdict here; it reaches the scoring
+	 *     corpus as the dmarc_monitored_fail meta token instead (SpamMeta).
+	 *     A fail with the policy unknown is still spam.
 	 *   - DMARC absent (none/unverified/empty) AND both SPF and DKIM fail → spam.
 	 *     The fallback for providers that supply SPF/DKIM but no DMARC. BOTH must
 	 *     fail: raw SPF/DKIM lack DMARC's alignment check, and a single failure
@@ -733,12 +742,12 @@ class InboundEmailMessage extends SystemBase {
 	 * Deliberately knows nothing about content scores, contacts or filters — it is
 	 * one input to a disposition, never the disposition.
 	 *
-	 * @param array{dkim?:string,spf?:string,dmarc?:string} $auth
+	 * @param array{dkim?:string,spf?:string,dmarc?:string,dmarc_policy?:?string} $auth
 	 */
 	public static function authRuleSaysSpam(array $auth): bool {
 		$dmarc = strtolower(trim((string)($auth['dmarc'] ?? '')));
 		if ($dmarc === 'fail') {
-			return true;
+			return strtolower(trim((string)($auth['dmarc_policy'] ?? ''))) !== 'none';
 		}
 		if ($dmarc === '' || $dmarc === 'none' || $dmarc === 'unverified') {
 			$spf  = strtolower(trim((string)($auth['spf'] ?? '')));
@@ -1340,11 +1349,11 @@ class InboundEmailMessage extends SystemBase {
 			return;
 		}
 		$db->prepare("UPDATE iem_inbound_email_messages
-			 SET iem_dkim_result = ?, iem_spf_result = ?, iem_dmarc_result = ?, iem_auth_source = ?
+			 SET iem_dkim_result = ?, iem_spf_result = ?, iem_dmarc_result = ?, iem_dmarc_policy = ?, iem_auth_source = ?
 			 WHERE iem_inbound_email_message_id = ?
 			   AND COALESCE(iem_auth_source, 'none') = 'none'")->execute(array(
 			$auth['dkim'] ?? 'unverified', $auth['spf'] ?? 'unverified',
-			$auth['dmarc'] ?? 'unverified', $auth['source'] ?? 'none', $message_id));
+			$auth['dmarc'] ?? 'unverified', $auth['dmarc_policy'] ?? null, $auth['source'] ?? 'none', $message_id));
 	}
 
 	/**

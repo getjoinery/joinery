@@ -83,6 +83,8 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.52 - authFromRelayMeta() takes the policy from the line that gave the dmarc verdict; readAuthResults' provider branch passes it through (relay path)
+ * @version 1.51 - the DMARC policy rides with the verdicts (readAuthResults, iem_dmarc_policy): a fail under p=none is not spam by the auth rule and is a dmarc_monitored_fail meta token for the corpus
  * @version 1.50 - a raw reset to inline forgets its file store and key; a stored raw is deleted by its row's descriptor
  * @version 1.49 - stores nothing at the site's disk allowance (DiskAllowance): the message is deferred
  *                 for retry on every path, the spam-held copy included, and the deferral logged once
@@ -847,6 +849,7 @@ class InboundEmailRouter {
 			'iem_dkim_result'  => $auth['dkim'],
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_dmarc_policy' => $auth['dmarc_policy'] ?? null,
 			'iem_auth_source'  => $auth['source'],
 			'iem_spam_verdict' => $decision['verdict'],
 			'iem_spam_reason'  => $decision['reason'],
@@ -1110,6 +1113,7 @@ class InboundEmailRouter {
 			'dkim'   => (string)$msg->get('iem_dkim_result'),
 			'spf'    => (string)$msg->get('iem_spf_result'),
 			'dmarc'  => (string)$msg->get('iem_dmarc_result'),
+			'dmarc_policy' => $msg->get('iem_dmarc_policy') ?: null,
 			'source' => (string)$msg->get('iem_auth_source'),
 		);
 		$content_spam = $this->resolveContentSpam($raw);
@@ -1212,6 +1216,7 @@ class InboundEmailRouter {
 			'iem_dkim_result'  => $auth['dkim'],
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_dmarc_policy' => $auth['dmarc_policy'] ?? null,
 			'iem_auth_source'  => $auth['source'],
 			'iem_size_bytes'  => intval($meta['size'] ?? 0),
 			'iem_received_time' => (string)($meta['received_utc'] ?? gmdate('Y-m-d H:i:s')),
@@ -1365,6 +1370,7 @@ class InboundEmailRouter {
 			'iem_dkim_result'  => $auth['dkim'],
 			'iem_spf_result'   => $auth['spf'],
 			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_dmarc_policy' => $auth['dmarc_policy'] ?? null,
 			'iem_auth_source'  => $auth['source'],
 			'iem_spam_verdict' => $decision['verdict'],
 			'iem_spam_reason'  => $decision['reason'],
@@ -1577,7 +1583,7 @@ class InboundEmailRouter {
 	 * @param string|null $authserv_id The relay's mail hostname; null = this box's.
 	 */
 	public function authFromRelayMeta(array $meta, ?string $authserv_id = null): array {
-		$default = array('dkim'=>'unverified','spf'=>'unverified','dmarc'=>'unverified','source'=>'none');
+		$default = array('dkim'=>'unverified','spf'=>'unverified','dmarc'=>'unverified','dmarc_policy'=>null,'source'=>'none');
 
 		// The relay records EVERY Authentication-Results header in document order.
 		// Milters prepend, so the trusted (milter-stamped) verdicts are the earliest
@@ -1603,6 +1609,9 @@ class InboundEmailRouter {
 			return $default; // nothing to match against; trust nothing
 		}
 		$verdict = array('dkim'=>null, 'spf'=>null, 'dmarc'=>null);
+		// The DMARC policy belongs to the dmarc verdict it came with: taken from the
+		// same first line that supplied the dmarc verdict, never from a later one.
+		$dmarc_policy = null;
 		$matched = false;
 
 		foreach ($list as $ar) {
@@ -1621,6 +1630,9 @@ class InboundEmailRouter {
 					$val = $parsed->$method();
 					if ($val !== null && $val !== '') {
 						$verdict[$method] = $val;
+						if ($method === 'dmarc') {
+							$dmarc_policy = $parsed->dmarcPolicy();
+						}
 					}
 				}
 			}
@@ -1636,6 +1648,7 @@ class InboundEmailRouter {
 			'dkim'   => $verdict['dkim']  ?: 'none',
 			'spf'    => $verdict['spf']   ?: 'none',
 			'dmarc'  => $verdict['dmarc'] ?: 'none',
+			'dmarc_policy' => $dmarc_policy,
 			'source' => 'relay',
 		);
 	}
@@ -2183,6 +2196,7 @@ class InboundEmailRouter {
 			'iem_dkim_result'  => $auth['dkim'] ?? 'unverified',
 			'iem_spf_result'   => $auth['spf'] ?? 'unverified',
 			'iem_dmarc_result' => $auth['dmarc'] ?? 'unverified',
+			'iem_dmarc_policy' => $auth['dmarc_policy'] ?? null,
 			'iem_auth_source'  => $auth['source'] ?? 'none',
 			'iem_size_bytes'  => intval($msg['size_bytes'] ?? 0),
 			'iem_iia_inbound_imap_account_id' => intval($msg['imap_account_id'] ?? 0) ?: null,
@@ -3243,6 +3257,7 @@ class InboundEmailRouter {
 				'dkim'   => ($provider_auth['dkim']  ?? null) ?: 'none',
 				'spf'    => ($provider_auth['spf']   ?? null) ?: 'none',
 				'dmarc'  => ($provider_auth['dmarc'] ?? null) ?: 'none',
+				'dmarc_policy' => $provider_auth['dmarc_policy'] ?? null,
 				'source' => (string)$provider_auth['source'],
 			);
 		}
@@ -3255,6 +3270,7 @@ class InboundEmailRouter {
 				'dkim'   => $ar->dkim()  ?: 'none',
 				'spf'    => $ar->spf()   ?: 'none',
 				'dmarc'  => $ar->dmarc() ?: 'none',
+				'dmarc_policy' => $ar->dmarcPolicy(),
 				'source' => 'milter',
 			);
 		}
@@ -3264,6 +3280,7 @@ class InboundEmailRouter {
 			'dkim'   => 'unverified',
 			'spf'    => 'unverified',
 			'dmarc'  => 'unverified',
+			'dmarc_policy' => null,
 			'source' => 'none',
 		);
 	}
@@ -3284,8 +3301,9 @@ class InboundEmailRouter {
 	 *   7. the scanner signal says spam                    → spam   'scanner'
 	 *   8. otherwise                                       → ham    'none'
 	 *
-	 * Nothing overrides step 1: a DMARC failure means the From is unattested, so
-	 * no claim about the sender can rescue it. Nothing but a mail rule overrides
+	 * Nothing overrides step 1: a DMARC failure under an enforcing policy means the
+	 * From is unattested, so no claim about the sender can rescue it. A failure under
+	 * p=none is not step 1's to decide; it reaches the corpus as a meta token. Nothing but a mail rule overrides
 	 * step 2: a score rspamd itself would reject at is spam even from a contact,
 	 * because a compromised correspondent passes DMARC and thread-hijack phishing
 	 * replays real Message-IDs. The Spam view's "Always allow sender" rule is the
@@ -3458,6 +3476,12 @@ class InboundEmailRouter {
 		}
 		foreach (array('dmarc', 'spf', 'dkim') as $k) {
 			$tokens[] = $k . ':' . SpamMeta::canonicalAuth((string)($auth[$k] ?? ''));
+		}
+		// A DMARC fail the domain asked us not to act on (p=none). The auth rule does not
+		// file it, so the corpus learns its weight from the user's teaching instead.
+		if (SpamMeta::canonicalAuth((string)($auth['dmarc'] ?? '')) === 'fail'
+				&& strtolower(trim((string)($auth['dmarc_policy'] ?? ''))) === 'none') {
+			$tokens[] = 'dmarc_monitored_fail';
 		}
 		$source = (string)($content_spam['source'] ?? '');
 		$score = $content_spam['score'] ?? null;
