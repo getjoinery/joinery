@@ -51,6 +51,8 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.6 - the reconcile neither counts nor adopts the run ledger files in a space (specs/storage_targets.md F4),
+ *                and says, rather than adopts, a size that differs under a row recorded with its hash
  * @version 1.5 - retention deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the newest
  *                verified chain and everything newer stay, the newest stays, and a chain goes only once a pass
  *                CONFIRM_HOURS earlier found it surplus (sps_surplus); a draining space is released by a verified
@@ -481,6 +483,13 @@ class ServiceTenantWatch {
 					}
 					continue;
 				}
+				if ((string)$object->get('svo_sha256') !== '' && (int)$object->get('svo_bytes') !== $listed[$key]) {
+					// Its run recorded its size and hash; another size there is
+					// something other than that run's bytes. Said, never adopted.
+					$this->errors[] = $this->label($row) . ': ' . $key . ' is ' . $listed[$key] . ' bytes in backup storage, but its run '
+						. 'recorded ' . (int)$object->get('svo_bytes') . ' bytes and a hash: it is not the object that run wrote.';
+					continue;
+				}
 				if ($object->get('svo_completed_time') === null || (int)$object->get('svo_bytes') !== $listed[$key]) {
 					$object->set('svo_bytes', $listed[$key]);
 					$object->set('svo_completed_time', $object->get('svo_completed_time') ?? $now);
@@ -519,9 +528,12 @@ class ServiceTenantWatch {
 		try {
 			list($target, $creds, $bucket) = $space->reach();
 			$listed = array();
+			// The run ledger files are the plane's own record of the space,
+			// written with its key: never a customer's object to count or adopt.
+			$ledger = $space->base() . ShelfBroker::LEDGER_DIR . '/';
 			foreach (S3Signer::list($creds, $bucket, $space->base()) as $object) {
 				$key = (string)($object['key'] ?? '');
-				if ($space->holds_key($key)) {
+				if ($space->holds_key($key) && strpos($key, $ledger) !== 0) {
 					$listed[$key] = (int)($object['size'] ?? 0);
 				}
 			}

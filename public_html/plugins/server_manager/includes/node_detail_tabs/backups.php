@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.19 - each run shows its manifest and the sha256 recorded when it was written, and a backup set whose
+ *                 newest manifest differs from the recorded one says so (specs/storage_targets.md WP5)
  * @version 1.18 - the node's storage spaces: where new backups go, older backups kept on a target it was moved
  *                away from, and Move; every cloud action names the space its backup is in; one unreadable
  *                space no longer hides the chains of the others (specs/storage_targets.md WP4)
@@ -592,9 +594,16 @@
 				$c = $entry['chain']; $r = $entry['run'];
 				echo '<tr>';
 				echo '<td>' . htmlspecialchars($run_when($r)) . '</td>';
+				// The run's manifest and the hash recorded when it was written:
+				// what a shell restore of this run checks its manifest against.
 				echo '<td>' . ($r['level'] === 0 ? 'Full' : 'Incremental')
 				   . (($c['space_state'] ?? '') === StorageSpace::STATE_DRAINING
 						? ' <span class="text-muted small">on ' . htmlspecialchars($c['target_name']) . ', moved away from</span>' : '')
+				   . (($r['manifest_sha256'] ?? '') !== ''
+						? '<div class="text-muted small text-break">' . htmlspecialchars($r['manifest']) . ' sha256 <code class="user-select-all">'
+							. htmlspecialchars($r['manifest_sha256']) . '</code></div>' : '')
+				   . (!empty($c['manifest_mismatch'])
+						? '<div class="text-danger small">The newest manifest of this backup set in backup storage is not the one its run wrote.</div>' : '')
 				   . '</td>';
 				echo '<td><small>' . htmlspecialchars($profile_labels[$c['profile']] ?? $c['profile']) . '</small></td>';
 				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($r['bytes'])) . '</td>';

@@ -130,7 +130,7 @@ check(is_file($chain_d . '/manifest.json'), 'the manifest is on disk');
 
 $manifest = BackupChain::read($chain_d . '/manifest.json');
 $run0 = $manifest['runs'][0] ?? array();
-check((int)$manifest['version'] === 2, 'the chain is a version-2 chain');
+check((int)$manifest['version'] === 3, 'the chain is a version-3 chain');
 $data0 = $run0['artifacts']['data'] ?? array();
 $code0 = $run0['artifacts']['code'] ?? array();
 $key = 'joinery-backups/' . $slug . '/manager/' . $chain_id . '/data-0000.tar.gz.enc';
@@ -161,7 +161,8 @@ $db0 = $run0['artifacts']['db'] ?? array();
 check($db_object !== null && (int)$db0['bytes'] === strlen($db_object) && $db0['sha256'] === hash('sha256', $db_object),
 	'the manifest\'s dump bytes and sha256 equal the object\'s');
 check(!glob('/tmp/jy_backup_*'), 'no plaintext dump temp file exists');
-check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest.json') !== null, 'the manifest is in backup storage');
+check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest-0000.json') !== null, 'the run\'s manifest is in backup storage under its own name');
+check(s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest.json') === null, 'and no manifest.json is');
 
 $history_artifacts = $history->artifacts();
 $data_hist = null;
@@ -207,6 +208,15 @@ check($error === null && ($result['status'] ?? '') === 'success', 'the second ru
 $manifest = BackupChain::read($chain_d . '/manifest.json');
 check(count($manifest['runs']) === 2 && (int)$manifest['runs'][1]['level'] === 1, 'the chain has two runs, the second incremental',
 	json_encode(array_map(function ($r) { return $r['level']; }, $manifest['runs'])));
+$m1 = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest-0001.json');
+check($m1 !== null && $m1 === file_get_contents($chain_d . '/manifest.json')
+	&& s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/manifest-0000.json') !== null,
+	'the second run wrote manifest-0001.json beside the first run\'s, which is untouched');
+$m_art = null;
+foreach ($history2->artifacts() as $a) { if (($a['kind'] ?? '') === 'manifest') { $m_art = $a; } }
+check($m_art !== null && $m_art['name'] === 'manifest-0001.json' && ($m_art['ledger_name'] ?? '') === 'manifest.json'
+	&& substr((string)$m_art['key'], -strlen($chain_id . '/manifest-0001.json')) === $chain_id . '/manifest-0001.json',
+	'the run records its manifest by its own key, ledgered as the chain\'s manifest.json — the name a staged chain is checked by', json_encode($m_art));
 $object1 = s3fx_object($fx, 'bkt', '/joinery-backups/' . $slug . '/manager/' . $chain_id . '/code-0001.tar.gz.enc');
 check($object1 !== null && (int)$manifest['runs'][1]['artifacts']['code']['bytes'] === strlen($object1), 'the code incremental is in backup storage with its recorded size');
 check(!glob($chain_d . '/code-0001*') && !glob($chain_d . '/data-0001*'), 'and not on disk');
@@ -411,7 +421,7 @@ check($error === null && strpos((string)$v1_new->get('bkh_message'), 'new chain:
 check((string)$v1_new->get('bkh_chain_id') !== 'chain-20260901_040000', 'not the version-1 chain');
 check(!is_file($old_snar) && !is_file($old_snar . '.tree'), 'the version-1 snapshot is deleted: nothing reads it any more');
 $v2_m = BackupChain::read($v1_plan['output_dir'] . '/' . $v1_new->get('bkh_chain_id') . '/manifest.json');
-check((int)$v2_m['version'] === 2 && ($v2_m['started_because'] ?? '') === 'layout_split', 'the new chain is version 2 and says why it started');
+check((int)$v2_m['version'] === 3 && ($v2_m['started_because'] ?? '') === 'layout_split', 'the new chain is version 3 and says why it started');
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('A database-only run streams the dump; only the sidecar is written');

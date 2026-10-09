@@ -3025,13 +3025,6 @@
       "kind": "operator",
       "locator": "bkt_backup_targets.bkt_credentials",
       "enumerator": "BackupTarget::eachCredentialBlob"
-    },
-    {
-      "label": "Backup target node credentials",
-      "feature": "Backup targets",
-      "kind": "operator",
-      "locator": "bkt_backup_targets.bkt_node_credentials",
-      "enumerator": "BackupTarget::eachNodeCredentialBlob"
     }
   ]
 }

@@ -15,16 +15,15 @@
  *   3. Write — the main key can put a probe object under the target's prefix.
  *   4. Private — an anonymous read of that probe is refused.
  *   5. Prune — the main key can delete the probe (retention needs it).
- *   6. Node key, when one is set — it can write a probe and CANNOT delete it
- *      (that is the whole point of a second key); the main key cleans up.
- *   7. Backblaze keys — what each key says it may do: pinned to this bucket
- *      (warn when it opens the whole account, naming the file store's
- *      buckets it also opens), and every capability the job needs, plus the
- *      key-minting ones when minting per run is on.
+ *   6. Backblaze — what the key says it may do: pinned to this bucket (warn
+ *      when it opens the whole account, naming the file store's buckets it
+ *      also opens), and every capability the job needs.
  *
  * All providers (Backblaze via its S3 endpoint included) go through S3Signer;
- * only step 7 asks Backblaze itself.
+ * only step 6 asks Backblaze itself.
  *
+ * @version 4.1 - one key per target: no node key to prove write-only and no minting capabilities to ask
+ *                for (specs/storage_targets.md WP5)
  * @version 4.0 - the full check (specs/implemented/storage_bucket_and_key_check.md): own bucket, private,
  *                prune, the node key proven write-only, Backblaze capabilities; steps returned
  * @version 3.0
@@ -105,55 +104,19 @@ class TargetTester {
 				$steps[] = $del['ok']
 					? array('label' => 'Prune', 'status' => 'pass', 'message' => 'The main key can delete, so retention can prune.')
 					: array('label' => 'Prune', 'status' => 'fail', 'message' => 'The main key cannot delete (' . $del['error'] . '). '
-						. 'Retention could never prune, so the bucket would only grow. Use a key that can delete as the main key; a write-only key belongs in the node key field.');
+						. 'Retention could never prune, so the bucket would only grow. Use a key that can delete.');
 			} else {
 				$steps[] = array('label' => 'Write', 'status' => 'fail', 'message' => 'The main key cannot store an object in "' . $bucket . '" (' . $put['error'] . ').');
 				return $done($steps);
-			}
-
-			// 6. The node key: write yes, delete no.
-			$node_creds = array();
-			try {
-				$node_creds = $target->has_node_credentials() ? $target->get_node_credentials() : array();
-			} catch (Exception $e) {
-				$steps[] = array('label' => 'Node key', 'status' => 'fail', 'message' => $e->getMessage());
-			}
-			if (!empty($node_creds['access_key'])) {
-				$node_probe = '/' . trim($prefix, '/') . '/_joinery_probe-node-' . bin2hex(random_bytes(4)) . '.txt';
-				$nput = self::put($node_creds, $bucket, $node_probe, $probe_local);
-				if (!$nput['ok']) {
-					$steps[] = array('label' => 'Node key', 'status' => 'fail',
-						'message' => 'The node key cannot store an object in "' . $bucket . '" (' . $nput['error'] . '). A backup run on a node would fail to upload.');
-				} else {
-					$ndel = self::delete($node_creds, $bucket, $node_probe);
-					if ($ndel['ok']) {
-						$steps[] = array('label' => 'Node key', 'status' => 'fail',
-							'message' => 'The node key can delete objects, so a node handed it could erase backups. '
-								. 'That key is meant to write and nothing else: make one with write but not delete capability, or leave the field empty and nodes use the main key.');
-					} else {
-						$steps[] = array('label' => 'Node key', 'status' => 'pass', 'message' => 'The node key can write and cannot delete.');
-						self::delete($creds, $bucket, $node_probe);
-					}
-				}
 			}
 		} finally {
 			@unlink($probe_local);
 		}
 
-		// 7. What Backblaze says each key may do.
+		// 6. What Backblaze says the key may do.
 		if ((string)$target->get('bkt_provider') === 'b2' || BucketCheck::is_b2((string)($creds['endpoint'] ?? ''))) {
-			$needed = self::B2_MAIN_NEEDS;
-			if (!empty($target->get('bkt_mint_run_keys'))) {
-				$needed = array_merge($needed, BucketCheck::B2_MINT_CAPABILITIES);
-			}
-			$others = BucketCheck::file_store_buckets();
-			foreach (BucketCheck::b2_key_steps($creds, $bucket, $needed, 'main key', $others) as $step) {
+			foreach (BucketCheck::b2_key_steps($creds, $bucket, self::B2_MAIN_NEEDS, 'main key', BucketCheck::file_store_buckets()) as $step) {
 				$steps[] = $step;
-			}
-			if (!empty($node_creds['access_key'])) {
-				foreach (BucketCheck::b2_key_steps($node_creds, $bucket, array('writeFiles'), 'node key', $others) as $step) {
-					$steps[] = $step;
-				}
 			}
 		}
 

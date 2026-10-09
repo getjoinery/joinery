@@ -27,12 +27,19 @@
  * A site can be backed up by more than one party — see BackupProfile. Every run
  * belongs to exactly one, and the profile decides the working directory, the
  * lock, the snapshot, the bucket path, the recipient and which history rows the
- * run may look at. The manager profile does NOT prune the bucket: the credential
- * it is handed cannot delete, and pruning that shelf belongs to the party that
- * owns it. Local disk is a separate question with a separate answer: every
+ * run may look at. The manager profile does NOT prune the bucket: it writes
+ * through the management node's broker, which signs writes and nothing else,
+ * and pruning that shelf belongs to the party that owns it. Local disk is a separate question with a separate answer: every
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.30 - a manager run writes through the management node's broker when its slot names a broker run
+ *                (BackupBroker): begun before the chain is chosen, finished with every object's hash before the
+ *                run is committed, aborted when the run fails; a manager chain follows the broker's storage space
+ *                (bkh_remote_space_id); a version-3 chain uploads one manifest per run; a site run writes its
+ *                ledger file to its own bucket; a name already in backup storage with other bytes closes the
+ *                chain (the next run starts one, name_taken), and the same bytes count as stored; a pruned
+ *                chain takes every manifest in its folder (specs/storage_targets.md WP5, F4, F9)
  * @version 1.29 - retention deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the newest
  *                verified restore point and everything newer stay, the newest stays, and a point goes only once
  *                a pass CONFIRM_HOURS earlier found it surplus (bkh_surplus_time); the local sweep keeps every
@@ -174,12 +181,21 @@ require_once(PathHelper::getIncludePath('includes/BackupObjects.php'));
 class BackupRunnerException extends Exception {}
 
 /**
+ * A run asked to write a name backup storage already holds with other bytes:
+ * a run the broker recorded and this machine did not commit (it died after
+ * finishing, or never heard the answer). Nothing is written twice, so the chain
+ * cannot be extended at that run number; the next run starts a new chain.
+ */
+class BackupRunnerNameTakenException extends BackupRunnerException {}
+
+/**
  * A backup destination that exists only for the length of one run.
  *
- * The manager profile is handed its bucket and credentials by whoever triggered
- * the run; they are never stored here. That a node holds no credential which
- * could reach another site's backup storage is a security property, so this is
- * deliberately NOT a BackupTarget model: there is no save(), no table and no
+ * The manager profile is handed its bucket and a run on the management node's
+ * backup broker by whoever triggered the run; they are never stored here. That
+ * a node holds no credential at all — every write is a link the bucket's owner
+ * signs — is a security property, so this is deliberately NOT a BackupTarget
+ * model: there is no save(), no table and no
  * persistence path to forget to avoid. It carries only the surface a run reads.
  */
 class EphemeralBackupDestination {
@@ -190,7 +206,8 @@ class EphemeralBackupDestination {
 	private $fields;
 	private $credentials;
 
-	public function __construct(array $fields, array $credentials) {
+	/** @param array|S3LinkSource $credentials a key, or the broker run every request is signed by */
+	public function __construct(array $fields, $credentials) {
 		$this->fields = $fields;
 		$this->credentials = $credentials;
 	}
@@ -306,9 +323,22 @@ class BackupRunner {
 		$history->save();
 
 		try {
+			if (!empty($plan['broker'])) {
+				// Where the management node takes this run: its broker run, the
+				// storage space and the target. Asked before anything is built,
+				// so a refusal is the run's cause and nothing was stored.
+				$history->set('bkh_remote_run_id', $plan['broker']->run_id());
+				$plan['broker']->begin();
+				$history->set('bkh_remote_space_id', $plan['broker']->space_id());
+				$history->set('bkh_target_name', $plan['broker']->target_name());
+				$history->save();
+			}
 			$result = self::execute($plan, $history);
 		} catch (\Throwable $e) {
 			self::fail($history, $e->getMessage());
+			if (!empty($plan['broker'])) {
+				$plan['broker']->abort($e->getMessage());
+			}
 			return array('status' => 'error', 'message' => 'Backup failed: ' . $e->getMessage());
 		} finally {
 			self::release_lock($lock);
@@ -494,9 +524,9 @@ class BackupRunner {
 	 * A management node's backup of this site: where it goes arrives with the run,
 	 * what opens it does not.
 	 *
-	 * The bucket and its credential are the management node's to supply — they name
-	 * a shelf this machine has no other way to reach, and they leave with the
-	 * process. The recovery key is different in kind. Sealing to a public key
+	 * The bucket and the broker run are the management node's to supply — they
+	 * name a shelf this machine has no other way to reach, and they leave with
+	 * the process. The recovery key is different in kind. Sealing to a public key
 	 * always appears to succeed: seal to an attacker's and every archive reports
 	 * itself encrypted while only the attacker can open it, with nothing on any
 	 * machine looking wrong. A key that arrives over a wire is therefore a key
@@ -547,6 +577,17 @@ class BackupRunner {
 		if (!$credentials) {
 			throw new BackupRunnerException('The credentials supplied with this run could not be read.');
 		}
+		// A management node's broker run, not a key: every write is made on a
+		// link the management node signs (specs/storage_targets.md WP5).
+		$broker = null;
+		if (BackupBroker::is_slot($credentials)) {
+			try {
+				$broker = new BackupBroker($credentials);
+			} catch (BackupBrokerException $e) {
+				throw new BackupRunnerException($e->getMessage());
+			}
+			$credentials = $broker;
+		}
 
 		$target = new EphemeralBackupDestination(array(
 			'bkt_name'        => (string)($m['target_name'] ?? 'management node storage'),
@@ -574,8 +615,9 @@ class BackupRunner {
 
 		return array(
 			'profile'      => BackupProfile::MANAGER,
-			// A management node's storage, reached with what the run was handed.
+			// A management node's storage, reached through its broker.
 			'destination'  => 'service',
+			'broker'       => $broker,
 			'type'         => $type,
 			'mode'         => $mode,
 			'full_days'    => max(0, (int)($m['full_interval_days'] ?? 7)),
@@ -593,9 +635,8 @@ class BackupRunner {
 			// How long these backups are kept is this site's decision: the run
 			// reports the window (BACKUP_KEEP_DAYS) and the management node
 			// deletes by it, never below its own minimum. The deleting is not
-			// this machine's — the credential it was handed cannot delete, and a
-			// site that could erase its own offsite copies would lose them to the
-			// first intruder. Retention here removes the records only, by the
+			// this machine's — the broker signs no delete, and a site that could
+			// erase its own offsite copies would lose them to the first intruder. Retention here removes the records only, by the
 			// same rule and window, so this site's list matches what is kept.
 			'keep_days'    => self::keep_days(),
 			'prunes_cloud' => false,
@@ -603,8 +644,8 @@ class BackupRunner {
 			// fields a management node running that code sends. A request
 			// without `objects` — an older management node — stores nothing and
 			// holds nothing, so a node upgraded ahead of its management node
-			// behaves as it always did. The credential cannot list, so what the
-			// shelf holds arrives as the newest index by link, never by listing;
+			// behaves as it always did. The broker lists nothing for a node, so what
+			// the shelf holds arrives as the newest index by link, never by listing;
 			// a request with no link means backup storage holds nothing yet. Links
 			// are https or nothing: a signature is a bearer token.
 			'objects'             => $objects,
@@ -774,6 +815,11 @@ class BackupRunner {
 		}
 
 		$manifest_path = self::chain_dir($plan, $chain_id) . '/' . BackupChain::MANIFEST_NAME;
+		if (is_file(self::chain_dir($plan, $chain_id) . '/' . self::CLOSED_MARKER)) {
+			// A run found its next name already taken in backup storage: this
+			// chain is not extended again.
+			return array(null, null, null, true);
+		}
 		try {
 			return array($chain_id, BackupChain::read($manifest_path), $chain_destination);
 		} catch (BackupChainException $e) {
@@ -797,9 +843,12 @@ class BackupRunner {
 			return null;
 		}
 		if ($plan['profile'] !== BackupProfile::SITE) {
-			// A management node's storage is named by the target it sends;
-			// moving the node to another target names another, and the chain
-			// starts again there.
+			// A management node's storage: the space its broker took the run
+			// in. Moving the node opens another space, and the chain starts
+			// again there.
+			if (!empty($plan['broker'])) {
+				return 'space:' . (int)$plan['broker']->space_id();
+			}
 			return 'service:' . (string)$plan['target']->get('bkt_name');
 		}
 		return $plan['target']->key ? 'target:' . (int)$plan['target']->key : null;
@@ -808,6 +857,9 @@ class BackupRunner {
 	/** destination_of_plan() for a run already taken, from its history row. */
 	private static function destination_of_row(array $plan, BackupHistory $row) {
 		if ($plan['profile'] !== BackupProfile::SITE) {
+			if ((int)$row->get('bkh_remote_space_id') > 0) {
+				return 'space:' . (int)$row->get('bkh_remote_space_id');
+			}
 			return 'service:' . (string)$row->get('bkh_target_name');
 		}
 		return (string)$row->get('bkh_destination') === 'target'
@@ -887,6 +939,9 @@ class BackupRunner {
 		return hash_equals($recorded, $current);
 	}
 
+	/** In a chain's local folder: the chain is not to be extended (BackupRunnerNameTakenException). */
+	const CLOSED_MARKER = '.closed';
+
 	private static function chain_dir(array $plan, $chain_id) {
 		return rtrim($plan['output_dir'], '/') . '/' . $chain_id;
 	}
@@ -904,11 +959,15 @@ class BackupRunner {
 		foreach ($snars as $s) {
 			$snars_present = $snars_present && is_file($s) && filesize($s) > 0;
 		}
-		list($chain_id, $manifest, $chain_destination) = self::current_chain($plan);
+		$current = self::current_chain($plan);
+		list($chain_id, $manifest, $chain_destination) = $current;
 
 		$reason = BackupChain::should_start_new($manifest, $snars_present,
 			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr'], BackupChain::VERSION,
 			$chain_destination, self::destination_of_plan($plan));
+		if (!empty($current[3])) {
+			$reason = 'name_taken';
+		}
 		if ($reason === 'recovery_rotated') {
 			error_log('BackupRunner: the recovery key changed since chain ' . $chain_id
 				. ' started; starting a new chain sealed to the current key.');
@@ -1053,7 +1112,8 @@ class BackupRunner {
 			$level = (int)$manifest['runs'][count($manifest['runs']) - 1]['level'];
 			BackupChain::write($manifest, $manifest_path);
 
-			$uploaded = self::upload_chain($plan, $chain_id, $artifacts, $manifest_path);
+			$uploaded = self::upload_chain($plan, $chain_id, $artifacts, $manifest_path, BackupChain::stored_manifest_name($manifest));
+			self::finish_broker_run($plan, $chain_id);
 		} catch (\Throwable $e) {
 			// The snapshots advance DURING the files engines, before this run is
 			// committed to the manifest and confirmed in the bucket. Carrying one
@@ -1073,6 +1133,9 @@ class BackupRunner {
 			// finally removed the whole chain — weeks, on a disk that may not
 			// have them to spare.
 			self::discard_failed_run($chain_d, $seq, $artifacts, $manifest_path, $manifest_pre, $plan);
+			if ($e instanceof BackupRunnerNameTakenException && is_dir($chain_d)) {
+				@file_put_contents($chain_d . '/' . self::CLOSED_MARKER, $e->getMessage() . "\n");
+			}
 			throw $e;
 		}
 
@@ -1108,6 +1171,7 @@ class BackupRunner {
 		// The run is committed: record what backup storage now holds, and release
 		// the local bytes every enabled profile holds.
 		$released = $objects ? self::finish_objects($plan, $objects) : 0;
+		self::write_ledger_file($plan, $history, $uploaded, $objects);
 
 		// Both retention families run on every backup, so a site switched
 		// between modes still ages its old backups out. Each pass only ever
@@ -1287,9 +1351,11 @@ class BackupRunner {
 	 *
 	 * An artifact that streamed to the bucket has no local file to delete; it
 	 * has an object, which is deleted where the credential can delete (the
-	 * site profile). Under the manager profile's write-only credential the
-	 * object stays until its chain is pruned whole — a bounded orphan the
-	 * manifest never names, the same one a failed upload_chain() can leave.
+	 * site profile). A manager run deletes nothing: the broker cancels what the
+	 * failed run signed, and an object it did put stays until its chain is
+	 * pruned whole — a bounded orphan the manifest never names, the same one a
+	 * failed upload_chain() can leave, and its name is signed again for the run
+	 * that retries it.
 	 *
 	 * Every step is best-effort: this runs on the failure path, and the failure
 	 * being reported must stay the real one.
@@ -1524,6 +1590,10 @@ class BackupRunner {
 		$report = is_file($report_file) ? self::parse_kv((string)@file_get_contents($report_file)) : array();
 		@unlink($report_file);
 
+		if ($failure instanceof S3ObjectExistsException) {
+			throw new BackupRunnerNameTakenException($name . ' is already in backup storage with other bytes, so this '
+				. 'chain is not extended; the next run starts a new one.');
+		}
 		if ($failure !== null) {
 			throw new BackupRunnerException('Streaming ' . $name . ' to the bucket failed: ' . $failure->getMessage()
 				. ($stderr !== '' ? ' | engine: ' . self::tail($stderr) : ''));
@@ -1552,7 +1622,13 @@ class BackupRunner {
 			throw new BackupRunnerException(ucfirst($why) . '. ' . self::tail($stderr));
 		}
 
-		$final = S3Signer::complete_stream($resp['pending']);
+		try {
+			$final = S3Signer::complete_stream($resp['pending']);
+		} catch (S3ObjectExistsException $e) {
+			// A short stream is sent here, as one request: its name may be taken.
+			throw new BackupRunnerNameTakenException($name . ' is already in backup storage with other bytes, so this '
+				. 'chain is not extended; the next run starts a new one.');
+		}
 		$status = (int)($final['status'] ?? 0);
 		if ($status < 200 || $status >= 300) {
 			$msg = S3Signer::extract_error($final['body'] ?? '') ?: ('HTTP ' . $status);
@@ -1691,14 +1767,40 @@ class BackupRunner {
 		);
 	}
 
-	/** Upload what a run made on disk plus the rewritten manifest; streamed artifacts pass through keyed. */
-	private static function upload_chain(array $plan, $chain_id, array $artifacts, $manifest_path) {
+	/**
+	 * Tell the management node's broker the run is done: every object it
+	 * wrote, with its size and sha256, and the chain it extended. Called once
+	 * everything is uploaded and before the run is committed here, so a run
+	 * the broker did not record is a failed run — undone like any other — and
+	 * its retry signs the same names again. A plan with no broker has nothing
+	 * to tell.
+	 */
+	private static function finish_broker_run(array $plan, $chain_id) {
+		if (empty($plan['broker'])) {
+			return;
+		}
+		try {
+			$plan['broker']->finish((string)$chain_id);
+		} catch (\Throwable $e) {
+			throw new BackupRunnerException('The management node did not record this run, so it is not kept: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Upload what a run made on disk plus the manifest; streamed artifacts pass
+	 * through keyed. The manifest goes up under $stored_name (a version-3 run's
+	 * own manifest-{seq}.json) and is ledgered under manifest.json, the name
+	 * every staged chain reads it by, so each run's manifest is one more
+	 * version of that one name.
+	 */
+	private static function upload_chain(array $plan, $chain_id, array $artifacts, $manifest_path, $stored_name) {
 		$to_send = array_values($artifacts);
 		$to_send[] = array(
-			'name'  => BackupChain::MANIFEST_NAME,
-			'path'  => $manifest_path,
-			'bytes' => (int)filesize($manifest_path),
-			'kind'  => 'manifest',
+			'name'        => (string)$stored_name,
+			'ledger_name' => BackupChain::MANIFEST_NAME,
+			'path'        => $manifest_path,
+			'bytes'       => (int)filesize($manifest_path),
+			'kind'        => 'manifest',
 		);
 		return self::upload($plan, $to_send, $chain_id . '/');
 	}
@@ -1747,6 +1849,7 @@ class BackupRunner {
 		$targets = array();
 		$pruned = 0;
 		foreach ($surplus as $cid) {
+			$folders = array();
 			try {
 				// Each run is deleted from the target it went to, never "the
 				// current one": after a switch the old chains are still on the
@@ -1761,6 +1864,24 @@ class BackupRunner {
 						$pruned_indexes[$tid] = ($pruned_indexes[$tid] ?? array()) + self::index_entries_of_rows($rplan, array($row));
 					}
 					self::delete_row_objects($rplan, $row);
+					foreach ($row->object_keys() as $key) {
+						if (basename(dirname($key)) === $cid) {
+							$folders[dirname($key) . '/'] = $rplan;
+						}
+					}
+				}
+				// A run that failed after its manifest went up and was never
+				// retried at that number left a manifest no row names: every
+				// manifest in the chain's folder goes with the chain.
+				foreach ($folders as $folder => $rplan) {
+					$creds = $rplan['target']->get_credentials();
+					$bucket = trim((string)$rplan['target']->get('bkt_bucket'));
+					foreach (S3Signer::list($creds, $bucket, ltrim($folder, '/')) as $o) {
+						$key = (string)($o['key'] ?? '');
+						if (BackupChain::is_manifest_name(basename($key)) && dirname($key) . '/' === ltrim($folder, '/')) {
+							S3Signer::delete($creds, $bucket, '/' . $key);
+						}
+					}
 				}
 				// Only once every object of the chain is gone are its rows
 				// marked deleted — a half-deleted chain must keep looking like
@@ -1885,6 +2006,7 @@ class BackupRunner {
 		$archive_bytes = (int)$artifacts[0]['bytes'];
 
 		$uploaded = self::upload($plan, $artifacts);
+		self::finish_broker_run($plan, '');
 		$history->set_artifacts($uploaded);
 		$history->set('bkh_upload_time', gmdate('Y-m-d H:i:s'));
 		$history->set('bkh_outcome', 'success');
@@ -1901,6 +2023,7 @@ class BackupRunner {
 		}
 
 		$released = $objects ? self::finish_objects($plan, $objects) : 0;
+		self::write_ledger_file($plan, $history, $uploaded, $objects);
 
 		// Only now, with this run safely offsite, is it sound to delete anything.
 		// Chains are pruned here too, so a site switched from chain mode to full
@@ -2061,7 +2184,17 @@ class BackupRunner {
 				continue;
 			}
 			$key = $base_key . $sub . $a['name'];
-			$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($key, '/'), $a['path']);
+			try {
+				$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($key, '/'), $a['path']);
+			} catch (S3ObjectExistsException $e) {
+				// Nothing is written twice. These very bytes there is this
+				// artifact stored; other bytes under its name is a name taken.
+				if ((string)$e->sha256 === '' || !hash_equals((string)$e->sha256, (string)hash_file('sha256', $a['path']))) {
+					throw new BackupRunnerNameTakenException($a['name'] . ' is already in backup storage with other bytes, '
+						. 'so this chain is not extended; the next run starts a new one.');
+				}
+				$resp = array('status' => 200, 'body' => '');
+			}
 			$status = (int)($resp['status'] ?? 0);
 			if ($status < 200 || $status >= 300) {
 				$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . $status);
@@ -2074,11 +2207,14 @@ class BackupRunner {
 			// it is the only moment a record of the pairing is worth anything.
 			// The relative name is what a later download will ask for, chain
 			// subdirectory included.
-			if (!BackupLedger::record($plan['profile'], $sub . $a['name'], $a['path'], $key)) {
+			if (!BackupLedger::record($plan['profile'], $sub . ($a['ledger_name'] ?? $a['name']), $a['path'], $key)) {
 				$unledgered[] = $a['name'];
 			}
 
 			$a['key'] = $key;
+			if (empty($a['sha256'])) {
+				$a['sha256'] = (string)hash_file('sha256', $a['path']);
+			}
 			$out[] = $a;
 		}
 
@@ -2087,6 +2223,64 @@ class BackupRunner {
 		}
 
 		return $out;
+	}
+
+	/** Where a run's ledger file goes in the site's own bucket: {prefix}/{slug}/ledger/{history id}.json. */
+	public static function ledger_file_key(array $plan, $history_id) {
+		return BackupTarget::normalise_prefix((string)$plan['target']->get('bkt_path_prefix')) . '/' . $plan['slug']
+			. '/ledger/' . (int)$history_id . '.json';
+	}
+
+	/**
+	 * The run's ledger file in this site's own bucket (specs/storage_targets.md
+	 * F4): every object the run put there, with key, bytes and sha256, and the
+	 * run's time, profile and chain, written with this site's key once the run
+	 * is committed. With the site's database lost, it is where the manifest's
+	 * hash comes from for a shell restore. A run through a management node's
+	 * broker has its ledger file written there, by the bucket's owner. A
+	 * failure is logged and never fails a run that is already offsite.
+	 */
+	private static function write_ledger_file(array $plan, BackupHistory $history, array $uploaded, $objects = null) {
+		if (!empty($plan['broker']) || empty($plan['prunes_cloud']) || empty($plan['target'])) {
+			return;
+		}
+		try {
+			list($creds, $bucket, $base_key) = self::destination($plan);
+			$entries = array();
+			foreach ($uploaded as $a) {
+				if (!empty($a['key'])) {
+					$entries[] = array('key' => (string)$a['key'], 'bytes' => (int)($a['bytes'] ?? 0), 'sha256' => (string)($a['sha256'] ?? ''));
+				}
+			}
+			foreach ((array)($objects['stored'] ?? array()) as $name => $e) {
+				$entries[] = array('key' => $base_key . BackupObjects::object_relname((string)$e['epoch'], (string)$name),
+					'bytes' => (int)($e['object_bytes'] ?? 0), 'sha256' => (string)($e['object_sha256'] ?? ''));
+			}
+			$body = json_encode(array(
+				'version'  => 1,
+				'run_id'   => (int)$history->key,
+				'kind'     => 'backup',
+				'owner'    => (string)$plan['slug'],
+				'profile'  => BackupProfile::path_segment($plan['profile']),
+				'chain'    => (string)$history->get('bkh_chain_id'),
+				'started'  => (string)$history->get('bkh_start_time'),
+				'finished' => (string)$history->get('bkh_finish_time'),
+				'objects'  => $entries,
+			), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+			$tmp = tempnam(sys_get_temp_dir(), 'jy_ledger_');
+			try {
+				file_put_contents($tmp, $body);
+				$resp = S3Signer::put_file($creds, $bucket, '/' . self::ledger_file_key($plan, $history->key), $tmp, 'application/json');
+			} finally {
+				@unlink($tmp);
+			}
+			$status = (int)($resp['status'] ?? 0);
+			if ($status < 200 || $status >= 300) {
+				throw new BackupRunnerException('HTTP ' . $status . ' ' . S3Signer::extract_error($resp['body'] ?? ''));
+			}
+		} catch (\Throwable $e) {
+			error_log('BackupRunner: the ledger file of run ' . (int)$history->key . ' could not be written: ' . $e->getMessage());
+		}
 	}
 
 	/**

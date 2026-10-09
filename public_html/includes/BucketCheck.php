@@ -19,6 +19,7 @@
  *   'anonymous_status'      => fn($url): int         the HTTP status an anonymous GET gets
  *   'is_b2'                 => bool                  treat any endpoint as Backblaze
  *
+ * @version 1.6 - B2_MINT_CAPABILITIES is gone: no key is minted per run (specs/storage_targets.md WP5)
  * @version 1.5 - the file store's buckets are its target rows (specs/storage_targets.md WP6); a backup target's
  *                buckets are the backup targets only
  * @version 1.4 - one host parser (StorageProvider::host()) and one address for an object
@@ -37,8 +38,6 @@ class BucketCheck {
 
 	/** What a backup target's main key must be able to do on Backblaze: list, read, write, and prune. */
 	const B2_BACKUP_CAPABILITIES = array('listFiles', 'readFiles', 'writeFiles', 'deleteFiles');
-	/** What a key must be able to do to mint a per-run key. */
-	const B2_MINT_CAPABILITIES = array('writeKeys', 'listKeys', 'deleteKeys');
 	/** What the file store's key must be able to do: serve, store, and permanently delete. */
 	const B2_FILE_STORE_CAPABILITIES = array('listFiles', 'readFiles', 'writeFiles', 'deleteFiles');
 
@@ -222,7 +221,7 @@ class BucketCheck {
 	 * @param array  $creds   access_key / secret_key
 	 * @param string $bucket  the bucket this key is for
 	 * @param array  $needed  capabilities the job needs (self::B2_* constants)
-	 * @param string $role    'main key' | 'node key' | 'file store key', for the labels
+	 * @param string $role    'main key' | 'file store key', for the labels
 	 * @param array  $others  the other side's buckets, so an account-wide warning can name them
 	 */
 	public static function b2_key_steps(array $creds, $bucket, array $needed, $role, array $others = array()) {
@@ -272,7 +271,6 @@ class BucketCheck {
 		if (in_array('writeFiles', $missing, true)) { $why[] = 'nothing could be stored'; }
 		if (in_array('readFiles', $missing, true)) { $why[] = 'nothing could be read back'; }
 		if (in_array('listFiles', $missing, true)) { $why[] = 'nothing could be listed'; }
-		if (array_intersect(array('writeKeys', 'listKeys', 'deleteKeys'), $missing)) { $why[] = 'no per-run key could be minted, and every run would fail'; }
 		return $why ? ucfirst(implode('; ', $why)) . '.' : '';
 	}
 

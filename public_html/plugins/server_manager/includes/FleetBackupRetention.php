@@ -22,6 +22,9 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.12 - a deleted object's ledger row is kept, marked pruned by retention; a chain's newest manifest is
+ *                 read whatever its version, and every envelope of an emptied epoch goes with it
+ *                 (specs/storage_targets.md WP5)
  * @version 1.11 - prune() deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the node's newest
  *                 verified chain and everything newer stay, the newest stays, and a point goes only once a pass
  *                 CONFIRM_HOURS earlier found it surplus too (recorded on its space, sps_surplus); the verified
@@ -208,6 +211,11 @@ class FleetBackupRetention {
 					// 404 is the state we were asking for.
 					if (($status < 200 || $status >= 300) && $status !== 404) {
 						throw new Exception('HTTP ' . $status . ' deleting ' . $key);
+					}
+					// The broker's ledger keeps the row, marked with when and why.
+					$row = ShelfObject::forKey((int)$sp['space']->key, ltrim((string)$key, '/'));
+					if ($row !== null) {
+						$row->markPruned(ShelfObject::PRUNED_RETENTION);
 					}
 				};
 			};
@@ -537,7 +545,7 @@ class FleetBackupRetention {
 	 *                      or throws; defaults to a signed GET from the bucket
 	 * @return array{problem:string, unread:string}
 	 */
-	public static function check_shelf(array $objects, $base, array $creds, $bucket, $read = null) {
+	public static function check_shelf(array $objects, $base, array $creds, $bucket, $read = null, $space_id = 0) {
 		$base = rtrim((string)$base, '/') . '/';
 		$present = array();      // chain dir => [name => size]
 		$manifests = array();    // chain dir => manifest key
@@ -556,8 +564,12 @@ class FleetBackupRetention {
 			list($dir, $name) = $parts;
 			$size = $obj['size'] ?? $obj['Size'] ?? null;
 			$present[$dir][$name] = is_numeric($size) ? (int)$size : null;
-			if ($name === BackupChain::MANIFEST_NAME) {
-				$manifests[$dir] = $key;
+		}
+		// Each chain's newest manifest: a version-3 chain writes one per run.
+		foreach ($present as $dir => $names) {
+			$newest = ShelfObject::preferredManifestName((int)$space_id, $base . $dir . '/', array_keys($names));
+			if ($newest !== '') {
+				$manifests[$dir] = $base . $dir . '/' . $newest;
 			}
 		}
 		$store = self::object_store($objects, $base);
@@ -647,11 +659,14 @@ class FleetBackupRetention {
 
 	/**
 	 * The object store as the listing shows it: objects by shelf location
-	 * (epoch/name => ['key', 'size', 'last_modified']) and envelopes by epoch.
+	 * (epoch/name => ['key', 'size', 'last_modified']); 'envelopes', the key of
+	 * each epoch's newest envelope (the one a re-seal wrote last, else its
+	 * envelope.json); and 'envelope_keys', every envelope key of each epoch.
 	 */
 	public static function object_store(array $objects, $base) {
 		$base = rtrim((string)$base, '/') . '/';
-		$out = array('objects' => array(), 'envelopes' => array());
+		$out = array('objects' => array(), 'envelopes' => array(), 'envelope_keys' => array());
+		$written = array();
 		foreach ($objects as $obj) {
 			if (!is_array($obj)) { continue; }
 			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
@@ -661,7 +676,13 @@ class FleetBackupRetention {
 			$epoch = $at['epoch'];
 			$size = $obj['size'] ?? $obj['Size'] ?? null;
 			if ($at['envelope']) {
-				$out['envelopes'][$epoch] = $key;
+				$out['envelope_keys'][$epoch][] = $key;
+				// Newest written wins; on a tie a re-sealed name over envelope.json.
+				$when = array((string)($obj['last_modified'] ?? $obj['LastModified'] ?? ''), $at['file'] !== BackupObjects::ENVELOPE_NAME ? 1 : 0);
+				if (!isset($written[$epoch]) || $when > $written[$epoch]) {
+					$written[$epoch] = $when;
+					$out['envelopes'][$epoch] = $key;
+				}
 				continue;
 			}
 			$name = $at['name'];
@@ -811,8 +832,10 @@ class FleetBackupRetention {
 				if (strpos($loc, $epoch . '/') === 0) { $left = true; break; }
 			}
 			if (!$left) {
-				$delete($store['envelopes'][$epoch]);
-				$deleted[] = $store['envelopes'][$epoch];
+				foreach (($store['envelope_keys'][$epoch] ?? array($store['envelopes'][$epoch])) as $key) {
+					$delete($key);
+					$deleted[] = $key;
+				}
 			}
 		}
 		return $deleted;

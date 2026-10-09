@@ -341,35 +341,6 @@ foreach (array(
 }
 
 // ---------------------------------------------------------------------------
-section('A backup target that can mint keys says so, and only where it can');
-
-require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
-$b2 = new BackupTarget(NULL);
-$b2->set('bkt_name', 'HarnessTest hosted ' . $suffix);
-$b2->set('bkt_provider', 'b2');
-$b2->set('bkt_bucket', 'ht-bucket');
-$b2->set('bkt_credentials', json_encode(array('access_key' => 'k', 'secret_key' => 's',
-	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.backblazeb2.com')));
-$b2->save();
-$b2->load();
-check(!$b2->can_mint_run_keys(),
-	'a new target does NOT mint until somebody turns it on — minting needs a master key the '
-	. 'provider will let create keys, and switching it on by default would fail every run of a '
-	. 'fleet that was working');
-
-$b2->set('bkt_mint_run_keys', true);
-$b2->save();
-$b2->load();
-check($b2->can_mint_run_keys(), 'and does once an operator has');
-
-$b2->set('bkt_mint_run_keys', true);
-$b2->set('bkt_provider', 's3');
-$b2->save();
-check(!$b2->can_mint_run_keys(),
-	'a provider that cannot pin a key to a prefix cannot mint, whatever the flag says — '
-	. 'the fleet keeps the shared write-only credential it always had');
-
-// ---------------------------------------------------------------------------
 section('The two writers are two job types, so neither can read the other\'s answer');
 
 // This was a real bug while both rode one general primitive: the mail leg read

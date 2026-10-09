@@ -2,10 +2,13 @@
 /**
  * shelf_finish_run - the site closes a run and names what it completed.
  *
- * (specs/services_phase2_platform.md §3). The ledger marks the named
- * objects complete; anything signed for the run and not named stays
- * uncompleted for the prune pass to abort. The tenant's figure is refreshed.
+ * (specs/services_phase2_platform.md §3). The ledger marks each named object
+ * complete with the size and sha256 the site reports — one named without its
+ * hash is not completed — and cancels everything else signed for the run. A
+ * completed key is never signed again. The run's ledger file goes to backup
+ * storage and the tenant's figure is refreshed (specs/storage_targets.md §6, F4).
  *
+ * @version 1.1 - each completed object carries its sha256
  * @version 1.0
  */
 function shelf_finish_run_logic(array $input): LogicResult {
@@ -30,15 +33,16 @@ function shelf_finish_run_logic(array $input): LogicResult {
 
 function shelf_finish_run_logic_descriptor(): array {
 	return array(
-		'description'      => 'Close a backup storage run, naming the objects the site completed ([{name, bytes}]). The ledger marks them complete and the figure is refreshed.',
+		'description'      => 'Close a backup storage run, naming the objects the site completed ([{name, bytes, sha256}]). The ledger marks them complete with their hashes, cancels the rest, and the figure is refreshed.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(
 			'run_id'    => array('type' => 'integer', 'required' => true, 'label' => 'Run id'),
-			'completed' => array('type' => 'array',   'required' => true, 'label' => 'Completed objects: [{name, bytes}]', 'max_items' => 500,
+			'completed' => array('type' => 'array',   'required' => true, 'label' => 'Completed objects: [{name, bytes, sha256}]', 'max_items' => 500,
 				'items' => array(
-					'name'  => array('type' => 'string',  'required' => true,  'label' => 'Object name'),
-					'bytes' => array('type' => 'integer', 'required' => false, 'label' => 'Size in bytes'),
+					'name'   => array('type' => 'string',  'required' => true,  'label' => 'Object name'),
+					'bytes'  => array('type' => 'integer', 'required' => false, 'label' => 'Size in bytes'),
+					'sha256' => array('type' => 'string',  'required' => true,  'label' => 'The object\'s sha256, hex'),
 				)),
 		),
 	);

@@ -34,6 +34,8 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.11 - the pass aborts node broker runs whose token expired and writes any run ledger file that did not
+ *                 reach backup storage (specs/storage_targets.md WP5)
  * @version 1.10 - retention prunes across every storage space of the node (FleetBackupRetention::prune); the
  *                 scheduled verify names the space of the chain it reads, which is how a moved node's old space
  *                 learns its successor holds a verified chain
@@ -241,7 +243,8 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							// backup nor clears a real one found last time.
 							$shelf = FleetBackupRetention::check_shelf(
 								(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''),
-								$active_target->get_credentials(), (string)$active_target->get('bkt_bucket'));
+								$active_target->get_credentials(), (string)$active_target->get('bkt_bucket'), null,
+								(int)(JobCommandBuilder::node_space($node) ? JobCommandBuilder::node_space($node)->key : 0));
 							if ($shelf['unread'] !== '') {
 								$problems[] = $slug . ' backup storage: ' . $shelf['unread'];
 							} else {
@@ -277,6 +280,23 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				$busy[$machine] = $slug . '\'s backup';
 			} catch (Throwable $e) {
 				$problems[] = $slug . ': ' . $e->getMessage();
+			}
+		}
+
+		// The broker's own housekeeping (specs/storage_targets.md WP5): a node
+		// run whose token expired is aborted, and a finished run whose ledger
+		// file did not reach backup storage is written again.
+		if (!$dry) {
+			try {
+				$expired = NodeBroker::abortExpired();
+				if ($expired) { $problems[] = $expired . ' backup run' . ($expired === 1 ? ' was' : 's were') . ' never finished on the node and aborted'; }
+				$ledger = ShelfBroker::writeMissingLedgerFiles();
+				if ($ledger['stuck']) {
+					$problems[] = $ledger['stuck'] . ' backup run ledger file' . ($ledger['stuck'] === 1 ? '' : 's')
+						. ' could not be written to backup storage (' . $ledger['problem'] . '); tried again daily';
+				}
+			} catch (Throwable $e) {
+				$problems[] = 'backup broker: ' . $e->getMessage();
 			}
 		}
 

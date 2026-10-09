@@ -153,7 +153,7 @@ $sign = function ($relname) use ($base) { return 'https://shelf.invalid/' . $bas
 $stage = function ($chain_id, $manifest, $seq, array $links) use ($work, $base, $shelf) {
 	$dir = $work . '/verify-' . $seq . '-' . bin2hex(random_bytes(3));
 	BackupStaging::prepare_workspace($dir);
-	file_put_contents($dir . '/manifest.json', $shelf($base . $chain_id . '/manifest.json'));
+	file_put_contents($dir . '/manifest.json', $shelf($base . $chain_id . '/' . BackupChain::stored_manifest_name($manifest)));
 	$plan_r = BackupStaging::plan($manifest, $seq);
 	foreach (BackupStaging::wanted($plan_r) as $name) {
 		file_put_contents($dir . '/' . $name, $shelf($base . $chain_id . '/' . $name));
@@ -171,7 +171,7 @@ list($result, $error) = $run();
 check($error === null && ($result['status'] ?? '') === 'success', 'the run succeeds', (string)$error . ' ' . json_encode($result));
 $dirs = glob($plan['output_dir'] . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR);
 $chain_id = basename($dirs[0]);
-$manifest = BackupChain::decode($shelf($base . $chain_id . '/manifest.json'));
+$manifest = BackupChain::decode($shelf($base . $chain_id . '/manifest-0000.json'));
 $index_bytes = $shelf($base . $chain_id . '/objects-0000.json.gz');
 $index = BackupObjects::decode_index($index_bytes);
 $epoch = $index['epochs'][0] ?? '';
@@ -293,7 +293,7 @@ section('A row that disagrees with the plaintext fails by name');
 $scratch->exec("UPDATE fbb_file_blobs SET fbb_size_bytes = 1 WHERE fbb_stored_name = 'mid.bin'");
 list($result, $error) = $run();
 check($error === null && ($result['status'] ?? '') === 'success', 'a second run succeeds', (string)$error);
-$manifest1 = BackupChain::decode($shelf($base . $chain_id . '/manifest.json'));
+$manifest1 = BackupChain::decode($shelf($base . $chain_id . '/manifest-0001.json'));
 check(count($manifest1['runs']) === 2, 'as run 1 of the same chain');
 $index1 = BackupObjects::decode_index($shelf($base . $chain_id . '/objects-0001.json.gz'));
 list($dir1, $key1, $objects1) = $stage($chain_id, $manifest1, 1, BackupVerifyLauncher::object_links($index1, 3, $sign));
@@ -303,7 +303,7 @@ check($r['result'] === 'fail' && strpos($r['reason'], 'offloaded file mid.bin de
 check(!is_file($dir1 . '/' . BackupVerifier::SAMPLE_PLAIN), 'no plaintext is left after the failure');
 $scratch->exec("UPDATE fbb_file_blobs SET fbb_size_bytes = 9000, fbb_sha256 = repeat('0', 64) WHERE fbb_stored_name = 'mid.bin'");
 list($result, $error) = $run();
-$manifest2 = BackupChain::decode($shelf($base . $chain_id . '/manifest.json'));
+$manifest2 = BackupChain::decode($shelf($base . $chain_id . '/manifest-0002.json'));
 $index2 = BackupObjects::decode_index($shelf($base . $chain_id . '/objects-0002.json.gz'));
 list($dir2, $key2, $objects2) = $stage($chain_id, $manifest2, 2, BackupVerifyLauncher::object_links($index2, 3, $sign));
 $r = BackupVerifier::rehearse($dir2, $manifest2, 2, $key2, $db, 'site', $objects2);

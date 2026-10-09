@@ -1,32 +1,17 @@
 <?php
 /**
- * B2Client — Backblaze B2's own API, for the one thing S3 cannot express.
+ * B2Client — Backblaze B2's own API, for what S3 cannot say.
  *
  * Every read and write of a backup goes through S3Signer against B2's
- * S3-compatible endpoint, and nothing here changes that. What the S3 API has no
- * equivalent for is MINTING A KEY: B2 application keys can be pinned to one
- * bucket, one name prefix, a named set of capabilities and a lifetime, in one
- * call. That is the whole reason this class exists.
+ * S3-compatible endpoint. What the S3 API has no equivalent for is asking a
+ * key about itself: b2_authorize_account answers the account's S3 endpoint
+ * (so a Backblaze target needs no endpoint typed in) and what the key may do
+ * (its capabilities, the bucket and prefix it is pinned to), which the target
+ * check reads (StorageProvider R5).
  *
- * WHY THAT MATTERS. A backup target holds one write-only credential and hands
- * the same one to every node in the fleet. On a machine somebody else
- * administers — a hosted customer's box, where they are permission 10 — that
- * shared key can write anywhere in the fleet's bucket. Minting per run turns
- * "a key that can write the fleet's backup storage" into "a key that can add objects
- * under this node's own prefix, for as long as this run takes"
- * (specs/hosted_trial_provisioning.md §4.5). The blast radius of a key read off
- * a customer's box goes from the fleet to that customer's own directory, and
- * expires.
- *
- * THE KEY IS MINTED AT PICKUP, NOT AT BUILD. A key's lifetime starts when it is
- * created, and the moment that matters is when the agent actually holds it —
- * a job that sat in the queue for an hour would otherwise arrive with an
- * expired credential and read as a bucket error rather than as a stale key.
- *
- * A B2 application key's secret is returned exactly ONCE, by the call that
- * creates it. Nothing here stores one; the caller hands it straight to the job
- * being dispatched.
- *
+ * @version 1.3 - authorize() only: per-run key minting (createKey, bucketId, s3CredentialFor) is gone, since a
+ *                Managed node writes through the management node's broker and is handed no key
+ *                (specs/storage_targets.md WP5)
  * @version 1.2 - a minted key's region comes from the one Backblaze region rule (StorageProvider::b2_location());
  *                deleteKey() and countKeys(), which nothing called, are gone
  * @version 1.1 - authorize() keeps what the key is allowed to do (capabilities, pinned bucket, prefix)
@@ -111,105 +96,6 @@ class B2Client {
 		return $this->auth;
 	}
 
-	/**
-	 * The bucket's B2 id, which key creation needs and the S3 API never uses.
-	 *
-	 * Looked up by name because a bucket name is what an operator configured on
-	 * the target; the id is B2's own handle for it.
-	 */
-	public function bucketId(string $bucket_name): string {
-		$auth = $this->authorize();
-		$data = $this->call('b2_list_buckets', array(
-			'accountId'  => $auth['account_id'],
-			'bucketName' => $bucket_name,
-		));
-		foreach ((array)($data['buckets'] ?? array()) as $bucket) {
-			if ((string)($bucket['bucketName'] ?? '') === $bucket_name) {
-				return (string)($bucket['bucketId'] ?? '');
-			}
-		}
-		throw new B2Exception('B2 has no bucket named "' . $bucket_name . '" on this account.');
-	}
-
-	/**
-	 * Mint a key pinned to one bucket, one prefix, one capability set and a
-	 * lifetime.
-	 *
-	 * $capabilities is B2's own vocabulary — 'writeFiles' for a backup run,
-	 * 'listFiles' plus 'readFiles' for a restore. Nothing here defaults it: a
-	 * caller that has not said what the key may do is a caller that has not
-	 * thought about it, and the safe default for that is a refusal.
-	 *
-	 * @return array{key_id:string, application_key:string, expires_time:string}
-	 */
-	public function createKey(string $bucket_id, string $name_prefix, array $capabilities,
-			int $valid_seconds, string $label): array {
-		if (!$capabilities) {
-			throw new B2Exception('A minted key needs an explicit capability list.');
-		}
-		if ($valid_seconds < 60) {
-			throw new B2Exception('A minted key needs a lifetime of at least a minute.');
-		}
-		// B2's own ceiling on a key lifetime is 1000 days; the caller's number
-		// is derived from a job timeout and is nowhere near it, but a bad
-		// derivation should fail here rather than at the provider.
-		if ($valid_seconds > 86400 * 7) {
-			throw new B2Exception('A per-run key lives for the length of a run, not ' . $valid_seconds . ' seconds.');
-		}
-		$auth = $this->authorize();
-		$data = $this->call('b2_create_key', array(
-			'accountId'             => $auth['account_id'],
-			'capabilities'          => array_values($capabilities),
-			'keyName'               => self::safeKeyName($label),
-			'validDurationInSeconds' => $valid_seconds,
-			'bucketId'              => $bucket_id,
-			'namePrefix'            => $name_prefix,
-		));
-		$key_id = (string)($data['applicationKeyId'] ?? '');
-		$secret = (string)($data['applicationKey'] ?? '');
-		if ($key_id === '' || $secret === '') {
-			throw new B2Exception('B2 created a key but did not return it.');
-		}
-		return array(
-			'key_id'          => $key_id,
-			'application_key' => $secret,
-			'expires_time'    => gmdate('Y-m-d H:i:s', time() + $valid_seconds),
-		);
-	}
-
-	/**
-	 * The credential array S3Signer takes, for a minted key. Region is derived
-	 * from the S3 endpoint the same way the target's own credential was.
-	 */
-	public function s3CredentialFor(array $minted): array {
-		$loc = StorageProvider::b2_location($this->authorize()['s3_endpoint']);
-		return array(
-			'access_key' => $minted['key_id'],
-			'secret_key' => $minted['application_key'],
-			'region'     => $loc['region'],
-			'endpoint'   => $loc['endpoint'],
-		);
-	}
-
-	/** One authorized B2 API call. */
-	private function call(string $operation, array $body): array {
-		$auth = $this->authorize();
-		try {
-			$response = $this->http->request('POST', $auth['api_url'] . '/b2api/v3/' . $operation, array(
-				'headers' => array(
-					'Authorization' => $auth['token'],
-					'Accept'        => 'application/json',
-				),
-				'json' => $body,
-			));
-		} catch (RequestException $e) {
-			$status = $e->getResponse() ? $e->getResponse()->getStatusCode() : 0;
-			throw new B2Exception('B2 ' . $operation . ' failed (' . $status . '): ' . self::reason($e), $status, $e);
-		}
-		$decoded = json_decode((string)$response->getBody(), true);
-		return is_array($decoded) ? $decoded : array();
-	}
-
 	private static function reason(RequestException $e): string {
 		if (!$e->getResponse()) {
 			return $e->getMessage();
@@ -219,14 +105,5 @@ class B2Client {
 			return (string)$decoded['message'];
 		}
 		return $e->getMessage();
-	}
-
-	/** B2 key names are letters, digits and hyphens, up to 100 characters. */
-	private static function safeKeyName(string $label): string {
-		$name = preg_replace('/[^A-Za-z0-9-]/', '-', $label);
-		$name = preg_replace('/-+/', '-', (string)$name);
-		$name = trim((string)$name, '-');
-		if ($name === '') { $name = 'joinery'; }
-		return substr($name, 0, 100);
 	}
 }

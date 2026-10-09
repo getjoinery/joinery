@@ -25,59 +25,58 @@ A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 | Triggered by | the `Backup` scheduled task | the management node's `FleetBackupRun` |
 | Executed by | `BackupRunner` on the machine | `BackupRunner` on the machine |
 | Recovery key | the site's own `backup_recovery_public_key` | the site's own `backup_recovery_public_key` |
-| Bucket credentials | stored on the machine | supplied per run, never stored; write-only, and minted for that one run where the provider allows it |
+| Bucket credentials | stored on the machine | none: every write is a link the management node's broker signs |
 | Prunes backup storage | the site | the management node |
 | Depends on | nothing | the management node being alive at the scheduled moment |
 
 Both run the same engine, so chains, envelopes, deletion replay and history are
 written once and behave identically for both.
 
-### The credential a run is handed
+### Where a manager run writes: the broker
 
-A manager run needs a credential to write with, and it is chosen at build time
-from three, strongest first:
+A Managed node holds no key to the bucket its management node keeps for it.
+Its backup job carries, where a credential would go, a **broker run**: the
+management node's broker address, a run opened for this job when the node's
+agent claimed it, and that run's token. The run's engine hands that to
+`S3Signer` in place of a credential (`BackupBroker`, an `S3LinkSource`): every
+upload request becomes one call to the broker for a signed link, then the
+request itself on that link, so a stream, a multipart upload and a retry work
+exactly as they do against a site's own target.
 
-- **A key minted for that run.** Where the target's provider can pin a key to
-  one bucket, one name prefix, one capability and a lifetime — Backblaze B2
-  does, in one call — the node is handed a key created when the job is picked
-  up, allowed only to add objects under **its own** prefix, expiring with the
-  run. A key read off a machine somebody else administers then opens that
-  machine's own directory for an hour, rather than the fleet's whole backup storage
-  indefinitely. **Off until an operator turns it on**, per target, on the Remote
-  Backup page — minting needs a master key the provider will let create keys,
-  and a target switched on without one fails every run rather than falling back.
-- **The target's write-only node credential.** A second stored key allowed to
-  add objects and not to delete any. Shared across the fleet, which is what
-  minting improves on.
-- **The target's main credential.** Where neither of the above is configured.
+- **begin** says where the run writes: the storage space, its base key
+  (`{path_prefix}/{slug}/manager/`), the bucket and the target's name. It is
+  asked before the run decides which chain it extends, because a chain stays in
+  one space (`bkh_remote_space_id`); a run the broker takes in another space
+  starts a new chain there.
+- **sign** answers one link for one write inside the base key: a put, or a
+  multipart create, a batch of ten part links, a complete. Nothing outside the
+  base key, no read and no delete is ever signed for a node. **Nothing is
+  written twice**: a key a finished run completed is answered `exists`, with
+  the size and sha256 recorded for it, instead of a link.
+- **finish** names every object the run wrote, with the bytes and sha256 the
+  node sent, and the chain. The broker records them (`svo_sha256`), cancels
+  whatever else the run signed, and writes the run's ledger file (below). Only
+  then is the run committed on the node; a run the broker did not record is a
+  failed run, undone like any other, and its retry signs the same names again.
+  A finish whose reply was lost is asked again and answered with what was
+  recorded. A node that never heard back (it died after the broker recorded the
+  run) finds its next run number already taken: that run fails saying so, and
+  marks the chain closed, and the run after it starts a new chain (`name_taken`).
+  A name already holding the same bytes counts as stored.
+- **abort** says the run failed: what it signed is cancelled.
 
-Minting happens at PICKUP rather than at build, because a key's lifetime starts
-when it is created and the moment that matters is when the agent actually holds
-it; a key minted an hour earlier would arrive expired and read at the node as a
-bucket error. Its lifetime is derived from the job's own claim budget, so it
-outlasts the upload it exists for. A target that declares it can mint and then
-cannot fails the job with the provider's reason — it never falls back to the
-shared key, because a silent downgrade would defeat the only thing minting is
-for, on exactly the machines where it matters.
+The token is stored on the management node as its hash, names one run, and is
+accepted for the job's claim budget plus an hour; the fleet pass aborts an open
+run whose token expired. A node that cannot write through the broker — its
+core predates it — is refused at build with the release it needs, and keeps its
+backups on its own disk until it is upgraded.
 
-Restores need no minted key at all: the management node signs one object key
-per artifact and the node receives the signature, so no bucket credential of
-any kind travels for a read.
-
-**Two things to settle before switching minting on for a real fleet**, neither
-of which has been exercised yet:
-
-- **Key lifetime and cleanup.** Nothing deletes a minted key early; each one is
-  expected to expire on its own. Whether the provider removes expired keys, and
-  what its per-account key ceiling is, decides whether a fleet of forty nodes
-  backing up nightly accumulates keys faster than they lapse.
-- **Cost per pickup.** Minting adds three provider round trips to the job
-  hand-out request (authorize, look the bucket up, create the key), and the
-  bucket is looked up afresh every run. Fine for a fleet of tens; worth caching
-  the bucket id if job pickup ever starts timing out.
+Reads need no broker call: for a restore, a verify or a download the management
+node signs one link per object into the job, so no credential of any kind
+travels for a read either.
 
 **The recovery key is the one thing a management node does not supply.** It says
-where a backup goes and hands over a write-only credential to put it there; what
+where a backup goes and signs the writes that put it there; what
 opens the archive is read on the machine, from that machine's own verified
 setting. A manager run that arrives carrying key material is refused, not
 ignored, and a machine with no verified key of its own refuses to back up at all
@@ -126,7 +125,7 @@ incremental history: **data**, the site directory less `public_html/`
 
 ```
 {path_prefix}/{slug}/{profile}/chain-{YYYYMMDD_HHMMSS}/
-    manifest.json           the restore contract — order, levels, hashes, sealed keys
+    manifest-0000.json      the restore contract — order, levels, hashes, sealed keys
     data-0000.tar.gz.enc    the site less public_html: the full
     code-0000.tar.gz.enc    public_html, rooted at public_html: the full
     db-0000.sql.gz.enc
@@ -134,20 +133,31 @@ incremental history: **data**, the site directory less `public_html/`
     data-0001.tar.gz.enc    an incremental
     code-0001.tar.gz.enc    a full again when an upgrade swapped the code
     db-0001.sql.gz.enc
+    manifest-0001.json      run 1's manifest: every run up to and including it
     ...
 ```
 
-The manifest (version 2) records a `level` on every artifact of a kind that
+The manifest (version 3) records a `level` on every artifact of a kind that
 increments — `data`, `code`, and a physical database backup, `pgdata` — so one
 kind can start over inside a chain while the others carry on; a run's own
 `level` is 0 exactly when every kind in it is. A restore takes each kind from
 its newest level 0 at or before the run, forward to the run
 (`BackupChain::restore_plan()`; `restore_chain.sh` applies the same rule).
-A **version 1** manifest is a chain written before the split: one
-`files-NNNN.tar.gz.enc` a run, the whole site directory, and one `level` per
-run that is the files archive's. Every reader reads versions 1 and 2, and
-refuses a version it does not know, by name, rather than restoring part of a
-chain.
+
+**Every run writes its own manifest**, `manifest-{seq}.json`, naming every run
+of the chain up to and including it, so nothing in a chain is ever written
+twice. Readers take the highest number (`BackupChain::newest_manifest_name()`);
+a prune deletes every manifest of a chain with the chain. On the machine the
+chain's working copy is `manifest.json`, and staging lands the chosen manifest
+under that name, so everything that reads a local chain reads one file.
+
+A **version 2** manifest is the same layout with one `manifest.json` that every
+run rewrote; a **version 1** manifest is a chain written before the data/code
+split: one `files-NNNN.tar.gz.enc` a run, the whole site directory, and one
+`level` per run that is the files archive's. Every reader reads versions 1 to
+3, and refuses a version it does not know, by name, rather than restoring part
+of a chain. A runner never extends a chain of another version: the next run
+starts a new chain (`layout_split`).
 
 **Full every time.** One self-contained archive per run:
 
@@ -232,6 +242,7 @@ photos backup storage already holds.
     objects/
         {epoch}/
             envelope.json             the epoch's sealed data key
+            envelope-{fpr}.json       the same key re-sealed to a later recovery key
             {fbb_stored_name}.enc     one object per offloaded blob
             mailbox/{id}.eml.enc      one object per offloaded message
 ```
@@ -263,9 +274,12 @@ current, in the same `aes-256-cbc-pbkdf2` form as an archive, so the
 unchanged. A new epoch starts when there is none, when the recovery recipient
 changed, or when the site key cannot open the current envelope (degrade, never
 fail every run). On recovery-key rotation the older epochs are **re-sealed**,
-not re-encrypted: each envelope the site key opens is rebuilt with the new
-recovery recipient added and uploaded again under its name, so the new key
-opens everything and the old key still opens what it always did. An epoch the
+not re-encrypted: each envelope the site key opens is rebuilt for the current
+recipients and uploaded **beside** it as `envelope-{fpr}.json`, named by the
+first 16 hex of the new recovery key's fingerprint — nothing in backup storage
+is written twice. The new key opens everything through those, and the old key
+still opens what it always did through `envelope.json`. An epoch whose envelope
+re-sealed to the current key is already there is left alone. An epoch the
 site key cannot open stays sealed to the retired key alone; the run writes
 those down (`objects/retired-epochs.json`), names them in its message (so a
 management node's job result and this site's history say so), and **Recovery
@@ -303,8 +317,8 @@ database-only backup) stores nothing and holds nothing.
 **The manager run request** carries three fields from a management node
 running the object store: `objects: true`, `objects_index_url` (a presigned
 GET for the newest manager index, or absent when there is none) and
-`epoch_envelope_urls` (`{epoch id: presigned GET}` for every envelope in the
-listing, what the re-seal reads). A node whose management node sends none of
+`epoch_envelope_urls` (`{epoch id: presigned GET}` for each epoch's newest
+envelope in the listing, what the re-seal reads). A node whose management node sends none of
 them behaves as if the object store did not exist.
 
 **Node disk.** Every step is bounded:
@@ -493,10 +507,11 @@ back before deciding anything. If an upgrade lands while a run is incrementing t
 and the next one re-bases the code. The failed run also removes what it made
 and puts the manifest back to its pre-run state: the metadata artifact on disk,
 and any object it had already streamed to backup storage where the credential
-can delete (the site profile). Under the manager profile's write-only
-credential an already-streamed data or code object stays until its chain is
-pruned whole — a bounded orphan the manifest never names, overwritten if the
-next run reuses its run number. A local manifest describing a run the bucket
+can delete (the site profile). A manager run deletes nothing: the broker
+cancels what the failed run signed, and an already-streamed data or code object
+stays until its chain is pruned whole — a bounded orphan the manifest never
+names, written over by the next run that reuses its run number (a key a run
+never finished is signed again for its retry). A local manifest describing a run the bucket
 never received must not survive to be uploaded by anything later.
 
 Runs are serialized with a lock in the working directory; a run that finds
@@ -512,10 +527,23 @@ right up until someone needed it.
 
 ```
 php maintenance_scripts/sysadmin_tools/backup_envelope.php open \
-    --sidecar manifest.json --private ~/recovery.key --key-out /tmp/k
+    --sidecar manifest-0007.json --manifest-sha256 {recorded hash} \
+    --private ~/recovery.key --key-out /tmp/k
 bash maintenance_scripts/sysadmin_tools/restore_chain.sh {project} \
-    --artifacts {downloaded chain dir} --key-file /tmp/k [--seq N] [--domain d]
+    --artifacts {downloaded chain dir} --key-file /tmp/k \
+    --manifest-sha256 {recorded hash} [--seq N] [--domain d]
 ```
+
+Download the chain folder; the newest `manifest-NNNN.json` names every run, and
+`restore_chain.sh` reads it (a version-2 chain's `manifest.json` likewise). The
+manifest names every archive's size and hash, so the archives are only as good
+as it is: `backup_envelope.php open` opens a chain manifest only against the
+sha256 recorded when it was written — the management node shows it beside each
+run on the node's Backups tab, and the run's ledger file in the bucket holds it
+(*Ledger files*, below) — and `restore_chain.sh` checks it again and prints the
+hash it used. A manifest whose hash differs is refused before anything is read.
+Only for a bucket with neither record does `--trust-bucket-manifest` open one,
+saying that nothing vouches for it.
 
 Every artifact is checked against its recorded size and hash **before anything
 is written**, so a truncated download fails while the live site is still intact.
@@ -741,7 +769,10 @@ replace the two keypair lines with
 `$kp = base64_decode(trim(file_get_contents($argv[2])));` — and that is all the
 platform's own restore path does. A chain restores by decrypting the full plus
 each incremental with the one data key from the chain manifest's envelope and
-applying them oldest-first.
+applying them oldest-first. Check the manifest first — `sha256sum
+manifest-NNNN.json` against the hash recorded when it was written (beside the
+run on the management node, or in the run's ledger file in the bucket) — since
+every archive is checked against the hashes it names.
 
 ## Recovery key setup
 
@@ -890,8 +921,8 @@ holds. The runner asks for completion to be **deferred**: the parts go up (or
 the small buffer is held) while the engine runs, and `CompleteMultipartUpload`
 — or the single PUT — is issued only after the engine's report has been read.
 A refused archive is aborted, and under the small-stream shape nothing was
-ever sent, which is what lets a write-only credential refuse an archive with
-no object to delete.
+ever sent, which is what lets a machine that cannot delete — a Managed node
+writing through the broker — refuse an archive with no object to delete.
 
 **File artifacts** — the metadata artifact, the chain manifest, an envelope
 sidecar — go through `put_file()`. At 1 GiB or less that is one signed
@@ -940,8 +971,9 @@ attacks fail against it, and the second is the one that carries it:
   it really is this machine's backup; sealing does not touch this at all. The
   name it is offered under has no record, so it is refused.
 
-A name that is legitimately rewritten keeps its earlier versions. Only one is:
-a chain's `manifest.json`, which every run of that chain rewrites. The ledger
+One name holds more than one version: a chain's `manifest.json`, the name a
+staged chain is checked by. Each run's manifest (`manifest-{seq}.json` in the
+bucket) is recorded under it, so every run of a chain adds a version. The ledger
 answers "did this machine make these bytes", not "are these the newest bytes it
 made" — so a chain staged for restore is not refused because a scheduled backup
 happened to land while somebody was reading the approval screen. What is
@@ -972,6 +1004,30 @@ the owner: backups legitimately run as root on a managed node and as the site
 user elsewhere. `fix_permissions.sh` pins the directory out of its sweep to
 match.
 
+### Ledger files in the bucket
+
+The machine's upload ledger and the management node's database are each one
+record of what a run's bytes are. Lose that record together with the machine
+that wrote the run, and nothing vouches for the bucket — so every run's record
+is in the bucket too, written when the run finishes by whoever owns the bucket:
+
+```
+{path_prefix}/{slug}/ledger/{run id}.json
+```
+
+It lists every object the run put in backup storage with its key, bytes and
+sha256 — its archives, its manifest, its offloaded files — and the run's time,
+profile and chain. A site writes its own runs' files with its own key (the run
+id is its history row); a management node writes them for the runs its broker
+took (`ShelfBroker::writeLedgerFile()`; the run id is the broker run), with its
+key, at a folder no run's base key reaches, so the broker never signs a write
+there. A file that could not be written is logged; the management node's
+fleet pass writes any its broker runs still lack. A shell restore takes the
+manifest's hash from here when nothing else holds it. Ledger files are kept
+after their runs are pruned: each is a few kilobytes, and a record of a run
+that is gone answers questions too. On a target without object lock a ledger
+file is only as trustworthy as the target's key.
+
 ## Where each run went
 
 Every history row records where its run went (`bkh_destination`, never null):
@@ -980,7 +1036,7 @@ Every history row records where its run went (`bkh_destination`, never null):
 |---|---|---|
 | `local` | kept on this machine only | nothing |
 | `target` | one of this site's own targets, used directly | `bkh_bkt_backup_target_id` |
-| `service` | a management node's storage (a Managed run) | `bkh_target_name`; `bkh_remote_run_id` once the management node records a run id |
+| `service` | a management node's storage (a Managed run) | `bkh_remote_run_id`, the broker run; `bkh_remote_space_id`, its storage space; `bkh_target_name` for display |
 
 Every reader of a run's objects uses the target its row names, never the one
 configured now (`BackupHistory::stored_target()`, `BackupRunner::plan_for_run()`):
@@ -997,11 +1053,13 @@ under, so each target's objects open from that target alone. Object retention
 runs per target too: an object is removed from a target when no kept run on that
 target names it.
 
-A `service` run goes to the management node's target for this site, which sends
-the target's name with every run. A run sent to a target of another name starts
-a new chain (`destination_changed`): a management node that moves a site to
-another target gets a full backup there on the next run, and the old chain is
-never extended into the new bucket. On the management node each site's backups
+A `service` run goes through the management node's broker, which takes it in
+this site's active storage space there and says which. A run the broker takes in
+another space starts a new chain (`destination_changed`): a management node that
+moves a site to another target gets a full backup there on the next run, and the
+old chain is never extended into the new bucket — the broker also refuses to
+sign a write into a chain whose objects are in a space the site was moved away
+from. On the management node each site's backups
 are in its **storage space** on a target, and a move drains the old space until
 its backups age out ([Server Manager § Storage spaces](../plugins/server_manager/docs/overview.md#storage-spaces)).
 
@@ -1028,9 +1086,9 @@ its backups age out ([Server Manager § Storage spaces](../plugins/server_manage
   only when no retained run's index names them ([Offloaded files in backup
   storage](#offloaded-files-in-backup-storage)).
 - **A management node's copies** — kept by the same setting. The site decides
-  how long; the management node deletes, because the credential a managed site
-  is handed cannot delete (a site that could erase its own offsite copies would
-  lose them to the first intruder). Every manager-profile run prints
+  how long; the management node deletes, because its broker signs a managed
+  site no delete (a site that could erase its own offsite copies would lose them
+  to the first intruder). Every manager-profile run prints
   `BACKUP_KEEP_DAYS=` with the site's window; the management node stores it and
   prunes by it, never keeping fewer days than its own minimum (see the
   server_manager overview). The run removes this site's records of manager runs
@@ -1042,7 +1100,7 @@ its backups age out ([Server Manager § Storage spaces](../plugins/server_manage
   sidecar. The archives and the dumps stream to the bucket and are never here.
   This window says how long those leftovers are kept. Age is per file, so an
   old chain's early runs go while its recent runs stay, and the emptied chain
-  directory is left for chain retention to retire. A chain's `manifest.json`
+  directory is left for chain retention to retire. A chain's local `manifest.json`
   and the snapshot beside it are never swept — they are what make the chain
   extendable, and without either the next run silently starts a fresh full. The
   sweep also removes the `auto_pre_*` snapshots a restore leaves behind, which
@@ -1056,8 +1114,8 @@ its backups age out ([Server Manager § Storage spaces](../plugins/server_manage
   On a machine a management node backs up, this window is the *only* thing
   bounding local disk. Chain retention deletes a chain's local directory as
   part of pruning the bucket, and a managed node does not prune the bucket —
-  backup storage belongs to the management node, and the credential the node is
-  handed cannot delete.
+  backup storage belongs to the management node, and its broker signs the node
+  no delete.
 
   A backup file written after the newest run of its own kind that finished
   uploading is kept whatever its age: while uploads are failing it may be the
@@ -1175,9 +1233,10 @@ offsite — and a restore takes the name of a file it expects to find in its own
 backup directory. *Bring back to node* on the node's Backups tab (or *Prepare*,
 for a chain) fetches it. No bucket credential is sent: the management node signs
 one object key, for no longer than the job's own claim budget, and the node
-receives the signature. A node's stored credential is write-only by design,
-because a node that could read backup storage is a node whose compromise reaches
-every other node's backups. Everything fetched is checked against the node's own
+receives the signature. A node holds no bucket credential at all — it writes
+through the broker, which signs it writes and nothing else — because a node that
+could read backup storage is a node whose compromise reaches every other node's
+backups. Everything fetched is checked against the node's own
 upload ledger before it lands, and lands `0600` — created that way, not chmod'd
 afterwards, because on a container node the backup directory is inside the site
 tree and a descriptor opened during a multi-gigabyte transfer stays open. The
@@ -1446,9 +1505,10 @@ still opens a real backup:
 
 ```bash
 # 1. Download the chain's whole directory from the bucket to DIR
-#    (manifest.json and every artifact it names).
-# 2. Recover the chain key with the recovery private key.
-php backup_envelope.php open --sidecar DIR/manifest.json \
+#    (its manifests and every artifact they name).
+# 2. Recover the chain key with the recovery private key, against the newest
+#    manifest's recorded sha256 (Restoring a chain, above).
+php backup_envelope.php open --sidecar DIR/manifest-NNNN.json --manifest-sha256 HASH \
     --private /path/to/recovery.key --key-out /tmp/chain.key
 # 3. Open and read (level 2), or rehearse a restore (level 3).
 ./verify_backup.sh --artifacts DIR --key-file /tmp/chain.key --level 2

@@ -11,6 +11,8 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.9 - each run names its own manifest and the sha256 the broker recorded for it, and a chain whose
+ *                newest manifest in backup storage differs from the recorded one says so (specs/storage_targets.md WP5)
  * @version 1.8 - the object store totals read keys through BackupObjects::location_of(), offloaded mail included
  * @version 1.7 - chains are listed from every live storage space of the node, each naming its space;
  *                chain_path() is a space's (specs/storage_targets.md WP4)
@@ -117,6 +119,7 @@ class BackupChainListHelper {
 		// through: it is part of the path a restore reads from, and it names
 		// which party's backup this is.
 		$manifest_keys = [];
+		$manifest_names = [];
 		$profiles = [];
 		$sizes = [];
 		$objects = [];
@@ -143,9 +146,13 @@ class BackupChainListHelper {
 
 			$sizes[$dir] = ($sizes[$dir] ?? 0) + (int)$f['size'];
 			$profiles[$dir] = $profile;
-			if (end($parts) === BackupChain::MANIFEST_NAME && count($parts) === 3) {
-				$manifest_keys[$dir] = $key;
+			if (count($parts) === 3 && BackupChain::is_manifest_name(end($parts))) {
+				$manifest_names[$dir][end($parts)] = $key;
 			}
+		}
+		// Each chain's newest manifest: a version-3 chain writes one per run.
+		foreach ($manifest_names as $dir => $named) {
+			$manifest_keys[$dir] = $named[ShelfObject::preferredManifestName((int)$space->key, $node_prefix . $profiles[$dir] . '/' . $dir . '/', array_keys($named))];
 		}
 
 		krsort($manifest_keys);            // chain ids sort chronologically by name
@@ -165,6 +172,17 @@ class BackupChainListHelper {
 			$m = json_decode($resp['body'], true);
 			if (!is_array($m) || empty($m['runs'])) { continue; }
 
+			// What the broker recorded for each manifest of the chain: the hash
+			// a shell restore checks a manifest against. Absent for a chain
+			// written before runs went through the broker.
+			$recorded = [];
+			foreach (new MultiShelfObject(['space_id' => (int)$space->key, 'chain' => (string)$chain_id, 'completed' => true,
+					'pruned' => false, 'deleted' => false]) as $o) {
+				$recorded[basename((string)$o->get('svo_key'))] = strtolower((string)$o->get('svo_sha256'));
+			}
+			$newest_name = basename($key);
+			$newest_sha = $recorded[$newest_name] ?? '';
+
 			$runs = [];
 			foreach ($m['runs'] as $r) {
 				$bytes = 0;
@@ -175,13 +193,20 @@ class BackupChainListHelper {
 					$by_kind[(string)$kind] = (int)($a['bytes'] ?? 0);
 					if (isset($a['level'])) { $levels[(string)$kind] = (int)$a['level']; }
 				}
+				$seq = (int)($r['seq'] ?? count($runs));
+				$manifest = ((int)($m['version'] ?? 1) >= BackupChain::PER_RUN_MANIFEST_VERSION)
+					? BackupChain::manifest_name($seq) : BackupChain::MANIFEST_NAME;
 				$runs[] = [
-					'seq'       => (int)($r['seq'] ?? count($runs)),
+					'seq'       => $seq,
 					'level'     => (int)($r['level'] ?? 1),
 					'time'      => (string)($r['time'] ?? ''),
 					'bytes'     => $bytes,
 					'artifacts' => $by_kind,
 					'levels'    => $levels,
+					// The run's own manifest and the sha256 recorded when it was
+					// written, '' when nothing recorded one.
+					'manifest'        => $manifest,
+					'manifest_sha256' => isset($manifest_names[$chain_id][$manifest]) ? (string)($recorded[$manifest] ?? '') : '',
 				];
 			}
 
@@ -196,6 +221,9 @@ class BackupChainListHelper {
 				'updated'  => (string)($m['updated'] ?? ''),
 				'runs'     => $runs,
 				'bytes'    => (int)($sizes[$chain_id] ?? 0),
+				// The newest manifest in backup storage is not the one recorded
+				// when it was written: something other than its run put it there.
+				'manifest_mismatch' => $newest_sha !== '' && !hash_equals($newest_sha, hash('sha256', (string)$resp['body'])),
 			];
 		}
 

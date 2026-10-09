@@ -14,6 +14,8 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.10 - bkh_remote_space_id: the management node's storage space a brokered run went to
+ *                 (specs/storage_targets.md WP5)
  * @version 1.9 - bkh_surplus_time: when retention first found this run surplus; it is deleted only once a pass
  *                CONFIRM_HOURS later still finds it so (specs/storage_targets.md F3)
  * @version 1.8 - bkh_destination (local | target | service, never null) and bkh_remote_run_id; stored_target()
@@ -81,12 +83,16 @@ class BackupHistory extends SystemBase {
 		//   target   this site's own target, used directly: bkh_bkt_backup_target_id
 		//   service  a management node's storage (a Managed run, or a customer of
 		//            backup storage): bkh_remote_run_id is the management node's run
-		//            id once the broker records one, bkh_target_name says which
+		//            id once the broker records one, bkh_remote_space_id the storage
+		//            space the broker took it in, bkh_target_name says which
 		// Every reader of a run's objects (retention, verify, Bring files back,
 		// restore) uses the target recorded here, never "the current one".
 		'bkh_destination'   => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'local',
 		                             'allowed_values'=>array('local', 'target', 'service')),
 		'bkh_remote_run_id' => array('type'=>'int8'),
+		// The management node's storage space: a chain stays in one, and a run
+		// the broker takes in another starts a new chain.
+		'bkh_remote_space_id' => array('type'=>'int8'),
 		'bkh_slug'          => array('type'=>'varchar(255)'),
 
 		// Every object this run produced: [{name, key, bytes, kind}] where kind

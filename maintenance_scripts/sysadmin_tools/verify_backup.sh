@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # verify_backup.sh - Prove a downloaded backup chain can be recovered, without restoring it
+# Version: 1.1.0 - a version-3 chain's run manifests are read in place of manifest.json
 # Version: 1.0.0
 #
 # Description:
@@ -27,11 +28,14 @@
 #   ./verify_backup.sh --artifacts DIR --key-file PATH [--seq N] [--level 2|3] [--project NAME]
 #
 # Options:
-#   --artifacts DIR   Directory holding manifest.json and the artifacts it names
+#   --artifacts DIR   Directory holding the chain's manifest (manifest.json, or a version-3
+#                     chain's run manifests, the newest of which is read) and the artifacts
 #                     (download the chain's whole directory from the bucket)
 #   --key-file PATH   The chain data key. Recover it with the recovery private key:
-#                       php backup_envelope.php open --sidecar DIR/manifest.json \
-#                           --private /path/to/recovery.key --key-out /tmp/chain.key
+#                       php backup_envelope.php open --sidecar DIR/manifest-NNNN.json \
+#                           --manifest-sha256 HASH --private /path/to/recovery.key \
+#                           --key-out /tmp/chain.key
+#                     HASH is the manifest's sha256 as recorded when it was written.
 #   --seq N           Verify as at run N. Default: the newest run in the chain.
 #   --level 2|3       2 opens and reads (default); 3 rehearses a restore.
 #   --project NAME    The directory name the archive carries, for a rehearsal.
@@ -81,7 +85,9 @@ done
 
 [ -n "$ARTIFACT_DIR" ] || { print_error "--artifacts is required."; exit 2; }
 [ -d "$ARTIFACT_DIR" ] || { print_error "Artifact directory not found: $ARTIFACT_DIR"; exit 2; }
-[ -f "$ARTIFACT_DIR/manifest.json" ] || { print_error "No manifest.json in $ARTIFACT_DIR"; exit 2; }
+if [ ! -f "$ARTIFACT_DIR/manifest.json" ] && ! { ls -1 "$ARTIFACT_DIR" 2>/dev/null | grep -qE '^manifest-[0-9]{4,}\.json$'; }; then
+    print_error "No manifest.json or manifest-NNNN.json in $ARTIFACT_DIR"; exit 2
+fi
 [ -n "$KEY_FILE" ] || { print_error "--key-file is required (recover it with backup_envelope.php open)."; exit 2; }
 [ -f "$KEY_FILE" ] || { print_error "--key-file '$KEY_FILE' does not exist"; exit 2; }
 case "$LEVEL" in 2|3) ;; *) print_error "--level must be 2 or 3"; exit 2 ;; esac

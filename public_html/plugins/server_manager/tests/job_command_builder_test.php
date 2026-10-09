@@ -89,6 +89,8 @@ function jcb_node(array $fields = array()) {
 		$node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 		$node->set('mgn_agent_primitives', jcb_current_vocabulary());
 	}
+	// And its site runs a release that backs up through the broker.
+	$node->set('mgn_joinery_version', JobCommandBuilder::BROKER_MIN_CORE_VERSION);
 	foreach ($fields as $k => $v) {
 		$node->set($k, $v);
 	}
@@ -878,11 +880,11 @@ try { JobCommandBuilder::build_restore_database($enc_paired, array('filename' =>
 catch (Exception $e) { $threw = true; }
 check($threw, 'a restore that names no archive is refused up front');
 
-section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
+section('Cloud writes: a broker slot only — no credential travels to a node');
 
-// Job rows persist forever, so credentials must NEVER be inlined into a
-// job payload. The agent channel resolves __SM_CREDS_<id>__ in memory when
-// the job is handed out; the row at rest carries only the placeholder.
+// Job rows persist forever, so nothing secret is ever in a job payload. The
+// agent channel opens a broker run for __SM_BROKER_<space>_<kind>__ when the
+// job is handed out; the row at rest carries only the placeholder.
 $cloud_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/credmode/public_html',
 	'backup_target_id' => $bkt->key,
@@ -891,9 +893,9 @@ $cloud_node = jcb_node(array(
 	'mgn_delete_local_after_upload' => false));
 
 $ph_built = JobCommandBuilder::build_upload_backup($cloud_node, array('filename' => 'credmode.sql.gz'));
-$token = '__SM_CREDS_' . (int)$bkt->key . '__';
+$token = '__SM_BROKER_' . (int)JobCommandBuilder::node_space($cloud_node)->key . '_upload__';
 check(($ph_built['params']['credentials_b64'] ?? '') === $token,
-	'the upload primitive carries the __SM_CREDS_<id>__ token, not a credential');
+	'the upload primitive carries a broker slot in the node\'s space, not a credential');
 $ph_json = (string)json_encode($ph_built);
 check(strpos($ph_json, "'application_key'") === false && strpos($ph_json, 'secret_key') === false,
 	'no credential data appears anywhere in the payload', substr($ph_json, 0, 300));
@@ -1014,12 +1016,11 @@ check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') =
 check(($run_config['full_interval_days'] ?? 0) === 7,
 	'the full interval defaults to a weekly full');
 
-// The credential is the resolve-at-run-time placeholder the agent channel
-// swaps in memory — job rows persist forever, so credential DATA must never
-// be inlined.
-$run_token = '__SM_CREDS_' . (int)$bkt->key . '__';
+// The credential slot is the broker run the agent channel opens at hand-out
+// — job rows persist forever, so nothing secret is ever inlined.
+$run_token = '__SM_BROKER_' . (int)JobCommandBuilder::node_space($run_node)->key . '_backup__';
 check(($run_config['credentials_b64'] ?? '') === $run_token,
-	'the credential is the __SM_CREDS_<id>__ placeholder, resolved at run time');
+	'the credential slot is a broker run in the node\'s space, opened at hand-out');
 $run_json = (string)json_encode($run_built);
 check(strpos($run_json, 'application_key') === false,
 	'no credential data appears anywhere in the payload');
@@ -1140,8 +1141,8 @@ foreach ($rk_cases as $label => $pair) {
 		"and the refusal for {$label} says where it is fixed", $rk_refusal);
 }
 
-// A target holding a node (write-only) credential hands nodes THAT key's
-// token; the main delete-capable credential then never travels to a node.
+// A target holds one key, and it never travels to a node: a backup run and a
+// re-upload carry a broker slot, a local delete carries nothing.
 $bkt_split = new BackupTarget(NULL);
 $bkt_split->set('bkt_name', 'HarnessTest Split Target ' . bin2hex(random_bytes(3)));
 $bkt_split->set('bkt_provider', 'b2');
@@ -1153,9 +1154,6 @@ $bkt_split->set('bkt_bucket', 'harness-split-bucket');
 $bkt_split->set('bkt_credentials', json_encode(array(
 	'access_key' => 'MAIN', 'secret_key' => 'main_full_perm',
 	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.example.invalid')));
-$bkt_split->set('bkt_node_credentials', json_encode(array(
-	'access_key' => 'NODE', 'secret_key' => 'node_write_only',
-	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.example.invalid')));
 $bkt_split->save();
 harness_register_row('bkt_backup_targets', 'bkt_backup_target_id', $bkt_split->key);
 
@@ -1166,30 +1164,21 @@ $split_node = jcb_node(array(
 	'mgn_agent_version'    => AgentVocabulary::FLOOR));
 
 $split_config = JobCommandBuilder::build_backup_run($split_node)['params'];
-$node_token = '__SM_NODE_CREDS_' . (int)$bkt_split->key . '__';
 $main_token = '__SM_CREDS_' . (int)$bkt_split->key . '__';
-check(($split_config['credentials_b64'] ?? '') === $node_token,
-	'with a node credential configured, backup_run carries the node token');
-check(strpos((string)json_encode($split_config), $main_token) === false,
-	'the main (delete-capable) token appears nowhere in the node-bound payload');
-
-// The per-file upload action sends from the node too, so it follows the same
-// rule.
+$node_token = '__SM_BROKER_' . (int)JobCommandBuilder::node_space($split_node)->key . '_backup__';
+check(($split_config['credentials_b64'] ?? '') === $node_token && strpos((string)json_encode($split_config), 'main_full_perm') === false,
+	'backup_run carries the broker slot and no key');
 $split_upload = JobCommandBuilder::build_upload_backup($split_node, array('filename' => 'splitnode.sql.gz'));
-check(($split_upload['params']['credentials_b64'] ?? '') === $node_token,
-	'the per-file upload also carries the node token');
-check(strpos((string)json_encode($split_upload), $main_token) === false,
-	'and never the main token');
+check(strpos((string)json_encode($split_upload), 'main_full_perm') === false && strpos((string)json_encode($split_upload), 'MAIN') === false,
+	'the per-file upload carries no key either');
 
-// Only an UPLOAD may run under the write-only key. A cloud delete needs delete
-// capability, so the delete-capable credential never travels at all: the plane
-// deletes cloud objects itself, in-process, and the delete primitive names a
-// local file with NO credential parameter through which one could arrive.
+// A cloud delete needs delete capability, so the credential never travels for
+// one: the plane deletes cloud objects itself, in-process, and the delete
+// primitive names a local file with NO credential parameter.
 $split_del = JobCommandBuilder::build_delete_backup($split_node, array('filename' => 'y.tar.gz'));
 $split_del_json = (string)json_encode($split_del);
-check(strpos($split_del_json, $main_token) === false && strpos($split_del_json, $node_token) === false
-	&& !array_key_exists('credentials_b64', $split_del['params'] ?? array()),
-	'a local delete carries no credential token of either kind', $split_del_json);
+check(strpos($split_del_json, '__SM_') === false && !array_key_exists('credentials_b64', $split_del['params'] ?? array()),
+	'a local delete carries no credential slot of any kind', $split_del_json);
 
 // A RESTORE DOWNLOAD CARRIES NO TOKEN AT ALL — not the main one either.
 //
@@ -1216,15 +1205,11 @@ check(($split_download['primitive'] ?? '') === 'download_backup',
 check(strpos($split_dl_json, $main_token) === false && strpos($split_dl_json, $node_token) === false,
 	'and carries neither credential token — a node is handed a signature, not a key',
 	$split_dl_json);
-check(strpos($split_dl_json, 'main_full_perm') === false
-	&& strpos($split_dl_json, 'node_write_only') === false,
-	'nor either secret key inline');
+check(strpos($split_dl_json, 'main_full_perm') === false,
+	'nor the secret key inline');
 check(strpos($split_dl_json, 'X-Amz-Signature') !== false
 	&& strpos($split_dl_json, 'X-Amz-Expires') !== false,
 	'what it does carry is a signed, expiring link to one object', $split_dl_json);
-
-// Without a node credential, everything stays on the main token ($run_node's
-// target has none) — already asserted above via credentials_b64 === __SM_CREDS_.
 
 section('Decommission: one destructive primitive to the host agent, or a refusal naming the fix');
 

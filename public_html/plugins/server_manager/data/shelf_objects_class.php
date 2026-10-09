@@ -22,6 +22,10 @@
  * is remembered (specs/storage_targets.md §4). Every count and every lookup of
  * a live object reads unpruned rows only.
  *
+ * @version 1.2 - a Managed node's objects are in the ledger too (no tenant; the space names the owner); svo_sha256,
+ *                the hash the writer reported at finish, which nothing in backup storage can change
+ *                (specs/storage_targets.md §6); a completed key is never signed again; preferredManifestName(),
+ *                a chain's newest recorded manifest before a newer one nothing recorded
  * @version 1.1 - svo_sps_storage_space_id; pruned rows are kept with their time and cause
  * @version 1.0
  */
@@ -55,12 +59,16 @@ class ShelfObject extends SystemBase {
 
 	public static $field_specifications = array(
 		'svo_shelf_object_id'       => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'svo_svt_service_tenant_id' => array('type'=>'int8', 'is_nullable'=>false),
+		// A customer's object names its tenant; a node's names none — its space says whose it is.
+		'svo_svt_service_tenant_id' => array('type'=>'int8'),
 		'svo_svr_shelf_run_id'      => array('type'=>'int8'),
 		// The space the object is in, and so the target that holds it.
 		'svo_sps_storage_space_id'  => array('type'=>'int8'),
 		'svo_key'                   => array('type'=>'varchar(1024)', 'is_nullable'=>false),
 		'svo_bytes'                 => array('type'=>'int8', 'is_nullable'=>false, 'default'=>0),
+		// The sha256 the writer reported when the run finished: the management
+		// node's record of what these bytes are.
+		'svo_sha256'                => array('type'=>'varchar(64)'),
 		'svo_chain'                 => array('type'=>'varchar(64)'),
 		// Held while a multipart upload is open; cleared on completion.
 		'svo_upload_id'             => array('type'=>'varchar(255)'),
@@ -80,9 +88,6 @@ class ShelfObject extends SystemBase {
 	}
 
 	function save($debug = false) {
-		if (!(int)$this->get('svo_svt_service_tenant_id')) {
-			throw new ShelfObjectException('A ledger row belongs to a tenant.');
-		}
 		if (trim((string)$this->get('svo_key')) === '') {
 			throw new ShelfObjectException('A ledger row names a key.');
 		}
@@ -111,6 +116,52 @@ class ShelfObject extends SystemBase {
 			return $row;
 		}
 		return null;
+	}
+
+	/**
+	 * Whether a chain has live objects in another space of $space's owner: a
+	 * chain belongs to one space, and one stored where its owner was moved
+	 * away from is not extended in the new one.
+	 */
+	public static function chainLivesElsewhere(StorageSpace $space, string $chain): bool {
+		if ($chain === '') {
+			return false;
+		}
+		$column = ($space->owner_kind() === StorageSpace::OWNER_NODE) ? 'sps_mgn_managed_node_id' : 'sps_svt_service_tenant_id';
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT 1 FROM svo_shelf_objects o JOIN sps_storage_spaces s ON s.sps_storage_space_id = o.svo_sps_storage_space_id
+			WHERE o.svo_chain = ? AND o.svo_pruned_time IS NULL AND o.svo_delete_time IS NULL
+			  AND s.{$column} = ? AND s.sps_storage_space_id <> ? LIMIT 1");
+		$q->execute(array($chain, $space->owner_id(), (int)$space->key));
+		return (bool)$q->fetchColumn();
+	}
+
+	/**
+	 * The manifest of a chain to read among a chain folder's bare names: the
+	 * newest one a finished run recorded with its hash, else the newest there.
+	 * A run that failed between its upload and its finish can leave a newer
+	 * manifest nothing recorded; it is not read while a recorded one is there.
+	 *
+	 * @param string $dir_key the chain folder's key, ending in '/'
+	 */
+	public static function preferredManifestName(int $space_id, string $dir_key, array $names): string {
+		$recorded = array();
+		if ($space_id > 0) {
+			$db = DbConnector::get_instance()->get_db_link();
+			$q = $db->prepare("SELECT svo_key FROM svo_shelf_objects WHERE svo_sps_storage_space_id = ? AND svo_key LIKE ?
+				AND svo_completed_time IS NOT NULL AND svo_sha256 IS NOT NULL AND svo_sha256 <> ''
+				AND svo_pruned_time IS NULL AND svo_delete_time IS NULL");
+			$q->execute(array($space_id, str_replace(array('\\', '%', '_'), array('\\\\', '\\%', '\\_'), $dir_key) . '%'));
+			$present = array_flip(array_map('strval', $names));
+			foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $key) {
+				$name = substr((string)$key, strlen($dir_key));
+				if (isset($present[$name]) && BackupChain::is_manifest_name($name)) {
+					$recorded[] = $name;
+				}
+			}
+		}
+		$name = BackupChain::newest_manifest_name($recorded);
+		return $name !== '' ? $name : BackupChain::newest_manifest_name($names);
 	}
 
 	/** Gone from backup storage: the row is kept with when and why. */

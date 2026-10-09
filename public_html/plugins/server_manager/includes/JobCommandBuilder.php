@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.109 - a backup run and a re-upload carry a broker run in the credential slot (__SM_BROKER_<space>_<kind>__,
+ *                  never a bucket key, and are refused for a node below BROKER_MIN_CORE_VERSION; a chain job
+ *                  signs the chain's newest manifest and none of its older run manifests (specs/storage_targets.md WP5)
  * @version 1.108 - build_retire_install_password writes every root key (the last line of the list had no
  *                 newline and `read` dropped it: a single key was never written) and fails unless each is on root
  * @version 1.107 - a node's backups are in its storage spaces (specs/storage_targets.md WP4): new backups and
@@ -436,6 +439,17 @@ class JobCommandBuilder {
 	 * page reads.
 	 */
 	const DECOMMISSION_PANEL_MIN_CORE_VERSION = '0.8.357';
+
+	/**
+	 * The platform release whose backup engine writes through the management
+	 * node's backup broker (specs/storage_targets.md WP5). A node below it
+	 * would read the broker slot as a bucket key and fail half way through a
+	 * run, so a backup or a re-upload is refused at build with the upgrade
+	 * named (owner, 2026-10-09: no node is handed a key while it catches up).
+	 * It is the release that ships WP5: if another release goes out first,
+	 * this moves to the one that does.
+	 */
+	const BROKER_MIN_CORE_VERSION = '0.8.472';
 
 	/**
 	 * The oldest release a site can be copied from (specs/site_copy.md WP8). A
@@ -1099,6 +1113,7 @@ class JobCommandBuilder {
 	 */
 	private static function backup_run_config($node, $params = []) {
 		self::assert_node_can_be_backed_up($node);
+		self::assert_node_takes_broker($node, 'back up');
 
 		$space = self::write_space($node);
 		if (!$space) {
@@ -1115,15 +1130,16 @@ class JobCommandBuilder {
 
 		// The node composes every key as {path_prefix}/{slug}/{profile}/…, so
 		// the two are the space's own: its target's folder and the node's
-		// folder in it. The target's name tells the node where its chain
-		// went; a new name starts a new chain there.
+		// folder in it — the base key the broker signs inside. The credential
+		// slot is a broker run, opened in this space when the agent claims the
+		// job; the space the broker answers is where the node's chain is.
 		$slug = $space->folder();
 		$config = [
 			'target_name'               => (string)$target->get('bkt_name'),
 			'provider'                  => (string)$target->get('bkt_provider'),
 			'bucket'                    => (string)$target->get('bkt_bucket'),
 			'path_prefix'               => $space->prefix_part(),
-			'credentials_b64'           => self::creds_token($target),
+			'credentials_b64'           => self::broker_slot($space, 'backup'),
 			'slug'                      => $slug,
 			'type'                      => (($params['type'] ?? 'project') === 'database') ? 'database' : 'project',
 			'mode'                      => (($params['mode'] ?? 'chain') === 'full') ? 'full' : 'chain',
@@ -3030,6 +3046,7 @@ class JobCommandBuilder {
 	 * ignored — an ignored parameter is a lie the sender believes.
 	 */
 	public static function build_upload_backup_primitive($node, $params = []) {
+		self::assert_node_takes_broker($node, 'upload a backup');
 		$space = self::write_space($node);
 		if (!$space) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' cannot upload: " . self::write_target_refusal($node) . '.');
@@ -3045,11 +3062,10 @@ class JobCommandBuilder {
 			'bucket'          => $target->get('bkt_bucket'),
 			'path_prefix'     => $space->prefix_part(),
 			'slug'            => $space->folder(),
-			// The placeholder, not the secret. AgentChannelEndpoint substitutes
-			// it when the job is handed out, so the credential never rests in
-			// the job row. creds_token() prefers the write-only node slot, and
-			// upload is the one operation that can use it.
-			'credentials_b64' => self::creds_token($target),
+			// The placeholder, not the secret: a broker run of kind upload,
+			// opened when the job is handed out (AgentChannelEndpoint), so its
+			// token never rests in the job row.
+			'credentials_b64' => self::broker_slot($space, 'upload'),
 		];
 
 		// Send the flag only when it is true — never as false.
@@ -3504,8 +3520,7 @@ class JobCommandBuilder {
 		}
 
 		$expires  = self::signed_link_seconds($operation);
-		$manifest_url = '';
-		$artifact_urls = [];
+		$names = [];
 		foreach ($listing as $object) {
 			$key  = (string)($object['key'] ?? $object['Key'] ?? '');
 			if ($key === '' || strpos($key, $chain_key . '/') !== 0) {
@@ -3515,13 +3530,24 @@ class JobCommandBuilder {
 			// would take a bare name here and could shadow the link of the real
 			// artifact of that name; the manifest never names anything nested.
 			$name = substr($key, strlen($chain_key) + 1);
-			if ($name === '' || strpos($name, '/') !== false) {
+			if ($name !== '' && strpos($name, '/') === false) {
+				$names[$name] = $key;
+			}
+		}
+		// The newest manifest names every run before it, so it is the one sent,
+		// whatever run is asked for; the node lands it as manifest.json. The
+		// other manifests of a version-3 chain travel nowhere.
+		$manifest_name = ShelfObject::preferredManifestName((int)$space->key, $chain_key . '/', array_keys($names));
+		$manifest_url = '';
+		$artifact_urls = [];
+		foreach ($names as $name => $key) {
+			if (BackupChain::is_manifest_name($name) && $name !== $manifest_name) {
 				continue;
 			}
 			$url  = (self::$shelf_listing_for_tests !== null)
 				? 'https://shelf.invalid/' . ltrim($key, '/') . '?X-Amz-Expires=' . $expires . '&X-Amz-Signature=test'
 				: S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
-			if ($name === BackupChain::MANIFEST_NAME) {
+			if ($name === $manifest_name) {
 				$manifest_url = $url;
 				continue;
 			}
@@ -3650,40 +3676,25 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The credential placeholder a NODE-bound step carries for this target.
-	 *
-	 * Three answers, strongest first.
-	 *
-	 * __SM_RUN_CREDS_<id>__ — the target's provider can mint a key scoped to
-	 * one bucket, one name prefix, one capability and a lifetime, so the node
-	 * is handed a key minted at pickup that can add objects under ITS OWN
-	 * prefix, write-only, expiring with the run. A key read off a node then
-	 * opens that node's directory for an hour, rather than the fleet's backup storage
-	 * forever.
-	 *
-	 * __SM_NODE_CREDS_<id>__ — no minting, but the target holds a second,
-	 * write-only credential (bkt_node_credentials). The node can add objects
-	 * and never delete, so a compromised node cannot erase the fleet's
-	 * backups. It is shared across the fleet, which is what minting fixes.
-	 *
-	 * __SM_CREDS_<id>__ — neither. The main credential is emitted and
-	 * behaviour is unchanged. The main (delete-capable) credential otherwise
-	 * stays on the management node for retention and listings.
-	 *
-	 * The choice is made at build time, where the data lives; the agent stays
-	 * strict and resolves exactly the slot the token names. A node token built
-	 * while the slot was filled fails visibly if the slot is later cleared.
+	 * The placeholder a backup or re-upload job carries in its credential
+	 * slot: the space and the kind of broker run to open in it when the node's
+	 * agent claims the job (AgentChannelEndpoint). No node is handed a bucket
+	 * key (specs/storage_targets.md R4): the token that replaces this reaches
+	 * one run in one space, writes only, and expires with the job.
 	 */
-	private static function creds_token($target) {
-		// Best first: a key minted for THIS run, pinned to this node's own
-		// prefix and expiring with the job. The other two hand every node in
-		// the fleet the same key, which on a machine somebody else administers
-		// is a key that can write the whole fleet's backup storage.
-		if ($target->can_mint_run_keys()) {
-			return '__SM_RUN_CREDS_' . (int)$target->key . '__';
+	private static function broker_slot(StorageSpace $space, string $kind) {
+		return '__SM_BROKER_' . (int)$space->key . '_' . ($kind === 'upload' ? 'upload' : 'backup') . '__';
+	}
+
+	/** Refuse a node whose core predates the broker, naming the upgrade. */
+	private static function assert_node_takes_broker($node, string $what) {
+		$core = trim((string)$node->get('mgn_joinery_version'));
+		if ($core !== '' && version_compare($core, self::BROKER_MIN_CORE_VERSION, '>=')) {
+			return;
 		}
-		$slot = $target->has_node_credentials() ? '__SM_NODE_CREDS_' : '__SM_CREDS_';
-		return $slot . (int)$target->key . '__';
+		throw new Exception("Node '{$node->get('mgn_slug')}' runs release " . ($core === '' ? '(unknown)' : $core)
+			. ", which cannot {$what} through this management node's backup broker. Upgrade it to release "
+			. self::BROKER_MIN_CORE_VERSION . ' or later; until then it keeps its backups on its own disk.');
 	}
 
 	/**
@@ -4147,16 +4158,11 @@ class JobCommandBuilder {
 	/**
 	 * Primitive path: delete ONE LOCAL backup file on the node.
 	 *
-	 * Local only, and the omission is the design. The SSH path's cloud branch
-	 * shipped the MAIN, delete-capable bucket credential to the node, because a
-	 * write-only key cannot delete — while creds_token()'s own docblock says
-	 * that credential "stays on the management node", the whole point of the
-	 * write-only node key being that "a compromised node then cannot erase the
-	 * fleet's backups". Migrating that branch would have carried a live
-	 * contradiction across the boundary and made it look reviewed. So the cloud
-	 * object is deleted by the plane, in-process, with S3Signer — which
-	 * backup_actions_logic already does — and the node's vocabulary has no way
-	 * to name a bucket, a key, or a credential.
+	 * Local only, and the omission is the design. A node holds no bucket key
+	 * at all, so a compromised node cannot erase the fleet's backups; the
+	 * cloud object is deleted by the plane, in-process, with S3Signer — which
+	 * backup_actions_logic does — and the node's vocabulary has no way to name
+	 * a bucket, a key, or a credential.
 	 *
 	 * The node also cannot be told a path: it gets a filename and resolves it
 	 * inside its compiled-in backup directory.

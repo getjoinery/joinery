@@ -172,13 +172,29 @@ file_put_contents($manifest_file, json_encode([
 	'runs'     => [],
 ], JSON_PRETTY_PRINT));
 
+$manifest_sha = hash_file('sha256', $manifest_file);
+$key_from_manifest = $work . '/from_manifest.key';
 $out = [];
 $rc  = 0;
-$key_from_manifest = $work . '/from_manifest.key';
 exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($manifest_file)
 	. ' --private ' . escapeshellarg($rec_file)
 	. ' --key-out ' . escapeshellarg($key_from_manifest) . ' 2>&1', $out, $rc);
-check($rc === 0, 'CLI opens a chain manifest', implode(' | ', $out));
+check($rc !== 0 && strpos(implode(' ', $out), '--manifest-sha256') !== false && strpos(implode(' ', $out), $manifest_sha) !== false
+	&& !is_file($key_from_manifest),
+	'a chain manifest is not opened without its expected sha256, and the refusal names the hash it has', implode(' | ', $out));
+$out = [];
+$rc  = 0;
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($manifest_file)
+	. ' --manifest-sha256 ' . str_repeat('0', 64) . ' --private ' . escapeshellarg($rec_file)
+	. ' --key-out ' . escapeshellarg($key_from_manifest) . ' 2>&1', $out, $rc);
+check($rc !== 0 && strpos(implode(' ', $out), 'not the manifest that run wrote') !== false && !is_file($key_from_manifest),
+	'a manifest whose hash differs from the recorded one is refused', implode(' | ', $out));
+$out = [];
+$rc  = 0;
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($manifest_file)
+	. ' --manifest-sha256 ' . strtoupper($manifest_sha) . ' --private ' . escapeshellarg($rec_file)
+	. ' --key-out ' . escapeshellarg($key_from_manifest) . ' 2>&1', $out, $rc);
+check($rc === 0, 'CLI opens a chain manifest whose hash is the recorded one', implode(' | ', $out));
 check(is_file($key_from_manifest) && filesize($key_from_manifest) > 0,
 	'and writes the recovered data key');
 
@@ -204,9 +220,11 @@ file_put_contents($mixed_file, json_encode($mixed));
 $out = [];
 $rc  = 0;
 exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($mixed_file)
-	. ' --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
+	. ' --trust-bucket-manifest --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
 check($rc === 0, 'a manifest version it does not know does not block a readable envelope',
 	implode(' | ', $out));
+check(strpos(implode(' ', $out), 'nothing vouches for this manifest') !== false,
+	'and --trust-bucket-manifest opens one with no hash, saying nothing vouches for it');
 
 // A nested envelope that is itself from the future is still refused.
 $future_nested = json_decode((string)file_get_contents($core_sidecar), true);
@@ -216,7 +234,7 @@ file_put_contents($fn_file, json_encode(['version' => 1, 'envelope' => $future_n
 $out = [];
 $rc  = 0;
 exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($fn_file)
-	. ' --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
+	. ' --trust-bucket-manifest --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
 check($rc !== 0, 'but a nested envelope from the future is still refused');
 
 // ── Site key stability ──────────────────────────────────────────────────────

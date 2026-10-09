@@ -16,15 +16,15 @@
  *   - a target that can list, write, is private and can prune passes and
  *     leaves nothing behind
  *   - a bucket anyone can read is refused; a main key that cannot delete is
- *     refused; a node key that can delete is refused; one that cannot passes
+ *     refused
  *   - a Backblaze key pinned to another bucket is refused, one that opens the
  *     whole account warns and names the other side's bucket, one missing a
- *     capability is refused naming it, minting per run asks for the key
- *     capabilities, a refused authorize is a fail
+ *     capability is refused naming it, a refused authorize is a fail
  *   - the cloud storage test starts with the same two questions
  *
  * Run: php tests/backups/bucket_check_test.php
  *
+ * @version 1.4 - one key per target: no node key and no per-run minting to check (specs/storage_targets.md WP5)
  * @version 1.3 - the file store's buckets are target rows (checked in cloud_storage_guards, which may
  *                write one); the Guzzle stand-in loads Composer itself
  * @version 1.2 - the no-bucket check skips on a box with a bucket stored (a blank cannot be forced in memory)
@@ -167,7 +167,6 @@ if ($fx_wo === null) {
 } else {
 	harness_defer(function () use ($fx_wo) { s3fx_stop($fx_wo); });
 	$creds = s3fx_creds($fx_wo);
-	$wo = array_merge($creds, array('access_key' => 'wo-node'));
 	BucketCheck::$test_hooks = array('file_store_buckets' => $no_store);
 
 	section('A main key that cannot delete is refused');
@@ -177,14 +176,6 @@ if ($fx_wo === null) {
 
 	check(count(s3fx_keys($fx_wo)) === 1, 'a main key that cannot delete leaves its probe behind: the one thing the check cannot undo');
 
-	section('A node key that can write and cannot delete passes; one that can delete is refused');
-	$before = s3fx_keys($fx_wo);
-	$r = TargetTester::test($make_target($creds, array('bkt_node_credentials' => $wo)));
-	check($r['success'] === true && $step($r['steps'], 'Node key')['status'] === 'pass', 'the write-only node key passes', $r['message']);
-	check(s3fx_keys($fx_wo) === $before, 'the node probe was removed by the main key', json_encode(s3fx_keys($fx_wo)));
-	$r = TargetTester::test($make_target($creds, array('bkt_node_credentials' => array_merge($creds, array('access_key' => 'TESTKEY2')))));
-	check($r['success'] === false && strpos($r['message'], 'The node key can delete objects') !== false, 'a node key that deletes is refused', $r['message']);
-	check(s3fx_keys($fx_wo) === $before, 'its probe was deleted in the proving');
 	BucketCheck::$test_hooks = array();
 }
 
@@ -209,15 +200,11 @@ check($steps[0]['status'] === 'pass' && strpos($steps[0]['message'], 'names unde
 check($steps[1]['status'] === 'fail' && strpos($steps[1]['message'], 'cannot deleteFiles') !== false && strpos($steps[1]['message'], 'Retention could never prune') !== false,
 	'a missing deleteFiles is named with what it would break', $steps[1]['message']);
 
-$steps = BucketCheck::b2_key_steps(array('access_key' => 'k', 'secret_key' => 's'), 'bk', array_merge($all, BucketCheck::B2_MINT_CAPABILITIES), 'main key', $others);
-check(strpos($steps[1]['message'], 'writeKeys, listKeys, deleteKeys') !== false && strpos($steps[1]['message'], 'no per-run key could be minted') !== false,
-	'minting per run asks for the key capabilities and says every run would fail', $steps[1]['message']);
-
 BucketCheck::$test_hooks = array('b2_allowed' => function () { throw new Exception('B2 authorize failed (401): bad key'); });
-$steps = BucketCheck::b2_key_steps(array('access_key' => 'k', 'secret_key' => 's'), 'bk', $all, 'node key', $others);
-check(count($steps) === 1 && $steps[0]['status'] === 'fail' && strpos($steps[0]['message'], 'Backblaze refused the node key') !== false, 'a refused authorize is a fail naming the key', $steps[0]['message']);
+$steps = BucketCheck::b2_key_steps(array('access_key' => 'k', 'secret_key' => 's'), 'bk', $all, 'main key', $others);
+check(count($steps) === 1 && $steps[0]['status'] === 'fail' && strpos($steps[0]['message'], 'Backblaze refused the main key') !== false, 'a refused authorize is a fail naming the key', $steps[0]['message']);
 
-section('The tester runs the Backblaze steps for a b2 target, with the minting ones when minting is on');
+section('The tester runs the Backblaze steps for a b2 target');
 if ($fx !== null) {
 	$creds = s3fx_creds($fx);
 	$seen = array();
@@ -225,12 +212,10 @@ if ($fx !== null) {
 		$seen[] = $id;
 		return array('capabilities' => $all, 'bucketName' => 'bk');
 	});
-	$r = TargetTester::test($make_target($creds, array('bkt_provider' => 'b2', 'bkt_mint_run_keys' => true)));
-	check($r['success'] === false && strpos($r['message'], 'cannot writeKeys, listKeys, deleteKeys') !== false, 'a b2 target with minting on needs the key capabilities', $r['message']);
-	check($seen === array('TESTKEY'), 'the main key was asked once', json_encode($seen));
 	$r = TargetTester::test($make_target($creds, array('bkt_provider' => 'b2')));
 	check($r['success'] === true && $labels($r['steps']) === array('Its own bucket', 'Reach', 'Write', 'Private', 'Prune', 'Main key reach', 'Main key capabilities'),
-		'without minting the four capabilities suffice', json_encode($labels($r['steps'])));
+		'the four capabilities suffice', json_encode($labels($r['steps'])));
+	check($seen === array('TESTKEY'), 'the main key was asked once', json_encode($seen));
 	BucketCheck::$test_hooks = array();
 } else {
 	harness_skip('b2 target steps', 'no loopback S3 fixture could start');

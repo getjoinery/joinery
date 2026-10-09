@@ -14,15 +14,28 @@
  *                records as its cause. Answers a run id and the run's base key.
  *   sign         a write (put | multipart_create | multipart_parts |
  *                multipart_complete) needs an open run and a key inside its
- *                base key. A get needs no run: the key is inside the tenant's
- *                prefix (the layout list answers), or inside a run's base key
- *                when one is named. Never a delete.
+ *                base key, and is never signed for a key a finished run
+ *                completed: that answers 'exists' with the recorded size and
+ *                hash instead of a link. A get needs no run: the key is inside
+ *                the tenant's prefix (the layout list answers), or inside a
+ *                run's base key when one is named. Never a delete.
  *   list         a prefix inside the tenant's own; answers from inside it only.
  *   finish_run   closes the run; the ledger marks the named objects complete
- *                and cancels everything else signed for the run — an open
- *                multipart is aborted at the provider with the plane's
- *                credential before its row goes.
+ *                with the size and sha256 the writer reports, and cancels
+ *                everything else signed for the run — an open multipart is
+ *                aborted at the provider with the plane's credential before
+ *                its row goes. The run's ledger file goes to backup storage.
  *   status       the C2 fields.
+ *
+ * A Managed node's run takes the same signing and finishing path
+ * (NodeBroker): only how its owner is recognised differs — a token minted
+ * when the node's agent claims the job, not an API key.
+ *
+ * What a link binds is the host, the key, the verb and the expiry. The size
+ * declared at sign and the size and hash reported at finish are the writer's
+ * word: the hash is what every later reader checks the bytes against, and the
+ * customer reconcile compares sizes with a listing, but nothing here reads the
+ * bytes back as they land.
  *
  * Reads and writes have different standing. A write needs a usable tenant:
  * active, date ahead, inside the allowance. A read (list, get) is allowed to
@@ -30,17 +43,19 @@
  * retention promise is that the copies stay readable — and is refused only
  * once svt_pruned_time is set.
  *
- * Every write signed is a ledger row: one per space and key (tenant, run,
- * key, bytes, chain, signed time; completed time once the site says so). A
- * key signed again by a later run — chain-x/manifest.json on every
- * incremental — moves its row to that run, so the figure counts the object
- * once. A row completed by an earlier run stays completed, at the size that
- * run finished it, until the later run names it done: the object is on the
- * shelf whatever the later run does, so the figure keeps counting it, and a
- * cancel drops only rows never completed. A key signed again while its row
- * holds a multipart upload id has that upload aborted at the provider first;
- * no upload is orphaned by a retry. The figure on the tenant row is the sum
- * of completed rows. The prune pass reconciles the ledger against a listing.
+ * Every write signed is a ledger row: one per space and key (owner's space,
+ * run, key, bytes, chain, signed time; completed time and sha256 once the
+ * writer says so). NOTHING IS WRITTEN TWICE: a key a finished run completed
+ * with a recorded hash is never signed again, for any run, so a writer can
+ * replace nothing it already wrote and the hash recorded here stays the hash
+ * of what is there (specs/storage_targets.md §6). A key signed but never
+ * completed — a failed run's — may be signed again by the run that retries
+ * it, except a manifest or an envelope whose object landed: that name is
+ * never written over, so a run that failed after its manifest went up is
+ * followed by a new chain, not a retry; a key signed again while its row holds a multipart upload id has that
+ * upload aborted at the provider first, so no upload is orphaned by a retry.
+ * The figure on the tenant row is the sum of completed rows. The prune pass
+ * reconciles the ledger against a listing.
  *
  * Every link is signed in a STORAGE SPACE, never against "the target in use
  * now" (specs/storage_targets.md §3). A run is taken in the tenant's active
@@ -51,6 +66,13 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.7 - write-once: a key a finished run completed is never signed again (sign answers 'exists'); finish
+ *                records each object's sha256 and writes the run's ledger file, {space base}ledger/{run id}.json
+ *                (F4); the signing and finishing path is shared with Managed nodes (NodeBroker); a manifest or an
+ *                envelope is never signed over one already in backup storage, recorded or not; a run that takes
+ *                over an adopted row and aborts leaves it as it was; a ledger file that fails is retried daily
+ *                (svr_ledger_tried_time); a run's finish and abort run one at a time (an advisory lock), and an abort
+ *                leaves a closed run alone
  * @version 1.6 - verifiedRun(): the site reports a finished run's chain verified restorable through it; retention
  *                keeps the newest verified chain and everything newer (specs/storage_targets.md F1)
  * @version 1.5 - a draining space takes no write, even for a run opened before the move; one space that
@@ -64,7 +86,29 @@
  */
 class ShelfBrokerException extends Exception {}
 
+/**
+ * A write asked for a key a finished run already completed. Not a failure of
+ * the request's shape: the object is there, at the size and hash recorded.
+ */
+class ShelfBrokerExistsException extends ShelfBrokerException {
+	public $bytes;
+	public $sha256;
+	public $key;
+	public function __construct(string $key, int $bytes, string $sha256) {
+		parent::__construct('That object is already in backup storage, and nothing there is written twice.');
+		$this->key = $key;
+		$this->bytes = $bytes;
+		$this->sha256 = $sha256;
+	}
+	public function answer(): array {
+		return array('exists' => true, 'key' => $this->key, 'bytes' => $this->bytes, 'sha256' => $this->sha256);
+	}
+}
+
 class ShelfBroker {
+
+	/** A space's folder for run ledger files: {space base}ledger/. No run's base key reaches it. */
+	const LEDGER_DIR = 'ledger';
 
 	/** How long a signed URL lives. Parts come in batches of this many. */
 	const URL_LIFE_SECONDS = 3600;
@@ -173,7 +217,7 @@ class ShelfBroker {
 			throw new ShelfBrokerException($e->getMessage());
 		}
 		$chain = self::cleanChain($chain);
-		if ($chain !== '' && self::chainElsewhere($row, $space, $chain)) {
+		if ($chain !== '' && ShelfObject::chainLivesElsewhere($space, $chain)) {
 			throw new ShelfBrokerException('The chain ' . $chain . ' is stored where this site\'s backups are being moved away from; '
 				. 'it is not extended. Start a new chain: the old one stays readable until retention prunes it.');
 		}
@@ -275,24 +319,56 @@ class ShelfBroker {
 		if ($why !== '') {
 			throw new ShelfBrokerException($why);
 		}
-		$run = self::openRun($row, $run_id);
+		try {
+			return self::signWrite(self::openRun($row, $run_id), $name, $operation, $args);
+		} catch (ShelfBrokerExistsException $e) {
+			return $e->answer();
+		}
+	}
+
+	/**
+	 * Sign one write of an open run, whoever owns it: the run's owner has
+	 * already been recognised and its standing checked. The key is the run's
+	 * base key plus $name; a key a finished run completed is refused with
+	 * ShelfBrokerExistsException, which carries what is there.
+	 *
+	 * @param array $args as sign()'s
+	 */
+	public static function signWrite(ShelfRun $run, string $name, string $operation, array $args = array()): array {
+		if (!in_array($operation, self::OPERATIONS, true) || $operation === 'get') {
+			throw new ShelfBrokerException('The backup storage broker does not sign a "' . $operation . '" write.');
+		}
+		if ((string)$run->get('svr_state') !== ShelfRun::STATE_OPEN) {
+			throw new ShelfBrokerException('That run is already ' . $run->get('svr_state') . '.');
+		}
+		$name = self::cleanName($name);
+		if ($name === '') {
+			throw new ShelfBrokerException('That is not a key inside the run.');
+		}
+		$expires = self::URL_LIFE_SECONDS;
+		$expires_at = gmdate('Y-m-d H:i:s', time() + $expires);
 		$key = (string)$run->get('svr_base_key') . $name;
 		$space = self::runSpace($run);
 		if (!$space->is_active()) {
 			// Moved while the run was open: a space that is draining takes
-			// nothing new. The site starts the run again, in its new space.
-			throw new ShelfBrokerException('This site\'s backups were moved to another target while this run was open; '
+			// nothing new. The run is started again, in the new space.
+			throw new ShelfBrokerException('These backups were moved to another target while this run was open; '
 				. 'nothing more is stored in the old place. Start the run again.');
+		}
+		$chain = self::chainOfName($name, (string)$run->get('svr_chain'));
+		if ($chain !== '' && ShelfObject::chainLivesElsewhere($space, $chain)) {
+			throw new ShelfBrokerException('The chain ' . $chain . ' is stored where these backups are being moved away from; '
+				. 'it is not extended. Start a new chain: the old one stays readable until retention prunes it.');
 		}
 		list($target, $creds, $bucket) = self::reach($space);
 
 		switch ($operation) {
 			case 'put':
-				self::ledgerSigned($row, $run, $key, (int)($args['bytes'] ?? 0), null);
+				self::ledgerSigned($run, $key, $chain, (int)($args['bytes'] ?? 0), null, $creds, $bucket);
 				return array('url' => S3Signer::presign($creds, $bucket, $key, 'PUT', array(), $expires), 'key' => $key, 'expires_at' => $expires_at);
 
 			case 'multipart_create':
-				self::ledgerSigned($row, $run, $key, (int)($args['bytes'] ?? 0), null);
+				self::ledgerSigned($run, $key, $chain, (int)($args['bytes'] ?? 0), null, $creds, $bucket);
 				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploads' => ''), $expires), 'key' => $key, 'expires_at' => $expires_at);
 
 			case 'multipart_parts':
@@ -305,7 +381,7 @@ class ShelfBroker {
 				if ($first + $count - 1 > 10000) {
 					throw new ShelfBrokerException('A multipart upload has at most 10,000 parts.');
 				}
-				self::ledgerUploadId($row, $run, $key, $upload_id);
+				self::ledgerUploadId($run, $key, $upload_id);
 				$urls = array();
 				for ($n = $first; $n < $first + $count; $n++) {
 					$urls[$n] = S3Signer::presign($creds, $bucket, $key, 'PUT', array('partNumber' => (string)$n, 'uploadId' => $upload_id), $expires);
@@ -314,10 +390,23 @@ class ShelfBroker {
 
 			case 'multipart_complete':
 				$upload_id = self::uploadId($args);
-				self::ledgerUploadId($row, $run, $key, $upload_id);
+				self::ledgerUploadId($run, $key, $upload_id);
 				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploadId' => $upload_id), $expires), 'key' => $key, 'expires_at' => $expires_at);
 		}
 		throw new ShelfBrokerException('Unreachable.');
+	}
+
+	/**
+	 * The chain a name belongs to: its first segment when that is a chain's
+	 * folder (chain-…/files-0003.tar.gz.enc), else the run's chain ('' for a
+	 * name outside any chain: a standalone archive, an offloaded file).
+	 */
+	public static function chainOfName(string $name, string $run_chain = ''): string {
+		$first = strtok($name, '/');
+		if ($first !== false && $first !== $name && strpos($first, BackupChain::DIR_PREFIX) === 0) {
+			return self::cleanChain($first);
+		}
+		return self::cleanChain($run_chain);
 	}
 
 	// ── list ──────────────────────────────────────────────────────────────────
@@ -386,32 +475,159 @@ class ShelfBroker {
 	 *                         ledger is exact.
 	 */
 	public static function finishRun(ServiceTenant $row, int $run_id, array $completed): array {
-		$run = self::openRun($row, $run_id);
+		$out = self::completeRun(self::openRun($row, $run_id), $completed);
+		self::refreshFigure($row);
+		return $out + array('figure' => (int)$row->get('svt_figure'));
+	}
+
+	/**
+	 * Close an open run, whoever owns it. Each completed object is named
+	 * relative to the run's base key with its bytes and sha256; one never
+	 * signed for this run, or named without a well-formed hash, is not
+	 * completed. Everything else the run signed is cancelled. The run's ledger
+	 * file then goes to backup storage (writeLedgerFile).
+	 *
+	 * @param array $completed [{name, bytes, sha256}]
+	 */
+	public static function completeRun(ShelfRun $run, array $completed, string $chain = ''): array {
+		// One finish at a time per run: a finish asked again while the first is
+		// still working waits for it, then finds the run finished.
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('SELECT pg_advisory_lock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
+		try {
+			$run = new ShelfRun((int)$run->key, TRUE);
+			if ((string)$run->get('svr_state') !== ShelfRun::STATE_OPEN) {
+				throw new ShelfBrokerException('That run is already ' . $run->get('svr_state') . '.');
+			}
+			return self::completeLockedRun($run, $completed, $chain);
+		} finally {
+			$db->prepare('SELECT pg_advisory_unlock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
+		}
+	}
+
+	/** The advisory lock space a run's finish is serialised in. */
+	const FINISH_LOCK_SPACE = 7301;
+
+	private static function completeLockedRun(ShelfRun $run, array $completed, string $chain): array {
 		$now = gmdate('Y-m-d H:i:s');
 		$marked = 0;
+		$unhashed = 0;
 		foreach ($completed as $c) {
 			$name = self::cleanName((string)($c['name'] ?? ''));
 			if ($name === '') { continue; }
+			$sha256 = strtolower(trim((string)($c['sha256'] ?? '')));
+			if (!preg_match('/^[0-9a-f]{64}$/', $sha256)) {
+				$unhashed++;
+				continue; // a completion vouches for bytes only with their hash
+			}
 			$key = (string)$run->get('svr_base_key') . $name;
 			$object = ShelfObject::forKey((int)$run->get('svr_sps_storage_space_id'), $key);
-			if ($object === null || (int)$object->get('svo_svr_shelf_run_id') !== (int)$run->key) {
-				continue; // never signed for this run: not the ledger's to complete
+			if ($object === null || (int)$object->get('svo_svr_shelf_run_id') !== (int)$run->key
+					|| (string)$object->get('svo_sha256') !== '') {
+				continue; // never signed for this run, or completed with its hash already: not this run's to complete
 			}
-			if (isset($c['bytes'])) {
-				$object->set('svo_bytes', max(0, (int)$c['bytes']));
-			}
+			$object->set('svo_bytes', max(0, (int)($c['bytes'] ?? 0)));
+			$object->set('svo_sha256', $sha256);
 			$object->set('svo_completed_time', $now);
 			$object->set('svo_upload_id', null);
 			$object->save();
 			$marked++;
 		}
 		$cancelled = self::cancelUncompleted($run);
+		if ($chain !== '') {
+			$run->set('svr_chain', self::cleanChain($chain));
+		}
 		$run->set('svr_state', ShelfRun::STATE_FINISHED);
 		$run->set('svr_finish_time', $now);
 		$run->save();
-		self::refreshFigure($row);
-		return array('run_id' => (int)$run->key, 'completed' => $marked, 'cancelled' => $cancelled,
-			'figure' => (int)$row->get('svt_figure'));
+		self::writeLedgerFile($run);
+		return array('run_id' => (int)$run->key, 'completed' => $marked, 'cancelled' => $cancelled, 'unhashed' => $unhashed);
+	}
+
+	/** Where a run's ledger file goes: {space base}ledger/{run id}.json, outside every run's base key. */
+	public static function ledgerKey(ShelfRun $run): string {
+		return self::runSpace($run)->base() . self::LEDGER_DIR . '/' . (int)$run->key . '.json';
+	}
+
+	/**
+	 * The run's ledger file (specs/storage_targets.md F4): every object it
+	 * completed, with key, bytes and sha256, and the run's time, kind,
+	 * profile and chain. Written with the plane's credential to a key no run
+	 * can be signed for, so what vouches for a run's bytes is in the bucket as
+	 * well as in this database. True when written; a failure is logged and
+	 * svr_ledger_time stays empty, and writeMissingLedgerFiles() tries again.
+	 */
+	public static function writeLedgerFile(ShelfRun $run): bool {
+		try {
+			$space = self::runSpace($run);
+			list($target, $creds, $bucket) = $space->reach();
+			$objects = array();
+			foreach (new MultiShelfObject(array('run_id' => (int)$run->key, 'completed' => true, 'deleted' => false),
+					array('svo_key' => 'ASC')) as $o) {
+				$objects[] = array('key' => (string)$o->get('svo_key'), 'bytes' => (int)$o->get('svo_bytes'),
+					'sha256' => (string)$o->get('svo_sha256'));
+			}
+			$body = json_encode(array(
+				'version'  => 1,
+				'run_id'   => (int)$run->key,
+				'kind'     => (string)$run->get('svr_kind'),
+				'owner'    => $space->owner_name(),
+				'profile'  => (string)$run->get('svr_profile'),
+				'chain'    => (string)$run->get('svr_chain'),
+				'started'  => (string)$run->get('svr_create_time'),
+				'finished' => (string)$run->get('svr_finish_time'),
+				'objects'  => $objects,
+			), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+			$tmp = tempnam(sys_get_temp_dir(), 'jy_ledger_');
+			try {
+				file_put_contents($tmp, $body);
+				$resp = S3Signer::put_file($creds, $bucket, '/' . self::ledgerKey($run), $tmp, 'application/json');
+			} finally {
+				@unlink($tmp);
+			}
+			$status = (int)($resp['status'] ?? 0);
+			if ($status < 200 || $status >= 300) {
+				throw new ShelfBrokerException('HTTP ' . $status . ' ' . S3Signer::extract_error($resp['body'] ?? ''));
+			}
+		} catch (\Throwable $e) {
+			error_log('ShelfBroker: the ledger file of run ' . (int)$run->key . ' could not be written: ' . $e->getMessage());
+			$run->set('svr_ledger_problem', mb_substr($e->getMessage(), 0, 1000));
+			$run->set('svr_ledger_tried_time', gmdate('Y-m-d H:i:s'));
+			$run->save();
+			return false;
+		}
+		$run->set('svr_ledger_time', gmdate('Y-m-d H:i:s'));
+		$run->set('svr_ledger_problem', null);
+		$run->save();
+		return true;
+	}
+
+	/**
+	 * Write the ledger file of every finished run that has none yet and is due
+	 * a try: one that failed is tried again a day later, so a run whose space
+	 * cannot be reached never holds back newer ones. Answers what was written,
+	 * and how many runs still have none with the newest reason, for the pass
+	 * to report.
+	 *
+	 * @return array{written:int, stuck:int, problem:string}
+	 */
+	public static function writeMissingLedgerFiles(int $limit = 50): array {
+		$written = 0;
+		$runs = new MultiShelfRun(array('state' => ShelfRun::STATE_FINISHED, 'ledger_written' => false, 'ledger_due' => true,
+			'deleted' => false), array('svr_shelf_run_id' => 'ASC'), $limit);
+		foreach ($runs as $run) {
+			if (self::writeLedgerFile($run)) {
+				$written++;
+			}
+		}
+		$stuck = new MultiShelfRun(array('state' => ShelfRun::STATE_FINISHED, 'ledger_written' => false, 'ledger_failed' => true,
+			'deleted' => false), array('svr_update_time' => 'DESC'));
+		$problem = '';
+		foreach ($stuck as $run) {
+			$problem = (string)$run->get('svr_ledger_problem');
+			break;
+		}
+		return array('written' => $written, 'stuck' => count($stuck), 'problem' => $problem);
 	}
 
 	/**
@@ -450,12 +666,24 @@ class ShelfBroker {
 	 * upload is aborted at the provider with the plane's credential.
 	 */
 	public static function abortRun(ShelfRun $run, string $cause): int {
-		$dropped = self::cancelUncompleted($run);
-		$run->set('svr_state', ShelfRun::STATE_ABORTED);
-		$run->set('svr_finish_time', gmdate('Y-m-d H:i:s'));
-		$run->set('svr_cause', $cause);
-		$run->save();
-		return $dropped;
+		// Under the finish lock: an abort never lands in the middle of a
+		// finish, and a run the finish closed is left as it was.
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare('SELECT pg_advisory_lock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
+		try {
+			$run = new ShelfRun((int)$run->key, TRUE);
+			if ((string)$run->get('svr_state') !== ShelfRun::STATE_OPEN) {
+				return 0;
+			}
+			$dropped = self::cancelUncompleted($run);
+			$run->set('svr_state', ShelfRun::STATE_ABORTED);
+			$run->set('svr_finish_time', gmdate('Y-m-d H:i:s'));
+			$run->set('svr_cause', $cause);
+			$run->save();
+			return $dropped;
+		} finally {
+			$db->prepare('SELECT pg_advisory_unlock(:k1, :k2)')->execute(array(':k1' => self::FINISH_LOCK_SPACE, ':k2' => (int)$run->key));
+		}
 	}
 
 	/**
@@ -548,18 +776,6 @@ class ShelfBroker {
 		}
 	}
 
-	/** Does this chain have live objects in a space of the tenant other than $space? */
-	private static function chainElsewhere(ServiceTenant $row, StorageSpace $space, string $chain): bool {
-		$rows = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'chain' => $chain, 'pruned' => false,
-			'deleted' => false));
-		foreach ($rows as $object) {
-			if ((int)$object->get('svo_sps_storage_space_id') !== (int)$space->key) {
-				return true;
-			}
-		}
-		return false;
-	}
-
 	private static function openRun(ServiceTenant $row, int $run_id): ShelfRun {
 		$run = self::runOf($row, $run_id);
 		if ((string)$run->get('svr_state') !== ShelfRun::STATE_OPEN) {
@@ -569,37 +785,89 @@ class ShelfBroker {
 	}
 
 	/**
-	 * One live ledger row per space and key. A retry within the run refreshes it;
-	 * a later run signing the same key (a chain's manifest, rewritten by
-	 * every incremental) takes the row over: it is that run's to complete
-	 * from here, and the object is counted once whichever run wrote it. A
-	 * row already completed keeps its completed time and size — that object
-	 * is in backup storage until the new one lands over it — and takes the new
-	 * size when the run finishes it. An upload the row still holds is
-	 * aborted at the provider before its id is let go.
+	 * One live ledger row per space and key, and the rule that nothing in
+	 * backup storage is written twice:
+	 *
+	 *   - a key a finished run completed with its hash is never signed again
+	 *     (ShelfBrokerExistsException, carrying what is there);
+	 *   - a name that vouches for others — a chain manifest, an epoch envelope —
+	 *     is never signed over an object already there: one the reconcile
+	 *     adopted (no hash) is refused, and one with no row at all (written
+	 *     before runs went through the broker) is looked for in the bucket
+	 *     first. No run legitimately rewrites either: a run writes its own
+	 *     manifest name, and a re-sealed envelope its own name;
+	 *   - any other row is this run's to complete from here: one never
+	 *     completed (a failed run's, so its retry is never refused), or one
+	 *     the reconcile adopted — that one stays completed at its adopted size
+	 *     until this run finishes it, so an abort leaves it as it was.
+	 *
+	 * An upload the row still holds is aborted at the provider before its id is
+	 * let go.
 	 */
-	private static function ledgerSigned(ServiceTenant $row, ShelfRun $run, string $key, int $bytes, ?string $upload_id): void {
+	private static function ledgerSigned(ShelfRun $run, string $key, string $chain, int $bytes, ?string $upload_id, array $creds, string $bucket): void {
 		$object = ShelfObject::forKey((int)$run->get('svr_sps_storage_space_id'), $key);
+		if ($object !== null && $object->get('svo_completed_time') !== null && (string)$object->get('svo_sha256') !== '') {
+			throw new ShelfBrokerExistsException($key, (int)$object->get('svo_bytes'), (string)$object->get('svo_sha256'));
+		}
+		if (self::vouches(basename($key))) {
+			if ($object !== null && $object->get('svo_completed_time') !== null) {
+				throw new ShelfBrokerExistsException($key, (int)$object->get('svo_bytes'), '');
+			}
+			if ($object === null) {
+				$there = self::headObject($creds, $bucket, $key);
+				if ($there !== null) {
+					throw new ShelfBrokerExistsException($key, $there, '');
+				}
+			}
+		}
 		if ($object === null) {
 			$object = new ShelfObject(NULL);
-			$object->set('svo_svt_service_tenant_id', (int)$row->key);
 			$object->set('svo_sps_storage_space_id', (int)$run->get('svr_sps_storage_space_id'));
 			$object->set('svo_key', $key);
 		} else {
 			self::abortUpload($object);
 		}
+		if ((int)$run->get('svr_svt_service_tenant_id')) {
+			$object->set('svo_svt_service_tenant_id', (int)$run->get('svr_svt_service_tenant_id'));
+		}
 		$object->set('svo_svr_shelf_run_id', (int)$run->key);
-		if ($object->get('svo_bytes') === null || ($bytes > 0 && $object->get('svo_completed_time') === null)) {
+		if ($object->get('svo_completed_time') === null) {
 			$object->set('svo_bytes', max(0, $bytes));
 		}
-		$object->set('svo_chain', (string)$run->get('svr_chain'));
+		$object->set('svo_chain', $chain);
 		$object->set('svo_upload_id', $upload_id);
 		$object->set('svo_signed_time', gmdate('Y-m-d H:i:s'));
 		$object->save();
 	}
 
+	/** A name other objects are checked against: a chain manifest, or an epoch envelope. */
+	public static function vouches(string $name): bool {
+		return BackupChain::is_manifest_name($name) || BackupObjects::is_envelope_name($name);
+	}
+
+	/**
+	 * The size of the object at $key when backup storage holds one, else null.
+	 * A provider that does not answer is a refusal: signing over an object
+	 * nobody could look for is the one thing this check exists to prevent.
+	 */
+	private static function headObject(array $creds, string $bucket, string $key): ?int {
+		try {
+			$resp = S3Signer::head($creds, $bucket, '/' . ltrim($key, '/'));
+		} catch (\Throwable $e) {
+			throw new ShelfBrokerException('Backup storage could not say whether ' . basename($key) . ' is already there: ' . $e->getMessage());
+		}
+		$status = (int)($resp['status'] ?? 0);
+		if ($status === 404) {
+			return null;
+		}
+		if ($status >= 200 && $status < 300) {
+			return (int)($resp['headers']['content-length'] ?? 0);
+		}
+		throw new ShelfBrokerException('Backup storage could not say whether ' . basename($key) . ' is already there (HTTP ' . $status . ').');
+	}
+
 	/** A part or complete URL names an upload this run signed for the key. */
-	private static function ledgerUploadId(ServiceTenant $row, ShelfRun $run, string $key, string $upload_id): void {
+	private static function ledgerUploadId(ShelfRun $run, string $key, string $upload_id): void {
 		$object = ShelfObject::forKey((int)$run->get('svr_sps_storage_space_id'), $key);
 		if ($object === null || (int)$object->get('svo_svr_shelf_run_id') !== (int)$run->key) {
 			throw new ShelfBrokerException('No open upload was signed for that key.');
@@ -636,7 +904,7 @@ class ShelfBroker {
 		return $name;
 	}
 
-	private static function cleanChain(string $chain): string {
+	public static function cleanChain(string $chain): string {
 		$chain = trim($chain);
 		return preg_match('/^[A-Za-z0-9._-]{0,64}$/', $chain) ? $chain : '';
 	}

@@ -5,6 +5,8 @@
  *
  * CRUD page for managing backup storage targets, at any provider in StorageProvider's catalogue.
  *
+ * @version 2.17 - the form is the Backups page's: one key per target, since nodes write through the backup
+ *                 broker and are handed none (specs/storage_targets.md WP5)
  * @version 2.16 - Delete all is refused for the folder an owner's new backups go to
  * @version 2.15 - storage spaces (specs/storage_targets.md WP4): who backs up to this target and whose older
  *                 backups it keeps, Move everyone off to another target, Stored Backups classified by space,
@@ -226,8 +228,7 @@ if ($post_action === 'delete_backup_object' && $is_edit) {
 	exit;
 }
 
-// Handle form save: the one target form and save path (BackupTargetForm), with
-// this management node's node key and per-run key fields.
+// Handle form save: the one target form and save path (BackupTargetForm).
 $error = null;
 if ($_POST && isset($_POST['bkt_name'])) {
 	// Same CSRF gate as every other mutation on this page: this handler writes
@@ -236,7 +237,7 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	if (!$target) {
 		$target = new BackupTarget(NULL);
 	}
-	$saved = BackupTargetForm::save($target, $_POST, ['node_credentials' => true]);
+	$saved = BackupTargetForm::save($target, $_POST);
 	if ($saved['ok']) {
 		$session->save_message(new DisplayMessage(
 			$saved['message'], 'Success', '/\/admin\/server_manager/',
@@ -428,7 +429,7 @@ if ($target !== null) {
 	$formwriter = $page->getFormWriter('target_form');
 	$formwriter->begin_form();
 	echo SmAdminCsrf::field();
-	BackupTargetForm::render($formwriter, $target, ['node_credentials' => true]);
+	BackupTargetForm::render($formwriter, $target);
 	$formwriter->submitbutton('btn_submit', $is_edit ? 'Save Changes' : 'Add Target');
 	$formwriter->end_form();
 

@@ -595,9 +595,12 @@ list($result, $error) = $run($rot_plan);
 check($error === null, 'the run succeeds', (string)$error);
 check($fetched_env === 1, 'the envelope link was fetched once');
 $env_after = json_decode((string)s3fx_object($fx, 'bkt', '/' . $env_key), true);
-check(is_array($env_after) && $env_after['created'] !== $env_before['created'] && $env_after['artifact'] === $epoch,
-	'the epoch envelope in backup storage was re-sealed and uploaded again under the same name', json_encode(array($env_before['created'] ?? null, $env_after['created'] ?? null)));
-check(BackupEnvelope::open_as_site($env_after) === BackupEnvelope::open_as_site($env_before), 'with the same data key');
+check(is_array($env_after) && $env_after['created'] === $env_before['created'], 'the epoch\'s envelope.json is not written over');
+$resealed_key = $base . 'objects/' . $epoch . '/' . BackupObjects::resealed_envelope_name(str_repeat('f', 64));
+$env_new = json_decode((string)s3fx_object($fx, 'bkt', '/' . $resealed_key), true);
+check(is_array($env_new) && $env_new['artifact'] === $epoch && substr($resealed_key, -30) === 'envelope-ffffffffffffffff.json',
+	'the re-sealed envelope went up beside it, named by the new recovery fingerprint', $resealed_key);
+check(BackupEnvelope::open_as_site($env_new) === BackupEnvelope::open_as_site($env_before), 'with the same data key');
 check(strpos((string)$result['message'], 're-sealed 1 epoch envelope') !== false, 'and the run says so', $result['message']);
 unset(BackupObjects::$test_hooks['fetch']);
 

@@ -96,6 +96,8 @@
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
+ * @version 1.3 - by hand, a chain folder may hold a version-3 chain's run manifests in place of manifest.json; the
+ *                newest is read, and its sha256 is printed for the operator to compare (specs/storage_targets.md F9)
  * @version 1.2 - offloaded files: epoch_envelope_urls and object_urls in the request, staged through
  *                BackupStaging::fetch_objects after the set and handed to the verifier; the disk
  *                check is repeated with the sample's bytes once the index has been read
@@ -204,8 +206,11 @@ function verify_backup_local(array $config) {
 	if ($work === '' || !is_dir($work)) {
 		verify_backup_refuse("'artifacts_dir' must be a directory holding the chain's manifest and artifacts");
 	}
-	if (!is_file($work . '/' . BackupChain::MANIFEST_NAME)) {
-		verify_backup_refuse('there is no ' . BackupChain::MANIFEST_NAME . ' in ' . $work);
+	// manifest.json, or a version-3 chain's newest run manifest as downloaded.
+	$manifest_name = is_file($work . '/' . BackupChain::MANIFEST_NAME)
+		? BackupChain::MANIFEST_NAME : BackupChain::newest_manifest_name(scandir($work) ?: array());
+	if ($manifest_name === '' || !is_file($work . '/' . $manifest_name)) {
+		verify_backup_refuse('there is no manifest.json or manifest-NNNN.json in ' . $work);
 	}
 	$key_file = (string)($config['key_file'] ?? '');
 	if ($key_file === '' || !is_file($key_file) || !is_readable($key_file)) {
@@ -222,7 +227,10 @@ function verify_backup_local(array $config) {
 	$project = (string)($config['project'] ?? '');
 
 	try {
-		$manifest = BackupChain::read($work . '/' . BackupChain::MANIFEST_NAME);
+		$manifest = BackupChain::read($work . '/' . $manifest_name);
+		// By hand, nothing here holds the hash recorded when it was written.
+		fwrite(STDERR, 'Manifest ' . $manifest_name . ' sha256 ' . hash_file('sha256', $work . '/' . $manifest_name)
+			. ': nothing vouches for it here; compare it with the hash recorded when it was written.' . "\n");
 		$plan     = BackupChain::restore_plan($manifest, $seq);
 	} catch (\Throwable $e) {
 		verify_backup_finish(array('result' => BackupVerifier::RESULT_FAIL, 'level' => $level, 'reason' => $e->getMessage()));

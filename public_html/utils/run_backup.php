@@ -14,7 +14,8 @@
  *   php utils/run_backup.php
  *
  * With --profile=manager it runs a management node's backup of this site. Where the
- * archive goes arrives with the run — the bucket and a write-only credential, as
+ * archive goes arrives with the run — the bucket and a run on the management
+ * node's backup broker, whose token signs nothing but this run's writes, as
  * JSON **on stdin** — and leaves with the process.
  *
  *   php utils/run_backup.php --profile=manager <<'EOF'
@@ -27,12 +28,13 @@
  * no proven key of its own takes no backups for anybody and says so.
  *
  * Stdin rather than an argument on purpose. Anything in argv is visible to every
- * user on the box for the life of the process, and one of these fields is a
- * bucket credential.
+ * user on the box for the life of the process, and one of these fields is the
+ * broker run's token.
  *
  * Concurrency is handled by the runner itself: a run that finds another in
  * progress — either profile — reports itself skipped rather than racing it.
  *
+ * @version 1.7 - the slot is a broker run on the management node (specs/storage_targets.md WP5)
  * @version 1.6 - BACKUP_BYTES is the run's whole size, every artifact it put in backup storage
  * @version 1.5 - BACKUP_KEEP_DAYS line on a manager-profile run: this site's retention window, which the
  *                management node prunes its copies by

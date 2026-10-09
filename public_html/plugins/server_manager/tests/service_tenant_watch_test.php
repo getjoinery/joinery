@@ -239,14 +239,14 @@ $base = 'hb/' . $slug . '/';
 // Three chains in backup storage through the broker, oldest first.
 $run_ids = array();
 foreach (array('chain-20260901_010000', 'chain-20260910_010000', 'chain-20260920_010000') as $chain) {
-	$b = ShelfBroker::beginRun($shelf, 'site', $chain, array(array('name' => $chain . '/db', 'bytes' => 10), array('name' => $chain . '/files', 'bytes' => 20)));
+	$b = ShelfBroker::beginRun($shelf, 'site', $chain, array(array('name' => $chain . '/db', 'bytes' => 10), array('name' => $chain . '/files', 'bytes' => 20, 'sha256' => str_repeat('a', 64))));
 	$run_ids[] = (int)$b['run_id'];
 	$cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$b['run_id']);
 	foreach (array('db' => 10, 'files' => 20) as $name => $bytes) {
 		ShelfBroker::sign($shelf, (int)$b['run_id'], $chain . '/' . $name, 'put', array('bytes' => $bytes));
 		$put_raw($base . 'site/' . $chain . '/' . $name, str_repeat('x', $bytes));
 	}
-	ShelfBroker::finishRun($shelf, (int)$b['run_id'], array(array('name' => $chain . '/db', 'bytes' => 10), array('name' => $chain . '/files', 'bytes' => 20)));
+	ShelfBroker::finishRun($shelf, (int)$b['run_id'], array(array('name' => $chain . '/db', 'bytes' => 10, 'sha256' => str_repeat('a', 64)), array('name' => $chain . '/files', 'bytes' => 20, 'sha256' => str_repeat('a', 64))));
 }
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
 check((int)$shelf->get('svt_figure') === 90, 'three chains: 90 bytes on the ledger');
@@ -278,15 +278,15 @@ check(substr((string)$shelf->get('svt_reconciled_time'), 0, 19) === '2036-09-22 
 	'the reconcile ran against the listing once a day: last on the pass a day and more after the first');
 
 // A chain with an open run is never touched, and a manager chain is its own family.
-$open = ShelfBroker::beginRun($shelf, 'site', 'chain-20260830_010000', array(array('name' => 'chain-20260830_010000/db', 'bytes' => 1)));
+$open = ShelfBroker::beginRun($shelf, 'site', 'chain-20260830_010000', array(array('name' => 'chain-20260830_010000/db', 'bytes' => 1, 'sha256' => str_repeat('a', 64))));
 $cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$open['run_id']);
 ShelfBroker::sign($shelf, (int)$open['run_id'], 'chain-20260830_010000/db', 'put', array('bytes' => 1));
 $put_raw($base . 'site/chain-20260830_010000/db', 'x');
-$m = ShelfBroker::beginRun($shelf, 'manager', 'chain-20260801_010000', array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5)));
+$m = ShelfBroker::beginRun($shelf, 'manager', 'chain-20260801_010000', array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5, 'sha256' => str_repeat('a', 64))));
 $cleanup[] = array('svr_shelf_runs', 'svr_shelf_run_id', (int)$m['run_id']);
 ShelfBroker::sign($shelf, (int)$m['run_id'], 'chain-20260801_010000/db', 'put', array('bytes' => 5));
 $put_raw($base . 'manager/chain-20260801_010000/db', 'xxxxx');
-ShelfBroker::finishRun($shelf, (int)$m['run_id'], array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5)));
+ShelfBroker::finishRun($shelf, (int)$m['run_id'], array(array('name' => 'chain-20260801_010000/db', 'bytes' => 5, 'sha256' => str_repeat('a', 64))));
 $watch->watch($shelf, '2036-09-22 18:10:00');
 $keys = s3fx_keys($fx);
 check(in_array('shelf/' . $base . 'site/chain-20260830_010000/db', $keys, true), 'an older chain with an open run is left alone');
@@ -299,6 +299,8 @@ $shelf->set('svt_reconciled_time', null);
 $shelf->save();
 // Something in backup storage the ledger never saw, and a ledger row for something gone.
 $put_raw($base . 'site/chain-20260920_010000/stray', str_repeat('s', 7));
+// And an object whose run recorded its size and hash, replaced with other bytes.
+$put_raw($base . 'site/chain-20260920_010000/files', str_repeat('z', 25));
 $db->exec("UPDATE svo_shelf_objects SET svo_key = '" . $base . "site/chain-20260920_010000/vanished' WHERE svo_key = '" . $base . "site/chain-20260910_010000/db'");
 $watch->watch($shelf, '2036-09-23 00:00:00');
 $shelf = ServiceTenant::forKey($key_id, 'shelf');
@@ -310,6 +312,13 @@ check(count($gone) === 1 && (string)$gone->get(0)->get('svo_pruned_cause') === '
 $stray = ShelfObject::forKey((int)$space->key, $base . 'site/chain-20260920_010000/stray');
 check($stray !== null && (int)$stray->get('svo_bytes') === 7 && $stray->get('svo_completed_time') !== null
 	&& (string)$stray->get('svo_chain') === 'chain-20260920_010000', 'an object the ledger did not have is adopted at its listed size');
+$replaced = ShelfObject::forKey((int)$space->key, $base . 'site/chain-20260920_010000/files');
+check($replaced !== null && (int)$replaced->get('svo_bytes') === 20 && $replaced->get('svo_sha256') === str_repeat('a', 64),
+	'a size that differs under a row recorded with its hash is said, never adopted');
+$ledger_keys = preg_grep('#^shelf/' . preg_quote($base, '#') . 'ledger/\d+\.json$#', s3fx_keys($fx));
+$ledger_rows = $db->query("SELECT count(*) FROM svo_shelf_objects WHERE svo_key LIKE '" . $base . "ledger/%'")->fetchColumn();
+check(count($ledger_keys) >= 4 && (int)$ledger_rows === 0, 'the run ledger files are in the space and the reconcile neither counts nor adopts them',
+	count($ledger_keys) . ' files, ' . $ledger_rows . ' rows');
 // db of 0910 was renamed away in the ledger and is in backup storage → adopted back (10); the aborted run's db (1) adopted too.
 check((int)$shelf->get('svt_figure') === ShelfObject::completedBytes((int)$shelf->key), 'the figure is the reconciled ledger');
 
