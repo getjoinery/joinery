@@ -18391,3 +18391,75 @@ fn a_never_sent_record_gives_way_to_a_deleted_owners_edited_file() {
         assert_eq!(live.len(), 1, "{label}: a's edit is not on the server: {:?}", world.server.files());
     }
 }
+
+/// Rig runs 1881 and 1885, end to end. While this device is away its user
+/// case-renames a file (and, in the second arm, a folder) and moves it to
+/// another folder; a peer makes the same case rename. Both ends must hold it
+/// where this device's user put it: the name both chose, the folder only one
+/// side changed. Judged whole, the server won the race and the user's move
+/// was undone on every device. RED with the placement judged whole.
+#[test]
+fn the_same_rename_on_both_sides_never_undoes_a_move_only_one_side_made() {
+    for folder in [false, true] {
+        let world = World::of(1_881, &[("a", jd_sim::Platform::Linux), ("b", jd_sim::Platform::Linux)]);
+        let (a, b) = (world.device("a"), world.device("b"));
+        a.fs.user_mkdir("Projects");
+        a.fs.user_mkdir("Elsewhere");
+        let (from, renamed, moved) = if folder {
+            a.fs.user_mkdir("Projects/docs");
+            a.fs.user_write("Projects/docs/inside.txt", b"inside the folder");
+            ("Projects/docs", "Projects/DOCS", "Elsewhere/DOCS")
+        } else {
+            a.fs.user_write("Projects/doc-2.txt", b"the document");
+            ("Projects/doc-2.txt", "Projects/DOC-2.TXT", "Elsewhere/DOC-2.TXT")
+        };
+        assert!(world.settle().is_some(), "folder={folder}: everything goes up first");
+        b.fs.user_rename(from, renamed);
+        world.pass(b);
+        a.fs.user_rename(from, moved);
+        assert!(world.settle().is_some(), "folder={folder}: never settled");
+        for device in [a, b] {
+            let tree = disk_tree(device);
+            assert!(tree.contains_key(moved), "folder={folder}: {} lost the move: {:?}", device.name, tree.keys().collect::<Vec<_>>());
+            assert!(!tree.contains_key(renamed), "folder={folder}: {} still has {renamed}", device.name);
+        }
+    }
+}
+
+/// A drag out of a vault while a peer renames the file is held, not undone:
+/// this device's user dragged a sealed file out of its vault and renamed it,
+/// a peer renamed it to another name. The hold decides before any move race
+/// is judged, so the file stays where the user put it (D1), nothing is
+/// published, the sealed copy stays in the vault, and no race issue claims
+/// a move was undone. A guard on that order: green with the placement judged
+/// whole or by half alike.
+#[test]
+fn a_raced_drag_out_of_a_vault_nobody_contested_is_held_not_undone() {
+    let (world, private, out) = a_vault_of_two(9_974, &["holder", "peer"]);
+    let (holder, peer) = (world.device("holder"), world.device("peer"));
+    peer.fs.user_rename("Private/out.txt", "Private/theirs.txt");
+    world.pass(peer);
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_rename("Private/out.txt", "Plain/mine.txt");
+    assert!(world.settle().is_some(), "a held file must leave the device quiet");
+
+    no_plaintext_of(&world, HELD_BODY);
+    assert_eq!(server_folder_of(&world, out), Some(Some(private)), "the sealed copy left the vault");
+    let held = jd_sim::sha256_hex(HELD_BODY);
+    let in_plain: Vec<String> = disk_tree(holder)
+        .into_iter()
+        .filter(|(p, h)| p.starts_with("Plain/") && h.as_deref() == Some(held.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(in_plain.len(), 1, "the drag out was undone: {:?}", disk_tree(holder));
+    assert_eq!(held_issues(holder).len(), 1, "{:?}", holder.store.open_issues().unwrap());
+    let races: Vec<String> = holder
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.detail.starts_with("MoveRaceServerWon"))
+        .map(|i| i.detail)
+        .collect();
+    assert!(races.is_empty(), "a race was reported for a hold: {races:?}");
+}
