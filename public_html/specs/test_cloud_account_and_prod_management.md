@@ -160,10 +160,14 @@ moves:
 1. **Live token** saved on Provisioning Setup, WP1 showing no missing
    permissions. (Probably already set for hosted orders. Not verified;
    getjoinery's settings are not readable from dev.)
-2. **A backup destination of its own.** A new Backblaze application key for
-   getjoinery, scoped to `joinery-backups-354`. When the move is done,
-   dev's key for that bucket is revoked and dev gets a test bucket. See C1
-   for old backups.
+2. **A backup destination of its own, locked.** A new Backblaze bucket,
+   `joinery-prod-backups`, created with object lock on and no default
+   retention, and a key scoped to it. getjoinery's target for it locks every
+   backup for 35 days (retention 28 plus the 7-day full interval) and is the
+   default for new backups. **Done 2026-10-09.** Only a bucket created with
+   lock can lock, so `joinery-backups-354` could not be converted. A node must
+   run 0.8.474 or later before its backups can go to a locking target. See C1
+   for the old backups.
 3. **Alerts** to info@getjoinery.com. Activate the fleet tasks: backups and
    retention, uptime, incidents, rollouts, install jobs.
 4. **getjoinery manages itself.** Its agent leaves dev and joins getjoinery,
@@ -227,9 +231,9 @@ Per node:
 3. **Match its slug and site address to dev's** (Overview tab, edit). A join
    leaves the site address empty until a status check fills it; set it here. The slug is the node's
    folder in the backup bucket, and a join names it from the hostname, so it
-   can differ from dev's (jeremytunnell-vps will). With the same slug,
-   getjoinery's backups land next to dev's and its retention prunes both
-   (C1).
+   can differ from dev's (jeremytunnell-vps will). Keep dev's slug anyway:
+   the node's name stays the same in both places, and the old chains in
+   `joinery-backups-354` stay findable under it (C1).
 4. Set its backup policy on getjoinery and run one backup; it must pass
    verification.
 5. **Point its upgrade source at getjoinery** by hand: on the node's own
@@ -301,15 +305,20 @@ Dev's provision records for both go when their nodes are removed on dev
   works from the bucket listing, not from history rows
   (`FleetBackupRetention::prune` lists `{prefix}/{slug}/manager/`). Two
   things follow:
-  - A node keeping its slug and path prefix on getjoinery stays in the same
-    folder. getjoinery's retention then prunes dev's old chains along with
-    its own, as they age out (WP6 step 3).
+  - getjoinery backs up to its own locked bucket, so a moved node's first
+    backup there is a full one, and its old chains stay in
+    `joinery-backups-354` under the same slug. getjoinery's old target
+    (`Getjoinery-backup-read-write`) is kept, not removed, so those chains can
+    still be listed, pruned and restored from getjoinery.
   - Dev stops pruning a node as soon as its agent stops polling dev, and
-    never prunes a soft-deleted row.
+    never prunes a soft-deleted row. Retention works through each node's own
+    storage space, and a moved node's space is on the new target, so nothing
+    prunes its old chains: they are deleted by hand from the old target's
+    Stored Backups panel on getjoinery, or left until that bucket is retired.
 
-  So dev's Backblaze key can be revoked once the last node has moved.
-  getjoinery's key needs list and delete on `joinery-backups-354`, and its
-  target needs the same path prefix, `joinery-backups`.
+  So dev's Backblaze key for `joinery-backups-354` can be revoked once the
+  last node has moved and its old chains have been deleted or are no longer
+  wanted.
 - **C2 — No remote path exists, and none is built.** Every production node
   downloads its releases from dev today. The setting is vault-gated on the
   node, and nothing on the management node writes it. It is set by hand in
