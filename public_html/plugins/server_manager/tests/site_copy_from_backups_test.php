@@ -17,6 +17,9 @@
  * Also the copy's page handoff (CopyKeyHandoff): the shapes it accepts, and
  * that it does nothing with no request staged.
  *
+ * @version 1.3 - the key request carries a signed link to the manifest (specs/storage_targets.md F7); the sources'
+ *               backups are on a test target of their own (lib/node_space_fixture.php): since a node backs up only
+ *               through a storage space, the suite had been skipping
  * @version 1.2 - a container source's old container is stopped and held on its host, last; the site's Copy tab names
  *                 it until it and its certificate are gone (cleanup_left)
  * @version 1.1 - a container site and a management node from backups; the backups release floor
@@ -24,6 +27,7 @@
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
 
 $tag = bin2hex(random_bytes(3));
@@ -45,7 +49,10 @@ $manifest = json_encode(array('version' => 1, 'chain_id' => $chain_id, 'slug' =>
 		array('kind' => 'site', 'fingerprint' => str_repeat('0', 64), 'sealed' => base64_encode('not this one')),
 	)),
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 8 * 86400)))));
-SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest) { return $manifest; };
+$manifest_link = 'https://s3.us-west-004.backblazeb2.com/harness/x/manager/' . $chain_id . '/manifest-0000.json?X-Amz-Signature=1';
+SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest, $manifest_link) {
+	return array('body' => $manifest, 'url' => $manifest_link);
+};
 
 $mk_node = function (string $suffix, array $set) use ($tag) {
 	$n = new ManagedNode(NULL);
@@ -81,11 +88,8 @@ $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scbsite/public_htm
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.40.0', 'mgn_agent_primitives' => 'check_status',
 	'mgn_joinery_version' => JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION, 'mgn_backup_recovery_fpr' => $recovery_fpr,
 	'mgn_agent_server_manager' => 'inactive'));
-if (!JobCommandBuilder::get_target($src)) {
-	harness_skip('a copy from backups', 'no enabled backup target on this management node');
-	harness_finish();
-	return;
-}
+// Its backups, on a target of the test's own.
+sm_test_node_space($src);
 $listing = array('chains' => array(array('chain_id' => $chain_id, 'profile' => BackupProfile::MANAGER, 'bytes' => 70000000,
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 8 * 86400),
 		'artifacts' => array('files' => 69000000, 'db' => 140000))))), 'objects' => array(), 'error' => null);
@@ -142,7 +146,7 @@ check($copy->from_backups() && $copy->status() === SiteCopy::STATUS_WAITING, 'th
 
 // The copy's server joins.
 $cnode = $mk_node('copy', array('mgn_web_root' => '/var/www/html/scbsite/public_html', 'mgn_site_url' => 'https://scb.example.org',
-	'mgn_host' => $T4, 'mgn_agent_public_key' => $copy_key, 'mgn_agent_version' => '1.54.0',
+	'mgn_host' => $T4, 'mgn_agent_public_key' => $copy_key, 'mgn_agent_version' => '1.68.0',
 	'mgn_agent_primitives' => 'host_report,copy_look,copy_take_key,copy_stage,copy_restore,site_census,take_node_id,site_quiet,provision_certificate',
 	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$src->key,
 	'mgn_last_host_report' => json_encode(array('disk' => array('avail_bytes' => 50 * 1024 * 1024 * 1024),
@@ -219,6 +223,8 @@ $params = is_array($take_key_params) ? ($take_key_params['params'] ?? $take_key_
 check(($params['chain_id'] ?? '') === $chain_id && ($params['manifest_sha256'] ?? '') === hash('sha256', $manifest)
 	&& ($params['recovery_fingerprint'] ?? '') === $recovery_fpr,
 	'the copy is asked for the chain, its manifest\'s hash and the recovery key\'s fingerprint', json_encode($params));
+check(($params['manifest_url'] ?? '') === $manifest_link,
+	'with a link to the manifest, for the copy to read the backup at its provider itself');
 $sealed = base64_decode((string)($params['recovery_sealed'] ?? ''));
 check($sealed !== '' && sodium_crypto_box_seal_open($sealed, $recovery) === $data_key,
 	'and is handed the data key as sealed to the recovery key: ciphertext only this management node cannot open');
@@ -332,11 +338,12 @@ $csrc = $mk_node('csrc', array('mgn_web_root' => '/var/www/html/scbtwo/public_ht
 	'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.40.0', 'mgn_agent_primitives' => 'check_status',
 	'mgn_joinery_version' => JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION, 'mgn_backup_recovery_fpr' => $recovery_fpr,
 	'mgn_agent_server_manager' => 'inactive'));
+sm_test_node_space($csrc);
 $ccopy = SiteCopyRunner::start_own_server($csrc, 1, SiteCopy::FROM_BACKUPS);
 harness_register_row('scp_site_copies', 'scp_site_copy_id', $ccopy->key);
 $ccopy_key = base64_encode(random_bytes(32));
 $ccnode = $mk_node('ccopy', array('mgn_web_root' => '/var/www/html/scbtwo/public_html', 'mgn_site_url' => 'https://scb2.example.org',
-	'mgn_host' => '198.51.100.96', 'mgn_agent_public_key' => $ccopy_key, 'mgn_agent_version' => '1.54.0',
+	'mgn_host' => '198.51.100.96', 'mgn_agent_public_key' => $ccopy_key, 'mgn_agent_version' => '1.68.0',
 	'mgn_agent_primitives' => 'host_report,copy_look,copy_take_key,copy_stage,copy_restore,site_census,take_node_id,site_quiet,provision_certificate',
 	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$csrc->key,
 	'mgn_last_host_report' => json_encode(array('disk' => array('avail_bytes' => 50 * 1024 * 1024 * 1024),
@@ -443,10 +450,13 @@ check($threw !== '', 'and takes no answer');
 Setting::put(CopyKeyHandoff::REQUEST_SETTING, json_encode(array('job_id' => 5, 'chain_id' => $chain_id, 'site' => 'scb.example.org',
 	'manifest_sha256' => str_repeat('ab', 32), 'recovery_fingerprint' => $recovery_fpr,
 	'ephemeral_public' => base64_encode(random_bytes(32)), 'issued_time' => gmdate('Y-m-d H:i:s'),
-	'expires_time' => gmdate('Y-m-d H:i:s', time() + 3600), 'last_error' => 'that key does not open it')));
+	'expires_time' => gmdate('Y-m-d H:i:s', time() + 3600), 'last_error' => 'that key does not open it',
+	'run_time' => '2026-10-01T03:00:00Z', 'stored_time' => '2026-10-01T03:20:00Z', 'stored_at' => 'Backblaze B2')));
 $p = CopyKeyHandoff::pending();
 check($p && $p['job_id'] === 5 && $p['last_error'] === 'that key does not open it' && !$p['answered'],
 	'a staged request shows, with the last answer\'s reason');
+check($p['run_time'] === '2026-10-01T03:00:00Z' && $p['stored_time'] === '2026-10-01T03:20:00Z' && $p['stored_at'] === 'Backblaze B2',
+	'and with when the copy read that its provider stored the backup (storage_targets.md F7)', json_encode($p));
 $threw = '';
 try { CopyKeyHandoff::answer(5, 'not base64!', base64_encode(random_bytes(32))); } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw !== '', 'an answer that is not 32 bytes is refused');

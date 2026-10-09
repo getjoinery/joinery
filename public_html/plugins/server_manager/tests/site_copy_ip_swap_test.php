@@ -16,10 +16,14 @@
  * file, whose machines take a call or two to change state, as real ones do.
  * Agent jobs are finished by hand, as site_copy_switch does.
  *
+ * @version 1.1 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
+ *               up only through a storage space, the suite had been skipping;
+ *               the source on the broker's release floor
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
 
 use GuzzleHttp\Client;
@@ -235,13 +239,10 @@ $census = function (int $rows) {
 $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.54.0',
 	'mgn_agent_primitives' => 'copy_export,copy_vouch,site_census,site_quiet,backup_run,check_status',
-	'mgn_joinery_version' => '0.8.453', 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
+	'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
 	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive'));
-if (!JobCommandBuilder::get_target($src)) {
-	harness_skip('the switch-over by IP swap', 'no enabled backup target on this management node');
-	harness_finish();
-	return;
-}
+// Its backups, on a target of the test's own.
+sm_test_node_space($src);
 $cnode = $mk_node('copy', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
 	'mgn_host' => $T4, 'mgn_agent_public_key' => $copy_key, 'mgn_agent_version' => '1.54.0',
 	'mgn_agent_primitives' => 'host_report,copy_import,copy_take_vouch,copy_stage,copy_restore,site_census,take_node_id,site_quiet',
@@ -262,7 +263,7 @@ JobCommandBuilder::set_shelf_listing_for_tests(array());
 
 $mk_copy = function (ManagedNode $cnode) use ($src, $chain_id, $look) {
 	$c = new SiteCopy(NULL);
-	foreach (array('scp_source_node_id' => (int)$src->key, 'scp_copy_node_id' => (int)$cnode->key, 'scp_release' => '0.8.453',
+	foreach (array('scp_source_node_id' => (int)$src->key, 'scp_copy_node_id' => (int)$cnode->key, 'scp_release' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
 		'scp_status' => SiteCopy::STATUS_DORMANT, 'scp_chain_id' => $chain_id, 'scp_look_path' => $look,
 		'scp_last_copied_time' => gmdate('Y-m-d H:i:s')) as $k => $v) {
 		$c->set($k, $v);

@@ -40,6 +40,7 @@
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
@@ -200,23 +201,29 @@ check(strpos($forever, 'X-Amz-Expires=604800') !== false,
 // independently — one a parameter, one read out of a listing — so nothing made
 // them, and a mismatch is a job that was always going to be refused on the node
 // for a reason unrelated to what went wrong.
+// A saved node with backup storage of its own: storage is resolved before the
+// key is checked.
+$spaced = new ManagedNode(NULL);
+$spaced->set('mgn_name', 'HarnessTest Restore Dispatch');
+$spaced->set('mgn_slug', 'harnesstest-rd-' . bin2hex(random_bytes(3)));
+$spaced->set('mgn_host', '192.0.2.10');
+$spaced->set('mgn_agent_public_key', 'AAAA');
+$spaced->set('mgn_agent_version', AgentVocabulary::FLOOR);
+$spaced->set('mgn_agent_primitives', 'check_status,download_backup');
+$spaced->set('mgn_uptime_enabled', false);
+$spaced->save();
+$spaced->load();
+harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $spaced->key);
+$spaced_base = sm_test_node_space($spaced)->base();
 $mismatch = '';
 try {
-	JobCommandBuilder::build_download_backup_primitive($paired, array(
+	JobCommandBuilder::build_download_backup_primitive($spaced, array(
 		'filename'   => 'db.sql.gz.enc',
 		'profile'    => 'site',
-		'cloud_path' => 'joinery-backups/testnode/manager/db.sql.gz.enc'));
+		'cloud_path' => $spaced_base . 'manager/db.sql.gz.enc'));
 } catch (Exception $e) { $mismatch = $e->getMessage(); }
-if (strpos($mismatch, 'has no backup storage') !== false) {
-	// Backup storage (the node's storage space) is resolved before the key is
-	// checked, so a stand-in node with no space cannot reach this. Reported as
-	// skipped rather than passing on the wrong refusal.
-	harness_skip('a profile that disagrees with the object\'s own backup storage is refused here',
-		'the stand-in node has no storage space to resolve');
-} else {
-	check(strpos($mismatch, "'manager' backup storage") !== false && strpos($mismatch, "'site' one") !== false,
-		'a profile that disagrees with the object\'s own backup storage is refused here', $mismatch);
-}
+check(strpos($mismatch, "'manager' backup storage") !== false && strpos($mismatch, "'site' one") !== false,
+	'a profile that disagrees with the object\'s own backup storage is refused here', $mismatch);
 
 // ── 4. A restore with nowhere to go says so ─────────────────────────────────
 section('A restore that cannot travel refuses with something an operator can act on');

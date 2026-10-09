@@ -14,12 +14,15 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.3 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
+ *               up only through a storage space, the suite had been skipping
  * @version 1.2 - the swapped rows are named for what they hold (B6)
  * @version 1.1 - the copy's server is the source's size
  * @version 1.0
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/lib/node_space_fixture.php');
 harness_boot();
 
 $tag = bin2hex(random_bytes(3));
@@ -218,12 +221,8 @@ $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn
 	'mgn_last_host_report' => json_encode(array('memory' => array('total_bytes' => 1000000000),
 		'disk' => array('avail_bytes' => 9000000000))));
 $src = $mk_node('src', $source_cols);
-$has_target = (bool)JobCommandBuilder::get_target($src);
-if (!$has_target) {
-	harness_skip('preflight and copy runs', 'no enabled backup target on this management node');
-	harness_finish();
-	return;
-}
+// Its backups, on a target of the test's own.
+sm_test_node_space($src);
 check(SiteCopyRunner::source_refusals($src) === array(), 'a bare-metal site on a current release with the words, a proven key and backups can be copied',
 	implode(' | ', SiteCopyRunner::source_refusals($src)));
 foreach (array(

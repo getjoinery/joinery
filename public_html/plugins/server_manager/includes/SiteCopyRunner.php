@@ -98,6 +98,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.15 - key_request carries manifest_url, a link to the chain's newest manifest signed for as long as
+ *                 the copy_take_key step may wait: the copy reads the backup at its provider itself
+ *                 (specs/storage_targets.md F7)
  * @version 1.14 - the chain's newest manifest is read (one per run from chain version 3) and refused when its hash
  *                 differs from the one the broker recorded when the source wrote it (specs/storage_targets.md WP5)
  * @version 1.13 - a chain's manifest is read from whichever of the source's storage spaces holds it;
@@ -261,8 +264,9 @@ class SiteCopyRunner {
 
 	/**
 	 * Reads a chain's manifest from backup storage: fn(ManagedNode $source,
-	 * string $chain_id): string. Null reads it with the target's credentials.
-	 * A variable for the reason $chain_lister is one.
+	 * string $chain_id): array{body: string, url: string}, the manifest and a
+	 * signed link to it. Null reads it with the target's credentials. A
+	 * variable for the reason $chain_lister is one.
 	 *
 	 * @var callable|null
 	 */
@@ -1166,10 +1170,14 @@ class SiteCopyRunner {
 	 * run, and the chain's data key as sealed to the recovery key (the
 	 * recovery recipient of the manifest's envelope). Ciphertext and facts
 	 * only: what opens it is typed on the copy's own page and never comes
-	 * here.
+	 * here. With them, a link to the manifest: the copy reads it at its
+	 * provider and holds all of the above to it, and shows its owner when the
+	 * provider stored it, so none of it rests on this plane's word
+	 * (specs/storage_targets.md F7).
 	 */
 	public static function key_request(ManagedNode $source, string $chain_id): array {
-		$body = self::$manifest_reader ? (string)(self::$manifest_reader)($source, $chain_id) : self::read_manifest($source, $chain_id);
+		$read = self::$manifest_reader ? (self::$manifest_reader)($source, $chain_id) : self::read_manifest($source, $chain_id);
+		$body = (string)($read['body'] ?? '');
 		$manifest = json_decode($body, true);
 		if (!is_array($manifest) || (string)($manifest['chain_id'] ?? '') !== $chain_id) {
 			throw new SiteCopyException("chain {$chain_id}'s manifest in backup storage could not be read");
@@ -1202,11 +1210,18 @@ class SiteCopyRunner {
 			'recovery_fingerprint' => (string)$recipient['fingerprint'],
 			'recovery_sealed'      => (string)$recipient['sealed'],
 			'site'                 => self::site_domain($source),
+			'manifest_url'         => (string)($read['url'] ?? ''),
 		);
 	}
 
-	/** The chain's manifest, from whichever of the source's storage spaces holds the chain. */
-	private static function read_manifest(ManagedNode $source, string $chain_id): string {
+	/**
+	 * The chain's manifest, from whichever of the source's storage spaces holds
+	 * the chain, with a link to it signed for as long as the copy_take_key step
+	 * may wait (the copy reads it as the job starts).
+	 *
+	 * @return array{body: string, url: string}
+	 */
+	private static function read_manifest(ManagedNode $source, string $chain_id): array {
 		$status = 0;
 		foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$source->key) as $space) {
 			try {
@@ -1243,7 +1258,10 @@ class SiteCopyRunner {
 					throw new SiteCopyException("chain {$chain_id}'s manifest in backup storage is not the one its server wrote: "
 						. 'its hash differs from the one recorded when it was written. Nothing is copied from it.');
 				}
-				return (string)$got['body'];
+				// As long as the step may wait, so a claim late in the wait or
+				// a claim taken again still reads a live link.
+				$expires = (self::STEP_WAIT_MINUTES['copy_take_key'] ?? 60) * 60 + 600;
+				return array('body' => (string)$got['body'], 'url' => S3Signer::presign_get($creds, $bucket, $dir . $newest, $expires));
 			}
 		}
 		if ($status === 0) {

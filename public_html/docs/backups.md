@@ -614,8 +614,9 @@ runs the `restore_chain` job for that run. That job recovers the chain key on th
 from the node's own `backup_site_key`, so no recovery private key travels in a
 job record. Once it completes, the run's offloaded files follow in `missing`
 mode as the paged `restore_objects` jobs described under *Restoring a managed
-node* below. A chain taken by a machine that no longer exists is
-restored from a shell with the recovery key, as above.
+node* below. A chain taken by a machine that no longer exists goes onto a new
+one as a copy from backups (*Handing a chain to a copy*, below), or from a shell
+with the recovery key, as above.
 
 ### Checking a restore: the census
 
@@ -687,18 +688,41 @@ node that dispatches them can read none of it:
 that workspace.
 
 **When the source is dead**, nothing is left to export, and the recovery key is
-the one holder of the chain's data key. A copy made from backups alone takes it
-with **`copy_take_key`** instead of an import: the copy's own `/copy-key` page
-shows the chain, its newest run, its manifest's hash and the recovery key's
-fingerprint; the owner pastes the recovery key there, and the browser works out
-the X25519 of it with the ephemeral key of the recovery recipient's sealed box.
-That value opens that one box and nothing else; the copy finishes opening it
-(`crypto_box`'s HSalsa20 key and BLAKE2b nonce) and writes `chain.key` and the
-stated manifest as the vouch, exactly as `copy_import` would. The recovery key
-never leaves the browser, and the page is the copy's own, so the management
-node never sees the key or what it opens. The owner's reading of the statement
-stands in for the source's vouch: no machine that made the archive is left to
-vouch for it.
+the one holder of the chain's data key. This is how a dead machine's site is
+restored onto a new one: a copy made from backups alone, then switched over
+(the Copy tab, `plugins/server_manager/docs/overview.md`). The copy takes the key
+with **`copy_take_key`** instead of an import.
+
+First the copy reads the backup itself. The management node sends a link to the
+chain's newest manifest, and the copy downloads it from the storage provider and
+refuses it unless its bytes hash to the manifest named, it is that chain's, it
+seals the very key the job asks to open to the very recovery key, and its newest
+run is no later than the moment the provider stored it. That moment is the
+provider's `Last-Modified`: no request sets or backdates it, so a chain made up
+after the site's server died, by anyone holding the bucket's key, the management
+node included, carries a date after it died. The copy believes the date only
+from a provider's own storage host (Backblaze B2, Amazon S3, Cloudflare R2,
+Wasabi, DigitalOcean Spaces, Linode, Hetzner): anywhere else whoever signs the
+link could also run the server that answers it. The date proves when the backup
+was stored, not that the site made it: a management node taken over while the
+site was still running could have stored a chain of its own then, sealed to the
+recovery public key, and its date would pass. Nor does the copy find the newest
+chain itself: it reads the one it is sent, so an older genuine backup shows as
+an older newest run, which is the owner's to notice.
+
+Then the copy's own `/copy-key` page shows the chain, its newest run, when and
+by which provider it was stored (or that the date could not be checked), its
+manifest's hash and the recovery key's fingerprint. A backup stored two days or
+more after its run is flagged: backups are stored as they run, so it was copied
+or written again since. The owner pastes the recovery key there, and the
+browser works out the X25519 of it with the ephemeral key of the recovery
+recipient's sealed box. That value opens that one box and nothing else; the copy
+finishes opening it (`crypto_box`'s HSalsa20 key and BLAKE2b nonce) and writes
+`chain.key` and the manifest as the vouch, exactly as `copy_import` would. The
+recovery key never leaves the browser, and the page is the copy's own, so the
+management node never sees the key or what it opens. No machine that made the
+archive is left to vouch for it: the provider's date and the owner's reading of
+it stand in for the source's vouch.
 
 ## Key model: one envelope per backup
 
@@ -1327,10 +1351,12 @@ than by care. A management node can dispatch a restore and can do nothing
 whatsoever to get it approved.
 
 The costs are deliberate and worth stating. Restoring in place requires the
-node's site to be up. A node whose site will not boot is rebuilt by hand: a fresh
+node's site to be up. A node whose site will not boot goes onto a new machine as a
+copy from backups (*Handing a chain to a copy*, above), where the owner opens the
+backup with the recovery key on the new machine's own page, or by hand: a fresh
 site installed on a new machine, then the backup restored onto it from a shell
 with the recovery key ([Rebuilding a site on new hardware](deploy_and_upgrade.md#rebuilding-a-site-on-new-hardware)).
-No approval is asked there, because holding the recovery key is the proof. An unanswered challenge expires and the job is refused, so a restore
+No approval is asked on either path, because holding the recovery key is the proof. An unanswered challenge expires and the job is refused, so a restore
 nobody is watching fails rather than pinning the node. And a support-driven
 restore requires the customer to be reachable: there is no unattended
 destructive path, including for us.

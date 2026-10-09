@@ -6,8 +6,11 @@
  * When a site's server is dead, its copy is made from the site's backups
  * alone, and the one holder of the backups' key left is the owner's backup
  * recovery key. This machine's agent (copy_take_key) stages what the owner
- * should check: which backup, its newest run, its manifest's hash, and the
- * fingerprint of the recovery key it is sealed to. The /copy-key page shows
+ * should check: which backup, its newest run, when its storage provider says
+ * it was stored, its manifest's hash, and the fingerprint of the recovery key
+ * it is sealed to. The agent read all of it from the backup at its provider
+ * (specs/storage_targets.md F7); the stored date is empty when the storage is
+ * not at a provider it knows, and the page then says it could not be checked. The /copy-key page shows
  * it; the owner pastes their recovery key there, their browser works out the
  * one value that opens that backup's sealed key (X25519 of the recovery key
  * with the sealed box's ephemeral key), and only that value comes back here,
@@ -23,6 +26,7 @@
  * The page does nothing unless a request is pending, and only the agent of a
  * dormant copy stages one, so on any other site it is an empty page.
  *
+ * @version 1.1 - pending() carries stored_time and stored_at
  * @version 1.0
  */
 
@@ -54,6 +58,8 @@ class CopyKeyHandoff {
 			'site'                 => (string)($req['site'] ?? ''),
 			'chain_id'             => (string)($req['chain_id'] ?? ''),
 			'run_time'             => (string)($req['run_time'] ?? ''),
+			'stored_time'          => (string)($req['stored_time'] ?? ''),
+			'stored_at'            => (string)($req['stored_at'] ?? ''),
 			'manifest_sha256'      => (string)($req['manifest_sha256'] ?? ''),
 			'recovery_fingerprint' => (string)($req['recovery_fingerprint'] ?? ''),
 			'ephemeral_public'     => (string)$req['ephemeral_public'],

@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.71 - process_copy_take_key keeps the run, and when and at which provider the copy read that the backup
+ *                 was stored (specs/storage_targets.md F7)
  * @version 1.70 - process_move_to_plane keeps the move's management node, name and fingerprint for the job page
  * @version 1.69 - process_decommission_node stamps mgn_site_removed_time on the victim when the host verifies it gone
  * @version 1.68 - a comment names S3Signer::list() (TargetLister is folded into it)
@@ -2496,16 +2498,22 @@ HTML;
 
 	/**
 	 * copy_take_key (site_copy.md WP10): which chain's key a copy made from
-	 * backups took, once its owner opened it on the copy's own page. Facts
-	 * only: the key stays on the copy.
+	 * backups took, once its owner opened it on the copy's own page, and when
+	 * its storage provider says the backup was stored. Facts only: the key
+	 * stays on the copy.
 	 */
 	private static function process_copy_take_key($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
 		$ok = (string)$job->get('mjb_status') === 'completed' && is_array($data);
+		$rfc3339 = '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/';
 		$job->set('mjb_result', json_encode([
 			'chain_id'             => $ok && preg_match('/^chain-[0-9_]{1,58}$/', (string)($data['chain_id'] ?? '')) ? (string)$data['chain_id'] : '',
 			'manifest_sha256'      => $ok && preg_match('/^[0-9a-f]{64}$/', (string)($data['manifest_sha256'] ?? '')) ? (string)$data['manifest_sha256'] : '',
 			'recovery_fingerprint' => $ok && preg_match('/^[0-9a-f]{64}$/', (string)($data['recovery_fingerprint'] ?? '')) ? (string)$data['recovery_fingerprint'] : '',
+			// What the copy read at the backup's provider (specs/storage_targets.md F7).
+			'run_time'             => $ok && preg_match($rfc3339, (string)($data['run_time'] ?? '')) ? (string)$data['run_time'] : '',
+			'stored_time'          => $ok && preg_match($rfc3339, (string)($data['stored_time'] ?? '')) ? (string)$data['stored_time'] : '',
+			'stored_at'            => $ok ? mb_substr(preg_replace('/[^A-Za-z0-9 ]/', '', (string)($data['stored_at'] ?? '')), 0, 40) : '',
 		]));
 		$job->save();
 	}

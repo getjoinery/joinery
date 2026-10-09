@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.113 - build_copy_take_key sends manifest_url, the copy's own read of the backup at its provider; a copy
+ *                  whose agent predates COPY_TAKE_KEY_MIN_AGENT_VERSION is refused; COPY_KEY_DATE_MIN_VERSION
+ *                  (specs/storage_targets.md F7)
  * @version 1.112 - a node on a core older than LOCK_MIN_CORE_VERSION is refused a backup or re-upload to a space whose target
  *                  locks (specs/storage_targets.md F8)
  * @version 1.111 - build_move_to_plane: ask another management node to adopt this node's machine (agent 1.67.0),
@@ -465,6 +468,13 @@ class JobCommandBuilder {
 	const LOCK_MIN_CORE_VERSION = '0.8.474';
 
 	/**
+	 * The first agent whose copy_take_key reads the backup at its provider
+	 * itself (manifest_url, specs/storage_targets.md F7). An older one refuses
+	 * the parameter; it is refused here, naming the update.
+	 */
+	const COPY_TAKE_KEY_MIN_AGENT_VERSION = '1.68.0';
+
+	/**
 	 * The oldest release a site can be copied from (specs/site_copy.md WP8). A
 	 * copy installs the source's own release, and what that release's tree
 	 * carries is what the copy runs: the dormant install that records the
@@ -490,6 +500,14 @@ class JobCommandBuilder {
 	 * only the plain look path, which lands on its home page.
 	 */
 	const COPY_KEY_LOOK_MIN_VERSION = '0.8.463';
+
+	/**
+	 * The first release whose /copy-key page shows when the backup's provider
+	 * stored it (specs/storage_targets.md F7). A copy installs its source's
+	 * release, so a copy of an older source has the agent's checks and not the
+	 * page's date line; the Copy tab says so and shows the date itself.
+	 */
+	const COPY_KEY_DATE_MIN_VERSION = '0.8.475';
 
 	/**
 	 * Operations the agent registers as ClassDestructive.
@@ -2576,7 +2594,9 @@ class JobCommandBuilder {
 	 * with what their browser works out from it. Everything here is ciphertext
 	 * or a fact the owner checks: the chain, its manifest's hash, its newest
 	 * run, the recovery key's fingerprint, and the data key as sealed to the
-	 * recovery key in the chain's envelope.
+	 * recovery key in the chain's envelope. And a link to the chain's
+	 * manifest: the copy reads the backup at its provider and holds all of the
+	 * above to it, so none of it rests on this plane's word.
 	 *
 	 * $request: SiteCopyRunner::key_request()'s shape.
 	 */
@@ -2585,6 +2605,12 @@ class JobCommandBuilder {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot take a chain's key from its backups. "
 				. AgentVocabulary::needs_newer_agent_text($node, ['copy_take_key']));
+		}
+		$v = AgentVocabulary::version($node);
+		if ($v === '' || version_compare($v, self::COPY_TAKE_KEY_MIN_AGENT_VERSION, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' runs agent " . ($v ?: 'of an unknown version')
+				. ', which cannot read the backup at its storage provider itself. Update its agent to '
+				. self::COPY_TAKE_KEY_MIN_AGENT_VERSION . ' or newer.');
 		}
 		return self::build_copy_take_key_primitive($node, $request);
 	}
@@ -2600,7 +2626,11 @@ class JobCommandBuilder {
 			'recovery_fingerprint' => (string)($request['recovery_fingerprint'] ?? ''),
 			'recovery_sealed'      => (string)($request['recovery_sealed'] ?? ''),
 			'site'                 => (string)($request['site'] ?? ''),
+			'manifest_url'         => (string)($request['manifest_url'] ?? ''),
 		];
+		if (!preg_match('#^https://[^\s]+$#', $params['manifest_url']) || strlen($params['manifest_url']) > 2048) {
+			throw new Exception('Taking a key from backups needs a link to the chain\'s manifest, for the copy to read it itself.');
+		}
 		if (!preg_match('/^chain-[0-9_]+$/', $params['chain_id']) || !preg_match('/^[0-9a-f]{64}$/', $params['manifest_sha256'])
 				|| !preg_match('/^[0-9a-f]{64}$/', $params['recovery_fingerprint'])
 				|| strlen((string)base64_decode($params['recovery_sealed'], true)) <= 48 || strlen($params['recovery_sealed']) > 512) {
