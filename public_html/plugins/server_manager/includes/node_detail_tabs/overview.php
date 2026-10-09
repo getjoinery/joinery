@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.55 - Actions offers Hide from Dashboard / Restore to Dashboard and Remove Permanently (live or hidden,
+ *                through NodeRemoval's guards, an attestation where this management node cannot ask the provider);
+ *                the connection settings show and edit Hosted at
  * @version 1.54 - the backup target is shown with a Move link to the Backups tab; it is no longer a field of the
  *                connection form (storage spaces, specs/storage_targets.md WP4); the delete guard counts what the
  *                node's spaces hold
@@ -235,7 +238,7 @@
 	// figures in it. A bare-metal node is a whole machine and gets the
 	// provider-deletion note instead of a button that could only refuse.
 	// Available for a removed node too — its site may still be running on the
-	// host (Remove from Dashboard leaves it up).
+	// host (Hide from Dashboard leaves it up).
 	$decommission_site = null;
 	$is_container_site = trim((string)$node->get('mgn_container_name')) !== '';
 	if (!$node->get('mgn_is_relay') && $is_container_site) {
@@ -249,30 +252,49 @@
 	// once seen here. With none of that — e.g. an install that failed and never
 	// stood a site up — there is nothing to tear down, so a removed node is not
 	// offered the host-teardown action (the decommission job would find nothing).
-	$site_ever_confirmed = $node->get('mgn_last_status_check')
-		|| $node->get('mgn_joinery_version')
-		|| $node->get('mgn_uptime_last_status');
+	$site_ever_confirmed = NodeRemoval::site_ever_confirmed($node);
 
-	// Whether the record may be purged: blocked while offsite backups still exist
-	// for the slug (or a target can't be listed). Checked here so the menu item
-	// says "not allowed" up front instead of only rejecting after the confirm box.
-	// Backup listing is a management-node S3 call (the web user can do it), unlike the
-	// host SSH probe, so it is safe to run on render — only for a removed node.
-	$purge_block = null; // null = allowed; string = reason it is blocked
+	// Remove Permanently (spec node_hide_and_remove §4). What can be known
+	// without asking a provider is said up front: backups still stored (listed
+	// from the target, only for a hidden node, as before), a container on a
+	// server of ours not yet verified gone, an attestation with nothing to type.
+	// The provider is asked only on submit.
+	$remove_kind = NodeRemoval::machine_kind($node);
+	$remove_hosted_at = CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node));
+	$remove_block = '';
+	$remove_attest = '';
 	if ($is_removed) {
-		try {
-			$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
-			if ($bk['count'] > 0) {
-				$purge_block = 'This site still has ' . $bk['count'] . ' offsite backup'
-					. ($bk['count'] === 1 ? '' : 's')
-					. '. Delete them from the backup target Stored Backups panel before deleting the record.';
-			} elseif (!empty($bk['unchecked'])) {
-				$purge_block = 'Backups could not be verified on: ' . implode(', ', $bk['unchecked'])
-					. '. Resolve those targets before deleting the record.';
+		$remove_block = NodeRemoval::backups_refusal($node);
+	}
+	if ($remove_block === '' && $remove_kind === NodeRemoval::MACHINE_CONTAINER) {
+		$remove_block = NodeRemoval::container_refusal($node);
+	}
+	if ($remove_block === '' && $remove_kind === NodeRemoval::MACHINE_ATTEST) {
+		$remove_attest = NodeRemoval::attest_text($node);
+		if ($remove_attest === '') {
+			$remove_block = 'No instance or address is on record for this machine, so there is nothing to confirm it by. '
+				. 'Set its Host to the machine\'s IP address in Connection Settings.';
+		}
+	}
+	$remove_message = 'Remove this site permanently? Every record of it goes: its jobs and history, its incidents, its provisioning record and its backup storage records. This cannot be undone.';
+	if ($remove_kind === NodeRemoval::MACHINE_NONE) {
+		$remove_message .= ' It is hosted at ' . $remove_hosted_at . ': the site keeps running there and is no longer managed from here.';
+	} elseif ($remove_kind === NodeRemoval::MACHINE_PROVIDER) {
+		$remove_message .= ' Its machine at ' . $remove_hosted_at . ' must already be deleted: the provider is asked first, and nothing is removed while the machine is still there.';
+	} elseif ($remove_kind === NodeRemoval::MACHINE_ATTEST) {
+		$remove_message .= ' Its machine at ' . $remove_hosted_at . ' must already be deleted; you confirm that next.';
+	}
+	$attest_message = 'This management node cannot ask ' . $remove_hosted_at . ' about its machines. Confirm you deleted this machine there.'
+		. ' Your confirmation is logged.';
+	$attest_is_id = NodeRemoval::instance_id($node) !== '';
+
+	// Restore is refused while another live site has taken the slug.
+	$restore_block = '';
+	if ($is_removed) {
+		foreach (new MultiManagedNode(['slug' => (string)$node->get('mgn_slug'), 'deleted' => false]) as $slug_holder) {
+			if ((int)$slug_holder->key !== (int)$node->key) {
+				$restore_block = 'Another site now uses the slug ' . $node->get('mgn_slug') . '.';
 			}
-		} catch (Throwable $e) {
-			$purge_block = 'Could not check for existing backups (' . $e->getMessage()
-				. '). Resolve that before deleting the record.';
 		}
 	}
 	?>
@@ -331,10 +353,39 @@
 					<form method="post" action="<?php echo $base_url; ?>" id="delete_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="delete_node">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirm('Remove this site from the dashboard? The site keeps running on its host. Its tracking record goes, with any provisioning record and hosted trial from its hosting order; a domain bought for it is kept for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Remove from Dashboard</button>
+						<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Hide this site from the dashboard? The site keeps running on its host and every record is kept; Restore to Dashboard brings it back. Hiding stops the work on it: unfinished jobs are cancelled, its backup storage takes no new backups, any provisioning record and hosted trial from its hosting order are removed, and a domain bought for it is parked for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Hide from Dashboard</button>
 					</form>
 				</li>
+			<?php else: ?>
+				<li>
+					<?php if ($restore_block !== ''): ?>
+						<button type="button" class="dropdown-item" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Restore not allowed. ' . $restore_block), ENT_QUOTES); ?>)">Restore to Dashboard</button>
+					<?php else: ?>
+						<form method="post" action="<?php echo $base_url; ?>" id="restore_node_form" style="margin:0;">
+							<input type="hidden" name="action" value="restore_node">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Restore this site to the dashboard? Its agent is accepted again and monitoring resumes. Jobs cancelled when it was hidden stay cancelled, a removed provisioning record stays removed, and a parked domain stays parked.', function(){ document.getElementById('restore_node_form').submit(); })">Restore to Dashboard</button>
+						</form>
+					<?php endif; ?>
+				</li>
 			<?php endif; ?>
+			<li>
+				<?php if ($remove_block !== ''): ?>
+					<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Removal not allowed. ' . $remove_block), ENT_QUOTES); ?>)">Remove Permanently&hellip;</button>
+				<?php else: ?>
+					<form method="post" action="<?php echo $base_url; ?>" id="purge_node_form" style="margin:0;">
+						<input type="hidden" name="action" value="purge_node">
+						<input type="hidden" name="confirm_slug" value="<?php echo htmlspecialchars($node->get('mgn_slug')); ?>">
+						<input type="hidden" name="confirm_machine" value="">
+						<?php echo SmAdminCsrf::field(); ?>
+						<?php if ($remove_attest !== ''): ?>
+							<button type="button" class="dropdown-item text-danger" onclick="var f=document.getElementById('purge_node_form'); JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($attest_message . ' I deleted this machine at ' . $remove_hosted_at . '. Its ' . ($attest_is_id ? 'instance ID' : 'IP address') . ' is ' . $remove_attest . '.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>, function(){ f.elements['confirm_machine'].value = <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>; f.submit(); }, {confirmLabel: 'I deleted it'}); })">Remove Permanently&hellip;</button>
+						<?php else: ?>
+							<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ document.getElementById('purge_node_form').submit(); })">Remove Permanently&hellip;</button>
+						<?php endif; ?>
+					</form>
+				<?php endif; ?>
+			</li>
 			<?php if ($decommission_site !== null && (!$is_removed || $site_ever_confirmed)): ?>
 				<li>
 					<form method="post" action="<?php echo $base_url; ?>" id="decommission_node_form" style="margin:0;">
@@ -345,23 +396,9 @@
 					</form>
 				</li>
 			<?php elseif ($decommission_site !== null && $is_removed): ?>
-				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">No live site was ever confirmed on this host, so there is nothing to tear down. Use Permanently Delete Entry to remove the record.</span></li>
+				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">No live site was ever confirmed on this host, so there is nothing to tear down. Use Remove Permanently to remove the record.</span></li>
 			<?php elseif (!$node->get('mgn_is_relay') && !$is_container_site && $node->get('mgn_web_root')): ?>
-				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">This is a dedicated machine, not a container site. To retire it, delete the instance at its provider, then remove this record from the dashboard.</span></li>
-			<?php endif; ?>
-			<?php if ($is_removed): ?>
-				<li>
-					<?php if ($purge_block !== null): ?>
-						<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.alert(<?php echo htmlspecialchars(json_encode('Removal not allowed. ' . $purge_block), ENT_QUOTES); ?>)">Permanently Delete Entry&hellip;</button>
-					<?php else: ?>
-						<form method="post" action="<?php echo $base_url; ?>" id="purge_node_form" style="margin:0;">
-							<input type="hidden" name="action" value="purge_node">
-							<input type="hidden" name="confirm_slug" value="<?php echo htmlspecialchars($node->get('mgn_slug')); ?>">
-							<?php echo SmAdminCsrf::field(); ?>
-							<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode('Permanently delete the Server Manager entry for this site? This erases the tracking record and its history. It does NOT touch the host. This cannot be undone.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ document.getElementById('purge_node_form').submit(); })">Permanently Delete Entry&hellip;</button>
-						</form>
-					<?php endif; ?>
-				</li>
+				<li><span class="dropdown-item-text text-muted small d-block px-3" style="max-width:22rem;white-space:normal;">This is a dedicated machine, not a container site. To retire it, delete the instance at its provider, then use Remove Permanently.</span></li>
 			<?php endif; ?>
 		</ul>
 	</div>
@@ -1862,6 +1899,8 @@
 			. ' <a href="' . $base_url . '&tab=backups" class="small ms-1">Move</a>'
 		);
 	}
+	$conn_row('Hosted at', htmlspecialchars(CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node)))
+		. (CloudAccounts::is_ours($node) ? '' : ' <span class="text-muted">(not hosted by us)</span>'));
 	if ($node->get('mgn_notes')) {
 		$conn_row('Notes', nl2br(htmlspecialchars($node->get('mgn_notes'))));
 	}
@@ -2175,6 +2214,13 @@
 
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 		'checked' => $node->get('mgn_enabled'),
+	]);
+
+	$formwriter->dropinput('mgn_cloud_account', 'Hosted at', [
+		'options'  => CloudAccounts::HOSTED_AT,
+		'value'    => CloudAccounts::normalize_hosted_at($node->get('mgn_cloud_account')),
+		'helptext' => 'Where the machine runs. A machine in one of our accounts is removed for good only once it is deleted at the provider; '
+			. 'one hosted elsewhere keeps running and is simply no longer managed. A site placed on a server is hosted where its server is, whatever this says.',
 	]);
 
 	echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';

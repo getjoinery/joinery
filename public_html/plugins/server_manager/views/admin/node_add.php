@@ -10,6 +10,7 @@
  * on someone else's machine (specs/ssh_single_bootstrap.md).
  * After save, redirects to node_detail.
  *
+ * @version 1.10 - the choice is Hosted at: our two accounts, the customer's, or elsewhere; it defaults to this plane's
  * @version 1.9 - a cloud account choice (main or test) decides which dashboard tab the site is listed under
  * @version 1.8 - a new node is given its storage space on the target Where new backups go names, once saved
  * @version 1.7 - a new node is given the target Where new backups go names
@@ -49,7 +50,7 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$value = isset($_POST[$field]) ? true : false;
 			}
 			if ($field === 'mgn_cloud_account') {
-				$value = CloudAccounts::normalize($value);
+				$value = CloudAccounts::normalize_hosted_at($value);
 			}
 			if ($field === 'mgn_ssh_port' && $value === '') {
 				$value = 22;
@@ -157,10 +158,11 @@ $formwriter->textinput('mgn_host', 'SSH Host *', [
 	'validation' => ['required' => true, 'maxlength' => 255],
 ]);
 
-$formwriter->dropinput('mgn_cloud_account', 'Cloud Account', [
-	'options' => CloudAccounts::LABELS,
-	'value' => CloudAccounts::MAIN,
-	'helptext' => 'Which dashboard tab this site is listed under (a site placed on a host follows its host).',
+$formwriter->dropinput('mgn_cloud_account', 'Hosted at', [
+	'options' => CloudAccounts::HOSTED_AT,
+	'value' => CloudAccounts::plane_account(),
+	'helptext' => 'Where the machine runs; our two accounts are also the dashboard\'s tabs, and the others are listed on the Main tab. '
+		. 'A machine in one of our accounts is removed for good only once it is deleted at the provider. A site placed on a host follows its host.',
 ]);
 
 $formwriter->textinput('mgn_ssh_user', 'SSH User', [

@@ -16,6 +16,7 @@
  * is never one somebody bought, so it is never billed, put on a trial or
  * handed to a customer.
  *
+ * @version 1.1 - the node's Hosted at follows the account its server was found on
  * @version 1.0
  */
 
@@ -174,6 +175,7 @@ class CloudServerAdoption {
 		$provision->set('cvp_mgn_managed_node_id', (int)$node->key);
 		$provision->save();
 		$provision->load();
+		ManagedNode::updateColumns((int)$node->key, array('mgn_cloud_account' => CloudAccounts::for_provision($provision)));
 		return $provision;
 	}
 

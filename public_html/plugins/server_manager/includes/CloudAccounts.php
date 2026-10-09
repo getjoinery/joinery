@@ -8,6 +8,13 @@
  * (mgn_cloud_account); empty means main, so an unmarked box is never hidden from
  * the main tab. A node placed on a host takes its host's account.
  *
+ * A node's value is also where it is hosted (HOSTED_AT): one of our two
+ * accounts, a customer's connected account, or elsewhere. Only a machine in one
+ * of our accounts is ours (is_ours()): removing its node for good waits until
+ * the machine is gone, so none is left running and billing with nothing
+ * watching it. The customer's and elsewhere show on the main tab.
+ *
+ * @version 1.1 - customer and external: where a node is hosted; hosted_at(), is_ours(), for_provision()
  * @version 1.0
  */
 class CloudAccounts {
@@ -15,9 +22,21 @@ class CloudAccounts {
 	const MAIN = 'main';
 	const TEST = 'test';
 
+	const CUSTOMER = 'customer';
+	const EXTERNAL = 'external';
+
+	/** The dashboard's tabs: our two accounts. */
 	const LABELS = array(
 		self::MAIN => 'Joinery Main Linode',
 		self::TEST => 'Joinery Test Linode',
+	);
+
+	/** Where a node may be hosted: the Hosted at choices. */
+	const HOSTED_AT = array(
+		self::MAIN     => 'Joinery Main Linode',
+		self::TEST     => 'Joinery Test Linode',
+		self::CUSTOMER => 'The customer\'s own cloud account',
+		self::EXTERNAL => 'Elsewhere (not hosted by us)',
 	);
 
 	/** The operator token's account company, read from the provider when the hosted card is saved. */
@@ -113,6 +132,60 @@ class CloudAccounts {
 			$marked += $q->rowCount();
 		}
 		return $marked;
+	}
+
+	/** A stored Hosted at value: anything unrecognised reads as main, the account that is ours. */
+	public static function normalize_hosted_at($value): string {
+		$value = trim((string)$value);
+		return isset(self::HOSTED_AT[$value]) ? $value : self::MAIN;
+	}
+
+	public static function hosted_at_label(string $value): string {
+		return self::HOSTED_AT[self::normalize_hosted_at($value)];
+	}
+
+	/**
+	 * Where a node is hosted. A site placed on a live host is where that
+	 * server is: the server's own node's answer when the server has a node,
+	 * else the host's account. Anything else answers for itself.
+	 */
+	public static function hosted_at($node): string {
+		if (!$node) {
+			return self::MAIN;
+		}
+		$host_id = (int)$node->get('mgn_mgh_managed_host_id');
+		if ($host_id) {
+			try {
+				$host = new ManagedHost($host_id, TRUE);
+				if ($host->key && !$host->get('mgh_delete_time')) {
+					$server_id = (int)$host->get('mgh_mgn_managed_node_id');
+					if ($server_id && $server_id !== (int)$node->key) {
+						$server = new ManagedNode($server_id, TRUE);
+						if ($server->key) {
+							return self::normalize_hosted_at($server->get('mgn_cloud_account'));
+						}
+					}
+					return self::of_host($host);
+				}
+			} catch (Throwable $e) {
+				// a placement that points at no host: the node stands on its own
+			}
+		}
+		return self::normalize_hosted_at($node->get('mgn_cloud_account'));
+	}
+
+	/** Whether the machine a node runs on is in one of our accounts. */
+	public static function is_ours($node): bool {
+		return in_array(self::hosted_at($node), array(self::MAIN, self::TEST), true);
+	}
+
+	/**
+	 * Where a provision's node is hosted: a machine bought on our token is in
+	 * this plane's account; one on, or handed to, the customer's account is
+	 * the customer's.
+	 */
+	public static function for_provision($provision): string {
+		return (string)$provision->get('cvp_hosting_mode') === 'operator' ? self::plane_account() : self::CUSTOMER;
 	}
 
 	/** The selected tab: the request's choice (remembered in a cookie), else the cookie, else main. */

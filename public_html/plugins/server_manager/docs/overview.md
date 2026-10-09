@@ -1578,27 +1578,62 @@ Delete acts through `S3Signer` from the management node: a single object (guarde
 
 ## Retiring a node
 
-Two distinct actions on the node detail Overview tab, both permission-10 and CSRF-guarded:
+A node's Actions menu on the Overview tab has three retiring actions, all permission-10 and CSRF-guarded:
 
-- **Remove from Dashboard** — soft-deletes the node record. The site keeps running on its host; Server Manager simply stops tracking it. For a box handed back to its owner or managed elsewhere, or a machine already deleted at its provider.
-- **Permanently Delete Site** — creates a `decommission_node` job addressed to the **host's own agent** as the `decommission_site` primitive (see [Removing a container site](#removing-a-container-site-decommission)). The site approves its own removal on its own Backups page with its own recovery key; the host then runs the bundled self-verifying `remove_account.sh`. Only on `DECOMMISSION_VERIFIED` in the result does the result processor soft-delete the **victim's** node record (the job's subject is the host; the victim travels in the job params); a failed, declined or unverified teardown leaves the node intact and enabled to retry. Type-to-confirm the site name; the name is derived from the node's own fields, never operator input. Relays and bare-metal machines are refused — a whole machine is deleted at its provider, then its record removed here.
+| Node state | Items |
+|---|---|
+| Live | Hide from Dashboard · Remove Permanently… · Permanently Delete Site… (container sites) |
+| Hidden | Restore to Dashboard · Remove Permanently… · Permanently Delete Site… (when a site was ever confirmed) |
 
-Either way, removing the node ends the provisioning task's work on its site (`ManagedNode::soft_delete()`):
+### Where a node is hosted
 
+Every node records where its machine runs (`mgn_cloud_account`, shown and edited as **Hosted at** in Connection Settings and on Add Node; `CloudAccounts::HOSTED_AT`):
+
+| Value | Meaning | Hosted by us |
+|---|---|---|
+| `main` | Joinery Main Linode | yes |
+| `test` | Joinery Test Linode | yes |
+| `customer` | the customer's connected cloud account | no |
+| `external` | anywhere else | no |
+
+A site placed on a server is hosted where its server is (`CloudAccounts::hosted_at()`): the server's own node's value, else the host's account. A provisioned machine takes this management node's account when bought on the operator token and `customer` when bought on, or transferred to, the customer's account (`CloudAccounts::for_provision()`); an adopted server takes the account it was found on. A hand-added node defaults to this management node's account. `main` and `test` are also the dashboard's tabs; `customer` and `external` nodes are listed on the Main tab.
+
+### Hide from Dashboard
+
+Soft-deletes the node record (`delete_node` → `ManagedNode::soft_delete()`). The site keeps running on its host and every record is kept. Hiding ends the work on the site:
+
+- Its unfinished jobs are cancelled: its agent is refused from then on, so nothing else would end them.
+- Its active backup storage space drains: it takes no new backups and keeps what it holds.
 - The hosting order's provisioning record and its hosted trial are removed, so nothing seeds, retires a password on, sends mail setup to, or powers off a site nobody tracks.
-- A domain bought for the site is kept: the buyer is its registrant, and its record carries the renewals and the hand-over. One still being bought or wired up is parked on the Domains page with the reason (Retry parks it again while its site is still removed). An active domain needs no server and is left as it is; the domain watch sends a removed node no notice.
-- Billing is never touched. A subscription still charging for the hosting is named in the removal's message, so whoever removed the site can cancel it from the buyer's user page (its Subscriptions panel).
+- A domain bought for the site is kept: the buyer is its registrant, and its record carries the renewals and the hand-over. One still being bought or wired up is parked on the Domains page with the reason (Retry parks it again while its site is still hidden). An active domain needs no server and is left as it is; the domain watch sends a hidden node no notice.
+- Billing is never touched. A subscription still charging for the hosting is named in the page's message, so whoever hid the site can cancel it from the buyer's user page (its Subscriptions panel).
 
-The page's message after Remove from Dashboard lists each of these; a permanent deletion records them in its job result.
+Hidden sites, and their jobs, are left out of the dashboard (Hosts & Sites and Recent Jobs) and the Jobs page. **Show all sites (including hidden)** at the bottom of Hosts & Sites (`?show_all=1`), and **Include hidden sites** on the Jobs page, bring them back, each node with a **Hidden** badge and a link into its still-reachable detail page.
 
-The record is soft-deleted, not hard-deleted, on purpose: the container port stays reserved on shared hosts, and the job history stays joinable. A decommissioned site's offsite backups stay readable regardless — each carries its own key sealed to the recovery key — and are not purged by decommission; delete them deliberately from the Stored Backups panel above.
+### Restore to Dashboard
 
-Removed sites are hidden from the dashboard by default. The **Show all sites (including removed)** link at the bottom of the Hosts & Sites panel re-renders with them included, each carrying a **Removed** badge and linking into its still-reachable node detail page (`?show_all=1`).
+`restore_node` → `ManagedNode::undelete()`: the node is listed again, its agent is accepted with no re-pairing, monitoring resumes, and the backup space its hiding drained takes its backups again when nothing else is active for it. Nothing else is reversed: cancelled jobs stay cancelled, a removed provisioning record stays removed, a parked domain stays parked. Refused when another live site has taken the slug.
 
-Opening a removed node's detail page offers two follow-up actions in its Danger Zone:
+### Remove Permanently
 
-- **Permanently Delete Site** — the same `decommission_site` teardown on the host's agent, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this management node once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page never probes the host directly. A `decommission_site` that reaches a host with no vhost for the named site is refused by the host, naming the site and the path it looked for, and the job fails: a request naming a site the host does not know is never reported as a verified removal, so a stale entry or a mistyped name cannot be "verified" away. Asking again after a site is gone therefore fails on purpose; the dashboard entry is closed with **Permanently Delete Entry**.) The consent rule holds here too: the site must still approve on its own admin, so a container too broken to render its own approval is not removable this way — it is recovered by rebuild-and-restore instead.
-- **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's storage spaces still hold backups (or while one cannot be listed to confirm): deleting the record would leave them unclaimed, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched and the job history survives the purge (cascade rules null the references).
+`purge_node`, on a live or a hidden node: type the slug, then `NodeRemoval`'s guards, in order:
+
+1. **Backups.** Refused while the node's storage spaces still hold backups, or while one cannot be listed to confirm; clear them from the target's Stored Backups panel first.
+2. **A container site hosted by us.** Refused until its host verified the container gone: Permanently Delete Site stamps `mgn_site_removed_time` on the site when its teardown is verified. A node where no live site was ever seen (no status check, Joinery version or uptime result) has nothing to tear down and passes.
+3. **A machine hosted by us.** Refused until the provider says the instance is gone: by the instance ID on its provisioning record (removed ones included), else by the node's IPv4 and IPv6 addresses in the account's server listing. Only "not found" passes; a provider error refuses. The platform never deletes an instance itself. Where this management node holds no token for the machine's account (a management node holds one operator token: dev the test account, getjoinery the main one), the person confirms instead by typing the instance ID, or the machine's IP address when no instance is recorded. The confirmation is written to the error log as `[NODE_REMOVE_ATTEST]` (user, node name and slug, account, what was typed) before the delete, since the node's own record goes with it.
+4. **Not hosted by us.** No machine guard: the site keeps running where it is and is no longer managed from here.
+
+What can be known without a provider is shown up front in the menu (a refusal opens instead of the confirmation); the provider is asked only on submit.
+
+The removal itself is `ManagedNode::remove_permanently()`, one transaction: a live node's site records are released first, as hiding would; then `permanent_delete()` removes every record the node owns by the deletion rules: its jobs, its incidents and their events, its provisioning record with its trial and transfers, and its storage spaces with their runs and ledger rows. A copy of the node and a copy's provisioning record stay, and stop naming it. Join requests, relays, mail fleet shards, hosts, machine and instance transfers, site copies, service tenants and registered domains stop naming it too.
+
+### Permanently Delete Site
+
+Creates a `decommission_node` job addressed to the **host's own agent** as the `decommission_site` primitive (see [Removing a container site](#removing-a-container-site-decommission)). The site approves its own removal on its own Backups page with its own recovery key; the host then runs the bundled self-verifying `remove_account.sh`. Only on `DECOMMISSION_VERIFIED` in the result does the result processor stamp `mgn_site_removed_time` on the **victim's** node record and hide it (the job's subject is the host; the victim travels in the job params); the job result lists what hiding did. A failed, declined or unverified teardown leaves the node intact and enabled to retry. Type-to-confirm the site name; the name is derived from the node's own fields, never operator input. Relays and bare-metal machines are refused: a whole machine is deleted at its provider, then its record is removed with Remove Permanently.
+
+On a hidden node it is offered only when this management node once saw a live site there. With no such evidence (for example an install that failed and never stood a site up) the action is replaced by a short note, since there is nothing on the host to tear down. The page never probes the host directly. A `decommission_site` that reaches a host with no vhost for the named site is refused by the host, naming the site and the path it looked for, and the job fails: a request naming a site the host does not know is never reported as a verified removal, so a stale entry or a mistyped name cannot be "verified" away. The consent rule holds here too: the site must still approve on its own admin, so a container too broken to render its own approval is not removable this way; it is recovered by rebuild-and-restore instead.
+
+A hidden or decommissioned site's offsite backups stay readable regardless (each carries its own key sealed to the recovery key) and are never deleted by these actions; delete them deliberately from the Stored Backups panel above.
 
 ## Backup Encryption and Key Custody
 

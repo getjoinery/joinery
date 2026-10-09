@@ -557,4 +557,90 @@ return [
 			error_log('sm_017: ' . $moved . ' node backup polic' . ($moved === 1 ? 'y' : 'ies') . ' moved to weekly verification.');
 		},
 	],
+	[
+		// Hide a site, or remove it for good (spec node_hide_and_remove §1, §4, §5).
+		// The records the corrected deletion rules would have left, made so:
+		//   - a node a provision says is on the customer's account is hosted there;
+		//   - a site its host verified gone (a decommission job's result) carries
+		//     mgn_site_removed_time, which Remove Permanently waits for;
+		//   - the jobs earlier permanent deletes left behind are deleted (a node
+		//     removed for good now takes its jobs): those naming no node — all but
+		//     Publish Upgrade runs, which before September ran on this machine with
+		//     no node — and those naming a node that no longer exists;
+		//   - ledger rows of a space that no longer exists go with it; one whose
+		//     run no longer exists stops naming it, or goes when its space is gone
+		//     too; jobs, runs, copies and copy provisions stop naming what is gone.
+		// Safe to run again.
+		'id' => 'sm_018_node_records_cleanup',
+		'version' => '1.30.39',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$need = array(
+				'mgn_managed_nodes'             => array('mgn_cloud_account', 'mgn_site_removed_time', 'mgn_copy_of_node_id'),
+				'cvp_customer_cloud_provisions' => array('cvp_hosting_mode', 'cvp_cca_customer_cloud_account_id', 'cvp_mgn_managed_node_id', 'cvp_source_node_id'),
+				'mjb_management_jobs'           => array('mjb_mgn_managed_node_id', 'mjb_svr_shelf_run_id'),
+				'sps_storage_spaces'            => array('sps_storage_space_id'),
+				'svr_shelf_runs'                => array('svr_shelf_run_id', 'svr_sps_storage_space_id'),
+				'svo_shelf_objects'             => array('svo_svr_shelf_run_id', 'svo_sps_storage_space_id'),
+			);
+			$has = $dblink->prepare("SELECT count(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ANY (string_to_array(?, ','))");
+			foreach ($need as $table => $columns) {
+				$has->execute(array($table, implode(',', $columns)));
+				if ((int)$has->fetchColumn() !== count($columns)) {
+					// update_database adds the columns after migrations; the next pass runs this.
+					return 'defer';
+				}
+			}
+
+			$customer = $dblink->exec("UPDATE mgn_managed_nodes SET mgn_cloud_account = 'customer'
+				WHERE COALESCE(mgn_cloud_account, '') <> 'customer' AND mgn_managed_node_id IN (
+					SELECT cvp_mgn_managed_node_id FROM cvp_customer_cloud_provisions
+					WHERE cvp_hosting_mode = 'transferred'
+					   OR (cvp_hosting_mode = 'customer' AND cvp_cca_customer_cloud_account_id IS NOT NULL))");
+
+			$removed = 0;
+			$stamp = $dblink->prepare("UPDATE mgn_managed_nodes SET mgn_site_removed_time = ?
+				WHERE mgn_managed_node_id = ? AND mgn_site_removed_time IS NULL");
+			foreach ($dblink->query("SELECT mjb_parameters, mjb_result, mjb_completed_time, mjb_create_time FROM mjb_management_jobs
+					WHERE mjb_job_type = 'decommission_node' AND mjb_status = 'completed' AND mjb_result IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $j) {
+				$params = json_decode((string)$j['mjb_parameters'], true);
+				$result = json_decode((string)$j['mjb_result'], true);
+				$victim = (int)(is_array($params) ? ($params['victim_node_id'] ?? 0) : 0);
+				if (!$victim || !is_array($result) || ($result['decommissioned'] ?? false) !== true) {
+					continue;
+				}
+				$stamp->execute(array($j['mjb_completed_time'] ?: $j['mjb_create_time'], $victim));
+				$removed += $stamp->rowCount();
+			}
+
+			$jobs = $dblink->exec("DELETE FROM mjb_management_jobs j
+				WHERE (j.mjb_mgn_managed_node_id IS NULL AND j.mjb_job_type <> 'publish_upgrade')
+				   OR (j.mjb_mgn_managed_node_id IS NOT NULL
+				       AND NOT EXISTS (SELECT 1 FROM mgn_managed_nodes n WHERE n.mgn_managed_node_id = j.mjb_mgn_managed_node_id))");
+
+			$ledger = $dblink->exec("DELETE FROM svo_shelf_objects o
+				WHERE (o.svo_sps_storage_space_id IS NOT NULL
+				       AND NOT EXISTS (SELECT 1 FROM sps_storage_spaces s WHERE s.sps_storage_space_id = o.svo_sps_storage_space_id))
+				   OR (o.svo_sps_storage_space_id IS NULL AND o.svo_svr_shelf_run_id IS NOT NULL
+				       AND NOT EXISTS (SELECT 1 FROM svr_shelf_runs r WHERE r.svr_shelf_run_id = o.svo_svr_shelf_run_id))");
+			$unnamed = 0;
+			foreach (array(
+				"UPDATE svo_shelf_objects o SET svo_svr_shelf_run_id = NULL WHERE o.svo_svr_shelf_run_id IS NOT NULL
+					AND NOT EXISTS (SELECT 1 FROM svr_shelf_runs r WHERE r.svr_shelf_run_id = o.svo_svr_shelf_run_id)",
+				"UPDATE mjb_management_jobs j SET mjb_svr_shelf_run_id = NULL WHERE j.mjb_svr_shelf_run_id IS NOT NULL
+					AND NOT EXISTS (SELECT 1 FROM svr_shelf_runs r WHERE r.svr_shelf_run_id = j.mjb_svr_shelf_run_id)",
+				"UPDATE svr_shelf_runs r SET svr_sps_storage_space_id = NULL WHERE r.svr_sps_storage_space_id IS NOT NULL
+					AND NOT EXISTS (SELECT 1 FROM sps_storage_spaces s WHERE s.sps_storage_space_id = r.svr_sps_storage_space_id)",
+				"UPDATE mgn_managed_nodes m SET mgn_copy_of_node_id = NULL WHERE m.mgn_copy_of_node_id IS NOT NULL
+					AND NOT EXISTS (SELECT 1 FROM mgn_managed_nodes n WHERE n.mgn_managed_node_id = m.mgn_copy_of_node_id)",
+				"UPDATE cvp_customer_cloud_provisions c SET cvp_source_node_id = NULL WHERE c.cvp_source_node_id IS NOT NULL
+					AND NOT EXISTS (SELECT 1 FROM mgn_managed_nodes n WHERE n.mgn_managed_node_id = c.cvp_source_node_id)",
+			) as $sql) {
+				$unnamed += (int)$dblink->exec($sql);
+			}
+			error_log('sm_018: ' . (int)$customer . ' node(s) marked hosted on the customer\'s account, ' . $removed
+				. ' marked site removed; deleted ' . (int)$jobs . ' job(s) of no node or a missing one and ' . (int)$ledger
+				. ' ledger row(s) of missing spaces or runs; ' . $unnamed . ' reference(s) to missing rows cleared.');
+		},
+	],
 ];

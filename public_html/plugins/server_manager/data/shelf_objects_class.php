@@ -22,6 +22,7 @@
  * is remembered (specs/storage_targets.md §4). Every count and every lookup of
  * a live object reads unpruned rows only.
  *
+ * @version 1.3 - a space removed for good takes its ledger rows (cascade, was null)
  * @version 1.2 - a Managed node's objects are in the ledger too (no tenant; the space names the owner); svo_sha256,
  *                the hash the writer reported at finish, which nothing in backup storage can change
  *                (specs/storage_targets.md §6); a completed key is never signed again; preferredManifestName(),
@@ -42,7 +43,8 @@ class ShelfObject extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'svo_svt_service_tenant_id' => array('action' => 'cascade'),
 		'svo_svr_shelf_run_id'      => array('action' => 'null'),
-		'svo_sps_storage_space_id'  => array('action' => 'null'),
+		// A ledger row records an object in one space: a space removed for good takes it.
+		'svo_sps_storage_space_id'  => array('action' => 'cascade'),
 	);
 
 	/** Why an object left the ledger's live count. */

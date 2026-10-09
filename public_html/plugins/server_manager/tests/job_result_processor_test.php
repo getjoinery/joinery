@@ -825,6 +825,8 @@ $dn->load();
 check(!empty($dn->get('mgn_delete_time')),
 	'a verified decommission soft-deletes the node record',
 	var_export($dn->get('mgn_delete_time'), true));
+check(!empty($dn->get('mgn_site_removed_time')),
+	'and marks its site removed, which Remove Permanently waits for (node_hide_and_remove)');
 
 // A failed job leaves the node intact — never a half-deleted record over a live site.
 $dn2 = jrp_node(array('mgn_container_name' => 'decomrp2', 'mgn_web_root' => '/var/www/html/decomrp2/public_html'));
@@ -834,6 +836,7 @@ $dj2->save();
 JobResultProcessor::process($dj2);
 $dn2->load();
 check(empty($dn2->get('mgn_delete_time')), 'a failed decommission leaves the node intact');
+check(empty($dn2->get('mgn_site_removed_time')), 'and never marks its site removed');
 check((string)$dj2->get('mjb_result') !== '', 'and the failed decommission still records a result');
 
 // A completed run whose verify FAILED (traces remained) must not delete the node,

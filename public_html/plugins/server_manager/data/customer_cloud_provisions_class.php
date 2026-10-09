@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.19 - a node removed for good takes its provisioning record (permanent_delete, was null);
+ *                 cvp_source_node_id is registered for deletion
  * @version 1.18 - cvp_expected_site_key / cvp_expected_host_key / cvp_keys_captured_time and site_agent_name():
  *                 the keys the install showed, for automatic join approval (the auto_approve_provisioned_joins spec)
  * @version 1.17 - host_agent_name(): the site name and -host, the name install.sh's host agent joins as
@@ -90,7 +92,11 @@ class CustomerCloudProvision extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'cvp_usr_user_id'    => array('action' => 'prevent', 'message' => 'this user has cloud provisions - deprovision them first'),
 		'cvp_cca_customer_cloud_account_id' => array('action' => 'null'),
-		'cvp_mgn_managed_node_id'    => array('action' => 'null'),
+		// A node removed for good takes its provisioning record, and the record
+		// its trial and transfers; it holds sealed passwords nothing else needs.
+		'cvp_mgn_managed_node_id'    => array('action' => 'permanent_delete'),
+		// A copy's provision outlives the node it copied; it just stops naming it.
+		'cvp_source_node_id'         => array('action' => 'null', 'source_table' => 'mgn_managed_nodes'),
 	);
 
 	// Admin origin needs no order item, so spec-generated test rows validate;

@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.50 - mgn_cloud_account is where the node is hosted (CloudAccounts::HOSTED_AT); mgn_site_removed_time, when
+ *                its host verified the site's container gone; undelete() (Restore to Dashboard) gives back the
+ *                space its removal drained; remove_permanently(); mgn_copy_of_node_id is registered for deletion
  * @version 1.49 - mgn_cloud_account: which cloud account a machine not placed on a host is in; stamped when first saved
  * @version 1.48 - removing a node drains its active storage space: it takes no new backups and keeps what it holds
  * @version 1.47 - mgn_agent_bundle_state: a siteless machine's verdict on the support bundle on offer
@@ -117,6 +120,8 @@ class ManagedNode extends SystemBase {
 	protected static $foreign_key_actions = [
 		'mgn_mgh_managed_host_id' => ['action' => 'null'],
 		'mgn_mtr_machine_transfer_id' => ['action' => 'null'],
+		// A copy outlives its source removed for good; it just stops naming it.
+		'mgn_copy_of_node_id' => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
 	];
 
 	public static $field_specifications = array(
@@ -260,8 +265,11 @@ class ManagedNode extends SystemBase {
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		// Which cloud account the machine lives in: main or test (CloudAccounts). A node on a host takes the host's.
+		// Where the machine is hosted (CloudAccounts::HOSTED_AT): main or test (ours), customer or external.
+		// A node on a host takes the host's.
 		'mgn_cloud_account'       => array('type'=>'varchar(16)'),
+		// When the host verified this site's container gone (Permanently Delete Site).
+		'mgn_site_removed_time'   => array('type'=>'timestamp(6)'),
 		// Whether the node detail Console tab may run an ad-hoc command here.
 		// Default off: the management node holds SSH keys to every node, so being
 		// reachable from a browser form is a decision made per node rather than
@@ -845,7 +853,7 @@ class ManagedNode extends SystemBase {
 	/**
 	 * Removing a node ends the dashboard's work on its site.
 	 *
-	 * Both ways a node leaves the dashboard end here: Remove from Dashboard,
+	 * Both ways a node leaves the dashboard end here: Hide from Dashboard,
 	 * and the record's removal once a permanent deletion is verified. The
 	 * site's other records go first, so a failure leaves the node listed and
 	 * the removal can simply be asked again.
@@ -923,6 +931,81 @@ class ManagedNode extends SystemBase {
 
 	public function removal_notes(): array {
 		return $this->removal_notes;
+	}
+
+	/**
+	 * Restore to Dashboard. The node is listed and its agent accepted again,
+	 * and the backup space its removal drained takes its backups again when
+	 * nothing else is active for it. Nothing else is reversed: cancelled jobs
+	 * stay cancelled, a removed provisioning record stays removed, a parked
+	 * domain stays parked.
+	 */
+	function undelete() {
+		$taken = new MultiManagedNode(['slug' => (string)$this->get('mgn_slug'), 'deleted' => false]);
+		foreach ($taken as $other) {
+			if ((int)$other->key !== (int)$this->key) {
+				throw new DisplayableUserException('Another site now uses the slug ' . $this->get('mgn_slug')
+					. '. Nothing was restored.');
+			}
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = !$db->inTransaction();
+		if ($own) {
+			$db->beginTransaction();
+		}
+		try {
+			$done = parent::undelete();
+			if (!StorageSpace::active_for(StorageSpace::OWNER_NODE, (int)$this->key)) {
+				foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$this->key) as $space) {
+					if ($space->is_draining()) {
+						$space->set('sps_state', StorageSpace::STATE_ACTIVE);
+						$space->set('sps_draining_time', null);
+						$space->save();
+						break;
+					}
+				}
+			}
+			if ($own) {
+				$db->commit();
+			}
+			return $done;
+		} catch (Throwable $e) {
+			if ($own && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Remove the node for good, live or hidden. A live one's site records are
+	 * released first, as hiding it would (a bought domain is parked for its
+	 * buyer, a subscription still billing is named); then every record it
+	 * owns goes by the deletion rules, its jobs and backup space included.
+	 * One transaction. The guards that decide whether it may go are
+	 * NodeRemoval's; this is only the removal.
+	 *
+	 * @return string[] what releasing its site records did, when it was live
+	 */
+	public function remove_permanently(): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = !$db->inTransaction();
+		if ($own) {
+			$db->beginTransaction();
+		}
+		try {
+			$notes = $this->get('mgn_delete_time') ? [] : $this->release_site_records();
+			$this->permanent_delete();
+			if ($own) {
+				$db->commit();
+			}
+			return $notes;
+		} catch (Throwable $e) {
+			if ($own && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
 	}
 
 	/**

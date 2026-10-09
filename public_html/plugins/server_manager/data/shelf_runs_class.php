@@ -19,6 +19,7 @@
  * allowed. A run is spent once finished or aborted: a signing request against
  * it is refused.
  *
+ * @version 1.3 - its owner removes it through its own permanent_delete(), not a flat delete
  * @version 1.2 - a Managed node owns a run as a customer does (svr_mgn_managed_node_id); svr_kind, the run's
  *                token hash and expiry, and svr_ledger_time, when its ledger file reached backup storage
  *                (specs/storage_targets.md WP5, F4); svr_ledger_problem and svr_ledger_tried_time, why it could not be and when, retried daily
@@ -44,8 +45,10 @@ class ShelfRun extends SystemBase {
 	const KIND_UPLOAD = 'upload';
 
 	protected static $foreign_key_actions = array(
-		'svr_svt_service_tenant_id' => array('action' => 'cascade'),
-		'svr_mgn_managed_node_id'   => array('action' => 'cascade'),
+		// Through the run's own permanent_delete(): its ledger rows and its jobs
+		// stop naming it. A flat delete left them pointing at nothing.
+		'svr_svt_service_tenant_id' => array('action' => 'permanent_delete'),
+		'svr_mgn_managed_node_id'   => array('action' => 'permanent_delete'),
 		'svr_sps_storage_space_id'  => array('action' => 'null'),
 	);
 
