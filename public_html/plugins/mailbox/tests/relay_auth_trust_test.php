@@ -30,6 +30,7 @@
  *
  * Run: php plugins/mailbox/tests/relay_auth_trust_test.php
  *
+ * @version 1.1 - the DMARC policy rides with its verdict on the relay path
  * @version 1.0
  */
 
@@ -139,6 +140,50 @@ try {
 } catch (\Throwable $e) {
 	harness_skip('MailboxRelay not constructible in this bootstrap', $e->getMessage());
 }
+
+section('the DMARC policy rides with its verdict');
+
+// A fail under p=none from a relay stamp: the newsletter case (ghost.io is a public suffix).
+$ghost = relay_auth($router, array(
+	RELAY_HOST . '; dkim=pass header.d=m.ghost.io; spf=pass smtp.mailfrom=m.ghost.io',
+	RELAY_HOST . '; dmarc=fail reason="SPF not aligned (relaxed), DKIM not aligned (relaxed)" header.from=ghost.io (policy=none)',
+), RELAY_HOST);
+check($ghost['dmarc'] === 'fail' && $ghost['dmarc_policy'] === 'none',
+	'a relay DMARC fail carries the policy of its own line (p=none)',
+	'dmarc=' . $ghost['dmarc'] . ' policy=' . var_export($ghost['dmarc_policy'], true));
+
+// The milter's fail (reject) is the first dmarc line; a forged pass under p=none sits below it.
+$forged_policy = relay_auth($router, array(
+	RELAY_HOST . '; spf=fail; dkim=fail; dmarc=fail (policy=reject)',
+	RELAY_HOST . '; dmarc=pass (policy=none)',
+), RELAY_HOST);
+check($forged_policy['dmarc'] === 'fail' && $forged_policy['dmarc_policy'] === 'reject',
+	'a lower forged line cannot change the policy either',
+	'dmarc=' . $forged_policy['dmarc'] . ' policy=' . var_export($forged_policy['dmarc_policy'], true));
+
+// The policy comes from the line that supplied the dmarc verdict, not from an earlier line.
+$from_dmarc_line = relay_auth($router, array(
+	RELAY_HOST . '; spf=pass; dkim=pass (policy=quarantine)',
+	RELAY_HOST . '; dmarc=fail (policy=none)',
+), RELAY_HOST);
+check($from_dmarc_line['dmarc_policy'] === 'none',
+	'the policy is read from the dmarc line, not from a spf or dkim one',
+	'policy=' . var_export($from_dmarc_line['dmarc_policy'], true));
+
+$no_policy = relay_auth($router, array(RELAY_HOST . '; spf=pass; dkim=pass; dmarc=pass'), RELAY_HOST);
+check($no_policy['dmarc_policy'] === null, 'no policy named → null (fail-safe: a fail stays spam)',
+	'policy=' . var_export($no_policy['dmarc_policy'], true));
+
+$unstamped = relay_auth($router, array(), RELAY_HOST);
+check(array_key_exists('dmarc_policy', $unstamped) && $unstamped['dmarc_policy'] === null,
+	'an unstamped default carries a null policy key');
+
+// The provider branch (the relay spool hands its verdicts in as provider_auth) passes it through.
+$read = new ReflectionMethod('InboundEmailRouter', 'readAuthResults');
+$via_provider = $read->invoke($router, '', array('source' => 'relay', 'dmarc' => 'fail', 'dmarc_policy' => 'none'));
+check($via_provider['dmarc_policy'] === 'none',
+	'readAuthResults passes the relay policy through the provider branch',
+	'policy=' . var_export($via_provider['dmarc_policy'], true));
 
 section('legacy meta shape');
 

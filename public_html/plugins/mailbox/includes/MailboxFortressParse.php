@@ -30,6 +30,7 @@
  * offset: PHP drops every upload past max_file_uploads (20 on this stack), and
  * a newsletter with more inline images than that is ordinary (B37).
  *
+ * @version 1.6 - the device parse's auth verdicts carry the stored DMARC policy (iem_dmarc_policy)
  * @version 1.5 - the device parse records the spam reason and meta tokens; a reply noted at pull time is honoured
  * @version 1.4 - next() takes max_bytes; with no item to hand out it still counts what waits (and too_large)
  * @version 1.3 - rule_matches applied in the parse; forward_raw relays a matched forward
@@ -222,6 +223,7 @@ class MailboxFortressParse {
 				'dkim'   => (string)$row['iem_dkim_result'],
 				'spf'    => (string)$row['iem_spf_result'],
 				'dmarc'  => (string)$row['iem_dmarc_result'],
+				'dmarc_policy' => $row['iem_dmarc_policy'] ?: null,
 				'source' => (string)$row['iem_auth_source'],
 			);
 			$spam = (new InboundEmailRouter())->spamFromBrowserHeaders(

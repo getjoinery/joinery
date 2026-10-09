@@ -28,6 +28,7 @@
  * this header — see InboundEmailRouter::readAuthResults() and
  * specs/inbound_mailgun_verification.md.
  *
+ * @version 1.2 - dmarcPolicy(): the (policy=…) a DMARC line names, read from the same line as its verdict
  * @version 1.1 - extractHeaders() is public: the message timeline walks the Received: chain with it
  * @version 1.0
  */
@@ -38,28 +39,32 @@ class AuthenticationResults {
 	private $spf;
 	private $dkim;
 	private $dmarc;
+	/** @var string|null the DMARC policy the sender's domain published (none, quarantine, reject), from the dmarc line's (policy=…) */
+	private $dmarc_policy;
 	/** @var string|null signing domain (dkim header.d) / envelope-sender domain (spf smtp.mailfrom) */
 	private $dkim_domain;
 	private $spf_domain;
 
 	private function __construct() {}
 
-	public function spf()        { return $this->spf; }
-	public function dkim()       { return $this->dkim; }
-	public function dmarc()      { return $this->dmarc; }
-	public function dkimDomain() { return $this->dkim_domain; }
-	public function spfDomain()  { return $this->spf_domain; }
+	public function spf()         { return $this->spf; }
+	public function dkim()        { return $this->dkim; }
+	public function dmarc()       { return $this->dmarc; }
+	public function dmarcPolicy() { return $this->dmarc_policy; }
+	public function dkimDomain()  { return $this->dkim_domain; }
+	public function spfDomain()   { return $this->spf_domain; }
 
 	/**
-	 * @return array{spf:?string,dkim:?string,dmarc:?string,dkim_domain:?string,spf_domain:?string}
+	 * @return array{spf:?string,dkim:?string,dmarc:?string,dmarc_policy:?string,dkim_domain:?string,spf_domain:?string}
 	 */
 	public function toArray(): array {
 		return array(
-			'spf'         => $this->spf,
-			'dkim'        => $this->dkim,
-			'dmarc'       => $this->dmarc,
-			'dkim_domain' => $this->dkim_domain,
-			'spf_domain'  => $this->spf_domain,
+			'spf'          => $this->spf,
+			'dkim'         => $this->dkim,
+			'dmarc'        => $this->dmarc,
+			'dmarc_policy' => $this->dmarc_policy,
+			'dkim_domain'  => $this->dkim_domain,
+			'spf_domain'   => $this->spf_domain,
 		);
 	}
 
@@ -84,7 +89,7 @@ class AuthenticationResults {
 		}
 
 		$matched = false;
-		$spf = $dkim = $dmarc = null;
+		$spf = $dkim = $dmarc = $dmarc_policy = null;
 		$dkim_domain = $spf_domain = null;
 
 		foreach ($lines as $line) {
@@ -128,6 +133,12 @@ class AuthenticationResults {
 						break;
 					case 'dmarc':
 						$dmarc = self::strongest($dmarc, $result);
+						// The policy belongs to the verdict it came with: keep it only when
+						// its line is the one whose result was kept.
+						$p = self::policyOf($seg);
+						if ($p !== null && $result === $dmarc) {
+							$dmarc_policy = $p;
+						}
 						break;
 					// spf/dkim/dmarc only; other methods (iprev, auth, arc) ignored.
 				}
@@ -139,11 +150,12 @@ class AuthenticationResults {
 		}
 
 		$obj = new self();
-		$obj->spf         = $spf;
-		$obj->dkim        = $dkim;
-		$obj->dmarc       = $dmarc;
-		$obj->dkim_domain = $dkim_domain;
-		$obj->spf_domain  = $spf_domain;
+		$obj->spf          = $spf;
+		$obj->dkim         = $dkim;
+		$obj->dmarc        = $dmarc;
+		$obj->dmarc_policy = $dmarc_policy;
+		$obj->dkim_domain  = $dkim_domain;
+		$obj->spf_domain   = $spf_domain;
 		return $obj;
 	}
 
@@ -160,6 +172,18 @@ class AuthenticationResults {
 			return 'pass';
 		}
 		return $current;
+	}
+
+	/**
+	 * The DMARC policy named in a dmarc methodspec, e.g. rspamd's
+	 * `dmarc=fail reason="…" header.from=ghost.io (policy=none)`. Lowercased, or
+	 * null when the segment names none.
+	 */
+	private static function policyOf(string $segment): ?string {
+		if (preg_match('/\bpolicy\s*=\s*"?([A-Za-z]+)"?/i', $segment, $m)) {
+			return strtolower($m[1]);
+		}
+		return null;
 	}
 
 	/**

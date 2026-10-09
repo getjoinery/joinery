@@ -144,6 +144,22 @@ class AuthenticationResultsTest {
 		$this->eq('fail', $ar->spf(), 'rspamd spf=fail');
 		$this->eq('fail', $ar->dmarc(), 'rspamd dmarc=fail with reason="..." and a trailing comment');
 		$this->eq('probe@getjoinery.com', $ar->spfDomain(), 'rspamd spf smtp.mailfrom');
+		$this->eq('quarantine', $ar->dmarcPolicy(), 'rspamd dmarc policy is read from (policy=…)');
+
+		$this->out('-- rspamd: a DMARC fail under p=none (Ghost newsletter, ghost.io is a public suffix) --');
+		$raw = $this->msg([
+			'Authentication-Results: devmail.getjoinery.com;',
+			"\tdkim=pass header.d=m.ghost.io header.s=mailgun header.b=lRKDFgHL;",
+			"\tspf=pass (devmail.getjoinery.com: domain of \"bounce+8329f7@m.ghost.io\" designates 159.112.253.179 as permitted sender) smtp.mailfrom=\"bounce+8329f7@m.ghost.io\";",
+			"\tdmarc=fail reason=\"SPF not aligned (relaxed), DKIM not aligned (relaxed)\" header.from=ghost.io (policy=none)",
+			'From: Gil Duran <nerdreich@ghost.io>',
+		]);
+		$ar = AuthenticationResults::fromMessage($raw, 'devmail.getjoinery.com');
+		$this->eq('fail', $ar->dmarc(), 'the verdict is still fail');
+		$this->eq('none', $ar->dmarcPolicy(), 'and the policy it came with is none');
+		$this->eq(array('spf' => 'pass', 'dkim' => 'pass', 'dmarc' => 'fail', 'dmarc_policy' => 'none',
+			'dkim_domain' => 'm.ghost.io', 'spf_domain' => 'bounce+8329f7@m.ghost.io'), $ar->toArray(),
+			'toArray carries the policy beside the verdicts');
 
 		$this->out('-- rspamd: two signatures on one line, one passes --');
 		$raw = $this->msg([

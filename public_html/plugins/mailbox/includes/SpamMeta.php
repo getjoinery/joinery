@@ -15,11 +15,13 @@
  *   │ │ │ │  │  │  └ scanner source + 2-point score band: r rspamd, m mailgun,
  *   │ │ │ │  │  │    g sendgrid, a ses, x any other
  *   │ │ │ └──┴──┴ dmarc / spf / dkim result (AUTH_CODES)
- *   └─┴─┴ first_contact, catch_all, burst
+ *   └─┴─┴ first_contact, catch_all, burst; u dmarc_monitored_fail (a DMARC fail
+ *         under p=none, which the auth rule does not file on its own)
  *
  * Token values are canonical (canonicalAuth / canonicalSource), so what decode()
  * returns is exactly what the tokenizer saw at ingest.
  *
+ * @version 1.1 - dmarc_monitored_fail flag (code u)
  * @version 1.0
  */
 
@@ -30,7 +32,7 @@ class SpamMeta {
 		'temperror' => 't', 'permerror' => 'r', 'policy' => 'o', 'unverified' => 'v', 'other' => 'x',
 	);
 	const SOURCE_CODES = array('rspamd' => 'r', 'mailgun' => 'm', 'sendgrid' => 'g', 'ses' => 'a', 'other' => 'x');
-	const FLAG_CODES = array('first_contact' => 'f', 'catch_all' => 'c', 'burst' => 'b');
+	const FLAG_CODES = array('first_contact' => 'f', 'catch_all' => 'c', 'burst' => 'b', 'dmarc_monitored_fail' => 'u');
 	const AUTH_PREFIXES = array('dmarc' => 'd', 'spf' => 's', 'dkim' => 'k');
 	const BAYES_CODES = array('off' => 'o', 'untrained' => 'u', 'undecided' => 'd', 'spam' => 's', 'ham' => 'h');
 

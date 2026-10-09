@@ -367,10 +367,12 @@ precedence order:
    own rspamd evaluates the message on receipt, and the sealer carries every
    `Authentication-Results` line into the `.meta` sidecar.
    `InboundEmailRouter::authFromRelayMeta()` reads them when the message is
-   pulled and records `iem_auth_source = 'relay'`.
+   pulled and records `iem_auth_source = 'relay'`. The DMARC policy named on the
+   same line as the dmarc verdict travels in the same sidecar, so the auth rule
+   applies identically on the milter and relay paths.
 
 Either way the verdicts land in `iem_spf_result` / `iem_dkim_result` /
-`iem_dmarc_result`. Each provider normalizes its native field values to the same
+`iem_dmarc_result`, and the policy in `iem_dmarc_policy`. Each provider normalizes its native field values to the same
 token set the header parser produces: `pass | fail | softfail | neutral | none |
 temperror | permerror`. A method a source does not assert reads `none`. Only SES
 reports a real DMARC verdict; Mailgun and SendGrid report SPF and DKIM only, so
@@ -4120,7 +4122,11 @@ Mail rules run after the verdict and are final (`never_spam` / `mark_spam`, reas
 **The auth rule.** The router acts on the SPF/DKIM/DMARC verdicts it already records
 (it never computes them — see [Inbound authentication](#inbound-authentication-spf--dkim--dmarc)):
 
-- **DMARC `fail` → `spam`.** DMARC is alignment-based and subsumes SPF and DKIM.
+- **DMARC `fail` → `spam`, unless the domain publishes `p=none`.** DMARC is
+  alignment-based and subsumes SPF and DKIM. A `p=none` domain has asked for no
+  action on failures, so its failure is not filed on its own; it reaches the
+  corpus as the `dmarc_monitored_fail` meta token instead (see Meta tokens below).
+  A fail with the policy unknown is still `spam`.
 - **No DMARC verdict, and SPF *and* DKIM both `fail` → `spam`.** The fallback for
   providers that supply SPF/DKIM but no DMARC field (Mailgun, SendGrid). Both must
   fail: raw SPF/DKIM lack DMARC's alignment, so a single failure has too many
@@ -4215,8 +4221,10 @@ be read is passed over rather than left first in every pass.
 - **Meta tokens** turn weak signals into tokens whose weight the corpus learns from
   the user's own teaching: `first_contact`, `catch_all`, `dmarc:…`/`spf:…`/`dkim:…`,
   `scanner:<source>:<band>` (the score in 2-point bands, tagged with who produced it,
-  so scales never mix), and `burst` (one sender reaching 5 or more of this
-  deployment's mailboxes in 10 minutes, from the routing log). They are computed at
+  so scales never mix), `burst` (one sender reaching 5 or more of this
+  deployment's mailboxes in 10 minutes, from the routing log), and
+  `dmarc_monitored_fail` (a DMARC fail under a `p=none` policy, which the auth rule
+  does not file on its own). They are computed at
   ingest from clear facts and stored in `iem_spam_meta` with whether the corpus was
   voting, so teaching later uses the facts the verdict saw.
 - **Scoring.** Robinson's per-token probability with Fisher's chi-square combining

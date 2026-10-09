@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.57 - allowSender's SELECT carries the verdict columns decryptThreadRow() reads
+ * @version 1.56 - the reader's spam_auth_rule reads iem_dmarc_policy: a fail under p=none is not an auth-rule filing
  * @version 1.55 - setSpamVerdict stamps the correction to the microsecond, so a two-way IMAP feed (which
  *   marks a correction sent by copying that stamp) never mistakes a second one for the first
  * @version 1.54 - thread messages carry spam_reason_text; setSpamVerdict hands the correction to SpamLearning, which teaches the spam corpus in the request
@@ -1649,7 +1651,7 @@ class MailboxService {
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id,
 					iem_sender, iem_recipient, iem_bcc, iem_to, iem_cc, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
-					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
+					iem_spf_result, iem_dmarc_result, iem_dmarc_policy, iem_auth_source, iem_spam_score,
 					iem_spam_verdict, iem_spam_reason, iem_spam_meta,
 					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
 					iem_size_bytes, iem_message_id_header, iem_direction,
@@ -1725,9 +1727,10 @@ class MailboxService {
 				// because that is the one filing a contact entry cannot lift: the
 				// From is unattested, so trusting it has to be a deliberate act.
 				'spam_auth_rule'    => InboundEmailMessage::authRuleSaysSpam(array(
-										'spf'   => (string)$r['iem_spf_result'],
-										'dkim'  => (string)$r['iem_dkim_result'],
-										'dmarc' => (string)$r['iem_dmarc_result'])),
+										'spf'          => (string)$r['iem_spf_result'],
+										'dkim'         => (string)$r['iem_dkim_result'],
+										'dmarc'        => (string)$r['iem_dmarc_result'],
+										'dmarc_policy' => (string)($r['iem_dmarc_policy'] ?? ''))),
 				// How the message reached the box, and whether it earned the
 				// verified-direct mark. The mark asserts exactly two things: the
 				// sending instance was cryptographically verified, and the sender
@@ -1843,9 +1846,10 @@ class MailboxService {
 			'spam_reason_text'  => InboundEmailMessage::spamReasonText($r['iem_spam_reason'] ?? null,
 									$r['iem_spam_verdict'] ?? null, $r['iem_spam_score'], $r['iem_spam_meta'] ?? null),
 			'spam_auth_rule'    => InboundEmailMessage::authRuleSaysSpam(array(
-									'spf'   => (string)$r['iem_spf_result'],
-									'dkim'  => (string)$r['iem_dkim_result'],
-									'dmarc' => (string)$r['iem_dmarc_result'])),
+									'spf'          => (string)$r['iem_spf_result'],
+									'dkim'         => (string)$r['iem_dkim_result'],
+									'dmarc'        => (string)$r['iem_dmarc_result'],
+									'dmarc_policy' => (string)($r['iem_dmarc_policy'] ?? ''))),
 			'transport'         => (string)($r['iem_transport'] ?? ''),
 			'direct_verified'   => (bool)$this->pgBool($r['iem_direct_verified']),
 			'size_bytes'        => intval($r['iem_size_bytes']),
@@ -2588,7 +2592,8 @@ class MailboxService {
 		$sql = "SELECT iem_inbound_email_message_id, iem_iea_inbound_email_alias_id, iem_sender,
 					iem_recipient, iem_bcc, iem_subject, iem_body_plain, iem_body_html,
 					iem_ai_summary, iem_ai_scan, iem_pending_parse,
-					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id
+					iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id,
+					iem_spf_result, iem_dkim_result, iem_dmarc_result, iem_dmarc_policy
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql();
 		$rows = $this->db()->query($sql)->fetchAll(PDO::FETCH_ASSOC);
