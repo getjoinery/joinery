@@ -216,8 +216,13 @@ class PageContent extends SystemBase {
 	function save($debug = false) {
 		if ($this->key) {
 			// SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
-			$config_json = $this->get('pac_config');
-			$version_content = $config_json ?: $this->get('pac_body');
+			// pac_config comes back decoded (an array); the version table holds text,
+			// and the component edit page json_decodes it when loading a version.
+			$config = $this->get('pac_config');
+			if (is_array($config)) {
+				$config = $config ? json_encode($config) : null;
+			}
+			$version_content = $config ?: $this->get('pac_body');
 
 			ContentVersion::NewVersion(
 				ContentVersion::TYPE_PAGE_CONTENT,
