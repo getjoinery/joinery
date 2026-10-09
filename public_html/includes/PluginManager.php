@@ -13,6 +13,8 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.9 - sync() retries a plugin left in 'error' by a failed install once its files change (retryErroredPlugins),
+ *               so a fix that ships does not leave the plugin waiting for someone to press Repair
  * @version 1.8 - a plugin's PHP migrations run with its own classes resolvable (ClassAutoloader::allowPlugin),
  *               so a first install, which migrates before activation, can use them
  * @version 1.7 - a dependency or conflict is judged active by plg_active (Plugin::is_active()),
@@ -272,6 +274,36 @@ class PluginManager extends AbstractExtensionManager {
         return false;
     }
     
+    /**
+     * Re-run the install of each named plugin that a failed install left in
+     * 'error'. Only called with plugins whose files changed since the last sync,
+     * so a plugin that keeps failing is tried once per change, never every sync.
+     * A plugin that installs comes back inactive (activation stays with a person);
+     * one that fails again keeps its error, now the newest message. A failure
+     * here never stops the sync it runs in.
+     *
+     * @param string[] $names plugin names whose metadata changed
+     * @return array plugin name => 'installed' or the error message
+     */
+    public function retryErroredPlugins(array $names) {
+        $retried = array();
+        foreach ($names as $name) {
+            $plugin = Plugin::get_by_plugin_name($name);
+            if (!$plugin || $plugin->get('plg_status') !== 'error') {
+                continue;
+            }
+            try {
+                $this->install($name, false);
+                $retried[$name] = 'installed';
+                error_log("Plugin '$name' was in error; its files changed and the install was retried: installed (inactive).");
+            } catch (Throwable $e) {
+                $retried[$name] = $e->getMessage();
+                error_log("Plugin '$name' was in error; its files changed and the install was retried and failed again: " . $e->getMessage());
+            }
+        }
+        return $retried;
+    }
+
     // ========== Migration Handling ==========
     
     /**
@@ -1422,6 +1454,14 @@ class PluginManager extends AbstractExtensionManager {
 
     public function sync(array $options = array()) {
         $result = parent::sync($options);
+
+        // A plugin whose install failed stays in 'error' after the fix for the
+        // failure ships, because nothing re-runs the install. Its files changing
+        // is the sign the fix may have arrived, so try the install again here.
+        $retried = $this->retryErroredPlugins($result['updated'] ?? array());
+        if (!empty($retried)) {
+            $result['retried_install'] = $retried;
+        }
 
         // Guard the flat global namespace (ajax/, utils/, tests/) against basename
         // collisions across core and all active plugins BEFORE any schema mutation.
