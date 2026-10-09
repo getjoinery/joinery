@@ -22,6 +22,7 @@
  *
  * Run: php tests/backups/destination_switch_test.php
  *
+ * @version 1.1 - retention deletes on the second pass that finds a chain surplus, a day after the first
  * @version 1.0
  */
 
@@ -211,7 +212,12 @@ $age($c1, 50); $age($c2, 40); $age($c3, 30);
 $prune_plan = $plan_on($B);
 $prune_plan['keep_days'] = 1;
 $pruned_indexes = array();
-$pruned = BackupRunner::enforce_chain_retention($prune_plan, $pruned_indexes);
+$first = BackupRunner::enforce_chain_retention($prune_plan, $pruned_indexes);
+check($first === 0 && $chain_keys('bkt-a', $c1) && $chain_keys('bkt-b', $c2),
+	'the first pass that finds them surplus deletes nothing (it confirms a day later)', 'pruned ' . $first);
+// The next pass, a day on.
+$pruned_indexes = array();
+$pruned = BackupRunner::enforce_chain_retention($prune_plan, $pruned_indexes, time() + 21 * 3600);
 $objects_pruned = BackupRunner::enforce_object_retention($prune_plan, $pruned_indexes);
 
 check($pruned === 2, 'the two chains older than the one that covers the window are pruned', 'pruned ' . $pruned);

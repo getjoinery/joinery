@@ -30,6 +30,9 @@
  *
  * Run: php plugins/server_manager/tests/storage_spaces_test.php
  *
+ * @version 1.2 - a verified chain in a space that cannot be listed still sets the floor
+ * @version 1.1 - prunes delete on the second pass a day apart; a customer's old space is released by a verified
+ *                run (specs/storage_targets.md F1, F3)
  * @version 1.0
  */
 
@@ -193,7 +196,8 @@ $job->save();
 harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
 check(FleetBackupRetention::active_verified($node, $sb), 'a passed verify naming the active space counts');
 
-$r = FleetBackupRetention::prune($node, 7);
+// A day on: the pass before already found the oldest chain surplus (BackupSafety, F3).
+$r = FleetBackupRetention::prune($node, 7, null, time() + 21 * 3600);
 check(!$has('spa', $sa->base() . 'manager/' . $old1 . '/manifest.json'), 'once verified, the old space ages out: its oldest chain is deleted from its own bucket');
 check($has('spa', $sa->base() . 'manager/' . $old2 . '/manifest.json'), 'the newest point before the window is kept, wherever it is');
 check($has('spb', $sb->base() . 'manager/' . $new1 . '/manifest.json'), 'the active space is untouched');
@@ -201,7 +205,10 @@ check((new StorageSpace($sa->key, TRUE))->is_draining(), 'a draining space that 
 
 $new0 = 'chain-' . gmdate('Ymd_His', time() - 10 * 86400);
 $put('spb', $sb->base() . 'manager/' . $new0 . '/manifest.json', '{}');
-$r = FleetBackupRetention::prune($node, 7);
+$r = FleetBackupRetention::prune($node, 7, null, time() + 22 * 3600);
+check($has('spa', $sa->base() . 'manager/' . $old2 . '/manifest.json'), 'a point newly found surplus waits a day');
+check(isset((new StorageSpace($sa->key, TRUE))->surplus_listed()[$old2]), 'and its space records it as found surplus');
+$r = FleetBackupRetention::prune($node, 7, null, time() + 43 * 3600);
 check(!$has('spa', $sa->base() . 'manager/' . $old2 . '/manifest.json')
 	&& !$has('spa', $sa->base() . 'manager/objects/epoch-20200101_000000/envelope.json'),
 	'when none of its points is kept, the rest of the old space goes too', json_encode(s3fx_keys($fx)));
@@ -291,15 +298,20 @@ $run->set('svr_base_key', $tb->base() . 'site/');
 $run->set('svr_state', ShelfRun::STATE_FINISHED);
 $run->save();
 harness_register_row('svr_shelf_runs', 'svr_shelf_run_id', $run->key);
-check(!ServiceTenantWatch::holds_finished_run(new StorageSpace($tb->key, TRUE)),
+check(!ServiceTenantWatch::holds_verified_run(new StorageSpace($tb->key, TRUE)),
 	'a finished run that stored nothing does not release the old space');
 $yl->set('svo_svr_shelf_run_id', (int)$run->key);
 $yl->save();
+check(!ServiceTenantWatch::holds_verified_run(new StorageSpace($tb->key, TRUE)),
+	'nor does one that stored something, until the site reports it verified');
+ShelfBroker::verifiedRun(new ServiceTenant($tenant->key, TRUE), (int)$run->key);
+check(ServiceTenantWatch::holds_verified_run(new StorageSpace($tb->key, TRUE)), 'a verified run in the new space does');
 $tenant = new ServiceTenant($tenant->key, TRUE);
 $tenant->set('svt_reconciled_time', gmdate('Y-m-d H:i:s'));
 $tenant->save();
-$watch->watch($tenant, gmdate('Y-m-d H:i:s'));
-check(!$has('spa', $x_key), 'once the new space holds a finished run with something stored, the old chain is pruned from its own bucket');
+// A day after the first pass found the old chain surplus (BackupSafety, F3).
+$watch->watch($tenant, gmdate('Y-m-d H:i:s', time() + 21 * 3600));
+check(!$has('spa', $x_key), 'once the new space holds a verified run, the old chain is pruned from its own bucket');
 check($has('spb', $y_key), 'the new chain stays');
 $xr = new ShelfObject($x->key, TRUE);
 check($xr->get('svo_pruned_time') !== null && (string)$xr->get('svo_pruned_cause') === 'retention', 'its ledger row is kept, marked pruned by retention');
@@ -353,8 +365,35 @@ $v3->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 $v3->save();
 harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $v3->key);
 $r3 = FleetBackupRetention::prune($node3, 30);
+check($has('spb', $n3b->base() . 'manager/' . $b45 . '/manifest.json'), 'the first pass deletes nothing', $r3['error']);
+$r3 = FleetBackupRetention::prune($node3, 30, null, time() + 21 * 3600);
 check($has('spa', $n3a->base() . 'manager/' . $a35 . '/manifest.json'), 'the newest point before the window is kept, though it is in the old space', $r3['error']);
 check(!$has('spb', $n3b->base() . 'manager/' . $b45 . '/manifest.json'), 'an older one in the active space goes');
+
+section('A verified chain in a space that cannot be listed still protects what is newer');
+$node4 = $make_node('Four');
+$n4b = $track(StorageSpace::open($b, StorageSpace::OWNER_NODE, (int)$node4->key, (string)$node4->get('mgn_slug')));
+$n4bad = $track(StorageSpace::adopt(new BackupTarget($bad->key, TRUE), 'gone4-' . $suffix, StorageSpace::OWNER_NODE, (int)$node4->key));
+$v30 = 'chain-' . gmdate('Ymd_His', time() - 30 * 86400);
+$b20 = 'chain-' . gmdate('Ymd_His', time() - 20 * 86400);
+$b10 = 'chain-' . gmdate('Ymd_His', time() - 10 * 86400);
+$b1  = 'chain-' . gmdate('Ymd_His', time() - 86400);
+foreach (array($b20, $b10, $b1) as $c) { $put('spb', $n4b->base() . 'manager/' . $c . '/manifest.json', '{}'); }
+$v4 = new ManagementJob(NULL);
+$v4->set('mjb_mgn_managed_node_id', (int)$node4->key);
+$v4->set('mjb_job_type', 'verify_backup');
+$v4->set('mjb_status', 'completed');
+$v4->set('mjb_commands', array());
+$v4->set('mjb_parameters', json_encode(array('chain_id' => $v30, 'space_id' => (int)$n4bad->key, 'profile' => 'manager')));
+$v4->set('mjb_result', json_encode(array('verify_status' => 'pass', 'level' => 2)));
+$v4->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$v4->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $v4->key);
+$r4 = FleetBackupRetention::prune($node4, 7);
+$r4 = FleetBackupRetention::prune($node4, 7, null, time() + 21 * 3600);
+check($r4['error'] !== '', 'the space on the broken target is reported as unlisted', $r4['error']);
+check($has('spb', $n4b->base() . 'manager/' . $b20 . '/manifest.json'),
+	'a chain newer than the verified one survives two passes, though the verified chain\'s space could not be listed');
 
 section('Evidence from before a space was given back does not release anything');
 StorageSpace::move(StorageSpace::OWNER_NODE, (int)$node3->key, $a);

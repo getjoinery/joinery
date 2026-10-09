@@ -11,6 +11,8 @@
  * allowed. A run is spent once finished or aborted: a signing request against
  * it is refused.
  *
+ * @version 1.1 - svr_verified_time: when the site reported this run's chain verified restorable through it; the
+ *                customer's newest verified chain and everything newer survive retention (specs/storage_targets.md F1)
  * @version 1.0
  */
 
@@ -55,6 +57,10 @@ class ShelfRun extends SystemBase {
 		'svr_cause'                 => array('type'=>'text'),
 		'svr_create_time'           => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'svr_finish_time'           => array('type'=>'timestamp(6)'),
+		// When the site reported a verify of its chain through this run passed
+		// (shelf_verified_run). Retention keeps the newest verified chain and
+		// everything newer.
+		'svr_verified_time'         => array('type'=>'timestamp(6)'),
 		'svr_update_time'           => array('type'=>'timestamp(6)'),
 		'svr_delete_time'           => array('type'=>'timestamp(6)'),
 	);

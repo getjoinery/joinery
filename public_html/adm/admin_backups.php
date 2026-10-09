@@ -2,6 +2,8 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.17 - the Status box says when no backup of the site's own has finished off-site for two nights, or
+ *                 none has passed verification for a day past the interval (specs/storage_targets.md F1, F2)
  * @version 1.16 - the target form is BackupTargetForm, shared with the setup wizard and the management node;
  *                 every provider in StorageProvider's catalogue, named by its label
  * @version 1.15 - one approval panel for every scope (ApprovalChallengePanel)
@@ -46,6 +48,7 @@ $history      = $page_vars['history'];
 $milestones   = $page_vars['milestones'];
 $ceremony     = $page_vars['ceremony'];
 $verify_every = $page_vars['verify_every'];
+$safety       = $page_vars['safety'];
 $recovery     = $page_vars['recovery'];
 $plan         = $page_vars['plan'];
 $plan_problem = $page_vars['plan_problem'];
@@ -125,6 +128,25 @@ if ($is_managed) {
 	   . ($plan['type'] === 'database' ? '(database only)' : '(whole site)')
 	   . ' to <strong>' . htmlspecialchars($plan['target']->get('bkt_name')) . '</strong>, '
 	   . 'keeping ' . (int)$plan['keep_days'] . ' days of backups.</div>';
+}
+
+// What this site's own backups are missing. Retention keeps the newest
+// verified backup and everything newer, so neither gap loses a stored
+// backup; both need a person.
+if (!$is_managed) {
+	foreach ($safety as $gap) {
+		$since = $gap['since'] !== null ? gmdate('Y-m-d H:i:s', $gap['since']) : null;
+		if ($gap['kind'] === 'offsite') {
+			echo '<div class="alert alert-danger mb-2"><strong>No backup has finished going offsite '
+			   . ($since !== null ? 'since ' . htmlspecialchars($when($since)) : 'yet') . '.</strong> '
+			   . 'Nothing newer is in backup storage. Recent backups below says why the runs failed.</div>';
+		} else {
+			echo '<div class="alert alert-warning mb-2"><strong>No backup has passed verification '
+			   . ($since !== null ? 'since ' . htmlspecialchars($when($since)) : 'yet') . '.</strong> '
+			   . 'Backups are kept until a newer one passes, so storage grows meanwhile. '
+			   . 'Use Verify the newest backup below, and fix what it reports.</div>';
+		}
+	}
 }
 
 // The three facts this box exists to answer, each read from the runs still

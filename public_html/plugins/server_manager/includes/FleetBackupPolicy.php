@@ -13,6 +13,8 @@
  * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
+ * @version 1.8 - a node verifies weekly by default, and an unverified or stale verify is a problem a day past the
+ *                interval (verify_alarm_days(), specs/storage_targets.md F1); the fixed 45 and 60 days are gone
  * @version 1.7 - machine_key() and agent_unheard() replace max_concurrent(): backups are limited to one at a
  *                time per machine, and a node whose agent is not checking in is not sent one
  * @version 1.6 - a verify is due at once after the first backup under a changed recovery key (note_verify_sent)
@@ -52,14 +54,18 @@ class FleetBackupPolicy {
 		// backups-off. The scheduled verify is always level 2; a rehearsal
 		// (level 3) is only ever asked for by a person and no schedule can
 		// select it.
-		'verify_every_days'  => 30,
+		'verify_every_days'  => BackupSafety::DEFAULT_VERIFY_EVERY_DAYS,
 	);
 
-	/** A node never verified reads as a problem this long after its first backup. */
-	const NEVER_VERIFIED_GRACE_DAYS = 45;
-
-	/** A verify older than this is stale, whatever the policy interval says. */
-	const VERIFY_STALE_DAYS = 60;
+	/**
+	 * Days without a passed verify before a node's backups are a problem: a
+	 * day past its interval, both for a node never verified (counted from its
+	 * first backup from here) and for one whose last pass has gone stale.
+	 * 0 when its verification is switched off.
+	 */
+	public static function verify_alarm_days(array $policy): int {
+		return BackupSafety::verify_alarm_days((int)($policy['verify_every_days'] ?? 0));
+	}
 
 	/**
 	 * The effective policy for one node: fleet defaults, then the site's own

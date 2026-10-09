@@ -14,6 +14,8 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.9 - bkh_surplus_time: when retention first found this run surplus; it is deleted only once a pass
+ *                CONFIRM_HOURS later still finds it so (specs/storage_targets.md F3)
  * @version 1.8 - bkh_destination (local | target | service, never null) and bkh_remote_run_id; stored_target()
  *                is the target a run's objects are in, for every reader (specs/storage_targets.md WP3)
  * @version 1.7 - a stale comment about a shared 'bkt' prefix is gone (BookingType is bty)
@@ -140,6 +142,11 @@ class BackupHistory extends SystemBase {
 		'bkh_verify_outcome' => array('type'=>'varchar(20)',
 		                              'allowed_values'=>array('pass', 'fail')),
 		'bkh_verify_message' => array('type'=>'text'),
+
+		// When retention first found this run surplus, and every pass since
+		// has agreed. A run is deleted only once this is BackupSafety::
+		// CONFIRM_HOURS old; a pass that keeps it clears it.
+		'bkh_surplus_time'   => array('type'=>'timestamp(6)'),
 
 		'bkh_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkh_update_time'   => array('type'=>'timestamp(6)'),

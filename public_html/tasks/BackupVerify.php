@@ -3,7 +3,7 @@
  * BackupVerify — this site proving its own newest backup restorable.
  *
  * A backup that has never been opened is a hope. On the interval the site sets
- * (backup_verify_every_days, 30 by default, 0 never) this opens and reads the
+ * (backup_verify_every_days, 7 by default, 0 never) this opens and reads the
  * newest backup the site took of itself: every archive a restore of it would
  * need is downloaded from the site's own target, decrypted with the site's own
  * key and read to the end, then removed. Nothing on the site is touched. The
@@ -19,6 +19,7 @@
  * verify and says so, as a skip — a management node's backups of it are
  * verified from that management node.
  *
+ * @version 1.1 - weekly by default: retention keeps the newest verified backup (specs/storage_targets.md F1)
  * @version 1.0
  */
 
@@ -67,6 +68,6 @@ class BackupVerify implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 
 	private static function every_days() {
 		$v = Globalvars::get_instance()->get_setting('backup_verify_every_days', true, true);
-		return ($v === null || $v === '') ? 30 : (int)$v;
+		return ($v === null || $v === '') ? BackupSafety::DEFAULT_VERIFY_EVERY_DAYS : (int)$v;
 	}
 }

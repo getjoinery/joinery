@@ -29,6 +29,7 @@
  *
  * Run: php tests/backups/backup_objects_run_test.php
  *
+ * @version 1.2 - aged rows are marked as found surplus a day before, so a run's retention deletes on the window alone
  * @version 1.1 - one file store: an object's visibility reads private
  * @version 1.0
  */
@@ -456,9 +457,13 @@ section('Site retention deletes an object only when no retained index names it')
 // Retention keeps days: every point started inside the window, and the newest
 // one started before it. Everything the runs above made is backdated past a
 // one-day window, so what the next run keeps is decided by that rule alone.
+// A run deletes only what an earlier pass, a day before, also found surplus
+// (BackupSafety, F3); every row is marked as found so then, so the window rule
+// alone decides here. A row the next pass keeps loses the mark.
 $age_history = function () use ($slug) {
 	DbConnector::get_instance()->get_db_link()
-		->prepare("UPDATE bkh_backup_history SET bkh_start_time = bkh_start_time - interval '30 days' WHERE bkh_slug = ?")
+		->prepare("UPDATE bkh_backup_history SET bkh_start_time = bkh_start_time - interval '30 days',
+			bkh_surplus_time = now() - interval '2 days' WHERE bkh_slug = ?")
 		->execute(array($slug));
 };
 

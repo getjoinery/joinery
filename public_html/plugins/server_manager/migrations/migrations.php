@@ -6,6 +6,7 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.10 - sm_017 moves the fleet verify interval, and node policies, still at 30 days to the weekly default
  * @version 1.9 - sm_016 marks the boxes a test-account plane made since the token swap as test boxes
  * @version 1.8 - sm_013 moves incidents marked Looking to New (Looking is no longer a triage)
  * @version 1.7 - sm_011 drops the fleet-wide backup cap setting; sm_012 cancels the unfinished jobs of nodes
@@ -522,6 +523,38 @@ return [
 			}
 			$marked = CloudAccounts::backfill($dblink, $company);
 			error_log('sm_016: ' . $marked . ' box(es) marked as test-account boxes.');
+		},
+	],
+	[
+		// A node's newest backup is verified weekly (specs/storage_targets.md
+		// F1): retention keeps the newest verified chain and everything newer,
+		// and a node with nothing verified for eight days is an incident. The
+		// fleet setting and each node's saved policy still at the old shipped
+		// 30 days move to 7; any other choice stays.
+		'id' => 'sm_017_verify_weekly',
+		'version' => '1.30.36',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("UPDATE stg_settings SET stg_value = '7'
+				WHERE stg_name = 'server_manager_fleet_backup_verify_every_days' AND stg_value = '30'");
+			$ready = $dblink->query("SELECT to_regclass('mgn_managed_nodes') IS NOT NULL AND EXISTS (SELECT 1
+				FROM information_schema.columns WHERE table_name = 'mgn_managed_nodes' AND column_name = 'mgn_backup_policy')")->fetchColumn();
+			if (!$ready) {
+				return;
+			}
+			$moved = 0;
+			$update = $dblink->prepare("UPDATE mgn_managed_nodes SET mgn_backup_policy = ? WHERE mgn_managed_node_id = ?");
+			foreach ($dblink->query("SELECT mgn_managed_node_id, mgn_backup_policy FROM mgn_managed_nodes
+					WHERE mgn_backup_policy IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC) as $n) {
+				$policy = json_decode((string)$n['mgn_backup_policy'], true);
+				if (!is_array($policy) || !isset($policy['verify_every_days']) || (int)$policy['verify_every_days'] !== 30) {
+					continue;
+				}
+				$policy['verify_every_days'] = 7;
+				$update->execute(array(json_encode($policy), (int)$n['mgn_managed_node_id']));
+				$moved++;
+			}
+			error_log('sm_017: ' . $moved . ' node backup polic' . ($moved === 1 ? 'y' : 'ies') . ' moved to weekly verification.');
 		},
 	],
 ];

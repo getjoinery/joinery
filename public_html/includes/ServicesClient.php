@@ -16,6 +16,7 @@
  * sender domain; storeConnection() seals the pair; the daily poll writes the
  * banner settings from status().
  *
+ * @version 1.1 - shelfVerifiedRun(): report a passed verify of a chain to backup storage (specs/storage_targets.md F1)
  * @version 1.0
  */
 class ServicesClient extends ServiceClient {
@@ -191,6 +192,10 @@ class ServicesClient extends ServiceClient {
 
 	public function shelfFinishRun(int $run_id, array $completed): array {
 		return $this->call('shelf_finish_run', array('run_id' => $run_id, 'completed' => $completed));
+	}
+
+	public function shelfVerifiedRun(int $run_id): array {
+		return $this->call('shelf_verified_run', array('run_id' => $run_id));
 	}
 
 	public function shelfStatus(): array {

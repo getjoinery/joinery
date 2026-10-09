@@ -22,6 +22,10 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.11 - prune() deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the node's newest
+ *                 verified chain and everything newer stay, the newest stays, and a point goes only once a pass
+ *                 CONFIRM_HOURS earlier found it surplus too (recorded on its space, sps_surplus); the verified
+ *                 floor is read from the verify jobs, so a space that cannot be listed never lowers it
  * @version 1.10 - object_store() reads object keys through BackupObjects::location_of(), so offloaded mail is kept and pruned like files
  * @version 1.9 - prune() orders every space's points newest first before the window is applied; a draining space
  *                is released only by a verify sent after the active space was (re)opened
@@ -72,6 +76,12 @@ class FleetBackupRetention {
 	 * point started inside the window, plus the newest one started before it.
 	 * Each point is deleted from its own space's target.
 	 *
+	 * What the window finds surplus goes only as BackupSafety allows: the
+	 * newest chain a verify passed (verified_chains()) and everything newer
+	 * stay, the newest point stays, and a point is deleted only once a pass
+	 * CONFIRM_HOURS earlier found it surplus too. Each space records what was
+	 * found surplus in it (StorageSpace::record_surplus()).
+	 *
 	 * A space the node was moved away from (draining) is kept whole until the
 	 * node's active space holds a chain a verify has passed, so there is never
 	 * a night with no restorable copy anywhere (specs/storage_targets.md §5).
@@ -120,6 +130,8 @@ class FleetBackupRetention {
 		}
 
 		$errors = array();
+		$listed = array();     // space id => point name => first found surplus, for this pass to record
+		$decided = false;
 		$segment = BackupProfile::path_segment(BackupProfile::MANAGER) . '/';
 		$spaces = array();     // space id => [space, creds, bucket, base, objects, groups]
 		$active = null;
@@ -160,8 +172,34 @@ class FleetBackupRetention {
 			// surplus() reads its points newest first: the first one before the
 			// window is the one kept. Across spaces that order is not given.
 			usort($points, function ($x, $y) { return $y['time'] <=> $x['time'] ?: strcmp($y['item'], $x['item']); });
-			$surplus_items = array_flip(BackupRunner::surplus($points, $keep_days, $now));
+			$verified = self::verified_chains($node);
+			$listed_before = array();
+			foreach ($spaces as $id => $sp) {
+				foreach ($sp['space']->surplus_listed() as $name => $first) {
+					$listed_before[$id . '|' . $name] = $first;
+				}
+			}
+			foreach ($points as &$p) {
+				list($sid, $name) = explode('|', $p['item'], 2);
+				$p['verified'] = isset($verified[$sid . '|' . $name]) || isset($verified['|' . $name]);
+			}
+			unset($p);
+			// The floor comes from the verify jobs alone (a chain's start is in its
+			// name): a space that could not be listed this pass must not hide the
+			// newest verified chain and let what is newer than it go.
+			$floor = null;
+			foreach (array_keys($verified) as $key) {
+				$t = self::start_time_of(substr($key, strpos($key, '|') + 1));
+				if ($t > 0 && ($floor === null || $t > $floor)) { $floor = $t; }
+			}
+			$decision = BackupSafety::confirm($points, BackupRunner::surplus($points, $keep_days, $now), $listed_before, $now, $floor);
+			$surplus_items = array_flip($decision['delete']);
+			$decided = true;
 			$result['kept'] = count($points) - count($surplus_items);
+			foreach ($decision['listed'] as $item => $first) {
+				list($sid, $name) = explode('|', $item, 2);
+				$listed[(int)$sid][$name] = $first;
+			}
 
 			$deleter = function (array $sp) {
 				return function ($key) use ($sp) {
@@ -189,6 +227,7 @@ class FleetBackupRetention {
 						$result['deleted_objects']++;
 						$sp['pruned_keys'][$key] = true;
 					}
+					unset($listed[$id][$name]);
 					$result['pruned']++;
 				}
 				if ($held) {
@@ -225,6 +264,17 @@ class FleetBackupRetention {
 				. $node->get('mgn_slug') . ': ' . $e->getMessage());
 		}
 
+		// What each listed space found surplus, for the next pass to confirm.
+		// A space that could not be listed keeps what it had, and so does every
+		// space when the pass failed before it decided anything.
+		foreach ($decided ? $spaces : array() as $id => $sp) {
+			try {
+				$sp['space']->record_surplus($listed[$id] ?? array());
+			} catch (Throwable $e) {
+				$errors[] = $sp['space']->describe() . ': could not record what is surplus: ' . $e->getMessage();
+			}
+		}
+
 		// Sized from what is LEFT in every space, so the figure is what this
 		// node is keeping rather than what it briefly held. Objects the
 		// provider reported no size for count as nothing: an under-count trips
@@ -248,6 +298,33 @@ class FleetBackupRetention {
 		}
 		$result['error'] = implode('; ', $errors);
 		return $result;
+	}
+
+	/**
+	 * The chains of this node a verify has passed, as 'space id|chain id' and,
+	 * for a verify sent before verifies named their space, '|chain id'. Read
+	 * from the completed verify_backup jobs, newest first.
+	 */
+	public static function verified_chains($node): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_parameters, mjb_result FROM mjb_management_jobs
+			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'verify_backup' AND mjb_status = 'completed'
+			  AND mjb_delete_time IS NULL
+			ORDER BY mjb_management_job_id DESC LIMIT 200");
+		$q->execute(array((int)$node->key));
+		$out = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$params = json_decode((string)$row['mjb_parameters'], true);
+			$res = json_decode((string)$row['mjb_result'], true);
+			if (!is_array($params) || !is_array($res) || ($res['verify_status'] ?? '') !== 'pass') {
+				continue;
+			}
+			$chain = (string)($params['chain_id'] ?? '');
+			if ($chain === '') { continue; }
+			$space = (int)($params['space_id'] ?? 0);
+			$out[($space > 0 ? $space : '') . '|' . $chain] = true;
+		}
+		return $out;
 	}
 
 	/**

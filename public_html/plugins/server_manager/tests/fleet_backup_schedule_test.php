@@ -415,8 +415,10 @@ $vnode = function (array $extra) {
 	), $extra));
 };
 $vpolicy = array_merge($policy, array('verify_every_days' => 30));
-check(FleetBackupPolicy::DEFAULTS['verify_every_days'] === 30, 'the shipped default is every 30 days');
-check(FleetBackupPolicy::fleet_defaults()['verify_every_days'] === 30, 'and the fleet default reads it from the declared setting');
+check(FleetBackupPolicy::DEFAULTS['verify_every_days'] === 7, 'the shipped default is every 7 days');
+check(FleetBackupPolicy::fleet_defaults()['verify_every_days'] === 7, 'and the fleet default reads it from the declared setting');
+check(FleetBackupPolicy::verify_alarm_days(FleetBackupPolicy::DEFAULTS) === 8, 'a verify is a problem a day past the interval: 8 days at the default');
+check(FleetBackupPolicy::verify_alarm_days(array('verify_every_days' => 0)) === 0, 'and never when verification is off');
 
 check(FleetBackupPolicy::is_verify_due($vpolicy, $vnode(array()), $vnow),
 	'never verified and the first backup is hours old: due — the backup stamp comes from a completed upload, and on a daily node the next backup would always beat a settling wait');
@@ -500,12 +502,16 @@ check(!$h['is_problem'] && $h['label'] === 'Backed up' && strpos($h['detail'], '
 	'never verified, ten days in: information on a healthy card, not a problem', $h['detail']);
 
 // The first backup is read from the job history; here it is handed in.
-$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 50 * 86400);
+$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 32 * 86400);
 check($h['is_problem'] && $h['label'] === 'Backups never verified restorable',
-	'never verified, 50 days after the first backup: a problem', $h['label']);
-check(strpos($h['detail'], 'opened and read') !== false, 'in the page\'s words', $h['detail']);
-$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 40 * 86400);
-check(!$h['is_problem'], 'and 40 days after: still information');
+	'never verified, 32 days after the first backup on a 30-day interval: a problem', $h['label']);
+check(strpos($h['detail'], 'opened and read') !== false && strpos($h['detail'], '31 days') !== false,
+	'in the page\'s words, a day past the interval', $h['detail']);
+$h = NodeMonitorHealth::verify_state($hn(array()), $vpolicy, $now - 30 * 86400);
+check(!$h['is_problem'], 'and 30 days after: still information');
+$h = NodeMonitorHealth::verify_state($hn(array()), FleetBackupPolicy::DEFAULTS, $now - 9 * 86400);
+check($h['is_problem'] && $h['label'] === 'Backups never verified restorable',
+	'at the weekly default, never verified 9 days after the first backup: a problem', $h['label']);
 
 $h = NodeMonitorHealth::fleet_backup_health($hn(array(
 	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 2,
@@ -529,14 +535,19 @@ check(strpos($h['detail'], 'The node said: Verification of the backup of 2026-09
 	'with the node\'s own reason, and no automatic retry', $h['detail']);
 
 $h = NodeMonitorHealth::fleet_backup_health($hn(array(
-	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 61 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 32 * 86400), 'mgn_backup_verify_level' => 2,
 	'mgn_backup_verify_outcome' => 'pass')), $vpolicy);
-check($h['is_problem'] && $h['label'] === 'Backup verification is stale' && strpos($h['detail'], '60 days') !== false,
-	'a pass older than 60 days is stale', $h['label'] . ' — ' . $h['detail']);
+check($h['is_problem'] && $h['label'] === 'Backup verification is stale' && strpos($h['detail'], '31 days') !== false,
+	'a pass older than a day past the interval is stale', $h['label'] . ' — ' . $h['detail']);
 $h = NodeMonitorHealth::fleet_backup_health($hn(array(
-	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 59 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 30 * 86400), 'mgn_backup_verify_level' => 2,
 	'mgn_backup_verify_outcome' => 'pass')), $vpolicy);
-check(!$h['is_problem'], 'and 59 days is not');
+check(!$h['is_problem'], 'and 30 days is not');
+$h = NodeMonitorHealth::fleet_backup_health($hn(array(
+	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 9 * 86400), 'mgn_backup_verify_level' => 2,
+	'mgn_backup_verify_outcome' => 'pass')), FleetBackupPolicy::DEFAULTS + array('enabled' => true));
+check($h['is_problem'] && $h['label'] === 'Backup verification is stale', 'at the weekly default, a pass 9 days old is stale',
+	$h['label'] . ' — ' . $h['detail']);
 
 $h = NodeMonitorHealth::fleet_backup_health($hn(array(
 	'mgn_backup_verify_time' => gmdate('Y-m-d H:i:s', $now - 5 * 86400), 'mgn_backup_verify_level' => 2,
