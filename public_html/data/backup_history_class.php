@@ -14,6 +14,7 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.11 - held_until(): when object lock lets this run's objects be deleted (F8)
  * @version 1.10 - bkh_remote_space_id: the management node's storage space a brokered run went to
  *                 (specs/storage_targets.md WP5)
  * @version 1.9 - bkh_surplus_time: when retention first found this run surplus; it is deleted only once a pass
@@ -187,6 +188,26 @@ class BackupHistory extends SystemBase {
 	 * sent to a management node. Throws when the target it went to has been
 	 * deleted, which a target holding runs refuses (BackupTarget::delete_refusal()).
 	 */
+	/**
+	 * When the objects of this run can be deleted from the target it went to,
+	 * or 0 when nothing holds them (BackupTarget::held_until()): from the last
+	 * moment the run wrote anything.
+	 */
+	public function held_until(): int {
+		$target = $this->stored_target();
+		if (!$target) {
+			return 0;
+		}
+		$written = 0;
+		foreach (array('bkh_start_time', 'bkh_finish_time', 'bkh_upload_time') as $col) {
+			$t = trim((string)$this->get($col));
+			if ($t !== '') {
+				$written = max($written, (int)strtotime($t . ' UTC'));
+			}
+		}
+		return $target->held_until($written);
+	}
+
 	public function stored_target(): ?BackupTarget {
 		if ((string)$this->get('bkh_destination') !== 'target') {
 			return null;

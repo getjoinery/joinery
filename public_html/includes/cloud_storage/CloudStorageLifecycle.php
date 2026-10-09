@@ -27,6 +27,7 @@
  * health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 3.2 - a bucket that locks every new object by default fails the delete step: no deleted file could go (F8)
  * @version 3.1 - the tick finishes what earlier deletes only hid in each file store's folder
  *                (HiddenVersionSweep; specs/storage_targets.md S28), and stays active while a sweep has work left
  * @version 3.0 - the file store is a target row (specs/storage_targets.md WP6): saveStore(), removeStore(),
@@ -157,8 +158,17 @@ class CloudStorageLifecycle {
 			$driver->delete($probe_key);
 			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'pass', 'message' => 'The probe object was deleted.'];
 		} catch (Exception $e) {
-			$steps[] = ['label' => self::STEP_DELETE, 'status' => 'warn',
-				'message' => 'The key cannot delete from this bucket. Permanent delete and permission flips will fail until it can.', 'raw' => $e->getMessage()];
+			if ($e->getCode() === S3Signer::LOCKED) {
+				// The bucket locks every new object (a default retention): no
+				// member's deleted file could ever be deleted.
+				$ok = false;
+				$steps[] = ['label' => self::STEP_DELETE, 'status' => 'fail',
+					'message' => 'This bucket locks every new object (object lock with a default retention), so a deleted file could not be '
+						. 'deleted. A file store needs a bucket without default retention.', 'raw' => $e->getMessage()];
+			} else {
+				$steps[] = ['label' => self::STEP_DELETE, 'status' => 'warn',
+					'message' => 'The key cannot delete from this bucket. Permanent delete and permission flips will fail until it can.', 'raw' => $e->getMessage()];
+			}
 		}
 
 		@unlink($probe_local);

@@ -11,6 +11,7 @@
  * the key its object was written under (CloudFileStore::key()), so a reader
  * hands that key back unchanged.
  *
+ * @version 2.2 - a delete object lock still holds throws with S3Signer::LOCKED as its code
  * @version 2.1 - a ranged get answered with the whole object (200) is cut to the span asked for
  * @version 2.0 - on S3Signer instead of the AWS SDK; keys are full keys, the folder is the caller's
  *                (specs/storage_targets.md WP6); putMany() is gone, the engine pushes one object at a time
@@ -105,9 +106,11 @@ class CloudStorageS3Driver implements CloudStorageDriver {
 		$r = $this->call('delete', $remote_key, function ($path) {
 			return S3Signer::delete($this->creds, $this->bucket, $path);
 		});
-		// Deleting what is not there leaves it not there.
+		// Deleting what is not there leaves it not there. One object lock
+		// still holds carries S3Signer::LOCKED as its code.
 		if (($r['status'] < 200 || $r['status'] >= 300) && $r['status'] !== 404) {
-			throw new RuntimeException('S3 delete failed for ' . $remote_key . ': ' . self::why($r));
+			throw new RuntimeException('S3 delete failed for ' . $remote_key . ': ' . self::why($r),
+				(int)$r['status'] === S3Signer::LOCKED ? S3Signer::LOCKED : 0);
 		}
 	}
 

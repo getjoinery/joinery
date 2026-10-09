@@ -22,6 +22,8 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.13 - object lock (specs/storage_targets.md F8): a surplus point any of whose objects the lock still holds
+ *                 is kept whole, for a pass after its date; an object or envelope still held is left, not counted
  * @version 1.12 - a deleted object's ledger row is kept, marked pruned by retention; a chain's newest manifest is
  *                 read whatever its version, and every envelope of an emptied epoch goes with it
  *                 (specs/storage_targets.md WP5)
@@ -146,7 +148,7 @@ class FleetBackupRetention {
 				if (!is_array($objects)) {
 					throw new Exception('backup storage could not be listed');
 				}
-				$spaces[(int)$space->key] = array('space' => $space, 'creds' => $creds, 'bucket' => $bucket,
+				$spaces[(int)$space->key] = array('space' => $space, 'target' => $target, 'creds' => $creds, 'bucket' => $bucket,
 					'base' => $base, 'objects' => $objects, 'groups' => self::group($objects, $base));
 				if ($space->is_active()) { $active = (int)$space->key; }
 			} catch (Throwable $e) {
@@ -204,10 +206,15 @@ class FleetBackupRetention {
 				$listed[(int)$sid][$name] = $first;
 			}
 
+			// Deletes one key; false when object lock still holds it, which a
+			// pass after its date deletes (F8).
 			$deleter = function (array $sp) {
 				return function ($key) use ($sp) {
 					$resp = S3Signer::delete($sp['creds'], $sp['bucket'], '/' . ltrim($key, '/'));
 					$status = (int)($resp['status'] ?? 0);
+					if ($status === S3Signer::LOCKED) {
+						return false;
+					}
 					// 404 is the state we were asking for.
 					if (($status < 200 || $status >= 300) && $status !== 404) {
 						throw new Exception('HTTP ' . $status . ' deleting ' . $key);
@@ -225,15 +232,38 @@ class FleetBackupRetention {
 				$delete = $deleter($sp);
 				$sp['pruned_keys'] = array();
 				$kept_groups = array();
+				$written = self::written_times($sp['objects']);
 				foreach ($sp['groups'] as $name => $group) {
 					if (!isset($surplus_items[$id . '|' . $name]) || $held) {
 						$kept_groups[] = $group;
 						continue;
 					}
+					// A point is deleted whole or not at all: while object lock
+					// holds any of it, it stays, surplus, for a pass after that
+					// date — and is kept for what the object store keeps (F8).
+					$newest = 0;
 					foreach ($group['keys'] as $key) {
-						$delete($key);
+						$newest = max($newest, $written[$key] ?? 0);
+					}
+					if ($sp['target']->held_until($newest ?: $now) > $now) {
+						$kept_groups[] = $group;
+						continue;
+					}
+					$stopped = false;
+					foreach ($group['keys'] as $key) {
+						if ($delete($key) === false) {
+							// The clocks disagree by more than the margin: the
+							// rest of the point waits, still surplus, for a later
+							// pass; what was deleted answers 404 then.
+							$stopped = true;
+							break;
+						}
 						$result['deleted_objects']++;
 						$sp['pruned_keys'][$key] = true;
+					}
+					if ($stopped) {
+						$kept_groups[] = $group;
+						continue;
 					}
 					unset($listed[$id][$name]);
 					$result['pruned']++;
@@ -247,7 +277,7 @@ class FleetBackupRetention {
 					foreach ($sp['objects'] as $obj) {
 						$key = is_array($obj) ? (string)($obj['key'] ?? $obj['Key'] ?? '') : '';
 						if ($key === '' || isset($sp['pruned_keys'][$key]) || strpos($key, $sp['base']) !== 0) { continue; }
-						$delete($key);
+						if ($delete($key) === false) { continue; }
 						$result['deleted_objects']++;
 						$sp['pruned_keys'][$key] = true;
 					}
@@ -752,6 +782,18 @@ class FleetBackupRetention {
 	 * @param callable $delete     fn(key): void, throws on failure
 	 * @return string[] the keys deleted
 	 */
+	/** key => when the provider says it was written (unix time), for the keys a listing dated. */
+	private static function written_times(array $objects): array {
+		$out = array();
+		foreach ($objects as $obj) {
+			if (!is_array($obj)) { continue; }
+			$key = (string)($obj['key'] ?? $obj['Key'] ?? '');
+			$t = strtotime((string)($obj['last_modified'] ?? $obj['LastModified'] ?? ''));
+			if ($key !== '' && $t) { $out[$key] = (int)$t; }
+		}
+		return $out;
+	}
+
 	public static function prune_objects(array $objects, $base, array $kept, $read, $delete) {
 		$base = rtrim((string)$base, '/') . '/';
 		$store = self::object_store($objects, $base);
@@ -815,7 +857,7 @@ class FleetBackupRetention {
 		foreach ($candidates as $loc => $o) {
 			$landed = strtotime((string)$o['last_modified']);
 			if ($landed === false || $landed >= $newest_run) { continue; }
-			$delete($o['key']);
+			if ($delete($o['key']) === false) { continue; }   // object lock still holds it
 			$deleted[] = $o['key'];
 			$touched[substr($loc, 0, strpos($loc, '/'))] = true;
 			unset($store['objects'][$loc]);
@@ -833,8 +875,7 @@ class FleetBackupRetention {
 			}
 			if (!$left) {
 				foreach (($store['envelope_keys'][$epoch] ?? array($store['envelopes'][$epoch])) as $key) {
-					$delete($key);
-					$deleted[] = $key;
+					if ($delete($key) !== false) { $deleted[] = $key; }
 				}
 			}
 		}

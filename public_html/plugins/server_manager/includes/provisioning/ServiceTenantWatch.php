@@ -51,6 +51,9 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.7 - object lock (specs/storage_targets.md F8): retention keeps a chain the lock still holds whole, for a
+ *                pass after its date; the lapse prune is finished (rows marked, tenant told) only once nothing
+ *                the lock holds is left
  * @version 1.6 - the reconcile neither counts nor adopts the run ledger files in a space (specs/storage_targets.md F4),
  *                and says, rather than adopts, a size that differs under a row recorded with its hash
  * @version 1.5 - retention deletes only what BackupSafety allows (specs/storage_targets.md F1, F3): the newest
@@ -657,8 +660,28 @@ class ServiceTenantWatch {
 				}
 				try {
 					list($target, $creds, $bucket) = $space->reach();
+					// Deleted whole or not at all: while object lock holds any
+					// of it, it stays surplus for a pass after that date (F8).
+					$newest = 0;
 					foreach ($family['objects'] as $object) {
-						$this->delete_object($creds, $bucket, (string)$object->get('svo_key'));
+						$t = trim((string)($object->get('svo_completed_time') ?: $object->get('svo_signed_time')));
+						$newest = max($newest, $t === '' ? $now : (int)strtotime($t . ' UTC'));
+					}
+					if ($target->held_until($newest) > $now) {
+						continue;
+					}
+					$stopped = false;
+					foreach ($family['objects'] as $object) {
+						if (!$this->delete_object($creds, $bucket, (string)$object->get('svo_key'))) {
+							// The clocks disagree by more than the margin: the
+							// chain waits, still surplus and unmarked, for a
+							// later pass; what was deleted answers 404 then.
+							$stopped = true;
+							break;
+						}
+					}
+					if ($stopped) {
+						continue;
 					}
 					// Only once every object is gone are the rows marked: a
 					// half-deleted chain must keep looking like one that still
@@ -731,7 +754,9 @@ class ServiceTenantWatch {
 	 * The prune-after day has come for a stopped tenant: everything in every
 	 * one of its spaces goes, once, each from its own target, and the ledger
 	 * rows are kept, marked as a lapse. A space that cannot be reached leaves
-	 * the prune undone (said in the run's problems) for the next pass.
+	 * the prune undone (said in the run's problems) for the next pass, and so
+	 * does an object object lock still holds (F8): the prune is finished, the
+	 * rows marked and the tenant told, only once nothing is left.
 	 */
 	private function prune_if_due(ServiceTenant $row, string $now): int {
 		$after = trim((string)$row->get('svt_prune_after_time'));
@@ -744,21 +769,43 @@ class ServiceTenantWatch {
 		}
 		$spaces = StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$row->key);
 		$deleted = 0;
+		$held = 0;   // latest date object lock holds anything left until
+		$clock = (int)strtotime($now . ' UTC');
 		foreach ($spaces as $space) {
 			try {
 				list($target, $creds, $bucket) = $space->reach();
+				$objects = array();
+				$newest = 0;
 				foreach (S3Signer::list($creds, $bucket, $space->base()) as $object) {
 					$key = (string)($object['key'] ?? '');
-					if (!$space->holds_key($key)) {
-						continue;
+					if ($space->holds_key($key)) {
+						$objects[] = $key;
+						$newest = max($newest, (int)strtotime((string)($object['last_modified'] ?? '')));
 					}
-					$this->delete_object($creds, $bucket, $key);
-					$deleted++;
+				}
+				// While the lock holds what was written last, the space waits
+				// whole: no delete is tried that the provider would refuse.
+				$until = $objects ? $target->held_until($newest ?: $clock) : 0;
+				if ($until > $clock) {
+					$held = max($held, $until);
+					continue;
+				}
+				foreach ($objects as $key) {
+					if ($this->delete_object($creds, $bucket, $key)) {
+						$deleted++;
+					} else {
+						$held = max($held, $clock + 86400);   // the clocks disagree: a day on
+					}
 				}
 			} catch (\Throwable $e) {
 				$this->errors[] = $this->label($row) . ': the lapse prune of ' . $space->describe() . ' failed: ' . $e->getMessage();
 				return 0;
 			}
+		}
+		if ($held > 0) {
+			error_log('ServiceTenantWatch: the lapse prune of ' . $this->label($row) . ' deleted ' . $deleted
+				. ' object(s); object lock holds the rest until ' . gmdate('Y-m-d H:i', $held) . ' UTC, and a pass after that finishes it.');
+			return 0;
 		}
 		$ledger = new MultiShelfObject(array('tenant_id' => (int)$row->key, 'pruned' => false, 'deleted' => false));
 		foreach ($ledger as $object) {
@@ -793,12 +840,17 @@ class ServiceTenantWatch {
 		return count($parts) >= 3 ? (string)$parts[1] : '';
 	}
 
-	private function delete_object(array $creds, string $bucket, string $key): void {
+	/** Delete one object; false when object lock still holds it. */
+	private function delete_object(array $creds, string $bucket, string $key): bool {
 		$resp = S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
 		$status = (int)($resp['status'] ?? 0);
+		if ($status === S3Signer::LOCKED) {
+			return false;
+		}
 		if (($status < 200 || $status >= 300) && $status !== 404) {
 			throw new RuntimeException('HTTP ' . $status . ' deleting ' . $key);
 		}
+		return true;
 	}
 
 	private function mail_client(): ?Smtp2GoClient {

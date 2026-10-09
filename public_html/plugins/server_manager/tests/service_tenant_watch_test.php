@@ -28,6 +28,7 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/service_tenant_watch_test.php
  *
+ * @version 1.3 - a lapse prune that finds objects object lock still holds is not finished until they are gone
  * @version 1.2 - retention waits a day before deleting a surplus chain, and keeps the newest verified chain and
  *                everything newer (specs/storage_targets.md F1, F3)
  * @version 1.1 - its timeline runs in 2036-2037: a grant is judged against the real clock, so a paid-through date
@@ -90,7 +91,7 @@ $drain = function () use (&$history) {
 $paths = function (array $calls) { return array_map(function ($c) { return $c['path']; }, $calls); };
 
 // ── Shelf fixture ───────────────────────────────────────────────────────────
-$fx = s3fx_start();
+$fx = s3fx_start(array('FIXTURE_LOCK' => 1));
 if ($fx === null) {
 	section('fixture');
 	harness_skip('no loopback S3 fixture could start');
@@ -353,6 +354,25 @@ check($shelf->get('svt_pruned_time') !== null && (int)$shelf->get('svt_figure') 
 	'the row says it was pruned, the ledger is empty, the figure is 0');
 $watch->watch($shelf, '2037-06-01 00:00:00');
 check(ServiceTenant::forKey($key_id, 'shelf')->get('svt_pruned_time') !== null, 'pruning happens once');
+
+section('shelf: a lapse prune that meets a locked object finishes only once it is gone');
+$shelf->set('svt_pruned_time', null);
+$shelf->save();
+$locked_keys = array($base . 'site/chain-20370101_000000/db', $base . 'site/chain-20370101_000000/files');
+foreach ($locked_keys as $k) {
+	S3Signer::put_file(S3Signer::with_lock($fx_creds, 1), 'shelf', '/' . $k, tempnam_with('locked ' . $k));
+}
+$watch->watch(ServiceTenant::forKey($key_id, 'shelf'), '2037-06-02 00:00:00');
+$shelf = ServiceTenant::forKey($key_id, 'shelf');
+check($shelf->get('svt_pruned_time') === null && s3fx_object($fx, 'shelf', '/' . $locked_keys[0]) !== null,
+	'objects the lock still holds stay, and the prune is not marked done', (string)$shelf->get('svt_pruned_time'));
+foreach ($locked_keys as $k) {
+	file_put_contents(s3fx_object_file($fx['dir'], 'shelf', '/' . $k) . '.lock', gmdate('Y-m-d\TH:i:s\Z', time() - 60));
+}
+$watch->watch($shelf, '2037-06-03 00:00:00');
+$shelf = ServiceTenant::forKey($key_id, 'shelf');
+check($shelf->get('svt_pruned_time') !== null && s3fx_object($fx, 'shelf', '/' . $locked_keys[0]) === null
+	&& s3fx_object($fx, 'shelf', '/' . $locked_keys[1]) === null, 'once the lock has passed, the next pass deletes them and finishes the prune');
 
 section('the phase runs inside the provisioning task');
 $reply(array(array('sent' => 1), array('sent' => 1), array('sent' => 1)));

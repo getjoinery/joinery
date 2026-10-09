@@ -66,6 +66,8 @@
  * stays readable where it is until retention prunes it. A ledger row whose
  * object is gone is kept, with its time and cause.
  *
+ * @version 1.8 - a write to a target that locks carries COMPLIANCE lock headers signed into its link, which the
+ *                answer names; a run's ledger file is locked too (specs/storage_targets.md F8)
  * @version 1.7 - write-once: a key a finished run completed is never signed again (sign answers 'exists'); finish
  *                records each object's sha256 and writes the run's ledger file, {space base}ledger/{run id}.json
  *                (F4); the signing and finishing path is shared with Managed nodes (NodeBroker); a manifest or an
@@ -365,11 +367,15 @@ class ShelfBroker {
 		switch ($operation) {
 			case 'put':
 				self::ledgerSigned($run, $key, $chain, (int)($args['bytes'] ?? 0), null, $creds, $bucket);
-				return array('url' => S3Signer::presign($creds, $bucket, $key, 'PUT', array(), $expires), 'key' => $key, 'expires_at' => $expires_at);
+				$lock = self::lockHeaders($target);
+				return array('url' => S3Signer::presign($creds, $bucket, $key, 'PUT', array(), $expires, $lock), 'key' => $key,
+					'expires_at' => $expires_at, 'headers' => $lock);
 
 			case 'multipart_create':
 				self::ledgerSigned($run, $key, $chain, (int)($args['bytes'] ?? 0), null, $creds, $bucket);
-				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploads' => ''), $expires), 'key' => $key, 'expires_at' => $expires_at);
+				$lock = self::lockHeaders($target);
+				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploads' => ''), $expires, $lock), 'key' => $key,
+					'expires_at' => $expires_at, 'headers' => $lock);
 
 			case 'multipart_parts':
 				$upload_id = self::uploadId($args);
@@ -394,6 +400,19 @@ class ShelfBroker {
 				return array('url' => S3Signer::presign($creds, $bucket, $key, 'POST', array('uploadId' => $upload_id), $expires), 'key' => $key, 'expires_at' => $expires_at);
 		}
 		throw new ShelfBrokerException('Unreachable.');
+	}
+
+	/**
+	 * The object-lock headers a write to this target must carry, signed into
+	 * its link so the writer cannot leave them out (F8): COMPLIANCE until the
+	 * target's lock days from now. Empty for a target that does not lock.
+	 */
+	public static function lockHeaders(BackupTarget $target): array {
+		$days = $target->lock_days();
+		if ($days <= 0) {
+			return array();
+		}
+		return array('x-amz-object-lock-mode' => 'COMPLIANCE', 'x-amz-object-lock-retain-until-date' => S3Signer::lock_until($days));
 	}
 
 	/**
@@ -581,7 +600,8 @@ class ShelfBroker {
 			$tmp = tempnam(sys_get_temp_dir(), 'jy_ledger_');
 			try {
 				file_put_contents($tmp, $body);
-				$resp = S3Signer::put_file($creds, $bucket, '/' . self::ledgerKey($run), $tmp, 'application/json');
+				// Locked like the run's objects, so nobody can replace it (F4, F8).
+				$resp = S3Signer::put_file(S3Signer::with_lock($creds, $target->lock_days()), $bucket, '/' . self::ledgerKey($run), $tmp, 'application/json');
 			} finally {
 				@unlink($tmp);
 			}

@@ -25,6 +25,18 @@
  *                              bucket does: a DELETE with no versionId only
  *                              hides the object behind a delete marker, and
  *                              its bytes stay (s3fx_hidden())
+ *   FIXTURE_LOCK=1             the bucket has object lock on: GetObjectLock-
+ *                              Configuration answers Enabled, and a PUT or a
+ *                              multipart create carrying the lock headers locks
+ *                              its object (s3fx_lock()), which HEAD reports and
+ *                              a DELETE of it is refused until its date. As on
+ *                              Backblaze, a locked PUT needs Content-MD5. Without
+ *                              it, lock headers are refused as on a bucket with
+ *                              no lock. Either way, a presigned link that signed
+ *                              a header is refused when the request lacks it.
+ *   FIXTURE_LOCK_DEFAULT=1     with FIXTURE_LOCK, the bucket has a default
+ *                              retention: a write without lock headers is
+ *                              locked for a day all the same
  *
  * ListObjectVersions (?versions) answers every object as one version; a hidden
  * one as a non-current version under a delete marker. A DELETE naming a
@@ -40,6 +52,7 @@
  *   s3fx_object($fx, 'bucket', '/k');  // the bytes, or null
  *   s3fx_count($fx, 'complete');       // how many completes were seen
  *
+ * @version 1.6 - object lock (FIXTURE_LOCK, FIXTURE_LOCK_DEFAULT, s3fx_lock()); a presigned link's signed headers must be sent
  * @version 1.5 - ListObjectVersions and DELETE by versionId; FIXTURE_VERSIONED, where a plain DELETE only hides
  * @version 1.4 - a ranged GET is answered 206 with the span; every key written is logged in order
  *                (s3fx_put_keys())
@@ -132,6 +145,12 @@ function s3fx_hide($fixture, $bucket, $path) {
 	file_put_contents($f . '.marker', $bucket . '/' . ltrim($path, '/'));
 }
 
+/** The retain-until date an object is locked to, or null when it is not locked (FIXTURE_LOCK). */
+function s3fx_lock($fixture, $bucket, $path) {
+	$f = s3fx_object_file($fixture['dir'], $bucket, $path) . '.lock';
+	return is_file($f) ? (string)file_get_contents($f) : null;
+}
+
 /** Keys ('bucket/key') whose bytes are hidden behind a delete marker, sorted (FIXTURE_VERSIONED). */
 function s3fx_hidden($fixture) {
 	$out = array();
@@ -197,8 +216,44 @@ if ($anonymous && ($method === "GET" || $method === "HEAD") && (int)getenv("FIXT
 	return true;
 }
 
+// A presigned link that signed a header is refused when the request lacks it.
+foreach (explode(";", (string)($q["X-Amz-SignedHeaders"] ?? "")) as $h) {
+	if ($h !== "" && $h !== "host" && !isset($_SERVER["HTTP_" . strtoupper(str_replace("-", "_", $h))])) {
+		http_response_code(403);
+		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>signed header " . $h . " was not sent</Message></Error>";
+		return true;
+	}
+}
+// Object lock: what a write asks for, and whether this bucket takes it.
+$lock_until = (string)($_SERVER["HTTP_X_AMZ_OBJECT_LOCK_RETAIN_UNTIL_DATE"] ?? "");
+if ($lock_until !== "" && ($method === "PUT" || $method === "POST")) {
+	if ((int)getenv("FIXTURE_LOCK") !== 1) {
+		http_response_code(400);
+		echo "<?xml version=\"1.0\"?><Error><Code>InvalidRequest</Code><Message>Bucket is missing Object Lock Configuration</Message></Error>";
+		return true;
+	}
+	if ($method === "PUT" && !isset($q["partNumber"]) && !isset($_SERVER["HTTP_CONTENT_MD5"])) {
+		http_response_code(400);
+		echo "<?xml version=\"1.0\"?><Error><Code>InvalidRequest</Code><Message>Content-MD5 OR x-amz-checksum- HTTP header is required for Put Object requests with Object Lock parameters</Message></Error>";
+		return true;
+	}
+}
+$locked = function () use ($file) {
+	return is_file($file . ".lock") && strtotime((string)file_get_contents($file . ".lock")) > time();
+};
+if ($method === "GET" && $key === "" && array_key_exists("object-lock", $q)) {
+	if ((int)getenv("FIXTURE_LOCK") === 1) {
+		echo "<?xml version=\"1.0\"?><ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>";
+	} else {
+		http_response_code(404);
+		echo "<?xml version=\"1.0\"?><Error><Code>ObjectLockConfigurationNotFoundError</Code><Message>Object Lock configuration does not exist for this bucket</Message></Error>";
+	}
+	return true;
+}
+
 if ($method === "POST" && array_key_exists("uploads", $q)) {
 	$n = $bump("create");
+	if ($lock_until !== "") { file_put_contents($dir . "/parts/fixture-upload-" . $n . ".lock", $lock_until); }
 	echo "<?xml version=\"1.0\"?><InitiateMultipartUploadResult><UploadId>fixture-upload-" . $n . "</UploadId></InitiateMultipartUploadResult>";
 	return true;
 }
@@ -231,6 +286,7 @@ if ($method === "POST" && isset($q["uploadId"])) {
 	}
 	fclose($out);
 	file_put_contents($file . ".key", $full); @unlink($file . ".marker");
+	if (is_file($dir . "/parts/" . $q["uploadId"] . ".lock")) { rename($dir . "/parts/" . $q["uploadId"] . ".lock", $file . ".lock"); }
 	echo "<?xml version=\"1.0\"?><CompleteMultipartUploadResult><ETag>\"final\"</ETag></CompleteMultipartUploadResult>";
 	return true;
 }
@@ -247,8 +303,16 @@ if ($method === "PUT") {
 		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>put refused</Message></Error>";
 		return true;
 	}
+	if ($locked()) {
+		// A whole new version on a real bucket; here, one version: refused.
+		http_response_code(403);
+		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>forbidden by object lock</Message></Error>";
+		return true;
+	}
 	$sink($file);
 	file_put_contents($file . ".key", $full); @unlink($file . ".marker");
+	if ($lock_until === "" && (int)getenv("FIXTURE_LOCK_DEFAULT") === 1) { $lock_until = gmdate("Y-m-d\\TH:i:s\\Z", time() + 86400); }
+	if ($lock_until !== "") { file_put_contents($file . ".lock", $lock_until); } else { @unlink($file . ".lock"); }
 	file_put_contents($dir . "/put.keys", $full . "\n", FILE_APPEND);
 	header("ETag: \"" . md5_file($file) . "\"");
 	return true;
@@ -330,6 +394,10 @@ if ($method === "HEAD") {
 	if (!is_file($file)) { http_response_code(404); return true; }
 	header("Content-Length: " . filesize($file));
 	header("ETag: \"" . md5_file($file) . "\"");
+	if (is_file($file . ".lock")) {
+		header("x-amz-object-lock-mode: COMPLIANCE");
+		header("x-amz-object-lock-retain-until-date: " . file_get_contents($file . ".lock"));
+	}
 	return true;
 }
 if ($method === "DELETE") {
@@ -349,8 +417,14 @@ if ($method === "DELETE") {
 	}
 	if ($vid === "m1") { @unlink($file . ".marker"); http_response_code(204); return true; }
 	if ($vid === "v1") { @unlink($file . ".hidden"); http_response_code(204); return true; }
+	if ($locked()) {
+		http_response_code(403);
+		echo "<?xml version=\"1.0\"?><Error><Code>AccessDenied</Code><Message>forbidden by object lock</Message></Error>";
+		return true;
+	}
 	@unlink($file);
 	@unlink($file . ".key");
+	@unlink($file . ".lock");
 	http_response_code(204);
 	return true;
 }

@@ -52,7 +52,10 @@ exactly as they do against a site's own target.
   multipart create, a batch of ten part links, a complete. Nothing outside the
   base key, no read and no delete is ever signed for a node. **Nothing is
   written twice**: a key a finished run completed is answered `exists`, with
-  the size and sha256 recorded for it, instead of a link.
+  the size and sha256 recorded for it, instead of a link. In a space whose
+  target locks, a put's and a multipart create's link signs the object lock
+  headers and the answer names them; the node sends them as given
+  (§ Object lock).
 - **finish** names every object the run wrote, with the bytes and sha256 the
   node sent, and the chain. The broker records them (`svo_sha256`), cancels
   whatever else the run signed, and writes the run's ledger file (below). Only
@@ -907,8 +910,7 @@ so the signer never sees an incomplete B2 credential.
 `BackupTarget::credential_problem()` checks the provider's own fields before the
 provider is asked anything: a provider that asks for the region needs one, a
 region is a short name (`us-east-1`), never an address, and a Linode endpoint
-is the cluster's bare https host (`us-east-1.linodeobjects.com`). Linode targets
-never mint a per-run key.
+is the cluster's bare https host (`us-east-1.linodeobjects.com`).
 
 **Streamed artifacts** — the data and code archives, the standalone archive, the
 database dump — go through `S3Signer::put_stream()`: an engine's stdout,
@@ -1697,10 +1699,11 @@ node's runs stop.
 
 One form adds and edits a target: `BackupTargetForm`, drawn by the site's
 Backups page, the setup wizard (a short form: no name, folder or Enabled box)
-and, on a management node, the Targets page, which adds the node key and the
-per-run key switch. One save path sits behind all three
-(`BackupTargetForm::save()`). The provider select shows only the region and
-endpoint fields the provider asks for, and only those are read from the post.
+and, on a management node, the Targets page. One save path sits behind all
+three (`BackupTargetForm::save()`). The provider select shows only the region
+and endpoint fields the provider asks for, and only those are read from the
+post; the lock days field shows only for a provider that takes object lock
+(§ Object lock, below).
 
 A site's first enabled target becomes where its backups go
 (`backup_target_id`) as it is saved. Nothing ever picks "the one enabled
@@ -1714,7 +1717,7 @@ is the backup targets unless it asks for file stores (`MultiBackupTarget`,
 offloaded file records it.
 
 **A target's location is fixed once it is used.** Provider, endpoint, region,
-bucket and folder are drawn read-only, and refused on save, once anything was
+bucket, folder and lock days are drawn read-only, and refused on save, once anything was
 stored in the target (a history row points at it) or, on a management node, a
 storage space on it is still live (`BackupTarget::location_refusal()`). The name
 and the key stay editable. To use another bucket, add a target. The folder is
@@ -1744,21 +1747,84 @@ order, stopping where the rest would be meaningless:
 3. **Write.** The main key stores a probe object under the target's prefix.
 4. **Private.** An anonymous read of that probe is refused. Backups are
    encrypted, but a bucket anyone can read is refused all the same.
-5. **Prune.** The main key deletes the probe; retention needs that.
-6. **Node key**, when one is set. It stores a probe and *cannot* delete it;
-   the main key cleans up. A node key that can delete is refused, because a
-   node handed it could erase backups.
-7. **Backblaze keys.** Each key states what it may do
+5. **Prune.** The main key deletes the probe; retention needs that. A bucket
+   that locks every new object by default (object lock with a default
+   retention) fails here, saying so: retention could not prune on its own
+   schedule. Lock days on the target are how backups are locked.
+6. **Backblaze key.** The key states what it may do
    (`b2_authorize_account`'s `allowed`, kept by `B2Client::authorize()`): a
    key pinned to another bucket is refused; one that opens every bucket on
    the account passes with a warning naming the file store buckets it also
    opens; a missing capability (`listFiles`, `readFiles`, `writeFiles`,
-   `deleteFiles`, plus `writeKeys`, `listKeys`, `deleteKeys` when minting per
-   run is on) is refused naming it and what it would break.
+   `deleteFiles`, plus `readBucketRetentions`, `readFileRetentions`,
+   `writeFileRetentions` on a target that locks) is refused naming it.
+7. **Lock**, on a target that locks. The bucket's object lock setting is on
+   (`GetObjectLockConfiguration`), and a probe written locked for one day is
+   refused a delete. A bucket without lock is refused, saying lock can only be
+   turned on when a bucket is created. The probe stays until its date, under
+   `_joinery_lock_probe/` beside the target's folders; each test first deletes
+   the probes whose date has passed.
 
 The file store's Save asks the first and last questions the other way round
 (`docs/cloud_storage.md` § Test Connection Steps). `includes/BucketCheck.php`
 holds the shared pieces.
+
+### Object lock
+
+A backup target can lock what is written to it: under object lock in
+**compliance mode**, nobody can delete or replace an object before its
+retain-until date — not this site, not the management node, not the key's
+owner at the provider's console. A break-in on the machine holding the key
+cannot erase the backups.
+
+- **Where.** A backup target on a provider that takes object lock
+  (`StorageProvider::object_lock()`: Backblaze B2, Amazon S3, Linode). The
+  bucket must have object lock on, which a provider allows only when the bucket
+  is created; the connection test refuses a target set to lock whose bucket has
+  none. A file store never locks: deleting a member's file has to delete it.
+- **How long.** `bkt_lock_days`, 0 for off, part of the location (fixed once
+  anything is stored). The form suggests the site's retention plus its
+  full-backup interval (`BackupTarget::suggested_lock_days()`), which covers
+  each backup for as long as its set can be restored from.
+- **Every write is locked.** A site writes through the target's write
+  credential (`BackupTarget::write_credentials()`, `S3Signer::with_lock()`):
+  every whole-object PUT and multipart create carries
+  `x-amz-object-lock-mode: COMPLIANCE` and a retain-until date that many days
+  out, and a locked PUT carries its body's `Content-MD5`, which Backblaze
+  requires. Through the broker, the lock headers are signed into each link
+  (`ShelfBroker::lockHeaders()`, `S3Signer::presign()`'s signed headers) and
+  named in its answer, so the node sends them and cannot leave them out: the
+  provider refuses a request missing a signed header. The run's ledger file is
+  locked the same way. A node on a release older than
+  `JobCommandBuilder::LOCK_MIN_CORE_VERSION` is refused a backup or a
+  re-upload to a space that locks, naming the release.
+- **A delete waits for the date.** `S3Signer::delete()` answers `LOCKED`
+  (423, with `locked_until`) for a version the lock still holds, read from the
+  version's retain-until date. Retention deletes a point whole or not at all:
+  while the lock holds any of it — judged from when it was written plus the
+  lock days, with fifteen minutes for clocks (`BackupTarget::held_until()`,
+  `BackupHistory::held_until()`, and for a chain the newest `LastModified` in
+  its folder, which a failed run may have written after the last success; the
+  listing's `LastModified` on the management node) — a surplus point is left as it is, still recorded surplus, and the
+  first pass after its date deletes it. Should the clocks disagree by more
+  than that and a delete inside a point be refused, the rest of the point waits
+  the same way, without an error. The offloaded-files prune remembers each
+  delete it could not make, and every candidate of a pass that could not read
+  a retained run's index (`unpruned.json` beside the site's objects, per
+  target), and offers it again, through the same check of the retained runs'
+  indexes, once its date has passed; an epoch whose re-sealed envelope is still
+  locked is tidied again the same way. A customer's lapse prune is finished —
+  its ledger rows marked, the customer told — only once nothing the lock holds
+  is left; until then each pass tries again. Stored Backups and Empty backup
+  storage say the date in their refusal.
+- **What a refusal is read as.** A delete the provider refuses is read as
+  locked when the version's retain-until date is still ahead. So on a locking
+  target, a key that has lost its delete permission looks held until that
+  date, and then fails with the real reason; the connection test's Prune step,
+  whose probe is not locked, shows a missing permission at once.
+- **Cost.** Storage for a locked object is paid until its date even when
+  retention would delete it sooner, and nothing can shorten that; a mistaken
+  large upload costs its lock period. The form says so beside the field.
 
 ### A target an installer creates
 

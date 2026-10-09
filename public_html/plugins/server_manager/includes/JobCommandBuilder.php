@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.112 - a node on a core older than LOCK_MIN_CORE_VERSION is refused a backup or re-upload to a space whose target
+ *                  locks (specs/storage_targets.md F8)
  * @version 1.111 - build_move_to_plane: ask another management node to adopt this node's machine (agent 1.67.0),
  *                  under this node's slug; the machine stays here until that is approved
  * @version 1.110 - an install carrying the buyer's admin password exports JOINERY_ADMIN_PASSWORD_SHOWN=1: the plane's
@@ -454,6 +456,13 @@ class JobCommandBuilder {
 	 * this moves to the one that does.
 	 */
 	const BROKER_MIN_CORE_VERSION = '0.8.472';
+
+	/**
+	 * The first core that sends the object-lock headers a broker link signs
+	 * (specs/storage_targets.md F8). An older one would be refused by the
+	 * provider on every write; it is refused here, naming the upgrade.
+	 */
+	const LOCK_MIN_CORE_VERSION = '0.8.474';
 
 	/**
 	 * The oldest release a site can be copied from (specs/site_copy.md WP8). A
@@ -1125,6 +1134,7 @@ class JobCommandBuilder {
 				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this management node takes: "
 				. self::write_target_refusal($node) . '.');
 		}
+		self::assert_node_takes_lock($node, $space, 'back up');
 		$target = $space->target();
 
 		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
@@ -3088,6 +3098,7 @@ class JobCommandBuilder {
 		if (!$space) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' cannot upload: " . self::write_target_refusal($node) . '.');
 		}
+		self::assert_node_takes_lock($node, $space, 'upload a backup');
 		$target = $space->target();
 		$primitive_params = [
 			'filename'        => basename(trim((string)($params['filename'] ?? ''))),
@@ -3721,6 +3732,21 @@ class JobCommandBuilder {
 	 */
 	private static function broker_slot(StorageSpace $space, string $kind) {
 		return '__SM_BROKER_' . (int)$space->key . '_' . ($kind === 'upload' ? 'upload' : 'backup') . '__';
+	}
+
+	/** Refuse a node whose core cannot write to a space that locks what it holds. */
+	private static function assert_node_takes_lock($node, StorageSpace $space, string $what) {
+		$target = $space->target();
+		if (!$target || $target->lock_days() <= 0) {
+			return;
+		}
+		$core = trim((string)$node->get('mgn_joinery_version'));
+		if ($core !== '' && version_compare($core, self::LOCK_MIN_CORE_VERSION, '>=')) {
+			return;
+		}
+		throw new Exception("Node '{$node->get('mgn_slug')}' runs release " . ($core === '' ? '(unknown)' : $core)
+			. ", which cannot {$what} to " . $target->get('bkt_name') . ': that target locks every backup, and this release '
+			. 'does not send the lock. Upgrade it to release ' . self::LOCK_MIN_CORE_VERSION . ' or later.');
 	}
 
 	/** Refuse a node whose core predates the broker, naming the upgrade. */

@@ -42,7 +42,7 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('tests/lib/s3_fixtures.php'));
 
-$fx = s3fx_start();
+$fx = s3fx_start(array('FIXTURE_LOCK' => 1));
 if ($fx === null) {
 	harness_skip('storage spaces', 'could not start a local PHP HTTP server on 127.0.0.1');
 	harness_finish();
@@ -406,6 +406,49 @@ $deleted3 = NodeBackupShelf::prune(new ManagedNode($node3->key, TRUE));
 $n3a = new StorageSpace($n3a->key, TRUE);
 check(!$has('spa', $n3a->base() . 'manager/' . $a35 . '/manifest.json') && $n3a->is_draining(),
 	'emptying takes our backups but keeps the space while the site\'s own are beside them', (string)$deleted3);
+
+section('A point object lock still holds is kept whole until its date');
+$lt = $make_target('Lock', 'spl');
+$lt->set('bkt_lock_days', 60);
+$lt->save();
+$lt = new BackupTarget($lt->key, TRUE);
+$node5 = $make_node('Five');
+$n5 = $track(StorageSpace::open($lt, StorageSpace::OWNER_NODE, (int)$node5->key, (string)$node5->get('mgn_slug')));
+$l45 = 'chain-' . gmdate('Ymd_His', time() - 45 * 86400);
+$l30 = 'chain-' . gmdate('Ymd_His', time() - 30 * 86400);   // the newest before the window, which retention keeps
+$l01 = 'chain-' . gmdate('Ymd_His', time() - 86400);
+$lkeys = array();
+foreach (array($l45, $l30, $l01) as $c) {
+	foreach (array('manifest-0000.json', 'data-0000.tar.gz.enc') as $name) {
+		$f = tempnam(sys_get_temp_dir(), 'sps');
+		file_put_contents($f, $c . $name);
+		S3Signer::put_file($lt->write_credentials(), 'spl', '/' . $n5->base() . 'manager/' . $c . '/' . $name, $f);
+		@unlink($f);
+		$lkeys[$c][] = $n5->base() . 'manager/' . $c . '/' . $name;
+	}
+}
+$v5 = new ManagementJob(NULL);
+$v5->set('mjb_mgn_managed_node_id', (int)$node5->key);
+$v5->set('mjb_job_type', 'verify_backup');
+$v5->set('mjb_status', 'completed');
+$v5->set('mjb_commands', array());
+$v5->set('mjb_parameters', json_encode(array('chain_id' => $l01, 'space_id' => (int)$n5->key, 'profile' => 'manager')));
+$v5->set('mjb_result', json_encode(array('verify_status' => 'pass', 'level' => 2)));
+$v5->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$v5->save();
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $v5->key);
+FleetBackupRetention::prune($node5, 7);
+$r5 = FleetBackupRetention::prune($node5, 7, null, time() + 21 * 3600);
+check($r5['error'] === '' && $has('spl', $lkeys[$l45][0]) && $has('spl', $lkeys[$l45][1]) && $r5['pruned'] === 0
+	&& isset((new StorageSpace($n5->key, TRUE))->surplus_listed()[$l45]),
+	'a surplus chain written under a 60-day lock is left whole, still listed surplus, and the pass is not an error',
+	json_encode($r5['error']) . ' ' . json_encode((new StorageSpace($n5->key, TRUE))->surplus_listed()));
+foreach (array_merge($lkeys[$l45], $lkeys[$l30]) as $k) {
+	file_put_contents(s3fx_object_file($fx['dir'], 'spl', '/' . $k) . '.lock', gmdate('Y-m-d\TH:i:s\Z', time() - 60));
+}
+$r5 = FleetBackupRetention::prune($node5, 7, null, time() + 61 * 86400);
+check($r5['error'] === '' && !$has('spl', $lkeys[$l45][0]) && !$has('spl', $lkeys[$l45][1]) && $has('spl', $lkeys[$l01][0]),
+	'once the lock has passed, a later pass deletes it, and the newest verified chain stays', json_encode($r5['error']));
 
 section('A node removed from the dashboard takes no new backups');
 $node2 = new ManagedNode($node2->key, TRUE);

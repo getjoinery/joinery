@@ -28,6 +28,7 @@
  *                           to this site's name; saved by CloudStorageLifecycle,
  *                           whose check proves the bucket private
  *
+ * @version 1.4 - lock days for a backup target on a provider that takes object lock, part of the location (F8)
  * @version 1.3 - one key per target: the node key and the per-run key switch are gone, since a Managed node
  *                writes through the management node's broker and is handed no key (specs/storage_targets.md WP5)
  * @version 1.2 - the files option: the file store is a target row drawn and read by this form
@@ -93,7 +94,7 @@ class BackupTargetForm {
 			'options' => StorageProvider::options(),
 			'value' => $provider,
 			'disabled' => $locked !== '',
-			'visibility_rules' => StorageProvider::visibility_rules(),
+			'visibility_rules' => self::visibility_rules($files || $wizard),
 		));
 		$fw->textinput('bkt_bucket', 'Bucket', array('required' => $wizard || $files, 'readonly' => $locked !== '',
 			'value' => $target ? (string)$target->get('bkt_bucket') : '',
@@ -121,8 +122,32 @@ class BackupTargetForm {
 			'helptext' => 'The service\'s S3 address, such as s3.example.com.'));
 
 		if (!$wizard && !$files) {
+			$suggest = BackupTarget::suggested_lock_days();
+			$fw->numberinput('bkt_lock_days', 'Lock each backup for (days)', array(
+				'value' => $target ? (int)$target->get('bkt_lock_days') : 0, 'min' => 0, 'max' => 3650,
+				'readonly' => $locked !== '',
+				'helptext' => '0 is off. Every object written here is locked in compliance mode for this many days: '
+					. 'nobody can delete or replace it before then, the key\'s owner included, so a break-in on this '
+					. 'machine cannot erase backups. The bucket must have object lock turned on (it can only be turned on '
+					. 'when the bucket is created). Storage for a locked object is paid until its date even if it is '
+					. 'pruned sooner, and nothing can shorten that. ' . $suggest . ' days covers each of this site\'s own '
+					. 'backups for as long as its set can be restored from (its retention plus its full-backup interval); '
+					. 'backups kept longer than that are held for the lock days only.'));
 			$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $target ? (bool)$target->get('bkt_enabled') : true));
 		}
+	}
+
+	/** The provider select's rules: each provider's region and endpoint, and the lock for those that take one. */
+	private static function visibility_rules(bool $no_lock): array {
+		$rules = StorageProvider::visibility_rules();
+		if ($no_lock) {
+			return $rules;
+		}
+		foreach ($rules as $slug => $rule) {
+			$rule[StorageProvider::object_lock($slug) ? 'show' : 'hide'][] = 'bkt_lock_days';
+			$rules[$slug] = $rule;
+		}
+		return $rules;
 	}
 
 	/** $base, or "$base 2", "$base 3"… — the first no live target is called. Names are never shared. */
@@ -170,6 +195,11 @@ class BackupTargetForm {
 				?: ($target->is_file_store() ? CloudFileStore::default_prefix() : BackupTarget::DEFAULT_PREFIX));
 		}
 		$target->set('bkt_enabled', !empty($input['bkt_enabled']));
+		if (array_key_exists('bkt_lock_days', $input)) {
+			// A provider that takes no lock keeps none, whatever the box held.
+			$target->set('bkt_lock_days', StorageProvider::object_lock($provider) && !$target->is_file_store()
+				? max(0, (int)$input['bkt_lock_days']) : 0);
+		}
 
 		// What is stored now. A credential that cannot be decrypted has nothing
 		// to keep, so the key and secret must both be entered again.
@@ -234,6 +264,10 @@ class BackupTargetForm {
 				return $refuse('Not saved. ' . $refusal);
 			}
 		}
+		$lock = $target->lock_refusal();
+		if ($lock !== '') {
+			return $refuse('Not saved. ' . $lock);
+		}
 		if ($was_enabled && !$target->get('bkt_enabled')) {
 			$refusal = $target->disable_refusal();
 			if ($refusal !== '') {
@@ -260,6 +294,7 @@ class BackupTargetForm {
 			strtolower(trim((string)($creds['region'] ?? ''))),
 			(string)$target->get('bkt_bucket'),
 			trim((string)$target->get('bkt_path_prefix'), '/'),
+			(int)$target->get('bkt_lock_days'),
 		);
 	}
 
