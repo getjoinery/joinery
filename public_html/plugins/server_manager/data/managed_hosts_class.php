@@ -6,6 +6,7 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.5 - mgh_cloud_account: which cloud account the box is in (main or test); stamped when first saved
  * @version 1.4 - place_node(): the posture rule for the add/join writers — link an existing
  *                record at the address, mint one only for a container node
  * @version 1.3 - placement_for_addresses(): the live placement record keyed by any of a set of
@@ -40,6 +41,8 @@ class ManagedHost extends SystemBase {
 		// How many sites this box can hold, set by the operator from its memory and disk. Null = not set;
 		// a host with provisioning on must have one (prepare()), and pick_for_provisioning skips a null.
 		'mgh_max_sites'            => array('type'=>'int4'),
+		// Which cloud account the box lives in: main or test (CloudAccounts). Empty reads as main.
+		'mgh_cloud_account'        => array('type'=>'varchar(16)'),
 		'mgh_provisioning_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// The host's own agent identity: the paired ManagedNode that host-scope
 		// primitives (decommission_site, later certs and container install) are
@@ -52,6 +55,14 @@ class ManagedHost extends SystemBase {
 		'mgh_update_time'          => array('type'=>'timestamp(6)'),
 		'mgh_delete_time'          => array('type'=>'timestamp(6)'),
 	);
+
+	/** Every path that makes a host saves it, so the account is stamped here, on first save. */
+	function save($debug = false) {
+		if (!$this->key) {
+			CloudAccounts::stamp_new($this, 'mgh_cloud_account');
+		}
+		return parent::save($debug);
+	}
 
 	function prepare() {
 		$slug = strtolower(trim($this->get('mgh_slug')));

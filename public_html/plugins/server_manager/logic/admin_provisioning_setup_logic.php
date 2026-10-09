@@ -6,6 +6,7 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
+ * @version 1.9 - saving the hosted card also keeps the token's account company (CloudAccounts)
  * @version 1.8 - the test-account cleanup card: its task, last run, scopes, and a preview on request
  *   (test_cloud_account_and_prod_management WP3)
  * @version 1.7 - saving the hosted card records the operator token's scopes and names any it lacks
@@ -107,16 +108,21 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				$save_secret('operator_cloud_token', 'server_manager_operator_cloud_token');
 				// The account's own name, so pages offering it say which account it is.
 				$account_name = '';
+				$account_company = '';
 				$operator_token = trim(ProvisioningSetup::readSecret('server_manager_operator_cloud_token'));
 				if ($operator_token !== '') {
 					try {
-						$account_name = mb_substr((new LinodeComputeDriver($operator_token))->accountName(), 0, 255);
+						$driver = new LinodeComputeDriver($operator_token);
+						$account_name = mb_substr($driver->accountName(), 0, 255);
+						// Which dashboard tab the boxes this plane creates belong to (CloudAccounts).
+						try { $account_company = mb_substr($driver->accountCompany(), 0, 255); } catch (Exception $e) { /* needs account:read_only; read as main */ }
 					} catch (Exception $e) {
 						$error = 'Hosted tier settings saved, but the operator token could not read its account\'s name: '
 							. $e->getMessage();
 					}
 				}
 				ProvisioningSetup::writeSetting('server_manager_operator_cloud_account', $account_name);
+				ProvisioningSetup::writeSetting(CloudAccounts::COMPANY_SETTING, $account_company);
 				// What the token may do, so a missing scope is named now and not
 				// at the first job it is refused for.
 				try {

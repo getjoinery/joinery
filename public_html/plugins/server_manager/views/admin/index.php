@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.50 - a tab for each cloud account (Joinery Main Linode / Joinery Test Linode); hosts, machines, joins, provisions and jobs
+ *                 show only the selected tab's boxes (the server_manager_account_tabs spec)
  * @version 1.49 - a join that matches a provision says why a person still has it (or that it is about to be auto-approved);
  *                 a key that differs from the install's is flagged; provisions show when their agents were auto-approved
  *                 (the auto_approve_provisioned_joins spec WP3)
@@ -254,6 +256,24 @@ foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 $hosts = new MultiManagedHost(['deleted' => false], ['mgh_name' => 'ASC']);
 $hosts->load();
 
+// The selected cloud-account tab (?account=, remembered in a cookie). Everything on the board is
+// the selected tab's boxes; the other tab's are counted, not listed.
+$account = CloudAccounts::selected();
+if (isset($_GET['account']) && !headers_sent()) {
+	setcookie('svm_account', $account, ['expires' => time() + 31536000, 'path' => '/', 'samesite' => 'Lax']);
+}
+$host_accounts = [];
+$addr_account = []; // any box's address -> its account, so a join is filed with the box it comes from
+$addr_key = function ($addr) {
+	$addr = strtolower(trim((string)$addr));
+	$bin = @inet_pton($addr);
+	return $bin === false ? $addr : bin2hex($bin);
+};
+foreach ($hosts as $h) {
+	$host_accounts[(int)$h->key] = CloudAccounts::of_host($h);
+	$addr_account[$addr_key($h->get('mgh_host'))] = $host_accounts[(int)$h->key];
+}
+
 // Load nodes and group by host_id. Removed (soft-deleted) sites are hidden by
 // default; ?show_all=1 includes them, so a decommissioned site can be found
 // again — its record, its history, and a link into its detail page.
@@ -278,10 +298,19 @@ foreach ($hosts as $host) {
 }
 $nodes_by_host = [];
 $machines = [];
+$node_account = [];
+$tab_nodes = [CloudAccounts::MAIN => 0, CloudAccounts::TEST => 0];
 foreach ($nodes as $node) {
 	$hid = (int)$node->get('mgn_mgh_managed_host_id');
+	$node_acct = CloudAccounts::of_node($node, $host_accounts);
+	$node_account[(int)$node->key] = $node_acct;
+	$addr_account[$addr_key($node->get('mgn_host'))] = $node_acct;
 	if (isset($host_node_ids[(int)$node->key])) {
 		continue; // rendered in its host's header
+	}
+	$tab_nodes[$node_acct]++;
+	if ($node_acct !== $account) {
+		continue; // the other tab's
 	}
 	if ($hid && isset($live_host_ids[$hid])) {
 		$nodes_by_host[$hid][] = $node;
@@ -290,9 +319,20 @@ foreach ($nodes as $node) {
 	}
 }
 
-// Load recent jobs
-$recent_jobs = new MultiManagementJob(['deleted' => false], ['mjb_management_job_id' => 'DESC'], 20);
-$recent_jobs->load();
+// The hosts listed are the selected tab's.
+$hosts = array_values(array_filter(iterator_to_array($hosts, false), function ($h) use ($host_accounts, $account) {
+	return $host_accounts[(int)$h->key] === $account;
+}));
+
+// Load recent jobs: the newest of the selected tab's nodes
+$recent_jobs_all = new MultiManagementJob(['deleted' => false], ['mjb_management_job_id' => 'DESC'], 200);
+$recent_jobs = [];
+foreach ($recent_jobs_all as $rj_job) {
+	if (($node_account[(int)$rj_job->get('mjb_mgn_managed_node_id')] ?? CloudAccounts::MAIN) === $account) {
+		$recent_jobs[] = $rj_job;
+		if (count($recent_jobs) >= 20) { break; }
+	}
+}
 
 // Agent heartbeat
 $agent = AgentHeartbeat::getLatest();
@@ -305,6 +345,11 @@ $inflight_provisions = new MultiCustomerCloudProvision([
 	'deleted' => false,
 ], ['cvp_customer_cloud_provision_id' => 'DESC']);
 $inflight_provisions->load();
+// A provision belongs to its node's account; one with no node yet to the plane's own.
+$inflight_provisions = array_values(array_filter(iterator_to_array($inflight_provisions, false), function ($pv) use ($node_account, $account) {
+	$nid = (int)$pv->get('cvp_mgn_managed_node_id');
+	return ($nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::plane_account()) === $account;
+}));
 
 // Recovery not set up on this management node. A node's own trouble (broken
 // monitoring, backups from here not happening, a node that can no longer be
@@ -320,6 +365,36 @@ $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 // answer nobody knows they owe.
 $pending_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::pending() : [];
 $rejected_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::recently_rejected() : [];
+// A join is filed with the box whose address it comes from, or its provision's account. One from an
+// address nothing here knows appears on both tabs: it needs a person wherever they are looking.
+$join_account = function ($jr) use ($addr_account, $addr_key, $node_account) {
+	$ip = trim((string)$jr->get('ajr_source_ip'));
+	$prov = AgentChannelEndpoint::provisionForAddress($ip);
+	if ($prov) {
+		$nid = (int)$prov->get('cvp_mgn_managed_node_id');
+		return $nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::plane_account();
+	}
+	return $addr_account[$addr_key($ip)] ?? null;
+};
+$join_tabs = [CloudAccounts::MAIN => 0, CloudAccounts::TEST => 0];
+foreach ($pending_joins as $pj) {
+	$ja = $join_account($pj);
+	foreach ($join_tabs as $tab => $n) { if ($ja === null || $ja === $tab) { $join_tabs[$tab]++; } }
+}
+$keep_join = function ($jr) use ($join_account, $account) {
+	$ja = $join_account($jr);
+	return $ja === null || $ja === $account;
+};
+$pending_joins = array_values(array_filter($pending_joins, $keep_join));
+$rejected_joins = array_values(array_filter($rejected_joins, $keep_join));
+
+// Open incidents that need a person, by tab: a dot on the other tab, so it is never silent.
+$tab_incidents = [CloudAccounts::MAIN => 0, CloudAccounts::TEST => 0];
+$iq = $db->query("SELECT DISTINCT inc_mgn_managed_node_id FROM inc_incident_records
+	WHERE inc_delete_time IS NULL AND inc_status = 'open' AND " . IncidentRecord::NEEDS_YOU_SQL);
+foreach ($iq->fetchAll(PDO::FETCH_COLUMN) as $inc_node) {
+	$tab_incidents[$node_account[(int)$inc_node] ?? CloudAccounts::MAIN]++;
+}
 $agentless_nodes = [];
 if ($pending_joins) {
 	foreach (new MultiManagedNode(['enabled' => true, 'deleted' => false], ['mgn_name' => 'ASC']) as $candidate) {
@@ -480,6 +555,17 @@ $host_default_open_max = 6;
 $total_nodes = count($machines);
 foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 ?>
+<nav class="svm-tabs" aria-label="Cloud account">
+	<?php foreach (CloudAccounts::LABELS as $tab => $tab_label):
+		$tab_attention = $tab_incidents[$tab] + $join_tabs[$tab]; ?>
+		<a class="svm-tab<?php echo $tab === $account ? ' is-active' : ''; ?>" href="/admin/server_manager?account=<?php echo $tab; ?><?php echo $show_all ? '&amp;show_all=1' : ''; ?>"
+			<?php echo $tab === $account ? 'aria-current="page"' : ''; ?>>
+			<?php echo htmlspecialchars($tab_label); ?>
+			<span class="svm-tab-count"><?php echo (int)$tab_nodes[$tab]; ?></span>
+			<?php if ($tab_attention > 0 && $tab !== $account): ?><span class="svm-tab-dot" title="<?php echo (int)$tab_attention; ?> need attention" aria-label="needs attention"></span><?php endif; ?>
+		</a>
+	<?php endforeach; ?>
+</nav>
 <!-- Hosts & Sites (left) | Recent Jobs (right) -->
 <div class="svm-board">
 	<div class="svm-board-main">

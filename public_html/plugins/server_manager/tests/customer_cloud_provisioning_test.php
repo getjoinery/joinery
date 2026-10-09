@@ -1045,7 +1045,7 @@ class CustomerCloudProvisioningTest {
 		if ($node_id <= 0) { return; }
 		$node = new ManagedNode($node_id, TRUE);
 		if ($node->key && !ManagedNode::is_fixture_name((string)$node->get('mgn_name'))) {
-			$node->set('mgn_name', ManagedNode::FIXTURE_NAME_PREFIX . $node->get('mgn_name'));
+			$node->set('mgn_name', 'HarnessTest ' . $node->get('mgn_name'));
 			$node->save();
 		}
 	}

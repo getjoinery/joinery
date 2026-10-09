@@ -367,6 +367,16 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 The general limit (`api_agent_rate_limit_requests` per window) is counted in two buckets, one request-log row per request written at shutdown with the outcome. A request the node's **signature** proves (a result, a manifest fetch, a leave) counts toward that node's own bucket (`api_agent_node`, keyed `node:ID`); one that proves no node (a join, a missing or wrong signature, an unknown path) counts toward its address's (`api_agent`). A multi-tenant host's sites and a fleet behind one NAT share an address, so an address over its limit refuses only what proves no node: a neighbour whose signature verifies still gets in. A refused request is not recorded, so a bucket drains while it is over. The one request it does not count is a claim that succeeded: a fleet polls on a seconds cadence, which is tens of thousands of requests a day against a few hundred of everything else, and the rate-limit check counts rows with a query. A claim that fails does count, since an unsigned or mis-signed flood looks exactly like that. `AgentChannelEndpoint::meterOutcome()` is the rule.
 
+## Cloud account tabs
+
+The dashboard at `/admin/server_manager` has a tab for each cloud account, **Joinery Main Linode** and **Joinery Test Linode**. Hosts, machines, the find box, Agents asking to join, Cloud provisions and Recent Jobs show only the selected tab's boxes. `?account=main|test` selects a tab and a cookie remembers it. The other tab shows its node count and a dot when it holds an open incident that needs a person or a pending join.
+
+An account is recorded on a host (`mgh_cloud_account`) or a node (`mgn_cloud_account`) as `main` or `test`. A node placed on a live host takes its host's account; any other node uses its own; an empty value reads as main, so an unmarked box is never hidden from the main tab. `CloudAccounts` holds the labels and the rules.
+
+A box is marked when it is first saved, with the account of the plane that creates it: `test` when the operator token's company is the disposable one (`TestCloudCleanup::COMPANY`), otherwise `main`. The token's company is read from the provider and kept in `server_manager_operator_cloud_company` whenever the hosted card on Provisioning Setup is saved. Add Host and Connect Site ask for the account, with Main preselected. Migration `sm_016_cloud_account_backfill` marks the unmarked boxes a test-account plane created since 2026-10-07, the day its token became the test account's; nothing is changed on any other plane.
+
+A join belongs to the account of the box whose address it comes from, or of its provision. A join from an address no box or provision has appears on both tabs. A provision with no node yet belongs to the plane's own account. The notices at the top of the page and the Incidents inbox are not filtered by tab.
+
 ## Join approval
 
 An agent joins a plane by asking: it sends its name, public key and address, and a join request waits on the dashboard's **Agents asking to join** panel. A person approves it there after checking the key against what the machine printed, or a join from a machine this plane provisioned is approved automatically.

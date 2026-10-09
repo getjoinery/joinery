@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.33",
+  "version": "1.30.35",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -449,6 +449,12 @@
       "default": "",
       "managed": true,
       "helptext": "The provider's own name for the operator cloud token's account, read from the provider whenever the hosted card on Provisioning Setup is saved with a token set. Pages that offer cloud accounts name the operator account by it."
+    },
+    {
+      "name": "server_manager_operator_cloud_company",
+      "default": "",
+      "managed": true,
+      "helptext": "The company name the provider holds for the operator cloud token's account, read whenever the hosted card on Provisioning Setup is saved. The disposable test account is the one named 'Joinery Test disposable'; boxes this site creates are marked test or main by it, and the Server Manager dashboard shows a tab for each."
     },
     {
       "name": "server_manager_smtp2go_api_key",

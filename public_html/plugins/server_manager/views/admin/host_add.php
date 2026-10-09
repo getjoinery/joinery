@@ -4,6 +4,7 @@
  * URL: /admin/server_manager/host_add
  *      /admin/server_manager/host_add?mgh_managed_host_id=N  (edit mode)
  *
+ * @version 1.3 - a cloud account choice (main or test) decides which dashboard tab the host is listed under
  * @version 1.2 - Max Sites has no invented default: blank means not set, and provisioning needs it
  * @version 1.1 - host agent link (mgh_mgn_managed_node_id) and a delete action; a host is
  *                deleted last, after its container sites and its own node identity
@@ -57,7 +58,7 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 	$editable_fields = [
 		'mgh_name', 'mgh_slug', 'mgh_host', 'mgh_ssh_user', 'mgh_ssh_key_path',
 		'mgh_ssh_port', 'mgh_max_sites', 'mgh_provisioning_enabled', 'mgh_notes',
-		'mgh_mgn_managed_node_id',
+		'mgh_mgn_managed_node_id', 'mgh_cloud_account',
 	];
 
 	foreach ($editable_fields as $field) {
@@ -69,6 +70,8 @@ if ($_POST && ($_POST['action'] ?? '') === 'delete_host' && $is_edit) {
 			$value = 22;
 		} elseif ($field === 'mgh_max_sites' && $value === '') {
 			$value = null;
+		} elseif ($field === 'mgh_cloud_account') {
+			$value = CloudAccounts::normalize($value);
 		} elseif ($field === 'mgh_mgn_managed_node_id') {
 			$value = $value === '' ? null : (int)$value;
 		}
@@ -156,6 +159,12 @@ $formwriter->textinput('mgh_ssh_key_path', 'SSH Key Path', [
 $formwriter->numberinput('mgh_ssh_port', 'SSH Port', [
 	'placeholder' => '22',
 	'min' => 1, 'max' => 65535,
+]);
+
+$formwriter->dropinput('mgh_cloud_account', 'Cloud Account', [
+	'options' => CloudAccounts::LABELS,
+	'value' => CloudAccounts::normalize($host->get('mgh_cloud_account')),
+	'helptext' => 'Which dashboard tab this host is listed under.',
 ]);
 
 echo '<h6 class="text-muted mt-4 mb-3">Provisioning</h6>';
