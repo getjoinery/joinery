@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.51 - a hidden site's jobs are left out of Recent Jobs unless hidden sites are shown; Removed reads Hidden
  * @version 1.50 - a tab for each cloud account (Joinery Main Linode / Joinery Test Linode); hosts, machines, joins, provisions and jobs
  *                 show only the selected tab's boxes (the server_manager_account_tabs spec)
  * @version 1.49 - a join that matches a provision says why a person still has it (or that it is about to be auto-approved);
@@ -324,8 +325,11 @@ $hosts = array_values(array_filter(iterator_to_array($hosts, false), function ($
 	return $host_accounts[(int)$h->key] === $account;
 }));
 
-// Load recent jobs: the newest of the selected tab's nodes
-$recent_jobs_all = new MultiManagementJob(['deleted' => false], ['mjb_management_job_id' => 'DESC'], 200);
+// Load recent jobs: the newest of the selected tab's nodes. A hidden node's
+// jobs are hidden with it unless removed sites are shown.
+$recent_jobs_opts = ['deleted' => false];
+if (!$show_all) { $recent_jobs_opts['node_listed'] = true; }
+$recent_jobs_all = new MultiManagementJob($recent_jobs_opts, ['mjb_management_job_id' => 'DESC'], 200);
 $recent_jobs = [];
 foreach ($recent_jobs_all as $rj_job) {
 	if (($node_account[(int)$rj_job->get('mjb_mgn_managed_node_id')] ?? CloudAccounts::MAIN) === $account) {
@@ -698,10 +702,10 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 		<?php endif; ?>
 		<div class="svm-box-foot">
 			<?php if ($show_all): ?>
-				<a href="/admin/server_manager">Hide removed sites</a>
-				<span class="svm-muted">Showing all sites, including removed ones.</span>
+				<a href="/admin/server_manager">Leave out hidden sites</a>
+				<span class="svm-muted">Showing all sites, including hidden ones, and their jobs.</span>
 			<?php else: ?>
-				<a href="/admin/server_manager?show_all=1">Show all sites (including removed)</a>
+				<a href="/admin/server_manager?show_all=1">Show all sites (including hidden)</a>
 			<?php endif; ?>
 		</div>
 		</div>
@@ -1057,7 +1061,7 @@ function render_node_row($node, $db, $session, $role_badge = '', $show_ip = fals
 			<span class="badge badge-primary"><?php echo htmlspecialchars($role_badge); ?></span>
 		<?php endif; ?>
 		<?php if ($node->get('mgn_delete_time')): ?>
-			<span class="badge badge-secondary" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
+			<span class="badge badge-secondary" title="Hidden <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Hidden</span>
 		<?php endif; ?>
 		<?php if (!$node->is_operational()): ?>
 			<span class="badge badge-<?php echo htmlspecialchars(JobCommandBuilder::install_state_color($install_state)); ?>"><?php echo htmlspecialchars($node->install_state_label()); ?></span>

@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.69 - process_decommission_node stamps mgn_site_removed_time on the victim when the host verifies it gone
  * @version 1.68 - a comment names S3Signer::list() (TargetLister is folded into it)
  * @version 1.68 - process_install_node records the agents' keys the install printed (JoinAutoApproval::record_from_install)
  * @version 1.67 - host reports keep root_ssh (host_report 1.16): root's public keys and fingerprints; only bare keys are carryable
@@ -3837,10 +3838,16 @@ HTML;
 					self::record_moved_check($node, 'absent',
 						'Its container was removed from the host (job ' . (int)$job->key . ').');
 				}
-				if ($node->key && !$node->get('mgn_delete_time')) {
-					$node->soft_delete();
-					$soft_deleted = true;
-					$also = $node->removal_notes();
+				if ($node->key) {
+					// The fact Remove Permanently waits for: the host saw the container gone.
+					$node->set('mgn_site_removed_time', gmdate('Y-m-d H:i:s'));
+					if (!$node->get('mgn_delete_time')) {
+						$node->soft_delete();
+						$soft_deleted = true;
+						$also = $node->removal_notes();
+					} else {
+						$node->save();
+					}
 				}
 			}
 			$job->set('mjb_result', json_encode([

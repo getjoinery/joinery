@@ -294,9 +294,8 @@ check(in_array('2 unfinished jobs were cancelled.', $jobs_site->removal_notes(),
 
 $j_other_running = nr_job($jobs_other->key, 'running');
 $jobs_other->permanent_delete();
-check((string)nr_fresh($j_other)->get('mjb_status') === 'cancelled' && (string)nr_fresh($j_other_running)->get('mjb_status') === 'cancelled',
-	'a permanent delete cancels them too, before the deletion rule lets go of the node');
-check((int)nr_fresh($j_other)->get('mjb_mgn_managed_node_id') === 0, 'and the job no longer names the node');
+check(!nr_fresh($j_other)->key && !nr_fresh($j_other_running)->key,
+	'a permanent delete takes its jobs with it (spec node_hide_and_remove)');
 
 // ---------------------------------------------------------------------------
 section('sm_012 cancels the jobs a removal before this left open');

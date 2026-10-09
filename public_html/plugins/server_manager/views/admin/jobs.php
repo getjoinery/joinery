@@ -3,6 +3,7 @@
  * Server Manager - Job History
  * URL: /admin/server_manager/jobs
  *
+ * @version 1.2 - a hidden site's jobs are left out unless ?show_all=1 (or the site is picked)
  * @version 1.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -27,10 +28,14 @@ $sdirection = strtoupper(LibraryFunctions::fetch_variable_local($_GET, 'sdirecti
 if ($sdirection !== 'ASC' && $sdirection !== 'DESC') { $sdirection = 'DESC'; }
 
 $search_criteria = ['deleted' => false];
+// A site hidden from the dashboard keeps its jobs, out of sight with it.
+$show_all = !empty($_GET['show_all']);
 
 // Optional filters
 if (isset($_GET['node_id']) && $_GET['node_id']) {
 	$search_criteria['node_id'] = intval($_GET['node_id']);
+} elseif (!$show_all) {
+	$search_criteria['node_listed'] = true;
 }
 if (isset($_GET['status']) && $_GET['status']) {
 	$search_criteria['status'] = $_GET['status'];
@@ -44,7 +49,7 @@ $numrecords = $jobs->count_all();
 $jobs->load();
 
 // Load all nodes for filter dropdown and name lookup
-$all_nodes = new MultiManagedNode(['deleted' => false], ['mgn_name' => 'ASC']);
+$all_nodes = new MultiManagedNode($show_all ? [] : ['deleted' => false], ['mgn_name' => 'ASC']);
 $all_nodes->load();
 $node_map = [];
 foreach ($all_nodes as $n) {
@@ -73,7 +78,7 @@ $page->admin_header([
 				<select name="node_id" class="form-select form-select-sm">
 					<option value="">All Sites</option>
 					<?php foreach ($all_nodes as $n): ?>
-						<option value="<?php echo $n->key; ?>" <?php echo (isset($_GET['node_id']) && $_GET['node_id'] == $n->key) ? 'selected' : ''; ?>><?php echo htmlspecialchars($n->get('mgn_name')); ?></option>
+						<option value="<?php echo $n->key; ?>" <?php echo (isset($_GET['node_id']) && $_GET['node_id'] == $n->key) ? 'selected' : ''; ?>><?php echo htmlspecialchars($n->get('mgn_name') . ($n->get('mgn_delete_time') ? ' (hidden)' : '')); ?></option>
 					<?php endforeach; ?>
 				</select>
 			</div>
@@ -98,6 +103,9 @@ $page->admin_header([
 			<div class="col-auto">
 				<button type="submit" class="btn btn-sm btn-primary">Filter</button>
 				<a href="/admin/server_manager/jobs" class="btn btn-sm btn-outline-secondary">Clear</a>
+			</div>
+			<div class="col-auto">
+				<label><input type="checkbox" name="show_all" value="1" <?php echo $show_all ? 'checked' : ''; ?>> Include hidden sites</label>
 			</div>
 		</form>
 	</div>

@@ -58,6 +58,7 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.13 - a provisioned node records where it is hosted (CloudAccounts::for_provision)
  * @version 2.12 - a provisioned node is given its storage space on the target Where new backups go names, once
  *                 saved; the provision is linked to its node as soon as the node is saved, and a retried pass takes
  *                 up its own node instead of failing it as a duplicate (B9)
@@ -364,6 +365,9 @@ class ProvisionCustomerCloud {
 			}
 		}
 		$node->set('mgn_enabled',       true);
+		// Bought on our token, the machine is in this plane's account; on the
+		// customer's connected account, it is the customer's.
+		$node->set('mgn_cloud_account', CloudAccounts::for_provision($provision));
 		if (!$node->key) {
 			$node->prepare();
 		}

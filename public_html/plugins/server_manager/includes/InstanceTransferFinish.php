@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.2 - a finished transfer marks the node hosted on the customer's account
  * @version 1.1 - the last step marks its email, note and alert as each happens, so a crash never repeats them
  * @version 1.0
  */
@@ -95,6 +96,11 @@ class InstanceTransferFinish {
 		if (!$provision->is_transferred()) {
 			$provision->set('cvp_hosting_mode', 'transferred');
 			$provision->save();
+		}
+		// The machine is the customer's now: removing its node no longer waits for it.
+		$node_id = (int)$provision->get('cvp_mgn_managed_node_id');
+		if ($node_id) {
+			ManagedNode::updateColumns($node_id, array('mgn_cloud_account' => CloudAccounts::CUSTOMER));
 		}
 		if (!$row->get('itx_completed_time')) {
 			$row->set('itx_completed_time', gmdate('Y-m-d H:i:s'));

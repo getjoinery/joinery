@@ -23,6 +23,7 @@
  * storage (a service tenant).
  *
  * @version 1.4 - is_empty() does not count the run ledger files kept in a space (specs/storage_targets.md F4)
+ * @version 1.3 - its owners and its target remove it through its own permanent_delete(), not a flat delete
  * @version 1.2 - sps_surplus: what retention found surplus in the space and since when, so a point is
  *                deleted only once a pass CONFIRM_HOURS later still finds it so (specs/storage_targets.md F3)
  * @version 1.1 - a space given back to its owner is stamped opened again, so evidence from before does not
@@ -48,12 +49,14 @@ class StorageSpace extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		// Soft-deleting a target is refused while it holds a live space; a
-		// target removed for good takes its space records with it.
-		'sps_bkt_backup_target_id'  => array('action' => 'cascade'),
+		// target removed for good takes its space records with it. Each goes
+		// through its own permanent_delete(), so its ledger rows go and its
+		// runs stop naming it: a flat delete left both pointing at nothing.
+		'sps_bkt_backup_target_id'  => array('action' => 'permanent_delete'),
 		// An owner removed for good leaves its folders unclaimed on the target,
 		// where they can be adopted by another owner or deleted by hand.
-		'sps_mgn_managed_node_id'   => array('action' => 'cascade'),
-		'sps_svt_service_tenant_id' => array('action' => 'cascade'),
+		'sps_mgn_managed_node_id'   => array('action' => 'permanent_delete'),
+		'sps_svt_service_tenant_id' => array('action' => 'permanent_delete'),
 	);
 
 	public static $test_fixture = array(

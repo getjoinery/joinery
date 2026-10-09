@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.35 - a node removed for good takes its jobs (cascade, was null); MultiManagementJob option
+ *                 node_listed leaves out a hidden node's jobs
  * @version 1.34 - mjb_svr_shelf_run_id: the broker run a backup or re-upload job took
  * @version 1.33 - activeOrRecentForNode: a job the node answered inside the window is cover whatever the
  *                 answer. A refused or failed one counted for nothing, so the hourly refresh asked dev for
@@ -140,7 +142,8 @@ class ManagementJob extends SystemBase {
 	);
 
 	protected static $foreign_key_actions = [
-		'mjb_mgn_managed_node_id' => ['action' => 'null'],
+		// A node's job history is its own: a node removed for good takes it.
+		'mjb_mgn_managed_node_id' => ['action' => 'cascade'],
 		'mjb_created_by'  => ['action' => 'null', 'source_table' => 'usr_users'],
 		'mjb_svr_shelf_run_id' => ['action' => 'null'],
 	];
@@ -924,6 +927,10 @@ class MultiManagementJob extends SystemMultiBase {
 			$filters['mjb_created_by'] = [$this->options['created_by'], PDO::PARAM_INT];
 		}
 
+		// Leave out the jobs of nodes hidden from the dashboard.
+		if (!empty($this->options['node_listed'])) {
+			$filters['(mjb_mgn_managed_node_id'] = "IS NULL OR mjb_mgn_managed_node_id NOT IN (SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_delete_time IS NOT NULL))";
+		}
 
 		return $this->_get_resultsv2('mjb_management_jobs', $filters, $this->order_by, $only_count, $debug);
 	}

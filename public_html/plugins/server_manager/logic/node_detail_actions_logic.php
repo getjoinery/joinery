@@ -20,6 +20,8 @@
  * actual header()/redirect — logic files never exit().
  *
  * @version 1.53 - move_to_plane: ask another management node to adopt this node's machine (API Keys tab)
+ * @version 1.52 - Remove from Dashboard is Hide from Dashboard; restore_node (Restore to Dashboard); purge_node is
+ *                Remove Permanently, from a live or hidden node, through NodeRemoval's guards
  * @version 1.51 - move_backup_storage: a node's new backups move to another target (a new storage space) and
  *                its old space drains; the hard-delete guard counts what the node's spaces hold; the target is
  *                no longer a connection setting
@@ -189,6 +191,7 @@ class NodeDetailActions {
 		'decommission_node'        => 'overview',
 		'remove_site_certificate'  => 'overview',
 		'purge_node'               => 'overview',
+		'restore_node'             => 'overview',
 		'copy_new_server'          => 'copy',
 		'copy_own_server'          => 'copy',
 		'copy_approve_join'        => 'copy',
@@ -1035,8 +1038,8 @@ class NodeDetailActions {
 				}
 				$node->soft_delete();
 				$session->save_message(new DisplayMessage(
-					trim('Removed from dashboard. The site itself keeps running on its host. '
-						. implode(' ', $node->removal_notes())), 'Success', $page_regex,
+					trim('Hidden from the dashboard. The site itself keeps running on its host, and every record is kept; '
+						. 'Restore to Dashboard brings it back. ' . implode(' ', $node->removal_notes())), 'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return '/admin/server_manager';
@@ -1099,54 +1102,39 @@ class NodeDetailActions {
 				return self::jobUrl($job);
 			}
 
-			case 'purge_node': {
-				if (!$node->key) {
+			case 'restore_node': {
+				if (!$node->key || !$node->get('mgn_delete_time')) {
 					return $base_url;
 				}
-				// Guard: never hard-delete the record of a node that is still tracked.
-				// Purging a live node's record is exactly how a running site becomes an
-				// untracked orphan — remove it from the dashboard (or permanently delete
-				// the site) first, which soft-deletes the record.
-				if (!$node->get('mgn_delete_time')) {
-					$session->save_message(new DisplayMessage(
-						'Remove this node from the dashboard first, then permanently delete its entry.', 'Error',
-						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-					));
-					return $base_url . '&tab=overview';
+				$node->undelete();
+				$session->save_message(new DisplayMessage(
+					'Restored to the dashboard. Its agent is accepted again and monitoring resumes. Jobs cancelled when it '
+						. 'was hidden stay cancelled, a removed provisioning record stays removed, and a parked domain stays parked.',
+					'Success', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=overview';
+			}
+
+			case 'purge_node': {
+				// Remove Permanently, from a live or a hidden node: the typed slug,
+				// then NodeRemoval's guards, then every record the node owns.
+				if (!$node->key) {
+					return $base_url;
 				}
 				$typed = trim($_POST['confirm_slug'] ?? '');
 				if ($typed !== (string)$node->get('mgn_slug')) {
 					$session->save_message(new DisplayMessage(
-						'Type the exact site slug to permanently delete the entry. Nothing was deleted.', 'Error',
+						'Type the exact site slug to remove it permanently. Nothing was removed.', 'Error',
 						$page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 					));
 					return $base_url . '&tab=overview';
 				}
-				// Refuse while its storage spaces still hold backups: hard-deleting the
-				// record would leave them unclaimed. Delete them from the target's
-				// Stored Backups panel first. Fail safe — if a space can't be listed we
-				// cannot confirm zero, so we also refuse.
-				$bk = StorageSpace::owner_object_count(StorageSpace::OWNER_NODE, (int)$node->key);
-				if ($bk['count'] > 0) {
-					$session->save_message(new DisplayMessage(
-						'This site still has ' . $bk['count'] . ' offsite backup' . ($bk['count'] === 1 ? '' : 's')
-						. '. Delete them from the backup target\'s Stored Backups panel before deleting the record.',
-						'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-					));
-					return $base_url . '&tab=overview';
-				}
-				if (!empty($bk['unchecked'])) {
-					$session->save_message(new DisplayMessage(
-						'Could not verify backups on: ' . implode(', ', $bk['unchecked'])
-						. '. Resolve those targets before deleting the record.',
-						'Error', $page_regex, DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-					));
-					return $base_url . '&tab=overview';
-				}
-				// Hard delete. Escrow rows (SET NULL) and job history (nulled) survive.
-				$node->permanent_delete();
+				$ours = CloudAccounts::is_ours($node);
+				$notes = NodeRemoval::remove($node, (string)($_POST['confirm_machine'] ?? ''), (int)$uid);
 				$session->save_message(new DisplayMessage(
-					'Server Manager entry permanently deleted.', 'Success',
+					trim('Removed permanently, with its jobs and history. '
+						. ($ours ? '' : 'The site keeps running where it is hosted and is no longer managed from here. ')
+						. implode(' ', $notes)), 'Success',
 					$page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return '/admin/server_manager';
@@ -1165,7 +1153,7 @@ class NodeDetailActions {
 			'mgn_site_url', 'mgn_notes', 'mgn_enabled',
 			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
-			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds',
+			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds', 'mgn_cloud_account',
 		];
 		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled'];
@@ -1181,6 +1169,9 @@ class NodeDetailActions {
 				}
 				if (($field === 'mgn_uptime_tcp_port' || $field === 'mgn_uptime_interval_seconds') && $value === '') {
 					$value = $field === 'mgn_uptime_interval_seconds' ? 300 : 0;
+				}
+				if ($field === 'mgn_cloud_account') {
+					$value = CloudAccounts::normalize_hosted_at($value);
 				}
 				$node->set($field, $value);
 			}
