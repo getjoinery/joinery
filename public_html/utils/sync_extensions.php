@@ -20,6 +20,7 @@
 	 *   SYNC_RESULT: {"themes": {...}, "plugins": {...}}
 	 * Exit code 0 on success, 1 on failure.
 	 *
+	 * @version 1.2.0 - an errored plugin whose install was retried is named in plugins.migration_messages
 	 * @version 1.1.0 - plugins.versions: each plugin the sync added or updated, with the version it
 	 *                  had before and has after, for the structured apply result
 	 *                  (specs/agent_recipes_and_vocabulary.md).
@@ -90,7 +91,14 @@
 				'updated' => count($plugin_result['updated'] ?? []),
 				'stale_marked' => (int)($plugin_result['stale_marked'] ?? 0),
 				'table_messages' => array_values($plugin_result['table_messages'] ?? []),
-				'migration_messages' => array_values($plugin_result['migration_messages'] ?? []),
+				'migration_messages' => array_merge(
+					array_values($plugin_result['migration_messages'] ?? []),
+					array_map(
+						function ($name, $outcome) { return "$name: errored install retried - " . $outcome; },
+						array_keys($plugin_result['retried_install'] ?? []),
+						array_values($plugin_result['retried_install'] ?? [])
+					)
+				),
 				'versions' => $changed,
 			],
 		]) . "\n";

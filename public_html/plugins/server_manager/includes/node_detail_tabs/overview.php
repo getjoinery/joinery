@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.56 - the SSH Key Path is required only for a node with no paired agent; a node the agent manages has no
+ *                SSH to configure, and the form refused to save its slug or name without one
  * @version 1.55 - Actions offers Hide from Dashboard / Restore to Dashboard and Remove Permanently (live or hidden,
  *                through NodeRemoval's guards, an attestation where this management node cannot ask the provider);
  *                the connection settings show and edit Hosted at
@@ -2162,9 +2164,10 @@
 		'validation' => ['maxlength' => 50],
 	]);
 
-	$formwriter->textinput('mgn_ssh_key_path', 'SSH Key Path *', [
+	$agent_managed = trim((string)$node->get('mgn_agent_public_key')) !== '';
+	$formwriter->textinput('mgn_ssh_key_path', $agent_managed ? 'SSH Key Path' : 'SSH Key Path *', [
 		'placeholder' => $default_ssh_key,
-		'validation' => ['required' => true, 'maxlength' => 500],
+		'validation' => ['required' => !$agent_managed, 'maxlength' => 500],
 	]);
 
 	$formwriter->numberinput('mgn_ssh_port', 'SSH Port', [
