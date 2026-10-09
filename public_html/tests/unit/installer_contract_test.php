@@ -275,8 +275,14 @@ check(strpos($install_src, 'export UPGRADE_SERVER') !== false,
 // cases part ways, and handed to the reset tool as --chosen.
 check(strpos($site_init_src, 'RESET_ARGS="$RESET_ARGS --chosen"') !== false,
     '_site_init.sh passes --chosen to the reset tool for an owner-supplied password');
-check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = true ]; then') !== false,
-    'and only when JOINERY_ADMIN_PASSWORD supplied it');
+check(strpos($site_init_src, 'if [ "$ADMIN_PASSWORD_SUPPLIED" = true ] && [ "${JOINERY_ADMIN_PASSWORD_SHOWN:-}" != "1" ]; then') !== false,
+    'and only when JOINERY_ADMIN_PASSWORD supplied it and no management node shows it on a page');
+// A management node's password is generated there and shown once on the
+// buyer's page, which promises a new one is asked for at first sign-in. It
+// says so with JOINERY_ADMIN_PASSWORD_SHOWN, which must reach _site_init.sh
+// inside a container too (the env file is built from SITE_INIT_ENV_INPUTS).
+check(preg_match('/SITE_INIT_ENV_INPUTS=\(\s*[^)]*\bJOINERY_ADMIN_PASSWORD_SHOWN\b/s', $install_src) === 1,
+    'install.sh carries JOINERY_ADMIN_PASSWORD_SHOWN to _site_init.sh, Docker included');
 
 
 section('The OS pin is a stop, not a warning');

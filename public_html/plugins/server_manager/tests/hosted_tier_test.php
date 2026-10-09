@@ -108,6 +108,8 @@ check(strpos($ssh['cmd'], "--admin-email='buyer@example.com'") !== false,
 	'the site install line names the buyer\'s address, so the admin account is theirs');
 check(strpos($ssh['cmd'], 'IFS= read -r JOINERY_ADMIN_PASSWORD') !== false,
 	'the session reads the admin password from its own stdin');
+check(strpos($ssh['cmd'], 'export JOINERY_ADMIN_PASSWORD_SHOWN=1') !== false,
+	'and marks it as the plane\'s, shown on the buyer\'s page, so the site asks for a new one at first sign-in');
 check(strpos($ssh['cmd'], 'test -n "$JOINERY_ADMIN_PASSWORD"') !== false,
 	'and refuses to continue without one — a missing password must fail loudly, '
 	. 'not fall back to one nobody holds');

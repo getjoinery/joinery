@@ -39,7 +39,8 @@
         $formwriter = $page->getFormWriter('form1', ['action' => '/terms-accept', 'method' => 'POST']);
         $formwriter->begin_form();
 
-        echo $formwriter->checkboxinput('accept_terms', 'I agree to the ' . $terms_link . ' and ' . $privacy_link . '.', [
+        // A label is text (FormWriter escapes it); the links are in the note above.
+        echo $formwriter->checkboxinput('accept_terms', 'I agree to the Terms of Use and Privacy Policy.', [
             'required' => true,
         ]);
         ?>

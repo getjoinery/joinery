@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.53 - move_to_plane: ask another management node to adopt this node's machine (API Keys tab)
  * @version 1.51 - move_backup_storage: a node's new backups move to another target (a new storage space) and
  *                its old space drains; the hard-delete guard counts what the node's spaces hold; the target is
  *                no longer a connection setting
@@ -154,6 +155,7 @@ class NodeDetailActions {
 		'disk_usage'               => 'overview',
 		'reset_failed_unit'        => 'overview',
 		'restart_unit'             => 'overview',
+		'move_to_plane'            => 'api_keys',
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
 		'site_limits'              => 'overview',
@@ -290,6 +292,15 @@ class NodeDetailActions {
 			case 'restart_unit': {
 				$built = JobCommandBuilder::build_restart_unit($node, (string)($_POST['unit'] ?? ''));
 				$job = ManagementJob::createFromBuild($node->key, 'restart_unit', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'move_to_plane': {
+				// The machine asks the other management node to adopt it and
+				// stays here until that is approved there (B31: a host agent
+				// has no page of its own to move from).
+				$built = JobCommandBuilder::build_move_to_plane($node, (string)($_POST['management_node'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'move_to_plane', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

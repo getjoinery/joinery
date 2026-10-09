@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.12 - JOINERY_ADMIN_PASSWORD_SHOWN=1 marks a supplied password as one a management node
+#                 generated and shows on a page: it is replaced at first sign-in like a generated one
 # VERSION: 3.11 - JOINERY_OUTBOUND_NOTICE_GB (install.sh site --outbound-notice-gb) is the
 #                 monthly outbound notice's figure, outbound_monthly_notice_gb
 #                 (specs/node_outbound_and_transfer.md WP5)
@@ -454,10 +456,12 @@ if [ "$DB_EXISTS" = false ]; then
         printf '%s\n' "$ADMIN_PASSWORD" > "$ADMIN_PW_FILE"
 
         RESET_ARGS="--email=admin@example.com --password-file=$ADMIN_PW_FILE --yes"
-        if [ "$ADMIN_PASSWORD_SUPPLIED" = true ]; then
+        if [ "$ADMIN_PASSWORD_SUPPLIED" = true ] && [ "${JOINERY_ADMIN_PASSWORD_SHOWN:-}" != "1" ]; then
             # The owner chose it on the deploy form and nothing wrote it down,
             # so there is nothing to make them replace at first login. A
-            # generated one is printed to a file and IS replaced.
+            # generated one is printed to a file and IS replaced, and so is
+            # one a management node generated and shows the owner on a page
+            # (JOINERY_ADMIN_PASSWORD_SHOWN=1).
             RESET_ARGS="$RESET_ARGS --chosen"
         fi
         if [ "$ADMIN_EMAIL" != "admin@example.com" ]; then

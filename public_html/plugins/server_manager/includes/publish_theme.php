@@ -16,6 +16,8 @@
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
+ * Version: 1.7.0 - the catalog lists, and the download serves, the newest published archive; an extension
+ *                  whose live directory has moved past its last release is offered at the released version
  * Version: 1.6.0 - serves only the archive publish built; never cuts one from the live directory
  */
 
@@ -48,6 +50,27 @@ function catalog_audience_allows($audience, $requesting_site) {
     return empty($audience);
 }
 
+/**
+ * The newest archive publish built for this extension, or null when none has
+ * been: ['path' => ..., 'version' => ...].
+ *
+ * The catalog and the download both answer from here, never from the live
+ * manifest. On the publishing box the live directory runs ahead of the last
+ * release the moment a version is bumped, and a catalog that named the live
+ * version offered an extension the download then refused to serve.
+ */
+function published_archive($archive_dir, $name) {
+    $best = null;
+    $pattern = '/^' . preg_quote($name, '/') . '-(\d[0-9A-Za-z.+~-]*)\.tar\.gz$/';
+    foreach (glob($archive_dir . '/' . $name . '-*.tar.gz') ?: [] as $path) {
+        if (preg_match($pattern, basename($path), $m)
+                && ($best === null || version_compare($m[1], $best['version'], '>'))) {
+            $best = ['path' => $path, 'version' => $m[1]];
+        }
+    }
+    return $best;
+}
+
 // Handle ?list=themes
 if (isset($_GET['list']) && $_GET['list'] === 'themes') {
     header('Content-Type: application/json');
@@ -66,12 +89,13 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
             if (!catalog_audience_allows($audience, $requesting_site)) {
                 continue;
             }
-            if ($included && !$is_deprecated) {
+            $published = published_archive($full_site_dir . '/static_files/themes', basename(dirname($json_file)));
+            if ($included && !$is_deprecated && $published) {
                 $themes[] = [
                     'name' => $theme_data['name'] ?? basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),
                     'display_name' => $theme_data['display_name'] ?? $theme_data['displayName'] ?? $theme_data['name'] ?? basename(dirname($json_file)),
-                    'version' => $theme_data['version'] ?? '1.0.0',
+                    'version' => $published['version'],
                     'description' => $theme_data['description'] ?? '',
                     'author' => $theme_data['author'] ?? '',
                     'is_system' => $theme_data['is_system'] ?? false,
@@ -105,12 +129,13 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
             if (!catalog_audience_allows($audience, $requesting_site)) {
                 continue;
             }
-            if ($included && !$is_deprecated) {
+            $published = published_archive($full_site_dir . '/static_files/plugins', basename(dirname($json_file)));
+            if ($included && !$is_deprecated && $published) {
                 $plugins[] = [
                     'name' => basename(dirname($json_file)),
                     'directory_name' => basename(dirname($json_file)),
                     'display_name' => $plugin_data['name'] ?? basename(dirname($json_file)),
-                    'version' => $plugin_data['version'] ?? '1.0.0',
+                    'version' => $published['version'],
                     'description' => $plugin_data['description'] ?? '',
                     'author' => $plugin_data['author'] ?? '',
                     'is_system' => $plugin_data['is_system'] ?? false,
@@ -150,26 +175,22 @@ if (isset($_GET['download'])) {
         exit;
     }
 
-    // Get version from manifest
-    $manifest = json_decode(file_get_contents($manifest_file), true);
-    $version = $manifest['version'] ?? '1.0.0';
-
-    // Archive filename
-    $archive_filename = $item_name . '-' . $version . '.tar.gz';
-    $archive_path = $archive_dir . '/' . $archive_filename;
-
     // Only publish builds an archive: it carries exactly what its signed
     // manifest lists, and the release statement records that manifest. A
     // tarball cut here from the live directory would carry whatever sits in
     // it - an uncommitted edit, an ignored file - under a manifest that does
-    // not describe it, and would replace the published archive for this
-    // version. A version with no published archive is not available.
-    if (!is_file($archive_path)) {
+    // not describe it. So the newest published archive is served, whatever
+    // version the live directory has moved on to, and one never published
+    // is not available.
+    $published = published_archive($archive_dir, $item_name);
+    if (!$published) {
         http_response_code(404);
         header('Content-Type: application/json');
-        echo json_encode(['error' => ucfirst($type) . ' ' . $item_name . ' ' . $version . ' has not been published here']);
+        echo json_encode(['error' => ucfirst($type) . ' ' . $item_name . ' has not been published here']);
         exit;
     }
+    $archive_path = $published['path'];
+    $archive_filename = basename($archive_path);
 
     // Serve the archive
     header('Content-Type: application/gzip');
