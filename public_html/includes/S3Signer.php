@@ -9,6 +9,15 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * Or, on a machine that holds no key, an S3LinkSource: every request is then
+ * made on a link the source signed (a Managed node writing through the
+ * management node's backup broker), and every finished write is reported to
+ * it with its bytes and sha256. The request paths are the same either way.
+ *
+ * @version 1.12 - an S3LinkSource in place of a credential: each request asks it for a signed link and is
+ *                 made on that link, retries included; finished writes are reported to it with their bytes
+ *                 and sha256; S3ObjectExistsException when the source says a key is written already
+ *                 (specs/storage_targets.md WP5)
  * @version 1.11 - head() and get_range_to_file(): the file store's presence check and ranged read
  *                 (specs/storage_targets.md WP6, the file store's driver on this signer)
  * @version 1.10 - abort_upload(): one multipart abort that answers the provider's response, so a caller
@@ -40,6 +49,22 @@
  */
 
 class S3SignerException extends Exception {}
+
+/**
+ * The link source refused a write because the key is already in backup
+ * storage, and nothing there is written twice. Carries what is there.
+ */
+class S3ObjectExistsException extends S3SignerException {
+	public $key;
+	public $bytes;
+	public $sha256;
+	public function __construct(string $key, int $bytes, string $sha256) {
+		parent::__construct($key . ' is already in backup storage, and nothing there is written twice.');
+		$this->key = $key;
+		$this->bytes = $bytes;
+		$this->sha256 = $sha256;
+	}
+}
 
 class S3Signer {
 
@@ -225,14 +250,24 @@ class S3Signer {
 		if ($size > self::MULTIPART_THRESHOLD_BYTES) {
 			return self::put_file_multipart($creds, $bucket, $path, $local_path, $content_type);
 		}
+		$sha256 = ($creds instanceof S3LinkSource) ? (string)hash_file('sha256', $local_path) : '';
 		$fh = fopen($local_path, 'rb');
 		if (!$fh) {
 			throw new S3SignerException('Cannot open local file: ' . $local_path);
 		}
 		try {
-			return self::request('PUT', $creds, $bucket, $path, [], $fh, $size, $content_type);
+			$resp = self::request('PUT', $creds, $bucket, $path, [], $fh, $size, $content_type);
 		} finally {
 			fclose($fh);
+		}
+		self::report_write($creds, $path, $resp, $size, $sha256);
+		return $resp;
+	}
+
+	/** A write that finished is told to the link source it was made through. */
+	private static function report_write($creds, $path, array $resp, $bytes, $sha256) {
+		if ($creds instanceof S3LinkSource && (int)($resp['status'] ?? 0) >= 200 && (int)($resp['status'] ?? 0) < 300) {
+			$creds->completed((string)$path, (int)$bytes, (string)$sha256);
 		}
 	}
 
@@ -278,10 +313,12 @@ class S3Signer {
 		}
 
 		$done = false;
+		$hash = hash_init('sha256');
 		try {
 			$etags = [];
 			foreach ($parts as $p) {
 				$chunk = self::read_exactly($fh, $p['bytes'], $local_path);
+				hash_update($hash, $chunk);
 				$resp = self::request('PUT', $creds, $bucket, $path,
 					['partNumber' => (string)$p['number'], 'uploadId' => $upload_id],
 					$chunk, strlen($chunk));
@@ -312,6 +349,7 @@ class S3Signer {
 				}
 				if (self::complete_body_ok($resp['body'])) {
 					$done = true;
+					self::report_write($creds, $path, $resp, $size, hash_final($hash));
 					return $resp;
 				}
 				if ($try < self::MAX_ATTEMPTS) {
@@ -357,7 +395,8 @@ class S3Signer {
 	 * opaque handle for complete_stream() or abort_stream(); 'status' is 0
 	 * until one of them is called. That is what lets a caller refuse an archive
 	 * whose producer failed after the stream closed, with no object to delete
-	 * — which matters under a write-only credential.
+	 * — which matters to a machine that cannot delete (a Managed node writing
+	 * through the management node's broker).
 	 *
 	 * $part_size is overridable for tests against a local fixture; production
 	 * callers never pass it.
@@ -481,6 +520,7 @@ class S3Signer {
 		if ($pending['upload_id'] === null) {
 			$buffer = (string)$pending['buffer'];
 			$resp = self::request('PUT', $creds, $bucket, $path, array(), $buffer, strlen($buffer), $pending['content_type']);
+			self::report_write($creds, $path, $resp, $bytes, $sha256);
 			return self::with_stream_totals($resp, $bytes, $sha256);
 		}
 
@@ -498,6 +538,7 @@ class S3Signer {
 				}
 				if (self::complete_body_ok($resp['body'])) {
 					$done = true;
+					self::report_write($creds, $path, $resp, $bytes, $sha256);
 					return self::with_stream_totals($resp, $bytes, $sha256);
 				}
 				if ($try < self::MAX_ATTEMPTS) {
@@ -644,6 +685,12 @@ class S3Signer {
 	}
 
 	private static function abort_multipart($creds, $bucket, $path, $upload_id) {
+		if ($creds instanceof S3LinkSource) {
+			// No link removes anything: the bucket's owner cancels every upload
+			// a run opened and did not finish, when the run finishes or is
+			// aborted.
+			return;
+		}
 		try {
 			self::abort_upload($creds, $bucket, $path, $upload_id);
 		} catch (\Throwable $e) {
@@ -684,10 +731,17 @@ class S3Signer {
 	 * download. A HEAD asks for no body.
 	 */
 	private static function request($method, $creds, $bucket, $path, $params, $body = null, $body_size = 0, $content_type = null, $sink_file = null, array $extra_headers = []) {
-		self::validate_creds($creds);
-
-		$region = $creds['region'];
-		list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, $path);
+		// A link source signs; this machine only sends. One link per request,
+		// reused by its retries: it is good for longer than they take.
+		$link = null;
+		if ($creds instanceof S3LinkSource) {
+			$link = $creds->link((string)$method, (string)$path, (array)$params, (int)$body_size);
+			$region = $scheme = $host = $canonical_uri = '';
+		} else {
+			self::validate_creds($creds);
+			$region = $creds['region'];
+			list($scheme, $host, $canonical_uri) = self::locate($creds['endpoint'], $bucket, $path);
+		}
 
 		// Sorted querystring
 		ksort($params);
@@ -724,10 +778,12 @@ class S3Signer {
 				break;
 			}
 
-			$result = self::attempt(
-				$method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
-				$body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers
-			);
+			$result = ($link !== null)
+				? self::attempt_link($method, $link, $body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers)
+				: self::attempt(
+					$method, $creds, $region, $scheme, $host, $canonical_uri, $canonical_qs,
+					$body, $body_size, $content_type, $sink_file, $attempt_timeout, $extra_headers
+				);
 
 			if (!$result['retryable']) {
 				if ($result['transport_failed']) {
@@ -855,6 +911,30 @@ class S3Signer {
 			$curl_headers[] = $k . ': ' . $v;
 		}
 
+		return self::execute($method, $url, $curl_headers, $body, $body_size, $sink_file, $attempt_timeout, $extra_headers);
+	}
+
+	/**
+	 * One attempt on a link a source signed. The signature is in the URL, so
+	 * nothing is signed here and no x-amz header is sent: a link signs the
+	 * host alone, and an unsigned x-amz header would void it.
+	 */
+	private static function attempt_link($method, $url, $body, $body_size, $content_type, $sink_file, $attempt_timeout, array $extra_headers = []) {
+		$curl_headers = [];
+		if ($content_type !== null) {
+			$curl_headers[] = 'content-type: ' . $content_type;
+		}
+		if ($body !== null && $body_size > 0) {
+			$curl_headers[] = 'content-length: ' . (string)$body_size;
+		}
+		foreach ($extra_headers as $k => $v) {
+			$curl_headers[] = strtolower((string)$k) . ': ' . (string)$v;
+		}
+		return self::execute($method, $url, $curl_headers, $body, $body_size, $sink_file, $attempt_timeout, $extra_headers);
+	}
+
+	/** The HTTP half of an attempt: send, read the answer, and say whether a retry could help. */
+	private static function execute($method, $url, array $curl_headers, $body, $body_size, $sink_file, $attempt_timeout, array $extra_headers) {
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);

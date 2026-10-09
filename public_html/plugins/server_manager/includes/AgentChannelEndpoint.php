@@ -41,6 +41,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.43 - a backup or re-upload job's slot is a broker run opened at hand-out (__SM_BROKER_<space>_<kind>__,
+ *                 NodeBroker); per-run key minting and the node and main credential slots are gone, and a job
+ *                 still naming one is refused (specs/storage_targets.md WP5)
  * @version 1.42 - adoptJoin() makes the node and approves the join in one transaction: a step that fails
  *                 leaves no node without its key behind, and the request stays pending for a retry
  * @version 1.40 - approveProvisionSiteJoin(): a provisioned machine's site-agent join approved against the provision's site node (dashboard, JoinAutoApproval)
@@ -1279,12 +1282,11 @@ class AgentChannelEndpoint {
 			$commands = json_decode($commands, true);
 		}
 
-		// Credential slots resolve HERE, at hand-out — not at build. The job
-		// row at rest carries only the placeholder (__SM_CREDS_<id>__), the
-		// same property the SSH executor's in-memory substitution gives it;
-		// the real credential exists only inside this signed HTTPS response.
-		// A slot that cannot be resolved fails the job visibly — a placeholder
-		// must never reach a node, where it would be refused as a malformed
+		// The broker slot resolves HERE, at hand-out — not at build. The job
+		// row at rest carries only the placeholder (__SM_BROKER_<space>_<kind>__);
+		// the run's token exists only inside this signed HTTPS response. A slot
+		// that cannot be resolved fails the job visibly — a placeholder must
+		// never reach a node, where it would be refused as a malformed
 		// credential and read as a node-side fault.
 		$params = $commands['params'] ?? null;
 		try {
@@ -1292,7 +1294,7 @@ class AgentChannelEndpoint {
 		} catch (\Throwable $e) {
 			$job->set('mjb_status', 'failed');
 			$job->set('mjb_error_message',
-				'Credential slot could not be resolved at dispatch: ' . $e->getMessage());
+				'The backup broker slot could not be resolved at dispatch: ' . $e->getMessage());
 			$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 			$job->save();
 			api_success(['job' => null], '', 200);
@@ -1322,6 +1324,75 @@ class AgentChannelEndpoint {
 	}
 
 	/**
+	 * Resolve the broker slot in a primitive job's params: a backup or a
+	 * re-upload names __SM_BROKER_<space id>_<kind>__ in its credential slot,
+	 * and at hand-out — here, when the node's agent is actually
+	 * holding the job — the management node opens a broker run in that space
+	 * and puts the broker's address, the run and its token there
+	 * (NodeBroker::slot_value()). The job row at rest carries only the
+	 * placeholder; the token exists only inside this signed HTTPS response, and
+	 * is good for the job's claim budget plus a margin.
+	 *
+	 * No node is handed a bucket key (specs/storage_targets.md R4): a job that
+	 * names a credential slot is refused here with the reason rather than sent.
+	 */
+	private static function resolve_credential_slots($params, $job = null) {
+		if (!is_array($params)) {
+			return $params;
+		}
+		foreach ($params as $key => $value) {
+			if (!is_string($value)) {
+				continue;
+			}
+			if (preg_match('/^__SM_(RUN_|NODE_)?CREDS_\d+__$/', $value)) {
+				throw new Exception('this job was built to hand the node a bucket key, which no node is given any more; '
+					. 'start it again and it goes through the backup broker');
+			}
+			if (!preg_match('/^__SM_BROKER_(\d+)_(backup|upload)__$/', $value, $m)) {
+				continue;
+			}
+			$node = $job ? new ManagedNode((int)$job->get('mjb_mgn_managed_node_id'), TRUE) : null;
+			if (!$node || !$node->key) {
+				throw new Exception('a broker run is opened for the job\'s own node, and this job names none');
+			}
+			$space = new StorageSpace((int)$m[1], TRUE);
+			if (!$space->key) {
+				throw new Exception('storage space ' . (int)$m[1] . ' does not exist');
+			}
+			// A job handed out again (its claim was lost) replaces the run it
+			// opened before: one open run per job, so two never sign one name.
+			if ((int)$job->get('mjb_svr_shelf_run_id') > 0) {
+				$earlier = new ShelfRun((int)$job->get('mjb_svr_shelf_run_id'), TRUE);
+				if ($earlier->key) {
+					NodeBroker::abort($earlier, 'The job was handed out again; this run was replaced by a new one.');
+				}
+			}
+			list($run, $token) = NodeBroker::open($node, $space, $m[2], self::broker_token_lifetime($job));
+			$job->set('mjb_svr_shelf_run_id', (int)$run->key);
+			$job->save();
+			$params[$key] = NodeBroker::slot_value($run, $token);
+		}
+		return $params;
+	}
+
+	/**
+	 * How long a broker run's token is accepted: the job's own budget plus a
+	 * margin. Derived from the claim budget rather than fixed, because the
+	 * thing the token has to outlast is the upload — and one that expires
+	 * mid-upload reads at the node as a refusal half way through an archive.
+	 */
+	private static function broker_token_lifetime($job): int {
+		$budget = 0;
+		if ($job) {
+			$budget = (int)ManagementJob::claimBudgetSeconds($job);
+		}
+		if ($budget <= 0) {
+			$budget = 3 * 3600;
+		}
+		return min(86400 * 7, $budget + NodeBroker::TOKEN_MARGIN_SECONDS);
+	}
+
+	/**
 	 * Render a job's params as a JSON OBJECT, always.
 	 *
 	 * PHP decodes {} into an empty array and re-encodes an empty array as [],
@@ -1330,120 +1401,6 @@ class AgentChannelEndpoint {
 	 * rather than run. The asymmetry is PHP's, so it is corrected on PHP's side
 	 * of the wire rather than by teaching the node to accept two shapes.
 	 */
-	/**
-	 * Replace credential placeholder values in a primitive job's params with
-	 * base64(json(credentials)) for the named backup target — the same shape
-	 * the agent's SSH-path resolver splices (creds.go), produced from the same
-	 * stored slots. The slot the token names is the only slot consulted: a job
-	 * built against __SM_NODE_CREDS_ never falls back to the main credential,
-	 * so an emptied slot fails visibly rather than running with a more
-	 * powerful credential than intended.
-	 */
-	private static function resolve_credential_slots($params, $job = null) {
-		if (!is_array($params)) {
-			return $params;
-		}
-		foreach ($params as $key => $value) {
-			if (!is_string($value) || !preg_match('/^__SM_(RUN_|NODE_)?CREDS_(\d+)__$/', $value, $m)) {
-				continue;
-			}
-			$target = new BackupTarget((int)$m[2], TRUE);
-			if (!$target->key) {
-				throw new Exception('backup target ' . (int)$m[2] . ' does not exist');
-			}
-			// Every slot is a write credential. A target switched off or deleted
-			// after the job was built takes no more writes, whatever the job says.
-			if (!$target->get('bkt_enabled') || $target->get('bkt_delete_time')) {
-				throw new Exception('backup target "' . $target->get('bkt_name')
-					. '" is switched off or deleted, so it takes no backups');
-			}
-			if ($m[1] === 'RUN_') {
-				$params[$key] = base64_encode(json_encode(self::mint_run_credentials($target, $params, $job)));
-				continue;
-			}
-			$creds = ($m[1] === 'NODE_') ? $target->get_node_credentials() : $target->get_credentials();
-			if (empty($creds)) {
-				throw new Exception('backup target "' . $target->get('bkt_name')
-					. '" has no credentials in the slot this job names');
-			}
-			$params[$key] = base64_encode(json_encode($creds));
-		}
-		return $params;
-	}
-
-	/**
-	 * Mint the key this ONE run gets: pinned to the node's own prefix,
-	 * write-only, expiring with the job.
-	 *
-	 * PICKUP IS THE RIGHT MOMENT. A key's lifetime starts when it is created,
-	 * and the moment that matters is when the agent actually holds it — a key
-	 * minted at build time and then queued for an hour would arrive expired and
-	 * read as a bucket error rather than as a stale credential.
-	 *
-	 * THE PREFIX COMES FROM THE JOB'S OWN CONFIG, not from a fresh lookup. The
-	 * job already names the path prefix and the slug it will write under, so a
-	 * key derived from anything else could be pinned to a directory the run
-	 * does not use — a key that looks scoped and grants nothing.
-	 *
-	 * NO FALLBACK. A target that declares it can mint and then cannot is a
-	 * configuration fault, and the fix is a master key that may create keys.
-	 * Quietly handing out the fleet-wide credential instead would defeat the
-	 * only thing this is for, on the one machine — somebody else's — where it
-	 * matters most.
-	 */
-	private static function mint_run_credentials($target, array $params, $job): array {
-		require_once(PathHelper::getIncludePath('includes/B2Client.php'));
-
-		$prefix = trim((string)($params['path_prefix'] ?? ''), '/');
-		$slug   = trim((string)($params['slug'] ?? ''));
-		if ($slug === '' || !preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
-			throw new Exception('a per-run key needs the slug the run writes under, and this job names none');
-		}
-		$bucket = trim((string)$target->get('bkt_bucket'));
-		if ($bucket === '') {
-			throw new Exception('backup target "' . $target->get('bkt_name') . '" names no bucket');
-		}
-		$name_prefix = ($prefix === '' ? '' : $prefix . '/') . $slug . '/';
-
-		$creds = $target->get_credentials();
-		if (empty($creds['access_key']) || empty($creds['secret_key'])) {
-			throw new Exception('backup target "' . $target->get('bkt_name')
-				. '" has no master credential to mint a per-run key with');
-		}
-
-		$client = new B2Client((string)$creds['access_key'], (string)$creds['secret_key']);
-		$minted = $client->createKey(
-			$client->bucketId($bucket),
-			$name_prefix,
-			// Write-only, exactly as the shared node credential was: a node can
-			// add its archives and can never remove any, so a compromised node
-			// cannot erase the fleet's backups.
-			array('writeFiles'),
-			self::run_key_lifetime($job),
-			'joinery-run-' . $slug . '-' . (int)($job ? $job->key : 0));
-
-		return $client->s3CredentialFor($minted);
-	}
-
-	/**
-	 * How long a minted key lives: the job's own budget plus a margin.
-	 *
-	 * Derived from the claim budget rather than fixed, because the thing the
-	 * key has to outlast is the upload — and a key that expires mid-upload
-	 * reads at the node as a bucket error, which is the least diagnosable
-	 * failure this design could produce.
-	 */
-	private static function run_key_lifetime($job): int {
-		$budget = 0;
-		if ($job) {
-			$budget = (int)ManagementJob::claimBudgetSeconds($job);
-		}
-		if ($budget <= 0) {
-			$budget = 3 * 3600;
-		}
-		return min(86400 * 7, $budget + 3600);
-	}
-
 	private static function params_as_object($params) {
 		if (!is_array($params) || $params === []) {
 			return new stdClass();

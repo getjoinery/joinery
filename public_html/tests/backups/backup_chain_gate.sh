@@ -336,17 +336,47 @@ m = json.load(open(sys.argv[1]))
 last = m['runs'][2]['artifacts']
 last['pgdata'] = dict(last['data'], level=0)
 json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.pg.json'), 'w'))
-m['version'] = 3
-json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.v3.json'), 'w'))
+m['version'] = 4
+json.dump(m, open(sys.argv[1].replace('manifest.json', 'manifest.v4.json'), 'w'))
 PY
-mkdir -p "$V/arts_pg" "$V/arts_v3"; cp "$V/arts/"*.enc "$V/arts_pg/"; cp "$V/arts/"*.enc "$V/arts_v3/"
-mv "$V/arts/manifest.pg.json" "$V/arts_pg/manifest.json"; mv "$V/arts/manifest.v3.json" "$V/arts_v3/manifest.json"
+mkdir -p "$V/arts_pg" "$V/arts_v4"; cp "$V/arts/"*.enc "$V/arts_pg/"; cp "$V/arts/"*.enc "$V/arts_v4/"
+mv "$V/arts/manifest.pg.json" "$V/arts_pg/manifest.json"; mv "$V/arts/manifest.v4.json" "$V/arts_v4/manifest.json"
 rm -rf "${V:?}/out"; mkdir -p "$V/out/testsite"; echo sentinel > "$V/out/testsite/KEEP"
 OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_pg" --key-file "$W/chain.key" --force 2>&1) && RC=0 || RC=$?
 chk "a pgdata run without --skip-database is refused" "$RC" "1"
 chk "before anything is written" "$(ls "$V/out/testsite" | tr '\n' ' ')" "KEEP "
-OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v3" --dry-run --skip-database 2>&1) && RC=0 || RC=$?
-chk "a manifest version this script does not know is refused by name" "$(echo "$OUT" | grep -c 'unsupported chain manifest version 3')" "1"
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v4" --dry-run --skip-database 2>&1) && RC=0 || RC=$?
+chk "a manifest version this script does not know is refused by name" "$(echo "$OUT" | grep -c 'unsupported chain manifest version 4')" "1"
+
+# A version-3 chain: one manifest per run and no manifest.json. The newest is
+# read, whatever order the directory lists them in; it names every run.
+python3 - "$V/arts/manifest.json" "$V" <<'PY'
+import json, os, sys
+m = json.load(open(sys.argv[1]))
+m['version'] = 3
+d = os.path.join(sys.argv[2], 'arts_v3')
+os.makedirs(d, exist_ok=True)
+for n in range(len(m['runs'])):
+    part = dict(m, runs=m['runs'][:n + 1])
+    json.dump(part, open(os.path.join(d, 'manifest-%04d.json' % n), 'w'))
+PY
+cp "$V/arts/"*.enc "$V/arts_v3/"
+rm -rf "${V:?}/out"; mkdir -p "$V/out"
+bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v3" --key-file "$W/chain.key" \
+    --force --skip-database --skip-reconcile >/dev/null 2>&1
+chk "a version-3 chain restores from its newest run manifest, with no manifest.json" \
+    "$(diff -r "$V/at/2" "$V/out/testsite" >/dev/null 2>&1 && echo same || echo differs)" "same"
+
+# The manifest is checked against the hash recorded when it was written.
+V3_SHA=$(sha256sum "$V/arts_v3/manifest-0002.json" | cut -d' ' -f1)
+rm -rf "${V:?}/out"; mkdir -p "$V/out/testsite"; echo sentinel > "$V/out/testsite/KEEP"
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v3" --key-file "$W/chain.key" \
+    --manifest-sha256 "$(printf '0%.0s' $(seq 1 64))" --force --skip-database --skip-reconcile 2>&1) && RC=0 || RC=$?
+chk "a manifest whose hash is not the recorded one is refused" "$RC" "1"
+chk "before anything is written" "$(ls "$V/out/testsite" | tr '\n' ' ')" "KEEP "
+OUT=$(bash "$RESTORE" testsite --target-dir "$V/out/testsite" --artifacts "$V/arts_v3" --dry-run --skip-database \
+    --manifest-sha256 "$V3_SHA" 2>&1) && RC=0 || RC=$?
+chk "the recorded hash is accepted and said" "$(echo "$OUT" | grep -c "manifest-0002.json sha256 ${V3_SHA} (matches the recorded hash)")" "1"
 
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"

@@ -343,7 +343,7 @@ class BackupStaging {
 				'the chain envelope did not open with this machine\'s own backup key — '
 				. 'this chain was taken by a different machine. ' . $e->getMessage() . "\n"
 				. 'Restore it from a shell with the recovery key: backup_envelope.php open '
-				. '--sidecar manifest.json --private <recovery key>');
+				. '--sidecar manifest.json --manifest-sha256 <the hash recorded beside the run> --private <recovery key>');
 		}
 
 		$old_umask = umask(0077);

@@ -3,11 +3,67 @@
 **Status:** Building — 2026-10-09. No open owner decisions; build order in §10.
 WP1–WP3 committed (7b6d7f0b). WP4 committed (3e90d348; dev migrated by `sm_015`, 19 node spaces), and the
 reviewer1 review of WP1–WP4 committed (de6202d4). WP6 committed (c10c7f1b; dev migrated by migration 210
-and `iem_019`). **WP7 built, uncommitted (10-09):** dev migrated by migration 211 and `sm_017`; the live
-retention test (F5) passes against dev's B2 bucket, and its Linode half waits for a Linode backup target.
-A browser look at the target forms, the node Move form, Who backs up here, Adopt, and the Cloud Storage
-page's Switch to another bucket and Move files on a real second bucket is owed, and now the Backups page's
-two safety warnings. WP7 notes, decided while building:
+and `iem_019`). WP7 committed (fd391509; dev migrated by migration 211 and `sm_017`). **WP5 built and
+reviewed VALID by reviewer1 (10-09):** dev migrated (new columns; migration 212 emptied the one stored node key); every
+suite the change reaches passes, and the new `broker_managed_run_test` drives a Managed run end to end
+through broker links over the loopback fixture. Owed before it ships: the live gate in §13 (one Managed
+node moved B2 → Linode → B2, restored from each), which needs a node on the release that carries WP5.
+WP8 and WP9 remain. The Linode half of F5 waits for a Linode backup target. A browser look at the target
+forms, the node Move form, Who backs up here, Adopt, the Cloud Storage page's Switch to another bucket and
+Move files, the Backups page's two safety warnings, and now the node Backups tab's manifest hashes is owed.
+
+WP5 notes, decided while building:
+- Owner (10-09): a Managed node on an older core is **refused** a backup or a re-upload until it is
+  upgraded (no key is handed out while it catches up). `JobCommandBuilder::BROKER_MIN_CORE_VERSION` is
+  `0.8.472`, the release expected to carry WP5; if another release ships first, it moves to the one that
+  does.
+- Transport: the job's credential slot carries `__SM_BROKER_<space>_<kind>__`; at hand-out the agent channel
+  opens a broker run (`svr_mgn_managed_node_id`, `svr_kind` backup|upload, token hash and expiry = claim
+  budget + 1 h, `mjb_svr_shelf_run_id`) and puts `{broker, run_id, token}` in the slot, so the agent passes
+  it through unchanged and **no agent release is needed**. The node calls `/api/v1/broker/{begin,sign,
+  finish,abort}` (a pre-auth route like the relay channel). On the node, `BackupBroker` is an
+  `S3LinkSource` that `S3Signer` takes in place of a credential, so streaming, multipart and retries are
+  unchanged; it writes only.
+- A manager chain follows the broker's space (`bkh_remote_space_id`), asked at begin, before the chain is
+  chosen. A run is finished at the broker before it is committed on the node; a run the broker did not
+  record is a failed run.
+- Write-once: a key whose row a finished run completed with a sha256 is never signed again (answered
+  `exists` with the recorded size and hash). A failed run's keys, and rows the customer reconcile adopted
+  from a listing (no hash), are signed again for the run that retries them. `shelf_finish_run` requires each
+  object's sha256. The offloaded-files step treats `exists` as stored.
+- Re-sealing an epoch envelope after a recovery-key rotation was the one other rewrite: it now writes
+  `envelope-{first 16 hex of the new fingerprint}.json` beside `envelope.json`.
+- F9: chain version 3; the local working copy stays `manifest.json` and the node's upload ledger records
+  each run's manifest under that name, so the agent's staged-chain check is unchanged. A v2 chain is not
+  extended by a v3 runner (`layout_split`).
+- F4: ledger files are `{space base}ledger/{run id}.json`, written by the broker at finish (and retried by
+  the fleet pass), and by a site for its own target at `{prefix}/{slug}/ledger/{history id}.json`. They
+  are kept after their runs are pruned (a few kB each).
+- Shell disaster recovery: the required hash is on `backup_envelope.php open` (`--manifest-sha256`, or
+  `--trust-bucket-manifest`), which only an operator runs. `restore_chain.sh` takes `--manifest-sha256` as
+  an optional check and prints the hash it used: the agent runs it after its own ledger or vouch check,
+  and making it required there would need an agent release. The node Backups tab shows each run's
+  manifest and its recorded sha256, and says when a set's newest manifest differs from the recorded one.
+- The site-copy check compares the manifest with the recorded hash when there is one; a chain written
+  before the broker has none and is read as before.
+- reviewer1's review (10-09: 1 high, 5 medium, 5 low, 4 notes) is fixed, and its re-review found WP5 VALID
+  (10-09). Of its four observations, three are fixed after it: the broker header says a landed manifest or
+  envelope is followed by a new chain, not a retry; one finish runs at a time per run (an advisory lock);
+  a failed ledger file waits on its own `svr_ledger_tried_time`. The fourth (a taken-over adopted row names
+  the aborted run) is cosmetic and left. The fixes: a finish or
+  abort asked again for a closed run is answered (a lost reply no longer fails a recorded run); a name
+  already taken with other bytes closes the chain and the next run starts one (`name_taken`), the same bytes
+  count as stored; a manifest or envelope is never signed over one already in the bucket, recorded,
+  adopted or written before the broker (looked for first); a taken-over adopted row is left as it was when
+  the run aborts; ledger files do not make a draining space non-empty; a failed ledger file records why and
+  waits a day, counted by the pass; `restore_chain.sh` no longer exits silently with no manifest, and it and
+  the hand verify say when nothing vouches; readers prefer the newest recorded manifest; a site's pruned
+  chain takes every manifest in its folder; a re-claimed job aborts the run it opened; the reconcile says a
+  size that differs under a hashed row instead of adopting it.
+- The node prune marks a deleted object's ledger row pruned (`retention`). Retired: per-run key minting,
+  `bkt_node_credentials`, `bkt_mint_run_keys`, the three credential placeholders, `B2Client`'s key calls.
+
+WP7 notes, decided while building:
 - Owner Q1 (10-08): verification is weekly by default, for sites (`backup_verify_every_days`) and nodes
   (`server_manager_fleet_backup_verify_every_days`), and "not verified" is a problem a day past the
   interval (8 days). Migration 211 and `sm_017` move settings and node policies still at the old 30.
@@ -33,7 +89,8 @@ two safety warnings. WP7 notes, decided while building:
   gap cannot go unnoticed when customers arrive.
 - Incidents: a Managed node's two-night gap and verify gap are the existing `plane:backups_stopped` and
   `plane:backup_unverified` (now 8 days); customers get `plane:customer_backups` on this node.
-- §13's `backup_safety_test` covers F1–F3; its F4 and F9 checks come with WP5.
+- §13's `backup_safety_test` covers F1–F3; F4 and F9 are checked by `broker_managed_run_test` (ledger file,
+  write-once), `backup_chain_manifest` and the `backup_chain` gate (one manifest per run, version 2 still restores).
 
 WP6 notes, decided while building:
 - A row records its store and the full key of its **primary** object (`fbb_remote_key`,
@@ -598,12 +655,12 @@ date. "Now" means fixed in this session, outside this spec's work packages.
 | S15 | Changing `site_template` re-points every offloaded file's key with no warning | **WP6** (built): every row records its full key |
 | S16 | The file store's secret key is stored in plain text | **WP6** (built): sealed in the target row |
 | S17 | Offloaded mail is not in backups; the bucket holds the only copy | **WP6** (built): `RawMessageStore` declares its backup objects |
-| S18 | Dead code and stale text: `B2Client::deleteKey`/`countKeys`, the "bkt claimed by BookingType" comment, misplaced docblocks in `backup_targets_class.php`, `creds.go` and "target override" comments, `__SM_RUN_CREDS_` missing from the overview doc | WP1 part built (the first three); WP5 the rest |
+| S18 | Dead code and stale text: `B2Client::deleteKey`/`countKeys`, the "bkt claimed by BookingType" comment, misplaced docblocks in `backup_targets_class.php`, `creds.go` and "target override" comments, `__SM_RUN_CREDS_` missing from the overview doc | WP1 part built (the first three); **WP5** (built): the credential slots are gone, the overview describes the broker, and the agent holds no slot code of its own |
 | S19 | Backup storage: no target on customer, run or object rows; `shelf_of()` skips silently; reconcile against the wrong bucket wipes the ledger and zeroes the figure; a read with a run id signs the old key against the current bucket; abort uses the current target and drops the row on failure; `t{id}` can collide with a node slug; the target setting is free text; completeness checks differ; unpaid customers can list | **WP4** (built; the setting was WP2) |
 | S20 | Site targets: retention after a switch deletes from the wrong bucket and counts 404 as success; chains continue across a switch; verify and *Bring files back* use the current target; no epoch envelope on a new target; `bkh_bkt_backup_target_id` is never read; location editable in place | WP2 and WP3 (built) |
 | S22 | `NodeBackupShelf::prune` deletes every profile under the node's folder, including a site-profile target sharing that bucket and prefix | **WP4** (built): it empties `{space}manager/` only |
-| S24 | A write-only key can overwrite a manifest; a copy from a dead source, shell disaster recovery and the management node's listings trust the bucket's manifest | WP5 |
-| S25 | Linode Managed nodes are handed the delete-capable main key | WP5 |
+| S24 | A write-only key can overwrite a manifest; a copy from a dead source, shell disaster recovery and the management node's listings trust the bucket's manifest | **WP5** (built): write-once names, recorded hashes, one manifest per run |
+| S25 | Linode Managed nodes are handed the delete-capable main key | **WP5** (built): no node is handed any key |
 | S26 | The setup wizard's target form posted no Enabled box, so the target it saved was disabled, never tested and never scheduled | **WP1**: the wizard draws the shared form, which saves it enabled |
 | S27 | The node Backups tab listed the whole target capped at 500 objects and then filtered to the node, so a node past the first 500 showed no cloud backups | **WP1**: listed under the node's own folder |
 

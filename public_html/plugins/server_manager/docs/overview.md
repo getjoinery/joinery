@@ -673,7 +673,7 @@ The row swap (`SiteCopySwap`) moves only the machine columns (`SiteCopySwap::MAC
 | `retire_install_password` | The bootstrap's closing session, once every agent the install put on the machine is admitted: over the same password, put the provision's `cvp_root_ssh_keys` (if any) in root's `authorized_keys`, write `/etc/ssh/sshd_config.d/00-joinery-agent-managed.conf` (password and keyboard-interactive authentication off; root login off, or key-only when keys were given) and restart sshd, so the machine stops accepting it. `InstallJobExecutor` completes the job only after a fresh login with the password is refused; the provision pipeline then erases the sealed password | No |
 | `provision_certificate` | Issue the node's certificate as a primitive on the **issuer**: the node itself on bare metal, its host's own agent for a container (`for_node_id` names the site). Driven by `ProvisionPendingSsl`, which observes a certificate the machine already reports before asking | No |
 | `fleet_enroll` | Seed a new site's fleet-service URL and API key pair (three settings; the names are compiled into `utils/fleet_enroll.php`). The secret is blanked from the job row once the node answers | No |
-| `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
+| `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — writing through a broker run opened for that job ([The backup broker](#the-backup-broker)); no bucket key is sent. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
 | `stage_chain` | Put a whole backup chain back on the node, ready to restore: the plane signs a link to every object under the chain (`JobCommandBuilder::sign_chain_links`) and the node reads its own manifest, fetches what a restore of the run needs, checks each against its upload ledger and recovers the chain key from its own `backup_site_key`. The `stage_chain` **operate primitive** (script `utils/stage_chain.php`); no approval. The link set is every object in the chain, so the word takes up to 1024 links under a 1020 KiB params ceiling (agent 1.45.0). An agent before 1.45.0 takes 64 links under 60 KiB; a chain past that is refused when that node claims it, naming the update | No |
 | `verify_backup` | Prove one of the node's backups restorable without restoring it, as the `verify_backup` **operate primitive** (script `utils/verify_backup.php`, agent 1.24.0+): the same links as `stage_chain`, under the same bounds, plus a level — 2 opens and reads every artifact to the end, 3 rehearses a restore into a scratch tree and a throwaway database on the node. Nothing on the site is touched, so no approval; the schedule dispatches level 2, a person chooses 3. The `VERIFY_*` result lines stamp `mgn_backup_verify_*` (`JobResultProcessor::process_verify_backup`). See [Verifying backups](../../../docs/backups.md#verifying-backups) | No |
 | `restore_objects` | Bring a run's offloaded files home from the node's manager-profile backup storage, as the `restore_objects` **operate primitive** (script `utils/restore_objects.php`, agent 1.38.0+), paged and driven from the plane (`FleetObjectRestore`): a survey job carries the run's index link and the node answers with the names the file bucket cannot serve; each page job carries the signed links for a slice of them with the envelope of each epoch they are sealed under, filled to the job's byte ceiling, and its result issues the next page. Started by a completed `restore_chain` in `missing` mode (`JobResultProcessor::process_restore_chain`), and by hand from the node's Backups tab (**Bring them back**, the `restore_objects` backup action) when the node's own daily file-store check has found offloaded files its bucket can no longer serve. Overwrites nothing and deletes nothing in any bucket, so no approval. See [Restoring a managed node](../../../docs/backups.md#restoring-a-managed-node-from-its-management-node) | No |
@@ -1372,15 +1372,18 @@ records when the ledger's bytes plus the declared sizes would cross the
 allowance, when the tenant is not usable, or when the chain's objects are in
 a space the tenant was moved away from); `shelf_sign` (run id, name,
 operation — `put`, `multipart_create`, `multipart_parts` in batches of ten
-and `multipart_complete` need an open run and a key inside its base key;
+and `multipart_complete` need an open run and a key inside its base key, and
+a write for a key a finished run completed answers `exists` with the size and
+sha256 recorded for it instead of a link — nothing is written twice;
 `get` needs no run: with run id 0 the name is relative to one of the
 tenant's spaces, as `shelf_list` answers it; nothing signs a delete);
 `shelf_list` (a prefix inside every live space of the tenant; each object
 names its `space_id`, its key relative to that space);
-`shelf_finish_run` (the objects completed; the ledger marks them, and
-everything else the run signed is cancelled — an open multipart aborted at
-the provider with the plane's credential, a row never completed marked
-pruned);
+`shelf_finish_run` (the objects completed, each with its bytes and sha256;
+the ledger marks them with the hash — one named without it is not completed —
+and everything else the run signed is cancelled — an open multipart aborted
+at the provider with the plane's credential, a row never completed marked
+pruned — and the run's ledger file is written to `{space}ledger/{run id}.json`);
 `shelf_verified_run` (a finished run whose chain the site opened and read and
 found sound: `svr_verified_time`, which retention and the draining release
 read);
@@ -1390,17 +1393,18 @@ reads (`shelf_list`, a `get`) are allowed to a suspended or released tenant
 until `svt_pruned_time` is set, so the retention promise is a readable one; a
 tenant never entitled reads nothing.
 The ledger (`svo_shelf_objects`, `ShelfObject`) holds one live row per space and
-key — tenant, space, run, key, bytes, chain, signed and completed times. An
-object that goes keeps its row, with `svo_pruned_time` and the cause
-(`retention`, `lapse`, `abort`, `reconcile`); every count reads live rows only; a key a
-later run signs again (a chain's manifest, rewritten by every incremental)
-moves its row to that run and is counted once: the row stays completed at
-the size the earlier run finished it, whatever the later run does, until
-that run names it finished. A key signed again while its row holds a
-multipart upload id has that upload aborted at the provider first, so a
-retried `multipart_create` orphans nothing — so the figure is exact and
-immediate; runs are `svr_shelf_runs` (`ShelfRun`), spent once finished or
-aborted.
+key — owner's space, run, key, bytes, sha256, chain, signed and completed
+times. An object that goes keeps its row, with `svo_pruned_time` and the cause
+(`retention`, `lapse`, `abort`, `reconcile`); every count reads live rows only. A
+key a finished run completed with its hash is never signed again; one a run
+signed and never completed (a failed run's) is taken by the run that signs it
+next, so a retry is never refused for its own leftovers, and a row the
+reconcile adopted from a listing carries no hash and is taken the same way. A
+key signed again while its row holds a multipart upload id has that upload
+aborted at the provider first, so a retried `multipart_create` orphans
+nothing — so the figure is exact and immediate; runs are `svr_shelf_runs`
+(`ShelfRun`), spent once finished or aborted. The reconcile neither counts nor
+adopts the run ledger files in a space; they are the plane's own record.
 
 **The reconcile** is the `Services` phase of `ServerManagerAdvanceProvisioning`
 (`ServiceTenantWatch`), last, every tick. Per tenant row: the allowance is
@@ -1485,13 +1489,13 @@ On one target no live space's folder equals or contains another's, so a customer
 
 **Where new backups go** (`server_manager_backup_target_id`, chosen on the Targets page among the targets switched on) is where every new node (`ManagedNode::open_default_backup_space()`, called by each path that creates a node, once it is saved) and every new customer of backup storage (at enrol) opens its first space. A node with no space has no backups taken from here.
 
-**Moving.** *Move* on a node's Backups tab, or on a customer's row of the Service Tenants page, sends the owner's new backups to another switched-on target: that target opens (or gives back) the owner's space there and the old one starts draining (`StorageSpace::move()`). *Move everyone* on a target's page does the same for every owner whose new backups go there (`move_everyone_off()`). Nothing is copied: the next backup starts a full one on the new target — a node's run carries the new target's name, and the node starts a new chain when the name changes; the broker refuses to extend a customer's chain whose objects are in a draining space — and the old backups stay readable and restorable where they are until they age out.
+**Moving.** *Move* on a node's Backups tab, or on a customer's row of the Service Tenants page, sends the owner's new backups to another switched-on target: that target opens (or gives back) the owner's space there and the old one starts draining (`StorageSpace::move()`). *Move everyone* on a target's page does the same for every owner whose new backups go there (`move_everyone_off()`). Nothing is copied: the next backup starts a full one on the new target — the broker takes the run in the owner's new space, the node starts a new chain when the space changes, and the broker refuses to extend any chain whose objects are in a draining space — and the old backups stay readable and restorable where they are until they age out.
 
 `JobCommandBuilder::node_space()` returns a node's space by id, or its active one; `get_target()` is the active space's target switched on or off; `write_space()` / `write_target()` return it only while its target is switched on, for new backups and uploads. Downloads, Prepare, Verify and Bring them back name the space a backup is in (`space_id`, from the listing), and a chain named without one is found in whichever space holds it.
 
 ### Supported Providers
 
-Every provider in `StorageProvider` (Backblaze B2, Amazon S3, Linode, Cloudflare R2, Wasabi, DigitalOcean Spaces, Hetzner, generic S3-compatible). The form is `BackupTargetForm`, the same one the core Backups page draws, with the node key fields added here; each provider shows the region and endpoint fields it asks for, and Backblaze's are read from the key at save time. A target's location, how it is switched off and when it may be deleted follow [Backups § Saving a target](../../../docs/backups.md#saving-a-target).
+Every provider in `StorageProvider` (Backblaze B2, Amazon S3, Linode, Cloudflare R2, Wasabi, DigitalOcean Spaces, Hetzner, generic S3-compatible). The form is `BackupTargetForm`, the same one the core Backups page draws; each provider shows the region and endpoint fields it asks for, and Backblaze's are read from the key at save time. A target's location, how it is switched off and when it may be deleted follow [Backups § Saving a target](../../../docs/backups.md#saving-a-target).
 
 All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls, from the management node (web tier) or from the node's own agent.
 
@@ -1516,11 +1520,9 @@ Credentials are stored on the `bkt_backup_targets` table using a unified shape f
 {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
 ```
 
-Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the management node itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to backup storage but never erase it*). Both are SecretBox-sealed at rest.
+`bkt_credentials` holds a target's one key, SecretBox-sealed at rest, and it never leaves this management node. Nodes and customers reach backup storage through links it signs with that key (see [The backup broker](#the-backup-broker)).
 
-A persisted job never contains a credential — a node-bound **upload** (`backup_run`, `upload_backup`) carries a placeholder token that the agent channel resolves in memory when the job is handed out: `__SM_NODE_CREDS_<target_id>__` for the write-only node slot whenever it is filled, `__SM_CREDS_<target_id>__` otherwise. The channel resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
-
-The operations that need more capability than a write-only key never send one at all: a node-side **download** receives a presigned URL for the one object it names, signed on the management node with the main credential; a **cloud delete** runs on the management node itself, in-process. So the main (delete-capable) credential never travels to a node in any form.
+A persisted job never contains a credential. A node's **backup run** and **re-upload** (`backup_run`, `upload_backup`) carry a placeholder, `__SM_BROKER_<space id>_<backup|upload>__`, that the agent channel turns into a broker run when the job is handed out; a job naming a key slot is refused at hand-out. A node-side **download**, **Prepare**, **Verify** or **Bring them back** carries presigned GETs for the objects it names, signed here; a **cloud delete** runs on this management node, in-process.
 
 ### Transient Failures
 
@@ -1735,20 +1737,57 @@ management node that had been tampered with cannot re-seal the fleet's next back
 to a key of its choosing. A node holds no key to anyone's backups but its own, and
 a node that leaves this fleet takes nothing with it.
 
-#### The node may write to backup storage but never erase it
+#### The backup broker
 
-A backup target holds two credential slots. The main credential
-(`bkt_credentials`) is the management node's own — it lists, prunes and downloads.
-The **node credential** (`bkt_node_credentials`, on the target edit form) is an
-optional second key created **write-only** — `writeFiles` without `deleteFiles`
-on B2, `s3:PutObject` without `s3:DeleteObject` on S3. When it is set, that is
-the key nodes are handed during a run: a node can add its archives and remove
-nothing. When no node credential is configured, nodes receive the main key —
-functional, but a compromised node then briefly holds a key that could erase
-backup storage, so a fleet target wants the node slot filled.
+A node holds no key to backup storage; it writes through this management
+node's broker (`NodeBroker`, `BrokerEndpoint`, the shared signing and finishing
+code in `ShelfBroker`). When a node's agent claims a `backup_run` or
+`upload_backup` job, the agent channel opens a broker run (`svr_shelf_runs` with
+`svr_mgn_managed_node_id`, `svr_kind` `backup` or `upload`) in the space the job
+names, mints a token, keeps its hash and expiry on the run (the job's claim
+budget plus an hour, `svr_token_hash`, `svr_token_expires_time`), records the
+run on the job (`mjb_svr_shelf_run_id`) and puts the broker's address, the run
+and the token in the job's credential slot. The job row at rest carries only
+the placeholder.
 
-`FleetBackupRetention` prunes from here, with the delete-capable main
-credential that never leaves this machine. A credential that can delete is a
+The node's backup engine (`BackupBroker` in core) then calls
+`/api/v1/broker/{begin,sign,finish,abort}` with the token in the
+`X-Joinery-Broker-Token` header — a route dispatched before key
+authentication, metered in its own bucket — and makes every upload request on
+the link it is given:
+
+- **begin**: the run's space, base key (`{space}manager/`), bucket and target name;
+- **sign**: one write inside the base key, refused when the space is draining
+  (the node was moved while the run was open), when the chain's objects are in
+  another of the node's spaces, or for any read or delete; a key a finished run
+  completed answers `exists` with its recorded size and sha256 — nothing is
+  written twice, so a node can replace nothing it wrote. A chain manifest or an
+  epoch envelope is never signed over one already in the bucket, even one
+  written before runs went through the broker (it is looked for first);
+- **finish**: every object written, with bytes and sha256; the ledger records
+  them, cancels the rest, and writes the run's ledger file
+  (`{space}ledger/{run id}.json`, outside every run's base key). Asked again
+  for a finished run — a lost reply — it answers what was recorded;
+- **abort**: the run failed; what it signed is cancelled.
+
+`FleetBackupRun` aborts every open node run whose token expired, and writes any
+finished run's ledger file that did not reach backup storage
+(`ShelfBroker::writeMissingLedgerFiles()`); one that cannot be written records
+why (`svr_ledger_problem`), is tried again a day later, and is counted in the
+pass's problems. A job handed out again replaces the broker run it opened.
+Ledger files do not count when a draining space is checked for empty. Readers
+of a chain take its newest manifest the broker recorded, before a newer one a
+failed run left. A node whose core predates the
+broker (`JobCommandBuilder::BROKER_MIN_CORE_VERSION`) is refused a backup or a
+re-upload at build, naming the release it needs. The node's Backups tab shows
+each run's manifest with the sha256 recorded when it was written — what a shell
+restore checks the manifest against — and says when a set's newest manifest in
+backup storage is not the one its run wrote; a site copy refuses such a
+manifest outright.
+
+`FleetBackupRetention` prunes from here, with the target's key, which never
+leaves this machine; a deleted object's ledger row is kept, marked pruned by
+retention. A credential that can delete is a
 credential that can erase the fleet's backups, which is the first move of any
 ransomware worth the name and the exact thing these copies exist to survive.
 
@@ -1775,15 +1814,9 @@ retention will not delete* in `docs/backups.md`). The site removes its own recor
 of manager runs outside its window by the window alone, so its Backups page lists
 what is kept.
 
-Two provider notes:
-
-- Linode Object Storage keys are read-only or read-write per bucket with no
-  separate delete capability, so write-without-delete cannot be expressed there.
-  B2 and S3 both express it cleanly.
-- A chain rewrites `manifest.json` every run. That is a PUT over an existing key,
-  which write-only permits, but on B2 it leaves superseded versions the node
-  cannot remove. Give the fleet bucket a lifecycle rule keeping only the current
-  version.
+Every run of a chain writes its own manifest (`manifest-{seq}.json`), so no
+key in backup storage is written twice and a versioned bucket keeps no
+superseded versions of one.
 
 #### Scheduling
 
@@ -2270,6 +2303,7 @@ Represents a queued, running, or completed operation. Key fields:
 - `mjb_output` -- Progressive text output (appended during execution)
 - `mjb_result` -- Structured JSON populated by `JobResultProcessor` after completion
 - `mjb_current_step` / `mjb_total_steps` -- Progress tracking
+- `mjb_svr_shelf_run_id` -- The broker run a backup or re-upload job took, opened when the agent claimed it
 
 Create jobs with the static helper:
 
@@ -2292,7 +2326,6 @@ Configured storage target for backups. Key fields:
 - `bkt_bucket` -- Bucket name (required)
 - `bkt_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
 - `bkt_credentials` -- JSON with the unified shape `{access_key, secret_key, region, endpoint}` for every provider; B2's region/endpoint are auto-detected at save time
-- `bkt_node_credentials` -- optional write-only key handed to nodes during a backup run in place of the main one; same shape, same sealing; B2/S3 only
 - `bkt_delete_local` -- Whether to delete local backup after successful upload
 - `bkt_enabled` -- Whether this target is active
 
@@ -2477,7 +2510,9 @@ Used by the backup browser on the Backups tab.
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage: requests, the one presigner, and paginated listing |
 | `includes/StorageProvider.php` | The one provider catalogue: labels, endpoint patterns, region rules, addressing, console links |
-| `includes/BackupTargetForm.php` | The one backup target form and save path, drawn here with the node key fields |
+| `includes/BackupTargetForm.php` | The one backup target form and save path, the same one the core Backups page draws |
+| `includes/services/NodeBroker.php` | A Managed node's broker runs: opened at job hand-out with a token, begin, sign, finish, abort, and the expiry pass |
+| `includes/services/BrokerEndpoint.php` | `/api/v1/broker/*`: the token-authenticated HTTP shell a node's backup run calls |
 | `includes/TargetTester.php` | Connection test on Save for Backup Targets |
 | `includes/BackupListHelper.php` | Merges latest local list_backups job output with live cloud listing into a unified file table |
 | `ajax/job_status.php` | Live job output polling |

@@ -39,6 +39,17 @@
  * run where the others increment. A run's own level is 0 exactly when every
  * kind in it is: "this run restores on its own".
  *
+ * A version-3 chain is a version-2 chain whose every run writes its own
+ * manifest, manifest-{seq}.json (manifest_name()), instead of rewriting
+ * manifest.json: nothing in a chain is ever written twice, so a key a
+ * broker has completed is never signed again (specs/storage_targets.md F9).
+ * Readers take the newest (newest_manifest_name()). On this machine the
+ * chain's working copy is still manifest.json, and staging lands the chosen
+ * manifest under that name, so everything that reads a local chain reads one
+ * file whatever the version.
+ *
+ * @version 1.9 - version 3: one manifest per run, manifest-{seq}.json (manifest_name(), stored_manifest_name(),
+ *                newest_manifest_name(), is_manifest_name()); object_keys() names every run's manifest
  * @version 1.8 - should_start_new: destination_changed, when the chain's runs went somewhere other than where
  *                this run goes (specs/storage_targets.md WP3)
  * @version 1.7 - should_start_new: a swapped tree no longer starts a chain (the runner re-bases that kind
@@ -76,18 +87,28 @@ class BackupChainException extends Exception {}
 class BackupChain {
 
 	/** The newest manifest schema this build writes and reads. */
-	const VERSION = 2;
+	const VERSION = 3;
 
 	/** Every manifest schema decode() accepts. An older build refuses a newer one by name. */
-	const VERSIONS = array(1, 2);
+	const VERSIONS = array(1, 2, 3);
 
 	/** The kinds that make up the site tree, in the order a restore applies them, by version. */
-	const TREE_KINDS = array(1 => array('files'), 2 => array('data', 'code'));
+	const TREE_KINDS = array(1 => array('files'), 2 => array('data', 'code'), 3 => array('data', 'code'));
+
+	/** The first version whose runs each write their own manifest. */
+	const PER_RUN_MANIFEST_VERSION = 3;
 
 	/** The kinds a run's database may be: a dump, whole every run, or a physical backup that increments. */
 	const DATABASE_KINDS = array('db', 'pgdata');
 
+	/**
+	 * The manifest's name on this machine, in every version, and in the bucket
+	 * for a version-1 or version-2 chain.
+	 */
 	const MANIFEST_NAME = 'manifest.json';
+
+	/** A version-3 run's manifest in the bucket: manifest-0003.json. */
+	const RUN_MANIFEST_PATTERN = '/^manifest-(\d{4,})\.json\z/';
 
 	/** Prefix of a chain directory in the bucket. */
 	const DIR_PREFIX = 'chain-';
@@ -138,6 +159,48 @@ class BackupChain {
 	/** Directory name inside the target prefix. */
 	public static function dir_for($chain_id) {
 		return (string)$chain_id;
+	}
+
+	/** A version-3 run's manifest name in the bucket, e.g. manifest-0003.json. */
+	public static function manifest_name($seq) {
+		return 'manifest-' . str_pad((string)(int)$seq, 4, '0', STR_PAD_LEFT) . '.json';
+	}
+
+	/**
+	 * The name a manifest goes to the bucket under: its newest run's own name
+	 * in a version-3 chain, manifest.json before that.
+	 */
+	public static function stored_manifest_name(array $manifest) {
+		$runs = $manifest['runs'] ?? array();
+		if ((int)($manifest['version'] ?? 1) < self::PER_RUN_MANIFEST_VERSION || !$runs) {
+			return self::MANIFEST_NAME;
+		}
+		return self::manifest_name((int)($runs[count($runs) - 1]['seq'] ?? count($runs) - 1));
+	}
+
+	/** Whether a bare name in a chain's folder is one of its manifests, of any version. */
+	public static function is_manifest_name($name) {
+		return (string)$name === self::MANIFEST_NAME || preg_match(self::RUN_MANIFEST_PATTERN, (string)$name) === 1;
+	}
+
+	/**
+	 * The manifest to read among a chain folder's bare names: the run manifest
+	 * with the highest number, else manifest.json, else ''. The newest names
+	 * every run before it, so it is the one a restore of any run reads.
+	 */
+	public static function newest_manifest_name(array $names) {
+		$best = -1;
+		$found = '';
+		foreach ($names as $name) {
+			if (preg_match(self::RUN_MANIFEST_PATTERN, (string)$name, $m) && (int)$m[1] > $best) {
+				$best = (int)$m[1];
+				$found = (string)$name;
+			}
+		}
+		if ($found !== '') {
+			return $found;
+		}
+		return in_array(self::MANIFEST_NAME, array_map('strval', $names), true) ? self::MANIFEST_NAME : '';
 	}
 
 	/** Next run sequence number in a chain. */
@@ -472,7 +535,7 @@ class BackupChain {
 		if (!in_array((int)($data['version'] ?? 0), self::VERSIONS, true)) {
 			throw new BackupChainException(
 				'Unsupported chain manifest version ' . (int)($data['version'] ?? 0)
-				. '; this build reads versions ' . implode(' and ', self::VERSIONS) . '.');
+				. '; this build reads versions ' . implode(', ', self::VERSIONS) . '.');
 		}
 		if (!isset($data['runs']) || !is_array($data['runs'])) {
 			throw new BackupChainException('This chain manifest lists no runs.');
@@ -516,7 +579,8 @@ class BackupChain {
 	}
 
 	/**
-	 * Every object key a chain owns, for a chain-atomic delete.
+	 * Every object key a chain owns, for a chain-atomic delete: every run's
+	 * artifacts and every manifest the chain wrote.
 	 *
 	 * The profile segment is required rather than defaulted: this list is handed
 	 * to a delete, and guessing the wrong segment would either delete nothing
@@ -525,8 +589,12 @@ class BackupChain {
 	public static function object_keys(array $manifest, $prefix, $slug, $profile) {
 		$dir = rtrim($prefix, '/') . '/' . $slug . '/' . BackupProfile::path_segment($profile)
 		     . '/' . self::dir_for($manifest['chain_id'] ?? '') . '/';
-		$keys = array($dir . self::MANIFEST_NAME);
-		foreach ($manifest['runs'] ?? array() as $run) {
+		$per_run = ((int)($manifest['version'] ?? 1) >= self::PER_RUN_MANIFEST_VERSION);
+		$keys = $per_run ? array() : array($dir . self::MANIFEST_NAME);
+		foreach ($manifest['runs'] ?? array() as $i => $run) {
+			if ($per_run) {
+				$keys[] = $dir . self::manifest_name((int)($run['seq'] ?? $i));
+			}
 			foreach ($run['artifacts'] ?? array() as $a) {
 				if (!empty($a['name'])) {
 					$keys[] = $dir . $a['name'];

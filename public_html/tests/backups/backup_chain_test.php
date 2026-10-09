@@ -175,8 +175,8 @@ check(BackupChain::artifact_name('code', 4) === 'code-0004.tar.gz.enc' && Backup
 $v2 = BackupChain::start('chain-20260926_040000', 'site', array('recipients' => array()), 'no_chain', 2);
 check($v2['version'] === 2, 'a chain can be started at version 2');
 $threw = '';
-try { BackupChain::start('chain-x', 'site', array(), '', 3); } catch (BackupChainException $e) { $threw = $e->getMessage(); }
-check($threw !== '', 'there is no version 3 to start');
+try { BackupChain::start('chain-x', 'site', array(), '', 4); } catch (BackupChainException $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'there is no version 4 to start');
 
 // Run 0: everything full. Run 1: increments. Run 2: an upgrade re-bases the
 // code only. Run 3: increments again. The database is a dump until run 2, when
@@ -225,6 +225,33 @@ try { BackupChain::restore_plan($headless2, 1); } catch (BackupChainException $e
 check(strpos($threw, 'no full code backup') !== false, 'a kind with no full at or before the run is refused', $threw);
 
 check(BackupChain::decode(BackupChain::encode($v2))['version'] === 2, 'a version-2 manifest decodes');
+
+section('Version 3: one manifest per run');
+
+check(BackupChain::VERSION === 3, 'the runner writes version 3');
+check(BackupChain::manifest_name(3) === 'manifest-0003.json' && BackupChain::manifest_name(12345) === 'manifest-12345.json',
+	'a run\'s manifest is named by its number, zero-padded to four');
+$v3 = $v2; $v3['version'] = 3;
+check(BackupChain::stored_manifest_name($v3) === 'manifest-0003.json', 'a version-3 manifest goes up under its newest run\'s name');
+check(BackupChain::stored_manifest_name($v2) === 'manifest.json', 'a version-2 manifest goes up as manifest.json');
+check(BackupChain::is_manifest_name('manifest.json') && BackupChain::is_manifest_name('manifest-0007.json')
+	&& !BackupChain::is_manifest_name('manifest-7.json') && !BackupChain::is_manifest_name('files-0007.tar.gz.enc'),
+	'is_manifest_name knows both shapes and nothing else');
+check(BackupChain::newest_manifest_name(array('manifest-0002.json', 'files-0010.tar.gz.enc', 'manifest-0010.json', 'manifest-0009.json')) === 'manifest-0010.json',
+	'the newest run manifest is the highest number, not the last listed');
+check(BackupChain::newest_manifest_name(array('manifest.json', 'files-0000.tar.gz.enc')) === 'manifest.json'
+	&& BackupChain::newest_manifest_name(array('files-0000.tar.gz.enc')) === '', 'manifest.json before version 3; nothing when there is none');
+check(BackupChain::newest_manifest_name(array('manifest.json', 'manifest-0001.json', 'manifest-0000.json')) === 'manifest-0001.json',
+	'a folder holding both shapes reads the newest run manifest');
+check(!BackupChain::is_manifest_name("manifest-0001.json\n"), 'a name with a trailing newline is not a manifest');
+$k3 = BackupChain::object_keys($v3, 'p', 'site', 'site');
+check(count(preg_grep('#/manifest-000[0-3]\.json$#', $k3)) === 4 && !preg_grep('#/manifest\.json$#', $k3),
+	'a version-3 chain owns every run\'s manifest and no manifest.json', implode(' ', $k3));
+$k2 = BackupChain::object_keys($v2, 'p', 'site', 'site');
+check(count(preg_grep('#/manifest\.json$#', $k2)) === 1 && !preg_grep('#/manifest-\d+\.json$#', $k2), 'a version-2 chain owns manifest.json');
+check(BackupChain::decode(BackupChain::encode($v3))['version'] === 3 && array_keys(BackupChain::restore_plan($v3, 3)['trees']) === array('data', 'code'),
+	'a version-3 manifest decodes and plans as version 2 does');
+check(BackupChain::should_start_new($v2, true, 7, 30, null, null, 3) === 'layout_split', 'a version-2 chain is not extended by a version-3 runner');
 $runner_exp = BackupRunner::expected_bytes($v2, 0);
 check($runner_exp === (100 + 0) + (100 + 2), 'expected_bytes for a full sums each tree kind\'s newest level 0', (string)$runner_exp);
 check(BackupRunner::expected_bytes($v2, 1) === 103 + 103, 'and for an incremental each kind\'s newest');

@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.34 - mjb_svr_shelf_run_id: the broker run a backup or re-upload job took
  * @version 1.33 - activeOrRecentForNode: a job the node answered inside the window is cover whatever the
  *                 answer. A refused or failed one counted for nothing, so the hourly refresh asked dev for
  *                 a host_report every minute for five days (923 refusals, 10-02..10-07) — a repeat a minute
@@ -126,6 +127,9 @@ class ManagementJob extends SystemBase {
 		'mjb_agent_outcome'     => array('type'=>'varchar(16)'),
 		'mjb_total_steps'       => array('type'=>'int4'),
 		'mjb_error_message'     => array('type'=>'text'),
+		// The backup storage run this job took through the broker, when it took
+		// one (specs/storage_targets.md §4): a node's backup or re-upload.
+		'mjb_svr_shelf_run_id'  => array('type'=>'int8'),
 		'mjb_external_order_item_id' => array('type'=>'int8'),
 		'mjb_created_by'        => array('type'=>'int8'),
 		'mjb_started_time'      => array('type'=>'timestamp(6)'),
@@ -138,6 +142,7 @@ class ManagementJob extends SystemBase {
 	protected static $foreign_key_actions = [
 		'mjb_mgn_managed_node_id' => ['action' => 'null'],
 		'mjb_created_by'  => ['action' => 'null', 'source_table' => 'usr_users'],
+		'mjb_svr_shelf_run_id' => ['action' => 'null'],
 	];
 
 	/**

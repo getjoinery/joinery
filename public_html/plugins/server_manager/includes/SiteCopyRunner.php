@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.14 - the chain's newest manifest is read (one per run from chain version 3) and refused when its hash
+ *                 differs from the one the broker recorded when the source wrote it (specs/storage_targets.md WP5)
  * @version 1.13 - a chain's manifest is read from whichever of the source's storage spaces holds it;
  *                 a copy's node is given no storage space of its own: its backups are its source's (backup_node_of)
  * @version 1.12 - a copy's node is given the target Where new backups go names
@@ -1212,10 +1214,35 @@ class SiteCopyRunner {
 			} catch (StorageSpaceException $e) {
 				throw new SiteCopyException('The source\'s backup storage cannot be read: ' . $e->getMessage());
 			}
-			$path = '/' . BackupChainListHelper::chain_path($space, BackupProfile::MANAGER, $chain_id) . '/' . BackupChain::MANIFEST_NAME;
-			$got = S3Signer::get($creds, $bucket, $path);
+			// The chain's newest manifest: a version-3 chain writes one per run.
+			$dir = BackupChainListHelper::chain_path($space, BackupProfile::MANAGER, $chain_id) . '/';
+			$names = array();
+			try {
+				foreach (S3Signer::list($creds, $bucket, $dir) as $o) {
+					$name = substr((string)($o['key'] ?? ''), strlen($dir));
+					if ($name !== '' && strpos($name, '/') === false) { $names[] = $name; }
+				}
+			} catch (Exception $e) {
+				throw new SiteCopyException('The source\'s backup storage cannot be listed: ' . $e->getMessage());
+			}
+			$newest = ShelfObject::preferredManifestName((int)$space->key, $dir, $names);
+			if ($newest === '') {
+				$status = 404;
+				continue;
+			}
+			$got = S3Signer::get($creds, $bucket, '/' . $dir . $newest);
 			$status = (int)($got['status'] ?? 0);
 			if ($status === 200) {
+				// The manifest is checked against the hash the broker recorded when
+				// the source wrote it, not taken on the bucket's word: nothing a
+				// node writes is written twice, so a manifest whose bytes differ
+				// was put there by something else (specs/storage_targets.md §6).
+				$recorded = ShelfObject::forKey((int)$space->key, $dir . $newest);
+				$recorded_sha = $recorded ? strtolower(trim((string)$recorded->get('svo_sha256'))) : '';
+				if ($recorded_sha !== '' && !hash_equals($recorded_sha, hash('sha256', (string)$got['body']))) {
+					throw new SiteCopyException("chain {$chain_id}'s manifest in backup storage is not the one its server wrote: "
+						. 'its hash differs from the one recorded when it was written. Nothing is copied from it.');
+				}
 				return (string)$got['body'];
 			}
 		}

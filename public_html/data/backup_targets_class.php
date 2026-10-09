@@ -17,6 +17,9 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 3.5 - one credential, the main one, which never leaves the machine that owns the target: the node
+ *                credential (bkt_node_credentials) and per-run key minting (bkt_mint_run_keys) are gone, since a
+ *                Managed node writes through the management node's backup broker (specs/storage_targets.md WP5)
  * @version 3.4 - overlaps(): two targets in one bucket whose folders are the same or nested hold one set of
  *                objects; file_store_overlap() names the file store a file store would share a place with
  * @version 3.3 - bkt_purpose: a target holds backups or is a file store (specs/storage_targets.md WP6); a file
@@ -62,7 +65,7 @@ class BackupTarget extends SystemBase {
 	public static $tablename = 'bkt_backup_targets';
 	public static $pkey_column = 'bkt_backup_target_id';
 
-	public static $json_vars = array('bkt_credentials', 'bkt_node_credentials');
+	public static $json_vars = array('bkt_credentials');
 
 	// A collection lists the backup targets unless asked for another purpose,
 	// so the generated rows are backup targets for the filters to find.
@@ -80,21 +83,11 @@ class BackupTarget extends SystemBase {
 		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array()),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
 		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
+		// The target's one credential. It never leaves the machine that owns
+		// the target: a site uses it directly, and a management node signs
+		// links with it for its Managed nodes and customers (R4).
 		'bkt_credentials'      => array('type'=>'jsonb'),
-		'bkt_node_credentials' => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
-		// Whether a node-bound run gets a key MINTED for it — pinned to that
-		// node's own prefix, write-only, expiring with the run — instead of the
-		// one write-only credential every node in the fleet otherwise shares.
-		//
-		// OFF until an operator turns it on, and that default is load-bearing.
-		// Minting needs a master key the provider will let create keys, and
-		// whether a given account's key can is not knowable from here. A target
-		// switched on by default would try to mint on the next cycle and, where
-		// the key cannot, fail EVERY node's backup — trading a working fleet for
-		// a better credential nobody asked for yet. The Remote Backup page says
-		// what it needs; flipping it is a decision with a check behind it.
-		'bkt_mint_run_keys'   => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkt_update_time'     => array('type'=>'timestamp(6)'),
 		'bkt_delete_time'     => array('type'=>'timestamp(6)'),
@@ -139,9 +132,7 @@ class BackupTarget extends SystemBase {
 		$this->set('bkt_path_prefix', self::normalise_prefix((string)$this->get('bkt_path_prefix'),
 			$this->is_file_store() ? CloudFileStore::default_prefix() : self::DEFAULT_PREFIX));
 		$this->normalise_endpoint('bkt_credentials');
-		$this->normalise_endpoint('bkt_node_credentials');
 		$this->seal_credentials('bkt_credentials');
-		$this->seal_credentials('bkt_node_credentials');
 		return parent::save($debug);
 	}
 
@@ -410,14 +401,6 @@ class BackupTarget extends SystemBase {
 	}
 
 	/**
-	 * The write-only credential handed to nodes during a backup run, or [] when
-	 * none is configured (nodes then receive the main credential).
-	 */
-	function get_node_credentials() {
-		return $this->heal_b2_location('bkt_node_credentials', $this->unseal_column('bkt_node_credentials'));
-	}
-
-	/**
 	 * A Backblaze credential with no region or endpoint cannot sign a request.
 	 * The forms hide both and complete_credentials() fills them at save time,
 	 * so a target saved before that existed carries an empty region for good
@@ -429,7 +412,7 @@ class BackupTarget extends SystemBase {
 	 * ask Backblaze leaves the credential as it was; the caller's signer then
 	 * says what is missing, as before.
 	 *
-	 * @param string $column bkt_credentials | bkt_node_credentials
+	 * @param string $column bkt_credentials
 	 * @param array  $creds  what the column unsealed to
 	 * @return array the credential, completed where it could be
 	 */
@@ -456,29 +439,6 @@ class BackupTarget extends SystemBase {
 				. $this->get('bkt_name') . '": ' . $e->getMessage());
 		}
 		return $healed;
-	}
-
-	/**
-	 * Whether a node-facing credential is configured, without decrypting it.
-	 * This is what decides which placeholder token a node-bound job carries.
-	 */
-	function has_node_credentials() {
-		return !empty(self::creds_to_array($this->get('bkt_node_credentials')));
-	}
-
-	/**
-	 * Can this target mint a key for one run, scoped to one node's prefix?
-	 *
-	 * Provider-dependent and deliberately narrow: B2 pins an application key to
-	 * a bucket, a name prefix, a capability list and a lifetime in one call.
-	 * Amazon's equivalent is an STS session policy and is not built. A target
-	 * that cannot mint keeps handing nodes the stored write-only credential,
-	 * which is what the fleet had before and is unchanged by any of this.
-	 */
-	function can_mint_run_keys() {
-		return $this->get('bkt_provider') === 'b2'
-			&& !empty($this->get('bkt_mint_run_keys'))
-			&& !empty(self::creds_to_array($this->get('bkt_credentials')));
 	}
 
 	private function unseal_column($column) {
@@ -640,11 +600,6 @@ class BackupTarget extends SystemBase {
 	 */
 	public static function eachCredentialBlob(): array {
 		return self::each_column_blob('bkt_credentials');
-	}
-
-	/** As eachCredentialBlob(), for the node-facing credential column. */
-	public static function eachNodeCredentialBlob(): array {
-		return self::each_column_blob('bkt_node_credentials');
 	}
 
 	private static function each_column_blob(string $column): array {

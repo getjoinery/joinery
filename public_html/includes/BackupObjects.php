@@ -9,6 +9,10 @@
  * stored name, and never moves it again:
  *
  *   {prefix}/{slug}/{profile}/objects/{epoch}/envelope.json   the epoch's sealed data key
+ *   {prefix}/{slug}/{profile}/objects/{epoch}/envelope-{fpr}.json
+ *                                         the same key re-sealed after a recovery-key
+ *                                         rotation, named by the first 16 hex of the new
+ *                                         recovery fingerprint; nothing is written twice
  *   {prefix}/{slug}/{profile}/objects/{epoch}/{name}.enc      one object per offloaded blob
  *
  * and every run writes an INDEX — every cloud blob, with whether it is stored —
@@ -41,6 +45,9 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.5.0 - a re-seal writes envelope-{fpr}.json beside the epoch's envelope.json instead of over it, so
+ *                  no key in backup storage is written twice (specs/storage_targets.md WP5); location_of()
+ *                  reads both names, and a listing records every envelope of an epoch
  * @version 1.4.0 - an object's row lock is its table's (CloudOffloadEngine::lockSpace()); an object is fetched from the file store its row records; a name may carry one namespace
  *                  segment (offloaded mail is 'mailbox/{id}.eml', which no stored file name can be), read
  *                  back from a listing as such; temporaries are named by a hash of the object's name
@@ -80,6 +87,8 @@ class BackupObjects {
 	const RETIRED_FILE = 'retired-epochs.json';
 	const TMP_DIR = 'tmp';
 	const ENVELOPE_NAME = 'envelope.json';
+	/** A re-sealed envelope: envelope-{first 16 hex of the recovery fingerprint}.json. */
+	const RESEALED_ENVELOPE_PATTERN = '/^envelope-[0-9a-f]{16}\.json\z/';
 	const OBJECT_SUFFIX = '.enc';
 	/** The one namespace segment an object name may carry, as in 'mailbox/12.eml'. */
 	const NAMESPACE_PATTERN = '/^[a-z][a-z0-9_-]*$/';
@@ -153,8 +162,23 @@ class BackupObjects {
 		return self::DIR . '/' . $epoch . '/' . $name . self::OBJECT_SUFFIX;
 	}
 
-	public static function envelope_relname($epoch) {
-		return self::DIR . '/' . $epoch . '/' . self::ENVELOPE_NAME;
+	/** An epoch envelope's name in backup storage: envelope.json, or a re-sealed one by name. */
+	public static function envelope_relname($epoch, $name = self::ENVELOPE_NAME) {
+		return self::DIR . '/' . $epoch . '/' . $name;
+	}
+
+	/** The name an envelope re-sealed to this recovery fingerprint goes up under. */
+	public static function resealed_envelope_name($fingerprint) {
+		$hex = strtolower(substr(preg_replace('/[^0-9a-fA-F]/', '', (string)$fingerprint), 0, 16));
+		if (strlen($hex) !== 16) {
+			throw new BackupObjectsException('A re-sealed envelope is named by a recovery fingerprint, and none was given.');
+		}
+		return 'envelope-' . $hex . '.json';
+	}
+
+	/** Whether a file in an epoch's folder is one of its envelopes. */
+	public static function is_envelope_name($file) {
+		return (string)$file === self::ENVELOPE_NAME || preg_match(self::RESEALED_ENVELOPE_PATTERN, (string)$file) === 1;
 	}
 
 	// --------------------------------------------------------------- cipher
@@ -421,23 +445,27 @@ class BackupObjects {
 	 * that switched targets keeps its epoch, and the new target needs the
 	 * envelope that opens what is stored there).
 	 */
-	public static function upload_envelope(array $plan, $id, array $envelope) {
-		$tmp = self::tmp_dir($plan) . '/' . $id . '-' . self::ENVELOPE_NAME . '.' . getmypid();
+	public static function upload_envelope(array $plan, $id, array $envelope, $name = self::ENVELOPE_NAME) {
+		$tmp = self::tmp_dir($plan) . '/' . $id . '-' . $name . '.' . getmypid();
 		if (@file_put_contents($tmp, BackupEnvelope::encode($envelope)) === false) {
 			throw new BackupObjectsException('Could not write the epoch envelope for upload.');
 		}
 		try {
-			self::put($plan, self::envelope_relname($id), $tmp, 'application/json');
+			self::put($plan, self::envelope_relname($id, $name), $tmp, 'application/json');
+		} catch (S3ObjectExistsException $e) {
+			// That envelope is in backup storage already, and is not written again.
 		} finally {
 			@unlink($tmp);
 		}
 	}
 
 	/**
-	 * Site profile, after a recovery-key rotation: every epoch envelope on the
-	 * shelf sealed to another recovery key, and openable with the site key, is
-	 * re-sealed to the current recipients and uploaded again under the same
-	 * name — the same data key, one more recipient. Nothing is re-encrypted.
+	 * After a recovery-key rotation: every epoch envelope in backup storage
+	 * sealed to another recovery key, and openable with the site key, is
+	 * re-sealed to the current recipients and uploaded beside it as
+	 * envelope-{fpr}.json — the same data key, the current recipients. Nothing
+	 * is re-encrypted and nothing is overwritten: the envelope it was re-sealed
+	 * from stays, and still opens with the key it was sealed to.
 	 * Epochs the site key cannot open are returned under 'unopenable' for
 	 * Recovery Readiness to report; nothing is re-copied automatically.
 	 *
@@ -463,7 +491,7 @@ class BackupObjects {
 			}
 			try {
 				$rebuilt = BackupEnvelope::build($data_key, (string)$id, $plan['recipients']);
-				self::upload_envelope($plan, (string)$id, $rebuilt);
+				self::upload_envelope($plan, (string)$id, $rebuilt, self::resealed_envelope_name($current));
 				$resealed[] = (string)$id;
 				$stored = self::read_epoch($plan);
 				if ($stored && $stored['id'] === (string)$id) {
@@ -476,14 +504,26 @@ class BackupObjects {
 		return array('resealed' => $resealed, 'unopenable' => $unopenable);
 	}
 
-	/** Fetch and decode every epoch envelope the site's backup storage lists. */
+	/**
+	 * Fetch and decode one envelope of every epoch the site's backup storage
+	 * lists: the one re-sealed to the current recovery key when there is one,
+	 * else envelope.json.
+	 */
 	public static function envelopes_site(array $plan, array $shelf) {
 		$out = array();
 		list($creds, $bucket, $base) = self::destination($plan);
+		$current = '';
+		try {
+			$current = self::resealed_envelope_name((string)($plan['recovery_fpr'] ?? ''));
+		} catch (BackupObjectsException $e) {
+			// No current fingerprint: read the epochs' own envelopes.
+		}
 		foreach (array_keys($shelf['envelopes'] ?? array()) as $id) {
+			$names = (array)($shelf['envelope_names'][$id] ?? array());
+			$name = ($current !== '' && in_array($current, $names, true)) ? $current : self::ENVELOPE_NAME;
 			$tmp = self::tmp_dir($plan) . '/env-' . getmypid();
 			try {
-				$resp = S3Signer::get_to_file($creds, $bucket, '/' . ltrim($base . self::envelope_relname($id), '/'), $tmp);
+				$resp = S3Signer::get_to_file($creds, $bucket, '/' . ltrim($base . self::envelope_relname($id, $name), '/'), $tmp);
 				if ((int)($resp['status'] ?? 0) === 200) {
 					$out[$id] = BackupEnvelope::read_sidecar($tmp);
 				}
@@ -561,9 +601,10 @@ class BackupObjects {
 	 * Backup storage picture from a raw listing. Pure. Anything not
 	 * objects/{epoch}/{name} is ignored, where a name is a stored file name
 	 * (no slash) or one namespace segment and a file ('mailbox/12.eml').
+	 * 'envelopes' marks each epoch that has one; 'envelope_names' lists them.
 	 */
 	public static function parse_listing(array $objects, $prefix) {
-		$out = array('objects' => array(), 'envelopes' => array());
+		$out = array('objects' => array(), 'envelopes' => array(), 'envelope_names' => array());
 		$prefix = ltrim((string)$prefix, '/');
 		foreach ($objects as $obj) {
 			$key = ltrim((string)($obj['key'] ?? ''), '/');
@@ -573,6 +614,7 @@ class BackupObjects {
 			$epoch = $at['epoch'];
 			if ($at['envelope']) {
 				$out['envelopes'][$epoch] = true;
+				$out['envelope_names'][$epoch][] = $at['file'];
 				continue;
 			}
 			$name = $at['name'];
@@ -586,8 +628,8 @@ class BackupObjects {
 	}
 
 	/**
-	 * What a key under objects/ is, from the part after 'objects/': an epoch's
-	 * envelope, ['epoch', 'envelope' => true, 'name' => ''], or an object,
+	 * What a key under objects/ is, from the part after 'objects/': one of an
+	 * epoch's envelopes, ['epoch', 'envelope' => true, 'name' => '', 'file'], or an object,
 	 * ['epoch', 'envelope' => false, 'name'] where the name is a stored file
 	 * name or one namespace segment and a file ('mailbox/12.eml'). Null for
 	 * anything else. The one reading of the layout every listing uses. Pure.
@@ -601,8 +643,8 @@ class BackupObjects {
 			return null;
 		}
 		list($epoch, $file) = $parts;
-		if ($file === self::ENVELOPE_NAME) {
-			return array('epoch' => $epoch, 'envelope' => true, 'name' => '');
+		if (self::is_envelope_name($file)) {
+			return array('epoch' => $epoch, 'envelope' => true, 'name' => '', 'file' => $file);
 		}
 		if (substr($file, -strlen(self::OBJECT_SUFFIX)) !== self::OBJECT_SUFFIX || strlen($file) === strlen(self::OBJECT_SUFFIX)) {
 			return null;
@@ -1046,7 +1088,14 @@ class BackupObjects {
 		$tmp = self::tmp_dir($plan) . '/' . self::tmp_name((string)$obj['name']) . self::OBJECT_SUFFIX;
 		try {
 			$enc = self::encrypt_file($source, $tmp, $epoch['data_key']);
-			self::put($plan, self::object_relname($epoch['id'], $obj['name']), $tmp);
+			try {
+				self::put($plan, self::object_relname($epoch['id'], $obj['name']), $tmp);
+			} catch (S3ObjectExistsException $e) {
+				// Already in backup storage under this epoch — a run that failed
+				// after storing it, or a held picture that lost it. Nothing there
+				// is written twice; what is there is recorded as stored.
+				return array('epoch' => $epoch['id'], 'bytes' => (int)$e->bytes, 'sha256' => (string)$e->sha256);
+			}
 			return array('epoch' => $epoch['id'], 'bytes' => (int)$enc['bytes'], 'sha256' => $enc['sha256']);
 		} finally {
 			@unlink($tmp);
@@ -1353,12 +1402,16 @@ class BackupObjects {
 		foreach (array_keys($epochs) as $epoch) {
 			try {
 				$left = S3Signer::list($creds, $bucket, ltrim($base . self::DIR . '/' . $epoch . '/', '/'));
+				$envelopes = array();
 				$only_envelope = true;
 				foreach ($left as $o) {
-					if (basename((string)$o['key']) !== self::ENVELOPE_NAME) { $only_envelope = false; break; }
+					if (!self::is_envelope_name(basename((string)$o['key']))) { $only_envelope = false; break; }
+					$envelopes[] = (string)$o['key'];
 				}
 				if ($only_envelope) {
-					S3Signer::delete($creds, $bucket, '/' . ltrim($base . self::envelope_relname($epoch), '/'));
+					foreach ($envelopes as $key) {
+						S3Signer::delete($creds, $bucket, '/' . ltrim($key, '/'));
+					}
 				}
 			} catch (\Throwable $ex) {
 				error_log('BackupObjects: could not tidy epoch ' . $epoch . ': ' . $ex->getMessage());

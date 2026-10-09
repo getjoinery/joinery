@@ -159,15 +159,22 @@ class BackupVerifyLauncher {
 			throw new BackupVerifyLauncherException('Nothing is stored under that backup on the target, so there is nothing to verify.');
 		}
 
-		$manifest_url = '';
-		$artifact_urls = array();
+		$names = array();
 		foreach ($listing as $object) {
 			$key = (string)($object['key'] ?? $object['Key'] ?? '');
 			if ($key === '' || strpos($key, $chain_key . '/') !== 0) { continue; }
 			$name = substr($key, strlen($chain_key) + 1);
 			if ($name === '' || strpos($name, '/') !== false) { continue; }
+			$names[$name] = $key;
+		}
+		// The newest manifest names every run; a version-3 chain's others stay put.
+		$manifest_name = BackupChain::newest_manifest_name(array_keys($names));
+		$manifest_url = '';
+		$artifact_urls = array();
+		foreach ($names as $name => $key) {
+			if (BackupChain::is_manifest_name($name) && $name !== $manifest_name) { continue; }
 			$url = S3Signer::presign_get($creds, $bucket, '/' . ltrim($key, '/'), self::LINK_SECONDS);
-			if ($name === BackupChain::MANIFEST_NAME) {
+			if ($name === $manifest_name) {
 				$manifest_url = $url;
 			} elseif (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name)) {
 				$artifact_urls[$name] = $url;

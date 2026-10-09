@@ -2,7 +2,9 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.22
+ * @version 2.23
+ * @changelog 2.23 - Backup broker (/api/v1/broker/*): a Managed node's backup run asks for signed links with its
+ *   run token, dispatched before key authentication (BrokerEndpoint).
  * @changelog 2.22 - The agent channel's limit is checked by the endpoint, per node for what a
  *   node's signature proves and per address for the rest, not here per address for everything.
  * @changelog 2.21 - api_error() and a logic action's error envelope carry
@@ -385,6 +387,20 @@ if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH
 		api_error('Not found', 'ActionError', 404);
 	}
 	RelayBirthEndpoint::dispatchPreAuth(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/')));
+	// dispatchPreAuth() always exits.
+}
+
+// Backup broker (/api/v1/broker/*): a Managed node's backup run asks the
+// management node for signed links (specs/storage_targets.md WP5). Its
+// credential is the run's own token, minted when the node's agent claimed the
+// job, never an API key, so like the relay channel it authenticates itself
+// before the key-header requirement below. Present only where the
+// server_manager plugin is active; metered in its own bucket by the endpoint.
+if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'broker') {
+	if (!class_exists('BrokerEndpoint')) {
+		api_error('Not found', 'ActionError', 404);
+	}
+	BrokerEndpoint::dispatchPreAuth(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/')));
 	// dispatchPreAuth() always exits.
 }
 

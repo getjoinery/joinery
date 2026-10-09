@@ -47,6 +47,13 @@
  *     {prefix}/{slug}/{profile}/{file}, where the backup run writes the same
  *     profile's archives, so a re-upload is listed, counted and pruned with them.
  *
+ * WHERE IT GOES. The credential slot is a run the management node opened for
+ * this job on its backup broker (BackupBroker): every write is made on a link
+ * the management node signs, inside the node's own folder, and is recorded
+ * there with its sha256 when the run finishes. A name already in backup
+ * storage is not written again: when the bytes there are this file's, the
+ * upload is done; when they are not, it is refused.
+ *
  * Configuration arrives as JSON **on stdin**, and only on stdin:
  *
  *   php utils/upload_backup.php <<'EOF'
@@ -67,6 +74,9 @@
  *
  * Exits 0 on success, 1 on a transfer failure, 2 on a malformed request.
  *
+ * @version 1.4 - writes through the management node's backup broker when the slot names a broker run, and
+ *                finishes or aborts that run; a name already in backup storage is not written twice
+ *                (specs/storage_targets.md WP5)
  * @version 1.3 - the object key carries the profile segment, {prefix}/{slug}/{profile}/{file}, as the
  *                 backup run's own keys do; a re-upload is pruned and counted with the profile's backups
  * @version 1.2 - resolves the backup directory from the node's own configured working
@@ -101,6 +111,14 @@ require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 function upload_backup_put($creds, $bucket, $key, $path) {
 	try {
 		$resp = S3Signer::put_file($creds, $bucket, '/' . $key, $path);
+	} catch (S3ObjectExistsException $e) {
+		// Never written twice. The same bytes there is the upload done; other
+		// bytes under this name is a refusal, not an overwrite.
+		if (hash_equals((string)$e->sha256, (string)hash_file('sha256', $path))) {
+			return array('ok' => true, 'attempts' => 0, 'error' => '', 'already' => true);
+		}
+		return array('ok' => false, 'attempts' => 0,
+			'error' => 'a different file of this name is already in backup storage, and nothing there is written over');
 	} catch (Exception $e) {
 		// S3Signer's messages name the endpoint and the failure, never the key.
 		return array('ok' => false, 'attempts' => 1, 'error' => $e->getMessage());
@@ -119,9 +137,17 @@ function upload_backup_put($creds, $bucket, $key, $path) {
 
 /** Complain and stop. Never handed anything read from the configuration. */
 function upload_backup_refuse($message, $code = 2) {
+	upload_backup_abort($message);
 	fwrite(STDERR, 'UPLOAD_FAIL: ' . $message . "\n");
 	echo "UPLOAD_RESULT=error\n";
 	exit($code);
+}
+
+/** The broker run, when there is one, is told the upload failed. */
+function upload_backup_abort($cause) {
+	if (!empty($GLOBALS['upload_backup_broker'])) {
+		$GLOBALS['upload_backup_broker']->abort($cause);
+	}
 }
 
 $raw = stream_get_contents(STDIN);
@@ -202,6 +228,17 @@ $creds = json_decode((string)base64_decode($config['credentials_b64'], true), tr
 if (!is_array($creds)) {
 	upload_backup_refuse('the storage credential is not readable');
 }
+// The management node's broker run: every write is signed there.
+$upload_backup_broker = null;
+if (BackupBroker::is_slot($creds)) {
+	try {
+		$upload_backup_broker = new BackupBroker($creds);
+		$upload_backup_broker->begin();
+	} catch (Exception $e) {
+		upload_backup_refuse('the backup broker did not take this upload: ' . $e->getMessage(), 1);
+	}
+	$creds = $upload_backup_broker;
+}
 // Nothing below may reach for the raw form again, and neither may an error
 // handler or a shutdown function.
 unset($config);
@@ -235,6 +272,7 @@ if ($include_envelope) {
 		if (!$put['ok']) {
 			// Stop before the archive. Uploading it now would produce exactly
 			// the unopenable copy this pairing exists to prevent.
+			upload_backup_abort('could not upload the key file: ' . $put['error']);
 			fwrite(STDERR, 'UPLOAD_FAIL: could not upload the key file: ' . $put['error'] . "\n");
 			echo "UPLOAD_RESULT=error\n";
 			echo "UPLOAD_ENVELOPE=failed\n";
@@ -247,6 +285,7 @@ if ($include_envelope) {
 // ── Then the archive ────────────────────────────────────────────────────────
 $put = upload_backup_put($creds, $bucket, $remote_key, $local_path);
 if (!$put['ok']) {
+	upload_backup_abort($put['error']);
 	fwrite(STDERR, 'UPLOAD_FAIL: ' . $put['error'] . "\n");
 	echo "UPLOAD_RESULT=error\n";
 	echo 'UPLOAD_ATTEMPTS=' . (int)$put['attempts'] . "\n";
@@ -255,8 +294,21 @@ if (!$put['ok']) {
 }
 $attempts = (int)$put['attempts'];
 
+// The broker records what was written, with its hash; until it has, the
+// upload is not done.
+if ($upload_backup_broker) {
+	try {
+		$upload_backup_broker->finish('');
+	} catch (Exception $e) {
+		upload_backup_abort($e->getMessage());
+		fwrite(STDERR, 'UPLOAD_FAIL: the management node did not record the upload: ' . $e->getMessage() . "\n");
+		echo "UPLOAD_RESULT=error\n";
+		exit(1);
+	}
+}
+
 // The human line is not a contract; the ones below it are.
-echo 'Uploaded ' . $filename . ' (' . $size . ' bytes) to ' . $remote_key
+echo (!empty($put['already']) ? 'Already in backup storage: ' : 'Uploaded ') . $filename . ' (' . $size . ' bytes) at ' . $remote_key
 	. ($attempts > 1 ? ' on attempt ' . $attempts : '')
 	. ($envelope_status === 'uploaded' ? ', with its key file' : '') . "\n";
 if ($envelope_status === 'absent') {

@@ -14,12 +14,12 @@
  *     linodeobjects.com are each refused with a sentence. Other providers pass untouched.
  *   - Both save paths call credential_problem() (a source check, so a later edit cannot
  *     quietly drop the guard from one of them).
- *   - A Linode target cannot mint a per-run key, whatever its flag says.
  *   - A Linode-provider target runs the whole connection test (reach, write, private,
  *     prune) against the loopback S3 fixture, which signs path-style as Linode needs.
  *
  * Run: php tests/backups/linode_target_test.php
  *
+ * @version 1.2 - no per-run key minting to check (specs/storage_targets.md WP5)
  * @version 1.1 - a bare cluster host signs as https in both signers
  * @version 1.0
  */
@@ -114,16 +114,14 @@ try {
 	check(true, 'an empty endpoint is refused');
 }
 
-// ── a Linode target never mints ─────────────────────────────────────
-section('A Linode target cannot mint a per-run key');
+// ── a Linode target saves ───────────────────────────────────────────
+section('A Linode target passes the model\'s own checks');
 
 $t = new BackupTarget(NULL);
 $t->set('bkt_name', 'linode');
 $t->set('bkt_provider', 'linode');
 $t->set('bkt_bucket', 'lin');
 $t->set('bkt_credentials', array('access_key' => 'k', 'secret_key' => 's', 'region' => 'us-east-1', 'endpoint' => 'us-east-1.linodeobjects.com'));
-$t->set('bkt_mint_run_keys', true);
-check($t->can_mint_run_keys() === false, 'the mint flag on a Linode target is ignored');
 try {
 	$t->prepare();
 	check(true, 'a Linode provider passes prepare()');

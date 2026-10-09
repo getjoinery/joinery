@@ -42,11 +42,19 @@
  *              it is the one mode that must know whose key this site holds.
  *
  *   open:      php backup_envelope.php open --sidecar PATH [--private PATH] [--key-out PATH]
+ *                  [--manifest-sha256 HEX | --trust-bucket-manifest]
  *              Recovers the data key. --sidecar takes either a standalone
- *              envelope or a chain's manifest.json, which nests one -- a chain
- *              writes no separate sidecar, so the manifest is the only envelope
- *              it has. --private takes the recovery private key or the site key
- *              file; with neither, the key is read from stdin.
+ *              envelope or a chain's manifest (manifest.json, or a version-3
+ *              chain's manifest-NNNN.json), which nests one -- a chain writes no
+ *              separate sidecar, so the manifest is the only envelope it has.
+ *              A chain manifest is opened only against its expected sha256
+ *              (--manifest-sha256): the hash the management node shows beside
+ *              the run, or the one in the run's ledger file in the bucket
+ *              ({space}/ledger/{run}.json). The manifest names every archive's
+ *              hash, so a manifest nothing vouches for vouches for nothing.
+ *              --trust-bucket-manifest opens one with no hash, and says so.
+ *              --private takes the recovery private key or the site key file;
+ *              with neither, the key is read from stdin.
  *              Writes to --key-out (0600) or prints to stdout.
  *
  *   relabel:   php backup_envelope.php relabel --sidecar PATH --artifact NAME [--out PATH]
@@ -59,6 +67,8 @@
  * The envelope format written here is the same one includes/BackupEnvelope.php
  * reads; backup_envelope_cli_test.php holds both to that contract.
  *
+ * @version 1.3 - open refuses a chain manifest without its expected sha256 (--manifest-sha256) or an
+ *                explicit --trust-bucket-manifest (specs/storage_targets.md §6)
  * @version 1.2 - mint seals to the site's own proven recovery key, read on this machine, and
  *                refuses --recovery-pub: no caller supplies the key that opens these archives
  * @version 1.1 - open accepts a chain manifest, not only a standalone sidecar.
@@ -336,6 +346,28 @@ if ($mode === 'open') {
     // own rather than the manifest's — they are separate formats that are free to
     // diverge, and comparing the wrong one would reject a readable envelope.
     if (isset($envelope['envelope']) && is_array($envelope['envelope'])) {
+        // A chain manifest names every archive's size and hash, so the archives
+        // are only as trustworthy as it is. It is opened against the hash
+        // recorded when it was written, never on the bucket's word.
+        $expected = strtolower(trim((string)($opts['manifest-sha256'] ?? '')));
+        $actual = hash('sha256', $raw);
+        if ($expected !== '') {
+            if (!preg_match('/^[0-9a-f]{64}$/', $expected)) {
+                be_fail('--manifest-sha256 takes the 64-character hex sha256 of the manifest.');
+            }
+            if (!hash_equals($expected, $actual)) {
+                be_fail("this manifest's sha256 is {$actual}, not the {$expected} recorded when it was written. "
+                    . 'It is not the manifest that run wrote; do not restore from it.');
+            }
+        } elseif (!empty($opts['trust-bucket-manifest'])) {
+            fwrite(STDERR, "WARNING: nothing vouches for this manifest (sha256 {$actual}). Its archives are checked against "
+                . "it, so a replaced manifest would pass a replaced archive. Opened only because --trust-bucket-manifest was given.\n");
+        } else {
+            be_fail("a chain manifest is opened against its expected sha256: pass --manifest-sha256 with the hash the "
+                . "management node shows beside the run, or the one in the run's ledger file in the bucket "
+                . "({space}/ledger/{run}.json). This manifest's sha256 is {$actual}. Only for a bucket with neither, "
+                . "pass --trust-bucket-manifest.");
+        }
         $envelope = $envelope['envelope'];
     }
 

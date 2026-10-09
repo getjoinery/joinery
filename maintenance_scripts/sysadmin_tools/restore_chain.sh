@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.8.0 - reads manifest version 3, whose runs each write their own manifest-NNNN.json:
+#                  --artifacts may hold manifest.json or the chain's run manifests, and the newest
+#                  is read (specs/storage_targets.md F9). --manifest-sha256 refuses a manifest that is
+#                  not the one recorded when it was written, and the hash used is always printed
 # Version: 1.7.0 - --adopt-secret-key: this machine keeps its own Globalvars_site.php and takes
 #                  only the chain's secret_box_key into it, so what the source sealed opens here
 #                  (a copy onto new hardware; specs/site_copy.md WP2). --skip-ssl is passed to
@@ -54,7 +58,7 @@
 #   BEFORE it touches anything.
 #
 # Usage:
-#   ./restore_chain.sh PROJECT --artifacts DIR --key-file PATH [--seq N] [--dry-run] [--force]
+#   ./restore_chain.sh PROJECT --artifacts DIR --key-file PATH [--manifest-sha256 HEX] [--seq N] [--dry-run] [--force]
 #
 # Options:
 #   PROJECT           Project name; restores to /var/www/html/PROJECT
@@ -65,8 +69,16 @@
 #                     carries (the one backup_files.sh archived), because tar
 #                     recreates that directory itself. A mismatch is refused,
 #                     naming the path to use.
-#   --artifacts DIR   Directory holding manifest.json and the downloaded artifacts
+#   --artifacts DIR   Directory holding the chain's manifest (manifest.json, or a
+#                     version-3 chain's newest manifest-NNNN.json) and the
+#                     downloaded artifacts
 #   --key-file PATH   The chain data key (recover it with backup_envelope.php open)
+#   --manifest-sha256 HEX
+#                     The manifest's sha256 as recorded when it was written (the
+#                     management node shows it beside the run; the run's ledger
+#                     file in the bucket holds it). A manifest that differs is
+#                     refused before anything is read. Without it, the hash of
+#                     the manifest used is printed for the operator to compare.
 #   --seq N           Restore as at run N. Default: the newest run in the chain.
 #   --domain DOMAIN   The domain the restored site is to answer to. Defaults to
 #                     the domain THIS machine's config already names — a restore
@@ -118,6 +130,7 @@ print_dry()     { echo -e "${CYAN}[DRY-RUN]${NC} $1" >&2; }
 PROJECT_NAME=""
 ARTIFACT_DIR=""
 KEY_FILE=""
+MANIFEST_SHA256=""
 SEQ=""
 TARGET_DIR_OVERRIDE=""
 DRY_RUN=false
@@ -136,6 +149,7 @@ while [[ $# -gt 0 ]]; do
         --artifacts)      ARTIFACT_DIR="$2"; shift 2 ;;
         --target-dir)     TARGET_DIR_OVERRIDE="$2"; shift 2 ;;
         --key-file)       KEY_FILE="$2"; shift 2 ;;
+        --manifest-sha256) MANIFEST_SHA256="$(echo "$2" | tr 'A-F' 'a-f')"; shift 2 ;;
         --seq)            SEQ="$2"; shift 2 ;;
         --domain)         DOMAIN="$2"; shift 2 ;;
         --domain=*)       DOMAIN="${1#*=}"; shift ;;
@@ -168,8 +182,29 @@ if [ -n "$OBJECTS_DIR" ]; then
     case "$OBJECTS_MODE" in missing|all) ;; *) print_error "--objects-mode must be missing or all."; exit 1 ;; esac
 fi
 
+# The chain's manifest: manifest.json, or for a version-3 chain the newest of
+# its run manifests (manifest-0000.json, manifest-0001.json, ...), each of
+# which names every run before it.
 MANIFEST="${ARTIFACT_DIR}/manifest.json"
-[ -f "$MANIFEST" ] || { print_error "No manifest.json in $ARTIFACT_DIR"; exit 1; }
+if [ ! -f "$MANIFEST" ]; then
+    MANIFEST=$(ls -1 "$ARTIFACT_DIR" 2>/dev/null | grep -E '^manifest-[0-9]{4,}\.json$' | sort -t- -k2 -n | tail -n 1 || true)
+    [ -n "$MANIFEST" ] && MANIFEST="${ARTIFACT_DIR}/${MANIFEST}"
+fi
+[ -n "$MANIFEST" ] && [ -f "$MANIFEST" ] || { print_error "No manifest.json or manifest-NNNN.json in $ARTIFACT_DIR"; exit 1; }
+# The manifest names every archive's hash, so the archives are only as good as
+# it is: checked against the hash recorded when it was written, when given.
+MANIFEST_ACTUAL="$(sha256sum "$MANIFEST" | cut -d' ' -f1)"
+if [ -n "$MANIFEST_SHA256" ] && [ "$MANIFEST_SHA256" != "$MANIFEST_ACTUAL" ]; then
+    print_error "$(basename "$MANIFEST")'s sha256 is ${MANIFEST_ACTUAL}, not the ${MANIFEST_SHA256} recorded when it was written."
+    print_error "It is not the manifest that run wrote; nothing is restored from it."
+    exit 1
+fi
+if [ -n "$MANIFEST_SHA256" ]; then
+    echo "Manifest: $(basename "$MANIFEST") sha256 ${MANIFEST_ACTUAL} (matches the recorded hash)"
+else
+    echo "Manifest: $(basename "$MANIFEST") sha256 ${MANIFEST_ACTUAL} -- nothing vouches for it here: no --manifest-sha256 was"
+    echo "  given. Compare it with the hash recorded when it was written before trusting this restore."
+fi
 command -v python3 >/dev/null 2>&1 || { print_error "python3 is required to read the manifest."; exit 1; }
 
 # ── Plan and verify ─────────────────────────────────────────────────────────
@@ -188,8 +223,8 @@ with open(manifest_path) as fh:
     m = json.load(fh)
 
 version = int(m.get('version', 0))
-if version not in (1, 2):
-    sys.exit("unsupported chain manifest version %s; this script reads versions 1 and 2" % m.get('version'))
+if version not in (1, 2, 3):
+    sys.exit("unsupported chain manifest version %s; this script reads versions 1, 2 and 3" % m.get('version'))
 
 runs = m.get('runs') or []
 if not runs:
@@ -204,7 +239,7 @@ if version == 1 and int(runs[0].get('level', 1)) != 0:
 # The same rules as BackupChain::restore_plan. Version 1 has one level per
 # run, the files archive's; version 2 records a level on every artifact of a
 # kind that increments, so each kind goes back to its own newest full.
-TREES = {1: ['files'], 2: ['data', 'code']}
+TREES = {1: ['files'], 2: ['data', 'code'], 3: ['data', 'code']}
 INCREMENTS = ('files', 'code', 'data', 'pgdata')
 
 def level(run, kind):
@@ -335,7 +370,7 @@ fi
 if [ -z "$ARCHIVE_ROOT" ]; then
     print_error "Could not read the archive's contents with this key."
     print_error "Check --key-file: it must be the chain data key, recovered with"
-    print_error "  backup_envelope.php open --sidecar <manifest.json> --private <recovery key>"
+    print_error "  backup_envelope.php open --sidecar <manifest> --manifest-sha256 <recorded hash> --private <recovery key>"
     exit 1
 fi
 

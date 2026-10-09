@@ -1711,3 +1711,16 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = '7' WHERE stg_name = 'backup_verify_every_days' AND stg_value = '30'";
 	$migrations[] = $migration;
+
+	// No node is handed a bucket key (specs/storage_targets.md WP5): a Managed
+	// node writes through the management node's backup broker. The write-only
+	// node key a target used to keep is no longer declared, and the column is
+	// only dropped by a cleanup run, so the sealed key in it is emptied here.
+	// A site whose table never had the column has nothing to empty.
+	$migration = array();
+	$migration['database_version'] = '212';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns
+		WHERE table_name = 'bkt_backup_targets' AND column_name = 'bkt_node_credentials') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE bkt_backup_targets SET bkt_node_credentials = NULL WHERE bkt_node_credentials IS NOT NULL";
+	$migrations[] = $migration;

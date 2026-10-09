@@ -22,10 +22,11 @@
  *     and says so when Backblaze names an address the rule does not know
  *   - BackupTargetForm::apply(): only the fields a provider asks for are read,
  *     the rest come from the catalogue; an unknown provider and a bad region
- *     are refused; a node key needs a provider whose keys can write without deleting
+ *     are refused; a target has one key, with no second node key or per-run switch
  *
  * Run: php tests/backups/storage_provider_catalogue_test.php
  *
+ * @version 1.1 - one key per target (specs/storage_targets.md WP5)
  * @version 1.0
  */
 
@@ -184,21 +185,12 @@ $r = BackupTargetForm::apply($t, $post(array('bkt_provider' => 'wasabi', 'region
 check(!$r['ok'] && stripos($r['message'], 'short name') !== false, 'an address in the region field is refused before the provider is asked', $r['message']);
 
 $t = new BackupTarget(NULL);
-$r = BackupTargetForm::apply($t, $post(array('bkt_provider' => 'linode', 'region' => 'us-east-1',
-	'node_access_key' => 'NK', 'node_secret_key' => 'NS')), array('node_credentials' => true));
-check($r['ok'] && !$t->has_node_credentials(), 'a Linode target keeps no node key: its keys cannot write without deleting');
-
-$t = new BackupTarget(NULL);
 $r = BackupTargetForm::apply($t, $post(array('bkt_provider' => 's3', 'region' => 'us-east-1',
-	'node_access_key' => 'NK', 'node_secret_key' => 'NS', 'bkt_mint_run_keys' => '1')), array('node_credentials' => true));
-$node_creds = $t->get_node_credentials();
-check($r['ok'] && $node_creds['access_key'] === 'NK' && $node_creds['endpoint'] === 'https://s3.us-east-1.amazonaws.com',
-	'an Amazon node key shares the main key\'s endpoint', json_encode(array_diff_key($node_creds, array('secret_key' => 1))));
-check(!$t->get('bkt_mint_run_keys'), 'only Backblaze makes a key per run, whatever the box said');
-
-$t = new BackupTarget(NULL);
-BackupTargetForm::apply($t, $post(array('bkt_provider' => 's3', 'region' => 'us-east-1', 'node_access_key' => 'NK', 'node_secret_key' => 'NS')));
-check(!$t->has_node_credentials(), 'the Backups page form never sets a node key');
+	'node_access_key' => 'NK', 'node_secret_key' => 'NS', 'bkt_mint_run_keys' => '1')));
+check($r['ok'] && !array_key_exists('bkt_node_credentials', BackupTarget::$field_specifications)
+	&& !array_key_exists('bkt_mint_run_keys', BackupTarget::$field_specifications)
+	&& strpos(json_encode($t->get('bkt_credentials')), 'NK') === false,
+	'a target has one key: the form reads no second key and no per-run switch');
 
 section('The provider select shows what each provider asks for');
 $rules = StorageProvider::visibility_rules();

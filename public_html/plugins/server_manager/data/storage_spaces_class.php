@@ -22,6 +22,7 @@
  * Exactly one owner column is set: a Managed node, or a customer of backup
  * storage (a service tenant).
  *
+ * @version 1.4 - is_empty() does not count the run ledger files kept in a space (specs/storage_targets.md F4)
  * @version 1.2 - sps_surplus: what retention found surplus in the space and since when, so a point is
  *                deleted only once a pass CONFIRM_HOURS later still finds it so (specs/storage_targets.md F3)
  * @version 1.1 - a space given back to its owner is stamped opened again, so evidence from before does not
@@ -237,13 +238,21 @@ class StorageSpace extends SystemBase {
 	}
 
 	/**
-	 * Does the whole folder hold nothing, every profile included? False when
-	 * it cannot be listed: a space is never taken for empty on no answer.
+	 * Does the whole folder hold no backup, every profile included? The run
+	 * ledger files ({base}ledger/) are kept after their runs go and do not
+	 * count. False when it cannot be listed: a space is never taken for empty
+	 * on no answer.
 	 */
 	public function is_empty(): bool {
 		try {
 			list($target, $creds, $bucket) = $this->reach();
-			return count(S3Signer::list($creds, $bucket, $this->base(), 1)) === 0;
+			$ledger = $this->base() . 'ledger/';
+			foreach (S3Signer::list($creds, $bucket, $this->base()) as $o) {
+				if (strpos((string)($o['key'] ?? ''), $ledger) !== 0) {
+					return false;
+				}
+			}
+			return true;
 		} catch (\Throwable $e) {
 			return false;
 		}

@@ -11,8 +11,11 @@
  * absent), and it is signed for a suspended or released site for as long as
  * its copies exist. Operations: put, get, multipart_create,
  * multipart_parts (upload_id, first, count ≤ 10), multipart_complete
- * (upload_id). Each URL is good for one hour.
+ * (upload_id). Each URL is good for one hour. Nothing is written twice: a write
+ * for a key a finished run completed answers {exists, key, bytes, sha256}
+ * instead of a link.
  *
+ * @version 1.4 - a write for a completed key answers 'exists' with what is there (specs/storage_targets.md §6)
  * @version 1.3 - space_id: a get names the storage space it reads from (specs/storage_targets.md WP4)
  * @version 1.2 - a signing failure is S3Signer's (the one presigner)
  * @version 1.1 - a get needs no run and stands until the prune
@@ -44,7 +47,7 @@ function shelf_sign_logic(array $input): LogicResult {
 
 function shelf_sign_logic_descriptor(): array {
 	return array(
-		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside one of the site\'s storage spaces (run_id 0, space_id from shelf_list) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete.',
+		'description'      => 'A presigned URL for one backup storage object: put, multipart_create, multipart_parts (a batch of up to ten part URLs) or multipart_complete inside an open run; get inside one of the site\'s storage spaces (run_id 0, space_id from shelf_list) or a run\'s base key, allowed until the site\'s copies are pruned. Never a delete. A write for a key a finished run completed answers {exists, bytes, sha256} instead of a link.',
 		'requires_session' => true,
 		'mutates'          => true,
 		'input'            => array(

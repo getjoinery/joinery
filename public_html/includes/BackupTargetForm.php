@@ -21,8 +21,6 @@
  * to the provider it was saved under; changing the provider starts from none.
  *
  * Options:
- *   node_credentials  bool  also draw and save the write-only node key and the
- *                           per-run key switch (management node only)
  *   wizard            bool  the setup wizard's short form: no name, folder or
  *                           Enabled box; the target is named Backups and enabled
  *   files             bool  the file store's form: no Enabled box (the page's
@@ -30,6 +28,8 @@
  *                           to this site's name; saved by CloudStorageLifecycle,
  *                           whose check proves the bucket private
  *
+ * @version 1.3 - one key per target: the node key and the per-run key switch are gone, since a Managed node
+ *                writes through the management node's broker and is handed no key (specs/storage_targets.md WP5)
  * @version 1.2 - the files option: the file store is a target row drawn and read by this form
  *                (specs/storage_targets.md WP6)
  * @version 1.1 - WP2: the location is drawn read-only and refused once anything is stored there, and a
@@ -39,9 +39,6 @@
 
 class BackupTargetForm {
 
-	/** Providers whose keys can write without deleting, so a node key means something. */
-	const NODE_KEY_PROVIDERS = array('b2', 's3');
-
 	/**
 	 * Draw the fields into a form the caller has opened. The caller adds its
 	 * own hidden routing fields, the submit button and end_form().
@@ -50,7 +47,6 @@ class BackupTargetForm {
 	 * @param BackupTarget|null $target the target being edited (its posted values, after a refused save), or null
 	 */
 	public static function render($fw, ?BackupTarget $target, array $opts = array()): void {
-		$node = !empty($opts['node_credentials']);
 		$wizard = !empty($opts['wizard']);
 		$files = !empty($opts['files']);
 		$editing = $target !== null && $target->key;
@@ -62,28 +58,17 @@ class BackupTargetForm {
 			echo '<div class="alert alert-danger">' . htmlspecialchars($e->getMessage())
 				. ' Re-enter the access key and the secret to replace them.</div>';
 		}
-		try {
-			$node_creds = ($node && $target && $target->has_node_credentials()) ? $target->get_node_credentials() : array();
-		} catch (BackupTargetException $e) {
-			$node_creds = array();
-		}
 		$provider = $target ? StorageProvider::normalise($target->get('bkt_provider') ?: 'b2') : 'b2';
 
 		// Whether a secret is stored is read from the saved row, never from this
 		// request's copy: a refused save must not draw a typed key as saved.
 		$saved = $editing ? new BackupTarget($target->key, TRUE) : null;
 		$main_stored = false;
-		$node_stored = false;
 		if ($saved) {
 			try {
 				$main_stored = (string)(($saved->get_credentials())['secret_key'] ?? '') !== '';
 			} catch (BackupTargetException $e) {
 				$main_stored = false;
-			}
-			try {
-				$node_stored = $saved->has_node_credentials() && (string)(($saved->get_node_credentials())['secret_key'] ?? '') !== '';
-			} catch (BackupTargetException $e) {
-				$node_stored = false;
 			}
 		}
 		$saved_provider = $saved ? (string)$saved->get('bkt_provider') : null;
@@ -108,7 +93,7 @@ class BackupTargetForm {
 			'options' => StorageProvider::options(),
 			'value' => $provider,
 			'disabled' => $locked !== '',
-			'visibility_rules' => self::visibility_rules($node),
+			'visibility_rules' => StorageProvider::visibility_rules(),
 		));
 		$fw->textinput('bkt_bucket', 'Bucket', array('required' => $wizard || $files, 'readonly' => $locked !== '',
 			'value' => $target ? (string)$target->get('bkt_bucket') : '',
@@ -126,7 +111,6 @@ class BackupTargetForm {
 			'value' => (string)($creds['access_key'] ?? ''),
 			'helptext' => 'A key for this bucket only, that can list, read, write and delete. '
 				. 'Backblaze: listFiles, readFiles, writeFiles, deleteFiles'
-				. ($node ? ' (add writeKeys, listKeys, deleteKeys to make a key for each run)' : '')
 				. '. Amazon: s3:ListBucket, s3:GetObject, s3:PutObject, s3:DeleteObject.'));
 		$fw->passwordinput('secret_key', 'Secret key', array('required' => ($wizard || $files) && !$main_stored,
 			'autocomplete' => 'new-password',
@@ -135,30 +119,6 @@ class BackupTargetForm {
 			'helptext' => 'The bucket\'s region, cluster or datacenter, such as us-east-1.'));
 		$fw->textinput('endpoint', 'Endpoint', array('value' => (string)($creds['endpoint'] ?? ''), 'readonly' => $locked !== '',
 			'helptext' => 'The service\'s S3 address, such as s3.example.com.'));
-
-		if ($node) {
-			echo '<div id="node_key_fields">';
-			echo '<p class="fw-semibold text-muted mt-2 mb-1">Node key (write-only)'
-				. (!empty($node_creds) ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
-			$fw->textinput('node_access_key', 'Node access key ID', array('autocomplete' => 'off',
-				'value' => (string)($node_creds['access_key'] ?? ''),
-				'helptext' => 'Optional. A key for this bucket that can write and not delete '
-					. '(Backblaze: writeFiles without deleteFiles; Amazon: s3:PutObject without s3:DeleteObject). '
-					. 'Nodes are handed it for each run, so a compromised node cannot erase backups.'));
-			$fw->passwordinput('node_secret_key', 'Node secret key', array(
-				'autocomplete' => 'new-password',
-				'stored' => $node_stored && $saved_provider === $provider,
-				'helptext' => 'Without one, nodes are handed the main key during a run.'));
-			echo '</div>';
-			echo '<p id="node_key_none" class="text-muted small">This provider\'s keys cannot write without also deleting, '
-				. 'so nodes are handed the main key during a run.</p>';
-			$fw->checkboxinput('bkt_mint_run_keys', 'Make a key for each run', array(
-				'checked' => (bool)($target ? $target->get('bkt_mint_run_keys') : false),
-				'helptext' => 'Each backup run is handed a key made for it: pinned to that node\'s own folder in this bucket, '
-					. 'write-only, and expiring with the run. Check first that the main key can make keys '
-					. '(writeKeys, listKeys, deleteKeys): a key that cannot fails every run rather than falling back.',
-			));
-		}
 
 		if (!$wizard && !$files) {
 			$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $target ? (bool)$target->get('bkt_enabled') : true));
@@ -179,40 +139,12 @@ class BackupTargetForm {
 	}
 
 	/**
-	 * The provider select's rules: each provider shows the region and endpoint
-	 * it asks for; on a management node, the node key fields for a provider
-	 * whose keys can write without deleting, and the per-run key for Backblaze.
-	 */
-	private static function visibility_rules(bool $node): array {
-		$rules = StorageProvider::visibility_rules();
-		if ($node) {
-			foreach ($rules as $slug => $rule) {
-				if (in_array($slug, self::NODE_KEY_PROVIDERS, true)) {
-					$rule['show'][] = 'node_key_fields';
-					$rule['hide'][] = 'node_key_none';
-				} else {
-					$rule['show'][] = 'node_key_none';
-					$rule['hide'][] = 'node_key_fields';
-				}
-				if ($slug === 'b2') {
-					$rule['show'][] = 'bkt_mint_run_keys';
-				} else {
-					$rule['hide'][] = 'bkt_mint_run_keys';
-				}
-				$rules[$slug] = $rule;
-			}
-		}
-		return $rules;
-	}
-
-	/**
 	 * Read posted fields onto a target. Nothing is stored.
 	 *
 	 * @return array{ok: bool, message: string, note: string} message says what
 	 *   is wrong when not ok; note is a remark the save message should carry
 	 */
 	public static function apply(BackupTarget $target, array $input, array $opts = array()): array {
-		$node = !empty($opts['node_credentials']);
 		$refuse = function ($message) {
 			return array('ok' => false, 'message' => $message, 'note' => '');
 		};
@@ -309,12 +241,6 @@ class BackupTargetForm {
 			}
 		}
 
-		if ($node) {
-			self::apply_node_key($target, $input, $provider, $same_provider, $creds);
-			// Only Backblaze can make a key per run; anywhere else the switch is
-			// off whatever the box said.
-			$target->set('bkt_mint_run_keys', $provider === 'b2' && !empty($input['bkt_mint_run_keys']));
-		}
 		return array('ok' => true, 'message' => '', 'note' => $note);
 	}
 
@@ -335,55 +261,6 @@ class BackupTargetForm {
 			(string)$target->get('bkt_bucket'),
 			trim((string)$target->get('bkt_path_prefix'), '/'),
 		);
-	}
-
-	/**
-	 * The write-only node key. A stored one is a locked field like the main
-	 * secret; Reset and blank removes it, and nodes are then handed the main
-	 * key. A provider change, or a provider whose keys cannot write without
-	 * deleting, leaves none behind: a stale one would fail the save's own
-	 * connection test and be handed to nodes. The node key is for the same
-	 * bucket, so it shares the main key's region and endpoint.
-	 */
-	private static function apply_node_key(BackupTarget $target, array $input, string $provider, bool $same_provider, array $creds): void {
-		if (!$same_provider || !in_array($provider, self::NODE_KEY_PROVIDERS, true)) {
-			$target->set('bkt_node_credentials', null);
-			if (!in_array($provider, self::NODE_KEY_PROVIDERS, true)) {
-				return;
-			}
-		}
-		$existing = array();
-		if ($same_provider && $target->key) {
-			try {
-				$existing = $target->get_node_credentials() ?: array();
-			} catch (BackupTargetException $e) {
-				$existing = array();
-			}
-		}
-		$stored = (string)($existing['secret_key'] ?? '') !== '';
-		list($what, $typed) = FormWriterV2Base::process_secretinput($input, 'node_secret_key', $stored);
-		$access = trim((string)($input['node_access_key'] ?? ''));
-		if ($what === FormWriterV2Base::SECRET_CLEAR) {
-			$target->set('bkt_node_credentials', null);
-			return;
-		}
-		if ($what === FormWriterV2Base::SECRET_KEEP) {
-			if ($stored) {
-				$existing['access_key'] = $access !== '' ? $access : (string)($existing['access_key'] ?? '');
-				$existing['region'] = (string)($creds['region'] ?? '');
-				$existing['endpoint'] = (string)($creds['endpoint'] ?? '');
-				$target->set('bkt_node_credentials', $existing);
-			}
-			return;
-		}
-		if ($access !== '' && $typed !== '') {
-			$target->set('bkt_node_credentials', array(
-				'access_key' => $access,
-				'secret_key' => $typed,
-				'region'     => (string)($creds['region'] ?? ''),
-				'endpoint'   => (string)($creds['endpoint'] ?? ''),
-			));
-		}
 	}
 
 	/**
