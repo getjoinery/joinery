@@ -11,6 +11,8 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.11 - "Deploy to all managed nodes": the publish job carries deploy_all, and once it completes a
+ *                 staged rollout of the release starts over every eligible node (StagedRolloutRunner)
  * @version 1.10 - the page checks the publisher script against the signed release manifest before
  *                 offering the form: the agent runs only files that match the release, and the one
  *                 file a publish cannot sign for itself ahead of time is publish_upgrade.php, so an
@@ -145,6 +147,11 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 		$params['major'] = intval($_POST['version_major']);
 		$params['minor'] = intval($_POST['version_minor']);
 		$params['patch'] = intval($_POST['version_patch']);
+	}
+	// Recorded on the job, never sent to the node: the plane starts the
+	// rollout itself once the publish completes.
+	if (!empty($_POST['deploy_all'])) {
+		$params['deploy_all'] = true;
 	}
 	if ($release_notes) {
 		$self = ManagedNode::self_node();
@@ -503,6 +510,19 @@ $formwriter->textarea('release_notes', 'Release notes', [
 	'required'    => true,
 	'rows'        => 4,
 	'placeholder' => 'Describe what changed in this release...',
+]);
+$deploy_plan = StagedRolloutRunner::deploy_all_plan();
+$deploy_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $deploy_plan['nodes']);
+$deploy_help = $deploy_names
+	? 'Once the publish completes, the release is rolled out to ' . implode(', ', $deploy_names)
+		. ', one node at a time in that order, stopping at the first node whose upgrade fails.'
+	: 'No managed node can take a rollout right now.';
+foreach ($deploy_plan['left_out'] as $lo) {
+	$deploy_help .= ' Left out: ' . $lo['name'] . ' (' . $lo['reason'] . ').';
+}
+$formwriter->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
+	'checked'  => false,
+	'helptext' => $deploy_help,
 ]);
 $formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
 $formwriter->end_form();

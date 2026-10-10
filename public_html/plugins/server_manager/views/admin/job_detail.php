@@ -5,6 +5,8 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.15 - a publish that asked to deploy to all managed nodes says what became of that: the nodes it
+ *                 will reach, the rollout it started (loading the page starts it), or why it did not
  * @version 1.14 - a disk_usage result shows the data root's figures and biggest directories beside the site tree
  * @version 1.13 - a move_to_plane result renders as a card: which management node was asked, the name and the fingerprint
  * @version 1.12 - a page_probe that could not run shows the node's reason instead of "no report"
@@ -89,6 +91,20 @@ if ($post_action === 'rerun_job') {
 // and the dashboard sweep apply, so a failed job is folded here too.
 if (JobResultProcessor::process_if_due($job)) {
 	$job->load();
+}
+
+// A publish that asked to deploy to all managed nodes: loading the page is a
+// tick, so the rollout starts here as soon as the publish has completed.
+$deploy_all = null;
+if ($job->get('mjb_job_type') === 'publish_upgrade') {
+	$deploy_all = StagedRolloutRunner::job_params($job);
+	if (empty($deploy_all['deploy_all'])) {
+		$deploy_all = null;
+	} elseif (!isset($deploy_all['deploy_all_outcome']) && $job->get('mjb_status') === 'completed'
+		&& (int)$job->get('mjb_mgn_managed_node_id') === (int)(ManagedNode::self_node()?->key)) {
+		StagedRolloutRunner::deploy_all_for_publish($job);
+		$deploy_all = StagedRolloutRunner::job_params($job);
+	}
 }
 
 // Load node name
@@ -189,6 +205,39 @@ $status_class = match($job->get('mjb_status')) {
 		<?php if ($job->get('mjb_error_message')): ?>
 			<div class="alert alert-danger mt-2">
 				<strong>Error:</strong> <?php echo nl2br(htmlspecialchars($job->get('mjb_error_message'))); ?>
+			</div>
+		<?php endif; ?>
+
+		<?php if ($deploy_all !== null): ?>
+			<?php
+			$da_status  = (string)$job->get('mjb_status');
+			$da_outcome = (string)($deploy_all['deploy_all_outcome'] ?? '');
+			$da_left    = (array)($deploy_all['deploy_all_left_out'] ?? []);
+			?>
+			<div class="jy-callout <?php echo $da_outcome === 'refused' || in_array($da_status, ['failed', 'cancelled'], true) ? 'jy-callout-warning' : 'jy-callout-info'; ?> mt-2">
+				<strong>Deploy to all managed nodes:</strong>
+				<?php if ($da_outcome === 'started'): ?>
+					rollout started. <a href="/admin/server_manager/rollouts">Follow it on the Staged rollout page</a>.
+				<?php elseif ($da_outcome === 'refused'): ?>
+					not started — <?php echo htmlspecialchars((string)($deploy_all['deploy_all_reason'] ?? '')); ?>.
+				<?php elseif (in_array($da_status, ['failed', 'cancelled'], true)): ?>
+					nothing was deployed, because this publish did not complete.
+				<?php elseif ($da_status === 'completed'): ?>
+					waiting for the rollout already running to finish; this one starts after it.
+					<a href="/admin/server_manager/rollouts">Staged rollout</a>
+				<?php else: ?>
+					<?php
+					$da_plan  = StagedRolloutRunner::deploy_all_plan();
+					$da_left  = $da_plan['left_out'];
+					$da_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $da_plan['nodes']);
+					?>
+					once this publish completes, the release is rolled out to
+					<?php echo $da_names ? htmlspecialchars(implode(', ', $da_names)) : 'no node (none can take a rollout right now)'; ?>,
+					one node at a time, stopping at the first node whose upgrade fails.
+				<?php endif; ?>
+				<?php foreach ($da_left as $lo): ?>
+					<br><small>Left out: <?php echo htmlspecialchars((string)($lo['name'] ?? '')); ?> — <?php echo htmlspecialchars((string)($lo['reason'] ?? '')); ?></small>
+				<?php endforeach; ?>
 			</div>
 		<?php endif; ?>
 
@@ -677,6 +726,10 @@ if ($commands_data && isset($commands_data['steps'])) {
 					polling = false;
 					statusEl.textContent = data.status;
 					statusEl.className = 'badge bg-' + (data.status === 'completed' ? 'success' : 'danger');
+					<?php if ($deploy_all !== null): ?>
+					// The page says what became of the deploy, and loading it starts the rollout.
+					if (data.status === 'completed') { window.location.reload(); return; }
+					<?php endif; ?>
 					if (data.error_message) {
 						var errDiv = document.createElement('div');
 						errDiv.className = 'alert alert-danger mt-2';

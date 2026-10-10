@@ -20,6 +20,8 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.3 - deploy to all managed nodes: a publish job carrying deploy_all starts a rollout over every
+ *                eligible node once it completes (start_pending_deploy_all, deploy_all_for_publish)
  * @version 1.2 - node_refusal() refuses a node in an install state (ManagedNode::is_operational())
  * @version 1.1 - review 2026-09-23: one mover at a time (a PostgreSQL advisory lock around start and
  *                every step, B16); a node whose apply has not finished in APPLY_WAIT_MINUTES halts the
@@ -138,6 +140,148 @@ class StagedRolloutRunner {
 		$rollout->load();
 		self::advance_locked($rollout);
 		return $rollout;
+	}
+
+	/** How long after a deploy-all publish completes its rollout may still start: a late start is a surprise, not a convenience. */
+	const DEPLOY_ALL_WINDOW_HOURS = 24;
+
+	/**
+	 * The nodes "Deploy to all managed nodes" rolls a release out to, in the
+	 * order it applies them, and the ones it leaves out with why. This
+	 * management node is the release's source, a node that hosts no site has
+	 * nothing to apply, and a test's fixture node is nobody's site; those are
+	 * not listed at all. A disabled node or one the rollout would refuse is
+	 * listed as left out, so "all" never quietly means "some".
+	 *
+	 * Plain sites go first and management nodes last: a management node that
+	 * breaks takes its own fleet's dashboard with it, so it waits until the
+	 * release has proved good elsewhere.
+	 *
+	 * @param ManagedNode[]|null $candidates the nodes to consider; null is every node on record
+	 * @return array{nodes: ManagedNode[], left_out: array<int, array{name: string, reason: string}>}
+	 */
+	public static function deploy_all_plan(?array $candidates = null): array {
+		if ($candidates === null) {
+			$candidates = array();
+			foreach (new MultiManagedNode(array('deleted' => false), array('mgn_name' => 'ASC')) as $node) {
+				if ($node->is_self() || ManagedNode::is_fixture_name((string)$node->get('mgn_name'))) { continue; }
+				$candidates[] = $node;
+			}
+		}
+		$sites = array();
+		$managers = array();
+		$left_out = array();
+		foreach ($candidates as $node) {
+			if (!$node->hosts_site()) { continue; }
+			$name = (string)$node->get('mgn_name');
+			if (!$node->get('mgn_enabled')) {
+				$left_out[] = array('name' => $name, 'reason' => 'it is disabled');
+				continue;
+			}
+			$why = self::node_refusal($node);
+			if ($why !== null) {
+				$left_out[] = array('name' => $name, 'reason' => $why);
+				continue;
+			}
+			if ($node->is_management_node()) {
+				$managers[] = $node;
+			} else {
+				$sites[] = $node;
+			}
+		}
+		return array('nodes' => array_merge($sites, $managers), 'left_out' => $left_out);
+	}
+
+	/**
+	 * Start the rollout of every completed deploy-all publish that has not had
+	 * one yet. What the scheduled task calls each tick. Only this management
+	 * node's own publishes count — a publish is a job of its own agent — and
+	 * only those that finished within DEPLOY_ALL_WINDOW_HOURS.
+	 */
+	public static function start_pending_deploy_all() {
+		$self = ManagedNode::self_node();
+		if (!$self) {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs
+			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'publish_upgrade' AND mjb_status = 'completed'
+			  AND mjb_delete_time IS NULL AND mjb_parameters->>'deploy_all' = 'true'
+			  AND mjb_parameters->>'deploy_all_outcome' IS NULL
+			  AND mjb_completed_time > now() AT TIME ZONE 'UTC' - make_interval(hours => ?)
+			ORDER BY mjb_management_job_id");
+		$q->execute(array((int)$self->key, self::DEPLOY_ALL_WINDOW_HOURS));
+		$started = 0;
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+			if (self::deploy_all_for_publish(new ManagementJob((int)$id, TRUE))) {
+				$started++;
+			}
+		}
+		return $started;
+	}
+
+	/**
+	 * Start the rollout a completed deploy-all publish asked for, and write
+	 * what became of it onto the publish job (deploy_all_outcome: started or
+	 * refused, with the rollout, the nodes left out, or the reason). Waits —
+	 * returns false and records nothing — while the publish has not completed
+	 * or another rollout is running; the next tick tries again.
+	 *
+	 * @param ManagedNode[]|null $candidates passed to deploy_all_plan(); null is every node on record
+	 * @return bool whether a rollout was started
+	 */
+	public static function deploy_all_for_publish(ManagementJob $job, ?array $candidates = null): bool {
+		if (!self::lock()) {
+			return false;
+		}
+		try {
+			$job->load();
+			$params = self::job_params($job);
+			if (empty($params['deploy_all']) || isset($params['deploy_all_outcome'])
+				|| (string)$job->get('mjb_status') !== 'completed') {
+				return false;
+			}
+			if (StagedRollout::running()) {
+				return false;
+			}
+			$version = (string)($params['version'] ?? '');
+			$release = (string)self::published_release();
+			if ($version === '' || $release !== $version) {
+				self::record_deploy_all($job, $params, array('deploy_all_outcome' => 'refused',
+					'deploy_all_reason' => 'the newest published release is ' . ($release ?: 'nothing')
+						. ', not ' . ($version ?: 'the version this publish named') . ', so this publish is not what a node would apply'));
+				return false;
+			}
+			$plan = self::deploy_all_plan($candidates);
+			$ids = array_map(function ($n) { return (int)$n->key; }, $plan['nodes']);
+			try {
+				$rollout = self::start_locked($ids, $job->get('mjb_created_by'));
+			} catch (StagedRolloutException $e) {
+				self::record_deploy_all($job, $params, array('deploy_all_outcome' => 'refused',
+					'deploy_all_reason' => $ids ? $e->getMessage() : 'no managed node can take a rollout',
+					'deploy_all_left_out' => $plan['left_out']));
+				return false;
+			}
+			self::record_deploy_all($job, $params, array('deploy_all_outcome' => 'started',
+				'deploy_all_rollout_id' => (int)$rollout->key, 'deploy_all_left_out' => $plan['left_out']));
+			return true;
+		} finally {
+			self::unlock();
+		}
+	}
+
+	/** A job's recorded parameters, decoded. */
+	public static function job_params($job): array {
+		$params = $job->get('mjb_parameters');
+		if (is_string($params)) {
+			$params = json_decode($params, true);
+		}
+		return is_array($params) ? $params : array();
+	}
+
+	private static function record_deploy_all(ManagementJob $job, array $params, array $outcome) {
+		$job->set('mjb_parameters', json_encode(array_merge($params, $outcome)));
+		$job->save();
 	}
 
 	/** Stop between nodes: the apply in flight finishes; nothing further is queued. */
