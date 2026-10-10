@@ -993,6 +993,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
     };
     let probe = Entry {
         id: EntityId::file(0),
+        own_file_seen_at: None,
         remote: p.clone(),
         remote_content: None,
         remote_modified_time: None,
@@ -1609,6 +1610,7 @@ fn the_owner_follows_its_file(
         if beside == Beside::InPlace && to.parent != owner.remote.parent {
             return Ok(());
         }
+        owner.own_file_seen_at = Some(to.clone());
         owner.remote = to;
         owner.local_name = None;
         env.store.put_entry(&owner)?;
@@ -3417,6 +3419,11 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         if let Placed::At(to) = path_for(env, &copy.remote)? {
             if nothing_at(env, &to)? {
                 env.vfs.rename(&from, &to)?;
+                if let Some(at) = aside_placement(env, &to)? {
+                    let mut copy = copy.clone();
+                    copy.own_file_seen_at = Some(at);
+                    env.store.put_entry(&copy)?;
+                }
             }
         }
         return Ok(OpOutcome::Done);
@@ -3458,6 +3465,8 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
     };
     let rescued = Entry {
         id,
+        // Minted from the file it keeps, which stands there.
+        own_file_seen_at: Some(kept.clone()),
         remote: kept,
         remote_content: None,
         remote_modified_time: None,
@@ -3952,6 +3961,15 @@ fn never_sent_again(env: &ExecEnv, id: EntityId) -> Result<(), ExecError> {
     } else {
         minted.own_file = entry.own_file.take();
         minted.last_seen_sha = bytes;
+        // Re-minted from its agreement, which is not where the file was seen:
+        // where it stands now, found by its identity, or not known.
+        minted.own_file_seen_at = match minted.own_file {
+            Some(own) => match where_file_stands(env, own)? {
+                Some(path) => aside_placement(env, &path)?,
+                None => None,
+            },
+            None => None,
+        };
     }
     if minted.is_encrypted && env.vault.is_none() {
         minted.status = LocalStatus::PendingKey;
@@ -5231,6 +5249,10 @@ fn move_local(
         .file_name()
         .and_then(|n| n.to_str())
         .map(|n| n.to_string());
+    // A record never sent: this is where its file now stands.
+    if entry.id.is_provisional() && entry.id.entity_type == EntityType::File {
+        entry.own_file_seen_at = Some(Placement { parent: to.parent, name: landed_as.clone().unwrap_or_else(|| to.name.clone()) });
+    }
     if op.kind == "park_local" {
         // A park is one step inside another operation, not a place the two
         // sides agreed on: recorded as the spelling this disk holds and

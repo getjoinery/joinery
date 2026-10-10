@@ -507,6 +507,7 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -598,6 +599,7 @@ fn a_file_that_lost_a_naming_race_still_converges() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -918,6 +920,7 @@ fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -5769,6 +5772,7 @@ fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
         stands_at: None,
         own_file: None,
         last_seen_sha: None,
+        own_file_seen_at: None,
     };
     laptop.store.put_entry(&orphan).unwrap();
     assert!(
@@ -6223,6 +6227,7 @@ fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -6283,6 +6288,7 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -9900,6 +9906,7 @@ fn scratch_asymmetric_land_beside() {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         })
         .unwrap();
 
@@ -16728,6 +16735,82 @@ fn a_save_by_rename_seen_mid_save_is_the_files_next_version() {
     assert_eq!(live[0].id, shot, "the save went up as a new file, and the file's history ended: {live:?}");
     assert_eq!(live[0].sha256, jd_sim::sha256_hex(save));
     assert_converged(&world);
+}
+
+/// Not a save by rename: a file the engine has seen but never sent, brought
+/// from ANOTHER folder onto a synced file's name after that file was deleted,
+/// is a new file, not the old one's next version. A save writes its temporary
+/// file beside the one it replaces; one carried across folders is somebody's
+/// file in its own right. Read as the next version, the old file's history
+/// took the other file's bytes, and restoring it or following a link to it
+/// gave the other file (Defect AH; hostilename 120739 and five more sweep
+/// seeds once the 1873 park stopped splitting the record).
+#[test]
+fn a_never_sent_file_moved_across_folders_onto_a_deleted_files_name_is_a_new_file() {
+    let world = World::new(9_978, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let first = b"the synced file";
+    mac.fs.user_write("notes.txt", first);
+    assert!(world.settle().is_some());
+    let notes = world.server.files().into_iter().find(|f| f.name == "notes.txt").unwrap().id;
+    let other = b"another file, never sent";
+    mac.fs.user_write("Other/draft.txt", other);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    mac.fs.user_rename("notes.txt", "Gone/notes.txt");
+    mac.fs.user_remove("Gone");
+    mac.fs.user_rename("Other/draft.txt", "notes.txt");
+    assert!(world.settle().is_some(), "never settled");
+
+    let (first_sha, other_sha) = (jd_sim::sha256_hex(first), jd_sim::sha256_hex(other));
+    let versions = world.server.all_versions();
+    for f in world.server.files() {
+        let chain: Vec<&str> = versions.iter().filter(|v| v.file_id == f.id).map(|v| v.sha256.as_str()).collect();
+        assert!(
+            !(chain.contains(&first_sha.as_str()) && chain.contains(&other_sha.as_str())),
+            "file {} ({}) holds both files' bytes in its history",
+            f.id,
+            f.name
+        );
+    }
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    let at_name: Vec<_> = live.iter().filter(|f| f.name == "notes.txt").collect();
+    assert_eq!(at_name.len(), 1, "{live:?}");
+    assert_eq!(at_name[0].sha256, other_sha);
+    assert_ne!(at_name[0].id, notes, "the other file went up as the deleted file's next version");
+    assert_converged(&world);
+}
+
+/// A save in a folder that was new here when the save's temporary file was
+/// first seen: where the temporary file stood names the folder by the id it
+/// had then, and the folder's server id replaces it -- created, or met on the
+/// server and merged. Followed to that id, the save is still the file's next
+/// version; left behind, where the temporary file stood was not known, and the
+/// save went up as a new file while the file it replaced went to the trash
+/// (plain2 75248 and 75283, the first build of T-AH2).
+#[test]
+fn a_save_in_a_folder_new_here_when_its_temporary_file_was_seen_is_the_files_next_version() {
+    let world = World::new(9_983, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("New/shot.psd.tmp1453", b"mac's save");
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    world.pass(pc);
+    pc.fs.user_write("New/shot.psd", b"the first version");
+    world.pass(pc);
+    let shot = world.server.files().into_iter().find(|f| f.name == "shot.psd").map(|f| f.id).expect("pc's file went up");
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    assert!(mac.fs.peek("New/shot.psd").is_some(), "pc's file should have arrived beside the temporary one");
+    mac.fs.user_remove("New/shot.psd");
+    mac.fs.user_rename("New/shot.psd.tmp1453", "New/shot.psd");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 1, "{live:?}");
+    assert_eq!(live[0].id, shot, "the save went up as a new file, and the file's history ended: {live:?}");
+    assert_eq!(live[0].sha256, jd_sim::sha256_hex(b"mac's save"));
 }
 
 /// The same, read by the bytes: no births on either disk.

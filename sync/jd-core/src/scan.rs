@@ -89,6 +89,9 @@ pub struct KnownLocal {
     /// (`Entry::last_seen_sha`): on a weak volume, the identity `pair_files`
     /// reads the record by (layer 1).
     pub last_seen_sha: Option<String>,
+    /// For a record never sent, where its own file last stood on this disk
+    /// (`Entry::own_file_seen_at`), as a path; `None` where that is not known.
+    pub seen_at: Option<String>,
     /// The volume's own id for the record's file as last read in this mount
     /// session, where its ids may break a tie, and 0 where there is none
     /// (`jd_vfs::Personality::id_tie_break`). Never identity.
@@ -887,13 +890,30 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
         // stand nowhere may be a file edited where it went, and read as gone
         // a swap partner's bytes became the record's edit (hidden kill2 75107).
         // There a save seen mid-save reads, as any move-and-edit does, as a
-        // delete plus a creation.
+        // delete plus a creation. And only where the temporary file was SEEN
+        // beside the file it replaces, under another name: a save writes it
+        // there. A file never sent brought from another folder onto the name
+        // of a file the user has deleted is a file in its own right, and read
+        // as the next version the deleted file's history took its bytes --
+        // restoring it, or a link to it, gave the other file (Defect AH,
+        // hostilename 120739). Judged where the file stood, not by the
+        // record's path: a name naming planned for it, one the disk never
+        // gave it, is not where it stood, and read from there a file carried
+        // across folders, followed onto the deleted file's name a pass
+        // earlier, became that file's save (hostile kill2 75111). Where it
+        // stood is not known for a record older than that being kept, and
+        // then nothing is read as a save. A save whose temporary file is kept
+        // in another folder (a volume's .TemporaryItems, `rsync --temp-dir`
+        // inside the tree) reads the same way: a delete plus a creation.
         if steps == Steps::All
             && !held(k)
             && k.claimant_for.is_none()
             && k.id.is_provisional()
             && k.fingerprint.is_none()
             && k.sha256.is_none()
+            && k.seen_at.as_deref().is_some_and(|seen| {
+                seen != observed[c].path.as_str() && folder_of(seen) == folder_of(&observed[c].path)
+            })
         {
             let to = observed[c].path.as_str();
             let mut replaced: Vec<usize> = (0..known.len())
@@ -1124,7 +1144,72 @@ mod tests {
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
             server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None, last_seen_sha: None, tie_break: 0,
+            seen_at: None,
         }
+    }
+
+    fn strong(file_id: u64) -> jd_vfs::Fingerprint {
+        jd_vfs::Fingerprint { size: 10, mtime_ns: 100, file_id, birth_ns: 1 }
+    }
+
+    /// The records hostile kill2 75111 hands pc's scan at #20, as pc's store
+    /// holds them after the kill in #18: a sealed file Synced at
+    /// Private/Report 8.docx with its own file gone, and a file never sent
+    /// followed onto that path a pass earlier, which naming has since given a
+    /// clash name the disk never got. Its file stands where it was last seen.
+    /// Not a save by rename: the sealed file is gone, and the other file is
+    /// itself.
+    #[test]
+    fn a_never_sent_file_under_a_name_naming_planned_is_not_read_as_a_save() {
+        let sealed = KnownLocal { own_file: Some(strong(1011).identity()), fingerprint: Some(strong(1011)), ..known(904, "Private/Report 8.docx", 1011, "sha-sealed") };
+        let never_sent = KnownLocal {
+            fingerprint: None,
+            sha256: None,
+            own_file: Some(strong(1010).identity()),
+            seen_at: Some("Private/Report 8.docx".into()),
+            ..known(-5, "Private/Report 8 (2).docx", 1010, "")
+        };
+        let here = ObservedFile { path: "Private/Report 8.docx".into(), fingerprint: strong(1010), sha256: "sha-other".into(), tie_break_id: 0 };
+        let out = pair_files(&[sealed, never_sent], &[here], &HashSet::new(), true);
+        assert_eq!(out.change_for(EntityId::file(904)), Some(&LocalChange::Deleted), "the sealed file took the other file as its save: {:?}", out.changes);
+        assert!(!out.superseded.contains(&EntityId::file(-5)), "{:?}", out.superseded);
+    }
+
+    /// The save itself: the temporary file was seen beside the file it
+    /// replaces, under another name, and now stands at that file's name.
+    #[test]
+    fn a_never_sent_file_seen_beside_a_gone_file_and_renamed_onto_it_is_its_save() {
+        let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
+        let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
+        assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
+        assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
+    }
+
+    /// A save whose temporary file naming has given a name the disk never
+    /// got: judged where the file was seen, beside the one it replaces, it is
+    /// still that file's save.
+    #[test]
+    fn a_save_whose_temporary_file_naming_renamed_on_paper_is_still_a_save() {
+        let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
+        let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd (2).tmp1453", 10, "") };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
+        assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
+        assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
+    }
+
+    /// Where the temporary file stood is not known (a store older than that
+    /// being kept): nothing is read as a save. A delete plus a creation.
+    #[test]
+    fn a_never_sent_file_whose_place_is_not_known_is_not_read_as_a_save() {
+        let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
+        let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: None, ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
+        assert_eq!(out.change_for(EntityId::file(1)), Some(&LocalChange::Deleted), "{:?}", out.changes);
+        assert!(!out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
     }
 
     #[test]
@@ -1405,6 +1490,7 @@ mod tests {
             own_file: None,
             last_seen_sha: None, tie_break: 0,
             claimant_for: None,
+            seen_at: None,
         };
         let out = pair(
             &[bare.clone()],
@@ -1510,6 +1596,7 @@ mod tests {
                 fingerprint: None,
                 sha256: None,
                 server_deleted: false, held: false, server_home: None, server_path: None, own_file: None, claimant_for: None, last_seen_sha: None, tie_break: 0,
+                seen_at: None,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
@@ -2130,6 +2217,7 @@ mod tie_break_tests {
             claimant_for: None,
             last_seen_sha: Some(seen.into()),
             tie_break,
+            seen_at: None,
         }
     }
 

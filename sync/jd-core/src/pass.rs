@@ -826,6 +826,9 @@ pub fn run_pass(
                 scan.change_for(entry.id)
             {
                 if let Some(to) = placement_of(to_path, &folder_ids) {
+                    // Where the scan found it, before a held name is cleared
+                    // from where it will be created.
+                    entry.own_file_seen_at = Some(to.clone());
                     let to = clear_of_a_held_name(env, to_path, &to, Some(entry.id), &leaving_a_vault)?;
                     let into_a_vault = parent_is_encrypted(env, to.parent)?;
                     // Out of a vault the server has deleted: there is nothing
@@ -6072,6 +6075,10 @@ fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec
             own_file: entry.own_file.filter(|_| !positional),
             claimant_for: entry.replaces.filter(|_| entry.id.is_provisional()),
             last_seen_sha: entry.last_seen_sha.clone(),
+            seen_at: match (&entry.own_file_seen_at, entry.id.is_provisional()) {
+                (Some(at), true) => path_of_placement(env, at)?,
+                _ => None,
+            },
             tie_break: tie_breaks.get(&entry.id).copied().unwrap_or(0),
         };
         if entry.remote_deleted {
@@ -6556,6 +6563,7 @@ pub(crate) fn held_outside_its_vault(env: &ExecEnv, entry: &Entry) -> Result<boo
 /// the scan finds moved (T1-C).
 pub(crate) fn follow_its_file(env: &ExecEnv, entry: &mut Entry, to: Placement) -> Result<(), ExecError> {
     debug_assert!(entry.id.is_provisional());
+    entry.own_file_seen_at = Some(to.clone());
     entry.remote = to;
     entry.local_name = None;
     env.store.put_entry(entry)?;
@@ -6616,6 +6624,8 @@ pub(crate) fn blank(id: EntityId, placement: &Placement) -> Entry {
         stands_at: None,
         own_file: None,
         last_seen_sha: None,
+        // A record never sent is minted from a file found where it is placed.
+        own_file_seen_at: (id.is_provisional() && id.entity_type == EntityType::File).then(|| placement.clone()),
     }
 }
 
@@ -7079,6 +7089,18 @@ pub(crate) fn relative_path(env: &ExecEnv, entry: &Entry) -> Result<Option<Strin
     }
     parts.reverse();
     Ok(Some(parts.join("/")))
+}
+
+/// A placement as a path relative to the sync root, its folders as this disk
+/// has them; `None` when a folder of it is not known here.
+fn path_of_placement(env: &ExecEnv, at: &Placement) -> Result<Option<String>, ExecError> {
+    let Some(parent) = at.parent else {
+        return Ok(Some(at.name.clone()));
+    };
+    let Some(folder) = env.store.get_entry(EntityId::folder(parent))? else {
+        return Ok(None);
+    };
+    Ok(relative_path(env, &folder)?.map(|dir| format!("{dir}/{}", at.name)))
 }
 
 /// An entry's path relative to the sync root by its agreement and its

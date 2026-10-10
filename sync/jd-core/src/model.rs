@@ -259,6 +259,20 @@ pub struct Entry {
     /// file whose bytes are still these is this record's file unedited, found
     /// wherever it now stands (`specs/drive_weak_volume_identity.md`, layer 1).
     pub last_seen_sha: Option<String>,
+    /// Where this record's own file last stood on this disk, for a record
+    /// never sent: the scan or the engine saw it there, or put it there.
+    /// Not `remote` -- for a record never sent that is where it will be
+    /// created, which clearing a held name moves off the file -- and never a
+    /// name naming has planned for it: a name the disk was never given is not
+    /// where a file stood (hostile kill2 75111). Written where that is
+    /// established, and only there: minting the record from a file found
+    /// (`pass::blank`), the scan following the file (`pass` T1-C, the path it
+    /// was found at), `pass::follow_its_file`, the engine moving the file
+    /// aside (`execute::the_owner_follows_its_file`) and renaming it
+    /// (`move_local`, `preserve_local_as`), and a record re-minted from its
+    /// agreement (`never_sent_again`) asking where its file stands now. `None`
+    /// is not known: a store older than the field, or a file found nowhere.
+    pub own_file_seen_at: Option<Placement>,
 }
 
 impl Entry {
