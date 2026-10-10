@@ -452,7 +452,7 @@ fn record_folder_swap(world: &World, device: &jd_sim::engine::Device, x: &str, y
     let sealed = device.fs.under_sealed_dir(x) || device.fs.under_sealed_dir(y);
     for (rel, body_x) in under(x) {
         if let Some(body_y) = in_y.get(&rel) {
-            world.record_swap_pair(&body_x, body_y, "folders", sealed);
+            world.record_swap_pair(&body_x, body_y, "folders", sealed, Some(&device.name));
         }
     }
 }
@@ -541,7 +541,14 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
         }
     }
     let mut excused = 0usize;
-    for p in &pairs {
+    // A pair a reading took that no scan of the reading device could have
+    // told from a save (`UnseenReading`: its own file destroyed and the file
+    // it was bound to never seen, or seen only beside it under another name,
+    // as a record never sent), with the swap that separated the pair made in
+    // that same window. Anything a scan could have seen stays a failure.
+    let unseen = world.unseen_readings();
+    let mut excused_unseen = 0usize;
+    for (pi, p) in pairs.iter().enumerate() {
         let (lo, hi) = if p.a <= p.b { (&p.a, &p.b) } else { (&p.b, &p.a) };
         let (sha_lo, sha_hi) = {
             let (x, y) = (jd_sim::sha256_hex(lo), jd_sim::sha256_hex(hi));
@@ -553,6 +560,25 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
                     excused += 1;
                 }
                 continue;
+            }
+            if chain.contains(lo) && chain.contains(hi) {
+                // The reading made this mix: it took one body over the other, its
+                // own at the window's start, on the device the swap was made on.
+                let made_it = |r: &jd_sim::scenario::UnseenReading| {
+                    ((r.body == *lo && r.displaced == *hi) || (r.body == *hi && r.displaced == *lo))
+                        && p.device == Some(r.device_index)
+                        && r.pairs.contains(&pi)
+                };
+                if let Some(r) = unseen.iter().find(|r| r.record == *id && made_it(r)) {
+                    if seen.insert((*id, lo.clone(), hi.clone())) {
+                        excused_unseen += 1;
+                        eprintln!(
+                            "EXCUSED-UNSEEN seed={seed} device={} record={id} from={} to={} window={}..{} separated_by={}",
+                            r.device, r.from.0, r.to.0, r.window.0, r.window.1, p.source
+                        );
+                    }
+                    continue;
+                }
             }
             if chain.contains(lo) && chain.contains(hi) && seen.insert((*id, lo.clone(), hi.clone())) {
                 held.push(format!(
@@ -567,7 +593,7 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
     let by_source = |src: &str| pairs.iter().filter(|p| p.source == src).count();
     eprintln!(
         "CHAIN-ORACLE seed={seed} pairs={} chaos={} slots={} rotation={} folders={} \
-         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused}",
+         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused} excused_unseen={excused_unseen}",
         pairs.len(),
         by_source("chaos"),
         by_source("slots"),
@@ -606,7 +632,23 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
 ///   latest because one legitimate race would fire otherwise: E edits `p` in
 ///   F1 while D moves `p` to F2, and the edit rightly follows the entity to
 ///   F2. The chaos name-swapper exchanges any two files across folders by the
-///   harness's own hand; its recorded pairs union the two files' candidates.
+///   harness's own hand; its recorded pairs union the two files' candidates,
+///   and give every body of a swapped file the folder it was swapped into.
+/// - A path means the file standing at it ON THAT DEVICE. Devices differ until
+///   they sync: a slot swap on one leaves the other's slots as they were, and
+///   its user's next move of `slot-1` moves the file that was always there.
+///   So a file the workload has touched on a device is known there by the
+///   disk's id for it, which its user's renames and saves keep, and the
+///   shared path map (aliases across devices) answers only for a file
+///   neither the device's user touched nor a learned landing names.
+/// - A file the engine LAID (a download's commit) is named at the pass point
+///   right after its pass, before any user can act on it: the record that
+///   owns that file id on this device is the one it was laid for, and its
+///   server id names the file -- learned once per server id, from the first
+///   pass point at which a record owns a file the workload touched. Read off
+///   the engine's belief exactly as the folder handles are, so a later
+///   mis-pairing still shows. Several server ids may name one file (a
+///   re-mint after a remote delete).
 ///
 /// The check, after settling, over every LIVE server file whose body the
 /// workload wrote: the folder it stands in is one of its candidates. Read
@@ -631,6 +673,26 @@ struct Custody {
     /// A path as the workload knows it -> the file it means. Aliases are kept
     /// across renames, since the other device still knows the old spelling.
     file_of_path: std::collections::HashMap<String, usize>,
+    /// (device index, the disk's file id, the disk's own birth for it) -> the
+    /// file it is, for files the workload touched on that device. By the pair:
+    /// an id is reused once its file is gone, and a new file on it is not the
+    /// old one.
+    file_of_id: std::collections::HashMap<(usize, u64, u64), usize>,
+    /// Server file id -> the file it is, learned once.
+    file_of_server: std::collections::HashMap<i64, usize>,
+    /// Per device, how many of its landings have been read.
+    landings_read: std::collections::HashMap<usize, usize>,
+    /// Server ids a record owned under two different files the workload
+    /// touched: the engine bound a record to a file other than the one it was
+    /// learned from. Such an id names nothing -- unlearned, never learned
+    /// again, and every landing named through it falls back to the path map
+    /// -- and its count is reported (`learn_conflicts`). What the user had
+    /// already done to such a landing (a write or a move) keeps the key it
+    /// was credited to; no verdict in the round-2 flips rests on that,
+    /// checked by re-running them with the id never learned.
+    ambiguous: std::collections::BTreeSet<i64>,
+    /// Which landings were named through which server id.
+    landed_via: std::collections::HashMap<(usize, u64, u64), i64>,
     /// Per file, every handle it was placed in.
     placed: Vec<Vec<(usize, u64)>>,
     /// Every body the workload wrote, by hash, with the file it was written to.
@@ -670,9 +732,26 @@ impl Custody {
         k
     }
 
+    /// The file the user means at `path` on this device, which stands there
+    /// now (each caller asks after its own write or rename): known by its id
+    /// if the workload touched it here, else by the shared path map.
+    fn key_on(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, by_path: &str) -> usize {
+        // By identity only where the disk's identity names one file; else
+        // by the path map alone.
+        let id = device.fs.true_identity_of(path).filter(|_| device.fs.identity_is_unique());
+        let key = match id.and_then(|(id, birth)| self.file_of_id.get(&(di, id, birth))) {
+            Some(k) => *k,
+            None => self.file_key(by_path),
+        };
+        if let Some((id, birth)) = id {
+            self.file_of_id.insert((di, id, birth), key);
+        }
+        key
+    }
+
     /// The user wrote `body` at `path` on this device; called after the write.
     fn wrote(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, body: &[u8]) {
-        let key = self.file_key(path);
+        let key = self.key_on(di, device, path, path);
         if let Some(h) = self.handle_of(di, device, Self::parent_of(path)) {
             self.placed[key].push(h);
         }
@@ -681,7 +760,7 @@ impl Custody {
 
     /// The user renamed the file at `from` to `to` on this device; called after.
     fn moved(&mut self, di: usize, device: &jd_sim::engine::Device, from: &str, to: &str) {
-        let key = self.file_key(from);
+        let key = self.key_on(di, device, to, from);
         self.file_of_path.insert(to.to_string(), key);
         if let Some(h) = self.handle_of(di, device, Self::parent_of(to)) {
             self.placed[key].push(h);
@@ -728,8 +807,8 @@ impl Custody {
     /// Files exchanged names in one motion (a slot swap or rotation): after
     /// it, each destination path means the file that stood at its source.
     /// Set together, because the sources are also the destinations.
-    fn rotated(&mut self, moves: &[(&str, &str)]) {
-        let keys: Vec<usize> = moves.iter().map(|(from, _)| self.file_key(from)).collect();
+    fn rotated(&mut self, di: usize, device: &jd_sim::engine::Device, moves: &[(&str, &str)]) {
+        let keys: Vec<usize> = moves.iter().map(|(from, to)| self.key_on(di, device, to, from)).collect();
         for ((_, to), key) in moves.iter().zip(keys) {
             self.file_of_path.insert(to.to_string(), key);
         }
@@ -755,9 +834,13 @@ impl Custody {
 
     /// Bodies the harness wrote by its own hand mid-pass (the chaos save
     /// hooks) are not in the ledger; attributed here, after the fact, to the
-    /// file standing at the path they were written to, so a body the chaos
-    /// swapper then exchanged with a user's file carries that file's
-    /// candidates across. Adds candidates only.
+    /// folder they were written into and to the file the shared path map
+    /// names at the path they were written to, so a body the chaos swapper
+    /// then exchanged with a user's file carries that file's candidates
+    /// across. The folder is the one that counts: the path map names one
+    /// file for every device, and the file it names may stand in another
+    /// device's folder of that name (longhostile-3dev 61066). Adds candidates
+    /// only.
     fn attribute_harness_writes(&mut self, world: &World) {
         let known: std::collections::HashSet<String> =
             self.intents.iter().map(|(h, _)| h.clone()).collect();
@@ -766,33 +849,34 @@ impl Custody {
                 if known.contains(&w.sha256) {
                     continue;
                 }
-                let key = match self.file_of_path.get(&w.path) {
-                    Some(k) => *k,
+                // The folder it was written into, by the birth read at the
+                // write: read by its path now, a rotation since had given
+                // that name to another folder, and the file the engine kept
+                // where the user put it read as misplaced (shown kill2
+                // 75111).
+                let at_write = w.parent_birth.map(|b| {
+                    self.handles.entry((di, b)).or_insert(None);
+                    (di, b)
+                });
+                // Its folder is gone before this could read it (a folder the
+                // engine trashed, the rescue net emptying it): an unknown
+                // candidate, never an empty set -- an empty set reads as
+                // known and lends nothing to a chaos swap partner (hostile2
+                // 74424).
+                let here = at_write.or_else(|| self.handle_of(di, d, Self::parent_of(&w.path))).unwrap_or((di, u64::MAX));
+                match self.file_of_path.get(&w.path).copied() {
+                    Some(k) => {
+                        self.intents.push((w.sha256.clone(), k));
+                        let own = self.placed.len();
+                        self.placed.push(vec![here]);
+                        self.intents.push((w.sha256.clone(), own));
+                    }
                     None => {
                         let k = self.file_key(&w.path);
-                        // The folder it was written into, by the birth read
-                        // at the write: read by its path now, a rotation
-                        // since had given that name to another folder, and
-                        // the file the engine kept where the user put it read
-                        // as misplaced (shown kill2 75111).
-                        let at_write = w.parent_birth.map(|b| {
-                            self.handles.entry((di, b)).or_insert(None);
-                            (di, b)
-                        });
-                        match at_write.or_else(|| self.handle_of(di, d, Self::parent_of(&w.path))) {
-                            Some(h) => self.placed[k].push(h),
-                            // Its folder is gone before this could read it (a
-                            // folder the engine trashed, the rescue net
-                            // emptying it): an unknown candidate, never an
-                            // empty set -- an empty set reads as known and
-                            // lends nothing to a chaos swap partner (hostile2
-                            // 74424).
-                            None => self.placed[k].push((di, u64::MAX)),
-                        }
-                        k
+                        self.placed[k].push(here);
+                        self.intents.push((w.sha256.clone(), k));
                     }
-                };
-                self.intents.push((w.sha256.clone(), key));
+                }
             }
         }
     }
@@ -814,7 +898,71 @@ impl Custody {
 
     /// A pass point on this device: learn every handle of its that is still
     /// unlearned and still standing.
+    /// A pass point on this device, for files: every server id a record here
+    /// holds for a file the workload touched is learned (once), and then every
+    /// file the engine laid since the last pass point is named by the record
+    /// that owns it, if that record's server id is learned.
+    fn learn_files(&mut self, di: usize, device: &jd_sim::engine::Device) {
+        if !device.fs.identity_is_unique() {
+            return;
+        }
+        // A record's own file, by the disk's own identity for it: the file
+        // standing on this disk under that id now.
+        let live = device.fs.true_identities();
+        let owner_of: std::collections::HashMap<(u64, u64), i64> = device
+            .store
+            .every_entry()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.id.entity_type == jd_core::model::EntityType::File && e.id.server_id > 0)
+            .filter_map(|e| {
+                let o = e.own_file.filter(|o| o.file_id != 0)?;
+                Some(((o.file_id, *live.get(&o.file_id)?), e.id.server_id))
+            })
+            .collect();
+        // In order, so what is learned never hangs on a map's iteration.
+        let mut mine: Vec<((u64, u64), usize)> = self
+            .file_of_id
+            .iter()
+            .filter(|((d, _, _), _)| *d == di)
+            .map(|((_, fid, birth), key)| ((*fid, *birth), *key))
+            .collect();
+        mine.sort();
+        for ((fid, birth), key) in mine {
+            let Some(sid) = owner_of.get(&(fid, birth)).copied() else { continue };
+            if self.ambiguous.contains(&sid) {
+                continue;
+            }
+            let learned = *self.file_of_server.entry(sid).or_insert(key);
+            if learned != key {
+                eprintln!("LEARN-CONFLICT device={di} server_id={sid} file=({fid}, {birth}) is key {key}, learned as key {learned}");
+                self.ambiguous.insert(sid);
+                self.file_of_server.remove(&sid);
+                let named: Vec<(usize, u64, u64)> =
+                    self.landed_via.iter().filter(|(_, s)| **s == sid).map(|(k, _)| *k).collect();
+                for k in named {
+                    self.landed_via.remove(&k);
+                    self.file_of_id.remove(&k);
+                }
+            }
+        }
+        let from = self.landings_read.get(&di).copied().unwrap_or(0);
+        let laid = device.fs.landed_since(from);
+        self.landings_read.insert(di, from + laid.len());
+        for (fid, birth) in laid {
+            if self.file_of_id.contains_key(&(di, fid, birth)) {
+                continue;
+            }
+            let Some(sid) = owner_of.get(&(fid, birth)).copied() else { continue };
+            if let Some(key) = self.file_of_server.get(&sid).copied() {
+                self.file_of_id.insert((di, fid, birth), key);
+                self.landed_via.insert((di, fid, birth), sid);
+            }
+        }
+    }
+
     fn learn(&mut self, di: usize, device: &jd_sim::engine::Device, late: bool) {
+        self.learn_files(di, device);
         let unlearned: Vec<u64> = self
             .handles
             .iter()
@@ -1008,6 +1156,28 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
                 }
             }
         }
+        // The swap moved FILES: what a save wrote onto a swapped file, before
+        // or after, stands where the swap put that file, and its partner may
+        // be a file the engine made (a conflict copy) with no candidates of
+        // its own to lend (killplat 81844: an edit on another device followed
+        // the swapped file into the root).
+        for (body, dir) in [(&a, s.b), (&b, s.a)] {
+            let keys: BTreeSet<usize> =
+                custody.intents.iter().filter(|(h, _)| h == body).map(|(_, k)| *k).collect();
+            let landed = dir.and_then(|birth| resolve(&(s.device, birth)));
+            for (h, k) in &custody.intents {
+                if h == body || !keys.contains(k) {
+                    continue;
+                }
+                // Where the folder it went to cannot be named (a disk that
+                // gives directories no identity), there is no union to make:
+                // the bodies are judged by their own candidates as before,
+                // never set aside unjudged.
+                if let Some(id) = landed {
+                    candidates.entry(h.clone()).or_default().insert(id);
+                }
+            }
+        }
     }
     let folders: BTreeMap<i64, jd_sim::server::FolderFact> =
         world.server.folders().into_iter().map(|f| (f.id, f)).collect();
@@ -1123,7 +1293,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         "CUSTODY-ORACLE seed={seed} files_checked={checked} multi_candidate={multi} bodies_unknown={unknown} \
          sealed_unopened={sealed_unopened} unresolved={skipped_unresolved} folders={} learned={learned} late={} \
          deferred={} undecided={} rescued={} reminted={} held={} misplaced={} held_records_converged_skips={} held_waiting={} held_never_sent={} user_removed_folders={} removal_unattributed={} \
-         net_fires_outside_a_user_delete={} rescued_lines={rescued:?} reminted_lines={reminted:?} net_lines={net_fires_outside_a_user_delete:?}",
+         learn_conflicts={} net_fires_outside_a_user_delete={} rescued_lines={rescued:?} reminted_lines={reminted:?} net_lines={net_fires_outside_a_user_delete:?}",
         custody.handles.len(),
         custody.late.len(),
         custody.deferred,
@@ -1137,6 +1307,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         world.devices.iter().map(|d| jd_sim::scenario::held_never_sent(d).len()).sum::<usize>(),
         custody.user_removed_folders.len(),
         custody.removal_unattributed,
+        custody.ambiguous.len(),
         net_fires_outside_a_user_delete.len(),
     );
     assert!(
@@ -1810,7 +1981,7 @@ fn two_files_trading_names_on(platform: Platform) {
     assert!(world.settle().is_some(), "both files go up");
     assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
     let versions_before = world.server.all_versions().len();
-    world.record_swap_pair(a, b, "slots", false);
+    world.record_swap_pair(a, b, "slots", false, None);
     laptop.fs.user_rename("a.txt", ".swap.tmp");
     laptop.fs.user_rename("b.txt", "a.txt");
     laptop.fs.user_rename(".swap.tmp", "b.txt");
@@ -1859,7 +2030,7 @@ fn on_windows_an_upgrade_keeps_a_file_moved_while_the_client_was_off() {
     // While the client is off: a trade (each file arrives wearing the
     // other's creation time) and a file renamed and edited, which only its
     // identity can follow.
-    world.record_swap_pair(x, y, "slots", false);
+    world.record_swap_pair(x, y, "slots", false, None);
     pc.fs.user_rename("Docs/x.txt", "Docs/.swap.tmp");
     pc.fs.user_rename("Docs/y.txt", "Docs/x.txt");
     pc.fs.user_rename("Docs/.swap.tmp", "Docs/y.txt");
@@ -2003,7 +2174,7 @@ fn a_trade_with_a_download_the_user_saved_over_is_read_as_a_trade() {
         pending.synced_placement.is_none(),
         "construction: doc-20's download must not have landed ({pending:?})"
     );
-    world.record_swap_pair(mine, &saved, "slots", false);
+    world.record_swap_pair(mine, &saved, "slots", false, None);
     laptop.fs.user_rename("doc-10.txt", ".swap.tmp");
     laptop.fs.user_rename("doc-20.txt", "doc-10.txt");
     laptop.fs.user_rename(".swap.tmp", "doc-20.txt");
@@ -2062,7 +2233,7 @@ fn move_onto_a_landing_download(
             disk.fail_next(jd_sim::FsOp::Rename, Some(path), jd_sim::FailureKind::Io, 1);
         }
     });
-    world.record_swap_pair(mine, fresh, "slots", false);
+    world.record_swap_pair(mine, fresh, "slots", false, None);
     world.pass(laptop);
     assert!(
         fired.load(std::sync::atomic::Ordering::SeqCst),
@@ -2399,6 +2570,47 @@ fn a_chaos_swap_lends_each_body_the_directory_the_other_stood_in() {
     let x_body = jd_sim::sha256_hex(b"x, which the user put in A");
     let x = world.server.files().into_iter().find(|f| !f.trashed && f.sha256 == x_body).expect("x's body is on the server");
     assert_eq!(x.folder, Some(s), "the engine keeps x's body where the swap carried it");
+    assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+}
+
+/// A body the harness wrote by its own hand is credited to the folder it was
+/// written into, not only to the file the shared path map names at its path:
+/// that file may stand in another folder of the same name. Here mac put
+/// `f.txt` in `A`, renamed `A` to `Old` and made a new `A`; a hand on pc then
+/// writes a new `A/f.txt`, into the new folder, where the engine keeps it.
+/// Lent only the path map's file, the check read it as misplaced
+/// (longhostile-3dev 61066).
+#[test]
+fn a_harness_write_is_credited_to_the_folder_it_was_written_into() {
+    let seed = 9_947;
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("A");
+    assert!(world.settle().is_some());
+    let mut custody = Custody::default();
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.adopt_standing(di, d);
+        custody.learn(di, d, false);
+    }
+    mac.fs.user_write("A/f.txt", b"the file the user put in the first A");
+    custody.wrote(0, mac, "A/f.txt", b"the file the user put in the first A");
+    assert!(world.settle().is_some());
+    let first = world.server.folder_id_at("A").expect("A went up");
+    mac.fs.user_rename("A", "Old");
+    mac.fs.user_mkdir("A");
+    assert!(world.settle().is_some());
+    let second = world.server.folder_id_at("A").expect("the new A went up");
+    assert_ne!(first, second, "the new A is another folder");
+    pc.fs.user_write("A/f.txt", b"a hand writes into the new A");
+    assert!(world.settle().is_some());
+    custody.attribute_harness_writes(&world);
+    for (di, d) in world.devices.iter().enumerate() {
+        custody.learn(di, d, true);
+    }
+    let body = jd_sim::sha256_hex(b"a hand writes into the new A");
+    let f = world.server.files().into_iter().find(|f| !f.trashed && f.sha256 == body).expect("the hand's body is on the server");
+    assert_eq!(f.folder, Some(second), "the engine keeps it in the folder it was written into");
     assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
 }
 
@@ -2890,25 +3102,25 @@ fn drive(
                     // special-cased pairs falls over.
                     let body = |s: &str| device.fs.peek(s).unwrap_or_default();
                     let (a, b, c) = (body(&slots[0]), body(&slots[1]), body(&slots[2]));
-                    world.record_swap_pair(&a, &b, "rotation", false);
-                    world.record_swap_pair(&b, &c, "rotation", false);
-                    world.record_swap_pair(&c, &a, "rotation", false);
+                    world.record_swap_pair(&a, &b, "rotation", false, Some(&device.name));
+                    world.record_swap_pair(&b, &c, "rotation", false, Some(&device.name));
+                    world.record_swap_pair(&c, &a, "rotation", false, Some(&device.name));
                     let via = join(&base, &format!(".rotate-{step}.tmp"));
                     device.fs.user_rename(&slots[0], &via);
                     device.fs.user_rename(&slots[1], &slots[0]);
                     device.fs.user_rename(&slots[2], &slots[1]);
                     device.fs.user_rename(&via, &slots[2]);
-                    custody.rotated(&[(&slots[0], &slots[2]), (&slots[1], &slots[0]), (&slots[2], &slots[1])]);
+                    custody.rotated(di, device, &[(&slots[0], &slots[2]), (&slots[1], &slots[0]), (&slots[2], &slots[1])]);
                 } else {
                     let i = rng.below(3) as usize;
                     let j = (i + 1 + rng.below(2) as usize) % 3;
                     let body = |s: &str| device.fs.peek(s).unwrap_or_default();
-                    world.record_swap_pair(&body(&slots[i]), &body(&slots[j]), "slots", false);
+                    world.record_swap_pair(&body(&slots[i]), &body(&slots[j]), "slots", false, Some(&device.name));
                     let via = join(&base, &format!(".swap-{step}.tmp"));
                     device.fs.user_rename(&slots[i], &via);
                     device.fs.user_rename(&slots[j], &slots[i]);
                     device.fs.user_rename(&via, &slots[j]);
-                    custody.rotated(&[(&slots[i], &slots[j]), (&slots[j], &slots[i])]);
+                    custody.rotated(di, device, &[(&slots[i], &slots[j]), (&slots[j], &slots[i])]);
                 }
             }
             // Both devices reach for the same name at once.
@@ -6043,7 +6255,7 @@ fn a_copy_swap_on(model: jd_sim::FileIds, remount_first: bool) -> World {
     if remount_first {
         stick.fs.remount();
     }
-    world.record_swap_pair(b"the first body", b"the second body", "chaos", false);
+    world.record_swap_pair(b"the first body", b"the second body", "chaos", false, None);
     stick.fs.user_trade_names("A/one.txt", "A/two.txt", "A/.swap.tmp");
     assert!(world.settle().is_some());
     world

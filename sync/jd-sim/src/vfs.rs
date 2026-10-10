@@ -153,6 +153,11 @@ struct MemFsState {
     /// Report every file's birth as 0: the volume with no birth time, where
     /// every file's identity is weak.
     births_hidden: bool,
+    /// Every file a spool commit laid, in order, by its id and the birth the
+    /// disk keeps for it (an id alone is reused once its file is gone): what
+    /// the engine put on this disk, for an oracle to name by the record that
+    /// owns it.
+    landed: Vec<(u64, u64)>,
     /// Ids released by deletes, handed out again when id reuse is enabled.
     freed_ids: Vec<u64>,
     reuse_file_ids: bool,
@@ -326,6 +331,7 @@ impl MemFs {
                 file_births: BTreeMap::new(),
                 next_file_birth: 0,
                 births_hidden: false,
+                landed: Vec::new(),
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
                 file_id_model: FileIds::Stable,
@@ -917,9 +923,43 @@ impl MemFs {
         self.state.lock().unwrap().file_births.get(&key).copied()
     }
 
+    /// The file at this path by what the disk itself knows it as: its id and
+    /// its birth, whatever the engine is shown. An id alone is reused once its
+    /// file is gone; the pair is not.
+    pub fn true_identity_of(&self, path: &str) -> Option<(u64, u64)> {
+        let key = self.store_path(path);
+        let st = self.state.lock().unwrap();
+        Some((*st.file_ids.get(&key)?, *st.file_births.get(&key)?))
+    }
+
+    /// Does a file's id with its birth name one file on this disk? Not where
+    /// an id is a directory slot that a freed entry hands to the next file in
+    /// the folder, nor where a name taken again inherits the birth of the
+    /// file that left it: there two files can share both.
+    pub fn identity_is_unique(&self) -> bool {
+        let st = self.state.lock().unwrap();
+        st.file_id_model != FileIds::DirectorySlot && !st.births_are_names
+    }
+
+    /// Every file on this disk by id, with the disk's own birth for it.
+    pub fn true_identities(&self) -> std::collections::HashMap<u64, u64> {
+        let st = self.state.lock().unwrap();
+        st.file_ids
+            .iter()
+            .filter_map(|(key, id)| st.file_births.get(key).map(|b| (*id, *b)))
+            .collect()
+    }
+
     pub fn birth_of(&self, path: &str) -> Option<u64> {
         let key = self.store_path(path);
         self.state.lock().unwrap().births.get(&key).copied()
+    }
+
+    /// The files spool commits have laid, from the `from`th on, by id and the
+    /// disk's own birth.
+    pub fn landed_since(&self, from: usize) -> Vec<(u64, u64)> {
+        let st = self.state.lock().unwrap();
+        st.landed.get(from..).map(|l| l.to_vec()).unwrap_or_default()
     }
 
     /// Where the directory born as `birth` stands now, as stored; `None`
@@ -1971,6 +2011,8 @@ impl SpoolFile for MemSpool {
         } else {
             jd_vfs::birth_as_seen(st.file_births[&key], st.births_shown_as_names)
         };
+        let true_birth = st.file_births[&key];
+        st.landed.push((id, true_birth));
         let id = if positional { 0 } else { id };
         let size = self.buf.len() as u64;
         st.nodes.insert(
