@@ -61,10 +61,10 @@ STUB
 chmod +x "$T/bin/docker" "$T/bin/systemctl"
 export PATH="$T/bin:$PATH" STUB_T="$T"
 
-# The multi-tenant functions as install.sh has them, writing to a fixture
-# daemon.json instead of /etc/docker's.
-FUNCS="$(awk '/^# --- Docker daemon settings, and multi-tenant hosts/,/^do_docker_install\(\) \{$/' "$INSTALL" | sed '$d' \
-    | sed -e "s#/etc/docker/daemon.json#${T}/daemon.json#" -e "s#mkdir -m 0755 -p /etc/docker#:#")"
+# The multi-tenant functions as install.sh has them. daemon.json is merged by
+# _docker_daemon_json.sh, pointed at a fixture instead of /etc/docker's.
+FUNCS="$(awk '/^# --- Docker daemon settings, and multi-tenant hosts/,/^do_docker_install\(\) \{$/' "$INSTALL" | sed '$d')"
+export DOCKER_DAEMON_JSON="$T/daemon.json"
 chk "the daemon.json and multi-tenant functions are findable" "$(printf '%s\n' "$FUNCS" | grep -c '^docker_[a-z_]*() {')" "4"
 run() {  # FUNCTION
     bash -c 'SCRIPT_DIR="$1"; print_success() { echo "OK $*"; }; print_error() { echo "ERR $*"; }

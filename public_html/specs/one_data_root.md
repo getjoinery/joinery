@@ -1,7 +1,8 @@
 # One data root: every install keeps its data in one place, on a filesystem of its own
 
-**Status:** DRAFT 2026-10-07. Written from an inventory of the installers the
-same day. Nothing built. Stands alone; `hosted_data_promise_disk_encryption`
+**Status:** BUILDING. Drafted 2026-10-07 from an inventory of the installers;
+O1 and O3 settled by the owner 2026-10-09 (D7, D8). WP1 BUILT 2026-10-10,
+box-proven, uncommitted. WP2 next. Stands alone; `hosted_data_promise_disk_encryption`
 stands on it and is deliberately NOT part of it — this spec never mentions a
 key.
 
@@ -77,11 +78,24 @@ and operates on `/srv/joinery/docker`.
 One script, `joinery_data_root.sh`, in `maintenance_scripts/install_tools/`:
 
 ```
-joinery_data_root.sh create SIZE [DEVICE]   make it (file of SIZE, or format DEVICE), fstab, mount
-joinery_data_root.sh check                  mounted, right filesystem, right options; exit 1 if not
-joinery_data_root.sh grow SIZE              a file grows in place; a device grows after the provider does
-joinery_data_root.sh status                 size, used, what is under it
+joinery_data_root.sh create [SIZE] [DEVICE] make it (file of SIZE, default per D7, or format DEVICE), fstab, mount
+joinery_data_root.sh check                  mounted, right filesystem, right options; exit 1 if not, 2 if this host has none
+joinery_data_root.sh grow [SIZE]            a file grows in place (to SIZE, or by D7's step); a device grows after the provider does
+joinery_data_root.sh status                 size, used, what is under it, and whether it can still grow
+joinery_data_root.sh tick                   the converger's call: check, keep the units, grow when D7 says so
 ```
+
+The fstab line always carries `prjquota`: it costs nothing where no quota is
+set, and one mount line everywhere is the point. A host's data root is
+recorded in `/etc/joinery/data_root` (what backs it), on the root disk; a host
+without that file has no data root, which is a different answer from one that
+is declared and not mounted.
+
+No node in the fleet carries the old `/var/lib/docker` pool (every host
+report said `disk_pool: none`, 2026-10-09; only scratch boxes ever had one), so
+`docker_disk_pool.sh` moves onto the data root outright: its pool IS the data
+root, mounted at `/srv/joinery`, and Docker's `data-root` is
+`/srv/joinery/docker`. There is no second layout to keep working.
 
 ### D3. Services wait for it
 
@@ -91,6 +105,13 @@ are ordered after it (`After=` + `Requires=` drop-ins written by the
 installer). A box whose data root is absent starts the agent and nothing
 else, and `check` says why. This is what `docker_disk_pool.sh` already does
 for Docker alone, applied to every consumer.
+
+The drop-ins are written only on a host that has a data root (a `Requires=`
+naming a target that does not exist would stop the unit starting), and kept
+by `tick` on every converge, so a PHP-FPM version installed later is ordered
+after the data root too. The host converger itself refuses to run any
+installer while a declared data root fails `check`: every installer it would
+run writes to a host whose data is missing.
 
 ### D4. Install shapes
 
@@ -143,15 +164,87 @@ The data root therefore does not make upgrades smaller or larger: they need
 about two copies of the code tree plus the archives on the root disk,
 before and after.
 
+### D7. Size: modest at first, grown automatically (O1, settled 2026-10-09)
+
+A data root in a file starts modest and grows as it fills. XFS can grow but
+never shrink, so space handed to the data root never comes back to the root
+disk; a large first size would be a choice nobody can undo, and it would
+squeeze the root disk that upgrades unpack on (D6).
+
+- **First size**, when `create` is given none: the larger of 16 GiB and a
+  quarter of the root disk, but never more than the root disk can give above
+  its reserve. Under 4 GiB available is refused.
+- **The root disk's reserve**: the larger of 6 GiB and 15% of the root disk
+  is never given to the data root. It sits above the agent's `disk_headroom`
+  floor (10% / 5 GiB), so growing the data root can never be what opens a
+  disk case on the root disk.
+- **When it grows**: on the converger's tick (every minute; one `df`), when
+  the data root has less than the larger of 8 GiB and 20% of its size free.
+  That is above the same floor applied to the data root, so it grows before a
+  case would open.
+- **By how much**: to the largest of a quarter more than it is, its used
+  space plus 12 GiB, and its used space over 0.7, rounded up to a whole GiB;
+  then cut down to what the root disk can give above its reserve. Under 1 GiB
+  to give is no growth.
+- **When it cannot**: `tick` says so in the converger's transcript and
+  `status` says so; nothing else is built. The data root then fills like any
+  disk, and the agent's `disk_headroom` recipe opens its case when it reaches
+  the floor (host_report's `disk_pool` reports the data root's figures), as
+  for any full disk. Disk space is the operator's; there is no trend notice.
+- **Growing** is online: `fallocate` to the new length, `losetup -c` so the
+  loop device sees it, `xfs_growfs`. A data root on a device grows only after
+  the provider has grown the device; `tick` runs `xfs_growfs` when the device
+  is larger than the filesystem, and never asks the provider for more.
+
+### D8. Logs live in the data root (O3, settled 2026-10-09)
+
+A site's `logs/` is data, under `/srv/joinery/sites/<site>/logs`: logs fill
+disks, and they belong with the rest. The agent's own log, the converger's
+record and `/var/lib/joinery/host` stay on the root disk, so a box whose data
+root is the thing that failed can still say why.
+
 ## Work packages
 
-- **WP1 — `joinery_data_root.sh`** with `create / check / grow / status`, the
-  target and the drop-ins; `docker_disk_pool.sh` rebased onto it.
+- **WP1 — `joinery_data_root.sh`** with `create / check / grow / status /
+  tick`, the target and the drop-ins; the converger's gate and growth tick
+  (D3, D7); `docker_disk_pool.sh` rebased onto it; `host_report`'s
+  `disk_pool` reads the data root, so the agent's floor covers it with no
+  agent change; the support bundle carries the script.
   `installer_contract_test` pins the layout; `host_converger_gate.sh` pins
   that the converger refuses to run installers when `check` fails.
+  **BUILT 2026-10-10.** Gates: `joinery_data_root` (43, new),
+  `docker_disk_pool` (39), `host_converger` (+6), `host_report`,
+  `docker_multi_tenant`, `installer_contract` (+37). Box-proven on a scratch
+  Nanode (Ubuntu 26.04, systemd 259; deleted after): created at 2G, the first
+  tick grew it online to 13G in 0.17 s with data intact; a second tick was
+  silent; at the root disk's reserve it said "cannot grow" once; a consumer
+  (Apache) whose package was installed after its drop-in still waited for the
+  target; a clean reboot brought the mount, direct I/O and Apache up in that
+  order; with the file missing the box booted, Apache stayed down and `check`
+  named the cause, and starting Apache once the file was back pulled the mount
+  in; the runner as root refused `--machine --only` while unmounted and ran
+  once mounted; `docker_disk_pool.sh create` reused the data root, Docker's
+  root and volumes landed under `/srv/joinery/docker` and Docker and
+  containerd required the target; an XFS project limit of 100M held on it.
+  install.sh loads `_docker_daemon_json.sh` only when it edits daemon.json, so
+  the base image build carries no new file.
+  **Reviewed by reviewer2 2026-10-10: NOT VALID, F1-F4 bugs, F5-F9 smaller; all
+  nine fixed.** F1 `tick` exits non-zero only for not-ready (failed growth or
+  reload is said and absorbed); F2 both installer job processors go red with
+  the reason, and the admin notice names `data-root-not-ready`; F3 both gates
+  skip as root and `docker_disk_pool.sh` refuses its test root as root; F4 the
+  daemon.json loader fails instead of recursing without its helper; F5 docs
+  name the half-configured-package case; F6 first size in whole GiB; F7 a
+  trailing slash in data-root accepted, an unused SIZE said; F8 a device read
+  by its UUID path; F9 `status` bounds each `du` at 20 s. Re-review VALID
+  2026-10-10; its nit N1 (create says what to run when its units cannot be
+  written) fixed.
 - **WP2 — New installs born on it:** `install.sh`, `_site_init.sh`, the
   Docker host path. Upgrade staging moves to the site root (D6), released
   before WP3 runs anywhere.
+  Also in WP2: the agent's `disk_headroom` reason text names "the Docker
+  disk pool"; once bare-metal sites have a data root it should say "the data
+  root" (joinery-agent, text only; host_report's key stays `disk_pool`).
 - **WP3 — `migrate`** for the three existing shapes, proven on a scratch box
   of each.
 - **WP4 — Fleet:** managed nodes migrated one at a time from the management
@@ -159,12 +252,10 @@ before and after.
 
 ## Open items
 
-- **O1.** Default file size for a bare-metal site when no device is given —
-  a fraction of the root disk, or asked at install.
+- **O1 — SETTLED 2026-10-09.** Modest at first, grown automatically: D7.
 - **O2 — SETTLED 2026-10-07.** `/var/lib/joinery/host` stays on the root
   disk: the agent needs it before the data root is up, and the encryption
   spec needs the agent to run with the data root closed. The `host/` line in
   D1 is withdrawn.
-- **O3.** Logs: data (they fill disks, they belong with the rest) or not
-  (useful when the data root is the thing that failed). Lean: under the data
-  root, with the agent's own log on the root disk.
+- **O3 — SETTLED 2026-10-09.** Under the data root, with the agent's own log on
+  the root disk: D8.

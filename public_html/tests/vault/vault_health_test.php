@@ -124,6 +124,9 @@ check(HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd') 
 check(HostConvergerNotice::forState(false, null, '', $now, 'cmd') === '', 'and silent on a box with no converger');
 check(strpos(HostConvergerNotice::forState(true, $now - 2 * 86400, 'converged', $now, 'sudo bash x'), 'sudo bash x') !== false, 'a stale converger shows the command');
 check(strpos(HostConvergerNotice::forState(true, null, '', $now, 'cmd'), 'never run') !== false, 'a converger that never ran says so');
+$dr_notice = HostConvergerNotice::forState(true, $now - 60, 'data-root-not-ready', $now, 'cmd');
+check(strpos($dr_notice, 'data root') !== false && strpos($dr_notice, 'joinery_data_root.sh status') !== false && strpos($dr_notice, '>cmd<') === false,
+	'a fresh run stopped by an unmounted data root is named, with the status command, not the reinstall one');
 $facts = HostConvergerNotice::facts();
 check(array_key_exists('installed', $facts) && array_key_exists('last_run', $facts) && array_key_exists('outcome', $facts),
 	'the live fact reader returns the three facts the check decides on');

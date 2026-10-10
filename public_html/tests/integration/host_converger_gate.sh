@@ -17,7 +17,8 @@
 # The certificate summary the runner writes for the admin notice is pinned from
 # a fixture lineage (specs/implemented/tls_and_origin_trust.md WP11). The
 # release verification key the runner writes from the agent bundle is pinned
-# from a throwaway key (specs/package_signing.md WP1).
+# from a throwaway key (specs/package_signing.md WP1). A host whose declared data
+# root is not mounted runs nothing (specs/one_data_root.md WP1).
 
 set -u
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/maintenance_scripts/install_tools"
@@ -470,6 +471,27 @@ out="$(bash "$INSTALLER" --machine "$T" 2>&1)"; rc=$?
 chk "not root: --machine ROOT skips with exit 0" "$rc:$(printf '%s\n' "$out" | grep -c 'not root - skipping')" "0:1"
 out="$(bash "$INSTALLER" --machine 2>&1)"; rc=$?
 chk "--machine without a root skips, exit 0, and says what it needed" "$rc:$(printf '%s\n' "$out" | grep -c -- '--machine needs the bundle root')" "0:1"
+
+echo "== a declared data root that is not mounted stops every run (specs/one_data_root.md WP1) =="
+# The data root tool reads a fixture's /etc when this is not root. Nothing is
+# mounted at the fixture's /srv/joinery, so the host is declared and not ready.
+DR="$T/hostroot"
+mkdir -p "$DR/etc/joinery" "$DR/srv"
+printf 'backing=file\nsource=/srv/joinery.img\n' > "$DR/etc/joinery/data_root"
+: > "$DR/srv/joinery.img"
+rm -f "$STAMP"
+out=$(JOINERY_HOST_ROOT="$DR" bash "$RUNNER" --site-root="$T" 2>&1)
+chk "no installer runs" "$(echo "$out" | grep -c 'core installers: running')" "0"
+chk "the transcript says the data root is not ready, and why" \
+    "$(echo "$out" | grep -c 'the data root is not ready')|$(echo "$out" | grep -c '/srv/joinery is not mounted')" "1|1"
+chk "and the run records data-root-not-ready" "$(cut -d' ' -f2 "$LAST")" "data-root-not-ready"
+out=$(JOINERY_HOST_ROOT="$DR" bash "$RUNNER" --only=host_housekeeping.sh --site-root="$T" 2>&1)
+chk "--only is held too" "$(echo "$out" | grep -c 'core installers: running')|$(echo "$out" | grep -c 'the data root is not ready')" "0|1"
+out=$(JOINERY_HOST_ROOT="$DR" bash "$RUNNER" --when-changed --site-root="$T" 2>&1)
+chk "and the timer's tick" "$(echo "$out" | grep -c 'core installers: running')|$(echo "$out" | grep -c 'the data root is not ready')" "0|1"
+rm -f "$DR/etc/joinery/data_root"
+out=$(JOINERY_HOST_ROOT="$DR" bash "$RUNNER" --site-root="$T" 2>&1)
+chk "a host with no data root runs as it always has" "$(echo "$out" | grep -c 'core installers: running')|$(echo "$out" | grep -c 'data root')" "$CORE_COUNT|0"
 
 echo
 echo "host_converger gate: $passed passed, $failed failed"

@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.72 - process_run_plugin_installers and process_host_converge go red with the runner's reason when the host's
+ *                 data root is not ready and nothing ran (one_data_root WP1, reviewer2 F2)
  * @version 1.71 - process_copy_take_key keeps the run, and when and at which provider the copy read that the backup
  *                 was stored (specs/storage_targets.md F7)
  * @version 1.70 - process_move_to_plane keeps the move's management node, name and fingerprint for the job page
@@ -3347,8 +3349,9 @@ HTML;
 			// Root's authorized keys, public halves and fingerprints (host_report 1.16); null from an older node.
 			'root_ssh'                     => array_key_exists('root_ssh', $in) ? self::host_report_root_ssh($in['root_ssh']) : null,
 			'disk'                         => $disk,
-			// A Docker host's disk pool, /var/lib/docker on a filesystem of its
-			// own (host_report 1.15): the root disk never shows it filling.
+			// The host's data root, /srv/joinery on a filesystem of its own
+			// (host_report 1.17; a Docker host's disk pool): the root disk
+			// never shows it filling.
 			'disk_pool'                    => array_key_exists('disk_pool', $in) ? self::host_report_disk_pool($in['disk_pool']) : null,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
@@ -4025,6 +4028,13 @@ HTML;
 				$failures[] = trim($line);
 			}
 		}
+		// The host's data root is declared and not mounted: the runner ran
+		// nothing, and says why (specs/one_data_root.md D3).
+		if (preg_match_all('/^host installers: (the data root is not ready .+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
 		if (preg_match_all('/^(?:core|plugin) installers: (.+): ok$/m', $output, $m)) {
 			foreach ($m[1] as $name) {
 				$ran[] = trim($name);
@@ -4112,7 +4122,7 @@ HTML;
 				$failures[] = 'installer refused: ' . trim($line);
 			}
 		}
-		if (preg_match_all('/^host installers: (another run holds the lock .+|cannot open .+ - refusing to run unlocked|--only=.+ - refused|--only and --when-changed .+ - refused)$/m', $output, $m)) {
+		if (preg_match_all('/^host installers: (another run holds the lock .+|cannot open .+ - refusing to run unlocked|--only=.+ - refused|--only and --when-changed .+ - refused|the data root is not ready .+)$/m', $output, $m)) {
 			foreach ($m[1] as $line) {
 				$failures[] = trim($line);
 			}

@@ -10,13 +10,16 @@
 # A Docker host's disk pool and each site's allowance in it
 # (specs/multi_tenant_docker_hosts.md WP4), against a scratch root with the
 # system's commands stubbed: what docker_disk_pool.sh writes and asks for, and
-# what it refuses.
+# what it refuses. The pool is the host's data root (specs/one_data_root.md
+# WP1); joinery_data_root.sh's own gate pins how that is made and grown.
 #
-#   - create: refused with Docker on the host, with /var/lib/docker not empty,
-#     for a size that is not one, and for one that would leave the root disk
-#     under 4 GB. Otherwise it allocates and formats the file, writes the fstab
-#     line once (nofail, prjquota), makes Docker and containerd require the
-#     mount, and mounts it.
+#   - create: refused with Docker on the host and for a size that is not one.
+#     On a host with no data root it makes one of the size given (refused when
+#     the root disk cannot give it above its reserve); on a host whose data
+#     root is mounted it uses that one; on a host whose data root is declared
+#     and not mounted it refuses. Either way Docker's data-root is set to
+#     /srv/joinery/docker in daemon.json, every other key kept, and Docker and
+#     containerd wait for the data root.
 #   - allow: refused with no pool. Otherwise every volume but backups and
 #     deploy gets one project, numbered from 1,000,000,000, whose hard limit is
 #     the allowance plus 10%; backups and deploy each get one of their own, with
@@ -46,9 +49,13 @@ chk() {
     else echo "  FAIL: $1 (got '$2', want '$3')"; failed=$((failed + 1)); fi
 }
 
+# Unprivileged only: as root the scripts ignore the fixture and the stubs would
+# report a real /etc/fstab and real units rewritten as success.
+if [ "$(id -u)" = "0" ]; then echo "  SKIP: this gate runs unprivileged"; echo "RESULT: PASS 0 0"; exit 0; fi
+
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
-mkdir -p "$T/bin" "$T/dockerbin" "$T/root/etc" "$T/root/var/lib"
+mkdir -p "$T/bin" "$T/dockerbin" "$T/root/etc" "$T/root/srv"
 LOG="$T/log"; : > "$LOG"
 export GATE_LOG="$LOG" GATE_MOUNTED="$T/mounted" GATE_T="$T"
 
@@ -58,46 +65,57 @@ stub mkfs.xfs 'echo "mkfs.xfs $*" >> "$GATE_LOG"'
 stub mount 'echo "mount $*" >> "$GATE_LOG"; touch "$GATE_MOUNTED"'
 stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"'
 stub apt-get 'echo "apt-get $*" >> "$GATE_LOG"'
-stub findmnt '[ -f "$GATE_MOUNTED" ] && echo "xfs rw,relatime,inode64,prjquota"; exit 0'
+stub findmnt '[ -f "$GATE_MOUNTED" ] || exit 1; case "$*" in *FSTYPE,OPTIONS*) echo "xfs rw,relatime,inode64,prjquota" ;; *) echo /srv/joinery ;; esac'
 stub xfs_quota 'echo "xfs_quota $*" >> "$GATE_LOG"; case "$*" in *report*) cat "$GATE_T/report" 2>/dev/null ;; esac'
 # Docker exists only for allow: create refuses a host it is on.
-printf '#!/bin/bash\n[ "$1 $2" = "volume inspect" ] && echo "/var/lib/docker/100000.100000/volumes/${@: -1}/_data"\n' > "$T/dockerbin/docker"
+printf '#!/bin/bash\n[ "$1 $2" = "volume inspect" ] && echo "/srv/joinery/docker/100000.100000/volumes/${@: -1}/_data"\n' > "$T/dockerbin/docker"
 chmod 755 "$T/dockerbin/docker"
 
 run() { PATH="$T/bin:$PATH" JOINERY_POOL_ROOT="$T/root" JOINERY_SITE_STATE_ROOT="$T/root" bash "$SCRIPT" "$@"; }
 run_docker() { PATH="$T/dockerbin:$T/bin:$PATH" JOINERY_POOL_ROOT="$T/root" JOINERY_SITE_STATE_ROOT="$T/root" bash "$SCRIPT" "$@"; }
+DJ="$T/root/etc/docker/daemon.json"
+data_root_of() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("data-root",""))' "$DJ" 2>/dev/null; }
 
 echo "=== create ==="
 out="$(PATH="$T/dockerbin:$T/bin:$PATH" JOINERY_POOL_ROOT="$T/root" bash "$SCRIPT" create 1G 2>&1)"; rc=$?
 chk "refused with Docker on the host" "$rc|$(grep -c 'already installed' <<< "$out")" "1|1"
-mkdir -p "$T/root/var/lib/docker/x"
-out="$(run create 1G 2>&1)"; rc=$?
-chk "refused with /var/lib/docker not empty" "$rc|$(grep -c 'is not empty' <<< "$out")" "1|1"
-rmdir "$T/root/var/lib/docker/x"
 out="$(run create 68GB 2>&1)"; rc=$?
 chk "refused: a size that is not one" "$rc|$(grep -c 'not .68GB.' <<< "$out")" "1|1"
 out="$(run create 999T 2>&1)"; rc=$?
-chk "refused: a size leaving the root disk under 4 GB" "$rc|$(grep -c 'less than 4 GB' <<< "$out")" "1|1"
-# Room for it, but not for it and the 4 GB kept beside it.
-near="$(( $(df -B1M --output=avail "$T/root" | tail -n 1 | tr -d ' ') - 2048 ))M"
-out="$(run create "$near" 2>&1)"; rc=$?
-chk "refused: a size that fits the disk but leaves under 4 GB beside it ($near)" "$rc|$(grep -c 'less than 4 GB' <<< "$out")" "1|1"
-chk "and nothing was allocated or written" "$(wc -l < "$LOG" | tr -d ' ')|$( [ -e "$T/root/etc/fstab" ] && echo fstab || echo none)" "0|none"
+chk "refused: a size the root disk cannot give above its reserve" "$rc|$(grep -c 'under its reserve' <<< "$out")" "1|1"
+chk "and nothing was allocated or written" \
+    "$(wc -l < "$LOG" | tr -d ' ')|$( [ -e "$T/root/etc/fstab" ] && echo fstab || echo none)|$( [ -e "$DJ" ] && echo dj || echo none)" "0|none|none"
+mkdir -p "$(dirname "$DJ")"; printf '{"userns-remap": "default"}\n' > "$DJ"
 out="$(run create 1G 2>&1)"; rc=$?
-chk "create: exit 0" "$rc" "0"
-chk "the file is allocated whole, then formatted with ftype=1" \
-    "$(grep -c "^fallocate -l 1073741824 $T/root/var/lib/joinery-docker-pool.img$" "$LOG")|$(grep -c "^mkfs.xfs -q -n ftype=1 $T/root/var/lib/joinery-docker-pool.img$" "$LOG")" "1|1"
-chk "fstab: one line, at /var/lib/docker, loop, prjquota, nofail" \
-    "$(grep -c '^/var/lib/joinery-docker-pool.img /var/lib/docker xfs loop,prjquota,nofail 0 0$' "$T/root/etc/fstab")" "1"
-chk "Docker and containerd each require the mount" \
-    "$(cat "$T/root/etc/systemd/system/docker.service.d/joinery-disk-pool.conf" "$T/root/etc/systemd/system/containerd.service.d/joinery-disk-pool.conf" | grep -c '^RequiresMountsFor=/var/lib/docker$')" "2"
-chk "the loop device is given direct I/O by a unit of its own, before Docker" \
-    "$(grep -c 'losetup --direct-io=on' "$T/root/etc/systemd/system/joinery-docker-pool-dio.service")|$(grep -c '^Before=docker.service containerd.service$' "$T/root/etc/systemd/system/joinery-docker-pool-dio.service")" "1|1"
-chk "the pool is mounted from fstab, after the units are known" \
-    "$(grep -n -e '^systemctl daemon-reload' -e "^mount $T/root/var/lib/docker$" "$LOG" | cut -d: -f2 | cut -c1-5 | paste -sd,)" "syste,mount"
+chk "create on a host with no data root: exit 0" "$rc" "0"
+chk "the data root is made at the size given: a 1G file, formatted with ftype=1" \
+    "$(grep -c "^fallocate -l 1073741824 $T/root/srv/joinery.img$" "$LOG")|$(grep -c "^mkfs.xfs -q -n ftype=1 $T/root/srv/joinery.img$" "$LOG")" "1|1"
+chk "fstab: one line, at /srv/joinery, loop, prjquota, nofail" \
+    "$(grep -c '^/srv/joinery.img /srv/joinery xfs loop,prjquota,nofail 0 0$' "$T/root/etc/fstab")" "1"
+chk "Docker and containerd each require the data root" \
+    "$(cat "$T/root/etc/systemd/system/docker.service.d/joinery-data-root.conf" "$T/root/etc/systemd/system/containerd.service.d/joinery-data-root.conf" | grep -c '^Requires=joinery-data.target$')" "2"
+chk "Docker's data-root is /srv/joinery/docker, and userns-remap is kept" \
+    "$(data_root_of)|$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["userns-remap"])' "$DJ")" "/srv/joinery/docker|default"
+chk "the directory is made, 710" "$(stat -c %a "$T/root/srv/joinery/docker")" "710"
+: > "$LOG"
 out="$(run create 1G 2>&1)"; rc=$?
-chk "run again on a mounted pool: nothing more is done" "$rc|$(grep -c '^fallocate' "$LOG")|$(grep -c 'joinery-docker-pool.img' "$T/root/etc/fstab")" "0|1|1"
-chk "check: 0 with the pool mounted" "$(run check; echo $?)" "0"
+chk "run again with the pool in place: nothing more is done" "$rc|$(grep -c '^fallocate' "$LOG")|$(grep -c 'joinery.img' "$T/root/etc/fstab")|$(grep -c 'is in place' <<< "$out")" "0|0|1|1"
+chk "check: 0 with the pool in place" "$(run check; echo $?)" "0"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop("data-root"); json.dump(d, open(sys.argv[1], "w"))' "$DJ"
+chk "check: 1 when Docker's data-root is elsewhere" "$(run check; echo $?)" "1"
+printf '{"userns-remap": "default", "data-root": "/srv/joinery/docker/"}\n' > "$DJ"
+chk "check: 0 for the same place written with a trailing slash (reviewer2 F7)" "$(run check; echo $?)" "0"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop("data-root"); json.dump(d, open(sys.argv[1], "w"))' "$DJ"
+out="$(run create 8G 2>&1)"; rc=$?
+chk "create on a host whose data root is mounted: uses it, allocates nothing, sets data-root, says 8G was not used" \
+    "$rc|$(grep -c '^fallocate' "$LOG")|$(data_root_of)|$(grep -c 'The size 8G was not used' <<< "$out")" "0|0|/srv/joinery/docker|1"
+rm -f "$GATE_MOUNTED"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop("data-root"); json.dump(d, open(sys.argv[1], "w"))' "$DJ"
+out="$(run create 1G 2>&1)"; rc=$?
+chk "create on a host whose data root is declared and not mounted: refused, nothing changed" \
+    "$rc|$(grep -c 'is not mounted' <<< "$out")|$(data_root_of)" "1|1|"
+run create >/dev/null 2>&1 || true
+touch "$GATE_MOUNTED"; run create >/dev/null 2>&1
 
 echo "=== allow ==="
 mkdir -p "$T/root/etc/joinery/sites/sitea" "$T/root/etc/joinery/sites/siteb"
@@ -109,12 +127,12 @@ out="$(run_docker allow sitea 4G 2>&1)"; rc=$?
 chk "refused with no pool" "$rc|$(grep -c 'no disk pool' <<< "$out")" "1|1"
 touch "$GATE_MOUNTED"; : > "$LOG"
 # The config volume, where the site reads its allowance, is a real directory here.
-V="$T/root/var/lib/docker/100000.100000/volumes"
+V="$T/root/srv/joinery/docker/100000.100000/volumes"
 mkdir -p "$V/sitea_config/_data"
 cat > "$T/dockerbin/docker" <<STUB
 #!/bin/bash
 [ "\$1 \$2" = "volume inspect" ] || exit 0
-case "\${@: -1}" in *_config) echo "$V/\${@: -1}/_data" ;; *) echo "/var/lib/docker/100000.100000/volumes/\${@: -1}/_data" ;; esac
+case "\${@: -1}" in *_config) echo "$V/\${@: -1}/_data" ;; *) echo "/srv/joinery/docker/100000.100000/volumes/\${@: -1}/_data" ;; esac
 STUB
 out="$(run_docker allow sitea 4G 2>&1)"; rc=$?
 chk "allow: exit 0" "$rc" "0"
@@ -136,7 +154,7 @@ B_ID="$(awk -F: '$1 == "joinery_siteb" { print $2 }' "$T/root/etc/projid")"
 chk "another site: a project of its own" "$( [ -n "$B_ID" ] && [ "$B_ID" != "$A_ID" ] && echo yes)" "yes"
 chk "ids never repeat" "$(cut -d: -f2 "$T/root/etc/projid" | sort | uniq -d | wc -l | tr -d ' ')" "0"
 # Every site's hard limit together must fit the pool (reviewer2 B2).
-pool_kib=$(( $(df -B1 --output=size "$T/root/var/lib/docker" | tail -n 1 | tr -d ' ') / 1024 ))
+pool_kib=$(( $(df -B1 --output=size "$T/root/srv/joinery" | tail -n 1 | tr -d ' ') / 1024 ))
 printf '#%s 0 0 %s 00 [--------]\n' "$B_ID" "$(( pool_kib - 1024 ))" > "$T/report"
 out="$(run_docker allow sitea 1G 2>&1)"; rc=$?
 chk "refused: an allowance that, with the others' limits, would promise more than the pool holds" \

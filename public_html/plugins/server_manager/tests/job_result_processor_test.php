@@ -744,6 +744,13 @@ $hc_bad->load();
 check($hc_bad->get('mjb_status') === 'failed', 'a failed installer turns the job red through process() too');
 check(jrp_pending_host_reports($hc_node2->key) === array(),
 	'and a red run queues no report');
+$hc_dr = jrp_job($hc_node2, 'host_converge', "=== [Step 1/1] host_converge ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'output' => "joinery_data_root: /srv/joinery is not mounted (see: journalctl -u srv-joinery.mount)\nhost installers: the data root is not ready - nothing runs until it is (joinery_data_root.sh status says why)\n"))));
+JobResultProcessor::process($hc_dr);
+$hc_dr->load();
+check($hc_dr->get('mjb_status') === 'failed' && strpos((string)$hc_dr->get('mjb_error_message'), 'the data root is not ready') !== false,
+	'a run the data root held back is red, and says so rather than "gives no reason" (one_data_root, reviewer2 F2)',
+	var_export($hc_dr->get('mjb_error_message'), true));
 check(in_array('host_converge', JobResultProcessor::processable_types(), true),
 	'host_converge is a type this processor knows');
 

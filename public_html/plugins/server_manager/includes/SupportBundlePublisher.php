@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.17 - carries joinery_data_root.sh and _docker_daemon_json.sh: the host converger's data-root
+ *                 gate and growth tick, and the disk pool's check, which reads the data root
+ *                 (one_data_root WP1)
  * @version 1.16 - the tarball is deterministic (sorted, epoch mtimes, no owner, normalised modes,
  *                 gzip -n): one staging tree is one byte string (spec release_transparency D2)
  * @version 1.15 - carries site_limits.sh and docker_disk_pool.sh: the site_limits word, which changes a
@@ -164,6 +167,13 @@ class SupportBundlePublisher {
 		// disk pool's script for the allowance.
 		'maintenance_scripts/sysadmin_tools/site_limits.sh',
 		'maintenance_scripts/install_tools/docker_disk_pool.sh',
+		// The disk pool is the host's data root: docker_disk_pool.sh asks
+		// joinery_data_root.sh whether it is mounted and reads daemon.json
+		// through the helper. The runner, in --machine mode too, refuses to
+		// run installers while a declared data root is not mounted, and grows
+		// it as it fills (joinery_data_root.sh tick).
+		'maintenance_scripts/install_tools/joinery_data_root.sh',
+		'maintenance_scripts/install_tools/_docker_daemon_json.sh',
 		// outbound_limits: the word that sets a host's outbound figures, and
 		// what host_housekeeping.sh refreshes the installed joinery-limits from.
 		// It sources the run spec helper beside it to write a site's own
