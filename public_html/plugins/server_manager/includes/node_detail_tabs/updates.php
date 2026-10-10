@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.6 - Publish Release on This Node offers Deploy to all managed nodes, as the Upgrades page does
  * @version 1.5 - Upgrade All Sites on This Host is offered only when more than one site shares the host
  * @version 1.4 - the fact arrives at poll (agent 1.37.0), so the unreported sentence says the next poll settles it
  * @version 1.3 - Publish Release is offered only to a management node (the node's own report that Server
@@ -128,6 +129,22 @@
 		$pub_form->numberinput('version_patch', 'Patch', ['required' => true, 'value' => $pub_patch, 'min' => 0]);
 		$pub_form->textarea('release_notes', 'Release notes', ['required' => true, 'rows' => 3,
 			'placeholder' => 'What this release carries...']);
+		// Only the management node that serves the fleet's release can roll it out.
+		if ($node->is_self()) {
+			$deploy_plan = StagedRolloutRunner::deploy_all_plan();
+			$deploy_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $deploy_plan['nodes']);
+			$deploy_help = $deploy_names
+				? 'Once the publish completes, the release is rolled out to ' . implode(', ', $deploy_names)
+					. ', one node at a time in that order, stopping at the first node whose upgrade fails.'
+				: 'No managed node can take a rollout right now.';
+			foreach ($deploy_plan['left_out'] as $lo) {
+				$deploy_help .= ' Left out: ' . $lo['name'] . ' (' . $lo['reason'] . ').';
+			}
+			$pub_form->checkboxinput('deploy_all', 'Deploy to all managed nodes', [
+				'checked'  => false,
+				'helptext' => $deploy_help,
+			]);
+		}
 		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
 		$pub_form->end_form();
 		$page->end_box();

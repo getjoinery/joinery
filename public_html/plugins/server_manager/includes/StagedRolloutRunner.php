@@ -20,6 +20,8 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.4 - gate(): a node that refused to run its upgrade script as modified (or with an unusable manifest)
+ *                halts with a reason that names the file and says another release will not fix it
  * @version 1.3 - deploy to all managed nodes: a publish job carrying deploy_all starts a rollout over every
  *                eligible node once it completes (start_pending_deploy_all, deploy_all_for_publish)
  * @version 1.2 - node_refusal() refuses a node in an install state (ManagedNode::is_operational())
@@ -418,6 +420,19 @@ class StagedRolloutRunner {
 	public static function gate($job, $release) {
 		if ((string)$job->get('mjb_status') !== 'completed') {
 			$err = trim((string)$job->get('mjb_error_message'));
+			// The node's agent refused to run the upgrade script: a different
+			// problem from an upgrade that ran and failed, with a different
+			// remedy, so it is named.
+			$trust = NodeMonitorHealth::classify_script_trust($err);
+			if ($trust === 'untrusted_file') {
+				$file = NodeMonitorHealth::refused_path($err);
+				return 'the node refused to run its upgrade: ' . ($file !== '' ? $file : 'a deployment file')
+					. ' on the node is not the file the installed release signed. Another release will not fix it;'
+					. ' that file has to be put back to the installed release\'s version on the node, then the rollout started again';
+			}
+			if ($trust === 'untrusted_manifest') {
+				$err .= ' (the node\'s release manifest cannot be used; its agent fetches a good one from this management node, so check the node\'s trust state before starting again)';
+			}
 			return 'the apply job ' . $job->get('mjb_status') . ($err !== '' ? ': ' . $err : '');
 		}
 		$result = json_decode((string)$job->get('mjb_result'), true);
