@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.7 - Publish Release on this management node itself is not offered while its repositories have uncommitted work
  * @version 1.6 - Publish Release on This Node offers Deploy to all managed nodes, as the Upgrades page does
  * @version 1.5 - Upgrade All Sites on This Host is offered only when more than one site shares the host
  * @version 1.4 - the fact arrives at poll (agent 1.37.0), so the unreported sentence says the next poll settles it
@@ -116,7 +117,13 @@
 		if (preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $running, $pm)) {
 			$pub_major = (int)$pm[1]; $pub_minor = (int)$pm[2]; $pub_patch = (int)$pm[3];
 		}
+		$publish_blocked = $node->is_self() ? AgentDistPublisher::uncommittedAdvice()['lines'] : array();
 		$page->begin_box(['title' => 'Publish Release on This Node']);
+		if ($publish_blocked) {
+			echo '<div class="jy-callout jy-callout-warning">A release is built from committed work, so there is nothing to publish until these are committed and pushed:<ul class="mb-0"><li>'
+				. implode('</li><li>', array_map('htmlspecialchars', $publish_blocked)) . '</li></ul>Reload this page afterwards.</div>';
+			$page->end_box();
+		} else {
 		echo '<p class="text-muted">Builds and signs release archives from the tree this node runs, as a job of '
 			. 'its own agent. The version defaults to what the node is running, which is what a site that received '
 			. 'its code republishes; the node refuses a number it may not mint.</p>';
@@ -148,6 +155,7 @@
 		$pub_form->submitbutton('btn_publish_on_node', 'Publish on ' . htmlspecialchars($node_name));
 		$pub_form->end_form();
 		$page->end_box();
+		}
 	} elseif (JobCommandBuilder::has_primitive($node, 'publish_upgrade') && !$node->reports_management_status()) {
 		// The agent could run a publish but has not yet said whether this is
 		// a management node — an agent that predates the fact. Say so rather

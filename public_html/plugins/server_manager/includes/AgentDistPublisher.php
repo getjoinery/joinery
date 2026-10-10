@@ -25,6 +25,7 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.8 - uncommittedAdvice(): what stops a publish from this box before it is queued, so the form is not offered
  * @version 2.7 - every key pinned for a log ships, so a key the log rotates to reaches nodes first (WP7 review B7)
  * @version 2.6 - builds with the official toolchain go.mod pins (GoBinaryPublisher::officialGo), never the
  *                box's own Go, so anyone can rebuild the same bytes
@@ -315,6 +316,38 @@ class AgentDistPublisher {
 			$say($msg);
 			return $result(self::STATUS_FAILED, $msg, $agent_version, $bundled_version);
 		}
+	}
+
+	/**
+	 * Why a publish from this box would be refused for uncommitted work, as a
+	 * sentence list for a person, or '' when nothing is in the way. The publish
+	 * job makes the same check as its first step after the tests; asking it here
+	 * means the form is not offered to be refused. Nothing is said about a box
+	 * that republishes the release it received (it builds from signed files, not
+	 * from its own tree).
+	 *
+	 * @return array{lines:string[]} one entry per repository, each naming its files
+	 */
+	public static function uncommittedAdvice() {
+		if (!DeploymentHelper::mayMintReleaseVersion()) {
+			return array('lines' => array());
+		}
+		$b = ReleaseCommit::ownerBlockers(PathHelper::getSiteRoot(), self::sourcePath());
+		$lines = array();
+		$show = function (array $paths) {
+			$shown = array_slice($paths, 0, 12);
+			return implode(', ', $shown) . (count($paths) > 12 ? ' and ' . (count($paths) - 12) . ' more' : '');
+		};
+		if ($b['core']) {
+			$lines[] = 'The core repository has uncommitted changes: ' . $show($b['core']) . '.';
+		}
+		if ($b['agent']) {
+			$lines[] = 'The agent repository (' . self::sourcePath() . ') has uncommitted changes: ' . $show($b['agent']) . '.';
+		}
+		foreach ($b['unreadable'] as $why) {
+			$lines[] = ucfirst($why) . '.';
+		}
+		return array('lines' => $lines);
 	}
 
 	/** Resolve the agent source path from settings, with the dev default. */
