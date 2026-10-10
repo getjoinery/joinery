@@ -15,8 +15,10 @@
 3. **Cal.com closed its code on 2026-04-14.** That strengthens the case for a self-hosted booking tool and removes the best-known open-source comparison (§1.3).
 4. **Calendly import no longer needs a Calendly OAuth app.** A one-time migration can use a personal access token the host pastes in (§7).
 5. **Proxy mode for Calendly and Acuity is demoted** to "only on request". The reason is in §7.
-6. **Corrections to names.** The booking type's prefix is `bty_` (the old draft said `bkt_`), and `cal_` is already the prefix of calendar entries, so calendar connections use `ccn_` (§8).
-7. **Core already ships Google and Microsoft OAuth providers** (used for DNS publishing and mail), which shrinks the OAuth work for sync.
+6. **Corrections to names.** The booking type's prefix is `bty_` (the old draft said `bkt_`; `bkt_` is backup targets), and `cal_` is already the prefix of calendar entries. External connections and the busy cache now live in the Bookings plugin under `bpc_`, in one table (§5, §6).
+7. **Core already ships Google and Microsoft OAuth providers** (used for DNS publishing and mail), and Mailbox already has a consumer that stores access and refresh tokens, which shrinks the OAuth work for sync.
+8. **Review found that pay-at-booking is not built** (only its columns exist). It becomes the first native gap (N0), ahead of credits, which depend on it (§2, §3).
+9. **One connection table, in the plugin,** replaces the earlier core `ccn_` and `cbb_` tables (reviewer finding; §5, §6).
 
 ---
 
@@ -78,14 +80,14 @@ What remains open source is **Easy!Appointments** (PHP, GPL-3.0, actively commit
 
 ## 2. Where the native engine stands
 
-From the plugin documentation as of 2026-10-10. Rows marked **verify** are not mentioned in the docs and need a quick check against the code before this table is relied on.
+From the plugin documentation as of 2026-10-10. Checked against the code on 2026-10-10 by review.
 
 | 2026 expectation (E = essential, N = nice) | State | Part |
 |---|---|---|
 | Weekly availability, overrides, buffers, minimum notice, booking window, per-day and per-week caps (E) | Built | — |
 | Several bookable types per host, with duration and price (E) | Built | — |
 | Race-safe creation, no double-booking (E) | Built: a per-host advisory lock, then a re-check | — |
-| Payments at booking, with a hold that expires (E) | Built (a booking type can name a product; holds count as occupied until they expire) | — |
+| Payments at booking, with a hold that expires (E) | **Columns only; the flow is unbuilt.** `bkn_hold_expires_time`, the created status and `occupies_host_time()` exist, but no production code creates a hold or talks to the store. `bty_pro_product_id` is only copied onto the booking. The tests are the only writers. | **N0** |
 | Cancel and reschedule by link, with notice rules (E) | Built | — |
 | Email reminders and follow-up, idempotent across reschedules (E) | Built | — |
 | ICS attachment (E) | Built | — |
@@ -93,10 +95,10 @@ From the plugin documentation as of 2026-10-10. Rows marked **verify** are not m
 | Timezones (E) | Built (UTC stored, invitee zone recorded) | — |
 | Static meeting link or location per type (E) | Built | — |
 | Group or class booking with capacity (E) | Not in Bookings; **Event Manager already has capacity, waiting lists and paid registration** | N1 |
-| Membership gating, allowances and packages/credits (E, and our differentiator) | Not built; **verify** whether a booking type can be tier-gated today | N2 |
+| Membership gating, allowances and packages/credits (E, and our differentiator) | Not built (no `bty_tier_min_level`; checked) | N2 |
 | Several hosts or a resource (room, court) behind one type (N; "E" for clubs and studios) | Not built; the calendar's subject model reserves `resource` and `team` | N3 |
-| Spam and bot controls (E) | **Verify.** Paid holds expire; nothing else is documented | N4 |
-| Embeddable widget (E) | **Verify** | N5 |
+| Spam and bot controls (E) | Not built: the booking handler checks only the slot, name and email; the slots endpoint has only the general API limit; `POST /book/{slug}` has no limiter | N4 |
+| Embeddable widget (E) | Not built (`getEmbedHtml` exists on the interface and nothing calls it) | N5 |
 | SMS reminders (N) | Unbuilt platform piece (`specs/sms_messaging.md`) | N6 |
 | Zoom or Meet link auto-created (N) | Not built | N7 |
 | Two-way calendar sync (E) | Not built | Part 2 |
@@ -108,23 +110,33 @@ From the plugin documentation as of 2026-10-10. Rows marked **verify** are not m
 
 ## 3. Part 1 — Native gaps, in order
 
+### N0. Pay at booking (prerequisite for credits)
+
+A booking type already has a product column, and the booking has a hold status and expiry, but nothing connects them to the store. Build it the way Event Manager sells seats:
+
+- A `booking` **fulfillment provider**, registered from the plugin's `serve.php` with the store's `FulfillmentRegistry` (the same registration Event Manager uses). Its `checkAvailability()` is asked before any payment step and refuses a slot that has since been taken; its `fulfill()` confirms the held booking when payment succeeds.
+- Choosing a slot on a paid type creates a **hold** (a created booking with an expiry) and adds the type's product to the cart with the booking id in the line's data. An unpaid hold expires and stops occupying time; no sweeper is needed because `occupies_host_time()` already answers by the clock.
+- Free types keep today's direct flow.
+- Deposits are the product's price; the full price on the day is outside scope.
+
 ### N1. Classes and group sessions: use Event Manager, don't rebuild it
 
 A class with 12 seats, a waiting list and a payment is already an event. Building a second capacity-and-waitlist engine inside Bookings would duplicate Event Manager. Instead:
 
-- A **"Book with us" landing page** (`/book`) lists bookable one-to-one types and upcoming events (classes, workshops) together, grouped by host, from the two plugins' own data. Each entry links to its own flow.
+- A **"Book with us" landing page** lists bookable one-to-one types and, when Event Manager is active (`class_exists('Event')`), upcoming events too, using `MultiEvent`. There is no shared registry between the two plugins, so there is no provider list to build: Bookings reads Events directly and degrades to types only when the plugin is absent. The `/book/{slug}` route already maps to the booking view, so the listing needs its own view name and route (for example `/book`'s index view, resolved before the slug placeholder).
 - Both projections already land on the host's calendar (`BookingItemSource`, `EventItemSource`), so a class and a one-to-one cannot overlap on the host's calendar and availability (a class blocks the host's bookable time).
-- No new tables. Cost: one view and a small provider list that each plugin registers into.
+- No new tables. Cost: one view.
 
 ### N2. Memberships, allowances and packages (the differentiator)
 
-This is where tying booking to the membership platform wins, and no competitor does it.
+This is where tying booking to the membership platform wins, and no competitor does it. It depends on N0 (there is no price flow yet to substitute a credit into).
 
-- **Gating by tier.** A booking type can be limited to people holding a subscription tier (`bty_tier_min_level`, using the platform's existing tier gating, the same as other tier-gatable entities). Others see a prompt to join.
+- **Gating by tier.** A booking type can be limited to people holding a subscription tier. Add `bty_tier_min_level` and use the platform's tier-gating hooks exactly as other entities do: `SystemBase::authenticate_tier($session)` derives the column on its own, and the type registers with `TierGatedContentRegistry`. Others see the standard gate prompt.
 - **Credits.** A new ledger, `bcr_booking_credits`: `bcr_usr_user_id`, `bcr_bty_booking_type_id` (null for "any type"), `bcr_delta` (+ grant, − use), `bcr_reason` (`purchase` / `tier_allowance` / `admin` / `booking` / `refund`), `bcr_bkn_booking_id`, `bcr_expires_time`, `bcr_odi_order_item_id`. A user's balance is the sum of unexpired rows.
+- **One session counter, not two.** The store already has `prd_product_details` (`prd_num_sessions`, `prd_num_used`, per user and product), a dormant counter that only the admin "shadow sessions" pages touch and no purchase path writes. It cannot carry expiry or a history. Build `bcr_` and **retire `prd_`** (core/store change C10) so the platform does not keep two. `own_ownerships` is a yes/no and skips subscriptions, so it is not a fit.
 - **Using a credit.** At booking, a user with an unexpired credit for that type pays with it instead of the product price: the credit row is written inside the same locked transaction that takes the slot. Canceling inside the notice window returns the credit; a late cancel or a no-show keeps it, per the type's policy text.
-- **Selling a package.** A store product with fulfillment provider `booking_credits` (registered with the store's `FulfillmentRegistry`, the way events register `event_registration`) grants N credits on purchase ("10-session pack", valid 12 months).
-- **Tier allowance.** "Gold members get 2 free sessions a month" is a monthly grant of credits, written by a scheduled task at the start of each billing period, or on each paid renewal (`subscription.payment_succeeded`, the signal proposed in the Donations spec §4.2). The task is simpler and does not depend on that signal; use it.
+- **Selling a package.** A store product with fulfillment provider `booking_credits` (registered from `serve.php`, the way events register `event_registration`) grants N credits on purchase ("10-session pack", valid 12 months).
+- **Tier allowance** ("Gold members get 2 free sessions a month") uses the platform's existing tier-feature mechanism, not a new setting: a `bookings_monthly_credits` key in the plugin's `tier_features.json`, read with `SubscriptionTier::getUserFeature`. A `BookingCreditGrants` task grants that many credits at the start of each period.
 - **Refunds** of a package product revoke unspent credits (a negative `bcr_reason = refund` row, never below zero).
 
 ### N3. Several hosts and shared resources
@@ -139,16 +151,15 @@ Clubs and studios need "any coach" and "court 2".
 
 ### N4. Spam and abuse controls
 
-A public booking page that sends emails is an open target for bots and for being used to mail strangers.
+A public booking page that sends emails is an open target for bots and for being used to mail strangers. Every piece below already exists to copy:
 
-- Per-IP rate limit on the slots and booking actions (IPv4 and IPv6 compared as addresses).
-- A honeypot field and the platform's existing CAPTCHA support (FormWriter hCaptcha/reCAPTCHA) as a per-type switch.
-- **Email verification for unpaid bookings:** the booking is created as a short-lived hold (the paid-hold mechanism already exists) until the invitee clicks a link in the email. Google's own paid tier offers the same control for the same reason.
-- Paid holds already expire; unpaid unverified holds expire in 15 minutes (a setting).
+- **Per-IP rate limit** on the slots and booking actions with `RequestLogger::check_rate_limit`.
+- **A honeypot field** (`honeypot_hidden_input` / `honeypot_check`) and **CAPTCHA** (`captcha_check`) from FormWriter. CAPTCHA is switched by the global `use_captcha` setting; a per-type switch does not exist, so the per-type option is dropped for now.
+- **Email verification for unpaid bookings:** create the booking as a short-lived hold with a status and expiry (`createBooking` already accepts a status) until the invitee clicks a link in the email. Google's own paid tier offers the same control for the same reason. An expired hold simply stops occupying time.
 
 ### N5. Embeds
 
-An iframe snippet and a chrome-less view (`/book/{slug}?embed=1`) that drops the site header and footer and posts its height to the parent so the frame fits. The admin page for a booking type shows the snippet with a copy button. No script is loaded on the host's page beyond the one `<script>` they paste for auto-resize (optional).
+An iframe snippet and a chrome-less view (`/book/{slug}?embed=1`) that drops the site header and footer and posts its height to the parent so the frame fits. The admin page for a booking type shows the snippet with a copy button. No script is loaded on the host's page beyond one optional `<script>` they paste for auto-resize.
 
 ### N6–N7. Later
 
@@ -160,9 +171,9 @@ An iframe snippet and a chrome-less view (`/book/{slug}?embed=1`) that drops the
 - **A database exclusion constraint for double-booking.** Engineering guidance says to use one (`btree_gist` with a range-overlap rule) in place of check-then-insert. Our creation path already holds a per-host lock and re-checks inside the transaction, which is the same guarantee. A constraint also can't express the *expiring paid hold* rule (`occupies_host_time()` depends on the current time, which cannot appear in a constraint). So the lock stays. If a second code path that creates bookings is ever added, route it through the same function.
 - **Recurring series, waitlist for one-to-one, no-show card holds, a workflows engine, routing forms, SSO, analytics dashboards:** not asked for by the research's "essential" list, and each adds clutter.
 
-### Open item carried over: tentative calendar entries and availability
+### Settled: tentative calendar entries block availability
 
-AI-extracted calendar entries land as *tentative* and block availability by default. The plugin has never decided whether they should. The conservative choice, and the recommendation: **keep them blocking**, because a false "busy" costs a missed slot, while a false "free" costs a double-booking. Offer a per-host switch "Tentative entries don't block my bookable time" (default off). See Q1.
+AI-extracted calendar entries land as *tentative*. Reading the code shows `getBusyBlocks` ignores the entry's status, so they already block availability, and the plugin overview records the question as undecided. The decision is to **keep today's behaviour**, because a false "busy" costs a missed slot while a false "free" costs a double-booking. No code and no per-host switch. The overview's "Undecided" paragraph should be replaced by this statement when this lands.
 
 ---
 
@@ -180,17 +191,20 @@ This is the original premise of the spec, unchanged: an external account can be 
 
 ### Connections
 
-**`bpc_provider_connections`** (bookings plugin; the prefix is unused):
+**One table for every kind of external connection**, `bpc_connections` (Bookings plugin; the prefix is unused), because a Calendly token, a CalDAV login, an ICS feed URL and a Google grant all have the same shape: a user, a kind, encrypted credentials, a status and a last-synced time.
 
-- `bpc_provider_connection_id`
+- `bpc_connection_id`
 - `bpc_usr_user_id` — the host
-- `bpc_provider`
-- `bpc_credentials` — SecretBox-encrypted JSON (token, or API key and user id)
-- `bpc_external_user_uri`
-- `bpc_webhook_uri`, `bpc_webhook_signing_key` (encrypted)
-- `bpc_status`, timestamps
+- `bpc_kind` — `calendly` / `acuity` (booking providers) or `ics` / `caldav` / `google` / `microsoft` (calendar sync)
+- `bpc_label`
+- `bpc_credentials` — SecretBox-encrypted JSON (token; API key and user id; the feed URL, which is a secret; a CalDAV login; or an OAuth token set)
+- `bpc_external_ref` — provider-side account or calendar id
+- `bpc_read_busy`, `bpc_write_back` — calendar kinds only
+- `bpc_busy_cache` (jsonb) and `bpc_busy_fetched_time` — the busy cache for calendar kinds (§6), cleared on disconnect
+- `bpc_webhook_uri`, `bpc_webhook_signing_key` (encrypted) — proxy kinds only
+- `bpc_status`, `bpc_status_detail`, `bpc_last_synced_time`, timestamps
 
-Hosts connect at `/profile/bookings/connections`. After connecting, `listEventTypes()` powers an import step.
+Hosts connect at one page, `/profile/bookings/connections`. After connecting a booking provider, `listEventTypes()` powers an import step.
 
 **Import step.** The page lists the external event types and lets the host bring each in as a **native** type (default, recommended: duration and a native schedule the host then tunes) or as a **proxy** type. When every type a host cares about is native, they disconnect with nothing left behind.
 
@@ -198,7 +212,7 @@ Hosts connect at `/profile/bookings/connections`. After connecting, `listEventTy
 
 ## 6. Calendar sync: four routes
 
-All four plug into the existing `CalendarItemSource` registry, so once one exists the host's personal calendar shows the external events (`type=external`) and the busy projection that slot generation consumes already includes them. Nothing else changes.
+All four plug into the existing `CalendarItemSource` registry (sources are discovered per plugin from `includes/calendar_item_sources/`, so this lives in Bookings), so once one exists the host's personal calendar shows the external events (`type=external`) and the busy projection that slot generation consumes already includes them. Nothing else changes.
 
 | Route | How it works | Strengths | Weaknesses |
 |---|---|---|---|
@@ -209,23 +223,29 @@ All four plug into the existing `CalendarItemSource` registry, so once one exist
 
 ### Handling the SSRF risk in R1
 
-A feed URL is a destination chosen by a user, so every fetch goes through `SafeHttpClient` (validated, pinned, redirects re-checked, response capped). No direct `curl` or `file_get_contents`.
+A feed URL is a destination chosen by a user, so every fetch goes through `SafeHttpClient` (validated and pinned; response capped at 5 MB; ports 80 and 443 only). **Redirects are off by default** and published feed URLs often redirect (including `webcal` links), so the feed reader opts in to redirects, with each hop re-validated and re-pinned (at most three). No direct `curl` or `file_get_contents`.
 
 ### Shared rules for all four
 
-- **Busy cache.** `cbb_calendar_busy_blocks` caches fetched busy blocks with a TTL. There is deliberately no background refresh task: it would spend quota on hosts nobody is viewing. Browsing tolerates a stale TTL; **booking confirmation makes one live freshness check** against connected calendars (R2–R4), so a stale cache can't cause a double-booking for live routes. For R1 the check can only be as fresh as the feed, and the host's page says so.
+- **Busy cache.** The connection row carries the fetched busy blocks as a small JSON value with the time it was fetched (`bpc_busy_cache`), a TTL cache with no table of its own. There is deliberately no background refresh task: it would spend quota on hosts nobody is viewing. Browsing tolerates a stale TTL; **booking confirmation makes one live freshness check** against connected calendars (R2–R4), so a stale cache can't cause a double-booking for live routes. For R1 the check can only be as fresh as the feed, and the host's page says so.
 - **"Last synced" is shown** on every connection, with a Refresh button. This is the answer to the sync-delay complaint.
-- **Echo dedup.** When a native booking is written to the host's external calendar (write-back) or arrives there by invitation, the same meeting is read back and would appear twice. Native bookings carry the ICS UID `booking-{id}@{site host}` (in their confirmation `.ics`, which the host may have accepted into Google). The external source sets each item's `source_key` from the UID, and the calendar and busy projection collapse items with the same key. A write-back stamps the same UID into the external event. This is the first place `source_key` dedup applies.
-- **Write-back (R2–R4).** On confirmation, create an event on each calendar flagged `ccn_write_back` (attendee email, intake summary, location or auto-created video link); on cancellation, delete it. The external event id is stored on the booking (`bkn_external_calendar_event_id`, a new column). With R1, no write-back is possible; the host's confirmation email carries the `.ics` so they can add it themselves.
+- **Echo dedup.** When a native booking is written to the host's external calendar (write-back) or arrives there by invitation, the same meeting is read back and would appear twice. Native bookings carry the ICS UID `booking-{id}@{site host}` (in their confirmation `.ics`, which the host may have accepted into Google). The external source emits the native item's own key (`bookings:bkn-{id}`, recovered from that UID) as `source_key`. A duplicate never harms availability, because the busy projection merges overlapping blocks, so this only matters for the calendar *display*. `CalendarItem::$source_key` exists, but the registry's `getItems` does not yet collapse equal keys across sources; that is a small core change (C11, below). A write-back stamps the same UID into the external event.
+- **Write-back (R2–R4).** On confirmation, create an event on each calendar flagged `bpc_write_back` (attendee email, intake summary, location or auto-created video link); on cancellation, delete it. The external event id is stored on the booking (`bkn_external_calendar_event_id`, a new column). One column means **one write-back calendar per host**, which is the simpler rule and is stated on the connections page. With R1, no write-back is possible; the host's confirmation email carries the `.ics` so they can add it themselves.
 - **Disconnect** deletes cached blocks and leaves events already written in place.
 
-### Core pieces
+### Pieces
 
-- **`CalendarConnection` / `ccn_calendar_connections`** (core; the old draft's `cal_` prefix collides with calendar entries): `ccn_usr_user_id`, `ccn_kind` (`ics` / `caldav` / `google` / `microsoft`), `ccn_label`, `ccn_external_calendar_id`, `ccn_credentials` (SecretBox JSON: ICS URL, CalDAV login, or OAuth token), `ccn_read_busy`, `ccn_write_back`, `ccn_last_synced_time`, `ccn_status`, `ccn_status_detail`.
-- **`CalendarBusyBlock` / `cbb_calendar_busy_blocks`** (core): `cbb_ccn_calendar_connection_id`, `cbb_start_time`, `cbb_end_time`, `cbb_source_key` (ICS UID or event id), `cbb_fetched_time`.
-- **`ExternalCalendarItemSource`** (core): serves cached blocks with on-demand refresh, owner-visible titles where the account grants them, `busy` visibility otherwise.
-- **OAuth.** Core already ships `GoogleOAuthProvider` and `MicrosoftOAuthProvider` in the provider catalog. A new `CalendarSyncOAuthConsumer` (purpose `calendar_sync`) is added in `includes/oauth/consumers/` and requests the calendar scope (`https://www.googleapis.com/auth/calendar` for Google, `Calendars.ReadWrite` plus `offline_access` for Microsoft) and stores the token on the connection. Unlike DNS publishing, which deliberately persists nothing, calendar sync *must* keep the refresh token.
-- **Connect page:** `/profile/bookings/calendars` ships with the Bookings plugin (connections are consumed only through scheduling today; it moves to core if a second consumer appears).
+- **`ExternalCalendarItemSource`** (Bookings plugin, `includes/calendar_item_sources/`): serves the cached busy blocks with on-demand refresh, owner-visible titles where the account grants them, `busy` visibility otherwise.
+- **OAuth.** Core already ships `GoogleOAuthProvider` and `MicrosoftOAuthProvider`. The pieces to add are a `CalendarSyncOAuthConsumer` (purpose `calendar_sync`, in `plugins/bookings/includes/oauth_consumers/`) and the page that starts consent. **Scopes are not on the consumer:** the consumer is only `getPurpose()` and `onTokenGranted(token, payload)`; the initiating page passes the scopes to `OAuth2Client::beginConsent($provider, $scopes, $purpose, $payload, $returnUrl)` (`https://www.googleapis.com/auth/calendar` for Google, `Calendars.ReadWrite` plus `offline_access` for Microsoft). Mailbox's `InboundImapOAuthConsumer` already stores access and refresh tokens encrypted and is the model to copy. Unlike DNS publishing, which deliberately persists nothing, calendar sync *must* keep the refresh token.
+- **Connect page:** `/profile/bookings/connections` (one page, §5).
+
+### Core changes that would help
+
+Found by review; each is a small change to code that exists. The owner decides (Q5).
+
+- **C2. A generic VEVENT builder** (shared with the Volunteers spec). `IcsHelper` is shaped around events and Bookings hand-rolls `booking_build_ics`.
+- **C10. Retire the dormant `prd_product_details` session counter** once `bcr_` lands (N2), so there is one session counter on the platform.
+- **C11. Collapse items with equal `source_key` in `CalendarItemSourceRegistry::getItems`**, for the echo case above.
 
 ---
 
@@ -258,25 +278,25 @@ Each phase lands working and tested before the next.
 
 ### Phase 0 — close the unknowns (small)
 
-- Check the "verify" rows in §2 against the code, and fix the table.
 - Confirm Google's current rules for calendar-scope verification and Testing-mode refresh-token expiry (§6 R3), and Calendly's personal-token and webhook availability (§7).
-- Decide Q1 (tentative entries).
 
 ### Phase 1 — native gaps
 
-N1 (landing page), then N4 (spam controls) and N5 (embed), which are small, then N2 (credits and tier gating), then N3 (pools and resources) as its own spec.
+N0 (pay at booking) first, since credits depend on it. Then N1 (landing page), N4 (spam controls) and N5 (embed), which are small; then N2 (credits and tier gating); then N3 (pools and resources) as its own spec.
+
+*Checkpoint, N0:* a paid type holds a slot, the buyer pays through the store checkout, and the booking confirms; an unpaid hold frees its slot after expiry.
 
 *Checkpoint, N2:* a user buys a 10-session pack, books three sessions, cancels one inside the notice window and one late; the balance reads 8.
 
 ### Phase 2 — migration import
 
-`bpc_provider_connections`, the connections page, the Calendly provider (`listEventTypes`), the import step. Then Acuity.
+`bpc_connections`, the connections page, the Calendly provider (`listEventTypes`), the import step. Then Acuity.
 
 *Checkpoint:* a real Calendly account connects with a token; its event types appear; importing one as native creates a working type with Calendly disconnected.
 
 ### Phase 3 — calendar sync
 
-- **3a. Core plumbing:** `ccn_` and `cbb_` classes, `ExternalCalendarItemSource`, the busy cache, the live check at confirmation, "last synced".
+- **3a. Plumbing:** the `bpc_connections` table and page, `ExternalCalendarItemSource`, the busy cache, the live check at confirmation, "last synced".
 - **3b. R1 (ICS feed):** the smallest route. *Checkpoint:* an event on a published feed suppresses the matching slot after a refresh; the feed fetch goes through `SafeHttpClient`.
 - **3c. R3 (Google):** `CalendarSyncOAuthConsumer`, busy-read, then write-back and the echo dedup. *Checkpoints:* an event in Google suppresses a slot; a booking appears in Google and disappears on cancel; it shows once on the calendar.
 - **3d. R2 (CalDAV).**
@@ -292,20 +312,24 @@ Calendly embed and webhooks, Acuity headless.
 
 ## 9. Deletion strategy
 
-- **CalendarConnection:** disconnect deletes cached busy blocks; events already written externally stay.
-- **ProviderConnection:** disconnect deactivates the host's proxy types for that provider; migrated native types are unaffected; ingested bookings remain.
+- **Connection (`bpc_`):** disconnect clears the busy cache; events already written to an external calendar stay. For a booking provider, disconnect also deactivates the host's proxy types for that provider; migrated native types are unaffected; ingested bookings remain.
 - **BookingCredit:** a user delete sets `bcr_usr_user_id` to the deleted-user value and keeps the ledger (it is a financial record).
-- **User as host:** deletion also deletes their calendar and provider connections.
+- **User as host:** deletion also deletes their connections.
 
 ---
 
 ## 10. Files
 
-**Create (core):** `data/calendar_connections_class.php`, `data/calendar_busy_blocks_class.php`, `includes/calendar/item_sources/ExternalCalendarItemSource.php`, `includes/oauth/consumers/CalendarSyncOAuthConsumer.php`, a small CalDAV client and an ICS busy-feed reader under `includes/calendar/`.
+**Create (plugin):**
 
-**Create (plugin):** `data/provider_connections_class.php`, `data/booking_credits_class.php`, `includes/scheduling_providers/CalendlySchedulingProvider.php`, `includes/scheduling_providers/AcuitySchedulingProvider.php`, `includes/fulfillment_providers/BookingCreditsFulfillment.php`, a `BookingCreditGrants` scheduled task, `views/book.php`-level landing view (`/book`), `views/embed` handling, profile views for connections and calendars.
+- Data: `data/connections_class.php` (`bpc_`), `data/booking_credits_class.php` (`bcr_`).
+- Includes: `includes/calendar_item_sources/ExternalCalendarItemSource.php`, `includes/oauth_consumers/CalendarSyncOAuthConsumer.php`, a small CalDAV client and an ICS busy-feed reader, `includes/scheduling_providers/CalendlySchedulingProvider.php` and `AcuitySchedulingProvider.php`, `includes/fulfillment_providers/BookingFulfillment.php` (N0) and `BookingCreditsFulfillment.php` (N2). The providers are registered with the store from `serve.php`.
+- Tasks: a `BookingCreditGrants` scheduled task.
+- Views: the `/book` landing view, the embed view, the connections page.
 
-**Modify:** `plugins/bookings/data/bookings_class.php` (`bkn_external_calendar_event_id`), `plugins/bookings/data/booking_types_class.php` (`bty_tier_min_level`, pool fields, `bty_captcha`, `bty_verify_email`), `plugins/bookings/logic/book_logic.php` (credit use inside the locked transaction), the booking confirmation email (ICS UID), `plugin.json` (menu items, settings), `plugins/bookings/docs/overview.md`.
+**Modify:** `plugins/bookings/data/bookings_class.php` (`bkn_external_calendar_event_id`), `plugins/bookings/data/booking_types_class.php` (`bty_tier_min_level`, pool fields, `bty_verify_email`), `plugins/bookings/logic/book_logic.php` (hold and cart flow, rate limit and honeypot, credit use inside the locked transaction), the confirmation email (ICS UID), a `tier_features.json` entry, `plugin.json` (menu items, settings, `serve.php` registrations), `plugins/bookings/docs/overview.md`.
+
+**Core/store (owner's decision, Q5):** C2, C10, C11 above.
 
 ---
 
@@ -316,10 +340,11 @@ Each is a test with an `@joinery-test` header.
 - **Credits** (test-db): purchase grants N; a booking uses one inside the locked transaction; early cancel returns it; late cancel keeps it; a refund revokes only unspent credits and never drives the balance below zero; two simultaneous bookings with one credit left produce one booking.
 - **Tier gating** (test-db): a gated type refuses a non-holder at the slots endpoint and at submission.
 - **Pools** (test-db, when built): two simultaneous bookings for the last slot in a pool of two hosts go to different hosts; rotation is fair; the lock is taken on the chosen host only.
-- **Abuse** (test-db): rate limits count IPv4 and IPv6 addresses as addresses; an unverified hold expires and frees the slot; a honeypot post is dropped.
+- **Abuse** (test-db): the rate limit blocks the sixth attempt from one address (IPv4 and IPv6); an unverified hold expires and frees the slot; a honeypot post is dropped.
+- **Pay at booking** (test-db): a held slot cannot be booked by anyone else; an expired unpaid hold frees the slot; a paid line confirms the booking; a second buyer racing the same slot is refused by `checkAvailability` before payment.
 - **Busy cache** (test-db): the busy projection includes cached external blocks; the live check at confirmation refuses a slot an external calendar has just taken (a stubbed provider); TTL staleness is shown.
-- **Echo dedup** (test-db): a booking written back and read back appears once, by UID.
-- **ICS feed** (safe): a private-address feed URL is refused; a redirect to a private address is refused.
+- **Echo dedup** (test-db): a booking written back and read back shows once on the calendar (display only; availability is unaffected either way).
+- **ICS feed** (safe): a private-address feed URL is refused; a `webcal` link and a public redirect work; a redirect to a private address is refused.
 - **Import** (test-db with recorded fixtures): a recorded Calendly event-type list becomes native types with the right duration, buffers and location.
 - **Live walk:** book through an embed on a page outside the site; book with a credit; connect a real Google test calendar and watch a slot disappear.
 
@@ -333,10 +358,11 @@ When each piece lands, fold it into `plugins/bookings/docs/` (an "integrations" 
 
 ## 13. Decisions and open questions
 
-- **Q1. Do tentative (AI-extracted) calendar entries block bookable time?** *Option A, keep blocking (recommended):* never double-books; the catch is a few lost slots until the host confirms or deletes the entry. *Option B, don't block:* more slots; the catch is a real chance of a double-booking on an entry that turns out to be real. Draft: A, with a per-host switch to B.
+- **Q1 (settled by review).** Tentative entries keep blocking availability, as they do today (§3). No code.
 - **Q2. Which sync route first?** *R1 (ICS feed):* smallest and avoids Google entirely; the catch is staleness and read-only. *R3 (Google OAuth):* best behaviour for the largest base; the catch is per-site app setup and Google's verification rules. *R2 (CalDAV):* the best fit for the leaving-Google buyer; the catch is the biggest client to write. Recommendation: R1 first (days of work, immediate value, honest about staleness), then R3, then R2. If a managed-hosting tier is where most buyers land, R3's per-site burden largely disappears and R3 could go first.
 - **Q3. Demote the Calendly and Acuity proxy modes to "on request"?** *Yes (recommended):* three code paths and a tether with no evidence of demand. *No:* a customer who wants to keep Calendly can't. Draft: yes.
-- **Q4. How much of N2 goes in the first release?** Tier gating and package credits are the differentiator; tier allowance (monthly free sessions) is the part with the most moving pieces (a grant task, period rules). Recommend credits and gating first, allowance second, in the same release if cheap.
+- **Q4. How much of N2 goes in the first release?** Tier gating and package credits are the differentiator; tier allowance is now small because it uses the existing tier-feature mechanism. Recommend all of it, after N0.
+- **Q5. Make the core and store changes C2, C10 and C11?** *Yes:* one `.ics` builder instead of three, one session counter instead of two, a cleaner calendar display. The catch is touching built code (`IcsHelper`, `prd_product_details`, the calendar registry). *No:* Bookings carries its own `.ics` string and a second counter, and the echo case shows twice on the calendar. Recommend yes; each is small and has existing tests nearby.
 
 ---
 

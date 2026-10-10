@@ -48,7 +48,7 @@ The pattern: price is gated by volunteer count, admin seats, events or SMS volum
 | Basics are paywalled (hours, vetting, groups, kiosk, SMS caps). | Every feature is in the one price. |
 | Stagnation and weak reporting: "has barely changed in about five years"; reports "cumbersome". | A small set of ready-made reports (§8). |
 | CRM sync "regularly creates duplicates" (VolunteerHub–Salesforce reviewer). | A volunteer is the same user record as the member, the donor and the event attendee. There is nothing to sync. |
-| Dated, cumbersome time-slot setup. | One flat shift form; repeat rules reuse the calendar's recurrence widget. |
+| Dated, cumbersome time-slot setup. | One flat shift form; repeat rules reuse the calendar's recurrence block. |
 | You outgrow the free tier as the group grows. | No volunteer or admin cap. |
 | One-time events are awkward to set up. | A one-time opportunity and a recurring program are the same object (§3). |
 | A 5% payment fee. | Volunteers pay nothing. Anything paid goes through the site's own Stripe account. |
@@ -104,7 +104,8 @@ The pattern: price is gated by volunteer count, admin seats, events or SMS volum
 - **Background-check status field:** a status, a date and an expiry, never the report itself (§9).
 - **Student and court-ordered verification:** a supervisor attestation page with a signed-off record.
 - **Swap and cover requests** between volunteers. Needs its own research first (§1.5).
-- **Event link:** an Event Manager event can show its volunteer shifts, and a volunteer opportunity can link to its event.
+- **Event link:** an Event Manager event can show its volunteer shifts, and a volunteer opportunity can link to its event (adds a nullable `vop_evt_event_id`, a plain integer with no foreign-key action so the event plugin may be absent).
+- **Columns that arrive with their features:** `vsf_checkin_code`, `vsg_checkin_time`, `vsg_checkout_time` (check-in), and a contact-detail purge setting (retention). `update_database` adds columns for free, so none is added early.
 - **Skills and interests** on the volunteer's profile, filterable on the roster.
 
 ### Deferred (not scheduled)
@@ -124,29 +125,32 @@ All tables come from `$field_specifications`. Each model gets a Multi class. Pre
 
 | Class / table | Key columns |
 |---|---|
-| `Opportunity` / `vop_opportunities` | `vop_title`, `vop_slug` (unique), `vop_description`, `vop_location`, `vop_visibility` (`public` / `members`), `vop_signup_mode` (`self` / `admin_only`), `vop_requires_approval` (a coordinator must accept each sign-up), `vop_waiver_text`, `vop_svy_survey_id` (nullable intake), `vop_hour_value` (nullable per-opportunity override of the in-kind rate), `vop_recurrence` (jsonb, nullable), `vop_horizon_days` (how far ahead recurring shifts are generated), `vop_grp_group_id` (optional core Group that approved attendees join), `vop_min_cancel_notice_minutes`, `vop_evt_event_id` (plain nullable int, no foreign-key action, so the event plugin may be absent), `vop_archived_time`, `vop_delete_time` |
-| `Shift` / `vsf_shifts` | `vsf_vop_opportunity_id`, `vsf_role` (free text, "Greeter"), `vsf_start_time` (UTC), `vsf_end_time` (UTC), `vsf_timezone` (IANA), `vsf_capacity`, `vsf_waitlist_enabled`, `vsf_checkin_code` (P2), `vsf_is_generated` (made from the recurrence rule), `vsf_cancelled_time`, `vsf_delete_time` |
-| `Signup` / `vsg_signups` | `vsg_vsf_shift_id`, `vsg_usr_user_id`, `vsg_status` (`confirmed` / `pending` / `waitlisted` / `cancelled` / `attended` / `no_show`), `vsg_waitlist_position`, `vsg_source` (`self` / `guest` / `admin`), `vsg_waiver_accepted_time`, `vsg_waiver_text_hash`, `vsg_action_token` (the guest's cancel link), `vsg_note`, `vsg_reminder_sent_for_start_time`, `vsg_checkin_time`, `vsg_checkout_time` (P2), `vsg_create_time`. Unique per (shift, user) while not cancelled. |
-| `HourRecord` / `vhr_hours` | `vhr_usr_user_id`, `vhr_vop_opportunity_id` (nullable for general hours), `vhr_vsg_signup_id` (nullable: set when it came from a shift), `vhr_work_date`, `vhr_hours` (numeric(6,2)), `vhr_description`, `vhr_status` (`pending` / `approved` / `rejected`), `vhr_source` (`attendance` / `self_reported` / `admin`), `vhr_usr_user_id_approver`, `vhr_decided_time`, `vhr_reject_reason`, `vhr_delete_time` |
-| `Coordinator` / `vco_coordinators` | `vco_vop_opportunity_id`, `vco_usr_user_id`. Unique pair. |
+| `Opportunity` / `vop_opportunities` | `vop_title`, `vop_slug` (unique), `vop_description`, `vop_location`, `vop_visibility` (`public` / `members`), `vop_signup_mode` (`self` / `admin_only`), `vop_requires_approval` (a coordinator must accept each sign-up), `vop_waiver_text`, `vop_svy_survey_id` (nullable intake), `vop_timezone` (IANA; every shift of the opportunity uses it), `vop_usr_user_id_coordinator` (the one named coordinator), the five recurrence columns `vop_recurrence_type` / `vop_recurrence_interval` / `vop_recurrence_days_of_week` / `vop_recurrence_week_of_month` / `vop_recurrence_end_date` (the same five the calendar keeps on `cal_entries`; all null for a one-time opportunity), `vop_grp_group_id` (optional core Group that approved attendees join), `vop_min_cancel_notice_minutes`, `vop_delete_time` (soft delete doubles as archive) |
+| `Shift` / `vsf_shifts` | `vsf_vop_opportunity_id`, `vsf_role` (free text, "Greeter"), `vsf_start_time` (UTC), `vsf_end_time` (UTC), `vsf_capacity`, `vsf_waitlist_enabled`, `vsf_is_generated` (made from the recurrence rule), `vsf_cancelled_time`, `vsf_delete_time` |
+| `Signup` / `vsg_signups` | `vsg_vsf_shift_id`, `vsg_usr_user_id`, `vsg_status` (`confirmed` / `pending` / `waitlisted` / `cancelled` / `attended` / `no_show`), `vsg_source` (`self` / `guest` / `admin`), `vsg_waiver_accepted_time`, `vsg_action_token` (the guest's cancel link), `vsg_note`, `vsg_reminder_sent_for_start_time`, `vsg_create_time`. The waitlist order is `vsg_create_time` among `waitlisted` rows, so there is no position to renumber. Unique per (shift, user) while not cancelled. |
+| `HourRecord` / `vhr_hour_records` | `vhr_usr_user_id`, `vhr_vop_opportunity_id` (nullable for general hours), `vhr_vsg_signup_id` (nullable: set when it came from a shift), `vhr_work_date`, `vhr_hours` (numeric(6,2)), `vhr_description`, `vhr_status` (`pending` / `approved` / `rejected`), `vhr_source` (`attendance` / `self_reported` / `admin`), `vhr_usr_user_id_approver`, `vhr_decided_time`, `vhr_reject_reason`, `vhr_delete_time` |
 
-**One hours ledger.** `vhr_hours` is the only source for totals, reports and letters. Marking a signup *attended* inserts one `attendance` row, already `approved`, with the coordinator as approver. Changing the signup afterward (no-show, edited hours) updates that same row. Self-reported hours start `pending`.
+**One hours ledger.** `vhr_hour_records` is the only source for totals, reports and letters. Marking a signup *attended* inserts one `attendance` row, already `approved`, with the coordinator as approver. Changing the signup afterward (no-show, edited hours) updates that same row. Self-reported hours start `pending`.
 
-**Guest sign-up.** A guest is an inactive `usr_users` row matched or created by email inside the same transaction that takes the seat, like the Bookings plugin. A lost race leaves no user row behind. A guest who later creates an account by the same email gets their history.
+**Guest sign-up.** A guest is an inactive `usr_users` row (permission 0) matched or created by email inside the same transaction that takes the seat, copying the Bookings plugin's invitee code (`book_logic.php`). It deliberately does **not** use the store's guest checkout, which sends a welcome and activation email and logs the guest in. A lost race leaves no user row behind. A guest who later creates an account by the same email gets their history.
 
 **Capacity is a race.** Taking a seat uses a transaction that locks the shift row, re-counts confirmed sign-ups, and then inserts or waitlists. Two people grabbing the last seat produce one confirmed sign-up and one waitlisted one.
 
-**Waitlist promotion.** A cancellation or a capacity increase promotes the first waitlisted person (lowest `vsg_waitlist_position`) in the same transaction and then sends the notification after commit. Promotion skips anyone who has since been blocked from the opportunity.
+**Waitlist promotion.** A cancellation or a capacity increase promotes the first waitlisted person (oldest `vsg_create_time` among waitlisted rows) in the same transaction and then sends the notification after commit. Promotion skips anyone who has since been blocked from the opportunity.
 
-**Recurring shifts.** The `vop_recurrence` rule reuses the recurrence widget and rule shape the personal calendar uses for native entries (weekly or monthly, days of week, interval, ends never / on a date / after a count). Unlike the calendar (where occurrences are computed on the fly), shifts are **materialized rows**, because people sign up to a specific shift and that sign-up must have somewhere to live. A `VolunteerShiftGenerator` task keeps shifts generated up to `vop_horizon_days` ahead (default 60). Rules:
+**Recurring shifts.** The opportunity keeps the same five recurrence columns the calendar keeps on `cal_entries` (weekly or monthly, days of week, interval, ends on a date; "after N times" is converted to an end date, as the calendar does). Unlike the calendar (where occurrences are computed on the fly), shifts are **materialized rows**, because people sign up to a specific shift and that sign-up must have somewhere to live. The opportunity form lifts the calendar's inline recurrence block (`views/profile/calendar.php`, a FormWriter block with `visibility_rules`) unchanged. The date arithmetic should come from a shared `RecurrenceRule` class extracted from `CalendarEntry` (core change C1, §7); until that exists the fallback is to call `CalendarEntry::compute_dates_in_range` on a transient unsaved entry, which the calendar's own tests already do. One `VolunteersMaintenance` task keeps shifts generated `volunteers_horizon_days` ahead (a setting, default 60) and sends reminders (§5). Rules:
 
-- A shift's wall-clock time is expanded per occurrence in the shift's IANA zone, never by adding 24 hours, so a daylight-saving change does not move it.
+- A shift's wall-clock time is expanded per occurrence in the opportunity's IANA zone, never by adding 24 hours, so a daylight-saving change does not move it.
 - Editing the rule changes only future shifts that have no sign-ups. Shifts with sign-ups stay until a coordinator cancels them (which notifies everyone on them).
 - A generated shift can be edited or cancelled individually.
 
+**Why not Event Manager for shifts.** Checked against the code: registrants have no attendance field, the waiting list has no automatic promotion, recurring instances are materialized one at a time by an admin and are bound to events, registration runs through a store product, and an event's leader gets no permission from being the leader. Reusing it would mean changing all five, so shifts get their own small engine. The cost is a third sign-up-and-capacity engine on the platform; if waitlist promotion and attendance are built as small shared helpers (core change C9, §7), Event Manager can adopt them later.
+
+**Intake answers.** Survey answers are keyed by (survey, question, user), so an intake is stored once per volunteer per survey, and a second sign-up overwrites the first. That is right for intake. Guests cannot use the core survey page (it requires login), so the sign-up handler saves answers itself with the matched user's id, copying `booking_save_survey_answers` in Bookings.
+
 **Deletion.** See the deletion system doc.
 
-- Opportunities soft-delete. Deleting cascades a soft delete to their shifts. Existing `vhr_hours` rows **stay**: hours already earned are the volunteer's record. Their opportunity link becomes null with the opportunity's title kept in `vhr_description`.
+- Opportunities soft-delete. Deleting cascades a soft delete to their shifts. Existing `vhr_hour_records` rows **stay**: hours already earned are the volunteer's record. Their opportunity link becomes null with the opportunity's title kept in `vhr_description`.
 - A user delete sets `vsg_usr_user_id` and `vhr_usr_user_id` to the platform's deleted-user value, like event registrants do.
 
 ---
@@ -172,7 +176,7 @@ All emails go through core Notify with signals declared in `plugin.json`, each w
 
 | Signal | Recipient | When |
 |---|---|---|
-| `volunteers.signed_up` | the volunteer | confirmed, with an `.ics` attachment and a cancel link |
+| `volunteers.signed_up` | the volunteer | confirmed, with a link to download the `.ics` and a cancel link |
 | `volunteers.waitlisted` | the volunteer | full shift, with the position |
 | `volunteers.promoted` | the volunteer | moved from the waitlist, with the same cancel link |
 | `volunteers.reminder` | the volunteer | `volunteers_reminder_hours` before the shift (default 24) |
@@ -180,7 +184,9 @@ All emails go through core Notify with signals declared in `plugin.json`, each w
 | `volunteers.hours_decided` | the volunteer | self-reported hours approved or rejected |
 | `volunteers.new_signup` | the coordinators | opt-in per coordinator, default off |
 
-**Reminders.** A `VolunteerReminders` task (every run) finds confirmed sign-ups whose shift starts inside the window and whose `vsg_reminder_sent_for_start_time` differs from the shift start. It sends and then sets that column. A reminder therefore goes out once, and goes out again only if the shift moves.
+**Why a link, not an attachment.** Notify queues mail with no attachment column; Bookings sends its `.ics` directly. A link to `/volunteer/shift.ics?token=…` is simpler, and members already see the shift on their calendar through the item source (§7). The `.ics` is built by the shared VEVENT builder (core change C2, §7).
+
+**Reminders.** The `VolunteersMaintenance` task (every run) finds confirmed sign-ups whose shift starts inside the window and whose `vsg_reminder_sent_for_start_time` differs from the shift start. It sends and then sets that column. A reminder therefore goes out once, and goes out again only if the shift moves.
 
 **Cancel link.** Guests have no login, so the sign-up carries an unguessable token (`vsg_action_token`, like `bkn_action_token` in Bookings). The link cancels that one sign-up and honors a per-opportunity minimum notice.
 
@@ -219,6 +225,14 @@ Auto-routed from `views/`, no `serve.php` route needed except the slug route.
 | **Files and surveys** | Intake uses core Questions/Surveys. Waivers are text on the opportunity for P1. |
 | **Donations plugin** | Shares nothing but the user record. The Donations spec's "Supporters" screen shows a person's hours beside their giving if both plugins are active (a read-only panel through the admin-user panel registry, not a dependency). |
 
+### Core changes that would make this plugin simpler
+
+Found by review on 2026-10-10. Each is a small change to code that already exists; the owner decides whether to make them (Q4).
+
+- **C1. Extract a `RecurrenceRule` class** from the five recurrence columns: `compute_dates_in_range`, `nth_occurrence_date` and a description. `CalendarEntry` and `Event` each carry their own copy of this arithmetic today, so Volunteers would be the third. One class, with the two existing ones delegating to it, removes the copies and fixes any daylight-saving bug once.
+- **C2. A generic VEVENT builder** (uid, start, end, zone, summary, location, description). `IcsHelper` is shaped around events and Bookings hand-rolls its own `.ics`; Volunteers would be the third. One builder, used by all three.
+- **C9. Waitlist promotion and attendance marking as shared helpers**, which Event Manager can adopt (it has a waiting list with no automatic promotion and no attendance field).
+
 ---
 
 ## 8. Reports, letter and in-kind value
@@ -228,12 +242,12 @@ Auto-routed from `views/`, no `serve.php` route needed except the slug route.
 1. **Hours by person** for a date range.
 2. **Hours by opportunity** for a date range, with head-count.
 3. **Shift fill rate:** capacity, confirmed, attended, no-show.
-4. **In-kind value:** approved hours × rate. The rate is the `volunteers_hour_rate` setting (default **$36.14**, the 2026 national figure, with the source and year shown beside it). A state figure can be typed in. An opportunity's own `vop_hour_value` overrides it for that opportunity. The report prints the rate and the source it used, because an auditor will ask.
+4. **In-kind value:** approved hours × rate. The rate is the `volunteers_hour_rate` setting (default **$36.14**, the 2026 national figure, with the source and year shown beside it). A state figure can be typed in. The report prints the rate and the source it used, because an auditor will ask.
 5. **Pending hours:** self-reported hours awaiting a decision.
 
 **Hours letter.** `/profile/volunteers/letter?from=…&to=…` renders a printable page: the volunteer's name, the organization's name (a setting), the date range, each opportunity with approved hours, a total, the date issued, and the names of the approving people. It is the document a student, a court-ordered volunteer or an employer asks for. P2 adds a supervisor attestation line.
 
-**Retention.** Hours are never purged automatically. A setting `volunteers_contact_retention_months` (blank = keep) lets an admin purge contact details of volunteers inactive for that long while keeping anonymous hours totals (§9).
+**Retention.** Hours are never purged automatically. A contact-detail purge setting is P2 (§9).
 
 ---
 
@@ -295,6 +309,7 @@ Each item below is a test with an `@joinery-test` header.
 
 - **Q1. Should hours need approval for attended shifts?** The draft says no: marking someone attended is the coordinator's approval. A stricter option makes every attendance row pending until an admin signs off. Recommend the draft (fewer clicks), since the coordinator is already a named person.
 - **Q2. Should the first release include QR check-in?** The research ranks it as a commonly paywalled feature, which makes it a differentiator, but roster tap-to-mark covers the need for small groups. Recommend P2.
+- **Q4. Make core changes C1, C2 and C9?** *Yes:* Volunteers stays small and the platform loses duplicated code. The catch is touching the calendar and Event Manager, which are built and tested. *No:* Volunteers carries a transient-`CalendarEntry` workaround and its own `.ics` string. Recommend C1 and C2 (they are extractions with existing tests), and C9 only when Event Manager needs it.
 - **Q3. Can members-only sign-up ask for a login before showing the shift list?** The draft shows the list to guests on public opportunities only. No open decision unless the owner wants public opportunities to require an account.
 
 ---

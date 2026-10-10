@@ -6,7 +6,7 @@
 
 **Plugin name:** `donations`. The product name is "Joinery Donations".
 
-**Depends on:** the **store** plugin. A donation is a store purchase, so payment, refunds, subscriptions, guest checkout and order history already work. Three small gaps in the store must close first (§4).
+**Depends on:** the **store** plugin. A donation is a store purchase, so payment, refunds, subscriptions, guest checkout and order history already work. Five small changes in the store must land first (§4).
 
 **Guiding rule: when in doubt, leave it out.** The research says donors and treasurers want an honest checkout, recurring gifts that don't silently fail, and receipts that satisfy the tax authority. They do not want a feature list.
 
@@ -82,15 +82,15 @@ The sticker price of "free" is paid by the donor as a tip, or by the organizatio
   - one-time, monthly or yearly;
   - donor name, email, and address when the receipt rules need it;
   - "Cover the processing fee" checkbox, **off by default**, with one honest line showing the exact amount;
-  - "Give anonymously" (hides the name on any public display);
+  - "Give anonymously" (shown only when the public supporter list is turned on, §7);
   - "In honor of / in memory of" with a name;
   - a note to the organization;
-  - optional extra questions from a Survey.
+  - optional extra questions, attached to the donation product as ordinary Product Requirements (a Question or Survey requirement), which the store already stores per order line.
   - No account needed.
 - **Payment through the store:** Stripe and PayPal as already configured, guest checkout, refunds (full and partial), coupons ignored. A donation is an order.
 - **Recurring gifts:** monthly and yearly, with:
-  - a donor self-service page to change the card (the store's billing portal), pause, or cancel;
-  - failed-payment follow-up written for donors, not for tier members (§4.3);
+  - a donor self-service page to change the card (the store's billing portal), or cancel;
+  - failed-payment follow-up written for donors, not for tier members (§4.4);
   - revival of a recurring gift when a later payment succeeds.
 - **Receipts:**
   - one receipt per gift, numbered, with the organization's legal name, address and EIN, the amount, the date, and the goods-or-services statement;
@@ -115,6 +115,7 @@ The sticker price of "free" is paid by the donor as a tip, or by the organizatio
 - **Pre-expiry card warning** to recurring donors.
 - **Canada (CRA) receipt mode** and **UK Gift Aid declaration capture** (§6.3).
 - **QuickBooks-friendly export.**
+- **Pause** a recurring gift (the store has no pause action today; nothing calls `PaypalHelper::suspend_subscription`).
 - **Webhook health panel** (when the last payment event arrived; a red flag after N days of silence on a site that has live subscriptions).
 
 ### Deferred (not scheduled)
@@ -133,19 +134,21 @@ All tables come from `$field_specifications`. Prefixes were checked as unused on
 
 | Class / table | Key columns |
 |---|---|
-| `Campaign` / `dcm_campaigns` | `dcm_title`, `dcm_slug` (unique), `dcm_description`, `dcm_goal_amount` (nullable), `dcm_start_time`, `dcm_end_time` (nullable), `dcm_suggested_amounts` (text, comma list), `dcm_allow_recurring`, `dcm_fil_file_id` (image, nullable), `dcm_svy_survey_id` (nullable extra questions), `dcm_show_progress`, `dcm_is_default`, `dcm_is_active`, `dcm_delete_time` |
-| `Gift` / `dgf_gifts` | `dgf_usr_user_id`, `dgf_dcm_campaign_id`, `dgf_amount` (numeric(10,2); the whole payment, fee-cover included), `dgf_fee_covered_amount` (numeric, default 0), `dgf_currency`, `dgf_gift_date`, `dgf_method` (`online` / `cash` / `check` / `other`), `dgf_ord_order_id` (nullable), `dgf_odi_order_item_id` (nullable), `dgf_stripe_invoice_id` (nullable; unique when set, so a replayed webhook cannot record a second gift), `dgf_is_recurring`, `dgf_is_anonymous`, `dgf_dedication_kind` (`in_honor` / `in_memory` / null), `dgf_dedication_name`, `dgf_note`, `dgf_benefit_value` (numeric, default 0), `dgf_benefit_description`, `dgf_donor_name`, `dgf_donor_address` (text; **snapshots** at the time of the gift, so a later address change does not rewrite old receipts), `dgf_status` (`received` / `refunded` / `partially_refunded`), `dgf_refund_amount`, `dgf_usr_user_id_entered_by` (offline gifts), `dgf_delete_time` |
-| `Receipt` / `drc_receipts` | `drc_dgf_gift_id`, `drc_number` (unique, sequential), `drc_issued_time`, `drc_amount`, `drc_eligible_amount` (amount minus `dgf_benefit_value`), `drc_legal_text` (snapshot of the wording used), `drc_void_time`, `drc_sent_time` |
+| `Campaign` / `dcm_campaigns` | `dcm_title`, `dcm_slug` (unique), `dcm_description`, `dcm_goal_amount` (nullable), `dcm_start_time`, `dcm_end_time` (nullable), `dcm_suggested_amounts` (text, comma list), `dcm_allow_recurring`, `dcm_fil_file_id` (image, nullable), `dcm_is_default`, `dcm_delete_time` (a goal of null means no thermometer; the dates and the delete time decide whether a campaign is open) |
+| `Gift` / `dgf_gifts` | `dgf_usr_user_id`, `dgf_dcm_campaign_id`, `dgf_amount` (numeric(10,2); the whole payment, fee-cover included), `dgf_fee_covered_amount` (numeric, default 0), `dgf_gift_date`, `dgf_method` (`online` / `cash` / `check` / `other`), `dgf_odi_order_item_id` (nullable; the order is reached through it), `dgf_payment_ref` (nullable; unique when set: the Stripe invoice id, or for PayPal `{subscription id}:{period end}`, so a replayed webhook or reconciler cannot record a second gift), `dgf_is_recurring`, `dgf_is_anonymous`, `dgf_dedication_kind` (`in_honor` / `in_memory` / null), `dgf_dedication_name`, `dgf_note`, `dgf_benefit_value` (numeric, default 0), `dgf_benefit_description`, `dgf_donor_name`, `dgf_donor_address` (text; **snapshots** at the time of the gift, so a later address change does not rewrite old receipts), `dgf_status` (`received` / `refunded` / `partially_refunded`), `dgf_refund_amount`, `dgf_usr_user_id_entered_by` (offline gifts), `dgf_delete_time` |
+| `Receipt` / `drc_receipts` | `drc_dgf_gift_id`, `drc_receipt_id` (the receipt number, shown with the prefix setting), `drc_issued_time`, `drc_amount`, `drc_eligible_amount` (amount minus `dgf_benefit_value`), `drc_legal_text` (snapshot of the wording used), `drc_void_time`, `drc_sent_time` |
+
+The currency is the site's single `site_currency`; it is not stored per gift.
 
 **A gift is one payment.** A monthly donor has one gift row per successful charge, all pointing at the same order item. A one-time donor has one row. An offline gift has no order.
 
-**Idempotence.** `dgf_stripe_invoice_id` has a unique index. The webhook handler that creates a gift for a renewal uses insert-or-ignore on it, so a repeated delivery of the same event never creates a second gift or a second receipt. This answers the GiveWP complaints about duplicate and stuck records.
+**Idempotence.** `dgf_payment_ref` has a unique index. Stripe's invoice id is available on its webhook, but PayPal's renewal event and both reconcilers carry only a status and a period end, so the neutral key is `{subscription id}:{period end}` for PayPal. The subscriber that creates a gift for a renewal uses insert-or-ignore on it, so a repeated delivery of the same event, or the same renewal arriving by webhook and by reconciler, never creates a second gift or a second receipt. This answers the GiveWP complaints about duplicate and stuck records.
 
 **Refunds.** A refund through the store updates the gift's status and `dgf_refund_amount`. A refunded gift keeps its receipt, which is **voided** (`drc_void_time`) when refunded in full and **re-issued** with the reduced eligible amount when refunded in part, so the annual statement stays correct.
 
-**Receipt numbers** come from a dedicated sequence per organization. Gaps are possible (sequences move forward only); the receipt records every number it uses. The number format is `{prefix}{year}-{number}`, prefix a setting.
+**Receipt numbers** are the receipt row's own id with a prefix setting (`{prefix}{id}`). A site is one organization, so one sequence is enough; no numbering helper exists in the platform and none is needed. Gaps are possible (sequences move forward only); a voided receipt keeps its number.
 
-**The donor is a user.** A guest becomes an inactive user matched or created by email (the store's guest checkout already does this). Donors with no password can still reach their giving page through the emailed receipt link, which carries a token; they can set a password later.
+**The donor is a user.** The store's guest checkout matches the buyer by email or creates the account, sends the usual welcome and activation email, and signs the donor in. So a guest donor can reach `/profile/donations` with no extra token; no special receipt-link credential is built.
 
 **Deletion.** See the deletion system doc.
 
@@ -159,27 +162,43 @@ All tables come from `$field_specifications`. Prefixes were checked as unused on
 
 These were found by reading the code on 2026-10-10. Each should be checked against the running system before work starts.
 
-### 4.1 A recurring gift needs a chosen amount
+### 4.1 A buyer-chosen amount, and what it already does
 
-A product version's price type is *one* of: `day`, `week`, `month`, `year` (a subscription at the version's price), or `user` (the buyer types the amount). There is no version that is both. `StripeHelper::get_or_create_price()` already creates a Stripe price for any amount on demand, so the Stripe side can do it. The store needs one change: let a version recur at an interval *and* take its amount from the buyer. Proposed: a version of price type `user` may carry `prv_user_price_interval` (null / `month` / `year`); `ProductVersion::is_subscription()` then answers from it. The cart, charge and reconciler paths that call `is_subscription()` then need no other change, but **the charge path and the PayPal subscription path were not traced for this spec** and must be checked first.
+Traced by review on 2026-10-10: both charge paths already carry the **cart** amount, not the version price. Stripe's `get_or_create_price($version, $final_price)` builds a recurring price per amount (`cart_charge_logic.php`, `StripeHelper.php`), and PayPal's `createPlan($paypal_product_id, $version, $amount)` builds a plan per amount (`checkout_logic.php`, `PaypalHelper.php`). The only gate is `Product::get_price()`, which honours a typed amount for just one product: the one named by `store_optional_donation_product_id`. So no new version column is needed and the versions stay single / month / year.
 
-### 4.2 A renewal needs to announce itself
+**The store change:** generalize that one-product check to a product flag, "buyer sets the amount" (`pro_buyer_sets_amount`, or treat `pro_fulfillment_provider = 'donation'` as that), and make `validate_form` require the amount for such a product. The Donations plugin sets the flag on its donation product. Because both providers already create a price or plan per amount, **recurring gifts work on Stripe and PayPal from the first release**.
 
-The Stripe webhook's `invoice.payment_succeeded` handler sets the order item active and dispatches a signal **only when a failed payment recovers** (`subscription.payment_recovered`). An ordinary renewal dispatches nothing, so nothing outside the store can hear it. The plugin needs a signal for every successful renewal. Add `subscription.payment_succeeded`, with `order_item_id`, `user_id`, `provider`, `provider_subscription_id`, `amount`, `currency`, `invoice_id` and `paid_time`, dispatched from both the Stripe handler and the PayPal sync. The Donations subscriber records a gift from it. (A signal handler is inline in the webhook request, so it does a bounded local insert only; the receipt email is queued, per the signal-bus cost budget.)
+**A minimum amount** does not exist anywhere (`0.00` passes `validate_form` today). It is added here, once, in the cart's `add_item` path or the provider's `checkAvailability` (which receives the line data and is asked before any payment step, §5).
 
-### 4.3 The failed-payment email talks about tiers
+### 4.2 A cached Stripe price would be the first donor's amount
 
-The Stripe webhook's failure email looks up the user's subscription tier and falls back to the words "your current plan". A donor with a failed monthly gift would be told their plan has a problem. Donations needs wording of its own. Smallest fix: the store's failure email asks the product's fulfillment provider (if it has one) for the sentence and link, and falls back to today's text. The `donation` provider answers: "Your monthly gift of {amount} to {organization} could not be processed. Update your card here: {link}", where the link opens the billing portal.
+`get_or_create_price()` stores the first matching or created Stripe price id in `prv_stripe_price_id` when that column is empty, and `change_billing_cycle` charges from that cached id. With a different amount per donor, the first donor's amount would become "the" yearly price for anyone who later switches billing cycle. This is a latent store bug today (a coupon-discounted amount gets cached as the version's price). **Fix: cache the id only when the price equals the version's own price.** Must land before Donations ships.
+
+### 4.3 A renewal needs to announce itself
+
+Traced: the Stripe `invoice.payment_succeeded` handler sets the order item active and dispatches a signal **only when a failed payment recovers**. An ordinary renewal dispatches nothing. PayPal's `RENEWED` webhook dispatches nothing, neither reconciler dispatches anything, and PayPal never dispatches `payment_recovered`. So nothing outside the store can hear a renewal, and a PayPal site with flaky webhooks would never record gifts.
+
+**The store change:** a signal `subscription.payment_succeeded` (`order_item_id`, `user_id`, `provider`, `provider_subscription_id`, `amount`, `currency`, `payment_ref`, `paid_time`), dispatched from the Stripe handler, the PayPal `RENEWED` handler **and both reconcilers**, with PayPal also dispatching `payment_recovered`. The dedup key is the neutral `payment_ref` (§3). The Donations subscriber records the gift from it. A signal handler runs inline in the webhook request, so it does a bounded local insert only; the receipt email is queued, per the signal-bus cost budget.
+
+### 4.4 The failed-payment email talks about tiers, and is suppressed across subscribers
+
+Traced: the failure email names the user's tier (falling back to "your current plan") and its template links to `/change-tier`. Smaller fix than a per-provider hook: **make the template product-generic** ("your subscription to {product_name}") and **point its link at the existing billing-portal action** (`update_payment_method`, which calls `create_billing_portal_session`). That fixes the wording for every plugin with no new seam, and gives donors a link that updates their card.
+
+A bug found on the way: `WebhookLog::hasRecentPaymentFailure` is site-wide, not per subscription, so one subscriber's failure suppresses every other subscriber's failure email for 24 hours (and its comment about `> 1` is wrong, because the log row is written after the switch). **Scope the dedup per subscription** before relying on "at most once per failure" (§8).
+
+### 4.5 Smaller store bug noted
+
+PayPal plan creation hardcodes the currency "USD" (`PaypalHelper.php`). A site whose `site_currency` is not USD would create plans in the wrong currency. Fix with the other store changes.
 
 ---
 
 ## 5. How a donation flows
 
 1. The donor opens `/donate` (a view in the plugin, rendered by FormWriter in the active theme) and picks the amount, interval, and extras.
-2. The page's JS adds a cart line through the store's cart action: the plugin's **donation product** (named by the `donations_product_id` setting, created on activation), the version matching the interval (once, monthly, yearly), with the amount, campaign, anonymity, dedication, note and fee-cover amount in the line's form data. The fee-cover amount is added into the line's price, not a second line, so the order total is the gift (§3).
+2. The page's JS adds a cart line through the store's cart action: the plugin's **donation product** (named by the `donations_product_id` setting, created on activation), the version matching the interval (once, monthly, yearly), with the amount, campaign, anonymity, dedication and note in the line's form data. The server (not the browser) computes the fee-cover amount from the typed gift amount when it adds the line, and adds it into the line's price, not a second line, so the order total is the gift (§3).
 3. The store's normal checkout runs (guest allowed, CAPTCHA enforced, §9).
-4. On success, the plugin's `DonationFulfillment` (a `FulfillmentProvider` registered with the store, key `donation`) reads the line's form data and writes the `dgf_gifts` row, issues the receipt, and queues the receipt email. It returns a label for the order summary.
-5. For a recurring gift, each later renewal arrives as `subscription.payment_succeeded` (§4.2) and the subscriber does the same: new gift row, new receipt, new email.
+4. On success, the plugin's `DonationFulfillment` (a `FulfillmentProvider` registered from the plugin's `serve.php`, as Event Manager registers its provider, key `donation`) reads the line's data from `$order_item->get_raw_data()` / `get_all_data()` (as the Server Manager's fulfillment provider does) and writes the `dgf_gifts` row, issues the receipt, and queues the receipt email. It returns a label for the order summary.
+5. For a recurring gift, each later renewal arrives as `subscription.payment_succeeded` (§4.3) and the subscriber does the same: new gift row, new receipt, new email.
 6. Refunds and cancellations flow back the other way (§3).
 
 **Fee-cover amount.** The plugin shows the donor exactly what they are adding, calculated so the organization nets the chosen gift after processing:
@@ -188,7 +207,7 @@ The Stripe webhook's failure email looks up the user's subscription tier and fal
 
 with `rate` and `fixed` taken from settings `donations_fee_percent` (default 2.9) and `donations_fee_fixed` (default 0.30). An organization on Stripe's nonprofit rate sets 2.2. The page prints the sentence: "Add $0.38 so that all $10.00 reaches {organization}". The exact figure is shown; no percentage default is ever pre-applied.
 
-**The amount is never trusted from the browser.** The price is re-derived server-side from the form data when the cart is charged (the store already does this for coupons), and a minimum amount (`donations_min_amount`, default 3.00) is enforced there.
+**The browser's amount is validated where it enters the cart.** The store computes a line's price once, in `ShoppingCart::add_item`, keeps it in the session, and the charge trusts that figure; it does not re-derive it at charge time. `add_item` is server code, so that is the right place to compute the fee-cover amount and to enforce the minimum (`donations_min_amount`, default 3.00); the provider's `checkAvailability`, which runs before any payment step, is the second check.
 
 ---
 
@@ -227,15 +246,15 @@ A gift with a benefit (a dinner ticket sold through the store as part of a fundr
 
 - `/donate` shows the default campaign. `/donate/{slug}` shows another, with its description, image, goal and progress.
 - **Progress** is the sum of `dgf_amount` for non-refunded gifts of the campaign (net of partial refunds), computed with one aggregate query. It is not cached; if a large site needs it, a materialized total is a later optimization.
-- **Public supporter list.** Off by default (`donations_show_supporters`). When on, a campaign page shows first name and last initial of donors who are not anonymous, never amounts unless `donations_show_supporter_amounts`.
+- **Public supporter list.** Off by default (`donations_show_supporters`). When on, a campaign page shows first name and last initial of donors who are not anonymous, never amounts.
 - **Goal reached.** The thermometer simply fills past 100%. Nothing else changes (donors can keep giving).
 
 ---
 
 ## 8. Recurring gifts in operation
 
-- **Self-service.** `/profile/donations` lists a donor's gifts and their active recurring gifts with **Update card**, **Pause** (a Stripe pause of collection for 1–6 months), **Change amount** (P2) and **Cancel**. Update card and cancel reuse the store's billing portal and subscription cancel.
-- **Failed payments.** The store already marks the order item past-due on `invoice.payment_failed` and Stripe retries on its schedule. The donor gets the donation-specific email from §4.3 with the card-update link, at most once per failure (the store's existing dedup). If the subscription ends after retries, the donor gets a "your monthly gift has ended" message and the organization gets a notification.
+- **Self-service.** `/profile/donations` lists a donor's gifts and their active recurring gifts with **Update card** and **Cancel** (**Pause** and **Change amount** are P2). Both reuse what exists: the store's billing-portal action and its recurring-cancel action.
+- **Failed payments.** The store already marks the order item past-due on `invoice.payment_failed` and Stripe retries on its schedule. The donor gets the product-generic email from §4.4 with the card-update link, at most once per failure per subscription (needs the per-subscription dedup fix in §4.4). If the subscription ends after retries, the donor gets a "your monthly gift has ended" message and the organization gets a notification.
 - **Revival.** A later successful payment on a past-due subscription sets it active again and records the gift. A single failed event never puts a subscription into a permanently-failed state.
 - **Organization view.** The Supporters screen shows each recurring donor's state (active, past due, cancelled) and the next charge date, and a "recurring at risk" filter for past-due ones.
 
@@ -245,14 +264,15 @@ A gift with a benefit (a dinner ticket sold through the store as part of a fundr
 
 A free public form that takes small amounts invites card-testing. P1 ships:
 
-1. **CAPTCHA** on guest gifts, using the platform's existing hCaptcha/reCAPTCHA support in FormWriter (a keyed setting). Logged-in members skip it.
-2. **A minimum amount** (`donations_min_amount`, default 3.00), enforced server-side.
-3. **Per-IP rate limit** on the cart/charge action for the donation product (default 5 attempts an hour per address, IPv4 and IPv6 handled as addresses, not text), and a short lockout after repeated card declines from one address.
-4. **No predictable form id.** The page needs none; the donation product id is not in the page source in a way that lets a script post directly.
+1. **CAPTCHA** on the donation form, using FormWriter's existing support (`captcha_check`, hCaptcha preferred over reCAPTCHA). It is switched by the **global** `use_captcha` setting and, with no keys configured, silently passes, so the settings page warns when it is off or unkeyed.
+2. **A minimum amount** (`donations_min_amount`, default 3.00), enforced in `add_item` and `checkAvailability` (§5).
+3. **Per-IP rate limit** on the donation product's add-to-cart and charge, reusing `RequestLogger::check_rate_limit` (default 5 attempts an hour; the pattern is in `register_logic.php`). It keys on the client address as recorded, which is correct for IPv4 and IPv6 because a same-client limit compares like with like.
+4. **No predictable form id.** The page needs none.
 5. **A setup checklist** on the plugin's settings page: turn on Stripe Radar, add a rule blocking a missing CVC, set the Stripe dashboard alert for spikes in declines, and an explanation of what a card-testing attack looks like in the order list.
-6. **A velocity alarm.** If more than N declined donation attempts occur in an hour (default 25), the plugin raises a site notification to admins and (setting, default on) turns on CAPTCHA for logged-in members too until an admin clears it.
 
-**PCI scope.** The donation page uses the store's checkout, which keeps card data off our servers. The page must load **no third-party analytics, chat or testing scripts**; the plugin adds a test that fails if one is added to the donation view's script inventory (§13). The CAPTCHA script is the one allowed exception and sits on a separate step before the payment step.
+**PCI scope.** The donation page uses the store's checkout, which keeps card data off our servers. The page must load **no third-party analytics, chat or testing scripts**; the plugin adds a test that fails if one is added to the donation view's script inventory (§13). The CAPTCHA script is the one allowed exception.
+
+**Left for later:** a velocity alarm that turns CAPTCHA on for members, and a lockout after repeated declines. Both need a per-form CAPTCHA switch that does not exist (the switch is global).
 
 ---
 
@@ -269,7 +289,7 @@ A free public form that takes small amounts invites card-testing. P1 ships:
 | **Groups / tiers** | A gift can add the donor to a core Group (`donations_donor_group_id`, optional), so a site can gate content to "donors", or offer a tier to recurring donors. |
 | **Joinery AI** | `Gift` and `Campaign` set `$ai_readable`. `dgf_note` and `dgf_dedication_name` go in `$ai_untrusted_fields`. No AI write access to gifts or receipts (they are financial records). |
 | **Analytics** | The donation page sends the standard visitor events so campaign conversion (visit → gift) shows in the existing attribution reports. |
-| **Existing report** | `admin_yearly_report_donations` (per-user totals across all products) is left alone; the new Supporters screen reports only real gifts. |
+| **Existing report** | `plugins/store/admin/admin_yearly_report_donations` (per-user totals across all paid order items) is left alone; the new Supporters screen reports only real gifts. |
 
 ---
 
@@ -301,7 +321,7 @@ Each item below is a test with an `@joinery-test` header.
 **`plugins/donations/tests/donations_gift_test.php`** (test-db):
 
 - A completed one-time order writes one gift, one receipt, one email in the queue.
-- A replayed renewal event (same invoice id) writes nothing new.
+- A replayed renewal event, or the same renewal arriving by webhook and reconciler (same `payment_ref`), writes nothing new.
 - A renewal after a failure recovers the subscription and writes a gift.
 - A full refund voids the receipt; a partial refund re-issues with the reduced eligible amount; the annual total follows.
 - A gift with a benefit value prints the eligible amount.
@@ -316,15 +336,14 @@ Each item below is a test with an `@joinery-test` header.
 
 **`plugins/donations/tests/donations_abuse_test.php`** (test-db):
 
-- Guest gifts require a valid CAPTCHA; members don't.
+- The form requires a valid CAPTCHA when `use_captcha` is on.
 - The per-IP limit applies to IPv4 and IPv6 addresses, compared as addresses.
-- The velocity alarm raises one notification and turns CAPTCHA on for members.
 
 **`plugins/donations/tests/donations_page_test.php`** (safe tier): the donation view loads no script from outside the allowed list.
 
-**`plugins/donations/tests/donations_access_test.php`** (test-db): a donor sees only their own gifts and receipts (including via a receipt link token); a stranger doesn't; public campaign pages show only non-anonymous first names and last initials when enabled.
+**`plugins/donations/tests/donations_access_test.php`** (test-db): a donor sees only their own gifts and receipts ; a stranger doesn't; public campaign pages show only non-anonymous first names and last initials when enabled.
 
-**Store tests belong with the store changes (§4):** a user-priced recurring version charges the typed amount; a renewal dispatches `subscription.payment_succeeded` once per invoice from Stripe and PayPal; the failure email asks the product's provider for its wording.
+**Store tests belong with the store changes (§4):** a product flagged "buyer sets the amount" charges the typed amount, once, monthly or yearly, on both Stripe and PayPal; a renewal dispatches `subscription.payment_succeeded` from the Stripe handler, the PayPal handler and both reconcilers; the failure email is product-generic and links to the billing portal and is deduplicated per subscription; a typed amount is not cached as the version's Stripe price.
 
 **Live walk (Stripe test mode, dev):**
 
@@ -339,7 +358,7 @@ Each item below is a test with an `@joinery-test` header.
 ## 14. Decisions and open questions
 
 - **D1. No tip, no platform fee, and the fee-cover box ships off.** The vendor studies say pre-checking raises coverage from about 49% to about 74% with no change in conversion. That is real money for an organization. But a pre-checked amount is the very complaint donors make about tips, the studies are by vendors who profit from it, and it can be a per-site setting later. Draft: off, setting available (`donations_fee_cover_default`, default off). *Recommend: ship off; let the organization choose.*
-- **Q1. Should the plugin ship P1 with Stripe recurring only, or Stripe and PayPal?** The store supports both for subscriptions, but the PayPal path wasn't traced for chosen-amount recurring (§4.1). *Option A: both, after tracing PayPal. Catch: the PayPal sync is its own code path and delays release. Option B: recurring on Stripe only at first; PayPal one-time works from day one. Catch: sites that only use PayPal can't take monthly gifts. Recommend B unless the PayPal trace is cheap.*
+- **Q1 (settled by review).** Recurring ships on Stripe and PayPal from the first release: both charge paths already build a price or plan per amount (§4.1).
 - **Q2. Do receipts go out for every recurring charge?** Some organizations send one annual summary instead of twelve emails. *Recommend: a setting `donations_email_recurring_receipts`, default on, with the annual statement always available.*
 - **Q3. Who owns the legal wording?** The spec ships US defaults and says to check with an accountant. Whether the sales page should carry any claim like "IRS-compliant receipts" needs counsel; the draft makes no such claim.
 - **Q4. Apple and Google in-app rules for donations** were not researched (§10). The draft opens the system browser.
