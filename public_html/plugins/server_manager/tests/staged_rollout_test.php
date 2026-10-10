@@ -16,6 +16,7 @@
  * asked for it starts one rollout over every eligible node, management nodes
  * last, and writes what became of it onto the publish job.
  *
+ * @version 1.4 - a node past the rollout's release passes the gate; one short of it, or reporting none, halts
  * @version 1.3 - the readiness check (upgrade_preflight) before a node's apply: passes, fails by name, is skipped for an agent without it
  * @version 1.2 - a node refusing a modified upgrade script halts with its own reason
  * @version 1.1 - deploy to all managed nodes
@@ -51,6 +52,8 @@ section('The gate between nodes');
 
 check(StagedRolloutRunner::gate(srl_job('completed', srl_apply()), '0.8.411') === null,
 	'completed, deploy tier passed, the release reported, no rollback: the next node may start');
+check(StagedRolloutRunner::gate(srl_job('completed', srl_apply(array('version_after' => '0.8.480'))), '0.8.411') === null,
+	'a node that follows a newer upgrade source and lands past the release passes');
 $cases = array(
 	array('the job failed', srl_job('failed', srl_apply(), 'boom'), 'failed'),
 	array('the node refused a modified upgrade script', srl_job('failed', null, 'Refused by the node: primitive "apply_update" refused: file does not match its signed hash — it has been modified since release: public_html/utils/upgrade.php'), 'public_html/utils/upgrade.php on the node is not the file the installed release signed'),
@@ -58,7 +61,8 @@ $cases = array(
 	array('no structured result', srl_job('completed', null), 'no structured apply result'),
 	array('rolled back', srl_job('completed', srl_apply(array('outcome' => 'failed', 'rolled_back' => array('rolled_back' => true, 'step' => 'deploy_tier', 'schema_ahead_of_code' => true)))), 'rolled back at deploy_tier'),
 	array('deploy tier failed', srl_job('completed', srl_apply(array('deploy_tier' => array('verdict' => 'failed', 'failed_tests' => array('boot'))))), 'deploy tier failed (boot)'),
-	array('wrong version', srl_job('completed', srl_apply(array('version_after' => '0.8.410'))), 'not 0.8.411'),
+	array('wrong version', srl_job('completed', srl_apply(array('version_after' => '0.8.410'))), 'not 0.8.411 or later'),
+	array('no version reported', srl_job('completed', srl_apply(array('version_after' => null))), 'not 0.8.411 or later'),
 	array('did not complete', srl_job('completed', srl_apply(array('outcome' => 'failed'))), 'did not complete'),
 );
 foreach ($cases as $c) {
