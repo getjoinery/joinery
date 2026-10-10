@@ -2,6 +2,12 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.37 - a claim that never reports is LOST, never requeued: failStaleClaims() (was requeueStaleClaims)
+ *                 fails a job past its budget, markLost() fails a node's running jobs when its agent says it is
+ *                 idle or an operator says so, both with mjb_agent_outcome 'lost' so a result that arrives
+ *                 later still lands. A requeue re-ran work that had already happened: getjoinery's data root
+ *                 move (job 536, 10-10) finished, its one result post failed, and the requeue would have run
+ *                 the move again four hours later, unattended. MAX_CLAIM_ATTEMPTS removed.
  * @version 1.36 - data_root_migrate's claim budget: the agent's four hours, plus room (one_data_root WP4)
  * @version 1.35 - a node removed for good takes its jobs (cascade, was null); MultiManagementJob option
  *                 node_listed leaves out a hidden node's jobs
@@ -239,9 +245,11 @@ class ManagementJob extends SystemBase {
 	 * How long each primitive is allowed to hold a claim, in seconds.
 	 *
 	 * MUST NOT be shorter than the deadline the agent applies to itself. If the
-	 * plane gives up first it requeues a job that is still running, and the node
-	 * starts a second copy of work the first copy has not finished — two
-	 * concurrent backups writing one chain. The agent is the authority on how
+	 * plane gives up first it fails, as lost, a job that is still running: the
+	 * card says a backup or a move failed while it is in fact still working, and
+	 * the node's lock is freed for the next job while it does. (A job is never
+	 * handed out twice — failStaleClaims — so the older risk, a second copy of
+	 * the work started over the first, is gone.) The agent is the authority on how
 	 * long its own primitives may take (primitives.Primitive.Timeout, compiled
 	 * in); these are that value plus room for the result to be posted, and
 	 * primitive_transport_parity_test asserts none of them has fallen behind the
@@ -263,33 +271,33 @@ class ManagementJob extends SystemBase {
 		'site_quiet'            => 1080,
 		// 60m + slack. An upgrade downloads a release, deploys it, runs
 		// migrations, runs the deploy-tier suite against the deployed tree and
-		// then every host installer. Requeuing one that is still running would
-		// start a second upgrade on a node mid-deploy, which is the worst
+		// then every host installer. Failing one that is still running would
+		// free the node for a second job mid-deploy, which is the worst
 		// moment on the list to do it twice.
 		'apply_update'          => 4200,
 		// 20m + slack. The management node's own release build: the deploy
 		// gate, an agent cross-compile when its source moved, the archives,
-		// the signed manifests. Requeuing one mid-run would start a second
+		// the signed manifests. Failing one mid-run would free the node for a second
 		// publish of the same number over the first.
 		'publish_upgrade'       => 1500,
 		// 4h + slack: one copy of a host's data onto its data root
 		// (one_data_root WP4). The move itself runs in a unit of its own and a
-		// second one is refused while it does, but a requeue would still end
+		// second one is refused while it does, but an early failure would still end
 		// in a red job beside a move that is fine.
 		'data_root_migrate'     => 14520,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than
 		// the node's own deadline only delays recovery from a genuine crash,
-		// while a shorter one requeues a restore that is still running and
-		// starts a SECOND restore over the first, which is the one job in this
+		// while a shorter one fails a restore that is still running and frees
+		// the node for a SECOND restore over the first, which is the one job in this
 		// vocabulary where doing it twice concurrently destroys the thing it
 		// was recovering. Sized above the SSH path's own step timeouts (3600
 		// for a database or project, 7200 for a chain's restore step) so the
 		// agent's declared Timeout has room underneath whatever it lands on.
 		// The agent declares 70m for restore_database; this is that plus room to
 		// post the result, not the same number — a budget equal to the node's
-		// deadline requeues a job whose result is still in flight.
+		// deadline fails a job whose result is still in flight.
 		//
 		// Each of these carries the agent's APPROVAL WINDOW as well as its work.
 		// A destructive job is claimed, and then held while the node's own
@@ -297,9 +305,9 @@ class ManagementJob extends SystemBase {
 		// wait happens inside the claim, because a challenge is bound to a
 		// specific job and re-dispatching would issue a different one. ONE HOUR
 		// of that is inside every number below (it was fifteen minutes until
-		// 2026-08-30). A budget sized for the restore alone would requeue a job
-		// during the approval the restore requires — and requeuing a restore
-		// starts a second one over the first.
+		// 2026-08-30). A budget sized for the restore alone would fail a job
+		// during the approval the restore requires, and an operator re-running
+		// it would start a second one over the first.
 		//
 		// These grow with the window, which is the cost that bounds it: see
 		// `deferred_destructive_approval.md`, where the wait stops being held
@@ -368,9 +376,6 @@ class ManagementJob extends SystemBase {
 		return self::PRIMITIVE_CLAIM_BUDGETS[$name] ?? self::CLAIM_TIMEOUT_SECONDS;
 	}
 
-	/** After this many lost claims the job fails rather than looping forever. */
-	const MAX_CLAIM_ATTEMPTS = 3;
-
 	/**
 	 * Ceiling on a primitive job's params, matched byte-for-byte on the node
 	 * (agent primitives.MaxParamsBytes). 4 KiB under AgentChannelEndpoint::MAX_JOB_BODY,
@@ -406,6 +411,15 @@ class ManagementJob extends SystemBase {
 
 	/** The outcomes a node agent may report. Anything else is refused at the endpoint. */
 	const AGENT_OUTCOMES = ['completed', 'failed', 'refused'];
+
+	/**
+	 * mjb_agent_outcome on a job this plane gave up on without hearing from the
+	 * node: its agent checked in idle, its budget ran out, or an operator marked
+	 * it failed. Never sent by a node. A result that arrives afterwards replaces
+	 * it (AgentChannelEndpoint::load_reportable_job), because what the node did
+	 * is the truth and 'lost' was only the plane not knowing.
+	 */
+	const OUTCOME_LOST = 'lost';
 
 	/**
 	 * How many jobs a node's agent has refused since a given time.
@@ -616,32 +630,33 @@ class ManagementJob extends SystemBase {
 	}
 
 	/**
-	 * Return an unreported claim to the queue.
+	 * Fail every claim that has run past its own budget without a result.
 	 *
-	 * A claim that never comes back is the normal consequence of an agent
-	 * crashing mid-job, and it is also what a replayed claim would leave
-	 * behind. Either way the job is wedged in 'running', holding the per-node
-	 * concurrency lock, and nothing else for that node can move. Returning it
-	 * to pending with a counted attempt turns a wedge into a delay; after
-	 * MAX_CLAIM_ATTEMPTS it fails outright, because a job that kills three
-	 * agents is not going to succeed on the fourth.
+	 * A job is never handed out a second time. Whatever the node was doing may
+	 * well have happened — getjoinery's data root move finished, and only its
+	 * one result post was lost — so running it again is a second move, a second
+	 * upgrade or a second restore, unattended, hours later. The job fails with
+	 * 'lost' instead; a result that turns up later still lands on it, and a
+	 * person decides whether to run it again.
+	 *
+	 * An agent that reports idle at its claim has its running jobs marked lost
+	 * at once (markLost), so this budget is now the fallback for an agent that
+	 * never comes back, or one too old to say it is idle.
 	 *
 	 * @param int|null $node_id Sweep only this node's claims. A polling agent
-	 *   passes its own id — the lock it cares about is its own, and a
-	 *   fleet-wide scan on every poll of every node is a lot of scanning to
-	 *   answer a question about one machine. The scheduled pass passes null,
-	 *   which is what covers an agent that never polls again.
-	 * @return int How many jobs were acted on.
+	 *   passes its own id; the scheduled pass passes null, which is what covers
+	 *   an agent that never polls again.
+	 * @return int How many jobs were failed.
 	 */
-	static function requeueStaleClaims($node_id = null) {
+	static function failStaleClaims($node_id = null) {
 		$db = DbConnector::get_instance()->get_db_link();
 
 		// Select on the SHORTEST budget, then filter each row against its own
-		// primitive's. A single global cutoff cannot be right for a vocabulary
-		// whose members range from a directory read to a four-hour backup.
+		// primitive's: the vocabulary ranges from a directory read to a
+		// four-hour backup.
 		$cutoff = gmdate('Y-m-d H:i:s', time() - self::shortest_claim_budget());
 
-		$sql = "SELECT mjb_management_job_id, mjb_claim_attempts, mjb_commands,
+		$sql = "SELECT mjb_management_job_id, mjb_commands,
 			        EXTRACT(EPOCH FROM (now() - COALESCE(mjb_started_time, mjb_create_time)))::int AS running_for
 			 FROM mjb_management_jobs
 			 WHERE mjb_status = 'running'
@@ -656,53 +671,67 @@ class ManagementJob extends SystemBase {
 
 		$q = $db->prepare($sql);
 		$q->execute($args);
-		$rows = $q->fetchAll(PDO::FETCH_ASSOC);
 
-		$acted = 0;
-		foreach ($rows as $row) {
-			// Has this job actually outrun ITS OWN budget? A backup_run is
-			// allowed hours; requeueing it at fifteen minutes does not rescue a
-			// wedge, it starts a SECOND backup of the same node while the first
-			// is still writing — and the agent's own poll is what triggers it,
-			// because the endpoint sweeps this node's claims on every poll.
+		$failed = 0;
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 			$budget = self::claim_budget_for($row['mjb_commands']);
 			if ((int)$row['running_for'] < $budget) {
 				continue;
 			}
-
-			$attempts = (int)$row['mjb_claim_attempts'];
-			if ($attempts >= self::MAX_CLAIM_ATTEMPTS) {
-				$fail = $db->prepare(
-					"UPDATE mjb_management_jobs
-					 SET mjb_status = 'failed',
-					     mjb_error_message = ?,
-					     mjb_completed_time = now(),
-					     mjb_update_time = now()
-					 WHERE mjb_management_job_id = ? AND mjb_status = 'running'"
-				);
-				$fail->execute([
-					'Claimed ' . $attempts . ' times by the node agent without a result each time. '
-					. 'The agent may be crashing on this job; check the node before re-running it.',
-					$row['mjb_management_job_id'],
-				]);
-			} else {
-				$requeue = $db->prepare(
-					"UPDATE mjb_management_jobs
-					 SET mjb_status = 'pending',
-					     mjb_started_time = NULL,
-					     mjb_output = COALESCE(mjb_output, '') || ?,
-					     mjb_update_time = now()
-					 WHERE mjb_management_job_id = ? AND mjb_status = 'running'"
-				);
-				$requeue->execute([
-					"\n[The node agent claimed this job and did not report back within "
-						. $budget . " seconds, this primitive's whole budget. Returned to the queue.]\n",
-					$row['mjb_management_job_id'],
-				]);
-			}
-			$acted++;
+			$failed += self::fail_lost((int)$row['mjb_management_job_id'],
+				'No result from the node within ' . $budget . ' seconds, this job\'s whole budget. '
+				. 'What it did on the node is unknown: check the node before running it again.');
 		}
-		return $acted;
+		return $failed;
+	}
+
+	/**
+	 * Fail a node's running jobs as lost, now.
+	 *
+	 * Two callers. The claim endpoint, when the node's agent says it is idle: an
+	 * agent claims only while it runs nothing and has no result waiting to be
+	 * delivered, so a job this plane still has as running was lost — the agent or
+	 * its machine restarted, or the hand-out never reached it. And the job page,
+	 * when an operator marks one failed.
+	 *
+	 * @param int $node_id
+	 * @param string $reason The job's error message.
+	 * @param int|null $job_id Only this job (the job page); NULL for all of the node's.
+	 * @return int How many jobs were failed.
+	 */
+	static function markLost($node_id, $reason, $job_id = null) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT mjb_management_job_id FROM mjb_management_jobs
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_status = 'running'
+			   AND mjb_delete_time IS NULL AND jsonb_exists(mjb_commands, 'primitive')";
+		$args = [(int)$node_id];
+		if ($job_id !== null) {
+			$sql .= ' AND mjb_management_job_id = ?';
+			$args[] = (int)$job_id;
+		}
+		$q = $db->prepare($sql);
+		$q->execute($args);
+		$failed = 0;
+		foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
+			$failed += self::fail_lost((int)$id, $reason);
+		}
+		return $failed;
+	}
+
+	/** One running job to failed/lost; the WHERE clause is the lock. */
+	private static function fail_lost($job_id, $reason) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$fail = $db->prepare(
+			"UPDATE mjb_management_jobs
+			 SET mjb_status = 'failed',
+			     mjb_agent_outcome = ?,
+			     mjb_error_message = ?,
+			     mjb_completed_time = now(),
+			     mjb_update_time = now()
+			 WHERE mjb_management_job_id = ? AND mjb_status = 'running'"
+		);
+		$fail->execute([self::OUTCOME_LOST, $reason, (int)$job_id]);
+		return $fail->rowCount();
 	}
 
 	function prepare() {

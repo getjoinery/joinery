@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.75 - a lost apply_update keeps its own message ("what it did is unknown"), never "finished but
+ *                 the node is still on X" (reviewer2 F5)
  * @version 1.74 - a host report's disk_pool keeps not_mounted (host_report 1.18): a data root declared and down,
  *                  which the node page tells apart from none
  * @version 1.74 - process_upgrade_preflight, process_restore_release_file (specs/release_file_repair.md)
@@ -1458,7 +1460,9 @@ class JobResultProcessor {
 	 */
 	private static function behind_verdict(string $node_outcome, string $node_message,
 		string $output, string $version, string $target): array {
-		if ($node_outcome === 'refused' || $node_outcome === 'failed') {
+		// A lost job is the plane not knowing, never a node that finished: its
+		// own message (what is unknown, and what to do) stands.
+		if ($node_outcome === 'refused' || $node_outcome === 'failed' || $node_outcome === ManagementJob::OUTCOME_LOST) {
 			$message = trim($node_message);
 			if ($message !== '') {
 				return ['reason' => $message, 'node_outcome' => $node_outcome, 'rewrite_message' => false];

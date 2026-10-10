@@ -41,6 +41,13 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.48 - a claim can say idle (agent 1.72.0): the agent runs nothing and holds no undelivered result,
+ *                 so any job this plane still has as running for the node was lost, and is failed as lost at
+ *                 once (ManagementJob::markLost) instead of holding the node's queue for its whole budget. A
+ *                 result may land on a job failed as lost (load_reportable_job): what the node did replaces
+ *                 'lost'. The poll's sweep fails a claim past its budget (failStaleClaims), never requeues it.
+ *                 A late take_node_id result never swaps rows (the copy dropped its staged identity), and a
+ *                 late result is not folded over a newer job of its type that finished since (reviewer2 F1, F6).
  * @version 1.47 - release_file artifact kind (one of five deployment files from a core archive) and the claim's
  *                script_trust_files list, for restore_release_file and the poll's file report
  * @version 1.46 - a join and a claim can say container: the node is named and placed as a container site (ManagedNode::adopt_reported_container)
@@ -1165,6 +1172,13 @@ class AgentChannelEndpoint {
 			// that said so, which is how a site that joined before agents
 			// reported it gets grouped under its Docker host.
 			'container'      => ['type' => 'bool'],
+			// True when the agent is running no job and holds no result it has
+			// not delivered (agent 1.72.0). It claims only then — the job lock
+			// is tried, not waited for, and its outbox is emptied first — so a
+			// job this plane still has as running for the node was lost: the
+			// agent or its machine restarted, or the hand-out never reached it.
+			// Absent for an older agent, whose lost jobs wait out their budget.
+			'idle'           => ['type' => 'bool'],
 		];
 	}
 
@@ -1309,11 +1323,19 @@ class AgentChannelEndpoint {
 		}
 
 		// A claim that never came back would otherwise hold this node's
-		// concurrency lock forever. Swept on every poll — scoped to this node,
-		// because the lock this poll cares about is this node's — so an agent
-		// that crashed heals the moment it comes back. The fleet-wide sweep on
-		// the scheduled pass is what covers an agent that never returns.
-		ManagementJob::requeueStaleClaims((int)$node->key);
+		// concurrency lock. An agent that says it is idle runs nothing and holds
+		// no undelivered result, so whatever this plane still has as running
+		// for it was lost, and fails now: getjoinery's move (job 536) held the
+		// node's queue for four hours after the machine rebooted. An older
+		// agent cannot say so, and its lost job waits out its budget. Neither
+		// is ever handed out again: what it did may well have happened.
+		if (!empty($in['idle'])) {
+			ManagementJob::markLost((int)$node->key,
+				'The node\'s agent checked in with no job running and no result to deliver: the agent or '
+				. 'its machine restarted before it reported, or the job never reached it. What it did on the '
+				. 'node is unknown: check the node before running it again.');
+		}
+		ManagementJob::failStaleClaims((int)$node->key);
 
 		$job = self::claim_next_job_for((int)$node->key);
 		if (!$job) {
@@ -1533,18 +1555,15 @@ class AgentChannelEndpoint {
 			api_error('Result status must be completed, failed or refused.', 'ValidationError', 400);
 		}
 
-		$job = self::load_running_job((int)$in['job_id'], (int)$node->key);
+		$was_lost = false;
+		$job = self::load_reportable_job((int)$in['job_id'], (int)$node->key, $was_lost);
 		self::record_result($node, $job, $in);
 
 		// A copy's take_node_id result is answered with the swap, or without
 		// it: the copy takes its source's node id only when this answer says
 		// node_id_taken (specs/site_copy.md D4). The swap is made here and
 		// nowhere else, because only here does the copy hear about it.
-		$taken = 0;
-		if ((string)$job->get('mjb_job_type') === 'take_node_id' && $in['status'] === 'completed') {
-			$job->load();
-			$taken = JobResultProcessor::complete_take_node_id($job);
-		}
+		$taken = self::settle_take($job, (string)$in['status'], $was_lost);
 
 		// A site copy's step: its run moves on now, not at the next task tick.
 		// After the swap, so a switch-over judges take_node_id by what it did.
@@ -2604,7 +2623,19 @@ class AgentChannelEndpoint {
 	}
 
 	/** Load a job that is genuinely this node's, genuinely a primitive job, and genuinely running. */
-	private static function load_running_job($job_id, $node_id) {
+	/**
+	 * The job a node's result is for: its own, a primitive job, and either
+	 * still running or failed as lost.
+	 *
+	 * A lost job is one this plane gave up on without hearing from the node
+	 * (its agent came back idle, its budget ran out, an operator marked it
+	 * failed). The node's account of what it did is the truth, so a result that
+	 * arrives afterwards — from an agent's outbox after a restart, or after the
+	 * plane itself was down — replaces 'lost'. mjb_result is cleared so the
+	 * result is folded into the node again.
+	 */
+	private static function load_reportable_job($job_id, $node_id, &$was_lost = null) {
+		$was_lost = false;
 		try {
 			$job = new ManagementJob($job_id, TRUE);
 		} catch (Exception $e) {
@@ -2616,11 +2647,71 @@ class AgentChannelEndpoint {
 		if (!$job->isPrimitiveJob()) {
 			api_error('That job is not an agent primitive job.', 'ActionError', 409);
 		}
-		if ($job->get('mjb_status') !== 'running') {
+		$status = (string)$job->get('mjb_status');
+		if ($status === 'failed' && (string)$job->get('mjb_agent_outcome') === ManagementJob::OUTCOME_LOST) {
+			$was_lost = true;
+			$job->set('mjb_error_message', null);
+			// Folded into the node again — unless a newer job of the same type
+			// on this node has finished since this one started: its facts are
+			// newer than these, and a late fold would put the older ones back
+			// over them. mjb_result set keeps process_if_due from folding.
+			$newer = self::newer_finished_job_of_type($job);
+			$job->set('mjb_result', $newer ? json_encode(['superseded_by' => $newer]) : null);
+			return $job;
+		}
+		if ($status !== 'running') {
 			// A replayed result lands here: the job is already terminal, so
 			// there is nothing to write and nothing to corrupt.
 			api_error('That job is not currently claimed by this node.', 'ActionError', 409);
 		}
 		return $job;
+	}
+
+
+	/**
+	 * The id of a job of the same type on the same node that finished after
+	 * $job started, or 0. A result arriving late for a lost job must not fold
+	 * its older facts over that one's.
+	 */
+	private static function newer_finished_job_of_type($job): int {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_management_job_id FROM mjb_management_jobs
+			 WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ? AND mjb_management_job_id <> ?
+			   AND mjb_status IN ('completed', 'failed') AND mjb_delete_time IS NULL
+			   AND COALESCE(mjb_agent_outcome, '') <> 'lost'
+			   AND mjb_completed_time > COALESCE(?, mjb_completed_time)
+			 ORDER BY mjb_completed_time DESC LIMIT 1"
+		);
+		$q->execute([(int)$job->get('mjb_mgn_managed_node_id'), (string)$job->get('mjb_job_type'),
+			(int)$job->key, $job->get('mjb_started_time') ?: $job->get('mjb_create_time')]);
+		return (int)$q->fetchColumn();
+	}
+
+	/**
+	 * The swap a take_node_id result asks for, or none; the node id the copy
+	 * may now take, or 0.
+	 *
+	 * Never for a job this plane had already given up on: by then the copy
+	 * has discarded its staged identity (the agent drops a take's result when
+	 * its post fails), and a swap it will never take leaves both rows naming
+	 * the wrong machine (reviewer2 F1).
+	 */
+	private static function settle_take($job, string $status, bool $was_lost): int {
+		if ((string)$job->get('mjb_job_type') !== 'take_node_id' || $status !== 'completed') {
+			return 0;
+		}
+		$job->load();
+		if (!$was_lost) {
+			return JobResultProcessor::complete_take_node_id($job);
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		$result = is_array($result) ? $result : [];
+		$result['taken'] = false;
+		$result['reason'] = 'The result arrived after the job was given up on; the copy discarded its '
+			. 'staged identity by then, so nothing was swapped. Run the step again.';
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+		return 0;
 	}
 }

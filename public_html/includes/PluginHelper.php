@@ -5,6 +5,10 @@ require_once(__DIR__ . '/ComponentBase.php');
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
  *
+ * @version 1.2.0 - activePluginNames(): the active plugins, or an exception when they cannot be read. The
+ *   class autoloader caches a map per active set, and "the database did not answer" read as "nothing is
+ *   active" let it cache a map with no plugins in it: getjoinery's server_manager classes stopped
+ *   resolving after a restart (B47, 10-10). isPluginActive() keeps answering false then, for its callers.
  * @version 1.1.0 - the active set is read once per request (activeSet()) and
  *   every isActive() answers from it; a request asked "is this plugin active?"
  *   some fifteen times (once per plugin dir just to list the active ones) and
@@ -87,6 +91,47 @@ class PluginHelper extends ComponentBase {
         }
         self::$active_set = $set;
         return $set;
+    }
+
+    /**
+     * The names of the active plugins, sorted: every plg_plugins row with
+     * plg_active = 1, and the active theme provider, which is always active.
+     *
+     * Unlike isPluginActive(), which answers false when it cannot tell, this
+     * throws: a caller that keeps the answer (the class autoloader's cached
+     * map) must be able to tell "nothing is active" from "the database did not
+     * answer".
+     *
+     * @return string[]
+     * @throws RuntimeException when the active set cannot be read
+     */
+    public static function activePluginNames() {
+        if (self::$active_set === null) {
+            try {
+                $dblink = DbConnector::get_instance()->get_db_link();
+                $q = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active = 1");
+                $set = [];
+                foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $name) {
+                    $set[$name] = true;
+                }
+                self::$active_set = $set;
+            } catch (Throwable $e) {
+                throw new RuntimeException('The active plugins cannot be read: ' . $e->getMessage(), 0, $e);
+            }
+        }
+        $names = array_keys(self::$active_set);
+        try {
+            $settings = Globalvars::get_instance();
+            $provider = $settings->get_setting('theme_template') === 'plugin'
+                ? (string)$settings->get_setting('active_theme_plugin') : '';
+        } catch (Throwable $e) {
+            throw new RuntimeException('The active theme provider cannot be read: ' . $e->getMessage(), 0, $e);
+        }
+        if ($provider !== '' && !in_array($provider, $names, true)) {
+            $names[] = $provider;
+        }
+        sort($names);
+        return $names;
     }
 
     /**

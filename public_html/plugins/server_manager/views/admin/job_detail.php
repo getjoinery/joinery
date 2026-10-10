@@ -5,6 +5,10 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.16 - Mark as failed on a running agent job: fails it as lost (ManagementJob::markLost) and frees the
+ *                 node's queue; a result that arrives later still replaces it. No running job was ever stuck
+ *                 past what a page could clear again (getjoinery job 536, 10-10). The hour-long-run warning
+ *                 points at the button, not at a shell on the node.
  * @version 1.15 - a publish that asked to deploy to all managed nodes says what became of that: the nodes it
  *                 will reach, the rollout it started (loading the page starts it), or why it did not
  * @version 1.14 - a disk_usage result shows the data root's figures and biggest directories beside the site tree
@@ -64,6 +68,20 @@ if ($post_action === 'cancel_job' && in_array($job->get('mjb_status'), ['pending
 	$job->set('mjb_status', 'cancelled');
 	$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
 	$job->save();
+	header('Location: /admin/server_manager/job_detail?job_id=' . $job_id);
+	exit;
+}
+
+// A running agent job the node will not report: its agent restarted without
+// saying it is idle (an agent before 1.72.0), or something nobody foresaw. Failed
+// as lost, the same verdict the claim endpoint and the budget sweep give, so a
+// result that arrives later still lands on it.
+if ($post_action === 'mark_job_lost' && $job->get('mjb_status') === 'running' && $job->isPrimitiveJob()) {
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/job_detail?job_id=' . $job_id); exit; }
+	ManagementJob::markLost((int)$job->get('mjb_mgn_managed_node_id'),
+		'Marked failed from the job page while it showed as running. What it did on the node is unknown: '
+		. 'check the node before running it again. A result the node sends later replaces this.',
+		(int)$job->key);
 	header('Location: /admin/server_manager/job_detail?job_id=' . $job_id);
 	exit;
 }
@@ -282,7 +300,7 @@ $status_class = match($job->get('mjb_status')) {
 			if ($running_seconds > 3600): ?>
 				<div class="alert alert-warning mt-2">
 					<strong>This job has been running for <?php echo round($running_seconds / 3600, 1); ?> hours.</strong>
-					It may be stuck. Check agent logs: <code>journalctl -u joinery-agent -f</code>
+					It may be stuck. If the node will not report it, <strong>Mark as failed</strong> frees the node for its next job.
 				</div>
 			<?php endif;
 		}
@@ -294,6 +312,13 @@ $status_class = match($job->get('mjb_status')) {
 					<input type="hidden" name="action" value="cancel_job">
 					<?php echo SmAdminCsrf::field(); ?>
 					<button type="button" class="btn btn-sm btn-warning" onclick="JoineryModal.confirm('Cancel this job?', function(){ document.getElementById('cancel_job_form').submit(); })">Cancel</button>
+				</form>
+			<?php endif; ?>
+			<?php if ($job->get('mjb_status') === 'running' && $job->isPrimitiveJob()): ?>
+				<form method="post" action="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>" id="mark_job_lost_form" style="display:inline;">
+					<input type="hidden" name="action" value="mark_job_lost">
+					<?php echo SmAdminCsrf::field(); ?>
+					<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('Mark this job as failed? Do this only when the node is not going to report it: its agent or machine restarted, or it is long past its time. It is never run again by itself, and the node is free for its next job. If the node does report it later, its result replaces this.', function(){ document.getElementById('mark_job_lost_form').submit(); })">Mark as failed</button>
 				</form>
 			<?php endif; ?>
 			<?php if (in_array($job->get('mjb_status'), ['completed', 'failed', 'cancelled'])): ?>

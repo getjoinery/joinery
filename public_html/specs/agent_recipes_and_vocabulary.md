@@ -391,6 +391,16 @@ the host keeps run specs, so the operator opened a read-only SSH session to dock
 | To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | The plane-side notice over stored samples (floor **and** slope, § 2 of the spec) was **dropped by the owner 2026-09-22**: disk space is the operator's responsibility and a daily notice is noise. What was built is the node's own floor: recipe `disk_headroom` (check-only, `Recipe.NoRepair`: 10% or 5 GiB available, a case on the first failing check) — **BUILT** (agent 1.41.0) |
 | Whether a user's Mark as spam reached the spam filter on jeremytunnell (10-03) — the correction rows and the size of the learned corpus | Read-only SSH and a PHP query against `iem_inbound_email_messages` and `ibt_inbound_bayes_tokens`; the cron log only said Taught 0, which cannot tell a correction already taught apart from one never recorded | `spam_learning_status` (observe, no parameters): counts only, never a subject or address — corrections recorded, taught, pending clear, pending sealed, skipped as IMAP-polled in the last 7 days, corpus token count and newest token time, and the two policy switches |
 
+**2026-10-10, the data root moves (one_data_root.md WP4), joinerydemo first.** The move
+ran through `data_root_migrate`, and its last step is a reboot: the old copies stay
+until the host has booted with the data root working, and the reboot is what proves
+the mounts come up on their own. Nothing on the plane can reboot a machine, and every
+production host already showed "Reboot required" for 1 to 7 days.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| To reboot a host after a data root move, and to act on "Reboot required" at all | The owner rebooted from Linode's Cloud Manager; on a server outside our accounts (jeremytunnell-vps, the owner's own Linode) only its owner can | `reboot_machine` (operate, machine, no parameters): schedules the reboot a few seconds out so the job reports first, refuses inside a site container; a node page button behind a confirm beside "Reboot required"; the plane notes the boot id before and sees it change |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.

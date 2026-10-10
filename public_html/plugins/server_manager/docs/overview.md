@@ -194,7 +194,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager/node_add` | **Add Node** -- the record a node's own join request is approved against |
 | `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (any provider in `StorageProvider`), and Where new backups go |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
-| `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
+| `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling; **Cancel** a pending job, **Mark as failed** a running agent job its node will not report, **Re-run** a finished one |
 | `/admin/server_manager/domains` | **Domains** -- managed domain registrations: hand-overs waiting for a registrar push, failures, and the full ledger |
 | `/admin/server_manager/transfers` | **Server Transfers** -- hosted sites moving to their customers' own Linode accounts: state, code expiry, what Linode last said, the last email and check, and any to-do (see [Hosted tier](hosted_tier.md#moving-a-site-to-its-customers-own-linode-account)) |
 | `/admin/server_manager/rollouts` | **Staged Rollout** -- apply this management node's release across chosen nodes, one at a time in the order given, stopping at the first node whose apply does not prove good (see *Staged rollout* below) |
@@ -355,11 +355,17 @@ A refused job is a terminal failure like any other, and reads as one everywhere 
 
 This matters more as the vocabulary grows. A node refusing work is a node whose plane is asking for something it should not be, or whose policy has been tightened without the plane noticing — either way it is the number, not the prose, that an alert reads.
 
-A job this plane gives up on after repeated lost claims records **no** node outcome. The node never reported one, and inventing a verdict for it would make the refusal count untrustworthy in exactly the situation where it is being consulted.
+A job this plane gives up on records the outcome `lost` (`ManagementJob::OUTCOME_LOST`), never one a node can send. The node never reported one, and inventing a verdict for it would make the refusal count untrustworthy in exactly the situation where it is being consulted.
 
 ### When a claim does not come back
 
-An agent claims a job and then reports. If it never reports — it crashed, the box rebooted, the network went — the job would otherwise sit in `running` holding that node's concurrency lock. A claim older than 15 minutes is returned to the queue with a note in the job output saying so, on every poll and on every scheduled uptime pass. After three such claims the job fails instead, naming the node: a job that kills three agents will not succeed on the fourth.
+An agent claims a job and then reports. If it never reports — it crashed, the box rebooted, the network went — the job would otherwise sit in `running` holding that node's concurrency lock. **A job is never handed out a second time**: whatever the node was doing may well have happened, and running a move, an upgrade or a restore again, unattended, is worse than not knowing. A lost job fails with the outcome `lost` and a message saying what it did on the node is unknown, and a person decides whether to run it again. It is found lost three ways:
+
+- **The agent checks in idle** (agent 1.72.0+). An agent claims only while it runs nothing and owes no result, and says `idle` on that claim; whatever this plane still has as running for the node is failed as lost at once (`ManagementJob::markLost`). This is what catches an agent or a machine that restarted mid-job.
+- **Its claim budget runs out** (`ManagementJob::failStaleClaims`, on every poll and every scheduled uptime pass): 15 minutes, or the primitive's own budget (`PRIMITIVE_CLAIM_BUDGETS`). This covers an agent that never comes back, or one too old to say it is idle.
+- **An operator marks it failed**: **Mark as failed** on a running job's page, behind a confirm. It frees the node for its next job.
+
+A result that arrives after any of these still lands: what the node did replaces `lost` (unless a newer job of the same type on the node has finished since, whose facts stand). The agent keeps every result on disk (`/etc/joinery-agent/outbox`) until this plane has taken it or refused it for good — a 4xx other than a rate limit or a refusal for the node's clock — and delivers what it kept before it claims anything, so a result posted to a management node that was down, or one cut off by a restart, arrives once it can. After an hour undelivered a result is sent as its outcome alone; after a day it is dropped and the agent's log says so, by which time this plane has failed the job as lost. A copy's `take_node_id` result is the exception: one whose post failed is dropped at once, because the copy gives up the identity it staged, and this plane never swaps node rows for a take that arrives after the job was given up on. While a unit a primitive started is still running on its own (the data root move), the agent's claim does not say idle, so the move's job keeps the node until it reports.
 
 **Status facts are kept current on a cadence.** Version, certificate, disk and memory facts are measured only by a `check_status` job. Every scheduled uptime pass queues one for each enabled node whose agent offers the primitive and has no `check_status` completed inside the last hour (`RunNodeUptimeChecks::STATUS_REFRESH_SECONDS`, matching the hourly plugin health report), whatever the node's uptime setting — the up/down probe and the facts measure different things. The job table decides, not `mgn_last_status_check`, which the probe also stamps when it reads a site's health document. A queued or running `check_status`, or one completed inside the window, counts as cover, so a stale node yields one job per window.
 
@@ -1914,8 +1920,9 @@ Three rules keep a fleet from behaving like a thundering herd:
   `mgn_mgh_managed_host_id`) take turns, and a node on a machine of its own
   waits for nobody. Only claimed work occupies a machine: an agent claims
   within seconds of polling, so a job still pending is one no agent is
-  running, and it holds nobody back. A lost claim is requeued at its budget
-  (`ManagementJob::requeueStaleClaims`), which frees its machine.
+  running, and it holds nobody back. A lost claim is failed as lost when its
+  agent checks in idle or its budget runs out (`ManagementJob::markLost`,
+  `failStaleClaims`), which frees its machine.
 
 A node whose agent has never checked in, or not within the two hours after
 which **The agent stopped checking in** opens (`IncidentSourceAgentSilent`),

@@ -28,6 +28,8 @@
  *
  * Run: php tests/unit/class_autoloader_test.php
  *
+ * @version 1.5 - a cached map is one site's and one plugin set's (B47): per-site APCu key, the plugin set
+ *               stored and checked on read, a set that cannot be read never cached
  * @version 1.4 - no prefix lists two models (InboundEmailFilter took ief)
  * @version 1.3 - the shared-prefix case is fil (ContentVersion took cvn)
  * @version 1.2 - the shared-prefix case is cnv; abt has one owner (specs/implemented/shared_prefixes_first_three.md)
@@ -126,6 +128,54 @@ $miss_ms = (int)shell_exec($probe . ' 2>/dev/null');
 check($miss_ms < 100,
 	'a miss against an unchanged tree costs a stat walk, not a rebuild',
 	$miss_ms . ' ms');
+
+section('A cached map is one site\'s and one plugin set\'s (B47)');
+
+// After getjoinery's data root move (10-10) its server_manager classes stopped
+// resolving: a map that did not have them stood in the shared cache. Two holes
+// let that happen, and both are closed here.
+check(preg_match('/function cache_key\(\).*?md5\(PathHelper::getSiteRoot\(\)\)/s', $src) === 1
+	&& strpos($src, 'apcu_fetch(self::cache_key()') !== false && strpos($src, 'apcu_store(self::cache_key()') !== false,
+	'the APCu key names the site: every site on a host shares one PHP-FPM pool, and two sites on one release fingerprint alike');
+check(strpos($src, "'plugins'  => self::\$plugins") !== false,
+	'the cached map carries the active plugins it was built for');
+check(preg_match('/function cache_read\(\).*?\$current !== \$value\[\'plugins\'\]/s', $src) === 1,
+	'and is used only while they are still the active set');
+check(preg_match('/function cache_read\(\).*?if \(!\$complete\) \{.*?return \$value;.*?CACHE_TTL/s', $src) === 1,
+	'while the set cannot be read the last good map stands, past its TTL too (reviewer2 F4)');
+check(strpos($src, 'PluginHelper::activePluginNames()') !== false,
+	'the set comes from activePluginNames(), which throws when it cannot tell');
+$ph_src = file_get_contents(PathHelper::getIncludePath('includes/PluginHelper.php'));
+check(preg_match('/function activePluginNames\(\).*?throw new RuntimeException/s', $ph_src) === 1,
+	'activePluginNames() throws rather than answer "none" when the database does not answer');
+
+// Live: a cache file claiming another plugin set, with a map missing every
+// plugin class, is thrown away by the next lookup and rebuilt for the real set.
+$real_plugins = PluginHelper::activePluginNames();
+$probe_class = '';
+foreach ($real_plugins as $pl) {
+	foreach ((array)glob(PathHelper::getIncludePath('plugins/' . $pl . '/includes') . '/*.php') as $f) {
+		if (preg_match('/^\s*(?:final\s+|abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)/m', (string)file_get_contents($f), $m)) {
+			$probe_class = $m[1];
+			break 2;
+		}
+	}
+}
+check($probe_class !== '', 'an active plugin\'s class to probe with', $probe_class);
+$poisoned = $decoded;
+$poisoned['map'] = array_filter($decoded['map'], function ($path) { return strpos($path, '/plugins/') === false; });
+$poisoned['plugins'] = array();
+$poisoned['built'] = time();
+file_put_contents($json_map . '.poison', json_encode($poisoned));
+rename($json_map . '.poison', $json_map);
+$lookup = escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=0 -r '
+	. escapeshellarg('require_once("' . PathHelper::getIncludePath('includes/PathHelper.php') . '");'
+		. ' echo class_exists("' . $probe_class . '") ? "yes" : "no";');
+check(trim((string)shell_exec($lookup . ' 2>/dev/null')) === 'yes',
+	'a map cached for another plugin set (none) does not stand: the plugin class resolves at once');
+$after = json_decode((string)file_get_contents($json_map), true);
+check(($after['plugins'] ?? null) === $real_plugins,
+	'and the cache is rebuilt for the real set', json_encode($after['plugins'] ?? null));
 
 section('The cache is not writable by the whole machine');
 
