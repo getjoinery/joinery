@@ -6,7 +6,7 @@
 # needs: []
 # timeout: 60
 #
-# utils/upgrade.php must run one upgrade at a time: staging (uploads/upgrades/)
+# utils/upgrade.php must run one upgrade at a time: staging (SITE/upgrades/)
 # is shared state, so a second run's staging-clear wipes the first run's
 # extraction mid-flight and whichever run swaps first deploys a broken tree.
 # The guard is a kernel-held flock — a killed run releases it automatically and

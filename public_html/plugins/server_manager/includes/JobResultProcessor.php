@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.73 - process_disk_usage keeps the data root's figures and tree (disk_usage.sh 1.1), or none
  * @version 1.72 - process_run_plugin_installers and process_host_converge go red with the runner's reason when the host's
  *                 data root is not ready and nothing ran (one_data_root WP1, reviewer2 F2)
  * @version 1.71 - process_copy_take_key keeps the run, and when and at which provider the copy read that the backup
@@ -3158,25 +3159,42 @@ HTML;
 
 		$fs = is_array($decoded['filesystem'] ?? null) ? $decoded['filesystem'] : [];
 		$tree = is_array($decoded['tree'] ?? null) ? $decoded['tree'] : [];
+		// The data root (disk_usage.sh 1.1): its own figures and tree, where
+		// the host has one; null where it has none or the script predates it.
+		$dr = is_array($decoded['data_root'] ?? null) ? $decoded['data_root'] : null;
 
 		$job->set('mjb_result', json_encode([
-			'read'       => true,
-			'filesystem' => [
-				'path'        => self::disk_usage_path($fs['path'] ?? ''),
-				'used_bytes'  => self::host_report_count($fs['used_bytes'] ?? null),
-				'total_bytes' => self::host_report_count($fs['total_bytes'] ?? null),
-				'avail_bytes' => self::host_report_count($fs['avail_bytes'] ?? null),
-			],
-			'tree' => [
-				'path'        => self::disk_usage_path($tree['path'] ?? ''),
-				'total_bytes' => self::host_report_count($tree['total_bytes'] ?? null),
-				'partial'     => !empty($tree['partial']),
-				'entries'     => self::disk_usage_entries($tree['entries'] ?? null),
+			'read'         => true,
+			'filesystem'   => self::disk_usage_filesystem($fs),
+			'tree'         => self::disk_usage_tree($tree),
+			'data_root'    => $dr === null ? null : [
+				'filesystem' => self::disk_usage_filesystem(is_array($dr['filesystem'] ?? null) ? $dr['filesystem'] : []),
+				'tree'       => self::disk_usage_tree(is_array($dr['tree'] ?? null) ? $dr['tree'] : []),
 			],
 			'machine'      => self::disk_usage_entries($decoded['machine'] ?? null),
 			'generated_at' => self::host_report_count($decoded['generated_at'] ?? null),
 		]));
 		$job->save();
+	}
+
+	/** A disk_usage filesystem object: a path and three byte counts. */
+	private static function disk_usage_filesystem(array $fs) {
+		return [
+			'path'        => self::disk_usage_path($fs['path'] ?? ''),
+			'used_bytes'  => self::host_report_count($fs['used_bytes'] ?? null),
+			'total_bytes' => self::host_report_count($fs['total_bytes'] ?? null),
+			'avail_bytes' => self::host_report_count($fs['avail_bytes'] ?? null),
+		];
+	}
+
+	/** A disk_usage tree: its root, its total, whether the walk was partial, and its capped entries. */
+	private static function disk_usage_tree(array $tree) {
+		return [
+			'path'        => self::disk_usage_path($tree['path'] ?? ''),
+			'total_bytes' => self::host_report_count($tree['total_bytes'] ?? null),
+			'partial'     => !empty($tree['partial']),
+			'entries'     => self::disk_usage_entries($tree['entries'] ?? null),
+		];
 	}
 
 	/** A path as the walker bounds it: safe characters, capped, never empty. */

@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.58 - the disk allowance's help says it needs a multi-tenant host: every new Docker host has a data root
  * @version 1.57 - the disk_pool gauge is labelled Data root: host_report reports the host's data root, /srv/joinery, under
  *                 that key (one_data_root WP1)
  * @version 1.56 - the SSH Key Path is required only for a node with no paired agent; a node the agent manages has no
@@ -1199,7 +1200,7 @@
 							'helptext' => 'Restarts the site, so PostgreSQL and PHP size themselves to it.']);
 						$fw_sl->textinput('cpus', 'CPU ceiling (cores)', ['placeholder' => '1.0', 'maxlength' => 8]);
 						$fw_sl->textinput('disk', 'Disk allowance', ['placeholder' => '4g', 'maxlength' => 8,
-							'helptext' => 'Only on a host with a disk pool; none takes it away. Leave a field empty to keep it. A memory limit or CPU ceiling is lifted by rebuilding the site (install.sh site --memory=none).']);
+							'helptext' => 'Only on a multi-tenant host; none takes it away. Leave a field empty to keep it. A memory limit or CPU ceiling is lifted by rebuilding the site (install.sh site --memory=none).']);
 						$fw_sl->submitbutton('btn_site_limits', 'Change limits', ['class' => 'btn btn-sm btn-outline-secondary']);
 						$fw_sl->end_form();
 						echo '</details>';

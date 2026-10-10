@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.12 - A bare-metal site on a data root (specs/one_data_root.md WP2): its folders are bind
+#               mounts of /srv/joinery/sites/<site>, so before its directory goes,
+#               joinery_data_root.sh remove-site takes those mounts away (the target first, so no
+#               service stops) and removes its data there, and its own test site's too. rm -rf over
+#               live mounts emptied them and then stopped the removal at the first mountpoint
+#               (reviewer2 F2).
 #VERSION 2.11 - A site's disk allowance goes with it (docker_disk_pool.sh, specs/
 #               multi_tenant_docker_hosts.md WP4): its projects leave /etc/projid and
 #               /etc/projects, and its disk_allowance mark goes; its volumes include deploy
@@ -481,8 +487,19 @@ if [ "$IS_BAREMETAL" = true ]; then
         echo "WARNING: Failed to reload Apache, but continuing with cleanup"
     fi
 
-    # Remove website directories
+    # Remove website directories. On a data root the site's folders are
+    # mounts of /srv/joinery/sites/<site>: those go first, with the data
+    # behind them, so rm meets ordinary directories.
     echo "Removing website directories..."
+    DATA_ROOT_TOOL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../install_tools" 2>/dev/null && pwd)/joinery_data_root.sh"
+    if [ -f "$DATA_ROOT_TOOL" ]; then
+        for dr_site in "$SITE_NAME" $( [ "$OWN_TEST_SITE" = true ] && echo "${SITE_NAME}_test" ); do
+            JOINERY_HOST_ROOT="$FS" bash "$DATA_ROOT_TOOL" remove-site "$dr_site" \
+                || { echo "ERROR: ${dr_site}'s folders on the data root could not be taken away (above); nothing more was removed."; exit 1; }
+        done
+    elif [ -f "$FS/etc/joinery/data_binds" ]; then
+        echo "WARNING: this host has a data root, but $DATA_ROOT_TOOL is missing, so ${SITE_NAME}'s folders mounted from it cannot be taken away first."
+    fi
     if [ -d "$SITE_ROOT" ]; then
         rm -rf "${SITE_ROOT:?}"
         echo "Removed: $SITE_ROOT"

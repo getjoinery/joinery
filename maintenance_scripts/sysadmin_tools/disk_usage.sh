@@ -5,6 +5,10 @@
 # and the machine directories that are usually the answer when a site tree is
 # not.
 #
+# Version: 1.1 - data_root: on a host with a data root (/srv/joinery, specs/one_data_root.md),
+#                its own figures and its biggest directories to depth three. A site's folders
+#                and Postgres are bind mounts of it, so the -x walk of the site tree stops at
+#                them; this is where their space shows. "none" on a host without one.
 # Version: 1.0 - the disk_usage observe word of
 #                specs/disk_headroom_and_unit_diagnosis.md § 11. The agent runs
 #                this file, verified against the release manifest, with no argv
@@ -27,7 +31,8 @@
 #     anything to escape and nothing a directory was named can break the JSON.
 #   - -x, always: du never walks off the filesystem it started on. A bind mount
 #     or a network mount under the tree is somebody else's disk and not this
-#     figure's business.
+#     figure's business. The data root is the one other disk reported, walked
+#     from its own top, and only where it is mounted.
 #   - READ ONLY, and deliberately polite: nice and ionice, because walking a
 #     large tree on a small box is the one read in this vocabulary that costs
 #     the machine something.
@@ -43,6 +48,9 @@ DU_TIMEOUT=240          # seconds for one walk
 MAX_ENTRIES=20          # directories reported from the tree
 MAX_PATH=200            # characters kept of any path
 TREE_DEPTH=2
+# The data root, where a host has one: depth three reaches sites/<site>/<folder>.
+DATA_ROOT=/srv/joinery
+DATA_ROOT_DEPTH=3
 
 SITE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WEB_ROOT="$SITE_ROOT/public_html"
@@ -83,43 +91,57 @@ du_run() {
 # The filesystem, from df — the same figures host_report carries, repeated here
 # on purpose so one answer explains itself without a second word.
 # ---------------------------------------------------------------------------
-emit_filesystem() {
+emit_filesystem() {  # PATH
     local line used total avail
-    line="$(timeout 10 df -B1 --output=used,size,avail "$WEB_ROOT" 2>/dev/null | tail -n 1)"
+    line="$(timeout 10 df -B1 --output=used,size,avail "$1" 2>/dev/null | tail -n 1)"
     read -r used total avail <<< "$line"
     printf '{"path":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s}' \
-        "$(json_path "$WEB_ROOT")" \
+        "$(json_path "$1")" \
         "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" \
         "$(json_num_or_unknown "${avail:-}")"
 }
 
 # ---------------------------------------------------------------------------
-# The site tree: its own total, and its biggest directories to depth two, with
-# paths relative to the tree so the object never repeats the site root.
+# A tree: its own total, and its biggest directories to DEPTH, with paths
+# relative to the tree so the object never repeats its root.
 # ---------------------------------------------------------------------------
-emit_tree() {
-    local out rc total entries n=0 first=1 bytes path rel
-    out="$(du_run "$SITE_ROOT" "$TREE_DEPTH")"; rc=$?
+emit_tree() {  # ROOT DEPTH
+    local root="$1" out rc total entries n=0 first=1 bytes path rel
+    out="$(du_run "$root" "$2")"; rc=$?
     if [[ -z "$out" ]]; then
-        printf '{"path":%s,"total_bytes":"unknown","partial":true,"entries":[]}' "$(json_path "$SITE_ROOT")"
+        printf '{"path":%s,"total_bytes":"unknown","partial":true,"entries":[]}' "$(json_path "$root")"
         return
     fi
-    total="$(printf '%s\n' "$out" | awk -v r="$SITE_ROOT" -F'\t' '$2==r {print $1; exit}')"
-    printf '{"path":%s,' "$(json_path "$SITE_ROOT")"
+    total="$(printf '%s\n' "$out" | awk -v r="$root" -F'\t' '$2==r {print $1; exit}')"
+    printf '{"path":%s,' "$(json_path "$root")"
     printf '"total_bytes":%s,' "$(json_num_or_unknown "${total:-}")"
     printf '"partial":%s,' "$( (( rc == 0 )) && printf 'false' || printf 'true' )"
     printf '"entries":['
-    entries="$(printf '%s\n' "$out" | awk -v r="$SITE_ROOT" -F'\t' '$2!=r' | sort -t$'\t' -k1,1nr)"
+    entries="$(printf '%s\n' "$out" | awk -v r="$root" -F'\t' '$2!=r' | sort -t$'\t' -k1,1nr)"
     while IFS=$'\t' read -r bytes path; do
         [[ -n "$path" ]] || continue
         (( n < MAX_ENTRIES )) || break
-        rel="${path#"$SITE_ROOT"/}"
+        rel="${path#"$root"/}"
         (( first )) || printf ','
         first=0
         printf '{"path":%s,"bytes":%s}' "$(json_path "$rel")" "$(json_num_or_unknown "$bytes")"
         n=$((n+1))
     done <<< "$entries"
     printf ']}'
+}
+
+# ---------------------------------------------------------------------------
+# The data root, where it is mounted: its figures and its tree. "none" where
+# this host has none mounted, which is an answer too.
+# ---------------------------------------------------------------------------
+emit_data_root() {
+    if ! timeout 10 findmnt -n --mountpoint "$DATA_ROOT" >/dev/null 2>&1; then
+        printf '"none"'
+        return
+    fi
+    printf '{"filesystem":%s,' "$(emit_filesystem "$DATA_ROOT")"
+    printf '"tree":%s,' "$(emit_tree "$DATA_ROOT" "$DATA_ROOT_DEPTH")"
+    printf '"depth":%s}' "$DATA_ROOT_DEPTH"
 }
 
 # ---------------------------------------------------------------------------
@@ -148,8 +170,9 @@ emit_machine() {
 # The object. One line, every key, in this order.
 # ---------------------------------------------------------------------------
 printf '{'
-printf '"filesystem":%s,' "$(emit_filesystem)"
-printf '"tree":%s,' "$(emit_tree)"
+printf '"filesystem":%s,' "$(emit_filesystem "$WEB_ROOT")"
+printf '"tree":%s,' "$(emit_tree "$SITE_ROOT" "$TREE_DEPTH")"
+printf '"data_root":%s,' "$(emit_data_root)"
 printf '"machine":%s,' "$(emit_machine)"
 printf '"depth":%s,' "$TREE_DEPTH"
 printf '"max_entries":%s,' "$MAX_ENTRIES"

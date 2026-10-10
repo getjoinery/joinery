@@ -3,6 +3,10 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.2 - Every new Docker host has the data root (one_data_root WP2), so a data root no
+#                longer says the host is multi-tenant: can-cap answers whether a site's disk can
+#                be capped here (the pool in place and userns-remap on), and allow asks it. create
+#                takes a device as well as a size.
 # Version: 2.1 - review (reviewer2): JOINERY_POOL_ROOT is refused as root (F3); pool_mounted
 #                accepts Docker's data-root with a trailing slash (F7); create says when it
 #                ignores a SIZE because the data root exists (F7).
@@ -20,15 +24,21 @@
 #                the whole pool as its own use and refused every upload (reviewer2 B1).
 # Version: 1.0
 #
-#   docker_disk_pool.sh create [SIZE]    Root, on a host Docker is not on yet.
+#   docker_disk_pool.sh create [SIZE|DEVICE]
+#                                        Root, on a host Docker is not on yet.
 #                                        Makes the host's data root when it has
-#                                        none (joinery_data_root.sh create SIZE:
-#                                        XFS at /srv/joinery with project quotas,
-#                                        grown as it fills), and points Docker's
-#                                        data-root at /srv/joinery/docker.
+#                                        none (joinery_data_root.sh create: XFS
+#                                        at /srv/joinery with project quotas, in
+#                                        a file of SIZE grown as it fills, or on
+#                                        DEVICE), and points Docker's data-root
+#                                        at /srv/joinery/docker.
 #   docker_disk_pool.sh check            Exit 0 when the data root is mounted
 #                                        with project quotas on and Docker's
 #                                        data-root is in it; 1 when not.
+#   docker_disk_pool.sh can-cap          Exit 0 when a site's disk can be capped
+#                                        here: the pool in place, and Docker
+#                                        remapping user ids; 1, with the reason,
+#                                        when not.
 #   docker_disk_pool.sh allow SITE SIZE  Root. Gives the site's volumes one
 #                                        allowance of SIZE: one project over all
 #                                        of them but backups and deploy, whose
@@ -130,10 +140,19 @@ pool_mounted() {
     [[ "$dr" == "${DOCKER_DATA_ROOT}" ]]
 }
 
+# A site's disk can be capped here: the pool is in place, and root in a
+# container is not root on the host. Without remapping, a site's own
+# processes own its files and can move them out of its project (chattr -p).
+can_cap() {
+    pool_mounted || { printf 'docker_disk_pool: this host has no disk pool\n' >&2; return 1; }
+    [[ -n "$(docker_daemon_json_get userns-remap)" ]] \
+        || { printf 'docker_disk_pool: Docker does not remap user ids here, so a site could move its own files out of its allowance\n' >&2; return 1; }
+}
+
 do_create() {
     local want="${1:-}" rc=0
-    if [[ -n "$want" ]]; then
-        [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the pool size is a number with G, M or T (68G), not '${want}'"
+    if [[ -n "$want" && "$want" != /dev/* ]]; then
+        [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the size is a number with G, M or T (68G), or a device under /dev, not '${want}'"
     fi
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
 
@@ -145,13 +164,13 @@ do_create() {
     # Docker has run, its images and volumes are where it put them, and
     # pointing it elsewhere would leave every site behind.
     if command -v dockerd >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
-        die "Docker is already installed here; the pool must be made before it. Make it on a new host: install.sh docker --disk-pool=SIZE"
+        die "Docker is already installed here; the pool must be made before it. Make it on a new host: install.sh docker"
     fi
 
     data_root check >/dev/null 2>&1 || rc=$?
     case "$rc" in
         0) say "The host's data root is already mounted; the pool is made on it"
-           [[ -z "$want" ]] || say "The size ${want} was not used: the data root exists and grows by itself" ;;
+           [[ -z "$want" ]] || say "${want} was not used: the data root exists and grows by itself" ;;
         2) data_root create ${want:+"$want"} || die "the data root could not be made; nothing else was changed" ;;
         *) die "this host has a data root that is not mounted: $(data_root check 2>&1 || true). Nothing was changed." ;;
     esac
@@ -243,7 +262,7 @@ do_allow() {
     site_name_ok "$site" || die "'${site}' is not a site name"
     bytes="$(size_bytes "$want")" || die "the allowance is a number with G, M or T (4G), not '${want}'"
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
-    pool_mounted || die "this host has no disk pool, so a site's disk cannot be capped here (install.sh docker --disk-pool=SIZE makes one on a new host)"
+    can_cap || die "a site's disk cannot be capped here (install.sh docker --multi-tenant makes a host that can, on a new host)"
 
     while IFS=$'\t' read -r suffix mp; do
         [[ -n "$suffix" ]] || continue
@@ -319,8 +338,9 @@ do_show() {
 case "${1:-}" in
     create)  do_create "${2:-}" ;;
     check)   pool_mounted ;;
+    can-cap) can_cap ;;
     allow)   do_allow "${2:-}" "${3:-}" ;;
     release) do_release "${2:-}" ;;
     show)    do_show "${2:-}" ;;
-    *) die "usage: docker_disk_pool.sh create [SIZE] | check | allow SITE SIZE | release SITE | show SITE" ;;
+    *) die "usage: docker_disk_pool.sh create [SIZE|DEVICE] | check | can-cap | allow SITE SIZE | release SITE | show SITE" ;;
 esac

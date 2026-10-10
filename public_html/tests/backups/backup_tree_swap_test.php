@@ -118,14 +118,14 @@ copy($snar, $snar_before_swap);
 
 // utils/upgrade.php's deploy: the backup area is cleared, the staged tree is
 // laid down, the live children move out and the staged children move in.
-$stage = $site . '/uploads/upgrades/public_html';
+$stage = $site . '/upgrades/public_html';
 exec('find ' . escapeshellarg($site . '/public_html_last') . ' -mindepth 1 -delete');
 tree_make($stage, 'v2');
 exec('find ' . escapeshellarg($site . '/public_html') . ' -mindepth 1 -maxdepth 1 -exec mv -t '
 	. escapeshellarg($site . '/public_html_last') . ' {} +');
 exec('find ' . escapeshellarg($stage) . ' -mindepth 1 -maxdepth 1 -exec mv -t '
 	. escapeshellarg($site . '/public_html') . ' {} +');
-exec('rm -rf ' . escapeshellarg($site . '/uploads'));
+exec('rm -rf ' . escapeshellarg($site . '/upgrades'));
 
 list($l2, $a2) = engine_run($engine, $site, $snar, $w, 'files-0002');
 check($l2 === 0, 'the run after a swap is a full, not an incremental across the swap', var_export($l2, true));
@@ -171,14 +171,17 @@ list($c0, $ca0) = engine_run($engine, $ps, $cs, $p, 'code-0000', 'code');
 check($d0 === 0 && $c0 === 0, 'the first run is a full of both parts');
 
 // The upgrade's swap, as utils/upgrade.php does it, and a new upload beside it.
-$pstage = $ps . '/uploads/upgrades/public_html';
+// Staging is made anew beside the code and left there empty, as the deploy
+// leaves it: the data's identity must not see it.
+$pstage = $ps . '/upgrades/public_html';
 tree_make($pstage, 'v2');
 @mkdir($ps . '/public_html_last', 0755, true);
 exec('find ' . escapeshellarg($ps . '/public_html') . ' -mindepth 1 -maxdepth 1 -exec mv -t '
 	. escapeshellarg($ps . '/public_html_last') . ' {} +');
 exec('find ' . escapeshellarg($pstage) . ' -mindepth 1 -maxdepth 1 -exec mv -t '
 	. escapeshellarg($ps . '/public_html') . ' {} +');
-exec('rm -rf ' . escapeshellarg($ps . '/uploads/upgrades') . ' ' . escapeshellarg($ps . '/public_html_last'));
+exec('rm -rf ' . escapeshellarg($ps . '/upgrades') . ' ' . escapeshellarg($ps . '/public_html_last'));
+@mkdir($ps . '/upgrades', 0770);
 file_put_contents($ps . '/uploads/photos/b.jpg', "photo b\n");
 
 list($d1, $da1) = engine_run($engine, $ps, $ds, $p, 'data-0001', 'data');
@@ -191,6 +194,7 @@ list($d2, $da2) = engine_run($engine, $ps, $ds, $p, 'data-0002', 'data');
 list($c2, $ca2) = engine_run($engine, $ps, $cs, $p, 'code-0002', 'code');
 check($d2 === 1 && $c2 === 1, 'the next run increments both', implode(' | ', $GLOBALS['engine_errors'] ?? array()));
 
+@rmdir($ps . '/upgrades');   // the archive leaves it out, so the restored tree has none
 $restored = $p . '/restored';
 check(chain_extract(array($da0, $da1, $da2), $restored) === 0 && code_extract(array($ca1, $ca2), $restored . '/site') === 0,
 	'the data from its full and the code from its re-base extract');

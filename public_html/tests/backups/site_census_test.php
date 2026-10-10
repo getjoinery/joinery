@@ -79,6 +79,8 @@ sc_site($s, array(
 	'config/backup_site_key'           => 'source site key',
 	'config/backup-ledger/site.json'   => '{}',
 	'uploads/upgrades/joinery-1.zip'   => 'upgrade',
+	'upgrades/public_html/index.php'   => 'staged',
+	'upgrade_archives/joinery-core-2.tar.gz' => 'archive',
 	'logs/error.log'                   => 'x',
 	'backups/chain/manifest.json'      => '{}',
 	'vendor/autoload.php'              => '<?php',
@@ -97,6 +99,7 @@ check(array_keys($fs) === array('.', 'config', 'empty_dir', 'public_html', 'stat
 check($fs['config']['files'] === 1, 'config/ counts the relay key only: Globalvars_site.php, backup_site_key and the ledger are this machine\'s',
 	json_encode($fs['config']));
 check($fs['uploads']['files'] === 2 && $fs['uploads']['bytes'] === 150, 'uploads/upgrades is left out', json_encode($fs['uploads']));
+check(!isset($fs['upgrades']) && !isset($fs['upgrade_archives']), 'an upgrade\'s staging and archives beside the code are left out', implode(',', array_keys($fs)));
 check($fs['static_files']['files'] === 1, 'an offloaded file\'s local copy is left out', json_encode($fs['static_files']));
 check($fs['public_html']['files'] === 4, 'public_html: node_modules, .git and the backup_exclude pattern left out; a link counted',
 	json_encode($fs['public_html']));
@@ -294,7 +297,10 @@ preg_match('/^NAMED_EXCLUDES=\(([^)]*)\)/m', $bf, $m);
 $engine = preg_split('/\s+/', trim($m[1] ?? ''));
 check($engine === SiteCensus::NAMED_EXCLUDES, 'the census leaves out exactly the names backup_files.sh leaves out',
 	implode(' ', $engine) . ' vs ' . implode(' ', SiteCensus::NAMED_EXCLUDES));
-check(strpos($bf, '--exclude="${BASE}/uploads/upgrades"') !== false && strpos($bf, '--exclude="${BASE}/public_html_*"') !== false,
-	'and the files engine still leaves out uploads/upgrades and public_html_*, as the census does');
+foreach (array('public_html_*', 'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy') as $own) {
+	check(strpos($bf, '--exclude="${BASE}/' . $own . '"') !== false, "and the files engine leaves out $own, as the census does");
+}
+check(preg_match('/case "\$name" in public_html\|public_html_\*\|upgrades\|upgrade_archives\) skip=true/', $bf) === 1,
+	'and the data identity ignores the upgrade\'s staging and archives, which every upgrade makes anew');
 
 harness_finish();

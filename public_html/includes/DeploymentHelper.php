@@ -5,6 +5,7 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.4 - deployRoot() names upgrades/ and upgrade_archives/, which utils/upgrade.php keeps there
  * @version 1.3 - performRollback() keeps only the newest failed deployment, removing older
  *                public_html_failed_* trees before preserving the current one.
  * @version 1.2 - performRollback() sets the restored tree's permissions through fix_permissions.sh.
@@ -826,8 +827,9 @@ class DeploymentHelper {
     // ============================================
 
     /**
-     * Where an upgrade keeps its staging, the previous code (public_html_last)
-     * and a failed deployment's code: a container's deploy volume, mounted at
+     * Where an upgrade keeps its staging (upgrades/), its downloaded archives
+     * (upgrade_archives/), the previous code (public_html_last) and a failed
+     * deployment's code: a container's deploy volume, mounted at
      * SITE_DIR/deploy, where there is one; the site directory otherwise. The
      * volume is outside the site's disk allowance, so a site at its limit can
      * still be upgraded, and the previous code stays off the container's

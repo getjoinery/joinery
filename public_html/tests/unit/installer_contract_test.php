@@ -3977,4 +3977,82 @@ check(strpos($lazy_missing, 'rc=1') !== false && strpos($lazy_missing, 'is missi
 	'with its helper missing the loader returns 1 and says so, without recursing', $lazy_missing);
 exec('rm -rf ' . escapeshellarg($lazy_dir));
 
+section('New installs born on the data root (specs/one_data_root.md WP2)');
+// Binds, not symlinks (D1, O4): a recorded bind is a mount unit the target requires.
+check(strpos($data_root_src, 'BINDS="${ROOT}/etc/joinery/data_binds"') !== false
+	&& strpos($data_root_src, "Type=none\nOptions=bind") !== false,
+	'a path is a bind mount of its place under the data root, recorded in /etc/joinery/data_binds');
+check(strpos($data_root_src, "printf 'Requires=%s\\nAfter=%s\\n' \"\$unit\" \"\$unit\"") !== false,
+	'joinery-data.target requires every recorded bind, so a consumer waits for its folders too');
+check(strpos($data_root_src, 'ln -s') === false, 'the data root tool makes no symlink: tar, find and the census would not go inside one');
+check(strpos($data_root_src, 'chmod 000 "$1"') !== false && strpos($data_root_src, 'chattr +i "$1"') !== false,
+	'the folder underneath a bind is locked, so nothing writes to the root disk while the data root is down');
+
+// install.sh server: the data root and its three binds before the packages that keep data.
+$sdr_at    = strpos($install_src, "\n        server_data_root \"\$DATA_ROOT\" || exit 1");
+$pg_at     = strpos($install_src, 'apt install -y postgresql postgresql-contrib');
+$postfix_at = strpos($install_src, "            postfix \\\n            postfix-pgsql");
+check($sdr_at !== false && $pg_at !== false && $postfix_at !== false && $sdr_at < $pg_at && $sdr_at < $postfix_at,
+	'install.sh server makes the data root before PostgreSQL and Postfix are installed');
+check(preg_match('/if ! is_docker; then\n\s*server_data_root "\$DATA_ROOT" \|\| exit 1/', $install_src) === 1,
+	'and not in the container image build, whose data is a site\'s volumes');
+check(strpos($install_src, 'SERVER_DATA_BINDS=("postgresql /var/lib/postgresql" "mail/postfix /var/spool/postfix" "mail/rspamd /var/lib/rspamd")') !== false,
+	'Postgres, the Postfix queue and rspamd are bound at the paths their packages use (D1)');
+check(strpos($install_src, 'No data root made: this host already keeps data at') !== false,
+	'a host already keeping data there gets no new data root, and is told so');
+// install.sh docker: every new Docker host, not only a multi-tenant one.
+check(strpos($install_src, "\n    bash \"\$SCRIPT_DIR/docker_disk_pool.sh\" create \${DATA_ROOT:+\"\$DATA_ROOT\"} || exit 1") !== false,
+	'every new Docker host makes the data root, with or without --data-root');
+check(preg_match('/^[^#\n]*--disk-pool/m', $install_src) === 0, '--disk-pool is gone: --data-root names the size or device on both shapes');
+check(strpos($install_src, 'docker_disk_pool.sh" can-cap >/dev/null 2>&1; then') !== false
+	&& strpos($pool_src, 'can_cap || die') !== false,
+	'a site\'s disk allowance asks can-cap (the pool and user-id remapping), not the data root alone');
+
+// _site_init.sh: the site's six folders, bound before anything is made in them.
+$init_src = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_init.sh');
+$bind_call = strpos($init_src, 'site_data_on_data_root "$SITENAME" uploads static_files storage backups logs cache');
+$first_mkdir = strpos($init_src, 'mkdir -p "$SITE_ROOT/uploads/small"');
+check($bind_call !== false && $first_mkdir !== false && $bind_call < $first_mkdir,
+	'_site_init.sh binds uploads, static_files, storage, backups, logs and cache before it makes anything in them');
+check(strpos($init_src, 'site_data_on_data_root "${SITENAME}_test" logs') !== false, 'and the test site\'s logs');
+check(preg_match('/if \[ "\$DOCKER_MODE" = false \]; then\n\s*site_data_on_data_root "\$SITENAME"/', $init_src) === 1,
+	'never in a container, whose folders are its volumes');
+check(strpos($init_src, 'bind "sites/${name}/${d}" "$dir/$d"') !== false, 'each folder\'s place is /srv/joinery/sites/<site>/<folder>');
+
+// reviewer2 F1: the target lets a bind go (record out, units reloaded) before the mount stops.
+$unbind_body = preg_match('/^unbind_one\(\) \{.*?^\}/ms', $data_root_src, $um) ? $um[0] : '';
+$u_rec = strpos($unbind_body, "awk -v t=\"\$target\" '!(NF == 2");
+$u_units = strpos($unbind_body, 'ensure_units ||');
+$u_stop = strpos($unbind_body, 'unbind_release "$rel" "$target"');
+$release_body = preg_match('/^unbind_release\(\) \{.*?^\}/ms', $data_root_src, $rm) ? $rm[0] : '';
+check($u_rec !== false && $u_units !== false && $u_stop !== false && $u_rec < $u_units && $u_units < $u_stop
+	&& strpos($release_body, 'systemctl stop "$unit"') !== false,
+	'unbind drops the record and reloads the units before it stops the mount, so no consumer stops with it');
+$rs_body = preg_match('/^do_remove_site\(\) \{.*?^\}/ms', $data_root_src, $rsm) ? $rsm[0] : '';
+$rs_units = strpos($rs_body, 'ensure_units ||');
+$rs_release = strpos($rs_body, 'unbind_release');
+check($rs_units !== false && $rs_release !== false && $rs_units < $rs_release && strpos($rs_body, 'unbind_one') === false,
+	'remove-site lets all of a site\'s mounts go in one reload, then unmounts each (reviewer2 N2)');
+// reviewer2 F2: a bare-metal site's removal takes its data-root folders first.
+$remove_src = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/remove_account.sh');
+$ra_release = strpos($remove_src, 'bash "$DATA_ROOT_TOOL" remove-site "$dr_site"');
+$ra_rm = strpos($remove_src, 'rm -rf "${SITE_ROOT:?}"');
+check($ra_release !== false && $ra_rm !== false && $ra_release < $ra_rm,
+	'remove_account takes a site\'s data-root mounts and data away before it removes its directory');
+// reviewer2 F3: a loop device renumbered at boot does not re-dump the data.
+$bf_src = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/backup_files.sh');
+check(strpos($bf_src, 'TAR_ARGS+=(--listed-incremental="$SNAR" --no-check-device)') !== false,
+	'incrementals ignore the device number, which the data root\'s loop device can change across a reboot');
+
+// D6: the upgrade stages beside the code, never in uploads/.
+$upgrade_src = (string)file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
+check(strpos($upgrade_src, "\$stage_location = \$deploy_root.'/upgrades/';") !== false
+	&& strpos($upgrade_src, "\$archive_location = \$deploy_root.'/upgrade_archives/';") !== false,
+	'an upgrade stages and downloads in the deploy root, beside the code (D6)');
+
+// disk_usage: the data root is walked from its own top, since -x stops at its binds.
+$du_src = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/disk_usage.sh');
+check(strpos($du_src, 'printf \'"data_root":%s,\' "$(emit_data_root)"') !== false,
+	'disk_usage reports the data root, whose binds the site tree\'s -x walk stops at');
+
 harness_finish();

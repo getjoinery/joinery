@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.6.1 - a site with folders mounted from the data root is not moved aside before a restore:
+#                  the restore says to run in place (--force) instead (one_data_root WP2, reviewer2 F6)
 # Version: 1.6.0 - holds the host runner lock (host_runner_lock.sh) from before the first write
 #                  until exit, so the host converger never runs installers against a half-restored
 #                  tree
@@ -572,6 +574,16 @@ perform_restore() {
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 print_info "Skipping project files restore"
             else
+                # A site whose folders are mounts of the data root
+                # (specs/one_data_root.md D1) cannot be moved aside: its mounts
+                # would go with the move, the restore would land on the root
+                # disk, and the data root's old folders would be mounted back
+                # over it. Restore it in place instead (reviewer2 F6).
+                if findmnt -rn -o TARGET 2>/dev/null | awk -v d="${PROJECT_DIR%/}/" 'index($0, d) == 1 { f = 1 } END { exit !f }'; then
+                    print_error "$PROJECT_DIR has folders mounted from the data root, so it cannot be moved aside."
+                    print_error "Restore in place instead: run this again with --force."
+                    return 1
+                fi
                 # Backup existing project
                 BACKUP_TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
                 EXISTING_BACKUP="${PROJECT_DIR}_backup_${BACKUP_TIMESTAMP}"

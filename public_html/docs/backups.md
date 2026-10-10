@@ -489,9 +489,11 @@ the data increments. A directory the data archive leaves out (`vendor/`,
 `cache/`, …) can be recreated without re-basing anything.
 
 The data archive leaves out `public_html/`, `public_html_*` (an upgrade's
-rollback and failed trees), `uploads/upgrades/` (its staging area, which
-holds a whole code tree mid-upgrade) and `deploy/` (a container's deploy
-volume, which holds all three). These are anchored to the site
+rollback and failed trees), `upgrades/` and `upgrade_archives/` (its staging
+area, which holds a whole code tree mid-upgrade, and its downloads) and
+`deploy/` (a container's deploy volume, which holds all of them). Neither
+`upgrades/` nor `upgrade_archives/` counts toward the data's identity: an
+upgrade makes its staging anew. These are anchored to the site
 directory, so a `public_html` deeper in the tree — a worktree under `sync/`,
 say — is data and is archived. A code archive is rooted at `public_html` and
 extracts into the site directory, after the data.
@@ -643,8 +645,8 @@ It reads and writes nothing (`SecretReconciler::census()` is the reconciler's
 read-only pass). It counts what a backup chain carries and leaves out what each
 machine keeps as its own: the names the files engine never archives, at any
 depth, and the site's `backup_exclude` names (a pattern matched as tar matches
-it: any tail of the path that starts at a name, `*` crossing `/`); `public_html_*` and
-`uploads/upgrades`; the local copies of offloaded files; this machine's
+it: any tail of the path that starts at a name, `*` crossing `/`); `public_html_*`,
+`upgrades` and `upgrade_archives`; the local copies of offloaded files; this machine's
 `config/Globalvars_site.php`, `config/backup_site_key` and
 `config/backup-ledger`; and the rows of `bkh_backup_history`, which a backup
 run writes after its dump. The list lives in `includes/SiteCensus.php`, and

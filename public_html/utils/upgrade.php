@@ -31,9 +31,13 @@
 	 * but `signed` aborts the upgrade with the verdict, so `upgrade_source`
 	 * chooses where a verified archive is fetched from and nothing more. The
 	 * check runs again on the re-run after a self-update, because staging
-	 * lives under uploads/ and could have changed in between. The origin
+	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.13 - staging and the downloaded archives live beside the code (SITE/upgrades and
+ *                SITE/upgrade_archives, or the deploy volume's), never in uploads/, which is data and
+ *                may be another filesystem (specs/one_data_root.md D6); the disk-space check asks
+ *                the deploy root for all of it; what older releases left in uploads/ goes after a deploy
 	 * @version 1.12 - keys a release proves that cannot be recorded stop the upgrade before anything is deployed
 	 * @version 1.11 - the disk-space check before download asks for room measured from the live code tree
  *                (a staged copy and the archives where it stages, a failed copy in the deploy root,
@@ -79,13 +83,11 @@
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 
-	// The staging area (uploads/upgrades/) is created by whoever runs the
-	// upgrade — root, under the agent — and it lives inside uploads/, which the
-	// web user has to be able to walk: the clone export's manifest, and anything
-	// else that measures or archives uploads, opens every directory in it. Give
-	// staging its parent's owner, group and mode, so a root-run upgrade leaves
-	// nothing root-only behind in content. A non-root run owns the directory
-	// already and the chown is a harmless no-op.
+	// The staging area and the archive directory are created by whoever runs
+	// the upgrade — root, under the agent — inside the site directory (or the
+	// deploy volume), which the web user walks. Give each its parent's owner and
+	// group, so a root-run upgrade leaves nothing root-only behind. A non-root
+	// run owns the directory already and the chown is a harmless no-op.
 	function upgrade_stage_dir_match_parent($dir) {
 		$dir = rtrim($dir, '/');
 		$parent = dirname($dir);
@@ -447,7 +449,7 @@
 	// the self-update set: adding a file to that set makes the re-run find one
 	// more file to copy, and the re-run is one-shot. So a node that has the new
 	// verifier but not yet its helper loads the helper from staging, for this
-	// run only. Staging is under uploads/, which the web user can write, and
+	// run only. Staging may have changed since it was extracted, and
 	// this runs as root - so, unlike the verifier itself (which a node without
 	// one has nothing to check with), the helper is checked first: its bytes
 	// must be the ones the release's signed listing names, under a key this
@@ -559,7 +561,7 @@
 		exit(1);
 	}
 
-	// One upgrade at a time. Staging (uploads/upgrades/) is shared state: a second
+	// One upgrade at a time. Staging (SITE/upgrades/) is shared state: a second
 	// run's staging-clear wipes the first run's extraction mid-flight, and whichever
 	// run swaps first deploys a broken tree. flock is kernel-held, so a killed run
 	// can never wedge the next one. Returns the held handle (keep it for process
@@ -577,16 +579,20 @@
 		return $handle;
 	}
 
-	// A container's deploy volume (SITE/deploy) holds the staging, the previous
-	// code and a failed deployment's code: it is outside the site's disk
-	// allowance, so a site at its limit can still be upgraded, and none of it
-	// lands on the container's capped writable layer
-	// (specs/multi_tenant_docker_hosts.md WP4 S11, S12). The same rule as
-	// DeploymentHelper::deployRoot(), inline because this file updates itself
-	// ahead of that class.
+	// The deploy root holds the staging, the downloaded archives, the previous
+	// code and a failed deployment's code. A container's deploy volume
+	// (SITE/deploy) where there is one: it is outside the site's disk allowance,
+	// so a site at its limit can still be upgraded, and none of it lands on the
+	// container's capped writable layer (specs/multi_tenant_docker_hosts.md WP4
+	// S11, S12). The site directory otherwise. Never uploads/: that is data, and
+	// may be another filesystem than the code, where swapping the staged tree in
+	// would copy every file instead of renaming it (specs/one_data_root.md D6).
+	// The same rule as DeploymentHelper::deployRoot(), inline because this file
+	// updates itself ahead of that class.
 	$deploy_root = (is_dir($full_site_dir.'/deploy') && is_writable($full_site_dir.'/deploy'))
 		? $full_site_dir.'/deploy' : $full_site_dir;
-	$stage_location = ($deploy_root !== $full_site_dir) ? $deploy_root.'/upgrades/' : $full_site_dir.'/uploads/upgrades/';
+	$stage_location = $deploy_root.'/upgrades/';
+	$archive_location = $deploy_root.'/upgrade_archives/';
 	$live_directory = $full_site_dir. '/public_html';
 	$backup_directory = $deploy_root. '/public_html_last';
 	$stage_directory = $stage_location. 'public_html';
@@ -892,36 +898,25 @@
 			}
 		}
 
-		// Check disk space before download. Where it stages (the deploy volume,
-		// or uploads/ without one) the upgrade writes the downloaded archives
-		// and a staged copy of the code; in the deploy root a rollback keeps a
-		// copy of the failed code. Each is about the size of the live code
-		// tree, so the need is measured from it, never less than 500MB per
-		// disk (migrations and logs need room too). Two places on one disk
-		// add up.
+		// Check disk space before download. The deploy root takes the
+		// downloaded archives, a staged copy of the code and, on a rollback, a
+		// copy of the failed code. Each is about the size of the live code tree,
+		// so the need is measured from it, never less than 500MB (migrations and
+		// logs need room too).
 		$du_out = array();
 		exec('du -sk ' . escapeshellarg($live_directory) . ' 2>/dev/null', $du_out);
 		$live_bytes = (int)($du_out[0] ?? 0) * 1024;
-		$stage_disk = rtrim($stage_location, '/') === $full_site_dir.'/uploads/upgrades' ? $full_site_dir.'/uploads/' : $deploy_root;
-		$space_needs = array();
-		foreach (array(array($stage_disk, 2 * $live_bytes), array($deploy_root, $live_bytes)) as list($space_path, $space_bytes)) {
-			$space_stat = @stat($space_path);
-			$space_dev = $space_stat ? $space_stat['dev'] : $space_path;
-			$space_needs[$space_dev]['path'] = $space_needs[$space_dev]['path'] ?? $space_path;
-			$space_needs[$space_dev]['bytes'] = ($space_needs[$space_dev]['bytes'] ?? 0) + $space_bytes;
-		}
-		foreach ($space_needs as $space_need) {
-			$min_required = max(500 * 1024 * 1024, $space_need['bytes']);
-			$free_space = disk_free_space($space_need['path']);
-			if ($free_space !== false && $free_space < $min_required) {
-				$free_mb = round($free_space / 1024 / 1024);
-				$need_mb = round($min_required / 1024 / 1024);
-				echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
-				echo "<strong>❌ Insufficient Disk Space:</strong> Only {$free_mb}MB available at " . htmlspecialchars($space_need['path']) . ", need at least {$need_mb}MB.<br>";
-				echo 'Free up disk space before upgrading.<br>';
-				echo '</div>';
-				exit(1);
-			}
+		$space_bytes = 3 * $live_bytes;
+		$min_required = max(500 * 1024 * 1024, $space_bytes);
+		$free_space = disk_free_space($deploy_root);
+		if ($free_space !== false && $free_space < $min_required) {
+			$free_mb = round($free_space / 1024 / 1024);
+			$need_mb = round($min_required / 1024 / 1024);
+			echo '<div style="border: 2px solid #dc3545; padding: 15px; margin: 20px 0; background-color: #f8d7da; color: #721c24;">';
+			echo "<strong>❌ Insufficient Disk Space:</strong> Only {$free_mb}MB available at " . htmlspecialchars($deploy_root) . ", need at least {$need_mb}MB.<br>";
+			echo 'Free up disk space before upgrading.<br>';
+			echo '</div>';
+			exit(1);
 		}
 
 		// Download core + individual themes/plugins
@@ -1019,7 +1014,11 @@
 		upgrade_echo('Downloading core archive: ' . htmlspecialchars($sourceFile) . '<br>');
 		flush();
 
-		$file_download_location = $full_site_dir . '/uploads/' . basename($sourceFile);
+		if (!is_dir($archive_location) && !@mkdir($archive_location, 0770, true)) {
+			upgrade_abort('File Error', 'Cannot create the archive directory ' . htmlspecialchars($archive_location), false);
+		}
+		upgrade_stage_dir_match_parent($archive_location);
+		$file_download_location = $archive_location . basename($sourceFile);
 
 		// Download core archive
 		$new_file = fopen($file_download_location, "w");
@@ -1234,8 +1233,8 @@
 		} // end if (!$resuming_after_self_update)
 
 		// The re-run after a self-update picks staging up where the previous
-		// run left it — and staging is under uploads/, which the web user can
-		// write. So it is verified again here, before the extension archives
+		// run left it, and it could have changed in between. So it is verified
+		// again here, before the extension archives
 		// land in it and before anything is copied out of it.
 		if ($resuming_after_self_update) {
 			if (!upgrade_verifier_ready($stage_directory)) {
@@ -1676,17 +1675,16 @@
 				}
 			}
 
-			// Purge the whole downloaded-upgrade-package cache in uploads/. The
-			// deploy has succeeded and the staging area is cleared, so nothing
-			// needs these tarballs anymore; a fresh upgrade always re-downloads.
-			// This clears not just this run's core archive but every earlier
-			// version left behind by past upgrades (they accumulated because only
-			// the current download was ever removed). Consumer-side only: served
-			// archives on a publisher live in static_files/, never uploads/, so
-			// this can never touch what a management node hands out. Non-fatal —
-			// the deploy already succeeded.
+			// Empty the archive directory. The deploy has succeeded and staging is
+			// cleared, so nothing needs the downloaded archives; a fresh upgrade
+			// always downloads again. What releases before upgrade.php 1.13 left in
+			// uploads/ (their archives and their staging directory) goes too.
+			// Consumer-side only: served archives on a publisher live in
+			// static_files/, so this can never touch what a management node hands
+			// out. Non-fatal: the deploy already succeeded.
 			$upload_cache_dir = $full_site_dir . '/uploads';
 			$cached_pkgs = array_merge(
+				glob($archive_location . '*')                         ?: array(),
 				glob($upload_cache_dir . '/joinery-core-*.tar.gz')   ?: array(),
 				glob($upload_cache_dir . '/joinery-plugin-*.tar.gz') ?: array(),
 				glob($upload_cache_dir . '/joinery-theme-*.tar.gz')  ?: array(),
@@ -1695,7 +1693,7 @@
 			$purged_count = 0;
 			$purged_bytes = 0;
 			foreach ($cached_pkgs as $pkg) {
-				if (!is_file($pkg)) continue;
+				if (!is_file($pkg) || is_link($pkg)) continue;
 				$pkg_size = @filesize($pkg);
 				if (@unlink($pkg)) {
 					$purged_count++;
@@ -1703,8 +1701,12 @@
 				}
 			}
 			if ($verbose && $purged_count > 0) {
-				upgrade_echo('Purged ' . $purged_count . ' cached upgrade package(s) from uploads/ ('
+				upgrade_echo('Purged ' . $purged_count . ' downloaded upgrade archive(s) ('
 					. round($purged_bytes / 1024 / 1024, 1) . ' MB freed)<br>');
+			}
+			$old_stage_location = $upload_cache_dir . '/upgrades';
+			if (is_dir($old_stage_location) && !is_link($old_stage_location)) {
+				exec('rm -rf ' . escapeshellarg($old_stage_location) . ' 2>&1');
 			}
 
 		// ============================================

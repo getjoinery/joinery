@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.5.2 - the data part also leaves out upgrades/ and upgrade_archives/, where an upgrade
+#                  stages and downloads beside the code (specs/one_data_root.md D6), and neither
+#                  counts toward the data's identity: staging is made anew by every upgrade.
+#                  Incrementals ignore the device number (--no-check-device): the data root's
+#                  loop device can change number across a reboot (reviewer2 F3).
 # Version: 1.5.1 - config/release_statement_key (the release-log signing key, root-only like
 #                  agent_signing_key) is also left out of an unprivileged run, and said; the two
 #                  root-only keys are one named list. Any other unreadable file still fails the run.
@@ -75,7 +80,9 @@
 #   --part code|data  Archive one part of the site: code is public_html,
 #                     rooted at public_html; data is the site directory less
 #                     public_html, public_html_* (an upgrade's rollback and
-#                     failed trees) and uploads/upgrades (its staging area).
+#                     failed trees), upgrades and upgrade_archives (its staging
+#                     and downloads) and uploads/upgrades (where older releases
+#                     staged).
 #                     Each has its own snapshot and identity. Without it the
 #                     whole site directory is one archive.
 #   --print-tree-id   Print TREE_ID=<hex>, the identity of the tree a
@@ -205,7 +212,7 @@ data_identity() {
     while IFS= read -r entry; do
         name="${entry%:*}"
         skip=false
-        case "$name" in public_html|public_html_*) skip=true ;; esac
+        case "$name" in public_html|public_html_*|upgrades|upgrade_archives) skip=true ;; esac
         for x in "${NAMED_EXCLUDES[@]}" ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do
             [ "$name" = "$x" ] && skip=true
         done
@@ -311,6 +318,7 @@ BASE="$(basename "$PROJECT_DIR")"
 # its own. The by-name exclusions after them stay unanchored on purpose.
 if [ "$PART" = "data" ]; then
     TAR_ARGS+=(--anchored --exclude="${BASE}/public_html" --exclude="${BASE}/public_html_*"
+               --exclude="${BASE}/upgrades" --exclude="${BASE}/upgrade_archives"
                --exclude="${BASE}/uploads/upgrades" --exclude="${BASE}/deploy" --no-anchored)
 fi
 
@@ -334,8 +342,12 @@ if [ -n "$EXCLUDE_FROM" ]; then
     TAR_ARGS+=(--no-wildcards --exclude-from="$EXCLUDE_FROM")
 fi
 
+# --no-check-device: a directory on the data root (/srv/joinery, a loop
+# device in a file) can come back after a reboot on another /dev/loopN, and
+# tar would otherwise dump every such directory whole on the next run. The
+# inode still tells a directory that was replaced.
 if [ -n "$SNAR" ]; then
-    TAR_ARGS+=(--listed-incremental="$SNAR")
+    TAR_ARGS+=(--listed-incremental="$SNAR" --no-check-device)
 fi
 
 # The signing keys on a publishing box are readable by root only, on purpose:

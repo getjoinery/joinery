@@ -3,6 +3,13 @@
 # joinery_data_root.sh - the host's data root: everything that is data, under
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md).
 #
+# Version: 1.2 - bind and unbind: a path the platform uses (a site's uploads, Postgres's
+#                directory) is a bind mount of its place under the data root, recorded in
+#                /etc/joinery/data_binds; the target requires every one, check fails while one
+#                is not in place, tick mounts it again, status lists them (one_data_root WP2, D1).
+#                unbind lets the target go before the mount, so no consumer stops with it, and
+#                leaves the path usable; remove-site NAME takes a removed site's binds and data
+#                (reviewer2 F1, F2, F4).
 # Version: 1.1 - review (reviewer2): tick exits non-zero only when the data root is not ready; a
 #                growth or reload that fails on a mounted one is said and absorbed (F1).
 #                The first size is whole GiB (F6). create says when it ignores a SIZE (F7). A
@@ -30,7 +37,25 @@
 #                     can still grow, and what is under it.
 #   joinery_data_root.sh tick
 #                     Root. The host converger's call, every minute: check,
-#                     keep the units, and grow when D7 says so. Exits as check.
+#                     keep the units, mount a recorded bind that is not in
+#                     place, and grow when D7 says so. Exits as check.
+#   joinery_data_root.sh bind REL TARGET
+#                     Root. TARGET (an absolute path, /var/lib/postgresql) is
+#                     from then on a bind mount of /srv/joinery/REL (postgresql),
+#                     recorded in /etc/joinery/data_binds, and the target
+#                     requires it. A new REL takes TARGET's owner and mode. Run
+#                     again, it does nothing. Exit 3 when TARGET holds data:
+#                     moving data is migrate's, and nothing is changed.
+#   joinery_data_root.sh unbind TARGET
+#                     Root. TARGET is no longer mounted from the data root; its
+#                     data stays where it is, under /srv/joinery, and TARGET is
+#                     left an empty folder with that place's owner and mode.
+#                     The target stops requiring it before it is unmounted, so
+#                     no service that waits for the data root stops with it.
+#   joinery_data_root.sh remove-site NAME
+#                     Root. A site is being removed: every bind under
+#                     /srv/joinery/sites/NAME is taken away and that data is
+#                     removed. Nothing on a host with no data root.
 #
 # WHY A FILESYSTEM OF ITS OWN. One place to measure, cap, grow, back up and
 # move, the same on every install; and the one shape that can later be
@@ -54,6 +79,14 @@
 # on an empty directory on the root disk. The drop-ins exist only where a
 # data root does: a Requires= naming a target that does not exist would stop
 # the unit starting.
+#
+# THE BINDS (D1). The paths the platform and its packages use stay as they
+# are; each is a bind mount of its place here. Not a symlink: tar, find and
+# the site census treat a symlink as one small file and never go inside it,
+# so a backup would quietly stop carrying the data behind it. The target
+# requires every recorded bind, so a consumer waits for its folders too. The
+# directory underneath each one is root's, mode 000 and immutable: while the
+# data root is down, nothing writes to the root disk in its place.
 
 set -euo pipefail
 
@@ -73,11 +106,13 @@ FSTAB="${ROOT}/etc/fstab"
 SYSTEMD_DIR="${ROOT}/etc/systemd/system"
 LOCK_FILE="${ROOT}/run/joinery/data-root.lock"
 CANNOT_GROW_FLAG="${ROOT}/run/joinery/data-root.cannot-grow"
+BINDS="${ROOT}/etc/joinery/data_binds"
 TARGET_UNIT="joinery-data.target"
 MOUNT_UNIT="srv-joinery.mount"
 DIO_UNIT="joinery-data-dio.service"
 DROPIN_NAME="joinery-data-root.conf"
 FSTAB_MARK="# joinery-data-root (joinery_data_root.sh)"
+BIND_MARK="# Written by joinery_data_root.sh (specs/one_data_root.md D1): a bind mount."
 # Every service whose data lives under the data root (D1). A drop-in for a
 # unit that is not installed does nothing, and is there when it is.
 CONSUMERS="postgresql.service postgresql@.service docker.service containerd.service apache2.service postfix.service postfix@.service rspamd.service"
@@ -139,6 +174,31 @@ root_givable() {
 
 conf_get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$CONF" 2>/dev/null || true; }
 
+# Every recorded bind, "REL TARGET" a line.
+binds() { awk 'NF == 2 && $1 !~ /^#/ { print $1, $2 }' "$BINDS" 2>/dev/null || true; }
+
+# The mount unit for TARGET.
+bind_unit() { systemd-escape -p --suffix=mount "$1"; }
+
+# A path under the data root: names of letters, digits, . _ -, none leading
+# with a dot, so no .. and nothing hidden.
+rel_ok() { [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]]; }
+
+# An absolute path outside the data root, with no . or .. in it.
+target_ok() {
+    local t="${1:-}"
+    [[ "$t" =~ ^(/[A-Za-z0-9][A-Za-z0-9._-]*)+$ ]] || return 1
+    [[ "$t" != "$MNT_REAL" && "$t" != "$MNT_REAL"/* && "$t" != "$IMAGE_REAL" ]]
+}
+
+# TARGET is the data root's REL, the same directory: the bind is in place.
+bind_ok() {  # REL TARGET
+    local want got
+    want="$(stat -L -c %d:%i "${MNT}/$1" 2>/dev/null)" || return 1
+    got="$(stat -L -c %d:%i "${ROOT}$2" 2>/dev/null)" || return 1
+    [[ "$want" == "$got" ]]
+}
+
 # The data root is mounted at /srv/joinery, XFS, with project quotas on.
 mounted_ok() {
     local fstype opts
@@ -162,6 +222,13 @@ check_reason() {
         printf '%s is mounted as %s, not XFS' "$MNT_REAL" "$fstype"
     elif [[ ",${opts:-}," != *",prjquota,"* ]]; then
         printf '%s is mounted without project quotas' "$MNT_REAL"
+    else
+        local rel target
+        while read -r rel target; do
+            bind_ok "$rel" "$target" && continue
+            printf '%s is not mounted from %s/%s (see: systemctl status %s)' "$target" "$MNT_REAL" "$rel" "$(bind_unit "$target")"
+            return
+        done < <(binds)
     fi
 }
 
@@ -204,7 +271,30 @@ EOF
     if [[ "$backing" == "file" ]]; then
         printf 'Wants=%s\nAfter=%s\n' "$DIO_UNIT" "$DIO_UNIT"
     fi
+    local rel target unit
+    while read -r rel target; do
+        unit="$(bind_unit "$target")"
+        printf 'Requires=%s\nAfter=%s\n' "$unit" "$unit"
+    done < <(binds)
     printf '\n[Install]\nWantedBy=multi-user.target\n'
+}
+
+bind_unit_text() {  # REL TARGET
+    cat <<EOF
+${BIND_MARK}
+# ${2} is ${MNT_REAL}/${1}, on the data root.
+[Unit]
+Description=Joinery data root: ${2}
+Requires=${MOUNT_UNIT}
+After=${MOUNT_UNIT}
+Before=${TARGET_UNIT}
+
+[Mount]
+What=${MNT_REAL}/${1}
+Where=${2}
+Type=none
+Options=bind
+EOF
 }
 
 dio_unit_text() {
@@ -285,6 +375,19 @@ ensure_units() {
     while IFS= read -r unit; do
         put "${SYSTEMD_DIR}/${unit}.d/${DROPIN_NAME}" "$(dropin_text)"
     done < <(consumer_units | sort -u)
+    local rel target f keep=" "
+    while read -r rel target; do
+        unit="$(bind_unit "$target")"
+        keep+="${unit} "
+        put "${SYSTEMD_DIR}/${unit}" "$(bind_unit_text "$rel" "$target")"
+    done < <(binds)
+    # A bind this script wrote and no longer records.
+    for f in "${SYSTEMD_DIR}"/*.mount; do
+        [[ -f "$f" ]] || continue
+        [[ "$keep" == *" $(basename "$f") "* ]] && continue
+        [[ "$(head -n 1 "$f")" == "$BIND_MARK" ]] || continue
+        if rm -f "$f"; then changed=1; fi
+    done
     if (( changed )); then
         if ! systemctl daemon-reload; then
             printf 'joinery_data_root: systemctl daemon-reload failed; the units are written and take effect at the next reload\n' >&2
@@ -391,6 +494,152 @@ do_create() {
     systemctl start "$TARGET_UNIT" || say "WARNING: ${TARGET_UNIT} did not start; see: systemctl status ${TARGET_UNIT}"
     read -r fsize _ _ < <(df_bytes "$MNT") || fsize=0
     say "The data root is mounted at ${MNT_REAL}: $(gib "$fsize"), XFS with project quotas"
+}
+
+# ---------------------------------------------------------------------------
+# bind, unbind
+# ---------------------------------------------------------------------------
+
+# The directory underneath a bind: root's, mode 000 and immutable, so while
+# the data root is down nothing writes to the root disk in its place. The
+# immutable flag needs a filesystem that has one; the mode alone stops all but
+# root.
+lock_mountpoint() {
+    chown root:root "$1" 2>/dev/null || true
+    chmod 000 "$1"
+    chattr +i "$1" 2>/dev/null || true
+}
+
+# Mount a recorded bind that is not in place. Quiet when it is.
+start_bind() {  # REL TARGET
+    bind_ok "$1" "$2" && return 0
+    systemctl start "$(bind_unit "$2")" || return 1
+    bind_ok "$1" "$2"
+}
+
+do_bind() {
+    local rel="${1:-}" target="${2:-}" cur other fresh=0
+    need_root
+    rel_ok "$rel" || die "'${rel}' is not a path under the data root (postgresql, sites/mysite/uploads)"
+    target_ok "$target" || die "'${target}' is not an absolute path outside the data root"
+    mounted_ok || die "the data root is not mounted: $(check_reason)"
+    take_lock
+
+    cur="$(binds | awk -v t="$target" '$2 == t { print $1; exit }')"
+    other="$(binds | awk -v r="$rel" -v t="$target" '$1 == r && $2 != t { print $2; exit }')"
+    [[ -z "$cur" || "$cur" == "$rel" ]] || die "${target} is already mounted from ${MNT_REAL}/${cur}"
+    [[ -z "$other" ]] || die "${MNT_REAL}/${rel} is already mounted at ${other}"
+
+    if [[ -z "$cur" ]]; then
+        [[ ! -L "${ROOT}${target}" ]] || die "${target} is a symlink; nothing was changed"
+        [[ ! -e "${ROOT}${target}" || -d "${ROOT}${target}" ]] || die "${target} is not a directory; nothing was changed"
+        if findmnt -n --mountpoint "${ROOT}${target}" >/dev/null 2>&1; then
+            die "something else is mounted at ${target}; nothing was changed"
+        fi
+        if [[ -n "$(find "${ROOT}${target}" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 || true)" ]]; then
+            printf "joinery_data_root: %s holds data; it stays where it is (moving it onto the data root is migrate's). Nothing was changed.\n" "$target" >&2
+            exit 3
+        fi
+        if [[ ! -e "${MNT}/${rel}" ]]; then
+            fresh=1
+            mkdir -p "${MNT}/${rel}" || die "could not make ${MNT_REAL}/${rel}"
+        fi
+        # A new place takes the owner and mode the path had, so the package
+        # or site that made it finds it as it left it.
+        if (( fresh )) && [[ -d "${ROOT}${target}" ]]; then
+            chown --reference="${ROOT}${target}" "${MNT}/${rel}" 2>/dev/null || true
+            chmod --reference="${ROOT}${target}" "${MNT}/${rel}" 2>/dev/null || true
+        fi
+        mkdir -p "${ROOT}${target}" || die "could not make ${target}"
+        lock_mountpoint "${ROOT}${target}"
+        if [[ ! -f "$BINDS" ]]; then
+            mkdir -p "$(dirname "$BINDS")"
+            printf '# Written by joinery_data_root.sh (specs/one_data_root.md D1).\n# Each line: a path under %s, and where it is mounted.\n' "$MNT_REAL" > "$BINDS"
+            chmod 644 "$BINDS"
+        fi
+        printf '%s %s\n' "$rel" "$target" >> "$BINDS" || die "could not record the bind in ${BINDS}"
+    fi
+    ensure_units || die "${target} is recorded in ${BINDS}, but the units could not be written; fix the reason above, then run this again"
+    start_bind "$rel" "$target" || die "${target} did not mount from ${MNT_REAL}/${rel}; see: systemctl status $(bind_unit "$target")"
+    say "${target} is on the data root (${MNT_REAL}/${rel})"
+}
+
+# Take one bind away. The target stops requiring it first: stopping a unit
+# the target still requires would stop the target, and every service that
+# requires the target with it. Then the mount goes, and the path is left the
+# empty folder its package or site expects, with the place's owner and mode.
+unbind_one() {  # REL TARGET
+    local rel="$1" target="$2"
+    awk -v t="$target" '!(NF == 2 && $2 == t)' "$BINDS" > "${BINDS}.tmp.$$" && mv -f "${BINDS}.tmp.$$" "$BINDS" \
+        || { rm -f "${BINDS}.tmp.$$"; die "could not update ${BINDS}"; }
+    chmod 644 "$BINDS"
+    ensure_units || die "${target} is no longer recorded, but the target could not be reloaded without it, so it is still mounted; fix the reason above, then run: systemctl daemon-reload && systemctl stop $(bind_unit "$target")"
+    unbind_release "$rel" "$target"
+}
+
+# The mount of a bind no longer recorded, once the target has let it go.
+unbind_release() {  # REL TARGET
+    local rel="$1" target="$2" unit
+    unit="$(bind_unit "$target")"
+    if bind_ok "$rel" "$target" || findmnt -n --mountpoint "${ROOT}${target}" >/dev/null 2>&1; then
+        # systemd still knows a mounted unit whose file is gone, from mountinfo.
+        systemctl stop "$unit" 2>/dev/null || umount "${ROOT}${target}" \
+            || die "${target} could not be unmounted; see: findmnt ${target}"
+    fi
+    chattr -i "${ROOT}${target}" 2>/dev/null || true
+    if [[ -d "${MNT}/${rel}" && -d "${ROOT}${target}" && ! -L "${ROOT}${target}" ]]; then
+        chown --reference="${MNT}/${rel}" "${ROOT}${target}" 2>/dev/null || true
+        chmod --reference="${MNT}/${rel}" "${ROOT}${target}" 2>/dev/null || true
+    fi
+}
+
+do_unbind() {
+    local target="${1:-}" rel
+    need_root
+    target_ok "$target" || die "'${target}' is not an absolute path outside the data root"
+    take_lock
+    rel="$(binds | awk -v t="$target" '$2 == t { print $1; exit }')"
+    [[ -n "$rel" ]] || die "${target} is not mounted from the data root"
+    unbind_one "$rel" "$target"
+    say "${target} is no longer mounted from the data root; its data stays at ${MNT_REAL}/${rel}"
+}
+
+# A site is being removed: every bind of its places (sites/NAME/...) goes,
+# and so does its data on the data root, as a container site's volumes go with
+# it. Nothing to do on a host with no data root, or for a site with none.
+do_remove_site() {
+    local name="${1:-}" rel target n=0
+    [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || die "'${name}' is not a site name"
+    need_root
+    [[ -f "$CONF" ]] || return 0
+    take_lock
+    # Its data is removed with its mounts, so nothing is touched while the
+    # data root it lives on cannot be reached.
+    if binds | awk -v p="sites/${name}/" 'index($1, p) == 1 { f = 1 } END { exit !f }' && ! mounted_ok; then
+        die "${name}'s data is on the data root, which is not mounted: $(check_reason). Nothing was changed."
+    fi
+    # All of the site's records go, the units reload once, then each mount.
+    local -a gone=()
+    while read -r rel target; do
+        [[ "$rel" == "sites/${name}/"* ]] && gone+=("$rel $target")
+    done < <(binds)
+    if (( ${#gone[@]} > 0 )); then
+        awk -v p="sites/${name}/" '!(NF == 2 && index($1, p) == 1)' "$BINDS" > "${BINDS}.tmp.$$" && mv -f "${BINDS}.tmp.$$" "$BINDS" \
+            || { rm -f "${BINDS}.tmp.$$"; die "could not update ${BINDS}"; }
+        chmod 644 "$BINDS"
+        ensure_units || die "${name}'s mounts are no longer recorded, but the target could not be reloaded without them, so they are still mounted; fix the reason above, then run: systemctl daemon-reload, and this again"
+        local pair
+        for pair in "${gone[@]}"; do
+            unbind_release "${pair%% *}" "${pair#* }"
+            n=$((n + 1))
+        done
+    fi
+    if [[ -e "${MNT}/sites/${name}" ]] && mounted_ok; then
+        rm -rf "${MNT:?}/sites/${name:?}" || die "could not remove ${MNT_REAL}/sites/${name}"
+        say "${name}: ${n} mount(s) taken away and its data on the data root removed (${MNT_REAL}/sites/${name})"
+    elif (( n > 0 )); then
+        say "${name}: ${n} mount(s) taken away"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -518,7 +767,22 @@ tick_upkeep() {
 # data root (a growth that did not take, a reload systemd refused) is said and
 # absorbed; the installers still run, and the next tick tries again.
 do_tick() {
-    local rc=0
+    local rc=0 rel target
+    do_check >/dev/null 2>&1 || rc=$?
+    # The filesystem is mounted and a bind on it is not: mount it again.
+    if (( rc == 1 )) && mounted_ok; then
+        need_root
+        if take_lock nowait; then
+            ensure_units || true
+            while read -r rel target; do
+                bind_ok "$rel" "$target" && continue
+                if start_bind "$rel" "$target"; then
+                    say "data root: mounted ${target} again"
+                fi
+            done < <(binds)
+        fi
+    fi
+    rc=0
     do_check >/dev/null || rc=$?
     (( rc == 0 )) || return "$rc"
     need_root
@@ -552,6 +816,14 @@ do_status() {
     else
         say "growth: grows when its device is grown at the provider"
     fi
+    local rel target
+    while read -r rel target; do
+        if bind_ok "$rel" "$target"; then
+            say "mount: ${target} <- ${rel}"
+        else
+            say "mount: ${target} <- ${rel}: NOT MOUNTED"
+        fi
+    done < <(binds)
     for d in "$MNT"/*/; do
         [[ -d "$d" ]] || continue
         # Bounded: a Docker host's docker/ holds every image layer.
@@ -571,5 +843,8 @@ case "${1:-}" in
     grow)   do_grow "${2:-}" ;;
     status) do_status ;;
     tick)   do_tick ;;
-    *) die "usage: joinery_data_root.sh create [SIZE] [DEVICE] | check | grow [SIZE] | status | tick" ;;
+    bind)   do_bind "${2:-}" "${3:-}" ;;
+    unbind) do_unbind "${2:-}" ;;
+    remove-site) do_remove_site "${2:-}" ;;
+    *) die "usage: joinery_data_root.sh create [SIZE] [DEVICE] | check | grow [SIZE] | status | tick | bind REL TARGET | unbind TARGET | remove-site NAME" ;;
 esac

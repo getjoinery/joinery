@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.13 - On a host with a data root, a bare-metal site's uploads, static_files, storage,
+#                 backups, logs and cache (and its test site's logs) are bind mounts of
+#                 /srv/joinery/sites/<site>/<folder>, made before anything is put in them
+#                 (specs/one_data_root.md WP2, D1). A site already holding data keeps it where it is.
 # VERSION: 3.12 - JOINERY_ADMIN_PASSWORD_SHOWN=1 marks a supplied password as one a management node
 #                 generated and shows on a page: it is replaced at first sign-in like a generated one
 # VERSION: 3.11 - JOINERY_OUTBOUND_NOTICE_GB (install.sh site --outbound-notice-gb) is the
@@ -179,6 +183,42 @@ log() {
     fi
 }
 
+# A bare-metal site's data on the host's data root (specs/one_data_root.md
+# D1): each folder a bind mount of /srv/joinery/sites/<dir>/<folder>, made
+# before anything is put in it. A host with no data root keeps the folders in
+# the site directory. A site with any folder already holding data keeps every
+# one where it is - moving data is joinery_data_root.sh migrate's - so a site
+# is never half on the data root. A declared data root that is not mounted
+# stops the install: a folder made now would be on the root disk.
+site_data_on_data_root() {  # SITE_DIR_NAME FOLDER...
+    local name="$1" dir rc=0 d held=""
+    shift
+    dir="/var/www/html/${name}"
+    bash "${SCRIPT_DIR}/joinery_data_root.sh" check >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) ;;
+        2) return 0 ;;
+        *) log_error "This host's data root is not mounted: $(bash "${SCRIPT_DIR}/joinery_data_root.sh" check 2>&1 | sed 's/^joinery_data_root: //')"
+           log_error "The site's data would be made on the root disk; nothing more was done (joinery_data_root.sh status says why)"
+           exit 1 ;;
+    esac
+    for d in "$@"; do
+        if [ -d "$dir/$d" ] && ! findmnt -n --mountpoint "$dir/$d" >/dev/null 2>&1 \
+            && [ -n "$(ls -A "$dir/$d" 2>/dev/null)" ]; then
+            held="${held} ${d}"
+        fi
+    done
+    if [ -n "$held" ]; then
+        log "${name}'s data stays in ${dir}: it already holds data in${held} (joinery_data_root.sh migrate moves it)"
+        return 0
+    fi
+    for d in "$@"; do
+        bash "${SCRIPT_DIR}/joinery_data_root.sh" bind "sites/${name}/${d}" "$dir/$d" >/dev/null \
+            || { log_error "$dir/$d could not be put on the data root (above)"; exit 1; }
+    done
+    log "${name}'s data is on the data root (/srv/joinery/sites/${name})"
+}
+
 log_error() {
     echo "ERROR: $1" >&2
 }
@@ -229,6 +269,9 @@ done
 
 log "Creating directory structure..."
 
+if [ "$DOCKER_MODE" = false ]; then
+    site_data_on_data_root "$SITENAME" uploads static_files storage backups logs cache
+fi
 mkdir -p "$SITE_ROOT/config"
 mkdir -p "$SITE_ROOT/uploads/small"
 mkdir -p "$SITE_ROOT/uploads/medium"
@@ -795,6 +838,7 @@ if [ "$DOCKER_MODE" = false ]; then
     # Create test site directories FIRST — the virtualhost template references them, so
     # Apache reload will fail if they don't exist yet when the vhost is enabled.
     log "Creating test site directories..."
+    site_data_on_data_root "${SITENAME}_test" logs
     mkdir -p "/var/www/html/${SITENAME}_test/public_html"
     mkdir -p "/var/www/html/${SITENAME}_test/logs"
 

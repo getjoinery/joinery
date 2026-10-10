@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 3.09 - Every new host keeps its data on the data root (specs/one_data_root.md WP2, D4). install.sh server
+#               makes it and binds Postgres, the Postfix queue and rspamd onto it before their packages are
+#               installed; install.sh docker makes it for Docker's data on every new Docker host, not only a
+#               multi-tenant one. --data-root=SIZE|DEVICE gives the first size or a device on both, and replaces
+#               --disk-pool. A host that already keeps data in those places keeps it there and says so. A site's
+#               disk allowance (site --disk) asks docker_disk_pool.sh can-cap: a data root with remapping on.
 #VERSION 3.08 - (review: the daemon.json loader fails, not recurses, when its helper is missing.)
 #               install.sh docker --disk-pool=SIZE makes the host's data root (joinery_data_root.sh, specs/one_data_root.md
 #               WP1): XFS at /srv/joinery with project quotas, starting at SIZE and grown as it fills, with Docker's
@@ -534,16 +540,18 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
-#                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
-#                       --disk-pool=SIZE: Docker's data on the host's data root, /srv/joinery: XFS with project quotas,
-#                                         first SIZE (16G) and grown as it fills, so each site's disk can be
-#                                         capped (site --disk); with --multi-tenant, a fresh host only
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#                       Docker keeps its data on the host's data root, /srv/joinery/docker: XFS with project
+#                       quotas, made before Docker's first start and grown as it fills
+#                       --multi-tenant: root in a container is not root on the host (userns-remap), so each
+#                                       site's disk can be capped (site --disk); a fresh host only
+#                       --data-root=SIZE|DEVICE: the data root's first size (16G), or a spare device for it
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#                       Postgres, the mail queue and rspamd keep their data on the host's data root, /srv/joinery
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
 #   ./install.sh site-limits SITENAME [--memory=SIZE] [--cpus=N] [--disk=SIZE]  # Change a site's limits, no rebuild
@@ -699,10 +707,10 @@ CONTAINER_PIDS_DEFAULT=512
 CONTAINER_PIDS_FLOOR=128
 
 # --disk=SIZE: the site's disk allowance (4G), over all of its volumes but
-# backups and deploy, on a host with a disk pool (install.sh docker
-# --disk-pool, docker_disk_pool.sh). Refused on a host without one: a cap that
-# silently does nothing is worse than none. Kept in the run spec like --memory;
-# none lifts it.
+# backups and deploy, on a multi-tenant host (install.sh docker --multi-tenant:
+# its data root holds the allowances, docker_disk_pool.sh). Refused on any
+# other host: a cap that silently does nothing is worse than none. Kept in the
+# run spec like --memory; none lifts it.
 CONTAINER_DISK=""
 CONTAINER_DISK_GIVEN=0
 
@@ -2413,7 +2421,7 @@ do_docker_install() {
     local MGMT_NODE_URL=""
     local NODE_NAME=""
     local MULTI_TENANT=0
-    local DISK_POOL=""
+    local DATA_ROOT=""
     local arg
     local NO_OUTBOUND_LIMITS=0
     for arg in "$@"; do
@@ -2421,7 +2429,7 @@ do_docker_install() {
             --management-node=*) MGMT_NODE_URL="${arg#--management-node=}" ;;
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             --multi-tenant) MULTI_TENANT=1 ;;
-            --disk-pool=*) DISK_POOL="${arg#--disk-pool=}" ;;
+            --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
@@ -2433,14 +2441,6 @@ do_docker_install() {
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
         print_error "This command must be run as root (use sudo)"
-        exit 1
-    fi
-
-    # A site's disk cap is only a cap where root in its container is not root
-    # on the host: the owner of a file can move it out of its project
-    # (chattr -p), and a site's own processes own its uploads.
-    if [ -n "$DISK_POOL" ] && [ "$MULTI_TENANT" -ne 1 ]; then
-        print_error "--disk-pool needs --multi-tenant: without user-namespace remapping a site could move its own files out of its disk allowance"
         exit 1
     fi
 
@@ -2463,15 +2463,16 @@ do_docker_install() {
         else
             print_success "Docker daemon is running"
         fi
-        # The pool goes under Docker before its first start: here, only a host
-        # that already has one passes.
-        if [ -n "$DISK_POOL" ]; then
-            if bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
-                print_success "Docker keeps its data on the disk pool (/srv/joinery/docker)"
-            else
-                print_error "--disk-pool must be made before Docker is installed, and Docker is already on this host. Build a new host with install.sh docker --multi-tenant --disk-pool=SIZE and move the sites onto it."
-                exit 1
-            fi
+        # The data root goes under Docker before its first start. A host
+        # Docker is already on keeps its data where it is (moving it is
+        # joinery_data_root.sh migrate's); asked for one, it says so.
+        if bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
+            print_success "Docker keeps its data on the data root (/srv/joinery/docker)"
+        elif [ -n "$DATA_ROOT" ]; then
+            print_error "--data-root must be made before Docker is installed, and Docker is already on this host. Build a new host with install.sh docker --data-root=${DATA_ROOT} and move the sites onto it."
+            exit 1
+        else
+            print_info "Docker keeps its data where it is: it was installed before this host had a data root"
         fi
         if [ "$MULTI_TENANT" -eq 1 ]; then
             docker_multi_tenant_existing || exit 1
@@ -2518,13 +2519,12 @@ do_docker_install() {
         docker_daemon_json_set_userns_remap || exit 1
     fi
 
-    # The pool too: the package starts the daemon, which would make its data
-    # on the root disk, with no disk limits.
-    if [ -n "$DISK_POOL" ]; then
-        print_step "Making the disk pool: the data root, first ${DISK_POOL}, for Docker's data..."
-        bash "$SCRIPT_DIR/docker_disk_pool.sh" create "$DISK_POOL" || exit 1
-        print_success "Docker keeps its data at /srv/joinery/docker: XFS with project quotas, grown as it fills (docker_disk_pool.sh)"
-    fi
+    # The data root too (specs/one_data_root.md D4), on every new Docker host:
+    # the package starts the daemon, which would make its data on the root
+    # disk, with no disk limits.
+    print_step "Making the data root (/srv/joinery) for Docker's data..."
+    bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
+    print_success "Docker keeps its data at /srv/joinery/docker: XFS with project quotas, grown as it fills (docker_disk_pool.sh)"
 
     print_step "Installing Docker..."
 
@@ -2936,6 +2936,45 @@ detect_php_version() {
 # SUBCOMMAND: server - Set up bare-metal server (integrated from server_setup.sh)
 #==============================================================================
 
+# The data root on a bare-metal server (specs/one_data_root.md D1, D4): made
+# when the host has none, then Postgres, the Postfix queue and rspamd bound
+# onto it at the paths their packages use. A host that already keeps data in
+# one of those places (server run again on an existing box) gets no new data
+# root, and a place that holds data stays where it is: moving data is
+# joinery_data_root.sh migrate's, never a side effect of an install.
+SERVER_DATA_BINDS=("postgresql /var/lib/postgresql" "mail/postfix /var/spool/postfix" "mail/rspamd /var/lib/rspamd")
+server_data_root() {  # [SIZE|DEVICE]
+    local want="${1:-}" tool="$SCRIPT_DIR/joinery_data_root.sh" rc=0 pair rel target held=""
+    bash "$tool" check >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) print_info "The data root is mounted at /srv/joinery"
+           [ -z "$want" ] || print_info "--data-root=${want} was not used: the data root exists and grows by itself" ;;
+        1) print_error "This host has a data root that is not mounted: $(bash "$tool" check 2>&1 | sed 's/^joinery_data_root: //')"
+           print_error "Nothing that keeps data is installed until it is: see joinery_data_root.sh status"
+           return 1 ;;
+        *) for pair in "${SERVER_DATA_BINDS[@]}"; do
+               target="${pair#* }"
+               if [ -d "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; then held="${held} ${target}"; fi
+           done
+           if [ -n "$held" ]; then
+               print_warning "No data root made: this host already keeps data at${held}, which stays where it is (joinery_data_root.sh migrate moves it)"
+               return 0
+           fi
+           print_step "Making the data root (/srv/joinery)..."
+           bash "$tool" create ${want:+"$want"} || { print_error "The data root could not be made (above). Nothing that keeps data was installed."; return 1; } ;;
+    esac
+    for pair in "${SERVER_DATA_BINDS[@]}"; do
+        rel="${pair%% *}"; target="${pair#* }"
+        rc=0; bash "$tool" bind "$rel" "$target" >/dev/null || rc=$?
+        case "$rc" in
+            0) ;;
+            3) print_warning "${target} stays where it is: it holds data (joinery_data_root.sh migrate moves it)" ;;
+            *) print_error "${target} could not be put on the data root (above)"; return 1 ;;
+        esac
+    done
+    print_success "Postgres, the mail queue and rspamd keep their data on the data root (/srv/joinery)"
+}
+
 do_server_setup() {
     print_header "Bare-Metal Server Setup"
 
@@ -2947,10 +2986,12 @@ do_server_setup() {
     local SKIP_POSTGRES_PASSWORD=0
     local ALLOW_UNSUPPORTED_OS=0
     local PASSWORD_FILE=""
+    local DATA_ROOT=""
     for arg in "$@"; do
         case "$arg" in
             --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
             --allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1 ;;
+            --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
             --password-file=*) PASSWORD_FILE="${arg#*=}" ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac
@@ -3303,6 +3344,15 @@ EOF
     host_files_write_mpm_event /etc/apache2/mods-available/mpm_event.conf
 
     print_success "Apache configured"
+
+    # The data root, before the packages that keep data on it make anything
+    # (specs/one_data_root.md D4). Not in a container image: a site
+    # container's data is its volumes.
+    if ! is_docker; then
+        server_data_root "$DATA_ROOT" || exit 1
+    elif [ -n "$DATA_ROOT" ]; then
+        print_warning "--data-root is for a host; a container's data is its volumes. Not used."
+    fi
 
     # Install PostgreSQL Database
     print_step "Installing PostgreSQL server..."
@@ -4735,10 +4785,11 @@ do_site_docker() {
     local DISK_IN="$CONTAINER_DISK"
     CONTAINER_DISK="$(run_spec_norm_disk "$DISK_IN")" \
         || refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$DISK_IN" "not a disk size (4G, 500M; at least 100M; none for no allowance)"
-    # A disk allowance is an XFS project on the disk pool. Without one here it
-    # would not hold, and is refused rather than ignored.
-    if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
-        refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: it has no disk pool (install.sh docker --multi-tenant --disk-pool=SIZE makes one on a new host)"
+    # A disk allowance is an XFS project on the data root, and holds only
+    # where root in the container is not root on the host. Where it would not
+    # hold, it is refused rather than ignored.
+    if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap >/dev/null 2>&1; then
+        refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: $(bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap 2>&1 | sed 's/^docker_disk_pool: //') (install.sh docker --multi-tenant makes a host that can, on a new host)"
     fi
     # The site's own outbound figures (outbound_limits.sh, WP5): the spec's,
     # with each one given on the command line in its place; default removes it.

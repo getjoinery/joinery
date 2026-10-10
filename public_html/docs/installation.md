@@ -9,17 +9,18 @@ Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker c
 1. [Quick Start](#quick-start)
 2. [Prerequisites](#prerequisites)
 3. [Password Security](#password-security)
-4. [Docker Deployment](#docker-deployment)
-5. [Bare-Metal Deployment](#bare-metal-deployment)
-6. [Outbound Limits](#outbound-limits)
-7. [SSL Certificates](#ssl-certificates)
-8. [Cloudflare Proxy Support](#cloudflare-proxy-support)
-9. [Themes and Plugins](#themes-and-plugins)
-10. [Domain Management](#domain-management)
-11. [Site Management](#site-management)
-12. [Maintenance Operations](#maintenance-operations)
-13. [Troubleshooting](#troubleshooting)
-14. [Script Reference](#script-reference)
+4. [The Data Root](#the-data-root)
+5. [Docker Deployment](#docker-deployment)
+6. [Bare-Metal Deployment](#bare-metal-deployment)
+7. [Outbound Limits](#outbound-limits)
+8. [SSL Certificates](#ssl-certificates)
+9. [Cloudflare Proxy Support](#cloudflare-proxy-support)
+10. [Themes and Plugins](#themes-and-plugins)
+11. [Domain Management](#domain-management)
+12. [Site Management](#site-management)
+13. [Maintenance Operations](#maintenance-operations)
+14. [Troubleshooting](#troubleshooting)
+15. [Script Reference](#script-reference)
 
 ## Quick Start
 
@@ -167,6 +168,39 @@ sudo ./install.sh -y -q site mysite mysite.com 8080
 
 Without `-y`, a run with no terminal on stdin (cloud-init, CI, piped ssh) still completes: every prompt takes its default. Defaults are conservative — proposals (install Docker, use a suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes, downgrade code) refuse, and only their explicit flags (`--wipe-data`, `--allow-downgrade`) can say otherwise. The one hard requirement is the bare-metal server setup's database password, which must arrive via `POSTGRES_PASSWORD` in the environment when nobody can type it.
 
+## The Data Root
+
+Everything a host keeps as data lives under one mount point, `/srv/joinery`, on a filesystem of its own: a new bare-metal server's database, mail queue, rspamd state and sites' files, and a new Docker host's containers, images and volumes. One place to measure, grow and back up, the same on every install. A site container needs nothing of its own: its volumes are already under Docker's data, on the data root.
+
+`install.sh server` and `install.sh docker` make it on a new host, before anything that keeps data is installed. `--data-root=SIZE` gives its first size and `--data-root=/dev/sdX` a spare device for it; without either it starts at the size below. A root disk that cannot give it 4 GiB above its reserve (below) stops the install: the host would have nowhere for its data. A host that already keeps data where the data root would go (a server or Docker host installed before it, or `server` run again on such a box) keeps it where it is and says so; moving it is a separate step.
+
+- **A file, allocated whole.** `/srv/joinery.img` on the root disk, fully allocated so it never promises space the disk lacks, formatted XFS and mounted with project quotas through `/etc/fstab`. The loop device reads the file with direct I/O. `/etc/joinery/data_root` records what backs it; `--data-root=/dev/sdX` (or `joinery_data_root.sh create /dev/sdX`) puts it on a spare device instead, mounted by UUID.
+- **Services wait for it.** `joinery-data.target` is reached when `/srv/joinery` is mounted. PostgreSQL, Docker and containerd, Apache, every PHP-FPM version, Postfix and rspamd require it (a drop-in `joinery-data-root.conf` under each unit's `.d/`), so none starts on an empty directory of the root disk. The mount carries `nofail`, so a host whose data root fails to mount still boots and its agent can say why.
+- **It starts modest and grows as it fills.** XFS grows but never shrinks, so the first size is the one given (`--data-root=SIZE`), or the larger of 16 GiB and a quarter of the root disk when none is. The root disk always keeps the larger of 6 GiB and 15% of itself. Every minute the host converger runs `joinery_data_root.sh tick`: when the data root has less than the larger of 8 GiB and 20% of its size free, the file grows online to the largest of a quarter more, its used space plus 12 GiB, and its used space over 0.7, as far as the root disk can give. When it cannot grow, the converger's transcript says so once a day, and the agent's `disk_headroom` recipe opens a case when it reaches its floor, as for any full disk. A data root on a device grows only after its provider grows the device.
+- **Nothing runs without it.** While a declared data root is not mounted, the host converger runs no installer, in any mode, and records `data-root-not-ready`; the site's admin header names it with the `status` command, and a `run_plugin_installers` or `host_converge` job goes red with the same reason. A failed growth or unit reload on a mounted data root is reported in the transcript and does not stop the run. A package upgrade that restarts PHP-FPM, Postfix or PostgreSQL while the data root is unmounted cannot start the service, so the package stays half-configured; once the data root is back, `dpkg --configure -a` finishes it. `joinery_data_root.sh status` says what backs it, its size, use and free space, whether it can still grow, each place mounted from it, and what is under it; `check` exits 0 when it is right, 1 with the reason when not, and 2 on a host with none.
+- **The host report shows it.** `host_report`'s `disk_pool` carries the data root's figures, shown on the node page as **Data root**, and the agent's `disk_usage` word reports its biggest directories beside the site tree's.
+
+**The same paths as always.** Packages and the site address their data where they always have; each of those paths is a **bind mount** of its place under the data root, kept by `joinery_data_root.sh bind REL TARGET`, recorded in `/etc/joinery/data_binds`:
+
+| Under `/srv/joinery` | Mounted at | Made by |
+|---|---|---|
+| `postgresql` | `/var/lib/postgresql` | `install.sh server` |
+| `mail/postfix` | `/var/spool/postfix` | `install.sh server` |
+| `mail/rspamd` | `/var/lib/rspamd` | `install.sh server` |
+| `sites/{site}/{folder}`, for `uploads`, `static_files`, `storage`, `backups`, `logs` and `cache` | `/var/www/html/{site}/{folder}` | `install.sh site` (`_site_init.sh`) |
+| `sites/{site}_test/logs` | `/var/www/html/{site}_test/logs` | `install.sh site --with-test-site` |
+| `docker` | (Docker's `data-root` in `/etc/docker/daemon.json`) | `install.sh docker` |
+
+A mount, not a symlink: the backup engine, restore, the site census and the permission sweep all treat a symlink as one small file and never go inside it, so a backup would quietly stop carrying the files behind it. To every tool a mounted folder is an ordinary folder. A file moved between two of them (`uploads/` to `static_files/`) is copied rather than renamed; PHP's `rename()` does that by itself.
+
+- Each mount is a unit of its own (`var-lib-postgresql.mount`, `var-www-html-{site}-uploads.mount`) that requires the data root's mount, and `joinery-data.target` requires every recorded one, so a service that waits for the target waits for its folders too.
+- The folder underneath each mount is root's, mode 000 and immutable: while the data root is down, nothing writes to the root disk in its place.
+- `bind` refuses a path that holds data and changes nothing (exit 3). A new site whose folders already hold data keeps every one of them where it is.
+- `check` fails while any recorded mount is not in place, naming it, and the converger's `tick` mounts it again. Because the target requires every recorded mount, a mount whose place under `/srv/joinery` is gone keeps every service that waits for the data root down; take it away with `unbind`.
+- `unbind TARGET` takes one away: the target lets it go first, so no service stops, and the path is left an empty folder with its place's owner and mode; the data stays under `/srv/joinery`. `remove-site NAME` takes every mount of a site and its data there; `remove_account.sh` runs it before it removes a bare-metal site's directory.
+- Incremental backups ignore the device number (`--no-check-device`): the data root's loop device can come back under another number after a reboot.
+- `/var/lib/joinery/host`, the agent and its log, the code and `config/` stay on the root disk, so a host whose data root is the thing that failed can still say why.
+
 ## Docker Deployment
 
 ### What Docker mode is
@@ -191,7 +225,7 @@ So run Joinery containers on a machine you control, and put sites that must not 
 sudo ./install.sh docker
 ```
 
-Checks for Docker, installs Docker CE if missing, starts the daemon, verifies it's operational.
+Checks for Docker, installs Docker CE if missing, starts the daemon, verifies it's operational. On a host Docker is not yet on, it makes the [data root](#the-data-root) first and points Docker's `data-root` at `/srv/joinery/docker` (`install_tools/docker_disk_pool.sh create`), so every container, image and volume lives on it. `--data-root=SIZE|DEVICE` gives its first size or a device.
 
 ```bash
 sudo ./install.sh docker --multi-tenant
@@ -229,23 +263,9 @@ It then runs `install_tools/proxy_default_site.sh install`, which gives the host
 - certbot's challenge rule loads ahead of the switch, so a suspended site's certificate still renews.
 - Removing the site removes its mark.
 
-**A disk allowance per site.** Docker on an ordinary cloud disk cannot cap one container's disk, so one site could fill the disk for all of them. A new host made with `--disk-pool` can:
+**A disk allowance per site.** Docker on an ordinary cloud disk cannot cap one container's disk, so one site could fill the disk for all of them. A multi-tenant host can: Docker keeps its data on the host's [data root](#the-data-root), which has XFS project quotas, and with user ids remapped a site cannot move its own files out of its allowance. `install_tools/docker_disk_pool.sh can-cap` says whether this host can cap a site's disk, and why not.
 
-```bash
-sudo ./install.sh docker --multi-tenant --disk-pool=16G
-```
-
-`install_tools/docker_disk_pool.sh create` runs before Docker is installed. It makes the host's **data root** (`install_tools/joinery_data_root.sh create`) and points Docker's `data-root` at `/srv/joinery/docker` in `/etc/docker/daemon.json`, so its containers and volumes live on it. A host Docker is already on cannot be given a pool, and `--disk-pool` needs `--multi-tenant`: without user-namespace remapping, a site could move its own files out of its allowance.
-
-The data root is `/srv/joinery`, a filesystem of its own:
-
-- **A file, allocated whole.** `/srv/joinery.img` on the root disk, fully allocated so it never promises space the disk lacks, formatted XFS and mounted with project quotas through `/etc/fstab`. The loop device reads the file with direct I/O. `/etc/joinery/data_root` records what backs it; `joinery_data_root.sh create /dev/sdX` puts it on a spare device instead, mounted by UUID.
-- **Services wait for it.** `joinery-data.target` is reached when `/srv/joinery` is mounted. PostgreSQL, Docker and containerd, Apache, every PHP-FPM version, Postfix and rspamd require it (a drop-in `joinery-data-root.conf` under each unit's `.d/`), so none starts on an empty directory of the root disk. The mount carries `nofail`, so a host whose data root fails to mount still boots and its agent can say why.
-- **It starts modest and grows as it fills.** XFS grows but never shrinks, so the first size is the one given (`--disk-pool=SIZE`), or the larger of 16 GiB and a quarter of the root disk when none is. The root disk always keeps the larger of 6 GiB and 15% of itself. Every minute the host converger runs `joinery_data_root.sh tick`: when the data root has less than the larger of 8 GiB and 20% of its size free, the file grows online to the largest of a quarter more, its used space plus 12 GiB, and its used space over 0.7, as far as the root disk can give. When it cannot grow, the converger's transcript says so once a day, and the agent's `disk_headroom` recipe opens a case when it reaches its floor, as for any full disk. A data root on a device grows only after its provider grows the device.
-- **Nothing runs without it.** While a declared data root is not mounted, the host converger runs no installer, in any mode, and records `data-root-not-ready`; the site's admin header names it with the `status` command, and a `run_plugin_installers` or `host_converge` job goes red with the same reason. A failed growth or unit reload on a mounted data root is reported in the transcript and does not stop the run. A package upgrade that restarts PHP-FPM, Postfix or PostgreSQL while the data root is unmounted cannot start the service, so the package stays half-configured; once the data root is back, `dpkg --configure -a` finishes it. `joinery_data_root.sh status` says what backs it, its size, use and free space, whether it can still grow, and what is under it; `check` exits 0 when it is right, 1 with the reason when not, and 2 on a host with none.
-- **The host report shows it.** `host_report`'s `disk_pool` carries the data root's figures, shown on the node page as **Data root**.
-
-`install.sh site SITENAME ... --disk=4G` then gives the site its allowance, and a site install with `--disk` on a host without a pool is refused:
+`install.sh site SITENAME ... --disk=4G` then gives the site its allowance, and a site install with `--disk` on a host that cannot cap it is refused:
 
 - All of the site's volumes but `backups` and `deploy` share one XFS project, so the allowance covers its whole footprint. `backups` (fleet backups stage there) and `deploy` (an upgrade's staging and the previous code) are each a project of their own, outside the allowance, so a full site can still be backed up and upgraded.
 - The project's hard limit is the allowance plus 10%. The site itself stops taking uploads and stored mail at the allowance (`DiskAllowance`), naming what is used and the way out, and inbound mail is deferred so senders retry. The 10% above is left for the database, logs and system writes, so PostgreSQL never meets the wall first.
@@ -295,7 +315,7 @@ Each site container can be given limits, so one site cannot use up the machine:
 | `--memory=SIZE` | memory, in Docker's syntax (`512m`, `1G`); swap is held to the same figure | none |
 | `--cpus=N` | CPU, in cores (`1.0` is at most one core) | none |
 | `--pids-limit=N` | processes and threads together; at least 128 | 512 for a new site |
-| `--disk=SIZE` | disk, over all of the site's volumes but `backups` and `deploy` (`4G`, `500M`; at least 100M); only on a host with a disk pool, see above | none |
+| `--disk=SIZE` | disk, over all of the site's volumes but `backups` and `deploy` (`4G`, `500M`; at least 100M); only on a multi-tenant host, see above | none |
 
 Under load, sites already share the CPU evenly, whatever their ceilings. The limits are recorded in the site's run spec, so a rebuild keeps them; give an option again to change one, or `none` to lift it. `install.sh site-limits SITENAME [--memory=SIZE] [--cpus=N] [--disk=SIZE]` changes memory, CPU and the disk allowance on the running site without a rebuild (`sysadmin_tools/site_limits.sh`, the host agent's `site_limits` word, the node page's **Change a site's limits**); a flag left out keeps that limit, a memory change restarts the site, and lifting a memory limit or CPU ceiling takes a rebuild. A limit is refused before anything stops if Docker would refuse it, such as a CPU ceiling above the machine's CPUs. A bare-metal site has no container, so the options are refused there. With a memory budget, PostgreSQL, PHP's worker pool and the database connections between them are sized from it at every start. The capabilities above are not a limit and not in the run spec: every rebuild applies them to every site. See [Deploy and Upgrade](deploy_and_upgrade.md) for the run spec and the sizing.
 
@@ -354,7 +374,7 @@ The next container start clears it. `rebase_site_container.sh` holds the supervi
 sudo ./install.sh server
 ```
 
-Installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Composer, Certbot, UFW, fail2ban, SSH hardening, and unattended security updates. Beside PHP's `gd` it installs `libjpeg-turbo-progs`, whose `djpeg` lets the site decode a large JPEG already shrunk to the sizes it needs (about 15 MB for a 24-megapixel photo instead of 92; see [Photo System](photo_system.md#how-sizes-are-made)); the same step runs inside the base image build. The package is also declared in root `composer.json` (`extra.joinery-system-packages`), so the dependency resolver installs it at every other root moment too — container start, `install.sh site`, and `upgrade.php` on a node that was installed before it was declared. Without it a site still works, decoding large JPEGs in full.
+Makes the host's [data root](#the-data-root) and mounts PostgreSQL's, Postfix's and rspamd's directories from it (`--data-root=SIZE|DEVICE` gives its first size or a device), then installs and configures PHP 8.3, Apache (with `mod_rewrite`), PostgreSQL, Composer, Certbot, UFW, fail2ban, SSH hardening, and unattended security updates. Beside PHP's `gd` it installs `libjpeg-turbo-progs`, whose `djpeg` lets the site decode a large JPEG already shrunk to the sizes it needs (about 15 MB for a 24-megapixel photo instead of 92; see [Photo System](photo_system.md#how-sizes-are-made)); the same step runs inside the base image build. The package is also declared in root `composer.json` (`extra.joinery-system-packages`), so the dependency resolver installs it at every other root moment too — container start, `install.sh site`, and `upgrade.php` on a node that was installed before it was declared. Without it a site still works, decoding large JPEGs in full.
 
 #### How SSH hardening picks its account
 
@@ -457,11 +477,15 @@ Two separate things, which the installer keeps in agreement:
 /var/www/html/{sitename}/
 ├── public_html/      # Application code
 ├── config/           # Site configuration
-├── uploads/          # User uploads
-├── logs/             # Application logs
-├── static_files/     # Generated files
-└── backups/          # Database backups
+├── uploads/          # User uploads           (mounted from /srv/joinery/sites/{sitename}/uploads)
+├── static_files/     # Generated files        (mounted from the data root, as uploads)
+├── storage/          # Stored mail and files  (mounted from the data root)
+├── backups/          # Database backups       (mounted from the data root)
+├── logs/             # Application logs       (mounted from the data root)
+└── cache/            # Page cache             (mounted from the data root)
 ```
+
+On a host with no data root the folders are ordinary directories in the site directory.
 
 ## Outbound Limits
 

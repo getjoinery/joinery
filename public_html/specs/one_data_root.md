@@ -2,7 +2,9 @@
 
 **Status:** BUILDING. Drafted 2026-10-07 from an inventory of the installers;
 O1 and O3 settled by the owner 2026-10-09 (D7, D8). WP1 BUILT 2026-10-10,
-box-proven, uncommitted. WP2 next. Stands alone; `hosted_data_promise_disk_encryption`
+box-proven, committed (586d2ec3). WP2 BUILT 2026-10-10, box-proven,
+uncommitted; O4 settled (D1: bind mounts, not symlinks). WP3 next; D6 must be
+released before WP3 runs anywhere. Stands alone; `hosted_data_promise_disk_encryption`
 stands on it and is deliberately NOT part of it — this spec never mentions a
 key.
 
@@ -54,11 +56,38 @@ provided by this system", which is exactly what this is. Under it:
 ```
 
 A site container needs nothing: its volumes are under `docker/`. The paths
-the platform uses today keep working — `/var/www/html/<site>/uploads` becomes
-a symlink to `/srv/joinery/sites/<site>/uploads`, Postgres's `data_directory`
-and Postfix's `queue_directory` are configuration, and Docker's `data-root` is
-one line of `daemon.json`. No PHP changes: code addresses the site root as it
-always has.
+the platform uses today keep working: each one is a **bind mount** of its
+place under the data root (O4, settled 2026-10-10), and Docker's `data-root` is
+one line of `daemon.json`:
+
+| Under `/srv/joinery` | Mounted at |
+|---|---|
+| `postgresql` | `/var/lib/postgresql` |
+| `mail/postfix` | `/var/spool/postfix` |
+| `mail/rspamd` | `/var/lib/rspamd` |
+| `sites/<site>/<dir>`, for uploads, static_files, storage, backups, logs, cache | `/var/www/html/<site>/<dir>` |
+
+No PHP changes, no package configuration changed: code, `apt`, `pg_*` and
+Postfix address the paths they always have.
+
+Why mounts and not symlinks: everything that walks a site directory — the
+backup engine (tar), restore, the site census, the permission sweep — treats a
+symlink as one small file and never goes inside it. With symlinks a backup
+would silently stop carrying uploads, and a restore would rebuild the folders
+on the root disk. A mounted folder is an ordinary folder to every tool, the
+same shape a site container's volumes already are. The cost: six mounts per
+site, kept by `joinery_data_root.sh`, and a file moved between two of them is
+copied rather than renamed (PHP's `rename()` does that itself). While the data
+root is down the folder underneath each mount is root's, mode 000 and
+immutable, so nothing writes to the root disk in its place.
+
+`joinery_data_root.sh bind REL TARGET` makes one: the directory under the data
+root, a mount unit (`Requires=srv-joinery.mount`), and a line in
+`/etc/joinery/data_binds`; `joinery-data.target` requires every recorded mount,
+so a consumer waits for its folders as well as for the filesystem. `bind`
+refuses a TARGET that holds data: moving data is `migrate`'s (WP3). `unbind
+TARGET` takes one away and leaves its data where it is. `check` fails while
+any recorded mount is not in place, and `tick` starts one that is not.
 
 ### D2. A filesystem of its own, in a file or on a device
 
@@ -115,11 +144,19 @@ run writes to a host whose data is missing.
 
 ### D4. Install shapes
 
-- **New bare-metal site:** `install.sh` creates the data root before Postgres
-  is initialised, and every data directory is born under it.
+- **New bare-metal site:** `install.sh server` creates the data root and binds
+  Postgres, Postfix and rspamd onto it before their packages are installed;
+  `_site_init.sh` binds the site's six folders before it makes anything in
+  them. A host that already holds data in any of those places (a `server` run
+  again on an existing box) keeps it where it is and says so: moving it is
+  `migrate`'s (WP3).
 - **New Docker host (any kind):** the pool becomes the data root; Docker's
-  `data-root` is `/srv/joinery/docker`; the multi-tenant quota work is
-  unchanged in substance.
+  `data-root` is `/srv/joinery/docker`. Every new Docker host gets one, not
+  only a multi-tenant one. A site's disk allowance still needs a multi-tenant
+  host (user-namespace remapping), and `docker_disk_pool.sh allow` asks for it
+  itself, since a data root no longer says the host is multi-tenant.
+- **Size or device:** `install.sh server|docker --data-root=SIZE` gives the
+  first size, `--data-root=/dev/X` a device; without it, D7's first size.
 - **Site container:** nothing to do.
 - **Self-hosted, operator says no:** not offered. A filesystem of its own in a
   file costs nothing an operator would notice, and one layout is the point.
@@ -245,6 +282,70 @@ root is the thing that failed can still say why.
   Also in WP2: the agent's `disk_headroom` reason text names "the Docker
   disk pool"; once bare-metal sites have a data root it should say "the data
   root" (joinery-agent, text only; host_report's key stays `disk_pool`).
+  And `disk_usage.sh`, which walks with `du -x` and so stops at a mount,
+  reports the data root's own figures and tree beside the root disk's.
+  **D6 BUILT 2026-10-10:** `upgrade.php` 1.13 stages in `SITE/upgrades/` and
+  downloads to `SITE/upgrade_archives/` (or the deploy volume's), asks the
+  deploy root for 3x the live code, and after a deploy empties the archives
+  and removes what older releases left in `uploads/`; `backup_files.sh` 1.5.2
+  and `SiteCensus` 1.3 leave both out, and neither counts toward the data's
+  identity (staging is made anew by every upgrade).
+  **WP2 BUILT 2026-10-10.** `joinery_data_root.sh` 1.2 (`bind`, `unbind`;
+  check/tick/status know the binds), `install.sh` 3.09 (`server` makes the
+  data root and binds Postgres, the Postfix queue and rspamd before their
+  packages; `docker` makes it on every new Docker host; `--data-root=SIZE|DEVICE`
+  replaces `--disk-pool`), `_site_init.sh` 3.13 (six site folders, the test
+  site's logs), `docker_disk_pool.sh` 2.2 (`can-cap`: the pool and user-id
+  remapping, asked by `allow`, `install.sh site --disk` and `site_limits.sh`
+  1.1), `disk_usage.sh` 1.1 (`data_root`: its figures and tree to depth 3;
+  JobResultProcessor 1.73 and job_detail 1.14 carry and show it), agent 1.68.1
+  (`disk_headroom` says "the data root"). Gates: `joinery_data_root` 76,
+  `docker_disk_pool` 43, `disk_usage` 42, `site_limits` 21, `upgrade_cleanup`
+  32, `installer_contract` 867; `db --changed` 88 suites green.
+  Box-proven on two scratch Linodes (Ubuntu 26.04, 2 GB; deleted after) from
+  the 0.8.475 archive with this tree's scripts laid over it. Bare metal:
+  `install.sh server` made a 16 GiB data root and bound the three paths;
+  PostgreSQL 18's cluster and Postfix's queue were made on it by their own
+  packages and ran; `install.sh site --with-test-site` bound the six folders
+  (www-data 770, as the permission sweep sets them) and the test site's logs;
+  a file in uploads/ was in `backup_files.sh --part data`'s archive;
+  `disk_usage.sh` reported the data root's tree; a reboot brought every mount
+  (direct I/O on) and every service back, Apache after the target; with the
+  file missing the box booted, PostgreSQL, Apache, PHP-FPM and Postfix stayed
+  down, `check` named the file, and the folders underneath were mode 000 and
+  immutable (root's own touch refused); with it back, starting the services
+  pulled the mounts in. Docker host: `install.sh docker --multi-tenant` with
+  no size made a 16 GiB data root, Docker's root at
+  `/srv/joinery/docker/100000.100000`, `can-cap` 0; `install.sh docker` run
+  again on it reused everything and exited 0.
+  Not box-tested: a device given as `--data-root=/dev/X` through install.sh
+  (the tool's device path is gate-covered), `unbind` on a live mount.
+  Found on the box, not this WP's: B1 (todo memory) a companion test site's
+  own vhost carries a test site of its own, so `<site>_test_test` directories
+  (and now its logs bind) are made.
+  **Reviewed by reviewer2 2026-10-10: NOT VALID, F1-F2 blockers, F3-F8 notes.**
+  F1 `unbind` stopped every consumer (stopping a mount the target still
+  required stops the target): the record goes and the units reload before the
+  mount stops; box-tested on a live mount, PostgreSQL, Apache, PHP-FPM and
+  Postfix stayed up. F2 a bare-metal `remove_account.sh` emptied the mounts and
+  stopped at the first mountpoint: `joinery_data_root.sh remove-site NAME`
+  takes a site's mounts and its data on the data root first (refused while the
+  data root is down); box-tested, six mounts and the data went and the
+  directory was removed. F3 incrementals pass `--no-check-device` (a loop
+  device renumbered at boot re-dumped the data). F4 `unbind` leaves the path
+  an ordinary folder with its place's owner and mode. F6 `restore_project.sh`
+  1.6.1 will not move a site with mounts aside; it says to restore in place.
+  F7 the upgrade transition read as harmless; `uploads/.upgrade.lock` stays
+  where it is (the runner and older upgrade.php must agree on it across
+  versions, and it is an empty file). F8 restore_chain and binds: fine.
+  F5 (a stale bind record holds every consumer down) is an owner decision; the
+  consequence is in installation.md. The box run also found B2 (bare-metal
+  remove_account hangs at dropdb's password prompt) and B3 (a converger run
+  racing a removal recreates the site's cache/), both pre-existing, todo memory.
+  Re-review VALID 2026-10-10. Its notes N1 (remove_account warns when the tool
+  is missing on a host with binds) and N2 (remove-site reloads once for all of
+  a site's mounts) done; N3 (remove_account runs a sibling script the primitive
+  does not verify, as remove_site_certificate.sh already does) noted.
 - **WP3 — `migrate`** for the three existing shapes, proven on a scratch box
   of each.
 - **WP4 — Fleet:** managed nodes migrated one at a time from the management
@@ -259,3 +360,7 @@ root is the thing that failed can still say why.
   D1 is withdrawn.
 - **O3 — SETTLED 2026-10-09.** Under the data root, with the agent's own log on
   the root disk: D8.
+- **O4 — SETTLED 2026-10-10.** A site's folders reach the data root by bind
+  mounts, not symlinks (every tool that walks a site skips a symlink's
+  contents); Postgres, Postfix and rspamd the same way, so no package is
+  reconfigured: D1.

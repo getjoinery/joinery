@@ -30,8 +30,9 @@
  *   - the names the files engine never archives, at any depth
  *     (backup_files.sh NAMED_EXCLUDES; site_census_test pins the two lists
  *     equal), and the site's own backup_exclude names;
- *   - public_html_* beside the code, and uploads/upgrades (the upgrade's
- *     trees);
+ *   - public_html_* beside the code, and upgrades, upgrade_archives and
+ *     uploads/upgrades (the upgrade's staging and downloads, and where older
+ *     releases staged);
  *   - offloaded files' local copies: they live in the bucket, and the archive
  *     leaves them out (BackupObjects::exclude_lines);
  *   - each machine's own config/Globalvars_site.php, config/backup_site_key and
@@ -39,6 +40,7 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.3 - upgrades and upgrade_archives, where an upgrade stages beside the code, are left out
  * @version 1.2 - offloaded() asks each sampled file of the file store its record names
  * @version 1.1 - check(): one machine's census judged alone, for a copy from backups (site_copy.md WP10)
  * @version 1.0
@@ -55,7 +57,7 @@ class SiteCensus {
 	const NAMED_EXCLUDES = array('backups', 'vendor', 'node_modules', 'target', '.git', 'logs', 'cache', 'tmp', 'sessions');
 
 	/** Paths, relative to the site root, each machine keeps as its own. */
-	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'uploads/upgrades', 'deploy');
+	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');
 
 	/** Tables a backup run writes on the source after its dump. */
 	const OWN_TABLES = array('bkh_backup_history');
