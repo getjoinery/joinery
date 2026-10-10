@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use crate::model::{Delta, EntityId, Entry};
 use crate::order::{plan, FolderParents, Plan, PlanItem};
-use crate::reconcile::{is_mass_delete, reconcile, Action, Context, Issue};
+use crate::reconcile::{is_mass_delete, reconcile, Action, Context, Issue, Side};
 
 /// Which direction a paused delete would have gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,14 +91,100 @@ pub fn run_round(
 ) -> RoundOutcome {
     let mut out = RoundOutcome::default();
     let mut resolved: Vec<(RoundInput, Vec<Action>)> = Vec::new();
+    // Records deleted here whose delete lost to an edit on the server, and
+    // the folder the server keeps each in: the edit comes back
+    // (`restore_locally`), and so do its folders (below).
+    let mut edit_kept: Vec<(EntityId, Option<i64>)> = Vec::new();
 
     for input in inputs {
         let res = reconcile(&input.entry, &input.local, &input.remote, ctx);
+        if res.issues.iter().any(|i| matches!(i, Issue::DeleteLostToEdit { side: Side::Local, .. })) {
+            edit_kept.push((input.entry.id, input.entry.remote.parent));
+        }
         for issue in res.issues {
             out.issues.push((input.entry.id, issue));
         }
         if !res.actions.is_empty() {
             resolved.push((input, res.actions));
+        }
+    }
+
+    // What arrives under a folder the user removed here is not brought in:
+    // its trash runs, the server trashes the subtree, and the feed forgets
+    // what was under it. With one exception: a file whose delete here lost to
+    // an edit there is not an arrival. An edit beats a delete, and trashed
+    // with the folder, the server's cascade took the edit while its coming
+    // back was dropped as an arrival (B-O1). So every folder up the chain the
+    // server keeps that file in, that this round would trash, is put back
+    // here instead, at the server's placement; the edited file lands in it,
+    // and what nobody touched goes to the trash on its own.
+    //
+    // Only what this round decides. A folder whose trash is still in the
+    // journal from an earlier pass is not taken back here: that trash was
+    // decided before the edit was heard of, and it is the executor that
+    // stands it down (`trash_remote`), after which a later round decides
+    // again from here. Until then the edit's download stays dropped with the
+    // other arrivals.
+    //
+    // The server's own cascade is unconditional: an edit that reaches the
+    // server after this device's last read of the feed and before its trash
+    // still goes with the folder, to the server's trash -- recoverable, not
+    // visible. Closing that needs the server to refuse a trash once something
+    // under the folder has changed since a given cursor.
+    let mut kept_for_an_edit: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for (_, mut parent) in edit_kept.iter().copied() {
+        let mut guard = 0;
+        while let Some(id) = parent {
+            if !kept_for_an_edit.insert(id) {
+                break;
+            }
+            guard += 1;
+            if guard > 512 {
+                break;
+            }
+            parent = parents.remote.get(&id).copied().flatten();
+        }
+    }
+    let put_back = |input: &RoundInput, action: &Action| {
+        input.entry.id.entity_type == crate::model::EntityType::Folder
+            && matches!(action, Action::TrashRemote)
+            && kept_for_an_edit.contains(&input.entry.id.server_id)
+            && !trash_already_queued.contains(&input.entry.id.server_id)
+    };
+    let restored: std::collections::HashSet<i64> = resolved
+        .iter()
+        .filter(|(input, actions)| actions.iter().any(|a| put_back(input, a)))
+        .map(|(input, _)| input.entry.id.server_id)
+        .collect();
+    for (id, mut parent) in edit_kept {
+        let mut guard = 0;
+        let mut folder_kept = false;
+        while let Some(f) = parent {
+            if restored.contains(&f) {
+                folder_kept = true;
+                break;
+            }
+            guard += 1;
+            if guard > 512 {
+                break;
+            }
+            parent = parents.remote.get(&f).copied().flatten();
+        }
+        if folder_kept {
+            for (who, issue) in out.issues.iter_mut() {
+                if *who == id {
+                    if let Issue::DeleteLostToEdit { side: Side::Local, folder_kept: kept } = issue {
+                        *kept = true;
+                    }
+                }
+            }
+        }
+    }
+    for (input, actions) in resolved.iter_mut() {
+        for action in actions.iter_mut() {
+            if put_back(input, action) {
+                *action = Action::CreateLocalFolder { placement: input.entry.remote.clone() };
+            }
         }
     }
 
@@ -135,18 +221,16 @@ pub fn run_round(
     // this round, or still in the journal from an earlier one (refused once
     // by the network, or a kill mid-call -- such a folder is busy and out of
     // this round, and its trash is just as decided). Nothing arrives under
-    // them meanwhile. Transfers run before deletes, and a landing creates its
-    // parent directories -- on a real disk too -- so a download planned under
-    // such a folder rebuilt the directory the user had just deleted, the trash
-    // then ran on the server, and the next scan met a directory nobody knew,
-    // holding the download, and minted a new folder for it: the user's delete
-    // undone, in a folder nobody made (the reset's WP1d finding C2). The
-    // trash runs, the server trashes the subtree, and the feed forgets what
-    // was under it; the arrivals are simply not brought in. Walked up the
-    // REMOTE chain, which is where an arrival's parent is stated. Read before
-    // the mass-delete withholding below, deliberately: while that pause holds
-    // a folder's trash for a person to answer, the arrivals under it wait
-    // with it.
+    // them meanwhile (above). Transfers run before deletes, and a landing
+    // creates its parent directories -- on a real disk too -- so a download
+    // planned under such a folder rebuilt the directory the user had just
+    // deleted, the trash then ran on the server, and the next scan met a
+    // directory nobody knew, holding the download, and minted a new folder
+    // for it: the user's delete undone, in a folder nobody made (the reset's
+    // WP1d finding C2). Walked up the REMOTE chain, which is where an
+    // arrival's parent is stated. Read before the mass-delete withholding
+    // below, deliberately: while that pause holds a folder's trash for a
+    // person to answer, the arrivals under it wait with it.
     let mut going: std::collections::HashSet<i64> = trash_already_queued.clone();
     going.extend(
         resolved

@@ -6871,6 +6871,58 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             }
         }
     }
+    // A file of its own is not trashed once the server has moved past this
+    // device's agreement: a delete only ever wins against unchanged content,
+    // and a round never plans one otherwise, so a head past the agreement is
+    // an edit that came in after this was decided -- queued in an earlier
+    // pass, refused or killed. Stood down, it leaves the journal, and the
+    // next round decides again, where the edit wins (B-O1).
+    if op.entity.entity_type == EntityType::File {
+        if let Some(e) = env.store.get_entry(op.entity)? {
+            if !e.remote_deleted && crate::reconcile::server_moved_past_agreement(&e) {
+                return Ok(OpOutcome::Overtaken("it was edited on the server since this was decided".into()));
+            }
+        }
+    }
+    // Nor a folder while a file inside it has been edited on the server since
+    // this device agreed on it AND since the trash was decided. A trash
+    // decided before the edit was heard of would have the server's cascade
+    // take it; stood down, it leaves the journal, and the next round decides
+    // again: an edit beats a delete, and the folder comes back for it
+    // (`round`, B-O1). What the server had changed when the trash was
+    // decided, that round judged (`decided_at`); stood down for that too, a
+    // file moved in from elsewhere with an edit -- which no round keeps a
+    // folder for -- held the trash every pass for ever. A file this device
+    // never agreed on is not counted: it is content arriving under a folder
+    // the user deleted, which goes with it. Walked down the server's tree as
+    // this store has it, folder by folder.
+    if op.entity.entity_type == EntityType::Folder {
+        let decided_at = serde_json::from_str::<Value>(&op.params)
+            .ok()
+            .and_then(|p| p.get("decided_at").and_then(Value::as_i64))
+            .unwrap_or(0);
+        let mut below = vec![op.entity.server_id];
+        let mut guard = 0;
+        while let Some(folder) = below.pop() {
+            guard += 1;
+            if guard > 100_000 {
+                return Err(ExecError::Contract("folder tree has a loop in it".into()));
+            }
+            for e in env.store.children_of(Some(folder))? {
+                match e.id.entity_type {
+                    EntityType::Folder => below.push(e.id.server_id),
+                    EntityType::File => {
+                        if !e.remote_deleted && e.head_change_id > decided_at && crate::reconcile::server_moved_past_agreement(&e) {
+                            return Ok(OpOutcome::Overtaken(format!(
+                                "a file inside it was edited on the server since this was decided ({})",
+                                e.id.server_id
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let body = json!({
         "entity_type": op.entity.entity_type.to_string(),
         "entity_id": op.entity.server_id,

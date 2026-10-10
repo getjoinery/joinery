@@ -2103,7 +2103,17 @@ pub fn run_pass(
         }
         out.round.plan.ops = kept;
     }
-    journal(env.store, &out.round.plan, key_for)?;
+    let queued = journal(env.store, &out.round.plan, key_for)?;
+    // A folder's trash carries the change it was decided at: whatever the
+    // server had changed under it by then, this round has judged, and only
+    // what changes after is the executor's to stand it down for
+    // (`trash_remote`, B-O1).
+    let queued: std::collections::HashSet<i64> = queued.into_iter().collect();
+    for op in env.store.queued_ops()? {
+        if queued.contains(&op.op_id) && op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder {
+            env.store.set_op_params(op.op_id, &serde_json::json!({ "decided_at": next_cursor }).to_string())?;
+        }
+    }
     out.exec = match trace.as_mut() {
         Some(t) => crate::execute::run_queued_with(env, &mut |op, outcome| {
             t.ops.push((op.op_id, op.kind.clone(), crate::trace::name(op.entity), format!("{outcome:?}")));
