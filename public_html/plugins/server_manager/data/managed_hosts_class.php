@@ -6,6 +6,7 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.6 - retire_if_empty(): a record with no live site and no live host node is retired when the last one is removed
  * @version 1.5 - mgh_cloud_account: which cloud account the box is in (main or test); stamped when first saved
  * @version 1.4 - place_node(): the posture rule for the add/join writers — link an existing
  *                record at the address, mint one only for a container node
@@ -115,6 +116,30 @@ class ManagedHost extends SystemBase {
 		$q = $db->prepare("SELECT COUNT(*) FROM mgn_managed_nodes WHERE mgn_mgh_managed_host_id = ? AND mgn_delete_time IS NULL");
 		$q->execute([$this->key]);
 		return (int) $q->fetchColumn();
+	}
+
+	/**
+	 * Retire a placement record when nothing is left on it: no live site and no
+	 * live node of its own. A box this plane no longer manages is not a group
+	 * the dashboard should keep listing, and the host page's own delete refuses
+	 * only while something is still placed. A record that provisions new sites
+	 * stays: an empty box is what it is for. Restoring a node places it again
+	 * (ManagedNode::undelete). Returns true when the record was retired.
+	 */
+	public static function retire_if_empty($host_id): bool {
+		$host_id = (int)$host_id;
+		if ($host_id <= 0) {
+			return false;
+		}
+		$host = new ManagedHost($host_id, TRUE);
+		if (!$host->key || $host->get('mgh_delete_time') || $host->get('mgh_provisioning_enabled')) {
+			return false;
+		}
+		if ($host->count_sites() > 0 || $host->host_node()) {
+			return false;
+		}
+		$host->soft_delete();
+		return true;
 	}
 
 	/**

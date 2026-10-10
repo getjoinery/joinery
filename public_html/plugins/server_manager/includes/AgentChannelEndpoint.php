@@ -41,6 +41,7 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.46 - a join and a claim can say container: the node is named and placed as a container site (ManagedNode::adopt_reported_container)
  * @version 1.45 - node_address_for_join() skips the shared range 100.64.0.0/10: a Tailscale address
  *                 reported first was recorded as a joined node's host (jeremytunnell-vps, 2026-10-10)
  * @version 1.44 - the plane joining itself takes its slug from the claimed name (the site's name, or the slug a
@@ -620,6 +621,9 @@ class AgentChannelEndpoint {
 			'addresses'        => ['type' => 'list', 'max' => 64],
 			// The site's public_html directory; a machine with no site sends none.
 			'web_root'         => ['type' => 'string', 'max' => 500],
+			// True when the agent runs inside a container: the node is then a
+			// container site and is placed on its Docker host's record.
+			'container'        => ['type' => 'bool'],
 		];
 	}
 
@@ -639,6 +643,7 @@ class AgentChannelEndpoint {
 				$existing->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
 				$existing->set('ajr_claimed_name', $in['claimed_name']);
 				$existing->set('ajr_web_root', ManagedNode::valid_web_root($in['web_root'] ?? null));
+				$existing->set('ajr_container', !empty($in['container']));
 				$existing->save();
 			}
 			api_success(self::join_status_payload($existing), '', 200);
@@ -663,6 +668,7 @@ class AgentChannelEndpoint {
 		// Not a web root is no web root: the join still stands, and the node
 		// it makes simply has none, as one from an older agent does.
 		$request->set('ajr_web_root', ManagedNode::valid_web_root($in['web_root'] ?? null));
+		$request->set('ajr_container', !empty($in['container']));
 		$request->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
 		$request->save();
 
@@ -825,7 +831,8 @@ class AgentChannelEndpoint {
 		$node->save();
 		$node->load();
 		$node->open_default_backup_space();
-		// A join never names a container, so this mints nothing: it links the
+		// A join names no container here (approveJoin does, when the agent says it
+		// runs in one), so this mints nothing: it links the
 		// node to a placement record that already exists at its address (a
 		// host's own agent landing on the record its containers point at) and
 		// leaves a bare machine as what it is — a node with no host row.
@@ -977,6 +984,9 @@ class AgentChannelEndpoint {
 		// backup refuses. A web root already on the record stays.
 		ManagedNode::adopt_reported_web_root($node, $request->get('ajr_web_root'), 'join');
 		$node->save();
+		// An agent inside a container makes its node a container site, placed on
+		// its Docker host's record (a join names the container only this way).
+		ManagedNode::adopt_reported_container($node, $request->get('ajr_container'));
 
 		$request->set('ajr_status', AgentJoinRequest::STATUS_APPROVED);
 		$request->set('ajr_mgn_managed_node_id', (int)$node->key);
@@ -1144,6 +1154,10 @@ class AgentChannelEndpoint {
 			// held to the public log as the binary is. Absent on a machine with
 			// a site, and before the first check.
 			'bundle_state'   => ['type' => 'string', 'max' => 24, 'pattern' => '/^(current|unlogged|verify_failed)$/'],
+			// True when the agent runs inside a container. Placed like a join
+			// that said so, which is how a site that joined before agents
+			// reported it gets grouped under its Docker host.
+			'container'      => ['type' => 'bool'],
 		];
 	}
 
@@ -1250,6 +1264,10 @@ class AgentChannelEndpoint {
 
 		if (array_key_exists('bundle_state', $in) && (string)$in['bundle_state'] !== (string)$node->get('mgn_agent_bundle_state')) {
 			$node->set('mgn_agent_bundle_state', (string)$in['bundle_state']);
+		}
+
+		if (!empty($in['container'])) {
+			ManagedNode::adopt_reported_container($node, true);
 		}
 
 		// The node saying, unprompted, whether it can verify its own scripts.

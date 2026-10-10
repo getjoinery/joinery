@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.52 - soft_delete() retires an emptied Docker host record; undelete() places a container site back on one
+ * @version 1.51 - adopt_reported_container(): a node whose agent says it runs in a container is named and placed as one
  * @version 1.50 - mgn_cloud_account is where the node is hosted (CloudAccounts::HOSTED_AT); mgn_site_removed_time, when
  *                its host verified the site's container gone; undelete() (Restore to Dashboard) gives back the
  *                space its removal drained; remove_permanently(); mgn_copy_of_node_id is registered for deletion
@@ -679,6 +681,35 @@ class ManagedNode extends SystemBase {
 	}
 
 	/**
+	 * A node whose agent says it runs inside a container is a container site:
+	 * name its container (the site folder, which is how install.sh names the
+	 * container) and place it on its Docker host's record, the way a node made
+	 * by the add form or a provision is. An agent's claim, not a proof: it only
+	 * decides how the node is grouped, and only for a node that has a web root
+	 * and no container name yet. Sets and saves through place_node(); returns
+	 * true when it named the container.
+	 */
+	public static function adopt_reported_container($node, $reported): bool {
+		if ($reported !== true && $reported !== 1 && $reported !== '1') {
+			return false;
+		}
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			return false;
+		}
+		$root = self::valid_web_root($node->get('mgn_web_root'));
+		if ($root === null) {
+			return false;
+		}
+		$name = basename(dirname($root));
+		if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]{0,49}$/', $name)) {
+			return false;
+		}
+		$node->set('mgn_container_name', $name);
+		ManagedHost::place_node($node);
+		return true;
+	}
+
+	/**
 	 * A site domain as a node's agent reports it (webDir from its config), or
 	 * null when it is not one: a lowercase hostname of two or more labels whose
 	 * last label starts with a letter. An address, a port, a scheme or a path
@@ -872,7 +903,13 @@ class ManagedNode extends SystemBase {
 				$this->removal_notes[] = 'Its backups stay on "' . $t->get('bkt_name') . '"; delete them from that target\'s Stored Backups when they are no longer wanted.';
 			}
 		}
-		return parent::soft_delete();
+		$host_id = (int)$this->get('mgn_mgh_managed_host_id');
+		$done = parent::soft_delete();
+		// The last site or host agent to leave a Docker box leaves no group behind.
+		if ($host_id > 0 && ManagedHost::retire_if_empty($host_id)) {
+			$this->removal_notes[] = 'Its Docker host had nothing left on it and was removed from the dashboard too.';
+		}
+		return $done;
 	}
 
 	/**
@@ -955,6 +992,11 @@ class ManagedNode extends SystemBase {
 		}
 		try {
 			$done = parent::undelete();
+			// A container site goes back on its Docker host, whose record may have
+			// been retired when the box emptied.
+			if (trim((string)$this->get('mgn_container_name')) !== '' && trim((string)$this->get('mgn_host')) !== '') {
+				ManagedHost::place_node($this);
+			}
 			if (!StorageSpace::active_for(StorageSpace::OWNER_NODE, (int)$this->key)) {
 				foreach (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$this->key) as $space) {
 					if ($space->is_draining()) {
