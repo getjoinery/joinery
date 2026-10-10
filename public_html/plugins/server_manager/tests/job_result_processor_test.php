@@ -491,6 +491,8 @@ check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['c
 $dp = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true, 'evil' => '<b>')))['disk_pool'];
 check($dp === array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true),
 	'a disk pool keeps its figures and quota state, nothing else', var_export($dp, true));
+check(JobResultProcessor::sanitise_host_report(array('disk_pool' => 'not_mounted'))['disk_pool'] === 'not_mounted',
+	'a data root declared and not mounted stays not_mounted, never none (host_report 1.18)');
 check(JobResultProcessor::sanitise_host_report(array('disk_pool' => 'none'))['disk_pool'] === 'none'
 	&& JobResultProcessor::sanitise_host_report(array('disk_pool' => 'rm -rf'))['disk_pool'] === 'unknown'
 	&& JobResultProcessor::sanitise_host_report(array())['disk_pool'] === null,

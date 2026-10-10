@@ -1561,6 +1561,22 @@ foreach (array('', 'Gone.example.com', '../x', 'gone.example.com/x', '*.example.
 	check($c_msg !== '', "the envelope refuses '{$bad}'");
 }
 
+// data_root_migrate: a host's data onto its data root (one_data_root WP4).
+// Nothing crosses the wire but the word; never a site container.
+list($host_dr, $host_dr_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,data_root_migrate'));
+$drenv = JobCommandBuilder::build_data_root_migrate($host_dr_node);
+check(($drenv['primitive'] ?? '') === 'data_root_migrate' && ($drenv['params'] ?? null) === array(),
+	'data_root_migrate routes the word with no parameters', json_encode($drenv));
+list($host_nodr, $host_nodr_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
+$dr_msg = '';
+try { JobCommandBuilder::build_data_root_migrate($host_nodr_node); } catch (Exception $e) { $dr_msg = $e->getMessage(); }
+check(strpos($dr_msg, 'data_root_migrate') !== false, 'an agent without the word refuses, naming it', $dr_msg);
+$dr_container = jcb_node(array('mgn_container_name' => 'drsite', 'mgn_agent_public_key' => base64_encode(str_repeat("\x0c", 32)),
+	'mgn_agent_version' => AgentVocabulary::FLOOR, 'mgn_agent_primitives' => 'check_status,data_root_migrate'));
+$dr_msg = '';
+try { JobCommandBuilder::build_data_root_migrate($dr_container); } catch (Exception $e) { $dr_msg = $e->getMessage(); }
+check(strpos($dr_msg, 'is a site container') !== false, 'a site container is refused even when its agent has the word', $dr_msg);
+
 // site_limits: a site's limits changed on its host without a rebuild
 // (multi_tenant_docker_hosts WP6). An empty field is keep; at least one changes.
 list($host_sl, $host_sl_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,site_limits'));

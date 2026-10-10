@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.54 - data_root_migrate: move this host's data onto its data root (one_data_root WP4)
  * @version 1.53 - move_to_plane: ask another management node to adopt this node's machine (API Keys tab)
  * @version 1.52 - Remove from Dashboard is Hide from Dashboard; restore_node (Restore to Dashboard); purge_node is
  *                Remove Permanently, from a live or hidden node, through NodeRemoval's guards
@@ -161,6 +162,7 @@ class NodeDetailActions {
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
 		'site_limits'              => 'overview',
+		'data_root_migrate'        => 'overview',
 		'outbound_limits'          => 'overview',
 		'run_installer'            => 'overview',
 		'file_head'                => 'overview',
@@ -392,6 +394,15 @@ class NodeDetailActions {
 			case 'disk_usage': {
 				$built = JobCommandBuilder::build_disk_usage($node);
 				$job = ManagementJob::createFromBuild($node->key, 'disk_usage', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'data_root_migrate': {
+				// This host's data onto its data root (one_data_root WP4): its
+				// services stop for one copy, and a move that does not finish
+				// puts everything back.
+				$built = JobCommandBuilder::build_data_root_migrate($node);
+				$job = ManagementJob::createFromBuild($node->key, 'data_root_migrate', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

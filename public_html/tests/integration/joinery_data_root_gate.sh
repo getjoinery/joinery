@@ -4,7 +4,7 @@
 # tier: safe
 # env: any
 # needs: []
-# timeout: 60
+# timeout: 120
 # covers: [maintenance_scripts/install_tools/joinery_data_root.sh]
 #
 # The host's data root (specs/one_data_root.md WP1), against a scratch root
@@ -30,6 +30,15 @@
 #     and nothing changed; one path, one place. check fails while a recorded
 #     bind is not in place and names it; tick mounts it again. unbind leaves
 #     the data, and only this script's mount units are ever removed.
+#   - migrate (WP3, D5): refuses, naming every reason and changing nothing, a
+#     symlinked folder, a cluster outside /var/lib/postgresql, a root disk that
+#     cannot hold the data twice and a site that is upgrading; otherwise makes
+#     the data root, stops the running consumers and cron, copies each place
+#     (symlinks and modes kept), switches each path to a mount, keeps the copy
+#     from before at /srv/joinery.old until a tick on a later boot, starts the
+#     services again, and moves Docker's data-root by daemon.json. A move whose
+#     mount fails puts every folder back and starts the services. Run again, it
+#     moves only what is not moved.
 #
 # The real XFS behaviour (the loop device, online growth, project quotas) is
 # the multi-tenant spec's proof on a scratch Linode; this pins the decisions.
@@ -74,7 +83,7 @@ stub findmnt 'case "$*" in
   *FSTYPE,OPTIONS*) [ -f "$GATE_T/mounted" ] || exit 1; echo "$(cat "$GATE_T/fstype" 2>/dev/null || echo xfs) rw,relatime,$(cat "$GATE_T/opts" 2>/dev/null || echo prjquota)" ;;
   *"--mountpoint $GATE_T/root/srv/joinery") { [ -f "$GATE_T/mounted" ] || [ -f "$GATE_T/stranger" ]; } || exit 1; echo /srv/joinery ;;
   *--mountpoint*) p="${@: -1}"; grep -qxF "$p" "$GATE_T/othermounts" 2>/dev/null || exit 1; echo "$p" ;;
-  *) { [ -f "$GATE_T/mounted" ] || [ -f "$GATE_T/stranger" ]; } || exit 1; echo /srv/joinery ;;
+  *) cat "$GATE_T/othermounts" 2>/dev/null; { [ -f "$GATE_T/mounted" ] || [ -f "$GATE_T/stranger" ]; } || exit 1; echo /srv/joinery ;;
 esac'
 # df: figures by filesystem, "size used avail" in bytes.
 stub df 'p="${@: -1}"; echo "1B-blocks Used Avail"; case "$p" in */srv/joinery) cat "$GATE_T/fig_data" ;; *) cat "$GATE_T/fig_root" ;; esac'
@@ -365,6 +374,171 @@ chk "a site whose name starts with it keeps its own" "$(grep -c '^sites/s4x/uplo
 chk "check: 0, so nothing on the host waits on the removed site" "$(run check >/dev/null 2>&1; echo $?)" "0"
 chk "a site with nothing on the data root: exit 0, silent" "$(run remove-site nosuch 2>&1; echo $?)" "0"
 chk "a name that is not a site name is refused" "$(run remove-site ../etc >/dev/null 2>&1; echo $?)" "1"
+
+echo "=== migrate (WP3, D5): an install's data moves onto the data root ==="
+rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/srv/joinery" "$T/root/srv/joinery.old" "$SD" "$T/root/run" "$T/root/var" "$T/active"
+unmount; : > "$LOG"
+figs root 100*G 20*G 80*G
+figs data 25*G 1*G 24*G
+# list-units: the services running now; a mount start can be made to fail for
+# one unit named in bind_fail.
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"
+case "$1" in
+  list-units) cat "$GATE_T/active_units" 2>/dev/null; exit 0 ;;
+esac
+case "$1 $2" in
+  "start "*.mount|"stop "*.mount)
+    mkdir -p "$GATE_T/active"
+    if [ "$1" = start ]; then
+      f="$GATE_T/root/etc/systemd/system/$2"; [ -f "$f" ] || exit 5
+      what="$(sed -n "s/^What=//p" "$f")"; where="$(sed -n "s/^Where=//p" "$f")"
+      grep -qxF "$2" "$GATE_T/bind_fail" 2>/dev/null && exit 1
+      rmdir "$GATE_T/root$where" 2>/dev/null; ln -sfn "$GATE_T/root$what" "$GATE_T/root$where"
+      echo "$where" > "$GATE_T/active/$2"
+    else
+      [ -f "$GATE_T/active/$2" ] || exit 5
+      where="$(cat "$GATE_T/active/$2")"; rm -f "$GATE_T/active/$2"
+      rm -f "$GATE_T/root$where"; mkdir -p "$GATE_T/root$where"; chmod 000 "$GATE_T/root$where"
+    fi ;;
+esac
+exit 0'
+printf '%s\n' 'postgresql@18-main.service loaded active running PostgreSQL Cluster 18-main' \
+    'apache2.service loaded active running The Apache HTTP Server' \
+    'cron.service loaded active running Regular background program processing daemon' \
+    'ssh.service loaded active running OpenBSD Secure Shell server' > "$T/active_units"
+R="$T/root"
+mkdir -p "$R/var/lib/postgresql/18/main" "$R/etc/postgresql/18/main" "$R/var/spool/postfix/maildrop" "$R/proc"
+echo 18 > "$R/var/lib/postgresql/18/main/PG_VERSION"
+echo "data_directory = '/var/lib/postgresql/18/main'" > "$R/etc/postgresql/18/main/postgresql.conf"
+echo queued > "$R/var/spool/postfix/maildrop/m1"
+mkdir -p "$R/var/www/html/s1/config" "$R/var/www/html/s1/uploads/large" "$R/var/www/html/s1/logs" "$R/var/www/html/s1/cache" \
+    "$R/var/www/html/s1/storage" "$R/var/www/html/s1/backups" "$R/var/www/html/s1_test/logs" "$R/var/www/html/other/logs"
+: > "$R/var/www/html/s1/config/Globalvars_site.php"
+echo photo > "$R/var/www/html/s1/uploads/large/a.jpg"
+ln -s a.jpg "$R/var/www/html/s1/uploads/large/b.jpg"
+chmod 770 "$R/var/www/html/s1/uploads"
+echo err > "$R/var/www/html/s1/logs/error.log"
+echo t > "$R/var/www/html/s1_test/logs/t.log"
+echo o > "$R/var/www/html/other/logs/o.log"
+echo 11111111-aaaa-4bbb-8ccc-000000000001 > "$R/proc/boot_id"
+
+echo "--- refusals: said all at once, nothing changed ---"
+mv "$R/var/www/html/s1/cache" "$R/var/www/html/s1/cache.real"; ln -s cache.real "$R/var/www/html/s1/cache"
+echo "data_directory = '/data/pg'" > "$R/etc/postgresql/18/main/postgresql.conf"
+out="$(run migrate 2>&1)"; rc=$?
+chk "a symlinked folder and a cluster outside /var/lib/postgresql: exit 1, both named" \
+    "$rc|$(grep -c '/var/www/html/s1/cache is a symlink' <<< "$out")|$(grep -c 'cluster at /data/pg' <<< "$out")" "1|1|1"
+chk "nothing made, nothing stopped" "$( [ -e "$R/etc/joinery/data_root" ] && echo made || echo none)|$(grep -c '^systemctl stop' "$LOG")" "none|0"
+rm "$R/var/www/html/s1/cache"; mv "$R/var/www/html/s1/cache.real" "$R/var/www/html/s1/cache"
+echo "data_directory = '/var/lib/postgresql/18/main'" > "$R/etc/postgresql/18/main/postgresql.conf"
+figs root 100*G 90*G 10*G
+out="$(run migrate 2>&1)"; rc=$?
+chk "a root disk that cannot give a data root above its reserve: refused, nothing made" \
+    "$rc|$(grep -c 'cannot hold this host' <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)" "1|1|none"
+figs root 100*G 20*G 80*G
+: > "$R/var/www/html/s1/uploads/.upgrade.lock"
+flock "$R/var/www/html/s1/uploads/.upgrade.lock" sleep 30 & holder=$!
+sleep 0.3
+out="$(run migrate 2>&1)"; rc=$?
+pkill -P "$holder" 2>/dev/null; kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+chk "a site that is upgrading: refused, nothing made" \
+    "$rc|$(grep -c 's1 is upgrading' <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)" "1|1|none"
+echo "$R/var/www/html/s1/uploads/nfs" > "$T/othermounts"
+out="$(run migrate 2>&1)"; rc=$?
+rm -f "$T/othermounts"
+chk "a mount inside a folder that moves: refused before anything stops" \
+    "$rc|$(grep -c '/var/www/html/s1/uploads/nfs is mounted inside /var/www/html/s1/uploads' <<< "$out")|$(grep -c '^systemctl stop' "$LOG")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)" "1|1|0|none"
+mv "$R/proc/boot_id" "$R/proc/boot_id.x"
+out="$(run migrate 2>&1)"; rc=$?
+mv "$R/proc/boot_id.x" "$R/proc/boot_id"
+chk "no boot id to tell a later boot by: refused, nothing made (reviewer2 F2)" \
+    "$rc|$(grep -c "boot's id .* cannot be read" <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)" "1|1|none"
+out="$(run migrate 2M 2>&1)"; rc=$?
+chk "a size that cannot hold the data with room: refused" "$rc|$(grep -c 'cannot hold this host' <<< "$out")" "1|1"
+
+echo "--- the move ---"
+: > "$LOG"
+out="$(run migrate 2>&1)"; rc=$?
+chk "exit 0, and says what moved" "$rc|$(grep -c 'onto the data root: 9 folder(s)' <<< "$out")" "0|1"
+chk "the data root was made first: D7's first size" "$(grep -c "^fallocate -l $((25 * G)) " "$LOG")" "1"
+chk "the converger's timer and path stop first, then a run waiting on the lock, then the running services in one go; ssh is not touched (reviewer2 F1)" \
+    "$(grep '^systemctl stop ' "$LOG" | grep -v '\.mount' | paste -sd'|')" \
+    "systemctl stop joinery-host-converger.timer joinery-host-converger.path|systemctl stop joinery-host-converger.service|systemctl stop postgresql@18-main.service apache2.service cron.service"
+chk "held down for the move (masked, with logrotate and unattended upgrades), unmasked before they start (reviewer2 F4)" \
+    "$(grep -e '^systemctl mask' -e '^systemctl unmask' -e '^systemctl start postgresql' "$LOG" | paste -sd'|')" \
+    "systemctl mask --runtime postgresql@18-main.service apache2.service cron.service logrotate.service apt-daily-upgrade.service joinery-host-converger.service|systemctl unmask --runtime postgresql@18-main.service apache2.service cron.service logrotate.service apt-daily-upgrade.service joinery-host-converger.service|systemctl start postgresql@18-main.service"
+chk "and started again after the mounts, the target first, the converger's timer and path last" \
+    "$(grep -e '^systemctl start' "$LOG" | grep -v '\.mount' | tail -n 5 | cut -d' ' -f3- | paste -sd,)" \
+    "joinery-data.target,postgresql@18-main.service,apache2.service,cron.service,joinery-host-converger.timer joinery-host-converger.path"
+chk "every place recorded: the packages, the site's six folders, the test site's logs" \
+    "$(grep -c -e '^postgresql /var/lib/postgresql$' -e '^mail/postfix /var/spool/postfix$' -e '^sites/s1/' -e '^sites/s1_test/logs ' "$B")" "9"
+chk "the data is where it was, read through its mount" \
+    "$(cat "$R/var/lib/postgresql/18/main/PG_VERSION")|$(cat "$R/var/spool/postfix/maildrop/m1")|$(cat "$R/var/www/html/s1/uploads/large/a.jpg")|$(cat "$R/var/www/html/s1_test/logs/t.log")" "18|queued|photo|t"
+chk "and on the data root, a symlink kept a symlink, the folder's mode kept" \
+    "$(cat "$R/srv/joinery/sites/s1/uploads/large/a.jpg")|$(readlink "$R/srv/joinery/sites/s1/uploads/large/b.jpg")|$(stat -c %a "$R/srv/joinery/sites/s1/uploads")" "photo|a.jpg|770"
+chk "a folder the site lacked (static_files) is made and mounted too" "$(readlink "$R/var/www/html/s1/static_files")" "$R/srv/joinery/sites/s1/static_files"
+chk "made like the folders the site had: uploads' mode, not root's 755 (reviewer2 F6)" "$(stat -c %a "$R/srv/joinery/sites/s1/static_files")" "770"
+chk "a directory that is not a site is left alone" "$( [ -L "$R/var/www/html/other/logs" ] && echo moved || cat "$R/var/www/html/other/logs/o.log")|$(grep -c other "$B")" "o|0"
+chk "the copies from before kept at /srv/joinery.old, root's only" \
+    "$(cat "$R/srv/joinery.old/sites/s1/uploads/large/a.jpg")|$(cat "$R/srv/joinery.old/postgresql/18/main/PG_VERSION")|$(stat -c %a "$R/srv/joinery.old")" "photo|18|700"
+chk "the boot that moved them recorded; check 0; status says they are kept" \
+    "$(grep -c '^boot=11111111-aaaa-4bbb-8ccc-000000000001$' "$R/etc/joinery/data_root_migrated")|$(run check >/dev/null 2>&1; echo $?)|$(run status 2>&1 | grep -c 'kept at /srv/joinery.old')" "1|0|1"
+: > "$LOG"
+out="$(run migrate 2>&1)"; rc=$?
+chk "run again: nothing to move, nothing stopped" "$rc|$out|$(grep -c '^systemctl stop' "$LOG")" "0|This host keeps no data off the data root; nothing to move|0"
+
+echo "--- the copies from before go after a reboot ---"
+run tick >/dev/null 2>&1
+chk "a tick on the same boot keeps them" "$( [ -d "$R/srv/joinery.old" ] && echo kept)" "kept"
+echo 22222222-aaaa-4bbb-8ccc-000000000002 > "$R/proc/boot_id"
+out="$(run tick 2>&1)"; rc=$?
+chk "a tick on a later boot, check passing: removed, and said" \
+    "$rc|$( [ -e "$R/srv/joinery.old" ] && echo kept || echo gone)|$( [ -e "$R/etc/joinery/data_root_migrated" ] && echo rec || echo none)|$(grep -c 'copies from before the move (/srv/joinery.old) are removed' <<< "$out")" "0|gone|none|1"
+
+echo "--- a move that does not finish puts everything back ---"
+mkdir -p "$R/var/www/html/s5/config" "$R/var/www/html/s5/uploads" "$R/var/www/html/s5/logs"
+: > "$R/var/www/html/s5/config/Globalvars_site.php"
+echo five > "$R/var/www/html/s5/uploads/f.jpg"; echo log5 > "$R/var/www/html/s5/logs/e.log"
+echo var-www-html-s5-logs.mount > "$T/bind_fail"
+mkdir -p "$R/srv/joinery/sites/s5/uploads"
+: > "$LOG"
+out="$(run migrate 2>&1)"; rc=$?
+chk "a mount that does not take: exit 1, and says nothing was moved" "$rc|$(grep -c 'Nothing was moved: this host keeps its data where it did' <<< "$out")" "1|1"
+chk "the folders that had mounted are unmounted, and every folder is its own again" \
+    "$(grep -c '^systemctl stop var-www-html-s5-' "$LOG")|$( [ -L "$R/var/www/html/s5/uploads" ] && echo link || cat "$R/var/www/html/s5/uploads/f.jpg")|$(cat "$R/var/www/html/s5/logs/e.log")" "4|five|log5"
+chk "not recorded, its copies on the data root (one in a place that was there empty, reviewer2 F5) and aside are gone, the moved record too" \
+    "$(grep -c s5 "$B")|$( [ -e "$R/srv/joinery/sites/s5/uploads" ] && echo kept || echo gone)|$( [ -e "$R/srv/joinery.old" ] && echo kept || echo gone)|$( [ -e "$R/etc/joinery/data_root_migrated" ] && echo rec || echo none)" "0|gone|gone|none"
+chk "the services started again; s1's mounts untouched; check 0" \
+    "$(grep -c '^systemctl start apache2.service cron.service$' "$LOG")|$(cat "$R/var/www/html/s1/uploads/large/a.jpg")|$(run check >/dev/null 2>&1; echo $?)" "1|photo|0"
+chk "a site added since the first move stops only the web stack and cron, never PostgreSQL" \
+    "$(grep '^systemctl stop ' "$LOG" | grep -v -e '\.mount' -e converger | head -n 1)" "systemctl stop apache2.service cron.service"
+rm -f "$T/bind_fail"
+out="$(run migrate 2>&1)"; rc=$?
+chk "once it will mount: exit 0, and only s5 moves" "$rc|$(grep -c 'onto the data root: 6 folder(s)' <<< "$out")|$(cat "$R/var/www/html/s5/uploads/f.jpg")" "0|1|five"
+
+echo "--- Docker's data-root ---"
+stub dockerd 'exit 0'
+# docker: one container running, stopped and started by name.
+stub docker 'echo "docker $*" >> "$GATE_LOG"; case "$1" in ps) echo s9site ;; esac; exit 0'
+mkdir -p "$R/var/lib/docker/volumes/s9_uploads/_data" "$R/etc/docker"
+echo vol > "$R/var/lib/docker/volumes/s9_uploads/_data/v.jpg"
+echo '{"log-driver": "json-file"}' > "$R/etc/docker/daemon.json"
+printf '%s\n' 'docker.service loaded active running Docker' 'docker.socket loaded active running Docker Socket' \
+    'containerd.service loaded active running containerd' > "$T/active_units"
+: > "$LOG"
+out="$(run migrate 2>&1)"; rc=$?
+chk "exit 0: Docker's data on the data root" "$rc|$(cat "$R/srv/joinery/docker/volumes/s9_uploads/_data/v.jpg")" "0|vol"
+chk "its containers stopped by Docker first, then Docker, then containerd last" \
+    "$(grep -e '^docker stop' -e '^systemctl stop' "$LOG" | grep -v converger | paste -sd'|')" "docker stop -t 60 s9site|systemctl stop docker.service docker.socket|systemctl stop containerd.service"
+chk "and the containers that were running started again after Docker" \
+    "$(grep -e '^docker start' -e '^systemctl start docker.service' "$LOG" | paste -sd'|')" "systemctl start docker.service|docker start s9site"
+chk "daemon.json: data-root set, every other key kept" \
+    "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("data-root"), d.get("log-driver"))' "$R/etc/docker/daemon.json")" "/srv/joinery/docker json-file"
+chk "the old data-root kept aside, not bound" \
+    "$(cat "$R/srv/joinery.old/docker/volumes/s9_uploads/_data/v.jpg")|$( [ -e "$R/var/lib/docker" ] && echo there || echo gone)|$(grep -c docker "$B")" "vol|gone|0"
+out="$(run migrate 2>&1)"; rc=$?
+chk "run again: nothing to move" "$rc|$out" "0|This host keeps no data off the data root; nothing to move"
+rm -f "$T/bin/dockerd" "$T/bin/docker" "$T/active_units"
 
 echo "=== a device ==="
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/srv/joinery" "$SD" "$T/root/run"

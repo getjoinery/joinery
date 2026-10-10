@@ -2759,9 +2759,11 @@ if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE
 	// ls -l (targets, not bare numbers) because the observing shell parks its
 	// OWN redirection descriptors at 10 and above - a bare number can never
 	// distinguish those from a caller leak, but a target pointing at the
-	// lockfile can only be inherited.
+	// lockfile can only be inherited. Written aside and renamed into place: the
+	// wait below polls for /fds, and a redirect creates the file before ls has
+	// written a line, which read as "fds listing missing" under load.
 	file_put_contents($tmp . '/' . $fake_agent,
-		"#!/bin/sh\necho started > " . $tmp . "/ran\nls -l /proc/\$\$/fd > " . $tmp . "/fds 2>/dev/null\nsleep 2\n");
+		"#!/bin/sh\necho started > " . $tmp . "/ran\nls -l /proc/\$\$/fd > " . $tmp . "/fds.part 2>/dev/null\nmv " . $tmp . "/fds.part " . $tmp . "/fds\nsleep 2\n");
 	chmod($tmp . '/' . $fake_agent, 0755);
 	touch($tmp . '/lockfile');
 
@@ -4054,5 +4056,37 @@ check(strpos($upgrade_src, "\$stage_location = \$deploy_root.'/upgrades/';") !==
 $du_src = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/disk_usage.sh');
 check(strpos($du_src, 'printf \'"data_root":%s,\' "$(emit_data_root)"') !== false,
 	'disk_usage reports the data root, whose binds the site tree\'s -x walk stops at');
+
+section('An existing install moves onto the data root (specs/one_data_root.md WP3, D5)');
+$mig_body = preg_match('/^do_migrate\(\) \{.*?^\}/ms', $data_root_src, $mgm) ? $mgm[0] : '';
+$m_locks = strpos($mig_body, 'migrate_hold_runners');
+$m_trap = strpos($mig_body, 'trap migrate_abort EXIT');
+$m_stop = strpos($mig_body, 'docker stop -t 60 "${MIGRATE_CONTAINERS[@]}"');
+$m_stop_units = strpos($mig_body, 'systemctl stop "${first[@]}"');
+$m_copy = strpos($mig_body, 'rsync -aHAXS --numeric-ids --delete --modify-window=-1 "${MIGRATE_XATTR_SKIP[@]}" "$t/" "$p/"');
+$m_cmp = strpos($mig_body, 'rsync -aHAXSn --numeric-ids --delete --modify-window=-1 "${MIGRATE_XATTR_SKIP[@]}" -i "$t/" "$p/"');
+$m_swap = strpos($mig_body, 'MIGRATE_PHASE="swap"');
+$m_done = strpos($mig_body, 'MIGRATE_PHASE="done"');
+$m_conv = strpos($mig_body, 'systemctl stop "${MIGRATE_TIMERS[@]}"');
+$m_mask = strpos($mig_body, 'systemctl mask --runtime "${MIGRATE_MASKED[@]}"');
+$m_masked = strpos($mig_body, 'MIGRATE_MASKED=("${MIGRATE_STOPPED[@]}" "${MIGRATE_MASK_EXTRA[@]}")');
+$m_recheck = strpos($mig_body, 'these opened files where the data moves from during the copy');
+check($m_locks !== false && $m_trap !== false && $m_stop !== false && $m_stop_units !== false && $m_conv !== false
+	&& $m_trap < $m_conv && $m_conv < $m_locks && $m_locks < $m_stop && $m_stop < $m_stop_units,
+	'migrate arms its put-back, stops the converger\'s triggers and holds its locks, before it stops a container or a service (reviewer2 F1)');
+check($m_mask !== false && $m_masked !== false && $m_masked < $m_mask && $m_recheck !== false && $m_stop_units < $m_mask && $m_cmp < $m_recheck && $m_recheck < $m_swap,
+	'the stopped units are masked for the move (recorded before, so a partial mask is undone: F8), and nothing may hold a file there at the switch (reviewer2 F4)');
+check(strpos($mig_body, '(( ${#last[@]} == 0 )) || systemctl stop "${last[@]}"') > $m_stop_units,
+	'Docker stops its own containers first, and containerd stops last: stopped together, a container kept running');
+check($m_copy !== false && $m_cmp !== false && $m_swap !== false && $m_copy < $m_cmp && $m_cmp < $m_swap,
+	'every place is copied and compared with its original before any is switched');
+check($m_done !== false && $m_swap < $m_done && strpos($mig_body, 'do_check >/dev/null || die') < $m_done,
+	'nothing is put back once the services start on the data root, and they start only once check passes');
+check(strpos($data_root_src, "migrate_forget_old || true") !== false
+	&& strpos($data_root_src, '[[ -n "$now" && -n "$boot" && "$boot" != "unknown" && "$now" != "$boot" ]] || return 0') !== false
+	&& strpos($data_root_src, 'rm -rf --one-file-system "${OLD:?}"') !== false,
+	'the copies from before are removed only by a tick on a later boot, after check');
+check(strpos($mig_body, 'mv -T "$t" "${OLD}/${rel}"') !== false && strpos($mig_body, 'chmod 700 "$OLD"') !== false,
+	'the originals go aside by a rename into /srv/joinery.old, root\'s only');
 
 harness_finish();
