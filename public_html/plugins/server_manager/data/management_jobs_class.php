@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.36 - data_root_migrate's claim budget: the agent's four hours, plus room (one_data_root WP4)
  * @version 1.35 - a node removed for good takes its jobs (cascade, was null); MultiManagementJob option
  *                 node_listed leaves out a hidden node's jobs
  * @version 1.34 - mjb_svr_shelf_run_id: the broker run a backup or re-upload job took
@@ -271,6 +272,11 @@ class ManagementJob extends SystemBase {
 		// the signed manifests. Requeuing one mid-run would start a second
 		// publish of the same number over the first.
 		'publish_upgrade'       => 1500,
+		// 4h + slack: one copy of a host's data onto its data root
+		// (one_data_root WP4). The move itself runs in a unit of its own and a
+		// second one is refused while it does, but a requeue would still end
+		// in a red job beside a move that is fine.
+		'data_root_migrate'     => 14520,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than

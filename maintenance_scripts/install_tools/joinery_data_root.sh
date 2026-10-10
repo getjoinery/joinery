@@ -3,6 +3,17 @@
 # joinery_data_root.sh - the host's data root: everything that is data, under
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md).
 #
+# Version: 1.3 - migrate: an install that keeps its data where it always did moves it onto the
+#                data root (one_data_root WP3, D5). The packages' directories, every site's six
+#                folders and Docker's data-root are copied with every service stopped, checked,
+#                and switched; the copies from before stay at /srv/joinery.old until the data
+#                root passes check after a reboot, when tick removes them. A move that does not
+#                finish puts everything back. Review (reviewer2): the host converger's timer
+#                and path stop first and a run waiting on the lock is stopped (F1); no boot id,
+#                no move (F2); the log records a stopped move's put-back (F3); the stopped
+#                units are masked for the move and nothing may hold a file at the switch (F4);
+#                an empty place it filled goes on a put-back (F5); a lacking folder is made
+#                like its siblings (F6); the copies from before are removed on one filesystem (F7).
 # Version: 1.2 - bind and unbind: a path the platform uses (a site's uploads, Postgres's
 #                directory) is a bind mount of its place under the data root, recorded in
 #                /etc/joinery/data_binds; the target requires every one, check fails while one
@@ -56,6 +67,21 @@
 #                     Root. A site is being removed: every bind under
 #                     /srv/joinery/sites/NAME is taken away and that data is
 #                     removed. Nothing on a host with no data root.
+#   joinery_data_root.sh migrate [SIZE|DEVICE]
+#                     Root. This host's data moves onto the data root, made
+#                     first when it has none (of SIZE, on DEVICE, or sized to
+#                     hold the data): PostgreSQL, Postfix's queue and rspamd's
+#                     state, each site's six folders and a test site's logs,
+#                     each from then on a bind mount; and Docker's data-root,
+#                     set to /srv/joinery/docker. Every service whose data
+#                     moves is stopped for the copy, so the downtime is the
+#                     time to copy the data once. Refused, with every reason,
+#                     before anything changes when the root disk cannot hold
+#                     the data twice: the copy from before is kept at
+#                     /srv/joinery.old until the data root has passed check
+#                     after a reboot, then tick removes it. A move that does
+#                     not finish puts everything back and starts the services.
+#                     Run again, it moves only what is not moved.
 #
 # WHY A FILESYSTEM OF ITS OWN. One place to measure, cap, grow, back up and
 # move, the same on every install; and the one shape that can later be
@@ -116,6 +142,31 @@ BIND_MARK="# Written by joinery_data_root.sh (specs/one_data_root.md D1): a bind
 # Every service whose data lives under the data root (D1). A drop-in for a
 # unit that is not installed does nothing, and is there when it is.
 CONSUMERS="postgresql.service postgresql@.service docker.service containerd.service apache2.service postfix.service postfix@.service rspamd.service"
+
+# migrate (D5). The sites, and the six folders of each that are its data.
+SITES_REAL="/var/www/html"
+SITE_FOLDERS="uploads static_files storage backups logs cache"
+# The copies from before a move, on the root disk, until the data root has
+# passed check after a reboot; and the record that says which boot moved them.
+OLD_REAL="/srv/joinery.old"
+OLD="${ROOT}${OLD_REAL}"
+MIGRATED="${ROOT}/etc/joinery/data_root_migrated"
+BOOT_ID_FILE="/proc/sys/kernel/random/boot_id"
+[[ -z "$ROOT" ]] || BOOT_ID_FILE="${ROOT}/proc/boot_id"
+DOCKER_DATA_ROOT="${MNT_REAL}/docker"
+MIGRATE_UNIT="joinery-data-root-migrate.service"
+MIGRATE_LOG="/var/log/joinery-data-root-migrate.log"
+# The host converger: its timer and path trigger stop for the move, so no run
+# starts and waits on a site's logs (reviewer2 F1).
+MIGRATE_CONVERGER=(joinery-host-converger.timer joinery-host-converger.path)
+# Masked for the move, besides every unit it stopped: what would otherwise
+# start on its own and write where the data moves from (reviewer2 F4).
+MIGRATE_MASK_EXTRA=(logrotate.service apt-daily-upgrade.service joinery-host-converger.service)
+MIGRATE_XATTR_SKIP=(--filter='-x trusted.SGI_ACL_FILE' --filter='-x trusted.SGI_ACL_DEFAULT')
+# What migrate stops while it copies: every consumer, and cron, whose
+# scheduled tasks write into a site's folders on their own.
+MIGRATE_STOP=('postgresql*.service' 'docker.socket' 'docker.service' 'containerd.service' 'apache2.service'
+              'php*-fpm.service' 'postfix*.service' 'rspamd.service' 'cron.service')
 
 GIB=$((1024 * 1024 * 1024))
 # D7, the size rules. In one place, so the numbers in the spec are these.
@@ -243,14 +294,18 @@ do_check() {
 
 need_root() { [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"; }
 
+LOCK_HELD=0
 take_lock() {  # [nowait]
+    # Once per run: migrate holds it and calls create, which takes it too.
+    (( LOCK_HELD )) && return 0
     mkdir -p "$(dirname "$LOCK_FILE")"
     exec 9>>"$LOCK_FILE"
     if [[ "${1:-}" == "nowait" ]]; then
-        flock -n 9
+        flock -n 9 || return 1
     else
         flock -w 600 9 || die "another run holds ${LOCK_FILE}"
     fi
+    LOCK_HELD=1
 }
 
 # ---------------------------------------------------------------------------
@@ -643,6 +698,506 @@ do_remove_site() {
 }
 
 # ---------------------------------------------------------------------------
+# migrate (D5)
+# ---------------------------------------------------------------------------
+
+# Every place this host keeps data that belongs on the data root (D1), "REL
+# TARGET" a line: each package directory that is here, each site's six
+# folders, and a companion test site's logs, as a new install binds them.
+migrate_places() {
+    [[ -d "${ROOT}/var/lib/postgresql" ]] && echo "postgresql /var/lib/postgresql"
+    [[ -d "${ROOT}/var/spool/postfix" ]] && echo "mail/postfix /var/spool/postfix"
+    [[ -d "${ROOT}/var/lib/rspamd" ]] && echo "mail/rspamd /var/lib/rspamd"
+    local d name f
+    for d in "${ROOT}${SITES_REAL}"/*/; do
+        [[ -d "$d" ]] || continue
+        name="$(basename "$d")"
+        [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || continue
+        if [[ -f "${d}config/Globalvars_site.php" ]]; then
+            for f in $SITE_FOLDERS; do
+                printf 'sites/%s/%s %s/%s/%s\n' "$name" "$f" "$SITES_REAL" "$name" "$f"
+            done
+        elif [[ "$name" == *_test && -f "${ROOT}${SITES_REAL}/${name%_test}/config/Globalvars_site.php" ]]; then
+            printf 'sites/%s/logs %s/%s/logs\n' "$name" "$SITES_REAL" "$name"
+        fi
+    done
+    return 0
+}
+
+# Docker's data-root, when Docker is installed here and keeps it off the data
+# root; nothing otherwise.
+migrate_docker_root() {
+    local dr
+    dr="$(docker_daemon_json_get data-root)"
+    dr="${dr#\"}"; dr="${dr%\"}"; dr="${dr%/}"
+    [[ -n "$dr" ]] || dr="/var/lib/docker"
+    [[ "$dr" != "$DOCKER_DATA_ROOT" && -d "${ROOT}${dr}" ]] && printf '%s' "$dr"
+    return 0
+}
+
+# Processes with a file open, or their working directory, under any PATH:
+# "pid(command)" each.
+migrate_holders() {  # PATH...
+    local p pid args=()
+    for p in "$@"; do args+=(-o -lname "$p" -o -lname "${p}/*"); done
+    find /proc/[0-9]*/fd /proc/[0-9]*/cwd -maxdepth 1 \( "${args[@]:1}" \) -print 2>/dev/null \
+        | awk -F/ '{ print $3 }' | sort -u | while read -r pid; do
+            [[ "$pid" == "$$" ]] && continue
+            printf '%s(%s) ' "$pid" "$(cat "/proc/${pid}/comm" 2>/dev/null || echo '?')"
+        done
+    return 0
+}
+
+# Hold every host converger off for the life of this run: each one's lock, by
+# the converger's own rule (host_runner_lock.sh), so no installer runs against
+# a site whose folders are moving.
+migrate_hold_runners() {  # SITE...
+    local dir="${ROOT}/run/joinery" f fd name
+    mkdir -p "$dir"
+    for name in "$@" host; do
+        f="${dir}/host-installers.${name}.lock"
+        [[ -e "$f" ]] || ( umask 077; : >> "$f" )
+    done
+    for f in "$dir"/host-installers.*.lock; do
+        [[ -e "$f" ]] || continue
+        exec {fd}>>"$f"
+        flock -w 600 "$fd" || die "a host converger run ($(basename "$f")) did not finish in ten minutes. ${MIGRATE_NOTHING}"
+    done
+}
+
+# What a move that did not finish leaves: the folders put back where they
+# were, Docker pointed back, the places this run made removed, and every
+# service it stopped started again. Once the services are started on the data
+# root (MIGRATE_PHASE=done) nothing is put back: what they write from then on
+# is only there.
+# Unmask what the move masked, so the units can start again.
+migrate_unmask() {
+    (( ${#MIGRATE_MASKED[@]} > 0 )) || return 0
+    systemctl unmask --runtime "${MIGRATE_MASKED[@]}" >/dev/null 2>&1 \
+        || say "WARNING: could not unmask ${MIGRATE_MASKED[*]}; run: systemctl unmask --runtime ${MIGRATE_MASKED[*]}"
+    MIGRATE_MASKED=()
+}
+
+MIGRATE_PHASE=""
+MIGRATE_SWAPPED=()
+MIGRATE_MADE=()
+MIGRATE_STOPPED=()
+MIGRATE_CONTAINERS=()
+MIGRATE_TIMERS=()
+MIGRATE_MASKED=()
+MIGRATE_BOOT=""
+MIGRATE_DOCKER_FROM=""
+MIGRATE_DOCKER_JSON=""
+MIGRATE_DOCKER_JSON_HAD=0
+MIGRATE_NOTHING="Nothing was changed."
+migrate_abort() {
+    local rc=$? i pair rel target t
+    trap - EXIT
+    [[ -z "$MIGRATE_PHASE" || "$MIGRATE_PHASE" == "done" ]] && exit "$rc"
+    set +e
+    if [[ "$MIGRATE_PHASE" == "swap" || "$MIGRATE_PHASE" == "docker" ]]; then
+        say "Putting back what was moved..."
+        for pair in "${MIGRATE_SWAPPED[@]}"; do
+            target="${pair#* }"
+            awk -v t="$target" '!(NF == 2 && $2 == t)' "$BINDS" > "${BINDS}.tmp.$$" && mv -f "${BINDS}.tmp.$$" "$BINDS"
+        done
+        ensure_units >/dev/null
+        for (( i = ${#MIGRATE_SWAPPED[@]} - 1; i >= 0; i-- )); do
+            pair="${MIGRATE_SWAPPED[$i]}"; rel="${pair%% *}"; target="${pair#* }"; t="${ROOT}${target}"
+            if bind_ok "$rel" "$target" || findmnt -n --mountpoint "$t" >/dev/null 2>&1; then
+                systemctl stop "$(bind_unit "$target")" 2>/dev/null || umount "$t"
+            fi
+            chattr -i "$t" 2>/dev/null
+            rmdir "$t" 2>/dev/null
+            mv -T "${OLD}/${rel}" "$t" || say "COULD NOT PUT BACK ${target}: it is at ${OLD_REAL}/${rel}"
+        done
+        if [[ -n "$MIGRATE_DOCKER_FROM" && -e "${OLD}/docker" ]]; then
+            mv -T "${OLD}/docker" "${ROOT}${MIGRATE_DOCKER_FROM}" || say "COULD NOT PUT BACK ${MIGRATE_DOCKER_FROM}: it is at ${OLD_REAL}/docker"
+        fi
+        if [[ "$MIGRATE_PHASE" == "docker" ]]; then
+            if (( MIGRATE_DOCKER_JSON_HAD )); then
+                printf '%s\n' "$MIGRATE_DOCKER_JSON" > "$(docker_daemon_json_path)"
+            else
+                rm -f "$(docker_daemon_json_path)"
+            fi
+        fi
+        rm -f "$MIGRATED"
+        find "$OLD" -depth -type d -empty -delete 2>/dev/null
+    fi
+    for t in "${MIGRATE_MADE[@]}"; do rm -rf "$t"; done
+    migrate_unmask
+    if (( ${#MIGRATE_STOPPED[@]} > 0 )); then
+        systemctl start "$TARGET_UNIT" 2>/dev/null
+        systemctl start "${MIGRATE_STOPPED[@]}" || say "WARNING: not every service started again: $(printf '%s ' "${MIGRATE_STOPPED[@]}")"
+    fi
+    if (( ${#MIGRATE_CONTAINERS[@]} > 0 )); then
+        docker start "${MIGRATE_CONTAINERS[@]}" >/dev/null || say "WARNING: not every container started again: ${MIGRATE_CONTAINERS[*]}"
+    fi
+    if (( ${#MIGRATE_TIMERS[@]} > 0 )); then
+        systemctl start "${MIGRATE_TIMERS[@]}" || say "WARNING: the host converger's ${MIGRATE_TIMERS[*]} did not start again"
+    fi
+    say "Nothing was moved: this host keeps its data where it did."
+    exit "$rc"
+}
+
+do_migrate() {
+    local arg="${1:-}" want="" device="" rc=0 pair rel target t p sz total=0 need bytes givable rsize
+    local fsize used avail diff waited holders mounted name
+    local -a moves=() sites=() problems=()
+    if [[ "$arg" == /* ]]; then device="$arg"; elif [[ -n "$arg" ]]; then want="$arg"; fi
+    need_root
+    cd /
+    # A container's data is its volumes, on its host: the host is what moves.
+    if [[ -z "$ROOT" ]] && { [[ -e /.dockerenv ]] || systemd-detect-virt --container --quiet 2>/dev/null; }; then
+        die "this is a container; its data is its volumes, which move with its host (run this on the host). ${MIGRATE_NOTHING}"
+    fi
+    # A unit of its own: the move outlives whoever started it (an ssh session
+    # that drops, an agent restarted or timed out mid-copy, which kills its
+    # whole process group), and a second move cannot start beside it. What it
+    # says goes to its caller while there is one, and always to MIGRATE_LOG.
+    if [[ -z "$ROOT" && -z "${JOINERY_DATA_ROOT_MIGRATE_UNIT:-}" ]] && command -v systemd-run >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
+        if systemctl is-active --quiet "$MIGRATE_UNIT" 2>/dev/null; then
+            die "a move is already running (journalctl -u ${MIGRATE_UNIT}, ${MIGRATE_LOG})"
+        fi
+        exec systemd-run --quiet --wait --pipe --collect --unit="$MIGRATE_UNIT" \
+            -p TimeoutStopSec=30min --setenv=JOINERY_DATA_ROOT_MIGRATE_UNIT=1 \
+            /bin/bash "$(readlink -f "${BASH_SOURCE[0]}")" migrate ${arg:+"$arg"}
+    fi
+    if [[ -n "${JOINERY_DATA_ROOT_MIGRATE_UNIT:-}" ]]; then
+        # A caller that goes away must not end the move: nothing here dies of a
+        # closed pipe, and tee keeps the log when the caller is gone.
+        trap '' PIPE
+        # tee ignores TERM too, so a stop (systemctl stop of this unit) still
+        # logs the put-back; it ends when this shell does (reviewer2 F3).
+        trap '' TERM
+        exec > >(tee -p -a "$MIGRATE_LOG") 2>&1
+        say "=== $(date -u '+%Y-%m-%d %H:%M:%S UTC'): joinery_data_root.sh migrate ${arg}"
+    fi
+    # Stopped (systemctl stop, a hand's ^C): the put-back below runs.
+    trap 'exit 143' TERM INT HUP
+    take_lock
+
+    do_check >/dev/null 2>&1 || rc=$?
+    (( rc != 1 )) || die "this host has a data root that is not ready: $(check_reason). ${MIGRATE_NOTHING}"
+
+    # What moves: every place not on the data root already, and Docker's root.
+    while read -r rel target; do
+        (( rc == 0 )) && bind_ok "$rel" "$target" && continue
+        moves+=("$rel $target")
+        if [[ "$rel" =~ ^sites/([^/]+)/ ]] && [[ " ${sites[*]} " != *" ${BASH_REMATCH[1]} "* ]]; then
+            sites+=("${BASH_REMATCH[1]}")
+        fi
+    done < <(migrate_places)
+    if command -v dockerd >/dev/null 2>&1; then
+        export DOCKER_DAEMON_JSON="${ROOT}/etc/docker/daemon.json"
+        # shellcheck source=_docker_daemon_json.sh
+        . "$(dirname "${BASH_SOURCE[0]}")/_docker_daemon_json.sh" || die "_docker_daemon_json.sh is missing beside this script"
+        MIGRATE_DOCKER_FROM="$(migrate_docker_root)"
+    fi
+    if (( ${#moves[@]} == 0 )) && [[ -z "$MIGRATE_DOCKER_FROM" ]]; then
+        say "This host keeps no data off the data root; nothing to move"
+        return 0
+    fi
+
+    # Everything that would stop the move, said at once, before anything changes.
+    for pair in "${moves[@]}" ${MIGRATE_DOCKER_FROM:+"docker ${MIGRATE_DOCKER_FROM}"}; do
+        rel="${pair%% *}"; target="${pair#* }"; t="${ROOT}${target}"
+        if [[ -L "$t" ]]; then problems+=("${target} is a symlink"); continue; fi
+        if [[ -e "$t" && ! -d "$t" ]]; then problems+=("${target} is not a directory"); continue; fi
+        [[ -n "$(ls -A "${MNT}/${rel}" 2>/dev/null)" ]] && problems+=("${MNT_REAL}/${rel} already holds data")
+        [[ -e "${OLD}/${rel}" ]] && problems+=("${OLD_REAL}/${rel} exists: an earlier move's copy is kept there")
+        # A mount inside it would be copied through, and moved aside with it.
+        # (Docker's own, while it runs, are checked again once it has stopped.)
+        if [[ "$rel" != "docker" && -d "$t" ]]; then
+            p="$(findmnt -rn -o TARGET 2>/dev/null | awk -v p="$t" 'index($0, p "/") == 1 { print; exit }' || true)"
+            [[ -z "$p" ]] || problems+=("${p#"$ROOT"} is mounted inside ${target}")
+        fi
+        # The copy from before is kept by a rename, which only one filesystem can do.
+        if [[ -d "$t" && "$(stat -c %d "$t")" != "$(stat -c %d "$(root_disk_path)")" ]]; then
+            problems+=("${target} is not on the root disk with ${OLD_REAL}")
+        fi
+    done
+    # The copies from before wait for a later boot; without this boot's id
+    # there is no telling one boot from the next (reviewer2 F2).
+    MIGRATE_BOOT="$(cat "$BOOT_ID_FILE" 2>/dev/null || true)"
+    [[ "$MIGRATE_BOOT" =~ ^[0-9a-fA-F-]{8,}$ ]] || problems+=("this boot's id (${BOOT_ID_FILE}) cannot be read, so the copies from before could not wait for a reboot")
+    local conf dd
+    for conf in "${ROOT}"/etc/postgresql/*/*/postgresql.conf; do
+        [[ -f "$conf" ]] || continue
+        dd="$(sed -n "s/^[[:space:]]*data_directory[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$conf" | tail -n 1)"
+        [[ -z "$dd" || "$dd" == /var/lib/postgresql/* ]] || problems+=("PostgreSQL keeps a cluster at ${dd}, outside /var/lib/postgresql")
+    done
+    if (( ${#problems[@]} > 0 )); then
+        printf 'joinery_data_root: cannot move this host'"'"'s data:\n' >&2
+        printf '  - %s\n' "${problems[@]}" >&2
+        die "${MIGRATE_NOTHING}"
+    fi
+    for name in "${sites[@]}"; do
+        if [[ -e "${ROOT}${SITES_REAL}/${name}/uploads/.upgrade.lock" ]] \
+            && ! flock -n "${ROOT}${SITES_REAL}/${name}/uploads/.upgrade.lock" true; then
+            die "${name} is upgrading; run this once it has finished. ${MIGRATE_NOTHING}"
+        fi
+    done
+    if ! command -v rsync >/dev/null 2>&1; then
+        say "Installing rsync..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y rsync >/dev/null || die "could not install rsync. ${MIGRATE_NOTHING}"
+    fi
+
+    # How much, and a data root to hold it. The copy from before stays on the
+    # root disk until the data root has passed a reboot, so both must fit.
+    for pair in "${moves[@]}" ${MIGRATE_DOCKER_FROM:+"docker ${MIGRATE_DOCKER_FROM}"}; do
+        t="${ROOT}${pair#* }"
+        [[ -d "$t" ]] || continue
+        sz="$(du -sxB1 "$t" 2>/dev/null | cut -f1)"
+        [[ "$sz" =~ ^[0-9]+$ ]] || die "could not measure ${pair#* }. ${MIGRATE_NOTHING}"
+        total=$(( total + sz ))
+    done
+    need=$(( total + total / 10 + GIB ))
+    say "This host keeps $(gib "$total") of data off the data root"
+    if (( rc == 2 )); then
+        if [[ -n "$device" ]]; then
+            sz="$(blockdev --getsize64 "$device" 2>/dev/null || true)"
+            [[ "$sz" =~ ^[0-9]+$ ]] || die "could not read the size of ${device}. ${MIGRATE_NOTHING}"
+            (( sz >= need )) || die "${device} holds $(gib "$sz"); this host's data needs $(gib "$need") with room. ${MIGRATE_NOTHING}"
+            do_create "$device"
+        else
+            givable="$(root_givable)" || die "could not read the root disk's free space. ${MIGRATE_NOTHING}"
+            if [[ -n "$want" ]]; then
+                bytes="$(size_bytes "$want")" || die "the size is a number with G, M or T (32G), not '${want}'"
+                (( bytes >= need )) || die "a data root of ${want} cannot hold this host's data: it needs $(gib "$need") with room. ${MIGRATE_NOTHING}"
+            else
+                # D7's first size, or room for the data and a growth step if that is more.
+                read -r rsize _ _ < <(df_bytes "$(root_disk_path)") || die "could not read the root disk's size. ${MIGRATE_NOTHING}"
+                bytes="$(max "$FIRST_MIN" $(( rsize * FIRST_ROOT_PCT / 100 / GIB * GIB )) $(( total + GROW_PLUS )) $(( total * 10 / 7 )))"
+                bytes=$(( (bytes + GIB - 1) / GIB * GIB ))
+                (( bytes <= givable )) || bytes=$(( givable / GIB * GIB ))
+            fi
+            (( bytes >= need && bytes <= givable )) || die "the root disk cannot hold this host's data twice: a data root for it needs $(gib "$need"), and the root disk can give $(gib "$givable") above its reserve. The copy from before is kept until the data root has passed a reboot, so both must fit. ${MIGRATE_NOTHING}"
+            do_create "$bytes"
+        fi
+    else
+        [[ -z "$arg" ]] || say "${arg} was not used: this host has a data root"
+        read -r fsize used avail < <(df_bytes "$MNT") || die "could not read the data root's figures. ${MIGRATE_NOTHING}"
+        if (( avail < need )); then
+            [[ "$(conf_get backing)" == "file" ]] \
+                || die "the data root has $(gib "$avail") free and this host's data needs $(gib "$need"). Grow its device at the provider, run joinery_data_root.sh grow, then this again. ${MIGRATE_NOTHING}"
+            sz="$(image_bytes)"
+            bytes=$(( (sz + need - avail + GIB - 1) / GIB * GIB ))
+            givable="$(root_givable)" || die "could not read the root disk's free space. ${MIGRATE_NOTHING}"
+            (( bytes - sz <= givable )) || die "the data root needs $(gib $(( bytes - sz ))) more to hold this host's data, and the root disk can give $(gib "$givable") above its reserve. ${MIGRATE_NOTHING}"
+            grow_file_to "$bytes"
+        fi
+    fi
+    MIGRATE_NOTHING="Nothing was moved; the data root is made and empty."
+    mounted_ok || die "the data root is not mounted. ${MIGRATE_NOTHING}"
+
+    # Quiet: no converger run, then every service whose data moves, and cron.
+    trap migrate_abort EXIT
+    MIGRATE_PHASE="stop"
+    local u pat
+    # The converger's triggers first: a run that starts now would wait on the
+    # lock this move holds with the site's logs open (reviewer2 F1).
+    for u in "${MIGRATE_CONVERGER[@]}"; do
+        systemctl is-active --quiet "$u" 2>/dev/null && MIGRATE_TIMERS+=("$u")
+    done
+    if (( ${#MIGRATE_TIMERS[@]} > 0 )); then
+        systemctl stop "${MIGRATE_TIMERS[@]}" || die "the host converger's ${MIGRATE_TIMERS[*]} did not stop"
+    fi
+    migrate_hold_runners "${sites[@]}"
+    # A run that started before its timer stopped and still waits for a lock
+    # this move now holds has changed nothing: it takes the lock before its
+    # first change. Stopped, it lets go of the logs it writes to.
+    systemctl stop joinery-host-converger.service 2>/dev/null || true
+    while read -r u; do
+        # Only what keeps data that moves this time: a site added since an
+        # earlier move does not stop PostgreSQL or Docker.
+        case "$u" in
+            docker.service|docker.socket|containerd.service) [[ -n "$MIGRATE_DOCKER_FROM" ]] || continue ;;
+            postgresql*) [[ " ${moves[*]} " == *" postgresql /var/lib/postgresql "* ]] || continue ;;
+            postfix*)    [[ " ${moves[*]} " == *" mail/postfix "* ]] || continue ;;
+            rspamd*)     [[ " ${moves[*]} " == *" mail/rspamd "* ]] || continue ;;
+            apache2.service|php*-fpm.service|cron.service)
+                (( ${#sites[@]} > 0 )) || [[ -n "$MIGRATE_DOCKER_FROM" ]] || continue ;;
+        esac
+        for pat in "${MIGRATE_STOP[@]}"; do
+            # shellcheck disable=SC2053
+            [[ "$u" == $pat ]] && { MIGRATE_STOPPED+=("$u"); break; }
+        done
+    done < <(systemctl list-units --type=service,socket --state=active --plain --no-legend 2>/dev/null | awk '{ print $1 }')
+    # Docker's containers first, by Docker, while containerd still runs: stopped
+    # with Docker in one go, Docker cannot reach containerd to stop them, and
+    # a container left running keeps writing to its volumes. Each one running
+    # now is started again after, whatever its restart policy.
+    if [[ -n "$MIGRATE_DOCKER_FROM" ]] && systemctl is-active --quiet docker.service 2>/dev/null; then
+        mapfile -t MIGRATE_CONTAINERS < <(docker ps --format '{{.Names}}' 2>/dev/null)
+        if (( ${#MIGRATE_CONTAINERS[@]} > 0 )); then
+            say "Stopping containers: ${MIGRATE_CONTAINERS[*]}"
+            docker stop -t 60 "${MIGRATE_CONTAINERS[@]}" >/dev/null || die "not every container stopped"
+        fi
+    fi
+    if (( ${#MIGRATE_STOPPED[@]} > 0 )); then
+        say "Stopping: ${MIGRATE_STOPPED[*]}"
+        # containerd last, once everything that talks to it has stopped.
+        local -a first=() last=()
+        for u in "${MIGRATE_STOPPED[@]}"; do
+            if [[ "$u" == containerd.service ]]; then last+=("$u"); else first+=("$u"); fi
+        done
+        (( ${#first[@]} == 0 )) || systemctl stop "${first[@]}" || die "not every service stopped"
+        (( ${#last[@]} == 0 )) || systemctl stop "${last[@]}" || die "containerd did not stop"
+    fi
+    # Nothing starts them again for the length of the move: an unattended
+    # upgrade restarting PHP-FPM, logrotate, a hand (reviewer2 F4).
+    # Recorded first: a mask that takes for some and not all must still be
+    # undone by the put-back (reviewer2 F8).
+    MIGRATE_MASKED=("${MIGRATE_STOPPED[@]}" "${MIGRATE_MASK_EXTRA[@]}")
+    say "Held down for the move (if it is ever killed outright: systemctl unmask --runtime ${MIGRATE_MASKED[*]})"
+    systemctl mask --runtime "${MIGRATE_MASKED[@]}" >/dev/null 2>&1 \
+        || die "could not hold the stopped services down (systemctl mask --runtime)"
+    local -a paths=()
+    for pair in "${moves[@]}" ${MIGRATE_DOCKER_FROM:+"docker ${MIGRATE_DOCKER_FROM}"}; do paths+=("${ROOT}${pair#* }"); done
+    for t in "${paths[@]}"; do
+        mounted="$(findmnt -rn -o TARGET 2>/dev/null | awk -v p="$t" 'index($0, p "/") == 1 { print; exit }' || true)"
+        [[ -z "$mounted" ]] || die "${mounted} is mounted inside ${t#"$ROOT"}; unmount it first"
+    done
+    # A scheduled task cron started before it stopped finishes on its own.
+    waited=0
+    while holders="$(migrate_holders "${paths[@]}")"; [[ -n "$holders" ]]; do
+        (( waited < 120 )) || die "these still have files open where the data moves from: ${holders}"
+        (( waited % 30 == 0 )) && say "Waiting for: ${holders}"
+        sleep 5; waited=$(( waited + 5 ))
+    done
+
+    # Copy, then check the copy matches, every place before any is switched.
+    MIGRATE_PHASE="copy"
+    # A folder the site lacks is made as its others are, owner and mode, so
+    # the web user can write to it once mounted (reviewer2 F6).
+    local -a lacking=()
+    local f ref
+    for pair in "${moves[@]}"; do
+        [[ -d "${ROOT}${pair#* }" ]] || lacking+=("${ROOT}${pair#* }")
+    done
+    for t in "${lacking[@]}"; do
+        ref=""
+        # A companion test site's logs: its site's logs, which the web user writes too.
+        if [[ "$t" == "${ROOT}${SITES_REAL}"/*_test/logs ]]; then
+            f="${t%_test/logs}/logs"
+            [[ -d "$f" && " ${lacking[*]} " != *" ${f} "* ]] && ref="$f"
+        fi
+        for f in $SITE_FOLDERS; do
+            [[ -z "$ref" ]] || break
+            # A sibling the site had, not one made a moment ago.
+            [[ -d "$(dirname "$t")/${f}" && " ${lacking[*]} " != *" $(dirname "$t")/${f} "* ]] && { ref="$(dirname "$t")/${f}"; break; }
+        done
+        mkdir -p "$t"
+        if [[ -n "$ref" ]]; then
+            chown --reference="$ref" "$t" 2>/dev/null || true
+            chmod --reference="$ref" "$t" 2>/dev/null || true
+        fi
+    done
+    for pair in "${moves[@]}" ${MIGRATE_DOCKER_FROM:+"docker ${MIGRATE_DOCKER_FROM}"}; do
+        rel="${pair%% *}"; target="${pair#* }"; t="${ROOT}${target}"; p="${MNT}/${rel}"
+        # Absent or empty (the pre-check proved it empty): this run's to remove.
+        [[ -n "$(ls -A "$p" 2>/dev/null)" ]] || MIGRATE_MADE+=("$p")
+        mkdir -p "$p"
+        say "Copying ${target} to ${MNT_REAL}/${rel}..."
+        # Nanoseconds, both times: rsync leaves a time that matches to the second
+        # as it is, so a folder made this second would keep its own and fail the
+        # check; and a file changed after it was copied shows, even within the second.
+        # XFS shows each ACL a second time, as a trusted.SGI_ACL_* attribute; -A
+        # copies the ACL itself, and those two names are left out of both.
+        rsync -aHAXS --numeric-ids --delete --modify-window=-1 "${MIGRATE_XATTR_SKIP[@]}" "$t/" "$p/" || die "copying ${target} failed"
+        diff="$(rsync -aHAXSn --numeric-ids --delete --modify-window=-1 "${MIGRATE_XATTR_SKIP[@]}" -i "$t/" "$p/")" || die "${target} could not be compared with its copy"
+        [[ -z "$diff" ]] || die "the copy of ${target} does not match it ($(head -n 1 <<< "$diff"))"
+    done
+
+    # Still quiet: anything that opened a file there since the copy began would
+    # write into the original after the switch (reviewer2 F4).
+    holders="$(migrate_holders "${paths[@]}")"
+    [[ -z "$holders" ]] || die "these opened files where the data moves from during the copy: ${holders}"
+
+    # Switch: each folder's own goes aside to the root disk's ${OLD_REAL}, and
+    # the path becomes a mount of its copy.
+    MIGRATE_PHASE="swap"
+    mkdir -p "$OLD"; chmod 700 "$OLD"
+    printf '# Written by joinery_data_root.sh migrate (specs/one_data_root.md D5): the boot that moved\n# this host'"'"'s data. %s is removed once the data root passes check on a later one.\nboot=%s\n' \
+        "$OLD_REAL" "$MIGRATE_BOOT" > "$MIGRATED"
+    chmod 644 "$MIGRATED"
+    if [[ ! -f "$BINDS" ]]; then
+        mkdir -p "$(dirname "$BINDS")"
+        printf '# Written by joinery_data_root.sh (specs/one_data_root.md D1).\n# Each line: a path under %s, and where it is mounted.\n' "$MNT_REAL" > "$BINDS"
+        chmod 644 "$BINDS"
+    fi
+    for pair in "${moves[@]}"; do
+        rel="${pair%% *}"; target="${pair#* }"; t="${ROOT}${target}"
+        mkdir -p "$(dirname "${OLD}/${rel}")"
+        mv -T "$t" "${OLD}/${rel}" || die "could not move ${target} aside"
+        MIGRATE_SWAPPED+=("$pair")
+        mkdir "$t"
+        lock_mountpoint "$t"
+        printf '%s %s\n' "$rel" "$target" >> "$BINDS"
+    done
+    if [[ -n "$MIGRATE_DOCKER_FROM" ]]; then
+        MIGRATE_PHASE="docker"
+        if [[ -f "$(docker_daemon_json_path)" ]]; then
+            MIGRATE_DOCKER_JSON="$(cat "$(docker_daemon_json_path)")"; MIGRATE_DOCKER_JSON_HAD=1
+        fi
+        mv -T "${ROOT}${MIGRATE_DOCKER_FROM}" "${OLD}/docker" || die "could not move ${MIGRATE_DOCKER_FROM} aside"
+        docker_daemon_json_set data-root "\"${DOCKER_DATA_ROOT}\"" || die "could not set data-root in $(docker_daemon_json_path)"
+    fi
+    ensure_units >/dev/null || die "the units could not be written"
+    for pair in "${moves[@]}"; do
+        start_bind "${pair%% *}" "${pair#* }" || die "${pair#* } did not mount from ${MNT_REAL}/${pair%% *}; see: systemctl status $(bind_unit "${pair#* }")"
+    done
+    do_check >/dev/null || die "the data root does not pass check: $(check_reason)"
+
+    # Running on the data root: from here on nothing is put back.
+    MIGRATE_PHASE="done"
+    trap - EXIT
+    local failed=""
+    migrate_unmask
+    systemctl start "$TARGET_UNIT" || failed="${TARGET_UNIT} "
+    if (( ${#MIGRATE_STOPPED[@]} > 0 )); then
+        for u in "${MIGRATE_STOPPED[@]}"; do systemctl start "$u" || failed+="${u} "; done
+    fi
+    if (( ${#MIGRATE_CONTAINERS[@]} > 0 )); then
+        docker start "${MIGRATE_CONTAINERS[@]}" >/dev/null || failed+="containers (${MIGRATE_CONTAINERS[*]}) "
+    fi
+    if (( ${#MIGRATE_TIMERS[@]} > 0 )); then
+        systemctl start "${MIGRATE_TIMERS[@]}" || failed+="${MIGRATE_TIMERS[*]} "
+    fi
+    # Postfix's chroot holds syslog's socket (dev/log), and syslog still listens
+    # on the one that moved aside.
+    if [[ -e "${ROOT}/var/spool/postfix/dev" ]] && systemctl is-active --quiet rsyslog.service 2>/dev/null; then
+        systemctl restart rsyslog.service || failed+="rsyslog.service "
+    fi
+    local also=""
+    [[ -z "$MIGRATE_DOCKER_FROM" ]] || also=", and Docker's data (${DOCKER_DATA_ROOT})"
+    if (( ${#moves[@]} > 0 )); then
+        say "Moved $(gib "$total") onto the data root: ${#moves[@]} folder(s)${also}"
+    else
+        say "Moved $(gib "$total") onto the data root: Docker's data (${DOCKER_DATA_ROOT})"
+    fi
+    say "The copies from before are kept at ${OLD_REAL} until the data root passes check after a reboot; the next tick after that removes them. Reboot when you can."
+    [[ -z "$failed" ]] || die "the data is moved, but these did not start: ${failed}(see: systemctl status)"
+}
+
+# A tick on a mounted, ready data root, on a boot after the one that moved
+# this host's data: the copies from before are no longer needed (D5).
+migrate_forget_old() {
+    [[ -f "$MIGRATED" ]] || return 0
+    local boot now
+    boot="$(awk -F= '$1 == "boot" { print $2; exit }' "$MIGRATED")"
+    now="$(cat "$BOOT_ID_FILE" 2>/dev/null || true)"
+    [[ -n "$now" && -n "$boot" && "$boot" != "unknown" && "$now" != "$boot" ]] || return 0
+    if [[ -d "$OLD" ]]; then
+        findmnt -n --mountpoint "$OLD" >/dev/null 2>&1 && { say "data root: ${OLD_REAL} is a mount point; left as it is"; return 1; }
+        rm -rf --one-file-system "${OLD:?}" || { say "data root: could not remove ${OLD_REAL}"; return 1; }
+    fi
+    rm -f "$MIGRATED"
+    say "data root: passed check after a reboot; the copies from before the move (${OLD_REAL}) are removed"
+}
+
+# ---------------------------------------------------------------------------
 # grow
 # ---------------------------------------------------------------------------
 
@@ -738,6 +1293,7 @@ do_grow() {
 # die in it ends only the subshell.
 tick_upkeep() {
     ensure_units || return 1
+    migrate_forget_old || true
     case "$(conf_get backing)" in
         file)
             plan_growth
@@ -816,6 +1372,9 @@ do_status() {
     else
         say "growth: grows when its device is grown at the provider"
     fi
+    if [[ -f "$MIGRATED" ]]; then
+        say "moved: the copies from before the move are kept at ${OLD_REAL} until the data root passes check after a reboot"
+    fi
     local rel target
     while read -r rel target; do
         if bind_ok "$rel" "$target"; then
@@ -846,5 +1405,6 @@ case "${1:-}" in
     bind)   do_bind "${2:-}" "${3:-}" ;;
     unbind) do_unbind "${2:-}" ;;
     remove-site) do_remove_site "${2:-}" ;;
-    *) die "usage: joinery_data_root.sh create [SIZE] [DEVICE] | check | grow [SIZE] | status | tick | bind REL TARGET | unbind TARGET | remove-site NAME" ;;
+    migrate) do_migrate "${2:-}" ;;
+    *) die "usage: joinery_data_root.sh create [SIZE] [DEVICE] | check | grow [SIZE] | status | tick | bind REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE]" ;;
 esac

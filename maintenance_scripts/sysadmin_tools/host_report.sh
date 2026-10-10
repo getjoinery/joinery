@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.18 - disk_pool says "not_mounted" where this host declares a data root
+#                (/etc/joinery/data_root) that is not mounted, and "none" only where it has
+#                none: the node page offers to move a host's data only on the second
+#                (specs/one_data_root.md WP4).
 # Version: 1.17 - disk_pool reports the host's data root, /srv/joinery (specs/one_data_root.md WP1):
 #                a Docker host's disk pool is that data root, and on any host it is a
 #                filesystem of its own whose filling the root disk never shows. The key
@@ -389,11 +393,16 @@ emit_disk() {
 # The host's data root (joinery_data_root.sh), reported under disk_pool: a
 # filesystem of its own, in a file allocated whole or on a device, whose
 # filling the root disk never shows. A Docker host's disk pool is its data
-# root. "none" where /srv/joinery is not a mount of its own.
+# root. "none" where this host has none; "not_mounted" where it declares one
+# (/etc/joinery/data_root) and /srv/joinery is not a mount of its own.
 emit_disk_pool() {
     local mp="${HOST_REPORT_DATA_ROOT:-/srv/joinery}" fstype opts line used total avail
     read -r fstype opts < <(run findmnt -n -o FSTYPE,OPTIONS --mountpoint "$mp") || true
-    [[ -n "${fstype:-}" ]] || { printf '"none"'; return; }
+    if [[ -z "${fstype:-}" ]]; then
+        # Declared and down is not the same answer as never made.
+        if [[ -f "${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}" ]]; then printf '"not_mounted"'; else printf '"none"'; fi
+        return
+    fi
     line="$(run df -B1 --output=used,size,avail "$mp" | tail -n 1)"
     read -r used total avail <<< "$line"
     printf '{"path":"%s","fstype":%s,"prjquota":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s}' \

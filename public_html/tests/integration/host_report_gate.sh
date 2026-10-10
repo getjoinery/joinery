@@ -503,7 +503,10 @@ CMD_TIMEOUT=10
 pool="$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/pooldir" emit_disk_pool)"
 chk "a data root: its own figures, xfs, with project quotas" \
     "$(php -r '$o=json_decode($argv[1],true); echo $o["fstype"], "/", var_export($o["prjquota"], true), "/", is_int($o["total_bytes"]) && is_int($o["avail_bytes"]) ? "figures" : "none";' "$pool")" "xfs/true/figures"
-chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" emit_disk_pool)" '"none"'
+chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" HOST_REPORT_DATA_ROOT_CONF="$T/no_conf" emit_disk_pool)" '"none"'
+: > "$T/data_root_conf"
+chk "declared and not mounted: not_mounted, never none (one_data_root WP4)" \
+    "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" HOST_REPORT_DATA_ROOT_CONF="$T/data_root_conf" emit_disk_pool)" '"not_mounted"'
 # A docker inspect that answers nothing (timed out) is unknown, never no sites.
 cat > "$T/poolbin/docker" <<'STUB'
 #!/bin/bash

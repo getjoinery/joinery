@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.59 - a host with no data root offers Move its data onto the data root where its agent has
+ *                 data_root_migrate (one_data_root WP4); never a site container. A data root declared and
+ *                 not mounted (host_report 1.18) says so instead
  * @version 1.58 - the disk allowance's help says it needs a multi-tenant host: every new Docker host has a data root
  * @version 1.57 - the disk_pool gauge is labelled Data root: host_report reports the host's data root, /srv/joinery, under
  *                 that key (one_data_root WP1)
@@ -165,6 +168,10 @@
 </form>
 <form id="host_converge_form" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="host_converge">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<form id="data_root_migrate_form" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="data_root_migrate">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
 <?php
@@ -916,6 +923,20 @@
 			$class = ($free < $dp['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
 			$gauge('Data root', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
 				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), '');
+		} elseif ($dp === 'not_mounted') {
+			// Declared and down: nothing that keeps data starts until it is back.
+			$gauge('Data root', null, '', '<span class="text-danger fs-6">not mounted</span>',
+				'This host has a data root, and it is not mounted: the services that keep data wait for it. <code>joinery_data_root.sh status</code> on the host says why.');
+		} elseif ($dp === 'none' && (string)$node->get('mgn_container_name') === ''
+			&& JobCommandBuilder::has_primitive($node, 'data_root_migrate')) {
+			// A host installed before the data root (one_data_root WP4): its data
+			// moves there with one job. A site container never: its data is its
+			// volumes, which move with its host.
+			$gauge('Data root', null, '', '<span class="text-muted fs-6">none</span>',
+				'This host keeps its data on the root disk.',
+				'<div class="mt-2"><button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+				. ' onclick="JoineryModal.confirm(\'Move this host\\\'s data onto a data root, /srv/joinery? Its sites, database and mail stop for as long as one copy of the data takes, then start again. A move that does not finish puts everything back. The copies from before stay on the host until it has rebooted with the data root working, so reboot it afterwards.\', function(){ document.getElementById(\'data_root_migrate_form\').submit(); })">'
+				. 'Move its data onto the data root</button></div>');
 		}
 
 		// Memory

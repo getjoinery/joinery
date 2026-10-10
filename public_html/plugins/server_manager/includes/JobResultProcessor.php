@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.74 - a host report's disk_pool keeps not_mounted (host_report 1.18): a data root declared and down,
+ *                  which the node page tells apart from none
  * @version 1.73 - process_disk_usage keeps the data root's figures and tree (disk_usage.sh 1.1), or none
  * @version 1.72 - process_run_plugin_installers and process_host_converge go red with the runner's reason when the host's
  *                 data root is not ready and nothing ran (one_data_root WP1, reviewer2 F2)
@@ -3757,7 +3759,7 @@ HTML;
 	/** {used_bytes, total_bytes}, each a count or unknown. */
 	/** A disk pool's figures, the string none, or unknown. */
 	private static function host_report_disk_pool($v) {
-		if ($v === 'none') { return 'none'; }
+		if ($v === 'none' || $v === 'not_mounted') { return $v; }
 		if (!is_array($v)) { return 'unknown'; }
 		return self::host_report_gauge($v) + [
 			'avail_bytes' => self::host_report_count($v['avail_bytes'] ?? null),

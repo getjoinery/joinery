@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.114 - build_data_root_migrate: move a host's data onto its data root (one_data_root WP4), never
+ *                  addressed to a site container, whose data is its volumes on its host
  * @version 1.113 - build_copy_take_key sends manifest_url, the copy's own read of the backup at its provider; a copy
  *                  whose agent predates COPY_TAKE_KEY_MIN_AGENT_VERSION is refused; COPY_KEY_DATE_MIN_VERSION
  *                  (specs/storage_targets.md F7)
@@ -2794,6 +2796,33 @@ class JobCommandBuilder {
 
 	public static function build_host_converge_primitive($node) {
 		return ['primitive' => 'host_converge', 'params' => []];
+	}
+
+	/**
+	 * Move a host's data onto its data root, /srv/joinery (one_data_root WP4,
+	 * D5): the data_root_migrate word, which runs joinery_data_root.sh migrate.
+	 * The node's sites, database and mail stop for as long as one copy of the
+	 * data takes; a move that does not finish puts everything back, and the
+	 * originals stay on the node until its data root has passed a reboot.
+	 *
+	 * Nothing crosses the wire but the request: what moves, and how large a
+	 * data root to make, the node works out from what it holds. Never a site
+	 * container: its data is its volumes, which move with its host.
+	 */
+	public static function build_data_root_migrate($node) {
+		if ((string)$node->get('mgn_container_name') !== '') {
+			throw new Exception("'{$node->get('mgn_slug')}' is a site container; its data is its volumes, which move when its host's data does.");
+		}
+		if (!self::has_primitive($node, 'data_root_migrate')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot move its data onto a data root. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_migrate']));
+		}
+		return self::build_data_root_migrate_primitive($node);
+	}
+
+	public static function build_data_root_migrate_primitive($node) {
+		return ['primitive' => 'data_root_migrate', 'params' => []];
 	}
 
 	/**

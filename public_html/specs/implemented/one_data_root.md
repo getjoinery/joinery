@@ -1,12 +1,14 @@
 # One data root: every install keeps its data in one place, on a filesystem of its own
 
-**Status:** BUILDING. Drafted 2026-10-07 from an inventory of the installers;
-O1 and O3 settled by the owner 2026-10-09 (D7, D8). WP1 BUILT 2026-10-10,
-box-proven, committed (586d2ec3). WP2 BUILT 2026-10-10, box-proven,
-uncommitted; O4 settled (D1: bind mounts, not symlinks). WP3 next; D6 must be
-released before WP3 runs anywhere. Stands alone; `hosted_data_promise_disk_encryption`
-stands on it and is deliberately NOT part of it — this spec never mentions a
-key.
+**Status:** IMPLEMENTED 2026-10-10. Drafted 2026-10-07 from an inventory of
+the installers; O1-O4 and F5 settled by the owner. WP1 (586d2ec3) and WP2 with
+D6 (5997795d) committed, box-proven. WP3 `migrate` box-proven on bare metal, a
+Docker host and a multi-tenant host, reviewer2 VALID. WP4's tooling (agent
+1.69.0 word, node page action) built and gate-tested. Not yet run: the release
+carrying D6, WP2, WP3 and agent 1.69.0, and WP4's moves (dev first, then
+getjoinery, Joinerydemo, jeremytunnell.com, docker-prod); both are in the live
+verification queue. Stands alone; `hosted_data_promise_disk_encryption` stands
+on it and is deliberately NOT part of it — this spec never mentions a key.
 
 ## The goal, in one sentence
 
@@ -69,6 +71,12 @@ one line of `daemon.json`:
 
 No PHP changes, no package configuration changed: code, `apt`, `pg_*` and
 Postfix address the paths they always have.
+
+One stated exception: Docker 29 keeps images, and each container's writable
+layer, in containerd's store (`/var/lib/containerd`), not under `data-root`.
+They stay on the root disk. Images are code, rebuilt or pulled again; a site's
+data is its volumes, which are under `docker/`. (Found moving a Docker host in
+WP3; reviewer2 N2.)
 
 Why mounts and not symlinks: everything that walks a site directory — the
 backup engine (tar), restore, the site census, the permission sweep — treats a
@@ -164,19 +172,36 @@ run writes to a host whose data is missing.
 ### D5. Existing installs
 
 One procedure, the same everywhere, run by the operator (or the management
-node on a managed node) with downtime proportional to data size:
+node on a managed node): `joinery_data_root.sh migrate [SIZE|DEVICE]`. The
+downtime is the time to copy the data once.
 
-1. `create` the data root beside the live data.
-2. Stop `joinery-data.target`'s consumers.
-3. Copy each data location into its place under `/srv/joinery` (rsync, checked).
-4. Point each consumer at the new place (symlink, `data_directory`,
-   `queue_directory`, `data-root`); on a multi-tenant host the existing pool
-   file is renamed and remounted at `/srv/joinery`, no copy.
-5. Start the target. `check` passes. The old locations are removed only after
-   a `check` on the next boot.
+1. Find what moves: each place of D1's table that is on this host and not
+   mounted from the data root yet (a site is a directory under
+   `/var/www/html` with `config/Globalvars_site.php`; a companion test site
+   moves its logs), and Docker's data-root when it is not `/srv/joinery/docker`.
+2. Refuse, with every reason at once and nothing changed: a place that is a
+   symlink or on another filesystem, a cluster whose `data_directory` is
+   outside `/var/lib/postgresql`, a site holding its upgrade lock, a data root
+   that cannot hold the data with room, a root disk that cannot hold it twice.
+3. `create` the data root when there is none: the largest of D7's first size,
+   the data plus 12 GiB and the data over 0.7, as far as the root disk gives.
+4. Hold every host converger off (their runner locks), stop every running
+   consumer and cron, and wait (two minutes at most) for anything still
+   holding a file there.
+5. Copy each place (`rsync -aHAXS --numeric-ids`), then compare it with its
+   original, nanosecond times included; nothing is switched until every copy
+   matches.
+6. Switch: each original goes aside to `/srv/joinery.old` (a rename on the
+   root disk), each path becomes a bind (D1), Docker's `data-root` is set;
+   `check` passes; the services start.
+7. Anything failing before the services start puts every original back,
+   removes the copies and starts the services: a move is whole or not at all.
+8. The originals are removed by the first `tick` on a later boot whose `check`
+   passes (the boot is recorded in `/etc/joinery/data_root_migrated`): a
+   reboot is the proof that the data root comes up on its own.
 
-`joinery_data_root.sh migrate` does 1–5 and refuses to start if the root
-disk cannot hold both copies for the duration.
+The pool-backed multi-tenant layout this section once named needs no step: no
+node carries it (D2).
 
 ### D6. Upgrades stay on the code's disk
 
@@ -338,8 +363,10 @@ root is the thing that failed can still say why.
   F7 the upgrade transition read as harmless; `uploads/.upgrade.lock` stays
   where it is (the runner and older upgrade.php must agree on it across
   versions, and it is an empty file). F8 restore_chain and binds: fine.
-  F5 (a stale bind record holds every consumer down) is an owner decision; the
-  consequence is in installation.md. The box run also found B2 (bare-metal
+  F5 (a stale bind record holds every consumer down) SETTLED 2026-10-10 by the
+  owner: kept. A bare-metal host runs one site, so it holds down only that site
+  (or, for a test site's logs, its main site), and only after a hand deletion
+  under /srv/joinery; the consequence is in installation.md. The box run also found B2 (bare-metal
   remove_account hangs at dropdb's password prompt) and B3 (a converger run
   racing a removal recreates the site's cache/), both pre-existing, todo memory.
   Re-review VALID 2026-10-10. Its notes N1 (remove_account warns when the tool
@@ -348,8 +375,80 @@ root is the thing that failed can still say why.
   does not verify, as remove_site_certificate.sh already does) noted.
 - **WP3 — `migrate`** for the three existing shapes, proven on a scratch box
   of each.
+  **WP3 BUILT 2026-10-10.** `joinery_data_root.sh` 1.3 `migrate [SIZE|DEVICE]`
+  (D5): the places of D1 that are here and not on the data root, and Docker's
+  data-root; every refusal said at once before anything changes; the data
+  root made to hold the data; converger locks held, running containers stopped
+  by Docker, then the consumers and cron (containerd last); each place copied
+  (`rsync -aHAXS --numeric-ids`, nanosecond times) and compared before any is
+  switched; originals renamed into `/srv/joinery.old`; a failure before the
+  services start puts everything back; the first tick on a later boot with
+  check passing removes the originals. It runs in its own systemd unit
+  (`joinery-data-root-migrate.service`, log `/var/log/joinery-data-root-migrate.log`),
+  so a caller that dies or times out ends only its transcript, and refuses
+  inside a container. Gates: `joinery_data_root` 115 (+39), `installer_contract`
+  877 (+6). Docs: installation.md, "Moving an existing host onto it".
+  Box-proven on three scratch Linodes (Ubuntu 26.04, 2 GB; test account; deleted after),
+  each installed the old way from the 0.8.475 archive, with a marker file in a
+  site's uploads and a marker row in its database:
+  - Docker host, one site container: moved in 5 s (0.2 GiB; Docker 29 keeps
+    images in containerd's store, which stays on the root disk); daemon.json
+    `data-root` set, every other key kept; site healthy, markers read back;
+    after a reboot everything came up and the first tick removed the originals.
+  - Multi-tenant host (userns-remap), one site container: moved in 44 s
+    (1.6 GiB); `100000.100000` kept root:100000 710, volumes their remapped
+    owners; `docker_disk_pool.sh check` and `can-cap` both 0 after (the host can
+    now cap a site's disk); reboot and tick as above.
+  - Bare metal, a site with its test site: 16 folders plus PostgreSQL, Postfix
+    and rspamd moved, the web down 12 s; owners and modes kept; reboot: every
+    mount, direct I/O, the target and all six services up, check 0, tick removed the
+    originals. A tmpfs mounted inside `uploads/` was refused before anything
+    stopped; the same refusal reached only after stopping (the earlier build)
+    started all six services again.
+  Found on the boxes and fixed: stopping Docker and containerd in one
+  transaction left the container running (Docker could not reach containerd to
+  stop it); the post-stop mount check caught it before a copy, and containers
+  are now stopped by Docker first. rsync leaves a directory time that matches
+  to the second, which the nanosecond compare flagged; the copy uses the same
+  window. XFS shows each ACL a second time as `trusted.SGI_ACL_*`; those two
+  names are left out of the copy and the compare (`-A` copies the ACL).
+  Not box-tested: `migrate DEVICE`; a move large enough to meet the two-minute
+  holder wait.
+  **Reviewed by reviewer2 2026-10-10: NOT VALID, F1; F2-F7 smaller; all seven
+  fixed.** F1 a converger run that starts during the move waits on the lock
+  with the site's `logs/host_converger.log` open, so the holder wait failed:
+  the converger's timer and path stop first, and a run waiting on the lock is
+  stopped (it changes nothing before the lock); both start again after, or on
+  a put-back. F2 an unreadable boot id is refused before anything changes, and
+  forget_old never acts on `unknown`. F3 tee ignores TERM, so a stopped move
+  logs its put-back. F4 the stopped units, logrotate and apt-daily-upgrade are
+  masked (`--runtime`) for the move and unmasked before the starts, and holders
+  are checked again just before the switch. F5 an empty place the copy filled
+  is removed on a put-back. F6 a folder a site lacks is made with a sibling's
+  owner and mode. F7 the originals are removed with `--one-file-system`. Gates:
+  `joinery_data_root` 118, `installer_contract` 878.
+  Re-review: F1-F7 taken; F8 (a partial mask was not undone on a put-back:
+  the mask list is recorded before the mask command) fixed; N4 the converger's
+  service is masked too; N5 the log names the unmask command before masking; a
+  companion test site's lacking logs take its site's logs' owner. Also: a unit
+  stops only when data it keeps moves this time (a site added since an earlier
+  move stops the web stack and cron, never PostgreSQL). Box: a second site
+  moved with the fixed build (timer back, no masks left, a lacking folder
+  www-data 770), a reboot, tick; a 3 GiB move stopped mid-copy by `systemctl
+  stop` logged its put-back and left every service running and nothing masked.
+  Gates: `joinery_data_root` 119, `installer_contract` 878. Final trace by
+  reviewer2 on the frozen tree 2026-10-10: VALID, nothing open.
 - **WP4 — Fleet:** managed nodes migrated one at a time from the management
   node, dev first.
+  **WP4 tooling BUILT 2026-10-10, unreleased.** Agent 1.69.0: the
+  `data_root_migrate` operate machine word (no parameters, argv `migrate`,
+  4 h timeout; the move outlives it in its own unit). Plane: JobCommandBuilder
+  1.114 `build_data_root_migrate` (refuses a site container), node detail
+  actions 1.54, node overview 1.59 (Health shows "Data root: none" with
+  **Move its data onto the data root** on a host whose host report says
+  `disk_pool: none`, behind a confirm), server_manager 1.30.48, overview.md's
+  vocabulary row; `job_command_builder` test +3. Waiting on the owner: a
+  release carrying D6, WP2, WP3 and agent 1.69.0, then the moves, dev first.
 
 ## Open items
 
