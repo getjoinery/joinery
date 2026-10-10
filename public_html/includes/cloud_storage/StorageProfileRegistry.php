@@ -23,6 +23,8 @@
  * instantiated profile's visibility(), never the manifest. Implementations
  * must have a no-argument constructor.
  *
+ * @version 1.2 - present(): the declared profiles whose table exists, for every reader that queries one;
+ *                a plugin that was never installed has no table and holds nothing
  * @version 1.1 - all() refuses a profile that is not private; forVisibility() is gone, there is one store
  * @version 1.0
  */
@@ -63,6 +65,29 @@ class StorageProfileRegistry {
 		}
 
 		return array_values(self::$profiles);
+	}
+
+	/**
+	 * The declared profiles whose table exists: what every reader that
+	 * queries a profile's rows walks. A plugin on disk that was never
+	 * installed declares its profile but has no table, and a table that does
+	 * not exist holds nothing. Asked each call, not cached, so a plugin
+	 * installed mid-process is seen.
+	 *
+	 * @return StorageProfile[]
+	 */
+	public static function present(): array {
+		$profiles = self::all();
+		if (!$profiles) {
+			return [];
+		}
+		$tables = array_map(function ($p) { return $p->table(); }, $profiles);
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ("
+			. implode(',', array_fill(0, count($tables), '?')) . ")");
+		$q->execute(array_values($tables));
+		$have = array_flip($q->fetchAll(PDO::FETCH_COLUMN));
+		return array_values(array_filter($profiles, function ($p) use ($have) { return isset($have[$p->table()]); }));
 	}
 
 	/** Clear the cache (tests after declaring a new profile on disk). */

@@ -731,8 +731,8 @@ $ds2_v4 = agent_channel_free_v4();
 $ds2_v6 = '2001:db8:' . dechex(random_int(1, 65535)) . '::' . dechex(random_int(1, 65535));
 $ds2_jr = new AgentJoinRequest();
 $ds2_jr->set('ajr_source_ip', $ds2_v6);
-$ds2_jr->set('ajr_addresses', '10.0.0.5,' . $ds2_v4 . ',' . $ds2_v6);
-check(AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6) === $ds2_v4, 'with no placement, the first PUBLIC IPv4 wins over a private one and over the IPv6 source', AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6));
+$ds2_jr->set('ajr_addresses', '10.0.0.5,100.84.83.5,' . $ds2_v4 . ',' . $ds2_v6);
+check(AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6) === $ds2_v4, 'with no placement, the first PUBLIC IPv4 wins over a private one, a shared-range (Tailscale) one and the IPv6 source', AgentChannelEndpoint::node_address_for_join($ds2_jr, $ds2_v6));
 $ds3_jr = new AgentJoinRequest();
 $ds3_jr->set('ajr_source_ip', $ds2_v6);
 $ds3_jr->set('ajr_addresses', '10.0.0.5,' . $ds2_v6);
@@ -813,6 +813,7 @@ if ($self_node->get('mgn_mgh_managed_host_id') && !in_array((int)$self_node->get
 }
 check($self_adopted['self'] === true, 'A join from this machine\'s own address is the plane joining itself');
 check($self_node->get('mgn_name') === $own_host, 'It is named for this site, not for what the machine called itself', $self_node->get('mgn_name'));
+check($self_node->get('mgn_slug') === 'agtest-localhost', 'Its slug is the name it claimed (the site\'s name, or the slug a move carries), so a moved node keeps its backup folder name', $self_node->get('mgn_slug'));
 check($self_node->get('mgn_site_url') === $own_url, 'It carries this site\'s URL, which is how the plane finds itself', (string)$self_node->get('mgn_site_url'));
 check($self_node->get('mgn_host') === $own_host, 'Its host is this site\'s hostname');
 check($self_node->get('mgn_web_root') === PathHelper::getRootDir(), 'Its web root is this site\'s');
