@@ -25,7 +25,7 @@
 //! after a bound. Giving up is itself a finding — a client that never settles
 //! is a client that never stops using the network.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use jd_core::execute::ExecEnv;
 use jd_core::pass::run_pass;
@@ -149,6 +149,8 @@ pub struct World {
     /// list; every swap the harness makes -- the chaos name-swapper here, the
     /// workload's slot swaps, rotations and folder trades -- records here.
     swap_pairs: std::sync::Arc<std::sync::Mutex<Vec<SwapPair>>>,
+    sightings: std::sync::Mutex<HashMap<String, Sightings>>,
+    unseen: std::sync::Mutex<Vec<UnseenReading>>,
 }
 
 /// Two bodies a swap separated, and which swap did it.
@@ -175,6 +177,62 @@ pub struct SwapPair {
     /// other there -- the user, or this device applying someone else's move.
     /// `None` for the workload's own swaps.
     pub stood_in: Option<StoodIn>,
+    /// The device the swap was made on, by its index in the world, where the
+    /// recorder knows it.
+    pub device: Option<usize>,
+}
+
+/// A reading no scan of the device could have told from a save: a record
+/// whose own file was destroyed between two of the device's pass points, and
+/// which came out of the second bound to a file its scans had never seen --
+/// or had seen only beside it, under another name, as the file of a record
+/// never sent (the evidence a save by rename is read from). One scan cannot
+/// tell a save from a rotation and a save made over the rotated file between
+/// two scans; it shrinks only with observation finer than a scan. No body is
+/// lost: the record's history holds both. The chain oracle excuses a pair
+/// such a reading took, and only when the swap that separated the pair was
+/// made in that same window (`excused_unseen`).
+#[derive(Clone, Debug)]
+pub struct UnseenReading {
+    pub device: String,
+    pub record: i64,
+    /// The device, by its index in the world.
+    pub device_index: usize,
+    /// The record's own file before, and the one it was bound to after, by
+    /// the disk's own id and birth.
+    pub from: (u64, u64),
+    pub to: (u64, u64),
+    /// The bytes the record was bound to, and the bytes of the file it
+    /// displaced (its own at the window's start).
+    pub body: Vec<u8>,
+    pub displaced: Vec<u8>,
+    /// The pass points the window ran between (journal indices).
+    pub window: (usize, usize),
+    /// The swap pairs recorded in that window, by their index.
+    pub pairs: std::ops::Range<usize>,
+}
+
+/// Per device, what its scans have seen, for `UnseenReading`. Files by the
+/// disk's own id and birth: an id alone is reused once its file is gone, and
+/// a volume with no births shows the engine 0 for every one.
+#[derive(Default)]
+struct Sightings {
+    /// Every sighting of a file, as the own file of a record: was it a record
+    /// never sent, and its path (`None` where the path could not be resolved,
+    /// which is never beside anything).
+    of: HashMap<(u64, u64), Vec<(bool, Option<String>)>>,
+    /// Each file record's own file (by the disk's identity, and as the engine
+    /// holds it), path and bytes at the device's last pass point, and where
+    /// in the journal that was.
+    last: HashMap<i64, ((u64, u64), jd_vfs::FileIdentity, String, Vec<u8>)>,
+    last_at: usize,
+    last_pairs: usize,
+    /// Every path each record has been seen at.
+    held: HashMap<i64, std::collections::HashSet<String>>,
+    /// How many of the disk's landings have been read.
+    landings_read: usize,
+    /// Every file the engine laid on this disk.
+    laid: std::collections::HashSet<(u64, u64)>,
 }
 
 /// The device a chaos swap was made on (its index in the world) and the
@@ -209,7 +267,7 @@ fn swap_two_names(
             };
             let dir = |p: &str| disk.birth_of(p.rsplit_once('/').map(|(d, _)| d).unwrap_or(""));
             let stood_in = Some(StoodIn { device, a: dir(a), b: dir(b) });
-            pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out, stood_in });
+            pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out, stood_in, device: Some(device) });
         }
     }
     disk.user_trade_names(a, b, parked);
@@ -281,6 +339,8 @@ impl World {
             ownership: Default::default(),
             journal: Default::default(),
             swap_pairs: Default::default(),
+            sightings: Default::default(),
+            unseen: Default::default(),
         }
     }
 
@@ -658,6 +718,7 @@ impl World {
             Err(e) => format!("{} failed={e:?}", device.name),
         });
         let after = held_by(device);
+        self.note_unseen_readings(device);
         let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
         for hash in &before {
             if after.contains(hash) || by_the_user.contains(hash) {
@@ -842,10 +903,12 @@ impl World {
         *self.power_cycles.lock().unwrap() += 1;
     }
 
-    /// Two bodies a swap is about to separate. Recorded only when they differ:
-    /// equal bodies are not separated by exchanging their names.
-    pub fn record_swap_pair(&self, a: &[u8], b: &[u8], source: &'static str, sealed: bool) {
+    /// Two bodies a swap is about to separate, on the named device where the
+    /// caller knows it. Recorded only when they differ: equal bodies are not
+    /// separated by exchanging their names.
+    pub fn record_swap_pair(&self, a: &[u8], b: &[u8], source: &'static str, sealed: bool, on: Option<&str>) {
         if a != b {
+            let device = on.and_then(|name| self.devices.iter().position(|d| d.name == name));
             self.swap_pairs.lock().unwrap().push(SwapPair {
                 a: a.to_vec(),
                 b: b.to_vec(),
@@ -853,6 +916,7 @@ impl World {
                 sealed,
                 crossed_out: None,
                 stood_in: None,
+                device,
             });
         }
     }
@@ -860,6 +924,105 @@ impl World {
     /// Every pair of bodies a swap separated in this world, in order.
     pub fn swap_pairs(&self) -> Vec<SwapPair> {
         self.swap_pairs.lock().unwrap().clone()
+    }
+
+    /// Every reading no scan could have told from a save (`UnseenReading`).
+    pub fn unseen_readings(&self) -> Vec<UnseenReading> {
+        self.unseen.lock().unwrap().clone()
+    }
+
+    /// At a pass point of this device: which records were bound, between this
+    /// one and its last, to a file its scans had not seen except beside them,
+    /// with their own file destroyed; then what its scans have now seen.
+    fn note_unseen_readings(&self, device: &Device) {
+        let at = self.journal.lock().unwrap().len();
+        let pairs_now = self.swap_pairs.lock().unwrap().len();
+        let Some(index) = self.devices.iter().position(|d| d.name == device.name) else { return };
+        // Where an id and its birth can name two files, nothing can be said of
+        // what this device's scans saw, and nothing is excused.
+        if !device.fs.identity_is_unique() {
+            return;
+        }
+        let entries = device.store.every_entry().unwrap();
+        let path_of = |e: &jd_core::model::Entry| -> Option<String> {
+            let name = e.effective_local_name().to_string();
+            match e.local_placement().parent {
+                None => Some(name),
+                Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+            }
+        };
+        let live = device.fs.true_identities();
+        // A record's own file by the disk's identity for it: the file standing
+        // on this disk under that id now.
+        let owned: Vec<(i64, (u64, u64), jd_vfs::FileIdentity, Option<String>, bool, bool)> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::File)
+            .filter_map(|e| {
+                let own = e.own_file.filter(|o| o.file_id != 0)?;
+                let birth = *live.get(&own.file_id)?;
+                Some((e.id.server_id, (own.file_id, birth), own, path_of(e), e.id.is_provisional(), e.remote_deleted))
+            })
+            .collect();
+        let now: HashMap<i64, ((u64, u64), jd_vfs::FileIdentity, String)> = owned
+            .iter()
+            .filter(|(_, _, _, path, _, deleted)| path.is_some() && !deleted)
+            .map(|(r, own, seen, path, _, _)| (*r, (*own, *seen, path.clone().unwrap())))
+            .collect();
+        let on_disk: std::collections::HashSet<(u64, u64)> = live.iter().map(|(id, b)| (*id, *b)).collect();
+        let folder = |p: &str| p.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
+        let mut all = self.sightings.lock().unwrap();
+        let mine = all.entry(device.name.clone()).or_default();
+        // What the engine itself laid is never a scan's reading.
+        let laid = device.fs.landed_since(mine.landings_read);
+        mine.landings_read += laid.len();
+        mine.laid.extend(laid);
+        for (record, (to, seen_to, path)) in &now {
+            let Some((from, seen_from, was_at, displaced)) = mine.last.get(record) else { continue };
+            // A reading is the engine binding the record to another file: the
+            // identity it holds changed, not only the disk's under an id it
+            // reused while the engine was shown nothing to tell them apart.
+            if from == to || seen_from == seen_to || on_disk.contains(from) || mine.laid.contains(to) {
+                continue;
+            }
+            let held = mine.held.get(record);
+            let beside_only = mine.of.get(to).is_none_or(|seen| {
+                seen.iter().all(|(never_sent, p)| {
+                    *never_sent
+                        && p.as_deref().is_some_and(|p| folder(p) == folder(was_at) && held.is_none_or(|h| !h.contains(p)))
+                })
+            });
+            if !beside_only {
+                continue;
+            }
+            if let Some(body) = device.fs.peek(path) {
+                self.unseen.lock().unwrap().push(UnseenReading {
+                    device: device.name.clone(),
+                    device_index: index,
+                    record: *record,
+                    from: *from,
+                    to: *to,
+                    body,
+                    displaced: displaced.clone(),
+                    window: (mine.last_at, at),
+                    pairs: mine.last_pairs..pairs_now,
+                });
+            }
+        }
+        for (_, own, _, path, never_sent, _) in &owned {
+            mine.of.entry(*own).or_default().push((*never_sent, path.clone()));
+        }
+        for (record, (_, _, path)) in &now {
+            mine.held.entry(*record).or_default().insert(path.clone());
+        }
+        mine.last = now
+            .into_iter()
+            .map(|(r, (own, seen, path))| {
+                let bytes = device.fs.peek(&path).unwrap_or_default();
+                (r, (own, seen, path, bytes))
+            })
+            .collect();
+        mine.last_at = at;
+        mine.last_pairs = pairs_now;
     }
 
     /// Every pass this world has run, in order, as the plan it made and the
