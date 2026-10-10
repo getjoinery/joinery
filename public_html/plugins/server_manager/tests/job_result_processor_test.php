@@ -1749,6 +1749,31 @@ section('unit_journal and disk_usage: the two observe words land as bounded resu
 		'a path is reduced to path characters', var_export($d['tree']['entries'][1] ?? null, true));
 	check(is_array($d) && $d['machine'][1] === array('path' => '/var/lib/docker', 'bytes' => 'absent'),
 		'absent is an answer a size may take: the directory is not there');
+	check(is_array($d) && array_key_exists('data_root', $d) && $d['data_root'] === null,
+		'a report with no data root (a host without one, or a script before it) keeps none');
+
+	// The data root (one_data_root WP2): the site's folders are mounts of it,
+	// so its own figures and tree are where their space shows.
+	$dr_job = jrp_job($uj_node, 'disk_usage', $envelope(array(
+		'filesystem' => array('path' => '/var/www/html/x/public_html', 'used_bytes' => 100, 'total_bytes' => 200, 'avail_bytes' => 80),
+		'tree' => array('path' => '/var/www/html/x', 'total_bytes' => 90, 'partial' => false, 'entries' => array()),
+		'data_root' => array(
+			'filesystem' => array('path' => '/srv/joinery', 'used_bytes' => 30, 'total_bytes' => 64, 'avail_bytes' => 34, 'owner' => 'x'),
+			'tree' => array('path' => '/srv/joinery', 'total_bytes' => 30, 'partial' => true, 'entries' => array_merge(
+				array(array('path' => 'sites/x/uploads', 'bytes' => 20, 'mtime' => 5)),
+				array_fill(0, 30, array('path' => 'd', 'bytes' => 1)))),
+			'depth' => 3),
+		'machine' => array(),
+		'generated_at' => 1790050543,
+	)));
+	JobResultProcessor::process($dr_job);
+	$d = json_decode((string)$dr_job->get('mjb_result'), true);
+	check(is_array($d['data_root'] ?? null) && $d['data_root']['filesystem'] === array('path' => '/srv/joinery', 'used_bytes' => 30, 'total_bytes' => 64, 'avail_bytes' => 34),
+		'the data root\'s figures are kept, and nothing else the node put beside them', var_export($d['data_root']['filesystem'] ?? null, true));
+	check(is_array($d['data_root'] ?? null) && $d['data_root']['tree']['partial'] === true
+		&& count($d['data_root']['tree']['entries']) === JobResultProcessor::DISK_USAGE_MAX_ENTRIES
+		&& $d['data_root']['tree']['entries'][0] === array('path' => 'sites/x/uploads', 'bytes' => 20),
+		'its tree is capped and shaped as the site tree is', var_export($d['data_root']['tree']['entries'][0] ?? null, true));
 }
 
 section('reset_failed_unit: before and after, and a fresh host report behind an accepted reset');

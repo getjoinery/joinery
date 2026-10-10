@@ -13,6 +13,8 @@
 # all preserved failed trees, and must remove ONLY those: the live tree and
 # every other site-root directory stay untouched. The disk-space check before
 # download asks for room measured from the live code tree, not a flat figure.
+# Staging and the downloaded archives live in the deploy root, never in uploads/
+# (specs/one_data_root.md D6), and a deploy empties the archives.
 #
 # The cleanup and disk-space blocks are EXTRACTED FROM utils/upgrade.php rather than copied
 # here, so this exercises the code that actually ships. upgrade.php itself is
@@ -85,33 +87,60 @@ chk "after the failure/rollback exit (never runs on a failed deploy)" \
     "$([ -n "$cleanup_line" ] && [ -n "$rollback_line" ] && [ "$cleanup_line" -gt "$rollback_line" ] && echo yes)" "yes"
 
 echo "== the disk-space check asks for room measured from the live code =="
-# Staging takes the archives and a staged copy (2x the live tree); the deploy
-# root takes a failed copy on rollback (1x). On one disk the needs add up.
+# The deploy root takes the archives, a staged copy and, on rollback, a failed
+# copy: 3x the live tree, all asked of the deploy root.
 awk '/Check disk space before download/{f=1} f{print} f&&/^\t\t}$/{exit}' "$SRC" > "$T/space.txt"
 chk "space block found in upgrade.php" "$(grep -q 'live_bytes' "$T/space.txt" && echo yes)" "yes"
 {
     echo '<?php'
     echo '$full_site_dir = $argv[1]; $deploy_root = $argv[2];'
-    echo '$stage_location = ($deploy_root !== $full_site_dir) ? $deploy_root."/upgrades/" : $full_site_dir."/uploads/upgrades/";'
     echo '$live_directory = $full_site_dir."/public_html";'
     # Only the measuring half: the refusal compares against real free space.
-    sed '/foreach (\$space_needs as \$space_need)/,$d' "$T/space.txt"
-    echo 'echo $live_bytes, " ", implode(",", array_column($space_needs, "bytes")), "\n";'
+    sed '/\$free_space = disk_free_space/,$d' "$T/space.txt"
+    echo 'echo $live_bytes, " ", $space_bytes, " ", $min_required, "\n";'
 } > "$T/space.php"
 php -l "$T/space.php" >/dev/null 2>&1
 chk "extracted space block parses" "$?" "0"
 SP="$T/spacesite"
 mkdir -p "$SP/public_html" "$SP/uploads"
 head -c 2097152 /dev/zero > "$SP/public_html/big.bin"
-read -r live needs <<< "$(php "$T/space.php" "$SP" "$SP")"
+read -r live needs floor <<< "$(php "$T/space.php" "$SP" "$SP")"
 chk "live tree measured" "$([ "$live" -ge 2097152 ] && echo yes)" "yes"
-chk "one disk: staging and deploy root add up to 3x" "$needs" "$((3 * live))"
-if [ -d /dev/shm ] && [ "$(stat -c %d /dev/shm)" != "$(stat -c %d "$T")" ]; then
-    D=$(mktemp -d /dev/shm/upgrade_space.XXXXXX)
-    read -r live needs <<< "$(php "$T/space.php" "$SP" "$D")"
-    rm -rf "${D:?}"
-    chk "deploy volume on another disk: all 3x asked of the volume" "$needs" "$((3 * live))"
-fi
+chk "the deploy root is asked for 3x the live tree" "$needs" "$((3 * live))"
+chk "never less than 500MB" "$floor" "$((500 * 1024 * 1024))"
+chk "free space is read at the deploy root" "$(grep -c 'disk_free_space(\$deploy_root)' "$T/space.txt")" "1"
+
+echo "== staging and the archives live in the deploy root, never in uploads/ =="
+chk "staging is the deploy root's upgrades/" "$(grep -c "^\s*\$stage_location = \$deploy_root.'/upgrades/';" "$SRC")" "1"
+chk "archives are the deploy root's upgrade_archives/" "$(grep -c "^\s*\$archive_location = \$deploy_root.'/upgrade_archives/';" "$SRC")" "1"
+chk "the core archive downloads there" "$(grep -c '\$file_download_location = \$archive_location . basename' "$SRC")" "1"
+chk "no code path stages or downloads into uploads/" \
+    "$(grep -v '^\s*//' "$SRC" | grep -c "uploads/upgrades/'\|'/uploads/' \. basename")" "0"
+
+echo "== a successful deploy empties the archives and what older releases left in uploads/ =="
+awk '/Empty the archive directory/{f=1} f{print} f&&/old_stage_location\) \. . 2>&1.\);/{getline; print; exit}' "$SRC" > "$T/purge.txt"
+chk "purge block found" "$(grep -c 'old_stage_location' "$T/purge.txt")" "3"
+{
+    echo '<?php'
+    echo 'function upgrade_echo($m) { echo strip_tags($m), "\n"; }'
+    echo '$full_site_dir = $argv[1]; $archive_location = $argv[1]."/upgrade_archives/"; $verbose = true;'
+    cat "$T/purge.txt"
+} > "$T/purge.php"
+php -l "$T/purge.php" >/dev/null 2>&1
+chk "extracted purge block parses" "$?" "0"
+PS="$T/purgesite"
+mkdir -p "$PS/upgrade_archives" "$PS/uploads/upgrades/public_html" "$PS/uploads/photos"
+echo a > "$PS/upgrade_archives/joinery-core-1.2.tar.gz"
+echo b > "$PS/upgrade_archives/joinery-plugin-x-1.tar.gz"
+echo c > "$PS/uploads/joinery-core-1.1.tar.gz"
+echo d > "$PS/uploads/photos/keep.jpg"
+echo e > "$PS/uploads/keep.pdf"
+out=$(php "$T/purge.php" "$PS")
+chk "archives emptied" "$(find "$PS/upgrade_archives" -type f | wc -l)" "0"
+chk "an old archive in uploads/ removed" "$([ -e "$PS/uploads/joinery-core-1.1.tar.gz" ] && echo present || echo gone)" "gone"
+chk "old staging in uploads/ removed" "$([ -e "$PS/uploads/upgrades" ] && echo present || echo gone)" "gone"
+chk "uploaded files untouched" "$(cat "$PS/uploads/photos/keep.jpg" "$PS/uploads/keep.pdf" | tr -d '\n')" "de"
+chk "the purge is reported" "$(echo "$out" | grep -c 'Purged 3 downloaded upgrade archive')" "1"
 
 echo
 if [ "$failed" -eq 0 ]; then

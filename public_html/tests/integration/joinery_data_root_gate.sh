@@ -24,6 +24,12 @@
 #     D7's step when it is filling, grows only as far as the root disk can
 #     give above its reserve, and says once when it cannot grow at all.
 #   - grow SIZE: never shrinks, never takes the root disk under its reserve.
+#   - bind / unbind (WP2, D1): a path is a bind mount of its place under the
+#     data root, recorded, its unit written and required by the target; a new
+#     place takes the path's mode; a path holding data is refused with exit 3
+#     and nothing changed; one path, one place. check fails while a recorded
+#     bind is not in place and names it; tick mounts it again. unbind leaves
+#     the data, and only this script's mount units are ever removed.
 #
 # The real XFS behaviour (the loop device, online growth, project quotas) is
 # the multi-tenant spec's proof on a scratch Linode; this pins the decisions.
@@ -66,6 +72,8 @@ stub blkid 'case "$1" in -p) [ -f "$GATE_T/dev_has_fs" ] && exit 0; exit 2 ;; -s
 stub findmnt 'case "$*" in
   *"-S "*) exit 1 ;;
   *FSTYPE,OPTIONS*) [ -f "$GATE_T/mounted" ] || exit 1; echo "$(cat "$GATE_T/fstype" 2>/dev/null || echo xfs) rw,relatime,$(cat "$GATE_T/opts" 2>/dev/null || echo prjquota)" ;;
+  *"--mountpoint $GATE_T/root/srv/joinery") { [ -f "$GATE_T/mounted" ] || [ -f "$GATE_T/stranger" ]; } || exit 1; echo /srv/joinery ;;
+  *--mountpoint*) p="${@: -1}"; grep -qxF "$p" "$GATE_T/othermounts" 2>/dev/null || exit 1; echo "$p" ;;
   *) { [ -f "$GATE_T/mounted" ] || [ -f "$GATE_T/stranger" ]; } || exit 1; echo /srv/joinery ;;
 esac'
 # df: figures by filesystem, "size used avail" in bytes.
@@ -237,6 +245,126 @@ out="$(run grow $(( cur / G + 16 ))G 2>&1)"; rc=$?
 chk "never takes the root disk under its reserve (15 to give)" "$rc|$(grep -c 'under its reserve' <<< "$out")" "1|1"
 out="$(run grow $(( cur / G + 15 ))G 2>&1)"; rc=$?
 chk "grows to a size it can give" "$rc|$(grep -c "^fallocate -l $(( (cur / G + 15) * G )) " "$LOG")" "0|1"
+
+echo "=== bind and unbind (WP2, D1) ==="
+figs root 100*G 20*G 80*G
+figs data 40*G 2*G 38*G
+# A mount unit's start puts its place where its path is (a symlink stands in
+# for the bind: stat follows it, as it would see the mounted directory); its
+# stop takes it away. GATE_BIND_FAIL makes every start fail.
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"
+case "$1 $2" in
+  "start "*.mount|"stop "*.mount)
+    # systemd knows a started mount from mountinfo even once its file is gone.
+    mkdir -p "$GATE_T/active"
+    if [ "$1" = start ]; then
+      f="$GATE_T/root/etc/systemd/system/$2"; [ -f "$f" ] || exit 5
+      what="$(sed -n "s/^What=//p" "$f")"; where="$(sed -n "s/^Where=//p" "$f")"
+      [ -f "$GATE_T/bind_fail" ] && exit 1
+      rmdir "$GATE_T/root$where" 2>/dev/null; ln -sfn "$GATE_T/root$what" "$GATE_T/root$where"
+      echo "$where" > "$GATE_T/active/$2"
+    else
+      [ -f "$GATE_T/active/$2" ] || exit 5
+      where="$(cat "$GATE_T/active/$2")"; rm -f "$GATE_T/active/$2"
+      rm -f "$GATE_T/root$where"; mkdir -p "$GATE_T/root$where"; chmod 000 "$GATE_T/root$where"
+    fi ;;
+esac
+exit 0'
+run tick >/dev/null 2>&1
+: > "$LOG"
+B="$T/root/etc/joinery/data_binds"
+out="$(run bind ../etc /var/lib/x 2>&1)"; rc=$?
+chk "a place with .. in it is refused" "$rc|$(grep -c "'../etc' is not a path" <<< "$out")" "1|1"
+out="$(run bind postgresql var/lib/postgresql 2>&1)"; rc=$?
+chk "a relative path is refused" "$rc|$(grep -c 'is not an absolute path' <<< "$out")" "1|1"
+out="$(run bind postgresql /srv/joinery/x 2>&1)"; rc=$?
+chk "a path inside the data root is refused" "$rc|$(grep -c 'is not an absolute path outside the data root' <<< "$out")" "1|1"
+out="$(run bind postgresql /var/lib/../etc 2>&1)"; rc=$?
+chk "a path with .. in it is refused" "$rc" "1"
+unmount
+out="$(run bind postgresql /var/lib/postgresql 2>&1)"; rc=$?
+chk "refused while the data root is not mounted" "$rc|$(grep -c 'the data root is not mounted' <<< "$out")" "1|1"
+touch "$T/mounted"
+chk "and nothing was recorded or written" "$( [ -e "$B" ] && echo rec || echo none)|$(grep -c -e '^systemctl start' -e daemon-reload "$LOG")" "none|0"
+
+mkdir -p "$T/root/var/lib/postgresql"; chmod 750 "$T/root/var/lib/postgresql"
+out="$(run bind postgresql /var/lib/postgresql 2>&1)"; rc=$?
+chk "bind an empty path: exit 0, and says where it is" "$rc|$(tail -n 1 <<< "$out")" "0|/var/lib/postgresql is on the data root (/srv/joinery/postgresql)"
+chk "recorded once" "$(grep -c '^postgresql /var/lib/postgresql$' "$B")" "1"
+chk "the new place took the path's mode" "$(stat -c %a "$T/root/srv/joinery/postgresql")" "750"
+U="$SD/var-lib-postgresql.mount"
+chk "its unit: the place onto the path, a bind, after the data root's mount" \
+    "$(grep -c '^What=/srv/joinery/postgresql$' "$U")|$(grep -c '^Where=/var/lib/postgresql$' "$U")|$(grep -c '^Options=bind$' "$U")|$(grep -c '^Requires=srv-joinery.mount$' "$U")" "1|1|1|1"
+chk "the target requires it and orders after it" \
+    "$(grep -c '^Requires=var-lib-postgresql.mount$' "$SD/joinery-data.target")|$(grep -c '^After=var-lib-postgresql.mount$' "$SD/joinery-data.target")" "1|1"
+chk "units reloaded before it is started" \
+    "$(grep -e '^systemctl daemon-reload' -e '^systemctl start var-lib' "$LOG" | cut -d' ' -f2 | paste -sd,)" "daemon-reload,start"
+chk "check: 0, and status lists it" "$(run check >/dev/null 2>&1; echo $?)|$(run status 2>&1 | grep -c '^mount: /var/lib/postgresql <- postgresql$')" "0|1"
+: > "$LOG"
+out="$(run bind postgresql /var/lib/postgresql 2>&1)"; rc=$?
+chk "bind again: exit 0, still one line, nothing restarted" "$rc|$(grep -c postgresql "$B")|$(grep -c -e '^systemctl start' -e daemon-reload "$LOG")" "0|1|0"
+
+out="$(run bind postgresql /var/lib/other 2>&1)"; rc=$?
+chk "one place mounts at one path" "$rc|$(grep -c 'is already mounted at /var/lib/postgresql' <<< "$out")" "1|1"
+out="$(run bind pg2 /var/lib/postgresql 2>&1)"; rc=$?
+chk "one path mounts one place" "$rc|$(grep -c 'is already mounted from /srv/joinery/postgresql' <<< "$out")" "1|1"
+
+mkdir -p "$T/root/var/www/html/s1/uploads"; echo photo > "$T/root/var/www/html/s1/uploads/a.jpg"
+: > "$LOG"
+out="$(run bind sites/s1/uploads /var/www/html/s1/uploads 2>&1)"; rc=$?
+chk "a path holding data: exit 3, it says so, nothing changed" \
+    "$rc|$(grep -c 'holds data' <<< "$out")|$(grep -c s1 "$B")|$(cat "$T/root/var/www/html/s1/uploads/a.jpg")|$( [ -e "$T/root/srv/joinery/sites/s1" ] && echo made || echo none)|$(wc -l < "$LOG" | tr -d ' ')" "3|1|0|photo|none|0"
+echo "$T/root/var/www/html/s2/uploads" > "$T/othermounts"
+mkdir -p "$T/root/var/www/html/s2/uploads"
+out="$(run bind sites/s2/uploads /var/www/html/s2/uploads 2>&1)"; rc=$?
+chk "a path something else is mounted at is refused" "$rc|$(grep -c 'something else is mounted' <<< "$out")" "1|1"
+rm -f "$T/othermounts"
+
+touch "$T/bind_fail"
+out="$(run bind sites/s3/logs /var/www/html/s3/logs 2>&1)"; rc=$?
+chk "a mount that does not take: exit 1, and the unit to look at" "$rc|$(grep -c 'see: systemctl status var-www-html-s3-logs.mount' <<< "$out")" "1|1"
+chk "the path underneath is locked: mode 000" "$(stat -c %a "$T/root/var/www/html/s3/logs")" "0"
+out="$(run check 2>&1)"; rc=$?
+chk "check: 1, naming the path that is not mounted" "$rc|$(grep -c '/var/www/html/s3/logs is not mounted from /srv/joinery/sites/s3/logs' <<< "$out")" "1|1"
+out="$(run tick 2>&1)"; rc=$?
+chk "tick, while it still will not mount: 1, not ready" "$rc" "1"
+rm -f "$T/bind_fail"
+out="$(run tick 2>&1)"; rc=$?
+chk "tick, once it will: mounts it, says so, exit 0" "$rc|$out" "0|data root: mounted /var/www/html/s3/logs again"
+
+echo keep > "$T/root/srv/joinery/sites/s3/logs/error.log"
+: > "$LOG"
+echo "# Written by someone else" > "$SD/mnt-other.mount"
+out="$(run unbind /var/www/html/s3/logs 2>&1)"; rc=$?
+chk "unbind: exit 0, unmounted, no longer recorded, and says where the data is" \
+    "$rc|$(grep -c '^systemctl stop var-www-html-s3-logs.mount$' "$LOG")|$(grep -c s3 "$B")|$(grep -c 'its data stays at /srv/joinery/sites/s3/logs' <<< "$out")" "0|1|0|1"
+chk "its unit is gone, and the target no longer requires it" \
+    "$( [ -e "$SD/var-www-html-s3-logs.mount" ] && echo kept || echo gone)|$(grep -c s3 "$SD/joinery-data.target")" "gone|0"
+chk "the target let it go before it was unmounted, so no consumer stopped with it (reviewer2 F1)" \
+    "$(grep -e '^systemctl daemon-reload' -e '^systemctl stop var-www-html-s3-logs.mount' "$LOG" | cut -d' ' -f2 | paste -sd,)" "daemon-reload,stop"
+chk "the path is left an empty folder with its place's mode, not locked (reviewer2 F4)" \
+    "$(stat -c %a "$T/root/var/www/html/s3/logs")|$(stat -c %a "$T/root/srv/joinery/sites/s3/logs")" "$(stat -c %a "$T/root/srv/joinery/sites/s3/logs")|$(stat -c %a "$T/root/srv/joinery/sites/s3/logs")"
+chk "the data stays; a mount unit this script did not write stays" \
+    "$(cat "$T/root/srv/joinery/sites/s3/logs/error.log")|$( [ -e "$SD/mnt-other.mount" ] && echo kept)" "keep|kept"
+out="$(run unbind /var/www/html/s3/logs 2>&1)"; rc=$?
+chk "unbind what is not mounted from it: refused" "$rc|$(grep -c 'is not mounted from the data root' <<< "$out")" "1|1"
+chk "check: 0 again" "$(run check >/dev/null 2>&1; echo $?)" "0"
+
+echo "=== remove-site: a removed site's mounts and data go (reviewer2 F2) ==="
+for d in uploads logs; do run bind "sites/s4/$d" "/var/www/html/s4/$d" >/dev/null 2>&1; done
+run bind sites/s4x/uploads /var/www/html/s4x/uploads >/dev/null 2>&1
+echo photo > "$T/root/srv/joinery/sites/s4/uploads/a.jpg"
+unmount
+out="$(run remove-site s4 2>&1)"; rc=$?
+chk "refused while the data root is down, nothing changed" "$rc|$(grep -c 'which is not mounted' <<< "$out")|$(grep -c '^sites/s4/' "$B")" "1|1|2"
+touch "$T/mounted"; : > "$LOG"
+out="$(run remove-site s4 2>&1)"; rc=$?
+chk "exit 0, both mounts taken away and its data removed" \
+    "$rc|$(grep -c '^sites/s4/' "$B")|$( [ -e "$T/root/srv/joinery/sites/s4" ] && echo kept || echo gone)|$(grep -c '2 mount(s) taken away and its data on the data root removed' <<< "$out")" "0|0|gone|1"
+chk "a site whose name starts with it keeps its own" "$(grep -c '^sites/s4x/uploads ' "$B")|$( [ -d "$T/root/srv/joinery/sites/s4x/uploads" ] && echo kept)" "1|kept"
+chk "check: 0, so nothing on the host waits on the removed site" "$(run check >/dev/null 2>&1; echo $?)" "0"
+chk "a site with nothing on the data root: exit 0, silent" "$(run remove-site nosuch 2>&1; echo $?)" "0"
+chk "a name that is not a site name is refused" "$(run remove-site ../etc >/dev/null 2>&1; echo $?)" "1"
 
 echo "=== a device ==="
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/srv/joinery" "$SD" "$T/root/run"

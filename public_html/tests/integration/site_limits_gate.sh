@@ -44,7 +44,7 @@ export GATE_LOG="$T/log" GATE_POOL="$T/pool"
 cat > "$T/tools/docker_disk_pool.sh" <<'STUB'
 #!/bin/bash
 echo "pool $*" >> "$GATE_LOG"
-[ "$1" = check ] && { [ -f "$GATE_POOL" ]; exit; }
+[ "$1" = can-cap ] && { [ -f "$GATE_POOL" ] && exit 0; echo 'docker_disk_pool: this host has no disk pool' >&2; exit 1; }
 exit 0
 STUB
 cat > "$T/bin/docker" <<'STUB'

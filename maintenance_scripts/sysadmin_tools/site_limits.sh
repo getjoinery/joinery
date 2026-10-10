@@ -4,6 +4,9 @@
 # rebuilding it: its memory, its CPU ceiling and its disk allowance, and say
 # what is now in force, as ONE JSON object on stdout.
 #
+# Version: 1.1 - a disk allowance asks docker_disk_pool.sh can-cap (the pool in place and user ids
+#                remapped), and is refused with its reason: every new Docker host has a data root,
+#                which alone no longer says a site's disk can be capped (one_data_root WP2).
 # Version: 1.0 - the site_limits operate word and install.sh site-limits
 #                (specs/multi_tenant_docker_hosts.md WP6). The agent runs this
 #                file with four argv elements it has already validated: the
@@ -16,7 +19,7 @@
 #     SITENAME, the shape install.sh creates) with a run spec. Any other is
 #     refused (exit 2), and so is a value install.sh site would refuse: a
 #     memory size or CPU ceiling Docker would not take, a CPU ceiling above
-#     the host's, a disk allowance on a host with no disk pool.
+#     the host's, a disk allowance on a host that cannot cap a site's disk.
 #   - Memory and CPU change on the running container (docker update), and the
 #     run spec records them, so a rebuild keeps them. Neither can be lifted on
 #     a running container: Docker keeps a CPU ceiling in the container's
@@ -80,8 +83,8 @@ DISK="$(pick disk "$DISK_IN" run_spec_norm_disk)" || refuse "disk ${DISK_IN:0:32
 [[ -n "$CPUS" || -z "$OLD_CPUS" ]] \
     || refuse "a running container's CPU ceiling cannot be lifted; rebuild it with install.sh site ${NAME} --cpus=none"
 run_spec_cpus_fit "$CPUS" || refuse "a CPU ceiling of ${CPUS} is more than this host has ($(run_spec_host_cpus 2>/dev/null || echo unknown) CPUs)"
-if [[ -n "$DISK" ]] && ! bash "$TOOLS/docker_disk_pool.sh" check; then
-    refuse "this host has no disk pool, so ${NAME}'s disk cannot be capped here"
+if [[ -n "$DISK" ]] && ! bash "$TOOLS/docker_disk_pool.sh" can-cap >/dev/null 2>&1; then
+    refuse "${NAME}'s disk cannot be capped here: $(bash "$TOOLS/docker_disk_pool.sh" can-cap 2>&1 | sed 's/^docker_disk_pool: //')"
 fi
 
 DONE=true; REASON=""; RESTARTED=false

@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.14 - a disk_usage result shows the data root's figures and biggest directories beside the site tree
  * @version 1.13 - a move_to_plane result renders as a card: which management node was asked, the name and the fingerprint
  * @version 1.12 - a page_probe that could not run shows the node's reason instead of "no report"
  * @version 1.11 - an apply_update job renders its structured apply result (versions, migrations, schema
@@ -579,6 +580,18 @@ if ($result) {
 		// Depth two, so a parent and a child both appear: the pair is the
 		// answer to "which part of it", not a double count.
 		$rows($tree['entries'] ?? array());
+		$dr = is_array($result_data['data_root'] ?? null) ? $result_data['data_root'] : null;
+		if ($dr) {
+			$dr_fs = is_array($dr['filesystem'] ?? null) ? $dr['filesystem'] : array();
+			$dr_tree = is_array($dr['tree'] ?? null) ? $dr['tree'] : array();
+			echo '<p class="mb-1"><strong>' . htmlspecialchars((string)($dr_fs['path'] ?? '')) . '</strong> (the data root): '
+				. htmlspecialchars($fmt($dr_fs['used_bytes'] ?? null)) . ' used of '
+				. htmlspecialchars($fmt($dr_fs['total_bytes'] ?? null)) . ', '
+				. htmlspecialchars($fmt($dr_fs['avail_bytes'] ?? null)) . ' free'
+				. (!empty($dr_tree['partial']) ? ' <small class="text-muted">(the walk could not read everything, so these are a floor)</small>' : '')
+				. '</p>';
+			$rows($dr_tree['entries'] ?? array());
+		}
 		echo '<p class="mb-1 text-muted small">Machine directories</p>';
 		$rows($result_data['machine'] ?? array());
 		echo '</div></div>';

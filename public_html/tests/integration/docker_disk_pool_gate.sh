@@ -108,7 +108,7 @@ chk "check: 0 for the same place written with a trailing slash (reviewer2 F7)" "
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop("data-root"); json.dump(d, open(sys.argv[1], "w"))' "$DJ"
 out="$(run create 8G 2>&1)"; rc=$?
 chk "create on a host whose data root is mounted: uses it, allocates nothing, sets data-root, says 8G was not used" \
-    "$rc|$(grep -c '^fallocate' "$LOG")|$(data_root_of)|$(grep -c 'The size 8G was not used' <<< "$out")" "0|0|/srv/joinery/docker|1"
+    "$rc|$(grep -c '^fallocate' "$LOG")|$(data_root_of)|$(grep -c '8G was not used' <<< "$out")" "0|0|/srv/joinery/docker|1"
 rm -f "$GATE_MOUNTED"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d.pop("data-root"); json.dump(d, open(sys.argv[1], "w"))' "$DJ"
 out="$(run create 1G 2>&1)"; rc=$?
@@ -125,7 +125,15 @@ done
 rm -f "$GATE_MOUNTED"
 out="$(run_docker allow sitea 4G 2>&1)"; rc=$?
 chk "refused with no pool" "$rc|$(grep -c 'no disk pool' <<< "$out")" "1|1"
-touch "$GATE_MOUNTED"; : > "$LOG"
+touch "$GATE_MOUNTED"
+# Every new Docker host has the pool; only remapping makes a cap hold (WP2).
+cp "$DJ" "$T/dj.keep"; printf '{"data-root": "/srv/joinery/docker"}\n' > "$DJ"
+out="$(run_docker allow sitea 4G 2>&1)"; rc=$?
+chk "refused where Docker does not remap user ids" "$rc|$(grep -c 'does not remap user ids' <<< "$out")" "1|1"
+chk "can-cap says the same, and why" "$(run_docker can-cap >/dev/null 2>&1; echo $?)|$(run_docker can-cap 2>&1 | grep -c 'move its own files out of its allowance')" "1|1"
+cp "$T/dj.keep" "$DJ"
+chk "can-cap: 0 with the pool in place and remapping on" "$(run_docker can-cap >/dev/null 2>&1; echo $?)" "0"
+: > "$LOG"
 # The config volume, where the site reads its allowance, is a real directory here.
 V="$T/root/srv/joinery/docker/100000.100000/volumes"
 mkdir -p "$V/sitea_config/_data"
@@ -176,13 +184,14 @@ chk "and its allowance goes, from the host and from the site's config volume (re
     "$( [ -e "$T/root/etc/joinery/sites/sitea/disk_allowance" ] && echo kept || echo gone)|$( [ -e "$V/sitea_config/_data/disk_allowance" ] && echo kept || echo gone)" "gone|gone"
 
 echo "=== install.sh ==="
-chk "--disk-pool needs --multi-tenant" "$(grep -c 'disk-pool needs --multi-tenant' "$INSTALL")" "1"
+chk "every new Docker host makes the data root, with no flag needed" \
+    "$(grep -c '^    bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1$' "$INSTALL")|$(grep -c -- '^[^#]*--disk-pool' "$INSTALL")" "1|0"
 # The pool is made after the remap is set and before Docker's package installs.
 order="$(grep -n -e 'docker_daemon_json_set_userns_remap || exit 1' -e 'docker_disk_pool.sh" create' -e 'apt-get install -y docker-ce' "$INSTALL" | cut -d: -f1 | paste -sd' ')"
 read -r o1 o2 o3 <<< "$order"
 chk "the pool is made before Docker's package starts the daemon" "$( [ "$o2" -gt "$o1" ] && [ "$o3" -gt "$o2" ] && echo yes)" "yes"
-chk "a host Docker is already on, with no pool, is refused" "$(grep -c 'disk-pool must be made before Docker is installed' "$INSTALL")" "1"
-chk "site --disk is refused without a pool" "$(grep -c 'it has no disk pool' "$INSTALL")" "1"
+chk "a host Docker is already on, asked for a data root, is refused" "$(grep -c 'data-root must be made before Docker is installed' "$INSTALL")" "1"
+chk "site --disk is refused where it cannot hold (can-cap)" "$(grep -c 'docker_disk_pool.sh" can-cap >/dev/null 2>&1; then' "$INSTALL")" "1"
 chk "the allowance is set once the volumes exist, after the container runs" \
     "$(awk '/docker run -d "\$\{RUN_ARGS\[@\]\}"/ { r = NR } /docker_disk_pool.sh" allow/ { a = NR } END { print (r && a > r) ? "yes" : "no" }' "$INSTALL")" "yes"
 . "$TOOLS/_site_run_spec.sh"
