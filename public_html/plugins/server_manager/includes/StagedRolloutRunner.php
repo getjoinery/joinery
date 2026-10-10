@@ -20,6 +20,7 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.6 - gate(): a node that reports a release past the rollout's (it follows a newer upgrade source) passes
  * @version 1.5 - a node whose agent offers upgrade_preflight is asked whether an upgrade would stop before it
  *                started, before its apply is queued; a failing check halts the rollout at that node with the
  *                check's reason, with nothing changed (specs/release_file_repair.md)
@@ -547,8 +548,14 @@ class StagedRolloutRunner {
 			return 'the deploy tier ' . ($apply['deploy_tier']['verdict'] ?? 'did not run')
 				. ($failed ? ' (' . implode(', ', $failed) . ')' : '');
 		}
-		if (($apply['version_after'] ?? null) !== $release) {
-			return 'it reports version ' . ($apply['version_after'] ?? 'unknown') . ', not ' . $release;
+		// A node upgrades from the source IT is configured with (apply_update takes
+		// no version), so one that follows a newer source - the developers site
+		// follows dev - legitimately lands past the release this rollout offers.
+		// That is a good apply; only a node short of the release, or one that
+		// reports none, is not.
+		$after = $apply['version_after'] ?? null;
+		if (!is_string($after) || !preg_match('/^\d+\.\d+\.\d+$/', $after) || version_compare($after, $release, '<')) {
+			return 'it reports version ' . ($after ?? 'unknown') . ', not ' . $release . ' or later';
 		}
 		return null;
 	}
