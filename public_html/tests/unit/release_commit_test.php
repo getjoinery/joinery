@@ -358,5 +358,35 @@ try { AgentDistPublisher::assertOwnKeyListed($site, base64_encode(random_bytes(3
 check($refused !== null && strpos($refused, 'not listed') !== false, 'a signing key the repository does not list is refused', (string)$refused);
 check(AgentDistPublisher::assertOwnKeyListed($site, $pub)['release_keys'] === array($pub), 'a listed key passes and returns the lists');
 
+// ---------------------------------------------------------------------------
+section('What stops a publish, asked before it is queued (ownerBlockers)');
+
+// Two scratch repositories: a core with a committed tracked file, and an agent.
+$own_core  = $tmp . '/own_core';
+$own_agent = $tmp . '/own_agent';
+foreach (array($own_core, $own_agent) as $dir) {
+	mkdir($dir . '/public_html', 0755, true);
+	file_put_contents($dir . '/public_html/a.php', "<?php // a\n");
+	exec('git -C ' . escapeshellarg($dir) . ' init -q && git -C ' . escapeshellarg($dir) . ' add -A && git -C ' . escapeshellarg($dir)
+		. ' -c user.email=t@example.test -c user.name=t commit -qm init 2>&1');
+}
+$clean = ReleaseCommit::ownerBlockers($own_core, $own_agent);
+check($clean['core'] === array() && $clean['agent'] === array() && $clean['unreadable'] === array(),
+	'two clean repositories block nothing', json_encode($clean));
+
+file_put_contents($own_core . '/public_html/a.php', "<?php // edited\n");
+file_put_contents($own_core . '/public_html/VERSION', "9.9.9\n");          // a file publish writes itself
+file_put_contents($own_agent . '/main.go', "package main\n");              // untracked in the agent: always a blocker
+$b = ReleaseCommit::ownerBlockers($own_core, $own_agent);
+check($b['core'] === array('public_html/a.php'), 'the owner\'s edit in the core blocks, the file publish writes itself does not', json_encode($b['core']));
+check($b['agent'] === array('main.go'), 'any change in the agent source blocks, untracked included', json_encode($b['agent']));
+
+$nogit = $tmp . '/no_agent_here';
+mkdir($nogit, 0755, true);
+$u = ReleaseCommit::ownerBlockers($own_core, $nogit);
+check(count($u['unreadable']) === 1 && strpos($u['unreadable'][0], 'not a git checkout') !== false,
+	'an agent source that is not a git checkout is named, not skipped', json_encode($u['unreadable']));
+check(count(ReleaseCommit::ownerBlockers($own_core, null)['unreadable']) === 1, 'and so is no agent source path at all');
+
 exec('rm -rf ' . escapeshellarg($tmp));
 harness_finish();

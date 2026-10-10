@@ -11,6 +11,8 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.12 - the form is not offered while the core or agent repository has uncommitted work, with the files named;
+ *                a post that gets past it is refused the same way
  * @version 1.11 - "Deploy to all managed nodes": the publish job carries deploy_all, and once it completes a
  *                 staged rollout of the release starts over every eligible node (StagedRolloutRunner)
  * @version 1.10 - the page checks the publisher script against the signed release manifest before
@@ -159,6 +161,9 @@ if ($_POST && ($_POST['action'] ?? '') === 'publish_upgrade') {
 			if (!$self) {
 				throw new Exception(publish_self_pairing_advice());
 			}
+			if (($blocked = AgentDistPublisher::uncommittedAdvice()['lines'])) {
+				throw new Exception('Commit and push first. ' . implode(' ', $blocked));
+			}
 			$built = JobCommandBuilder::build_publish_upgrade($self, $params);
 		} catch (Exception $e) {
 			$session->save_message(new DisplayMessage(
@@ -279,6 +284,11 @@ if (!$self_node) {
 		. 'minute after the publish finishes.';
 } elseif (($publisher_state = publisher_matches_signed_release()) !== '') {
 	$cannot_publish = $publisher_state;
+} elseif (($uncommitted = AgentDistPublisher::uncommittedAdvice()['lines'])) {
+	// The job's own first check, asked ahead of it: no point queueing a publish
+	// that can only refuse after the tests have run.
+	$cannot_publish = 'A release is built from committed work, so there is nothing to publish until these are committed and pushed:<ul class="mb-0"><li>'
+		. implode('</li><li>', array_map('htmlspecialchars', $uncommitted)) . '</li></ul>Reload this page afterwards.';
 }
 
 /**

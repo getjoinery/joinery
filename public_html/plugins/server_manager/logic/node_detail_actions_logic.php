@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.57 - publish_upgrade on this management node itself is refused while its repositories have uncommitted work
  * @version 1.56 - restore_release_file: put a deployment file back to the bytes the node's release signed
  * @version 1.55 - publish_upgrade records deploy_all on the job when the management node publishes itself
  * @version 1.54 - data_root_migrate: move this host's data onto its data root (one_data_root WP4)
@@ -577,6 +578,9 @@ class NodeDetailActions {
 					'patch'         => $_POST['version_patch'] ?? null,
 				];
 				$built = JobCommandBuilder::build_publish_upgrade($node, $params);
+				if ($node->is_self() && ($blocked = AgentDistPublisher::uncommittedAdvice()['lines'])) {
+					throw new Exception('Commit and push first. ' . implode(' ', $blocked));
+				}
 				// Recorded on the job, never sent to the node: the plane starts
 				// the rollout itself once the publish completes.
 				if ($node->is_self() && !empty($_POST['deploy_all'])) {

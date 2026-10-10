@@ -242,6 +242,43 @@ class ReleaseCommit {
 		return false;
 	}
 
+	/**
+	 * Everything uncommitted that would stop a publish from this box, before
+	 * the publish is queued: the owner's changes in the core repository (not
+	 * the files a publish writes itself) and every change in the agent source.
+	 * The check the publish job makes first, asked ahead of it so the button
+	 * is not offered while the job could only refuse.
+	 *
+	 * @param string|null $agent_root null when the box has no agent source path
+	 * @return array{core:string[], agent:string[], unreadable:string[]} 'unreadable'
+	 *         names a repository git could not read, with the reason
+	 */
+	public static function ownerBlockers($core_root, $agent_root) {
+		$out = array('core' => array(), 'agent' => array(), 'unreadable' => array());
+		$core = self::joineryBlockers($core_root);
+		if ($core === null) {
+			$out['unreadable'][] = 'the core repository at ' . $core_root . ' could not be read by git';
+		} else {
+			foreach ($core as $path) {
+				if (!self::publishWrite($core_root, $path)) {
+					$out['core'][] = $path;
+				}
+			}
+		}
+		if ($agent_root === null || $agent_root === '' || !is_dir($agent_root . '/.git')) {
+			$out['unreadable'][] = 'the agent source at ' . ($agent_root ?: '(no path set)')
+				. ' is not a git checkout on this box, and a release names the agent commit it was built from';
+		} else {
+			$agent = self::agentBlockers($agent_root);
+			if ($agent === null) {
+				$out['unreadable'][] = 'the agent repository at ' . $agent_root . ' could not be read by git';
+			} else {
+				$out['agent'] = $agent;
+			}
+		}
+		return $out;
+	}
+
 	/** The files that stop the agent repository from being a release: all of them. */
 	public static function agentBlockers($repo_root) {
 		$status = self::status($repo_root);
