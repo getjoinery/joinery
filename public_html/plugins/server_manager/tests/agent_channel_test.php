@@ -783,6 +783,48 @@ check(count(array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_
 $second = AgentChannelEndpoint::freeSlug('agtest-Fresh Box.local');
 check($second === 'agtest-fresh-box-local-2', 'A second machine with the same name gets the next free slug', $second);
 
+// A join that says it runs in a container makes a container site, grouped on
+// its Docker host's record (minted when none exists).
+section('A join from inside a container is named and placed as a container site');
+$ctr_pair = sodium_crypto_sign_keypair();
+$ctr_pub  = sodium_crypto_sign_publickey($ctr_pair);
+$ctr_jr = new AgentJoinRequest();
+$ctr_jr->set('ajr_claimed_name', 'agtest-ctr');
+$ctr_jr->set('ajr_public_key', base64_encode($ctr_pub));
+$ctr_jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($ctr_pub));
+$ctr_jr->set('ajr_source_ip', '203.0.113.79');
+$ctr_jr->set('ajr_web_root', '/var/www/html/agtest-ctr/public_html');
+$ctr_jr->set('ajr_container', true);
+$ctr_jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$ctr_jr->save();
+$made_join_requests[] = $ctr_jr->key;
+$hosts_before = array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_managed_hosts')->fetchAll(PDO::FETCH_COLUMN));
+$ctr_adopted = AgentChannelEndpoint::adoptJoin($ctr_jr);
+$ctr_node = new ManagedNode($ctr_adopted['node']->key, TRUE);
+$made_nodes[] = $ctr_node->key;
+$ctr_host_id = (int)$ctr_node->get('mgn_mgh_managed_host_id');
+if ($ctr_host_id && !in_array($ctr_host_id, $hosts_before, true)) {
+	$made_hosts[] = $ctr_host_id;
+}
+check($ctr_node->get('mgn_container_name') === 'agtest-ctr', 'The container is named for the site folder', (string)$ctr_node->get('mgn_container_name'));
+check($ctr_host_id > 0 && (new ManagedHost($ctr_host_id, TRUE))->get('mgh_host') === '203.0.113.79', 'and the node is placed on the host record for its address');
+check(ManagedNode::adopt_reported_container($ctr_node, true) === false, 'a node already named is left alone');
+check(ManagedNode::adopt_reported_container($ctr_adopted['node'], false) === false && ManagedNode::adopt_reported_container($ctr_adopted['node'], null) === false, 'a node that does not say container is never made one');
+// The last site off a Docker host takes the empty group with it, and
+// restoring the site puts it on a host record again.
+$ctr_node->soft_delete();
+check((new ManagedHost($ctr_host_id, TRUE))->get('mgh_delete_time') !== null, 'removing the last site on a Docker host retires its host record');
+$ctr_node = new ManagedNode($ctr_node->key, TRUE);
+$ctr_node->undelete();
+$ctr_node = new ManagedNode($ctr_node->key, TRUE);
+$ctr_host_again = (int)$ctr_node->get('mgn_mgh_managed_host_id');
+if ($ctr_host_again && $ctr_host_again !== $ctr_host_id) { $made_hosts[] = $ctr_host_again; }
+check($ctr_host_again > 0 && (new ManagedHost($ctr_host_again, TRUE))->get('mgh_delete_time') === null, 'restoring it places the site on a live host record again');
+check(ManagedHost::retire_if_empty($ctr_host_again) === false, 'a host record that still has a site is not retired');
+
+check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k', 'container' => true], AgentChannelEndpoint::join_spec()) === null, 'the join spec accepts container');
+check(AgentChannelEndpoint::validation_error(['claimed_name' => 'x', 'agent_public_key' => 'k', 'container' => 'yes'], AgentChannelEndpoint::join_spec()) !== null, 'and refuses a container that is not true or false');
+
 try {
 	AgentChannelEndpoint::adoptJoin($adopt_jr);
 	check(false, 'An already-approved request cannot be adopted twice');
