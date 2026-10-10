@@ -91,15 +91,37 @@ pub fn run_round(
 ) -> RoundOutcome {
     let mut out = RoundOutcome::default();
     let mut resolved: Vec<(RoundInput, Vec<Action>)> = Vec::new();
-    // Records deleted here whose delete lost to an edit on the server, and
-    // the folder the server keeps each in: the edit comes back
-    // (`restore_locally`), and so do its folders (below).
+    // Files this device agreed on that the server holds edited since, and
+    // the folder this round puts each in: a record deleted here whose delete
+    // lost to the edit, or one a peer edited, wherever this round resolves it
+    // -- the place a move it plans takes it to, either way (a race the server
+    // won, or this device's rename merged with a peer's move to another
+    // folder, by halves), else where the server has it. The edit comes back
+    // there, and so do its folders (below); a file whose own move here keeps
+    // it out of a folder is not kept for. Content this device never agreed on
+    // is not among them.
     let mut edit_kept: Vec<(EntityId, Option<i64>)> = Vec::new();
+    let mut lost_a_delete: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
 
     for input in inputs {
         let res = reconcile(&input.entry, &input.local, &input.remote, ctx);
-        if res.issues.iter().any(|i| matches!(i, Issue::DeleteLostToEdit { side: Side::Local, .. })) {
-            edit_kept.push((input.entry.id, input.entry.remote.parent));
+        let lost = res.issues.iter().any(|i| matches!(i, Issue::DeleteLostToEdit { side: Side::Local, .. }));
+        let edited_there = input.entry.id.entity_type == crate::model::EntityType::File
+            && input.entry.is_established()
+            && input.remote.touched_content()
+            && !matches!(input.remote, Delta::Created { .. });
+        if lost || edited_there {
+            let moved_to = res.actions.iter().find_map(|a| match a {
+                Action::ApplyRemoteMove { to, .. } | Action::ApplyLocalMove { to } => Some(to.parent),
+                _ => None,
+            });
+            let parent = moved_to
+                .or_else(|| input.remote.placement().map(|p| p.parent))
+                .unwrap_or(input.entry.remote.parent);
+            edit_kept.push((input.entry.id, parent));
+        }
+        if lost {
+            lost_a_delete.insert(input.entry.id);
         }
         for issue in res.issues {
             out.issues.push((input.entry.id, issue));
@@ -171,12 +193,18 @@ pub fn run_round(
             parent = parents.remote.get(&f).copied().flatten();
         }
         if folder_kept {
-            for (who, issue) in out.issues.iter_mut() {
-                if *who == id {
-                    if let Issue::DeleteLostToEdit { side: Side::Local, folder_kept: kept } = issue {
-                        *kept = true;
+            if lost_a_delete.contains(&id) {
+                for (who, issue) in out.issues.iter_mut() {
+                    if *who == id {
+                        if let Issue::DeleteLostToEdit { side: Side::Local, folder_kept: kept } = issue {
+                            *kept = true;
+                        }
                     }
                 }
+            } else {
+                // Edited and moved into it from elsewhere: the user's delete of
+                // the folder is what lost, and says so on the file.
+                out.issues.push((id, Issue::DeleteLostToEdit { side: Side::Local, folder_kept: true }));
             }
         }
     }

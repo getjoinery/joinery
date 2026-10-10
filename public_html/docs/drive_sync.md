@@ -193,12 +193,18 @@ the edit survives, even where that resurrects a file somebody meant to remove.
 That holds inside a folder too. A folder deleted here that holds a file edited
 elsewhere since this device last agreed on it comes back, at the server's name
 and place, holding only the edited file; what nobody touched goes to the trash
-on its own, and the user is told the folder came back for the edit. A trash
-decided before the edit was heard of stands down when it runs. What arrives
-under a folder deleted here that this device never had is not an edit it lost,
-and goes with the folder. The server trashes a folder with everything in it,
-so an edit that reaches the server after this device last read the change feed
-and before its trash lands goes to the server's trash with the folder.
+on its own, and the user is told the folder came back for the edit. So it does
+for a file this device agreed on that a peer edited, wherever this device's
+round puts it: moved into the folder by the peer while this device left it
+where it was, or edited here too, the peer's edit stands where the peer put
+it and an edit made here stands beside it. A file whose move here keeps it out
+of the folder goes where it was moved; where the server's move wins, or this
+device only renamed it, the folder comes back for it. A trash decided before
+the edit was heard of stands down when it runs. What arrives under a folder
+deleted here that this device never had is not an edit it lost, and goes with
+the folder. The server trashes a folder with everything in it, so an edit that
+reaches the server after this device last read the change feed and before its
+trash lands goes to the server's trash with the folder.
 
 **Deletes only ever win against unchanged content.** A remote move with a local
 delete resolves as a delete only when the last-agreed hash still matches the
