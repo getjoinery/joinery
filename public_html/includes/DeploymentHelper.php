@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.5 - keepSelfUpdateOriginals() / restoreSelfUpdateFiles(): the deployment files a self-update replaced
+ *                are put back when the run ends without deploying (utils/upgrade.php 1.15)
  * @version 1.4 - deployRoot() names upgrades/ and upgrade_archives/, which utils/upgrade.php keeps there
  * @version 1.3 - performRollback() keeps only the newest failed deployment, removing older
  *                public_html_failed_* trees before preserving the current one.
@@ -1345,6 +1347,115 @@ class DeploymentHelper {
             return 'published as preserved (incoming manifest says receives_upgrades=false)';
         }
         return '';
+    }
+
+    // ============================================
+    // SELF-UPDATE UNDO
+    // ============================================
+
+    /**
+     * The bytes of the live deployment files a self-update is about to replace,
+     * with the live VERSION they belong to. A null entry is a file that did not
+     * exist. Pass the result to restoreSelfUpdateFiles().
+     */
+    public static function keepSelfUpdateOriginals(string $live_dir, string $lock_path, array $rel_paths): array {
+        $files = [];
+        foreach ($rel_paths as $rel_path) {
+            $live_file = $live_dir . '/' . $rel_path;
+            $files[$rel_path] = is_file($live_file) ? file_get_contents($live_file) : null;
+        }
+        return ['live' => $live_dir, 'lock' => $lock_path, 'version' => self::readVersion($live_dir . '/VERSION'), 'files' => $files];
+    }
+
+    /**
+     * Put back what keepSelfUpdateOriginals() kept, when the run ended without
+     * deploying.
+     *
+     * A self-update copies the release's deployment files over the live ones
+     * before anything else is checked. If the run then stops short of a deploy,
+     * the tree is the old release with new deployment files in it, which no
+     * longer match the old release's signed manifest: the agent refuses to run
+     * them and every later apply on the node fails the same way. So whenever
+     * the live VERSION is still the one recorded, whatever the exit code, the
+     * files go back; a run can stop without deploying and still exit 0.
+     *
+     * Staging is emptied too: the restored (old) upgrade.php would read a staged
+     * VERSION as "the deployment files are already updated" and deploy the
+     * release with old deployment code.
+     *
+     * $in_process is the run that made the copy, still running: it holds the
+     * lock and its staging is still in use, so neither is touched. Otherwise
+     * the lock is taken again, because the run that held it has exited and
+     * another could have started; if it is held, nothing is written.
+     *
+     * Returns ['status' => 'restored'|'deployed'|'locked'|'unknown_version'|'version_unreadable'|'nothing_kept',
+     *          'failed' => [files that could not be put back]].
+     */
+    public static function restoreSelfUpdateFiles(array $kept, bool $in_process, string $stage_location = ''): array {
+        if (empty($kept['files'])) {
+            return ['status' => 'nothing_kept', 'failed' => []];
+        }
+        if ($kept['version'] === null) {
+            return ['status' => 'unknown_version', 'failed' => []];
+        }
+
+        $lock = null;
+        if (!$in_process) {
+            $lock = @fopen($kept['lock'], 'c');
+            if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+                if ($lock) fclose($lock);
+                return ['status' => 'locked', 'failed' => []];
+            }
+        }
+        $release = function () use (&$lock) {
+            if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
+        };
+
+        $now = self::readVersion($kept['live'] . '/VERSION');
+        if ($now !== $kept['version']) {
+            $release();
+            // No VERSION at all is a tree caught mid-move: nothing is written into it.
+            return ['status' => $now === null ? 'version_unreadable' : 'deployed', 'failed' => []];
+        }
+
+        $failed = [];
+        foreach ($kept['files'] as $rel_path => $bytes) {
+            $live_file = $kept['live'] . '/' . $rel_path;
+            if ($bytes === null) {
+                if (is_file($live_file) && !@unlink($live_file)) $failed[] = $rel_path;
+                continue;
+            }
+            // Written beside and renamed over, so a kill mid-write leaves a whole file.
+            $tmp = $live_file . '.restore' . getmypid();
+            $ok = (@file_put_contents($tmp, $bytes) === strlen($bytes));
+            if ($ok && is_file($live_file)) {
+                @chmod($tmp, fileperms($live_file) & 07777);
+                if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+                    @chown($tmp, fileowner($live_file));
+                    @chgrp($tmp, filegroup($live_file));
+                }
+            }
+            if (!$ok || !@rename($tmp, $live_file)) {
+                @unlink($tmp);
+                $failed[] = $rel_path;
+                continue;
+            }
+            if (function_exists('opcache_invalidate')) {
+                opcache_invalidate($live_file, true);
+            }
+        }
+
+        if (!$in_process && $stage_location !== '' && is_dir($stage_location)) {
+            exec('rm -rf ' . escapeshellarg($stage_location) . '/*');
+        }
+        $release();
+        return ['status' => 'restored', 'failed' => $failed];
+    }
+
+    /** A VERSION file's release number, or null when it is missing or malformed. */
+    private static function readVersion(string $path): ?string {
+        $v = is_readable($path) ? trim((string)@file_get_contents($path)) : '';
+        return preg_match('/^\d+\.\d+\.\d+$/', $v) ? $v : null;
     }
 
     // ============================================

@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.55 - publish_upgrade records deploy_all on the job when the management node publishes itself
  * @version 1.54 - data_root_migrate: move this host's data onto its data root (one_data_root WP4)
  * @version 1.53 - move_to_plane: ask another management node to adopt this node's machine (API Keys tab)
  * @version 1.52 - Remove from Dashboard is Hide from Dashboard; restore_node (Restore to Dashboard); purge_node is
@@ -568,6 +569,11 @@ class NodeDetailActions {
 					'patch'         => $_POST['version_patch'] ?? null,
 				];
 				$built = JobCommandBuilder::build_publish_upgrade($node, $params);
+				// Recorded on the job, never sent to the node: the plane starts
+				// the rollout itself once the publish completes.
+				if ($node->is_self() && !empty($_POST['deploy_all'])) {
+					$params['deploy_all'] = true;
+				}
 				$job = ManagementJob::createFromBuild($node->key, 'publish_upgrade', $built, $params, $uid);
 				return self::jobUrl($job);
 			}

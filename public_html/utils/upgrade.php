@@ -34,6 +34,10 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.15 - the self-update check also runs when a run resumes from staging (only the download is
+	 *                skipped), and the unreachable browser Continue page is gone; a self-update that does
+	 *                not end in a deploy puts the deployment files back (and empties staging): a run that aborts after copying them left a new upgrade.php under the old release's
+	 *                signed manifest, and the agent then refused every apply on that node as a modified file
 	 * @version 1.14 - the active-theme check asks DeploymentHelper::preserveReason, the rule the deploy itself
 	 *                applies: a live theme the release does not carry is kept, so it no longer blocks (a customer
 	 *                theme the origin does not publish stopped a rollout at galactictribune, 0.8.477)
@@ -328,7 +332,33 @@
 		}
 		$GLOBALS['APPLY_RESULT_SUPPRESS'] = true;
 		passthru($cmd, $exit_code);
+		self_update_restore();
 		exit($exit_code);
+	}
+
+	// The self-update copies the release's deployment files over the live ones
+	// before anything else is checked, so a run that then stops short of a
+	// deploy has to put them back (DeploymentHelper::restoreSelfUpdateFiles
+	// says why and how). $in_process: the run that made the copy is still
+	// running, holding the lock, with its staging in use.
+	function self_update_restore($in_process = false) {
+		global $stage_location;
+		$kept = $GLOBALS['SELF_UPDATE_ORIGINALS'] ?? null;
+		if (!$kept || !method_exists('DeploymentHelper', 'restoreSelfUpdateFiles')) return;
+		$r = DeploymentHelper::restoreSelfUpdateFiles($kept, $in_process, (string)($stage_location ?? ''));
+		if ($r['status'] === 'unknown_version' || $r['status'] === 'version_unreadable') {
+			echo "  Deployment files were not put back: this site's VERSION could not be read, so the tree was left as it is.\n";
+		} elseif ($r['status'] === 'locked') {
+			echo "  Deployment files were not put back: another upgrade holds the lock.\n";
+		} elseif ($r['status'] === 'restored') {
+			unset($GLOBALS['SELF_UPDATE_ORIGINALS']);
+			if ($r['failed']) {
+				echo "  The upgrade stopped before deploying, and these deployment files could not be put back: "
+					. implode(', ', $r['failed']) . ".\n";
+			} else {
+				echo "  The upgrade stopped before deploying; the deployment files are back as they were.\n";
+			}
+		}
 	}
 
 	// Section header: emits as plain heading on CLI, as <h3> for web.
@@ -1140,12 +1170,33 @@
 			}
 		}
 
+		} // end if (!$resuming_after_self_update)
+
+		// The re-run after a self-update picks staging up where the previous
+		// run left it, and it could have changed in between. So it is verified
+		// again here, before the extension archives
+		// land in it and before anything is copied out of it.
+		if ($resuming_after_self_update) {
+			if (!upgrade_verifier_ready($stage_directory)) {
+				upgrade_abort('Upgrade refused: no verifier',
+					'This node has no includes/PackageSignature.php and the staged release carries none, '
+					. 'so the archive cannot be verified. Nothing has been deployed.');
+			}
+			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
+			upgrade_proof_ready($stage_location, $stage_directory);
+			upgrade_verify_staged($stage_location, '', 'staged core archive');
+		}
+
 		// =====================================================
 		// SELF-UPDATE CHECK
 		// =====================================================
 		// Compare key deployment files between staged and live versions.
 		// If any differ, copy the new versions to live and request a re-run
-		// so the new code executes from the start.
+		// so the new code executes from the start. It runs on a resume too
+		// (only the download is skipped): a run that put the old files back
+		// leaves staging behind, and resuming into old deployment code is
+		// the one thing this step exists to prevent. Where the files already
+		// match it does nothing.
 		$self_update_files = [
 			'utils/upgrade.php',
 			'utils/update_database.php',
@@ -1175,6 +1226,11 @@
 
 			// Copy new versions over live files
 			$copy_errors = [];
+			// (A DeploymentHelper from before this undo existed has nothing to keep with.)
+			if (method_exists('DeploymentHelper', 'keepSelfUpdateOriginals')) {
+				$GLOBALS['SELF_UPDATE_ORIGINALS'] = DeploymentHelper::keepSelfUpdateOriginals(
+					$live_directory, $upgrade_lock_path, $files_needing_update);
+			}
 			foreach ($files_needing_update as $rel_path) {
 				$staged_file = $stage_directory . '/' . $rel_path;
 				$live_file = $live_directory . '/' . $rel_path;
@@ -1197,33 +1253,22 @@
 			if (!empty($copy_errors)) {
 				out_alert('warning', 'Failed to copy some files: ' . implode(', ', $copy_errors),
 					'Continuing with current versions.');
+				// Half-updated files under an unchanged release are the wedge itself.
+				self_update_restore(true);
 				// Don't abort — proceed with old code, which is better than failing entirely
 			} else {
 				// Resume detection on re-run finds the staged VERSION file matching the
 				// target system_version and skips the download step. No marker needed.
 
-				// Ask user to re-run
-				if ($is_cli) {
-					echo "\n";
-					echo "════════════════════════════════════════════════════════════\n";
-					echo "  SELF-UPDATE COMPLETE\n";
-					echo "════════════════════════════════════════════════════════════\n";
-					echo "\n";
-					self_update_cli_rerun();
-				} else {
-					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
-					echo '<h2 style="margin-top: 0; color: #0066cc;">Self-Update Complete</h2>';
-					echo '<p>Deployment infrastructure has been updated to the latest version.</p>';
-					echo '<p><strong>Please click the button below to continue the upgrade.</strong> ';
-					echo 'The download step will be skipped automatically.</p>';
-					echo '<form method="POST" action="/utils/upgrade">';
-					echo '<input type="hidden" name="confirm" value="1">';
-					if ($force_upgrade) echo '<input type="hidden" name="force-upgrade" value="1">';
-					if ($verbose) echo '<input type="hidden" name="verbose" value="1">';
-					echo '<button type="submit" style="background-color: #0066cc; color: white; padding: 12px 24px; font-size: 16px; border: none; cursor: pointer; border-radius: 4px;">Continue Upgrade</button>';
-					echo '</form>';
-					echo '</div>';
-				}
+				// Only the command line gets here (a browser was sent to the Updates
+				// page above), and nobody is present to click Continue, so the run
+				// re-execs itself.
+				echo "\n";
+				echo "════════════════════════════════════════════════════════════\n";
+				echo "  SELF-UPDATE COMPLETE\n";
+				echo "════════════════════════════════════════════════════════════\n";
+				echo "\n";
+				self_update_cli_rerun();
 
 				exit(0);
 			}
@@ -1231,23 +1276,6 @@
 			if ($verbose) {
 				upgrade_echo('Self-update check: all deployment files are current.<br>');
 			}
-		}
-
-		} // end if (!$resuming_after_self_update)
-
-		// The re-run after a self-update picks staging up where the previous
-		// run left it, and it could have changed in between. So it is verified
-		// again here, before the extension archives
-		// land in it and before anything is copied out of it.
-		if ($resuming_after_self_update) {
-			if (!upgrade_verifier_ready($stage_directory)) {
-				upgrade_abort('Upgrade refused: no verifier',
-					'This node has no includes/PackageSignature.php and the staged release carries none, '
-					. 'so the archive cannot be verified. Nothing has been deployed.');
-			}
-			upgrade_ensure_verify_keys($full_site_dir, $live_directory);
-			upgrade_proof_ready($stage_location, $stage_directory);
-			upgrade_verify_staged($stage_location, '', 'staged core archive');
 		}
 
 		// =====================================================

@@ -16,6 +16,7 @@
  * asked for it starts one rollout over every eligible node, management nodes
  * last, and writes what became of it onto the publish job.
  *
+ * @version 1.2 - a node refusing a modified upgrade script halts with its own reason
  * @version 1.1 - deploy to all managed nodes
  * @version 1.0
  */
@@ -51,6 +52,8 @@ check(StagedRolloutRunner::gate(srl_job('completed', srl_apply()), '0.8.411') ==
 	'completed, deploy tier passed, the release reported, no rollback: the next node may start');
 $cases = array(
 	array('the job failed', srl_job('failed', srl_apply(), 'boom'), 'failed'),
+	array('the node refused a modified upgrade script', srl_job('failed', null, 'Refused by the node: primitive "apply_update" refused: file does not match its signed hash — it has been modified since release: public_html/utils/upgrade.php'), 'public_html/utils/upgrade.php on the node is not the file the installed release signed'),
+	array('the node cannot use its release manifest', srl_job('failed', null, 'Refused by the node: primitive "apply_update" refused: no signed manifest can be verified before running as root'), 'release manifest cannot be used'),
 	array('no structured result', srl_job('completed', null), 'no structured apply result'),
 	array('rolled back', srl_job('completed', srl_apply(array('outcome' => 'failed', 'rolled_back' => array('rolled_back' => true, 'step' => 'deploy_tier', 'schema_ahead_of_code' => true)))), 'rolled back at deploy_tier'),
 	array('deploy tier failed', srl_job('completed', srl_apply(array('deploy_tier' => array('verdict' => 'failed', 'failed_tests' => array('boot'))))), 'deploy tier failed (boot)'),
