@@ -171,6 +171,9 @@ class MethodExistenceTest {
         // Check CSS-kit style policy
         $this->checkStylePolicy();
 
+        // Check hand-rolled forms (FormWriter policy)
+        $this->checkHandRolledForms();
+
         // Check AI action descriptor contract
         $this->checkDescriptorContract();
 
@@ -1525,6 +1528,54 @@ class MethodExistenceTest {
         }
 
         echo sprintf("\n⚠️  Total style-policy advisories: %d\n\n", count($issues));
+    }
+
+    /**
+     * Advisory: flag hand-rolled <form> markup that should go through FormWriter.
+     *
+     * A form is exempt when it holds no user-entered fields (only hidden
+     * inputs and buttons - a single-button action form), when the line or
+     * the line above carries a jy-allow-form marker, or when the file is
+     * itself a form-emitting class (FormWriter*). Advisory only: does not
+     * change the exit status.
+     */
+    private function checkHandRolledForms() {
+        echo "HAND-ROLLED FORM ANALYSIS\n";
+        echo str_repeat("-", 80) . "\n";
+
+        $issues = [];
+        if (!preg_match('~^FormWriter~', basename($this->file_path))) {
+            $source = file_get_contents($this->file_path);
+            $lines = explode("\n", $source);
+            if (preg_match_all('~<form\b~i', $source, $m, PREG_OFFSET_CAPTURE)) {
+                foreach ($m[0] as $match) {
+                    $offset = $match[1];
+                    $line_idx = substr_count(substr($source, 0, $offset), "\n");
+                    $marker_zone = ($lines[$line_idx] ?? '') . ' ' . ($lines[$line_idx - 1] ?? '');
+                    if (stripos($marker_zone, 'jy-allow-form') !== false) {
+                        continue;
+                    }
+                    $end = stripos($source, '</form', $offset);
+                    $body = $end === false ? substr($source, $offset) : substr($source, $offset, $end - $offset);
+                    $has_fields = preg_match('~<(select|textarea)\b~i', $body)
+                        || preg_match('~<input\b(?![^>]*\btype\s*=\s*["\']?(hidden|submit|button|image)\b)~i', $body);
+                    if ($has_fields) {
+                        $issues[] = sprintf("  ⚠️  Line %4d: <form> with user-entered fields - use FormWriter (\$page->getFormWriter())", $line_idx + 1);
+                    }
+                }
+            }
+        }
+
+        if (!empty($issues)) {
+            echo "Advisories (add a jy-allow-form comment on or above the <form> line if intentional):\n";
+            foreach ($issues as $issue) {
+                echo $issue . "\n";
+            }
+        } else {
+            echo "✓ No hand-rolled form advisories\n";
+        }
+
+        echo sprintf("\n⚠️  Total hand-rolled form advisories: %d\n\n", count($issues));
     }
 
     /**
