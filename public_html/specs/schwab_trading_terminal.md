@@ -13,7 +13,9 @@ roll, stuck orders, halts, stale data and clock tampering. R14 became
 rules frozen per day (§I.6, D14): each day's rules live in the OS
 credential store, so deleting or editing the app's data cannot loosen
 today; R20 became D15 (an exit button never flips
-a position). No open owner decisions. Every other choice carries a
+a position). Build started 2026-10-10 in `~/trader` (D16): engine,
+simulator and scenario suite first (Phase 2 and the keyless half of
+Phase 1). Every other choice carries a
 builder default in
 [§ Defaults](#defaults-owner-may-override). Builder guardrails in
 [§ Build contract](#part-iv--build-contract-executor-notes).
@@ -63,10 +65,11 @@ watched by its own rules all the time, whichever one is on screen.
 # Architecture overview
 
 ```
-{repo root}/trader/                   ← new top-level dir, like sync/, ios/
+~/trader/                             ← its own git repo, outside Joinery (D16)
   Cargo.toml                          ← Rust workspace
-  jt-broker/     Broker trait + Schwab impl (OAuth, REST, streamer) + types
-  jt-engine/     account model, rule engine, lockout, order gateway, audit log
+  jt-broker/     Schwab impl of the Broker trait (OAuth, REST, streamer)
+  jt-engine/     domain types, the Broker trait, account model, rule engine,
+                 lockout, order gateway, audit log
   jt-sim/        mock Broker impl, scripted feeds, scenario tests
   jt-platform/   every per-OS piece: credential store, app-data paths,
                  opening the browser — no C dependencies, so the dev box
@@ -78,7 +81,7 @@ watched by its own rules all the time, whichever one is on screen.
 auth, tokens, the rule engine, order routing, lockout state — and the webview
 is a rendering surface. The webview communicates only via Tauri commands and
 events; **the only command that can create an order is
-`press_button(button_id, account_hash)`** — there is no `place_order(order)` command
+`press_button(button_id, account_hash, chart_symbol)`** — there is no `place_order(order)` command
 exposed to JS, so no UI code path reaches the broker without the engine.
 
 **Chart: TradingView `lightweight-charts`** (Apache-2.0), bundled locally
@@ -108,9 +111,12 @@ code earns by these rules:
   silently. On every OS, a global hotkey another program already holds
   (thinkorswim's own, say) fails at registration, and the editor says so.
 - The repo gate cross-checks `jt-platform` and `jt-app` for
-  `x86_64-pc-windows-gnu` and `aarch64-apple-darwin` on every safe-tier run
-  (same pattern as `sync_cross_build_gate.sh`), so a change that breaks an
-  OS nobody is running fails at once, not at release time.
+  `x86_64-pc-windows-gnu` and `aarch64-apple-darwin` on every run (same
+  pattern as Joinery's `sync_cross_build_gate.sh`), so a change that breaks
+  an OS nobody is running fails at once, not at release time. `jt-engine`
+  (bundled SQLite) and `jt-broker` (a TLS library) need a C cross-compiler
+  the dev box lacks; they hold no per-OS code, so their Linux build covers
+  them.
 
 **Token custody:** Schwab app key/secret and OAuth tokens in the OS
 credential store via the `keyring` crate (Windows Credential Manager / macOS
@@ -121,23 +127,27 @@ app secret, access token and refresh token are **four separate entries**;
 the token response's `id_token` is not stored at all. Each account's
 rules (§I.6) live in the same store, in entries of their own.
 
-## The Broker trait (`jt-broker`)
+## The Broker trait (`jt-engine`)
 
-The seam everything tests through. Shape (builder may refine signatures, not
-responsibilities):
+The seam everything tests through. It lives in `jt-engine`, with the
+domain types, so that `GatedIntent` can live there too and keep its
+constructor private; `jt-broker` and `jt-sim` implement it. Shape (builder
+may refine signatures, not responsibilities):
 
 ```rust
 #[async_trait]
 trait Broker: Send + Sync {
     async fn snapshots(&self) -> Result<Vec<AccountSnapshot>>;   // every granted account, one call: balances incl. start-of-day, positions
-    async fn open_orders(&self) -> Result<Vec<Order>>;           // every account, one call; child orders flattened in
+    async fn orders(&self, day: TradingDay) -> Result<Vec<Order>>; // every account, one call; child orders flattened in;
+                                                                   // every non-terminal order plus everything entered or changed today
     async fn place_order(&self, intent: GatedIntent) -> Result<PlaceOutcome>;
     async fn replace_order(&self, id: &OrderId, intent: GatedIntent) -> Result<PlaceOutcome>;
     async fn cancel_order(&self, acct: &AccountHash, id: &OrderId) -> Result<()>;  // a request; the order may still fill
-    async fn todays_executions(&self, acct: &AccountHash) -> Result<Vec<Execution>>; // trade count (§I.2)
+    async fn executions(&self, acct: &AccountHash, day: TradingDay) -> Result<Vec<Execution>>; // trade count (§I.2)
     async fn transactions(&self, acct: &AccountHash, kind: TxnType, day: TradingDay) -> Result<Vec<Txn>>;
     async fn candles(&self, req: CandleRequest) -> Result<Vec<Candle>>;
     async fn subscribe(&self, req: StreamRequest) -> Result<BroadcastRx<StreamEvent>>;
+    fn unsubscribe(&self, req: StreamRequest);                    // releases a reference-counted subscription
 }
 // PlaceOutcome: Placed(OrderId) | AcceptedIdUnknown   ← 201 without Location, §I.3 step 3d
 // StreamEvent: Quote{symbol, bid, ask, last, volume, halted, ts}
@@ -281,7 +291,26 @@ working reference for every flow below**):
   a TRIGGER's OCO children release sized to the filled quantity on a
   partial fill, or wait for the full fill. Either way, an entry that ends
   partially filled (cancelled, or expired) must not leave children sized
-  for the full quantity: the engine replaces them to the held quantity.
+  for the full quantity. More generally, **protective legs never close
+  more than is held** — a stop for 100 on a 30-share position would sell
+  70 short when it fires. A *protective leg* is a closing stop or target:
+  a bracket child whose entry is done, either half of an OCO pair (from
+  any source, thinkorswim included), or a closing stop; one OCO pair
+  counts once. Whenever a fresh read shows the protective legs on a
+  symbol adding up to more than the position, the engine cuts them,
+  newest first: a pair with nothing left to protect is cancelled; a pair
+  to be made smaller is **cancelled, and re-placed at the smaller size
+  as a new OCO once Schwab shows it gone**. Re-placing rather than
+  resizing in place costs a moment without a stop, and avoids depending
+  on whether Schwab lets one OCO child be replaced and keep its link
+  (unverified; code review CR7). Nothing is placed while a cancelled leg
+  could still fill. The change is **written ahead** before the first
+  cancel (CR13): if the app dies between the cancel and the re-place, the
+  next start puts protection back for whatever is still held — and drops
+  an interrupted exit with a loud notice rather than selling minutes later
+  on its own. On a symbol with no position, any closing stop or OCO is an
+  orphan that could open a position, so it is cancelled — including a
+  `SELL` stop resting in thinkorswim on a symbol no longer held.
   Children sit nested in `childOrderStrategies`; every order parser
   recurses into it.
 - **Today's executions come from transactions, not orders.**
@@ -304,7 +333,8 @@ working reference for every flow below**):
   frozen in one constant); dividends and interest are not transfers (they
   are P&L). Because that is nine calls per account, transfers are fetched
   once at start and then only when a balance change appears that no fill
-  explains (§I.1) — never on a timer. A withdrawal may reduce cash before
+  explains (§I.1) — at once, then once a minute until a transaction
+  explains it; never on a timer otherwise. A withdrawal may reduce cash before
   its transaction row posts; §I.1 holds such a change out of the rules
   until it is explained.
 - **Price history:** `GET /marketdata/v1/pricehistory` (periodType /
@@ -377,6 +407,13 @@ on disagreement** (log the divergence).
 - **Waking from sleep:** a gap in the monotonic clock, or the OS resume
   event, triggers a full reconcile (snapshots, orders, executions) before
   any button is enabled again.
+- **A fill seen in the order list** (filled quantity up) triggers a balance
+  read at once, not at the next 60-second reconcile.
+- **Orders are read before balances, always.** A fill landing between the
+  two reads then shows as a working order and a smaller position — the
+  cautious reading — never as a fill the balances miss. Every check that
+  compares the two (closing quantity, protective legs, flatten) relies on
+  this order.
 
 **Day P&L anchors on the broker, not the app:** Schwab's `initialBalances`
 *is* the start-of-day equity, so
@@ -452,7 +489,9 @@ refused with the reason shown, nothing else happens:
 
 **What counts as a trade:** one order that opens or adds to a position
 (`BUY`, `SELL_SHORT`) and filled today, fully or partly — partial fills of
-one order are one trade. Counted by order id, once: an entry that is
+one order are one trade. A fill counts from the moment today's order list
+shows it (executions post minutes later); executions still catch an old
+GTC entry that fills today. Counted by order id, once: an entry that is
 partly filled and still working is one trade, not a trade plus a
 slot-holding working order. Exits never count: a bracket's stop or target
 filling, a close, and every enforcement order are closes. Trades made in
@@ -492,6 +531,18 @@ in thinkorswim is as real as ours, and an order whose id we never learned
 is still live. Every step below obeys this rule; nothing else is a
 reason to submit.
 
+Two more rules close the gaps between Schwab's separate services (code
+review 2026-10-10, CR1–CR2):
+
+- **The engine counts what it has seen fill.** Each symbol's flatten keeps
+  a ledger: the position when it began, plus every fill on the symbol
+  since, from the order list. Balances showing more shares than the
+  ledger allows are behind the order list; nothing is submitted until
+  they agree, and after 30 s the account shows `Stalled`.
+- **An order of ours missing from the order list is still live.** It is
+  looked up by id; it counts as gone only once Schwab shows it terminal
+  or the position proves it filled. Missing for 30 s shows `Stalled`.
+
 0. **Confirm the trip.** A trip computed from streamed marks is
    confirmed by one immediate REST snapshot (~300 ms) before anything
    happens; if Schwab's own `liquidationValue` does not confirm it, the
@@ -516,8 +567,8 @@ reason to submit.
      order **may exist**: submit nothing more on this symbol; read the
      order list and adopt the order matching symbol, instruction and
      quantity entered since the write-ahead time. Until it is adopted, or
-     two successive polls show neither the order nor any change in the
-     held quantity, the symbol is blocked.
+     two successive polls over at least 30 s show neither the order nor
+     any change in the held quantity, the symbol is blocked.
    - e. Watch the order through the poller. Filled → back to (b) (a
      partial fill leaves a remainder). Still working after 10 s while
      the symbol is trading → cancel it, back to (a). Rejected → surface
@@ -603,8 +654,8 @@ Schwab rather than trusting local files**:
   records that the daily-loss first step already fired today; trip
   conditions are still re-evaluated first thing, before the UI enables
   anything. Day P&L past the second limit locks until the next day roll on
-  any start. Deleting or editing the database to lose that row blocks the
-  whole app until the next roll (§I.6), so it never buys an early unlock.
+  any start. Deleting the database to lose that row never buys an early
+  unlock (see the next bullets).
   All of this runs on the current trading day as `market_calendar` defines it
   (§I.1): a start at 00:30 ET after a losing day still reads yesterday's
   `initialBalances` as yesterday's, and writes nothing for the new day.
@@ -624,7 +675,9 @@ Schwab rather than trusting local files**:
   tomorrow. For the two-step daily loss: a smaller limit, a longer
   timeout, or removing the second limit (which makes the first step end
   the day) is tightening; a larger limit, a shorter timeout, or adding a
-  second limit is loosening.
+  second limit is loosening. A per-symbol position limit compares with
+  the limit that symbol actually has (its own, or the account-wide one):
+  adding a symbol limit larger than the default is a loosening.
 - **Today's rules are not in the app's data folder** (§I.6), so deleting
   or editing that folder cannot loosen today. Deleting the database during
   a first-step lockout loses its row; the rule re-trips with a fresh
@@ -664,7 +717,13 @@ stricter during the day.
 **At the day roll** (or at the first start after it, if the app was not
 running at 04:00 ET), `today` ← `next`. Only the app does this, and only
 across a roll in server time (§ Ground truth), so changing the PC's clock
-does not promote a loosening early.
+does not promote a loosening early. **Nothing is read or promoted until
+Schwab's clock has answered** — before the first response the app's only
+clock is the PC's; until then the account shows "waiting for Schwab's
+clock" and nothing arms. Rules dated after today (only a clock set ahead
+could write them) put no rules in force until the real day catches up.
+If the credential store fails mid-day, the rules last read keep
+enforcing; only arming needs a fresh read.
 
 **What deleting or editing does:**
 
@@ -761,7 +820,7 @@ around the engine). Full action vocabulary (all v1, one order builder):
 | Buy / Sell market | symbol (fixed or chart-selected); qty (shares / dollars / % of buying power) |
 | Buy / Sell limit | + limit price: offset from bid/ask/mark, or absolute |
 | Bracket entry | entry (market or limit) + stop offset + optional target offset → Schwab TRIGGER+OCO |
-| Close position | symbol; percentage (25/50/100) of the held quantity **minus closing orders already working on it** — two fast "Close 100%" presses send one order, and a press with nothing left to close is refused; `SELL` or `BUY_TO_COVER` by the position's sign |
+| Close position | symbol; percentage (25/50/100) of the held quantity **minus closing orders already working on it** (a bracket's stop and target excepted, below) — two fast "Close 100%" presses send one order, and a press with nothing left to close is refused; `SELL` or `BUY_TO_COVER` by the position's sign |
 | Flatten all | cancel all orders + close all positions (manual §I.3 steps 2–3; never locks) |
 | Cancel all orders | optional per-symbol. **Keeps the stops protecting held positions** (bracket children of a filled entry — cancelling either OCO child cancels both) and says "3 stops kept"; Flatten all is the way out of a position |
 
@@ -774,6 +833,17 @@ it. Anything beyond that is dropped and said plainly — "Sold 100 of 200
 or `SELL_SHORT` for a Sell) and passes every entry gate: margin only for
 shorts, stop required, trade limit, sizes. One press never closes a
 position and opens the opposite one.
+
+**Exiting a bracketed position (D17).** A position's own stop and target
+do not block an exit. A Close (or a Sell while long, a Buy while short)
+first steps them aside: they are cancelled, and once a fresh read shows
+them gone, a partial exit re-places them for the shares kept (so those
+stay protected) and then sends the exit; a full exit just sends. Nothing
+is sent while a cancelled leg could still fill for shares being sold, so
+the position cannot go short. If the
+stop fills meanwhile, only what is still held is sold (often nothing). If
+they have not stepped aside in 30 s, nothing is sold and a loud notice
+says so. A second press on the same symbol while one waits is refused.
 
 Stored shape (SQLite `buttons.config` JSON):
 `{action, symbol_mode: "fixed"|"chart", symbol?, qty: {kind: "shares"|"dollars"|"pct_bp", value}, limit?: {ref: "bid"|"ask"|"mark"|"abs", offset}, stop_offset?, target_offset?, close_pct?, confirm: bool, hotkey?, global_hotkey: bool, color?, position: {row, col}}`.
@@ -856,6 +926,11 @@ Tables (builder may add columns, not drop):
   never persisted; it exists only in memory (§ Ground truth).
 - `pending_orders` — the write-ahead rows of §I.3 step 3c: `account_hash,
   symbol, instruction, qty, written_at, resolved_order_id, resolved_at`.
+- `pending_protection` — protection being stepped aside (§ Ground truth,
+  bracket children): `account_hash, symbol, body_json` (the cancelled
+  legs, each pair's prices and sizes, any waiting exit), `written_at,
+  resolved_at, resolution`. Written before the first cancel; an
+  unresolved row is finished at the next start.
 - `buttons` — `button_id, config_json (§II.4), created_at, updated_at`.
 - `watchlist` — `symbol, sort_order`.
 - `lockouts` — `lockout_id, account_hash, rule_id, step, trading_day, tripped_at,
@@ -939,6 +1014,21 @@ gate; Cancel all — stops kept; confirm left open while
 the account locks — refused on OK; chart symbol changed between press
 and resolution — refused.
 
+Added by the 2026-10-10 code review (`tests/review.rs`): balances lagging
+the order list after a flatten fill — nothing more sent, `Stalled` if
+they never catch up; our own order missing from the list — still live,
+found by id, or proven filled by the position; a PC clock set ahead at
+start — nothing promoted; rules dated in the future — nothing armed; a
+press after an unposted withdrawal — no trip; executions posting late —
+the trade limit still counts the fill; the credential store failing
+mid-day — rules keep enforcing; an OCO placed in thinkorswim — kept by
+Cancel all and cut by the guard; a crash between cancelling a stop and
+putting it back, on a partial or full close and with cancels still
+pending — the stop comes back for what is held, nothing is sold. **Harsh mode** (`tests/harsh.rs`) re-runs
+the main scenarios with the market moving between every REST call,
+cancels that take a second and can lose to a fill, executions two
+minutes late, and partial fills.
+
 **The "DB deleted" scenarios keep the `SimBroker`'s own state across the
 simulated restart** — only the app's state is wiped, or the scenario
 proves nothing. Rule-storage tests run against an in-memory credential
@@ -973,11 +1063,13 @@ one forced daily-loss first-step trip with real flatten; lockout survives app
 restart; one after-hours 1-share market order to confirm Schwab queues it
 (then cancel it); a 1-share market buy in session to see whether the 201
 carries `Location`; thinkorswim open while the app streams; overnight
-sampling of `initialBalances` to pin the day roll.
+sampling of `initialBalances` to pin the day roll; how a transfer's
+transaction `time` relates to when its cash moves (if a row can be
+stamped before the balances show the cash, day P&L counts it twice —
+code review CR11).
 
-**Repo gate:** `tests/functional/trader/trader_sim_gate.sh` — tier `safe`,
-env `any`, needs `[rust]`, skip-if-no-toolchain (same pattern as
-`sync_sim_gate.sh`) — runs the jt-sim + jt-broker suites.
+**Repo gate:** `gate.sh` at the repo root — runs every suite and the
+cross-checks of §Platforms, under `nice -n 19`.
 
 ---
 
@@ -1090,6 +1182,13 @@ Rules for whoever (whatever) builds this:
 - **D15 — An exit never flips a position:** a Sell while long (or Buy while
   short) sells at most what is held and reports any excess as dropped;
   with no position the same button is a gated entry. (Owner, 2026-10-09.)
+- **D16 — The code lives in its own git repo at `~/trader`**, outside
+  Joinery, so it never ships in a Joinery release or sits in Joinery's
+  history. (Owner, 2026-10-09.)
+- **D17 — An exit steps a position's own stop and target aside**
+  (cancelled, then re-placed for the shares kept on a partial close) and
+  sends once they are out of the way; it never waits on Flatten all.
+  (Owner, 2026-10-10.)
 
 # Defaults (owner may override)
 

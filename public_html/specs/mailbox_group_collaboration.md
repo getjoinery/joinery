@@ -220,6 +220,10 @@ mailbox-only:
   adding a parallel store.
 - **Notifications (Phase 5)** belong on the core notification system, not a
   mailbox-local table.
+- **Not the Boards plugin's job** (owner, 2026-10-10). The Boards plugin spec
+  turns email into tasks for site members, and does nothing else. Answering
+  outside senders, intake addresses and customer threads stay here. The two meet
+  only at Boards' "Make a card" action in the message reader.
 
 ## Carved out → individual track
 
