@@ -59,6 +59,12 @@ pub enum VfsError {
     RootUnavailable(PathBuf),
     #[error("no space left for {0}")]
     OutOfSpace(PathBuf),
+    /// The volume refused the NAME: too long for it, or holding something it
+    /// cannot store (ENAMETOOLONG; ERROR_INVALID_NAME,
+    /// ERROR_FILENAME_EXCED_RANGE). The personality is a guess about the
+    /// volume; this is its answer, and no retry changes it.
+    #[error("this disk cannot hold the name {0}")]
+    NameRefused(PathBuf),
     #[error("io error on {path}: {source}")]
     Io {
         path: PathBuf,

@@ -335,8 +335,8 @@ the entry alone. Deciding who gets a contested name belongs to naming, and an
 identity minted after naming has already run for its pass can only be judged by
 surviving into the next one — where the loser is parked, visibly, under
 `unsyncable`. Nothing is raised from the transfer itself: the park carries the
-issue, and `unsyncable` is the one kind a pass withdraws again once the state
-ends.
+issue, and `unsyncable` is one of the kinds a pass withdraws again once the
+state ends.
 
 Moves are ordered by what they wait on. A rename into a name another mover
 still holds waits for that mover; a folder moved into what is currently its own
@@ -745,12 +745,18 @@ than shown; the original stays in the issue's detail for diagnosis.
 **An issue about a state is withdrawn when the state ends.** Most issues report
 an *event* — something was moved aside, something was rescued, a piece of work
 was given up on — and those stand until the user waves them away, because they
-happened and no later state makes them untrue. Two report a *state* instead:
-`unsyncable` (this disk cannot hold that name) and `store_inconsistent` (these
-items have no way back to the root). Both are re-derived every pass, and both
-are withdrawn the moment they stop being true. Otherwise the user carries a
-permanent warning about a file that is now perfectly fine, clearable only by
-hand, and it inflates the attention count the tray reads from.
+happened and no later state makes them untrue. Four report a *state* instead:
+`unsyncable` (this disk cannot hold that name), `store_inconsistent` (these
+items have no way back to the root), `name_refused` (the disk itself turned
+away the name the server gives an entry; its detail is that name) and
+`rename_held` (an entry with no key on this device was renamed elsewhere to a
+name this disk cannot give it, so it keeps its old name here; its detail is
+the server's name). All four are checked every pass and withdrawn the moment
+they stop being true: a refused name is spent once the server no longer gives
+the entry that name, and a held rename once the entry is no longer held at that
+name. Otherwise the user carries a permanent warning about a file that is now
+perfectly fine, clearable only by hand, and it inflates the attention count the
+tray reads from.
 
 What decides is the entry's own `LocalStatus`, not the naming pass's report of
 what it just did: an entry already settled as unsyncable is not re-reported each

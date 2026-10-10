@@ -954,7 +954,16 @@ mod tests {
     /// side renamed it. And a folder record is judged the same way.
     #[test]
     fn both_moved_to_one_folder_and_only_this_side_renamed_keeps_the_name() {
-        for folder in [false, true] {
+        both_moved_to_one_folder_and_only_this_side_renamed(false);
+    }
+
+    #[test]
+    fn a_folder_both_moved_to_one_folder_and_only_this_side_renamed_keeps_the_name() {
+        both_moved_to_one_folder_and_only_this_side_renamed(true);
+    }
+
+    fn both_moved_to_one_folder_and_only_this_side_renamed(folder: bool) {
+        {
             let mut e = if folder { established_folder(1, "a") } else { established("a", "aaa") };
             e.synced_placement = Some(placement(Some(1), "a"));
             let r = reconcile(

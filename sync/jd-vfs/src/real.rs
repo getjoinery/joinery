@@ -231,6 +231,10 @@ fn io_err(path: &Path, e: std::io::Error) -> VfsError {
         std::io::ErrorKind::NotFound => VfsError::NotFound(path.to_path_buf()),
         std::io::ErrorKind::PermissionDenied => VfsError::PermissionDenied(path.to_path_buf()),
         std::io::ErrorKind::AlreadyExists => VfsError::AlreadyExists(path.to_path_buf()),
+        // ENAMETOOLONG, and on Windows ERROR_INVALID_NAME and
+        // ERROR_FILENAME_EXCED_RANGE. EINVAL is not read as one: it says many
+        // other things too (a folder moved into itself).
+        std::io::ErrorKind::InvalidFilename => VfsError::NameRefused(path.to_path_buf()),
         _ => VfsError::Io {
             path: path.to_path_buf(),
             source: e,

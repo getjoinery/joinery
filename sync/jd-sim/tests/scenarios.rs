@@ -18344,7 +18344,18 @@ fn a_park_never_lets_a_moved_file_go_up_as_another_files_version() {
 /// counted (`owners_here(.., false)` in the gone check), delete-first arm.
 #[test]
 fn a_never_sent_record_gives_way_to_a_deleted_owners_edited_file() {
-    for delete_arrives_first in [true, false] {
+    a_never_sent_record_and_a_deleted_owners_edited_file(true);
+}
+
+/// The same with a pass between the landing and the delete: the control,
+/// green before the fix and after it.
+#[test]
+fn a_never_sent_record_and_a_deleted_owners_edited_file_with_a_pass_between() {
+    a_never_sent_record_and_a_deleted_owners_edited_file(false);
+}
+
+fn a_never_sent_record_and_a_deleted_owners_edited_file(delete_arrives_first: bool) {
+    {
         let label = if delete_arrives_first { "delete first" } else { "a pass between" };
         let world = World::of(1_864, &[("a", jd_sim::Platform::Linux), ("b", jd_sim::Platform::Linux)]);
         let (a, b) = (world.device("a"), world.device("b"));
@@ -18400,7 +18411,17 @@ fn a_never_sent_record_gives_way_to_a_deleted_owners_edited_file() {
 /// was undone on every device. RED with the placement judged whole.
 #[test]
 fn the_same_rename_on_both_sides_never_undoes_a_move_only_one_side_made() {
-    for folder in [false, true] {
+    the_same_rename_on_both_sides_and_a_move_on_one(false);
+}
+
+/// The same for a folder (with a file inside).
+#[test]
+fn the_same_rename_on_both_sides_never_undoes_a_folder_move_only_one_side_made() {
+    the_same_rename_on_both_sides_and_a_move_on_one(true);
+}
+
+fn the_same_rename_on_both_sides_and_a_move_on_one(folder: bool) {
+    {
         let world = World::of(1_881, &[("a", jd_sim::Platform::Linux), ("b", jd_sim::Platform::Linux)]);
         let (a, b) = (world.device("a"), world.device("b"));
         a.fs.user_mkdir("Projects");
@@ -18462,4 +18483,400 @@ fn a_raced_drag_out_of_a_vault_nobody_contested_is_held_not_undone() {
         .map(|i| i.detail)
         .collect();
     assert!(races.is_empty(), "a race was reported for a hold: {races:?}");
+}
+
+/// B4. A new file's upload reaches the server (under a conflict name: its
+/// name was taken) but the answer is lost; before the retry completes, the
+/// change feed names the server's new file and a download is planned for it.
+/// The retry finds that record already here with nothing of it on this disk:
+/// it is this upload, learned twice, and the upload's record becomes it. The
+/// server ends with one copy, owned by the user's own file. Folded in, the
+/// server's record kept no agreement, the download laid a second copy beside
+/// the user's file, and the user's file -- recordless -- went up again.
+#[test]
+fn an_upload_learned_twice_is_one_file_not_two() {
+    let world = World::new(11_873, &["a", "b"]);
+    let (a, b) = (world.device("a"), world.device("b"));
+    a.fs.user_mkdir("F");
+    a.fs.user_write("x.dat", b"X bytes");
+    assert!(world.settle().is_some());
+    a.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    let body = b"P bytes";
+    a.fs.user_write("F/c.dat", body);
+    world.pass(a);
+    a.net.set_faults(NetFaults::none());
+    b.fs.user_rename("x.dat", "F/c.dat");
+    world.pass(b);
+    let root = jd_vfs::Vfs::root(&a.fs).unwrap();
+    let mine = jd_vfs::Vfs::fingerprint(&a.fs, &root.join("F/c.dat")).unwrap().expect("a's file").identity();
+    a.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
+    world.pass(a);
+    a.fs.user_rename("x.dat", "x2.dat");
+    assert!(world.settle().is_some(), "never settled");
+    let copies: Vec<String> = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(body))
+        .map(|f| f.name)
+        .collect();
+    assert_eq!(copies.len(), 1, "the upload went up twice: {copies:?}");
+    let owner = a.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(mine));
+    assert!(owner.is_some_and(|e| !e.id.is_provisional()), "the user's file is not the server file's own");
+}
+
+/// R1881, seed 9137's shape. A laptop's user moves a file into a folder they
+/// have just made and renames it; a desktop's user renames it too (to another
+/// name) and edits it. The race keeps the laptop's folder and gives the name
+/// to the server; the same pass downloads the desktop's edit. The download
+/// lands on the laptop's own file where it now stands. Landed at the agreed
+/// path instead -- where nothing stood any more -- it made a second copy, the
+/// record followed that copy, and the user's file went up again as new.
+#[test]
+fn a_kept_move_half_and_a_remote_edit_in_one_pass_stay_one_file() {
+    let world = World::new(9_137, &["laptop", "desktop"]);
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    laptop.fs.user_mkdir("Shared");
+    laptop.fs.user_write("Shared/slot-1.dat", b"the first bytes");
+    assert!(world.settle().is_some());
+    desktop.fs.user_rename("Shared/slot-1.dat", "Shared/slot-3.dat");
+    let edited = b"the desktop's edit";
+    desktop.fs.user_write("Shared/slot-3.dat", edited);
+    world.pass(desktop);
+    laptop.fs.user_mkdir("Shared/Sub 23");
+    laptop.fs.user_rename("Shared/slot-1.dat", "Shared/Sub 23/slot-2.dat");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<(Option<i64>, String, String)> = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed)
+        .map(|f| (f.folder, f.name, f.sha256))
+        .collect();
+    assert_eq!(live.len(), 1, "the file went up twice: {live:?}");
+    assert_eq!(live[0].2, jd_sim::sha256_hex(edited), "the edit is not the file's head");
+    let sub = world.server.folders().into_iter().find(|f| f.name == "Sub 23").expect("the laptop's new folder");
+    assert_eq!(live[0].0, Some(sub.id), "the laptop's folder half was lost");
+    let chain = world.server.all_versions().into_iter().filter(|v| v.file_id == world.server.files()[0].id).count();
+    assert!(chain >= 2, "the version chain was broken");
+}
+
+/// B5, end to end. A Linux peer renames a vault to a case twin of a plain
+/// folder the Mac holds; the Mac's user drags a plain file into the vault in
+/// the same window. The Mac cannot hold the vault's new name and parks it --
+/// but not before the drag is followed: the file is converted into the vault
+/// on the server, never trashed with the parked directory. The Mac's own
+/// Notes folder is untouched. RED without the park waiting for the drag: the
+/// file went to the OS trash with the vault and its record's delete reached
+/// the server, leaving it nowhere live.
+#[test]
+fn a_file_dragged_into_a_vault_the_mac_must_park_is_kept_in_the_vault() {
+    let seed = 5_005;
+    let vault = SimVault::new(seed);
+    let mut world = World::of(seed, &[("mac", jd_sim::Platform::MacOs), ("lin", jd_sim::Platform::Linux)]);
+    world.give_vault("mac", &vault);
+    world.give_vault("lin", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(Some(private), "inside.txt", b"sealed inside", &vault.public_key_b64);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let dragged = b"a plain file the user drags into the vault";
+    mac.fs.user_mkdir("Notes");
+    mac.fs.user_write("x.txt", dragged);
+    assert!(world.settle().is_some(), "setup settles");
+    lin.fs.user_rename("Private", "notes");
+    world.pass(lin);
+    mac.fs.user_rename("x.txt", "Private/x.txt");
+    world.pass(mac);
+    assert!(world.settle().is_some(), "never settled");
+
+    let sealed_now = world.server.files().into_iter().filter(|f| f.encrypted && !f.trashed && f.folder == Some(private)).count();
+    assert_eq!(sealed_now, 2, "the dragged file did not reach the vault: {:?}", world.server.files());
+    assert_eq!(
+        disk_tree(lin).get("notes/x.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(dragged)),
+        "the peer does not hold the dragged file in the vault"
+    );
+    assert!(disk_tree(mac).contains_key("Notes"), "the mac's own Notes was moved");
+}
+
+/// B6. A peer renames Work to a case twin of the Mac's own Notes and, in the
+/// same change, moves a file out of Work. The Mac parks Work; the park waits
+/// for the moved-out file, and while it waits Work's own move does not land on
+/// the name naming refused. RED with the move left in the plan and unguarded:
+/// it landed, moved the user's Notes aside as a conflict copy, and that copy
+/// was parked and trashed on the Mac.
+#[test]
+fn a_waiting_folder_park_never_lets_its_move_take_the_users_folder() {
+    let world = World::of(5_006, &[("mac", jd_sim::Platform::MacOs), ("lin", jd_sim::Platform::Linux)]);
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    let keep = b"the mac user's own notes";
+    mac.fs.user_mkdir("Notes");
+    mac.fs.user_write("Notes/keep.txt", keep);
+    mac.fs.user_mkdir("Work");
+    mac.fs.user_write("Work/child.txt", b"a child the peer moves out");
+    mac.fs.user_write("Work/stays.txt", b"stays in the folder");
+    assert!(world.settle().is_some());
+    lin.fs.user_rename("Work/child.txt", "child.txt");
+    lin.fs.user_rename("Work", "notes");
+    world.pass(lin);
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(
+        disk_tree(mac).get("Notes/keep.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(keep)),
+        "the mac user's own Notes was moved aside or trashed: {:?}",
+        disk_tree(mac).keys().collect::<Vec<_>>()
+    );
+    assert!(disk_tree(mac).contains_key("child.txt"), "the moved-out child did not arrive");
+}
+
+/// B8. A Mac holds a vault and a plain Notes folder, and the vault is then
+/// locked there (no key). A peer renames the vault to a case twin of Notes.
+/// With no key the Mac never gives the vault up over a name, but it still
+/// judges where the server puts it: the clash holds the move, the vault's
+/// directory stays under its old name, the user's Notes is untouched, and the
+/// Mac says why. Not judged at all, the vault's move landed on the clash and
+/// made room by moving the user's Notes aside as a conflict copy, the
+/// vault's directory ending under that copy's name, with nothing said. RED
+/// without the destination judged for a keyless entry.
+#[test]
+fn a_locked_vault_renamed_onto_a_clash_is_held_not_moved() {
+    let seed = 5_009;
+    let vault = SimVault::new(seed);
+    let mut world = World::of(seed, &[("mac", jd_sim::Platform::MacOs), ("lin", jd_sim::Platform::Linux)]);
+    world.give_vault("mac", &vault);
+    world.give_vault("lin", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(Some(private), "inside.txt", b"sealed inside", &vault.public_key_b64);
+    world.device("mac").fs.user_mkdir("Notes");
+    assert!(world.settle().is_some(), "setup settles");
+    world.lock_vault("mac");
+    let unsent = b"saved in the vault, never sent";
+    let (mac, lin) = (world.device("mac"), world.device("lin"));
+    mac.fs.user_write("Private/new.txt", unsent);
+    world.pass(mac);
+    lin.fs.user_rename("Private", "notes");
+    world.pass(lin);
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(mac);
+    }
+    let tree = disk_tree(mac);
+    assert!(tree.contains_key("Notes"), "the user's Notes was moved: {:?}", tree.keys().collect::<Vec<_>>());
+    assert!(!tree.keys().any(|k| k.contains("conflicted copy")), "a conflict copy was made: {:?}", tree.keys().collect::<Vec<_>>());
+    assert_eq!(mac.fs.peek("Private/new.txt").as_deref(), Some(&unsent[..]), "the vault's directory moved or lost its file");
+    assert!(mac.fs.trashed().is_empty(), "{:?}", mac.fs.trashed());
+    let vault_rec = mac.store.get_entry(jd_core::model::EntityId::folder(private)).unwrap().expect("the vault's record");
+    assert!(
+        !matches!(vault_rec.status, jd_core::model::LocalStatus::Unsyncable(_)),
+        "a keyless vault was given up over a name: {:?}",
+        vault_rec.status
+    );
+    let held: Vec<String> = mac
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == jd_core::naming::RENAME_HELD)
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(held, vec!["notes".to_string()], "the user was not told why");
+}
+
+/// B8 with B3's usability refusals: a locked vault renamed by a peer to a
+/// name a Windows disk cannot hold at all. With no key the vault is never
+/// given up over a name; the refusal is a hold like a clash's, the vault's
+/// directory stays under its old name with its unsent file, and the device
+/// says why. The keyless hold reads NameTooLong / NAME_REFUSED through the
+/// same judgement as a clash, so this states it rather than assuming it.
+#[test]
+fn a_locked_vault_renamed_to_a_name_this_disk_cannot_hold_is_held() {
+    let seed = 5_011;
+    let vault = SimVault::new(seed);
+    let mut world = World::of(seed, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    world.give_vault("pc", &vault);
+    world.give_vault("lin", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(Some(private), "inside.txt", b"sealed inside", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "setup settles");
+    world.lock_vault("pc");
+    let unsent = b"saved in the vault, never sent";
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    pc.fs.user_write("Private/new.txt", unsent);
+    world.pass(pc);
+    let long = format!("{}{}", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename("Private", &long);
+    world.pass(lin);
+    for _ in 0..6 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(pc);
+    }
+    assert_eq!(pc.fs.peek("Private/new.txt").as_deref(), Some(&unsent[..]), "the vault's directory moved or lost its file");
+    assert!(pc.fs.trashed().is_empty(), "{:?}", pc.fs.trashed());
+    let vault_rec = pc.store.get_entry(jd_core::model::EntityId::folder(private)).unwrap().expect("the vault's record");
+    assert!(
+        !matches!(vault_rec.status, jd_core::model::LocalStatus::Unsyncable(_)),
+        "a keyless vault was given up over a name: {:?}",
+        vault_rec.status
+    );
+    let held: Vec<String> = pc
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == jd_core::naming::RENAME_HELD)
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(held, vec![long], "the user was not told why");
+}
+
+/// B8, the hold lifting: once the vault is unlocked on the Mac, the held
+/// rename is judged as any other (the Mac still cannot hold 'notes' beside
+/// Notes, so the vault is given up the ordinary way, after its unsent file
+/// goes up), the hold's issue goes, and the user's Notes is untouched.
+#[test]
+fn a_held_locked_vault_is_handed_to_the_ordinary_path_once_unlocked() {
+    let seed = 5_010;
+    let vault = SimVault::new(seed);
+    let mut world = World::of(seed, &[("mac", jd_sim::Platform::MacOs), ("lin", jd_sim::Platform::Linux)]);
+    world.give_vault("mac", &vault);
+    world.give_vault("lin", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(Some(private), "inside.txt", b"sealed inside", &vault.public_key_b64);
+    world.device("mac").fs.user_mkdir("Notes");
+    assert!(world.settle().is_some(), "setup settles");
+    world.lock_vault("mac");
+    let unsent = b"saved in the vault, never sent";
+    world.device("mac").fs.user_write("Private/new.txt", unsent);
+    world.pass(world.device("mac"));
+    world.device("lin").fs.user_rename("Private", "notes");
+    world.pass(world.device("lin"));
+    for _ in 0..3 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(world.device("mac"));
+    }
+    world.give_vault("mac", &vault);
+    assert!(world.settle().is_some(), "never settled once unlocked");
+    let mac = world.device("mac");
+    assert!(disk_tree(mac).contains_key("Notes"), "the user's Notes was moved");
+    let held = mac.store.open_issues().unwrap().into_iter().filter(|i| i.kind == jd_core::naming::RENAME_HELD).count();
+    assert_eq!(held, 0, "the hold outlived the key");
+    let sealed = world.server.files().into_iter().filter(|f| f.encrypted && !f.trashed && f.folder == Some(private)).count();
+    assert_eq!(sealed, 2, "the unsent file never reached the vault: {:?}", world.server.files());
+}
+
+/// B3, the plan half. A peer renames a file to a name a Windows disk cannot
+/// hold once escaped. The Windows device parks it in the first pass it sees
+/// the rename -- naming judges the DESTINATION's name, not only the agreed
+/// one -- and never carries the name to the disk: no refusal is ever
+/// recorded, and it settles. RED without the destination verdict on a strict
+/// disk: the disk refuses the rename, and only the refusal record parks it a
+/// pass late.
+#[test]
+fn a_server_rename_to_a_name_this_disk_cannot_hold_is_parked_at_once() {
+    let world = World::of(3_005, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    pc.fs.user_write("x.dat", b"X bytes");
+    assert!(world.settle().is_some());
+    let long = format!("{}{}.dat", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename("x.dat", &long);
+    world.pass(lin);
+    world.pass(pc);
+    let parked = pc
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .any(|e| matches!(e.status, jd_core::model::LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { .. })));
+    assert!(parked, "not parked in the first pass that saw the rename");
+    let refused: Vec<String> = pc
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == jd_core::naming::NAME_REFUSED)
+        .map(|i| i.detail)
+        .collect();
+    assert!(refused.is_empty(), "the unholdable name reached the disk: {refused:?}");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(!world.server.files().iter().any(|f| f.trashed), "the server's file was trashed");
+}
+
+/// B3, the folder arm. A peer renames a folder to a name a Windows disk
+/// cannot hold. The Windows device parks the folder (it cannot be held here
+/// under its server name) and settles; nothing about it is lost on the
+/// server. The park sends the directory to the OS trash with what is in it,
+/// whose bytes the server has -- a user-facing outcome, stated in the issue.
+#[test]
+fn a_server_rename_of_a_folder_to_a_name_this_disk_cannot_hold_is_parked() {
+    let world = World::of(3_006, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    pc.fs.user_mkdir("Docs");
+    pc.fs.user_write("Docs/a.txt", b"inside the folder");
+    assert!(world.settle().is_some());
+    let long = format!("{}{}", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename("Docs", &long);
+    world.pass(lin);
+    assert!(world.settle().is_some(), "never settled");
+    let parked = pc.store.every_entry().unwrap().into_iter().any(|e| {
+        e.id.entity_type == jd_core::EntityType::Folder
+            && matches!(e.status, jd_core::model::LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { .. }))
+    });
+    assert!(parked, "the folder was not parked");
+    assert!(!world.server.files().iter().any(|f| f.trashed), "a file was trashed on the server");
+    assert!(world.server.folders().iter().all(|f| !f.trashed), "the folder was trashed on the server");
+}
+
+/// B3b. This device's user renames a file to an ordinary name while a peer
+/// renames it to one this disk cannot hold, before this device's next pass.
+/// The name race goes to the server, whose name cannot be held here: the
+/// park gives up the user's copy where it stands (its bytes are the
+/// server's), and the device settles. Standing down because the file had
+/// moved -- right for a clash against a stale agreement -- re-parked it every
+/// pass for ever, since no local move makes the server's name holdable.
+#[test]
+fn a_local_rename_racing_an_unholdable_server_rename_settles_parked() {
+    let world = World::of(3_004, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    pc.fs.user_write("x.dat", b"X bytes");
+    assert!(world.settle().is_some());
+    let long = format!("{}{}.dat", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename("x.dat", &long);
+    world.pass(lin);
+    pc.fs.user_rename("x.dat", "mine.dat");
+    assert!(world.settle().is_some(), "never settled");
+    let trashed: Vec<String> = pc.fs.trashed().into_iter().map(|t| t.0).collect();
+    assert_eq!(trashed, vec!["mine.dat".to_string()], "the user's copy is not in the OS trash");
+    let live: Vec<String> = world.server.files().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    assert_eq!(live, vec![long], "the server's name was changed");
+    let kinds: Vec<String> = pc.store.open_issues().unwrap().into_iter().map(|i| i.kind).collect();
+    assert!(kinds.iter().any(|k| k == "unsyncable"), "{kinds:?}");
+    assert!(kinds.iter().any(|k| k == "parked"), "{kinds:?}");
+}
+
+/// The same with the user's copy edited too: it holds work the server does
+/// not have, so it is not trashed. The edit goes up first, and only then is
+/// the file parked; the server holds the edit under its long name.
+#[test]
+fn a_local_rename_and_edit_racing_an_unholdable_server_rename_uploads_first() {
+    let world = World::of(3_007, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    pc.fs.user_write("x.dat", b"X bytes");
+    assert!(world.settle().is_some());
+    let long = format!("{}{}.dat", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename("x.dat", &long);
+    world.pass(lin);
+    pc.fs.user_rename("x.dat", "mine.dat");
+    let edited = b"X bytes, edited after the rename";
+    pc.fs.user_write("mine.dat", edited);
+    assert!(world.settle().is_some(), "never settled");
+    let on_server: Vec<(String, String)> =
+        world.server.files().into_iter().filter(|f| !f.trashed).map(|f| (f.name, f.sha256)).collect();
+    assert!(
+        on_server.iter().any(|(_, h)| *h == jd_sim::sha256_hex(edited)),
+        "the edit never reached the server: {on_server:?}"
+    );
 }

@@ -3482,10 +3482,11 @@ fn a_held_holder_at_the_uploads_own_path_is_still_another_file() {
 }
 
 /// A folder parked off a contested name while its own directory stands at
-/// another path keeps its placement and its directory: it was moved, and the
-/// next pass re-derives that rename by directory identity. Disowned, its
-/// directory stood on with no record and was minted as a new folder, a
-/// vault's sealed files with it (WP2's row 4; hostile2 74424).
+/// another path is not disowned: it was moved, the park stands down with the
+/// record untouched, and the next pass re-derives that rename by directory
+/// identity. Disowned, its directory stood on with no record and was minted
+/// as a new folder, a vault's sealed files with it (WP2's row 4; hostile2
+/// 74424).
 #[test]
 fn a_folder_parked_while_its_directory_stands_elsewhere_keeps_it() {
     let (_clock, _server, device) = world();
@@ -3503,12 +3504,63 @@ fn a_folder_parked_while_its_directory_stands_elsewhere_keeps_it() {
         id,
         Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "contested".into() } },
     );
-    assert_eq!(report.done, 1, "{report:?}");
-    let after = device.store.get_entry(id).unwrap().unwrap();
-    assert_eq!(after.synced_fingerprint.map(|f| f.file_id), Some(mine), "the directory stays its own");
-    assert!(after.synced_placement.is_some(), "the placement stays");
+    assert_eq!((report.done, report.overtaken), (0, 1), "{report:?}");
+    assert_eq!(device.store.get_entry(id).unwrap().unwrap(), entry, "the park stands down and changes nothing");
+}
+
+/// B2: and the passes after it keep the folder. The park used to take the
+/// folder out of the contest under a scratch local name with no operation
+/// open, which naming reads as an abandoned park: the next pass parked it
+/// again for the reserved prefix and disowned it, its directory went up as a
+/// new folder, and the folder went to the server's trash. RED with the
+/// scratch name written. Run to quiet: which directory the record ends bound
+/// to is the folder scan's call (here the path-first rule binds it to the
+/// unrecorded directory at its agreed path), so only the record, its status
+/// and the server's folder are asserted.
+#[test]
+fn a_folder_parked_while_its_directory_stands_elsewhere_is_kept_by_the_next_pass() {
+    let (clock, server, device) = world();
+    let folder = server.seed_folder(None, "contested");
+    device.fs.user_mkdir("moved-here");
+    device.fs.user_mkdir("contested");
+    let mine = device.fs.file_id_of("moved-here").expect("a directory id");
+    let id = EntityId::folder(folder);
+    let mut entry = fresh(id, None, "contested", LocalStatus::Synced);
+    entry.synced_placement = Some(entry.remote.clone());
+    entry.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(mine, 0));
+    device.store.put_entry(&entry).unwrap();
+    do_one(
+        &device,
+        id,
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "contested".into() } },
+    );
+
+    let ctx = jd_core::reconcile::Context {
+        date: "2026-07-31".into(),
+        device_name: "laptop".into(),
+        conflict_suffix: 1,
+        personality: jd_vfs::Personality::linux(),
+        trace: false,
+    };
+    let mut quiet = false;
+    for _ in 0..10 {
+        let now = device.now();
+        let e: ExecEnv = env(&device, &now);
+        let mut keys = device.key_source();
+        let outcome = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+        if outcome.quiet() {
+            quiet = true;
+            break;
+        }
+        clock.advance_secs(20 * 60);
+    }
+    assert!(quiet, "the device never went quiet");
+
+    let after = device.store.get_entry(id).unwrap().expect("the folder's record was dropped");
     assert!(!matches!(after.status, LocalStatus::Unsyncable(_)), "{:?}", after.status);
-    assert!(after.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap-")), "{:?}", after.local_name);
+    assert!(after.synced_placement.is_some(), "the folder lost its agreement");
+    let theirs = server.folders().into_iter().find(|f| f.id == folder).expect("the server's folder");
+    assert!(!theirs.trashed, "the folder went to the server's trash");
 }
 
 /// A file parked off a contested name while its own file stands at another
@@ -3590,6 +3642,234 @@ fn a_file_parked_whose_own_file_stands_nowhere_is_disowned() {
     let after = device.store.get_entry(id).unwrap().unwrap();
     assert!(matches!(after.status, LocalStatus::Unsyncable(_)), "{:?}", after.status);
     assert!(after.synced_placement.is_none() && after.own_file.is_none(), "{after:?}");
+}
+
+/// R1881's executor half: a download for a record whose own file stands away
+/// from its agreed path -- moved there by a race's kept half, not yet read by
+/// a scan -- replaces that file where it stands, and makes no second copy.
+#[test]
+fn a_download_replaces_the_records_own_file_where_it_stands() {
+    let (_clock, server, device) = world();
+    let newer = b"the server's newer bytes";
+    let file = server.seed_file(None, "agreed.txt", newer);
+    device.fs.user_mkdir("Moved");
+    device.fs.user_write("Moved/agreed.txt", b"the older bytes");
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("Moved/agreed.txt")).unwrap().unwrap();
+    let id = EntityId::file(file);
+    let mut e = fresh(id, None, "agreed.txt", LocalStatus::Synced);
+    e.synced_placement = Some(e.remote.clone());
+    e.synced_fingerprint = Some(fp);
+    e.own_file = Some(fp.identity());
+    e.synced_content = Some(ContentId { sha256: sha256_hex(b"the older bytes"), size: 15 });
+    e.remote_content = Some(ContentId { sha256: sha256_hex(newer), size: newer.len() as u64 });
+    device.store.put_entry(&e).unwrap();
+    // A stranger's file at the agreed path: another record's, which the
+    // download must not touch.
+    let stranger = b"another file's bytes";
+    device.fs.user_write("agreed.txt", stranger);
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(report.done, 1, "{report:?}");
+    assert_eq!(device.fs.peek("Moved/agreed.txt").as_deref(), Some(&newer[..]), "the own file was not replaced where it stands");
+    assert_eq!(device.fs.peek("agreed.txt").as_deref(), Some(&stranger[..]), "the stranger at the agreed path was touched");
+}
+
+/// B5: a vault folder parked while a plain file the user has just dragged into
+/// it stands inside, owned by a record the folder's chain does not reach. The
+/// park waits for the scan to follow the drag, says so, and trashes nothing.
+/// Taken to the trash with the directory, the file's record read as deleted
+/// by the user next pass and the delete went to the server. RED without the
+/// stranger check.
+#[test]
+fn a_folder_park_waits_for_a_file_the_user_moved_in() {
+    let (_clock, server, device) = world();
+    let body = b"the user's file, moved into the folder";
+    let folder = server.seed_encrypted_folder(None, "contested");
+    let file = server.seed_file(None, "x.txt", body);
+    device.fs.user_mkdir("contested");
+    device.fs.user_write("contested/x.txt", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("contested/x.txt")).unwrap().unwrap();
+    let dir = device.fs.file_id_of("contested").unwrap();
+    let mut f = fresh(EntityId::folder(folder), None, "contested", LocalStatus::Synced);
+    f.is_encrypted = true;
+    f.synced_placement = Some(f.remote.clone());
+    f.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(dir, 0));
+    device.store.put_entry(&f).unwrap();
+    let mut x = fresh(EntityId::file(file), None, "x.txt", LocalStatus::Synced);
+    let content = ContentId { sha256: sha256_hex(body), size: body.len() as u64 };
+    x.synced_placement = Some(x.remote.clone());
+    x.synced_fingerprint = Some(fp);
+    x.own_file = Some(fp.identity());
+    x.synced_content = Some(content.clone());
+    x.remote_content = Some(content);
+    x.last_seen_sha = Some(sha256_hex(body));
+    device.store.put_entry(&x).unwrap();
+
+    let report = do_one(
+        &device,
+        EntityId::folder(folder),
+        Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::CaseClash { with: "Contested".into() } },
+    );
+    assert_eq!(report.retrying, 1, "{report:?}");
+    assert!(device.fs.trashed().is_empty(), "{:?}", device.fs.trashed());
+    assert_eq!(device.fs.peek("contested/x.txt").as_deref(), Some(&body[..]));
+    let waits: Vec<String> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "park_waits")
+        .map(|i| i.detail)
+        .collect();
+    assert!(waits.iter().any(|d| d.contains("x.txt was moved in here")), "{waits:?}");
+}
+
+/// While a park for an entry is open, nothing places that entry under the
+/// name the park refuses: a move that ran beside a waiting park landed on the
+/// name refused (B6). A move to another name still runs -- it is what ends a
+/// clash read against an agreement the disk has left behind (rig run 1873).
+#[test]
+fn nothing_places_an_entry_while_its_park_is_open() {
+    let (_clock, server, device) = world();
+    let folder = server.seed_folder(None, "notes");
+    device.fs.user_mkdir("Work");
+    device.fs.user_mkdir("Notes");
+    let mut f = fresh(EntityId::folder(folder), None, "notes", LocalStatus::Synced);
+    f.synced_placement = Some(Placement { parent: None, name: "Work".into() });
+    f.synced_fingerprint = Some(jd_vfs::Fingerprint::of_directory(device.fs.file_id_of("Work").unwrap(), 0));
+    device.store.put_entry(&f).unwrap();
+    // A park that is still waiting, queued ahead of the move.
+    let park = plan(
+        vec![PlanItem::new(
+            EntityId::folder(folder),
+            Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "notes".into() } },
+            0,
+        )],
+        &jd_vfs::Personality::linux(),
+        &jd_core::order::FolderParents::default(),
+    );
+    device.fs.user_mkdir("notes");
+    let mv = plan(
+        vec![PlanItem::new(
+            EntityId::folder(folder),
+            Action::ApplyRemoteMove { to: Placement { parent: None, name: "notes".into() }, agree_at: None },
+            0,
+        )],
+        &jd_vfs::Personality::linux(),
+        &jd_core::order::FolderParents::default(),
+    );
+    {
+        let mut keys = device.key_source();
+        journal(&device.store, &park, &mut keys).unwrap();
+        journal(&device.store, &mv, &mut keys).unwrap();
+    }
+    let now = device.now();
+    let e: ExecEnv = env(&device, &now);
+    let mover = device.store.queued_ops().unwrap().into_iter().find(|o| o.kind == "move_local").unwrap();
+    let outcome = jd_core::execute::run_one(&e, &mover).unwrap();
+    assert!(matches!(outcome, OpOutcome::Overtaken(ref why) if why.contains("a park for this entry is open")), "{outcome:?}");
+    assert!(device.fs.exists("Work"), "the folder moved while its park was open");
+
+    // A move to a name the park does not refuse is not held.
+    let elsewhere = plan(
+        vec![PlanItem::new(
+            EntityId::folder(folder),
+            Action::ApplyRemoteMove { to: Placement { parent: None, name: "elsewhere".into() }, agree_at: None },
+            0,
+        )],
+        &jd_vfs::Personality::linux(),
+        &jd_core::order::FolderParents::default(),
+    );
+    {
+        let mut keys = device.key_source();
+        journal(&device.store, &elsewhere, &mut keys).unwrap();
+    }
+    let mover = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .find(|o| o.kind == "move_local" && o.params.contains("elsewhere"))
+        .unwrap();
+    let outcome = jd_core::execute::run_one(&e, &mover).unwrap();
+    assert!(!matches!(outcome, OpOutcome::Overtaken(ref why) if why.contains("a park for this entry is open")), "{outcome:?}");
+}
+
+/// B3, the exec half: a disk that refuses a name the personality thinks it
+/// can hold (an eCryptfs home, an SMB share) is not retried. The move stands
+/// down, the refusal is written down under the name the server gives the
+/// entry, and the next pass parks it. Retried, it was refused every pass, for
+/// ever, with nothing said. RED with the refusal classified as a retry.
+#[test]
+fn a_name_the_disk_refuses_is_written_down_not_retried() {
+    let (_clock, server, device) = world();
+    let body = b"held under a name the disk will refuse";
+    let file = server.seed_file(None, "refused-here.dat", body);
+    device.fs.user_write("x.dat", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("x.dat")).unwrap().unwrap();
+    let id = EntityId::file(file);
+    let mut e = fresh(id, None, "refused-here.dat", LocalStatus::Synced);
+    let content = ContentId { sha256: sha256_hex(body), size: body.len() as u64 };
+    e.synced_placement = Some(Placement { parent: None, name: "x.dat".into() });
+    e.synced_fingerprint = Some(fp);
+    e.own_file = Some(fp.identity());
+    e.synced_content = Some(content.clone());
+    e.remote_content = Some(content);
+    device.store.put_entry(&e).unwrap();
+    device.fs.fail_next(jd_sim::FsOp::Rename, None, jd_sim::FailureKind::NameRefused, 1);
+
+    let report = do_one(&device, id, Action::ApplyRemoteMove { to: Placement { parent: None, name: "refused-here.dat".into() }, agree_at: None });
+    assert_eq!((report.retrying, report.overtaken), (0, 1), "{report:?}");
+    let refused: Vec<String> = device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == jd_core::naming::NAME_REFUSED && i.entity == Some(id))
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(refused, vec!["refused-here.dat".to_string()]);
+
+    let ctx = jd_core::reconcile::Context {
+        date: "2026-07-31".into(),
+        device_name: "laptop".into(),
+        conflict_suffix: 1,
+        personality: jd_vfs::Personality::linux(),
+        trace: false,
+    };
+    let now = device.now();
+    let env_ = env(&device, &now);
+    let mut keys = device.key_source();
+    jd_core::pass::run_pass(&env_, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert!(matches!(after.status, LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { .. })), "{:?}", after.status);
+}
+
+/// B4's guard: a download for a record that already agrees with the server's
+/// head, its own file standing here, fetches nothing and stands down.
+#[test]
+fn a_download_stands_down_when_the_record_already_holds_the_head() {
+    let (_clock, server, device) = world();
+    let body = b"already here";
+    let file = server.seed_file(None, "kept.txt", body);
+    device.fs.user_write("kept.txt", body);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("kept.txt")).unwrap().unwrap();
+    let id = EntityId::file(file);
+    let mut e = fresh(id, None, "kept.txt", LocalStatus::Synced);
+    let content = ContentId { sha256: sha256_hex(body), size: body.len() as u64 };
+    e.synced_placement = Some(e.remote.clone());
+    e.synced_fingerprint = Some(fp);
+    e.own_file = Some(fp.identity());
+    e.synced_content = Some(content.clone());
+    e.remote_content = Some(content);
+    device.store.put_entry(&e).unwrap();
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!((report.done, report.overtaken), (0, 1), "{report:?}");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(after.own_file, Some(fp.identity()), "the record was rebound");
 }
 
 /// The same on a USB stick, where neither a file nor a directory has an id:
