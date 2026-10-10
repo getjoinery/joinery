@@ -253,9 +253,20 @@ check(AgentChannelEndpoint::validation_error(
 	'a request that names a file is refused as an undeclared field',
 	'a node that could name a file could name any file; the plane names it from its own manifest');
 
+// The one field that names a file, for release_file, is a closed pattern: a
+// deployment file under utils/ or includes/, never a path that climbs.
+foreach (['public_html/utils/../../config/x.php', '/etc/passwd', 'public_html/utils/upgrade.sh', 'public_html/plugins/x/y.php', '../public_html/utils/upgrade.php'] as $bad) {
+	check(AgentChannelEndpoint::validation_error(
+			['node_id' => 1, 'kind' => 'release_file', 'version' => '0.8.475', 'file' => $bad], $spec) !== null,
+		'a release_file request naming ' . $bad . ' is refused before anything is resolved');
+}
+check(AgentChannelEndpoint::validation_error(
+		['node_id' => 1, 'kind' => 'release_file', 'version' => '0.8.475', 'file' => 'public_html/utils/upgrade.php'], $spec) === null,
+	'and a deployment file is accepted');
+
 $kinds = AgentChannelEndpoint::ARTIFACT_KINDS;
-check($kinds === ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body', 'release_manifest'],
-	'the artifact kinds are exactly the six the agent asks for',
+check($kinds === ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body', 'release_manifest', 'release_file'],
+	'the artifact kinds are exactly the seven the agent asks for',
 	'the agent and the plane agree by convention here, the way the primitive vocabulary does; '
 	. 'a kind on one side and not the other is a request that silently 400s: ' . implode(',', $kinds));
 // Where the agent's source is on this box, its compiled-in list is read and

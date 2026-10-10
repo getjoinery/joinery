@@ -15,6 +15,9 @@
  *
  * @version 1.24 - verify_state(): never verified and stale are problems a day past the node's verify interval
  *                 (FleetBackupPolicy::verify_alarm_days(), 8 days at the weekly default), not 45 and 60 days
+ * @version 1.24 - note_reported_script_trust(): a node that looked at its deployment files (agent 1.71.0) names the
+ *                differing ones, and its report that none differ clears an untrusted_file state it set; the
+ *                health card lists the files and the repair
  * @version 1.23 - problems(), fleet_backup_problems() and script_trust_problems() are gone with the
  *                dashboard banners they fed; each condition is an incident (IncidentSource*)
  * @version 1.22 - unpublished_file also covers an edit in progress on this management node: a refused file
@@ -579,18 +582,36 @@ class NodeMonitorHealth {
 	 * Does not save. The claim handler saves the node once, after folding
 	 * everything the poll reported.
 	 */
-	public static function note_reported_script_trust($node, string $reported): void {
+	public static function note_reported_script_trust($node, string $reported, ?array $files = null): void {
 		if (!$node || !$node->key) { return; }
 		if (!in_array($reported, ['ok', 'untrusted_manifest', 'untrusted_file'], true)) { return; }
 
 		$current = (string)$node->get('mgn_script_trust');
-		if ($reported === 'ok') {
-			if ($current !== 'untrusted_manifest') { return; }
+		$clear = function () use ($node) {
 			$node->set('mgn_script_trust', 'ok');
 			$node->set('mgn_script_trust_since', null);
 			$node->set('mgn_script_trust_reason', '');
 			$node->set('mgn_script_trust_job_type', '');
+			$node->set('mgn_script_trust_files', '');
+		};
+
+		if ($reported === 'ok') {
+			if ($current === 'untrusted_manifest') {
+				$clear();
+			} elseif ($current === 'untrusted_file' && $files !== null && $files === []) {
+				// The node looked at its deployment files itself and every one
+				// matches its release: the file that refused has been put back.
+				// Only an agent that checks files says an empty list; an older
+				// agent says nothing and cannot clear this.
+				$clear();
+			}
 			return;
+		}
+
+		// The names, when the node gave them: they are what the incident lists
+		// and what the repair is offered for.
+		if ($reported === 'untrusted_file' && $files !== null) {
+			$node->set('mgn_script_trust_files', json_encode(array_values($files)));
 		}
 
 		if ($current !== $reported) {
@@ -601,9 +622,19 @@ class NodeMonitorHealth {
 			// plainly where this came from rather than leaving it blank.
 			if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
 				$node->set('mgn_script_trust_reason',
-					'The node reported on its poll that it cannot verify its own scripts.');
+					$reported === 'untrusted_file' && $files
+						? 'The node reported that these deployment files differ from its signed release: ' . implode(', ', $files) . '.'
+						: 'The node reported on its poll that it cannot verify its own scripts.');
 			}
 		}
+	}
+
+	/** The deployment files a node reported as differing from its release, or []. */
+	public static function script_trust_files($node): array {
+		$raw = trim((string)$node->get('mgn_script_trust_files'));
+		$list = $raw === '' ? [] : json_decode($raw, true);
+		if (!is_array($list)) { return []; }
+		return array_values(array_intersect(array_map('strval', $list), ReleaseManifestSource::SELF_UPDATE_FILES));
 	}
 
 	/** Has this job type ever refused on this node for a trust reason? */
@@ -649,10 +680,13 @@ class NodeMonitorHealth {
 		}
 
 		if ($state === 'untrusted_file') {
+			$files = self::script_trust_files($node);
 			return self::result('script_trust', 'A file on this node does not match the release' . $for,
 				'The signed manifest is good and a file on disk does not match it, so the agent will '
 				. 'not run it as root. This is not fixed by re-delivering a manifest — find out why the '
 				. 'file differs before anything else.'
+				. ($files ? ' Differing: ' . implode(', ', $files) . '. If one is a deployment file an upgrade '
+					. 'replaced and stopped, Restore signed copy puts the release\'s own bytes back and keeps what it replaced.' : '')
 				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
 				. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
 		}

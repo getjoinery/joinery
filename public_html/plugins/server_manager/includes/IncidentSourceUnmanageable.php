@@ -10,6 +10,7 @@
  * upgrades and backups included), or a file does not match its signed release
  * (find out why before anything else). Clears when a later job verifies.
  *
+ * @version 1.3 - lists the deployment files the node reported as differing (agent 1.71.0)
  * @version 1.2 - cleared_text() covers an edit in this site's own checkout as well as a commit
  * @version 1.1 - cleared_text() says when the file turned out to be this site's own unpublished commit
  * @version 1.0
@@ -29,6 +30,10 @@ class IncidentSourceUnmanageable implements IncidentSource {
 		}
 		$health = NodeMonitorHealth::script_trust_health($node);
 		$detail = array('What it means' => (string)$health['detail']);
+		$files = $state === 'untrusted_file' ? NodeMonitorHealth::script_trust_files($node) : array();
+		if ($files) {
+			$detail['Differing files'] = implode(', ', $files);
+		}
 		$since = trim((string)$node->get('mgn_script_trust_since'));
 		if ($since !== '') {
 			$detail['Since'] = $since . ' UTC';

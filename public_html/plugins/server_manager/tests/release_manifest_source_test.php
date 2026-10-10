@@ -161,4 +161,41 @@ if ($pv === '') {
 	}
 }
 
+// ---------------------------------------------------------------------------
+section('A deployment file out of a published core archive (release_file)');
+
+// The node names a version and one of five files. Nothing else is served this
+// way, whatever its spelling.
+foreach ([
+	'public_html/index.php', 'public_html/utils/../../config/Globalvars_site.php', '../etc/passwd',
+	'/etc/passwd', 'public_html/utils/upgrade.php/', 'RELEASE_MANIFEST', '', 'public_html/utils/upgrade.PHP',
+] as $bad) {
+	check(ReleaseManifestSource::read_file('0.8.370', $bad) === null, 'not served as a release file: ' . var_export($bad, true));
+}
+check(ReleaseManifestSource::read_file('../0.8.370', 'public_html/utils/upgrade.php') === null,
+	'a traversal version reads nothing');
+check(ReleaseManifestSource::read_file('9.99.999', 'public_html/utils/upgrade.php') === null,
+	'an unpublished version is nothing to offer');
+check(count(ReleaseManifestSource::SELF_UPDATE_FILES) === 5, 'there are five deployment files');
+
+if ($core_version === '' || !is_array($pair ?? null)) {
+	check(true, 'no core archive on this box - release files not exercised (skipped)');
+} else {
+	// The proof that matters: each file the plane serves hashes to the value the
+	// signed manifest of the same release lists for it, which is what the node
+	// checks before it writes a byte.
+	$listed = array();
+	foreach (explode("\n", $pair['manifest']) as $line) {
+		if (strlen($line) > 66 && $line[64] === ' ' && $line[65] === ' ') {
+			$listed[substr($line, 66)] = substr($line, 0, 64);
+		}
+	}
+	foreach (ReleaseManifestSource::SELF_UPDATE_FILES as $file) {
+		$body = ReleaseManifestSource::read_file($core_version, $file);
+		check(is_string($body) && strlen($body) > 100, 'the archive yields ' . $file);
+		check(is_string($body) && isset($listed[$file]) && hash('sha256', $body) === $listed[$file],
+			$file . ' is byte-identical to what the signed manifest lists');
+	}
+}
+
 harness_finish();

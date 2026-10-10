@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.56 - restore_release_file: put a deployment file back to the bytes the node's release signed
  * @version 1.55 - publish_upgrade records deploy_all on the job when the management node publishes itself
  * @version 1.54 - data_root_migrate: move this host's data onto its data root (one_data_root WP4)
  * @version 1.53 - move_to_plane: ask another management node to adopt this node's machine (API Keys tab)
@@ -169,6 +170,7 @@ class NodeDetailActions {
 		'file_head'                => 'overview',
 		'schema_probe'             => 'overview',
 		'reclaim_managed_file'     => 'overview',
+		'restore_release_file'     => 'overview',
 		'page_probe'               => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
@@ -376,6 +378,12 @@ class NodeDetailActions {
 			case 'schema_probe': {
 				$built = JobCommandBuilder::build_schema_probe($node, trim((string)($_POST['table'] ?? '')));
 				$job = ManagementJob::createFromBuild($node->key, 'schema_probe', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'restore_release_file': {
+				$built = JobCommandBuilder::build_restore_release_file($node, (string)($_POST['file'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'restore_release_file', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

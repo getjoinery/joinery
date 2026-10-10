@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.115 - build_upgrade_preflight / build_restore_release_file: the two words of specs/release_file_repair.md
  * @version 1.114 - build_data_root_migrate: move a host's data onto its data root (one_data_root WP4), never
  *                  addressed to a site container, whose data is its volumes on its host
  * @version 1.113 - build_copy_take_key sends manifest_url, the copy's own read of the backup at its provider; a copy
@@ -2846,6 +2847,51 @@ class JobCommandBuilder {
 
 	public static function build_agent_report_primitive($node) {
 		return ['primitive' => 'agent_report', 'params' => []];
+	}
+
+	/**
+	 * Would an upgrade stop before it started: the upgrade_preflight observe
+	 * word. The node checks its signed manifest, its five deployment files, its
+	 * VERSION, the upgrade lock, room to stage a release and its active theme,
+	 * and answers pass or fail per check with a short reason. No parameters, no
+	 * content. A staged rollout asks this of a node before it queues its apply
+	 * (specs/release_file_repair.md).
+	 */
+	public static function build_upgrade_preflight($node) {
+		if (!self::has_primitive($node, 'upgrade_preflight')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot check an upgrade first. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['upgrade_preflight']));
+		}
+		return self::build_upgrade_preflight_primitive($node);
+	}
+
+	public static function build_upgrade_preflight_primitive($node) {
+		return ['primitive' => 'upgrade_preflight', 'params' => []];
+	}
+
+	/**
+	 * Put one deployment file back to the bytes the node's installed release
+	 * signed: the restore_release_file operate word. `file` is one of the five
+	 * files an upgrade replaces first (ReleaseManifestSource::SELF_UPDATE_FILES,
+	 * mirrored from the agent's own compiled list); the node refuses anything
+	 * else, and refuses bytes that are not the signed ones whoever offers them.
+	 */
+	public static function build_restore_release_file($node, $file) {
+		if (!self::has_primitive($node, 'restore_release_file')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot restore a release file. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['restore_release_file']));
+		}
+		return self::build_restore_release_file_primitive($node, $file);
+	}
+
+	public static function build_restore_release_file_primitive($node, $file = null) {
+		$file = (string)$file;
+		if (!in_array($file, ReleaseManifestSource::SELF_UPDATE_FILES, true)) {
+			throw new Exception('restore_release_file names one of the five deployment files an upgrade replaces first.');
+		}
+		return ['primitive' => 'restore_release_file', 'params' => ['file' => $file]];
 	}
 
 	/**

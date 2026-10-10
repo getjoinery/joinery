@@ -26,6 +26,8 @@
  * happens entirely here, out of this plane's own directory layout, for the same
  * reason serve_agent_binary() takes an architecture rather than a filename.
  *
+ * @version 1.2 - read_file(): one of the five self-update files out of a published core archive, for a node
+ *                that must put it back (specs/release_file_repair.md)
  * @version 1.1 - member names are matched by stripping a './' PREFIX, not a character set
  */
 class ReleaseManifestSource {
@@ -85,6 +87,46 @@ class ReleaseManifestSource {
 		if ($signature === null) { return null; }
 
 		return ['manifest' => $manifest, 'signature' => $signature];
+	}
+
+	/**
+	 * The deployment files an upgrade replaces before it deploys anything, in
+	 * the agent's spelling. The only files read_file() will serve: a node that
+	 * has put one of these wrong cannot upgrade itself, and nothing else in a
+	 * core archive is the plane's to hand out this way.
+	 */
+	const SELF_UPDATE_FILES = [
+		'public_html/utils/upgrade.php',
+		'public_html/utils/update_database.php',
+		'public_html/includes/DatabaseUpdater.php',
+		'public_html/includes/DeploymentHelper.php',
+		'public_html/includes/PackageSignature.php',
+	];
+
+	/** A self-update file is far smaller than this; larger is not one of ours. */
+	const MAX_FILE_BYTES = 4194304;
+
+	/**
+	 * The bytes of one self-update file as the core archive for a version holds
+	 * it, or NULL when this plane cannot supply it (an unknown file or version, a
+	 * pruned archive, a member that is not there).
+	 *
+	 * The node names a VERSION and one of five FILES; neither reaches the
+	 * filesystem as given. Same trust position as read(): these are bytes the
+	 * publisher signed, the node checks them against the signed manifest it
+	 * already holds before writing one, and a plane that sends other bytes
+	 * restores nothing.
+	 */
+	public static function read_file(string $version, string $file): ?string {
+		if (!self::valid_version($version))             { return null; }
+		if (!in_array($file, self::SELF_UPDATE_FILES, true)) { return null; }
+
+		$archive = self::archive_path('', $version);
+		if ($archive === null || !is_file($archive)) { return null; }
+
+		$body = self::extract($archive, $file);
+		if ($body === null || strlen($body) > self::MAX_FILE_BYTES) { return null; }
+		return $body;
 	}
 
 	/** Is this an artifact owner this plane will resolve? */
