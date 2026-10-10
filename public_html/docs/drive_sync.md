@@ -101,8 +101,15 @@ the file to another record.
   A file never sent, renamed over a record whose own file stands nowhere, is
   that record's next version, as a file no record owns at that path is. The
   record minted for it when a pass saw it under its temporary name is
-  dropped, with anything queued for it. A weak volume reads it, as any file
-  moved and edited between two scans, as a delete plus a creation.
+  dropped, with anything queued for it. It is read so only where the file
+  was seen under another name in the same folder: every record never sent
+  keeps where its own file last stood on this disk, written by the scan and
+  by the engine's own moves of the file, never by naming. A file carried in
+  from another folder, one whose record wears a name naming planned but the
+  disk never gave it, and one whose last place is not known are each a file
+  in their own right: a delete plus a creation. So is a save whose temporary
+  file is kept in another folder. A weak volume reads a save by rename, as
+  any file moved and edited between two scans, as a delete plus a creation.
 - **The executor acts only on the file it planned for.** On a strong volume a
   move, a park, a trash or a conflict copy of a file stands down
   (`Overtaken`) when the file at the path is not the record's own, and the

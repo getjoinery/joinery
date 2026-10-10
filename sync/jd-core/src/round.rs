@@ -324,6 +324,7 @@ mod tests {
             stands_at: None,
             own_file: None,
             last_seen_sha: None,
+            own_file_seen_at: None,
         }
     }
 

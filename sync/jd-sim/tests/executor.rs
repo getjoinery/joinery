@@ -100,6 +100,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         stands_at: None,
         own_file: None,
         last_seen_sha: None,
+        own_file_seen_at: None,
     }
 }
 
