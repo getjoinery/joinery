@@ -6,7 +6,7 @@
 
 **Plugin name:** `boards`. The product name is "Joinery Boards".
 
-**Prerequisite:** the **Email Handlers and Reply Addresses** spec. It provides the general platform pieces that the email features in §5 are built on:
+**Prerequisite:** **Core Improvements for Plugins**, Part 2 (Email handlers and reply addresses). It provides the general platform pieces that the email features in §5 are built on:
 
 - plugin-owned email addresses;
 - secret reply addresses;
@@ -15,6 +15,8 @@
 - buttons in the mailbox message reader.
 
 The rest of Boards can be built in parallel, but §5.2, §5.3 and §5.5 can't ship before it.
+
+The same spec's Part 1 (recurrence, calendar invites, calendar de-duplication) is for the sibling plugins; Boards does not depend on it.
 
 **Guiding rule: when in doubt, leave it out.** Reviewers keep naming simplicity as Trello's real product. Every feature here has to earn its place, and anything a small team would not miss within a month is deferred.
 
@@ -191,7 +193,7 @@ Resolution order:
 
 ## 5. Email
 
-This is the headline feature. The mechanics come from the prerequisite spec, **Email Handlers and Reply Addresses**:
+This is the headline feature. The mechanics come from **Core Improvements for Plugins**, Part 2 (Email handlers and reply addresses):
 
 - handler aliases;
 - reply addresses;
@@ -211,7 +213,7 @@ Boards declares one handler (`"inboundHandlers": {"boards": {"class": "BoardsInb
 - **No eligible domain.** The board's email panel says email-to-board needs the mailbox plugin with a Standard-level domain, and shows nothing else.
 - **Stored copies.** Every message to the alias is stored like any store-mode mail, so the `boards@` mailbox keeps a copy that admins can open under the usual mailbox grants.
 
-`BoardsInboundHandler::handle($msg, $tag)` runs the standard check from the prerequisite spec:
+`BoardsInboundHandler::handle($msg, $tag)` runs the standard check from the core-improvements spec:
 
 1. `InboundReplyAddress::resolve('boards', $tag)`.
 2. `senderIs()`.
@@ -305,7 +307,7 @@ Watching follows Trello's model, but quieter by default.
 
 ### 5.5 Make a card from the mailbox
 
-When the mailbox plugin is active, the message reader gains a **Make a card** button. It is a reader action from the prerequisite spec:
+When the mailbox plugin is active, the message reader gains a **Make a card** button. It is a reader action from the core-improvements spec:
 
 ```json
 "mailboxMessageActions": {
@@ -439,7 +441,7 @@ Each item below is a test. Every test uses the shared harness and an `@joinery-t
 
 **`plugins/boards/tests/boards_import_test.php`** (test-db): imports a fixture Trello export with several checklists per card, archived lists and unmatched members.
 
-The mailbox and core tests for the shared email pieces belong to the prerequisite spec.
+The mailbox and core tests for the shared email pieces belong to the core-improvements spec.
 
 **Live walk:**
 

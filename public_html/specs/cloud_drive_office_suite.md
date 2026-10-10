@@ -2,7 +2,7 @@
 
 **Purpose:** Members open a Word or Excel file in their Drive, edit it in the browser and save it back, without the file getting damaged. The target is everyday files: school papers, letters, resumes, to-do lists and household budgets.
 
-**Status:** Active. **Phase 0 (measure and test) comes first and gates everything else.** Phases 1–4 are written so the build can start as soon as Phase 0 passes. Their details may change with what Phase 0 finds.
+**Status:** Active. **Phase 0 (measure and test) ran 2026-10-10 and passed G1–G4.** Results are in §6, and Phases 1–3 below already reflect them. G5 (licensing) was decided the same day: the free edition in home mode (§1). Phase 1 can start.
 
 **Plugin name:** `office_editor`.
 
@@ -19,6 +19,7 @@
 | Where does it run? | **On the node, next to the site.** | Files never leave the user's own server. |
 | Formats | **.docx and .xlsx** (plus .odt/.ods, which come free). Blank new documents of both types. | This matches the target users. PowerPoint is out of scope for v1. |
 | Protection levels | **Standard files only.** Private and Fortress files show "Download to edit" instead. | The editor has to read the file's plaintext. For Fortress that breaks the promise outright. For Private it would put plaintext in the editor's memory and temp files outside the vault window. Private files could be added later in their own spec. |
+| Licensing | **Free Collabora edition (CODE) in home mode, from the MPL-licensed packages only.** A paid license waits until there is money for one. | Home mode shows users no Collabora popups. It caps each server at 10 open files and 20 connected people, about what a 1 GB node can hold anyway (§6.2). Default CODE has no cap, but it shows a welcome popup and feedback prompts that can't be switched off. The editor server and office engine are MPL 2.0, which allows commercial and production use; Collabora's "not for production" is advice about support, not a license term (§6.5). Three rules keep us inside the licenses: skip the EULA-licensed `code-brand` package, let each node download from Collabora's repository rather than us hosting the packages, and never put "Collabora" in a product or feature name. Moving to a paid license later swaps the package in installer step 1 and drops the home-mode setting; nothing else in the plugin changes. |
 | Multi-tenant Docker hosts | **Out of scope for v1.** | Those hosts give each site a fixed memory budget that starts at 256 MB, and the editor alone needs several times that. A shared, host-level editor for those hosts would be its own spec. |
 
 ### What the editor does and doesn't preserve
@@ -139,22 +140,32 @@ Results get written into §6 of this spec. **Go** requires all of:
 
 The installer:
 
-1. Adds Collabora's apt repository and signing key, then installs `coolwsd`, `code-brand` (or the licensed build chosen in G5) and the font packages Phase 0 found necessary.
+1. Adds Collabora's apt repository and signing key, then installs `coolwsd` and the office-engine packages it depends on, all MPL 2.0. It does **not** install `code-brand`: that package (styling and theme images) is under Collabora's EULA, "all rights reserved" (§6.5). Phase 1 confirms the editor opens, edits and saves without it; Phase 0 ran with it installed. The node downloads straight from Collabora's repository, so Joinery never hosts or redistributes Collabora's binaries. No font packages are needed: Collabora bundles metric twins of Times New Roman, Arial, Calibri and Cambria (§6.4).
 2. Writes `coolwsd.xml`:
    - listen on loopback only (`127.0.0.1` and `::1`);
    - TLS terminated by Apache, not coolwsd;
    - the WOPI host allowlist set to this site only;
-   - `memproportion`, `num_prespawn_children` and per-document limits set from the Phase 0 numbers;
-   - the capability mode Phase 0 settled on.
-3. Writes an Apache drop-in (`conf-available/joinery-office-editor-<site>.conf`) proxying `/browser`, `/hosting/discovery`, `/hosting/capabilities` and `/cool/` (websockets via `proxy_wstunnel`) to coolwsd. It also enables `proxy_wstunnel`. On Docker hosts this goes on both the host Apache and the container Apache. It's a drop-in because the main vhost template refuses operator edits.
-4. Refuses to install below the memory floor from §2.7 and logs why.
+   - `num_prespawn_children` = 1. Idle memory was the same at 1 and 4, and 1 means fewer processes.
+   - `home_mode.enable` = true: no Collabora popups, and at most 10 open documents and 20 connections per server (§1, §6.5).
+   - no added capabilities. Inside a site container, Collabora isolates each document with its Landlock jail (§6.3); on bare metal it uses namespaces.
+3. **Memory guard.**
+   - On bare metal: a systemd drop-in sets `MemoryMax` on `coolwsd.service`. When Collabora hits the cap, its overflow goes to swap and opens slow down, while Postgres and Apache stay untouched (§6.2).
+   - `memproportion` is only a soft limit: above it Collabora unloads idle documents, but it never refuses a new one.
+   - Inside a container there is no systemd, so `memproportion` and the site's own memory limit are the only guards.
+4. **Proxy.**
+   - The container Apache (or the bare-metal vhost) gets a drop-in, `conf-available/joinery-office-editor.conf`. It proxies `/browser`, `/hosting/discovery` and `/hosting/capabilities`, plus `/cool` with `upgrade=websocket`.
+   - On Docker hosts, the host proxy template's `ProxyPass / http://127.0.0.1:{{PORT}}/` line (in both the :80 and :443 blocks) gains `upgrade=websocket`. Without it the editor never connects (§6.3).
+   - This is a template change, because `render_vhost.sh` refuses operator edits. `mod_proxy_http` handles the upgrade itself, so `proxy_wstunnel` is not needed.
+5. Refuses to install on a node with under 2 GB of RAM **and no swap**, and logs why. A 1 GB node with 1 GB of swap handled 10 simultaneous editors (§6.2).
 
 ### 3.2 Starting and stopping
 
-Phase 0 decides between:
+**Start on open, stop when idle.** Idle Collabora costs about 165 MB. On a 1 GB hosted node that is close to half of what the site leaves free (398 MB). A cold start takes 3–7 seconds (§6.1), an acceptable wait on first open.
 
-- **Always on.** This is chosen if the idle cost is small (G2's second branch).
-- **Start on open, stop when idle.** A web request has no root, so the installer adds a narrow `sudoers` rule that lets the web user run only `office-editor-ctl start|status`. Opening a document calls `start` and waits for discovery to answer. A cron job stops the service after 30 minutes with no open documents.
+- A web request has no root, so the installer adds a narrow `sudoers` rule that lets the web user run only `office-editor-ctl start|status`.
+- Opening a document calls `start` and waits for discovery to answer. The page shows "Starting the editor…" meanwhile.
+- A cron job stops the service after 30 minutes with no open documents.
+- In a container, `office-editor-ctl` starts coolwsd directly as the `cool` user, the same command its systemd unit runs.
 
 ---
 
@@ -210,25 +221,182 @@ This needs one new method beside `save_new_content`, with its own test.
 
 ## 5. Phase 3 — user interface, gating and tests
 
-### 5.1 Drive UI
+### 5.1 The Drive hook (core)
 
-- **Open in editor** on any .docx, .xlsx, .odt or .ods file at the standard level that the member can read. Read-only members get the editor in view mode.
-- **New → Document / Spreadsheet** in a folder.
-- On Private or Fortress files, the action reads **Download to edit**, with one line explaining why.
-- The editor page fills the screen, keeps the Drive breadcrumb and a Close button, and shows "Saved" / "Saving…" from the editor's status messages.
+Drive is core, and the editor is a plugin, so Drive needs a place where a plugin can say "I can open these files". Drive itself never names Collabora or the plugin. With the plugin off, nothing registers, and Drive behaves exactly as it does today.
 
-### 5.2 Gating
+**Registering.** The plugin's `bootstrap` (loaded by `PluginBootstraps`, the same path the vault and mailbox plugins use to register their hooks) calls:
+
+- `DriveHelper::registerOpener($key, $spec)`. `$spec` holds:
+  - `label`: the menu text, e.g. "Open in editor".
+  - `extensions`: e.g. `docx`, `xlsx`, `odt`, `ods`.
+  - `url($file, $user_id)`: returns the page that opens this file for this member, or `null` when it can't right now. The member's tier lacks the feature, say, or the file isn't at the standard level.
+  - `explain($file, $user_id)` (optional): one line for when `url` returned `null` for a reason the member should see, e.g. "Private files can't be opened on the server. Download to edit."
+- `DriveHelper::registerCreator($key, $spec)`. `$spec` holds `label` (e.g. "Document") and `action`, the API action that creates the blank file and returns its opener URL.
+
+**Listing.** `DriveHelper::file_export()` adds `open_with` to each file it returns, as a list of `{key, label, url}` or `{key, label, explain}`:
+- Only openers whose extensions match are asked.
+- Only Drive's own files get openers. Another feature's file shown under "Also in your account" stays download-only, as now.
+- Nothing is added in Trash.
+- Openers load only when the listing is for a browser session. Sync clients and the mobile app don't receive the field.
+
+The folder listing carries the registered creators the same way, as `create_options`.
+
+**In the page** (`assets/js/drive.js`):
+- **Clicking a file** goes to its first `open_with` URL in the same tab. With no opener, the click downloads the file, as it does today.
+- **The ⋯ menu** lists each opener's label above Download. An opener carrying only `explain` shows its label greyed, with the explanation underneath.
+- **The toolbar's "New folder" button becomes a New menu:** Folder, then each creator. Choosing a creator asks for a name, calls its action and goes to the returned URL.
+
+**Tests:** the Drive API suite gains a test opener. It checks:
+- registration, and the extension match;
+- `open_with` present for a standard Drive file, and absent in Trash, for other features' files and for sync clients;
+- `explain` returned when `url` gives `null`;
+- `create_options` in the folder listing.
+
+### 5.2 What the member sees
+
+1. **Opening a file.** Clicking a .docx, .xlsx, .odt or .ods file at the standard level opens it in the editor, the way Google Drive does. Download stays in the ⋯ menu. Members with view-only access get the editor in view mode.
+2. **First open after a quiet spell.** "Starting the editor…" shows for 3–7 seconds (§3.2).
+3. **The editor page** (`/profile/office_editor/edit?file={id}`) fills the screen.
+   - A thin top bar holds the folder path, the file name, "Saved" / "Saving…" (from the editor's status messages) and **Close**.
+   - Saving is automatic, every few minutes and on close; Ctrl+S saves now.
+   - Close returns to the file's folder. The session adds one entry to Version history (§4.3).
+4. **New → Document / Spreadsheet** asks for a name, creates the blank file in the current folder and opens it.
+5. **Shared files:** people with Editor access edit together and see each other's cursors.
+6. **Private and Fortress files** still download when clicked. The menu shows **Download to edit** with one line explaining why.
+7. **Server full.** When the home-mode cap is reached, the member sees "The editor is busy: too many documents are open on this site right now. Try again in a few minutes, or download the file." with a Download button, not Collabora's own error. Phase 1 records exactly what Collabora returns for the 11th file and the 21st connection, so the page can recognise it.
+8. **Changed elsewhere.** A save refused for a timestamp conflict (§4.3) says the file was changed somewhere else, and offers to keep this version or reopen the other.
+9. **Phones:** the editor's own phone layout is used, with no extra work.
+
+### 5.3 Gating
 
 - **Per site:** the plugin is active, the host installer succeeded, and the node meets the memory floor.
 - **Per member:** a new tier feature, `office_editing` (boolean), in the plugin's `tier_features.json`.
 
-### 5.3 Tests
+### 5.4 Tests
 
 - **WOPI host suite** (`db` tier): token mint/verify, expiry, wrong-file and wrong-user refusal, non-loopback refusal, proof-key failure, permission revoked mid-session, level changed mid-session, quota exceeded, timestamp conflict, and one version per session.
 - **Live test** (`live` tier): on a node with the editor installed, open corpus file #1, change a word, save, and confirm a new version exists and the PDF page count is unchanged.
+- **Cap test** (`live` tier): open 11 different files; the 11th gets the "editor is busy" page, and the first 10 still save.
 
 ---
 
-## 6. Phase 0 results
+## 6. Phase 0 results (2026-10-10)
 
-*(Fill in when Phase 0 runs: tables from §2.4, fidelity results per corpus file, the container finding, the licensing finding, then the go/no-go call against §2.7.)*
+**Setup.** Collabora CODE 26.04.5 was installed from Collabora's apt repository: 58 s to install, ~700 MB of disk. Each box ran the public Joinery release, installed by the standard installer:
+
+| Box | Shape | Setup |
+|---|---|---|
+| A | 1 GB, 1 vCPU, 1 GB swap | bare metal, full mail stack |
+| B | 2 GB, 1 vCPU | bare metal |
+| C | 4 GB, 2 vCPU | Docker host, one site container under the default run spec |
+| D | 4 GB | load driver: one headless Chromium per simulated editor, each typing a sentence every 6 s |
+
+All four boxes were deleted afterwards.
+
+**How memory was counted.** "Real memory" is the anonymous (unreclaimable) PSS of Collabora's processes, plus the box's MemAvailable. Plain PSS also counts Collabora's ~650 MB of program files. The kernel can drop and re-read those, which is why naive totals (including the community's ~1.2–1.3 GB idle reports) look so much larger.
+
+### 6.1 Idle cost and cold start
+
+| | A (1 GB) | B (2 GB) | C (container) |
+|---|---|---|---|
+| Available, site idle, no Collabora | 398 MB | 1,315 MB | 3,348 MB |
+| Collabora idle, real memory | 164 MB | 164 MB | 169 MB |
+| Available, Collabora idle | 458 MB (see note) | 1,144 MB | 3,073 MB |
+| Cold start (service start → discovery answers) | 3.9–5.6 s | 4.0–7.2 s | 3.2 s |
+
+On box A the kernel made room by moving the idle spam filter (rspamd) into swap (263 MB), so available memory went *up*. rspamd is the largest process on a bare-metal node: 227–261 MB.
+
+`num_prespawn_children` at 1 and at 4 measured the same.
+
+### 6.2 Editors at once (small files: papers, resume, letter, budget, to-do list)
+
+| Editors | B real mem | B min available | B slowest site page | A real mem | A min available | A swap | A slowest site page | C real mem | C slowest site page |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 220 MB | 1,091 MB | 0.35 s | 229 MB | 412 MB | 273 MB | 0.21 s | 231 MB | 0.03 s |
+| 3 | 298 MB | 1,000 MB | 0.29 s | 343 MB | 305 MB | 284 MB | 0.06 s | – | – |
+| 5 | 365 MB | 939 MB | 0.82 s | 362 MB | 286 MB | 285 MB | 0.20 s | 353 MB | 0.03 s |
+| 10 | 554 MB | 687 MB | 0.92 s | 424 MB | 207 MB | 437 MB | 1.05 s | 547 MB | 0.04 s |
+| 22 (staggered) | – | – | – | – | – | – | – | 987 MB | 0.04 s |
+
+- **Per small document: 37–55 MB.**
+- **Large files:**
+  - A 5,000-row workbook with cross-sheet formulas adds ~120 MB.
+  - A 650 KB workbook dense with conditional formatting adds ~250 MB on its own (available memory fell by ~410 MB).
+  - On box A, that workbook plus two small files ran without trouble.
+- **Open time:** one editor alone sees the document in 2.2–5.6 s. Ten opening at the same instant took 13–17 s. That number is mostly the load driver: server load stayed under 2.
+- **Same file, 3 editors:** Collabora coordinated them itself, with no save conflicts.
+- **No out-of-memory kills on any box, in any run.** Postgres, Apache and rspamd stayed up throughout.
+- **Memory guard:**
+  - `memproportion` is soft. At 15% it unloaded idle documents but still opened all 6.
+  - `MemoryMax=400M` on `coolwsd.service` worked: 8 editors all ran, the overflow went to swap (168 MB), opens slowed to 13–19 s, and nothing else on the box was affected.
+
+### 6.3 Containers and proxying (box C)
+
+- **Privileges.** Collabora runs inside the site container under the default run spec, with no added capabilities. Without `SYS_CHROOT`/`MKNOD` it disables mount namespaces and bind mounting, and isolates each document with a **Landlock jail** (a kernel filesystem sandbox, ABI 4), which it logged as created successfully. On bare metal it uses user and mount namespaces.
+- **Memory and speed** matched bare metal.
+- **Proxy.**
+  - With the host vhost exactly as templated (`ProxyPass / http://127.0.0.1:{PORT}/`), the editor page loads but its websocket never connects.
+  - Adding `upgrade=websocket` to that line fixes it.
+  - The container Apache needs `/browser`, `/hosting/discovery`, `/hosting/capabilities` and `/cool` (with `upgrade=websocket`).
+
+### 6.4 Fidelity
+
+**Corpus.** 18 files, each opened, typed into, saved through the editor, then compared part by part and re-rendered to PDF:
+- **Real Word and Excel files:** 6 Word and 6 Excel from the Apache POI test collection (checkboxes, footnotes, different-first-page headers, pictures, tracked changes, comments; charts, conditional formatting, data validation, pivot table, formulas).
+- **Everyday documents** generated on Word's default template: MLA paper with footnotes and a page-number header, resume, letter with logo and table, monthly budget with pie chart, 5,000-row workbook, and a to-do list with modern checkboxes.
+
+**Survived:**
+- footnotes, page-number fields, different-first-page headers;
+- double spacing, Times New Roman, hanging indents;
+- tables and images;
+- legacy checkboxes (9, the same 5 ticked) and modern checkbox controls (6, the same 3 ticked);
+- tracked changes (new typing in a tracking-on document was itself recorded as a tracked insertion);
+- comment text and threads;
+- charts;
+- all 9 conditional-formatting rule types, including data bars, icon sets and color scales;
+- dropdown validation, the pivot table, frozen panes, currency formats and formulas.
+
+**Page counts were unchanged for every Word file,** including the 10-page MLA paper.
+
+**Lost:** a picture pasted *inside a comment*.
+
+**Rewritten harmlessly:**
+- Word 2010's duplicate styles part and empty footnote/endnote parts are dropped;
+- Excel's shared formulas are written out one per cell;
+- unused number formats are removed;
+- files usually shrink 30–80%.
+
+**Fonts:** Collabora bundles Liberation Serif/Sans (metric twins of Times New Roman/Arial), Carlito (Calibri) and Caladea (Cambria). No extra packages are needed.
+
+**Not checked:**
+- how saved files look in real Microsoft Word (the Windows test VM has no Office);
+- files exported from Google Docs/Sheets (no account);
+- page counts were compared LibreOffice to LibreOffice only.
+
+### 6.5 Licensing facts
+
+- **CODE, default mode:** free, and showed no document or connection cap: 22 documents were open at once. Every open shows an "Explore the New 26.04.5.1 — Collabora Online Development Edition" popup over the document, and its configuration says the welcome and feedback popups cannot be switched off in this mode.
+- **CODE, `home_mode`:** no popups (verified), but caps each server at **10 open documents and 20 connections**.
+- Collabora describes CODE as being for testing, home use and small teams, "not recommended for production": a rolling release with no SLA.
+- **What the packages say** (read 2026-10-10 from the 26.04.5 debs in Collabora's repository):
+  - `coolwsd` (the editor server): `License: MPL-2`.
+  - `collaboraoffice` (the office engine): "made available subject to the terms of the Mozilla Public License, v. 2.0" plus the usual third-party licenses (Apache, MIT, OFL fonts…), and "all rights are reserved to Collabora branding elements and Marks."
+  - `code-brand`: `License: EULA`, "All Rights Reserved". The EULA text itself is not in the package.
+  - None of them says anything about production, commercial use, hosting or user counts. MPL 2.0 has no such limits.
+- **What Collabora staff say:** "CODE is open source, you're not required to buy support… for production use, we recommend COOL" (forum, 2025). Earlier (2021): "the intention is that our CODE binaries are not suitable for use in production in the enterprise. If you want that — build, brand and support it yourself", while also saying the CODE licensing policy hadn't been reviewed and that trademark and CSS theming are proprietary. Read together: a stated preference and a branding claim, not a published license restriction.
+- **Trademark policy:** product, feature, service and domain names may not include Collabora's marks without written permission, and nothing may imply an endorsement.
+- **Collabora Online (paid):** priced per user per year. The list price is about €3 per user per month (on-premise, up to 99 users), and a partner quotes ~€21 per user per year. Shipping it to customer nodes would need a partner or hosting agreement, priced on request.
+- **Our own build from the MPL source:** permitted, but the Collabora marks must come out. We would build and ship LibreOffice core plus Collabora Online ourselves, every release.
+- **arm64:** Collabora's apt repository publishes arm64 packages. This was checked in their documentation only; nothing ran on ARM.
+
+### 6.6 Verdict against §2.7
+
+| # | Result |
+|---|---|
+| G1 | **Pass.** Box B with 5 editors: 939 MB available, slowest site page 0.82 s. With 10: 687 MB and 0.92 s. |
+| G2 | **Pass, both branches.** Cold start 3–7 s; idle ~165 MB. §3.2 chooses start-on-open anyway, for the 1 GB nodes. |
+| G3 | **Pass**, with one documented loss: a picture inside a comment. |
+| G4 | **Pass.** No added capabilities; Landlock jail in containers. |
+| G5 | **Decided 2026-10-10:** CODE in home mode, MPL packages only (§1). A paid license waits until there is money. |
+| Box A | **1 GB nodes can offer editing when they have swap.** It handled 10 simultaneous editors with no kills, and the site stayed within ~1 s. The installer floor is therefore "2 GB, or 1 GB plus swap" (§3.1 step 5). |

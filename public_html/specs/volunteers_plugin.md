@@ -227,7 +227,7 @@ Auto-routed from `views/`, no `serve.php` route needed except the slug route.
 
 ### Core changes that would make this plugin simpler
 
-Found by review on 2026-10-10. Each is a small change to code that already exists; the owner decides whether to make them (Q4).
+Found by review on 2026-10-10. Each is a small change to code that already exists. They are specified in **Core Improvements for Plugins** (C1, C2, C9); that spec is the source of truth for their design.
 
 - **C1. Extract a `RecurrenceRule` class** from the five recurrence columns: `compute_dates_in_range`, `nth_occurrence_date` and a description. `CalendarEntry` and `Event` each carry their own copy of this arithmetic today, so Volunteers would be the third. One class, with the two existing ones delegating to it, removes the copies and fixes any daylight-saving bug once.
 - **C2. A generic VEVENT builder** (uid, start, end, zone, summary, location, description). `IcsHelper` is shaped around events and Bookings hand-rolls its own `.ics`; Volunteers would be the third. One builder, used by all three.
@@ -309,7 +309,7 @@ Each item below is a test with an `@joinery-test` header.
 
 - **Q1. Should hours need approval for attended shifts?** The draft says no: marking someone attended is the coordinator's approval. A stricter option makes every attendance row pending until an admin signs off. Recommend the draft (fewer clicks), since the coordinator is already a named person.
 - **Q2. Should the first release include QR check-in?** The research ranks it as a commonly paywalled feature, which makes it a differentiator, but roster tap-to-mark covers the need for small groups. Recommend P2.
-- **Q4. Make core changes C1, C2 and C9?** *Yes:* Volunteers stays small and the platform loses duplicated code. The catch is touching the calendar and Event Manager, which are built and tested. *No:* Volunteers carries a transient-`CalendarEntry` workaround and its own `.ics` string. Recommend C1 and C2 (they are extractions with existing tests), and C9 only when Event Manager needs it.
+- **Q4 (settled 2026-10-10).** C1 and C2 are approved and specified in **Core Improvements for Plugins**. C9 is open there (its Q1); until decided, Volunteers carries its own waitlist and attendance code.
 - **Q3. Can members-only sign-up ask for a login before showing the shift list?** The draft shows the list to guests on public opportunities only. No open decision unless the owner wants public opportunities to require an account.
 
 ---

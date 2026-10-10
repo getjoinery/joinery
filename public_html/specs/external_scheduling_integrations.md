@@ -241,7 +241,7 @@ A feed URL is a destination chosen by a user, so every fetch goes through `SafeH
 
 ### Core changes that would help
 
-Found by review; each is a small change to code that exists. The owner decides (Q5).
+Found by review; each is a small change to code that exists. They are specified in **Core Improvements for Plugins** (C2, C10, C11), which is the source of truth for their design. The owner has approved all three to be built before this work.
 
 - **C2. A generic VEVENT builder** (shared with the Volunteers spec). `IcsHelper` is shaped around events and Bookings hand-rolls `booking_build_ics`.
 - **C10. Retire the dormant `prd_product_details` session counter** once `bcr_` lands (N2), so there is one session counter on the platform.
@@ -362,7 +362,7 @@ When each piece lands, fold it into `plugins/bookings/docs/` (an "integrations" 
 - **Q2. Which sync route first?** *R1 (ICS feed):* smallest and avoids Google entirely; the catch is staleness and read-only. *R3 (Google OAuth):* best behaviour for the largest base; the catch is per-site app setup and Google's verification rules. *R2 (CalDAV):* the best fit for the leaving-Google buyer; the catch is the biggest client to write. Recommendation: R1 first (days of work, immediate value, honest about staleness), then R3, then R2. If a managed-hosting tier is where most buyers land, R3's per-site burden largely disappears and R3 could go first.
 - **Q3. Demote the Calendly and Acuity proxy modes to "on request"?** *Yes (recommended):* three code paths and a tether with no evidence of demand. *No:* a customer who wants to keep Calendly can't. Draft: yes.
 - **Q4. How much of N2 goes in the first release?** Tier gating and package credits are the differentiator; tier allowance is now small because it uses the existing tier-feature mechanism. Recommend all of it, after N0.
-- **Q5. Make the core and store changes C2, C10 and C11?** *Yes:* one `.ics` builder instead of three, one session counter instead of two, a cleaner calendar display. The catch is touching built code (`IcsHelper`, `prd_product_details`, the calendar registry). *No:* Bookings carries its own `.ics` string and a second counter, and the echo case shows twice on the calendar. Recommend yes; each is small and has existing tests nearby.
+- **Q5 (settled 2026-10-10).** C2, C10 and C11 are approved and specified in **Core Improvements for Plugins**.
 
 ---
 
