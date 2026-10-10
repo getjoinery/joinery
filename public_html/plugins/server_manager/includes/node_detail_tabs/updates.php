@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.5 - Upgrade All Sites on This Host is offered only when more than one site shares the host
  * @version 1.4 - the fact arrives at poll (agent 1.37.0), so the unreported sentence says the next poll settles it
  * @version 1.3 - Publish Release is offered only to a management node (the node's own report that Server
  *                Manager is active); an agent that has not reported either way gets one sentence
@@ -65,6 +66,25 @@
 			<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('Apply update to ' + smNodeName + '?', function(){ document.getElementById('apply_update_form').submit(); })">Apply Update</button>
 		</form>
 	</div>
+<?php
+	// Sites that share this machine: the same placement record, or the same
+	// address (the action refuses the latter until they are grouped). One site
+	// alone has no "all" to upgrade, so the button is not offered.
+	$host_sites = [$node->key => true];
+	$host_id = (int)$node->get('mgn_mgh_managed_host_id');
+	$sharing = $host_id
+		? new MultiManagedNode(['host_id' => $host_id, 'enabled' => true, 'deleted' => false])
+		: new MultiManagedNode(['host' => (string)$node->get('mgn_host'), 'enabled' => true, 'deleted' => false]);
+	foreach ($sharing as $other) {
+		if ($other->hosts_site()) $host_sites[$other->key] = true;
+	}
+	if ($host_id) {
+		foreach (new MultiManagedNode(['host' => (string)$node->get('mgn_host'), 'enabled' => true, 'deleted' => false]) as $other) {
+			if ($other->hosts_site()) $host_sites[$other->key] = true;
+		}
+	}
+	if (count($host_sites) > 1):
+?>
 	<hr>
 	<div class="mt-3">
 		<form method="post" class="svm-inline-form" id="upgrade_all_form">
@@ -79,6 +99,7 @@
 			Disable a site first to skip it.
 		</p>
 	</div>
+<?php endif; ?>
 <?php
 	$page->end_box();
 
