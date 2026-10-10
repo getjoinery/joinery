@@ -45,6 +45,8 @@
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.5.2 - cloud_objects() walks StorageProfileRegistry::present(): a plugin that was never installed
+ *                  (no table) no longer fails the backup
  * @version 1.5.1 - written through the target's write credential (object lock, F8); a delete prune_site() could not
  *                  make (lock still holds it, or refused) is remembered per target in unpruned.json and offered
  *                  again, through the retained-index check, by every pass once its date has passed
@@ -1021,7 +1023,7 @@ class BackupObjects {
 			return (array)call_user_func(self::$test_hooks['enumerator']);
 		}
 		$out = array();
-		foreach (StorageProfileRegistry::all() as $profile) {
+		foreach (StorageProfileRegistry::present() as $profile) {
 			if (!method_exists($profile, 'backupObjects')) { continue; }
 			foreach ($profile->backupObjects() as $obj) {
 				$out[] = $obj;

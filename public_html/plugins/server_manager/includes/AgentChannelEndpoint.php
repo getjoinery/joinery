@@ -41,6 +41,10 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.45 - node_address_for_join() skips the shared range 100.64.0.0/10: a Tailscale address
+ *                 reported first was recorded as a joined node's host (jeremytunnell-vps, 2026-10-10)
+ * @version 1.44 - the plane joining itself takes its slug from the claimed name (the site's name, or the slug a
+ *                 move_to_plane carries) and only its display name from this site's host
  * @version 1.43 - a backup or re-upload job's slot is a broker run opened at hand-out (__SM_BROKER_<space>_<kind>__,
  *                 NodeBroker); per-run key minting and the node and main credential slots are gone, and a job
  *                 still naming one is refused (specs/storage_targets.md WP5)
@@ -770,6 +774,11 @@ class AgentChannelEndpoint {
 		$claimed = trim((string)$request->get('ajr_claimed_name'));
 		$name = $self && $own_host !== '' ? $own_host : $claimed;
 		if ($name === '') { $name = 'node-' . substr((string)$request->get('ajr_fingerprint'), 0, 8); }
+		// The plane joining itself shows as this site's host, but its slug (the
+		// folder its backups are named by) is the name the machine claimed: the
+		// site's name, or the slug a move_to_plane carries from the plane it
+		// left. Only a bare machine hostname, which names nothing, gives way.
+		$slug_basis = ($self && $claimed !== '' && strcasecmp($claimed, (string)gethostname()) !== 0) ? $claimed : $name;
 
 		// The node, its storage space, its placement and the approval are one
 		// step: a failure partway rolls the node back with the rest, so a retry
@@ -781,7 +790,7 @@ class AgentChannelEndpoint {
 			$db->beginTransaction();
 		}
 		try {
-			$result = self::adoptJoinNode($request, $name, $self, $own_url, $own_host, $host_of_provision, $ip);
+			$result = self::adoptJoinNode($request, $name, $slug_basis, $self, $own_url, $own_host, $host_of_provision, $ip);
 			if ($own) {
 				$db->commit();
 			}
@@ -795,10 +804,10 @@ class AgentChannelEndpoint {
 	}
 
 	/** adoptJoin()'s writes, inside its transaction. */
-	private static function adoptJoinNode($request, string $name, bool $self, string $own_url, string $own_host, $host_of_provision, string $ip): array {
+	private static function adoptJoinNode($request, string $name, string $slug_basis, bool $self, string $own_url, string $own_host, $host_of_provision, string $ip): array {
 		$node = new ManagedNode(NULL);
 		$node->set('mgn_name', mb_substr($name, 0, 100));
-		$node->set('mgn_slug', self::freeSlug($name));
+		$node->set('mgn_slug', self::freeSlug($slug_basis));
 		// A provision's host node lives at the address its placement record
 		// carries (the instance's IPv4), whichever family the join arrived on —
 		// that is what lets link_host_node() find the placement.
@@ -858,7 +867,8 @@ class AgentChannelEndpoint {
 	 * The address a node made from a join is keyed by. A placement record the
 	 * plane already holds for any address the machine has wins, so the node
 	 * lands on the record its containers point at; otherwise the first public
-	 * IPv4 the machine reported (the convention placement records are keyed
+	 * IPv4 the machine reported, not a private, reserved or shared-range one
+	 * (the convention placement records are keyed
 	 * by); otherwise the address the join came from.
 	 */
 	public static function node_address_for_join($request, string $source): string {
@@ -868,7 +878,10 @@ class AgentChannelEndpoint {
 			return trim((string)$placement->get('mgh_host'));
 		}
 		foreach ($addresses as $a) {
-			if (filter_var($a, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false) {
+			// NO_PRIV|NO_RES pass the shared range 100.64.0.0/10 (carrier NAT,
+			// and where a Tailscale address lives), so it is left out by hand.
+			if (filter_var($a, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false
+				&& (ip2long($a) & 0xFFC00000) !== (ip2long('100.64.0.0') & 0xFFC00000)) {
 				return $a;
 			}
 		}

@@ -27,6 +27,7 @@
  * health cloud-side counts to its own rows via its optional
  * reverseEligibilityWhere() ownership gate.
  *
+ * @version 3.3 - the move and offload ticks walk StorageProfileRegistry::present(): a never-installed plugin has no table
  * @version 3.2 - a bucket that locks every new object by default fails the delete step: no deleted file could go (F8)
  * @version 3.1 - the tick finishes what earlier deletes only hid in each file store's folder
  *                (HiddenVersionSweep; specs/storage_targets.md S28), and stays active while a sweep has work left
@@ -416,7 +417,7 @@ class CloudStorageLifecycle {
 		$from = (int)$state['from'];
 		$words = array();
 		$failed = 0;
-		foreach (StorageProfileRegistry::all() as $profile) {
+		foreach (StorageProfileRegistry::present() as $profile) {
 			$r = CloudOffloadEngine::moveBatch($profile, $from, $to);
 			$failed += (int)($r['failed'] ?? 0);
 			if ((int)($r['moved'] ?? 0) > 0 || (int)($r['failed'] ?? 0) > 0) {
@@ -497,7 +498,7 @@ class CloudStorageLifecycle {
 		$msgs = [];
 		$had_error = false;
 		$mode = self::mode();
-		foreach (StorageProfileRegistry::all() as $profile) {
+		foreach (StorageProfileRegistry::present() as $profile) {
 			if ($mode === 'offload') {
 				$r = CloudOffloadEngine::syncBatch($profile);
 			} elseif ($mode === 'drain') {

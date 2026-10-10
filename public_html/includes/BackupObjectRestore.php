@@ -37,6 +37,7 @@
  * it is handed; the two test hooks stand in for the file bucket and the
  * placement so a suite can run against scratch.
  *
+ * @version 1.1.1 - row_for() walks StorageProfileRegistry::present(): a never-installed plugin's profile has no table
  * @version 1.1.0 - a stored object is restored by the row its profile names for it (backupRow()), so offloaded
  *                  mail comes home as offloaded files do; whether the store still serves it is asked of the
  *                  store the row records (specs/storage_targets.md WP6)
@@ -295,7 +296,7 @@ class BackupObjectRestore {
 	 * size, sha256 (0 / '' when the record keeps none), target_id, remote_key.
 	 */
 	public static function row_for($name) {
-		foreach (StorageProfileRegistry::all() as $profile) {
+		foreach (StorageProfileRegistry::present() as $profile) {
 			if (!method_exists($profile, 'backupRow')) { continue; }
 			$row = $profile->backupRow((string)$name);
 			if ($row !== null) {
