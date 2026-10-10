@@ -12,8 +12,11 @@
  * completed, the deploy tier passed, the release's version is reported and
  * nothing rolled back; halting at the first miss and naming the node and why;
  * stoppable between nodes; and refusing, up front, a node that cannot take an
- * apply at all.
+ * apply at all. And "Deploy to all managed nodes": a completed publish that
+ * asked for it starts one rollout over every eligible node, management nodes
+ * last, and writes what became of it onto the publish job.
  *
+ * @version 1.1 - deploy to all managed nodes
  * @version 1.0
  */
 
@@ -164,5 +167,84 @@ StagedRolloutRunner::advance($w); $w->load();
 check((string)$w->get('srl_status') === StagedRollout::STATUS_HALTED
 	&& strpos((string)$w->get('srl_halt_reason'), 'has not finished in') !== false,
 	'an apply that never finishes halts the rollout by name after the budget', (string)$w->get('srl_halt_reason'));
+
+// ---------------------------------------------------------------------------
+section('Deploy to all managed nodes');
+
+$mgr = $mk('mgr');
+$mgr->set('mgn_agent_server_manager', 'active');
+$mgr->save();
+$off = $mk('off');
+$off->set('mgn_enabled', false);
+$off->save();
+$nosite = $mk('nosite');
+$nosite->set('mgn_web_root', '');
+$nosite->save();
+
+$plan = StagedRolloutRunner::deploy_all_plan(array($mgr, $a1, $off, $no_word, $nosite, $a2));
+$plan_ids = array_map(function ($n) { return (int)$n->key; }, $plan['nodes']);
+check($plan_ids === array((int)$a1->key, (int)$a2->key, (int)$mgr->key),
+	'the plan covers every eligible site, with the management node last', json_encode($plan_ids));
+$left = array_column($plan['left_out'], 'reason', 'name');
+check(isset($left[$off->get('mgn_name')]) && $left[$off->get('mgn_name')] === 'it is disabled'
+	&& isset($left[$no_word->get('mgn_name')]) && count($left) === 2,
+	'a disabled node and one that cannot take an apply are listed as left out; a node with no site is not listed', json_encode($left));
+
+foreach (StagedRolloutRunner::deploy_all_plan()['nodes'] as $n) {
+	check(!ManagedNode::is_fixture_name((string)$n->get('mgn_name')) && !$n->is_self(),
+		'the real plan never includes a test fixture or this management node: ' . $n->get('mgn_name'));
+}
+
+// A publish job on a fixture node: the task's scan reads only this management
+// node's own publishes, so a tick cannot pick this one up and roll out to the
+// real fleet; the test drives it directly with fixture candidates.
+$publish = function ($status, $version) use ($a1) {
+	$j = new ManagementJob(NULL);
+	$j->set('mjb_mgn_managed_node_id', $a1->key);
+	$j->set('mjb_job_type', 'publish_upgrade');
+	$j->set('mjb_status', $status);
+	$j->set('mjb_commands', json_encode(array('primitive' => 'publish_upgrade', 'params' => new stdClass(), 'steps' => array())));
+	$j->set('mjb_parameters', json_encode(array('version' => $version, 'notes' => 'x', 'deploy_all' => true)));
+	$j->set('mjb_total_steps', 1);
+	$j->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+	$j->save();
+	$j->load();
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $j->key);
+	return $j;
+};
+$candidates = array($a1, $off, $mgr);
+
+$prior = StagedRollout::running();
+if ($prior) { StagedRolloutRunner::stop($prior, null); }
+
+$running_pub = $publish('running', $release);
+check(StagedRolloutRunner::deploy_all_for_publish($running_pub, $candidates) === false
+	&& !isset(StagedRolloutRunner::job_params($running_pub)['deploy_all_outcome']),
+	'a publish still running starts nothing and records nothing');
+
+$wrong = $publish('completed', '0.0.1');
+StagedRolloutRunner::deploy_all_for_publish($wrong, $candidates);
+$wp = StagedRolloutRunner::job_params($wrong);
+check(($wp['deploy_all_outcome'] ?? '') === 'refused' && strpos((string)$wp['deploy_all_reason'], 'not 0.0.1') !== false,
+	'a publish that is not the newest published release is refused, saying why', json_encode($wp));
+
+$good = $publish('completed', $release);
+check(StagedRolloutRunner::deploy_all_for_publish($good, $candidates) === true, 'a completed publish starts its rollout');
+$gp = StagedRolloutRunner::job_params($good);
+$dr = new StagedRollout((int)($gp['deploy_all_rollout_id'] ?? 0), TRUE);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $dr->key);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $dr->steps()[0]['job_id']);
+check(($gp['deploy_all_outcome'] ?? '') === 'started' && $dr->is_running()
+	&& array_column($dr->steps(), 'node_id') === array((int)$a1->key, (int)$mgr->key)
+	&& ($gp['deploy_all_left_out'][0]['name'] ?? '') === $off->get('mgn_name'),
+	'the rollout covers the plan in order, and the job records it and who was left out', json_encode($gp));
+check(StagedRolloutRunner::deploy_all_for_publish($good, $candidates) === false,
+	'a publish starts its rollout once');
+
+$second = $publish('completed', $release);
+check(StagedRolloutRunner::deploy_all_for_publish($second, $candidates) === false
+	&& !isset(StagedRolloutRunner::job_params($second)['deploy_all_outcome']),
+	'while a rollout is running, another publish waits rather than being refused');
+StagedRolloutRunner::stop($dr, null);
 
 harness_finish();
