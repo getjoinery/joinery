@@ -352,6 +352,7 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 Ok(o) => o,
                 Err(e) => {
                     note_the_parent_is_in_the_trash(env, &e)?;
+                    note_a_refused_name(env, op, &e)?;
                     classify(&e)
                 }
             }
@@ -547,6 +548,13 @@ fn classify(e: &ExecError) -> OpOutcome {
             "the folder {} it is going into is not on this disk; planning again",
             p.display()
         )),
+        // The disk refused the name. No retry changes that; the refusal is
+        // written down (`note_a_refused_name`) and naming parks the entry on
+        // the next pass, as it parks any name this disk cannot hold.
+        ExecError::Vfs(jd_vfs::VfsError::NameRefused(p)) => OpOutcome::Overtaken(format!(
+            "this disk cannot hold the name {}; naming will park it",
+            p.display()
+        )),
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
@@ -602,6 +610,29 @@ fn server_view_after_retry(
     stat_one(env, id)
 }
 
+/// Write down a name the disk just refused for this op's entry, as the name
+/// the server gives it, where naming reads it as the verdict
+/// (`naming::NAME_REFUSED`). Without it the op is planned again every pass:
+/// the personality judged the name holdable and nothing else ever disagrees.
+fn note_a_refused_name(env: &ExecEnv, op: &Op, e: &ExecError) -> Result<(), ExecError> {
+    if !matches!(e, ExecError::Vfs(jd_vfs::VfsError::NameRefused(_))) {
+        return Ok(());
+    }
+    let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+    let name = match op.kind.as_str() {
+        "download" => env.store.get_entry(op.entity)?.map(|e| e.remote.name),
+        _ => params.get("name").and_then(Value::as_str).map(str::to_string),
+    };
+    let Some(name) = name else { return Ok(()) };
+    for issue in env.store.open_issues()? {
+        if issue.kind == crate::naming::NAME_REFUSED && issue.entity == Some(op.entity) {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    env.store.raise_issue(Some(op.entity), crate::naming::NAME_REFUSED, &name, (env.now_ms)() as i64)?;
+    Ok(())
+}
+
 fn note_the_parent_is_in_the_trash(env: &ExecEnv, e: &ExecError) -> Result<(), ExecError> {
     let ExecError::Proto(p) = e else {
         return Ok(());
@@ -636,8 +667,48 @@ fn note_the_parent_is_in_the_trash(env: &ExecEnv, e: &ExecError) -> Result<(), E
     Ok(())
 }
 
+/// Whether a park for this same entry is still queued and refuses the name
+/// this op would place it under.
+fn a_park_is_open(env: &ExecEnv, op: &Op, params: &Value) -> Result<bool, ExecError> {
+    // Asked of every placing op, so by index, never by reading the queue:
+    // on a first sync that is one op per file.
+    let parks: Vec<jd_vfs::UnsyncableReason> = env
+        .store
+        .queued_params_of("unmaterialize_and_park", op.entity, op.op_id)?
+        .into_iter()
+        .filter_map(|raw| {
+            let p: Value = serde_json::from_str(&raw).ok()?;
+            crate::store::decode_reason(p.get("reason")?.as_str()?)
+        })
+        .collect();
+    // A held destination refuses its name the same way, with no park queued.
+    let held: Vec<String> = env.store.open_issue_details(crate::naming::RENAME_HELD, op.entity)?;
+    if parks.is_empty() && held.is_empty() {
+        return Ok(false);
+    }
+    let name = match op.kind.as_str() {
+        "download" => env.store.get_entry(op.entity)?.map(|e| e.remote.name),
+        _ => params.get("name").and_then(Value::as_str).map(str::to_string),
+    };
+    let Some(name) = name else { return Ok(false) };
+    let personality = env.vfs.personality();
+    Ok(held.iter().any(|h| *h == name) || parks.iter().any(|r| crate::pass::a_park_refuses(r, &name, &personality)))
+}
+
 fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+    // An open park for this entry is naming's verdict standing: this disk
+    // cannot hold its name. Nothing places it here meanwhile -- a move that
+    // ran beside a park still waiting landed on the very name refused, and
+    // made room by moving aside whatever held it (B5, B6). The pass keeps
+    // these out of the plan; this is the guard for any already queued.
+    if matches!(
+        op.kind.as_str(),
+        "download" | "create_local_folder" | "move_local" | "preserve_local_as" | "adopt_placement"
+    ) && a_park_is_open(env, op, &params)?
+    {
+        return Ok(OpOutcome::Overtaken("a park for this entry is open and refuses that name".into()));
+    }
     match op.kind.as_str() {
         "download" => download(env, op),
         "upload_version" => upload(env, op, None),
@@ -1764,12 +1835,44 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             "the entry is no longer tracked".into(),
         ));
     };
-    let path = match local_path(env, &entry)? {
+    // Already here: the record agrees with the server's head and its own file
+    // stands on this disk. Two paths can learn of one entity in a batch -- the
+    // change feed and this device's own upload completing -- and a download
+    // planned from the first, run after the second, laid a second copy beside
+    // the record's file (B4). Nothing is fetched; where the file stands
+    // against where the server has it is the next pass's ordinary move.
+    if already_holds_the_head(env, &entry)? {
+        return Ok(OpOutcome::Overtaken("this computer already holds the server's bytes".into()));
+    }
+    let mut path = match local_path(env, &entry)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // A download replaces the record's OWN file, wherever the user has it.
+    // The two coincide except in one window: a move race that kept this
+    // side's half moves the file to its merged place and agrees at the
+    // server's (`agree_at`), until the next scan reads the kept half as a move.
+    // Landed at the agreed path in that window, the bytes made a second copy
+    // there and the record followed it, leaving the user's file recordless to
+    // go up again as a new one (R1881, seed 9137). Asked only when the own file
+    // is not at the path, so an ordinary download walks nothing. It stays above
+    // the folder checks below, which judge the AGREED placement's folder: the
+    // file already stands where it lands and nothing is created, and moved
+    // below them the landing would be skipped and the duplicate made again.
+    // It can never overwrite an edit: the write below stands down unless the
+    // file it lands on holds the agreed bytes or the arriving ones.
+    if let Some(own) = trusted_own_file(env, &entry) {
+        let here = env.vfs.fingerprint(&path)?.map(|fp| fp.identity());
+        if here != Some(own) {
+            if let Some(stands) = where_file_stands(env, own)? {
+                path = stands;
+            }
+        }
+    }
     // Where these bytes go, and so the placement the agreement records once
-    // they are there: the record's place on this disk, not the server's. They
+    // they are there: the record's place on this disk, not the server's. In
+    // the kept-half window above it stays the agreement (`agree_at`), not where
+    // the file stands: the kept half is the next scan's move to send. They
     // differ while a remote move is pending, and the move is its own op --
     // waiting, perhaps, for a folder this disk cannot make yet. Agreed at the
     // server's placement, the record said the file had moved while it stood
@@ -2408,6 +2511,27 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             Placed::Not(why) => unplaced = unplaced.or(Some(why)),
         }
     }
+    // None of the paths the record names holds it, but its own file stands
+    // somewhere else on this disk, known by identity: the user moved it and
+    // the move has not landed here (the server's name for it may be one this
+    // disk cannot hold, and its move refused). Its edit is still work only
+    // this disk has, so it goes up from where it stands; the placement agreed
+    // stays the old one, the move still owed. Not found, the upload stood
+    // down every pass while the park waited for it (B3b). Only where nothing
+    // stands at any of those paths: a stranger at one is the next scan's to
+    // decide, as above.
+    if found.is_none() && !not_its_own && !vetoed {
+        if let Some(own) = own {
+            if let Some(stands) = where_file_stands(env, own)? {
+                if let Some((reader, fp)) = env.vfs.open_file(&stands)? {
+                    if fp.identity() == own {
+                        found = Some((stands, fp, reader));
+                        found_at = entry.synced_placement.clone();
+                    }
+                }
+            }
+        }
+    }
     let Some((mut path, fingerprint, mut reader)) = found else {
         if let Some(why) = unplaced {
             return Ok(why.outcome());
@@ -2695,12 +2819,28 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                     entity_type: EntityType::File,
                     server_id: holder.id,
                 };
-                if env.store.get_entry(target)?.is_some() {
-                    // Both records exist here; folding them is the whole repair.
-                    // The real one takes the uploaded file: the arm is entered
-                    // only when it can (`holds_its_own_copy_here` said no).
-                    env.store.merge_file(entry.id, target, true)?;
-                    return Ok(OpOutcome::Done);
+                if let Some(real) = env.store.get_entry(target)? {
+                    // A record the change feed named, with nothing of it on
+                    // this disk, is this upload learned twice: the upload's
+                    // record becomes it below, agreement and all. Folded in, it
+                    // kept no agreement, the feed's download laid a second copy
+                    // beside the user's file, and that file went up again as a
+                    // new one (B4).
+                    let feed_learned = real.synced_placement.is_none()
+                        && real.stand_in.is_none()
+                        && !real.remote_deleted
+                        && real.own_file.is_none();
+                    if !feed_learned {
+                        // Both records exist here; folding them is the whole
+                        // repair. The real one takes the uploaded file: the arm
+                        // is entered only when it can (`holds_its_own_copy_here`
+                        // said no).
+                        env.store.merge_file(entry.id, target, true)?;
+                        return Ok(OpOutcome::Done);
+                    }
+                    // Nothing is lost with the feed's row: the dedup answer is
+                    // the holder as of now, which the adoption below writes.
+                    env.store.delete_entry(target)?;
                 }
                 let mut adopted = entry.clone();
                 env.store.rekey_entry(entry.id, target)?;
@@ -2874,8 +3014,28 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         // folding them is the whole repair.
         if let Some(real) = env.store.get_entry(target)? {
             let hand_over = takes_the_uploaded_file(env, &real, &path)?;
-            env.store.merge_file(entry.id, target, hand_over)?;
-            return Ok(OpOutcome::Done);
+            // A record the change feed named before this answer came back,
+            // with nothing of it on this disk: no agreement, no stand-in. It
+            // is this upload, learned twice. The upload's own record becomes
+            // it and the agreement is written below, as for any upload.
+            // Folded in instead, the server's record kept no agreement, read
+            // as never downloaded, and the download the feed had planned laid
+            // a second copy beside the user's file -- which, recordless, went
+            // up again as a new file (B4).
+            let feed_learned = hand_over
+                && real.synced_placement.is_none()
+                && real.stand_in.is_none()
+                && !real.remote_deleted
+                && real.own_file.is_none();
+            if !feed_learned {
+                env.store.merge_file(entry.id, target, hand_over)?;
+                return Ok(OpOutcome::Done);
+            }
+            // Nothing is lost with the feed's row: the completion's `file`
+            // describes the entity as of now, and `apply_export` below writes
+            // it, so a head newer than this upload (a peer's edit in the
+            // window) comes back as an ordinary pending download.
+            env.store.delete_entry(target)?;
         }
         env.store.rekey_entry(entry.id, target)?;
         entry.id = target;
@@ -5410,6 +5570,7 @@ fn unmaterialize_and_park(
     // They are not forgotten either -- the server still has them, and the whole
     // point of a park is that it comes back the moment the clash is resolved.
     let mut trashed = false;
+    let mut trashed_as: Option<String> = None;
     if entry.id.entity_type == EntityType::Folder {
         // Is the directory standing here even ours?
         //
@@ -5462,37 +5623,31 @@ fn unmaterialize_and_park(
         };
         // WP2's row 4, which this arm never asked: the directory at the agreed
         // path is not this record's, but is this record's own directory
-        // standing somewhere else? Then the folder was moved, and the next
-        // pass re-derives that rename by directory identity (C12). It is
-        // parked, not disowned: a scratch local name takes it out of the
-        // contest, and its placement and directory identity stay. Disowned,
-        // its directory stood on with no record, was minted as a new plain
-        // folder, and a vault's sealed file inside went up in the clear
-        // (hostile2 74424; Defect AF's family).
+        // standing somewhere else? Then the folder was moved, and the clash
+        // naming judged is against an agreement the disk has left behind. The
+        // park stands down, changes nothing, and hands the case to the folder
+        // scan, which decides from what the disk shows: where the agreed path
+        // holds another record's directory it follows this one by identity
+        // (C12); where it holds a directory no record has, the scan's
+        // path-first rule binds the record to that one and mints the moved
+        // directory as a new folder (soak 1504). Either way nothing is
+        // trashed and no history is lost. Disowned, its directory stood on
+        // with no record, was minted as a new plain folder, and a vault's
+        // sealed file inside went up in the clear (hostile2 74424; Defect
+        // AF's family).
+        //
+        // Not a scratch local name: a record wearing one with no operation
+        // open is an abandoned park to naming, which parked the folder again
+        // next pass for the reserved prefix and disowned it after all -- the
+        // moved directory went up as a new folder, its files as new files,
+        // and the folder with its history went to the server's trash (B2).
         if disown {
             if let Some(mine) = entry.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0) {
                 let (_, dir_identity) = crate::pass::observed_dirs(env)?;
                 if dir_identity.values().any(|id| *id == mine) {
-                    // Standing where the server has it, the folder has already
-                    // arrived: the clash naming judged, against the records
-                    // before the scan, is with a record that has since left
-                    // that name on this disk. Nothing here is given up, and no
-                    // scratch name is written that nothing wears -- the
-                    // round's adoption of that placement, in this same batch,
-                    // kept such a name, and the next scan read the folder as
-                    // deleted by the user and trashed it on the server (shown
-                    // kill2 75112).
-                    if let Placed::At(there) = path_for(env, &entry.remote)? {
-                        if env.vfs.directory_id(&there)?.filter(|id| *id != 0) == Some(mine) {
-                            return Ok(OpOutcome::Overtaken(
-                                "its own directory already stands where the server has it"
-                                    .into(),
-                            ));
-                        }
-                    }
-                    entry.local_name = Some(crate::order::swap_name(&op.idempotency_key));
-                    env.store.put_entry(&entry)?;
-                    return Ok(OpOutcome::Done);
+                    return Ok(OpOutcome::Overtaken(
+                        "its own directory stands elsewhere; deciding again from what is there now".into(),
+                    ));
                 }
             }
         }
@@ -5566,6 +5721,44 @@ fn unmaterialize_and_park(
                  moved here yet ({})",
                 e.id.server_id
             )));
+        }
+        // And a file standing in this directory that another record owns by
+        // identity, a record this folder's chain does not reach: the user
+        // moved it in, and the scan has not yet followed. A file saved in here
+        // and never sent is one too (its provisional record is outside
+        // `inside`): the park waits for its upload rather than rescuing it out
+        // as unsent work or, in a vault, trashing it with the folder -- and a
+        // sealed one waiting for a key holds the park, said by park_waits, for
+        // as long as there is no key. It is that record's
+        // file, not this folder's -- neither rescued as unsent work nor taken
+        // to the trash with the directory. Taken, its record read as deleted
+        // by the user on the next pass and the delete went to the server and
+        // to every device (B5, shown kill2 75125). The park waits, as it
+        // waits above for a child the server has moved out: the move it waits
+        // for is planned on the OTHER record, which has no open operation.
+        //
+        // Only where ids are identity; on a volume without them the file is
+        // known by its bytes, and a file both edited and dragged in is the
+        // gap 1873's file arm states too.
+        if env.vfs.personality().stable_file_identity {
+            if let Some(stranger) = a_strangers_file_inside(env, &path, &inside, entry.id)? {
+                let name = env.store.get_entry(stranger)?.map(|e| e.remote.name).unwrap_or_default();
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "park_waits",
+                    &format!(
+                        "{} cannot be held on this computer under the name it now has on \
+                         the server, but {name} was moved in here and has not been followed \
+                         yet; the folder stays until it has",
+                        entry.remote.name
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+                return Ok(OpOutcome::Retry(format!(
+                    "a file another record owns stands inside it and has not been followed yet ({})",
+                    stranger.server_id
+                )));
+            }
         }
         for issue in env.store.open_issues()? {
             if issue.kind == "park_waits" && issue.entity == Some(entry.id) {
@@ -5691,11 +5884,19 @@ fn unmaterialize_and_park(
             // alone would throw away work nobody has sent, which is the one
             // thing this operation exists to refuse.
             if the_file_here_is_another_entrys(env, &entry, &path, now)? {
-                // Not this record's file, and not this record's to give up
-                // either if its own file stands elsewhere: the user moved it.
-                if let Some(kept) = keep_a_moved_file(env, &entry, &path)? {
-                    return Ok(kept);
+                // Not this record's file. If its own file stands elsewhere --
+                // the user moved it -- what happens to that one turns on the
+                // reason (`keep_a_moved_file`).
+                match keep_a_moved_file(env, &entry, &path, &reason)? {
+                    MovedFile::StandDown(o) => return Ok(o),
+                    MovedFile::Trashed(name) => {
+                        trashed = true;
+                        trashed_as = Some(name);
+                    }
+                    MovedFile::NotMoved => {}
                 }
+            }
+            if !trashed && the_file_here_is_another_entrys(env, &entry, &path, now)? {
                 entry.synced_placement = None;
                 entry.synced_fingerprint = None;
                 entry.own_file = None;
@@ -5732,26 +5933,39 @@ fn unmaterialize_and_park(
             // -- by which time the entity is free, the ordinary upload has run,
             // and the copy standing here is one the server has. That is the
             // order this operation always meant to run in.
-            return Ok(OpOutcome::Overtaken(
-                "the copy here has work the server does not have yet"
-                    .into(),
-            ));
+            if !trashed {
+                return Ok(OpOutcome::Overtaken(
+                    "the copy here has work the server does not have yet"
+                        .into(),
+                ));
+            }
         }
-        match env.vfs.trash(&path) {
-            Ok(()) => trashed = true,
-            Err(jd_vfs::VfsError::NotFound(_)) => {}
-            Err(e) => return Err(e.into()),
+        if !trashed {
+            match env.vfs.trash(&path) {
+                Ok(()) => trashed = true,
+                Err(jd_vfs::VfsError::NotFound(_)) => {}
+                Err(e) => return Err(e.into()),
+            }
         }
-    } else if let Some(kept) = keep_a_moved_file(env, &entry, &path)? {
+    } else {
         // Nothing at the agreed path, and the record's own file standing
-        // elsewhere: the user moved it, and there is no copy to give up.
-        return Ok(kept);
+        // elsewhere: the user moved it.
+        match keep_a_moved_file(env, &entry, &path, &reason)? {
+            MovedFile::StandDown(o) => return Ok(o),
+            MovedFile::Trashed(name) => {
+                trashed = true;
+                trashed_as = Some(name);
+            }
+            MovedFile::NotMoved => {}
+        }
     }
-    let told = entry
-        .synced_placement
-        .as_ref()
-        .map(|p| p.name.clone())
-        .unwrap_or_else(|| entry.remote.name.clone());
+    let told = trashed_as.unwrap_or_else(|| {
+        entry
+            .synced_placement
+            .as_ref()
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| entry.remote.name.clone())
+    });
     // Everything that said "there is a copy of this here" goes with the copy.
     // Left behind, they would describe a file that is not there any more; and
     // the entry has to look un-downloaded so that releasing it fetches the
@@ -7056,37 +7270,73 @@ fn record_a_file_found_landing(
     Ok(())
 }
 
+/// What the park did about a record's own file standing away from its agreed
+/// path.
+enum MovedFile {
+    /// Its own file is not elsewhere (or cannot be told): park as before.
+    NotMoved,
+    /// The park stands down with the record untouched.
+    StandDown(OpOutcome),
+    /// Its own file, where it stands, went to the OS trash: park it. The
+    /// name it stood under, for what the user is told.
+    Trashed(String),
+}
+
 /// The park's row 4 for a file, as the folder arm above asks it of a
 /// directory: nothing of this record's stands at the agreed path, but does
-/// its own file stand somewhere else on this disk? Then the user moved it,
-/// and the clash naming judged is against an agreement the disk has left
-/// behind. The park stands down and changes nothing: the next scan finds the
-/// file by its identity and the move it plans rewrites the agreement, which
-/// ends the clash. Disowned instead, the file stood on with no record, the
+/// its own file stand somewhere else on this disk? Then the user moved it.
+/// What follows turns on WHY the park was judged.
+///
+/// A clash may be judged against an agreement the disk has left behind, and
+/// the move the next scan finds is what ends it: the park stands down and
+/// changes nothing. Disowned instead, the file stood on with no record, the
 /// user's next rename carried it onto another record's path, and the scan
 /// read it there as that record's edit: one file's bytes went up as a
 /// version of another (rig run 1873).
 ///
-/// Not a scratch name, as the folder arm writes: a file record wearing one
-/// with no operation open is an abandoned park to naming, which parks it
-/// again for the reserved prefix.
+/// A name this disk cannot hold at all -- too long, a path too long, refused
+/// by the disk -- is about the server's name itself, and no local move makes
+/// it holdable: standing down re-parked it every pass for ever while the
+/// race gave the name to the server (B3b). So the park acts on the record's
+/// own file where it stands: holding the agreed bytes, it goes to the OS
+/// trash and the record is parked, as a copy at the agreed path would be;
+/// holding work the server does not have, the park stands down for that
+/// upload and comes again.
 ///
-/// `None` when the question cannot be asked (a folder, or a volume whose ids
-/// are not identity) or the answer is no: the caller disowns as before.
+/// `NotMoved` when the question cannot be asked (a folder, or a volume whose
+/// ids are not identity) or the answer is no.
 fn keep_a_moved_file(
     env: &ExecEnv,
     entry: &Entry,
     agreed: &std::path::Path,
-) -> Result<Option<OpOutcome>, ExecError> {
+    reason: &jd_vfs::UnsyncableReason,
+) -> Result<MovedFile, ExecError> {
+    use jd_vfs::UnsyncableReason as R;
     let Some(own) = trusted_own_file(env, entry) else {
-        return Ok(None);
+        return Ok(MovedFile::NotMoved);
     };
-    match where_file_stands(env, own)? {
-        Some(stands) if stands != agreed => Ok(Some(OpOutcome::Overtaken(format!(
+    let stands = match where_file_stands(env, own)? {
+        Some(stands) if stands != agreed => stands,
+        _ => return Ok(MovedFile::NotMoved),
+    };
+    let unholdable = matches!(reason, R::NameTooLong { .. } | R::PathTooLong { .. } | R::Empty);
+    if !unholdable {
+        return Ok(MovedFile::StandDown(OpOutcome::Overtaken(format!(
             "its own file stands at {}; deciding again from what is there now",
             stands.display(),
-        )))),
-        _ => Ok(None),
+        ))));
+    }
+    if !its_agreed_file_is_here(env, entry, &stands)? || entry.synced_content.is_none() {
+        return Ok(MovedFile::StandDown(OpOutcome::Overtaken(format!(
+            "its own file at {} has work the server does not have yet",
+            stands.display(),
+        ))));
+    }
+    let name = stands.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    match env.vfs.trash(&stands) {
+        Ok(()) => Ok(MovedFile::Trashed(name)),
+        Err(jd_vfs::VfsError::NotFound(_)) => Ok(MovedFile::NotMoved),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -7122,6 +7372,69 @@ fn where_file_stands(
         }
     }
     Ok(None)
+}
+
+/// A file standing anywhere under `dir` whose own file is a live record's,
+/// where that record is neither the folder nor one of `inside`.
+fn a_strangers_file_inside(
+    env: &ExecEnv,
+    dir: &std::path::Path,
+    inside: &[Entry],
+    folder: EntityId,
+) -> Result<Option<EntityId>, ExecError> {
+    let mut queue = vec![dir.to_path_buf()];
+    let mut guard = 0;
+    while let Some(d) = queue.pop() {
+        guard += 1;
+        if guard > 100_000 {
+            return Err(ExecError::Contract("the local walk does not end".into()));
+        }
+        let listing = match env.vfs.read_dir_all(&d) {
+            Ok(l) => l,
+            Err(jd_vfs::VfsError::NotFound(_)) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        for child in listing {
+            match child.kind {
+                jd_vfs::EntryKind::Directory if !jd_vfs::is_internal(&child.name) => queue.push(d.join(&child.name)),
+                jd_vfs::EntryKind::File => {
+                    let Some(fp) = child.fingerprint.filter(|fp| fp.identity().is_strong()) else { continue };
+                    for owner in env.store.owners_of_file(fp.identity(), true)? {
+                        if owner.id != folder && !inside.iter().any(|e| e.id == owner.id) {
+                            return Ok(Some(owner.id));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// The record already agrees with the server's head and its file stands here:
+/// by its own identity where ids are identity, by its path and bytes
+/// elsewhere. The cheap half first: no hashing unless the agreement matches.
+fn already_holds_the_head(env: &ExecEnv, entry: &Entry) -> Result<bool, ExecError> {
+    if entry.id.entity_type != EntityType::File {
+        return Ok(false);
+    }
+    let (Some(agreed), Some(head)) = (entry.synced_content.as_ref(), entry.remote_content.as_ref()) else {
+        return Ok(false);
+    };
+    if agreed.sha256 != head.sha256 {
+        return Ok(false);
+    }
+    if let Some(own) = trusted_own_file(env, entry) {
+        return Ok(where_file_stands(env, own)?.is_some());
+    }
+    let Placed::At(path) = local_path(env, entry)? else {
+        return Ok(false);
+    };
+    if env.vfs.fingerprint(&path)?.is_none() {
+        return Ok(false);
+    }
+    Ok(env.vfs.hash(&path)? == head.sha256)
 }
 
 /// Is the file at this path the one both sides agreed on: unchanged since, or

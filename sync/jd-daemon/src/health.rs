@@ -228,6 +228,16 @@ fn describe(raw: StoredIssue) -> Issue {
         "unsyncable" => unsyncable_summary(&raw.detail),
         "reconcile" => reconcile_summary(&raw.detail),
         "quota" => "The Drive this file belongs to is full.".into(),
+        // The disk's own refusal, which the park that follows names as
+        // unsyncable; said once, plainly, in case the user meets it first.
+        "name_refused" => format!(
+            "This disk refused the name \"{}\" (too long, or holding a character it cannot store). It stays off this computer until the name is changed.",
+            raw.detail
+        ),
+        "rename_held" => format!(
+            "This was renamed to \"{}\" elsewhere, and that name clashes with something already on this disk. It is locked here, so it keeps its old name on this computer until it is unlocked or renamed again.",
+            raw.detail
+        ),
         "pending_key" => {
             "Waiting for the owner to grant this device a key for an encrypted folder.".into()
         }
@@ -306,10 +316,10 @@ fn reconcile_summary(detail: &str) -> String {
     // send the user looking for a file that is where they put it. A detail
     // with no half recorded says what it always said.
     if detail.starts_with("MoveRaceServerWon") {
-        if detail.contains("lost: Name") {
+        if detail.ends_with("lost: Name }") {
             return "Renamed in two places at once. The server's name was used, so this device's rename was undone.".into();
         }
-        if detail.contains("lost: Folder") {
+        if detail.ends_with("lost: Folder }") {
             return "Moved to two different folders at once. The server's folder was used, so this device's move to another folder was undone.".into();
         }
         return "Moved in two places at once. The server's location was used, so this device's move was undone.".into();
@@ -382,6 +392,9 @@ mod tests {
         assert!(folder.contains("move to another folder was undone"), "{folder}");
         assert!(both.contains("this device's move was undone"), "{both}");
         assert_eq!(both, unrecorded);
+        // A file named with the field's own text in it changes nothing.
+        let named = reconcile_summary("MoveRaceServerWon { local_wanted: Placement { parent: Some(2), name: \"lost: Name\" }, lost: Both }");
+        assert_eq!(named, both);
     }
 
     #[test]

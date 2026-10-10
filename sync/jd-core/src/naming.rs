@@ -71,6 +71,12 @@ pub struct NamingOutcome {
     /// arrival's move lands on the holder's directory this same pass and the
     /// room-making steps it aside. Judged, and moved, a pass later.
     pub pending: std::collections::HashSet<EntityId>,
+    /// Entries with no key here whose server name this disk refuses where the
+    /// server puts it: never given up (nothing can rescue or judge what is
+    /// inside a locked vault), but not moved there either. The pass keeps their
+    /// move off the disk and says why (`RENAME_HELD`); a key arriving hands
+    /// them to the ordinary verdict.
+    pub held_destinations: Vec<(EntityId, UnsyncableReason)>,
 }
 
 impl NamingOutcome {
@@ -243,6 +249,14 @@ fn parked_locally(entry: &Entry) -> bool {
 }
 
 
+/// The issue kind for an entry with no key here whose move to its server
+/// name is held off this disk; its detail is that name.
+pub const RENAME_HELD: &str = "rename_held";
+
+/// The issue kind under which the executor writes down a name the disk
+/// refused for an entry; its detail is the refused name.
+pub const NAME_REFUSED: &str = "name_refused";
+
 /// Resolve every tracked entry's local name against this filesystem.
 ///
 /// `root_prefix_bytes` is the length of the sync root's own path, which counts
@@ -409,6 +423,23 @@ pub fn apply_naming(
     // names as they stand; a folder whose own name changes this pass shifts its
     // children's lengths by a byte or two, which the next pass settles.
     let folder_paths = folder_path_lengths(env)?;
+    // Names the disk itself refused for an entry (`NAME_REFUSED`, written by
+    // the executor when a rename, create or download was turned away): the
+    // disk's answer, which outranks what the personality guessed it would hold.
+    // A refusal of a name the server no longer gives the entry is spent.
+    let mut refused: HashMap<EntityId, String> = HashMap::new();
+    for issue in env.store.open_issues()? {
+        if issue.kind != NAME_REFUSED {
+            continue;
+        }
+        let Some(id) = issue.entity else { continue };
+        match env.store.get_entry(id)? {
+            Some(e) if !e.remote_deleted && e.remote.name == issue.detail => {
+                refused.insert(id, issue.detail);
+            }
+            _ => env.store.dismiss_issue(issue.issue_id)?,
+        }
+    }
 
     // Folder -> what actually holds a name in it, filled as each folder is
     // resolved and read by `judge_destinations` afterwards.
@@ -627,6 +658,13 @@ pub fn apply_naming(
             // Length is checked against the resolved name, because escaping
             // makes names longer — a colon becomes three characters — and a name
             // that only just fitted may not any more.
+            // A name the disk refused for this entry is not holdable here,
+            // whatever the personality says.
+            let verdict = verdict.or_else(|| {
+                let name = competing_placement(&entry, &gone).name;
+                (refused.get(&entry.id) == Some(&name))
+                    .then(|| UnsyncableReason::NameTooLong { bytes: name.len(), limit: 0 })
+            });
             let verdict = verdict.or_else(|| {
                 let name_len = local_name
                     .as_deref()
@@ -762,7 +800,18 @@ pub fn apply_naming(
         }
     }
 
-    judge_destinations(env, personality, &settled, &leaving_this_pass, &busy, &gone, &mut out)?;
+    judge_destinations(
+        env,
+        personality,
+        &settled,
+        &leaving_this_pass,
+        &busy,
+        &gone,
+        &folder_paths,
+        root_prefix_bytes,
+        &refused,
+        &mut out,
+    )?;
 
     Ok(out)
 }
@@ -787,6 +836,7 @@ pub fn apply_naming(
 /// The entrant is judged LAST so the file already wearing the name keeps it,
 /// and losing is not a rename of anybody: the loser gives up its own local copy
 /// and parks. Nothing that belongs to the winner is touched.
+#[allow(clippy::too_many_arguments)]
 fn judge_destinations(
     env: &ExecEnv,
     personality: &Personality,
@@ -794,6 +844,9 @@ fn judge_destinations(
     leaving_this_pass: &std::collections::HashSet<EntityId>,
     busy: &std::collections::HashSet<EntityId>,
     gone: &Gone,
+    folder_paths: &HashMap<i64, usize>,
+    root_prefix_bytes: usize,
+    refused: &HashMap<EntityId, String>,
     out: &mut NamingOutcome,
 ) -> Result<(), ExecError> {
     // At most one park per entity per batch.
@@ -820,14 +873,19 @@ fn judge_destinations(
         if !holds(gone, &entry) || already.contains(&entry.id) {
             continue;
         }
-        // No key, so no name verdict, as in the main loop: what such an entry
-        // holds here -- a placeholder's directory, a vault locked after it
-        // was open -- is never given up over a name. Judged here, a waiting
-        // placeholder lost its destination to the folder still leaving it,
-        // and its directory went to the trash with the user's files inside.
-        if no_key_for(env, &entry).is_some() {
-            continue;
-        }
+        // No key, so never GIVEN UP over a name, as in the main loop: what
+        // such an entry holds here -- a placeholder's directory, a vault
+        // locked after it was open -- cannot be rescued or judged. Given up, a
+        // waiting placeholder lost its destination to the folder still leaving
+        // it, and its directory went to the trash with the user's files
+        // inside. But its destination is still JUDGED, and a refusal is a
+        // hold (`held_destinations`): skipped altogether, a locked vault's
+        // move landed on a name this disk refuses and made room by moving the
+        // user's own folder aside (B8). Judged, a keyless entry also passes
+        // the busy and pending waits below, as any entry does: a verdict
+        // against a slot an open op is changing waits a pass for it too, which
+        // only delays a hold.
+        let keyless = no_key_for(env, &entry).is_some();
         // Mid-operation, as the main loop reads it: a verdict against the
         // slot an open op of this device is about to change waits a pass.
         // The same for an arrival whose chain runs into such an entry -- the
@@ -879,29 +937,59 @@ fn judge_destinations(
         let entrant = names.len();
         names.push(entry.remote.name.clone());
         let resolved = jd_vfs::resolve_siblings(&names, personality);
-        // Only a COLLISION with something already in the destination. Whether
-        // the name is usable at all -- too long, empty once escaped, wearing
-        // the engine's own reserved prefix -- is the main loop's judgement and
-        // it has already made it.
+        // A collision with something already in the destination, and -- the
+        // half nothing else judges -- whether the destination name can be
+        // held here at all. The main loop resolves an entry against its
+        // AGREED name, so for an entry the server has just renamed nobody has
+        // asked of the new name; the move then carried an unholdable name to
+        // the disk, which refused it every pass, for ever, with nothing said.
+        // Too long and empty are this verdict's; so is a name the disk itself
+        // refused (`NAME_REFUSED`), which outranks the personality's guess.
         //
-        // The distinction is load-bearing, not tidiness. An entry whose server
-        // name is `.jd-swap-...` is one an interrupted rename left half
-        // finished, and the operation that renames it back is the only thing
-        // that will ever clean it up. Parking it here for `ReservedPrefix` --
-        // which is true of the name, and beside the point -- cancels that
-        // recovery and strands the scratch name on the server for ever.
+        // ReservedPrefix stays out, and the reason is load-bearing. An entry
+        // whose server name is `.jd-swap-...` is one an interrupted rename
+        // left half finished, and the operation that renames it back is the
+        // only thing that will ever clean it up. Parking it here for
+        // `ReservedPrefix` -- which is true of the name, and beside the point
+        // -- cancels that recovery and strands the scratch name on the server
+        // for ever.
+        let refused_here = refused.get(&entry.id).is_some_and(|n| *n == entry.remote.name);
         let taken = match &resolved[entrant].outcome {
             jd_vfs::LocalName::Unsyncable(reason) => matches!(
                 reason,
                 UnsyncableReason::CaseClash { .. }
                     | UnsyncableReason::UnicodeClash { .. }
                     | UnsyncableReason::DuplicateName { .. }
+                    | UnsyncableReason::NameTooLong { .. }
+                    | UnsyncableReason::Empty
             )
             .then(|| reason.clone()),
-            _ => None,
+            _ if refused_here => Some(UnsyncableReason::NameTooLong { bytes: entry.remote.name.len(), limit: 0 }),
+            jd_vfs::LocalName::AsIs(name) | jd_vfs::LocalName::Escaped { local: name, .. } => {
+                // Length is checked against the resolved name, as the main
+                // loop does: escaping lengthens. Measured in the destination's
+                // own folder.
+                let parent_len = entry
+                    .remote
+                    .parent
+                    .and_then(|id| folder_paths.get(&id).copied())
+                    .map(|len| len + 1)
+                    .unwrap_or(0);
+                let total = parent_len + name.len();
+                (!jd_vfs::path_fits(total, root_prefix_bytes, personality)).then(|| {
+                    UnsyncableReason::PathTooLong {
+                        bytes: total + root_prefix_bytes + 1,
+                        limit: personality.max_path_bytes,
+                    }
+                })
+            }
         };
         if let Some(reason) = taken {
-            out.give_up_local_copy.push((entry.id, reason));
+            if keyless {
+                out.held_destinations.push((entry.id, reason));
+            } else {
+                out.give_up_local_copy.push((entry.id, reason));
+            }
         }
     }
     Ok(())
@@ -1725,6 +1813,30 @@ mod tests {
             out.unsyncable.first().map(|(_, r)| r),
             Some(UnsyncableReason::PathTooLong { .. })
         ));
+    }
+
+    /// B3, the path arm. A file held here under a short name that the server
+    /// renames to one whose path is too long for this volume is given up at
+    /// its DESTINATION, before any move carries the name to the disk.
+    /// Judged only by its agreed name, it fitted, and the move went to the
+    /// disk to be refused.
+    #[test]
+    fn a_server_rename_whose_path_is_too_long_here_gives_up_the_copy() {
+        let f = fixture("deeprename");
+        let tight = Personality {
+            max_path_bytes: 40,
+            ..Personality::windows()
+        };
+        let mut e = entry(EntityId::file(1), &"a".repeat(30));
+        e.synced_placement = Some(crate::model::Placement { parent: None, name: "a.txt".into() });
+        f.store.put_entry(&e).unwrap();
+
+        let out = apply_naming(&env(&f.store), &tight, 20).unwrap();
+        assert!(
+            out.give_up_local_copy.iter().any(|(id, r)| *id == EntityId::file(1) && matches!(r, UnsyncableReason::PathTooLong { .. })),
+            "{:?}",
+            out.give_up_local_copy
+        );
     }
 
     #[test]

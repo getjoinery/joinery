@@ -226,6 +226,9 @@ impl Store {
                 last_error       TEXT
             );
             CREATE INDEX IF NOT EXISTS ops_state ON ops (state);
+            -- A park's verdict is asked of every op that places an entry
+            -- (the executor's guard); parks are rare, so they are found by kind.
+            CREATE INDEX IF NOT EXISTS ops_kind_state ON ops (kind, state);
 
             -- inode/file-id → entry, so a moved file is recognized as the same
             -- file rather than a delete plus a fresh upload. Plus a hash cache,
@@ -327,6 +330,9 @@ impl Store {
                 created_at  INTEGER NOT NULL DEFAULT 0,
                 dismissed   INTEGER NOT NULL DEFAULT 0
             );
+            -- An entry's open issues of one kind, asked per placing op by the
+            -- executor's guard (`rename_held`); by kind first, as they are few.
+            CREATE INDEX IF NOT EXISTS issues_kind_entity ON issues (kind, dismissed, entity_type, server_id);
             "#,
         )?;
 
@@ -1304,6 +1310,41 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    /// The params of every queued op of this kind for this entity, other than
+    /// `except`. Served by the (kind, state) index: cheap enough to ask per op.
+    pub fn queued_params_of(&self, kind: &str, entity: EntityId, except: i64) -> StoreResult<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT params FROM ops
+              WHERE kind = ?1 AND state = 'queued' AND entity_type = ?2 AND server_id = ?3 AND op_id != ?4",
+        )?;
+        let rows = stmt.query_map(
+            params![kind, entity.entity_type.to_string(), entity.server_id, except],
+            |r| r.get::<_, String>(0),
+        )?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// The details of this entity's open issues of one kind. Indexed, so
+    /// cheap enough to ask per op.
+    pub fn open_issue_details(&self, kind: &str, entity: EntityId) -> StoreResult<Vec<String>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT detail FROM issues
+              WHERE kind = ?1 AND dismissed = 0 AND entity_type = ?2 AND server_id = ?3",
+        )?;
+        let rows = stmt.query_map(params![kind, entity.entity_type.to_string(), entity.server_id], |r| {
+            r.get::<_, String>(0)
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     fn ops_in_state(&self, state: OpState) -> StoreResult<Vec<Op>> {

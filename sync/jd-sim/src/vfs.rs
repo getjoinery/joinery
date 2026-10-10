@@ -82,6 +82,10 @@ pub enum FailureKind {
     /// response is to pause, and the incorrect one is to conclude that every
     /// file was deleted.
     RootUnavailable,
+    /// The volume refuses the name, whatever the personality says it holds:
+    /// an eCryptfs home with short names, an SMB share, NTFS counting UTF-16
+    /// units where the personality counts bytes.
+    NameRefused,
 }
 
 /// What a disk's file id means: the question every FAT and exFAT volume
@@ -1302,6 +1306,7 @@ impl MemFs {
             FailureKind::OutOfSpace => VfsError::OutOfSpace(p),
             FailureKind::PermissionDenied => VfsError::PermissionDenied(p),
             FailureKind::RootUnavailable => VfsError::RootUnavailable(PathBuf::from("/sync")),
+            FailureKind::NameRefused => VfsError::NameRefused(p),
             FailureKind::Io => VfsError::Io {
                 path: p,
                 source: std::io::Error::other("simulated I/O error"),
@@ -1437,6 +1442,25 @@ impl MemFs {
     }
 }
 
+
+/// What a real filesystem refuses outright, whatever the engine thinks of the
+/// name: a component longer than the volume allows, or holding a character
+/// the volume cannot store. Asked only of the engine's own writes (rename,
+/// create, a download's commit), as the OS answers them; `JD_LAX_NAMES` turns
+/// it off, for comparing with a disk that takes anything. The length is the
+/// volume's own unit: UTF-16 code units where the volume is Windows-family
+/// (NTFS, FAT's long names), bytes elsewhere.
+fn refused_name(p: &Personality, path: &Path) -> Option<VfsError> {
+    if std::env::var("JD_LAX_NAMES").is_ok() {
+        return None;
+    }
+    let leaf = path.file_name()?.to_string_lossy().to_string();
+    let length = if p.reserved_stems.is_empty() { leaf.len() } else { leaf.encode_utf16().count() };
+    let too_long = length > p.max_name_bytes;
+    let illegal = leaf.chars().any(|c| p.illegal_chars.contains(&c));
+    (too_long || illegal).then(|| VfsError::NameRefused(path.to_path_buf()))
+}
+
 impl Vfs for MemFs {
     fn personality(&self) -> Personality {
         // A volume with no birth time is one whose file identity is weak, and
@@ -1528,6 +1552,7 @@ impl Vfs for MemFs {
     }
 
     fn create_dir(&self, path: &Path) -> VfsResult<()> {
+        if let Some(e) = refused_name(&self.personality(), path) { return Err(e); }
         let key = self.key_for(path)?;
         self.check_failure(FsOp::CreateDir, &key, path)?;
         // Taken and released before the state lock below, the way the landing
@@ -1558,6 +1583,7 @@ impl Vfs for MemFs {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
+        if let Some(e) = refused_name(&self.personality(), to) { return Err(e); }
         // Taken and released before any lock, as the folder-create hook is.
         if let Some(hook) = self.renaming.lock().unwrap().as_mut() {
             hook(from, to);
@@ -1828,6 +1854,7 @@ impl SpoolFile for MemSpool {
         if let Some(f) = self.fs.landing.lock().unwrap().as_mut() {
             f(target);
         }
+        if let Some(e) = refused_name(&self.fs.personality, target) { return Err(e); }
 
         // Whatever happens below, the spool goes. The handle is consumed by
         // this call, so a spool left behind on a failure is one nothing can
