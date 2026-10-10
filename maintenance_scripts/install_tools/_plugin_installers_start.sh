@@ -3,7 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
-# Version: 2.27 - A --when-changed tick does nothing while the site's upgrade holds uploads/.upgrade.lock:
+# Version: 2.28 - The data root (specs/one_data_root.md WP1): on a host that declares one, nothing runs
+#                while it is not mounted, in any mode, and the run's outcome says data-root-not-ready.
+#                A root run keeps its units and grows it as it fills (joinery_data_root.sh tick).
+# Version: 2.27 -A --when-changed tick does nothing while the site's upgrade holds uploads/.upgrade.lock:
 #                the upgrade runs the installers itself once its tree is finished.
 # Version: 2.26 - A host installer runs only out of a package that is also in the public release log
 #                where the node requires it (verify_package.php's `unlogged`); the key writer it
@@ -680,6 +683,38 @@ fi
 installer_is_trusted() {
     joinery_file_is_trusted "$1" "${TREE_OWNER}"
 }
+
+# --- The data root (specs/one_data_root.md D3, D7) ---------------------------
+# On a host that has one, everything that is data lives under /srv/joinery,
+# and every installer below writes to services that keep their data there.
+# While it is not mounted nothing runs, in any mode: a converge onto a missing
+# data root restarts services on an empty directory of the root disk. A root
+# run also keeps the data root's units and grows it when it is filling, which
+# costs one df. A host with no data root (exit 2) carries on as it always has;
+# a site container has none, its data being its volumes on the host's.
+#
+# The tool runs as root, so it must pass the check every installer does. One
+# that does not, on a host that declares a data root, stops the run: the gate
+# cannot be read without it.
+DATA_ROOT_TOOL="${TOOLS_DIR}/joinery_data_root.sh"
+DATA_ROOT_RC=2
+if [[ -f "${DATA_ROOT_TOOL}" ]]; then
+    if [[ "$(id -u)" != "0" ]]; then
+        DATA_ROOT_RC=0
+        bash "${DATA_ROOT_TOOL}" check >/dev/null || DATA_ROOT_RC=$?
+    elif installer_is_trusted "${DATA_ROOT_TOOL}"; then
+        DATA_ROOT_RC=0
+        bash "${DATA_ROOT_TOOL}" tick || DATA_ROOT_RC=$?
+    elif [[ -e /etc/joinery/data_root ]]; then
+        echo "data root: ${DATA_ROOT_TOOL} is not a file this box would run, and this host has a data root - nothing runs" >&2
+        DATA_ROOT_RC=1
+    fi
+fi
+if [[ "${DATA_ROOT_RC}" == "1" ]]; then
+    echo "host installers: the data root is not ready - nothing runs until it is (joinery_data_root.sh status says why)" >&2
+    record_last "data-root-not-ready"
+    exit 0
+fi
 
 # --- One core installer, as the full run runs it -----------------------------
 # The one body both the core loop and --only run, so the two cannot drift: the

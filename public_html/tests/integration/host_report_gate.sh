@@ -487,10 +487,10 @@ chk "120 sites answering in 2 s each: the report took the slowest, not the sum (
 many_bytes=$(( $(wc -c < "$T/many.json") + 100 * 123 ))
 chk "100 sites at the longest name, every figure a number: the report fits the agent's 64 KiB with 4 KiB to spare (${many_bytes} bytes)" "$( [ "$many_bytes" -lt 61440 ]; echo $? )" "0"
 
-echo "=== A Docker host's disk pool, and an inspect that answers nothing ==="
-# The pool is a filesystem of its own at /var/lib/docker: its figures, which
-# the root disk never shows (reviewer2 B2). Here a real directory stands in,
-# with findmnt saying it is a mount.
+echo "=== The data root (a Docker host's disk pool), and an inspect that answers nothing ==="
+# The data root is a filesystem of its own at /srv/joinery: its figures, which
+# the root disk never shows (reviewer2 B2, specs/one_data_root.md WP1). Here a
+# real directory stands in, with findmnt saying it is a mount.
 mkdir -p "$T/pooldir" "$T/poolbin"
 cat > "$T/poolbin/findmnt" <<STUB
 #!/bin/bash
@@ -500,10 +500,10 @@ STUB
 chmod 755 "$T/poolbin/findmnt"
 eval "$(sed -n -e '/^json_str() {/,/^}/p' -e '/^safe_name() {/,/^}/p' -e '/^run() {/p' -e '/^emit_disk_pool() {/,/^}/p' "$SCRIPT")"
 CMD_TIMEOUT=10
-pool="$(PATH="$T/poolbin:$PATH" HOST_REPORT_DOCKER_DIR="$T/pooldir" emit_disk_pool)"
-chk "a pool at /var/lib/docker: its own figures, xfs, with project quotas" \
+pool="$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/pooldir" emit_disk_pool)"
+chk "a data root: its own figures, xfs, with project quotas" \
     "$(php -r '$o=json_decode($argv[1],true); echo $o["fstype"], "/", var_export($o["prjquota"], true), "/", is_int($o["total_bytes"]) && is_int($o["avail_bytes"]) ? "figures" : "none";' "$pool")" "xfs/true/figures"
-chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DOCKER_DIR="$T/elsewhere" emit_disk_pool)" '"none"'
+chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" emit_disk_pool)" '"none"'
 # A docker inspect that answers nothing (timed out) is unknown, never no sites.
 cat > "$T/poolbin/docker" <<'STUB'
 #!/bin/bash

@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.17 - disk_pool reports the host's data root, /srv/joinery (specs/one_data_root.md WP1):
+#                a Docker host's disk pool is that data root, and on any host it is a
+#                filesystem of its own whose filling the root disk never shows. The key
+#                keeps its name, which the agent's disk_headroom floor reads.
 # Version: 1.16 - root_ssh: the public keys in root's authorized_keys, each with its SHA256 fingerprint,
 #                so a copy of this machine can carry them (specs/site_copy.md WP15). A key line is
 #                carried only when it is a bare key (type, key, comment): a line with options
@@ -382,12 +386,12 @@ emit_disk() {
         "$(json_num_or_unknown "${avail:-}")" "$(json_num_or_unknown "${ipct:-}")"
 }
 
-# A Docker host's disk pool (docker_disk_pool.sh): /var/lib/docker as a
-# filesystem of its own, whose figures the root disk never shows, since the
-# pool's file is allocated whole. "none" where /var/lib/docker is not a mount
-# of its own.
+# The host's data root (joinery_data_root.sh), reported under disk_pool: a
+# filesystem of its own, in a file allocated whole or on a device, whose
+# filling the root disk never shows. A Docker host's disk pool is its data
+# root. "none" where /srv/joinery is not a mount of its own.
 emit_disk_pool() {
-    local mp="${HOST_REPORT_DOCKER_DIR:-/var/lib/docker}" fstype opts line used total avail
+    local mp="${HOST_REPORT_DATA_ROOT:-/srv/joinery}" fstype opts line used total avail
     read -r fstype opts < <(run findmnt -n -o FSTYPE,OPTIONS --mountpoint "$mp") || true
     [[ -n "${fstype:-}" ]] || { printf '"none"'; return; }
     line="$(run df -B1 --output=used,size,avail "$mp" | tail -n 1)"

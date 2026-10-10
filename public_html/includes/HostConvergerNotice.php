@@ -16,6 +16,9 @@
  * silent on a box that never had one — a container converges at every start
  * and a managed node through its upgrade job.
  *
+ * @version 1.1 - A run that stopped because the host's data root is not mounted (data-root-not-ready,
+ *                specs/one_data_root.md D3) is named, with the command that says why; it was read
+ *                as a healthy run and the notice stayed silent while nothing converged.
  * @version 1.0
  */
 class HostConvergerNotice {
@@ -96,6 +99,17 @@ class HostConvergerNotice {
 				. '</div></div>';
 		}
 
+		if ($fresh && $outcome === 'data-root-not-ready') {
+			$status = self::dataRootStatusCommand();
+			return self::css()
+				. '<div class="jy-converger-notice" role="status">'
+				. '<div class="jy-converger-notice__text"><strong>'
+				. htmlspecialchars('This host\'s data root, /srv/joinery, is not mounted, so the host converger is running nothing.', ENT_QUOTES, 'UTF-8')
+				. '</strong> '
+				. htmlspecialchars('Every service whose data lives there waits for it. Run this on the host as root to see why:', ENT_QUOTES, 'UTF-8')
+				. ' <code class="jy-converger-notice__cmd">' . htmlspecialchars($status, ENT_QUOTES, 'UTF-8') . '</code></div>'
+				. '</div>';
+		}
 		if ($fresh && $outcome !== 'installer-failed' && $outcome !== 'installer-refused') {
 			return '';
 		}
@@ -116,6 +130,11 @@ class HostConvergerNotice {
 			. htmlspecialchars($body, ENT_QUOTES, 'UTF-8')
 			. ' <code class="jy-converger-notice__cmd">' . htmlspecialchars($command, ENT_QUOTES, 'UTF-8') . '</code></div>'
 			. '</div>';
+	}
+
+	/** The command that says what is wrong with the host's data root. */
+	public static function dataRootStatusCommand(): string {
+		return 'sudo bash ' . PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/joinery_data_root.sh status';
 	}
 
 	/** The one command that installs or repairs the converger on this machine. */

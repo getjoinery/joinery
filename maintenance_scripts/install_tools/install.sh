@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 3.08 - (review: the daemon.json loader fails, not recurses, when its helper is missing.)
+#               install.sh docker --disk-pool=SIZE makes the host's data root (joinery_data_root.sh, specs/one_data_root.md
+#               WP1): XFS at /srv/joinery with project quotas, starting at SIZE and grown as it fills, with Docker's
+#               data-root at /srv/joinery/docker. daemon.json's merge lives in _docker_daemon_json.sh, shared with
+#               docker_disk_pool.sh.
 #VERSION 3.07 - JOINERY_ADMIN_PASSWORD_SHOWN reaches _site_init.sh (the container env file included): a supplied
 #               password a management node shows its owner is replaced at first sign-in
 #VERSION 3.06 - install.sh site (--enable-agent --management-node) prints SITE_AGENT_KEY=<16 hex>: the site agent's key once it has
@@ -531,8 +536,9 @@
 # Usage:
 #   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       --multi-tenant: root in a container is not root on the host (userns-remap); a fresh host only
-#                       --disk-pool=SIZE: /var/lib/docker on an XFS pool of SIZE (68G) with project quotas, so each
-#                                         site's disk can be capped (site --disk); with --multi-tenant, a fresh host only
+#                       --disk-pool=SIZE: Docker's data on the host's data root, /srv/joinery: XFS with project quotas,
+#                                         first SIZE (16G) and grown as it fills, so each site's disk can be
+#                                         capped (site --disk); with --multi-tenant, a fresh host only
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
@@ -2311,38 +2317,23 @@ install_docker_host_agent() {
 }
 
 # --- Docker daemon settings, and multi-tenant hosts --------------------------
-# daemon.json is merged as JSON, one top-level key at a time, never edited as
-# text: a key set is replaced whole, every other key is kept, and a file that is
-# not a JSON object is refused and left as it was.
+# daemon.json is merged as JSON, one top-level key at a time, by
+# _docker_daemon_json.sh (shared with docker_disk_pool.sh). Loaded on first
+# use, which replaces this definition with the helper's: only a host with
+# Docker on it edits daemon.json, so the base image build (install.sh server)
+# never loads it and does not carry it.
 docker_daemon_json_set() {  # KEY JSON_VALUE
-    local DAEMON_JSON="/etc/docker/daemon.json"
-    mkdir -m 0755 -p /etc/docker
-    python3 - "$DAEMON_JSON" "$1" "$2" <<'PY'
-import json, os, sys
-p, key, value = sys.argv[1], sys.argv[2], json.loads(sys.argv[3])
-d = {}
-if os.path.exists(p) and os.path.getsize(p) > 0:
-    try:
-        with open(p) as f:
-            d = json.load(f)
-    except ValueError as e:
-        sys.exit("%s: %s" % (p, e))
-    if not isinstance(d, dict):
-        sys.exit("%s does not hold a JSON object" % p)
-d[key] = value
-tmp = p + ".tmp"
-with open(tmp, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
-os.replace(tmp, p)
-PY
+    # Without the helper this stub is still the definition, and calling it
+    # again would recurse until bash's stack gives out.
+    . "$SCRIPT_DIR/_docker_daemon_json.sh" || { print_error "_docker_daemon_json.sh is missing beside install.sh ($SCRIPT_DIR)"; return 1; }
+    docker_daemon_json_set "$@"
 }
 
 # Docker's user-namespace remapping (userns-remap) runs every container's ids
 # as a range of unprivileged host ids (100000 and up), so root in a site
 # container owns nothing on the host (specs/multi_tenant_docker_hosts.md WP5
 # item 3). It is daemon-wide, and turning it on moves Docker's data under
-# /var/lib/docker/<uid>.<gid>, out of sight of every existing container, volume
+# <data-root>/<uid>.<gid>, out of sight of every existing container, volume
 # and image; so it is set only before Docker's first start or on a Docker host
 # that has none of them yet.
 
@@ -2476,7 +2467,7 @@ do_docker_install() {
         # that already has one passes.
         if [ -n "$DISK_POOL" ]; then
             if bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
-                print_success "/var/lib/docker is on the disk pool"
+                print_success "Docker keeps its data on the disk pool (/srv/joinery/docker)"
             else
                 print_error "--disk-pool must be made before Docker is installed, and Docker is already on this host. Build a new host with install.sh docker --multi-tenant --disk-pool=SIZE and move the sites onto it."
                 exit 1
@@ -2527,12 +2518,12 @@ do_docker_install() {
         docker_daemon_json_set_userns_remap || exit 1
     fi
 
-    # The pool too: the package starts the daemon, which would make
-    # /var/lib/docker on the root disk, with no disk limits.
+    # The pool too: the package starts the daemon, which would make its data
+    # on the root disk, with no disk limits.
     if [ -n "$DISK_POOL" ]; then
-        print_step "Making the disk pool: ${DISK_POOL} for /var/lib/docker..."
+        print_step "Making the disk pool: the data root, first ${DISK_POOL}, for Docker's data..."
         bash "$SCRIPT_DIR/docker_disk_pool.sh" create "$DISK_POOL" || exit 1
-        print_success "/var/lib/docker is an XFS pool with project quotas (docker_disk_pool.sh)"
+        print_success "Docker keeps its data at /srv/joinery/docker: XFS with project quotas, grown as it fills (docker_disk_pool.sh)"
     fi
 
     print_step "Installing Docker..."

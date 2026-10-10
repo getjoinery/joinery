@@ -3638,9 +3638,10 @@ $install_b13 = (string)file_get_contents($site_root . '/maintenance_scripts/inst
 $base_b13    = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.base');
 // do_site_docker and the two Docker-host checks do_docker_install calls never
 // run inside the base build, so what they load (_site_run_spec.sh) is not the
-// base image's to carry. Named exactly: anything else that loads a helper is
-// assumed to run there.
-$server_b13 = preg_replace('/^(do_site_docker|docker_assert_remaps_ids|docker_multi_tenant_existing)\(\) \{.*?^\}$/ms', '', $install_b13);
+// base image's to carry; nor does docker_daemon_json_set, which loads
+// _docker_daemon_json.sh only when a host with Docker on it edits daemon.json.
+// Named exactly: anything else that loads a helper is assumed to run there.
+$server_b13 = preg_replace('/^(do_site_docker|docker_assert_remaps_ids|docker_multi_tenant_existing|docker_daemon_json_set)\(\) \{.*?^\}$/ms', '', $install_b13);
 preg_match_all('#^\s*\.\s+"\$SCRIPT_DIR/([A-Za-z0-9_.-]+)"#m', $server_b13, $m_b13);
 $loaded_b13 = array_values(array_unique($m_b13[1]));
 check(in_array('_host_files.sh', $loaded_b13, true), 'install.sh loads _host_files.sh (so the check below has something to hold)');
@@ -3896,5 +3897,84 @@ check(strpos($upgrade_lk, "update -qq 2>&1 && (apt-get") === false && strpos($up
 	'upgrade.php installs even when apt-get update could not take its list lock');
 check(strpos($upgrade_lk, 'A plugin requiring it will refuse activation') === false,
 	'upgrade.php\'s warning does not blame a plugin for a core-declared package');
+
+section('One data root: its layout, its size rules, and the converger\'s gate (specs/one_data_root.md WP1)');
+$data_root_sh  = $site_root . '/maintenance_scripts/install_tools/joinery_data_root.sh';
+$data_root_src = is_file($data_root_sh) ? (string)file_get_contents($data_root_sh) : '';
+check($data_root_src !== '', 'joinery_data_root.sh exists', $data_root_sh);
+check(strpos($data_root_src, 'MNT_REAL="/srv/joinery"') !== false && strpos($data_root_src, 'IMAGE_REAL="/srv/joinery.img"') !== false,
+	'the data root is /srv/joinery, in /srv/joinery.img when no device is given (D1, D2)');
+check(strpos($data_root_src, 'CONF="${ROOT}/etc/joinery/data_root"') !== false,
+	'what backs it is recorded in /etc/joinery/data_root, on the root disk');
+check(substr_count($data_root_src, 'xfs loop,prjquota,nofail 0 0') === 1 && substr_count($data_root_src, 'xfs prjquota,nofail 0 0') === 1,
+	'both fstab lines (file and device) mount XFS with project quotas, and nofail so a host still boots without it');
+check(strpos($data_root_src, 'mkfs.xfs -q -n ftype=1') !== false, 'formatted XFS with ftype=1, which Docker\'s overlay2 needs');
+check(strpos($data_root_src, 'fallocate -l') !== false, 'a file data root is allocated whole, never sparse');
+foreach (array('postgresql.service', 'postgresql@.service', 'docker.service', 'containerd.service', 'apache2.service', 'postfix.service', 'postfix@.service', 'rspamd.service') as $unit) {
+	check(preg_match('/^CONSUMERS="[^"]*\b' . preg_quote($unit, '/') . '/m', $data_root_src) === 1, "{$unit} waits for the data root (D3)");
+}
+check(strpos($data_root_src, 'php*-fpm.service') !== false, 'every installed PHP-FPM version waits for it too');
+check(strpos($data_root_src, "Requires=\${TARGET_UNIT}\nAfter=\${TARGET_UNIT}") !== false,
+	'a consumer requires joinery-data.target and starts after it');
+check(strpos($data_root_src, "Requires=\${MOUNT_UNIT}\nAfter=\${MOUNT_UNIT}") !== false && strpos($data_root_src, 'MOUNT_UNIT="srv-joinery.mount"') !== false,
+	'joinery-data.target is reached only with /srv/joinery mounted');
+// D7's numbers, as the spec states them.
+$d7 = array(
+	'FIRST_MIN=$((16 * GIB))' => 'first size at least 16 GiB',
+	'FIRST_ROOT_PCT=25' => 'or a quarter of the root disk',
+	'RESERVE_MIN=$((6 * GIB))' => 'the root disk keeps at least 6 GiB',
+	'RESERVE_PCT=15' => 'or 15% of itself',
+	'GROW_WHEN_MIN=$((8 * GIB))' => 'grows when under 8 GiB free',
+	'GROW_WHEN_PCT=20' => 'or under 20% free',
+	'GROW_PLUS=$((12 * GIB))' => 'to at least used plus 12 GiB',
+	'GROW_STEP_MIN=$GIB' => 'and never by under 1 GiB',
+);
+foreach ($d7 as $needle => $what) {
+	check(strpos($data_root_src, $needle) !== false, "D7: {$what}", $needle);
+}
+check(strpos($data_root_src, 'xfs_growfs') !== false && strpos($data_root_src, 'losetup -c') !== false,
+	'growing is online: the loop device rereads its file, then the filesystem grows');
+
+$runner_src = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
+$gate_at  = strpos($runner_src, 'record_last "data-root-not-ready"');
+$tick_at  = strpos($runner_src, 'bash "${DATA_ROOT_TOOL}" tick');
+$first_installer_run = strpos($runner_src, "\nrun_core_installer() {");
+check($gate_at !== false && $tick_at !== false, 'the converger runs the data root\'s tick and refuses with data-root-not-ready');
+check($gate_at !== false && $first_installer_run !== false && $gate_at < $first_installer_run,
+	'the gate stands before any installer is defined to run, in every mode');
+check(strpos($runner_src, 'installer_is_trusted "${DATA_ROOT_TOOL}"') !== false,
+	'the data root tool runs as root only when it passes the installers\' trust check');
+
+$bundle_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/SupportBundlePublisher.php'));
+check(strpos($bundle_src, "'maintenance_scripts/install_tools/joinery_data_root.sh'") !== false
+	&& strpos($bundle_src, "'maintenance_scripts/install_tools/_docker_daemon_json.sh'") !== false,
+	'a siteless host\'s bundle carries the data root tool and the daemon.json helper the disk pool reads');
+
+$pool_src = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/docker_disk_pool.sh');
+check(strpos($pool_src, 'MNT="${ROOT}/srv/joinery"') !== false && strpos($pool_src, 'DOCKER_DATA_ROOT="/srv/joinery/docker"') !== false,
+	'the disk pool is the data root, and Docker keeps its data at /srv/joinery/docker');
+check(preg_match('/if \\[\\[ -n "\\$ROOT" && "\\$EUID" -eq 0 \\]\\]; then\\n(?:[^\\n]*\\n){0,2}\\s*exit 1/', $pool_src) === 1,
+	'the disk pool refuses its test root as root, where the data root tool would write the real host (reviewer2 F3)');
+foreach (array('joinery_data_root_gate.sh', 'docker_disk_pool_gate.sh') as $gate_name) {
+	$gate_src = (string)@file_get_contents(PathHelper::getIncludePath('tests/integration/' . $gate_name));
+	check(strpos($gate_src, 'if [ "$(id -u)" = "0" ]; then echo "  SKIP: this gate runs unprivileged"') !== false,
+		"{$gate_name} skips as root, where its stubs would report the real host rewritten as success");
+}
+check(strpos($install_src, '. "$SCRIPT_DIR/_docker_daemon_json.sh"') !== false && strpos($install_src, 'python3 - "$DAEMON_JSON" "$1" "$2"') === false,
+	'install.sh merges daemon.json through the shared helper, not a copy of it');
+// The lazy loader really does load and then run the helper's definition.
+$lazy_dir = sys_get_temp_dir() . '/data_root_lazy_' . getmypid();
+@mkdir($lazy_dir, 0700, true);
+$lazy_out = trim((string)shell_exec('cd ' . escapeshellarg($lazy_dir) . ' && SCRIPT_DIR=' . escapeshellarg($site_root . '/maintenance_scripts/install_tools')
+	. ' DOCKER_DAEMON_JSON=' . escapeshellarg($lazy_dir . '/daemon.json')
+	. ' bash -c \'eval "$(awk "/^docker_daemon_json_set\\(\\) \\{/,/^}\$/" "$SCRIPT_DIR/install.sh")"; docker_daemon_json_set a \\"1\\" && docker_daemon_json_set b 2 && cat "$DOCKER_DAEMON_JSON"\' 2>&1'));
+check(json_decode($lazy_out, true) === array('a' => '1', 'b' => 2), 'install.sh\'s daemon.json loader merges both keys through the helper', $lazy_out);
+// Without the helper the loader fails once; it must not call its own stub again (reviewer2 F4).
+$lazy_missing = trim((string)shell_exec('cd ' . escapeshellarg($lazy_dir) . ' && SCRIPT_DIR=' . escapeshellarg($lazy_dir)
+	. ' bash -c \'FUNCNEST=20; print_error() { echo "ERR $*"; }; eval "$(awk "/^docker_daemon_json_set\\(\\) \\{/,/^}\$/" "$1")"; docker_daemon_json_set a 1; echo "rc=$?"\' _ '
+	. escapeshellarg($site_root . '/maintenance_scripts/install_tools/install.sh') . ' 2>&1'));
+check(strpos($lazy_missing, 'rc=1') !== false && strpos($lazy_missing, 'is missing beside install.sh') !== false && strpos($lazy_missing, 'nesting') === false,
+	'with its helper missing the loader returns 1 and says so, without recursing', $lazy_missing);
+exec('rm -rf ' . escapeshellarg($lazy_dir));
 
 harness_finish();

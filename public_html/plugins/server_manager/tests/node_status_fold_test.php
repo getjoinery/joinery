@@ -327,6 +327,16 @@ check($job->get('mjb_status') === 'completed' && count($result['warnings'] ?? []
 	'a missing extension is reported as a warning and does not fail the job',
 	var_export($result, true));
 
+// The host's data root is declared and not mounted: the runner ran nothing and
+// said why (specs/one_data_root.md D3, reviewer2 F2).
+$dr = "joinery_data_root: /srv/joinery is not mounted (see: journalctl -u srv-joinery.mount)\n"
+	. "host installers: the data root is not ready - nothing runs until it is (joinery_data_root.sh status says why)\n";
+$job = new NsfFakeJob(['mjb_output' => $dr, 'mjb_status' => 'completed']);
+nsf_call('process_run_plugin_installers', [$job]);
+check($job->get('mjb_status') === 'failed' && strpos((string)$job->get('mjb_error_message'), 'the data root is not ready') !== false,
+	'a run the data root held back is red, with the runner\'s reason',
+	var_export([$job->get('mjb_status'), $job->get('mjb_error_message')], true));
+
 $job = new NsfFakeJob(['mjb_output' => '', 'mjb_status' => 'completed']);
 nsf_call('process_run_plugin_installers', [$job]);
 check($job->get('mjb_status') === 'failed',

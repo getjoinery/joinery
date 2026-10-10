@@ -3,21 +3,32 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.1 - review (reviewer2): JOINERY_POOL_ROOT is refused as root (F3); pool_mounted
+#                accepts Docker's data-root with a trailing slash (F7); create says when it
+#                ignores a SIZE because the data root exists (F7).
+# Version: 2.0 - The pool is the host's data root (joinery_data_root.sh,
+#                specs/one_data_root.md WP1): XFS at /srv/joinery, with Docker's
+#                data-root at /srv/joinery/docker, set in daemon.json. create
+#                makes the data root when the host has none and takes SIZE as
+#                its first size, which it then grows by itself; the units that
+#                make Docker and containerd wait for it are the data root's.
+#                No host ever carried the /var/lib/docker pool outside a scratch
+#                box, so that layout is gone, not kept beside this one.
 # Version: 1.1 - allow refuses an allowance that, with every other site's limit, would promise
 #                more than the pool holds (reviewer2 B2). release removes the allowance from the site's config volume too, not only the
 #                host's copy: a site still reading one after its project's limit is gone read
 #                the whole pool as its own use and refused every upload (reviewer2 B1).
 # Version: 1.0
 #
-#   docker_disk_pool.sh create SIZE      Root, on a host Docker is not on yet.
-#                                        Makes the pool: a fully allocated file
-#                                        of SIZE (68G, 500M) on the root disk,
-#                                        formatted XFS and mounted at
-#                                        /var/lib/docker with project quotas,
-#                                        through /etc/fstab, and makes Docker
-#                                        and containerd wait for it.
-#   docker_disk_pool.sh check            Exit 0 when the pool is mounted with
-#                                        project quotas on; 1 when it is not.
+#   docker_disk_pool.sh create [SIZE]    Root, on a host Docker is not on yet.
+#                                        Makes the host's data root when it has
+#                                        none (joinery_data_root.sh create SIZE:
+#                                        XFS at /srv/joinery with project quotas,
+#                                        grown as it fills), and points Docker's
+#                                        data-root at /srv/joinery/docker.
+#   docker_disk_pool.sh check            Exit 0 when the data root is mounted
+#                                        with project quotas on and Docker's
+#                                        data-root is in it; 1 when not.
 #   docker_disk_pool.sh allow SITE SIZE  Root. Gives the site's volumes one
 #                                        allowance of SIZE: one project over all
 #                                        of them but backups and deploy, whose
@@ -32,17 +43,17 @@
 # WHY. Docker on ext4 cannot cap one container's disk: a site that fills the
 # disk fills it for every site on the host. XFS project quotas can, on the
 # directories a site's volumes live in, and only on an XFS filesystem mounted
-# with prjquota, which a cloud box's root disk is not. So /var/lib/docker is a
-# filesystem of its own, in a file, which works the same on any provider.
+# with prjquota, which a cloud box's root disk is not. The host's data root is
+# exactly that filesystem (joinery_data_root.sh), so Docker keeps its data
+# there and the quotas are set on it.
 #
-# THE POOL. A file, not a second cloud disk. fallocate allocates every block,
-# so the pool can never promise space the disk does not have. The loop device
-# reads the file with direct I/O, so the host does not cache each page twice.
-# The fstab line carries nofail, so a pool that fails to mount does not stop
-# the host booting; Docker and containerd require the mount
-# (RequiresMountsFor), so they do not start without it. Otherwise Docker would
-# make an empty /var/lib/docker on the root disk, with no limits, and every
-# site would look gone.
+# THE POOL. The data root: a file allocated whole, so it never promises space
+# the disk does not have, mounted with nofail so a host whose data root fails
+# still boots, and required by Docker and containerd (joinery-data.target), so
+# they do not start without it. Otherwise Docker would make an empty data-root
+# on the root disk, with no limits, and every site would look gone. It starts
+# at the size given and grows as it fills; the allowances below are checked
+# against its size now.
 #
 # THE ALLOWANCE. A site's data is its named volumes. All of them but backups
 # and deploy share one XFS project, so the allowance covers its whole
@@ -56,32 +67,40 @@
 # out counting up for --storage-opt size, so the two never pool together.
 #
 # Under user-namespace remapping the volumes live under
-# /var/lib/docker/<uid>.<gid>/volumes; the paths are asked of Docker, never
+# /srv/joinery/docker/<uid>.<gid>/volumes; the paths are asked of Docker, never
 # built, so they follow.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Tests point ROOT into a scratch directory, and stub the commands.
+# Tests point ROOT into a scratch directory, and stub the commands. The data
+# root's script is pointed at the same one.
 ROOT="${JOINERY_POOL_ROOT:-}"
-IMAGE="${ROOT}/var/lib/joinery-docker-pool.img"
-MNT="${ROOT}/var/lib/docker"
-FSTAB="${ROOT}/etc/fstab"
+# A fixture root as root would split the host: the data root tool ignores it
+# there and writes the real /etc/fstab and units, while daemon.json and the
+# projects went to the fixture.
+if [[ -n "$ROOT" && "$EUID" -eq 0 ]]; then
+    printf 'docker_disk_pool: JOINERY_POOL_ROOT is for tests, which run unprivileged; unset it to run as root\n' >&2
+    exit 1
+fi
+DATA_ROOT_TOOL="${SCRIPT_DIR}/joinery_data_root.sh"
+MNT="${ROOT}/srv/joinery"
+DOCKER_DATA_ROOT="/srv/joinery/docker"
 PROJECTS="${ROOT}/etc/projects"
 PROJID="${ROOT}/etc/projid"
-SYSTEMD_DIR="${ROOT}/etc/systemd/system"
 SITES_DIR="${ROOT}/etc/joinery/sites"
-DIO_UNIT="joinery-docker-pool-dio.service"
-FSTAB_MARK="# joinery-docker-pool (docker_disk_pool.sh)"
 SITE_PROJID_BASE=1000000000
-# Left on the root disk beside the pool: the OS, its logs and headroom.
-ROOT_KEEP_BYTES=$((4 * 1024 * 1024 * 1024))
 # The volumes outside the allowance, each in a project of its own.
 OWN_PROJECT_VOLUMES="backups deploy"
 HEADROOM_PCT=10
 # Where the site reads its allowance: a file in its config volume.
 ALLOWANCE_FILE="disk_allowance"
+export DOCKER_DAEMON_JSON="${ROOT}/etc/docker/daemon.json"
+# shellcheck source=_docker_daemon_json.sh
+. "${SCRIPT_DIR}/_docker_daemon_json.sh"
+
+data_root() { JOINERY_HOST_ROOT="$ROOT" bash "$DATA_ROOT_TOOL" "$@"; }
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'docker_disk_pool: %s\n' "$*" >&2; exit 1; }
@@ -101,101 +120,47 @@ size_bytes() {
     printf '%s' "$n"
 }
 
-# The pool is mounted at /var/lib/docker, XFS, with project quotas enforced.
+# The pool is in place: the data root mounted, XFS with project quotas on, and
+# Docker's data-root in it.
 pool_mounted() {
-    local fstype opts
-    read -r fstype opts < <(findmnt -n -o FSTYPE,OPTIONS --mountpoint "$MNT" 2>/dev/null || true) || true
-    [[ "${fstype:-}" == "xfs" && ",${opts:-}," == *",prjquota,"* ]]
-}
-
-dropin_text() {
-    cat <<EOF
-# Written by docker_disk_pool.sh (specs/multi_tenant_docker_hosts.md WP4).
-# /var/lib/docker is the disk pool. Without it mounted this unit does not
-# start: it would build an empty /var/lib/docker on the root disk, with no
-# disk limits, and every site would look gone.
-[Unit]
-RequiresMountsFor=/var/lib/docker
-EOF
-}
-
-dio_unit_text() {
-    cat <<EOF
-# Written by docker_disk_pool.sh (specs/multi_tenant_docker_hosts.md WP4).
-# The pool's loop device reads its file with direct I/O, so the host does not
-# keep every page twice in its cache.
-[Unit]
-Description=Joinery Docker disk pool: direct I/O on its loop device
-After=var-lib-docker.mount
-Requires=var-lib-docker.mount
-Before=docker.service containerd.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for d in \$(losetup -n -O NAME -j ${IMAGE}); do losetup --direct-io=on "\$d" || true; done'
-
-[Install]
-WantedBy=var-lib-docker.mount
-EOF
+    data_root check >/dev/null 2>&1 || return 1
+    local dr
+    dr="$(docker_daemon_json_get data-root)"
+    dr="${dr#\"}"; dr="${dr%\"}"; dr="${dr%/}"
+    [[ "$dr" == "${DOCKER_DATA_ROOT}" ]]
 }
 
 do_create() {
-    local want="${1:-}" bytes avail docker_has
-    bytes="$(size_bytes "$want")" || die "the pool size is a number with G, M or T (68G), not '${want}'"
+    local want="${1:-}" rc=0
+    if [[ -n "$want" ]]; then
+        [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the pool size is a number with G, M or T (68G), not '${want}'"
+    fi
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
 
     if pool_mounted; then
-        say "The disk pool is already mounted at /var/lib/docker"
+        say "The disk pool is in place: Docker keeps its data on the data root, ${DOCKER_DATA_ROOT}"
         return 0
     fi
-    # The pool goes under Docker before Docker's first start. On a host where
-    # Docker has run, /var/lib/docker already holds its images and volumes,
-    # which the pool would hide.
+    # Docker's data-root is set before Docker's first start. On a host where
+    # Docker has run, its images and volumes are where it put them, and
+    # pointing it elsewhere would leave every site behind.
     if command -v dockerd >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
         die "Docker is already installed here; the pool must be made before it. Make it on a new host: install.sh docker --disk-pool=SIZE"
     fi
-    docker_has="$(find "$MNT" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 || true)"
-    [[ -z "$docker_has" ]] || die "${MNT} is not empty; the pool would hide what is in it. Nothing was changed."
-    [[ ! -e "$IMAGE" ]] || die "${IMAGE} exists but is not mounted at ${MNT}. Mount it (mount ${MNT}) or remove it, then run this again."
 
-    avail="$(df -B1 --output=avail "${ROOT:-/}" | tail -n 1 | tr -d ' ')"
-    [[ "$avail" =~ ^[0-9]+$ ]] || die "could not read the root disk's free space"
-    if (( bytes + ROOT_KEEP_BYTES > avail )); then
-        die "a pool of ${want} would leave less than 4 GB on the root disk ($((avail / 1024 / 1024 / 1024)) GB free). Choose a smaller size."
-    fi
+    data_root check >/dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) say "The host's data root is already mounted; the pool is made on it"
+           [[ -z "$want" ]] || say "The size ${want} was not used: the data root exists and grows by itself" ;;
+        2) data_root create ${want:+"$want"} || die "the data root could not be made; nothing else was changed" ;;
+        *) die "this host has a data root that is not mounted: $(data_root check 2>&1 || true). Nothing was changed." ;;
+    esac
 
-    if ! command -v mkfs.xfs >/dev/null 2>&1; then
-        say "Installing xfsprogs..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y xfsprogs >/dev/null || die "could not install xfsprogs"
-    fi
-
-    say "Allocating the pool: ${want} at ${IMAGE}..."
-    mkdir -p "$(dirname "$IMAGE")"
-    fallocate -l "$bytes" "$IMAGE" || { rm -f "$IMAGE"; die "could not allocate ${want} on the root disk"; }
-    chmod 600 "$IMAGE"
-    # ftype=1: overlay2, Docker's storage driver, needs the file type in
-    # directory entries.
-    mkfs.xfs -q -n ftype=1 "$IMAGE" || { rm -f "$IMAGE"; die "could not format the pool"; }
-
-    mkdir -p "$MNT"
-    if ! grep -qF "$FSTAB_MARK" "$FSTAB" 2>/dev/null; then
-        printf '%s\n%s %s xfs loop,prjquota,nofail 0 0\n' "$FSTAB_MARK" "/var/lib/joinery-docker-pool.img" "/var/lib/docker" >> "$FSTAB"
-    fi
-
-    local unit
-    for unit in docker.service containerd.service; do
-        mkdir -p "${SYSTEMD_DIR}/${unit}.d"
-        dropin_text > "${SYSTEMD_DIR}/${unit}.d/joinery-disk-pool.conf"
-    done
-    dio_unit_text > "${SYSTEMD_DIR}/${DIO_UNIT}"
-    systemctl daemon-reload
-
-    mount "$MNT" || die "the pool did not mount at ${MNT}; see dmesg. /etc/fstab keeps its line, so fix it and run: mount ${MNT}"
-    pool_mounted || die "${MNT} is mounted, but not as XFS with project quotas on"
-    systemctl enable "$DIO_UNIT" >/dev/null 2>&1 || true
-    systemctl start "$DIO_UNIT" || say "Direct I/O could not be turned on for the pool's loop device; the pool works, with the host caching its pages twice."
-    say "The disk pool is mounted at /var/lib/docker: $(df -h --output=size "$MNT" | tail -n 1 | tr -d ' '), XFS with project quotas"
+    mkdir -p "${ROOT}${DOCKER_DATA_ROOT}"
+    chmod 710 "${ROOT}${DOCKER_DATA_ROOT}"
+    docker_daemon_json_set data-root "\"${DOCKER_DATA_ROOT}\"" || die "could not set data-root in $(docker_daemon_json_path) (is it valid JSON?)"
+    pool_mounted || die "the data root is mounted, but the pool is not in place; see: joinery_data_root.sh status"
+    say "The disk pool is in place: Docker keeps its data at ${DOCKER_DATA_ROOT}, on the data root"
 }
 
 # ---------------------------------------------------------------------------
@@ -357,5 +322,5 @@ case "${1:-}" in
     allow)   do_allow "${2:-}" "${3:-}" ;;
     release) do_release "${2:-}" ;;
     show)    do_show "${2:-}" ;;
-    *) die "usage: docker_disk_pool.sh create SIZE | check | allow SITE SIZE | release SITE | show SITE" ;;
+    *) die "usage: docker_disk_pool.sh create [SIZE] | check | allow SITE SIZE | release SITE | show SITE" ;;
 esac

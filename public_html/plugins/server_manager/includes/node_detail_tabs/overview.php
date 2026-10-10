@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.57 - the disk_pool gauge is labelled Data root: host_report reports the host's data root, /srv/joinery, under
+ *                 that key (one_data_root WP1)
  * @version 1.56 - the SSH Key Path is required only for a node with no paired agent; a node the agent manages has no
  *                SSH to configure, and the form refused to save its slug or name without one
  * @version 1.55 - Actions offers Hide from Dashboard / Restore to Dashboard and Remove Permanently (live or hidden,
@@ -903,14 +905,15 @@
 				? htmlspecialchars($status_data['disk_used'] . ' of ' . $status_data['disk_total'] . ' used · ' . ($status_data['disk_available'] ?? '?') . ' free') : '';
 			$gauge('Disk', $pct, $gauge_class($pct), $pct . '%', $line);
 		}
-		// A Docker host's disk pool (host_report 1.15): /var/lib/docker on a
-		// filesystem of its own, which the root disk above never shows filling.
+		// The host's data root (host_report 1.17; a Docker host's disk pool):
+		// /srv/joinery on a filesystem of its own, which the root disk above
+		// never shows filling.
 		$dp = $hr['disk_pool'] ?? null;
 		if (is_array($dp) && is_int($dp['total_bytes']) && $dp['total_bytes'] > 0 && is_int($dp['used_bytes'])) {
 			$pct = (int)round($dp['used_bytes'] * 100 / $dp['total_bytes']);
 			$free = is_int($dp['avail_bytes']) ? $dp['avail_bytes'] : $dp['total_bytes'] - $dp['used_bytes'];
 			$class = ($free < $dp['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
-			$gauge('Docker disk pool', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
+			$gauge('Data root', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
 				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), '');
 		}
 
