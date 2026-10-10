@@ -16,6 +16,16 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.5.0 - a cached map is a site's and a plugin set's (B47, 10-10). The APCu key names the site
+ *   root: every site on a host shares one PHP-FPM pool, and two sites on one release fingerprint alike, so
+ *   one site loaded its classes from the other's tree. The map carries the active plugins it was built
+ *   for (PluginHelper::activePluginNames) and is used only while they are still the active set, so a map
+ *   built for another set — by a request that could not read the set, by another site — is rebuilt on the
+ *   next request instead of standing for its TTL; getjoinery's server_manager classes stopped resolving
+ *   after a restart that way. A set that cannot be read is never cached (it used to read as "none"), and
+ *   a rebuild's fingerprint is taken over the directories it scanned, not a second reading of the set:
+ *   the two readings straddled Postgres coming up, so a map with no plugin classes was cached under the
+ *   full set's fingerprint and every later check matched it.
  * @version 1.4.0 - allowPlugin()/forgetPlugin(): a plugin's own install lets its classes resolve while its
  *   migrations run, before it is active; nothing is cached, and every other caller keeps the rule
  * @version 1.3.0 - a lookup miss no longer rebuilds the map on every request:
@@ -39,7 +49,7 @@
 class ClassAutoloader {
 
 	/** Bump when the map's shape changes so stale caches are ignored. */
-	const CACHE_KEY = 'joinery_class_map_v2';
+	const CACHE_KEY = 'joinery_class_map_v3';
 
 	/** Seconds a cached map is trusted before its fingerprint is rechecked. */
 	const CACHE_TTL = 600;
@@ -50,6 +60,10 @@ class ClassAutoloader {
 	private static $prefixes = null;
 	/** Fingerprint of the tree the current map was built from. */
 	private static $stamp = null;
+	/** The active plugins the current map was built for, sorted. */
+	private static $plugins = null;
+	/** True while the cache is being read (entry()), against re-entry. */
+	private static $entering = false;
 	private static $rebuilt = false;
 	private static $resolving_theme_chain = false;
 	private static $core_only = false;
@@ -83,6 +97,7 @@ class ClassAutoloader {
 		self::$map = null;
 		self::$prefixes = null;
 		self::$stamp = null;
+		self::$plugins = null;
 	}
 
 	/**
@@ -227,7 +242,7 @@ class ClassAutoloader {
 		if (self::$map === null) {
 			self::entry();
 		}
-		return self::$map;
+		return self::$map ?? array();
 	}
 
 	/**
@@ -242,18 +257,35 @@ class ClassAutoloader {
 		if (self::$prefixes === null) {
 			self::entry();
 		}
-		return self::$prefixes;
+		return self::$prefixes ?? array();
 	}
 
 	/**
 	 * Populate the map, prefixes and stamp from the cache, or by scanning.
 	 */
 	private static function entry() {
+		// Reading the cache asks for the active plugin set (settings, the
+		// database). A class that asking needs, and that is not a 1:1 includes/
+		// file, must not re-enter here and loop: it gets an empty map for that
+		// one nested lookup, and the outer read carries on.
+		if (self::$entering) {
+			return;
+		}
+		self::$entering = true;
+		try {
+			self::entry_once();
+		} finally {
+			self::$entering = false;
+		}
+	}
+
+	private static function entry_once() {
 		$cached = self::cache_read();
 		if (is_array($cached)) {
 			self::$map = $cached['map'];
 			self::$prefixes = $cached['prefixes'];
 			self::$stamp = $cached['stamp'];
+			self::$plugins = $cached['plugins'];
 			return;
 		}
 		self::rebuild();
@@ -272,12 +304,15 @@ class ClassAutoloader {
 		// built moments ago is not made stale by a miss.
 		self::$rebuilt = true;
 
-		foreach (self::scan_roots($complete) as $directory) {
+		$plugins = array();
+		$roots = self::scan_roots($complete, $plugins);
+		foreach ($roots as $directory) {
 			self::scan_directory($directory, $map, $prefixes);
 		}
 
 		self::$map = $map;
 		self::$prefixes = $prefixes;
+		self::$plugins = $plugins;
 
 		// A core-only map is never cached: it is deliberately missing its
 		// plugin half, and it belongs to a process that cannot write here.
@@ -286,7 +321,12 @@ class ClassAutoloader {
 			return $map;
 		}
 
-		self::$stamp = self::fingerprint();
+		// The stamp describes the directories just scanned, never a second
+		// reading of the active set: the set read twice straddled Postgres
+		// coming up on getjoinery, and a map with no plugin classes was cached
+		// under the full set's fingerprint, which every later check then
+		// matched (B47).
+		self::$stamp = self::fingerprint($roots);
 
 		// A map missing its plugin half would poison every later lookup, so it
 		// is used for this request only and never written to the cache.
@@ -305,15 +345,17 @@ class ClassAutoloader {
 	 * @param bool $complete set FALSE when the active plugin set is unknown
 	 * @return string[]
 	 */
-	private static function scan_roots(&$complete) {
+	private static function scan_roots(&$complete, &$plugins = null) {
 		$roots = array(
 			PathHelper::getIncludePath('includes'),
 			PathHelper::getIncludePath('data'),
 		);
+		$plugins = array();
 		if (self::$core_only) {
 			return $roots;
 		}
-		foreach (self::active_plugins($complete) as $plugin) {
+		$plugins = self::active_plugins($complete);
+		foreach ($plugins as $plugin) {
 			$plugin_root = PathHelper::getIncludePath('plugins/' . $plugin);
 			$roots[] = $plugin_root . '/includes';
 			$roots[] = $plugin_root . '/data';
@@ -328,12 +370,12 @@ class ClassAutoloader {
 	 *
 	 * @return string
 	 */
-	private static function fingerprint() {
+	private static function fingerprint(?array $roots = null) {
 		$complete = true;
 		$count = 0;
 		$newest = 0;
 		$sum = 0;
-		foreach (self::scan_roots($complete) as $directory) {
+		foreach ($roots ?? self::scan_roots($complete) as $directory) {
 			if (!is_dir($directory)) {
 				continue;
 			}
@@ -364,14 +406,18 @@ class ClassAutoloader {
 			'map'      => self::$map,
 			'prefixes' => self::$prefixes,
 			'stamp'    => self::$stamp,
+			'plugins'  => self::$plugins,
 			'built'    => time(),
 		);
 	}
 
 	/**
-	 * Active plugin names. Sets $complete to FALSE when the active set cannot
-	 * be determined (early bootstrap, no database) — the caller then treats the
-	 * map as request-scoped rather than caching a core-only answer.
+	 * Active plugin names that have a directory here, sorted. Sets $complete
+	 * to FALSE when the active set cannot be read (early bootstrap, no
+	 * database) — the caller then treats the map as request-scoped rather than
+	 * caching a core-only answer. The set comes from activePluginNames(), which
+	 * throws rather than answer "none" when it cannot tell: isPluginActive()'s
+	 * false-on-error let a map with no plugins be cached as complete.
 	 *
 	 * @param bool $complete
 	 * @return array
@@ -387,15 +433,10 @@ class ClassAutoloader {
 				require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 			}
 			$active = array();
-			foreach (scandir($plugins_dir) as $entry) {
-				if ($entry === '.' || $entry === '..') {
-					continue;
-				}
-				if (!is_dir($plugins_dir . '/' . $entry)) {
-					continue;
-				}
-				if (PluginHelper::isPluginActive($entry)) {
-					$active[] = $entry;
+			foreach (PluginHelper::activePluginNames() as $name) {
+				$name = basename((string)$name);
+				if ($name !== '' && $name[0] !== '.' && is_dir($plugins_dir . '/' . $name)) {
+					$active[] = $name;
 				}
 			}
 			return $active;
@@ -551,6 +592,11 @@ class ClassAutoloader {
 		return function_exists('apcu_enabled') && apcu_enabled();
 	}
 
+	/** The APCu key: one site's, since every site on a host shares one pool. */
+	private static function cache_key() {
+		return self::CACHE_KEY . ':' . md5(PathHelper::getSiteRoot());
+	}
+
 	private static function cache_file() {
 		return PathHelper::getSiteRoot() . '/cache/class_map.json';
 	}
@@ -574,7 +620,7 @@ class ClassAutoloader {
 
 		if (self::apcu_available()) {
 			$ok = false;
-			$value = apcu_fetch(self::CACHE_KEY, $ok);
+			$value = apcu_fetch(self::cache_key(), $ok);
 			if (!$ok) {
 				$value = null;
 			}
@@ -583,9 +629,29 @@ class ClassAutoloader {
 			$raw = is_file($file) ? @file_get_contents($file) : false;
 			$value = ($raw === false || $raw === '') ? null : json_decode($raw, true);
 		}
-		if (!is_array($value) || !isset($value['map'], $value['prefixes'], $value['stamp'], $value['built'])
-				|| !is_array($value['map']) || !is_array($value['prefixes'])) {
+		if (!is_array($value) || !isset($value['map'], $value['prefixes'], $value['stamp'], $value['built'], $value['plugins'])
+				|| !is_array($value['map']) || !is_array($value['prefixes']) || !is_array($value['plugins'])) {
 			return null;
+		}
+
+		// A map is for the plugin set it was built from. One built for another
+		// set — by a request that could not read it, by a site whose set
+		// differs — is rebuilt now, not trusted for its TTL. When the set
+		// cannot be read the map is used as it is (the last good answer) and
+		// nothing is written. A core-only process never reads the set.
+		if (!self::$core_only) {
+			$complete = true;
+			$current = self::active_plugins($complete);
+			if (!$complete) {
+				// Unreadable now (Postgres restarting): the last good map is the
+				// best answer, past its TTL too — the TTL check below would walk
+				// a core-only tree, never match, and throw it away for a
+				// plugin-less one (reviewer2 F4).
+				return $value;
+			}
+			if ($current !== $value['plugins']) {
+				return null;
+			}
 		}
 
 		// Past the TTL the map is not thrown away but checked against the
@@ -618,7 +684,7 @@ class ClassAutoloader {
 		if (self::apcu_available()) {
 			// No APCu TTL: expiry is the payload's own `built`, checked by
 			// cache_read(), so a stale-by-age map is revalidated, not dropped.
-			apcu_store(self::CACHE_KEY, $payload);
+			apcu_store(self::cache_key(), $payload);
 			return;
 		}
 
@@ -661,9 +727,10 @@ class ClassAutoloader {
 		self::$map = null;
 		self::$prefixes = null;
 		self::$stamp = null;
+		self::$plugins = null;
 		self::$rebuilt = false;
 		if (self::apcu_available()) {
-			apcu_delete(self::CACHE_KEY);
+			apcu_delete(self::cache_key());
 		}
 		$file = self::cache_file();
 		if (is_file($file)) {

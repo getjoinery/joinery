@@ -21,6 +21,7 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.9 - a claim past its budget is failed as lost (ManagementJob::failStaleClaims), never returned to the queue
  * @version 2.8 - no certificate mail: the current certificate problem is stored (mgn_cert_problem) and is an
  *                incident (IncidentSourceCertificate; incident_triage.md WP3)
  * @version 2.7 - no up/down mail: a site that goes down is an incident (incident_triage.md WP2);
@@ -159,16 +160,16 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		// A node agent claims a primitive job and then reports back. When it
 		// never reports — it crashed, the network went, the box rebooted — the
 		// job sits in 'running' holding that node's concurrency lock, and
-		// nothing else for the node can move. The claim endpoint sweeps on
+		// nothing else for the node can move. The claim endpoint frees it on
 		// every poll, which heals an agent that comes back; this sweep is for
-		// the agent that does not, where no poll is ever going to arrive.
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
-		$requeued = ManagementJob::requeueStaleClaims();
+		// the agent that does not, where no poll is ever going to arrive. The
+		// job fails as lost, never runs a second time.
+		$lost = ManagementJob::failStaleClaims();
 		$refreshed = $this->refresh_status_facts($nodes, $now_utc);
 
 		$message = sprintf('Checked %d node(s); %d skipped; %d not due.', $checked, $skipped, $not_due);
-		if ($requeued > 0) {
-			$message .= sprintf(' %d stale agent claim(s) returned to the queue.', $requeued);
+		if ($lost > 0) {
+			$message .= sprintf(' %d agent claim(s) past their budget failed as lost.', $lost);
 		}
 		if ($refreshed > 0) {
 			$message .= sprintf(' %d status/host refresh(es) queued.', $refreshed);

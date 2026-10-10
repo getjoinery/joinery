@@ -15,7 +15,8 @@
  *   - the plane stores a verifier and never a credential;
  *   - a job carries a NAME, never an instruction the plane composed;
  *   - a job an agent would refuse for size fails when it is BUILT, loudly;
- *   - a claim that never comes back becomes a delay, not a wedge;
+ *   - a claim that never comes back fails as lost, is never run twice, and a
+ *     late result still lands on it;
  *   - the two size caps stay two;
  *   - and the canonical signed message is byte-identical to the one the Go
  *     agent builds, because a silent drift there locks the whole fleet out.
@@ -509,23 +510,24 @@ check(ManagementJob::refusalCountForNode($outcome_node->key, gmdate('Y-m-d H:i:s
 check(ManagementJob::refusalCountForNode($node->key, $since) === 0,
 	'The count is per node — another node\'s refusals are not this node\'s');
 
-// A plane-side give-up is not a node verdict. The node said nothing, and
-// recording an outcome for it would be inventing one.
+// A plane-side give-up is not a node verdict. It is recorded as 'lost' — the
+// plane not knowing — which is never a refusal and never a wire outcome.
 $abandoned = ManagementJob::createPrimitiveJob($outcome_node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_management_job_id=?")
-	->execute([gmdate('Y-m-d H:i:s', time() - (ManagementJob::CLAIM_TIMEOUT_SECONDS + 60)),
-		ManagementJob::MAX_CLAIM_ATTEMPTS, $abandoned->key]);
-ManagementJob::requeueStaleClaims($outcome_node->key);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
+	->execute([gmdate('Y-m-d H:i:s', time() - (ManagementJob::CLAIM_TIMEOUT_SECONDS + 60)), $abandoned->key]);
+ManagementJob::failStaleClaims($outcome_node->key);
 $abandoned->load();
-check($abandoned->get('mjb_status') === 'failed', 'An abandoned claim still fails');
-check($abandoned->get('mjb_agent_outcome') === null,
-	'An abandoned claim records NO node outcome — the node never reported one',
+check($abandoned->get('mjb_status') === 'failed', 'An abandoned claim fails');
+check($abandoned->get('mjb_agent_outcome') === ManagementJob::OUTCOME_LOST,
+	'An abandoned claim is recorded as lost, never as something the node said',
 	var_export($abandoned->get('mjb_agent_outcome'), true));
+check(!in_array(ManagementJob::OUTCOME_LOST, ManagementJob::AGENT_OUTCOMES, true),
+	'Lost is not an outcome a node may report');
 check(ManagementJob::refusalCountForNode($outcome_node->key, $since) === 2,
 	'An abandoned claim does not inflate the refusal count');
 
 // ---------------------------------------------------------------------------
-section('A claim that never comes back is a delay, not a wedge');
+section('A claim that never comes back fails as lost; it is never run twice');
 
 $stale = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
 $old = gmdate('Y-m-d H:i:s', time() - (ManagementJob::CLAIM_TIMEOUT_SECONDS + 60));
@@ -544,20 +546,28 @@ $steps_stale = ManagementJob::createJob($node->key, 'install_node',
 $db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=? WHERE mjb_management_job_id=?")
 	->execute([$old, $steps_stale->key]);
 
-ManagementJob::requeueStaleClaims();
+// A move is the case that matters: getjoinery's data root move (job 536,
+// 10-10) finished, its one result post was lost, and a requeue would have run
+// it again four hours later with nobody watching.
+$move = ManagementJob::createPrimitiveJob($node->key, 'data_root_migrate', 'data_root_migrate', [], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
+	->execute([gmdate('Y-m-d H:i:s', time() - (ManagementJob::PRIMITIVE_CLAIM_BUDGETS['data_root_migrate'] + 60)), $move->key]);
 
-$stale->load(); $fresh->load(); $steps_stale->load();
-check($stale->get('mjb_status') === 'pending',
-	'A stale claim returns to pending', 'status ' . $stale->get('mjb_status'));
-check(strpos((string)$stale->get('mjb_output'), 'did not report back') !== false,
-	'The requeue says so in the job output — the delay is visible, not silent');
-check($fresh->get('mjb_status') === 'running', 'A claim still inside the timeout is left alone');
+ManagementJob::failStaleClaims();
+
+$stale->load(); $fresh->load(); $steps_stale->load(); $move->load();
+check($stale->get('mjb_status') === 'failed', 'A claim past its budget fails', 'status ' . $stale->get('mjb_status'));
+check($move->get('mjb_status') === 'failed' && $move->get('mjb_agent_outcome') === ManagementJob::OUTCOME_LOST,
+	'A move past its budget fails as lost — it is not handed out again', 'status ' . $move->get('mjb_status'));
+check(strpos((string)$stale->get('mjb_error_message'), 'check the node before running it again') !== false,
+	'The failure says the outcome is unknown and what to do about it');
+check($fresh->get('mjb_status') === 'running', 'A claim still inside its budget is left alone');
 check($steps_stale->get('mjb_status') === 'running',
 	'A step-list job is left alone — this sweep is only for agent claims');
+check(!method_exists('ManagementJob', 'requeueStaleClaims'),
+	'Nothing on the plane can hand an agent job out a second time');
 
-// A node's own poll sweeps only its own claims — a fleet-wide scan on every
-// poll of every node is a lot of scanning to answer a question about one
-// machine. The scheduled pass is what sweeps the rest.
+// A node's own poll sweeps only its own claims; the scheduled pass sweeps the rest.
 $other = agent_channel_node('agtest-other-' . substr(bin2hex(random_bytes(4)), 0, 8));
 $made_nodes[] = $other->key;
 $other_stale = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
@@ -568,27 +578,132 @@ $stale2 = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_s
 $db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
 	->execute([$old, $stale2->key]);
 
-ManagementJob::requeueStaleClaims($node->key);
+ManagementJob::failStaleClaims($node->key);
 $stale2->load(); $other_stale->load();
-check($stale2->get('mjb_status') === 'pending', 'A node-scoped sweep frees that node\'s stale claim');
+check($stale2->get('mjb_status') === 'failed', 'A node-scoped sweep frees that node\'s stale claim');
 check($other_stale->get('mjb_status') === 'running',
 	'A node-scoped sweep leaves another node\'s claim alone');
 
-ManagementJob::requeueStaleClaims();
+ManagementJob::failStaleClaims();
 $other_stale->load();
-check($other_stale->get('mjb_status') === 'pending',
+check($other_stale->get('mjb_status') === 'failed',
 	'The unscoped sweep — the scheduled one — reaches every node');
 
-// A job that kills three agents is not going to succeed on the fourth.
-$poison = ManagementJob::createPrimitiveJob($node->key, 'check_status', 'check_status', [], null);
-$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=?, mjb_claim_attempts=? WHERE mjb_management_job_id=?")
-	->execute([$old, ManagementJob::MAX_CLAIM_ATTEMPTS, $poison->key]);
-ManagementJob::requeueStaleClaims();
-$poison->load();
-check($poison->get('mjb_status') === 'failed',
-	'A job re-claimed to the attempt limit fails instead of looping forever');
-check(strpos((string)$poison->get('mjb_error_message'), 'without a result') !== false,
-	'That failure says what happened, and points at the node');
+// ---------------------------------------------------------------------------
+section('An agent that checks in idle frees its lost job at once');
+
+// An agent 1.72.0+ claims only while it runs nothing and holds no undelivered
+// result, and says so. A job this plane still has as running for it was lost:
+// waiting out the budget is what held getjoinery's queue for four hours.
+check(isset(AgentChannelEndpoint::claim_request_spec()['idle'])
+	&& AgentChannelEndpoint::claim_request_spec()['idle']['type'] === 'bool',
+	'A claim may say idle');
+$claim_src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
+$claim_body = substr($claim_src, strpos($claim_src, 'private static function handle_claim('));
+$claim_body = substr($claim_body, 0, strpos($claim_body, 'self::claim_next_job_for('));
+check(strpos($claim_body, "if (!empty(\$in['idle']))") !== false && strpos($claim_body, 'ManagementJob::markLost(') !== false,
+	'An idle claim fails the node\'s running jobs as lost before a job is handed out');
+check(strpos($claim_body, 'requeue') === false, 'The claim never requeues anything');
+
+$idle_node = agent_channel_node('agtest-idle-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$made_nodes[] = $idle_node->key;
+$just_claimed = ManagementJob::createPrimitiveJob($idle_node->key, 'data_root_migrate', 'data_root_migrate', [], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now(), mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
+	->execute([$just_claimed->key]);
+$bystander = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now(), mjb_claim_attempts=1 WHERE mjb_management_job_id=?")
+	->execute([$bystander->key]);
+
+$n = ManagementJob::markLost($idle_node->key, 'The node\'s agent checked in idle.');
+$just_claimed->load(); $bystander->load();
+check($n === 1 && $just_claimed->get('mjb_status') === 'failed'
+	&& $just_claimed->get('mjb_agent_outcome') === ManagementJob::OUTCOME_LOST,
+	'markLost fails the node\'s running job inside its budget, as lost', 'count ' . $n);
+check($bystander->get('mjb_status') === 'running', 'It touches no other node\'s job');
+
+// The job page marks one job, never its neighbours.
+$one = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
+ManagementJob::markLost($other->key, 'Marked failed from the job page.', $one->key);
+$bystander->load();
+check($bystander->get('mjb_status') === 'running', 'markLost with a job id marks only that job');
+ManagementJob::markLost($other->key, 'Marked failed from the job page.', $bystander->key);
+$bystander->load();
+check($bystander->get('mjb_status') === 'failed' && $bystander->get('mjb_error_message') === 'Marked failed from the job page.',
+	'and marks that one', (string)$bystander->get('mjb_status'));
+
+// ---------------------------------------------------------------------------
+section('A result that arrives after a job was given up on still lands');
+
+// What the node did is the truth; 'lost' was only the plane not knowing. The
+// agent keeps a result until it is delivered (1.72.0), so it can arrive after
+// a restart, or after the plane itself was down.
+$load_reportable = new ReflectionMethod('AgentChannelEndpoint', 'load_reportable_job');
+$load_reportable->setAccessible(true);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_result='{\"stale\":true}' WHERE mjb_management_job_id=?")
+	->execute([$just_claimed->key]);
+$late = $load_reportable->invoke(null, (int)$just_claimed->key, (int)$idle_node->key);
+AgentChannelEndpoint::record_result($idle_node, $late, ['status' => 'completed', 'data' => ['moved' => true], 'log' => 'done']);
+$just_claimed->load();
+check($just_claimed->get('mjb_status') === 'completed' && $just_claimed->get('mjb_agent_outcome') === 'completed',
+	'A late result replaces lost with what the node said', $just_claimed->get('mjb_status') . '/' . $just_claimed->get('mjb_agent_outcome'));
+check($just_claimed->get('mjb_error_message') === null || $just_claimed->get('mjb_error_message') === '',
+	'and takes the lost message away', var_export($just_claimed->get('mjb_error_message'), true));
+check(strpos((string)$just_claimed->get('mjb_output'), '"moved":true') !== false, 'and records its data');
+
+// reviewer2 F1: a take_node_id result arriving for a job already given up on
+// swaps nothing. The copy dropped its staged identity when its post failed; a
+// swap now would leave both rows naming the wrong machine.
+$take_copy = agent_channel_node('agtest-takecopy-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$take_src  = agent_channel_node('agtest-takesrc-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$made_nodes[] = $take_copy->key; $made_nodes[] = $take_src->key;
+$copy_key_before = (string)$take_copy->get('mgn_agent_public_key');
+$src_key_before  = (string)$take_src->get('mgn_agent_public_key');
+$take = ManagementJob::createPrimitiveJob($take_copy->key, 'take_node_id', 'take_node_id', ['node_id' => (int)$take_src->key], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now() WHERE mjb_management_job_id=?")
+	->execute([$take->key]);
+ManagementJob::markLost($take_copy->key, 'The node\'s agent checked in idle.');
+$was_lost = false;
+$late_take = $load_reportable->invokeArgs(null, [(int)$take->key, (int)$take_copy->key, &$was_lost]);
+AgentChannelEndpoint::record_result($take_copy, $late_take, ['status' => 'completed',
+	'data' => ['staged' => true, 'node_id' => (int)$take_src->key]]);
+$settle = new ReflectionMethod('AgentChannelEndpoint', 'settle_take');
+$settle->setAccessible(true);
+$taken = $settle->invoke(null, $late_take, 'completed', $was_lost);
+$take_copy->load(); $take_src->load(); $take->load();
+$take_result = json_decode((string)$take->get('mjb_result'), true);
+check($was_lost && $taken === 0, 'A late take result on a lost job is answered without node_id_taken', 'taken ' . $taken);
+check((string)$take_copy->get('mgn_agent_public_key') === $copy_key_before
+	&& (string)$take_src->get('mgn_agent_public_key') === $src_key_before,
+	'and neither node row was swapped');
+check(is_array($take_result) && empty($take_result['taken']) && strpos((string)$take_result['reason'], 'given up on') !== false,
+	'and the job says why nothing was swapped', (string)$take->get('mjb_result'));
+
+// reviewer2 F6: a late result is not folded over a newer job of its type that
+// finished since; its facts are older.
+$older = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='running', mjb_started_time=now() - interval '10 minutes' WHERE mjb_management_job_id=?")
+	->execute([$older->key]);
+ManagementJob::markLost($other->key, 'The node\'s agent checked in idle.', $older->key);
+$newer = ManagementJob::createPrimitiveJob($other->key, 'check_status', 'check_status', [], null);
+$db->prepare("UPDATE mjb_management_jobs SET mjb_status='completed', mjb_agent_outcome='completed', mjb_started_time=now() - interval '2 minutes', mjb_completed_time=now() - interval '1 minute' WHERE mjb_management_job_id=?")
+	->execute([$newer->key]);
+$late_old = $load_reportable->invoke(null, (int)$older->key, (int)$other->key);
+check(json_decode((string)$late_old->get('mjb_result'), true) === ['superseded_by' => (int)$newer->key],
+	'A late result for a job a newer one of its type has overtaken is recorded, not folded',
+	(string)$late_old->get('mjb_result'));
+check(JobResultProcessor::process_if_due($late_old) === false,
+	'so the newer job\'s facts stand');
+
+// reviewer2 F5: a lost upgrade keeps its own message, never 'finished but still on X'.
+$verdict = new ReflectionMethod('JobResultProcessor', 'behind_verdict');
+$verdict->setAccessible(true);
+$v = $verdict->invoke(null, ManagementJob::OUTCOME_LOST, 'What it did on the node is unknown.', '', '0.8.1', '0.8.2');
+check($v['rewrite_message'] === false && $v['reason'] === 'What it did on the node is unknown.',
+	'A lost apply_update keeps its own message', json_encode($v));
+
+$reportable_src = substr($claim_src, strpos($claim_src, 'private static function load_reportable_job('));
+check(strpos($reportable_src, "\$status !== 'running'") !== false && strpos($reportable_src, 'OUTCOME_LOST') !== false,
+	'Only a running or a lost job takes a result: a completed one, or one a node failed, does not');
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------

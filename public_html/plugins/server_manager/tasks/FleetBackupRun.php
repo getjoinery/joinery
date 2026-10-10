@@ -34,6 +34,7 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.13 - busy_machines names failStaleClaims and markLost, which free a lost claim (no requeue)
  * @version 1.12 - the pass finishes what earlier deletes only hid in each backup target's folder
  *                 (HiddenVersionSweep; specs/storage_targets.md S28)
  * @version 1.11 - the pass aborts node broker runs whose token expired and writes any run ledger file that did not
@@ -432,8 +433,8 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 	 * an agent claims within seconds of polling, so a job still pending is one
 	 * no agent is running (its node is busy with something else, its agent is
 	 * gone) and it uses nothing on the machine. A claim that outlives its
-	 * budget is requeued by ManagementJob::requeueStaleClaims(), so a lost one
-	 * frees its machine on its own.
+	 * budget, or whose agent comes back idle, is failed as lost by ManagementJob
+	 * (failStaleClaims, markLost), so a lost one frees its machine on its own.
 	 */
 	private static function busy_machines(): array {
 		$db = DbConnector::get_instance()->get_db_link();
