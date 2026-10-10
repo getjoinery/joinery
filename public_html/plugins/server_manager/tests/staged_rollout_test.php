@@ -16,6 +16,7 @@
  * asked for it starts one rollout over every eligible node, management nodes
  * last, and writes what became of it onto the publish job.
  *
+ * @version 1.3 - the readiness check (upgrade_preflight) before a node's apply: passes, fails by name, is skipped for an agent without it
  * @version 1.2 - a node refusing a modified upgrade script halts with its own reason
  * @version 1.1 - deploy to all managed nodes
  * @version 1.0
@@ -249,5 +250,70 @@ check(StagedRolloutRunner::deploy_all_for_publish($second, $candidates) === fals
 	&& !isset(StagedRolloutRunner::job_params($second)['deploy_all_outcome']),
 	'while a rollout is running, another publish waits rather than being refused');
 StagedRolloutRunner::stop($dr, null);
+
+// ---------------------------------------------------------------------------
+section('The readiness check before a node\'s apply (upgrade_preflight)');
+
+$pf = function ($status, $result) {
+	return new SrlJob(array('mjb_status' => $status, 'mjb_error_message' => '',
+		'mjb_result' => json_encode($result)));
+};
+check(StagedRolloutRunner::preflight_verdict($pf('completed', array('read' => true, 'ok' => true, 'checks' => array()))) === null,
+	'every check passing lets the apply go');
+$why = (string)StagedRolloutRunner::preflight_verdict($pf('completed', array('read' => true, 'ok' => false, 'checks' => array(
+	array('check' => 'files', 'ok' => false, 'reason' => 'these deployment files differ from the signed release: public_html/utils/upgrade.php'),
+	array('check' => 'disk', 'ok' => true, 'reason' => 'room')))));
+check(strpos($why, 'files: these deployment files differ') !== false && strpos($why, 'nothing has been changed') !== false
+	&& strpos($why, 'disk') === false, 'a failing check halts the node by name and says nothing was changed', $why);
+check(strpos((string)StagedRolloutRunner::preflight_verdict($pf('completed', array('read' => false))), 'no readable readiness answer') !== false,
+	'an unreadable answer is not a pass');
+check(strpos((string)StagedRolloutRunner::preflight_verdict($pf('failed', array())), 'readiness check failed') !== false,
+	'a check that did not run is not a pass');
+
+// The whole path: a node whose agent offers the word is asked first, and its
+// apply is queued only after it answers well.
+$prior = StagedRollout::running();
+if ($prior) { StagedRolloutRunner::stop($prior, null); }
+$p1 = $mk('pre', 'apply_update,check_status,upgrade_preflight');
+$p2 = $mk('post', 'apply_update,check_status');
+$r = StagedRolloutRunner::start(array($p1->key, $p2->key), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $r->key);
+$steps = $r->steps();
+check(!empty($steps[0]['preflight_job_id']) && empty($steps[0]['job_id']) && $steps[0]['verdict'] === 'running',
+	'the node is asked whether it can take an upgrade before its apply is queued', json_encode($steps[0]));
+$pre = new ManagementJob($steps[0]['preflight_job_id'], TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $pre->key);
+check((string)$pre->get('mjb_job_type') === 'upgrade_preflight', 'the job is an upgrade_preflight');
+
+StagedRolloutRunner::advance($r); $r->load(); $steps = $r->steps();
+check(empty($steps[0]['job_id']) && $r->is_running(), 'while the check runs, the apply waits');
+
+$pre->set('mjb_status', 'completed');
+$pre->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$pre->set('mjb_result', json_encode(array('read' => true, 'ok' => true, 'checks' => array(array('check' => 'files', 'ok' => true, 'reason' => 'ok')))));
+$pre->save();
+StagedRolloutRunner::advance($r); $r->load(); $steps = $r->steps();
+check(!empty($steps[0]['preflight_passed']) && !empty($steps[0]['job_id']),
+	'a good answer queues the apply in the same step', json_encode($steps[0]));
+$apply_job = new ManagementJob($steps[0]['job_id'], TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $apply_job->key);
+StagedRolloutRunner::stop($r, null);
+
+// A bad answer halts before any apply exists.
+$p3 = $mk('bad', 'apply_update,check_status,upgrade_preflight');
+$r2 = StagedRolloutRunner::start(array($p3->key), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $r2->key);
+$steps = $r2->steps();
+$bad = new ManagementJob($steps[0]['preflight_job_id'], TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $bad->key);
+$bad->set('mjb_status', 'completed');
+$bad->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+$bad->set('mjb_result', json_encode(array('read' => true, 'ok' => false, 'checks' => array(
+	array('check' => 'files', 'ok' => false, 'reason' => 'these deployment files differ from the signed release: public_html/utils/upgrade.php')))));
+$bad->save();
+StagedRolloutRunner::advance($r2); $r2->load(); $steps = $r2->steps();
+check((string)$r2->get('srl_status') === StagedRollout::STATUS_HALTED && empty($steps[0]['job_id'])
+	&& strpos((string)$r2->get('srl_halt_reason'), 'public_html/utils/upgrade.php') !== false,
+	'a failing check halts the rollout at that node with no apply ever queued', (string)$r2->get('srl_halt_reason'));
 
 harness_finish();

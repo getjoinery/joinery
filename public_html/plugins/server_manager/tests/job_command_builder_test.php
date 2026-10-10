@@ -1577,6 +1577,27 @@ $dr_msg = '';
 try { JobCommandBuilder::build_data_root_migrate($dr_container); } catch (Exception $e) { $dr_msg = $e->getMessage(); }
 check(strpos($dr_msg, 'is a site container') !== false, 'a site container is refused even when its agent has the word', $dr_msg);
 
+// upgrade_preflight and restore_release_file (specs/release_file_repair.md).
+list($host_pf, $host_pf_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,upgrade_preflight,restore_release_file'));
+$pfenv = JobCommandBuilder::build_upgrade_preflight($host_pf_node);
+check(($pfenv['primitive'] ?? '') === 'upgrade_preflight' && ($pfenv['params'] ?? null) === array(),
+	'upgrade_preflight routes the word with no parameters', json_encode($pfenv));
+$rrenv = JobCommandBuilder::build_restore_release_file($host_pf_node, 'public_html/utils/upgrade.php');
+check(($rrenv['primitive'] ?? '') === 'restore_release_file' && ($rrenv['params'] ?? null) === array('file' => 'public_html/utils/upgrade.php'),
+	'restore_release_file routes the word and the one file', json_encode($rrenv));
+foreach (array('', 'public_html/index.php', '../etc/passwd', 'public_html/utils/upgrade.php/..', 'RELEASE_MANIFEST') as $bad) {
+	$rr_msg = '';
+	try { JobCommandBuilder::build_restore_release_file($host_pf_node, $bad); } catch (Exception $e) { $rr_msg = $e->getMessage(); }
+	check($rr_msg !== '', "restore_release_file refuses '{$bad}'");
+}
+list($host_nopf, $host_nopf_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
+foreach (array('upgrade_preflight' => function () use ($host_nopf_node) { JobCommandBuilder::build_upgrade_preflight($host_nopf_node); },
+	'restore_release_file' => function () use ($host_nopf_node) { JobCommandBuilder::build_restore_release_file($host_nopf_node, 'public_html/utils/upgrade.php'); }) as $word => $call) {
+	$pf_msg = '';
+	try { $call(); } catch (Exception $e) { $pf_msg = $e->getMessage(); }
+	check(strpos($pf_msg, $word) !== false, "an agent without {$word} refuses, naming it", $pf_msg);
+}
+
 // site_limits: a site's limits changed on its host without a rebuild
 // (multi_tenant_docker_hosts WP6). An empty field is keep; at least one changes.
 list($host_sl, $host_sl_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,site_limits'));

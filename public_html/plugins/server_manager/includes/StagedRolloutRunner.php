@@ -20,6 +20,9 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.5 - a node whose agent offers upgrade_preflight is asked whether an upgrade would stop before it
+ *                started, before its apply is queued; a failing check halts the rollout at that node with the
+ *                check's reason, with nothing changed (specs/release_file_repair.md)
  * @version 1.4 - gate(): a node that refused to run its upgrade script as modified (or with an unusable manifest)
  *                halts with a reason that names the file and says another release will not fix it
  * @version 1.3 - deploy to all managed nodes: a publish job carrying deploy_all starts a rollout over every
@@ -39,6 +42,9 @@ class StagedRolloutRunner {
 
 	/** How long one node's apply may take, from queueing, before the rollout halts on it. */
 	const APPLY_WAIT_MINUTES = 90;
+
+	/** How long a node may take to answer its readiness check before the rollout halts at it. */
+	const PREFLIGHT_WAIT_MINUTES = 15;
 
 	/** The advisory lock every mover takes: the task tick and the page load never race. */
 	const LOCK_KEY = 7720230923;
@@ -364,6 +370,14 @@ class StagedRolloutRunner {
 				self::fail_step($rollout, $steps, $pos, $why);
 				return;
 			}
+			$pre = self::preflight($rollout, $node, $steps, $pos);
+			if ($pre === 'wait') {
+				return;
+			}
+			if ($pre !== null) {
+				self::fail_step($rollout, $steps, $pos, $pre);
+				return;
+			}
 			try {
 				$built = JobCommandBuilder::build_apply_update($node);
 				$job = ManagementJob::createFromBuild($node->key, 'apply_update', $built,
@@ -411,6 +425,87 @@ class StagedRolloutRunner {
 		if ($pos + 1 >= count($steps)) {
 			self::finish($rollout, StagedRollout::STATUS_COMPLETED, null);
 		}
+	}
+
+	/**
+	 * Ask a node whether an upgrade would stop before it started, before its
+	 * apply is queued. Null: carry on and queue the apply (the node passed, or
+	 * its agent has no readiness word and is applied as before). 'wait': the
+	 * check is queued or still running, look again on the next tick. A string:
+	 * the reason to halt at this node, with nothing yet changed on it.
+	 */
+	private static function preflight(StagedRollout $rollout, ManagedNode $node, array &$steps, $pos) {
+		$step = $steps[$pos];
+		if (!empty($step['preflight_passed']) || !JobCommandBuilder::has_primitive($node, 'upgrade_preflight')) {
+			return null;
+		}
+
+		if (empty($step['preflight_job_id'])) {
+			try {
+				$built = JobCommandBuilder::build_upgrade_preflight($node);
+				$job = ManagementJob::createFromBuild($node->key, 'upgrade_preflight', $built,
+					array('staged_rollout_id' => (int)$rollout->key), $rollout->get('srl_created_by'));
+			} catch (Exception $e) {
+				return 'the readiness check could not be queued: ' . $e->getMessage();
+			}
+			$steps[$pos]['preflight_job_id'] = (int)$job->key;
+			$steps[$pos]['verdict'] = 'running';
+			$steps[$pos]['reason'] = 'checking it can take an upgrade';
+			$rollout->set_steps($steps);
+			$rollout->save();
+			return 'wait';
+		}
+
+		try {
+			$job = new ManagementJob((int)$step['preflight_job_id'], TRUE);
+		} catch (Exception $e) {
+			return 'its readiness check is gone';
+		}
+		if (!in_array((string)$job->get('mjb_status'), JobResultProcessor::TERMINAL_STATUSES, true)) {
+			$queued = strtotime((string)$job->get('mjb_create_time') . ' UTC');
+			if ($queued && time() - $queued > self::PREFLIGHT_WAIT_MINUTES * 60) {
+				return 'its readiness check has not finished in ' . self::PREFLIGHT_WAIT_MINUTES
+					. ' minutes (status ' . $job->get('mjb_status') . '; is its agent claiming jobs?)';
+			}
+			return 'wait';
+		}
+		JobResultProcessor::process_if_due($job);
+		$job->load();
+		$why = self::preflight_verdict($job);
+		if ($why !== null) {
+			return $why;
+		}
+		$steps[$pos]['preflight_passed'] = true;
+		$steps[$pos]['reason'] = '';
+		$rollout->set_steps($steps);
+		$rollout->save();
+		return null;
+	}
+
+	/**
+	 * The verdict on a finished readiness check: null when every check passed,
+	 * else why the node cannot take an upgrade yet. Public so the test holds it
+	 * to the checks the agent reports.
+	 */
+	public static function preflight_verdict($job) {
+		if ((string)$job->get('mjb_status') !== 'completed') {
+			$err = trim((string)$job->get('mjb_error_message'));
+			return 'its readiness check ' . $job->get('mjb_status') . ($err !== '' ? ': ' . $err : '');
+		}
+		$result = json_decode((string)$job->get('mjb_result'), true);
+		if (!is_array($result) || empty($result['read'])) {
+			return 'the node sent no readable readiness answer, so it cannot be judged';
+		}
+		if (!empty($result['ok'])) {
+			return null;
+		}
+		$failing = array();
+		foreach ((array)($result['checks'] ?? array()) as $c) {
+			if (is_array($c) && empty($c['ok'])) {
+				$failing[] = ($c['check'] ?? '?') . ': ' . ($c['reason'] ?? '');
+			}
+		}
+		return 'it cannot take an upgrade yet (' . ($failing ? implode('; ', $failing) : 'a check failed') . '); nothing has been changed on it';
 	}
 
 	/**

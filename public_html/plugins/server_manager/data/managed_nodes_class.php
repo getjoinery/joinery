@@ -24,6 +24,7 @@
  *                 as this management node last proved it
  * @version 1.39 - mgn_mtr_machine_transfer_id: the cloud machine the node runs on, as the daily transfer read
  *                matched it (specs/node_outbound_and_transfer.md WP1)
+ * @version 1.39 - mgn_script_trust_files: the deployment files the node reported as differing from its release
  * @version 1.38 - mgn_script_trust may read unpublished_file (this management node's own commit, not yet published)
  * @version 1.37 - mgn_moved_check_*: where the old machine of a switch-over's domain goes, as its host last
  *                 checked (moved_site_check), shown beside its site
@@ -221,6 +222,7 @@ class ManagedNode extends SystemBase {
 		'mgn_script_trust'        => array('type'=>'varchar(24)'),
 		'mgn_script_trust_since'  => array('type'=>'timestamp(6)'),
 		'mgn_script_trust_reason' => array('type'=>'text'),
+		'mgn_script_trust_files'  => array('type'=>'text'),
 		// The job type whose refusal set the state. Clearing keys on it: a later
 		// job of a type that once refused on trust grounds and now completes is
 		// the node's own proof that it can verify scripts again. The plane holds

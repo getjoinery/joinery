@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.47 - release_file artifact kind (one of five deployment files from a core archive) and the claim's
+ *                script_trust_files list, for restore_release_file and the poll's file report
  * @version 1.46 - a join and a claim can say container: the node is named and placed as a container site (ManagedNode::adopt_reported_container)
  * @version 1.45 - node_address_for_join() skips the shared range 100.64.0.0/10: a Tailscale address
  *                 reported first was recorded as a joined node's host (jeremytunnell-vps, 2026-10-10)
@@ -265,7 +267,7 @@ class AgentChannelEndpoint {
 	 * as a path on this plane.
 	 */
 	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body',
-		'release_manifest'];
+		'release_manifest', 'release_file'];
 
 	/** Chunk size for streaming an artifact out. Bounds this plane's memory, not the transfer. */
 	const ARTIFACT_CHUNK_BYTES = 262144;
@@ -1138,6 +1140,11 @@ class AgentChannelEndpoint {
 			// would run as root. A closed set, matched not interpolated.
 			'script_trust'   => ['type' => 'string', 'max' => 24,
 				'pattern' => '/^(ok|untrusted_manifest|untrusted_file)?$/'],
+			// Which deployment files differ from the node's signed release, by
+			// name, when it looked (agent 1.71.0). An empty list is the node
+			// saying every one matches. Each item is checked against the five
+			// names in the handler; anything else is dropped.
+			'script_trust_files' => ['type' => 'list', 'max' => 8],
 			// Whether the Server Manager plugin is active on the node — what
 			// makes it a management node, the only kind offered a publish.
 			// Read by the agent from the node's own plugin registry with
@@ -1278,7 +1285,12 @@ class AgentChannelEndpoint {
 		// a machine with no site tree, and must never be read as good news —
 		// only an explicit answer moves the column, in either direction.
 		if (array_key_exists('script_trust', $in) && (string)$in['script_trust'] !== '') {
-			NodeMonitorHealth::note_reported_script_trust($node, (string)$in['script_trust']);
+			$trust_files = null;
+			if (array_key_exists('script_trust_files', $in) && is_array($in['script_trust_files'])) {
+				$trust_files = array_values(array_intersect(
+					array_map('strval', $in['script_trust_files']), ReleaseManifestSource::SELF_UPDATE_FILES));
+			}
+			NodeMonitorHealth::note_reported_script_trust($node, (string)$in['script_trust'], $trust_files);
 		}
 
 		$node->save();
@@ -2169,6 +2181,9 @@ class AgentChannelEndpoint {
 			// resolved to anything; neither is ever joined onto a path here.
 			'owner'    => ['type' => 'string', 'max' => 128],
 			'version'  => ['type' => 'string', 'max' => 24],
+			// For a release_file: which of the five deployment files. A closed
+			// set re-checked by ReleaseManifestSource; never joined onto a path.
+			'file'     => ['type' => 'string', 'max' => 64, 'pattern' => '/^public_html\/(utils|includes)\/[A-Za-z_]+\.php$/'],
 		];
 	}
 
@@ -2190,6 +2205,9 @@ class AgentChannelEndpoint {
 		switch ($kind) {
 			case 'release_manifest':
 				self::serve_release_manifest((string)($in['owner'] ?? ''), (string)($in['version'] ?? ''));
+				break;
+			case 'release_file':
+				self::serve_release_file((string)($in['version'] ?? ''), (string)($in['file'] ?? ''));
 				break;
 			case 'agent_manifest':
 				self::serve_agent_manifest($dist_dir);
@@ -2258,6 +2276,42 @@ class AgentChannelEndpoint {
 			'version'   => $version,
 			'manifest'  => $pair['manifest'],
 			'signature' => $pair['signature'],
+		], '', 200);
+	}
+
+	/**
+	 * One of the five deployment files an upgrade replaces first, out of the
+	 * published core archive of a version, so a node that has put one wrong can
+	 * get the signed bytes back (restore_release_file, specs/release_file_repair.md).
+	 *
+	 * The same position as serve_release_manifest(): bytes the publisher signed,
+	 * checked by the node against the signed manifest it already holds before a
+	 * byte is written, so a plane that sends anything else restores nothing. The
+	 * node names a version and one of five files; ReleaseManifestSource resolves
+	 * both against this plane's own layout. Logged, not metered as a body: it is
+	 * fetched by a node that cannot upgrade, about 150 KB at a time.
+	 */
+	private static function serve_release_file($version, $file) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseManifestSource.php'));
+
+		$version = trim((string)$version);
+		$file    = trim((string)$file);
+		if (!ReleaseManifestSource::valid_version($version) || !in_array($file, ReleaseManifestSource::SELF_UPDATE_FILES, true)) {
+			api_error('A release file request must name a version and one of the deployment files.',
+				'ValidationError', 400);
+		}
+
+		RequestLogger::log('api_agent_artifact', 'release_file ' . $file . ' ' . $version, true);
+
+		$body = ReleaseManifestSource::read_file($version, $file);
+		if ($body === null) {
+			api_success(['available' => false], '', 200);
+		}
+		api_success([
+			'available' => true,
+			'version'   => $version,
+			'file'      => $file,
+			'content'   => base64_encode($body),
 		], '', 200);
 	}
 

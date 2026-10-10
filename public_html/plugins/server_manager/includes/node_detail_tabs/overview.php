@@ -85,6 +85,8 @@
  *                 lacking any word this tab offers shows the one "needs a newer agent" state (AgentVocabulary)
  * @version 1.23 - the Machine box names the operating system and the release upgrade the node's own
  *                 check last offered, with the date of that check
+ * @version 1.23 - a node whose deployment files differ from its release lists them with Restore signed copy
+ *                (restore_release_file), each a confirmed single-button POST
  * @version 1.22 - a Plugin Checks card: each plugin check the node records for fleet reporting,
  *                 naming any that does not pass (the same list that fails the node's badge)
  * @version 1.21 - a Clear button beside each failed unit on the compiled list (reset_failed_unit),
@@ -586,6 +588,9 @@
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
 			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file'];
+		// (restore_release_file and upgrade_preflight are not listed: a node
+		// without them simply does not offer Restore signed copy, and a rollout
+		// applies it as before.)
 		if (!$node->hosts_site()) {
 			$tab_words = array_values(array_diff($tab_words, ['site_log', 'log_table_tail', 'schema_probe', 'page_probe']));
 		}
@@ -1665,6 +1670,29 @@
 			echo '<div class="mt-2"><span class="badge bg-danger">' . ($trust === 'untrusted_file' ? 'A script on the node does not match its release' : 'Cannot verify its scripts') . '</span></div>';
 			if ($node->get('mgn_script_trust_reason')) {
 				echo '<div class="small text-muted mt-1">' . htmlspecialchars((string)$node->get('mgn_script_trust_reason')) . '</div>';
+			}
+			// The deployment files the node named, each with the repair: put the
+			// release's own bytes back, keeping what is there for inspection.
+			if ($trust === 'untrusted_file' && JobCommandBuilder::has_primitive($node, 'restore_release_file')) {
+				$trust_files = NodeMonitorHealth::script_trust_files($node);
+				if ($trust_files) {
+					echo '<ul class="list-unstyled small mt-2 mb-0">';
+					foreach ($trust_files as $i => $tf) {
+						$form_id = 'nodeActionRestoreFile_' . $i;
+						$confirm = 'Put ' . $tf . ' back to the bytes this node\'s installed release signed? '
+							. 'The file now on the node is kept for inspection. Nothing else is changed.';
+						echo '<li>' . htmlspecialchars($tf)
+							. ' <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+							. ' onclick="' . htmlspecialchars('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })', ENT_QUOTES, 'UTF-8') . '">Restore signed copy</button>'
+							. '<form id="' . htmlspecialchars($form_id, ENT_QUOTES, 'UTF-8') . '" method="post" action="'
+							. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+							. '<input type="hidden" name="action" value="restore_release_file">'
+							. '<input type="hidden" name="file" value="' . htmlspecialchars($tf, ENT_QUOTES, 'UTF-8') . '">'
+							. SmAdminCsrf::field() . '</form></li>';
+					}
+					echo '</ul>';
+				}
 			}
 		} elseif ($agent_key !== '') {
 			echo '<div class="small text-muted mt-2">Its scripts verify against their signed release.</div>';

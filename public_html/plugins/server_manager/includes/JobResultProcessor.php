@@ -7,6 +7,7 @@
  *
  * @version 1.74 - a host report's disk_pool keeps not_mounted (host_report 1.18): a data root declared and down,
  *                  which the node page tells apart from none
+ * @version 1.74 - process_upgrade_preflight, process_restore_release_file (specs/release_file_repair.md)
  * @version 1.73 - process_disk_usage keeps the data root's figures and tree (disk_usage.sh 1.1), or none
  * @version 1.72 - process_run_plugin_installers and process_host_converge go red with the runner's reason when the host's
  *                 data root is not ready and nothing ran (one_data_root WP1, reviewer2 F2)
@@ -3000,6 +3001,57 @@ HTML;
 			'lines_returned' => max(0, min((int)($data['lines_returned'] ?? 0), JobCommandBuilder::FILE_HEAD_MAX_LINES)),
 			'truncated'      => !empty($data['truncated']) || $truncated_here,
 			'text'           => $text,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * An upgrade_preflight job's result: pass or fail per check with a short
+	 * reason, bounded here as well as on the node. The check names are a fixed
+	 * set; a reason is text the node composed from its own facts, capped.
+	 */
+	private static function process_upgrade_preflight($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !array_key_exists('checks', $data) || !is_array($data['checks'])) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$checks = [];
+		foreach ($data['checks'] as $c) {
+			if (!is_array($c)) { continue; }
+			$checks[] = [
+				'check'  => substr(preg_replace('/[^a-z_]/', '', strtolower((string)($c['check'] ?? ''))), 0, 24),
+				'ok'     => !empty($c['ok']),
+				'reason' => substr(preg_replace('/[^\x20-\x7E]/', '', (string)($c['reason'] ?? '')), 0, 300),
+			];
+			if (count($checks) >= 12) { break; }
+		}
+		$job->set('mjb_result', json_encode([
+			'read'   => true,
+			'ok'     => !empty($data['ok']) && !array_filter($checks, function ($c) { return !$c['ok']; }),
+			'checks' => $checks,
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A restore_release_file job's result: which file, the release, where the
+	 * bytes came from and whether what was replaced was kept. Compiled facts only.
+	 */
+	private static function process_restore_release_file($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !in_array((string)($data['file'] ?? ''), ReleaseManifestSource::SELF_UPDATE_FILES, true)) {
+			$job->set('mjb_result', json_encode(['restored' => false]));
+			$job->save();
+			return;
+		}
+		$job->set('mjb_result', json_encode([
+			'restored'      => true,
+			'file'          => (string)$data['file'],
+			'version'       => substr(preg_replace('/[^0-9.]/', '', (string)($data['version'] ?? '')), 0, 24),
+			'source'        => in_array((string)($data['source'] ?? ''), ['kept copy', 'management node'], true) ? (string)$data['source'] : '',
+			'replaced_kept' => !empty($data['replaced_kept']),
 		]));
 		$job->save();
 	}

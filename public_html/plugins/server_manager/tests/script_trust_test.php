@@ -237,6 +237,28 @@ $keeps->load();
 check($keeps->get('mgn_script_trust_reason') === $MANIFEST_NONE,
 	'a reason from a refusal survives a later poll that says the same thing');
 
+// A node that looked at its own deployment files (agent 1.71.0) names the ones
+// that differ, and says so again with an empty list once they are put back.
+$files = st_node();
+$names = array('public_html/utils/upgrade.php', 'public_html/includes/DeploymentHelper.php');
+NodeMonitorHealth::note_reported_script_trust($files, 'untrusted_file', $names);
+$files->save();
+$files->load();
+check($files->get('mgn_script_trust') === 'untrusted_file' && NodeMonitorHealth::script_trust_files($files) === $names,
+	'a reported untrusted_file keeps the names of the differing files');
+check(strpos((string)$files->get('mgn_script_trust_reason'), 'public_html/utils/upgrade.php') !== false,
+	'and its reason names them');
+NodeMonitorHealth::note_reported_script_trust($files, 'ok');
+$files->save();
+$files->load();
+check($files->get('mgn_script_trust') === 'untrusted_file',
+	'an ok with no file list (an older agent) still leaves the file state standing');
+NodeMonitorHealth::note_reported_script_trust($files, 'ok', array());
+$files->save();
+$files->load();
+check($files->get('mgn_script_trust') === 'ok' && NodeMonitorHealth::script_trust_files($files) === array(),
+	'an ok with an empty list - the node checked and every file matches - clears it, names and all');
+
 // Anything that is not one of the three answers is not an answer. An older
 // agent sends nothing at all, and nothing must never read as healthy.
 $untouched = st_node();
