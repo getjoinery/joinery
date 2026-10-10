@@ -16813,6 +16813,284 @@ fn a_save_in_a_folder_new_here_when_its_temporary_file_was_seen_is_the_files_nex
     assert_eq!(live[0].sha256, jd_sim::sha256_hex(b"mac's save"));
 }
 
+/// A folder deleted here while a peer's edit to a file in it is already on
+/// the server: an edit beats a delete, so the edited file stays, live, in its
+/// folder, and the files nobody touched go to the trash. Trashed with the
+/// folder, the server's cascade took the edit, and its download -- the edit
+/// coming back -- was dropped as an arrival under a folder being trashed
+/// (B-O1).
+#[test]
+fn a_folder_deleted_here_keeps_a_file_a_peer_edited_inside_it() {
+    a_folder_deleted_here_keeps_a_peers_edit(false);
+}
+
+/// The same on volumes that keep no file identities.
+#[test]
+fn a_folder_deleted_here_keeps_a_file_a_peer_edited_inside_it_hidden() {
+    a_folder_deleted_here_keeps_a_peers_edit(true);
+}
+
+fn a_folder_deleted_here_keeps_a_peers_edit(hidden: bool) {
+    let world = World::new(9_985, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    mac.fs.user_write("Art/other.txt", b"another file");
+    assert!(world.settle().is_some());
+    let shot = world.server.files().into_iter().find(|f| f.name == "shot.psd").unwrap().id;
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 1, "only the edited file stays: {live:?}");
+    assert_eq!(live[0].id, shot, "{live:?}");
+    assert_eq!(live[0].sha256, jd_sim::sha256_hex(edit));
+    assert_eq!(world.server.tree().get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A save seen mid-save in a folder the user renames in the same window,
+/// while a peer edits the file: the peer's edit stays live where the file
+/// is, and the save is kept beside it. On a volume with no identities the
+/// rename reads as the folder deleted, which took the peer's edit to the
+/// trash (B-O1); on one with them it pins the settle (reviewer O-1).
+#[test]
+fn a_save_in_a_folder_renamed_mid_save_while_a_peer_edits_keeps_both() {
+    a_save_in_a_renamed_folder_keeps_both(false);
+}
+
+#[test]
+fn a_save_in_a_folder_renamed_mid_save_while_a_peer_edits_keeps_both_hidden() {
+    a_save_in_a_renamed_folder_keeps_both(true);
+}
+
+fn a_save_in_a_renamed_folder_keeps_both(hidden: bool) {
+    let world = World::new(9_984, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let save = b"mac's save";
+    mac.fs.user_write("Art/shot.psd.tmp1453", save);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_rename("Art", "Art2");
+    mac.fs.user_remove("Art2/shot.psd");
+    mac.fs.user_rename("Art2/shot.psd.tmp1453", "Art2/shot.psd");
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(edit)), "the peer's edit is not live: {live:?}");
+    assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(save)), "the save is not kept: {live:?}");
+    assert_converged(&world);
+}
+
+/// The edit two folders down: only the chain the file is in comes back, and a
+/// sibling folder, and a file beside it, still go.
+#[test]
+fn a_folder_deleted_here_keeps_only_the_chain_to_an_edited_file() {
+    let world = World::new(9_986, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/Sub/shot.psd", b"the first version");
+    mac.fs.user_write("Art/Other/x.txt", b"untouched");
+    mac.fs.user_write("Art/top.txt", b"untouched too");
+    assert!(world.settle().is_some());
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/Sub/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/Sub/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{tree:?}");
+    assert!(!tree.contains_key("Art/Other") && !tree.contains_key("Art/Other/x.txt") && !tree.contains_key("Art/top.txt"), "what nobody touched should have gone: {tree:?}");
+    assert_eq!(
+        disk_tree(mac).get("Art/Sub/shot.psd").cloned().flatten(),
+        Some(jd_sim::sha256_hex(edit)),
+        "the edit is not back on mac: {:?}",
+        disk_tree(mac).keys().collect::<Vec<_>>()
+    );
+    assert_converged(&world);
+}
+
+/// A folder's trash decided before a peer's edit inside it was heard of --
+/// the pass killed after its plan was written, so still in the journal when
+/// the edit comes in -- stands down, and the next round puts the folder back
+/// for the edit.
+#[test]
+fn a_folder_trash_queued_before_a_peers_edit_stands_down_and_keeps_it() {
+    let world = World::new(9_987, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    mac.fs.user_remove("Art");
+    mac.fs.user_write("elsewhere.txt", b"sent in the same pass, before the deletes");
+    // Killed in the upload, before the deletes run.
+    mac.net.arm_death(2);
+    world.pass(mac);
+    assert!(
+        mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote" && o.entity.entity_type == jd_core::EntityType::Folder)
+            && mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote" && o.entity.entity_type == jd_core::EntityType::File),
+        "the trashes are not queued: the kill did not land between the plan and the deletes"
+    );
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{tree:?}");
+    assert_eq!(disk_tree(mac).get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "the folder was not put back on mac");
+    assert_converged(&world);
+}
+
+/// The folder renamed on the server before this device's delete reached it:
+/// back at the server's name, holding the edit. It comes back by its own
+/// rule -- a folder deleted here and moved there is restored -- not because
+/// a file in it was edited; this pins the end state.
+#[test]
+fn a_folder_deleted_here_and_renamed_elsewhere_comes_back_at_the_servers_name() {
+    let world = World::new(9_988, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let edit = b"pc's edit";
+    pc.fs.user_rename("Art", "Art renamed");
+    pc.fs.user_write("Art renamed/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art renamed/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{tree:?}");
+    assert_eq!(disk_tree(mac).get("Art renamed/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    assert!(!mac.fs.exists("Art"), "the old name came back");
+    assert_converged(&world);
+}
+
+/// The same for a vault: put back sealed, its edit decrypted here.
+#[test]
+fn a_vault_deleted_here_keeps_a_file_a_peer_edited_inside_it() {
+    let vault = SimVault::new(9_989);
+    let mut world = World::new(9_989, &["mac", "pc"]);
+    world.give_vault("mac", &vault);
+    world.give_vault("pc", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Private/notes.txt", b"the sealed file");
+    mac.fs.user_write("Private/other.txt", b"untouched");
+    assert!(world.settle().is_some());
+    let edit = b"pc's edit, sealed";
+    pc.fs.user_write("Private/notes.txt", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Private");
+    assert!(world.settle().is_some(), "never settled");
+
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|f| f.id == private && !f.trashed), "the vault went to the trash: {folders:?}");
+    assert!(world.server.blob(&jd_sim::sha256_hex(edit)).is_none(), "the edit reached the server in the clear");
+    assert_eq!(disk_tree(mac).get("Private/notes.txt").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "{:?}", disk_tree(mac).keys().collect::<Vec<_>>());
+    assert!(!mac.fs.exists("Private/other.txt"), "what nobody touched came back");
+    assert_converged(&world);
+}
+
+/// The mass-delete guard still holds the rest: the folder comes back for
+/// the edit, and the untouched files wait for a person to answer, not
+/// trashed.
+#[test]
+fn a_folder_kept_for_an_edit_leaves_the_mass_delete_guard_holding_the_rest() {
+    let world = World::new(9_990, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    for n in 0..60 {
+        mac.fs.user_write(&format!("Art/f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    assert!(world.settle().is_some());
+    let edit = b"pc's edit";
+    pc.fs.user_write("Art/shot.psd", edit);
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    for _ in 0..4 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(mac);
+    }
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 61, "the guard did not hold the untouched files: {} live", live.len());
+    assert!(live.iter().any(|f| f.name == "shot.psd" && f.sha256 == jd_sim::sha256_hex(edit)));
+    assert_eq!(disk_tree(mac).get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "the edit is not back on mac");
+}
+
+/// A peer moves a file INTO a folder this device deletes, and edits it
+/// there. No round keeps the folder for it -- the file is unchanged here, at
+/// its old place -- and the folder's trash, decided with the move and the
+/// edit in view, is not stood down for them: stood down for anything the
+/// server had changed under the folder, it waited for a restore nothing
+/// would plan, every pass for ever (reviewer C1). What becomes of the moved
+/// file is B-O2's, still open; this pins that it settles.
+#[test]
+fn a_folder_deleted_here_while_a_peer_moves_an_edited_file_into_it_settles() {
+    let world = World::new(9_991, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/top.txt", b"untouched");
+    mac.fs.user_write("Other/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Other/shot.psd", "Art/shot.psd");
+    pc.fs.user_write("Art/shot.psd", b"pc's edit");
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(mac.store.queued_ops().unwrap().is_empty(), "work is still queued");
+    assert_converged(&world);
+}
+
+/// This device moves a file out of a folder and deletes the folder while a
+/// peer edits the file, with the move refused once or not: the edit is live
+/// where this device put the file, and what nobody touched goes.
+#[test]
+fn a_file_moved_out_of_a_folder_deleted_here_keeps_a_peers_edit() {
+    for refused in [false, true] {
+        let world = World::new(9_992, &["mac", "pc"]);
+        let mac = world.device("mac");
+        let pc = world.device("pc");
+        mac.fs.user_write("Art/shot.psd", b"the first version");
+        mac.fs.user_write("Art/top.txt", b"untouched");
+        mac.fs.user_mkdir("Out");
+        assert!(world.settle().is_some());
+        let edit = b"pc's edit";
+        pc.fs.user_write("Art/shot.psd", edit);
+        world.pass(pc);
+        mac.fs.user_rename("Art/shot.psd", "Out/shot.psd");
+        mac.fs.user_remove("Art");
+        if refused {
+            mac.net.set_faults(NetFaults { refuse_before: Some("drive_move".into()), ..NetFaults::none() });
+        }
+        assert!(world.settle().is_some(), "never settled (refused {refused})");
+        let tree = world.server.tree();
+        assert_eq!(tree.get("Out/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "refused {refused}: {tree:?}");
+        assert!(!tree.contains_key("Art") && !tree.contains_key("Art/top.txt"), "refused {refused}: {tree:?}");
+        assert_converged(&world);
+    }
+}
+
 /// The same, read by the bytes: no births on either disk.
 #[test]
 fn a_save_by_rename_seen_mid_save_while_a_peer_edits_keeps_both_hidden() {

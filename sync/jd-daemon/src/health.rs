@@ -325,6 +325,11 @@ fn reconcile_summary(detail: &str) -> String {
         return "Moved in two places at once. The server's location was used, so this device's move was undone.".into();
     }
     if detail.starts_with("DeleteLostToEdit") {
+        // The folder the user deleted here is back to hold the edit, and
+        // without this they would find it back with no word why.
+        if detail.contains("folder_kept: true") {
+            return "Deleted in one place and edited in another. The edit was kept, and so was the folder it is in, with only the edited file back in it — a delete can be undone, an edit cannot.".into();
+        }
         return "Deleted in one place and edited in another. The edit was kept — a delete can be undone, an edit cannot.".into();
     }
     if detail.starts_with("RescuedFromDeletedFolder") {
@@ -378,6 +383,18 @@ mod tests {
             last_pass_ms: None,
             cursor: 0,
         }
+    }
+
+    /// A file whose delete lost to an edit says so, and says the folder came
+    /// back with it when one did.
+    #[test]
+    fn an_edit_that_kept_a_deleted_folder_says_the_folder_came_back() {
+        let file = reconcile_summary("DeleteLostToEdit { side: Local, folder_kept: false }");
+        let folder = reconcile_summary("DeleteLostToEdit { side: Local, folder_kept: true }");
+        assert!(file.contains("The edit was kept") && !file.contains("folder"), "{file}");
+        assert!(folder.contains("so was the folder it is in"), "{folder}");
+        // A detail written before the folder was told apart says what it always did.
+        assert_eq!(reconcile_summary("DeleteLostToEdit { side: Local }"), file);
     }
 
     /// A move race is described by the half it lost: the whole move only

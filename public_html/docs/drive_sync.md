@@ -190,6 +190,15 @@ Three rules run underneath the whole table:
 **An edit beats a delete, in both directions.** They are not symmetric outcomes:
 a delete that loses is recoverable from a trash, an edit that loses is gone. So
 the edit survives, even where that resurrects a file somebody meant to remove.
+That holds inside a folder too. A folder deleted here that holds a file edited
+elsewhere since this device last agreed on it comes back, at the server's name
+and place, holding only the edited file; what nobody touched goes to the trash
+on its own, and the user is told the folder came back for the edit. A trash
+decided before the edit was heard of stands down when it runs. What arrives
+under a folder deleted here that this device never had is not an edit it lost,
+and goes with the folder. The server trashes a folder with everything in it,
+so an edit that reaches the server after this device last read the change feed
+and before its trash lands goes to the server's trash with the folder.
 
 **Deletes only ever win against unchanged content.** A remote move with a local
 delete resolves as a delete only when the last-agreed hash still matches the

@@ -106,7 +106,9 @@ pub enum Issue {
     /// told which one lost and which half (`lost`).
     MoveRaceServerWon { local_wanted: Placement, lost: RaceHalf },
     /// A delete was overridden because the other side had edited the file.
-    DeleteLostToEdit { side: Side },
+    /// `folder_kept`: a folder deleted here comes back to hold it
+    /// (`round`, B-O1).
+    DeleteLostToEdit { side: Side, folder_kept: bool },
     /// A folder was removed remotely but held local edits; those were rescued
     /// to new server entries rather than going down with it.
     RescuedFromDeletedFolder { count: usize },
@@ -392,7 +394,7 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
         // would not have been.
         (Delta::Deleted, r) if r.touched_content() => {
             Resolution::just(restore_locally(entry, r))
-                .with_issue(Issue::DeleteLostToEdit { side: Side::Local })
+                .with_issue(Issue::DeleteLostToEdit { side: Side::Local, folder_kept: false })
         }
 
         // Deleted here, moved there. A move proves someone is working with the
@@ -404,7 +406,7 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
                 Resolution::just(Action::TrashRemote)
             } else {
                 Resolution::just(restore_locally(entry, r))
-                    .with_issue(Issue::DeleteLostToEdit { side: Side::Local })
+                    .with_issue(Issue::DeleteLostToEdit { side: Side::Local, folder_kept: false })
             }
         }
 
@@ -442,7 +444,7 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
                 .or_else(|| entry.synced_placement.clone())
                 .unwrap_or_else(|| entry.remote.clone());
             Resolution::just(restore_remotely(entry, placement))
-                .with_issue(Issue::DeleteLostToEdit { side: Side::Remote })
+                .with_issue(Issue::DeleteLostToEdit { side: Side::Remote, folder_kept: false })
         }
 
         // Gone there, moved here. The content is untouched, but the user did
@@ -450,7 +452,7 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
         // rather than vanishing out from under them.
         (Delta::Moved { to }, Delta::Deleted) => {
             Resolution::just(restore_remotely(entry, to.clone()))
-                .with_issue(Issue::DeleteLostToEdit { side: Side::Remote })
+                .with_issue(Issue::DeleteLostToEdit { side: Side::Remote, folder_kept: false })
         }
 
         // Any remaining shape reduces to one of the above; treat an unexpected
@@ -514,6 +516,21 @@ fn content_matches_last_agreement(entry: &Entry) -> bool {
     };
     match (agreed, &entry.remote_content) {
         (Some(synced), Some(remote)) => synced.sha256 == remote.sha256,
+        _ => false,
+    }
+}
+
+/// Has the server's copy moved on from the one this device agreed on? Only
+/// for a record that has an agreement: one with none (content arriving, never
+/// here) has nothing to have moved on from.
+pub(crate) fn server_moved_past_agreement(entry: &Entry) -> bool {
+    let agreed = if entry.is_encrypted {
+        entry.synced_remote_content.as_ref()
+    } else {
+        entry.synced_content.as_ref()
+    };
+    match (agreed, &entry.remote_content) {
+        (Some(synced), Some(remote)) => synced.sha256 != remote.sha256,
         _ => false,
     }
 }
@@ -1242,7 +1259,7 @@ mod tests {
         assert_eq!(r.actions, vec![Action::Download]);
         assert_eq!(
             r.issues,
-            vec![Issue::DeleteLostToEdit { side: Side::Local }]
+            vec![Issue::DeleteLostToEdit { side: Side::Local, folder_kept: false }]
         );
     }
 
@@ -1267,7 +1284,7 @@ mod tests {
         );
         assert_eq!(
             r.issues,
-            vec![Issue::DeleteLostToEdit { side: Side::Remote }]
+            vec![Issue::DeleteLostToEdit { side: Side::Remote, folder_kept: false }]
         );
     }
 
@@ -1353,7 +1370,7 @@ mod tests {
         assert_eq!(r.actions, vec![Action::Download]);
         assert_eq!(
             r.issues,
-            vec![Issue::DeleteLostToEdit { side: Side::Local }]
+            vec![Issue::DeleteLostToEdit { side: Side::Local, folder_kept: false }]
         );
     }
 
@@ -1431,7 +1448,7 @@ mod tests {
         );
         assert_eq!(
             r.issues,
-            vec![Issue::DeleteLostToEdit { side: Side::Local }]
+            vec![Issue::DeleteLostToEdit { side: Side::Local, folder_kept: false }]
         );
     }
 
