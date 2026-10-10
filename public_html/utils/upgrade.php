@@ -34,6 +34,9 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.14 - the active-theme check asks DeploymentHelper::preserveReason, the rule the deploy itself
+	 *                applies: a live theme the release does not carry is kept, so it no longer blocks (a customer
+	 *                theme the origin does not publish stopped a rollout at galactictribune, 0.8.477)
 	 * @version 1.13 - staging and the downloaded archives live beside the code (SITE/upgrades and
  *                SITE/upgrade_archives, or the deploy volume's), never in uploads/, which is data and
  *                may be another filesystem (specs/one_data_root.md D6); the disk-space check asks
@@ -1334,30 +1337,25 @@
 			$live_theme_path = $live_directory . '/theme/' . $active_theme;
 
 			if (!is_dir($staged_theme_path)) {
-				// Theme not in staging - check if it's preserved-on-deploy in live
+				// Theme not in staging: the deploy keeps a live theme the release
+				// does not carry (DeploymentHelper::copyPreservedToStaging), and
+				// this check asks the same rule, so the two cannot disagree.
 				$theme_will_be_preserved = false;
 				$preservation_reason = '';
 
 				if (is_dir($live_theme_path)) {
-					// Theme exists in live - check the receives_upgrades flag
-					$manifest_path = $live_theme_path . '/theme.json';
-					if (file_exists($manifest_path)) {
-						$manifest = json_decode(file_get_contents($manifest_path), true);
-						if (isset($manifest['receives_upgrades']) && $manifest['receives_upgrades'] === false) {
-							$theme_will_be_preserved = true;
-							$preservation_reason = 'marked preserved-on-deploy (receives_upgrades=false)';
-						}
-					}
+					$preservation_reason = DeploymentHelper::preserveReason($live_theme_path, $staged_theme_path, 'theme.json');
+					$theme_will_be_preserved = ($preservation_reason !== '');
 				}
 
 				if ($theme_will_be_preserved) {
 					out_alert('warning', "Active theme '$active_theme' is not in the upgrade package",
-						'However, it will be preserved because it is ' . $preservation_reason . '.');
+						'However, it will be preserved: ' . $preservation_reason . '.');
 				} else {
 					$detail = "The currently active theme '<strong>" . htmlspecialchars($active_theme) . "</strong>' is not included in this upgrade package. "
 						. "If the upgrade proceeds, your site would lose its theme.<br><br>"
-						. "To fix: republish the upgrade with the theme selected, switch to a different theme first, "
-						. "or mark the theme preserved with <code>\"receives_upgrades\": false</code> in its theme.json.";
+						. "It is not in the upgrade package and not on this site either. "
+						. "To fix: republish the upgrade with the theme selected, or switch to a theme this site has.";
 					upgrade_abort('UPGRADE BLOCKED: Active Theme Missing', $detail);
 				}
 			} else {
