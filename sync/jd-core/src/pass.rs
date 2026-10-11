@@ -5252,6 +5252,18 @@ fn detect_folder_moves(
         // directory is still its own and is claimed on a later pass, from
         // wherever the room-making put it.
         if remote_wants.get(*candidate).is_some_and(|w| w != id && !named_only) {
+            // Waiting is not leaving. A vault whose own directory is proven to
+            // stand at the path, by id and birth, is on this disk, so it is
+            // present, and its directory is held from the mint below until
+            // the claim can take it. Read as gone while it waited -- its
+            // agreed path another record's after a trade, its claim waiting
+            // on the server's move of a plain folder onto its directory's
+            // name -- the directory was minted as a new plain folder in the
+            // same pass, and a file the user then put in the vault went up in
+            // the clear (rings-hostile 74560).
+            if proven_at.get(id) == Some(candidate) {
+                scan.present.insert(*id);
+            }
             continue;
         }
         if holder_stands_elsewhere && !named_only {

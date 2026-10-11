@@ -134,6 +134,10 @@ directory standing at its agreed path on each scan.
   the folder had was moved out first. A directory made where another was
   deleted can inherit its id (`rm -rf A; mkdir B` hands `B` `A`'s inode on
   ext4) but never its birth, so a proven directory is never a stranger.
+  A vault whose proven directory stands where the server is moving another
+  folder waits for that move to claim it, and waiting is not leaving: the
+  vault is present and its directory held, never taken up as a new plain
+  folder that the vault's files would go up through in the clear.
 - **Id only** (no birth reported, or a weak volume). The id corroborates what
   the folder's files propose and never claims on its own. A folder whose
   files point to one new directory while its id stands at another is held,

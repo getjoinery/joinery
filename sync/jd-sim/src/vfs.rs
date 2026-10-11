@@ -220,6 +220,18 @@ struct MemFsState {
     /// renamed to a name that also exists sealed read as the sealed name
     /// reaching the server (seed 74000 on the two-device ring arm).
     user_renames: Vec<(String, bool)>,
+    /// Every body the user's hand took off this disk while it stood here:
+    /// saved over, renamed over, or deleted (a file, or everything under a
+    /// folder). As (sha256, order), the order drawn from [`user_act_order`].
+    ///
+    /// What the user saw when they acted. A save or a delete wins only over
+    /// content it saw, so an oracle asking whether an edit should still be
+    /// live asks first whether a later act of the user's stood on it. Kept
+    /// here rather than at the generator's arms, because the chaos writers
+    /// save and trade names through these same calls.
+    user_superseded: Vec<(String, u64)>,
+    /// Every path the user deleted, file or folder, with its order.
+    user_removes: Vec<(String, u64)>,
     /// Directories the harness has declared sealed, by their current path.
     ///
     /// The one piece of directory identity this disk keeps, and it keeps it
@@ -269,6 +281,17 @@ pub struct UserWrite {
     /// was written: the folder the user put it in, whatever that directory
     /// is called by the time anyone asks.
     pub parent_birth: Option<u64>,
+    /// When, among every act of a user's hand in this process: ordered
+    /// against [`MemFs::user_superseded`] on any disk.
+    pub order: u64,
+}
+
+/// One order for every act of a user's hand on every disk, so a write on one
+/// device and a delete on another can be put in sequence. Shared across the
+/// process, so it says nothing about time, only which came first.
+fn user_act_order() -> u64 {
+    static ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
@@ -351,6 +374,8 @@ impl MemFs {
                 next_spool: 0,
                 user_writes: Vec::new(),
                 user_renames: Vec::new(),
+                user_superseded: Vec::new(),
+                user_removes: Vec::new(),
                 sealed_dirs: BTreeSet::new(),
                 sealed_known: BTreeMap::new(),
                 sealed_names_known: BTreeSet::new(),
@@ -644,12 +669,18 @@ impl MemFs {
         st.touched.insert(key.clone());
         let in_sealed_dir = Self::under_a_sealed_dir(&st, &key);
         let parent_birth = st.births.get(key.rsplit_once('/').map(|(d, _)| d).unwrap_or("")).copied();
+        let order = user_act_order();
+        if let Some(Node::File { bytes: before, .. }) = st.nodes.get(&key) {
+            let before = crate::sha256_hex(before);
+            st.user_superseded.push((before, order));
+        }
         st.user_writes.push(UserWrite {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
             in_sealed_dir,
             named: created && names_it,
             parent_birth,
+            order,
         });
         st.nodes.insert(
             key,
@@ -663,6 +694,38 @@ impl MemFs {
     /// Every body the user has written to this disk, in the order written.
     pub fn user_writes(&self) -> Vec<UserWrite> {
         self.state.lock().unwrap().user_writes.clone()
+    }
+
+    /// Every body the user's hand took off this disk, with when. See
+    /// `MemFsState::user_superseded`.
+    pub fn user_superseded(&self) -> Vec<(String, u64)> {
+        self.state.lock().unwrap().user_superseded.clone()
+    }
+
+    /// Every path the user deleted, with its order.
+    pub fn user_removes(&self) -> Vec<(String, u64)> {
+        self.state.lock().unwrap().user_removes.clone()
+    }
+
+    /// The order of the last body the user wrote to this disk.
+    pub fn last_user_write_order(&self) -> Option<u64> {
+        self.state.lock().unwrap().user_writes.last().map(|w| w.order)
+    }
+
+    /// Note every file at or under `key` as taken off the disk by the user now.
+    fn supersede_under(st: &mut MemFsState, key: &str) -> u64 {
+        let order = user_act_order();
+        let gone: Vec<String> = st
+            .nodes
+            .iter()
+            .filter(|(k, _)| k.as_str() == key || k.starts_with(&format!("{key}/")))
+            .filter_map(|(_, n)| match n {
+                Node::File { bytes, .. } => Some(crate::sha256_hex(bytes)),
+                Node::Dir => None,
+            })
+            .collect();
+        st.user_superseded.extend(gone.into_iter().map(|h| (h, order)));
+        order
     }
 
     /// Declare the directory at this path sealed, for the harness's own
@@ -769,6 +832,10 @@ impl MemFs {
             .filter(|k| **k == key || k.starts_with(&format!("{key}/")))
             .cloned()
             .collect();
+        if st.nodes.contains_key(&key) {
+            let order = Self::supersede_under(&mut st, &key);
+            st.user_removes.push((key.clone(), order));
+        }
         let now = self.clock.now_ns();
         for v in victims {
             Self::watch_loss(&st, &v, "the user deleting it");
@@ -801,6 +868,9 @@ impl MemFs {
         Self::refuse_impossible(&st, &t, "move something");
         Self::ensure_parents(&mut st, &t);
         let replaced = st.nodes.contains_key(&t);
+        if replaced && t != f {
+            Self::supersede_under(&mut st, &t);
+        }
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
         let leaf = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
         if matches!(st.nodes.get(&t), Some(Node::File { .. })) && !replaced && leaf(&f) != leaf(&t) {
