@@ -1,0 +1,90 @@
+{
+    "event_planning": {
+        "name": "Event planning",
+        "description": "Everything a one-off event needs, from the first idea to the thank-you notes.",
+        "background": "blue",
+        "labels": [
+            {"name": "Venue", "color": "blue"},
+            {"name": "Food", "color": "orange"},
+            {"name": "Promotion", "color": "purple"},
+            {"name": "Volunteers", "color": "green"},
+            {"name": "Urgent", "color": "red"}
+        ],
+        "lists": [
+            {"name": "Ideas", "cards": [
+                {"title": "Pick a date and a theme", "description": "Check the calendar for clashes before you commit to a date."}
+            ]},
+            {"name": "Planning", "cards": [
+                {"title": "Book the venue", "labels": ["Venue", "Urgent"], "description": "Get the booking confirmed in writing.",
+                 "checklists": [{"title": "Venue", "items": ["Get a quote", "Confirm the date", "Ask about set-up time", "Pay the deposit"]}]},
+                {"title": "Plan the food", "labels": ["Food"], "checklists": [{"title": "Food", "items": ["Count dietary needs", "Choose a caterer", "Order"]}]}
+            ]},
+            {"name": "In progress", "cards": [
+                {"title": "Announce the event", "labels": ["Promotion"], "checklists": [{"title": "Announce", "items": ["Write the announcement", "Email members", "Post on social media"]}]}
+            ]},
+            {"name": "Ready", "cards": []},
+            {"name": "Done", "cards": []}
+        ]
+    },
+    "volunteer_tasks": {
+        "name": "Volunteer tasks",
+        "description": "Tasks that need a pair of hands. Volunteers add themselves to a card to claim it.",
+        "background": "green",
+        "labels": [
+            {"name": "Quick job", "color": "green"},
+            {"name": "Needs a skill", "color": "yellow"},
+            {"name": "Outdoors", "color": "lime"},
+            {"name": "Urgent", "color": "red"}
+        ],
+        "lists": [
+            {"name": "Needs a volunteer", "cards": [
+                {"title": "Set up chairs before the meeting", "labels": ["Quick job"], "description": "Add yourself to this card to claim it."},
+                {"title": "Update the member contact list", "labels": ["Needs a skill"]}
+            ]},
+            {"name": "Claimed", "cards": []},
+            {"name": "In progress", "cards": []},
+            {"name": "Done", "cards": []}
+        ]
+    },
+    "content_calendar": {
+        "name": "Content calendar",
+        "description": "Plan posts, newsletters and announcements from idea to published.",
+        "background": "purple",
+        "labels": [
+            {"name": "Blog", "color": "blue"},
+            {"name": "Newsletter", "color": "orange"},
+            {"name": "Social", "color": "pink"},
+            {"name": "Announcement", "color": "red"}
+        ],
+        "lists": [
+            {"name": "Ideas", "cards": [
+                {"title": "Member spotlight", "labels": ["Blog"], "description": "Interview a member about what they do."}
+            ]},
+            {"name": "Drafting", "cards": [
+                {"title": "Monthly newsletter", "labels": ["Newsletter"], "checklists": [{"title": "Newsletter", "items": ["Collect updates", "Write the draft", "Add photos", "Proofread"]}]}
+            ]},
+            {"name": "In review", "cards": []},
+            {"name": "Scheduled", "cards": []},
+            {"name": "Published", "cards": []}
+        ]
+    },
+    "simple_pipeline": {
+        "name": "Simple pipeline",
+        "description": "Follow people or opportunities from first contact to a yes or a no.",
+        "background": "orange",
+        "labels": [
+            {"name": "Hot", "color": "red"},
+            {"name": "Warm", "color": "orange"},
+            {"name": "Cold", "color": "sky"}
+        ],
+        "lists": [
+            {"name": "New", "cards": [
+                {"title": "Example: a new enquiry", "labels": ["Warm"], "description": "Move this card along as the conversation does."}
+            ]},
+            {"name": "Contacted", "cards": []},
+            {"name": "In conversation", "cards": []},
+            {"name": "Won", "cards": []},
+            {"name": "Lost", "cards": []}
+        ]
+    }
+}

@@ -14,6 +14,9 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.9 - a handler alias takes sub-addresses (RelayVersion::ACCEPTS_SUBADDRESSES): the
+#                merge writes a regexp line per alias the map marks accepts_tag into the
+#                regexp accept map (joinery-srs), and the sealer delivers boards+tag@ as boards@.
 # Version: 3.8 - rspamd is the only program that checks mail (mail_checking_in_rspamd.md):
 #                opendkim and opendmarc are not installed, and a relay that has them
 #                loses them once Postfix names rspamd alone. rspamd stamps its verdicts
@@ -92,7 +95,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.8"
+RELAY_VERSION="3.9"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -485,7 +488,7 @@ for f in "${MAP_DOMAINS}" "${MAP_RECIPIENTS}" "${MAP_TRANSPORT}" "${MAP_DEFERRED
         echo "postmap: rebuilt ${f}.db"
     fi
 done
-# The SRS accept map is a regexp map (no postmap); create it empty if absent.
+# The regexp accept map (SRS bounces, handler sub-addresses) needs no postmap; create it empty if absent.
 [[ -f "${MAP_SRS}" ]] || : > "${MAP_SRS}"
 if [[ ! -f "${ROUTING_JSON}" ]]; then
     printf '{"format":2,"tenants":{},"recipients":{},"domains":{}}\n' > "${ROUTING_JSON}"

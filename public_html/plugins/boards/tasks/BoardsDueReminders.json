@@ -1,0 +1,13 @@
+{
+  "name": "Send Boards due reminders",
+  "description": "Reminds the people on a card (or the person a checklist item is assigned to) shortly before it is due. A reminder goes out once for a due time, and again only if the due date moves. Done, archived and template cards are skipped.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "batch_size": {
+      "type": "number",
+      "label": "Reminders per run (default 500)",
+      "required": false
+    }
+  }
+}

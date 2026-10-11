@@ -3,6 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
+ * @version 2.0 - STATUS_HANDLER: the outcome of handing a stored message to a plugin handler
  * @version 1.9 - STATUS_UNCONFIRMED; iel_relay_spool_id marks the relay spool entry a line
  *   came from, so a re-pulled entry is not routed twice
  * @version 1.8 - index on iel_create_time (rate limits, the spam filter's burst token)
@@ -55,6 +56,10 @@ class InboundEmailLog extends SystemBase {
 	// A forward was not sent to a destination whose owner has not confirmed it
 	// (specs/relay_receive_only_forwarding.md, rule 4). iel_destinations names them.
 	const STATUS_UNCONFIRMED = 'unconfirmed';
+	// What became of a stored message at a handler alias: handed to the plugin's
+	// handler (handled / not mine), or not (no handler, it threw, or the message
+	// was withheld). iel_destinations names the handler key and the outcome.
+	const STATUS_HANDLER = 'handler';
 
 	protected static $foreign_key_actions = [
 		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],

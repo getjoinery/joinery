@@ -112,6 +112,13 @@ if ($is_edit && $alias->get('iea_ied_inbound_email_domain_id')) {
 	}
 }
 
+if ($alias->key && $alias->has_handler()) {
+	echo '<div class="jy-callout"><p><strong>This is the ' . htmlspecialchars($alias->handler_key())
+		. ' feature\'s address.</strong> Every message sent to it, including addresses like '
+		. htmlspecialchars($alias->get('iea_alias')) . '+something@, is stored here and handed to that feature. '
+		. 'It stores only, takes no member grants, and administrators read it through the all-mail view.</p></div>';
+}
+
 $formwriter->textinput('iea_alias', 'Mailbox', [
 	'validation' => ['required' => true],
 	'placeholder' => 'info',

@@ -31,6 +31,7 @@
  * query-shape change, or, with the map files deleted first, to rotate the role
  * password.
  *
+ * @version 1.6 - `base+tag` is accepted when base is an enabled handler alias (InboundEmailAlias::resolveRecipient)
  * @version 1.5 - neither map answers for an IMAP-feed anchor domain (gmail.com): this box does not
  *                receive its mail
  * @version 1.4 - the recipient_access map: unknown recipients are refused during the SMTP
@@ -134,6 +135,11 @@ function domains_query(): string {
  *   OK      an SRS bounce address on any of our domains (the router's SRS
  *           handling owns it, before any other routing)
  *   OK      an enabled alias on the domain
+ *   OK      `base+tag` where `base` is an enabled HANDLER alias on the domain
+ *           (iea_handler): a plugin's address accepts sub-addresses, and no other
+ *           alias does. Postfix's own recipient_delimiter is NOT used: the full
+ *           address would be answered 550 first, and every mailbox would start
+ *           accepting +tags
  *   OK      the domain's catch-all takes it (store, or a forward address)
  *   OK      postmaster, which every mail domain must accept and where our DMARC
  *           reports are sent (the router files a report by its content)
@@ -162,6 +168,9 @@ function recipient_access_query(): string {
 		. " WHEN NOT EXISTS (SELECT 1 FROM d) THEN CASE WHEN EXISTS (SELECT 1 FROM f) THEN " . $refuse . " END"
 		. " WHEN EXISTS (SELECT 1 FROM iea_inbound_email_aliases a JOIN d ON a.iea_ied_inbound_email_domain_id = d.id"
 		. " WHERE a.iea_alias = lower('%u') AND a.iea_is_enabled = true AND a.iea_delete_time IS NULL) THEN 'OK'"
+		. " WHEN position('+' in '%u') > 1 AND EXISTS (SELECT 1 FROM iea_inbound_email_aliases a JOIN d ON a.iea_ied_inbound_email_domain_id = d.id"
+		. " WHERE a.iea_alias = split_part(lower('%u'), '+', 1) AND coalesce(a.iea_handler, '') <> ''"
+		. " AND a.iea_is_enabled = true AND a.iea_delete_time IS NULL) THEN 'OK'"
 		. " WHEN EXISTS (SELECT 1 FROM d WHERE d.ied_catch_all_mode = 'store' OR coalesce(d.ied_catch_all_address, '') <> '') THEN 'OK'"
 		. " WHEN lower('%u') = 'postmaster' THEN 'OK'"
 		. " WHEN EXISTS (SELECT 1 FROM d WHERE d.ied_reject_unmatched = true) THEN " . $refuse

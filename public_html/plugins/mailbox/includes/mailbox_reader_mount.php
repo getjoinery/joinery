@@ -37,6 +37,8 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
+ * @version 1.31.0 - openMessage: the conversation a ?open=N link asks the reader to open
+ * @version 1.30.0 - messageActions: the buttons other plugins declare (MailboxMessageActions)
  * @version 1.29.0 - contactsPageUrl: the contacts pane's pencils open the Contacts page
  * @version 1.28.0 - mailbox_filter_match.js: mail rules run on end-to-end mail in the browser
  * @version 1.27.0 - relayPinMailboxes in the config: the mailboxes whose relay pin the browser checks
@@ -232,6 +234,14 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'maxFileBytes'      => MailboxSender::MAX_UPLOAD_BYTES,
 		'maxTotalBytes'     => MailboxSender::MAX_TOTAL_BYTES,
 		'fortress'          => !empty($opts['fortress']),
+		// Buttons other plugins add to a message (plugin.json mailboxMessageActions);
+		// the script offers them on Standard-level mailboxes only.
+		// A conversation another feature's link asked the reader to open (?open=N): the
+		// mailbox and thread, already checked against the viewer's grants.
+		'openMessage'       => $opts['open_message'] ?? null,
+		'messageActions'    => array_map(function ($a) {
+			return array('key' => $a['key'], 'label' => $a['label'], 'icon' => $a['icon'], 'url' => $a['url']);
+		}, MailboxMessageActions::declared()),
 	);
 	if (!empty($opts['fortress'])) {
 		// Search over Fortress mail runs on the device (specs/client_custody_mail.md

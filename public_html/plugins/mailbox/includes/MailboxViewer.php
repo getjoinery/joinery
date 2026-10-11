@@ -17,6 +17,7 @@
  * the reader decides visibility. Both reader mounts — the admin page and the
  * member page at /profile/mailbox/mailbox — sit on this one seam.
  *
+ * @version 1.2 - canReadMessage(): the one rule for "may this viewer read this stored message"
  * @version 1.1
  */
 
@@ -116,6 +117,18 @@ final class MailboxViewer {
 
 	public function canAccess(int $aliasId): bool {
 		return in_array($aliasId, $this->accessibleAliasIds(), true);
+	}
+
+	/**
+	 * May this viewer read this stored message? A viewer with a grant on the
+	 * message's mailbox may; a message that belongs to no mailbox (a NULL alias: the
+	 * catch-all, unmatched mail) is readable only by an all-access viewer. The one
+	 * place this rule lives: the reader's export and every plugin page that opens a
+	 * message by id (a reader action's target) call it rather than re-deriving it.
+	 */
+	public function canReadMessage(InboundEmailMessage $message): bool {
+		$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
+		return $alias_id > 0 ? $this->canAccess($alias_id) : $this->isAllAccess();
 	}
 
 	/**

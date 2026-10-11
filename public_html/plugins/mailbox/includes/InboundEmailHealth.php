@@ -166,6 +166,7 @@ class InboundEmailHealth {
                   JOIN ied_inbound_email_domains d
                     ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
                  WHERE a.iea_delete_time IS NULL AND d.ied_delete_time IS NULL
+                   AND coalesce(a.iea_handler, '') = ''
                    AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
                        . InboundEmailDomain::LEVEL_PRIVATE . "','"
                        . InboundEmailDomain::LEVEL_FORTRESS . "')";
@@ -198,6 +199,45 @@ class InboundEmailHealth {
                 . (count($broken) > 5 ? ' (and ' . (count($broken) - 5) . ' more)' : '')
                 . '. Give each one exactly one member who holds a vault, or set it to Standard. '
                 . 'Senders are retrying meanwhile; their queues expire in hours to days.'
+            );
+        }
+    }
+
+    /**
+     * A handler alias (a plugin's address, such as Boards') sits on a domain that does
+     * not seal its mail. An alias takes its level from its domain, so a domain raised to
+     * Private later leaves the alias still storing but no longer handing anything to its
+     * plugin: the router withholds a sealing alias's mail (InboundEmailRouter::handOver).
+     * This fails naming each such address so the feature that relies on it is not
+     * silently off.
+     *
+     * @throws ProvisioningCheckFailed when any enabled handler alias seals its content.
+     */
+    public static function checkHandlerAliasLevels() {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_aliases_class.php'));
+
+        $db = DbConnector::get_instance()->get_db_link();
+        $rows = $db->query("SELECT a.iea_alias AS local_part, a.iea_handler AS handler, d.ied_domain AS domain_name
+                  FROM iea_inbound_email_aliases a
+                  JOIN ied_inbound_email_domains d
+                    ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
+                 WHERE a.iea_delete_time IS NULL AND d.ied_delete_time IS NULL AND a.iea_is_enabled = true
+                   AND coalesce(a.iea_handler, '') <> ''
+                   AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
+                       . InboundEmailDomain::LEVEL_PRIVATE . "','"
+                       . InboundEmailDomain::LEVEL_FORTRESS . "')")->fetchAll(PDO::FETCH_ASSOC);
+
+        if (count($rows)) {
+            $broken = array();
+            foreach ($rows as $row) {
+                $broken[] = $row['local_part'] . '@' . $row['domain_name'] . ' (' . $row['handler'] . ')';
+            }
+            throw new ProvisioningCheckFailed(
+                'Email to a feature is switched off because its address is on a protected domain: '
+                . implode('; ', array_slice($broken, 0, 5))
+                . (count($broken) > 5 ? ' (and ' . (count($broken) - 5) . ' more)' : '')
+                . '. The mail is still stored in the mailbox; it is not handed to the feature. '
+                . 'Set the domain back to Standard, or move the feature to another domain.'
             );
         }
     }

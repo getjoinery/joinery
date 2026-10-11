@@ -537,6 +537,7 @@ shares a few connections between them. It reads the rows
 |---|---|
 | an `SRS0=` bounce address on one of our domains or forwarding subdomains | accepted (the router's SRS handling owns it) |
 | an enabled alias | accepted |
+| `base+tag` where `base` is an enabled *handler* alias | accepted (an alias without a handler is never sub-addressed; see [Email handlers](#email-handlers-and-personal-addresses)) |
 | any address on a domain whose catch-all stores, or forwards to an address | accepted |
 | `postmaster` (every mail domain must accept it; the DMARC `rua` we prescribe points at it) | accepted |
 | anything else on a domain with `ied_reject_unmatched` on | refused, `550 5.1.1` |
@@ -832,6 +833,189 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 - **Subject:** Preserved from the original email
 
 This approach is required because SMTP services (Mailgun, SendGrid, etc.) require the From address to be on a verified domain. Sending with an arbitrary external From would be silently dropped.
+
+## Email handlers and personal addresses
+
+A plugin can receive email addressed to one of its features. Three small pieces
+make that possible; none knows anything about the plugin that uses it.
+
+### Handler aliases
+
+A handler alias is an ordinary **store-mode** alias that also names a plugin
+handler (`iea_handler`). The router stores each message exactly as it stores any
+mail, then hands the stored row to the plugin, so spam checks, duplicate
+detection, attachment Files, raw retention, the message timeline, sealing rules
+and retention all apply unchanged. If the handler fails, the mail is still
+readable in the mailbox.
+
+A plugin declares its handler in `plugin.json`:
+
+```json
+"inboundHandlers": {
+    "boards": { "class": "BoardsInboundHandler", "label": "Boards" }
+}
+```
+
+and the class implements `InboundAddressHandler`:
+
+```php
+interface InboundAddressHandler {
+    /** Return true when the message was handled; false for "not mine". */
+    public function handle(InboundEmailMessage $msg, ?string $tag): bool;
+}
+```
+
+`InboundHandlerRegistry` reads the declarations from active plugins.
+
+- **One alias per handler per domain.** The local part is the handler key
+  (`boards@clubA.org`, `boards@clubB.org`). `ensureAlias($key, $domain)` creates
+  it or re-enables it, and is idempotent. It never moves or deletes an alias, so
+  an address already given out keeps working. It refuses, and returns the
+  reason, when the local part belongs to another mailbox, when the domain seals
+  its content, or when the domain's mail arrives through a relay older than
+  `RelayVersion::ACCEPTS_SUBADDRESSES`.
+- `eligibleDomains()` lists the domains where a new alias would not seal content
+  (lowest id first); `defaultDomain()` is the first of them; `aliasFor($key,
+  $domain)` returns the alias on a domain or `null`.
+- **A handler alias takes no member grants.** Everything sent to it is stored in
+  its mailbox, which for a feature like Boards holds content from invite-only
+  boards. The grant layer refuses a grant on one; superadmins read it through the
+  all-mail view. The alias editor says so.
+- **It stores only.** `prepare()` refuses a forwarding mode on a handler alias.
+
+### Sub-addresses
+
+A handler alias accepts `base+tag@domain`: the mail is stored under `base`, and
+`tag` is handed to the handler. An alias without a handler is never
+sub-addressed. The rule is one function, `InboundEmailAlias::resolveRecipient()`,
+which `InboundEmailRouter::lookupAlias()` and `InboundEmailAlias::GetByAddress()`
+both call, so the pipe, webhook, relay-pull and deferred-ingest paths agree.
+
+The same rule is applied at the two places that refuse mail before the router
+sees it:
+
+- **This site's mail server:** `recipient_access_query()` accepts `%u` when the
+  part before `+` names an enabled alias with `iea_handler` set. Postfix's
+  `recipient_delimiter` is not used: on a domain that refuses unknown addresses
+  the full address `boards+tag` is answered 550 first, which Postfix treats as
+  final, and the delimiter would make every mailbox accept `+tags`.
+  `install_email.sh` grants the map role the `iea_handler` column once
+  `update_database` has created it.
+- **The relay:** the exported routing map marks a handler alias's recipient entry
+  `accepts_tag`, and the relay's `resolve()` falls back to the base for a
+  `base+tag` address only when that entry carries it. The relay also writes an
+  accept line for the base's `+tag` addresses into its recipient access map. A
+  relay older than `RelayVersion::ACCEPTS_SUBADDRESSES` ignores the marker, so
+  `ensureAlias()` refuses a relay-fronted domain until the relay reports that
+  version.
+
+### The hand-over
+
+After a handler alias stores a message, the router (`handOver()`):
+
+1. Withholds it from an alias that seals its content (the mail stays stored).
+2. Withholds it when the spam decision filed it as junk for a hard reason: failed
+   authentication (`auth`) or the scanner's high-score rule (`scanner`). Junk from
+   the learned guesses (`sender_history`, `bayes`) is still handed over: nobody
+   trains a handler alias's mailbox, so a wrong guess would silently drop a
+   genuine message.
+3. Calls the handler with the stored row and the tag (null for the bare address).
+
+A duplicate (the Message-ID dedup returns before a second store) is never handed
+over twice. Every outcome is written to the routing log as a `handler` line:
+`<key>: handled`, `<key>: not mine`, `<key>: handler not available`,
+`<key>: withheld (...)`, or `<key>: error` with the exception message. A thrown
+exception is caught, the stored message stays, and there is no retry; a handler
+that needs one keeps its own queue.
+
+IMAP-polled accounts, archive imports, Joinery Direct and relay user and client
+deliveries never reach a handler alias; they mirror or carry someone else's
+mailbox.
+
+**Health.** An alias takes its level from its domain, so a handler alias on a
+domain raised to Private keeps storing but stops handing over. The
+`handler_alias_levels` check names each such address; a plugin's own panel reads
+`seals_content()` and says its email is off.
+
+### Personal addresses
+
+`InboundPersonalAddress` (`ipa_inbound_personal_addresses`) is a secret,
+unguessable address that stands for "this person, about this thing", for example
+`boards+r7k2…@example.org` for "Alice, about board 7". It is a sub-address of the
+plugin's handler alias, so the token arrives as the handler's `$tag`.
+
+| Method | Does |
+|---|---|
+| `addressFor($handler, $user_id, $ref_type, $ref_id, ?$domain_id)` | Returns `handler+token@domain`, creating the row on first use. The domain is the one given or the registry's default; `null` when the handler has no alias on it. The token is 26 characters of random base32 and is not tied to a domain. |
+| `resolve($handler, $tag)` | The live row for that token and handler, or `null` (unknown, malformed, revoked, or another handler's). |
+| `revoke(...)` / `revokeAllFor($handler, $ref_type, $ref_id)` | Soft-deletes one address, or every address for a thing. Resetting an address is revoke then `addressFor`. |
+
+The same person and thing always reuse one live address (a partial unique index
+over live rows). Revoked rows are purged after `mailbox_personal_address_retention_days`
+(default 90, `0` keeps them) by the core `RetentionSweep`. Deleting a person
+removes their addresses.
+
+**The standard check a handler makes**
+
+1. `resolve()` the tag.
+2. `InboundPersonalAddress::senderIs($msg, $user)`: the address in `iem_sender`
+   is the member's account email or verified recovery email (any case), **and**
+   the message is attested (below).
+3. `InboundPersonalAddress::userIsActive($user)` (a soft delete leaves the
+   address rows), then the handler's own permission: may this person still act on
+   this thing? That check runs at the moment of use, so an address held by
+   someone who has since lost access is harmless and addresses are not revoked on
+   access loss.
+
+Mail that fails any step is left stored and not acted on; the handler decides
+whether to tell the member. A token alone would let anyone holding a copied or
+forwarded address act as the member, and the `From` header alone is forgeable;
+together a forger needs both the secret address and a message that passes
+authentication for the member's own address.
+
+`InboundEmailMessage::senderAttested()` is the one attestation rule, built on the
+verdicts recorded at ingest: DMARC `pass`; or, for providers that report no DMARC
+verdict, DKIM `pass` signed by the From domain, or SPF `pass` for a Return-Path in
+the From domain. Where the verdict came from our own milter or the relay, the
+signing domain is read from that server's Authentication-Results line, so a forged
+`DKIM-Signature` header naming the From domain beside a valid signature for
+another domain proves nothing. Where a provider gave only a verdict, the
+`DKIM-Signature` and `Return-Path` headers stand in. A sealed row, a message with
+no readable From, or one that is merely unverified is not attested.
+
+### Buttons on a message in the reader
+
+Plugins add a button to a message's menu in the reader by declaring it in
+`plugin.json`:
+
+```json
+"mailboxMessageActions": {
+    "boards_make_card": { "label": "Make a card", "icon": "tasks", "url": "/profile/boards/from_message" }
+}
+```
+
+`MailboxMessageActions::declared()` reads them once per page into the reader's
+mount data (`messageActions`), and `mailbox_reader.js` renders each after the
+built-in items, opening `{url}?message_id=N` in a new tab. The url is a
+same-site path.
+
+- **Standard-level mailboxes only.** The reader hides the buttons on a message
+  with no mailbox, on a sealed row, and on a mailbox whose level is not Standard.
+  Putting decrypted text into a plugin's tables would break the promise of the
+  level, and a sealed attachment is a blob a plugin's own File could never open.
+- **The target page opens the message with
+  `MailboxMessageActions::openForAction($viewer, $message_id)`.** It applies
+  `MailboxViewer::canReadMessage()` and refuses a deleted message, a message with no
+  mailbox, and a mailbox that seals its content, returning a sentence for the person
+  on refusal. An action never widens access to a message.
+- **`MailboxViewer::canReadMessage($message)`** is the one rule for "may this viewer
+  read this stored message": a grant on the message's mailbox reads it, and a
+  message that belongs to no mailbox is readable only by an all-access viewer. The
+  reader's export (`/profile/mailbox/original`) uses it too.
+- **Opening a message from another feature.** `/profile/mailbox/mailbox?open=N` opens that message's conversation in the member reader, when the viewer holds a grant on its mailbox; for any other message it opens the mailbox as usual and says nothing about whether the message exists (`profile_mailbox_logic` hands the reader `openMessage`).
+- **Attachments.** A plugin adopts a stored attachment without copying bytes:
+  `File::createFromExistingBlob()` shares the refcounted blob and returns a new File
+  the plugin gates itself.
 
 ## Forwarding relay
 

@@ -5,7 +5,13 @@
  * Extracted from adm/admin_spec_view.php for reuse across
  * the spec viewer and help documentation viewer.
  *
- * Version: 1.7
+ * Version: 1.8
+ * @changelog 1.8 - Link and image targets are checked: only http, https, mailto and
+ *   relative targets become links, and an image is only ever http, https or relative.
+ *   Anything else (javascript:, data:, vbscript:, a scheme hidden behind tabs or
+ *   entities) is shown as plain text. New $restricted profile for text other people
+ *   wrote: no images, and headings carry no id (an id from someone else's text could
+ *   shadow an element of the page).
  */
 
 class MarkdownRenderer {
@@ -17,8 +23,13 @@ class MarkdownRenderer {
      * $soft_breaks — when true, a single newline inside a paragraph renders as
      * a line break (<br>) instead of collapsing to a space. Chat-style output
      * (LLM replies) wants this; authored docs are hard-wrapped and don't.
+     *
+     * $restricted — the profile for text other people wrote (comments, card
+     * descriptions, anything that can arrive by email): no images, no heading
+     * ids, links open in a new tab without the opener. Authored docs use the
+     * default profile.
      */
-    public static function render($text, $soft_breaks = false) {
+    public static function render($text, $soft_breaks = false, $restricted = false) {
         $text = htmlspecialchars($text);
 
         // Extract fenced and inline code to placeholders BEFORE any other pass so
@@ -58,9 +69,14 @@ class MarkdownRenderer {
         // table of contents links to. Repeated titles get -1, -2 suffixes, the
         // same way the anchors are written elsewhere.
         $slug_counts = array();
-        $text = preg_replace_callback('/^(#{1,6}) (.+)$/m', function($matches) use (&$slug_counts, $placeholders) {
+        $text = preg_replace_callback('/^(#{1,6}) (.+)$/m', function($matches) use (&$slug_counts, $placeholders, $restricted) {
             $level = strlen($matches[1]);
             $title = trim($matches[2]);
+            if ($restricted) {
+                // Someone else's heading: no id, and never bigger than the page's own.
+                $level = min(6, $level + 2);
+                return '<h' . $level . '>' . $title . '</h' . $level . '>';
+            }
             $slug = self::heading_slug($title, $placeholders);
             if ($slug !== '') {
                 $n = isset($slug_counts[$slug]) ? $slug_counts[$slug] : 0;
@@ -86,10 +102,24 @@ class MarkdownRenderer {
         // otherwise consume the bracket pair and leave a bare '!' beside a link.
         // Text was escaped up front, so alt and src need no further escaping.
         // Wrapped in a link to itself: shown small in the column, full size on click.
-        $text = preg_replace('/!\[([^\]]*)\]\(([^)\s]+)\)/', '<a href="$2" target="_blank" rel="noopener"><img src="$2" alt="$1"></a>', $text);
+        // The target is checked first: a scheme that can run script or fetch
+        // something nobody asked for is shown as the alt text instead.
+        $text = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function($matches) use ($restricted) {
+            if ($restricted || !self::is_safe_url($matches[2], false)) {
+                return $matches[1];
+            }
+            return '<a href="' . $matches[2] . '" target="_blank" rel="noopener"><img src="' . $matches[2] . '" alt="' . $matches[1] . '"></a>';
+        }, $text);
 
-        // Links [text](url)
-        $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '<a href="$2">$1</a>', $text);
+        // Links [text](url). Only http, https, mailto and relative targets
+        // become links; any other scheme leaves the text without the link.
+        $text = preg_replace_callback('/\[([^\]]+)\]\(([^)]+)\)/', function($matches) use ($restricted) {
+            if (!self::is_safe_url($matches[2], true)) {
+                return $matches[1];
+            }
+            $extra = $restricted ? ' target="_blank" rel="noopener noreferrer nofollow"' : '';
+            return '<a href="' . $matches[2] . '"' . $extra . '>' . $matches[1] . '</a>';
+        }, $text);
 
         // Unordered lists (- item) — each item may span indented continuation lines
         $text = preg_replace_callback('/(?:^- .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
@@ -169,6 +199,37 @@ class MarkdownRenderer {
         }
 
         return $text;
+    }
+
+    /**
+     * May this link or image target be emitted as-is?
+     *
+     * $url arrives already HTML-escaped (render() escapes the whole text up
+     * front), so it is decoded before the scheme is read, and the whitespace and
+     * control characters a browser ignores inside a scheme ("java\tscript:") are
+     * stripped first. A target with no scheme is relative and fine. A target with
+     * a scheme is fine only if the scheme is http or https — or mailto, for a
+     * link. Everything else (javascript:, data:, vbscript:, file:, …) is refused.
+     *
+     * @param string $url
+     * @param bool $allow_mailto true for a link, false for an image
+     */
+    public static function is_safe_url($url, $allow_mailto = true) {
+        $decoded = html_entity_decode((string)$url, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $decoded = preg_replace('/[\x00-\x20\x7f]+/u', '', $decoded);
+        if ($decoded === null || $decoded === '') {
+            return false;
+        }
+        if (!preg_match('/^([a-z][a-z0-9+.\-]*):/i', $decoded, $m)) {
+            // No scheme: relative ('/x', 'x', '#x', '?x'). A protocol-relative
+            // '//host/x' is still an http(s) link, which is allowed.
+            return true;
+        }
+        $scheme = strtolower($m[1]);
+        if ($scheme === 'http' || $scheme === 'https') {
+            return true;
+        }
+        return $allow_mailto && $scheme === 'mailto';
     }
 
     /**

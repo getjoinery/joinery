@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.4 - ACCEPTS_SUBADDRESSES 3.9: the relay that accepts and delivers a handler alias's +tag addresses
  * @version 1.3 - ANSWERS_HEALTH 3.7: the relay that answers GET /health, so the plane watches it over HTTPS
  * @version 1.2 - SEALS_FOR_BROWSERS 3.2: the relay that also answers the seal-target statement
  * @version 1.1 - sealsForBrowsers(): the relay version that writes the browser's format
@@ -117,6 +118,21 @@ class RelayVersion {
 		$running = trim($running);
 		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
 			&& version_compare($running, self::ANSWERS_HEALTH, '>=');
+	}
+
+	/**
+	 * The first relay version that accepts `base+tag@domain` for a handler alias
+	 * (the map's accepts_tag marker) and delivers it as `base@domain`. A site hands
+	 * out a personal address on a relay-fronted domain only when the relay reports
+	 * this or later; an older relay would refuse it at the door.
+	 */
+	const ACCEPTS_SUBADDRESSES = '3.9';
+
+	/** Does a relay running $running accept a handler alias's +tag addresses? Unknown reads as no. */
+	public static function acceptsSubaddresses(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::ACCEPTS_SUBADDRESSES, '>=');
 	}
 
 	/**

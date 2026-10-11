@@ -65,6 +65,8 @@ interface FileStreamingDecryptor {
  *   rather than at process shutdown.
  * @changelog 1.10.0 - SOURCE_MESSENGER_ATTACHMENT: photos and files sent in a
  *   conversation, gated on that conversation rather than owned privately.
+ * @changelog 1.13.0 - SOURCE_BOARDS_ATTACHMENT: files attached to a board's cards,
+ *   gated on that board (boards plugin).
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -109,6 +111,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_MESSENGER_ATTACHMENT = 'messenger_attachment'; // photo or file sent in a messenger conversation
 	const SOURCE_PROBLEM_REPORT       = 'problem_report';       // image a member attached to a problem report this site sent (prr_problem_reports)
 	const SOURCE_BUG_REPORT_IMAGE     = 'bug_report_image';     // image that arrived with a problem report from another site (bug_reports plugin)
+	const SOURCE_BOARDS_ATTACHMENT    = 'boards_attachment';    // file attached to a card (or a board's background image) in the boards plugin
 
 	/** The catalog key standing in for "no origin tag" (legacy rows). */
 	const SOURCE_UNCLASSIFIED = '_none';
@@ -147,6 +150,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 			self::SOURCE_EMAIL_ATTACHMENT   => array('label' => 'Mail attachments',     'internal' => false, 'default_view' => false),
 			self::SOURCE_AI_CHAT_UPLOAD     => array('label' => 'AI chat uploads',      'internal' => false, 'default_view' => false),
 			self::SOURCE_MESSENGER_ATTACHMENT => array('label' => 'Message attachments', 'internal' => false, 'default_view' => false),
+			self::SOURCE_BOARDS_ATTACHMENT  => array('label' => 'Board attachments',   'internal' => false, 'default_view' => false),
 			// Someone attached these deliberately, and they take space until the
 			// report's retention window removes them, so they stay listable.
 			self::SOURCE_PROBLEM_REPORT     => array('label' => 'Problem report images', 'internal' => false, 'default_view' => false),

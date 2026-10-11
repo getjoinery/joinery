@@ -103,6 +103,11 @@ var (
 	domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 )
 
+// handlerBaseRe is a handler alias's local part: the alphabet
+// InboundEmailAlias::prepare allows, which is what may be written into a
+// regexp line.
+var handlerBaseRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
 const maxFragmentBytes = 32 * 1024 * 1024
 
 func runMerge() int {
@@ -408,6 +413,11 @@ func validateFragment(frag *mapFragment, slug string, allow []string, claimed ma
 		if err := checkDomain(dom, "recipient domain"); err != nil {
 			return err
 		}
+		if e.AcceptsTag && !handlerBaseRe.MatchString(localPartOf(addr)) {
+			// The base goes into a regexp line; only the plain alias alphabet
+			// (InboundEmailAlias::prepare) may.
+			return fmt.Errorf("recipient %q cannot take sub-addresses", addr)
+		}
 		if e.PublicKey != "" {
 			if _, err := decodePublicKey(e.PublicKey); err != nil {
 				return fmt.Errorf("recipient %q seal key invalid: %v", addr, err)
@@ -450,8 +460,15 @@ func derivePostfixMaps(m *routingMap) (relayDomains, recipients, transport, srs 
 			raLines = append(raLines, "postmaster@"+dom+"\tOK")
 		}
 	}
-	for addr := range m.Recipients {
+	for addr, e := range m.Recipients {
 		raLines = append(raLines, addr+"\tOK")
+		if e.AcceptsTag {
+			// A handler alias also takes `base+tag@domain`. The access map is
+			// an exact-address hash, so the sub-address is accepted by a regexp
+			// line in the regexp map consulted before it.
+			srsLines = append(srsLines, "/^"+regexpQuoteDomain(localPartOf(addr))+`\+[^@]+@`+
+				regexpQuoteDomain(domainOf(addr))+"$/ OK")
+		}
 	}
 	for _, tc := range m.Tenants {
 		for _, fd := range tc.ForwardingDomains {

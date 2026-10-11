@@ -18,6 +18,8 @@
  * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
  * relay export) keeps asking the domain.
  *
+ * @version 2.0 - iea_handler: a store-mode alias that also hands each new message to a plugin's
+ *   InboundAddressHandler; such an alias accepts `+tag` sub-addresses (resolveRecipient())
  * @version 1.9 - forwarding_offered(): a Fortress mailbox, or one on a domain sealed at the
  *   relay, is store-only
  * @version 1.8 - effectiveLevelSql() reads a legacy unconverted Fortress domain as
@@ -72,6 +74,10 @@ class InboundEmailAlias extends SystemBase {
 		// the owner's `mail` vault derives, so the server cannot forge or alter
 		// a pin the browser will accept. NULL until first use.
 		'iea_relay_identity_pin' => array('type'=>'text', 'is_nullable'=>true),
+		// The plugin handler key this alias hands each new message to
+		// (InboundHandlerRegistry), or NULL for an ordinary mailbox. Only meaningful
+		// on a store-mode alias; a handler alias also accepts `+tag` sub-addresses.
+		'iea_handler'            => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
 		'iea_last_forward_time'  => array('type'=>'timestamp(6)'),
 		'iea_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -100,6 +106,22 @@ class InboundEmailAlias extends SystemBase {
 		}
 
 		$forwards = ($mode === self::MODE_FORWARD || $mode === self::MODE_FORWARD_AND_STORE);
+
+		// A handler alias hands each stored message to a plugin, so it is a store-mode
+		// alias: nothing forwards from it, and a sealing level would leave the plugin
+		// nothing it may read (the hand-over refuses one anyway).
+		$handler = trim((string)$this->get('iea_handler'));
+		if ($handler !== '') {
+			if (!preg_match('/^[a-z0-9][a-z0-9_]{0,63}$/', $handler)) {
+				throw new InboundEmailAliasException('A handler key is lowercase letters, digits and underscores.');
+			}
+			if ($mode !== self::MODE_STORE) {
+				throw new InboundEmailAliasException('A handler alias stores its mail; it cannot forward.');
+			}
+			$this->set('iea_handler', $handler);
+		} else {
+			$this->set('iea_handler', null);
+		}
 
 		// Destinations rules depend on delivery mode.
 		$destinations = $this->get('iea_destinations');
@@ -263,6 +285,61 @@ class InboundEmailAlias extends SystemBase {
 		return trim((string)$this->get('iea_security_level')) !== '';
 	}
 
+	/** The plugin handler key this alias hands mail to, or '' for an ordinary mailbox. */
+	function handler_key(): string {
+		return trim((string)$this->get('iea_handler'));
+	}
+
+	/** True when this alias hands each new message to a plugin handler. */
+	function has_handler(): bool {
+		return $this->handler_key() !== '';
+	}
+
+	/**
+	 * Find the enabled alias a recipient local part belongs to, with its sub-address tag.
+	 *
+	 * An exact match wins. Failing that, `base+tag` resolves to `base` — but only
+	 * when `base` is a handler alias; an ordinary alias is never sub-addressed, so
+	 * its behaviour does not change. The `+` cannot appear in an alias (prepare()
+	 * refuses it), so an exact match and a sub-address never collide.
+	 *
+	 * This is the one place the rule lives: the router, GetByAddress() and (as the
+	 * same SQL) the recipient check at the site's mail server all agree with it.
+	 *
+	 * @return array{0:?InboundEmailAlias,1:?string} [alias, tag]; tag is null for an exact match
+	 */
+	static function resolveRecipient(int $domain_id, string $local_part): array {
+		$local_part = strtolower(trim($local_part));
+		$exact = self::enabledAliasNamed($domain_id, $local_part);
+		if ($exact) {
+			return array($exact, null);
+		}
+		$plus = strpos($local_part, '+');
+		if ($plus === false || $plus === 0) {
+			return array(null, null);
+		}
+		$base = self::enabledAliasNamed($domain_id, substr($local_part, 0, $plus));
+		if ($base && $base->has_handler()) {
+			return array($base, substr($local_part, $plus + 1));
+		}
+		return array(null, null);
+	}
+
+	private static function enabledAliasNamed(int $domain_id, string $name): ?InboundEmailAlias {
+		if ($name === '') {
+			return null;
+		}
+		$results = new MultiInboundEmailAlias(array(
+			'domain_id' => $domain_id,
+			'alias' => $name,
+			'deleted' => false
+		));
+		foreach ($results as $alias) {
+			return $alias->get('iea_is_enabled') ? $alias : null;
+		}
+		return null;
+	}
+
 	/**
 	 * The domain's level, read fresh every time.
 	 *
@@ -343,20 +420,8 @@ class InboundEmailAlias extends SystemBase {
 			return false;
 		}
 
-		$results = new MultiInboundEmailAlias(array(
-			'domain_id' => $domain->key,
-			'alias' => $local_part,
-			'deleted' => false
-		));
-		$results->load();
-		if (count($results)) {
-			$alias = $results->get(0);
-			if ($alias->get('iea_is_enabled')) {
-				return $alias;
-			}
-		}
-
-		return false;
+		list($alias) = self::resolveRecipient(intval($domain->key), $local_part);
+		return $alias ?: false;
 	}
 }
 

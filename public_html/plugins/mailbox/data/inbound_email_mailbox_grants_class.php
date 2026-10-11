@@ -285,6 +285,20 @@ class InboundEmailMailboxGrant extends SystemBase {
 			$current[$uid] = $g;
 		}
 
+		// A handler alias (a plugin's address) takes no grants: every message sent to it
+		// is stored in its mailbox, and for a plugin like Boards that holds content from
+		// invite-only boards its readers could not otherwise open. Superadmins read it by
+		// oversight. Removing a grant that predates the alias being a handler is fine.
+		if ($alias->key && $alias->has_handler()) {
+			foreach ($desired as $uid => $_) {
+				if (!isset($current[$uid])) {
+					throw new InboundEmailMailboxGrantException('This is a ' . $alias->handler_key()
+						. ' handler address. Its mail belongs to that feature, so it takes no member grants; '
+						. 'administrators read it through the all-mail view.');
+				}
+			}
+		}
+
 		// Insert first, THEN remove. Handing a sealing mailbox from one holder to
 		// another is a legitimate edit, and removing the outgoing holder first
 		// would take it through zero holders — which the last-holder refusal
