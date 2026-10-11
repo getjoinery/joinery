@@ -92,8 +92,14 @@ section('apiv1.php meters browser sessions per user, and every 429 says when');
 
 $api = file_get_contents(PathHelper::getIncludePath('api/apiv1.php'));
 check(strpos($api, '$browser_shaped = empty($headers[\'public_key\'])') !== false
-	&& strpos($api, 'if (!$browser_shaped) {') !== false,
+	&& strpos($api, 'if (!$browser_shaped && !$app_shaped) {') !== false,
 	'a browser-shaped request skips the per-address check before authentication');
+check(strpos($api, '$app_shaped = isset($headers[\'x_joinery_app_secret\'])') !== false
+	&& strpos($api, '$api_entry === null || $api_entry->is_app_credential()') !== false,
+	'an app credential is metered per person after authentication, like a browser session');
+$at = strpos($api, "\$app_shaped = isset(\$headers['x_joinery_app_secret'])");
+check($at !== false && strpos(substr($api, $at, 300), "=== 'action';") !== false,
+	'only an ACTION request can be app-shaped: the headers switch no limiter off on auth/login or forms');
 check(strpos($api, "rate_limit_state('api', \$session_limit, \$session_window, null, intval(\$api_user->key))") !== false,
 	'a signed-in browser session is metered per user after authentication');
 check(strpos($api, "get_setting('api_session_rate_limit_requests')") !== false, 'the session limit is its own setting');

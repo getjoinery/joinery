@@ -27,7 +27,25 @@
  * is the only durable trace a window leaves — see docs/sealed_vault.md
  * § The audit log.
  *
- * @version 1.15
+ * BORROWED WINDOWS (specs/mail_apps_plugin.md § Core: the borrowed unlock). A
+ * program signed in with an app credential (a mail app) has no browser session
+ * and never unlocks anything itself. When the person unlocks on the website,
+ * arm() also arms the same key into one slot per live app credential whose
+ * purpose borrows the unlock (AppAccess), `vault:~apk{key_id}:{user_id}:user`,
+ * with the same caps measured from that moment. A request authenticated by
+ * that credential reads through its slot (useCredentialWindow(), set by
+ * ApiAuth), so secretKey(), endedByPolicy(), the egress guard and the audit all
+ * run unchanged. The program's checks count as activity (touchActivity()) up
+ * to the absolute cap — the one deliberate exception to "presence never keeps
+ * a key in RAM", bounded by that cap and shown to the person in the lock chip.
+ * Lock on the website (lockBorrowed()), a credential event (lockAll()), and the
+ * credential's revocation (lockCredentialWindow()) end it; signing out of one
+ * browser does not.
+ *
+ * @version 1.16
+ * @changelog 1.16 - Borrowed windows: arm() from the website also arms each
+ *   borrowing app credential's slot; useCredentialWindow(), touchActivity(),
+ *   lockBorrowed(), lockCredentialWindow(), borrowedWindows().
  * @changelog 1.15 - onClientRotationCommit()/clientRotationCommitRefusal(): a
  *   consumer can refuse a client-custody rotation's commit while retiring the
  *   old key would lose something it still receives.
@@ -136,6 +154,19 @@ class VaultUnlock {
 	private static $activity_suppressed = false;
 
 	/**
+	 * @var array{key_id:int, user_id:int}|null Set by ApiAuth when the request
+	 * authenticated with an app credential whose purpose borrows the unlock: the
+	 * request's window is that credential's slot, not a browser session's.
+	 */
+	private static $credential_window = null;
+
+	/**
+	 * The session-id position of a credential's slot. `~` cannot appear in a
+	 * PHP session id, so no browser session can name a credential's slot.
+	 */
+	const CREDENTIAL_SLOT_PREFIX = '~apk';
+
+	/**
 	 * Load every plugin bootstrap and core consumer bootstrap — lazy, once per
 	 * request, called by every code path that needs a consumer's hooks live: the
 	 * File decrypt-hook resolution (File::serve_from_path()), the rotation
@@ -211,6 +242,197 @@ class VaultUnlock {
 		self::touchWindowMarker($user_id, $scope);
 		self::rememberOpen($user_id, $scope, $via, $now);
 		VaultAudit::opened($user_id, $scope, $via, $caps, $sid);
+
+		// A person's unlock on the website also opens their app credentials'
+		// borrowed windows. Only the server-custody `user` scope is borrowed,
+		// and only from a person's own unlock — never from inside a borrowed
+		// window, which can arm nothing.
+		if ($scope === 'user' && self::$credential_window === null) {
+			self::armBorrowers($user_id, $key, $caps, $now);
+		}
+	}
+
+	/**
+	 * Arm $key into the slot of each live app credential of $user_id whose
+	 * purpose borrows the unlock, with the same caps measured from $now.
+	 * Re-arming (a second website unlock) restarts each slot's caps.
+	 */
+	private static function armBorrowers(int $user_id, PoolVaultKey $key, array $caps, int $now): void {
+		// A borrowed window is kept open by a program's checks, so the absolute
+		// cap is the only thing that ends it while the program is running. A
+		// person whose caps carry none (no consumer asks for one — no Private
+		// mailbox) has nothing a program needs to borrow: no slot at all,
+		// rather than one bounded by nothing.
+		if (empty($caps['absolute'])) {
+			return;
+		}
+		foreach (self::borrowingCredentials($user_id) as $credential) {
+			$sid = self::CREDENTIAL_SLOT_PREFIX . $credential['id'];
+			$key->storeInSlot(self::apcuKey($sid, $user_id, 'user'), self::idleSeconds());
+			apcu_store(self::metaKey($sid, $user_id, 'user'), array(
+				'armed'    => $now,
+				'content'  => $now,
+				'hb'       => null,             // no heartbeat ever applies to a borrowed slot
+				'idle_cap' => $caps['idle'] ?? null,
+				'abs_cap'  => $caps['absolute'] ?? null,
+			), self::idleSeconds());
+			// Remembered so an expiry nobody saw happen is still written down by
+			// the credential's next request (observeClosed()).
+			apcu_store(self::borrowMarkerKey($sid, $user_id, 'user'), $now,
+				max(self::idleSeconds(), (int)($caps['absolute'] ?? 0)) + self::CLOSE_TOMBSTONE_SECONDS);
+			VaultAudit::opened($user_id, 'user', VaultAudit::VIA_APP_BORROW, $caps, $sid);
+		}
+	}
+
+	/**
+	 * The live app credentials of $user_id that borrow the unlock.
+	 *
+	 * @return array<int, array{id:int, name:string, purpose:string}>
+	 */
+	private static function borrowingCredentials(int $user_id): array {
+		$purposes = AppAccess::borrowingPurposes();
+		if (!$purposes) {
+			return array();
+		}
+		$keys = new MultiApiKey(array('user_id' => $user_id, 'app_credential' => true, 'deleted' => false));
+		$out = array();
+		foreach ($keys as $api_key) {
+			if (!$api_key->get('apk_is_active') || !in_array($api_key->purpose(), $purposes, true)) {
+				continue;
+			}
+			$out[] = array(
+				'id'      => (int)$api_key->key,
+				'name'    => (string)$api_key->get('apk_name'),
+				'purpose' => (string)$api_key->purpose(),
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * Make this request read through an app credential's borrowed slot instead
+	 * of a browser session's window. Called by ApiAuth once the credential has
+	 * authenticated and its purpose is known to borrow; for the rest of the
+	 * request every VaultUnlock read is that slot's.
+	 */
+	public static function useCredentialWindow(int $key_id, int $user_id): void {
+		self::$credential_window = array('key_id' => $key_id, 'user_id' => $user_id);
+	}
+
+	/** Go back to the browser session's window. Tests only: a request never changes credential. */
+	public static function leaveCredentialWindowForTests(): void {
+		if (PHP_SAPI !== 'cli') {
+			throw new RuntimeException('VaultUnlock::leaveCredentialWindowForTests() is for tests run from the command line.');
+		}
+		self::$credential_window = null;
+	}
+
+	/** The app credential whose borrowed slot this request reads, or null. */
+	public static function credentialWindowKeyId(): ?int {
+		return self::$credential_window === null ? null : self::$credential_window['key_id'];
+	}
+
+	/**
+	 * A borrowing credential's check that decrypted nothing (a mail app asking
+	 * "anything new?") still counts as activity: refresh the slot's idle time
+	 * and content stamp as a content decrypt would (decision 2 in
+	 * specs/mail_apps_plugin.md). Every policy check still runs first, so the
+	 * absolute cap ends the window whatever the program does.
+	 *
+	 * Refuses to run anywhere but a borrowing credential's request: a browser's
+	 * window is kept alive by content decrypts alone, and a beacon proving only
+	 * presence must never extend it.
+	 *
+	 * @return bool whether the window is open
+	 * @throws RuntimeException outside a borrowing credential's request
+	 */
+	public static function touchActivity(int $user_id, string $scope = 'user'): bool {
+		if (self::$credential_window === null || self::$credential_window['user_id'] !== $user_id) {
+			throw new RuntimeException('VaultUnlock::touchActivity: only a borrowing app credential\'s request may count its checks as activity.');
+		}
+		$sid = self::currentSessionIdOrNull();
+		$slot = self::apcuKey($sid, $user_id, $scope);
+		$key = PoolVaultKey::fromSlot($slot);
+		if ($key === null) {
+			self::observeClosed($user_id, $scope);
+			return false;
+		}
+		if (self::endedByPolicy($sid, $user_id, $scope)) {
+			return false;
+		}
+		$key->storeInSlot($slot, self::idleSeconds());
+		self::touchWindowMarker($user_id, $scope);
+		self::stampMeta($sid, $user_id, $scope, 'content');
+		return true;
+	}
+
+	/**
+	 * Every open borrowed window of $user_id, for the lock chip's
+	 * "Also unlocked for: Laptop (Mail apps), until Oct 18" line. Reports
+	 * without extending anything.
+	 *
+	 * @return array<int, array{key_id:int, name:string, purpose:string, label:string, ends_at:?int}>
+	 *   ends_at is the absolute cap's end (unix time), or null when uncapped.
+	 */
+	public static function borrowedWindows(int $user_id): array {
+		$out = array();
+		foreach (self::borrowingCredentials($user_id) as $credential) {
+			$sid = self::CREDENTIAL_SLOT_PREFIX . $credential['id'];
+			if (!apcu_exists(self::apcuKey($sid, $user_id, 'user'))) {
+				continue;
+			}
+			$meta = apcu_fetch(self::metaKey($sid, $user_id, 'user'), $ok);
+			$ends_at = null;
+			if ($ok && is_array($meta)) {
+				$now = time();
+				if (!empty($meta['abs_cap']) && ($now - (int)$meta['armed']) > (int)$meta['abs_cap']) {
+					continue; // past its cap; the next read closes it
+				}
+				if (!empty($meta['abs_cap'])) {
+					$ends_at = (int)$meta['armed'] + (int)$meta['abs_cap'];
+				}
+			}
+			$out[] = array(
+				'key_id'  => $credential['id'],
+				'name'    => $credential['name'],
+				'purpose' => $credential['purpose'],
+				'label'   => AppAccess::label($credential['purpose']),
+				'ends_at' => $ends_at,
+			);
+		}
+		return $out;
+	}
+
+	/**
+	 * End every borrowed window of $user_id — the website's Lock button, which
+	 * means "lock my mail", wherever it is being read.
+	 */
+	public static function lockBorrowed(int $user_id, string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
+		if (!class_exists('APCUIterator') || !function_exists('apcu_enabled') || !apcu_enabled()) {
+			return;
+		}
+		$pattern = '/^vault:' . preg_quote(self::CREDENTIAL_SLOT_PREFIX, '/') . '(\d+):'
+			. preg_quote((string)$user_id, '/') . ':([^:]*)$/';
+		$slots = array();
+		foreach (new APCUIterator($pattern) as $entry) {
+			if (preg_match($pattern, (string)$entry['key'], $m)) {
+				$slots[] = array(self::CREDENTIAL_SLOT_PREFIX . $m[1], $m[2]);
+			}
+		}
+		foreach ($slots as $slot) {
+			self::lock($user_id, $slot[0], $slot[1], $reason);
+		}
+	}
+
+	/** End one app credential's borrowed window (the credential was revoked). */
+	public static function lockCredentialWindow(int $user_id, int $key_id,
+			string $reason = VaultAudit::REASON_APP_REVOKED): void {
+		self::lock($user_id, self::CREDENTIAL_SLOT_PREFIX . $key_id, 'user', $reason);
+	}
+
+	/** APCu key remembering that a borrowed slot was armed (see observeClosed()). */
+	private static function borrowMarkerKey(string $session_id, int $user_id, string $scope): string {
+		return 'vaultbrw:' . $session_id . ':' . $user_id . ':' . $scope;
 	}
 
 	/**
@@ -464,6 +686,7 @@ class VaultUnlock {
 
 		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
 		apcu_delete(self::metaKey($session_id, $user_id, $scope));
+		apcu_delete(self::borrowMarkerKey($session_id, $user_id, $scope));
 		// Wiping the window has to take the DEKs unwrapped under it as well, or a
 		// process that locked mid-request would still hold keys that open content.
 		// Cleared wholesale, not per user: this runs once at lock, and rebuilding
@@ -490,8 +713,9 @@ class VaultUnlock {
 		// windows to wipe, so skipping it is correct, not lossy.
 		$closed = array();
 		if (class_exists('APCUIterator') && function_exists('apcu_enabled') && apcu_enabled()) {
-			// Both the window keys (vault:) and their metadata (vaultmeta:).
-			$pattern = '/^vault(?:meta)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
+			// The window keys (vault:), their metadata (vaultmeta:), and a
+			// borrowed slot's armed marker (vaultbrw:).
+			$pattern = '/^vault(?:meta|brw)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
 			$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
 			foreach (new APCUIterator($pattern) as $entry) {
 				// One row per (session, scope) rather than a single summary: a
@@ -608,6 +832,26 @@ class VaultUnlock {
 	 * no record to find, and the check is an isset() on $_SESSION.
 	 */
 	private static function observeClosed(int $user_id, string $scope): void {
+		if (self::$credential_window !== null) {
+			// A borrowed slot has no PHP session to remember it by; arming left a
+			// marker in the pool instead. Present means armed and not yet
+			// reported closed.
+			$sid = self::currentSessionIdOrNull();
+			$marker = self::borrowMarkerKey($sid, $user_id, $scope);
+			$armed = apcu_fetch($marker, $had_marker);
+			if (!$had_marker) {
+				return;
+			}
+			apcu_delete($marker);
+			$tombstone = self::tombstoneKey($sid, $user_id, $scope);
+			if (apcu_exists($tombstone)) {
+				apcu_delete($tombstone);
+				return;
+			}
+			VaultAudit::closed($user_id, $scope, VaultAudit::REASON_IDLE_EXPIRED, $sid,
+				is_int($armed) ? time() - $armed : null);
+			return;
+		}
 		if (session_status() !== PHP_SESSION_ACTIVE
 				|| !isset($_SESSION['vault_windows'][$user_id . ':' . $scope])) {
 			return;
@@ -1105,6 +1349,7 @@ class VaultUnlock {
 		self::$wipe_callbacks = array();
 		self::$window_cap_providers = array();
 		self::$activity_suppressed = false;
+		self::$credential_window = null;
 		if (session_status() === PHP_SESSION_ACTIVE) {
 			unset($_SESSION['vault_windows']);
 		}
@@ -1115,6 +1360,9 @@ class VaultUnlock {
 	/** The session id, or null where none exists (a CLI/cron process). Readers
 	 *  treat null as locked; only open() demands a real session. */
 	private static function currentSessionIdOrNull(): ?string {
+		if (self::$credential_window !== null) {
+			return self::CREDENTIAL_SLOT_PREFIX . self::$credential_window['key_id'];
+		}
 		SessionControl::get_instance();
 		$session_id = session_id();
 		return $session_id ?: null;

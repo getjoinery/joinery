@@ -1594,6 +1594,7 @@ There is no second ceremony.
 | Best for | mailboxes without sensitive data (customer service, clubs, newsletters) | most users | mail that must stay private even from a hacked server |
 | Team features (shared mailboxes) | yes | no | no |
 | Phone apps | yes | yes | yes, once a computer hands the phone the key |
+| Mail apps (Thunderbird, any IMAP/SMTP program — the `mail_apps` plugin) | yes | yes, while the vault is unlocked on the website | no |
 | Contacts (the mailbox's address book) | plaintext | sealed to the adding member's vault, opened in their window | the same — server custody, not end to end; the card says so (§ Contacts) |
 
 **Extra protection — the add-ons on a Private domain**
@@ -3713,6 +3714,28 @@ so a crafted id/thread/alias for an un-granted mailbox returns nothing and mutat
 nothing. `MailboxViewer::forUser($user_id, $permission)` builds a viewer
 independent of the session.
 
+**What each view holds** is defined once, in `MailboxService`:
+`viewScopeSql(int $aliasId, string $view, ?int $labelId = null)` answers one
+WHERE fragment over `iem_` for `inbox`, `sent`, `drafts` (the viewer's own),
+`archive`, `spam`, `trash`, `all` or `label`, built from the same fragments
+(`INBOX_SQL`, `SENT_SQL`, `ARCHIVE_SQL`, the spam and label conditions) the
+reader's list composes its own query from. Other readers of a mailbox's folders
+— the `mail_apps` plugin's IMAP folders — ask it, so "what Inbox means" cannot
+drift.
+
+**Mail a program composed.** `MailboxSender::sendRaw(InboundEmailAlias $alias,
+string $raw_mime, string $mail_from, array $rcpt_to)` sends a whole MIME message
+and envelope as the mailbox, through the same pipeline as a reader send: the
+message is carried over part for part into an `EmailMessage` (From must be the
+mailbox; the envelope decides the recipients, extras becoming Bcc; the
+Message-ID kept when it names the mailbox's domain), so it leaves signed as this
+mailbox. A message signed or encrypted as a whole (PGP/MIME, S/MIME) is refused.
+`MailboxSender::storeRawOutbound(InboundEmailAlias $alias, string $raw_mime)`
+stores one as Sent without sending, through the same store an archive's Sent
+mail takes. `MailboxDrafts::saveDraft()` takes a part given as bytes (`name`,
+`type`, `bytes`, `content_id`) as well as an HTTP upload, for a program's draft
+parsed from its MIME.
+
 ### Permissions
 
 The endpoints (`ajax/mailbox_*.php`) require a **signed-in session** — any
@@ -3790,7 +3813,10 @@ dead ends (`specs/mailbox_show_original_coverage.md`):
   headers plus the decoded text body and labels it a reconstruction; there is
   no `.eml`, because a downloaded file claiming to be the original must be
   one. Rows stored before header retention have no header block and answer
-  `none`.
+  `none`. A mail program's copy of a message is a different contract: the
+  `mail_apps` plugin serves a faithful, byte-stable rebuild of what Joinery
+  holds (`plugins/mail_apps/docs/overview.md` § Whole messages), and never calls
+  it the original.
 - **`none`** — neither item; Print always appears — it works from the parsed
   body.
 

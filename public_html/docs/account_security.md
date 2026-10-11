@@ -566,6 +566,9 @@ core dependency on any one plugin.
 | Enroll a factor for another user | Never — enrollment is self-only |
 | Link a sync device | Session + recent step-up; the browser mints the device's credential, so an unattended unlocked browser must not be enough |
 | Unlink a sync device | Session; revokes the device's session key in the same step |
+| Make an app password (a mail app) | Session + recent step-up; for one purpose an active plugin declares |
+| Revoke an app password | Session; ends the window it borrowed |
+| Read sealed mail in a mail app | An open window borrowed from the person's own website unlock; the app cannot open one |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
 | Password reset | An authorizer — email link, passkey, TOTP (no-vault only), or verified recovery address; never opens a vault |
 | Passkey reset on a vault account | Passkey **plus** an independent second factor (TOTP or a different passkey), when one is enrolled |
@@ -647,3 +650,14 @@ The check-in time comes from the device's own change-feed polling rather than a
 separate heartbeat, so there is no client that can forget to send one. A device
 that has quietly stopped syncing shows a stale "last synced" instead of looking
 healthy.
+
+## App passwords
+
+A program that cannot do a passkey sign-in — a mail program such as Thunderbird — signs in with an **app password**: a core app credential for one device and one purpose (`mail`), listed under **App Sessions** with its purpose, when it was made, and when and from where it was last used. See [API § App credentials](api.md#app-credentials).
+
+It is a narrow door on purpose:
+- **Making one** needs the website session and a recent step-up. Leaving a standing credential behind is a credential change, the same bar as linking a sync device.
+- **It reaches only its purpose.** It reaches the actions that purpose's plugin declares, and nothing else: no page, no CRUD, no `auth/*`, not the web-session bridge.
+- **It never opens a vault.** `requires_person_credential` and `requires_browser_session` refuse it. It cannot unlock, set up, rotate, approve a device or change a protection level. For a Private mailbox it reads through a window **borrowed** from the person's own website unlock ([Sealed Vault § Borrowed windows](sealed_vault.md#borrowed-windows)). The program's checks keep that window open up to its absolute cap (7 days, or 24 hours with a hardened add-on), and the person is told so before making the password. **Lock** on the website ends it, and signing out of one browser does not.
+- **It ends with its plugin.** Deactivating the plugin that declares the purpose refuses every credential of it at once. A password change revokes every app password with the session keys.
+- **Failed sign-ins** are limited per source network and per username in their own bucket.

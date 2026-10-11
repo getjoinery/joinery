@@ -464,6 +464,18 @@ the account half the browser derived (`code_kek`, `passphrase_kek`). The
 account's sign-in second factor never takes part in opening a vault: an
 authenticator code confirms sign-ins and sensitive changes, and opens nothing.
 
+### Borrowed windows
+
+A program signed in with an **app credential** (`docs/api.md` § App credentials — a mail app's app password) has no browser session and never unlocks anything. When its purpose declares `borrowsUnlock`, it **borrows** the person's website unlock instead:
+
+- **Arming.** `arm()` from a browser session, scope `user`, also arms the same key into one slot per live app credential of that person whose purpose borrows: `vault:~apk{key_id}:{user_id}:user`, with the same caps, measured from that moment. Unlocking again re-arms them and restarts their caps. The audit row says `via=app_borrow` and names the credential (`session=apk{key_id}`). `~` cannot appear in a PHP session id, so no browser session can name a credential's slot.
+- **Reading.** `ApiAuth` calls `VaultUnlock::useCredentialWindow($key_id, $user_id)` once such a credential has authenticated. For the rest of the request every `VaultUnlock` read is that slot's: `secretKey()`, `isOpen()`, `endedByPolicy()`, the egress guard and the audit run unchanged.
+- **Staying open.** A content read refreshes the slot as it does a browser's. A check that reads nothing (a mail program asking "anything new?") calls `VaultUnlock::touchActivity()`, which refreshes the idle time and content stamp the same way and refuses outside a borrowing credential's request. This is the one place presence keeps a key in memory. The absolute cap (§ How long a window lasts) still bounds it, and the person is told before making the credential. No heartbeat applies to a borrowed slot, and neither does the IP-change rule.
+- **Ending.** The caps end it at read time. **Lock** on the website ends every borrowed slot with the browser's window (`vault_lock` calls `lockBorrowed()`). A credential event ends it (`lockAll()` matches the slots). Revoking the credential ends its slot (`ApiKey::soft_delete()` → `lockCredentialWindow()`). Signing out of one browser session does not: signing out is about that browser.
+- **Visible.** `VaultUnlock::borrowedWindows($user_id)` lists the open slots — device name, purpose label, and when the absolute cap ends them. `vault_status` returns them as `borrowed`, and the lock chip's popover names them ("Also unlocked for: Laptop (Mail apps), until Oct 18").
+
+An expiry nobody saw happen is still written down: arming leaves a marker (`vaultbrw:`) the credential's next request finds, the way a browser session's `$_SESSION` record serves its own window.
+
 ### Host hardening
 
 `includes/VaultHealth.php` checks the four facts that keep an unwrapped
@@ -521,7 +533,10 @@ partly locked. Clicking the closed padlock runs the one unlock in place
 ([One vault](#one-vault)), offering what the vault has — a passkey, the
 passphrase or a recovery code. Clicking the open padlock opens a popover with
 one line, "Vault", and one action: **Lock now** locks everything (the server
-window and every browser-held vault), **Unlock** runs the one unlock. The
+window, every window a program borrowed from it, and every browser-held vault),
+**Unlock** runs the one unlock. While programs read through a borrowed window,
+the popover adds one line naming them ("Also unlocked for: Laptop (Mail apps),
+until Oct 18"). The
 server window ending anywhere locks the browser-held vaults too. A user with no
 account vault sees the chip only while a browser-held vault is open. Users with no vault at all, on pages that open none, never load
 any of it.
@@ -1225,6 +1240,8 @@ never hand an uncapped window to someone who may have configured the strictest
 one, so a provider declares what its own failure should imply. Omitting it
 means the hardened caps (`VaultUnlock::HARDENED_*_CAP_SECONDS`) — abstaining on error must be said explicitly, with
 `['idle' => null, 'absolute' => null]`, never defaulted into.
+
+A borrowed window (§ Borrowed windows) is armed with the same fold. A program's checks keep it alive while it is checking, so for it the idle cap matters only when the program stops checking; the absolute cap is what ends it — 7 days, or 24 hours for a member with a hardened add-on.
 
 Fail-closed covers the load path too: a declared consumer bootstrap that is
 missing on disk (a partial deploy) never got to register its provider, so

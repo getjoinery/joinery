@@ -46,6 +46,8 @@
  *   passphrase, not only with a passkey the root knows (which lives on the device the root was made on)
  * @version 2.0 - the one vault: one unlock opens the account vault, the root and every browser-held vault;
  *   one line in the menu; Lock now locks everything; the server gets KEKs, never a code or a phrase
+ * @version 1.7 - the open popover names the programs reading through this unlock ("Also
+ *   unlocked for: Laptop (Mail apps), until Oct 18") from vault_status.borrowed
  * @version 1.6 - the chip reads open only when every vault the page needs is open
  *   (JoinerySealed.want); its menu offers Unlock for each one still shut
  * @version 1.5 - a bypass phrase or recovery code opens the vault on its own, with no step-up page
@@ -441,6 +443,28 @@
 			? 'Everything sealed is readable while you’re here. It all locks together after a while away, or when you press Lock now.'
 			: 'One unlock opens all of it.';
 		popover.appendChild(body);
+		if (open && serverVault) { fillBorrowed(); }
+	}
+
+	// Programs reading through this unlock (a mail app signed in with an app
+	// password borrows it, docs/sealed_vault.md § Borrowed windows): one line
+	// naming each and when it ends. Lock now ends them too.
+	function fillBorrowed() {
+		api('vault_status', {}).then(function (status) {
+			var list = (status && status.borrowed) || [];
+			if (!list.length || !popover || popover.hidden) { return; }
+			var old = popover.querySelector('.jy-vault-lock-pop-borrowed');
+			if (old) { old.remove(); }
+			var line = document.createElement('div');
+			line.className = 'jy-vault-lock-pop-body jy-vault-lock-pop-borrowed';
+			line.textContent = 'Also unlocked for: ' + list.map(function (b) {
+				var until = b.ends_at
+					? ', until ' + new Date(b.ends_at * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+					: '';
+				return b.name + ' (' + b.label + ')' + until;
+			}).join('; ') + '.';
+			popover.appendChild(line);
+		}).catch(function () { /* the line is a courtesy; the chip works without it */ });
 	}
 
 	function buildChip() {

@@ -2,7 +2,11 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.23
+ * @version 2.24
+ * @changelog 2.24 - An app-shaped request (the app-access headers on an action) is metered per
+ *   person after authentication and its failed sign-ins counted in app_access_auth; the
+ *   headers switch no limiter off on any other route family. An app credential (one purpose, AppAccess) is refused on every route
+ *   family but action dispatch (ApiAuth::refuseAppCredentialOutsideActions()).
  * @changelog 2.23 - Backup broker (/api/v1/broker/*): a Managed node's backup run asks for signed links with its
  *   run token, dispatched before key authentication (BrokerEndpoint).
  * @changelog 2.22 - The agent channel's limit is checked by the endpoint, per node for what a
@@ -430,7 +434,22 @@ $api_rate_limit = (int)($settings->get_setting('api_rate_limit_requests') ?: 100
 $api_rate_window = (int)($settings->get_setting('api_rate_limit_window') ?: 3600);
 $browser_shaped = empty($headers['public_key']) && empty($headers['secret_key'])
 	&& !empty($_COOKIE[session_name()]) && isset($headers['x_joinery_csrf']);
-if (!$browser_shaped) {
+// An app credential (a mail app through the mail gateway) is metered per
+// person after authentication, like a browser session: one person's mail
+// program syncing a large mailbox must not spend the budget that guards the
+// address against strangers, and is not a stranger's flood. Its failed
+// sign-ins have their own bucket (ApiAuth, app_access_auth).
+// Only an ACTION request can be app-shaped: every other route family is
+// dispatched before authentication (auth/login, forms) or refused to an app
+// credential after it, so the header must never switch a limiter off there.
+// A sessionless action is refused an app credential before it runs
+// (ApiLogicEndpoint::dispatchActionPreAuth()), so every request exempted here
+// reaches ApiAuth::authenticate() and its own app_access_auth bucket. (A
+// request with the header for an action that does not exist, or one switched
+// off, is answered before that, unmetered: a stateless refusal, cheap to give.)
+$app_shaped = isset($headers['x_joinery_app_secret'])
+	&& strtolower(explode('/', trim((string)parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'action';
+if (!$browser_shaped && !$app_shaped) {
 	$api_state = RequestLogger::rate_limit_state('api', $api_rate_limit, $api_rate_window);
 	if (!$api_state['allowed']) {
 		api_rate_limited($api_state, 'This address', $api_rate_limit, $api_rate_window);
@@ -440,7 +459,12 @@ if (!$browser_shaped) {
 // Rate limiting: failed auth attempts (configurable, default 10 failures per 15 min per IP)
 $api_auth_rate_limit = (int)($settings->get_setting('api_auth_rate_limit_requests') ?: 10);
 $api_auth_rate_window = (int)($settings->get_setting('api_auth_rate_limit_window') ?: 900);
-$api_auth_state = RequestLogger::rate_limit_state('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false);
+// An app credential's failed sign-ins have their own bucket (ApiAuth,
+// app_access_auth), counted per the program's network and per username; its
+// requests all arrive from the gateway's loopback address, which this
+// per-address bucket would share with every other loopback caller.
+$api_auth_state = $app_shaped ? array('allowed' => true)
+	: RequestLogger::rate_limit_state('api_auth', $api_auth_rate_limit, $api_auth_rate_window, false);
 if (!$api_auth_state['allowed']) {
 	api_rate_limited($api_auth_state, 'This address', $api_auth_rate_limit, $api_auth_rate_window,
 		'failed sign-in attempts');
@@ -519,9 +543,14 @@ $auth_data = $principal['auth_data'];
 // default 5000/hour), whoever else shares their address; the anonymous
 // browser principal, which has no name, is metered by address like any other
 // keyless caller. Key traffic was metered before authentication.
-if ($api_entry === null) {
+if ($api_entry === null || $api_entry->is_app_credential()) {
 	if ($api_user !== null) {
 		$session_limit  = (int)($settings->get_setting('api_session_rate_limit_requests') ?: 5000);
+		// A mail program's first sync of a large mailbox downloads it whole,
+		// a few dozen messages a request: give it room.
+		if ($api_entry !== null) {
+			$session_limit = max($session_limit, ApiAuth::APP_REQUEST_LIMIT);
+		}
 		$session_window = (int)($settings->get_setting('api_session_rate_limit_window') ?: 3600);
 		$session_state = RequestLogger::rate_limit_state('api', $session_limit, $session_window, null, intval($api_user->key));
 		if (!$session_state['allowed']) {
@@ -549,6 +578,7 @@ if ($api_user === null && strtolower($url_segments[2] ?? '') !== 'action') {
 // refuses the key here, including the ones that never call authorize().
 if (strtolower($url_segments[2] ?? '') !== 'action') {
 	ApiAuth::refuseScopedKeyOutsideActions($api_entry, strtolower($url_segments[2] ?? ''));
+	ApiAuth::refuseAppCredentialOutsideActions($api_entry, strtolower($url_segments[2] ?? ''));
 }
 
 // Sessioned action endpoint — sessionless actions executed pre-auth above.

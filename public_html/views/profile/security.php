@@ -1174,12 +1174,13 @@ $pac_writer->end_form();
             <?php if (!empty($page_vars['app_sessions']) && count($page_vars['app_sessions'])): ?>
             <div class="jy-panel jy-mt-4">
                 <h2>App Sessions</h2>
-                <p>Devices signed in to your account. Revoke a session to sign that device out.</p>
+                <p>Devices and programs signed in to your account. Revoke one to sign it out.</p>
 
                 <table class="jy-table jy-w-full">
                     <thead>
                         <tr>
                             <th>Device</th>
+                            <th>For</th>
                             <th>Signed in</th>
                             <th>Last used</th>
                             <th></th>
@@ -1194,11 +1195,24 @@ $pac_writer->end_form();
                     ?>
                         <tr>
                             <td><?php echo htmlspecialchars($app_session->get('apk_name')); ?></td>
+                            <td><?php
+                                // An app credential names its purpose and how it signs in;
+                                // a session key is the person's own signed-in app.
+                                if ($app_session->is_app_credential()) {
+                                    echo htmlspecialchars(AppAccess::label($app_session->purpose()))
+                                        . ($app_session->kind_label() !== null
+                                            ? ' <span class="jy-text-muted">(' . htmlspecialchars($app_session->kind_label()) . ')</span>' : '');
+                                } else {
+                                    echo 'Signed-in app';
+                                }
+                            ?></td>
                             <td><?php echo htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_create_time'), 'UTC',
                                 SessionControl::get_instance()->get_timezone(), 'M j, Y')); ?></td>
                             <td><?php echo $app_session->get('apk_last_used_time')
                                 ? htmlspecialchars(LibraryFunctions::convert_time($app_session->get('apk_last_used_time'), 'UTC',
                                     SessionControl::get_instance()->get_timezone(), 'M j, Y g:i A'))
+                                    . ($app_session->get('apk_last_used_ip')
+                                        ? '<br><span class="jy-text-muted">from ' . htmlspecialchars($app_session->get('apk_last_used_ip')) . '</span>' : '')
                                 : 'Never'; ?></td>
                             <td class="text-end">
                                 <form action="/profile/security" method="POST" class="jy-inline">

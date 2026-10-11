@@ -28,6 +28,8 @@
  * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
  * cannot land there.
  *
+ * @version 1.5 - saveDraft() takes parts given as bytes ({name, type, bytes, content_id}) as well
+ *   as HTTP uploads: a mail program's draft, parsed from its MIME
  * @version 1.4 - a Fortress draft's parts carry signed URLs to their ciphertext (specs/fortress_mobile_apps.md § R12)
  * @version 1.3.2 - a new part may not repeat a part name (review by public-html-91, B15)
  * @version 1.3.1 - review of 2026-09-27: only a browser-sealed or truly hollow draft is a Fortress
@@ -64,7 +66,10 @@ class MailboxDrafts {
 	/**
 	 * Create or update a draft. $params: alias_id (From), draft_id (optional, for
 	 * update), mode, source_id, to, cc, bcc, subject, body_html / body. New uploads
-	 * ($files, same shape as send) persist immediately onto the draft. Returns
+	 * ($files, same shape as send) persist immediately onto the draft; an entry
+	 * may instead carry its content as `bytes` (with `name`, `type`, and
+	 * `content_id` for an inline part) — a mail program's draft arrives as MIME,
+	 * not as an upload. Returns
 	 * ['draft_id'=>int], or ['locked'=>true] when a sealed draft with attachments
 	 * needs the unlock window it doesn't have.
 	 */
@@ -829,17 +834,21 @@ class MailboxDrafts {
 
 		$index = 0;
 		foreach ($files as $f) {
-			if (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+			// A part handed over as bytes (a mail program's draft, parsed from
+			// its MIME) rather than as an HTTP upload: no file to read, so none
+			// of the upload checks apply, and it may name its own Content-ID.
+			$given = array_key_exists('bytes', $f);
+			if (!$given && ($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
 				continue;
 			}
-			if (($f['error'] ?? 1) !== UPLOAD_ERR_OK) {
+			if (!$given && ($f['error'] ?? 1) !== UPLOAD_ERR_OK) {
 				throw new MailboxDraftsException('An attachment failed to upload.');
 			}
 			$tmp = (string)($f['tmp_name'] ?? '');
-			if ($tmp === '' || !is_uploaded_file($tmp)) {
+			if (!$given && ($tmp === '' || !is_uploaded_file($tmp))) {
 				throw new MailboxDraftsException('An attachment could not be read.');
 			}
-			$size = intval($f['size'] ?? 0);
+			$size = $given ? strlen((string)$f['bytes']) : intval($f['size'] ?? 0);
 			if ($size > MailboxSender::MAX_UPLOAD_BYTES) {
 				throw new MailboxDraftsException('An attachment exceeds the per-file size limit.');
 			}
@@ -850,7 +859,7 @@ class MailboxDrafts {
 			if ($running > MailboxSender::MAX_TOTAL_BYTES) {
 				throw new MailboxDraftsException('The draft attachments exceed the total size limit.');
 			}
-			$bytes = file_get_contents($tmp);
+			$bytes = $given ? (string)$f['bytes'] : file_get_contents($tmp);
 			if ($bytes === false) {
 				throw new MailboxDraftsException('An attachment could not be read.');
 			}
@@ -858,11 +867,16 @@ class MailboxDrafts {
 			$index++;
 			// A pasted inline image (matched by filename against the manifest) persists
 			// as an inline part carrying its local id as Content-ID, so a reopened draft
-			// resolves cid:{localId} back to the stored bytes (Fix 7).
-			$localId = MailboxSender::matchInlineLocalId($pending_inline, (string)($f['name'] ?? ''), $name);
+			// resolves cid:{localId} back to the stored bytes (Fix 7). A part given as
+			// bytes carries its Content-ID with it.
+			$localId = ($given && trim((string)($f['content_id'] ?? '')) !== '')
+				? substr(trim((string)$f['content_id'], '<> '), 0, 255)
+				: MailboxSender::matchInlineLocalId($pending_inline, (string)($f['name'] ?? ''), $name);
 			$is_inline = ($localId !== null);
 			try {
-				$mime = File::detect_mime_bytes($bytes) ?: 'application/octet-stream';
+				$mime = ($given && trim((string)($f['type'] ?? '')) !== '')
+					? substr(trim((string)$f['type']), 0, 255)
+					: (File::detect_mime_bytes($bytes) ?: 'application/octet-stream');
 				$original_size = strlen($bytes);
 				$prefix = $is_inline ? 'draftinl:' : 'draft:';
 				$part_id = $prefix . $message_id . ':' . $index . ':' . bin2hex(random_bytes(3));

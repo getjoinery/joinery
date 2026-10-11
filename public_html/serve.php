@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.13.0 — Thunderbird autoconfig paths route to the mail_apps plugin while it is active.
 // @version 1.12.0 — an offloaded file streams from the file store its record names (specs/storage_targets.md WP6).
 // @version 1.11.0 — /plugins/{plugin}/admin/* 404s while the plugin is inactive, like every other /plugins/* path.
 // @version 1.10.0 — /mail/forward-confirm: the mailbox plugin's forwarding confirmation page
@@ -133,6 +134,10 @@ $routes = [
         '/book/{slug}'         => ['view' => 'plugins/bookings/views/book', 'check_setting' => 'bookings_active'],
         '/booking/manage'      => ['view' => 'plugins/bookings/views/booking_manage', 'check_setting' => 'bookings_active'],
         '/mail/forward-confirm' => ['view' => 'views/forward_confirm', 'plugin' => 'mailbox'],
+        // mail_apps: Thunderbird autoconfig, at the two places a mail program
+        // looks for it (the plugin answers only for mail domains this site hosts).
+        '/mail/config-v1.1.xml'                         => ['view' => 'views/autoconfig', 'plugin' => 'mail_apps'],
+        '/.well-known/autoconfig/mail/config-v1.1.xml' => ['view' => 'views/autoconfig', 'plugin' => 'mail_apps'],
 
         // ---- store: view routes (files live in plugins/store/views) ----
         '/products'    => ['view' => 'views/products',    'plugin' => 'store', 'check_setting' => 'products_list_items_active'],

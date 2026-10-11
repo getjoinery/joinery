@@ -319,7 +319,7 @@ Routes outside the namespace are dropped with a logged warning.
 > declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
 > The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
-> `directKinds`, `inboundHandlers`, `mailboxMessageActions`, `host_installer`, `receives_upgrades`, `included_in_publish`,
+> `directKinds`, `inboundHandlers`, `mailboxMessageActions`, `appAccess`, `host_installer`, `receives_upgrades`, `included_in_publish`,
 > `audience`, `status`, and `deprecated`/`superseded_by`.
 
 #### Licensing and maturity metadata
@@ -519,6 +519,23 @@ Plugins (and themes) support two optional deprecation fields:
 - Activating a deprecated extension shows a warning message (activation is not blocked)
 - Deprecated extensions are excluded from deployment archives for new installs
 - Existing sites already running a deprecated extension continue to receive updates normally
+
+### App access purposes (`appAccess`)
+
+A plugin whose feature a program outside the browser uses — a mail app, a calendar or file-sync client — declares the **purpose** an app credential may be made for:
+
+```json
+"appAccess": {
+    "mail": { "label": "Mail apps", "borrowsUnlock": true }
+}
+```
+
+- The name is `[a-z][a-z0-9_]{0,31}` and must be unique across active plugins; a purpose two plugins claim is refused for both.
+- `label` is what the person sees on App Sessions and the lock chip.
+- `borrowsUnlock` lets the credential read sealed content through a window borrowed from the person's website unlock. Leave it off unless the feature reads sealed content.
+- `requiresSetting` (optional) names the plugin's on/off setting for the feature. While it is off, credentials of the purpose are refused and none can be made.
+
+The plugin's actions for that purpose declare `'app_purpose' => 'mail'` at the top of their descriptor. They then admit that purpose's credentials and nothing else, and those credentials reach nothing else. Making one goes through core's `app_password_create` action (step-up), from the plugin's own page. Deactivating the plugin refuses every credential of the purpose at once. Never decide anything on the credential's kind (`apk_type`): rules attach to the purpose and the credential's id, so a second kind (browser sign-in) can arrive without touching plugin code. See [API § App credentials](api.md#app-credentials). The `mail_apps` plugin is the reference implementation.
 
 ### Data Models
 
