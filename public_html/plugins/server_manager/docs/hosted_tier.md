@@ -73,9 +73,11 @@ customer waiting for their machine.
 
 ### Compute
 
-`ProvisionCustomerCloud` resolves its driver from the sealed operator token
-(**Server Manager → Provisioning → Hosted tier**) instead of a buyer grant, and
-skips the Connect wait: a hosted provision is created at `ready`. Everything
+`ProvisionCustomerCloud` resolves its driver from the credential of the cloud
+account of ours the provision names — the default account
+(**Server Manager → Provisioning → Hosting**), given to it when first saved —
+instead of a buyer grant, and skips the Connect wait: a hosted provision is
+created at `ready`. Everything
 after that is the same pipeline every other cloud install takes. The instance is
 born with a root password sealed on its row, used for the one bootstrap session
 and retired once the agent joins.
@@ -115,8 +117,8 @@ than pretending otherwise.
    does not, the records are kept on the provision and the leg says who has to
    publish them; it does not stall waiting for something nobody here can do.
 4. **One SMTP user**, inside that subaccount. On a rehearsal plane
-   (`server_manager_smtp2go_sandbox_users` on, from the Provisioning Setup
-   hosted card) it is minted in the provider's sandbox status: mail through it
+   (`server_manager_smtp2go_sandbox_users` on, from the Provisioning page's
+   Hosted tier tab) it is minted in the provider's sandbox status: mail through it
    is accepted and counted but never delivered, so a site built to prove the
    pipeline can email nobody. Its username and password are the
    only credential that reaches the box, handed over by the
@@ -241,7 +243,7 @@ own; it moves with a [site copy](overview.md#site-copy) instead.
 customer's Linode* panel opens, before every code is issued, and on Re-check.
 Each item passes, warns, or blocks, and every blocker says what to do:
 
-- *On Linode* (the operator token, through `CloudInstanceTransfers`): the
+- *On Linode* (the credential of the account the site is in, through `CloudInstanceTransfers`): the
   instance is on our account; no resource lock, Cloud Firewall, Block Storage
   volume, NodeBalancer, shared or reserved IPv4, IPv6 range, or VLAN/VPC
   interface; Linode Managed off; no pending transfer of it already. Linode
@@ -319,27 +321,28 @@ state, code expiry, what Linode last said and when, the last email, the last
 check, and any to-do, with Re-check, Start, Issue code now, Resend email,
 Cancel and To-do done.
 
-**The operator token** needs `linodes:read_write`, `account:read_write` (the
-transfer-allowance alert reads the account's pool; a handover creates and
-cancels a transfer), `firewall:read_only` and `volumes:read_only` (the check).
-A site copy's switch-over by IP swap also needs `ips:read_write`. Saving the
-hosted card asks Linode which scopes the token holds (the `X-OAuth-Scopes`
-header on a read of the token's own profile) and records them with a short
-fingerprint of the token (`server_manager_operator_cloud_token_scopes`). The
-card then names each missing scope and what it is needed for; a token
-replaced since reads as not checked until the card is saved again. The list
-is `ProvisioningSetup::OPERATOR_TOKEN_SCOPES`. A token missing
-`linodes:read_write` cannot fulfil a hosted order; one missing another scope
-is kept, and only what needs that scope is refused.
+**The account's credential** needs `linodes:read_write`, `account:read_write`
+(the transfer-allowance alert reads the default account's pool; a handover
+creates and cancels a transfer), `firewall:read_only` and `volumes:read_only`
+(the check). A site copy's switch-over by IP swap also needs `ips:read_write`.
+Adding or checking an account on the Hosting tab asks Linode which scopes the
+credential holds (the `X-OAuth-Scopes` header on a read of the token's own
+profile) and records them on the entry (`oca_scopes`). The tab, and the Hosted
+tier tab for the default account, then name each missing scope and what it is
+needed for. The list is `OperatorCloudAccount::SCOPES`. A default account
+missing `linodes:read_write` cannot fulfil a hosted order; one missing another
+scope is kept, and only what needs that scope is refused.
 
 ## Setting it up
 
-**Server Manager → Provisioning → Hosted tier** takes everything: the cloud
-token, the mail provider's master key and webhook secret, the allowances, the
-grace and backup storage periods, the sites-page address pushed to each site's banner,
-and the two referral links the off-ramps use. Until the token and the mail key
-are both present, a hosted order cannot be fulfilled — a hosted site without
-mail is a site whose owner cannot reset their own password.
+**Server Manager → Provisioning → Hosted tier** takes the mail provider's
+master key and webhook secret, the allowances, the grace and backup storage
+periods, the sites-page address pushed to each site's banner, and the two
+referral links the off-ramps use, and names the default cloud account hosted
+servers go to (chosen on the **Hosting** tab; see *Cloud accounts* in the
+[overview](overview.md#cloud-accounts)). Until a usable default account and the
+mail key are both present, a hosted order cannot be fulfilled — a hosted site
+without mail is a site whose owner cannot reset their own password.
 
 Then, on the product: pick *Customer cloud server* under Purchase grants and
 choose **Create the server on the operator's account (hosted)**. Give it one

@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/machine_transfer_test.php
  *
+ * @version 1.3 - an account of ours the provider answers 401 is marked refused (cloud_accounts_list)
  * @version 1.2 - a connected account the provider answers 401 is marked revoked; an outage and the operator token mark nothing
  * @version 1.1 - review R2, R5: one machine per node (host over join, newest of equals); a new month's
  *                first figure no lower than last month's is held for the first two days
@@ -166,9 +167,17 @@ MachineTransferWatch::run(array('cca:' . $outage->key => $rejecting), $no_dns, $
 check($status_of($outage) === 'active', 'a provider outage leaves the account as it was');
 
 $rejecting->code = 401;
-$result = MachineTransferWatch::run(array('operator' => $rejecting), $no_dns, $now);
-check($result['status'] === 'error' && strpos($result['message'], 'could not be listed') !== false,
-	'the operator token\'s 401 stays a problem: there is no account to mark');
+$ours = new OperatorCloudAccount(NULL);
+$ours->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+$ours->store_credential('harness-token-' . random_int(1000, 9999));
+$ours->save();
+$ours->load();
+harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $ours->key);
+$result = MachineTransferWatch::run(array('oca:' . $ours->key => $rejecting), $no_dns, $now);
+check((string)(new OperatorCloudAccount((int)$ours->key, TRUE))->get('oca_status') === OperatorCloudAccount::STATUS_REFUSED,
+	'a 401 marks an account of ours refused, which the Hosting tab shows');
+check($result['status'] === 'error' && strpos($result['message'], 'marked refused') !== false,
+	'the run says so: ' . $result['message']);
 
 // ---------------------------------------------------------------------------
 section('The rate window');

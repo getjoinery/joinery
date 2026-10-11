@@ -12,9 +12,10 @@
  *   2. A site in a container on a server of ours: its host verified the
  *      container gone (Permanently Delete Site stamps mgn_site_removed_time),
  *      or no site was ever seen there.
- *   3. A machine of ours: the provider says the instance is gone. Where this
- *      management node holds no token for the machine's account (a management
- *      node holds one: dev the test account, getjoinery the main one), the
+ *   3. A machine of ours: the provider says the instance is gone, asked with
+ *      the credential of the account the machine is in (its provision record
+ *      names it). Where this management node does not hold that account (no
+ *      record names one, or it was removed or its sign-in expired), the
  *      person types the instance ID, or the machine's address when no instance
  *      is recorded, to say they deleted it; that is logged as
  *      [NODE_REMOVE_ATTEST] before the delete, since the node's own record goes.
@@ -23,6 +24,8 @@
  *
  * The platform never deletes an instance itself.
  *
+ * @version 1.1 - the provider is asked with the machine's own account's credential, and only when that
+ *                account is held (cloud_accounts_list)
  * @version 1.0
  */
 
@@ -32,16 +35,31 @@ class NodeRemoval {
 	const MACHINE_NONE = 'none';
 	/** A site in a container on a server of ours: its container must be gone. */
 	const MACHINE_CONTAINER = 'container';
-	/** A machine of ours on the account this management node holds the token for: the provider is asked. */
+	/** A machine in an account of ours this management node holds: the provider is asked. */
 	const MACHINE_PROVIDER = 'provider';
-	/** A machine of ours on an account this management node cannot ask about: the person attests. */
+	/** A machine of ours in an account this management node cannot ask about: the person attests. */
 	const MACHINE_ATTEST = 'attest';
 
 	/**
-	 * Which machine guard applies. $plane_token is the operator token, read
-	 * from settings when null.
+	 * The credential of the account of ours the node's machine is in, or ''
+	 * when no record names one or it is not held now (removed, expired).
 	 */
-	public static function machine_kind(ManagedNode $node, ?string $plane_token = null): string {
+	public static function account_token(ManagedNode $node): string {
+		$account = HeldCloudAccounts::node_account($node);
+		return ($account !== null && $account->usable()) ? $account->token() : '';
+	}
+
+	/** The account a node's machine is in, in words: the account's own name when a record names it. */
+	public static function account_label(ManagedNode $node): string {
+		$account = HeldCloudAccounts::node_account($node);
+		return $account !== null ? $account->label() : CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node));
+	}
+
+	/**
+	 * Which machine guard applies. $account_token is the credential of the
+	 * machine's own account ('' when it is not held); looked up when null.
+	 */
+	public static function machine_kind(ManagedNode $node, ?string $account_token = null): string {
 		$hosted_at = CloudAccounts::hosted_at($node);
 		if (!in_array($hosted_at, array(CloudAccounts::MAIN, CloudAccounts::TEST), true)) {
 			return self::MACHINE_NONE;
@@ -49,9 +67,8 @@ class NodeRemoval {
 		if (trim((string)$node->get('mgn_container_name')) !== '') {
 			return self::MACHINE_CONTAINER;
 		}
-		$plane_token = $plane_token ?? ProvisionCustomerCloud::operator_compute_token();
-		return ($plane_token !== '' && $hosted_at === CloudAccounts::plane_account())
-			? self::MACHINE_PROVIDER : self::MACHINE_ATTEST;
+		$account_token = $account_token ?? self::account_token($node);
+		return $account_token !== '' ? self::MACHINE_PROVIDER : self::MACHINE_ATTEST;
 	}
 
 	/**
@@ -70,7 +87,7 @@ class NodeRemoval {
 			return '';
 		}
 		return 'Its site may still be running in its container on '
-			. CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node))
+			. self::account_label($node)
 			. '. Use Permanently Delete Site first; once its host verifies the container gone, this can go.';
 	}
 
@@ -151,7 +168,7 @@ class NodeRemoval {
 	 * the account's listing. Any answer but "not there" refuses.
 	 */
 	public static function provider_refusal(ManagedNode $node, $driver, ?callable $resolve = null): string {
-		$account = CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node));
+		$account = self::account_label($node);
 		$id = self::instance_id($node);
 		if ($id !== '') {
 			try {
@@ -217,23 +234,23 @@ class NodeRemoval {
 	 * Every guard, in order: '' when the node may go. $typed_attest is what
 	 * the person typed when the machine guard is an attestation.
 	 *
-	 * @param object|null   $driver       the provider for the plane's account (tests pass their own)
-	 * @param string|null   $plane_token  the operator token, read from settings when null
+	 * @param object|null   $driver         the provider for the machine's account (tests pass their own)
+	 * @param string|null   $account_token  the machine's own account's credential, looked up when null
 	 */
 	public static function refusal(ManagedNode $node, string $typed_attest = '', $driver = null,
-			?callable $resolve = null, ?string $plane_token = null): string {
+			?callable $resolve = null, ?string $account_token = null): string {
 		$why = self::backups_refusal($node);
 		if ($why !== '') {
 			return $why;
 		}
-		$plane_token = $plane_token ?? ProvisionCustomerCloud::operator_compute_token();
-		switch (self::machine_kind($node, $plane_token)) {
+		$account_token = $account_token ?? self::account_token($node);
+		switch (self::machine_kind($node, $account_token)) {
 			case self::MACHINE_CONTAINER:
 				return self::container_refusal($node);
 			case self::MACHINE_PROVIDER:
-				return self::provider_refusal($node, $driver ?? new LinodeComputeDriver($plane_token), $resolve);
+				return self::provider_refusal($node, $driver ?? OperatorCloudAccount::driver_for($account_token), $resolve);
 			case self::MACHINE_ATTEST:
-				$account = CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node));
+				$account = self::account_label($node);
 				if (self::attest_text($node, $resolve) === '') {
 					return 'No instance or address is on record for this machine, so there is nothing to confirm it by. '
 						. 'Set its Host to the machine\'s IP address in Connection Settings.';
@@ -254,16 +271,16 @@ class NodeRemoval {
 	 * @return string[] what releasing a live node's site records did
 	 */
 	public static function remove(ManagedNode $node, string $typed_attest, int $user_id, $driver = null,
-			?callable $resolve = null, ?string $plane_token = null): array {
-		$plane_token = $plane_token ?? ProvisionCustomerCloud::operator_compute_token();
-		$why = self::refusal($node, $typed_attest, $driver, $resolve, $plane_token);
+			?callable $resolve = null, ?string $account_token = null): array {
+		$account_token = $account_token ?? self::account_token($node);
+		$why = self::refusal($node, $typed_attest, $driver, $resolve, $account_token);
 		if ($why !== '') {
 			throw new DisplayableUserException($why);
 		}
-		if (self::machine_kind($node, $plane_token) === self::MACHINE_ATTEST) {
+		if (self::machine_kind($node, $account_token) === self::MACHINE_ATTEST) {
 			error_log('[NODE_REMOVE_ATTEST] user ' . $user_id . ' attested the machine of node "' . $node->get('mgn_name')
 				. '" (' . $node->get('mgn_slug') . ', #' . (int)$node->key . ') deleted at '
-				. CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node)) . '; typed "' . trim($typed_attest) . '"');
+				. self::account_label($node) . '; typed "' . trim($typed_attest) . '"');
 		}
 		return $node->remove_permanently();
 	}

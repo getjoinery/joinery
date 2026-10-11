@@ -24,6 +24,7 @@
  *
  * Run: php plugins/server_manager/tests/customer_cloud_provisioning_test.php
  *
+ * @version 1.9 - the account list is HeldCloudAccounts::targets(); scopes from OperatorCloudAccount::SCOPES (cloud_accounts_list)
  * @version 1.8 - teardown names every node this run's provisions made as a fixture, so a provisioner that
  *                failed before the test could rename its node leaves nothing nameless
  * @version 1.7 - the token's own scopes (X-OAuth-Scopes) and what a grant covers
@@ -536,7 +537,7 @@ class CustomerCloudProvisioningTest {
 		]);
 		check($driver->tokenScopes() === ['domains:read_write', 'linodes:read_write'],
 			'the scopes come from the X-OAuth-Scopes header');
-		$need = array_keys(ProvisioningSetup::OPERATOR_TOKEN_SCOPES);
+		$need = array_keys(OperatorCloudAccount::SCOPES);
 		check(LinodeComputeDriver::missingScopes(['domains:read_write', 'linodes:read_write'], $need)
 			=== ['account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write'],
 			'the dev token of 2026-10-06 lacks account, firewall, volumes and ips');
@@ -586,15 +587,15 @@ class CustomerCloudProvisioningTest {
 		// them, and an expired connection is said, not offered (B47).
 		$loaded->set('cca_account_name', 'Acme (user acme)');
 		$loaded->save();
-		$targets = CustomerCloudAccount::provision_targets(false);
-		check(strpos($targets['options'][(string)$loaded->key] ?? '', 'Linode — Acme (user acme), connected by') === 0,
+		$targets = HeldCloudAccounts::targets();
+		check(strpos($targets['options']['cca:' . $loaded->key] ?? '', 'Linode — Acme (user acme), connected by') === 0,
 			'a connected account is offered under its provider name', json_encode($targets['options']));
 		$loaded->set('cca_token_expires', gmdate('Y-m-d H:i:s', time() - 60));
 		$loaded->set('cca_refresh_token', null);
 		$loaded->save();
-		$targets = CustomerCloudAccount::provision_targets(false);
+		$targets = HeldCloudAccounts::targets();
 		$said = array_filter($targets['unusable'], function ($w) { return strpos($w, 'permission expired') !== false; });
-		check(!isset($targets['options'][(string)$loaded->key]) && $said, 'an expired connection is not offered, and says why',
+		check(!isset($targets['options']['cca:' . $loaded->key]) && $said, 'an expired connection is not offered, and says why',
 			json_encode($targets));
 	}
 
@@ -1008,13 +1009,13 @@ class CustomerCloudProvisioningTest {
 		$hosted->set('cvp_provider', 'linode');
 		$hosted->set('cvp_hosting_mode', 'operator');
 		check(NodeReverseDns::driverForProvision($hosted, 'operator-token-for-test') instanceof LinodeComputeDriver,
-			'a hosted instance is reached with the operator token');
+			'a hosted instance is reached with its own account\'s credential');
 		try {
 			NodeReverseDns::driverForProvision($hosted, '');
-			check(false, 'a hosted instance with no operator token names the Provisioning Setup page');
+			check(false, 'a hosted instance with no credential names the Provisioning Setup page');
 		} catch (NodeReverseDnsException $e) {
 			check(!$e->reconnect && strpos($e->getMessage(), 'Provisioning Setup') !== false,
-				'a hosted instance with no operator token names the Provisioning Setup page, not a reconnect',
+				'a hosted instance with no credential names the Provisioning Setup page, not a reconnect',
 				'got: ' . $e->getMessage());
 		}
 

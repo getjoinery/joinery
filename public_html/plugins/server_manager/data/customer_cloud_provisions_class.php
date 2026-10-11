@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.20 - cvp_oca_operator_cloud_account_id: which account of ours an operator-mode server is in
+ *                 (the cloud_accounts_list spec); a new one with none names the default account
  * @version 1.19 - a node removed for good takes its provisioning record (permanent_delete, was null);
  *                 cvp_source_node_id is registered for deletion
  * @version 1.18 - cvp_expected_site_key / cvp_expected_host_key / cvp_keys_captured_time and site_agent_name():
@@ -92,6 +94,7 @@ class CustomerCloudProvision extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'cvp_usr_user_id'    => array('action' => 'prevent', 'message' => 'this user has cloud provisions - deprovision them first'),
 		'cvp_cca_customer_cloud_account_id' => array('action' => 'null'),
+		'cvp_oca_operator_cloud_account_id' => array('action' => 'null'),
 		// A node removed for good takes its provisioning record, and the record
 		// its trial and transfers; it holds sealed passwords nothing else needs.
 		'cvp_mgn_managed_node_id'    => array('action' => 'permanent_delete'),
@@ -118,6 +121,11 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_buyer_name'             => array('type'=>'varchar(255)'),
 		'cvp_status'                 => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'pending_connect'),
 		'cvp_cca_customer_cloud_account_id'         => array('type'=>'int8'),
+		// Which account of ours an operator-mode server is in
+		// (OperatorCloudAccount); everything done to the server later uses
+		// that account's credential. Kept when the server is handed to its
+		// customer (transferred): it is where the server was.
+		'cvp_oca_operator_cloud_account_id'         => array('type'=>'int8'),
 		'cvp_provider'               => array('type'=>'varchar(32)', 'is_nullable'=>false, 'default'=>'linode'),
 		'cvp_instance_id'            => array('type'=>'varchar(50)'),
 		'cvp_instance_ip'            => array('type'=>'varchar(64)'),
@@ -158,9 +166,10 @@ class CustomerCloudProvision extends SystemBase {
 		// Whose cloud account the instance is created on, decided by the
 		// PRODUCT and never by the buyer (specs/hosted_trial_provisioning.md
 		// §4.1). customer: the buyer granted us access to their own account
-		// and the provider bills them. operator: the plane's own token creates
-		// it on our account, there is no Connect wait, and the hosted legs —
-		// mail, trial, banners — apply. transferred: it was operator, and the
+		// and the provider bills them. operator: it is created on one of our
+		// accounts (cvp_oca_operator_cloud_account_id) with that account's
+		// credential, there is no Connect wait, and the hosted legs — mail,
+		// trial, banners — apply to a sold one. transferred: it was operator, and the
 		// instance has since been handed to the customer's own account through
 		// the provider's transfer (specs/managed_to_self_hosted_transfer.md).
 		// Not customer: there is no account grant behind it, and nothing that
@@ -212,15 +221,32 @@ class CustomerCloudProvision extends SystemBase {
 	);
 
 	function prepare() {
+		$this->stamp_account();
 		$this->validate_row();
 		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
 	// Validation lives in save(): prepare() is not guaranteed to run first.
 	function save($debug = false) {
+		$this->stamp_account();
 		$this->validate_row();
 		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
+	}
+
+	/**
+	 * A new server in one of our accounts that names none goes to the
+	 * default account: a hosted order, and anything else this node creates
+	 * without asking. A form that asks sets the account first.
+	 */
+	private function stamp_account(): void {
+		if (!$this->key && ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator'
+				&& !(int)$this->get('cvp_oca_operator_cloud_account_id')) {
+			$default = OperatorCloudAccount::default_id();
+			if ($default > 0) {
+				$this->set('cvp_oca_operator_cloud_account_id', $default);
+			}
+		}
 	}
 
 	private function validate_row() {
@@ -287,6 +313,10 @@ class CustomerCloudProvision extends SystemBase {
 		$hosting_mode = $this->get('cvp_hosting_mode') ?: 'customer';
 		if (!in_array($hosting_mode, array('customer', 'operator', 'transferred'), true)) {
 			throw new CustomerCloudProvisionException("Unknown hosting mode '{$hosting_mode}'.");
+		}
+		// A server is in one account: ours or a customer's, never both.
+		if ((int)$this->get('cvp_oca_operator_cloud_account_id') && (int)$this->get('cvp_cca_customer_cloud_account_id')) {
+			throw new CustomerCloudProvisionException('A server is in one cloud account: ours or the customer\'s, not both.');
 		}
 		if (empty($this->get('cvp_usr_user_id'))) {
 			throw new CustomerCloudProvisionException('User is required.');

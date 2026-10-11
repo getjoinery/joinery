@@ -149,7 +149,7 @@ class PollHostingOrders {
 
 				if ($hosting_mode === 'operator') {
 					// Hosted: nothing to connect and nobody to ask. The instance
-					// is created on the operator's own account on the next tick.
+					// is created in the operator's default cloud account on the next tick.
 					$provision->set('cvp_status', 'ready');
 					$provision->set('cvp_mail_state', 'pending');
 				} elseif (($account = CustomerCloudAccount::get_for_user($user_id, 'linode')) !== null

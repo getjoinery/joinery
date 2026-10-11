@@ -10,8 +10,8 @@
  * Status: 'active' (usable), 'refresh_failed' (token refresh failed; needs
  * re-connect), 'revoked' (provider rejected the grant; needs re-connect).
  *
- * @version 1.2 - cca_account_name (the provider's own name for the account, read at connect) and
- *                 provision_targets(): one list of the accounts a server can be created on, named as the provider names them
+ * @version 1.3 - the list of accounts a server can be created on is HeldCloudAccounts::targets(), ours and customers'
+ * @version 1.2 - cca_account_name (the provider's own name for the account, read at connect)
  * @version 1.1 - grant_expired(): whether a stored grant can still be used, so pages can say so up front
  * @version 1.0
  */
@@ -58,38 +58,6 @@ class CustomerCloudAccount extends SystemBase {
 			return false;
 		}
 		return strtotime($expires . ' UTC') < time() && trim((string)$account->get('cca_refresh_token')) === '';
-	}
-
-	/**
-	 * The accounts a new server can be created on, each named as its
-	 * provider names it: the operator token's account first, then every
-	 * connected account still usable. A connection whose grant has expired
-	 * is not offered; it comes back as a sentence saying who must re-connect.
-	 *
-	 * @return array{options: array<string,string>, unusable: string[]} options keyed 'operator' or the account id
-	 */
-	public static function provision_targets(bool $with_operator = true): array {
-		$options = array();
-		$unusable = array();
-		if ($with_operator && ProvisionCustomerCloud::operator_compute_token() !== '') {
-			$name = trim((string)Globalvars::get_instance()->get_setting('server_manager_operator_cloud_account'));
-			$options['operator'] = 'Linode — ' . ($name !== '' ? $name : 'account name not read yet; save the hosted card on '
-				. 'Provisioning Setup to read it') . ' (operator token)';
-		}
-		foreach (new MultiCustomerCloudAccount(array('status' => 'active', 'deleted' => false)) as $ca) {
-			$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
-			$who = $ca_user->key ? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name'))
-				: ('user #' . $ca->get('cca_usr_user_id'));
-			$provider = ucfirst((string)$ca->get('cca_provider'));
-			$name = trim((string)$ca->get('cca_account_name'));
-			if (self::grant_expired($ca)) {
-				$unusable[] = $provider . ' account connected by ' . $who . ' on ' . $ca->get_local('cca_create_time', 'M j, Y')
-					. ': its permission expired. ' . $who . ' re-connects it from their profile.';
-				continue;
-			}
-			$options[(string)$ca->key] = $provider . ' — ' . ($name !== '' ? $name : 'account name not read') . ', connected by ' . $who;
-		}
-		return array('options' => $options, 'unusable' => $unusable);
 	}
 
 	function prepare() {

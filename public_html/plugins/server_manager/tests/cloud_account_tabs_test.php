@@ -9,9 +9,12 @@
  * Which cloud account a box belongs to, behind the Server Manager dashboard's tabs
  * (the server_manager_account_tabs spec).
  *
- *  - a box this plane creates is marked with the plane's own account (test when the
- *    operator token's company is the disposable one, else main); one that already
- *    names an account keeps it;
+ *  - a box made by hand is marked with the default cloud account's kind (test when
+ *    that account is flagged test, else main); one that already names an account
+ *    keeps it;
+ *  - a server in one of our accounts is on that account's tab: a test account's on
+ *    Test, a main account's, and a second main account's, on Main (the
+ *    cloud_accounts_list spec, WP5);
  *  - a node placed on a host takes its host's account, a node whose host is gone
  *    stands on its own, an unmarked box reads as main;
  *  - the backfill marks only unmarked boxes made since the token swap, and only on a
@@ -20,6 +23,7 @@
  *
  * Run: php plugins/server_manager/tests/cloud_account_tabs_test.php
  *
+ * @version 1.1 - main or test follows the account's own flag, and the default account's for a box made by hand
  * @version 1.0
  */
 
@@ -28,18 +32,41 @@ harness_boot();
 
 class CloudAccountTabsTest {
 
+	private $accounts = array();
+
+	/** An account of ours, flagged test or not, removed after the run. */
+	private function account(bool $test): OperatorCloudAccount {
+		$oca = new OperatorCloudAccount(NULL);
+		$oca->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+		$oca->set('oca_account_name', 'HarnessTest cat ' . ($test ? 'test' : 'main') . ' ' . bin2hex(random_bytes(3)));
+		$oca->set('oca_is_test', $test);
+		$oca->store_credential('harness-cat-token');
+		$oca->save();
+		$oca->load();
+		harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $oca->key);
+		return $oca;
+	}
+
+	private function provision(OperatorCloudAccount $oca): CustomerCloudProvision {
+		$p = new CustomerCloudProvision(NULL);
+		$p->set('cvp_hosting_mode', 'operator');
+		$p->set('cvp_oca_operator_cloud_account_id', (int)$oca->key);
+		return $p;
+	}
+
 	function run() {
-		$was = Globalvars::get_instance()->get_setting(CloudAccounts::COMPANY_SETTING);
+		$was = (string)OperatorCloudAccount::default_id();
 		try {
 			$this->test_names();
 			$this->test_stamping();
+			$this->test_account_flag();
 			$this->test_inheritance();
 			$this->test_backfill();
 			$this->test_selected();
 		} catch (Throwable $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
-			Setting::put(CloudAccounts::COMPANY_SETTING, (string)$was);
+			Setting::put(OperatorCloudAccount::DEFAULT_SETTING, $was === '0' ? '' : $was);
 		}
 	}
 
@@ -79,7 +106,7 @@ class CloudAccountTabsTest {
 
 	private function test_names() {
 		section('names');
-		check(CloudAccounts::label('main') === 'Joinery Main Linode' && CloudAccounts::label('test') === 'Joinery Test Linode', 'both tabs are named');
+		check(CloudAccounts::label('main') === 'Main' && CloudAccounts::label('test') === 'Test', 'both tabs are named');
 		check(CloudAccounts::normalize('') === 'main' && CloudAccounts::normalize('nonsense') === 'main' && CloudAccounts::normalize(' test ') === 'test',
 			'an empty or unknown value reads as main');
 		check(CloudAccounts::for_company(TestCloudCleanup::COMPANY) === 'test', 'the disposable company is the test account');
@@ -87,9 +114,11 @@ class CloudAccountTabsTest {
 	}
 
 	private function test_stamping() {
-		section('a new box is marked with the plane account');
-		Setting::put(CloudAccounts::COMPANY_SETTING, TestCloudCleanup::COMPANY);
-		check(CloudAccounts::plane_account() === 'test', 'this plane reads as test');
+		section('a new box is marked with the default account\'s kind');
+		$test = $this->account(true);
+		$main = $this->account(false);
+		Setting::put(OperatorCloudAccount::DEFAULT_SETTING, (string)$test->key);
+		check(CloudAccounts::plane_account() === 'test', 'with the test account the default, this plane reads as test');
 		$n = $this->node('on-test-plane');
 		check($n->get('mgn_cloud_account') === 'test', 'a node made on a test plane is test');
 		$h = $this->host();
@@ -98,12 +127,31 @@ class CloudAccountTabsTest {
 		$kept = $this->node('chosen', ['mgn_cloud_account' => 'main']);
 		check($kept->get('mgn_cloud_account') === 'main', 'a node that names its account keeps it');
 
-		Setting::put(CloudAccounts::COMPANY_SETTING, 'Joinery');
+		Setting::put(OperatorCloudAccount::DEFAULT_SETTING, (string)$main->key);
 		$m = $this->node('on-main-plane');
-		check($m->get('mgn_cloud_account') === 'main', 'a node made on any other plane is main');
-		Setting::put(CloudAccounts::COMPANY_SETTING, '');
-		$none = $this->node('no-company');
-		check($none->get('mgn_cloud_account') === 'main', 'no company on record means main');
+		check($m->get('mgn_cloud_account') === 'main', 'with a main account the default, a node is main');
+		Setting::put(OperatorCloudAccount::DEFAULT_SETTING, '');
+		$none = $this->node('no-default');
+		check($none->get('mgn_cloud_account') === 'main', 'no default account means main');
+	}
+
+	private function test_account_flag() {
+		section('a server is on its own account\'s tab');
+		$test = $this->account(true);
+		$main = $this->account(false);
+		$second = $this->account(false);
+		Setting::put(OperatorCloudAccount::DEFAULT_SETTING, (string)$main->key);
+		check(CloudAccounts::for_provision($this->provision($test)) === 'test',
+			'a server in the test account is on Test, whatever the default is');
+		check(CloudAccounts::for_provision($this->provision($main)) === 'main', 'one in a main account is on Main');
+		check(CloudAccounts::for_provision($this->provision($second)) === 'main', 'and so is one in a second main account');
+		$cust = new CustomerCloudProvision(NULL);
+		$cust->set('cvp_hosting_mode', 'customer');
+		check(CloudAccounts::for_provision($cust) === 'customer'
+			&& CloudAccounts::normalize(CloudAccounts::for_provision($cust)) === 'main', 'a customer\'s server is the customer\'s, shown on Main');
+		Setting::put(OperatorCloudAccount::DEFAULT_SETTING, (string)$test->key);
+		check(CloudAccounts::for_provision($this->provision($second)) === 'main',
+			'a main account\'s server stays on Main when the test account is the default');
 	}
 
 	private function test_inheritance() {

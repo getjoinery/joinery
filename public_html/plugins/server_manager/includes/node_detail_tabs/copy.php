@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.13 - the Cloud account list is every account held, ours first with the default chosen (cloud_accounts_list)
  * @version 1.12 - the key page's note asks the owner to check the date the backup's provider says it was stored, says
  *               when a copy's release is too old for its page to show it, and the taken key's step shows the date the
  *               copy read
@@ -199,17 +200,19 @@ if (!$site_copy) {
 	$page->begin_box(['title' => 'Create the new server for me']);
 	$src_provision = class_exists('CustomerCloudProvision') ? CustomerCloudProvision::latest_for_node($node->key) : null;
 	$settings_g = Globalvars::get_instance();
-	$targets = CustomerCloudAccount::provision_targets();
+	$targets = HeldCloudAccounts::targets();
 	$account_options = $targets['options'];
 	foreach ($targets['unusable'] as $why) {
 		echo '<p class="small text-muted">Not offered: ' . $copy_h($why) . '</p>';
 	}
 	if (!$account_options) {
-		echo '<p class="text-muted">No cloud account is available: set an operator cloud token on the Provisioning Setup page, '
-			. 'or connect an account. You can still bring a server of your own, below.</p>';
+		echo '<p class="text-muted">No cloud account is available: add one on the Hosting tab of '
+			. '<a href="/admin/server_manager/provisioning_setup?tab=hosting">Provisioning Setup</a>. '
+			. 'You can still bring a server of your own, below.</p>';
 	} else {
 		$fw = $page->getFormWriter('copy_new_server_form', [
 			'values' => [
+				'copy_account' => $targets['default'],
 				'copy_region' => ($src_provision && $src_provision->get('cvp_region')) ? $src_provision->get('cvp_region')
 					: ($settings_g->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
 			],

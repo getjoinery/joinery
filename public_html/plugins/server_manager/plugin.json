@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.58",
+  "version": "1.30.59",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -71,12 +71,6 @@
           "title": "Jobs",
           "url": "/admin/server_manager/jobs",
           "order": 7
-        },
-        {
-          "slug": "server-manager-cloud-connect",
-          "title": "Cloud Connect",
-          "url": "/profile/server_manager/connect_cloud",
-          "order": 9
         },
         {
           "slug": "system-specs",
@@ -426,30 +420,10 @@
       "helptext": "High-water mark over order items already checked for a paid domain year that produced no registration. Written by ManagedDomainWatch so each such order is reported once."
     },
     {
-      "name": "server_manager_operator_cloud_token",
-      "default": "",
-      "secret": true,
-      "group": "hosted",
-      "label": "Operator cloud token",
-      "helptext": "The Linode personal access token hosted instances are created on, with scopes linodes:read_write, account:read_write (the alert when the account's transfer allowance is nearly spent, and handing a server to its customer's own account), firewall:read_only and volumes:read_only (the check before a handover), and ips:read_write (a site copy's switch-over by swapping two servers' addresses). Set it on the Provisioning Setup page, which seals it at rest. It stays on this management node and never reaches a machine this plane creates."
-    },
-    {
-      "name": "server_manager_operator_cloud_token_scopes",
+      "name": "server_manager_default_cloud_account_id",
       "default": "",
       "managed": true,
-      "helptext": "The scopes the provider reported for the operator cloud token when the hosted card on Provisioning Setup was last saved, with a short fingerprint of that token. The setup page names each scope the token lacks and what it is needed for."
-    },
-    {
-      "name": "server_manager_operator_cloud_account",
-      "default": "",
-      "managed": true,
-      "helptext": "The provider's own name for the operator cloud token's account, read from the provider whenever the hosted card on Provisioning Setup is saved with a token set. Pages that offer cloud accounts name the operator account by it."
-    },
-    {
-      "name": "server_manager_operator_cloud_company",
-      "default": "",
-      "managed": true,
-      "helptext": "The company name the provider holds for the operator cloud token's account, read whenever the hosted card on Provisioning Setup is saved. The disposable test account is the one named 'Joinery Test disposable'; boxes this site creates are marked test or main by it, and the Server Manager dashboard shows a tab for each."
+      "helptext": "The cloud account of ours where a server goes when nobody chose one, such as a hosted order: an entry on the Hosting tab of Provisioning Setup, chosen there. It cannot be a Linode sign-in, which expires, nor the test account on a node that holds any other."
     },
     {
       "name": "server_manager_smtp2go_api_key",
@@ -659,10 +633,10 @@
       "locator": "cvp_customer_cloud_provisions.cvp_root_pass_sealed"
     },
     {
-      "label": "Operator cloud token",
-      "feature": "Hosted tier",
+      "label": "Our cloud account credentials",
+      "feature": "Server Manager provisioning",
       "kind": "operator",
-      "locator": "server_manager_operator_cloud_token"
+      "locator": "oca_operator_cloud_accounts.oca_credential"
     },
     {
       "label": "SMTP2GO master API key",

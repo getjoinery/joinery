@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.52 - a provision with no node yet, and a join from its address, sit on the tab of the account it is in
  * @version 1.51 - a hidden site's jobs are left out of Recent Jobs unless hidden sites are shown; Removed reads Hidden
  * @version 1.50 - a tab for each cloud account (Joinery Main Linode / Joinery Test Linode); hosts, machines, joins, provisions and jobs
  *                 show only the selected tab's boxes (the server_manager_account_tabs spec)
@@ -349,10 +350,10 @@ $inflight_provisions = new MultiCustomerCloudProvision([
 	'deleted' => false,
 ], ['cvp_customer_cloud_provision_id' => 'DESC']);
 $inflight_provisions->load();
-// A provision belongs to its node's account; one with no node yet to the plane's own.
+// A provision belongs to its node's account; one with no node yet to the account it is in.
 $inflight_provisions = array_values(array_filter(iterator_to_array($inflight_provisions, false), function ($pv) use ($node_account, $account) {
 	$nid = (int)$pv->get('cvp_mgn_managed_node_id');
-	return ($nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::plane_account()) === $account;
+	return ($nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::normalize(CloudAccounts::for_provision($pv))) === $account;
 }));
 
 // Recovery not set up on this management node. A node's own trouble (broken
@@ -376,7 +377,7 @@ $join_account = function ($jr) use ($addr_account, $addr_key, $node_account) {
 	$prov = AgentChannelEndpoint::provisionForAddress($ip);
 	if ($prov) {
 		$nid = (int)$prov->get('cvp_mgn_managed_node_id');
-		return $nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::plane_account();
+		return $nid && isset($node_account[$nid]) ? $node_account[$nid] : CloudAccounts::normalize(CloudAccounts::for_provision($prov));
 	}
 	return $addr_account[$addr_key($ip)] ?? null;
 };

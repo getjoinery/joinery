@@ -58,6 +58,8 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.14 - a server in one of our accounts is created with its own account's credential
+ *                 (HeldCloudAccounts::provision_token); the single operator token is gone (cloud_accounts_list)
  * @version 2.13 - a provisioned node records where it is hosted (CloudAccounts::for_provision)
  * @version 2.12 - a provisioned node is given its storage space on the target Where new backups go names, once
  *                 saved; the provision is linked to its node as soon as the node is saved, and a retried pass takes
@@ -365,8 +367,8 @@ class ProvisionCustomerCloud {
 			}
 		}
 		$node->set('mgn_enabled',       true);
-		// Bought on our token, the machine is in this plane's account; on the
-		// customer's connected account, it is the customer's.
+		// In one of our accounts, the machine is main or test by that
+		// account's flag; on the customer's connected account, it is the customer's.
 		$node->set('mgn_cloud_account', CloudAccounts::for_provision($provision));
 		if (!$node->key) {
 			$node->prepare();
@@ -688,19 +690,19 @@ class ProvisionCustomerCloud {
 	 * directly, because a refused approval must not move a provision.
 	 */
 	protected function resolve_driver($provision): array {
-		// Hosted: the instance is created on the OPERATOR's account, with a
-		// token this plane holds. There is no buyer grant, nothing to refresh
-		// and nothing to park for — a missing token is an operator's
-		// configuration gap, not something the buyer can act on, so it is
-		// reported rather than mailed to them.
+		// One of our accounts: the instance is created there with the
+		// credential this node holds for that account. There is no buyer
+		// grant, nothing to refresh and nothing to park for — an account not
+		// held is an operator's configuration gap, not something the buyer
+		// can act on, so it is reported rather than mailed to them.
 		if ($provision->is_operator_hosted()) {
-			$token = self::operator_compute_token();
-			if ($token === '') {
-				return ['driver' => null, 'park' => false, 'reason' =>
-					'This is a hosted provision, and no operator cloud token is configured. Set '
-					. '"Operator cloud token" on the Provisioning Setup page; the pipeline resumes on its own.'];
+			$held = HeldCloudAccounts::provision_token($provision);
+			if ($held['token'] === '') {
+				return ['driver' => null, 'park' => false, 'reason' => $held['reason']
+					. ($held['account'] === null ? ' Add a cloud account and make it the default on the Hosting tab of '
+						. 'Provisioning Setup.' : '') . ' The pipeline resumes on its own once it is fixed.'];
 			}
-			return ['driver' => new LinodeComputeDriver($token), 'reason' => '', 'park' => false];
+			return ['driver' => OperatorCloudAccount::driver_for($held['token']), 'reason' => '', 'park' => false];
 		}
 
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
@@ -749,27 +751,6 @@ class ProvisionCustomerCloud {
 		}
 
 		return ['driver' => new LinodeComputeDriver($fresh->getAccessToken()), 'reason' => '', 'park' => false];
-	}
-
-	/**
-	 * The operator's own cloud token, unsealed, or '' when none is configured.
-	 *
-	 * It stays on the plane and never reaches a machine this plane creates —
-	 * that is rule 3 of the hosted design, and it is why the hosted path builds
-	 * its driver here rather than seeding anything on the box.
-	 */
-	public static function operator_compute_token(): string {
-		$sealed = trim((string)Globalvars::get_instance()->get_setting(
-			'server_manager_operator_cloud_token', false, true));
-		if ($sealed === '') {
-			return '';
-		}
-		$opened = (new SecretBox())->open($sealed);
-		if ($opened['state'] !== 'ok') {
-			error_log('ProvisionCustomerCloud: the operator cloud token cannot be unsealed.');
-			return '';
-		}
-		return trim((string)$opened['value']);
 	}
 
 	// ── Retiring the install password (specs/keyless_provisioning.md WP2/WP3) ──
@@ -1036,12 +1017,13 @@ class ProvisionCustomerCloud {
 			// visit. It stays where it is, says why, and resumes on its own once
 			// the token is fixed — which is the only action that helps.
 			if ($provision->is_operator_hosted()) {
-				$reason = 'The operator cloud token was rejected by the provider (401) during ' . $phase
-					. '. Replace it on the Provisioning Setup page; this provision resumes on its own.';
+				$account = HeldCloudAccounts::provision_account($provision);
+				$reason = 'The provider rejected the credential for ' . ($account ? $account->label() : 'our cloud account')
+					. ' (401) during ' . $phase . '. Replace it on the Hosting tab of Provisioning Setup; this provision resumes on its own.';
 				$provision->set('cvp_error', mb_substr($reason, 0, 4000));
 				$provision->save();
 				$this->errors[] = "Provision #{$provision->key}: {$reason}";
-				$this->notify_ops('[hosted] Operator cloud token rejected: ' . $provision->get('cvp_domain'), $reason . "\n");
+				$this->notify_ops('[hosted] Cloud account credential rejected: ' . $provision->get('cvp_domain'), $reason . "\n");
 				return 0;
 			}
 			$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');

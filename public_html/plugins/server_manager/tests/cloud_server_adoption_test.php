@@ -14,11 +14,12 @@
  * container site, a node that already has a record, and a server another
  * node's record holds are each refused; a different answer than the one the
  * operator was shown adopts nothing. An adoption writes an admin 'adopted'
- * provision that reverse DNS and the IP swap then find, on the operator
- * account or a connected one.
+ * provision that reverse DNS and the IP swap then find, naming the account of
+ * ours it is in (oca:<id>, a second one of ours included) or a connected one.
  *
  * Run: php plugins/server_manager/tests/cloud_server_adoption_test.php
  *
+ * @version 1.1 - accounts of ours are keyed oca:<id>; a server in a second account of ours names it
  * @version 1.0
  */
 
@@ -97,13 +98,15 @@ $connected = new FakeAdoptionAccount(array(
 	$server('e' . $suffix, 'twice-two', '192.0.2.34'),
 	$server('f' . $suffix, 'boxed-host', '192.0.2.35'),
 ));
-$accounts = array('operator' => $operator, 'cca:424242' => $connected);
+// A second account of ours (the cloud_accounts_list spec): a server there names it.
+$second = new FakeAdoptionAccount(array());
+$accounts = array('oca:424241' => $operator, 'oca:424243' => $second, 'cca:424242' => $connected);
 
 // ---------------------------------------------------------------------------
 section('Finding the one server');
 
 $m = CloudServerAdoption::find($solo, $accounts, $no_dns);
-check($m['ok'] && $m['instance']['id'] === 'a' . $suffix && $m['account'] === 'operator', 'a node is matched by its host\'s IPv4');
+check($m['ok'] && $m['instance']['id'] === 'a' . $suffix && $m['account'] === 'oca:424241', 'a node is matched by its host\'s IPv4');
 $m = CloudServerAdoption::find($v6node, $accounts, $no_dns);
 check($m['ok'] && $m['instance']['id'] === 'b' . $suffix, 'a node is matched by its host\'s IPv6');
 $m = CloudServerAdoption::find($joined, $accounts, $no_dns);
@@ -140,9 +143,10 @@ $p = CloudServerAdoption::adopt($solo, $uid, 'a' . $suffix, $accounts, $no_dns);
 $register_provisions();
 check($p->key && $p->get('cvp_install_mode') === 'adopted' && $p->get('cvp_origin') === 'admin'
 	&& $p->get('cvp_status') === 'done' && $p->get('cvp_hosting_mode') === 'operator'
+	&& (int)$p->get('cvp_oca_operator_cloud_account_id') === 424241
 	&& $p->get('cvp_instance_id') === 'a' . $suffix && $p->get('cvp_instance_ip') === '192.0.2.31'
 	&& (int)$p->get('cvp_mgn_managed_node_id') === (int)$solo->key && $p->get('cvp_docker_mode') === 'bare-metal',
-	'the record: admin, adopted, done, operator-hosted, the instance and its address, linked to the node');
+	'the record: admin, adopted, done, in our account 424241, the instance and its address, linked to the node');
 check(!$p->is_sold(), 'an adopted server is never one somebody bought');
 check(NodeReverseDns::provisionForNode($solo) !== null && (int)NodeReverseDns::provisionForNode($solo)->key === (int)$p->key,
 	'reverse DNS finds it');
@@ -154,12 +158,22 @@ $register_provisions();
 check($p6->get('cvp_instance_ipv6') === '2001:db8::32' && $p6->get('cvp_instance_ip') === '192.0.2.132',
 	'a server found by IPv6 records both its addresses');
 
+// A server in the second account of ours.
+$in_second = $make_node('Second', '192.0.2.37');
+$second->instances[] = $server('h' . $suffix, 'second-server', '192.0.2.37');
+$ps = CloudServerAdoption::adopt($in_second, $uid, '', $accounts, $no_dns);
+$register_provisions();
+check($ps->get('cvp_hosting_mode') === 'operator' && (int)$ps->get('cvp_oca_operator_cloud_account_id') === 424243
+	&& !(int)$ps->get('cvp_cca_customer_cloud_account_id'),
+	'a server in the second account of ours names that account, and no connected one');
+
 // A connected account's server.
 $other = $make_node('Other', '192.0.2.36');
 $connected->instances[] = $server('g' . $suffix, 'other-server', '192.0.2.36');
 $pc = CloudServerAdoption::adopt($other, $uid, '', $accounts, $no_dns);
 $register_provisions();
-check($pc->get('cvp_hosting_mode') === 'customer' && (int)$pc->get('cvp_cca_customer_cloud_account_id') === 424242,
+check($pc->get('cvp_hosting_mode') === 'customer' && (int)$pc->get('cvp_cca_customer_cloud_account_id') === 424242
+	&& !(int)$pc->get('cvp_oca_operator_cloud_account_id'),
 	'a connected account\'s server is recorded against that account');
 
 // A server another node's record already holds.

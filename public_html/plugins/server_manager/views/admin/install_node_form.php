@@ -11,6 +11,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.17 - the Cloud Account list is every account held, ours first with the default chosen; a server in one
+ *                 of ours names that account (cloud_accounts_list)
  * @version 1.16 - the operator's own cloud account (its operator token) is offered beside connected ones, as the
  *                 Copy tab offers it; a provision on it is hosting mode operator, owned by the admin asking
  * @version 1.15 -'Keep root SSH login (not recommended)' with the public keys to put on root; unticked, root login is off
@@ -92,25 +94,15 @@ if ($_POST && isset($_POST['mgn_name'])) {
 			$field_errors['domain'] = 'Domain is required.';
 		}
 
-		$cloud_account = null;
-		$on_operator = (string)($_POST['cca_account_id'] ?? '') === 'operator';
+		$target = null;
 		if ($is_cloud_target) {
-			$cca_customer_cloud_account_id = $on_operator ? 0 : intval($_POST['cca_account_id'] ?? 0);
-			$cloud_account = $cca_customer_cloud_account_id ? new CustomerCloudAccount($cca_customer_cloud_account_id, TRUE) : null;
-			if ($on_operator) {
-				if (ProvisionCustomerCloud::operator_compute_token() === '') {
-					$field_errors['cca_account_id'] = 'No operator cloud token is set. Set it on the Provisioning Setup page, or choose a connected cloud account.';
-				}
-			} elseif (!$cloud_account || !$cloud_account->key
-					|| $cloud_account->get('cca_status') !== 'active'
-					|| $cloud_account->get('cca_delete_time')) {
-				$field_errors['cca_account_id'] = 'Choose an active connected cloud account.';
-			} elseif (CustomerCloudAccount::grant_expired($cloud_account)) {
-				// A Linode grant lasts two hours and cannot be refreshed. Saying
-				// so here beats a provision that parks for re-connect on its
-				// first tick and emails the buyer about it.
-				$field_errors['cca_account_id'] = 'That account\'s cloud grant has expired. Re-connect it at '
-					. '/profile/server_manager/connect_cloud (signed in as its owner), then return here.';
+			// A Linode grant lasts two hours and cannot be refreshed. Saying
+			// so here beats a provision that parks for re-connect on its
+			// first tick and emails the buyer about it.
+			try {
+				$target = HeldCloudAccounts::resolve((string)($_POST['cloud_account'] ?? ''));
+			} catch (DisplayableUserException $e) {
+				$field_errors['cloud_account'] = $e->getMessage();
 			}
 			if (trim($_POST['cloud_region'] ?? '') === '') {
 				$field_errors['cloud_region'] = 'Region is required.';
@@ -145,9 +137,10 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				// Provision Customer Cloud task birth the instance and
 				// dispatch the install from there. On a connected account the
 				// provision belongs to the grant owner: if the grant goes
-				// stale, they are the one who can re-connect and resume it. On
-				// the operator's own account it belongs to the admin asking.
-				$owner = new User($on_operator ? $session->get_user_id() : $cloud_account->get('cca_usr_user_id'), TRUE);
+				// stale, they are the one who can re-connect and resume it. In
+				// one of our accounts it is our server, recorded against the
+				// admin asking.
+				$owner = new User($target['oca'] ? $session->get_user_id() : $target['owner_id'], TRUE);
 
 				$provision = new CustomerCloudProvision(NULL);
 				$provision->set('cvp_origin',         'admin');
@@ -158,12 +151,12 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_buyer_email',    $owner->key ? $owner->get('usr_email') : '');
 				$provision->set('cvp_buyer_name',     $owner->key ? trim($owner->get('usr_first_name') . ' ' . $owner->get('usr_last_name')) : '');
 				$provision->set('cvp_status',         'ready');
-				if ($on_operator) {
-					$provision->set('cvp_hosting_mode', 'operator');
-					$provision->set('cvp_provider',     'linode');
+				$provision->set('cvp_hosting_mode',   $target['hosting_mode']);
+				$provision->set('cvp_provider',       $target['provider']);
+				if ($target['oca']) {
+					$provision->set('cvp_oca_operator_cloud_account_id', (int)$target['oca']->key);
 				} else {
-					$provision->set('cvp_cca_customer_cloud_account_id', $cloud_account->key);
-					$provision->set('cvp_provider',     $cloud_account->get('cca_provider'));
+					$provision->set('cvp_cca_customer_cloud_account_id', (int)$target['cca']->key);
 				}
 				$provision->set('cvp_region',         trim($_POST['cloud_region']));
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
@@ -185,8 +178,8 @@ if ($_POST && isset($_POST['mgn_name'])) {
 	}
 }
 
-// The operator's own account and connected cloud accounts — target options for cloud-instance birth
-$cloud_targets = CustomerCloudAccount::provision_targets();
+// Every account held, ours first — target options for cloud-instance birth
+$cloud_targets = HeldCloudAccounts::targets();
 $cloud_account_options = ['' => '-- Select a cloud account --'] + $cloud_targets['options'];
 $has_cloud_accounts = count($cloud_account_options) > 1;
 
@@ -220,7 +213,7 @@ $formwriter = $page->getFormWriter('install_form', [
 		'docker_mode'    => $_POST['docker_mode'] ?? '',
 		'install_mode'   => $_POST['install_mode'] ?? 'fresh',
 		'domain'         => $_POST['domain'] ?? '',
-		'cca_account_id' => $_POST['cca_account_id'] ?? '',
+		'cloud_account'  => $_POST['cloud_account'] ?? $cloud_targets['default'],
 		'cloud_region'   => $_POST['cloud_region'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_region') ?: 'us-east'),
 		'cloud_instance_type' => $_POST['cloud_instance_type'] ?? (Globalvars::get_instance()->get_setting('server_manager_customer_cloud_type') ?: 'g6-nanode-1'),
 	],
@@ -238,22 +231,21 @@ $formwriter->textinput('mgn_name', 'Display Name', [
 	'placeholder' => 'e.g., Getjoinery Orgs',
 ]);
 
-echo '<p class="text-muted small mb-3">A new instance is created in this management node\'s own cloud account (its operator token) or a connected one, and installed over one SSH session with a root password this '
+echo '<p class="text-muted small mb-3">A new instance is created in one of this management node\'s cloud accounts or a customer\'s connected one, and installed over one SSH session with a root password this '
 	. 'management node seals for the length of the install; from then on the machine is reached only through its agent. '
 	. 'To manage a server that already exists, add it on <a href="/admin/server_manager/node_add">Connect Site</a> and have it ask to join from its own Management Node page.</p>';
 
 // Cloud-instance fields
 echo '<div id="cloud_fields">';
 if ($has_cloud_accounts) {
-	$formwriter->dropinput('cca_account_id', 'Cloud Account', [
+	$formwriter->dropinput('cloud_account', 'Cloud Account', [
 		'options'      => $cloud_account_options,
 		'empty_option' => false,
 		'helptext'     => 'The instance is created in — and billed to — this account. A connected account\'s Linode grant expires after two hours: re-connect shortly before submitting if the connection is old.',
 	]);
 } else {
-	echo '<div class="alert alert-info mb-3">No cloud account is available. Set an operator token on '
-		. '<a href="/admin/server_manager/provisioning_setup" class="alert-link">Provisioning Setup</a>, or '
-		. '<a href="/profile/server_manager/connect_cloud" class="alert-link">connect a Linode account</a>, then return here.</div>';
+	echo '<div class="alert alert-info mb-3">No cloud account is available. Add one on the Hosting tab of '
+		. '<a href="/admin/server_manager/provisioning_setup?tab=hosting" class="alert-link">Provisioning Setup</a>, then return here.</div>';
 }
 foreach ($cloud_targets['unusable'] as $why) {
 	echo '<p class="small text-muted">Not offered: ' . htmlspecialchars($why) . '</p>';

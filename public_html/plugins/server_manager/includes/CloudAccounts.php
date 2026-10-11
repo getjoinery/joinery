@@ -1,8 +1,12 @@
 <?php
 /**
- * CloudAccounts — which cloud account a box belongs to: the main account or the
- * disposable test one. The Server Manager dashboard has a tab for each and shows
- * only that tab's boxes (the server_manager_account_tabs spec).
+ * CloudAccounts — which kind of cloud account a box is in: one of our main
+ * accounts or the disposable test one. The Server Manager dashboard has a tab
+ * for each and shows only that tab's boxes (the server_manager_account_tabs
+ * spec). Main or test is the flag of the account itself (OperatorCloudAccount
+ * oca_is_test, from its company name): a server created in or adopted from one
+ * of our accounts takes that account's flag, and a box made by hand takes the
+ * default account's.
  *
  * An account is recorded on a host (mgh_cloud_account) or a node
  * (mgn_cloud_account); empty means main, so an unmarked box is never hidden from
@@ -14,6 +18,8 @@
  * the machine is gone, so none is left running and billing with nothing
  * watching it. The customer's and elsewhere show on the main tab.
  *
+ * @version 1.2 - main or test follows the account's own test flag; plane_account() is the default account's
+ *                (cloud_accounts_list WP5)
  * @version 1.1 - customer and external: where a node is hosted; hosted_at(), is_ours(), for_provision()
  * @version 1.0
  */
@@ -25,22 +31,19 @@ class CloudAccounts {
 	const CUSTOMER = 'customer';
 	const EXTERNAL = 'external';
 
-	/** The dashboard's tabs: our two accounts. */
+	/** The dashboard's tabs: our main accounts, and the test one. */
 	const LABELS = array(
-		self::MAIN => 'Joinery Main Linode',
-		self::TEST => 'Joinery Test Linode',
+		self::MAIN => 'Main',
+		self::TEST => 'Test',
 	);
 
 	/** Where a node may be hosted: the Hosted at choices. */
 	const HOSTED_AT = array(
-		self::MAIN     => 'Joinery Main Linode',
-		self::TEST     => 'Joinery Test Linode',
+		self::MAIN     => 'One of our cloud accounts (main)',
+		self::TEST     => 'Our test cloud account',
 		self::CUSTOMER => 'The customer\'s own cloud account',
 		self::EXTERNAL => 'Elsewhere (not hosted by us)',
 	);
-
-	/** The operator token's account company, read from the provider when the hosted card is saved. */
-	const COMPANY_SETTING = 'server_manager_operator_cloud_company';
 
 	/** The day dev's operator token became the test account's; older boxes are not test boxes. */
 	const TEST_ACCOUNT_SINCE = '2026-10-07 00:00:00';
@@ -64,9 +67,15 @@ class CloudAccounts {
 		return trim($company) === TestCloudCleanup::COMPANY ? self::TEST : self::MAIN;
 	}
 
-	/** The account this plane's own operator token belongs to; boxes this plane creates are marked with it. */
+	/** An account of ours as a tab: its own test flag. */
+	public static function of_account(OperatorCloudAccount $account): string {
+		return $account->get('oca_is_test') ? self::TEST : self::MAIN;
+	}
+
+	/** The default account's kind; a box made by hand, with nothing else to say, is marked with it. */
 	public static function plane_account(): string {
-		return self::for_company((string)Globalvars::get_instance()->get_setting(self::COMPANY_SETTING));
+		$default = OperatorCloudAccount::default_account();
+		return $default !== null ? self::of_account($default) : self::MAIN;
 	}
 
 	/** A host's account. */
@@ -180,12 +189,16 @@ class CloudAccounts {
 	}
 
 	/**
-	 * Where a provision's node is hosted: a machine bought on our token is in
-	 * this plane's account; one on, or handed to, the customer's account is
-	 * the customer's.
+	 * Where a provision's node is hosted: a machine in one of our accounts is
+	 * main or test by that account's flag; one on, or handed to, the
+	 * customer's account is the customer's.
 	 */
 	public static function for_provision($provision): string {
-		return (string)$provision->get('cvp_hosting_mode') === 'operator' ? self::plane_account() : self::CUSTOMER;
+		if ((string)$provision->get('cvp_hosting_mode') !== 'operator') {
+			return self::CUSTOMER;
+		}
+		$account = HeldCloudAccounts::provision_account($provision);
+		return $account !== null ? self::of_account($account) : self::plane_account();
 	}
 
 	/** The selected tab: the request's choice (remembered in a cookie), else the cookie, else main. */
