@@ -49,6 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.59 - a search lists threads strictly newest first, never sectioned unread/starred/other
  * @version 1.58 - allowSender() and Not spam (setSpamVerdict ham) refuse a message its sender's domain disowns; the reader carries spam_disowned
  * @version 1.57 - allowSender's SELECT carries the verdict columns decryptThreadRow() reads
  * @version 1.56 - the reader's spam_auth_rule reads iem_dmarc_policy: a fail under p=none is not an auth-rule filing
@@ -1219,7 +1220,9 @@ class MailboxService {
 		// does. Emitting rank 2 (rather than dropping the column) keeps the reader
 		// rendering one plain list with no section header
 		// (specs/bugfix_sent_view_ordering.md).
-		$sectioned = !$sent && !$drafts && !$trash;
+		// A search is the same: what the member wants is the newest match, not
+		// the unread ones from ten years ago.
+		$sectioned = !$sent && !$drafts && !$trash && !$searching;
 		$rank_sql = $sectioned
 			? "CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
