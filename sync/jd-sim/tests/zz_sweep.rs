@@ -6859,3 +6859,16 @@ fn frozen_a_waiting_vault_keeps_its_directory_seeds() {
         workload_core(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary);
     }
 }
+
+/// kill2 75125, both ways round: a create of a peer's folder, queued before
+/// a kill and planned before the server moved that folder, ran after the
+/// move at the folder's old name, and took the directory a folder the user
+/// had just made there stood in. The move carried it away, the user's
+/// folder was trashed as deleted here, and a sealed file the other device
+/// put in it went with it (B-E1). Every oracle quiet is asserted.
+#[test]
+fn frozen_a_create_planned_before_a_move_stands_down_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(75_125, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}

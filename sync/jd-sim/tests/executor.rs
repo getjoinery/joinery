@@ -2244,12 +2244,14 @@ fn a_folder_created_from_a_stale_plan_does_not_overwrite_where_the_server_says_i
     // the folder in the meantime -- and the next pass will have absorbed that,
     // because the change feed is read before the queue is run.
     //
-    // Creating the folder under the old name is fine and self-correcting. What
-    // is not is writing that old name into the record of where the SERVER has
-    // it: that is the one field this operation cannot know anything about, and
-    // overwriting it destroys the only copy of the newer answer. The agreement
-    // is then set to match, both sides look settled, and the change that would
-    // have said otherwise has already gone past the cursor.
+    // Writing the old name into the record of where the SERVER has it would
+    // destroy the only copy of the newer answer: the agreement set to match,
+    // both sides looking settled, and the change that would have said
+    // otherwise already gone past the cursor. And the old name is where the
+    // folder was, not where it is: a directory standing there now -- one the
+    // user has just made of that name -- is not this folder, and taking it
+    // trashed the user's folder (B-E1). So the create stands down, and the
+    // next pass plans it from where the server has it.
     let (_clock, server, device) = world();
     let folder_id = server.seed_folder(None, "renamed on the server");
     let id = EntityId::folder(folder_id);
@@ -2276,20 +2278,16 @@ fn a_folder_created_from_a_stale_plan_does_not_overwrite_where_the_server_says_i
         .into_iter()
         .find(|o| o.op_id == op_id)
         .unwrap();
-    jd_core::execute::run_one(&e, &op).unwrap();
+    let outcome = jd_core::execute::run_one(&e, &op).unwrap();
+    assert!(matches!(outcome, OpOutcome::Overtaken(_)), "{outcome:?}");
 
     let entry = device.store.get_entry(id).unwrap().unwrap();
     assert_eq!(
         entry.remote.name, "renamed on the server",
         "the operation invented an answer about the server and overwrote the real one"
     );
-    assert_eq!(
-        entry.synced_placement.map(|p| p.name),
-        Some("the old name".to_string()),
-        "the agreement has to describe what is actually on this disk"
-    );
-    // And the mismatch is what makes the next pass fix it.
-    assert!(device.fs.exists("the old name"));
+    assert_eq!(entry.synced_placement, None, "nothing was made, so nothing is agreed");
+    assert!(!device.fs.exists("the old name"), "nothing is made where the folder was");
 }
 
 #[test]
