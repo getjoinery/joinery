@@ -39,6 +39,8 @@
  * The ledger already knows the exact size, so the transfer carries that as a
  * ceiling and aborts the moment it is passed.
  *
+ * @version 1.3 - fetch() retries a transient failure (storage 429/5xx, a dropped or timed-out connection) up to
+ *                RETRY_ATTEMPTS times with a growing pause; a refusal (size, ledger, 4xx) is never retried
  * @version 1.2 - human() counts in decimal units, matching BackupRunner::human()
  * @version 1.1 - the transfer is capped at the size the ledger recorded, the sink is CREATED
  *                0600 rather than created-then-chmod'd, and an error response's body is no
@@ -77,6 +79,18 @@ class BackupFetch {
 	 */
 	const SIZE_SLACK_BYTES = 1048576;       // 1 MiB
 
+	/** Attempts per object, the first included: a storage 503 is the provider asking to be asked again. */
+	const RETRY_ATTEMPTS = 4;
+
+	/** Seconds before the second attempt; each later pause is four times the one before. */
+	const RETRY_FIRST_PAUSE_SECONDS = 5;
+
+	/** Set to 0 by a test so a retry does not sleep. */
+	public static $retry_pause_scale = 1;
+
+	/** A test replaces the single attempt with a callable taking ($url, $sink, $max_bytes). */
+	public static $attempt_hook = null;
+
 	/** Is this an https URL? A signature is a bearer token; plaintext leaks it. */
 	public static function is_signed_url($url) {
 		return is_string($url) && strpos($url, 'https://') === 0;
@@ -94,6 +108,27 @@ class BackupFetch {
 	 * job transcript is read by more people than the person who ran the job.
 	 */
 	public static function fetch($url, $sink_path, $max_bytes = 0) {
+		$pause = self::RETRY_FIRST_PAUSE_SECONDS;
+		for ($attempt = 1; ; $attempt++) {
+			$got = self::$attempt_hook
+				? call_user_func(self::$attempt_hook, $url, $sink_path, $max_bytes)
+				: self::fetch_once($url, $sink_path, $max_bytes);
+			if ($got['ok'] || empty($got['transient']) || $attempt >= self::RETRY_ATTEMPTS) {
+				unset($got['transient']);
+				if (!$got['ok'] && $attempt > 1) {
+					$got['error'] .= ' (after ' . $attempt . ' attempts)';
+				}
+				return $got;
+			}
+			if (self::$retry_pause_scale > 0) {
+				sleep((int)($pause * self::$retry_pause_scale));
+			}
+			$pause *= 4;
+		}
+	}
+
+	/** One attempt. 'transient' marks a failure worth asking again about. */
+	private static function fetch_once($url, $sink_path, $max_bytes) {
 		if (!self::is_signed_url($url)) {
 			return array('ok' => false, 'error' => 'the download link is not an https URL');
 		}
@@ -148,7 +183,7 @@ class BackupFetch {
 		}
 		if ($ok === false || $errno) {
 			@unlink($sink_path);
-			return array('ok' => false, 'error' => 'transfer failed: ' . $err);
+			return array('ok' => false, 'error' => 'transfer failed: ' . $err, 'transient' => true);
 		}
 		if ($status !== 200) {
 			// The status, and NOT the body. A failed response is provider XML in
@@ -160,7 +195,8 @@ class BackupFetch {
 			// ("expired signature", "wrong key") without carrying anything.
 			@unlink($sink_path);
 			return array('ok' => false, 'error' => 'HTTP ' . $status . ' from storage '
-				. '(the response body is not repeated here)');
+				. '(the response body is not repeated here)',
+				'transient' => in_array($status, array(408, 429, 500, 502, 503, 504), true));
 		}
 		return array('ok' => true, 'error' => '');
 	}

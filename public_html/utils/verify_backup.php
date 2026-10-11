@@ -96,6 +96,7 @@
  * Validate with `php -l` only — never the file validator (this is a CLI with a
  * run-on-include body).
  *
+ * @version 1.4 - a verify that read from backup storage stamps the machine (BackupVerifyLauncher::note_verified)
  * @version 1.3 - by hand, a chain folder may hold a version-3 chain's run manifests in place of manifest.json; the
  *                newest is read, and its sha256 is printed for the operator to compare (specs/storage_targets.md F9)
  * @version 1.2 - offloaded files: epoch_envelope_urls and object_urls in the request, staged through
@@ -147,6 +148,9 @@ function verify_backup_refuse($message, $code = 2) {
 
 /** Print the contract and leave with the exit status it implies. */
 function verify_backup_finish(array $result) {
+	if (($result['result'] ?? '') !== BackupVerifier::RESULT_SKIPPED) {
+		BackupVerifyLauncher::note_verified();   // the site's own schedule keeps its distance from this read
+	}
 	echo BackupVerifier::format_contract($result);
 	exit(($result['result'] ?? '') === BackupVerifier::RESULT_FAIL ? 1 : 0);
 }
