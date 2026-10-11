@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.76 - process_data_root_enrol; a host report's data_root_encryption (host_report 1.19) is kept
+ *                 and handed to DataRootEscrowSync (specs/hosted_data_promise_disk_encryption.md WP2)
  * @version 1.75 - a lost apply_update keeps its own message ("what it did is unknown"), never "finished but
  *                 the node is still on X" (reviewer2 F5)
  * @version 1.74 - a host report's disk_pool keeps not_mounted (host_report 1.18): a data root declared and down,
@@ -3131,6 +3133,24 @@ HTML;
 		$job->save();
 	}
 
+	/**
+	 * data_root_enrol: the slot the node added and the identity it enrolled
+	 * (the escrow row itself is written by EscrowEndpoint as it happens).
+	 */
+	private static function process_data_root_enrol($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !is_int($data['slot'] ?? null)) {
+			$job->set('mjb_result', json_encode(['read' => false]));
+			$job->save();
+			return;
+		}
+		$job->set('mjb_result', json_encode([
+			'slot'               => (int)$data['slot'],
+			'unlock_fingerprint' => preg_match('/^[0-9a-f]{16}$/', (string)($data['unlock_fingerprint'] ?? '')) ? $data['unlock_fingerprint'] : '',
+		]));
+		$job->save();
+	}
+
 	private static function process_page_probe($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
 		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
@@ -3304,6 +3324,11 @@ HTML;
 				$node->set('mgn_last_host_report', json_encode($report));
 				$node->set('mgn_last_host_report_time', $read_at);
 				$node->save();
+				// An encrypted data root: which unlock identity is this node's,
+				// and its enrolment here when this plane holds its key.
+				if (is_array($report['data_root_encryption'] ?? null)) {
+					DataRootEscrowSync::from_host_report($node, $report['data_root_encryption']);
+				}
 				// Each site row's held state follows what its host says.
 				if (is_array($report['containers'] ?? null)) {
 					$held = [];
@@ -3429,6 +3454,7 @@ HTML;
 			// (host_report 1.17; a Docker host's disk pool): the root disk
 			// never shows it filling.
 			'disk_pool'                    => array_key_exists('disk_pool', $in) ? self::host_report_disk_pool($in['disk_pool']) : null,
+			'data_root_encryption'         => array_key_exists('data_root_encryption', $in) ? self::host_report_data_root_encryption($in['data_root_encryption']) : null,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			// Processors, for reading the load average against (host_report 1.6).
@@ -3814,6 +3840,36 @@ HTML;
 
 	/** {used_bytes, total_bytes}, each a count or unknown. */
 	/** A disk pool's figures, the string none, or unknown. */
+	/**
+	 * An encrypted data root's state (host_report 1.19): "none", or what the
+	 * node says of it, each field held to its shape. Public material only: the
+	 * unlock identity's public half and the sealed break-glass box.
+	 */
+	public static function host_report_data_root_encryption($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		$b64 = function ($s, $len) { $s = (string)$s; return (preg_match('#^[A-Za-z0-9+/=]+$#', $s) && strlen($s) <= $len) ? $s : ''; };
+		$identity = $b64($v['identity'] ?? '', 64);
+		if ($identity !== '' && strlen((string)base64_decode($identity, true)) !== 32) { $identity = ''; }
+		$holder = (string)($v['holder'] ?? '');
+		return [
+			'backing'               => in_array($v['backing'] ?? '', ['luks-file', 'luks-device'], true) ? $v['backing'] : 'unknown',
+			'open'                  => ($v['open'] ?? null) === true,
+			'opened_by'             => substr(preg_replace('#[^A-Za-z0-9 ,.:/-]#', '', (string)($v['opened_by'] ?? '')), 0, 200),
+			'identity'              => $identity,
+			'holder'                => preg_match('#^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$#', $holder) ? rtrim($holder, '/') : '',
+			'slot'                  => is_int($v['slot'] ?? null) && $v['slot'] >= 0 && $v['slot'] < 32 ? $v['slot'] : null,
+			'recipient_fingerprint' => preg_match('/^[0-9a-f]{64}$/', (string)($v['recipient_fingerprint'] ?? '')) ? $v['recipient_fingerprint'] : '',
+			'box_fingerprint'       => preg_match('/^[0-9a-f]{64}$/', (string)($v['box_fingerprint'] ?? '')) ? $v['box_fingerprint'] : '',
+			'box_sealed'            => $b64($v['box_sealed'] ?? '', 400),
+			// An encryption or its undo running (D5), and how far.
+			'reencrypt'             => in_array($v['reencrypt'] ?? '', ['encrypt', 'decrypt', 'reencrypt'], true) ? $v['reencrypt'] : '',
+			'reencrypt_percent'     => preg_match('/^\d{1,3}(\.\d)?$/', (string)($v['reencrypt_percent'] ?? '')) ? (string)$v['reencrypt_percent'] : '',
+			// "<epoch> <why>": a reboot an update asked for, held back (D4).
+			'reboot_held'           => substr(preg_replace('#[^A-Za-z0-9 ,.:/()_-]#', '', (string)($v['reboot_held'] ?? '')), 0, 400),
+		];
+	}
+
 	private static function host_report_disk_pool($v) {
 		if ($v === 'none' || $v === 'not_mounted') { return $v; }
 		if (!is_array($v)) { return 'unknown'; }

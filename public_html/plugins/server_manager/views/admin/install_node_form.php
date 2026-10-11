@@ -11,6 +11,8 @@
  * create. It is enrolled from its own Admin → System → Management Node page
  * and added on the Connect Site page.
  *
+ * @version 1.18 - a server in one of our accounts is born with its data root encrypted where data_root_encryption_offered
+ *                 is on, and the form says so (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.17 - the Cloud Account list is every account held, ours first with the default chosen; a server in one
  *                 of ours names that account (cloud_accounts_list)
  * @version 1.16 - the operator's own cloud account (its operator token) is offered beside connected ones, as the
@@ -162,6 +164,11 @@ if ($_POST && isset($_POST['mgn_name'])) {
 				$provision->set('cvp_instance_type',  trim($_POST['cloud_instance_type']));
 				$provision->set('cvp_docker_mode',    $is_bare ? 'docker' : $docker_mode); // a bare instance IS a Docker host; the builder refuses any other shape for it
 				$provision->set('cvp_install_mode',   $mode);
+				// A server in one of our accounts is born with its data root
+				// encrypted by us, where this management node offers it.
+				if (CustomerCloudProvision::born_encrypted_by_default($target['hosting_mode'])) {
+					$provision->set('cvp_data_root_encrypted', true);
+				}
 				if ($root_ssh_keys !== '') {
 					$provision->set('cvp_root_ssh_keys', $root_ssh_keys);
 				}
@@ -249,6 +256,10 @@ if ($has_cloud_accounts) {
 }
 foreach ($cloud_targets['unusable'] as $why) {
 	echo '<p class="small text-muted">Not offered: ' . htmlspecialchars($why) . '</p>';
+}
+if (CustomerCloudProvision::data_root_encryption_offered()) {
+	echo '<p class="small text-muted">A server in one of our accounts is born with its data root encrypted by us, and the provider\'s own '
+		. 'disk encryption off, so it has one layer. A server in a customer\'s account is born unencrypted.</p>';
 }
 $formwriter->textinput('cloud_region', 'Region', [
 	'placeholder' => 'e.g., us-east',

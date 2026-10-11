@@ -1,5 +1,46 @@
 # Encrypted data root: data encrypted at rest, with the key held off the machine
 
+**Build status, 2026-10-11:** every work package is BUILT (WP1-WP10, each
+marked in its entry), shipped dormant behind `data_root_encryption_offered`;
+uncommitted, awaiting the owner's commit and a release for the Linode phase.
+Proven on the Mac mini VM (Ubuntu 24.04 arm64, swtpm), each by the test named:
+- **Born encrypted:** T-V1, and T-K1 (a marker written into `config/` is
+  absent from the raw root disk; a control marker on it is found).
+- **The volume and boot:**
+  - T-V6: a locked boot with no failed unit and no ordering cycle.
+  - T-V10: a slot not made our way fails `check`.
+  - A clean shutdown order and clean XFS mounts, checked on the serial
+    console.
+- **What stays off the root disk:** T-A5. Markers in the logs (syslog and the
+  journal), a PHP session, PHP's temp files, DKIM, `config/`, a PostgreSQL row
+  and `/tmp` are all absent from the raw root disk.
+- **Secrets under the data root:**
+  - T-K3: the agent waits in site posture, then restarts and reads its config.
+  - T-K6: `fix_permissions.sh` changes nothing while the data root is down.
+  - T-K7: 382 reads of `config/` during its `move-in`, none failed.
+- **Rotation and rekey:**
+  - T-R1: a rotation re-seals, so the new key opens the copy and the old one
+    does not.
+  - T-R4: a power cut part-way through a rekey; opened by the recovery key, it
+    resumed and finished.
+  - T-R6: the TPM2 chip enrolled again and opening the next boot.
+  - A rekey to the finish, with a changed volume key and the data intact.
+  - T-R3 with dev as the escrow holder, file shape. The VM enrolled (approved
+    on dev's dashboard). At the rekey's finish dev's `rekey` action minted a
+    new secret and took the new report key, and the new escrow slot was
+    confirmed. The next boot, its TPM2 slot taken away, opened by escrow with
+    the new secret.
+- **Encrypt and undo:** `decrypt` then `encrypt` again in place, on a machine
+  whose `/var/log` is on the data root.
+- **Tier 2:** the event names, probed in the test account.
+- **Suites:**
+  - the data root gate (221);
+  - `data_root_escrow_test` (46), `escrow_tier2_test` (29),
+    `provision_one_layer_test` (60);
+  - the root request (103), vault health (81), installer contract (878) and
+    host report (171) tests;
+  - the agent's `go test`.
+
 **Status:** DRAFT 2026-10-07, rewritten the same day from the owner's framing
 (below). Decided beyond the framing: one standard LUKS configuration for
 every node (D-E) and the provider's disk encryption off where ours is on
@@ -32,7 +73,15 @@ converger logging to the journal, the journal flushed after the unlock,
 "locked", D7 re-ordered so no escrow exists before the key rotation, no plain
 override after a rescue boot). O13 decided: existing data roots are encrypted
 in place by LUKS2's online encryption, gated by the T-F2 reliability campaign
-(D5). Nothing built. Stands on
+(D5). Built dormant and switched on at the end (D-O, "How it is built"),
+2026-10-11. **WP1 built 2026-10-11, uncommitted** (`joinery_data_root.sh`
+1.4, agent 1.73.0 `unlock` and `data-root`): proven on the Mac mini VM
+(file and device backings, TPM2 hands-off, the recovery key at the serial
+console, grow through the mapping, Postgres on the volume across reboots);
+the Linode measurements (PBKDF2 count and slot memory on a 1 GB node, sector
+size speed) wait for a release and come with WP3. Three assumptions failed
+on the VM and are fixed above: the console agent (D2a), shutdown under
+`blkdeactivate` (D1b), discards (D1). Stands on
 `one_data_root`, which landed 2026-10-10 and has moved every node; every
 install shape now looks the same to this spec. The research that led here
 (Linode rescue mode, the precedents, the measured performance) is kept at
@@ -187,9 +236,17 @@ to guard.
 
 `joinery_data_root.sh create` grows an `--encrypted` option that does this
 before formatting XFS; `check`, `grow` and `status` look through the mapping
-(D1b). `--sector-size 4096` and `--allow-discards`
-are carried over from the first draft and were not part of the 2026-10-07
-measurements; WP1 proves them before they stay in the standard.
+(D1b). `--sector-size 4096` stays (WP1, 2026-10-11: formats, opens, grows and
+survives reboots on file and device backings; its speed is measured on
+Linode with WP3). **`--allow-discards` is dropped** (WP1): a discard through
+the mapping reaches a file-backed volume's loop device, which punches a hole
+in the image and hands that space back to the root disk, so the data root
+would promise space the disk may no longer have. The same was already
+happening to every unencrypted data root: Ubuntu's weekly `fstrim.timer`
+lists `/srv/joinery` from fstab and trims it through the loop device. Fixed
+in `joinery_data_root.sh` 1.4 for every machine: the loop device passes no
+discard (the direct-I/O unit at boot, the tick at once), and the tick
+allocates again any space a discard already took back.
 
 ### D1a. One layer of encryption, never two
 
@@ -345,6 +402,23 @@ LUKS that shape would mount before anything has unlocked, so it changes:
   writer that would warn each tick about an unwritable `config/` is silenced
   the same way.
 
+- **The mapping's device unit waits as long as the unlock.** The mount binds
+  to `/dev/mapper/joinery-data`'s device unit, which systemd gives 90 seconds
+  to appear before failing the mount and everything behind it; a drop-in sets
+  its `JobRunningTimeoutSec=infinity`.
+- **Shutdown: after `blk-availability.service`.** lvm2's
+  `blk-availability.service` runs `blkdeactivate -u` early in shutdown, which
+  unmounts every filesystem on a device-mapper device while the services
+  using it are still stopping (seen on the WP1 VM: the data root unmounted
+  under Apache). The mount and the unlock unit are ordered after it, so at
+  shutdown the consumers stop, then the binds, the mount and the mapping, and
+  only then `blkdeactivate` runs. Proven with Postgres on the volume: a clean
+  shutdown and a start with no recovery.
+- **While locked, `multi-user.target` is not reached** (its consumers are
+  waiting), so `systemctl is-system-running` says `starting`, and what is
+  ordered after it (`cloud-final`, utmp's runlevel record) waits too. The
+  agent daemon does not (WP2).
+
 WP1 proves the wiring: a boot with the holder down leaves the machine up and
 its consumers waiting, with no failed unit and no ordering cycle, and the
 unlock then brings the whole stack up.
@@ -396,6 +470,24 @@ So no volume is ever born without a sidecar. For a hosted machine "the
 owner" is the operator. The sealed copies are per machine; only the
 recipient is shared.
 
+**What building it found (2026-10-11): the TPM2 chip is asked again, and
+its slot sealed again after a boot it did not open.** On the test VM the chip
+refused its slot at two boots of about ten with `TPM_RC_PCR_CHANGED` (0x128):
+another process at boot extended a PCR between the policy check and the
+unseal, a race, not a changed measurement. So the unlock asks the chip up to
+five times, two seconds apart, before escrow or the recovery key. And when the
+chip still does not open a boot and something else does (escrow, the recovery
+key), the unlock records it (`/run/joinery/data-root.tpm2-failed`) and the
+data root's tick seals the chip's slot again to this boot's measurements,
+through a slot made for the moment from the open volume's key and removed
+after: harmless after a race, and what brings the chip back after a real
+change (a firmware or shim update moves PCR 7). Whoever opened this boot
+vouched for it, so the chip's slot trusts what they trusted. Every enrolment
+prunes the tokens whose slots are gone (a re-encryption under a new volume
+key, D8, leaves them), so the chip is never asked for a slot that is not
+there. Proven on the VM: three boots in a row opened by the chip after the
+re-seal and a rekey.
+
 ### D2a. A person opens a machine with the recovery key
 
 Wherever a machine has to be opened by a person — an unmanaged machine
@@ -428,11 +520,19 @@ PHP-side file in the site tree), rate limiting, and the console prompt. The
 `/copy-key` handoff itself (two settings rows in the site's Postgres and a
 PHP view) cannot be used, because none of it runs while the volume is locked.
 
-**The console prompt** runs after networking, well past early boot, so it
-relies on systemd's console password agent still running
-(`systemd-ask-password-console.path`, active on Ubuntu 24.04), and on the
-kernel's serial console (`console=ttyS0`, on Linode's default kernel line)
-for Lish to show it.
+**The console prompt** runs after networking, well past early boot. systemd's
+console password agent does not survive that on its own (found on the WP1
+VM, 2026-10-11): `systemd-ask-password-wall.service` stops it first thing
+(`ExecStartPre=systemctl stop systemd-ask-password-console.*`), and the wall
+agent starts at the first password request once user sessions are allowed,
+which for a disk opened in early boot is never and for this one is at once.
+So on an encrypted machine the wall agent and the console logins
+(`getty@`, `serial-getty@`) are ordered after the unlock, as they are behind a
+disk opened in early boot; ssh is not. The prompt then shows on every active
+console, the kernel's serial console included (`console=ttyS0`, on Linode's
+default kernel line) for Lish. Proven on the VM: a wrong key refused and
+asked again with the reason, the right key opening the volume and the stack
+starting with no reboot.
 
 So the break-glass path, the unlock page and the console are one path, and
 nothing is added to what the owner keeps. A passphrase slot is never
@@ -565,6 +665,19 @@ are Tier 2's.
   behind NAT). It is never inferred from agent traffic, which goes to the
   agent's plane: for the two management nodes the holder is the other one,
   and would otherwise never hear of a change.
+- **A report proves the volume is open** (found while building WP2,
+  2026-10-11). The identity is on the plain root disk, so a copy of the disk
+  could sign a report of its own new address and then ask from it. So at
+  enrolment, while its volume is open, the machine also hands the holder a
+  **report key**, HMAC-SHA256 of the volume key under a fixed label, and
+  every report (an address, unlocked, shut down, a new box) and the
+  enrolment's confirmation carry an HMAC of the request under it. A running
+  machine can make one; a copy of its disk, whose volume is ciphertext,
+  cannot. An IP swap still works (the machine reports from its new address,
+  T-E6); a copy elsewhere can neither move the address check nor reset the
+  one-answer rule. A re-encryption changes the volume key and so the report
+  key; the re-enrolment D8 already makes before it is done carries the new
+  one.
 - **It states both families.** The report names the machine's own IPv4 and
   IPv6; the holder records the stated set plus the address the report came
   from. A dual-stack machine whose earlier requests came over IPv4 may boot
@@ -658,6 +771,36 @@ the machine, or boots a copy at its address. It is a policy on the escrow
 endpoint and nothing else: no change on the machine. Nothing in the platform
 reads a provider's activity log today, so the provider-events capability is
 built whole (WP5).
+
+**What building Tier 2 found (2026-10-11, probed in the test account).**
+- **A rescue boot has no event of its own.** Linode logs it as a
+  `linode_reboot` (or `linode_boot`) that names no configuration profile.
+  Every other boot or reboot names the profile it booted, whether or not one
+  was asked for. That missing profile is how `EscrowTier2` recognises a rescue
+  boot. `password_reset` is logged under its own name.
+- **Linode refuses an `entity.id` filter without an `entity.type`.** So the
+  driver reads the instance's own events (`linode`), its disks' (`disks`) and
+  its backups' (`backups`) as three queries and merges them by time.
+- **What refuses:** `password_reset`, `linode_rebuild`, `linode_clone`,
+  `disk_imagize`, `disk_duplicate`, `backups_restore`, `linode_deleteip`, and a
+  boot naming no profile. A request from an address that belongs to another
+  instance, or to none in the account, also refuses: that is the clone or
+  moved address that is asking. A failed event does not count.
+- **What is answered:** a boot or reboot with its profile, `host_reboot`,
+  `lassie_reboot`, migrations and resizes.
+- **The window** runs from the latest of: the last unlock reported, the
+  enrolment, and the owner's excuse.
+- **A log that cannot be read refuses.** The machine asks again every ten
+  seconds, so an outage at the provider delays an unlock and never skips the
+  check.
+- **The owner's word ("I did this myself")** is superadmin-only. It is
+  recorded with the user's name and excuses every event up to then. The
+  preflight before a planned reboot runs the same check, so a reboot that
+  would be refused is held.
+- **Proven:** the test-account probe's real log classified as above, through
+  the driver (a plain reboot answered, the rescue boot and the password reset
+  refused); `escrow_tier2_test.php` 29/29 through the endpoint with a fake
+  provider. The live tests (T-A3, T-A4) are for the Linode phase.
 
 **Tier 2 needs a lasting read credential for the account each machine lives
 in.** A Linode sign-in (Linode Connect) lasts two hours, so it cannot serve:
@@ -766,6 +909,36 @@ nobody watching.
    takes the volume back to plain from wherever it stands. The owner can stop
    an encryption from the node page; the campaign uses it.
 
+**What building it found (WP3, 2026-10-11, on the VM):**
+
+- **Sectors.** Every existing data root is an XFS made with 512-byte sectors
+  (`mkfs.xfs` on the image itself), and dm-crypt refuses to encrypt one in
+  4096-byte sectors. `encrypt` keeps the filesystem's own sector size: 512 for
+  every machine encrypted in place, 4096 for one born encrypted. T-S measures
+  the difference.
+- **Crashes.** A power cut part-way (and a guest frozen and then cut, which is
+  harsher) recovers: the next open repairs the hotzone and the run resumes and
+  finishes, data intact (pgbench rows, file checksums, `pg_amcheck`,
+  `xfs_repair -n`). A SIGTERM finishes the hotzone and stops. A **SIGKILL of a
+  running encryption cannot be survived in place**: the hotzone is left
+  suspended, writes to the data root wait, and only a reboot (the crash path)
+  recovers it. So `joinery-data-encrypt.service` is never sent SIGKILL
+  (`SendSIGKILL=no`, `TimeoutStopSec=infinity`) and is never the OOM killer's
+  (`OOMScoreAdjust=-1000`).
+- **The run's unit is ordered after the data root, never requiring it**: the
+  undo's finish stops the mount to move it off the mapping, and a `Requires=`
+  stopped the unit, and the finish, half-way (found and fixed).
+- **The undo's finish is crash-safe in its order**: the mapping is closed by
+  the unlock unit's own stop, and from then the record and units say plain; a
+  run or a boot that finds a decryption recorded over a device that is already
+  plain XFS finishes the switch instead of asking for a key.
+- **TPM2 is enrolled at the finish**, through the driving slot before it goes,
+  not at step 2: there is no header before the start, and no slot can be
+  added part-way.
+- Undo uses `cryptsetup reencrypt --decrypt` with the header exported to
+  `/etc/joinery/data-root/decrypt.header` on the root disk, which a device
+  part-way opens with.
+
 Turning encryption **off** is step 7 run to the end, under D1a's rule. Either
 direction runs in place only where it leaves exactly one layer (D1a), the
 five machines of D-L excepted.
@@ -806,7 +979,7 @@ each encrypted machine opens only by its recovery key, so none is rebooted
 without the owner at hand.
 
 1. **Before:** WP1–WP3, WP9 and WP10 released, with every machine on that
-   release. getjoinery's and dev's newest backups are verified, and the owner
+   release (dormant until each is encrypted). getjoinery's and dev's newest backups are verified, and the owner
    has every machine's recovery key at hand. Each machine meets D5's
    preconditions (the node page shows them).
 2. **Rehearse in the test account,** end to end: two throwaway management
@@ -820,7 +993,8 @@ without the owner at hand.
    old one revoked.
 4. **The release keys are rotated** (`release_key_rotation`), the new keys
    made on dev inside its encrypted `config/`.
-5. **getjoinery** encrypts its data root in place, from its own node page, its
+5. **getjoinery** turns on `data_root_encryption_offered` and encrypts its
+   data root in place, from its own node page, its
    sidecar sealed to getjoinery's own recovery key, which is also the
    operator's key (D2). Then the same clean-up as step 3.
 6. **getjoinery and dev enrol with each other as escrow holders.**
@@ -833,6 +1007,8 @@ without the owner at hand.
    docker-prod. Each is encrypted in place, then enrols with getjoinery, which
    mints and holds its escrow. docker-prod's move covers all seven of its
    container sites at once, since they share its data root.
+8. **The launch release** removes `data_root_encryption_offered` and its
+   checks and adds the installer's offer ("How it is built").
 
 **Downtime** is D5's step 3: seconds to stop the consumers, start the
 encryption and bring them back. The encryption itself then runs for hours in
@@ -928,6 +1104,35 @@ device part-way through opens only through a keyslot, not a volume key:
 
 On a hosted fleet the management node runs these one machine at a time.
 
+**What building it found (2026-10-11).**
+- **The driving slot is always a temporary one.** The plan had the escrow
+  slot drive the run on an escrow machine. But the machine does not hold the
+  escrow secret once it has booted, so it cannot drive with it. So a
+  temporary slot drives every rekey, sealed to the recovery key, as D5's
+  encryption does. The escrow slot goes with every other slot.
+- **The escrow comes back at the finish** through the holder's `rekey`
+  action. It is signed by the unlock identity and MAC'd with the OLD volume
+  key's report key. That key is kept on the data root during the run
+  (`/srv/joinery/.joinery-rekey`). The holder stores the new report key and
+  mints a NEW secret for the new slot, which is confirmed as an enrolment's
+  is.
+  - It is never the old secret. Whoever holds the leaked recovery key and an
+    old copy of the disk can derive the old report key. If they raced the
+    machine and won, they would get a secret that no slot of the machine
+    holds, and the machine's own ask would fail and say so.
+  - A holder that cannot be reached at the finish does not hold the run up:
+    the finish completes, and the tick asks again each minute.
+- **cryptsetup 2.7 refuses `--key-slot` during a change of volume key,** for
+  resuming the run and for opening it part-way. The driving secret sits
+  behind two slots, the old key's and the new key's, and cryptsetup must be
+  free to try both. The resume and the unlock name no slot for it.
+- **Proven on the VM** (file-backed, TPM2, 8 GiB). A rekey to the finish: the
+  volume key changed (its table prefix), a 300 MB file's checksum held, and
+  the chip opened the next boot. Then a rekey with a power cut part-way: the
+  boot asked for the recovery key, opened through the driving slot, resumed,
+  finished, and enrolled the chip again, with the file intact and the machine
+  `running` with no failed unit.
+
 **What a leaked key still opens, even after all of this:** backups made
 before the rotation (the backup rule; `docs/backups.md`, Rotating the key),
 and the provider's own disk backups taken before the re-encryption, until
@@ -940,14 +1145,14 @@ root disk, so a copy of that disk carries its secrets: on dev the release
 signing keys (`agent_signing_key`, `release_statement_key`) and the
 Cloudflare DNS token, and on every bare-metal site `backup_site_key`, the
 backup ledger and the relay keys. A site inside a container keeps its tree
-in the data root, so its `config/` is already covered (its `/tmp` is not;
-D10). So on an encrypted
+in the data root, so its `config/` and its `/tmp` are already covered (D10,
+"What building it found"). So on an encrypted
 machine `config/` moves under the data root too (owner, 2026-10-11, D-M).
 
 **`config/` becomes a bind of the data root,** the same mechanism as a
-site's uploads and logs (`joinery_data_root.sh bind`, recorded in
+site's uploads and logs (`joinery_data_root.sh`, recorded in
 `/etc/joinery/data_binds`, required by `joinery-data.target`):
-`/srv/joinery/site-config/<site>` is bind-mounted over `{site}/config`. Every
+`/srv/joinery/sites/<site>/config` is bind-mounted over `{site}/config`. Every
 file anything writes into `config/` afterwards, including a key minted later
 (`AgentDistPublisher` mints `agent_signing_key` on first use,
 `ReleaseStatementPublisher` mints `release_statement_key` on the first logged
@@ -955,47 +1160,68 @@ publish), lands encrypted with no list to keep up to date. Default-deny: a
 new secret is protected because of where it is written, not because someone
 remembered to name it.
 
-**What stays readable before the unlock.** Only what something reads while
-the volume is locked: `Globalvars_site.php`, which the agent daemon reads at
-start (D4 starts the daemon before the unlock). It lives on the root disk at
-`/etc/joinery/sites/<site>/Globalvars_site.php`, and **both** the
-root-disk `config/` (seen while locked, under the bind) and the data-root
-`config/` hold a symlink to it, so there is one copy and it never drifts.
-Its secrets are the database password and the `SecretBox` key, both of
-which open nothing without the database, which is encrypted. Anything else
-that must be readable before the unlock is added to this one-item list only
-with the reason written beside it.
+**Nothing in `config/` stays readable before the unlock,
+`Globalvars_site.php` included.** The one reader that runs while the volume
+is locked is the agent daemon (D4 starts it beside the unlock), and all it
+reads from the file is the database login and the web directory, for a
+database that is on the data root too and so is not running. Finding its
+config absent, the agent asks whether the config's folder is a bind of the
+data root (`/etc/joinery/data_binds`) that is not mounted. If it is, the
+agent keeps site posture and waits: no database login, none of the powers
+only a siteless machine has, and it restarts to read the file within 15
+seconds of it becoming readable. Absent anywhere else still means a machine
+with no site (machine posture). So the list of what stays readable before the
+unlock is empty; anything that must join it is added only with the reason
+written beside it.
+
+**What building it found (2026-10-11).** The design first kept
+`Globalvars_site.php` on the root disk at `/etc/joinery/sites/<site>/`, with a
+symlink from both sides of the bind. The inventory of everything that reads
+or writes `config/` found three things wrong with that:
+- The backups would carry only the link. A copy onto new hardware would then
+  lose the source's `secret_box_key`, which `restore_chain.sh
+  --adopt-secret-key` takes from the chain's copy of the file.
+- Four writers replace the file rather than write through it:
+  `_config_secrets.sh`, `restore_chain.sh`, `reconcile_site.sh`'s `sed -i`,
+  and the restore's tar extract.
+- `/etc/joinery/sites/<site>/` is kept at mode 700, out of the web server's
+  reach.
+
+The agent's one read was the only reason for the root-disk copy. So the
+agent waits instead, and none of those three needs to change.
 
 **What this asks of the code that touches `config/`:**
 
-- Writers of `Globalvars_site.php` write through the link, never replacing
-  it. `_write_site_config.php` already does (`file_put_contents` follows the
-  link). `restore_chain.sh --adopt-secret-key` does not: it ends with `mv -f`
-  of a spliced file over `config/Globalvars_site.php`, which would replace the
-  link with a regular file on the data root; it renames over the link's
-  target instead.
-- The installer's checks `test -f config/Globalvars_site.php` (`install.sh`,
-  `_site_init.sh`) follow the link, so a born-encrypted install that seeds the
-  link before the file exists reads it as absent, which is what it wants. This
-  is deliberate; nobody should "fix" it.
-- `config/`'s bind is a new kind for `joinery_data_root.sh bind`: its
-  `do_bind` refuses a non-empty or symlink target today, and the root-disk
-  side must hold the link before the mountpoint is made immutable.
-- `fix_permissions.sh` **refuses, exiting 0 with a line saying why, while the
-  data root is not mounted.** Locked, its `chmod 750` on the immutable
-  root-disk `config/` mountpoint would fail under `set -e`, and its sweep
-  would hit the 000 mountpoints of uploads and the rest; nothing needs
-  permissions fixed on a machine that serves nothing. Unlocked, it pins
-  `Globalvars_site.php`'s target and its `/etc/joinery/sites/<site>/`
-  directory (640 root:www-data, as `_site_init.sh` sets once), because its
-  `*.php` sweep uses `-type f`, which skips a symlink, so nothing would
-  re-assert them otherwise.
-- The install of a machine born encrypted makes the bind before
-  `_site_init.sh` writes `config/`, so nothing is ever written to the root
-  disk first. On an existing machine `config/` moves into the data root once
-  `encrypt` has finished (D5 step 6), so it never sits in a partly plain data
-  root.
-- Backups read `config/` through the mounted bind, exactly as now.
+- **The move.** `joinery_data_root.sh move-in REL TARGET` moves a folder that
+  holds data onto the data root where it stands, and its path is never
+  missing at any moment:
+  1. its files are copied to the place;
+  2. the place is mounted over the path;
+  3. a file written there during the copy is copied again;
+  4. only then are the root disk's own files deleted, seen through a private
+     bind of `/` that has no mounts over it.
+
+  The path is left the locked mountpoint every bind leaves.
+- **Born encrypted:** `_site_init.sh` moves `config/` in before it writes
+  anything there. What the release put there first (the release
+  verification keys, which are public) moves in with it.
+- **An existing machine:** `config/` moves in when `encrypt` finishes (D5
+  step 6), before its `fstrim`, so it never sits in a partly plain volume. The
+  tick moves any site still left (one installed while the encryption ran, or
+  a move that failed), then trims.
+- `fix_permissions.sh` **exits 0, with a line saying why, while the data root
+  is not mounted** for a site whose folders are on it. Its `chmod 750` on the
+  locked `config/` mountpoint would fail under `set -e`, and nothing needs
+  permissions fixed on a machine that serves nothing. Once mounted, it sets
+  `config/`'s modes as it always has, on the data root's side.
+- The converger runner's "site not initialised" check reads a `config/` that
+  is a bind of an unmounted data root as locked. It says so once a boot, as
+  its gate does.
+- Writers, restores and backups are unchanged: they read and write `config/`
+  through the mounted bind. The first backup after the move starts a new
+  chain, because the folder's inode is part of the data archive's identity.
+- A site's removal takes the bind away with its other folders: `remove-site`
+  covers every bind under `sites/<site>/`.
 
 **What moving does not undo.** Copies made before the move still hold the
 secrets in plain text: the provider's backups and snapshots of the root
@@ -1017,7 +1243,9 @@ dev, right after its move:
 D9 moves `config/`. The inventory (O1) found the rest. Each item is fixed by
 moving it into the data root, keeping it in memory, or stating why it stays,
 so that "an offline copy of the disk is ciphertext" is true of the machine,
-not only of the database.
+not only of the database. Every item applies to an encrypted machine only; a
+machine with a plain data root keeps its `/var/log`, `/tmp`, swap and core
+dump settings as they are ("How it is built").
 
 - **`/var/log` becomes a bind of the data root.** One bind covers syslog,
   `mail.log`, `auth.log`, rspamd's log, Postgres's own log on bare metal,
@@ -1043,8 +1271,8 @@ not only of the database.
   directory on the data root for each site, on bare metal and in every
   container, so uploads in progress and spooled request bodies never touch
   the root disk; it is swept like any temp directory. The system `/tmp` is a
-  size-capped tmpfs (memory) everywhere, inside containers too (`--tmpfs
-  /tmp`), for what other tools leave there. The cap fits what the platform's
+  size-capped tmpfs (memory) on the machine, inside its containers too
+  (`--tmpfs /tmp`), for what other tools leave there. The cap fits what the platform's
   own tools put there: `install.sh` unpacks the core archive under `/tmp`
   (29 MB compressed today) and the StackScript writes its DNS file there;
   WP10 sizes the cap from a full install on a 1 GB node, or points those at
@@ -1055,8 +1283,8 @@ not only of the database.
   as `install.sh` makes it. Linode's own swap disk is plain once the
   provider's layer is off. `createInstance()` sends no `swap_size` today, so
   Linode makes its default 512 MB swap disk; `install.sh` already drops every
-  fstab swap line, so it is attached and unused. A new machine is created with
-  `swap_size: 0`, and the five existing machines detach theirs.
+  fstab swap line, so it is attached and unused. A new machine born encrypted is
+  created with `swap_size: 0`, and the five existing machines detach theirs.
 - **Core dumps** are off: `LimitCORE=0` for the platform's units and
   `rlimit_core = 0` in the PHP pool, not left to systemd's default.
 - **Freed blocks and provider backups, on every machine encrypted in place**
@@ -1065,9 +1293,66 @@ not only of the database.
   cancel and re-enable it and replace any manual snapshot, because those
   copies hold the data in plaintext from before the move.
 
-**Stays on the root disk, each with its reason:** `Globalvars_site.php`
-(the agent reads it before the unlock; its secrets open nothing without the
-database; D9); TLS private keys (the unlock page needs them); the SSH host
+**What building it found (2026-10-11).**
+- **Containers.** A container's `/tmp` is in its writable layer, which is
+  under Docker's data root, `/srv/joinery/docker`, on the encrypted volume. So
+  it needs no `--tmpfs`; on an encrypted host only the host's own `/tmp` is a
+  tmpfs.
+- **PHP's temporary files.** Bare metal runs one PHP-FPM pool for all its
+  sites, so these go to one directory, `/var/lib/php/tmp`, which is a bind of
+  the data root, rather than one per site. `/tmp` becomes a tmpfs at the
+  next boot (`tmp.mount`, `size=50%`, enabled and not started): mounting it
+  over a running install would hide what is in `/tmp` now.
+- **Folders a package makes.** PHP's sessions folder, its temp folder and the
+  DKIM keys are moved in by the tick once they exist, within a minute. They are
+  not made ahead of the package, because the package would then find its
+  directory with the wrong owner and mode. `/var/log` exists before the
+  install, so `create --encrypted` moves it in at once, and the rest of the
+  install logs onto the volume.
+- **Logs still being written.** After the move, a service still writing to a
+  deleted file under `/var/log` is reloaded, and restarted if the reload does
+  not reopen the file (PostgreSQL's log is its stderr). journald lets go of
+  `/var/log` before the move (`--relinquish-var`) and flushes back after.
+  `joinery-journal-flush.service` flushes at each boot once `/var/log` is
+  mounted. `RuntimeMaxUse=32M` gives the journal room in memory while the
+  boot waits for the key.
+- **Early boot writes `/var/log` before any unlock** (found on the test VM
+  with a real boot). Two early-boot units require `/var/log`:
+  `systemd-update-utmp` (the boot record in `wtmp`) and
+  `systemd-journal-flush`. A `/var/log` that waits for the unlock made an
+  ordering cycle with them, and systemd broke it by dropping early jobs, which
+  failed PHP-FPM (`/run/php` never made). A drop-in cannot take a
+  `RequiresMountsFor=` away (systemd 255), so on an encrypted machine each
+  runs from a copy of its package unit file without it, remade each tick so it
+  follows an update. The boot's own flush gains
+  `ConditionPathIsMountPoint=/var/log`, so the journal stays in memory until
+  `/var/log` is the data root. The root disk's `/var/log` underneath the bind
+  stays writable for what early boot writes there: the boot record,
+  cloud-init's first lines, empty files tmpfiles makes. Once a boot, after the
+  unlock, the tick appends those to the data root's logs, deletes them, and
+  trims. Proven on the VM: no cycle and no failed unit locked or open; the
+  persistent journal on the data root starts at the kernel's first line;
+  cloud-init's early lines land in the data root's `cloud-init.log`.
+- **sysstat** writes `/var/log/sysstat` at boot; it waits for the data root as
+  rsyslog and fail2ban do.
+- **The converger's path trigger** watches `cache/root_requests`, which an
+  encrypted data root mounts only after the unlock; a path unit is ordered
+  before `paths.target` by default, which was a second cycle. It is not
+  (`DefaultDependencies=no`), on every machine, and starts once its folder is
+  there.
+- **Core dumps** are off machine-wide rather than per unit:
+  `DefaultLimitCORE=0`, `systemd-coredump` set to `Storage=none`, and
+  `kernel.core_pattern=|/bin/false`.
+- **Swap.** The tick turns off any swap device that is not dm-crypt. The
+  provider's swap disk on the five existing machines is detached at Linode as
+  a step of D7.
+- **The agent's outbox** can hold a job's full result, and a result can carry
+  what the data root holds. So on an encrypted machine a result is kept under
+  `/srv/joinery/agent-outbox` while the data root is mounted. While it is
+  locked, results are kept where they always were, because nothing that runs
+  then reads the data root. Both places are delivered from.
+
+**Stays on the root disk, each with its reason:** TLS private keys (the unlock page needs them); the SSH host
 keys (no login uses them; a copy lets someone impersonate the host to an SSH
 client, nothing more); the agent's and the unlock identity (needed before the
 unlock; the address check bounds the second); the recovery recipient
@@ -1076,6 +1361,44 @@ database); Postfix's TLS session cache. The agent's outbox
 (`/etc/joinery-agent/outbox`) holds queued job results: WP10 checks what they
 carry, and moves the outbox under the data root if any carries member
 content.
+
+## How it is built: shipped dormant, switched on at the end
+
+The whole spec is built and tested before any production machine is
+encrypted (owner, 2026-10-11; D-O). Test servers take code only through a
+release, since publishing refuses uncommitted work, and every release from
+dev is the one getjoinery passes on. So the code reaches production machines
+while it is being built, and it is written to do nothing there:
+
+- **One setting decides whether encryption is offered:**
+  `data_root_encryption_offered`, a core setting, off by default. While it is
+  off, nothing makes an encrypted data root: no creating path sets
+  `cvp_data_root_encrypted` (order, admin, site copy, Remote Install), the
+  copy form shows no tick, the node page shows no Encrypt action, and a
+  self-hosted site's Backups page shows no **Encrypt the data root**. It is
+  turned on by hand at dev, at each test management node, and on the
+  self-hosted test site that tests WP4.
+- **Everything else acts only on an encrypted data root:** the unlock
+  service and page, escrow enrolment, D1b's boot wiring, the converger's
+  re-seal, the D9 and D10 moves, a multi-tenant host's reboot handling (D4),
+  `swap_size: 0` at create. A machine whose data root is plain is unchanged by
+  every release this spec ships. The escrow endpoint and the holder's table
+  exist on every management node, empty.
+- **`install.sh` takes encryption only by an explicit flag** until launch
+  (sent by a management node whose setting is on, or typed on a test box); it
+  does not offer it.
+- **What ships to every machine on purpose,** under the ordinary test gate:
+  the converger's output to the journal (D1b), the agent unit's start order
+  without Postgres (WP2), the uptime check's **locked** state, and
+  `release_key_rotation`'s agent changes, which must reach every agent before
+  its ceremony and are proven first by a rotation of dev's test keys on test
+  servers.
+- **Switching on** follows D7. getjoinery's setting is turned on at D7 step
+  5, after the release keys are rotated, and no hosted site is ordered while
+  getjoinery's own encryption runs. When D7 is done, a **launch release**
+  removes the setting and its checks and adds the installer's offer (WP3):
+  from then every hosted birth is encrypted by default, and every self-hosted
+  site can turn it on.
 
 ## Work packages
 
@@ -1116,7 +1439,9 @@ content.
   answered over the family it did not enrol from, and a second boot while the
   first is answered refused.
 - **WP3 — Install shapes.** `install.sh`: on by default on a hosted birth
-  (host provisioning), offered on a self-hosted install; `encrypt` (D5) for
+  (host provisioning), offered on a self-hosted install, both only where
+  `data_root_encryption_offered` is on until the launch release adds the
+  installer's offer ("How it is built"); `encrypt` (D5) for
   existing machines: the offline start, the online run at idle priority with
   progress on the node page, recovery and resume after a crash, the finish,
   and `decrypt` to undo. One layer, never two (D1a): `cvp_data_root_encrypted`
@@ -1147,7 +1472,11 @@ content.
   page's **Encrypt the data root** once its recovery key is proven (D2), and
   the installer's `--recovery-public-key`; `VaultHealth`-style advice when the
   break-glass sidecar is missing or sealed to a retired recovery key.
-- **WP5 — Tier 2 (D3), the next piece after launch.** The provider-events
+- **WP5 — Tier 2 (D3), the next piece after launch.** BUILT 2026-10-11 (D3,
+  "What building Tier 2 found"), but for the credentials, which are the
+  owner's to issue: the events-only token on dev and the personal-account
+  key. The machines that predate provisioning need adopting first (their
+  provision row names their instance). The provider-events
   capability on `CloudComputeProvider` (`LinodeComputeDriver` reads
   `account/events` for an instance); the refusal on the escrow endpoint, with
   the wait-and-read-again; the refused machine on the holder's page with its
@@ -1164,7 +1493,11 @@ content.
   provider's layer as well" tick and the node page's "two layers" line, the
   test-account rehearsal (T-M1), then getjoinery, dev, their escrow with each
   other, and joinerydemo, jeremytunnell-vps and docker-prod, in D7's order.
-- **WP7 — Rotation (D8).** The converger's re-seal when the recipient changes
+- **WP7 — Rotation (D8).** BUILT 2026-10-11 (D8, "What building it
+  found"): the tick's re-seal, the operator key pushed to hosted machines and
+  counted on the Backups page, `rekey` with the holder's `rekey` action, the
+  Rotate key question, and the node page's and the site Backups page's
+  Re-encrypt under a new key. The converger's re-seal when the recipient changes
   to a proven key; the management node pushing a rotated operator key to every
   hosted machine, and the re-seal count on its Backups page; the new box
   reported after each re-seal; the Rotate key
@@ -1192,11 +1525,13 @@ content.
   console still works, a wrong key refused, the uptime check reporting
   locked, and the web server takes port 443 after unlock.
 - **WP9 — Secrets under the data root (D9).** `config/` as a bind of
-  `/srv/joinery/site-config/<site>` on every encrypted machine, born that way
-  on a new one and moved in once `encrypt` finishes on an existing one;
-  `Globalvars_site.php` on the root disk behind a symlink from both sides;
-  every writer of it writing through the link; `fix_permissions.sh` correct on
-  both sides of the bind; the node page listing what stays on the root disk.
+  `/srv/joinery/sites/<site>/config` on every encrypted machine, born that way
+  on a new one and moved in (`move-in`) once `encrypt` finishes on an existing
+  one, `Globalvars_site.php` with it; the agent waiting in site posture while
+  its config is on an unmounted data root; `fix_permissions.sh` and the
+  converger waiting for the data root; the node page listing what stays on
+  the root disk. BUILT 2026-10-11 but for the node page list (agent
+  `site_waiting.go`, data root gate 186, installer contract 878).
   On dev, right after its move: Linode Backups cancelled and re-enabled (and
   any manual snapshot replaced), and a new Cloudflare token with the old one
   revoked.
@@ -1209,12 +1544,16 @@ content.
   containers; DKIM keys under the data root; Linode's swap disk left out of a
   new machine's profile and detached on the five; core dumps off; `fstrim` and
   the provider-backup purge after every in-place move; the agent outbox
-  checked and moved if needed. Ships with WP1–WP3.
+  checked and moved if needed. Ships with WP1–WP3. BUILT 2026-10-11 (D10,
+  "What building it found"), but for detaching the five machines' swap disks
+  at Linode, which is a step of D7, and the provider-backup purge, which is the
+  owner's.
 
 ## Testing
 
-Nothing in this spec reaches a production node until every test below that
-touches its work package has passed on scratch boxes. Each test names what
+Nothing in this spec acts on a production machine until every test below
+that touches its work package has passed on scratch boxes. The code reaches
+production machines earlier, dormant ("How it is built"). Each test names what
 it proves and what a pass looks like; results go in this spec's status line
 and, for anything run live, the live verification queue.
 
@@ -1231,8 +1570,13 @@ and, for anything run live, the live verification queue.
   file-backed data root (the common case); a bare-metal site on a device
   (a Linode Block Storage volume as the backing); a multi-tenant host with
   two container sites; a 1 GB plan wherever memory or speed is measured.
-- **TPM2** cannot be tested on Linode, which has none (O4 C). Those tests run
-  on a local VM with a software TPM (swtpm) on the Mac mini.
+- **A Linux VM on the Mac mini** (UTM, Ubuntu 24.04, with a software TPM)
+  is the fast loop for the shell and boot pieces (WP1, `encrypt` and
+  `decrypt`, T-F2's power cuts): files are copied straight in, so no release
+  is needed. A scratch box in the test account then confirms each release on
+  Linode's own CPU and kernel; speed is measured only there. **TPM2** cannot
+  be tested on Linode, which has none (O4 C), so those tests run on the VM
+  only.
 - **Automated suites** run in the ordinary gate (`php tests/run.php`) and the
   agent's `go test ./...`. Each work package lists its own; they cover logic
   that needs no real disk or provider.
@@ -1448,23 +1792,29 @@ Run on the file-backed and the device-backed shape unless marked.
 
 - **T-K1** A machine born encrypted: `config/` is a bind of the data root
   before `_site_init.sh` writes it; a search of the root disk's raw blocks for
-  a marker written into `config/` finds nothing.
+  a marker written into `config/`, `Globalvars_site.php` included, finds
+  nothing.
 - **T-K2** `encrypt` on an existing machine with an
   `agent_signing_key` and `backup_site_key`: both are on the data root
   afterwards, `config/` works for the site, publishing still signs, and a
   backup still runs and verifies.
-- **T-K3** Locked: the agent daemon starts and reads `Globalvars_site.php`
-  through the link; nothing else in `config/` is visible.
+- **T-K3** Locked: the agent daemon starts in site posture, waiting (never
+  machine posture), and the management node sees it; the root disk's
+  `config/` is an empty locked mountpoint. Unlocked: the agent restarts and
+  reads its config within 15 seconds, and connects to its database.
 - **T-K4** A key minted after the move (delete a scratch
   `release_statement_key` and publish): it is created on the data root.
-- **T-K5** `restore_chain.sh --adopt-secret-key` on an encrypted machine: the
-  `SecretBox` key is written through the link, the root-disk file and the one
-  seen inside `config/` are the same file, and the agent still starts after a
-  reboot.
+- **T-K5** `restore_chain.sh --adopt-secret-key` on an encrypted machine:
+  the chain carried the source's `Globalvars_site.php`, the `SecretBox` key
+  is adopted into this machine's own config on the data root, and the agent
+  still starts after a reboot.
 - **T-K6** `fix_permissions.sh` on a locked machine: exits 0 saying it waits
-  for the data root, changes nothing. On an unlocked machine: modes right on
-  both sides of the bind, `Globalvars_site.php`'s target pinned 640
-  root:www-data, no symlink target re-moded wrongly.
+  for the data root, changes nothing. On an unlocked machine: `config/`'s
+  modes right on the data root's side, `Globalvars_site.php` 640
+  root:www-data.
+- **T-K7** `move-in` on a live site: no request fails during it, a file
+  written to `config/` during the copy is on the data root afterwards, and
+  the root disk's copy is gone (searched in its raw blocks after `fstrim`).
 
 ### T-A — The claims in the table
 
@@ -1604,14 +1954,21 @@ the appendix's ranges; anything worse is reported before WP3 ships.
   Linode's layer goes when each is next replaced. Every machine born after
   WP3 has one layer (D-G stands for them).
 - **D-M. `config/` moves under the data root on every encrypted machine**
-  (owner, 2026-10-11; D9, WP9), with only `Globalvars_site.php` left on the
-  root disk. On dev it is carried out by dev's own in-place encryption (D7
+  (owner, 2026-10-11; D9, WP9), `Globalvars_site.php` with it. It was decided
+  with that one file left on the root disk; building it found the copy
+  unneeded and harmful to backups, so the agent waits for it instead (D9,
+  "What building it found"). On dev it is carried out by dev's own in-place encryption (D7
   step 3), so dev's signing keys and Cloudflare token are inside the
   encryption from its first encrypted boot.
 - **D-N. An existing data root is encrypted in place** (owner, 2026-10-11;
   O13, D5), by LUKS2's online encryption, on condition the T-F2 campaign shows
   it reliable; otherwise a second image. It serves our five machines once and
   every self-hosted owner who turns encryption on.
+- **D-O. Built dormant, switched on at the end** (owner, 2026-10-11; "How
+  it is built"). The code ships in ordinary releases while it is built, does
+  nothing on a machine whose data root is plain, and is offered only where
+  `data_root_encryption_offered` is on, until the launch release after D7
+  removes the setting.
 - **D-D. Warrant resistance is out of scope.** The vault is the answer to
   that question; this spec does not pretend otherwise.
 
@@ -1721,8 +2078,9 @@ the appendix's ranges; anything worse is reported before WP3 ships.
   so. The transfer refuses to finish while the sidecar is still sealed to the
   operator's key.
 - **O10 — DECIDED 2026-10-11 (D-M, D9):** `config/` moves under the data
-  root on every encrypted machine, by bind mount, with only
-  `Globalvars_site.php` left on the root disk behind a symlink. WP9.
+  root on every encrypted machine, by bind mount. WP9. Built with
+  `Globalvars_site.php` under the data root as well (D9, "What building it
+  found").
 - **O11 — CONFIRMED by the owner 2026-10-11: the holder's own restore.** A holder rebuilt from its backups has
   the escrow table as of its last backup. A machine enrolled after that
   backup falls to break-glass at its next boot. So the holder runs a database

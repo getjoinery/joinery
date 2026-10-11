@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.53 - machines asking to have their encrypted data root's key held here (C-3): approved or refused
+ *                 after comparing the fingerprint their machine printed (specs/hosted_data_promise_disk_encryption.md)
  * @version 1.52 - a provision with no node yet, and a join from its address, sit on the tab of the account it is in
  * @version 1.51 - a hidden site's jobs are left out of Recent Jobs unless hidden sites are shown; Removed reads Hidden
  * @version 1.50 - a tab for each cloud account (Joinery Main Linode / Joinery Test Linode); hosts, machines, joins, provisions and jobs
@@ -153,6 +155,45 @@ if ($_POST && in_array($_POST['action'] ?? '', ['adopt_join', 'adopt_provision_j
 			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		header('Location: /admin/server_manager'); exit;
 	}
+}
+
+// A machine asking this management node to hold its encrypted data root's key
+// (specs/hosted_data_promise_disk_encryption.md D3, C-3): one that is not this
+// plane's node, so no node key vouches for it. Approve only when the fingerprint
+// matches what the machine printed; the secret is then handed to it at its
+// next ask, never shown here.
+if ($_POST && in_array($_POST['action'] ?? '', ['escrow_approve', 'escrow_refuse'], true)) {
+	$page_regex = '/\/admin\/server_manager/';
+	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager'); exit; }
+	$dre = new DataRootEscrow((int)($_POST['dre_data_root_escrow_id'] ?? 0), TRUE);
+	try {
+		if (!$dre->key) {
+			throw new Exception('That request no longer exists.');
+		}
+		if ($_POST['action'] === 'escrow_approve') {
+			// Which of this plane's node rows it is, if any (an uptime-only row,
+			// say): its card, its unlock and its locked incident live there.
+			$as_node = (int)($_POST['mgn_managed_node_id'] ?? 0);
+			if ($as_node > 0) {
+				$n = new ManagedNode($as_node, TRUE);
+				if (!$n->key || $n->get('mgn_delete_time')) {
+					throw new Exception('That node no longer exists.');
+				}
+				$dre->set('dre_mgn_managed_node_id', $n->key);
+			}
+			$dre->approve((int)$session->get_user_id());
+			$msg = 'Approved: ' . $dre->get('dre_hostname') . ' (' . $dre->fingerprint() . ') takes its key at its next ask, and opens from here at every boot after.';
+		} else {
+			$dre->retire();
+			$msg = 'Refused: this management node will not hold ' . $dre->get('dre_hostname') . '\'s key.';
+		}
+		$session->save_message(new DisplayMessage($msg, 'Done', $page_regex,
+			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	} catch (Exception $e) {
+		$session->save_message(new DisplayMessage($e->getMessage(), 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+	}
+	header('Location: /admin/server_manager'); exit;
 }
 
 // Queue an upgrade job for every enabled site on a host (the host's Actions menu).
@@ -369,6 +410,17 @@ $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 // one — otherwise the only trace is a command on the machine waiting for an
 // answer nobody knows they owe.
 $pending_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::pending() : [];
+// Machines asking to have their encrypted data root's key held here (C-3).
+$pending_escrows = array();
+foreach (new MultiDataRootEscrow(array('status' => 'pending'), array('dre_requested_time' => 'ASC')) as $pe) {
+	$pending_escrows[] = $pe;
+}
+$escrow_node_choices = array();
+if ($pending_escrows) {
+	foreach (new MultiManagedNode(array('deleted' => false), array('mgn_name' => 'ASC')) as $en) {
+		$escrow_node_choices[(int)$en->key] = (string)$en->get('mgn_name');
+	}
+}
 $rejected_joins = class_exists('AgentJoinRequest') ? AgentJoinRequest::recently_rejected() : [];
 // A join is filed with the box whose address it comes from, or its provision's account. One from an
 // address nothing here knows appears on both tabs: it needs a person wherever they are looking.
@@ -714,6 +766,51 @@ foreach ($nodes_by_host as $hn_list) { $total_nodes += count($hn_list); }
 
 	<!-- RIGHT: Recent Jobs -->
 	<div class="svm-board-side">
+	<?php if ($pending_escrows): ?>
+	<details class="card svm-card" open id="svm-escrows">
+		<summary class="card-header">
+			<span class="svm-chev" aria-hidden="true"></span>
+			<h6>Machines asking to have their key held here</h6>
+			<span class="badge badge-primary svm-card-count"><?php echo count($pending_escrows); ?></span>
+		</summary>
+		<div class="svm-card-body">
+			<p class="svm-joins-warn">Each asks this management node to open its encrypted data root at every boot. Approve only if the fingerprint matches what the machine printed.</p>
+			<?php foreach ($pending_escrows as $pe):
+				$pe_addrs = $pe->allowed_addresses(); ?>
+				<div class="svm-join-row">
+					<div class="svm-join-top">
+						<strong class="svm-join-name"><?php echo htmlspecialchars((string)$pe->get('dre_hostname')); ?></strong>
+						<span class="svm-muted svm-join-age"><?php echo htmlspecialchars((string)$pe->get_local('dre_requested_time')); ?></span>
+					</div>
+					<div class="svm-join-sub svm-muted"><?php echo htmlspecialchars(implode(', ', $pe_addrs)); ?> &middot; <code><?php echo htmlspecialchars($pe->fingerprint()); ?></code></div>
+					<div class="svm-join-actions">
+						<form method="post" action="/admin/server_manager" id="escrow_approve_<?php echo (int)$pe->key; ?>" class="svm-inline-form">
+							<input type="hidden" name="action" value="escrow_approve">
+							<input type="hidden" name="dre_data_root_escrow_id" value="<?php echo (int)$pe->key; ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<select name="mgn_managed_node_id" class="form-select form-select-sm d-inline-block w-auto" title="Which of this management node's rows it is, so its unlock and its locked incident show there">
+								<option value="0">Not one of this management node's rows</option>
+								<?php foreach ($escrow_node_choices as $eid => $ename): ?>
+									<option value="<?php echo $eid; ?>"<?php echo (int)$pe->get('dre_mgn_managed_node_id') === $eid ? ' selected' : ''; ?>>It is <?php echo htmlspecialchars($ename); ?></option>
+								<?php endforeach; ?>
+							</select>
+							<button type="button" class="btn btn-sm btn-primary"
+								onclick="<?php echo $confirm_submit('escrow_approve_' . (int)$pe->key, 'Hold the key of ' . $pe->get('dre_hostname') . '? Confirm the fingerprint ' . $pe->fingerprint() . ' matches what the machine printed first.'); ?>">Approve</button>
+						</form>
+						<form method="post" action="/admin/server_manager" id="escrow_refuse_<?php echo (int)$pe->key; ?>" class="svm-inline-form">
+							<input type="hidden" name="action" value="escrow_refuse">
+							<input type="hidden" name="dre_data_root_escrow_id" value="<?php echo (int)$pe->key; ?>">
+							<?php echo SmAdminCsrf::field(); ?>
+							<button type="button" class="btn btn-sm btn-outline-danger"
+								onclick="<?php echo $confirm_submit('escrow_refuse_' . (int)$pe->key, 'Refuse to hold the key of ' . $pe->get('dre_hostname') . '?'); ?>">Refuse</button>
+						</form>
+					</div>
+				</div>
+			<?php endforeach; ?>
+		</div>
+	</details>
+	<?php endif; ?>
+
 	<?php // Agents waiting to be let in. A line when closed; compact entries when
 	      // open, in a scroll-box, so 50-100 asks a day stay one panel tall. ?>
 	<?php if (!empty($pending_joins) || !empty($rejected_joins)): ?>

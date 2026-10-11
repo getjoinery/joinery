@@ -199,7 +199,9 @@ A mount, not a symlink: the backup engine, restore, the site census and the perm
 - `check` fails while any recorded mount is not in place, naming it, and the converger's `tick` mounts it again. Because the target requires every recorded mount, a mount whose place under `/srv/joinery` is gone keeps every service that waits for the data root down; take it away with `unbind`.
 - `unbind TARGET` takes one away: the target lets it go first, so no service stops, and the path is left an empty folder with its place's owner and mode; the data stays under `/srv/joinery`. `remove-site NAME` takes every mount of a site and its data there; `remove_account.sh` runs it before it removes a bare-metal site's directory.
 - Incremental backups ignore the device number (`--no-check-device`): the data root's loop device can come back under another number after a reboot.
-- `/var/lib/joinery/host`, the agent and its log, the code and `config/` stay on the root disk, so a host whose data root is the thing that failed can still say why.
+- `/var/lib/joinery/host`, the agent and its log, and the code stay on the root disk, so a host whose data root is the thing that failed can still say why. So does each site's `config/`, unless the data root is encrypted: an [encrypted data root](encrypted_data_root.md) takes `config/`, `/var/log` and the rest of what holds the data onto the volume.
+
+**Encrypted.** The data root can be a LUKS2 volume, made encrypted by `install.sh server|docker --encrypted-data-root --recovery-public-key=KEY` or encrypted where it stands by `joinery_data_root.sh encrypt`, wherever `data_root_encryption_offered` is on. How it opens at boot, who holds its keys and what else moves onto it: [Encrypted data root](encrypted_data_root.md).
 
 **Moving an existing host onto it.** `joinery_data_root.sh migrate [SIZE|DEVICE]`, as root, moves a host's data onto the data root, making the data root first when the host has none:
 

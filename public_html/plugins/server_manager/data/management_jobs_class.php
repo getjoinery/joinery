@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.38 - claim budgets for data_root_encrypt, data_root_decrypt and data_root_rekey (their starts)
  * @version 1.37 - a claim that never reports is LOST, never requeued: failStaleClaims() (was requeueStaleClaims)
  *                 fails a job past its budget, markLost() fails a node's running jobs when its agent says it is
  *                 idle or an operator says so, both with mjb_agent_outcome 'lost' so a result that arrives
@@ -285,6 +286,11 @@ class ManagementJob extends SystemBase {
 		// second one is refused while it does, but an early failure would still end
 		// in a red job beside a move that is fine.
 		'data_root_migrate'     => 14520,
+		// 15m + slack: the encryption's start step; the run itself goes on in
+		// its own unit (specs/hosted_data_promise_disk_encryption.md D5).
+		'data_root_encrypt'     => 1020,
+		'data_root_decrypt'     => 1020,
+		'data_root_rekey'       => 1020,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than

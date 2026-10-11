@@ -539,8 +539,8 @@ class CustomerCloudProvisioningTest {
 			'the scopes come from the X-OAuth-Scopes header');
 		$need = array_keys(OperatorCloudAccount::SCOPES);
 		check(LinodeComputeDriver::missingScopes(['domains:read_write', 'linodes:read_write'], $need)
-			=== ['account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write'],
-			'the dev token of 2026-10-06 lacks account, firewall, volumes and ips');
+			=== ['account:read_write', 'firewall:read_only', 'volumes:read_only', 'ips:read_write', 'events:read_only'],
+			'the dev token of 2026-10-06 lacks account, firewall, volumes, ips and events');
 		check(LinodeComputeDriver::missingScopes(['*'], $need) === [], '"*" covers every scope');
 		check(LinodeComputeDriver::missingScopes(['firewall:read_write'], ['firewall:read_only']) === [],
 			'read_write covers the same area\'s read_only');

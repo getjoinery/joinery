@@ -16,6 +16,8 @@
  * is never one somebody bought, so it is never billed, put on a trial or
  * handed to a customer.
  *
+ * @version 1.3 - the record carries the provider's disk encryption as its listing reported it, else unknown
+ *                (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.2 - every account of ours is searched, and the record names the one the server is in (cloud_accounts_list)
  * @version 1.1 - the node's Hosted at follows the account its server was found on
  * @version 1.0
@@ -174,6 +176,10 @@ class CloudServerAdoption {
 		$provision->set('cvp_region', (string)($instance['region'] ?? ''));
 		$provision->set('cvp_docker_mode', 'bare-metal');
 		$provision->set('cvp_install_mode', 'adopted');
+		// The provider's own disk encryption, as the listing reported it
+		// (unknown when it did not say). Our encryption is never claimed for a
+		// server born elsewhere: cvp_data_root_encrypted stays unset (D1a).
+		$provision->set('cvp_provider_disk_encryption', CustomerCloudProvision::provider_layer_reported($instance));
 		$provision->set('cvp_mgn_managed_node_id', (int)$node->key);
 		$provision->save();
 		$provision->load();

@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.49 - escrow: /api/v1/agent/escrow/* goes to EscrowEndpoint, signed by an encrypted data
+ *                root's unlock identity (specs/hosted_data_promise_disk_encryption.md D3)
  * @version 1.48 - a claim can say idle (agent 1.72.0): the agent runs nothing and holds no undelivered result,
  *                 so any job this plane still has as running for the node was lost, and is failed as lost at
  *                 once (ManagementJob::markLost) instead of holding the node's queue for its whole budget. A
@@ -348,6 +350,13 @@ class AgentChannelEndpoint {
 
 		if (strtoupper($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 			api_error('The agent channel accepts POST only.', 'ActionError', 405);
+		}
+
+		// An encrypted data root's escrow (specs/hosted_data_promise_disk_encryption.md
+		// D3): signed by the machine's unlock identity, not a node key, and
+		// answered whether or not the machine is this plane's node.
+		if ($endpoint === 'escrow') {
+			EscrowEndpoint::dispatch(strtolower((string)($url_segments[4] ?? '')));
 		}
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404

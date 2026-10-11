@@ -58,6 +58,11 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.15 - one layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a): a provision with
+ *                 cvp_data_root_encrypted is refused before create without a proven recovery key or in a distributed
+ *                 region, is created with disk_encryption disabled and swap_size 0, saves its instance id before
+ *                 the provider's answer is checked (at create and again at booting), fails before install when the
+ *                 provider's layer is on, and installs with --encrypted-data-root and the recovery public key
  * @version 2.14 - a server in one of our accounts is created with its own account's credential
  *                 (HeldCloudAccounts::provision_token); the single operator token is gone (cloud_accounts_list)
  * @version 2.13 - a provisioned node records where it is hosted (CloudAccounts::for_provision)
@@ -210,6 +215,34 @@ class ProvisionCustomerCloud {
 		$type   = $provision->get('cvp_instance_type') ?: ($settings->get_setting('server_manager_customer_cloud_type')   ?: 'g6-nanode-1');
 		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu26.04';
 
+		// One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a):
+		// a data root we encrypt asks the provider's own disk encryption off at
+		// create, and Linode's swap disk away, since it would be plain once that
+		// layer is off (D10). Refused before anything is created when it cannot
+		// be done: no recovery key to seal the volume's break-glass copy to, or
+		// a region where the provider's layer cannot be turned off.
+		$encrypted = (bool)$provision->get('cvp_data_root_encrypted');
+		if ($encrypted) {
+			$refusal = self::recovery_key_refusal();
+			if ($refusal !== '') {
+				$this->alert_and_fail($provision, $refusal);
+				return 1;
+			}
+			if ($driver instanceof CloudRegionFacts) {
+				try {
+					$facts = $driver->regionInfo((string)$region);
+				} catch (CloudComputeException $e) {
+					return $this->handle_compute_failure($provision, $e, 'ready');
+				}
+				if ($facts['site_type'] === 'distributed') {
+					$this->alert_and_fail($provision, "Region {$region} is a distributed region, where the provider's own disk "
+						. 'encryption is always on, and a data root encrypted by us must be the only layer. Nothing was created; '
+						. 'choose a core region.');
+					return 1;
+				}
+			}
+		}
+
 		// Keyless: create with a root password and no SSH key of ours. The
 		// password is the sole credential, and only for the length of the
 		// install — sealed onto the row here, used by the install executor, and
@@ -223,19 +256,24 @@ class ProvisionCustomerCloud {
 		$provision->set('cvp_install_password', 'held');
 		$provision->save();
 
+		$create = array(
+			// cvp id suffix keeps labels unique on the customer's account
+			// across re-provisions of the same domain. A test purchase's
+			// label starts with test_, so it is never mistaken for a
+			// customer's machine in the provider's console.
+			'label'           => $provision->external_name_prefix() . $provision->get('cvp_slug') . '-' . $provision->key,
+			'region'          => $region,
+			'type'            => $type,
+			'image'           => $image,
+			'root_pass'       => $root_pass,
+			// No key of ours is installed on a machine we create.
+		);
+		if ($encrypted) {
+			$create['disk_encryption'] = 'disabled';
+			$create['swap_size'] = 0;
+		}
 		try {
-			$instance = $driver->createInstance(array(
-				// cvp id suffix keeps labels unique on the customer's account
-				// across re-provisions of the same domain. A test purchase's
-				// label starts with test_, so it is never mistaken for a
-				// customer's machine in the provider's console.
-				'label'           => $provision->external_name_prefix() . $provision->get('cvp_slug') . '-' . $provision->key,
-				'region'          => $region,
-				'type'            => $type,
-				'image'           => $image,
-				'root_pass'       => $root_pass,
-				// No key of ours is installed on a machine we create.
-			));
+			$instance = $driver->createInstance($create);
 		} catch (CloudComputeException $e) {
 			return $this->handle_compute_failure($provision, $e, 'ready');
 		}
@@ -245,10 +283,37 @@ class ProvisionCustomerCloud {
 		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_region',        $region);
 		$provision->set('cvp_instance_type', $type);
+		if ($encrypted) {
+			// The machine is named on the row before the check below can fail
+			// it: a failed provision is found and cleaned up by its instance.
+			$provision->save();
+			$layer = CustomerCloudProvision::provider_layer_reported($instance);
+			$provision->set('cvp_provider_disk_encryption', $layer);
+			if ($layer === 'enabled') {
+				$this->alert_and_fail($provision, CustomerCloudProvision::two_layers_reason((string)$instance['id']));
+				return 1;
+			}
+		}
 		$provision->set('cvp_status',        'booting');
 		$provision->set('cvp_error',         null);
 		$provision->save();
 		return 1;
+	}
+
+	/**
+	 * Why an encrypted data root cannot be made from here, or '' when it can:
+	 * the volume's break-glass copy is sealed to this management node's own
+	 * recovery key (D2), so that key must be set up and proven first.
+	 */
+	public static function recovery_key_refusal(): string {
+		try {
+			BackupRecoveryKey::public_key();
+			return '';
+		} catch (BackupRecoveryKeyException $e) {
+			return 'An encrypted data root is sealed to this management node\'s recovery key, and that key is not ready: '
+				. $e->getMessage() . ' Nothing was created; set it up on the Backups page (' . BackupRecoveryKey::SETUP_URL
+				. '), then provision again.';
+		}
 	}
 
 	/** The node a copy provision names in cvp_source_node_id, or null. */
@@ -285,6 +350,21 @@ class ProvisionCustomerCloud {
 				return 1;
 			}
 			return 0;
+		}
+
+		// One layer, never two (D1a), asked again now the machine is up and
+		// before anything is installed on it. A definite answer is recorded; an
+		// absent one never overwrites the answer the create gave.
+		$encrypted = (bool)$provision->get('cvp_data_root_encrypted');
+		if ($encrypted) {
+			$layer = CustomerCloudProvision::provider_layer_reported($instance);
+			if ($layer !== 'unknown' || !in_array((string)$provision->get('cvp_provider_disk_encryption'), array('enabled', 'disabled'), true)) {
+				$provision->set('cvp_provider_disk_encryption', $layer);
+			}
+			if ($layer === 'enabled') {
+				$this->alert_and_fail($provision, CustomerCloudProvision::two_layers_reason((string)$provision->get('cvp_instance_id')));
+				return 1;
+			}
 		}
 
 		$domain       = $provision->get('cvp_domain');
@@ -437,6 +517,13 @@ class ProvisionCustomerCloud {
 		}
 
 		try {
+			if ($encrypted) {
+				// The data root is born encrypted, its break-glass copy sealed
+				// to this management node's own proven recovery key (D2). The
+				// key is public; it rides the job's parameters.
+				$job_params['encrypted_data_root'] = true;
+				$job_params['recovery_public_key'] = base64_encode(BackupRecoveryKey::public_key());
+			}
 			$steps = JobCommandBuilder::build_install_node($node, $job_params);
 		} catch (Exception $e) {
 			$node->set('mgn_install_state', 'install_failed');

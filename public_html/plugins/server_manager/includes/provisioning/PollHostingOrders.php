@@ -12,6 +12,8 @@
  *   server_manager_getjoinery_api_secret_key
  *   server_manager_provisioning_domain_question_id
  *
+ * @version 1.5 - a hosted order's provision is born with its data root encrypted where data_root_encryption_offered
+ *               is on (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.4 - a provisioned node is given its storage space on the target Where new backups go names, once saved
  * @version 1.3 - a provisioned node is given the target Where new backups go names
  * @version 1.2 - port allocation delegates to JobCommandBuilder::next_container_port (single allocator)
@@ -146,6 +148,11 @@ class PollHostingOrders {
 				$provision->set('cvp_hosting_mode', $hosting_mode);
 				$provision->set('cvp_buyer_email', $admin_email);
 				$provision->set('cvp_buyer_name',  $user_name);
+				// A hosted birth's data root is encrypted by us, where this
+				// management node offers it (one layer, never two).
+				if (CustomerCloudProvision::born_encrypted_by_default($hosting_mode)) {
+					$provision->set('cvp_data_root_encrypted', true);
+				}
 
 				if ($hosting_mode === 'operator') {
 					// Hosted: nothing to connect and nobody to ask. The instance

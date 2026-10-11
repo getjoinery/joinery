@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.59",
+  "version": "1.30.60",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -655,6 +655,24 @@
       "feature": "Hosted tier",
       "kind": "ephemeral",
       "locator": "cvp_customer_cloud_provisions.cvp_admin_pass_sealed"
+    },
+    {
+      "label": "Encrypted data root escrow secret",
+      "feature": "Encrypted data roots",
+      "kind": "regenerable-breaks-things",
+      "locator": "dre_data_root_escrows.dre_secret"
+    },
+    {
+      "label": "Encrypted data root report key",
+      "feature": "Encrypted data roots",
+      "kind": "regenerable-breaks-things",
+      "locator": "dre_data_root_escrows.dre_report_key"
+    },
+    {
+      "label": "Encrypted data root unlock value",
+      "feature": "Encrypted data roots",
+      "kind": "ephemeral",
+      "locator": "dre_data_root_escrows.dre_pending_shared"
     },
     {
       "label": "Server transfer code",

@@ -39,6 +39,9 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.21 - cvp_data_root_encrypted and cvp_provider_disk_encryption: one layer of encryption, never two
+ *                 (specs/hosted_data_promise_disk_encryption.md D1a); data_root_encryption_offered(),
+ *                 born_encrypted_by_default(), provider_layer_reported(), two_layers_reason(), data_root_line()
  * @version 1.20 - cvp_oca_operator_cloud_account_id: which account of ours an operator-mode server is in
  *                 (the cloud_accounts_list spec); a new one with none names the default account
  * @version 1.19 - a node removed for good takes its provisioning record (permanent_delete, was null);
@@ -212,6 +215,16 @@ class CustomerCloudProvision extends SystemBase {
 		'cvp_error'                  => array('type'=>'text'),
 		// The agents' keys as this plane watched the install produce them (16 hex): what a join is matched
 		// against for automatic approval, and consumed when it is approved (JoinAutoApproval).
+		// One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a).
+		// Set when the provision is created, and only while this management node
+		// offers it (data_root_encryption_offered): the server's data root is
+		// encrypted by us, so the provider's own disk encryption is asked off at
+		// create and the install makes the encrypted volume. Never set on an
+		// adopted server, which was born elsewhere.
+		'cvp_data_root_encrypted'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// What the provider says about its own disk encryption on the instance:
+		// enabled, disabled, or unknown when it did not say. NULL: never read.
+		'cvp_provider_disk_encryption' => array('type'=>'varchar(20)', 'allowed_values'=>array('enabled', 'disabled', 'unknown')),
 		'cvp_expected_site_key'      => array('type'=>'varchar(16)'),
 		'cvp_expected_host_key'      => array('type'=>'varchar(16)'),
 		'cvp_keys_captured_time'     => array('type'=>'timestamp(6)'),
@@ -559,6 +572,59 @@ class CustomerCloudProvision extends SystemBase {
 	/** Was this Managed site's instance handed to its customer's own account? */
 	public function is_transferred(): bool {
 		return (string)$this->get('cvp_hosting_mode') === 'transferred';
+	}
+
+	// ── One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a) ──
+
+	/**
+	 * Whether this management node makes encrypted data roots at all: the core
+	 * setting data_root_encryption_offered, off until the launch release. While
+	 * it is off, no path that creates a provision sets cvp_data_root_encrypted.
+	 */
+	public static function data_root_encryption_offered(): bool {
+		return (string)Globalvars::get_instance()->get_setting('data_root_encryption_offered', true, true) === '1';
+	}
+
+	/**
+	 * Whether a new server is born with its data root encrypted when nobody
+	 * chose otherwise: encryption is offered here, and the server is in one of
+	 * our accounts (a hosted birth). A server in a customer's own account is a
+	 * self-hosted machine, born unencrypted until its owner's recovery key is
+	 * proven (D2).
+	 */
+	public static function born_encrypted_by_default(string $hosting_mode): bool {
+		return self::data_root_encryption_offered() && $hosting_mode === 'operator';
+	}
+
+	/**
+	 * The provider's answer about its own disk encryption, from a normalized
+	 * instance array: enabled, disabled, or unknown when it gave none.
+	 */
+	public static function provider_layer_reported(array $instance): string {
+		$layer = (string)($instance['disk_encryption'] ?? '');
+		return in_array($layer, array('enabled', 'disabled'), true) ? $layer : 'unknown';
+	}
+
+	/** Why an encrypted provision whose instance reports the provider's layer on is failed. */
+	public static function two_layers_reason(string $instance_id): string {
+		return "The provider's own disk encryption is on for instance {$instance_id}, and a data root encrypted by us "
+			. 'must be the only layer, so nothing was installed. The instance is left in place: delete it at the provider, '
+			. 'then provision again.';
+	}
+
+	/**
+	 * One line for the node page: whose encryption the server's data sits
+	 * under. Empty when nothing is known (a provision that was never asked).
+	 */
+	public function data_root_line(): string {
+		$encrypted = (bool)$this->get('cvp_data_root_encrypted');
+		$layer = (string)$this->get('cvp_provider_disk_encryption');
+		if (!$encrypted && $layer === '') {
+			return '';
+		}
+		$said = array('enabled' => 'on', 'disabled' => 'off')[$layer] ?? 'unknown';
+		return 'Data root: ' . ($encrypted ? 'encrypted by us' : 'not encrypted by us')
+			. ' · provider\'s disk encryption: ' . $said;
 	}
 
 	/**

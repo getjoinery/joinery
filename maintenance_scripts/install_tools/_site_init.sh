@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.14 - On an encrypted data root the site's config/ is on it too, moved in before
+#                 anything here writes into it (specs/hosted_data_promise_disk_encryption.md D9).
 # VERSION: 3.13 - On a host with a data root, a bare-metal site's uploads, static_files, storage,
 #                 backups, logs and cache (and its test site's logs) are bind mounts of
 #                 /srv/joinery/sites/<site>/<folder>, made before anything is put in them
@@ -219,6 +221,21 @@ site_data_on_data_root() {  # SITE_DIR_NAME FOLDER...
     log "${name}'s data is on the data root (/srv/joinery/sites/${name})"
 }
 
+# On an encrypted data root, config/ is on it too, before anything here
+# writes into it (specs/hosted_data_promise_disk_encryption.md D9): what the
+# release put there already moves in with it, and every key written later
+# lands encrypted because of where it is written. A plain data root keeps
+# config/ on the root disk.
+site_config_on_data_root() {  # SITE_DIR_NAME
+    local name="$1" dir
+    dir="/var/www/html/${name}"
+    grep -q '^backing=luks-' /etc/joinery/data_root 2>/dev/null || return 0
+    mkdir -p "$dir/config"
+    bash "${SCRIPT_DIR}/joinery_data_root.sh" move-in "sites/${name}/config" "$dir/config" >/dev/null \
+        || { log_error "$dir/config could not be put on the encrypted data root (above); its keys would be written to the root disk, so nothing more was done"; exit 1; }
+    log "${name}'s config is on the encrypted data root"
+}
+
 log_error() {
     echo "ERROR: $1" >&2
 }
@@ -271,6 +288,7 @@ log "Creating directory structure..."
 
 if [ "$DOCKER_MODE" = false ]; then
     site_data_on_data_root "$SITENAME" uploads static_files storage backups logs cache
+    site_config_on_data_root "$SITENAME"
 fi
 mkdir -p "$SITE_ROOT/config"
 mkdir -p "$SITE_ROOT/uploads/small"

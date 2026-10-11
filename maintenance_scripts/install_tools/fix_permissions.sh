@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 4.8 - A site whose folders are on the data root waits for it: while it is not mounted
+#              (an encrypted one locked) this exits 0 saying so, and changes nothing
+#              (specs/hosted_data_promise_disk_encryption.md D9).
 #VERSION 4.7 - config/release_statement_keys, transparency_log_keys, release_log_required and
 #              release_log_optional are pinned root:root 0644 and pruned from the config/ sweep
 #              (release_transparency D5, D6)
@@ -167,6 +170,17 @@ SITE_ROOT="/var/www/html/$SITE_NAME"
 if [ ! -d "$SITE_ROOT" ]; then
     echo -e "${RED}ERROR: Site directory $SITE_ROOT does not exist.${NC}"
     exit 1
+fi
+
+# A site whose folders are on the data root waits for it. While it is not
+# mounted (an encrypted one locked, or one still starting) those folders,
+# config/ among them on an encrypted machine, are locked empty mountpoints,
+# nothing serves, and a chmod on them would fail
+# (specs/hosted_data_promise_disk_encryption.md D9).
+if grep -q " ${SITE_ROOT}/" /etc/joinery/data_binds 2>/dev/null \
+   && [ -f "$SCRIPT_DIR/joinery_data_root.sh" ] && ! bash "$SCRIPT_DIR/joinery_data_root.sh" check >/dev/null 2>&1; then
+    echo "fix_permissions: ${SITE_NAME}'s folders are on the data root, which is not mounted yet; nothing to fix until it is"
+    exit 0
 fi
 
 echo -e "${GREEN}Fixing permissions for $SITE_NAME (mode: $MODE)${NC}"

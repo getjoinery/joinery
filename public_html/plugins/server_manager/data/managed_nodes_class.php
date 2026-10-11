@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.53 - mgn_uptime_locked_since: an encrypted data root answering locked
  * @version 1.52 - soft_delete() retires an emptied Docker host record; undelete() places a container site back on one
  * @version 1.51 - adopt_reported_container(): a node whose agent says it runs in a container is named and placed as one
  * @version 1.50 - mgn_cloud_account is where the node is hosted (CloudAccounts::HOSTED_AT); mgn_site_removed_time, when
@@ -306,6 +307,9 @@ class ManagedNode extends SystemBase {
 		// TCP connection on the port they exist to serve.
 		'mgn_uptime_tcp_port'             => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_last_status'          => array('type'=>'varchar(20)'),
+		// Since when the machine has answered locked: its encrypted data root
+		// waiting for its key (specs/hosted_data_promise_disk_encryption.md D2b).
+		'mgn_uptime_locked_since'         => array('type'=>'timestamp(6)'),
 		'mgn_uptime_consecutive_failures' => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
 		'mgn_uptime_down_since'           => array('type'=>'timestamp(6)'),
 		// What the newest failing probe saw while the site is down: the

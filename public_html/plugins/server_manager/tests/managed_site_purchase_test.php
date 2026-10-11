@@ -28,7 +28,13 @@
  *  - **The taken name** offers an alternate on the sites page, at the paid
  *    price or less, and returns the row to the queue.
  *
+ *  - **One layer, never two.** A hosted activation is marked for an encrypted
+ *    data root only where data_root_encryption_offered is on.
+ *
  * Run: php plugins/server_manager/tests/managed_site_purchase_test.php
+ *
+ * @version 1.1 - activation sets cvp_data_root_encrypted only where data root encryption is offered
+ *                (specs/hosted_data_promise_disk_encryption.md D1a)
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -416,8 +422,14 @@ $oir = new MultiOrderItemRequirement(array('order_item_id' => $item->key));
 foreach ($oir as $row) { harness_register_row('oir_order_item_requirements', 'oir_order_item_requirement_id', $row->key); }
 
 MspFulfillment::$alerts = array();
+// While this management node does not offer an encrypted data root, a hosted
+// birth is exactly as before (specs/hosted_data_promise_disk_encryption.md).
+harness_set_setting_mem('data_root_encryption_offered', '0');
 $f1 = $provider->fulfill($buyer, $managed, $item, $order, 1);
 check((int)($f1['ref_id'] ?? 0) === (int)$draft->key, 'fulfill activates the draft the line names', var_export($f1, true));
+$draft->load();
+check(!$draft->get('cvp_data_root_encrypted'),
+	'with data root encryption not offered, the hosted site is not marked for an encrypted data root');
 check(($f1['label'] ?? '') === 'Server for msp-register-test.com', 'the order line says which server');
 $draft->load();
 check($draft->get('cvp_status') === 'ready', 'the row is ready for the pipeline');
@@ -470,9 +482,15 @@ check(count($filed2) === 1, 'nor a second registration row');
 // An owned domain: activated, no registration row, the welcome email will
 // carry the A record.
 list($order_own, $item_own) = msp_paid_line($buyer, $managed, $managed_version, $data_own);
+// Where it is offered, a hosted birth is marked for an encrypted data root at
+// activation, the moment the product says the server is ours (D1a).
+harness_set_setting_mem('data_root_encryption_offered', '1');
 $f3 = $provider->fulfill($buyer, $managed, $item_own, $order_own, 1);
+harness_set_setting_mem('data_root_encryption_offered', '0');
 $own->load();
 check((int)($f3['ref_id'] ?? 0) === (int)$own->key && $own->get('cvp_status') === 'ready', 'an owned-domain draft activates too');
+check((bool)$own->get('cvp_data_root_encrypted'),
+	'with data root encryption offered, the hosted site is marked for an encrypted data root at activation');
 $none = new MultiRegisteredDomain(array('external_order_item_id' => (int)$item_own->key, 'deleted' => false));
 check(count($none) === 0, 'with no registration row');
 check(!JobResultProcessor::plane_registered_domain($own), 'so the welcome email carries the A-record instruction');

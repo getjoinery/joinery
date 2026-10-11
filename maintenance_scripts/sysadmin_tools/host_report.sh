@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.19 - data_root_encryption: an encrypted data root's state - open or locked, what opened
+#                it, the unlock identity's public half, the escrow holder and slot, the recovery
+#                recipient's fingerprint and the break-glass box (sealed, so public); "none" where
+#                the data root is not encrypted (specs/hosted_data_promise_disk_encryption.md WP2).
 # Version: 1.18 - disk_pool says "not_mounted" where this host declares a data root
 #                (/etc/joinery/data_root) that is not mounted, and "none" only where it has
 #                none: the node page offers to move a host's data only on the second
@@ -409,6 +413,41 @@ emit_disk_pool() {
         "$(printf '%s' "$mp" | tr -cd 'A-Za-z0-9._/-' | head -c 200)" "$(json_str "$fstype")" \
         "$([[ ",${opts:-}," == *",prjquota,"* ]] && echo true || echo false)" \
         "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" "$(json_num_or_unknown "${avail:-}")"
+}
+
+# The encrypted data root (specs/hosted_data_promise_disk_encryption.md D3,
+# D2b): whether it is open and what opened it, the unlock identity's PUBLIC
+# half (the private seed beside it is never read), the escrow holder and key
+# slot, the recovery recipient's fingerprint, and the break-glass box, which
+# is sealed to the recovery key and so public. Through this report, which the
+# node's own key signs, its management node learns which unlock identity is
+# this node's. "none" where the data root is not encrypted.
+emit_data_root_encryption() {
+    local conf="${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}" dir="${HOST_REPORT_DATA_ROOT_DIR:-/etc/joinery/data-root}"
+    local backing sidecar open=false identity holder slot recipient fpr sealed opened held
+    backing="$(awk -F= '$1=="backing" { print $2; exit }' "$conf" 2>/dev/null)"
+    [[ "$backing" == luks-* ]] || { printf '"none"'; return; }
+    [[ -e "${HOST_REPORT_MAPPER:-/dev/mapper/joinery-data}" ]] && open=true
+    kv() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$2" 2>/dev/null; }
+    sidecar="$(kv sidecar "$conf")"
+    identity="$(kv public_key "$dir/unlock_identity" | tr -cd 'A-Za-z0-9+/=' | head -c 64)"
+    holder="$(kv url "$dir/holder" | tr -cd 'A-Za-z0-9.:/-' | head -c 200)"
+    slot="$(kv slot "$dir/holder")"
+    recipient="$(kv fingerprint "$dir/recovery_recipient" | tr -cd '0-9a-f' | head -c 64)"
+    fpr="$(grep -o '"fingerprint": *"[0-9a-f]*"' "${HOST_REPORT_ROOT:-}${sidecar}" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' | head -n 1)"
+    sealed="$(grep -o '"sealed": *"[A-Za-z0-9+/=]*"' "${HOST_REPORT_ROOT:-}${sidecar}" 2>/dev/null | head -n 1 | sed 's/.*: *"//; s/"$//' | tr -cd 'A-Za-z0-9+/=' | head -c 400)"
+    opened="$(head -c 200 /run/joinery/data-root.opened-by 2>/dev/null | tr -cd 'A-Za-z0-9 ,.:/-')"
+    # A reboot an update asked for and the tick held back (D4): when, and why.
+    held="$(head -c 400 /run/joinery/data-root.reboot-held 2>/dev/null | tr -cd 'A-Za-z0-9 ,.:/()_-')"
+    # An encryption or its undo running (D5): which, and how far, in percent.
+    local mode pct="" progress
+    mode="$(kv reencrypt "$conf" | tr -cd 'a-z')"
+    if [[ -n "$mode" ]]; then
+        progress="$(head -c 600 /run/joinery/data-root-encrypt.progress 2>/dev/null)"
+        pct="$(printf '%s' "$progress" | sed -n 's/.*"device_bytes":"\{0,1\}\([0-9]*\).*"device_size":"\{0,1\}\([0-9]*\).*/\1 \2/p' | awk '$2 > 0 { printf "%.1f", $1 * 100 / $2 }')"
+    fi
+    printf '{"backing":%s,"open":%s,"opened_by":"%s","identity":"%s","holder":"%s","slot":%s,"recipient_fingerprint":"%s","box_fingerprint":"%s","box_sealed":"%s","reboot_held":"%s","reencrypt":"%s","reencrypt_percent":"%s"}' \
+        "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$fpr" "$sealed" "$held" "$mode" "$pct"
 }
 
 meminfo_kb() { awk -v k="$1" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/null; }
@@ -1033,6 +1072,7 @@ printf '"sshd":%s,' "$(emit_sshd)"
 printf '"root_ssh":%s,' "$(emit_root_ssh)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"disk_pool":%s,' "$(emit_disk_pool)"
+printf '"data_root_encryption":%s,' "$(emit_data_root_encryption)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"

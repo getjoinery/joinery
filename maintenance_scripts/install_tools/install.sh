@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.10 - install.sh server|docker --encrypted-data-root --recovery-public-key=KEY: the data root is born on a
+#              LUKS2 volume whose break-glass copy is sealed to KEY; the agent binary is placed first, switched off
+#              (specs/hosted_data_promise_disk_encryption.md WP3).
 #VERSION 3.09 - Every new host keeps its data on the data root (specs/one_data_root.md WP2, D4). install.sh server
 #               makes it and binds Postgres, the Postfix queue and rspamd onto it before their packages are
 #               installed; install.sh docker makes it for Docker's data on every new Docker host, not only a
@@ -540,7 +543,7 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       Docker keeps its data on the host's data root, /srv/joinery/docker: XFS with project
 #                       quotas, made before Docker's first start and grown as it fills
 #                       --multi-tenant: root in a container is not root on the host (userns-remap), so each
@@ -550,7 +553,9 @@
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#                       --encrypted-data-root: the data root on a LUKS2 volume, its key sealed to the recovery key
+#                       whose public half KEY is (specs/hosted_data_promise_disk_encryption.md)
 #                       Postgres, the mail queue and rspamd keep their data on the host's data root, /srv/joinery
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
 #   ./install.sh list                                # List existing sites
@@ -2430,6 +2435,8 @@ do_docker_install() {
             --node-name=*) NODE_NAME="${arg#--node-name=}" ;;
             --multi-tenant) MULTI_TENANT=1 ;;
             --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
+            --encrypted-data-root) ENCRYPTED_DATA_ROOT=1 ;;
+            --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
@@ -2523,6 +2530,10 @@ do_docker_install() {
     # the package starts the daemon, which would make its data on the root
     # disk, with no disk limits.
     print_step "Making the data root (/srv/joinery) for Docker's data..."
+    if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
+        encrypted_data_root_prepare || exit 1
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" create --encrypted ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
+    fi
     bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
     print_success "Docker keeps its data at /srv/joinery/docker: XFS with project quotas, grown as it fills (docker_disk_pool.sh)"
 
@@ -2943,6 +2954,45 @@ detect_php_version() {
 # root, and a place that holds data stays where it is: moving data is
 # joinery_data_root.sh migrate's, never a side effect of an install.
 SERVER_DATA_BINDS=("postgresql /var/lib/postgresql" "mail/postfix /var/spool/postfix" "mail/rspamd /var/lib/rspamd")
+
+# An encrypted data root (specs/hosted_data_promise_disk_encryption.md WP3):
+# --encrypted-data-root, with --recovery-public-key=KEY, the recovery key's
+# public half its break-glass copy is sealed to (a hosted machine's is its
+# management node's own; a self-hosted owner's is the one they already hold).
+# The agent seals the copy. Where none is installed yet, the release's own
+# binary (agent_dist, checked against its manifest) is unpacked into /run for
+# this and nothing else: the agent itself lands where it always does, with the
+# site install, or the Docker host's at the end of install.sh docker, and that
+# is the one that opens the volume at every boot.
+ENCRYPTED_DATA_ROOT=0
+RECOVERY_PUBLIC_KEY=""
+encrypted_data_root_prepare() {
+    local tool="$SCRIPT_DIR/joinery_data_root.sh" dist_dir="$SCRIPT_DIR/../../public_html/agent_dist"
+    if [ -z "$RECOVERY_PUBLIC_KEY" ]; then
+        print_error "--encrypted-data-root needs --recovery-public-key=KEY: the public half of the recovery key its break-glass copy is sealed to"
+        return 1
+    fi
+    if [ ! -x /usr/local/bin/joinery-agent ]; then
+        local arch gz want got
+        case "$(uname -m)" in
+            x86_64) arch="linux-amd64" ;;
+            aarch64) arch="linux-arm64" ;;
+            *) print_error "No agent build for $(uname -m): an encrypted data root needs the agent"; return 1 ;;
+        esac
+        gz="$dist_dir/joinery-agent-${arch}.gz"
+        want="$(tr -d '\n ' < "$dist_dir/manifest.json" 2>/dev/null | grep -o "\"${arch}\":{[^}]*}" | grep -o '"sha256":"[0-9a-f]*"' | cut -d'"' -f4)"
+        got="$(sha256sum "$gz" 2>/dev/null | awk '{ print $1 }')"
+        if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            print_error "The release's agent ($gz) does not match its manifest; an encrypted data root is not made with it"
+            return 1
+        fi
+        mkdir -p /run/joinery && chmod 755 /run/joinery
+        gunzip -c "$gz" > /run/joinery/agent-for-install && chmod 700 /run/joinery/agent-for-install \
+            || { print_error "Could not unpack the release's agent"; return 1; }
+        export JOINERY_AGENT_BIN=/run/joinery/agent-for-install
+    fi
+    bash "$tool" recipient "$RECOVERY_PUBLIC_KEY" || { print_error "That recovery public key was refused (above)"; return 1; }
+}
 server_data_root() {  # [SIZE|DEVICE]
     local want="${1:-}" tool="$SCRIPT_DIR/joinery_data_root.sh" rc=0 pair rel target held=""
     bash "$tool" check >/dev/null 2>&1 || rc=$?
@@ -2961,7 +3011,12 @@ server_data_root() {  # [SIZE|DEVICE]
                return 0
            fi
            print_step "Making the data root (/srv/joinery)..."
-           bash "$tool" create ${want:+"$want"} || { print_error "The data root could not be made (above). Nothing that keeps data was installed."; return 1; } ;;
+           if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
+               encrypted_data_root_prepare || return 1
+               bash "$tool" create --encrypted ${want:+"$want"} || { print_error "The encrypted data root could not be made (above). Nothing that keeps data was installed."; return 1; }
+           else
+               bash "$tool" create ${want:+"$want"} || { print_error "The data root could not be made (above). Nothing that keeps data was installed."; return 1; }
+           fi ;;
     esac
     for pair in "${SERVER_DATA_BINDS[@]}"; do
         rel="${pair%% *}"; target="${pair#* }"
@@ -2992,6 +3047,8 @@ do_server_setup() {
             --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
             --allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1 ;;
             --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
+            --encrypted-data-root) ENCRYPTED_DATA_ROOT=1 ;;
+            --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
             --password-file=*) PASSWORD_FILE="${arg#*=}" ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac

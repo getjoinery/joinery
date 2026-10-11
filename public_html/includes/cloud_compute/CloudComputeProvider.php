@@ -13,7 +13,15 @@
  *   status string  provider status ('provisioning', 'booting', 'running', ...)
  *   ip     string  first public IPv4, '' until assigned
  *   label  string  provider-side label
+ *   disk_encryption  string|null  the provider's own disk encryption on the
+ *                    instance, 'enabled' or 'disabled'; null when the provider
+ *                    does not say (unknown, never read as on)
  *
+ * @version 1.9 - CloudProviderEvents: an instance's activity log, and the instance an address belongs to
+ *                (Tier 2 of specs/hosted_data_promise_disk_encryption.md D3)
+ * @version 1.8 - createInstance() takes disk_encryption and swap_size; the instance array reports disk_encryption;
+ *                CloudRegionFacts: a region's site type and whether the provider's disk encryption is offered there
+ *                (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.7 - CloudAccountCleanup: an account's own company name, its volumes, and deleting one; each
  *                listed instance carries its tags (specs/test_cloud_account_and_prod_management.md WP3)
  * @version 1.6 - CloudMachineTransfer: an account's instances and each one's transfer this month
@@ -47,6 +55,15 @@ interface CloudComputeProvider {
 	 *   stackscript_id  string  provider-side first-boot script for a region
 	 *                           whose metadata service cannot carry user_data
 	 *   stackscript_data array  its named fields
+	 *   disk_encryption string  'enabled' or 'disabled': the provider's own disk
+	 *                           encryption on the new instance; absent = the
+	 *                           provider's default. A data root we encrypt asks
+	 *                           'disabled', so the machine has one layer, never
+	 *                           two. A driver whose provider cannot turn its
+	 *                           layer off (in that region, or at all) throws on
+	 *                           'disabled' rather than stacking silently.
+	 *   swap_size       int     the provider-made swap disk in MB; 0 = none.
+	 *                           Absent = the provider's default.
 	 *
 	 * @return array Normalized instance array.
 	 * @throws CloudComputeException on any API failure.
@@ -241,6 +258,66 @@ interface CloudAddressSwap {
 }
 
 class CloudComputeException extends Exception {}
+
+/**
+ * Optional capability: what happened to a machine at the provider, from its
+ * activity log, and which machine an address belongs to now
+ * (specs/hosted_data_promise_disk_encryption.md D3, Tier 2: an escrow holder
+ * refuses a boot after a rescue boot or a root-password reset). The caller
+ * asks `instanceof CloudProviderEvents`.
+ */
+interface CloudProviderEvents {
+
+	/**
+	 * The instance's events since $since_utc ('Y-m-d H:i:s', UTC), oldest
+	 * first, each:
+	 *   action   string  the provider's own name for it
+	 *   time     string  'Y-m-d H:i:s' UTC
+	 *   status   string  the provider's (started, finished, failed, ...)
+	 *   message  string
+	 *   entity   string  what it happened to: 'linode', 'disk', 'backups', ...
+	 *   via      string  its secondary entity, 'type:label', or ''
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function instanceEvents(string $instance_id, string $since_utc): array;
+
+	/**
+	 * The instance an address is assigned to now; '' when it is assigned to
+	 * none in this account.
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function instanceForAddress(string $address): string;
+}
+
+/**
+ * Optional capability: what a region offers, read before a create that depends
+ * on it (specs/hosted_data_promise_disk_encryption.md D1a). The caller asks
+ * `instanceof CloudRegionFacts`.
+ */
+interface CloudRegionFacts {
+
+	/**
+	 * One region as the provider describes it:
+	 *   id               string
+	 *   label            string
+	 *   site_type        string  'core', 'distributed' (an edge site), or '' when not reported
+	 *   disk_encryption  bool    the provider offers its own disk encryption there,
+	 *                            and so can be asked to turn it off
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function regionInfo(string $region): array;
+
+	/**
+	 * Every region the account may create in, keyed by id, each shaped as
+	 * regionInfo() returns it.
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function regions(): array;
+}
 
 /**
  * Optional capability: each machine's outbound transfer this billing month

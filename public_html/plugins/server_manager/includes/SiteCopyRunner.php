@@ -98,6 +98,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.17 - copy_born_encrypted(): the copy's new server is born with its data root encrypted by the form's tick,
+ *                 on by default in one of our accounts, and never while data_root_encryption_offered is off
+ *                 (specs/hosted_data_promise_disk_encryption.md D1a, C-2)
  * @version 1.16 - the copy's server goes in any account this node holds, ours ('oca:<id>') or a
  *                 customer's ('cca:<id>'); ours is our server, whoever asked (cloud_accounts_list)
  * @version 1.15 - key_request carries manifest_url, a link to the chain's newest manifest signed for as long as
@@ -546,7 +549,8 @@ class SiteCopyRunner {
 	 * of ours is our server, recorded against the admin who asked; one in a
 	 * customer's account belongs to that customer.
 	 *
-	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw)
+	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw),
+	 *                    data_root_encrypted (bool, the copy form's tick; absent = on for one of our accounts)
 	 */
 	public static function start_new_server(ManagedNode $source, array $opts, $user_id, string $from = SiteCopy::FROM_SOURCE): SiteCopy {
 		self::refuse_start($source, $from);
@@ -596,6 +600,9 @@ class SiteCopyRunner {
 		if ($carried !== '') {
 			$provision->set('cvp_root_ssh_keys', $carried);
 		}
+		if (self::copy_born_encrypted($opts, $target['hosting_mode'])) {
+			$provision->set('cvp_data_root_encrypted', true);
+		}
 		$provision->prepare();
 		$provision->save();
 
@@ -603,6 +610,30 @@ class SiteCopyRunner {
 		$copy->set('scp_cvp_customer_cloud_provision_id', (int)$provision->key);
 		$copy->save();
 		return $copy;
+	}
+
+	/**
+	 * Whether the copy's new server is born with its data root encrypted by us
+	 * (specs/hosted_data_promise_disk_encryption.md D1a, C-2 in D7): never while
+	 * this management node does not offer it; otherwise as the copy form's
+	 * "data root encrypted" tick says, and with no answer, on for a server in
+	 * one of our accounts.
+	 */
+	public static function copy_born_encrypted(array $opts, string $hosting_mode): bool {
+		if (!CustomerCloudProvision::data_root_encryption_offered()) {
+			return false;
+		}
+		// Born encrypted only in one of our accounts: its break-glass copy is
+		// sealed to our recovery key. A server in its owner's account is
+		// sealed to its owner's (D2), so it is born plain and encrypted from
+		// its own Backups page.
+		if ($hosting_mode !== 'operator') {
+			return false;
+		}
+		if (array_key_exists('data_root_encrypted', $opts)) {
+			return (bool)$opts['data_root_encrypted'];
+		}
+		return CustomerCloudProvision::born_encrypted_by_default($hosting_mode);
 	}
 
 	/** Record a copy onto a server the owner brings; the page shows them the command. */

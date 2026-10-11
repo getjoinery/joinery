@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.14 - "Data root encrypted" on the new-server form where data_root_encryption_offered is on, ticked when
+ *                 the first account offered is one of ours (specs/hosted_data_promise_disk_encryption.md C-2)
  * @version 1.13 - the Cloud account list is every account held, ours first with the default chosen (cloud_accounts_list)
  * @version 1.12 - the key page's note asks the owner to check the date the backup's provider says it was stored, says
  *               when a copy's release is too old for its page to show it, and the taken key's step shows the date the
@@ -275,6 +277,15 @@ if (!$site_copy) {
 			}
 		} elseif (!$copy_keys['known']) {
 			echo '<p class="small text-muted">This site\'s server has not reported its root SSH keys, so none can be carried; the copy will have none.</p>';
+		}
+		// One layer of encryption, never two (C-2 in specs/hosted_data_promise_disk_encryption.md D7):
+		// on by default when the account chosen first is one of ours.
+		if (CustomerCloudProvision::data_root_encryption_offered()) {
+			$fw->checkboxinput('copy_data_root_encrypted', 'Data root encrypted', [
+				'checked'  => strpos((string)$targets['default'], 'oca:') === 0,
+				'helptext' => 'The new server\'s data is encrypted by us and the provider\'s own disk encryption is turned off, '
+					. 'so it has one layer. For a server in one of our accounts only: one in its owner\'s account is born plain, '
+					. 'and encrypted from its own Backups page, sealed to its owner\'s recovery key.']);
 		}
 		$fw->submitbutton('btn_copy_new', 'Create the server and copy');
 		$fw->end_form();
