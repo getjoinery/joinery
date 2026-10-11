@@ -16,6 +16,7 @@
  * the Management Node page, from the button here or from the switch there:
  * never a write made because somebody viewed a page.
  *
+ * @version 1.1 - Calmer wording: what the node looks at and why, what is hidden, and where the switch is
  * @version 1.0
  */
 class AgentLogAccessNotice {
@@ -32,11 +33,9 @@ class AgentLogAccessNotice {
 			return '';
 		}
 		return '<div class="alert alert-info d-flex flex-wrap align-items-center gap-2" role="alert">'
-			. '<div style="flex:1 1 30rem;"><strong>Your management node can read this site\'s logs.</strong> '
-			. 'It can ask for the last lines of the error and task logs and the newest rows of the login, request, event, '
-			. 'form-error and webhook logs. Passwords, keys, tokens, addresses and the personal half of email addresses are '
-			. 'masked on this machine before anything is sent. The switch is on the '
-			. '<a href="/admin/admin_management_node">Management Node</a> page.</div>'
+			. '<div style="flex:1 1 30rem;">Your management node can look at this site\'s error and activity logs when it needs to '
+			. 'troubleshoot. Passwords, keys, tokens and email addresses are hidden on this machine before anything is sent. '
+			. 'You can turn this off any time on the <a href="/admin/admin_management_node">Management Node</a> page.</div>'
 			. '<form method="POST" action="/admin/admin_management_node" class="m-0">'
 			. '<input type="hidden" name="action" value="log_access_notice_seen">'
 			. '<button type="submit" class="btn btn-sm btn-outline-secondary">Got it</button>'
