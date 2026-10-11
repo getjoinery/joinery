@@ -8,7 +8,7 @@
  * its provision record, and only creating a server writes one. A node that
  * joined from another management node has none, so both refuse for it here.
  * Adoption finds the one server the node runs on, among the accounts this
- * management node holds (the operator token and each connected account), by
+ * management node holds (each of ours and each connected account), by
  * the node's addresses — the match MachineTransferWatch makes every day — and
  * writes an admin-origin provision in install mode 'adopted'.
  *
@@ -16,6 +16,7 @@
  * is never one somebody bought, so it is never billed, put on a trial or
  * handed to a customer.
  *
+ * @version 1.2 - every account of ours is searched, and the record names the one the server is in (cloud_accounts_list)
  * @version 1.1 - the node's Hosted at follows the account its server was found on
  * @version 1.0
  */
@@ -58,7 +59,7 @@ class CloudServerAdoption {
 	 * The one server the node runs on:
 	 *   ok        bool
 	 *   reason    string  why not, when not ok
-	 *   account   string  'operator' or 'cca:<id>'
+	 *   account   string  'oca:<id>' (ours) or 'cca:<id>' (a customer's)
 	 *   instance  array   the provider's listing entry (id, label, region, ipv4_public, ipv6, created)
 	 *
 	 * A match by the node's own host beats one by what its agent reported at
@@ -76,7 +77,7 @@ class CloudServerAdoption {
 		}
 		$problems = array();
 		if ($accounts === null) {
-			list($accounts, $problems) = MachineTransferWatch::accounts();
+			list($accounts, $problems) = HeldCloudAccounts::drivers();
 		}
 		$all = MachineTransferWatch::node_addresses($resolve ?? array('MachineTransferWatch', 'resolve'));
 		if (!isset($all[(int)$node->key])) {
@@ -114,7 +115,7 @@ class CloudServerAdoption {
 			}
 		}
 		return self::no('No server on the cloud accounts this management node holds has this node\'s address'
-			. ($accounts ? '' : ' (it holds none: set the operator cloud token on Provisioning Setup, or connect an account)')
+			. ($accounts ? '' : ' (it holds none: add one on the Hosting tab of Provisioning Setup)')
 			. '.' . ($problems ? ' ' . implode(' ', $problems) : ''));
 	}
 
@@ -149,14 +150,15 @@ class CloudServerAdoption {
 
 		$account = $match['account'];
 		$provision = new CustomerCloudProvision(NULL);
-		if ($account === 'operator') {
+		if (preg_match('/^oca:(\d+)$/', $account, $m)) {
 			$provision->set('cvp_hosting_mode', 'operator');
+			$provision->set('cvp_oca_operator_cloud_account_id', (int)$m[1]);
 		} elseif (preg_match('/^cca:(\d+)$/', $account, $m)) {
 			$provision->set('cvp_hosting_mode', 'customer');
 			$provision->set('cvp_cca_customer_cloud_account_id', (int)$m[1]);
 		} else {
 			throw new CloudServerAdoptionException('The server was found on account "' . $account
-				. '", which is neither the operator token nor a connected account. Nothing was adopted.');
+				. '", which is neither one of ours nor a connected account. Nothing was adopted.');
 		}
 		$domain = (string)(parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: $node->get('mgn_host'));
 		$provision->set('cvp_origin', 'admin');
@@ -188,8 +190,7 @@ class CloudServerAdoption {
 
 	/** Plain words for an account key. */
 	public static function account_name(string $key): string {
-		return $key === 'operator' ? 'the operator account'
-			: (preg_match('/^cca:(\d+)$/', $key, $m) ? 'connected account #' . $m[1] : $key);
+		return HeldCloudAccounts::name($key);
 	}
 
 	private static function no(string $reason): array {

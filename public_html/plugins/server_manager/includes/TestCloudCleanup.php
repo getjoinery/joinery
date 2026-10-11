@@ -3,18 +3,21 @@
  * TestCloudCleanup — deletes test servers and volumes past their age on a
  * cloud account kept for testing (specs/test_cloud_account_and_prod_management.md WP3).
  *
- * The safety catch is a property of the account, not of this site: a run
- * deletes only when the operator token's account carries the company name
- * COMPANY, read from the provider on every run. A live account never carries
- * it, so a live token on this site, or the task turned on at a production
- * management node, deletes nothing; the run stops and its incident names the
- * account it found. There is no "this is a test site" setting to flip in the
- * wrong place.
+ * A run covers every cloud account of ours flagged test (the company name
+ * read when the account was added or last checked), each on its own. The
+ * safety catch is a property of the account, not of this site: an account is
+ * cleaned only when it carries the company name COMPANY, read from the
+ * provider again on every run. A live account never carries it, so a live
+ * account flagged by mistake deletes nothing; its run stops and the incident
+ * names the account it found. There is no "this is a test site" setting to
+ * flip in the wrong place.
  *
  * Never deleted: anything tagged KEEP_TAG at the provider, and a server at
  * the address of a live managed node here (it is listed as held, so the
  * operator tags it or removes the node first).
  *
+ * @version 1.2 - every test account of ours, each behind its own safety catch; the state is one entry per account
+ *                (cloud_accounts_list)
  * @version 1.1 - the company name Linode accepts: Joinery Test disposable (it refuses parentheses)
  * @version 1.0
  */
@@ -36,10 +39,15 @@ class TestCloudCleanup {
 		'account:read_only'  => 'reading the account\'s company name, the safety catch',
 	);
 
-	/** The operator token's driver, or null when no token is set. */
-	public static function driver() {
-		$token = ProvisionCustomerCloud::operator_compute_token();
-		return $token === '' ? null : new LinodeComputeDriver($token);
+	/** The accounts of ours flagged test that can be used now. */
+	public static function accounts(): array {
+		$out = array();
+		foreach (OperatorCloudAccount::held() as $account) {
+			if ($account->get('oca_is_test') && $account->usable()) {
+				$out[] = $account;
+			}
+		}
+		return $out;
 	}
 
 	/** The age limit in hours (the setting, or the default when it is not a positive number). */
@@ -134,27 +142,52 @@ class TestCloudCleanup {
 	}
 
 	/**
-	 * One run: plan, then delete. Records the outcome for the setup page and
-	 * the incident. Returns the scheduled task's {status, message}.
+	 * One run over every test account (or, given $accounts as
+	 * [name => driver], over those): plan, then delete, each account on its
+	 * own. Records one outcome per account for the setup page and the
+	 * incident. Returns the scheduled task's {status, message}.
 	 */
-	public static function run($driver = null, ?callable $resolve = null, ?int $now = null): array {
+	public static function run(?array $accounts = null, ?callable $resolve = null, ?int $now = null): array {
 		$now = $now ?? time();
-		$driver = $driver ?? self::driver();
-		if ($driver === null) {
-			return array('status' => 'skipped', 'message' => 'No operator cloud token is set on this site.');
+		if ($accounts === null) {
+			$accounts = array();
+			foreach (self::accounts() as $account) {
+				$accounts[$account->label()] = $account->driver();
+			}
+		}
+		if (!$accounts) {
+			self::save_state(array());
+			return array('status' => 'skipped', 'message' => 'No cloud account of ours here is the test account.');
 		}
 		$nodes = MachineTransferWatch::node_addresses($resolve ?? array('MachineTransferWatch', 'resolve'));
+		$states = array();
+		$messages = array();
+		$status = 'success';
+		foreach ($accounts as $name => $driver) {
+			list($state, $result) = self::run_one((string)$name, $driver, $nodes, $now);
+			$states[] = $state;
+			$messages[] = $name . ': ' . $result['message'];
+			if ($result['status'] === 'error') {
+				$status = 'error';
+			}
+		}
+		self::save_state($states);
+		return array('status' => $status, 'message' => implode(' ', $messages));
+	}
+
+	/** One account's run: [its state, its {status, message}]. */
+	private static function run_one(string $name, $driver, array $nodes, int $now): array {
+		$base = array('name' => $name, 'time' => gmdate('Y-m-d H:i:s', $now));
 		try {
 			$plan = self::plan($driver, $nodes, $now, self::max_age_hours());
 		} catch (CloudComputeException $e) {
-			self::save_state(array('time' => gmdate('Y-m-d H:i:s', $now), 'outcome' => 'failed',
-				'reason' => 'The account\'s servers or volumes could not be listed: ' . $e->getMessage()));
-			return array('status' => 'error', 'message' => 'Nothing deleted: the account could not be listed (' . $e->getMessage() . ').');
+			return array($base + array('outcome' => 'failed',
+				'reason' => 'The account\'s servers or volumes could not be listed: ' . $e->getMessage()),
+				array('status' => 'error', 'message' => 'Nothing deleted: the account could not be listed (' . $e->getMessage() . ').'));
 		}
 		if (!$plan['safe']) {
-			self::save_state(array('time' => gmdate('Y-m-d H:i:s', $now), 'outcome' => 'refused',
-				'account' => $plan['account'], 'reason' => $plan['reason']));
-			return array('status' => 'error', 'message' => 'Nothing deleted. ' . $plan['reason']);
+			return array($base + array('outcome' => 'refused', 'account' => $plan['account'], 'reason' => $plan['reason']),
+				array('status' => 'error', 'message' => 'Nothing deleted. ' . $plan['reason']));
 		}
 
 		$deleted = array('instances' => array(), 'volumes' => array());
@@ -181,9 +214,9 @@ class TestCloudCleanup {
 		$held = array_map(function ($h) {
 			return $h['label'] . ' (' . implode(', ', $h['addresses']) . '; node #' . implode(', #', $h['node_ids']) . ')';
 		}, $plan['held']);
-		self::save_state(array('time' => gmdate('Y-m-d H:i:s', $now), 'outcome' => 'ran', 'account' => $plan['account'],
+		$state = $base + array('outcome' => 'ran', 'account' => $plan['account'],
 			'deleted_instances' => $deleted['instances'], 'deleted_volumes' => $deleted['volumes'],
-			'held' => $held, 'kept' => $plan['kept'], 'failures' => $failures));
+			'held' => $held, 'kept' => $plan['kept'], 'failures' => $failures);
 
 		$message = 'Deleted ' . count($deleted['instances']) . ' server(s)'
 			. ($deleted['instances'] ? ' (' . implode(', ', $deleted['instances']) . ')' : '')
@@ -195,26 +228,38 @@ class TestCloudCleanup {
 		if ($failures) {
 			$message .= ' Failed: ' . implode('; ', $failures) . '.';
 		}
-		return array('status' => $failures ? 'error' : 'success', 'message' => $message);
+		return array($state, array('status' => $failures ? 'error' : 'success', 'message' => $message));
 	}
 
 	/**
-	 * The incident while the task is on: the last run refused (the safety
-	 * catch failed) or could not list the account. Null otherwise.
+	 * The incident while the task is on: the last run refused an account
+	 * (its safety catch failed) or could not list it. Null otherwise. The
+	 * first such account speaks; the setup page lists them all.
 	 */
-	public static function condition(array $state, ?array $task): ?array {
-		if (!$task || !$task['active'] || !in_array($state['outcome'] ?? '', array('refused', 'failed'), true)) {
+	public static function condition(array $states, ?array $task): ?array {
+		if (!$task || !$task['active']) {
+			return null;
+		}
+		$state = null;
+		foreach ($states as $one) {
+			if (is_array($one) && in_array($one['outcome'] ?? '', array('refused', 'failed'), true)) {
+				$state = $one;
+				break;
+			}
+		}
+		if ($state === null) {
 			return null;
 		}
 		if ($state['outcome'] === 'refused') {
 			return array(
 				'severity' => IncidentRecord::SEVERITY_WARNING,
-				'title'    => 'The test-account cleanup stopped: the cloud token here is not for an account marked disposable',
+				'title'    => 'The test-account cleanup stopped: an account flagged test here is not marked disposable',
 				'detail'   => array(
-					'Account found' => (string)($state['account'] ?? '') !== '' ? $state['account'] : '(no company name)',
+					'Account'       => (string)($state['name'] ?? ''),
+					'Company found' => (string)($state['account'] ?? '') !== '' ? $state['account'] : '(no company name)',
 					'Why'           => (string)($state['reason'] ?? ''),
-					'What it means' => 'Nothing was deleted. Either this site holds a live account\'s token, or the test account\'s '
-						. 'company name was changed. Turn the Delete Old Test Servers task off here, or set the company name to "'
+					'What it means' => 'Nothing was deleted on it. Its company name changed since it was last checked. Check it again '
+						. 'on the Hosting tab of Provisioning Setup (a live account loses its test flag), or set the company name to "'
 						. self::COMPANY . '" in the test account\'s settings.',
 					'Checked'       => (string)($state['time'] ?? '') . ' UTC',
 				),
@@ -224,6 +269,7 @@ class TestCloudCleanup {
 			'severity' => IncidentRecord::SEVERITY_WARNING,
 			'title'    => 'The test-account cleanup could not list the account',
 			'detail'   => array(
+				'Account'       => (string)($state['name'] ?? ''),
 				'Why'           => (string)($state['reason'] ?? ''),
 				'What it means' => 'Nothing was deleted, so test servers past their age are still billing.',
 				'Checked'       => (string)($state['time'] ?? '') . ' UTC',
@@ -231,10 +277,14 @@ class TestCloudCleanup {
 		);
 	}
 
-	/** The last run's outcome, or an empty state. */
+	/** The last run's outcome, one entry per account ({name, time, outcome, ...}), or none. */
 	public static function state(): array {
 		$state = json_decode((string)Globalvars::get_instance()->get_setting(self::STATE_SETTING), true);
-		return is_array($state) ? $state : array();
+		if (!is_array($state)) {
+			return array();
+		}
+		// A run recorded before there were several accounts is one entry.
+		return isset($state['outcome']) ? array($state) : array_values($state);
 	}
 
 	/** The task row as condition() wants it: {active}, or null when there is none. */
@@ -245,14 +295,9 @@ class TestCloudCleanup {
 		return null;
 	}
 
-	/** The scopes a run needs that the operator token's recorded grant lacks, or null when it is not checked. */
-	public static function missing_scopes(): ?array {
-		$granted = ProvisioningSetup::operatorTokenGrantedScopes();
-		if ($granted === null) {
-			return null;
-		}
-		return array_intersect_key(self::SCOPES,
-			array_flip(LinodeComputeDriver::missingScopes($granted, array_keys(self::SCOPES))));
+	/** The scopes a run needs that an account's recorded grant lacks, or null when it is not checked. */
+	public static function missing_scopes(OperatorCloudAccount $account): ?array {
+		return $account->missing_scopes(self::SCOPES);
 	}
 
 	private static function save_state(array $state): void {

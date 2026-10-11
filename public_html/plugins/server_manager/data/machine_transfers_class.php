@@ -22,6 +22,7 @@
  * counts about the payload, and leaves out traffic to another machine in the
  * same data center over IPv6.
  *
+ * @version 1.1 - mtr_account names one of our accounts as oca:<id>
  * @version 1.0
  */
 
@@ -39,7 +40,7 @@ class MachineTransfer extends SystemBase {
 	);
 
 	public static $test_fixture = array(
-		'values'       => array('mtr_provider' => 'linode', 'mtr_instance_id' => '1', 'mtr_account' => 'operator'),
+		'values'       => array('mtr_provider' => 'linode', 'mtr_instance_id' => '1', 'mtr_account' => 'oca:1'),
 		'update_field' => 'mtr_label',
 	);
 
@@ -48,7 +49,7 @@ class MachineTransfer extends SystemBase {
 		'mtr_provider'      => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'linode',
 			'unique_with'=>array('mtr_instance_id')),
 		'mtr_instance_id'   => array('type'=>'varchar(50)', 'is_nullable'=>false),
-		// Which credential reads it: 'operator', or 'cca:<id>' for a connected account.
+		// Which credential reads it: 'oca:<id>' for one of ours, or 'cca:<id>' for a connected account.
 		'mtr_account'       => array('type'=>'varchar(30)', 'is_nullable'=>false),
 		'mtr_label'         => array('type'=>'varchar(255)'),
 		'mtr_region'        => array('type'=>'varchar(40)'),

@@ -24,6 +24,7 @@
  * Nothing on the box changes and our agent stays (D2): the node carries on as
  * a bring-your-own-cloud node until its customer says otherwise.
  *
+ * @version 1.3 - asks the account of ours the server was in (cloud_accounts_list)
  * @version 1.2 - a finished transfer marks the node hosted on the customer's account
  * @version 1.1 - the last step marks its email, note and alert as each happens, so a crash never repeats them
  * @version 1.0
@@ -65,7 +66,7 @@ class InstanceTransferFinish {
 
 	/** 1. Our own token can no longer see the instance. */
 	private static function step_left_us(InstanceTransfer $row, CustomerCloudProvision $provision): bool {
-		$resolved = InstanceTransfers::driver();
+		$resolved = InstanceTransfers::driver($provision);
 		if ($resolved['driver'] === null) {
 			$row->set('itx_error', 'Waiting to confirm the move: ' . $resolved['reason']);
 			return false;
@@ -356,7 +357,7 @@ class InstanceTransferFinish {
 	/**
 	 * The DNS records we still hold for the site, one per line: the sender
 	 * domain's records, a domain we registered for them, and a zone in our own
-	 * Linode DNS Manager when the operator token can read it.
+	 * Linode DNS Manager when the credential of the account it was in can read it.
 	 */
 	public static function records_we_hold(CustomerCloudProvision $provision): string {
 		$lines = array();
@@ -375,20 +376,20 @@ class InstanceTransferFinish {
 					. 'path to being fully yours, and its records stay where they are.';
 			}
 		}
-		foreach (self::operator_zone_records((string)$provision->get('cvp_domain')) as $line) {
+		foreach (self::operator_zone_records($provision) as $line) {
 			$lines[] = $line;
 		}
 		return implode("\n", $lines);
 	}
 
-	/** Records in a zone for this domain in the operator's Linode DNS Manager, or none. Best effort. */
-	private static function operator_zone_records(string $domain): array {
+	/** Records in a zone for the site's domain in the Linode DNS Manager of the account it was in, or none. Best effort. */
+	private static function operator_zone_records(CustomerCloudProvision $provision): array {
+		$domain = (string)$provision->get('cvp_domain');
 		if (InstanceTransfers::$driver !== null || trim($domain) === '') {
 			return array();
 		}
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionCustomerCloud.php'));
 		require_once(PathHelper::getIncludePath('includes/dns/drivers/LinodeDnsDriver.php'));
-		$token = ProvisionCustomerCloud::operator_compute_token();
+		$token = HeldCloudAccounts::provision_token($provision)['token'];
 		if ($token === '') {
 			return array();
 		}

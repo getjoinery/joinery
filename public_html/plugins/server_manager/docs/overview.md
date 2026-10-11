@@ -379,13 +379,13 @@ The general limit (`api_agent_rate_limit_requests` per window) is counted in two
 
 ## Cloud account tabs
 
-The dashboard at `/admin/server_manager` has a tab for each cloud account, **Joinery Main Linode** and **Joinery Test Linode**. Hosts, machines, the find box, Agents asking to join, Cloud provisions and Recent Jobs show only the selected tab's boxes. `?account=main|test` selects a tab and a cookie remembers it. The other tab shows its node count and a dot when it holds an open incident that needs a person or a pending join.
+The dashboard at `/admin/server_manager` has two tabs, **Main** (our main cloud accounts) and **Test** (the disposable test account). Hosts, machines, the find box, Agents asking to join, Cloud provisions and Recent Jobs show only the selected tab's boxes. `?account=main|test` selects a tab and a cookie remembers it. The other tab shows its node count and a dot when it holds an open incident that needs a person or a pending join.
 
 An account is recorded on a host (`mgh_cloud_account`) or a node (`mgn_cloud_account`) as `main` or `test`. A node placed on a live host takes its host's account; any other node uses its own; an empty value reads as main, so an unmarked box is never hidden from the main tab. `CloudAccounts` holds the labels and the rules.
 
-A box is marked when it is first saved, with the account of the plane that creates it: `test` when the operator token's company is the disposable one (`TestCloudCleanup::COMPANY`), otherwise `main`. The token's company is read from the provider and kept in `server_manager_operator_cloud_company` whenever the hosted card on Provisioning Setup is saved. Add Host and Connect Site ask for the account, with Main preselected. Migration `sm_016_cloud_account_backfill` marks the unmarked boxes a test-account plane created since 2026-10-07, the day its token became the test account's; nothing is changed on any other plane.
+Main or test is the flag of the cloud account of ours the box is in (see *Cloud accounts*): a server created in, or adopted from, an account flagged test is `test`, any other account of ours `main` (`CloudAccounts::for_provision()`). A box made by hand is marked when it is first saved with the default account's flag (`CloudAccounts::plane_account()`), `main` when there is no default. Add Host and Connect Site ask for the account, with Main preselected. Migration `sm_016_cloud_account_backfill` marks the unmarked boxes a test-account plane created since 2026-10-07, the day its account became the test account; nothing is changed on any other plane.
 
-A join belongs to the account of the box whose address it comes from, or of its provision. A join from an address no box or provision has appears on both tabs. A provision with no node yet belongs to the plane's own account. The notices at the top of the page and the Incidents inbox are not filtered by tab.
+A join belongs to the account of the box whose address it comes from, or of its provision. A join from an address no box or provision has appears on both tabs. A provision with no node yet belongs to the account it is in. The notices at the top of the page and the Incidents inbox are not filtered by tab.
 
 ## Join approval
 
@@ -541,7 +541,7 @@ The three backup sources are three views of one backup judgement (`IncidentBacku
 
 ### Each machine's transfer
 
-A cloud provider adds every machine's outbound allowance to one account pool, so the pool alone hides one machine running far past its own share. **Watch Machine Transfer** (daily, `MachineTransferWatch`) reads every account this management node holds a credential for (the operator token, and each connected customer account through `ProvisionCustomerCloud::account_driver()`), lists its machines (`CloudMachineTransfer::listInstances()`), and matches them to nodes by address: the node's host (resolved when it is a name), its server's host where it is a site on a shared one, and the addresses its agent reported at its newest approved join (a host name behind a proxy resolves to the proxy). A node is on one machine: where its addresses match more than one (a site that moved keeps the old machine's address on an old join), a match by host beats a match by a join's report, and of equals the newest machine wins. A connected account whose token cannot be refreshed is reported in the run's message and never marked for re-granting by this read. For each machine a node runs on it reads the provider's figure (`getInstanceTransfer()`; on Linode `GET linode/instances/{id}/transfer`, which needs only `linodes:read_only`) into one `MachineTransfer` row (`mtr_machine_transfers`): this month's bytes, the allowance (prorated for a machine created during the month), the overage, and the read before, whose difference is a day's rate. Every node on the machine points at the row (`mgn_mtr_machine_transfer_id`); a failed listing unlinks nothing. A machine no node runs on is not read. On the first two days of a month, a figure no lower than last month's last reading is taken as the provider's month not yet started again and is not recorded.
+A cloud provider adds every machine's outbound allowance to one account pool, so the pool alone hides one machine running far past its own share. **Watch Machine Transfer** (daily, `MachineTransferWatch`) reads every account this management node holds a credential for (`HeldCloudAccounts::drivers()`: each of ours, and each connected customer account through `ProvisionCustomerCloud::account_driver()`), lists its machines (`CloudMachineTransfer::listInstances()`), and matches them to nodes by address: the node's host (resolved when it is a name), its server's host where it is a site on a shared one, and the addresses its agent reported at its newest approved join (a host name behind a proxy resolves to the proxy). A node is on one machine: where its addresses match more than one (a site that moved keeps the old machine's address on an old join), a match by host beats a match by a join's report, and of equals the newest machine wins. A connected account whose token cannot be refreshed is reported in the run's message and never marked for re-granting by this read. For each machine a node runs on it reads the provider's figure (`getInstanceTransfer()`; on Linode `GET linode/instances/{id}/transfer`, which needs only `linodes:read_only`) into one `MachineTransfer` row (`mtr_machine_transfers`): this month's bytes, the allowance (prorated for a machine created during the month), the overage, and the read before, whose difference is a day's rate. Every node on the machine points at the row (`mgn_mtr_machine_transfer_id`); a failed listing unlinks nothing. A machine no node runs on is not read. On the first two days of a month, a figure no lower than last month's last reading is taken as the provider's month not yet started again and is not recorded.
 
 The provider's figure counts about the payload, and Linode leaves out traffic to another machine in the same data center over IPv6, in both directions.
 
@@ -562,14 +562,14 @@ Reverse DNS and an IP-swap switch-over reach a node's server only through its pr
 
 The panel appears in place of Reverse DNS on a node with no provision holding an instance, unless it is a container site: a shared server belongs to the server's own node. It names the machine the daily transfer watch matched, when it has one. On confirm, adoption asks the providers again:
 
-- It lists the servers on every account this management node holds (`MachineTransferWatch::accounts()`: the operator token and each connected account).
+- It lists the servers on every account this management node holds (`HeldCloudAccounts::drivers()`: each of ours and each connected account).
 - It matches the node by address, by the same rule as *Each machine's transfer*. A match by the node's own host beats one by its join's report.
 - Exactly one server at the strongest match is adopted. None, or more than one (each is named), adopts nothing. So does a server different from the one the panel showed, or a server another node's provision already records.
 
 Adoption writes an admin-origin provision in install mode `adopted`, status `done`:
 
 - the instance id, its IPv4 and IPv6, and its region;
-- hosting mode `operator`, or `customer` with the connected account;
+- hosting mode `operator` with the account of ours it was found in, or `customer` with the connected account;
 - the link to the node.
 
 Nothing is installed and nothing on the server changes. An adopted server is never one somebody bought, so it is never billed, trialled or handed to a customer. Removing the node removes its provision with it.
@@ -596,7 +596,7 @@ A node's **Copy** tab puts its whole site on another server and keeps it there, 
 
 **The new server**, one of two ways:
 
-- **Create it for me.** The tab records an admin-origin `CustomerCloudProvision` in install mode `copy` (`cvp_source_node_id`, `cvp_release` = the source's release), on this management node's operator cloud account or a connected one, in the region and type chosen (defaults: the source's own provision's). The provisioning pipeline creates the instance and runs `install_node` in mode `copy`; the node row it makes is named `<source> (copy)`, records `mgn_copy_of_node_id`, and a finished install leaves it in state `copy` (`process_install_node`), never working. The copy's agent then asks to join; the tab approves it after the provider confirms the instance runs at the join's address.
+- **Create it for me.** The tab records an admin-origin `CustomerCloudProvision` in install mode `copy` (`cvp_source_node_id`, `cvp_release` = the source's release), in the cloud account chosen (any of ours, the default preselected, or a customer's connected one; `HeldCloudAccounts::targets()`), in the region and type chosen (defaults: the source's own provision's). The provisioning pipeline creates the instance and runs `install_node` in mode `copy`; the node row it makes is named `<source> (copy)`, records `mgn_copy_of_node_id`, and a finished install leaves it in state `copy` (`process_install_node`), never working. The copy's agent then asks to join; the tab approves it after the provider confirms the instance runs at the join's address.
 - **I'll bring a server.** The tab shows the commands to run as root on any fresh Ubuntu server (`SiteCopyRunner::owner_command()`): fetch the source's exact release from this management node (`utils/latest_release?version=`), install the prerequisites, then `install.sh site --bare-metal <site> … <domain> --enable-agent --management-node=… --dormant --copy-of=<id> --copy-of-key=<source agent key>`. The owner reads the new server's fingerprint with `joinery-agent status` and approves the matching join request on the tab (it lists pending requests from an agent named after the source's site); approving makes the copy's row in state `copy`.
 
 **Root SSH keys.** A copy is keyless with root login off unless the operator carries the source's keys. When the source's host report lists root SSH keys (`root_ssh`, from `host_report.sh`), the Create-it-for-me form shows each key's fingerprint and offers a tick to carry them. A key with options (`command=`, `from=`, `restrict`) is shown but never carried. The ticked keys are stored on the provision (`cvp_root_ssh_keys`) and the `retire_install_password` job installs them on the copy's root account; the start is refused if the source's keys changed since the form was drawn. The install form offers "Keep root SSH login" with a box for public keys on the same terms. With no keys, root login is off.
@@ -621,7 +621,7 @@ The copy is a tracked record, `SiteCopy` (table `scp_site_copies`), moved by `Si
 **Switching over** makes the copy the site, from a dormant copy that is current, on the Copy tab (`SiteCopyRunner`, specs/site_copy.md steps 7–10). The tab offers each way the address can move (`SiteCopyRunner::switch_methods()`), with why one is not available:
 
 - **Through the proxy** (`proxied_origin`): the proxied records in front of the site (Cloudflare's orange cloud) point at the copy, so visitors follow within seconds and no resolver cache is involved. Each press that touches DNS takes a DNS token for the site's zone in the form, builds the driver for that request (`ProxiedOriginMove::driver_class_for()`, from the domain's NS records) and keeps nothing.
-- **By IP swap** (`ip_swap`, `IpSwapMove`): the two servers swap their public IPv4 addresses at Linode, so every record, allow-list and reverse DNS naming the site's address stays true. Both servers must have been created by this management node, on one account and in one region; the provider credential is the one that created them (the operator token, or the connected account's grant, which needs `ips:read_write` and `firewall:read_only`). IPv6 addresses do not move.
+- **By IP swap** (`ip_swap`, `IpSwapMove`): the two servers swap their public IPv4 addresses at Linode, so every record, allow-list and reverse DNS naming the site's address stays true. Both servers must have been created by this management node, on one account and in one region; the provider credential is the one that created them (the account of ours they are in, or the connected account's grant, which needs `ips:read_write` and `firewall:read_only`). Two servers in different accounts of ours never swap. IPv6 addresses do not move.
 - **By the owner's own DNS change** (`manual`), for a copy from backups only: the owner points the site's records at the copy at their DNS host.
 
 1. **Switch over** (`begin_switch()`). `switch_refusals()` first (read-only): the copy dormant and current, both agents reporting the switch-over's words (`SiteCopyRunner::SWITCH_SOURCE_WORDS`, `SWITCH_COPY_WORDS`; a copy from backups asks the source for none), the same release, the copy's look path known, and the source's newest backup still in the chain the copy holds the key for. Then the chosen way is checked, read-only, and anything that stops it is named with nothing frozen. **By IP swap**, `IpSwapMove::plan()` asks the provider: one public IPv4 on each server, Network Helper on for both (read from the configuration profiles, or the interface settings on the newer interface generation), every provider firewall of the source also on the copy, and no AAAA record of the site naming the source's IPv6; it records each machine's instance, address and reverse DNS. **Through the proxy**, with the token, `ProxiedOriginMove::plan()` reads the zone: every A and AAAA record naming one of the source's addresses (its host, its provision's addresses, and the addresses its agent reported at join, compared as addresses) must be proxied, the site's own name must point only at the source, and the copy must have an address of each record's family. Anything else stops here, naming the record, and nothing is frozen. The tab also says that a firewall letting only the proxy in is not visible from here.
@@ -710,7 +710,7 @@ Destructive operations take no safety copy of the state they replace: a restore 
 **Dashboard → Install New Node** opens a form that provisions a Joinery site in a single click. The **Target Host** dropdown offers three kinds of target:
 
 - **A known host** (or *Other server* with manual SSH details): the form creates the ManagedNode and dispatches the `install_node` job immediately.
-- **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (connected cloud account, region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected connected account; Linode grants expire after two hours, so connect (or re-connect) shortly before submitting. In-flight provisions appear in a banner at the top of the dashboard.
+- **Create a new cloud instance**: no server exists yet. The form records an admin-origin `CustomerCloudProvision` (the cloud account — one of ours, the default preselected, or a customer's connected one — region, instance type, plus all install parameters) and the **Provision Customer Cloud** task births the instance, creates the node, and dispatches the install — see [Customer-Cloud Fulfillment](#customer-cloud-fulfillment). The instance is created in, and billed to, the selected account; a Linode sign-in expires after two hours, so connect (or re-connect) shortly before submitting. In-flight provisions appear in a banner at the top of the dashboard.
 
   The cloud target also offers **Bare instance** as the install type: the instance is born, the SSH key injected, and the managed node created with `mgn_skip_joinery_checks` set — but no site is installed (no web root, site URL, or SSL flow). Completion is a passing `check_status` job. This is how infrastructure nodes that host no Joinery site — a mail relay shard, for example — enter management; the role's own provisioning (e.g. the mailbox plugin's provision-relay job) builds on the bare node afterward. Bare is admin-origin only; orders always install a site.
 
@@ -880,7 +880,13 @@ Question, and the Orders poll reads its answer from the store.
 ### Activation — the Provisioning page
 
 **Server Manager → Provisioning** (`/admin/server_manager/provisioning_setup`)
-activates the pipeline: every requirement shows a live status badge, and each
+activates the pipeline. It is six tabs (`?tab=`), one subject each: **Setup**
+(the job agent, the store API connection, scheduled tasks, emails), **Hosting**
+(the cloud accounts, below; the Linode sign-in app; a new server's region,
+type, image and the Linode referral URL), **Hosted tier** (see
+[Hosted tier](hosted_tier.md)), **Shop** (the domain question, shared-host
+fulfillment, products), **Domains** (registration) and **Cleanup** (the
+test-account cleanup). Every requirement shows a live status badge, and each
 automatable step is a one-click, idempotent action backed by
 `includes/ProvisioningSetup.php` — mint the store API service user
 (permission 5, password recovery disabled, a random `provisioning-<hex>@<host>`
@@ -901,6 +907,58 @@ OAuth app. When the store
 is a remote site rather than the management node itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
+### Cloud accounts
+
+The **Hosting** tab holds the cloud accounts of ours this management node
+creates and manages servers in (`OperatorCloudAccount`,
+`oca_operator_cloud_accounts`). Each is added one of two ways:
+
+- **By API key**, pasted once. The provider is asked first for the account's
+  name, company and the token's scopes (`OperatorCloudAccount::add_key()`); a
+  token it refuses saves nothing. The key is sealed
+  (`oca_operator_cloud_accounts.oca_credential`), never shown again, and never
+  reaches a machine this node creates. **Replace key** takes a new token for the
+  same account (a token for a different account is refused, since every server
+  in the entry would follow it).
+- **Connect with Linode**, a sign-in through the platform OAuth2 core (consumer
+  purpose `operator_cloud`, `OperatorCloudConsumer`; superadmin only). Linode
+  grants two hours and no refresh, so the entry shows the time it ends, then
+  shows expired with **Reconnect**, and is offered nowhere: right for one server
+  in somebody's own account, wrong for an account the node keeps managing.
+
+Each entry shows the provider's name for the account, its company, who added it
+(a record only: removing that login removes nothing), the scopes it lacks with
+what each is for (`OperatorCloudAccount::SCOPES`), and how many servers are in
+it. **Check** asks the provider again. The company `Joinery Test disposable`
+flags the test account. A credential the provider answers 401 (at a check, or
+in the daily transfer watch) marks the entry refused until it is replaced.
+**Remove** erases the credential and keeps the row, so a server in it still
+says which account it was in.
+
+**The default** (`server_manager_default_cloud_account_id`) is where a server
+goes when nobody chose one: a hosted order, and the account chosen first on the
+forms that create a server. It cannot be a Linode sign-in, nor the test account
+on a node that holds any other account (`OperatorCloudAccount::default_refusal()`),
+and it cannot be removed while it is the default.
+
+**Every server knows its account.** A provision in one of our accounts names it
+(`cvp_oca_operator_cloud_account_id`; a customer's names
+`cvp_cca_customer_cloud_account_id`, never both). A new server in our accounts
+that names none is given the default when first saved. Everything done to a
+server later uses its own account's credential
+(`HeldCloudAccounts::provision_token()`): creating it, reverse DNS, a handover,
+an address swap, shutting a hosted site down, removing its node. A server whose
+account is no longer held (removed, refused, or a sign-in that expired) gets the
+reason instead, and removing its node asks the person to confirm the machine is
+gone. The hosted tier's transfer-pool alert reads the default account.
+
+Customers' connected accounts are listed below ours, read-only: who connected
+each and when. Only the customer reconnects one, from their own Connect page.
+
+Migration `sm_019_operator_token_to_account_list` makes a single operator token
+held in settings the first entry and the default, and points every server and
+transfer record that named no account at it.
+
 The management node holds no SSH key. A machine it creates gets a one-time
 root password that the install job uses for its single bootstrap session and
 that is retired once the machine's agents are admitted; nothing of the
@@ -909,9 +967,9 @@ key file, and `config/` on the management node contains none.
 
 ### Test-account cleanup
 
-A management node whose operator token is for a cloud account kept for testing cleans that account up on its own. The **Delete Old Test Servers** task (`TestCloudCleanup`) runs hourly and is off until turned on under Scheduled Tasks. It deletes servers, and storage volumes attached to nothing, that are older than `server_manager_test_cloud_max_age_hours` (default 24).
+A management node that holds a cloud account flagged test (see *Cloud accounts*) cleans each such account up on its own, one at a time. The **Delete Old Test Servers** task (`TestCloudCleanup`) runs hourly and is off until turned on under Scheduled Tasks. It deletes servers, and storage volumes attached to nothing, that are older than `server_manager_test_cloud_max_age_hours` (default 24).
 
-**The safety catch is the account's own name.** Every run reads the account's company name from the provider (`CloudAccountCleanup::accountCompany()`; on Linode, Account Settings, which needs `account:read_only`). It deletes only when the name is exactly `Joinery Test disposable`. On any other account, or when the name cannot be read, it deletes nothing. It then records the refusal, and `plane:test_cloud_cleanup` opens on this management node's own node, naming the account it found. The incident clears when a run passes or the task is turned off. A live token pasted here, or the task turned on at a production management node, therefore deletes nothing. No site setting can make an account count as disposable.
+**The safety catch is the account's own name.** Every run reads the account's company name from the provider (`CloudAccountCleanup::accountCompany()`; on Linode, Account Settings, which needs `account:read_only`). It deletes only when the name is exactly `Joinery Test disposable`. On any other account, or when the name cannot be read, it deletes nothing on that account. It then records the refusal, and `plane:test_cloud_cleanup` opens on this management node's own node, naming the account and the company it found. The incident clears when a run passes or the task is turned off. A live account flagged test by mistake, or the task turned on at a production management node, therefore deletes nothing. No site setting can make an account count as disposable.
 
 **Never deleted:**
 - anything tagged `keep` at the provider (any case);
@@ -919,7 +977,7 @@ A management node whose operator token is for a cloud account kept for testing c
 
 A server or volume whose creation time cannot be read is left alone.
 
-Card 11 on the Provisioning page shows the task's state, the scopes a run needs that the token lacks (`linodes:read_write`, `volumes:read_write`, `account:read_only`), and the last run: what it deleted, held and kept, or why it refused. **Preview the next run** asks the provider what a run would do now and deletes nothing. A failed delete, or volumes that cannot be listed, is reported in the run's message without stopping the rest.
+The Cleanup tab of the Provisioning page shows the task's state, each test account with the scopes a run needs that it lacks (`linodes:read_write`, `volumes:read_write`, `account:read_only`), and the last run per account: what it deleted, held and kept, or why it refused. **Preview the next run** asks the provider what a run would do now on each test account and deletes nothing. A failed delete, or volumes that cannot be listed, is reported in the run's message without stopping the rest.
 
 ### What stays manual
 
@@ -1609,12 +1667,12 @@ Every node records where its machine runs (`mgn_cloud_account`, shown and edited
 
 | Value | Meaning | Hosted by us |
 |---|---|---|
-| `main` | Joinery Main Linode | yes |
-| `test` | Joinery Test Linode | yes |
+| `main` | One of our cloud accounts (main) | yes |
+| `test` | Our test cloud account | yes |
 | `customer` | the customer's connected cloud account | no |
 | `external` | anywhere else | no |
 
-A site placed on a server is hosted where its server is (`CloudAccounts::hosted_at()`): the server's own node's value, else the host's account. A provisioned machine takes this management node's account when bought on the operator token and `customer` when bought on, or transferred to, the customer's account (`CloudAccounts::for_provision()`); an adopted server takes the account it was found on. A hand-added node defaults to this management node's account. `main` and `test` are also the dashboard's tabs; `customer` and `external` nodes are listed on the Main tab.
+A site placed on a server is hosted where its server is (`CloudAccounts::hosted_at()`): the server's own node's value, else the host's account. A provisioned machine takes the flag of the account of ours it is in, and `customer` when bought on, or transferred to, the customer's account (`CloudAccounts::for_provision()`); an adopted server takes the account it was found on. A hand-added node defaults to the default account's flag. `main` and `test` are also the dashboard's tabs; `customer` and `external` nodes are listed on the Main tab.
 
 ### Hide from Dashboard
 
@@ -1638,7 +1696,7 @@ Hidden sites, and their jobs, are left out of the dashboard (Hosts & Sites and R
 
 1. **Backups.** Refused while the node's storage spaces still hold backups, or while one cannot be listed to confirm; clear them from the target's Stored Backups panel first.
 2. **A container site hosted by us.** Refused until its host verified the container gone: Permanently Delete Site stamps `mgn_site_removed_time` on the site when its teardown is verified. A node where no live site was ever seen (no status check, Joinery version or uptime result) has nothing to tear down and passes.
-3. **A machine hosted by us.** Refused until the provider says the instance is gone: by the instance ID on its provisioning record (removed ones included), else by the node's IPv4 and IPv6 addresses in the account's server listing. Only "not found" passes; a provider error refuses. The platform never deletes an instance itself. Where this management node holds no token for the machine's account (a management node holds one operator token: dev the test account, getjoinery the main one), the person confirms instead by typing the instance ID, or the machine's IP address when no instance is recorded. The confirmation is written to the error log as `[NODE_REMOVE_ATTEST]` (user, node name and slug, account, what was typed) before the delete, since the node's own record goes with it.
+3. **A machine hosted by us.** Refused until the provider says the instance is gone: by the instance ID on its provisioning record (removed ones included), else by the node's IPv4 and IPv6 addresses in the account's server listing. Only "not found" passes; a provider error refuses. The platform never deletes an instance itself. The provider is asked with the credential of the account the machine's provision record names (`NodeRemoval::account_token()`). Where no record names an account of ours, or that account is no longer held (removed, refused, a sign-in that expired), the person confirms instead by typing the instance ID, or the machine's IP address when no instance is recorded. The confirmation is written to the error log as `[NODE_REMOVE_ATTEST]` (user, node name and slug, account, what was typed) before the delete, since the node's own record goes with it.
 4. **Not hosted by us.** No machine guard: the site keeps running where it is and is no longer managed from here.
 
 What can be known without a provider is shown up front in the menu (a refusal opens instead of the confirmation); the provider is asked only on submit.

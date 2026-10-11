@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.60 - Remove Permanently names the machine's own cloud account (cloud_accounts_list)
  * @version 1.59 - a host with no data root offers Move its data onto the data root where its agent has
  *                 data_root_migrate (one_data_root WP4); never a site container. A data root declared and
  *                 not mounted (host_report 1.18) says so instead
@@ -274,7 +275,8 @@
 	// server of ours not yet verified gone, an attestation with nothing to type.
 	// The provider is asked only on submit.
 	$remove_kind = NodeRemoval::machine_kind($node);
-	$remove_hosted_at = CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node));
+	$remove_hosted_at = $remove_kind === NodeRemoval::MACHINE_NONE
+		? CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node)) : NodeRemoval::account_label($node);
 	$remove_block = '';
 	$remove_attest = '';
 	if ($is_removed) {

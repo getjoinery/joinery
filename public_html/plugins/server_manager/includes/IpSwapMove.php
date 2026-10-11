@@ -36,6 +36,7 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.2 - each of our accounts is its own account: two servers swap only within one (cloud_accounts_list)
  * @version 1.1 - a container site's shared server is never swapped or powered off
  * @version 1.0
  */
@@ -142,9 +143,10 @@ class IpSwapMove {
 		return $why;
 	}
 
-	/** Which account a provision's instance lives on: 'operator', or the connected account's id. */
+	/** Which account a provision's instance lives on: 'oca:<id>' for one of ours, 'cca:<id>' for a connected one. */
 	private static function account_of(CustomerCloudProvision $p): string {
-		return $p->is_operator_hosted() ? 'operator' : 'cca:' . (int)$p->get('cvp_cca_customer_cloud_account_id');
+		return $p->is_operator_hosted() ? 'oca:' . (int)$p->get('cvp_oca_operator_cloud_account_id')
+			: 'cca:' . (int)$p->get('cvp_cca_customer_cloud_account_id');
 	}
 
 	/** Does a granted scope string cover $want? A read_write grant covers read_only. */

@@ -39,6 +39,8 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.5 - a site is shut down with its own account's credential; the transfer pool watched is the default
+ *                account's, where hosted orders go (cloud_accounts_list)
  * @version 1.4 - the keep-period prune empties what this operator took in each storage space, and a refused
  *                delete is reported with its reason
  * @version 1.3 - sold sites only (CustomerCloudProvision::is_sold): a site copy on the operator's account
@@ -70,8 +72,7 @@ class HostedTrialWatch {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionHostedMail.php'));
 		// Named explicitly: classes under a plugin's includes/provisioning/ are
-		// not on the name-resolution path, and the operator token this watch
-		// shuts an instance down with lives on that class.
+		// not on the name-resolution path.
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionCustomerCloud.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/HostedTrialSignals.php'));
 		require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
@@ -108,9 +109,9 @@ class HostedTrialWatch {
 
 	/**
 	 * The sites this watch bills: finished, on the operator's account, and
-	 * sold. A relay shard and a site copy are on the operator's account too,
-	 * and a trial ending would shut a copy down with the operator token: after
-	 * a switch-over, that copy is the live site.
+	 * sold. A relay shard and a site copy are on our accounts too, and a
+	 * trial ending would shut a copy down: after a switch-over, that copy is
+	 * the live site.
 	 */
 	public static function sold_sites(): array {
 		$out = array();
@@ -482,12 +483,11 @@ class HostedTrialWatch {
 		$instance_id = trim((string)$provision->get('cvp_instance_id'));
 		if ($instance_id !== '') {
 			try {
-				$token = ProvisionCustomerCloud::operator_compute_token();
-				if ($token === '') {
-					throw new Exception('no operator cloud token is configured');
+				$held = HeldCloudAccounts::provision_token($provision);
+				if ($held['token'] === '') {
+					throw new Exception($held['reason']);
 				}
-				require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
-				(new LinodeComputeDriver($token))->shutdownInstance($instance_id);
+				OperatorCloudAccount::driver_for($held['token'])->shutdownInstance($instance_id);
 			} catch (Throwable $e) {
 				// The date has passed and the machine is still on. Say so and
 				// try again next tick — the deletion task below would be
@@ -591,12 +591,12 @@ class HostedTrialWatch {
 		if ($last !== '' && gmdate('Y-m', strtotime($last . ' UTC')) === gmdate('Y-m')) {
 			return 0;   // already said, this period
 		}
-		$token = ProvisionCustomerCloud::operator_compute_token();
-		if ($token === '') {
+		// The default account: where hosted orders go, so whose pool they draw on.
+		$account = OperatorCloudAccount::default_account();
+		if ($account === null || !$account->usable()) {
 			return 0;
 		}
-		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
-		$transfer = (new LinodeComputeDriver($token))->getTransfer();
+		$transfer = $account->driver()->getTransfer();
 		$quota = (float)($transfer['quota_gb'] ?? 0);
 		$used  = (float)($transfer['used_gb'] ?? 0);
 		if ($quota <= 0) {

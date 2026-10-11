@@ -14,10 +14,13 @@
  * volumes, a server at a managed node's IPv4 or IPv6 held rather than
  * deleted, an attached volume spared, a failed delete reported, a failed
  * volume listing not stopping the servers' cleanup, and the incident raised
- * only while the task is on.
+ * only while the task is on. Each account in a run is planned and cleaned on its
+ * own: a refused one does not stop the others.
  *
  * Run: php plugins/server_manager/tests/test_cloud_cleanup_test.php
  *
+ * @version 1.2 - a run covers each test account on its own; two accounts in one run, one refused and one cleaned
+ *                (cloud_accounts_list); the state is one entry per account
  * @version 1.1 - the company name Linode accepts: Joinery Test disposable (it refuses parentheses)
  * @version 1.0
  */
@@ -137,12 +140,14 @@ $live->company = 'Joinery';
 $plan = TestCloudCleanup::plan($live, $nodes, $now, 24);
 check(!$plan['safe'] && !$plan['instances'] && strpos($plan['reason'], '"Joinery"') !== false,
 	'another company name is not safe, and the plan names it: ' . $plan['reason']);
-$result = TestCloudCleanup::run($live, $no_dns, $now);
+$result = TestCloudCleanup::run(array('live' => $live), $no_dns, $now);
 check($result['status'] === 'error' && !$live->deleted_instances && !$live->deleted_volumes, 'a run on it deletes nothing');
-$state = TestCloudCleanup::state();
-check(($state['outcome'] ?? '') === 'refused' && ($state['account'] ?? '') === 'Joinery', 'the refusal is recorded with the account found');
-check(TestCloudCleanup::condition($state, array('active' => true)) !== null, 'with the task on, it is an incident');
-check(TestCloudCleanup::condition($state, array('active' => false)) === null && TestCloudCleanup::condition($state, null) === null,
+$states = TestCloudCleanup::state();
+$state = $states[0] ?? array();
+check(count($states) === 1 && ($state['outcome'] ?? '') === 'refused' && ($state['account'] ?? '') === 'Joinery'
+	&& ($state['name'] ?? '') === 'live', 'the refusal is recorded with the account and the company found');
+check(TestCloudCleanup::condition($states, array('active' => true)) !== null, 'with the task on, it is an incident');
+check(TestCloudCleanup::condition($states, array('active' => false)) === null && TestCloudCleanup::condition($states, null) === null,
 	'with the task off or absent, it is not');
 
 $blank = $fresh_account();
@@ -155,7 +160,7 @@ $blind = $fresh_account();
 $blind->company_fails = true;
 $plan = TestCloudCleanup::plan($blind, $nodes, $now, 24);
 check(!$plan['safe'] && strpos($plan['reason'], 'account:read_only') !== false, 'an unreadable company name is not safe');
-check(TestCloudCleanup::run($blind, $no_dns, $now)['status'] === 'error' && !$blind->deleted_instances, 'and deletes nothing');
+check(TestCloudCleanup::run(array('blind' => $blind), $no_dns, $now)['status'] === 'error' && !$blind->deleted_instances, 'and deletes nothing');
 
 // ---------------------------------------------------------------------------
 section('What a run deletes');
@@ -172,18 +177,38 @@ check(in_array((int)$node->key, $plan['held'][0]['node_ids'], true) && in_array(
 check($ids($plan['volumes']) === array('vold'), 'only the unattached volume past the age is to go');
 check($plan['kept'] === 2, 'a server and a volume tagged keep (any case) are kept');
 
-$result = TestCloudCleanup::run($test, $no_dns, $now);
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($result['status'] === 'success' && $test->deleted_instances === array('old') && $test->deleted_volumes === array('vold'),
 	'the run deletes exactly those: ' . $result['message']);
 check(strpos($result['message'], 'Held') !== false, 'the run\'s report lists the held servers');
-$state = TestCloudCleanup::state();
+$states = TestCloudCleanup::state();
+$state = $states[0] ?? array();
 check(($state['outcome'] ?? '') === 'ran' && count($state['deleted_instances']) === 1 && count($state['held']) === 2,
 	'the outcome is recorded for the setup page');
-check(TestCloudCleanup::condition($state, array('active' => true)) === null, 'a run that passes raises nothing');
+check(TestCloudCleanup::condition($states, array('active' => true)) === null, 'a run that passes raises nothing');
+
+// Two accounts in one run: each is planned on its own.
+$wrong = $fresh_account();
+$wrong->company = 'Joinery';
+$right = $fresh_account();
+$result = TestCloudCleanup::run(array('wrong' => $wrong, 'right' => $right), $no_dns, $now);
+$states = TestCloudCleanup::state();
+check(!$wrong->deleted_instances && $right->deleted_instances === array('old'),
+	'a refused account deletes nothing and the next is still cleaned');
+check(count($states) === 2 && $states[0]['outcome'] === 'refused' && $states[1]['outcome'] === 'ran',
+	'each account\'s outcome is recorded');
+check($result['status'] === 'error' && TestCloudCleanup::condition($states, array('active' => true)) !== null,
+	'the refused one is an incident');
+check(strpos(TestCloudCleanup::condition($states, array('active' => true))['detail']['Account'], 'wrong') !== false,
+	'which names the account');
+
+// No test account at all: nothing to do.
+$result = TestCloudCleanup::run(array(), $no_dns, $now);
+check($result['status'] === 'skipped' && TestCloudCleanup::state() === array(), 'with no test account a run deletes nothing and says so');
 
 Setting::put(TestCloudCleanup::MAX_AGE_SETTING, '22');
 $test = $fresh_account();
-TestCloudCleanup::run($test, $no_dns, $now);
+TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($test->deleted_instances === array('old', 'young', 'edge'), 'the age limit comes from the setting');
 Setting::put(TestCloudCleanup::MAX_AGE_SETTING, '24');
 
@@ -192,13 +217,13 @@ section('Failures');
 
 $test = $fresh_account();
 $test->refuse_delete = array('old');
-$result = TestCloudCleanup::run($test, $no_dns, $now);
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($result['status'] === 'error' && strpos($result['message'], 'refused by the provider') !== false
 	&& $test->deleted_volumes === array('vold'), 'a refused delete is reported and the rest goes on');
 
 $test = $fresh_account();
 $test->volumes_fail = true;
-$result = TestCloudCleanup::run($test, $no_dns, $now);
+$result = TestCloudCleanup::run(array('test' => $test), $no_dns, $now);
 check($test->deleted_instances === array('old') && $result['status'] === 'error'
 	&& strpos($result['message'], 'volumes could not be listed') !== false,
 	'a failed volume listing still lets the servers go, and is reported');

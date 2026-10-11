@@ -35,7 +35,7 @@
  *
  *   0  the buyer's own cloud account. They connect it, the provider bills
  *      them, and none of the operator's keys are involved.
- *   1  the operator's account. The plane's own token creates the instance,
+ *   1  the operator's account: the default cloud account of ours creates the instance,
  *      there is no Connect page and no grant to wait for, and the hosted legs
  *      — mail on our provider, the trial clock, the allowance banners — apply
  *      (specs/hosted_trial_provisioning.md §4.1). This is Managed hosting.
@@ -195,8 +195,8 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 			$draft->set('cvp_buyer_email', (string)$user->get('usr_email'));
 		}
 		if ($hosting_mode === 'operator') {
-			// Nothing to connect and nobody to ask: the instance is created on
-			// the operator's own account with the operator's own token.
+			// Nothing to connect and nobody to ask: the instance is created in
+			// the operator's default cloud account (CustomerCloudProvision stamps it).
 			$draft->set('cvp_status', 'ready');
 			// The hosted legs are owed from birth. Marking them pending here,
 			// rather than when the site comes up, is what makes an operator

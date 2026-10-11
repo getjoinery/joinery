@@ -29,6 +29,7 @@
  * row at once. Both take the row's lock (SELECT … FOR UPDATE) and re-read it
  * before they decide, so neither saves over the other's state.
  *
+ * @version 1.3 - the driver is the provision's own account's (cloud_accounts_list)
  * @version 1.2 - the open-incidents check counts every still-happening incident not ignored (a fix awaiting its proof too)
  * @version 1.1 - poll and cancel act on the row under its lock; a code that cannot be read is said for
  *                accepted as well as code_issued; an expired code Linode no longer knows is treated as stale
@@ -65,22 +66,20 @@ class InstanceTransfers {
 	// ── The operator's driver ─────────────────────────────────────────────────
 
 	/**
-	 * The driver that acts on the operator's account, with the transfer
-	 * capability, or a reason there is none.
+	 * The driver that acts on the account of ours the provision's server is
+	 * in, with the transfer capability, or a reason there is none.
 	 *
 	 * @return array{driver: ?object, reason: string}
 	 */
-	public static function driver(): array {
+	public static function driver(CustomerCloudProvision $provision): array {
 		if (self::$driver !== null) {
 			return array('driver' => self::$driver, 'reason' => '');
 		}
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ProvisionCustomerCloud.php'));
-		require_once(PathHelper::getIncludePath('includes/cloud_compute/LinodeComputeDriver.php'));
-		$token = ProvisionCustomerCloud::operator_compute_token();
-		if ($token === '') {
-			return array('driver' => null, 'reason' => 'No operator cloud token is configured. Set it on the Provisioning Setup page.');
+		$held = HeldCloudAccounts::provision_token($provision);
+		if ($held['token'] === '') {
+			return array('driver' => null, 'reason' => $held['reason']);
 		}
-		$driver = new LinodeComputeDriver($token);
+		$driver = OperatorCloudAccount::driver_for($held['token']);
 		if (!($driver instanceof CloudInstanceTransfers)) {
 			return array('driver' => null, 'reason' => 'This provider cannot hand an instance to another account. '
 				. 'Move the site with a site copy to a new server instead.');
@@ -102,7 +101,7 @@ class InstanceTransfers {
 
 		$instance_id = trim((string)$provision->get('cvp_instance_id'));
 		if ($instance_id !== '' && $provision->is_operator_hosted()) {
-			$resolved = self::driver();
+			$resolved = self::driver($provision);
 			if ($resolved['driver'] === null) {
 				$items[] = self::item('provider', 'The operator\'s cloud account can be asked', 'blocker',
 					$resolved['reason'], '');
@@ -113,7 +112,7 @@ class InstanceTransfers {
 					}
 				} catch (Throwable $e) {
 					$items[] = self::item('provider', 'The operator\'s cloud account can be asked', 'blocker',
-						'Linode could not be asked: ' . $e->getMessage(), 'Check the operator token on the Provisioning Setup page, then re-check.');
+						'Linode could not be asked: ' . $e->getMessage(), 'Check the account\'s credential on the Hosting tab of Provisioning Setup, then re-check.');
 				}
 			}
 		}
@@ -351,7 +350,7 @@ class InstanceTransfers {
 		}
 		self::withdraw_deletion_if_shut_down($provision, $row);
 
-		$resolved = self::driver();
+		$resolved = self::driver($provision);
 		if ($resolved['driver'] === null) {
 			throw new InstanceTransferFlowException($resolved['reason']);
 		}
@@ -393,7 +392,7 @@ class InstanceTransfers {
 			$provision = self::provision_of($row);
 			if ($row->state() === InstanceTransfer::STATE_CODE_ISSUED) {
 				$token = $row->open_token();
-				$resolved = self::driver();
+				$resolved = self::driver($provision);
 				if ($token !== '' && $resolved['driver'] !== null) {
 					$status = $resolved['driver']->getTransferStatus($token);
 					if (in_array($status['status'], array('accepted', 'completed'), true)) {
@@ -487,7 +486,7 @@ class InstanceTransfers {
 			}
 			return false;
 		}
-		$resolved = self::driver();
+		$resolved = self::driver(self::provision_of($row));
 		if ($resolved['driver'] === null) {
 			throw new InstanceTransferFlowException($resolved['reason']);
 		}
@@ -730,7 +729,7 @@ class InstanceTransfers {
 		if ($type === '') {
 			return '';
 		}
-		$resolved = self::driver();
+		$resolved = self::driver($provision);
 		if ($resolved['driver'] === null || !method_exists($resolved['driver'], 'typeMonthlyPrice')) {
 			return '';
 		}

@@ -509,17 +509,15 @@ return [
 					return;
 				}
 			}
-			// This plane's own account, read from the provider once when the setting was never saved.
-			$company = trim((string)Globalvars::get_instance()->get_setting(CloudAccounts::COMPANY_SETTING));
-			$token = ProvisionCustomerCloud::operator_compute_token();
-			if ($company === '' && $token !== '') {
-				try {
-					$company = trim((new LinodeComputeDriver($token))->accountCompany());
-					ProvisioningSetup::writeSetting(CloudAccounts::COMPANY_SETTING, $company);
-				} catch (Throwable $e) {
-					error_log('sm_016: the operator token could not read its account company (' . $e->getMessage() . '); no box was marked.');
-					return;
-				}
+			// This plane's own account's company, as the hosted card recorded it
+			// before the account list (sm_019 retires the setting; a node that
+			// reaches here after that has its account in the list instead).
+			$q = $dblink->prepare("SELECT stg_value FROM stg_settings WHERE stg_name = 'server_manager_operator_cloud_company'");
+			$q->execute();
+			$company = trim((string)$q->fetchColumn());
+			if ($company === '') {
+				$default = OperatorCloudAccount::default_account();
+				$company = $default ? trim((string)$default->get('oca_company')) : '';
 			}
 			$marked = CloudAccounts::backfill($dblink, $company);
 			error_log('sm_016: ' . $marked . ' box(es) marked as test-account boxes.');
@@ -641,6 +639,24 @@ return [
 			error_log('sm_018: ' . (int)$customer . ' node(s) marked hosted on the customer\'s account, ' . $removed
 				. ' marked site removed; deleted ' . (int)$jobs . ' job(s) of no node or a missing one and ' . (int)$ledger
 				. ' ledger row(s) of missing spaces or runs; ' . $unnamed . ' reference(s) to missing rows cleared.');
+		},
+	],
+	[
+		// Our cloud accounts become a list (the cloud_accounts_list spec, D6):
+		// the one operator token is its first entry and the default, every
+		// server on it names it, and the four settings that held it go.
+		'id' => 'sm_019_operator_token_to_account_list',
+		'version' => '1.30.59',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$ready = $dblink->query("SELECT to_regclass('oca_operator_cloud_accounts') IS NOT NULL AND EXISTS (SELECT 1
+				FROM information_schema.columns WHERE table_name = 'cvp_customer_cloud_provisions'
+				AND column_name = 'cvp_oca_operator_cloud_account_id')")->fetchColumn();
+			if (!$ready) {
+				// update_database adds the table and column after migrations; the next pass runs this.
+				return 'defer';
+			}
+			error_log('sm_019: ' . OperatorCloudAccount::migrate_operator_token($dblink) . '.');
 		},
 	],
 ];

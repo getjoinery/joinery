@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.16 - the copy's server goes in any account this node holds, ours ('oca:<id>') or a
+ *                 customer's ('cca:<id>'); ours is our server, whoever asked (cloud_accounts_list)
  * @version 1.15 - key_request carries manifest_url, a link to the chain's newest manifest signed for as long as
  *                 the copy_take_key step may wait: the copy reads the backup at its provider itself
  *                 (specs/storage_targets.md F7)
@@ -539,8 +541,10 @@ class SiteCopyRunner {
 
 	/**
 	 * Have this management node create the copy's server: a provision in
-	 * install mode copy, at the source's release, on the operator's cloud
-	 * account (account 'operator') or a connected one (its id).
+	 * install mode copy, at the source's release, in one of our accounts
+	 * ('oca:<id>') or a customer's connected one ('cca:<id>'). A copy in one
+	 * of ours is our server, recorded against the admin who asked; one in a
+	 * customer's account belongs to that customer.
 	 *
 	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw)
 	 */
@@ -553,32 +557,25 @@ class SiteCopyRunner {
 			throw new SiteCopyException('Choose the new server\'s region.');
 		}
 
+		try {
+			$target = HeldCloudAccounts::resolve($account);
+		} catch (DisplayableUserException $e) {
+			throw new SiteCopyException($e->getMessage());
+		}
 		$provision = new CustomerCloudProvision(NULL);
-		if ($account === 'operator') {
-			if (ProvisionCustomerCloud::operator_compute_token() === '') {
-				throw new SiteCopyException('No operator cloud token is set. Set it on the Provisioning Setup page, '
-					. 'or choose a connected cloud account.');
-			}
-			$provision->set('cvp_hosting_mode', 'operator');
+		$provision->set('cvp_hosting_mode', $target['hosting_mode']);
+		$provision->set('cvp_provider', $target['provider']);
+		if ($target['oca']) {
+			$provision->set('cvp_oca_operator_cloud_account_id', (int)$target['oca']->key);
 			$provision->set('cvp_usr_user_id', (int)$user_id);
-			$provision->set('cvp_provider', 'linode');
 		} else {
-			$cca = new CustomerCloudAccount((int)$account, TRUE);
-			if (!$cca->key || $cca->get('cca_status') !== 'active' || $cca->get('cca_delete_time')) {
-				throw new SiteCopyException('Choose an active connected cloud account.');
-			}
-			if (CustomerCloudAccount::grant_expired($cca)) {
-				throw new SiteCopyException('That account\'s cloud grant has expired. Re-connect it, then try again.');
-			}
-			$provision->set('cvp_cca_customer_cloud_account_id', (int)$cca->key);
-			$provision->set('cvp_usr_user_id', (int)$cca->get('cca_usr_user_id'));
-			$provision->set('cvp_provider', $cca->get('cca_provider'));
+			$provision->set('cvp_cca_customer_cloud_account_id', (int)$target['cca']->key);
+			$provision->set('cvp_usr_user_id', $target['owner_id']);
 		}
 		if ($type === '') {
-			$token = $account === 'operator' ? ProvisionCustomerCloud::operator_compute_token()
-				: (string)(($t = $cca->getToken()) ? $t->getAccessToken() : '');
+			$token = $target['token'];
 			$type = self::same_size_type($source, $from, function () use ($token) {
-				return (new LinodeComputeDriver($token))->instanceTypes();
+				return OperatorCloudAccount::driver_for($token)->instanceTypes();
 			});
 		}
 		if (!preg_match('/^[a-z0-9-]{2,60}$/', $type)) {

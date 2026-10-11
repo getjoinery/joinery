@@ -157,7 +157,7 @@ $p_op->set('cvp_hosting_mode', 'operator');
 $p_cu = new CustomerCloudProvision(NULL);
 $p_cu->set('cvp_hosting_mode', 'transferred');
 check(CloudAccounts::for_provision($p_op) === $ours && CloudAccounts::for_provision($p_cu) === CloudAccounts::CUSTOMER,
-	'a machine bought on our token is in this plane\'s account; one handed to the customer is theirs');
+	'a machine in our account that names none is the default account\'s kind; one handed to the customer is theirs');
 
 // ---------------------------------------------------------------------------
 section('Hide, then Restore');
@@ -282,14 +282,35 @@ check(strpos(NodeRemoval::refusal($m_ip6, '', nhr_driver(array(), array(array('i
 check(strpos(NodeRemoval::refusal($m_ip, '', nhr_driver(array(), new CloudComputeException('down', 0)), $no_dns, 'tok'), 'Could not list') !== false,
 	'a listing that fails refuses');
 
+// The machine's own account decides (the cloud_accounts_list spec): held here, the
+// provider is asked with that account's credential; not held, the person attests.
+$nhr_account = function (string $token) {
+	$oca = new OperatorCloudAccount(NULL);
+	$oca->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+	$oca->set('oca_account_name', 'nhr ' . $token);
+	$oca->store_credential($token);
+	$oca->save();
+	$oca->load();
+	harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $oca->key);
+	return $oca;
+};
+$held = $nhr_account('nhr-held-token');
+$gone = $nhr_account('nhr-gone-token');
+$gone->remove();
+$h = nhr_node('heldacct', array('mgn_cloud_account' => $ours));
+nhr_provision($buyer, $h, array('cvp_instance_id' => '616161', 'cvp_oca_operator_cloud_account_id' => $held->key));
+check(NodeRemoval::machine_kind($h) === NodeRemoval::MACHINE_PROVIDER, 'a machine in an account this node holds is asked about');
+check(NodeRemoval::account_token($h) === 'nhr-held-token', 'with its own account\'s credential');
+check(strpos(NodeRemoval::account_label($h), 'nhr nhr-held-token') !== false, 'and named by that account');
+
 $a = nhr_node('attest', array('mgn_cloud_account' => $other_ours));
-nhr_provision($buyer, $a, array('cvp_instance_id' => '515151'));
-check(NodeRemoval::machine_kind($a, 'tok') === NodeRemoval::MACHINE_ATTEST, 'a machine in the account this plane holds no token for is attested');
-check(NodeRemoval::machine_kind(nhr_node('notoken', array('mgn_cloud_account' => $ours)), '') === NodeRemoval::MACHINE_ATTEST,
-	'so is one in its own account when it holds no token at all');
+nhr_provision($buyer, $a, array('cvp_instance_id' => '515151', 'cvp_oca_operator_cloud_account_id' => $gone->key));
+check(NodeRemoval::machine_kind($a) === NodeRemoval::MACHINE_ATTEST, 'a machine whose account was removed from this node is attested');
+check(NodeRemoval::machine_kind(nhr_node('notoken', array('mgn_cloud_account' => $ours))) === NodeRemoval::MACHINE_ATTEST,
+	'so is one whose record names no account of ours');
 check(NodeRemoval::attest_text($a) === '515151', 'the person types its instance ID');
-check(strpos(NodeRemoval::refusal($a, '515150', null, $no_dns, 'tok'), 'Type the machine\'s instance ID') !== false, 'a wrong one is refused');
-check(NodeRemoval::refusal($a, '515151', null, $no_dns, 'tok') === '', 'the right one passes');
+check(strpos(NodeRemoval::refusal($a, '515150', null, $no_dns), 'Type the machine\'s instance ID') !== false, 'a wrong one is refused');
+check(NodeRemoval::refusal($a, '515151', null, $no_dns) === '', 'the right one passes');
 $a_ip = nhr_node('attestip', array('mgn_cloud_account' => $other_ours, 'mgn_host' => '198.51.100.75'));
 check(NodeRemoval::attest_text($a_ip, $no_dns) === '198.51.100.75', 'with no instance on record, its address');
 check(NodeRemoval::attest_matches($a_ip, ' 198.51.100.75 ', $no_dns) && !NodeRemoval::attest_matches($a_ip, '198.51.100.76', $no_dns),
@@ -298,7 +319,7 @@ check(NodeRemoval::attest_matches($a_ip, ' 198.51.100.75 ', $no_dns) && !NodeRem
 $log = tempnam(sys_get_temp_dir(), 'nhr');
 $was_log = ini_set('error_log', $log);
 try {
-	NodeRemoval::remove($a, '515151', (int)$buyer->key, null, $no_dns, 'tok');
+	NodeRemoval::remove($a, '515151', (int)$buyer->key, null, $no_dns);
 } finally {
 	ini_set('error_log', $was_log);
 }

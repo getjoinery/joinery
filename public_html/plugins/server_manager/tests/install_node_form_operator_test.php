@@ -6,9 +6,10 @@
  * needs: []
  */
 /**
- * Remote Install offers the management node's own cloud account (its operator
- * token) beside connected ones, as the Copy tab does: a management node with
- * no connected account can still install a new node on its own account.
+ * Remote Install offers every cloud account of this management node, the
+ * default chosen, beside customers' connected ones, as the Copy tab does
+ * (the cloud_accounts_list spec): a management node with no connected account
+ * can still install a new node in its own.
  *
  * Proven over HTTP as a signed-in superadmin. Nothing here creates a
  * provision: every POST leaves the domain empty, so the form refuses it, and
@@ -17,6 +18,7 @@
  *
  * Run: php plugins/server_manager/tests/install_node_form_operator_test.php [base_url] [origin_ip]
  *
+ * @version 1.1 - every account of ours is offered as oca:<id>, the default chosen; an unknown choice is refused
  * @version 1.0
  */
 
@@ -44,7 +46,7 @@ $post = function (string $account) use ($jar, $display, $run_id) {
 	return harness_request('POST', '/admin/server_manager/install_node_form', array(
 		'jar' => $jar, 'accept' => null, 'encode' => 'form',
 		'body' => array(
-			'mgn_name' => 'HarnessTest install ' . $run_id, 'cca_account_id' => $account,
+			'mgn_name' => 'HarnessTest install ' . $run_id, 'cloud_account' => $account,
 			'cloud_region' => 'us-east', 'cloud_instance_type' => 'g6-nanode-1',
 			'sitename' => 'harness' . $run_id, 'docker_mode' => 'docker', 'install_mode' => 'fresh',
 			'domain' => '',
@@ -55,31 +57,36 @@ $post = function (string $account) use ($jar, $display, $run_id) {
 check(harness_web_login($jar, $super->get('usr_email'), 'TestPassword_Inf' . $run_id) !== null, 'the superadmin is signed in');
 
 // ---------------------------------------------------------------------------
-section('The operator account is offered');
+section('Our accounts are offered, the default chosen');
 
-if (ProvisionCustomerCloud::operator_compute_token() === '') {
-	harness_skip('this site has no operator token, so there is nothing to offer');
+$default = OperatorCloudAccount::default_account();
+if ($default === null || !$default->usable()) {
+	harness_skip('this site holds no usable default cloud account, so there is nothing to offer');
 } else {
+	$key = $default->choice_key();
 	$page = harness_request('GET', '/admin/server_manager/install_node_form', array('jar' => $jar, 'accept' => null));
 	check($page['status'] === 200, 'Remote Install renders', 'status ' . $page['status']);
-	check(preg_match('#<option[^>]*value="operator"[^>]*>[^<]*operator token#i', $page['body']) === 1,
-		'the cloud account list offers the operator token\'s account');
+	check(preg_match('#<option[^>]*value="' . preg_quote($key, '#') . '"[^>]*selected[^>]*>[^<]*ours, default#i', $page['body']) === 1
+		|| preg_match('#<option[^>]*selected[^>]*value="' . preg_quote($key, '#') . '"[^>]*>[^<]*ours, default#i', $page['body']) === 1,
+		'the cloud account list offers the default account of ours, chosen');
 
 	// -----------------------------------------------------------------------
 	section('Choosing it is accepted');
 
 	$before = $provisions();
-	$r = $post('operator');
+	$r = $post($key);
 	check(strpos($r['body'], 'Domain is required.') !== false, 'the form is refused for the empty domain (the control)');
-	check(strpos($r['body'], 'Choose an active connected cloud account.') === false,
-		'the operator account is not refused as an unknown connected account');
+	check(strpos($r['body'], 'Choose a cloud account.') === false,
+		'our account is not refused as an unknown choice');
 	check($provisions() === $before, 'a refused form records no provision');
 }
 
 // ---------------------------------------------------------------------------
-section('No account chosen is still refused');
+section('No account chosen, or an unknown one, is refused');
 
 $r = $post('');
-check(strpos($r['body'], 'Choose an active connected cloud account.') !== false, 'an empty choice is refused, naming the field');
+check(strpos($r['body'], 'Choose a cloud account.') !== false, 'an empty choice is refused, naming the field');
+$r = $post('operator');
+check(strpos($r['body'], 'Choose a cloud account.') !== false, 'a key naming no account is refused');
 
 harness_finish();

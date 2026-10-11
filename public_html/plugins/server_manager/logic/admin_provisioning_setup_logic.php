@@ -3,9 +3,15 @@
  * admin_provisioning_setup_logic - Guided activation for the hosting
  * provisioning pipeline.
  *
- * POST actions delegate to ProvisioningSetup and redirect back with a
- * session message; GET renders the live status of every checklist item.
+ * POST actions delegate to ProvisioningSetup (and, for the Hosting tab's cloud
+ * accounts, OperatorCloudAccount) and redirect back to the tab they came from
+ * with a session message; GET renders the live status of every checklist item.
  *
+ * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
+ *
+ * @version 2.0 - tabs; the Hosting tab's cloud accounts: add by API key or Connect with Linode, check, replace a key,
+ *   make default, remove (cloud_accounts_list WP4); the hosted card no longer takes a token; the cleanup preview
+ *   covers every test account
  * @version 1.9 - saving the hosted card also keeps the token's account company (CloudAccounts)
  * @version 1.8 - the test-account cleanup card: its task, last run, scopes, and a preview on request
  *   (test_cloud_account_and_prod_management WP3)
@@ -22,6 +28,31 @@
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ProvisioningSetup.php'));
 
+/** The page's tabs: key => label. */
+const SMPS_TABS = array(
+	'setup'   => 'Setup',
+	'hosting' => 'Hosting',
+	'hosted'  => 'Hosted tier',
+	'shop'    => 'Shop',
+	'domains' => 'Domains',
+	'cleanup' => 'Cleanup',
+);
+
+/** Which tab each action is on, so a save returns to it. */
+const SMPS_ACTION_TABS = array(
+	'setup_api' => 'setup', 'activate_tasks' => 'setup', 'save_email' => 'setup',
+	'add_account_key' => 'hosting', 'connect_account' => 'hosting', 'reconnect_account' => 'hosting',
+	'check_account' => 'hosting', 'replace_account_key' => 'hosting', 'default_account' => 'hosting',
+	'remove_account' => 'hosting', 'save_cloud' => 'hosting',
+	'save_hosted' => 'hosted',
+	'create_question' => 'shop',
+	'save_domains' => 'domains',
+);
+
+/** The cloud-account actions: each takes the page's CSRF token. */
+const SMPS_ACCOUNT_ACTIONS = array('add_account_key', 'connect_account', 'reconnect_account', 'check_account',
+	'replace_account_key', 'default_account', 'remove_account');
+
 function admin_provisioning_setup_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(10);
@@ -30,6 +61,10 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 	$page_regex = '/\/admin\/server_manager\/provisioning_setup/';
 
 	$action = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($input['action'] ?? '') : '';
+	$tab = (string)($input['tab'] ?? '');
+	if (!isset(SMPS_TABS[$tab])) {
+		$tab = 'setup';
+	}
 
 	// A stored credential is a locked field: not posted, it is kept; after
 	// Reset, blank removes it and text replaces it.
@@ -46,8 +81,91 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 	if ($action !== '') {
 		$message = null;
 		$error = null;
+		$return_tab = SMPS_ACTION_TABS[$action] ?? $tab;
+		$account_of = function () use ($input): OperatorCloudAccount {
+			$account = new OperatorCloudAccount((int)($input['oca_id'] ?? 0), TRUE);
+			if (!$account->key || $account->removed()) {
+				throw new OperatorCloudAccountException('That cloud account is not held here.');
+			}
+			return $account;
+		};
 		try {
-			if ($action === 'setup_api') {
+			if (in_array($action, SMPS_ACCOUNT_ACTIONS, true) && !SmAdminCsrf::valid()) {
+				throw new OperatorCloudAccountException('The form expired. Reload the page and try again.');
+			}
+			if ($action === 'add_account_key') {
+				$account = OperatorCloudAccount::add_key((string)($input['cloud_api_token'] ?? ''), (int)$session->get_user_id());
+				$message = 'Added ' . $account->label() . '.';
+				if (OperatorCloudAccount::default_account() === null && $account->default_refusal() === '') {
+					$account->make_default();
+					$message .= ' It is the default: hosted orders go to it.';
+				}
+				$missing = $account->missing_scopes();
+				if ($missing) {
+					$error = $message . ' Its token lacks ' . implode(', ', array_keys($missing))
+						. '; what needs them will be refused. Replace the key with one that has them.';
+					$message = null;
+				}
+			} elseif ($action === 'connect_account' || $action === 'reconnect_account') {
+				$account_id = 0;
+				if ($action === 'reconnect_account') {
+					$account = $account_of();
+					if ((string)$account->get('oca_method') !== OperatorCloudAccount::METHOD_CONNECT) {
+						throw new OperatorCloudAccountException('That account was added by API key; replace its key instead.');
+					}
+					$account_id = (int)$account->key;
+				}
+				$consent_url = (new OAuth2Client())->beginConsent('linode', OperatorCloudAccount::CONNECT_SCOPES,
+					'operator_cloud', array('user_id' => (int)$session->get_user_id(), 'account_id' => $account_id),
+					$page_url . '?tab=hosting');
+				return LogicResult::redirect($consent_url);
+			} elseif ($action === 'check_account') {
+				$account = $account_of();
+				$why = $account->check();
+				if ($why !== '') {
+					$error = $why;
+				} else {
+					$message = 'Checked ' . $account->label() . ' with the provider.';
+				}
+			} elseif ($action === 'replace_account_key') {
+				$account = $account_of();
+				if ((string)$account->get('oca_method') !== OperatorCloudAccount::METHOD_KEY) {
+					throw new OperatorCloudAccountException('That account was added by a Linode sign-in; reconnect it instead.');
+				}
+				$token = trim((string)($input['cloud_api_token'] ?? ''));
+				if ($token === '') {
+					throw new OperatorCloudAccountException('Paste the new API token.');
+				}
+				// The same account, never another: every server that names this entry would follow it.
+				try {
+					$name = OperatorCloudAccount::driver_for($token)->accountName();
+				} catch (CloudComputeException $e) {
+					throw new OperatorCloudAccountException('The provider did not accept that token (' . $e->getMessage() . '). Nothing was changed.');
+				}
+				$was = trim((string)$account->get('oca_account_name'));
+				if ($was !== '' && trim($name) !== $was) {
+					throw new OperatorCloudAccountException('That token is for ' . $name . ', not ' . $was
+						. '. A replacement key must be for the same account; add a different account as its own entry.');
+				}
+				$account->store_credential($token);
+				$account->set('oca_status', OperatorCloudAccount::STATUS_ACTIVE);
+				$account->save();
+				$why = $account->check();
+				if ($why !== '') {
+					$error = 'The key was replaced, but ' . lcfirst($why);
+				} else {
+					$message = 'Replaced the key for ' . $account->label() . '.';
+				}
+			} elseif ($action === 'default_account') {
+				$account = $account_of();
+				$account->make_default();
+				$message = $account->label() . ' is the default: hosted orders go to it.';
+			} elseif ($action === 'remove_account') {
+				$account = $account_of();
+				$account->remove();
+				$message = 'Removed ' . $account->label() . '. Servers in it are no longer reached from here; removing one asks you '
+					. 'to confirm it is gone.';
+			} elseif ($action === 'setup_api') {
 				$result = ProvisioningSetup::setupApiCredentials(!empty($input['rotate']));
 				$message = $result['message'];
 			} elseif ($action === 'create_question') {
@@ -105,43 +223,9 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					trim($input['smtp2go_referral_url'] ?? ''));
 				ProvisioningSetup::writeSetting('server_manager_storage_referral_url',
 					trim($input['storage_referral_url'] ?? ''));
-				$save_secret('operator_cloud_token', 'server_manager_operator_cloud_token');
-				// The account's own name, so pages offering it say which account it is.
-				$account_name = '';
-				$account_company = '';
-				$operator_token = trim(ProvisioningSetup::readSecret('server_manager_operator_cloud_token'));
-				if ($operator_token !== '') {
-					try {
-						$driver = new LinodeComputeDriver($operator_token);
-						$account_name = mb_substr($driver->accountName(), 0, 255);
-						// Which dashboard tab the boxes this plane creates belong to (CloudAccounts).
-						try { $account_company = mb_substr($driver->accountCompany(), 0, 255); } catch (Exception $e) { /* needs account:read_only; read as main */ }
-					} catch (Exception $e) {
-						$error = 'Hosted tier settings saved, but the operator token could not read its account\'s name: '
-							. $e->getMessage();
-					}
-				}
-				ProvisioningSetup::writeSetting('server_manager_operator_cloud_account', $account_name);
-				ProvisioningSetup::writeSetting(CloudAccounts::COMPANY_SETTING, $account_company);
-				// What the token may do, so a missing scope is named now and not
-				// at the first job it is refused for.
-				try {
-					$missing = ProvisioningSetup::recordOperatorTokenScopes();
-					if ($missing && !$error) {
-						$lines = array();
-						foreach ($missing as $scope => $purpose) {
-							$lines[] = $scope . ' (' . $purpose . ')';
-						}
-						$error = 'Hosted tier settings saved, but the operator token lacks '
-							. implode('; ', $lines) . '. Make a Linode token with these scopes added and enter it here.';
-					}
-				} catch (Exception $e) {
-					$error = $error ?: 'Hosted tier settings saved, but the operator token\'s scopes could not be read: '
-						. $e->getMessage();
-				}
 				$save_secret('hosted_smtp2go_master_key', 'server_manager_smtp2go_api_key');
 				$save_secret('smtp2go_webhook_secret', 'server_manager_smtp2go_webhook_secret');
-				$message = $error ? null : 'Hosted tier settings saved.';
+				$message = 'Hosted tier settings saved.';
 			} else {
 				$error = 'Unknown action.';
 			}
@@ -157,33 +241,97 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 			$session->save_message(new DisplayMessage($error, 'Error', $page_regex,
 				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		}
-		return LogicResult::redirect($page_url);
+		return LogicResult::redirect($page_url . '?tab=' . $return_tab);
 	}
 
-	// The test-account cleanup's preview asks the provider, so only on request.
+	// What came back from a Linode sign-in.
+	if (!empty($input['connected'])) {
+		$connected = new OperatorCloudAccount((int)$input['connected'], TRUE);
+		if ($connected->key) {
+			$why = $connected->unusable_reason();
+			$session->save_message(new DisplayMessage($why === '' ? 'Connected ' . $connected->label()
+				. ' until ' . $connected->get_local('oca_token_expires', 'g:i a T') . '.' : $why,
+				$why === '' ? 'Success' : 'Error', $page_regex,
+				$why === '' ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		}
+		return LogicResult::redirect($page_url . '?tab=hosting');
+	}
+	if (!empty($input['connect_error'])) {
+		$why = array(
+			'permission'    => 'Only a superadmin adds a cloud account here.',
+			'gone'          => 'That cloud account was removed while you signed in. Nothing was saved.',
+			'other_account' => 'You signed in to a different Linode account than the one being reconnected. Nothing was saved; '
+				. 'connect it as its own entry instead.',
+		)[(string)$input['connect_error']] ?? 'The Linode sign-in did not finish.';
+		$session->save_message(new DisplayMessage($why, 'Error', $page_regex,
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($page_url . '?tab=hosting');
+	}
+
+	// The test-account cleanup's preview asks the provider, so only on request:
+	// one plan per test account, each behind its own safety catch.
 	$cleanup_preview = null;
-	if (!empty($input['cleanup_preview'])) {
-		$driver = TestCloudCleanup::driver();
-		if ($driver === null) {
-			$cleanup_preview = array('error' => 'No operator cloud token is set on this site.');
-		} else {
+	if ($tab === 'cleanup' && !empty($input['cleanup_preview'])) {
+		$cleanup_preview = array();
+		$nodes = MachineTransferWatch::node_addresses(array('MachineTransferWatch', 'resolve'));
+		foreach (TestCloudCleanup::accounts() as $account) {
 			try {
-				$cleanup_preview = TestCloudCleanup::plan($driver,
-					MachineTransferWatch::node_addresses(array('MachineTransferWatch', 'resolve')),
-					time(), TestCloudCleanup::max_age_hours());
+				$plan = TestCloudCleanup::plan($account->driver(), $nodes, time(), TestCloudCleanup::max_age_hours());
 			} catch (CloudComputeException $e) {
-				$cleanup_preview = array('error' => 'The account could not be listed: ' . $e->getMessage());
+				$plan = array('error' => 'The account could not be listed: ' . $e->getMessage());
 			}
+			$cleanup_preview[] = array('name' => $account->label()) + $plan;
 		}
 	}
 
+	$test_accounts = array();
+	foreach (TestCloudCleanup::accounts() as $account) {
+		$test_accounts[] = array('name' => $account->label(), 'missing_scopes' => TestCloudCleanup::missing_scopes($account));
+	}
+
+	// The Hosting tab's lists: ours with what each can do, and customers' (read-only).
+	$ours = array();
+	foreach (OperatorCloudAccount::held() as $account) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT count(*) FROM cvp_customer_cloud_provisions
+			WHERE cvp_oca_operator_cloud_account_id = ? AND cvp_delete_time IS NULL AND cvp_hosting_mode = 'operator'
+			  AND COALESCE(cvp_instance_id, '') <> ''");
+		$q->execute(array((int)$account->key));
+		$used = (int)$q->fetchColumn();
+		$ours[] = array(
+			'account'        => $account,
+			'problem'        => $account->unusable_reason(),
+			'missing_scopes' => $account->missing_scopes(),
+			'default_refusal' => $account->default_refusal(),
+			'servers'        => $used,
+		);
+	}
+	$customers = array();
+	foreach (new MultiCustomerCloudAccount(array('deleted' => false), array('cca_customer_cloud_account_id' => 'ASC')) as $ca) {
+		$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
+		$customers[] = array(
+			'name'      => trim((string)$ca->get('cca_account_name')),
+			'provider'  => ucfirst((string)$ca->get('cca_provider')),
+			'who'       => $ca_user->key ? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name')) : 'user #' . $ca->get('cca_usr_user_id'),
+			'user_id'   => (int)$ca->get('cca_usr_user_id'),
+			'connected' => $ca->get_local(trim((string)$ca->get('cca_update_time')) !== '' ? 'cca_update_time' : 'cca_create_time', 'M j, Y g:i a T'),
+			'state'     => $ca->get('cca_status') !== 'active' ? 'Needs reconnecting (' . $ca->get('cca_status') . ')'
+				: (CustomerCloudAccount::grant_expired($ca) ? 'Expired' : 'Connected'),
+		);
+	}
+
 	return LogicResult::render(array(
+		'tab'    => $tab,
+		'tabs'   => SMPS_TABS,
 		'status' => ProvisioningSetup::status(),
+		'accounts' => array(
+			'ours'      => $ours,
+			'customers' => $customers,
+		),
 		'cleanup' => array(
 			'task'           => TestCloudCleanup::taskRow(),
 			'state'          => TestCloudCleanup::state(),
 			'max_age_hours'  => TestCloudCleanup::max_age_hours(),
-			'missing_scopes' => TestCloudCleanup::missing_scopes(),
+			'accounts'       => $test_accounts,
 			'preview'        => $cleanup_preview,
 		),
 	));

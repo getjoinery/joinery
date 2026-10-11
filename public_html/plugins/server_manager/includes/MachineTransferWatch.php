@@ -3,8 +3,8 @@
  * MachineTransferWatch — each cloud machine's outbound transfer this month,
  * read from its provider once a day (specs/node_outbound_and_transfer.md WP1).
  *
- * The plane reads every account it holds a credential for: the operator token
- * and each connected customer account. It lists the account's machines,
+ * The plane reads every account it holds a credential for: each of ours and
+ * each connected customer account. It lists the account's machines,
  * matches them to its nodes by address (a node's host, and its server's
  * where it is a site on a shared one), and reads the transfer of each machine
  * a node runs on. A machine no node runs on is not read: the account pool
@@ -16,6 +16,7 @@
  * passed. One node speaks for each machine, so a server of twelve sites raises
  * one incident.
  *
+ * @version 1.4 - every account of ours is read, keyed oca:<id> (cloud_accounts_list)
  * @version 1.3 - a connected account the provider answers 401 is marked revoked instead of failing every day
  * @version 1.2 - accounts(), node_addresses() and nodes_on() are public: adopting a node's cloud server
  *                and the test-account cleanup match by the same rule (test_cloud_account_and_prod_management)
@@ -84,7 +85,9 @@ class MachineTransferWatch {
 			} catch (Exception $e) {
 				if (self::revoke_rejected((string)$key, $e)) {
 					$problems[] = 'Account ' . $key . ': the provider rejected its permission (' . $e->getMessage()
-						. '), so it is marked revoked and no longer read. Its owner re-connects it from their profile.';
+						. (strpos((string)$key, 'oca:') === 0
+							? '), so it is marked refused and no longer read. Replace its credential on the Hosting tab of Provisioning Setup.'
+							: '), so it is marked revoked and no longer read. Its owner re-connects it from their profile.');
 					continue;
 				}
 				$problems[] = 'Account ' . $key . ': its machines could not be listed (' . $e->getMessage() . ').';
@@ -259,12 +262,25 @@ class MachineTransferWatch {
 	/**
 	 * A connected account the provider answered 401 is marked revoked, as the
 	 * provisioning pipeline marks it: the grant is gone, not passing through
-	 * an outage, so reading it again tomorrow cannot succeed. The operator
-	 * token is a setting, not an account; its 401 stays a problem until it is
-	 * replaced. True when an account was marked.
+	 * an outage, so reading it again tomorrow cannot succeed. One of ours is
+	 * marked refused, which the Hosting tab of Provisioning Setup shows until
+	 * its credential is replaced. True when an account was marked.
 	 */
 	private static function revoke_rejected(string $key, Exception $e): bool {
-		if (!preg_match('/^cca:(\d+)$/', $key, $m) || (int)$e->getCode() !== 401) {
+		if ((int)$e->getCode() !== 401) {
+			return false;
+		}
+		if (preg_match('/^oca:(\d+)$/', $key, $m)) {
+			$ours = new OperatorCloudAccount((int)$m[1], TRUE);
+			if (!$ours->key || (string)$ours->get('oca_status') !== OperatorCloudAccount::STATUS_ACTIVE) {
+				return false;
+			}
+			$ours->set('oca_status', OperatorCloudAccount::STATUS_REFUSED);
+			$ours->set('oca_check_error', mb_substr($e->getMessage(), 0, 500));
+			$ours->save();
+			return true;
+		}
+		if (!preg_match('/^cca:(\d+)$/', $key, $m)) {
 			return false;
 		}
 		$account = new CustomerCloudAccount((int)$m[1], TRUE);
@@ -278,30 +294,10 @@ class MachineTransferWatch {
 
 	/**
 	 * The accounts this plane holds: [key => driver], and the sentences for
-	 * those it could not use. A connected account whose grant has expired is
-	 * skipped silently: the accounts page already asks its owner to reconnect.
+	 * those it could not use (HeldCloudAccounts::drivers()).
 	 */
 	public static function accounts(): array {
-		$accounts = array();
-		$problems = array();
-		$token = ProvisionCustomerCloud::operator_compute_token();
-		if ($token !== '') {
-			$accounts['operator'] = new LinodeComputeDriver($token);
-		}
-		foreach (new MultiCustomerCloudAccount(array('status' => 'active', 'deleted' => false)) as $account) {
-			if ((string)$account->get('cca_provider') !== 'linode' || CustomerCloudAccount::grant_expired($account)) {
-				continue;
-			}
-			// A read-only watch never parks an account: a failed refresh is a
-			// problem in this run's report, and the account stays as it was.
-			$resolved = ProvisionCustomerCloud::account_driver($account, false);
-			if ($resolved['driver'] === null) {
-				$problems[] = 'Connected account ' . $account->key . ': ' . $resolved['reason'];
-				continue;
-			}
-			$accounts['cca:' . $account->key] = $resolved['driver'];
-		}
-		return array($accounts, $problems);
+		return HeldCloudAccounts::drivers();
 	}
 
 	/**
