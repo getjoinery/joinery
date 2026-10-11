@@ -379,10 +379,13 @@ account there.
 exist **outside** the platform to prevent permanent data loss, derived live
 from system state, and gives each a verify tool and a canonical
 password-manager label (fingerprint included). Items come from a registry
-(`includes/RecoveryReadiness.php`): core contributes the signed-in user's
-vault recovery codes per scope; plugins declare providers under
-`recoveryReadiness` in `plugin.json` (server_manager contributes the backup
-recovery key and one console-access attestation per enabled backup target).
+(`includes/RecoveryReadiness.php`): core contributes the site's backup
+recovery key and one console-access attestation per backup target
+(`includes/BackupReadinessItems.php`, on every site whatever its plugins), and
+the signed-in user's vault recovery codes per scope; plugins declare providers
+of their own under `recoveryReadiness` in `plugin.json`. Each card carries its
+item key as an anchor, so the Backups page's Verify opens
+`/admin/admin_recovery_readiness#backup_recovery_key`.
 
 Verify tools, by kind:
 

@@ -42,6 +42,8 @@ foreach ($items as $item) {
 }
 
 foreach ($items as $i => $item) {
+	// Each card answers to its key, so a page that links here lands on its own card.
+	echo '<a id="' . htmlspecialchars($item['key'], ENT_QUOTES) . '"></a>';
 	$page->begin_box(array('title' => $item['title']));
 
 	// ── Status line ────────────────────────────────────────────────────
