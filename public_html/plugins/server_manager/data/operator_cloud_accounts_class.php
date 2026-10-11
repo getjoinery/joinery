@@ -29,6 +29,7 @@
  * record (cvp_oca_operator_cloud_account_id), and everything done to it later
  * is done with that account's credential (HeldCloudAccounts).
  *
+ * @version 1.1 - events:read_only: the activity log read before an encrypted data root is opened (Tier 2)
  * @version 1.0
  */
 
@@ -66,13 +67,14 @@ class OperatorCloudAccount extends SystemBase {
 		'firewall:read_only' => 'the check before a handover, and a site copy\'s switch-over by swapping addresses',
 		'volumes:read_only'  => 'the check before a handover',
 		'ips:read_write'     => 'a site copy\'s switch-over by swapping two servers\' addresses',
+		'events:read_only'   => 'reading a server\'s activity log before its encrypted data root is opened, to refuse a boot after a rescue boot or a root-password reset (Tier 2)',
 	);
 	/** The scope without which no server can be created on the account. */
 	const CREATE_SCOPE = 'linodes:read_write';
 
 	/** What a Connect with Linode asks for: everything above. */
 	const CONNECT_SCOPES = array('linodes:read_write', 'account:read_write', 'firewall:read_only',
-		'volumes:read_only', 'ips:read_write');
+		'volumes:read_only', 'ips:read_write', 'events:read_only');
 
 	protected static $foreign_key_actions = array(
 		// A record of who added it, never an owner: the account stays.

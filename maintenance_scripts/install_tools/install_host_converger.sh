@@ -3,6 +3,13 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.6 - The path trigger is not ordered before paths.target: its queue is under cache/,
+#                which an encrypted data root mounts only after the unlock (D10).
+# Version: 1.5 - On an encrypted data root the unit logs to the journal: its log
+#                file's folder is on the data root, and while that is locked
+#                systemd would fail the unit before it starts, every minute
+#                (specs/hosted_data_promise_disk_encryption.md D1b). Elsewhere
+#                it appends to its file as before.
 # Version: 1.4 - `--machine ROOT`: the timer for a host with no site (runner
 #                2.17 --machine). ROOT is the agent's support bundle. The
 #                unit runs the entry point with --when-changed --machine
@@ -205,14 +212,19 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
         DESCRIBED="for this host (no site)"
         DOC_LINE=""            # the bundle carries no specs
     fi
+    OUTPUT_TEXT="StandardOutput=append:${LOG_FILE}
+StandardError=append:${LOG_FILE}"
+    if grep -q '^backing=luks-' /etc/joinery/data_root 2>/dev/null; then
+        OUTPUT_TEXT="StandardOutput=journal
+StandardError=journal"
+    fi
     SERVICE_TEXT="[Unit]
 Description=Joinery host converger ${DESCRIBED}: run the host installers when the deployed release changes
 ${DOC_LINE}
 [Service]
 Type=oneshot
 ExecStart=${COMMAND}
-StandardOutput=append:${LOG_FILE}
-StandardError=append:${LOG_FILE}
+${OUTPUT_TEXT}
 Nice=10
 # An hour: a hung installer holds the runner lock while it lives; the timeout
 # kills the whole control group (the default KillMode) and the lock releases.
@@ -231,8 +243,17 @@ WantedBy=timers.target"
     # A queued root request should not wait for the next tick: an operator who
     # pressed Upgrade is watching a transcript. PathChanged fires the same
     # oneshot service the moment anything lands in the queue directory.
+    # Not ordered before paths.target, as a path unit is by default: the queue
+    # is under cache/, which on an encrypted data root is mounted only after
+    # the unlock, and a path unit early boot waits for would be an ordering
+    # cycle (specs/hosted_data_promise_disk_encryption.md D10). It starts once
+    # its folder is there.
     PATH_TEXT="[Unit]
 Description=Joinery host converger path trigger for ${SITENAME}: carry out a queued root request at once
+DefaultDependencies=no
+After=sysinit.target
+Conflicts=shutdown.target
+Before=shutdown.target
 
 [Path]
 PathChanged=${SITE_ROOT}/cache/root_requests

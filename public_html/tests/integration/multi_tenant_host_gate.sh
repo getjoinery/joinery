@@ -105,7 +105,12 @@ STUB
 cat > "$T/bin/apt-config" <<'STUB'
 #!/bin/bash
 if [ -f "$JOINERY_MT_ROOT/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot" ] && [ -z "${STUB_APT_OFF:-}" ]; then
-    echo "UU='1'"; echo "AR='true'"
+    # 53joinery-encrypted-reboot sorts after it and turns apt's own reboot off.
+    if [ -f "$JOINERY_MT_ROOT/etc/apt/apt.conf.d/53joinery-encrypted-reboot" ]; then
+        echo "UU='1'"; echo "AR='false'"
+    else
+        echo "UU='1'"; echo "AR='true'"
+    fi
 fi
 STUB
 cat > "$T/bin/apt-get" <<'STUB'
@@ -173,6 +178,20 @@ echo "=== apt that will not reboot is refused ==="
 out="$(STUB_APT_OFF=1 bash "$MTH" install 2>&1)"; rc=$?
 chk "exit non-zero" "$([ "$rc" -ne 0 ] && echo yes)" "yes"
 has "names apt-config" "$out" 'apt does not run unattended upgrades with a reboot'
+
+echo "=== an encrypted host: the data root's tick owns the reboot (hosted_data_promise_disk_encryption D4) ==="
+mkdir -p "$T/root/etc/joinery"
+printf 'backing=luks-file\nsource=/srv/joinery.img\n' > "$T/root/etc/joinery/data_root"
+printf 'Unattended-Upgrade::Automatic-Reboot "false";\n' > "$T/root/etc/apt/apt.conf.d/53joinery-encrypted-reboot"
+out="$(bash "$MTH" install 2>&1)"; rc=$?
+chk "apt's reboot off, the data root's on: install takes it" "$rc" "0"
+has "and says who reboots" "$out" 'once the escrow holder answers'
+out="$(bash "$MTH" check 2>&1)"; rc=$?
+has "check says so too" "$out" "by the data root's tick"
+rm -f "$T/root/etc/apt/apt.conf.d/53joinery-encrypted-reboot"
+out="$(bash "$MTH" install 2>&1)"; rc=$?
+chk "an encrypted host without the data root's override is still apt's: on" "$rc" "0"
+rm -f "$T/root/etc/joinery/data_root"
 
 echo "=== assert: what Docker runs before it starts ==="
 bash "$MTH" assert > /dev/null 2>&1; rc=$?

@@ -25,6 +25,8 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.4 - data_root_encrypt, data_root_reseal and data_root_rekey: a self-hosted server's data root encrypted, and its
+ *                break-glass copy sealed, to this site's own recovery key from its Backups page (WP4).
  * @version 1.3 - install_package carries `replace` (the operator confirmed
  *                replacing an installed package from the replace panel), and
  *                set_receives_upgrades handles plugins as well as themes
@@ -61,7 +63,20 @@ class RootRequest {
 		'save_doc',
 		'set_receives_upgrades',   // {type, name, value}: the fork mark in a theme's or plugin's live manifest
 		'remove_plugin',           // delete plugins/<name> once its row says uninstalled (PluginRemoval)
+		'data_root_encrypt',       // encrypt this server's data root, sealed to this site's own proven recovery key
+		'data_root_reseal',        // seal the data root's break-glass copy to this site's own proven recovery key
+		'data_root_rekey',         // re-encrypt this server's data root under a new volume key (a key that may have been seen)
 	);
+	/*
+	 * data_root_encrypt, data_root_reseal, data_root_rekey
+	 * (specs/hosted_data_promise_disk_encryption.md WP4, D2, D8): a server not
+	 * hosted by an operator, encrypted, sealed and re-keyed from its own
+	 * Backups page. The request carries nothing; root reads the conditions
+	 * (DataRootStatus) and the key itself. The key is this site's backup
+	 * recovery key, the one every backup is already sealed to, so a web tier
+	 * that could swap it to its own (it is a setting) already has the backups;
+	 * the break-glass copy trusts nothing the backups do not.
+	 */
 
 	/**
 	 * install_package {type, staged_dir, replace?, unsigned_ack?} — install a

@@ -6,6 +6,13 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.16 - CloudProviderEvents: account/events for one instance (its disks' and backups' too), and the
+ *                instance an address belongs to
+ * @version 1.15 - createInstance() sends disk_encryption only where the region offers Linode's "Disk Encryption"
+ *                (refusing 'disabled' in a distributed region, where it cannot be turned off) and swap_size when
+ *                given; normalize() reports the instance's disk_encryption; CloudRegionFacts: regions() and
+ *                regionInfo() carry each region's site_type and the disk-encryption capability
+ *                (specs/hosted_data_promise_disk_encryption.md D1a, D10)
  * @version 1.14 - CloudAccountCleanup: accountCompany() (the account's company field alone), listVolumes(),
  *                deleteVolume(); listInstances() carries each instance's tags
  *                (specs/test_cloud_account_and_prod_management.md WP3)
@@ -47,14 +54,19 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents {
 
 	const API_BASE = 'https://api.linode.com/v4/';
+
+	/** The region capability under which Linode offers (and can turn off) its own disk encryption. */
+	const DISK_ENCRYPTION_CAPABILITY = 'Disk Encryption';
 
 	/** @var Client */
 	private $http;
 	/** @var string */
 	private $access_token;
+	/** @var array regionInfo() answers already read, by region id */
+	private $region_facts = array();
 
 	public function __construct(string $access_token, ?Client $http = null) {
 		$this->access_token = $access_token;
@@ -83,7 +95,39 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			$body['authorized_keys'] = array_values($opts['authorized_keys']);
 		}
 		$this->applyFirstBoot($body, $opts);
+		$this->applyDiskEncryption($body, $opts);
+		if (isset($opts['swap_size'])) {
+			$body['swap_size'] = max(0, (int)$opts['swap_size']);
+		}
 		return $this->normalize($this->request('POST', 'linode/instances', $body));
+	}
+
+	/**
+	 * Linode's own disk encryption is a region capability, on by default where
+	 * the region offers it, and fixed at create. The field is sent only where
+	 * the region lists the capability: elsewhere there is no layer to turn
+	 * off. A distributed (edge) region keeps it on always and refuses
+	 * 'disabled', so that is refused here, before anything is created, rather
+	 * than stacked silently (CloudComputeProvider::createInstance).
+	 */
+	private function applyDiskEncryption(array &$body, array $opts): void {
+		$layer = (string)($opts['disk_encryption'] ?? '');
+		if ($layer === '') {
+			return;
+		}
+		if (!in_array($layer, array('enabled', 'disabled'), true)) {
+			throw new CloudComputeException("createInstance: disk_encryption is 'enabled' or 'disabled', not '{$layer}'.", 400);
+		}
+		$region = $this->regionInfo((string)$opts['region']);
+		if ($layer === 'disabled' && $region['site_type'] === 'distributed') {
+			throw new CloudComputeException("Region {$region['id']} is a distributed region: Linode's disk encryption is always "
+				. 'on there and cannot be turned off.', 400);
+		}
+		if ($region['disk_encryption']) {
+			$body['disk_encryption'] = $layer;
+		} elseif ($layer === 'enabled') {
+			throw new CloudComputeException("Region {$region['id']} does not offer Linode's disk encryption.", 400);
+		}
 	}
 
 	public function getInstance(string $instance_id): array {
@@ -110,20 +154,51 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 	}
 
 	/**
-	 * The regions this account may create in: id => label. Also the cheapest
-	 * live check that a token works, which is what the Setup tab's token step
-	 * uses it for.
+	 * The regions this account may create in, keyed by id, each as
+	 * regionInfo() shapes it. Also the cheapest live check that a token works,
+	 * which is what the relay setup's token step uses it for.
 	 */
 	public function regions(): array {
 		$listing = $this->request('GET', 'regions');
 		$out = array();
 		foreach ((array)($listing['data'] ?? array()) as $region) {
-			$id = (string)($region['id'] ?? '');
-			if ($id !== '') {
-				$out[$id] = (string)($region['label'] ?? $id);
+			$facts = self::regionFacts((array)$region);
+			if ($facts['id'] !== '') {
+				$out[$facts['id']] = $facts;
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * One region: id, label, site_type ('core' / 'distributed'), and whether it
+	 * offers the provider's disk encryption. Remembered for this driver's
+	 * life, so a caller's check before a create and the create itself ask once.
+	 */
+	public function regionInfo(string $region): array {
+		// A blank region would ask GET regions/, the list of every region.
+		if (trim($region) === '') {
+			throw new CloudComputeException('regionInfo needs a region');
+		}
+		if (!isset($this->region_facts[$region])) {
+			$facts = self::regionFacts($this->request('GET', 'regions/' . rawurlencode($region)));
+			if ($facts['id'] === '') {
+				$facts['id'] = $region;
+			}
+			$this->region_facts[$region] = $facts;
+		}
+		return $this->region_facts[$region];
+	}
+
+	private static function regionFacts(array $region): array {
+		$capabilities = isset($region['capabilities']) && is_array($region['capabilities']) ? $region['capabilities'] : array();
+		$id = (string)($region['id'] ?? '');
+		return array(
+			'id'              => $id,
+			'label'           => (string)($region['label'] ?? $id),
+			'site_type'       => strtolower((string)($region['site_type'] ?? '')),
+			'disk_encryption' => in_array(self::DISK_ENCRYPTION_CAPABILITY, $capabilities, true),
+		);
 	}
 
 	/**
@@ -328,6 +403,61 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			'instance_id' => isset($ip['linode_id']) ? (string)$ip['linode_id'] : '',
 			'rdns'        => (string)($ip['rdns'] ?? ''),
 		);
+	}
+
+	// ── The activity log (CloudProviderEvents) ──────────────────────────────
+
+	/**
+	 * account/events for one instance: its own, its disks' and its backups'
+	 * (Linode files those under the instance's id, each with its own entity
+	 * type, and refuses an id filter without a type, so one query a type).
+	 */
+	public function instanceEvents(string $instance_id, string $since_utc): array {
+		$out = array();
+		foreach (array('linode', 'disks', 'backups') as $type) {
+			foreach ($this->instanceEventsOfType($instance_id, $type, $since_utc) as $e) {
+				$out[] = $e;
+			}
+		}
+		usort($out, function ($a, $b) { return strcmp($a['time'], $b['time']); });
+		return $out;
+	}
+
+	private function instanceEventsOfType(string $instance_id, string $type, string $since_utc): array {
+		$filter = json_encode(array('entity.id' => (int)$instance_id, 'entity.type' => $type,
+			'created' => array('+gte' => str_replace(' ', 'T', $since_utc)),
+			'+order_by' => 'created', '+order' => 'asc'));
+		$out = array();
+		$page = 1;
+		do {
+			$result = $this->request('GET', 'account/events?page_size=100&page=' . $page, null, array('X-Filter' => $filter));
+			foreach ((array)($result['data'] ?? array()) as $e) {
+				$via = is_array($e['secondary_entity'] ?? null)
+					? (string)($e['secondary_entity']['type'] ?? '') . ':' . (string)($e['secondary_entity']['label'] ?? '') : '';
+				$out[] = array(
+					'action'  => (string)($e['action'] ?? ''),
+					'time'    => self::utc((string)($e['created'] ?? '')),
+					'status'  => (string)($e['status'] ?? ''),
+					'message' => (string)($e['message'] ?? ''),
+					'entity'  => (string)($e['entity']['type'] ?? $type),
+					'via'     => $via,
+				);
+			}
+			$pages = (int)($result['pages'] ?? 1);
+			$page++;
+		} while ($page <= $pages && $page <= 10);
+		return $out;
+	}
+
+	public function instanceForAddress(string $address): string {
+		try {
+			return $this->ipAddress($address)['instance_id'];
+		} catch (CloudComputeException $e) {
+			if ($e->getCode() === 404) {
+				return '';
+			}
+			throw $e;
+		}
 	}
 
 	public function assignIpv4(string $region, array $assignments): void {
@@ -626,6 +756,9 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 		if (!empty($instance['ipv6']) && is_string($instance['ipv6'])) {
 			$ipv6 = strtolower(trim(explode('/', $instance['ipv6'], 2)[0]));
 		}
+		// The provider's own disk encryption on the instance. Absent or anything
+		// else is null: unknown, which is never read as on.
+		$layer = isset($instance['disk_encryption']) ? (string)$instance['disk_encryption'] : '';
 		return array(
 			'id'     => isset($instance['id']) ? (string)$instance['id'] : '',
 			'status' => isset($instance['status']) ? (string)$instance['status'] : '',
@@ -633,6 +766,7 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 			'ipv6'   => $ipv6,
 			'label'  => isset($instance['label']) ? (string)$instance['label'] : '',
 			'region' => isset($instance['region']) ? (string)$instance['region'] : '',
+			'disk_encryption' => in_array($layer, array('enabled', 'disabled'), true) ? $layer : null,
 		);
 	}
 

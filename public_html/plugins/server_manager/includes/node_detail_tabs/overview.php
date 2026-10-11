@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.62 - under the address, a provision's one line: "Data root: encrypted by us · provider's disk encryption: off"
+ *                 (or on / unknown), shown once it knows (specs/hosted_data_promise_disk_encryption.md D1a)
+ * @version 1.61 - the Encrypted data root card (overview_encryption.php): its state, what this management node holds
+ *                 for it, enrol it here, unlock it from here (specs/hosted_data_promise_disk_encryption.md WP2, WP8)
  * @version 1.60 - Remove Permanently names the machine's own cloud account (cloud_accounts_list)
  * @version 1.59 - a host with no data root offers Move its data onto the data root where its agent has
  *                 data_root_migrate (one_data_root WP4); never a site container. A data root declared and
@@ -433,6 +437,12 @@
 	if ($head_provision && trim((string)$head_provision->get('cvp_instance_ipv6')) !== '') {
 		$addr_html .= '<div class="small fw-normal"><code>' . htmlspecialchars((string)$head_provision->get('cvp_instance_ipv6')) . '</code></div>';
 	}
+	// Whose encryption the server's data sits under: ours, the provider's, or
+	// unknown (one layer, never two). Said only once the provision knows.
+	$head_layers = $head_provision ? $head_provision->data_root_line() : '';
+	if ($head_layers !== '') {
+		$addr_html .= '<div class="small fw-normal text-muted">' . htmlspecialchars($head_layers) . '</div>';
+	}
 	$fact('Address', $addr_html);
 
 	if ($node->get('mgn_site_url')) {
@@ -550,6 +560,8 @@
 	} elseif ($uptime_status === 'down') {
 		$up_html .= '<div class="small text-danger">site down since ' . htmlspecialchars($uptime_down
 			? LibraryFunctions::time_ago($uptime_down, $session->get_timezone()) : 'unknown') . '</div>';
+	} elseif ($uptime_status === 'locked') {
+		$up_html .= '<div class="small text-danger">locked: its data root waits for its key (<a href="#node-data-root-encryption">unlock</a>)</div>';
 	} elseif ($uptime_status === 'up') {
 		$up_html .= '<div class="small fw-normal text-success">site answering</div>';
 	} else {
@@ -1795,6 +1807,9 @@
 		echo '</p>';
 		$page->end_box();
 	}
+
+	// ── Encrypted data root card (specs/hosted_data_promise_disk_encryption.md) ──
+	require(PathHelper::getIncludePath('plugins/server_manager/includes/node_detail_tabs/overview_encryption.php'));
 
 	// ── Incidents card ──
 	// This node's incidents: every one that needs a person, then the newest

@@ -60,6 +60,14 @@
   },
   "settings": [
     {
+      "name": "data_root_encryption_offered",
+      "default": "0",
+      "group": "backups",
+      "label": "Offer data root encryption",
+      "type": "checkbox",
+      "helptext": "While this is off, nothing on this site or its management node makes or offers an encrypted data root: new hosted servers are born unencrypted and no Encrypt action is shown. It is on only where encryption is being tested, until the release that launches it (specs/hosted_data_promise_disk_encryption.md, How it is built)."
+    },
+    {
       "name": "backup_recovery_public_key",
       "default": "",
       "group": "backups",

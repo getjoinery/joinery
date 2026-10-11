@@ -21,6 +21,9 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.3 - Rotate key asks whether the current key could have been seen, where an encrypted data
+ *                root is sealed to it (here, or on the servers a management node hosts), and says what to
+ *                re-encrypt and what the old key still opens (D8)
  * @version 2.2 - the proven state carries an Actions menu, and Rotate key walks the
  *                same generate-and-verify ceremony with the save marked as a rotation;
  *                the next backup run then starts a fresh chain sealed to the new key
@@ -151,6 +154,23 @@ class RecoveryKeySetupPanel {
 		   . 'current key (' . htmlspecialchars($state['fingerprint']) . '…) — keep that private key until '
 		   . 'every chain sealed to it has been retired. Once the new key is verified, every backup from '
 		   . 'then on seals to it, starting with a fresh chain on the next run.';
+		// An encrypted data root sealed to this key (D8): its break-glass copy
+		// is sealed again to the new key on its own; the question is whether
+		// the old key could have been seen.
+		$data_root = DataRootStatus::read();
+		$hosted = class_exists('DataRootEscrowSync') ? DataRootEscrowSync::sealing_counts() : array('sealed' => array(), 'behind' => array());
+		$hosted_n = count($hosted['sealed']) + count($hosted['behind']);
+		if (DataRootStatus::sealed_to($data_root, (string)$state['fingerprint']) === 'this_site' || $hosted_n > 0) {
+			echo '<p class="mt-2 mb-0"><strong>Could someone else have seen the current key?</strong> '
+			   . ($hosted_n > 0 ? 'The ' . $hosted_n . ' encrypted server' . ($hosted_n === 1 ? '' : 's') . ' this management node hosts '
+				   . ($hosted_n === 1 ? 'is' : 'are') : 'This server\'s encrypted data root is')
+			   . ' sealed to it, and each seals its break-glass copy to the new key on its own, within minutes. If the key '
+			   . 'could have been seen, also re-encrypt ' . ($hosted_n > 0 ? 'each one under a new key, from its node page, one at a time'
+				   : 'the data root under a new key, from its line above, once the new key is verified')
+			   . ': otherwise an old copy of the break-glass box, in a backup of the root disk, still opens it. Even then the '
+			   . 'old key still opens backups made before this rotation, and the provider\'s own disk backups taken before '
+			   . 'the re-encryption, until they age out.</p>';
+		}
 		echo '</div>';
 		self::renderSetup($page, $state, true);
 		// True only until Save and verify is clicked — the script hides this the

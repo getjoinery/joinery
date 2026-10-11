@@ -11,7 +11,11 @@
  * works out that value, and posts it with the public half. The pasted key is
  * cleared from the box and never put in the form.
  *
- * @version 1.0.0
+ * Also the encrypted data root's unlock from its management node's page
+ * (server_manager node_detail_tabs/overview_encryption.php): the same value,
+ * for the machine's break-glass box.
+ *
+ * @version 1.0.1
  */
 (function () {
 	'use strict';
@@ -79,7 +83,7 @@
 		jwk.d = '';
 		var fp = hex(await subtle.digest('SHA-256', pub));
 		if (fp !== c.fingerprint) {
-			throw new Error('That recovery key has fingerprint ' + fp.slice(0, 16) + ', and this backup is sealed to ' +
+			throw new Error('That recovery key has fingerprint ' + fp.slice(0, 16) + ', and this key is sealed to ' +
 				c.fingerprint.slice(0, 16) + '. Check you copied the right entry.');
 		}
 		var eph = await subtle.importKey('raw', b64decode(c.ephemeralPublic), { name: 'X25519' }, false, []);

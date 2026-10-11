@@ -95,9 +95,10 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 	'every superadmin is emailed and the event log has a row');
 
 // Every kind either fetches from the configured upgrade source and verifies,
-// verifies a staged upload, or writes something that is not executed. If that
-// stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 9, 'there are nine kinds', implode(', ', RootRequest::KINDS));
+// verifies a staged upload, writes something that is not executed, or seals
+// this server's data root to the site's own recovery key, which its backups
+// already trust. If that stops being true, this is the check that should stop it.
+check(count(RootRequest::KINDS) === 12, 'there are twelve kinds', implode(', ', RootRequest::KINDS));
 
 section('remove_plugin: root deletes a plugin directory only when the row and the manifest agree it may');
 

@@ -46,6 +46,8 @@
  * Registered from server_manager's serve.php when the store plugin is
  * present.
  *
+ * @version 1.5 - an activated draft on the operator's account is born with its data root encrypted where
+ *                data_root_encryption_offered is on (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.4 - configure first, pay once, payment activates (specs/managed_hosting_phase1_purchase.md):
  *                extraRequirements() contributes ManagedSiteRequirement, checkAvailability() refuses a
  *                stale draft before the charge, fulfill() activates the draft and files the domain row
@@ -189,6 +191,12 @@ class CustomerCloudFulfillment implements FulfillmentProvider {
 
 		$draft->set('cvp_external_order_item_id', (int)$order_item->key);
 		$draft->set('cvp_hosting_mode', $hosting_mode);
+		// Whose account the server is born on is known only now, so the draft
+		// carries the encryption decision from here: a hosted birth's data root
+		// is encrypted by us, where this management node offers it.
+		if (CustomerCloudProvision::born_encrypted_by_default($hosting_mode)) {
+			$draft->set('cvp_data_root_encrypted', true);
+		}
 		$draft->set('cvp_buyer_name',
 			trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name')));
 		if (trim((string)$draft->get('cvp_buyer_email')) === '') {

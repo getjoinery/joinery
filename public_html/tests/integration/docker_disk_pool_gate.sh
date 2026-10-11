@@ -187,8 +187,10 @@ echo "=== install.sh ==="
 chk "every new Docker host makes the data root, with no flag needed" \
     "$(grep -c '^    bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1$' "$INSTALL")|$(grep -c -- '^[^#]*--disk-pool' "$INSTALL")" "1|0"
 # The pool is made after the remap is set and before Docker's package installs.
-order="$(grep -n -e 'docker_daemon_json_set_userns_remap || exit 1' -e 'docker_disk_pool.sh" create' -e 'apt-get install -y docker-ce' "$INSTALL" | cut -d: -f1 | paste -sd' ')"
-read -r o1 o2 o3 <<< "$order"
+# (An encrypted data root's create comes just before the plain one: the first create is the one that counts.)
+o1="$(grep -n -m1 -e 'docker_daemon_json_set_userns_remap || exit 1' "$INSTALL" | cut -d: -f1)"
+o2="$(grep -n -m1 -e 'docker_disk_pool.sh" create' "$INSTALL" | cut -d: -f1)"
+o3="$(grep -n -m1 -e 'apt-get install -y docker-ce' "$INSTALL" | cut -d: -f1)"
 chk "the pool is made before Docker's package starts the daemon" "$( [ "$o2" -gt "$o1" ] && [ "$o3" -gt "$o2" ] && echo yes)" "yes"
 chk "a host Docker is already on, asked for a data root, is refused" "$(grep -c 'data-root must be made before Docker is installed' "$INSTALL")" "1"
 chk "site --disk is refused where it cannot hold (can-cap)" "$(grep -c 'docker_disk_pool.sh" can-cap >/dev/null 2>&1; then' "$INSTALL")" "1"

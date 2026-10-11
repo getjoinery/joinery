@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.21 - data_root_encrypt and data_root_reseal: this server's data root encrypted, and its
+ *                 break-glass copy sealed, to this site's recovery key, asked of root (WP4)
  * @version 1.20 - safety: what the site's own backups are missing (BackupSafety::site_warnings, no run off-site
  *                 for two nights, nothing verified for a day past the interval); the verify interval's
  *                 shipped default is BackupSafety's
@@ -227,6 +229,46 @@ function _admin_backups_handle($action, array $input, $session) {
 					$say($scope['declined_notice'], true);
 				}
 				return $url;
+			}
+
+			// ── This server's data root (specs/hosted_data_promise_disk_encryption.md WP4) ──
+			//
+			// Asked of root through RootRequest; root checks every condition
+			// again itself (utils/root_request.php). Token-checked: encrypting
+			// stops the server's services for seconds and runs for hours.
+			case 'data_root_encrypt':
+			case 'data_root_reseal':
+			case 'data_root_rekey': {
+				$fw = new FormWriterV2HTML5($action . '_form');
+				if (!$fw->validateCSRF($input)) {
+					$say('That request could not be verified — reload the Backups page and try again.', false);
+					return $url . '#data-root';
+				}
+				$st = DataRootStatus::read();
+				if ($action === 'data_root_encrypt') {
+					$offer = DataRootStatus::encrypt_offer($st);
+					if (!$offer['ready']) {
+						$say('Not encrypted: ' . ($offer['offered'] ? implode(' ', $offer['reasons'])
+							: 'this site does not offer it, or the data root is encrypted already.'), false);
+						return $url . '#data-root';
+					}
+				} elseif ($action === 'data_root_rekey') {
+					$fpr = BackupRecoveryKey::is_ready() ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
+					if (DataRootStatus::sealed_to($st, $fpr) !== 'this_site' || ($st['reencrypt'] ?? '') !== '') {
+						$say('Not started: the data root is not encrypted and sealed to this site\'s recovery key, or a run is going already.', false);
+						return $url . '#data-root';
+					}
+				} elseif (!BackupRecoveryKey::is_ready() || !DataRootStatus::encrypted($st)) {
+					$say('Nothing to seal: the data root is not encrypted, or this site\'s recovery key is not proven.', false);
+					return $url . '#data-root';
+				}
+				RootRequest::submit($action, array(), (int)$session->get_user_id());
+				$say(array(
+					'data_root_encrypt' => 'Asked. Within a minute the server stops its services for a few seconds, then encrypts its data root in the background, which takes hours. Its break-glass copy is sealed to this site\'s recovery key.',
+					'data_root_reseal'  => 'Asked. Within two minutes the server seals its break-glass copy to this site\'s recovery key.',
+					'data_root_rekey'   => 'Asked. Within a minute the server starts re-encrypting its data root under a new volume key, in the background, for hours. From then on the old recovery key opens no copy of its disk.',
+				)[$action], true);
+				return $url . '#data-root';
 			}
 
 			case 'save_target': {

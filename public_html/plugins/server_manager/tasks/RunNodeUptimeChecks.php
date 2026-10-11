@@ -21,6 +21,8 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.10 - locked is its own state (mgn_uptime_locked_since), from either check, never down
+ *                 (specs/hosted_data_promise_disk_encryption.md D2b)
  * @version 2.9 - a claim past its budget is failed as lost (ManagementJob::failStaleClaims), never returned to the queue
  * @version 2.8 - no certificate mail: the current certificate problem is stored (mgn_cert_problem) and is an
  *                incident (IncidentSourceCertificate; incident_triage.md WP3)
@@ -145,7 +147,11 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				$node->set('mgn_uptime_last_conclusive', $now_utc);
 				// A site going down or coming back is an incident
 				// (IncidentSourceSiteDown, from these columns), not a mail here.
-				$this->apply_state($node, $result['ok'], (string)($result['message'] ?? ''));
+				if (!empty($result['locked'])) {
+					$this->apply_locked($node);
+				} else {
+					$this->apply_state($node, $result['ok'], (string)($result['message'] ?? ''));
+				}
 				$node->save();
 			}
 
@@ -313,6 +319,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		if ($reason === 'config') {
 			return ['ok' => false, 'status' => 'skip', 'message' => 'api check selected but API keys not configured'];
 		}
+		if ($reason === 'locked') {
+			return ['ok' => false, 'locked' => true, 'message' => $result['message'], 'status' => 'done'];
+		}
 		if ($reason === 'transport') {
 			$detail = $result['message'] ?? 'transport failure';
 			// fetch_status_via_api folds every curl failure into one reason, so the
@@ -373,7 +382,24 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				NodeHealthProbe::TRANSPORT, $now)));
 			$node->set('mgn_last_status_check', $now);
 		}
-		return ['ok' => $probe['ok'], 'message' => $probe['message'], 'status' => 'done'];
+		return ['ok' => $probe['ok'], 'locked' => !empty($probe['locked']), 'message' => $probe['message'], 'status' => 'done'];
+	}
+
+	/**
+	 * Locked: the machine answers, and says its encrypted data root waits for
+	 * its key (503 with X-Joinery-Locked, D2b). Not down, and not up: a state
+	 * of its own, which IncidentSourceDataRootLocked turns into an incident
+	 * that links to the unlock. The first probe says so; there is no
+	 * threshold, because a locked machine is never a flake.
+	 */
+	private function apply_locked($node): void {
+		if ($node->get('mgn_uptime_last_status') !== 'locked') {
+			$node->set('mgn_uptime_locked_since', gmdate('Y-m-d H:i:s'));
+		}
+		$node->set('mgn_uptime_last_status', 'locked');
+		$node->set('mgn_uptime_consecutive_failures', 0);
+		$node->set('mgn_uptime_down_since', NULL);
+		$node->set('mgn_uptime_down_reason', NULL);
 	}
 
 	/**
@@ -406,6 +432,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	private function apply_state($node, bool $ok, string $message = ''): string {
 		$prev_status = $node->get('mgn_uptime_last_status');
 
+		$node->set('mgn_uptime_locked_since', NULL);
 		if ($ok) {
 			$node->set('mgn_uptime_last_status', 'up');
 			$node->set('mgn_uptime_consecutive_failures', 0);

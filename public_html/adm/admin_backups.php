@@ -2,6 +2,10 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.20 - the Data root line: encrypted, what opened it, whose key its break-glass copy is sealed
+ *                 to, advice, and Encrypt the data root on a server not hosted by an operator (WP4)
+ * @version 1.19 - on a management node, the encrypted servers it hosts sealed to this key, and those not yet
+ *                 (specs/hosted_data_promise_disk_encryption.md D8)
  * @version 1.18 - Verify on the recovery-key line opens the backup recovery key's own card
  * @version 1.17 - the Status box says when no backup of the site's own has finished off-site for two nights, or
  *                 none has passed verification for a day past the interval (specs/storage_targets.md F1, F2)
@@ -272,6 +276,87 @@ if ($recovery['is_ready']) {
 	echo htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery));
 }
 echo '</td></tr>';
+// On a management node, the encrypted servers it hosts are sealed to this key
+// and follow a rotation (specs/hosted_data_promise_disk_encryption.md D8):
+// how many have, and which have not yet.
+if ($recovery['is_ready'] && class_exists('DataRootEscrowSync')) {
+	$sealing = DataRootEscrowSync::sealing_counts();
+	$sealing_n = count($sealing['sealed']) + count($sealing['behind']);
+	if ($sealing_n > 0) {
+		echo '<tr><th>Encrypted servers</th><td>' . count($sealing['sealed']) . ' of ' . $sealing_n . ' sealed to this key';
+		if ($sealing['behind']) {
+			echo '; not yet: ' . htmlspecialchars(implode(', ', $sealing['behind']))
+				. ' <span class="text-muted small">(each is sent this key with its next host report, then seals its copy again within a minute)</span>';
+		}
+		echo '</td></tr>';
+	}
+}
+// This server's data root (specs/hosted_data_promise_disk_encryption.md WP4):
+// whether it is encrypted, what opened it, whose key its break-glass copy is
+// sealed to, and on a server not hosted by an operator, encrypting it from here.
+// A plain data root is shown only where encrypting it is offered (D-O: a
+// release reaches production while the feature is dormant).
+$dr = DataRootStatus::read();
+$dr_offer = DataRootStatus::encrypt_offer($dr);
+if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
+	$site_fpr = $recovery['is_ready'] ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
+	$dr_form = function ($action, $label, $confirm) use ($page) {
+		$fw = $page->getFormWriter($action . '_form');
+		$fw->begin_form();
+		$fw->hiddeninput('action', '', array('value' => $action));
+		$fw->submitbutton('btn_' . $action, $label, array('class' => 'btn btn-sm btn-outline-primary mt-1',
+			'onclick' => 'event.preventDefault(); var b=this, f=this.form; JoineryModal.confirm('
+				. json_encode($confirm, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
+				. ', function(){ f.requestSubmit(b); });'));
+		$fw->end_form();
+	};
+	echo '<tr id="data-root"><th>Data root</th><td>';
+	if (DataRootStatus::encrypted($dr)) {
+		$sealed = DataRootStatus::sealed_to($dr, $site_fpr);
+		echo 'Encrypted (LUKS2)';
+		if (($dr['reencrypt'] ?? '') !== '') {
+			echo '; ' . (array('encrypt' => 'encrypting', 'decrypt' => 'decrypting', 'reencrypt' => 're-encrypting under a new key')[$dr['reencrypt']] ?? 'changing') . ' in the background'
+				. (($dr['reencrypt_percent'] ?? '') !== '' ? ', ' . htmlspecialchars($dr['reencrypt_percent']) . '% done' : '');
+		}
+		$by = DataRootStatus::opened_by($dr);
+		if ($by !== '') {
+			echo '. Opened at the last boot by ' . htmlspecialchars($by);
+		}
+		$fpr = (string)($dr['recipient_fingerprint'] ?? '');
+		if ($fpr !== '') {
+			echo '. Its break-glass copy is sealed to <code>' . htmlspecialchars(substr($fpr, 0, 16)) . '&hellip;</code> ('
+				. ($sealed === 'this_site' ? 'this site\'s recovery key' : ($sealed === 'operator' ? 'your operator\'s recovery key' : 'another key')) . ')';
+		}
+		echo '.';
+		$reseal = false;
+		foreach (DataRootStatus::advice($dr, $site_fpr, (bool)$recovery['is_ready']) as $a) {
+			echo '<div class="alert alert-' . htmlspecialchars($a['level']) . ' small mt-2 mb-0">' . htmlspecialchars($a['text']) . '</div>';
+			$reseal = $reseal || $a['reseal'];
+		}
+		// A recovery key that may have been seen (D8): the volume key changes too.
+		if ($sealed === 'this_site' && ($dr['reencrypt'] ?? '') === '') {
+			$dr_form('data_root_rekey', 'Re-encrypt under a new key…',
+				'Re-encrypt this server\'s data root under a new volume key? Do this after rotating a recovery key someone else could have seen: from then on that key opens no copy of its disk. It runs in the background for hours.');
+		}
+		if ($reseal) {
+			$dr_form('data_root_reseal', 'Seal it to this site\'s recovery key',
+				'Seal this server\'s break-glass copy to this site\'s recovery key? Whoever holds the key it is sealed to now can no longer open a copy of its disk made from then on.');
+		}
+	} else {
+		echo 'Not encrypted: a copy of this server\'s disk holds its data in plain text.';
+		$offer = $dr_offer;
+		if ($offer['offered']) {
+			foreach ($offer['reasons'] as $why) {
+				echo '<div class="small text-muted mt-1">' . htmlspecialchars($why) . '</div>';
+			}
+			if ($offer['ready']) {
+				$dr_form('data_root_encrypt', 'Encrypt the data root',
+					'Encrypt this server\'s data root where it stands? Its services stop for a few seconds, then it encrypts in the background for hours. Its break-glass copy is sealed to this site\'s recovery key, so a reboot part-way, or a lost key slot, opens with that key.');
+			}
+		}
+	}
+	echo '</td></tr>';
+}
 echo '</tbody></table>';
 
 // A backup on demand — before a risky change, or to prove the setup works

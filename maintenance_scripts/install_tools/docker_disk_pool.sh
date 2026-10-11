@@ -3,6 +3,8 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.3 - create --encrypted passes through: the data root under the pool is born on a
+#                LUKS2 volume (specs/hosted_data_promise_disk_encryption.md WP3).
 # Version: 2.2 - Every new Docker host has the data root (one_data_root WP2), so a data root no
 #                longer says the host is multi-tenant: can-cap answers whether a site's disk can
 #                be capped here (the pool in place and userns-remap on), and allow asks it. create
@@ -150,7 +152,13 @@ can_cap() {
 }
 
 do_create() {
-    local want="${1:-}" rc=0
+    # --encrypted: the data root under the pool is born on a LUKS2 volume
+    # (specs/hosted_data_promise_disk_encryption.md WP3).
+    local want="" rc=0 enc=""
+    local a
+    for a in "$@"; do
+        if [[ "$a" == "--encrypted" ]]; then enc="--encrypted"; else want="$a"; fi
+    done
     if [[ -n "$want" && "$want" != /dev/* ]]; then
         [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the size is a number with G, M or T (68G), or a device under /dev, not '${want}'"
     fi
@@ -171,7 +179,7 @@ do_create() {
     case "$rc" in
         0) say "The host's data root is already mounted; the pool is made on it"
            [[ -z "$want" ]] || say "${want} was not used: the data root exists and grows by itself" ;;
-        2) data_root create ${want:+"$want"} || die "the data root could not be made; nothing else was changed" ;;
+        2) data_root create ${enc:+"$enc"} ${want:+"$want"} || die "the data root could not be made; nothing else was changed" ;;
         *) die "this host has a data root that is not mounted: $(data_root check 2>&1 || true). Nothing was changed." ;;
     esac
 
@@ -336,7 +344,7 @@ do_show() {
 }
 
 case "${1:-}" in
-    create)  do_create "${2:-}" ;;
+    create)  shift; do_create "$@" ;;
     check)   pool_mounted ;;
     can-cap) can_cap ;;
     allow)   do_allow "${2:-}" "${3:-}" ;;

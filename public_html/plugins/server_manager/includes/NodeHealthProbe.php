@@ -19,6 +19,8 @@
  * node. They used to be separate code and could disagree about whether a
  * machine was reachable.
  *
+ * @version 1.5 - a 503 with X-Joinery-Locked is locked, not down: an encrypted data root waiting for its key
+ *                (specs/hosted_data_promise_disk_encryption.md D2b)
  * @version 1.4 - comments: a relay answers /health (relay 3.7); tcp_port is for a service with no
  *                 health document
  * @version 1.3 - SERVICE_KEYS no longer carries db_connected: every DNS server reads its sites over
@@ -194,6 +196,16 @@ class NodeHealthProbe {
 			}
 		}
 
+		// A machine whose encrypted data root is locked answers every request
+		// itself, 503 with X-Joinery-Locked (specs/hosted_data_promise_disk_encryption.md
+		// D2b): a state of its own, not up and not down.
+		$locked = false;
+		$opts[CURLOPT_HEADERFUNCTION] = function ($ch, $line) use (&$locked) {
+			if (preg_match('/^X-Joinery-Locked:\s*1\s*$/i', trim($line))) {
+				$locked = true;
+			}
+			return strlen($line);
+		};
 		curl_setopt_array($ch, $opts);
 		$started = microtime(true);
 		$body    = curl_exec($ch);
@@ -209,6 +221,9 @@ class NodeHealthProbe {
 			$detail = $errmsg ?: ('curl errno ' . $errno);
 			return self::result(false, $target, $detail, $detail, [], $elapsed,
 				NodeMonitorHealth::is_name_resolution_failure($errno, $detail));
+		}
+		if ($status === 503 && $locked) {
+			return self::result(false, $target, 'locked', 'locked: its data root is waiting for its key', [], $elapsed, false, true);
 		}
 		if ($status < 200 || $status >= 400) {
 			return self::result(false, $target, 'HTTP ' . $status, 'HTTP ' . $status, [], $elapsed, false);
@@ -331,10 +346,11 @@ class NodeHealthProbe {
 		return implode("\n", $lines) . "\n";
 	}
 
-	private static function result($ok, $host, $detail, $message, array $measured, $elapsed, $unresolvable) {
+	private static function result($ok, $host, $detail, $message, array $measured, $elapsed, $unresolvable, $locked = false) {
 		return [
 			'ok'           => (bool)$ok,
 			'unresolvable' => (bool)$unresolvable,
+			'locked'       => (bool)$locked,
 			'host'         => (string)$host,
 			'detail'       => (string)$detail,
 			'message'      => $message,

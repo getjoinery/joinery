@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.58 - the encrypted data root (specs/hosted_data_promise_disk_encryption.md WP2, WP8):
+ *                data_root_enrol queues its enrolment here, data_root_unlock keeps the value a person
+ *                worked out in their browser for the locked machine's next ask, data_root_escrow_retire
+ *                stops holding its key
  * @version 1.57 - publish_upgrade on this management node itself is refused while its repositories have uncommitted work
  * @version 1.56 - restore_release_file: put a deployment file back to the bytes the node's release signed
  * @version 1.55 - publish_upgrade records deploy_all on the job when the management node publishes itself
@@ -166,6 +170,13 @@ class NodeDetailActions {
 		'hold_container'           => 'overview',
 		'site_limits'              => 'overview',
 		'data_root_migrate'        => 'overview',
+		'data_root_enrol'          => 'overview',
+		'data_root_unlock'         => 'overview',
+		'data_root_escrow_retire'  => 'overview',
+		'data_root_encrypt'        => 'overview',
+		'data_root_decrypt'        => 'overview',
+		'data_root_rekey'          => 'overview',
+		'data_root_escrow_excuse'  => 'overview',
 		'outbound_limits'          => 'overview',
 		'run_installer'            => 'overview',
 		'file_head'                => 'overview',
@@ -414,6 +425,99 @@ class NodeDetailActions {
 				$built = JobCommandBuilder::build_data_root_migrate($node);
 				$job = ManagementJob::createFromBuild($node->key, 'data_root_migrate', $built, null, $uid);
 				return self::jobUrl($job);
+			}
+
+			case 'data_root_enrol': {
+				// Its encrypted data root, enrolled with this management node
+				// as holder (D3): the node signs, the secret is handed over in
+				// answer, never written to the job.
+				if ($node->is_self()) {
+					self::fail($session, $page_regex, 'This is the management node\'s own machine: its key is held by another management node, never by itself (enrol it there).');
+					return $base_url;
+				}
+				$built = JobCommandBuilder::build_data_root_enrol($node);
+				$job = ManagementJob::createFromBuild($node->key, 'data_root_enrol', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'data_root_unlock': {
+				// The value the person's browser worked out from the machine's
+				// sealed box (D2b); the recovery key itself never left it. The
+				// machine takes it at its next ask, within ten seconds.
+				$row = DataRootEscrow::for_node((int)$node->key);
+				if (!$row) {
+					self::fail($session, $page_regex, 'This management node holds nothing for this machine\'s data root.');
+					return $base_url;
+				}
+				$row->accept_unlock_value((string)($_POST['shared'] ?? ''), (string)($_POST['public_key'] ?? ''));
+				$session->save_message(new DisplayMessage(
+					'Unlock sent. The machine takes it the next time it asks, within ten seconds, and starts its services; this page shows it open once its next report arrives.',
+					'Unlock sent', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
+			}
+
+			case 'data_root_encrypt': {
+				// Encrypt it where it stands (D5): the recipient, then the
+				// start; DataRootEncryptionOffer refuses, naming why, while any
+				// precondition is unmet or encryption is not offered here.
+				$job = DataRootEncryptionOffer::queue($node, !empty($_POST['keep_provider_layer']), $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'data_root_decrypt': {
+				$built = JobCommandBuilder::build_data_root_decrypt($node);
+				$job = ManagementJob::createFromBuild($node->key, 'data_root_decrypt', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'data_root_rekey': {
+				// One machine at a time (D8): hours of disk work each, and a
+				// fleet re-encrypting at once is a fleet slow at once.
+				foreach (new MultiManagedNode(array('deleted' => false)) as $other) {
+					$hr = json_decode((string)$other->get('mgn_last_host_report'), true);
+					if ((int)$other->key !== (int)$node->key
+							&& (($hr['data_root_encryption']['reencrypt'] ?? '') === 'reencrypt')) {
+						self::fail($session, $page_regex, 'Not started: ' . $other->get('mgn_name')
+							. ' is re-encrypting under a new key now. One machine at a time; start this one when it is done.');
+						return $base_url;
+					}
+				}
+				$built = JobCommandBuilder::build_data_root_rekey($node);
+				$job = ManagementJob::createFromBuild($node->key, 'data_root_rekey', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'data_root_escrow_excuse': {
+				// Tier 2 (D3): the owner says they caused what refused its boot
+				// (a rescue boot they ran). Superadmin-only, and recorded with
+				// their name: it trusts a root disk nothing else can vouch for.
+				if ($session->get_permission() < 10) {
+					self::fail($session, $page_regex, 'Only a superadmin can say they caused it.');
+					return $base_url;
+				}
+				$row = DataRootEscrow::for_node((int)$node->key);
+				if (!$row || (string)$row->get('dre_tier2_event') === '') {
+					self::fail($session, $page_regex, 'No boot of this machine is refused for its activity log.');
+					return $base_url;
+				}
+				EscrowTier2::excuse($row, (int)$uid);
+				$session->save_message(new DisplayMessage(
+					'Recorded with your name. Its next ask is answered, if nothing new has happened to it since.',
+					'Excused', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
+			}
+
+			case 'data_root_escrow_retire': {
+				$row = DataRootEscrow::for_node((int)$node->key);
+				if (!$row) {
+					self::fail($session, $page_regex, 'This management node holds nothing for this machine\'s data root.');
+					return $base_url;
+				}
+				$row->retire();
+				$session->save_message(new DisplayMessage(
+					'This management node no longer holds that machine\'s key. It opens by its recovery key until it is enrolled again.',
+					'Enrolment removed', $page_regex, DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+				return $base_url;
 			}
 
 			case 'host_converge': {
@@ -866,6 +970,7 @@ class NodeDetailActions {
 						'type'    => (string)($_POST['copy_type'] ?? ''),
 						'carry_root_keys'  => !empty($_POST['copy_carry_root_keys']),
 						'key_fingerprints' => (string)($_POST['copy_key_fingerprints'] ?? ''),
+						'data_root_encrypted' => !empty($_POST['copy_data_root_encrypted']),
 					], $uid, $copy_from);
 					self::ok($session, $page_regex, 'The new server is being created. Its install takes a few minutes; '
 						. 'the copy starts once its agent has joined.');

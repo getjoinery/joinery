@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.10 - on an encrypted data root, a row for its break-glass copy: there is one, sealed to a
+ *                 key that is held (specs/hosted_data_promise_disk_encryption.md WP4)
  * @version 1.9 - the unsigned row also lists extensions recorded 'unlogged' (signed by us, not in the
  *                public release log), installed on the same acknowledgement
  * @version 1.8 - the unsigned row lists page themes only; a style theme has nothing
@@ -57,7 +59,7 @@ class VaultHealth {
 	 *         state is one of 'verified' | 'unmet' | 'unknown'.
 	 */
 	public static function runAll(): array {
-		return [
+		$checks = [
 			self::checkApcuAnonymous(),
 			self::checkCoredumpsDisabled(),
 			self::checkExceptionArgs(),
@@ -68,6 +70,43 @@ class VaultHealth {
 			self::checkReleaseVerifyKeys(),
 			self::checkUnsignedExtensions(),
 		];
+		// Only on a server whose data root is encrypted: elsewhere there is
+		// no break-glass copy to have.
+		$data_root = DataRootStatus::read();
+		if (DataRootStatus::encrypted($data_root)) {
+			$checks[] = self::checkDataRootBreakGlass($data_root);
+		}
+		return $checks;
+	}
+
+	/**
+	 * The encrypted data root's break-glass copy (specs/hosted_data_promise_disk_encryption.md
+	 * WP4): there is one, and it is sealed to this site's recovery key or to
+	 * the operator's, not to a key retired or given at install. Without it a
+	 * lost key slot leaves nothing that opens the server's data.
+	 *
+	 * @param array|null  $status   Injected for tests: DataRootStatus::read() otherwise.
+	 * @param string|null $site_fpr Injected for tests: this site's proven recovery key's fingerprint otherwise.
+	 */
+	public static function checkDataRootBreakGlass(?array $status = null, ?string $site_fpr = null): array {
+		$key = 'data_root_break_glass';
+		$label = 'The encrypted data root has a break-glass copy sealed to a key that is held';
+		$status = $status ?? DataRootStatus::read();
+		$ready = BackupRecoveryKey::is_ready();
+		if ($site_fpr === null) {
+			$site_fpr = $ready ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
+		}
+		$problems = array();
+		foreach (DataRootStatus::advice($status, $site_fpr, $ready) as $a) {
+			if ($a['level'] !== 'info') {
+				$problems[] = $a['text'];
+			}
+		}
+		if (!$problems) {
+			return ['key' => $key, 'label' => $label, 'state' => 'verified', 'reason' => ''];
+		}
+		return ['key' => $key, 'label' => $label, 'state' => 'unmet',
+			'reason' => implode(' ', $problems) . ' The Backups page seals it to this site\'s recovery key.'];
 	}
 
 	/**

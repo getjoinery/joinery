@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.118 - build_data_root_rekey: re-encrypt a data root under a new volume key (D8)
+ * @version 1.117 - build_install_node: encrypted_data_root with recovery_public_key passes install.sh docker / server
+ *                  --encrypted-data-root --recovery-public-key=KEY (hosted_data_promise_disk_encryption D1a, D2)
+ * @version 1.116 - build_data_root_enrol (encrypted data root escrow, WP2); fetch_status_via_api reads a locked
+ *                  machine (503, X-Joinery-Locked) as reason locked; locked shows as a red dot
  * @version 1.115 - build_upgrade_preflight / build_restore_release_file: the two words of specs/release_file_repair.md
  * @version 1.114 - build_data_root_migrate: move a host's data onto its data root (one_data_root WP4), never
  *                  addressed to a site container, whose data is its volumes on its host
@@ -789,7 +794,15 @@ class JobCommandBuilder {
 			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
 			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
 			CURLOPT_FOLLOWLOCATION => false,
+			// A locked encrypted data root answers 503 with X-Joinery-Locked (D2b).
+			CURLOPT_HEADERFUNCTION => function ($ch, $line) use (&$locked) {
+				if (preg_match('/^X-Joinery-Locked:\s*1\s*$/i', trim($line))) {
+					$locked = true;
+				}
+				return strlen($line);
+			},
 		]);
+		$locked = false;
 		$body = curl_exec($ch);
 		$errno = curl_errno($ch);
 		$errmsg = curl_error($ch);
@@ -804,6 +817,10 @@ class JobCommandBuilder {
 			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
 				'message' => $errmsg ?: 'transport failure', 'reason' => 'transport',
 				'errno' => $errno];
+		}
+		if ((int)$status === 503 && $locked) {
+			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
+				'message' => 'locked: its data root is waiting for its key', 'reason' => 'locked'];
 		}
 		if ($status === 401 || $status === 403) {
 			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
@@ -918,7 +935,7 @@ class JobCommandBuilder {
 		if ($node->get('mgn_skip_joinery_checks') && $node->get('mgn_uptime_enabled')) {
 			$uptime = $node->get('mgn_uptime_last_status');
 			if ($uptime === 'up')   return 'success';
-			if ($uptime === 'down') return 'danger';
+			if ($uptime === 'down' || $uptime === 'locked') return 'danger';
 			return 'secondary'; // not yet probed
 		}
 
@@ -932,7 +949,7 @@ class JobCommandBuilder {
 			if ($node->get('mgn_uptime_enabled')) {
 				$uptime = $node->get('mgn_uptime_last_status');
 				if ($uptime === 'up')   return 'success';
-				if ($uptime === 'down') return 'danger';
+				if ($uptime === 'down' || $uptime === 'locked') return 'danger';
 			}
 			return 'secondary';
 		}
@@ -2824,6 +2841,99 @@ class JobCommandBuilder {
 
 	public static function build_data_root_migrate_primitive($node) {
 		return ['primitive' => 'data_root_migrate', 'params' => []];
+	}
+
+	/**
+	 * Enrol a node's encrypted data root with this management node as its
+	 * escrow holder (specs/hosted_data_promise_disk_encryption.md D3, WP2): the
+	 * data_root_enrol word. Nothing crosses in the job: the node signs its
+	 * enrolment with its unlock identity and its node key, and the secret is
+	 * handed to it in answer (EscrowEndpoint), never written to this job.
+	 */
+	public static function build_data_root_enrol($node) {
+		if (!self::has_primitive($node, 'data_root_enrol')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot enrol an encrypted data root. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_enrol']));
+		}
+		return self::build_data_root_enrol_primitive($node);
+	}
+
+	public static function build_data_root_enrol_primitive($node) {
+		return ['primitive' => 'data_root_enrol', 'params' => []];
+	}
+
+	/**
+	 * Encrypt a node's data root where it stands (D5): the data_root_encrypt
+	 * word. keep_provider_layer is the D-L exception (the five machines that
+	 * predate the one-layer rule keep the provider's disk encryption too);
+	 * the caller decides it from what the provider reports (D1a).
+	 */
+	public static function build_data_root_encrypt($node, bool $keep_provider_layer = false) {
+		if ((string)$node->get('mgn_container_name') !== '') {
+			throw new Exception("'{$node->get('mgn_slug')}' is a site container; its data is its volumes, encrypted when its host's data root is.");
+		}
+		if (!self::has_primitive($node, 'data_root_encrypt')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot encrypt its data root. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_encrypt']));
+		}
+		return self::build_data_root_encrypt_primitive($node, $keep_provider_layer);
+	}
+
+	public static function build_data_root_encrypt_primitive($node, bool $keep_provider_layer = false) {
+		return ['primitive' => 'data_root_encrypt', 'params' => $keep_provider_layer ? ['keep_provider_layer' => true] : []];
+	}
+
+	/** Undo it, online (D5 step 7): the data_root_decrypt word. */
+	public static function build_data_root_decrypt($node) {
+		if (!self::has_primitive($node, 'data_root_decrypt')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot decrypt its data root. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_decrypt']));
+		}
+		return self::build_data_root_decrypt_primitive($node);
+	}
+
+	public static function build_data_root_decrypt_primitive($node) {
+		return ['primitive' => 'data_root_decrypt', 'params' => []];
+	}
+
+	/**
+	 * Re-encrypt it under a new volume key, online (D8): the data_root_rekey
+	 * word, after a recovery key that may have been seen.
+	 */
+	public static function build_data_root_rekey($node) {
+		if (!self::has_primitive($node, 'data_root_rekey')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot re-encrypt its data root under a new key. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_rekey']));
+		}
+		return self::build_data_root_rekey_primitive($node);
+	}
+
+	public static function build_data_root_rekey_primitive($node) {
+		return ['primitive' => 'data_root_rekey', 'params' => []];
+	}
+
+	/**
+	 * The recovery public key a node's encrypted data root is sealed to (D2):
+	 * the data_root_recipient word. Public; the node checks its shape.
+	 */
+	public static function build_data_root_recipient($node, string $public_key) {
+		if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $public_key) || strlen((string)base64_decode($public_key, true)) !== 32) {
+			throw new Exception('That is not a recovery public key.');
+		}
+		if (!self::has_primitive($node, 'data_root_recipient')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot take a recovery recipient. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['data_root_recipient']));
+		}
+		return self::build_data_root_recipient_primitive($node, $public_key);
+	}
+
+	public static function build_data_root_recipient_primitive($node, string $public_key = '') {
+		return ['primitive' => 'data_root_recipient', 'params' => ['public_key' => $public_key]];
 	}
 
 	/**
@@ -4946,7 +5056,8 @@ class JobCommandBuilder {
 	 *
 	 * $params: mode (fresh|bare|copy), sitename, domain, docker_mode
 	 * (docker|bare-metal), admin_email, admin_password_stdin; for copy, the
-	 * source and its release (below).
+	 * source and its release (below); for an encrypted data root,
+	 * encrypted_data_root and recovery_public_key (base64).
 	 */
 	public static function build_install_node($node, $params) {
 		$mode     = (string)($params['mode'] ?? 'fresh');
@@ -5010,6 +5121,20 @@ class JobCommandBuilder {
 		$admin_flags = ($admin_email !== '' && $mode !== 'bare' && $mode !== 'copy')
 			? ' --admin-email=' . escapeshellarg($admin_email) : '';
 		$admin_password_stdin = !empty($params['admin_password_stdin']) && $mode !== 'bare' && $mode !== 'copy';
+
+		// An encrypted data root (specs/hosted_data_promise_disk_encryption.md
+		// D1a, D2): the command that makes the data root (install.sh docker on a
+		// Docker host, install.sh server on bare metal) makes it a LUKS2 volume,
+		// its break-glass copy sealed to this recovery public key (public).
+		$encrypted_flags = '';
+		if (!empty($params['encrypted_data_root'])) {
+			$recovery_key = (string)($params['recovery_public_key'] ?? '');
+			if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $recovery_key) || strlen((string)base64_decode($recovery_key, true)) !== 32) {
+				throw new Exception('install_node: an encrypted data root needs the recovery public key its break-glass copy '
+					. 'is sealed to (recovery_public_key, base64).');
+			}
+			$encrypted_flags = ' --encrypted-data-root --recovery-public-key=' . escapeshellarg($recovery_key);
+		}
 
 		// Per-job path, and NOT under /tmp: the extracted release stays on the
 		// machine (the deferred-SSL timer may run its setup_ssl.sh until the
@@ -5102,7 +5227,7 @@ class JobCommandBuilder {
 			// more; the machine's node IS the host, so it takes the site name.
 			$host_name = ($mode === 'bare') ? $sitename : $sitename . '-host';
 			$lines[] = "./install.sh -y -q docker --management-node={$plane_url_esc} --node-name=" . escapeshellarg($host_name)
-				. self::outbound_install_flags();
+				. self::outbound_install_flags() . $encrypted_flags;
 			if ($mode !== 'bare') {
 				// No --no-ssl: install.sh writes the universal proxy vhost,
 				// tries for a certificate, and arms the host's retry timer when
@@ -5144,7 +5269,7 @@ class JobCommandBuilder {
 			         . " test -n \"\$POSTGRES_PASSWORD\" || { echo 'FATAL: could not generate a postgres password'; exit 1; };"
 			         . ' echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password;'
 			         . ' export POSTGRES_PASSWORD;'
-			         . ' ./install.sh -y -q server' . self::outbound_install_flags() . ';'
+			         . ' ./install.sh -y -q server' . self::outbound_install_flags() . $encrypted_flags . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
 			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$copy_flags}";

@@ -6,6 +6,11 @@
 # reboot that follows a kernel update
 # (multi_tenant_docker_hosts WP5 items 1, 4, 5, 6 and 7).
 #
+# Version: 1.2 - On a host whose data root is encrypted, apt's own reboot is off
+#                (joinery_data_root.sh writes 53joinery-encrypted-reboot over this
+#                file's policy) and the data root's tick reboots it instead, after its
+#                escrow holder answers (specs/hosted_data_promise_disk_encryption.md
+#                D4); install and check take that as the reboot policy in force.
 # Version: 1.1
 #
 #   multi_tenant_host.sh install   Root. Copies this script to
@@ -234,11 +239,21 @@ do_assert() {
     walls_loaded || die "the site walls are not loaded, so Docker does not start: see systemctl status ${UNIT_NAME}"
 }
 
-# What apt itself will do, after every file in apt.conf.d is read.
+# The data root is encrypted: its tick owns the reboot (D4).
+encrypted_reboot() {
+    grep -q '^backing=luks-' "${ROOT}/etc/joinery/data_root" 2>/dev/null \
+        && [[ -f "${ROOT}/etc/apt/apt.conf.d/53joinery-encrypted-reboot" ]]
+}
+
+# What apt itself will do, after every file in apt.conf.d is read: update
+# every night, and reboot when an update asks, by apt itself or, on an
+# encrypted host, by the data root's tick after its holder answers.
 updates_reboot() {
     local UU="" AR=""
     eval "$(apt-config shell UU APT::Periodic::Unattended-Upgrade AR Unattended-Upgrade::Automatic-Reboot 2>/dev/null)"
-    [[ "$UU" == "1" && "$AR" == "true" ]]
+    [[ "$UU" == "1" ]] || return 1
+    [[ "$AR" == "true" ]] && return 0
+    encrypted_reboot
 }
 
 do_install() {
@@ -278,7 +293,11 @@ do_install() {
         systemctl restart apt-daily-upgrade.timer || die "apt-daily-upgrade.timer did not restart"
     fi
     updates_reboot || die "apt does not run unattended upgrades with a reboot here, though ${REBOOT_CONF} asks for both: see apt-config dump"
-    say "kernel updates: reboot at 05:30-06:00 UTC when an update needs it"
+    if encrypted_reboot; then
+        say "kernel updates: reboot between 06:00 and 08:00 UTC when an update needs it, once the escrow holder answers (encrypted data root)"
+    else
+        say "kernel updates: reboot at 05:30-06:00 UTC when an update needs it"
+    fi
 }
 
 do_check() {
@@ -294,7 +313,11 @@ do_check() {
         say "walls at boot: NOT kept (${UNIT_NAME} not enabled, or Docker would start without them)"; bad=1
     fi
     if [[ -f "$TIMER_DROPIN" ]] && updates_reboot; then
-        say "reboot after updates: on"
+        if encrypted_reboot; then
+            say "reboot after updates: on, by the data root's tick after its escrow holder answers"
+        else
+            say "reboot after updates: on"
+        fi
     else
         say "reboot after updates: NOT set"; bad=1
     fi

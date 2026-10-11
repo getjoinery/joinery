@@ -28,7 +28,8 @@ require_once(PathHelper::getIncludePath('includes/VaultHealth.php'));
 
 section('Report shape');
 $checks = VaultHealth::runAll();
-check(count($checks) === 9, 'runAll reports the nine host facts');
+check(count($checks) === 9 + (DataRootStatus::encrypted(DataRootStatus::read()) ? 1 : 0),
+	'runAll reports the nine host facts, and the data root\'s break-glass copy where it is encrypted');
 $valid_states = ['verified', 'unmet', 'unknown'];
 $all_valid = true;
 $has_fields = true;
@@ -242,6 +243,47 @@ check(strpos($r['reason'], '1 unsigned plugin (stranger)') !== false
 	'and the reason names each one');
 check(strpos($r['reason'], 'all mail') !== false, 'and repeats what the owner gave away');
 check(strpos($r['reason'], 'never run as root') !== false, 'and says their host installers never run');
+
+section('The encrypted data root\'s break-glass copy (WP4)');
+$site = str_repeat('a', 64);
+$base = array('backing' => 'luks-file', 'encrypted' => '1', 'open' => '1', 'recipient_fingerprint' => $site,
+	'recipient_set_by' => 'site', 'sidecar' => '1', 'sidecar_fingerprint' => $site);
+$row = VaultHealth::checkDataRootBreakGlass($base, $site);
+check($row['state'] === 'verified', 'sealed to this site\'s own key: verified', $row['reason']);
+$other = array_merge($base, array('recipient_fingerprint' => str_repeat('b', 64), 'sidecar_fingerprint' => str_repeat('b', 64), 'recipient_set_by' => 'install'));
+$row = VaultHealth::checkDataRootBreakGlass($other, $site);
+check($row['state'] === 'unmet' && strpos($row['reason'], 'not this site') !== false,
+	'sealed to a key that is not this site\'s, set at install: unmet, and it says whose', $row['reason']);
+$row = VaultHealth::checkDataRootBreakGlass(array_merge($other, array('recipient_set_by' => 'operator')), $site);
+check($row['state'] === 'verified', 'sealed to the operator\'s key, which its management node set: verified');
+$row = VaultHealth::checkDataRootBreakGlass(array_merge($base, array('sidecar' => '0', 'sidecar_fingerprint' => '')), $site);
+check($row['state'] === 'unmet' && strpos($row['reason'], 'no break-glass copy right now') !== false, 'no copy on disk: unmet');
+$row = VaultHealth::checkDataRootBreakGlass(array_merge($base, array('recipient_fingerprint' => '')), $site);
+check($row['state'] === 'unmet' && strpos($row['reason'], 'names no recovery key') !== false, 'no recovery key named: unmet');
+$row = VaultHealth::checkDataRootBreakGlass(array_merge($base, array('sidecar_fingerprint' => str_repeat('c', 64))), $site);
+check($row['state'] === 'verified', 'a copy being sealed again: not a problem, only said');
+
+section('DataRootStatus reads the status the data root tick writes');
+$tmp = tempnam(sys_get_temp_dir(), 'drs');
+file_put_contents($tmp, "# Written by joinery_data_root.sh\nbacking=luks-file\nencrypted=1\nopen=1\nopened_by=the TPM2 chip, at 2026-10-11 20:00:00 UTC\nrecipient_fingerprint=$site\nrecipient_set_by=site\nsidecar=1\nsidecar_fingerprint=$site\nreencrypt=\n");
+$st = DataRootStatus::read($tmp);
+check(DataRootStatus::encrypted($st) && DataRootStatus::opened_by($st) === 'the TPM2 chip, at 2026-10-11 20:00:00 UTC'
+	&& DataRootStatus::sealed_to($st, $site) === 'this_site', 'parsed: encrypted, what opened it, sealed to this site');
+file_put_contents($tmp, "backing=file\nencrypted=0\n");
+$st = DataRootStatus::read($tmp);
+check($st !== null && !DataRootStatus::encrypted($st) && DataRootStatus::advice($st, $site, true) === array(),
+	'a plain data root: read, not encrypted, no advice');
+unlink($tmp);
+check(DataRootStatus::read('/nonexistent/data-root.status') === null, 'no status file (no data root, or a container): null');
+harness_set_setting_mem('data_root_encryption_offered', '0');
+$offer = DataRootStatus::encrypt_offer(array('backing' => 'file', 'encrypted' => '0'));
+check(!$offer['offered'] && !$offer['ready'], 'encrypting is not offered while data_root_encryption_offered is off');
+harness_set_setting_mem('data_root_encryption_offered', '1');
+$offer = DataRootStatus::encrypt_offer(array('backing' => 'file', 'encrypted' => '0'));
+check($offer['offered'] && ($offer['ready'] === ($offer['reasons'] === array())), 'on: offered, ready exactly when nothing is missing', implode(' | ', $offer['reasons']));
+$offer = DataRootStatus::encrypt_offer(array('backing' => 'luks-file', 'encrypted' => '1'));
+check(!$offer['offered'], 'on, but encrypted already: not offered');
+harness_set_setting_mem('data_root_encryption_offered', '0');
 
 harness_finish();
 ?>

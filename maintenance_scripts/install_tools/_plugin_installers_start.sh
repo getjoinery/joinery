@@ -3,6 +3,12 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.31 - Root requests data_root_encrypt, data_root_reseal and data_root_rekey (a self-hosted site's
+#                 Backups page, specs/hosted_data_promise_disk_encryption.md WP4).
+# Version: 2.30 - A site whose config/ is on a data root that is not mounted (an encrypted
+#                 machine's, D9) is not "not initialised": said once a boot, as locked.
+# Version: 2.29 - An encrypted data root waiting for its key is "data-root-locked", said once a
+#                boot (specs/hosted_data_promise_disk_encryption.md D1b), not every minute.
 # Version: 2.28 - The data root (specs/one_data_root.md WP1): on a host that declares one, nothing runs
 #                while it is not mounted, in any mode, and the run's outcome says data-root-not-ready.
 #                A root run keeps its units and grows it as it fills (joinery_data_root.sh tick).
@@ -397,6 +403,16 @@ if [[ "${MACHINE}" == "0" ]] && [[ ! -d "${PUBLIC_HTML}/plugins" ]]; then
     exit 0
 fi
 if [[ "${MACHINE}" == "0" ]] && [[ ! -f "${CONFIG_FILE}" ]]; then
+    # An encrypted machine's config/ is on the data root (specs/hosted_data_promise_disk_encryption.md
+    # D9): absent while the data root is not mounted, which is said once a boot, as below.
+    if grep -q " ${SITE_ROOT}/config\$" /etc/joinery/data_binds 2>/dev/null \
+       && ! findmnt -n --mountpoint "${SITE_ROOT}/config" >/dev/null 2>&1; then
+        if [[ ! -e /run/joinery/converger-locked ]]; then
+            echo "host installers: the data root is not mounted (locked, waiting for its key) - nothing runs until it opens"
+            mkdir -p /run/joinery 2>/dev/null && : > /run/joinery/converger-locked 2>/dev/null || true
+        fi
+        exit 0
+    fi
     echo "plugin installers: site not initialised yet - skipping"
     exit 0
 fi
@@ -711,6 +727,17 @@ if [[ -f "${DATA_ROOT_TOOL}" ]]; then
     fi
 fi
 if [[ "${DATA_ROOT_RC}" == "1" ]]; then
+    # An encrypted data root waiting for its key (specs/hosted_data_promise_disk_encryption.md
+    # D1b) is said once a boot, not every minute: the unlock unit says the rest,
+    # and the machine reports itself locked.
+    if grep -q '^backing=luks-' /etc/joinery/data_root 2>/dev/null && [[ ! -e /dev/mapper/joinery-data ]]; then
+        if [[ ! -e /run/joinery/converger-locked ]]; then
+            echo "host installers: the data root is locked, waiting for its key - nothing runs until it opens"
+            mkdir -p /run/joinery 2>/dev/null && : > /run/joinery/converger-locked 2>/dev/null || true
+        fi
+        record_last "data-root-locked"
+        exit 0
+    fi
     echo "host installers: the data root is not ready - nothing runs until it is (joinery_data_root.sh status says why)" >&2
     record_last "data-root-not-ready"
     exit 0
@@ -1378,14 +1405,15 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same nine as RootRequest::KINDS, and no more. install_package
+            # The same twelve as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
             # remove_plugin deletes plugins/<name> only after root has read the
             # row as uninstalled and the manifest as not is_system (PluginRemoval).
             upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
-            write_agent_files|save_doc|set_receives_upgrades|remove_plugin) : ;;
+            write_agent_files|save_doc|set_receives_upgrades|remove_plugin|\
+            data_root_encrypt|data_root_reseal|data_root_rekey) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2
                 printf '2\n' > "${queue}/failed/${id}.exit" 2>/dev/null || true

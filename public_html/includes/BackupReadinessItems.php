@@ -13,6 +13,8 @@
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.6.0 - the recovery key's card says it also opens this server's encrypted data root, where the
+ *                  data root's break-glass copy is sealed to it (WP4)
  * @version 1.5.0 - core: every site's Recovery Readiness page lists its backup recovery key and backup
  *                  bucket consoles; they were missing on a site without server_manager, where the
  *                  Backups page's Verify link left only the vault card to type the key into
@@ -47,6 +49,11 @@ class BackupReadinessItems {
 			'protects' => 'Every encrypted backup this site makes. Each backup carries its own key sealed to this one, so if this site is lost and this key is too, none of its backups can ever be opened. Other nodes seal to their own keys, held by their own administrators — this key does not open theirs.',
 			'verify'   => 'ceremony',
 		);
+		// A server whose encrypted data root's break-glass copy is sealed to
+		// this key: it opens that too (specs/hosted_data_promise_disk_encryption.md WP4).
+		if ($state['is_ready'] && DataRootStatus::sealed_to(DataRootStatus::read(), (string)$state['fingerprint']) === 'this_site') {
+			$item['protects'] .= ' It also opens this server\'s encrypted data root: its break-glass copy is sealed to this key, so it is the key that opens the server\'s data if its other keys are lost.';
+		}
 
 		if (!$state['is_ready']) {
 			$item['state'] = 'not_configured';

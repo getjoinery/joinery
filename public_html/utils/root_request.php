@@ -24,6 +24,8 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.4 - data_root_encrypt, data_root_reseal, data_root_rekey: this server's data root encrypted, and its
+ *                break-glass copy sealed, to this site's own proven recovery key (WP4)
  * @version 1.3 - install_package: --replace from the request's `replace`
  *                argument; set_receives_upgrades for plugins as well as
  *                themes (specs/package_replace_on_upload.md WP1, WP3).
@@ -318,6 +320,53 @@ switch ($kind) {
 		$count = PluginRemoval::remove($name, $plugins_dir);
 		echo "removed plugins/$name ($count files and directories)\n";
 		exit(0);
+
+	case 'data_root_rekey': {
+		// A recovery key that may have been seen (D8): the volume key changes.
+		// Only where the break-glass copy is sealed to this site's own key.
+		$st = DataRootStatus::read();
+		$fpr = BackupRecoveryKey::is_ready() ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
+		if (DataRootStatus::sealed_to($st, $fpr) !== 'this_site' || ($st['reencrypt'] ?? '') !== '') {
+			fwrite(STDERR, "root_request: data_root_rekey refused: this server's data root is not encrypted and sealed to this site's recovery key, or a run is going already\n");
+			exit(1);
+		}
+		passthru('bash ' . escapeshellarg(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/joinery_data_root.sh') . ' rekey', $code);
+		exit((int)$code);
+	}
+
+	case 'data_root_encrypt':
+	case 'data_root_reseal': {
+		// This server's data root, sealed to this site's own proven recovery
+		// key (specs/hosted_data_promise_disk_encryption.md WP4, D2). Nothing
+		// in the request is used: the status is root's own file, the key is
+		// the site's, and every condition is checked again here.
+		$st = DataRootStatus::read();
+		if (!BackupRecoveryKey::is_ready()) {
+			fwrite(STDERR, "root_request: $kind refused: this site's recovery key is not set up and proven\n");
+			exit(1);
+		}
+		if ($kind === 'data_root_encrypt') {
+			$offer = DataRootStatus::encrypt_offer($st);
+			if (!$offer['ready']) {
+				fwrite(STDERR, "root_request: data_root_encrypt refused: " . ($offer['offered'] ? implode(' ', $offer['reasons'])
+					: 'encrypting the data root is not offered on this site, or it has none, or it is encrypted already') . "\n");
+				exit(1);
+			}
+		} elseif (!DataRootStatus::encrypted($st)) {
+			fwrite(STDERR, "root_request: data_root_reseal refused: this server's data root is not encrypted\n");
+			exit(1);
+		}
+		$tool = escapeshellarg(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/joinery_data_root.sh');
+		passthru('bash ' . $tool . ' recipient --set-by=site ' . escapeshellarg(base64_encode(BackupRecoveryKey::public_key())), $code);
+		if ((int)$code !== 0 || $kind === 'data_root_reseal') {
+			if ((int)$code === 0) {
+				echo "the data root's next tick seals the break-glass copy to this site's recovery key, within a minute\n";
+			}
+			exit((int)$code);
+		}
+		passthru('bash ' . $tool . ' encrypt', $code);
+		exit((int)$code);
+	}
 }
 
 fwrite(STDERR, "root_request: kind '$kind' has no handler\n");
