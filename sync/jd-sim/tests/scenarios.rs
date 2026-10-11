@@ -19356,3 +19356,51 @@ fn a_folder_moved_by_a_peer_into_a_folder_deleted_here_keeps_an_edit_inside_it()
     assert!(live_bodies(&world).contains(&jd_sim::sha256_hex(b"pc's edit")), "the peer's edit is not live: {:?}", world.server.tree());
     assert_converged(&world);
 }
+
+/// A folder a peer deleted and made again under the same name, with a new
+/// file in it: on this device the old folder's local trash and the new
+/// folder's create arrive in one round. The create takes the directory
+/// standing at the name -- the old folder's, its trash not yet run -- the
+/// trash then removes it, the new folder reads as deleted here, and it goes
+/// to the server's trash with the peer's new file (B-E1, ring 75406).
+#[test]
+fn a_folder_made_again_where_a_deleted_one_stands_keeps_its_new_file() {
+    a_folder_made_again_keeps_its_new_file(false);
+}
+
+/// The same on volumes that keep no file identities.
+#[test]
+fn a_folder_made_again_where_a_deleted_one_stands_keeps_its_new_file_hidden() {
+    a_folder_made_again_keeps_its_new_file(true);
+}
+
+fn a_folder_made_again_keeps_its_new_file(hidden: bool) {
+    let world = World::new(9_983, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    mac.fs.user_write("Shared/old.txt", b"the old folder's file");
+    assert!(world.settle().is_some());
+    // Work of mac's own in the old folder, not sent yet: its local trash
+    // has to rescue it first.
+    mac.fs.user_write("Shared/mine.txt", b"mac's unsent file");
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    // pc's delete goes up before the new folder is made, so the server
+    // holds two folders: the old one in its trash, the new one live.
+    pc.fs.user_remove("Shared");
+    world.pass(pc);
+    let new = b"made after the delete";
+    pc.fs.user_write("Shared/new.txt", new);
+    world.pass(pc);
+    world.pass(pc);
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(new)), "the new file is not live: {live:?}");
+    assert_eq!(mac.fs.peek("Shared/new.txt").as_deref(), Some(&new[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}

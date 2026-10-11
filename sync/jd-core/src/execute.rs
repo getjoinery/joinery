@@ -3983,6 +3983,17 @@ fn create_local_folder(
     op: &Op,
     placement: Placement,
 ) -> Result<OpOutcome, ExecError> {
+    // A create planned before the server moved the folder again is not this
+    // folder's to run: its path is where the folder was, and a directory
+    // standing there now -- one the user has just made of that name, still
+    // waiting to go up -- is not this folder. Taken, the two records shared
+    // it, this folder's move carried it away, and the user's folder read as
+    // deleted and went to the server's trash with what was in it (B-E1,
+    // kill2 75125). As `adopt_placement` does, it stands down, and the next
+    // pass plans from where the folder is now.
+    if env.store.get_entry(op.entity)?.is_some_and(|entry| entry.remote != placement) {
+        return Ok(OpOutcome::Overtaken("the server has moved it since this was planned".into()));
+    }
     let path = match path_for(env, &placement)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
@@ -4055,7 +4066,11 @@ fn create_local_folder(
     // directory; the other's rename then carries that directory away, this
     // entry reads as locally deleted, and the folder the user made is trashed
     // on the server -- with the two entries agreeing on one directory in the
-    // meantime.
+    // meantime. The same for a folder the server deleted whose local trash
+    // has not run yet: a peer deleted a folder and made another of the same
+    // name, the new one's create comes first in the round, and the old
+    // one's trash then took the directory from under it, and the peer's new
+    // files with it (B-E1, plat3 75406).
     //
     // What kept the create from being planned at all used to be a naming
     // verdict: the newcomer lost the name as a duplicate and was parked. That
@@ -4082,7 +4097,6 @@ fn create_local_folder(
         for other in env.store.every_entry()? {
             if other.id == op.entity
                 || other.id.entity_type != EntityType::Folder
-                || other.remote_deleted
                 || !crate::pass::holds_here(env, &other)?
             {
                 continue;
