@@ -1,9 +1,8 @@
 <?php
-require_once(__DIR__ . '/../../../includes/PathHelper.php');
-
 /**
- * RecoveryReadinessItems — server_manager's contributions to the core Recovery
- * Readiness page (declared under `recoveryReadiness` in plugin.json).
+ * BackupReadinessItems — the backup items on the Recovery Readiness page
+ * (RecoveryReadiness::items()). Backups are core, so every site lists them,
+ * whatever plugins it runs.
  *
  * Two item families:
  *   - The backup recovery private key: the one secret that opens every backup
@@ -14,6 +13,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
+ * @version 1.5.0 - core: every site's Recovery Readiness page lists its backup recovery key and backup
+ *                  bucket consoles; they were missing on a site without server_manager, where the
+ *                  Backups page's Verify link left only the vault card to type the key into
  * @version 1.4.0 - the provider's name and console sign-in come from StorageProvider, the one provider list
  * @version 1.3.0 - a console item for every target not deleted; a switched-off target still holds backups
  * @version 1.2.0 - the recovery-key card warns when offloaded files in backup storage open only with a
@@ -21,9 +23,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *                  (specs/implemented/backup_offloaded_files.md § Key model), from the record the run keeps
  * @version 1.1.0
  */
-class RecoveryReadinessItems {
+class BackupReadinessItems {
 
-	/** Provider for RecoveryReadiness::items() — returns a list of item arrays. */
+	/** The backup items for RecoveryReadiness::items(): a list of item arrays. */
 	public static function items() {
 		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 		require_once(PathHelper::getIncludePath('data/backup_targets_class.php'));
@@ -63,7 +65,7 @@ class RecoveryReadinessItems {
 		if ($retired !== '') {
 			$item['warnings'] = array($retired);
 		}
-		$item['verify_call'] = 'RecoveryReadinessItems::verify_recovery_key';
+		$item['verify_call'] = 'BackupReadinessItems::verify_recovery_key';
 		$item['ceremony'] = array(
 			'challenge'   => BackupRecoveryKey::browser_challenge(),
 			'public_key'  => base64_encode(BackupRecoveryKey::parse_public_key()),

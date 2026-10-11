@@ -2,6 +2,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.18 - Verify on the recovery-key line opens the backup recovery key's own card
  * @version 1.17 - the Status box says when no backup of the site's own has finished off-site for two nights, or
  *                 none has passed verification for a day past the interval (specs/storage_targets.md F1, F2)
  * @version 1.16 - the target form is BackupTargetForm, shared with the setup wizard and the management node;
@@ -264,7 +265,7 @@ echo '<tr><th>Recovery key</th><td>';
 if ($recovery['is_ready']) {
 	echo 'verified (' . htmlspecialchars($recovery['fingerprint']) . '&hellip;)';
 	if (!$rotating) {
-		echo ' <a href="/admin/admin_recovery_readiness" class="ms-2 small">Verify</a>';
+		echo ' <a href="/admin/admin_recovery_readiness#backup_recovery_key" class="ms-2 small">Verify</a>';
 		echo ' <a href="?rotate_recovery=1#recovery-key" class="ms-2 small">Rotate key&hellip;</a>';
 	}
 } else {

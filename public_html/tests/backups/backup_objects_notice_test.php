@@ -230,15 +230,10 @@ $sum = BackupObjects::retired_summary(BackupProfile::names(), $base);
 check($sum['count'] === 1 && $sum['epochs'] === array('epoch-20260201_000000'), 'a run that found every site epoch open clears the site record');
 check(BackupObjects::read_retired_file($base . '/objects/does-not-exist.json') === array(), 'a missing record reads as none');
 
-if (class_exists('RecoveryReadinessItems')) {
-	$w = RecoveryReadinessItems::retiredEpochsWarning($base);
-	check(strpos($w, '1 offloaded file object (500 B) in backup storage opens only with a retired recovery key (epoch epoch-20260201_000000)') === 0,
-		'the readiness card warning: ' . $w);
-	BackupObjects::write_retired_epochs(array('output_dir' => $base . '/manager', 'profile' => BackupProfile::MANAGER), array());
-	check(RecoveryReadinessItems::retiredEpochsWarning($base) === '', 'and nothing when every epoch opens');
-} else {
-	check(true, 'server_manager inactive here: the readiness card is not on this site');
-	check(true, '(placeholder to keep the count)');
-}
+$w = BackupReadinessItems::retiredEpochsWarning($base);
+check(strpos($w, '1 offloaded file object (500 B) in backup storage opens only with a retired recovery key (epoch epoch-20260201_000000)') === 0,
+	'the readiness card warning: ' . $w);
+BackupObjects::write_retired_epochs(array('output_dir' => $base . '/manager', 'profile' => BackupProfile::MANAGER), array());
+check(BackupReadinessItems::retiredEpochsWarning($base) === '', 'and nothing when every epoch opens');
 
 harness_finish();

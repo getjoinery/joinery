@@ -26,6 +26,7 @@
  *
  * Run: php tests/backups/storage_provider_catalogue_test.php
  *
+ * @version 1.2 - the backup readiness items are core (includes/BackupReadinessItems.php)
  * @version 1.1 - one key per target (specs/storage_targets.md WP5)
  * @version 1.0
  */
@@ -52,7 +53,7 @@ $readers = array(
 	'includes/BackupTargetForm.php', 'includes/B2Client.php', 'includes/BucketCheck.php', 'data/backup_targets_class.php',
 	'utils/install_backup_target.php', 'plugins/server_manager/views/admin/targets.php',
 	'plugins/server_manager/views/admin/target_info.php', 'plugins/server_manager/includes/node_detail_tabs/backups.php',
-	'plugins/server_manager/includes/RecoveryReadinessItems.php',
+	'includes/BackupReadinessItems.php',
 );
 foreach ($readers as $rel) {
 	$src = (string)@file_get_contents($root . '/' . $rel);

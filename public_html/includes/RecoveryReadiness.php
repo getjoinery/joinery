@@ -6,8 +6,9 @@
  * verify tool and a canonical password-manager label.
  *
  * Two sources of items:
- *   - Core: the signed-in user's Sealed Vault recovery codes, one item per
- *     scope that actually has a vault.
+ *   - Core: the site's backup recovery key and one console item per backup
+ *     target (BackupReadinessItems), and the signed-in user's Sealed Vault
+ *     recovery codes, one item per scope that actually has a vault.
  *   - Plugins: a `recoveryReadiness` array in plugin.json (the PluginProvisioning
  *     declaration pattern), each entry `{"call": "Class::method"}` resolving into
  *     the plugin's includes/ directory. The method returns a list of item arrays.
@@ -31,6 +32,7 @@
  * newest live recovery code was made, and a check that predates it proved codes
  * that no longer exist (regenerated, or retired by a key rotation).
  *
+ * @version 1.4.0 - the backup recovery key and bucket console items are core (BackupReadinessItems)
  * @version 1.3.0 - with the root vault, one card for the one code set (the account and root-opened vaults fold into it)
  * @version 1.2.0 - a check older than the newest live recovery code is stale (codes_since)
  * @version 1.1.0 - counts and checks only the unlockers of the key generation in use
@@ -48,10 +50,14 @@ class RecoveryReadiness {
 
 	/**
 	 * Every must-save item for this session's user, ledger state attached,
-	 * ordered: platform items first, then the user's vault scopes.
+	 * ordered: the site's backup items, then plugin items, then the user's
+	 * vault scopes.
 	 */
 	public static function items(SessionControl $session) {
 		$items = array();
+		foreach (self::backupItems() as $item) {
+			$items[] = $item;
+		}
 		foreach (self::pluginItems() as $item) {
 			$items[] = $item;
 		}
@@ -92,6 +98,26 @@ class RecoveryReadiness {
 				&& ($item['last_verified'] === null || $item['last_verified'] < $stale_before || $item['codes_changed']);
 		}
 		unset($item);
+		return $items;
+	}
+
+	// ── Core backup items ──────────────────────────────────────────────────
+
+	private static function backupItems() {
+		$items = array();
+		try {
+			$provided = BackupReadinessItems::items();
+		} catch (\Throwable $e) {
+			return array(self::normalize(array(
+				'key'        => 'backup_items_error',
+				'title'      => 'Backup readiness items',
+				'state'      => 'error',
+				'state_text' => 'Backup readiness items failed: ' . $e->getMessage(),
+			)));
+		}
+		foreach ($provided as $item) {
+			$items[] = self::normalize($item);
+		}
 		return $items;
 	}
 
@@ -157,15 +183,16 @@ class RecoveryReadiness {
 	}
 
 	/**
-	 * Resolve "Class::method" against a plugin's includes/ directory (the
-	 * PluginProvisioning convention). Returns a callable or null.
+	 * Resolve "Class::method": a core item's class by name, a plugin item's
+	 * against its plugin's includes/ directory (the PluginProvisioning
+	 * convention). Returns a callable or null.
 	 */
 	private static function resolveCall($plugin, $call) {
 		if (!is_string($call) || substr_count($call, '::') !== 1) {
 			return null;
 		}
 		list($class, $method) = explode('::', $call, 2);
-		if (!class_exists($class)) {
+		if (!class_exists($class) && $plugin !== null) {
 			$file = PathHelper::getIncludePath('plugins/' . $plugin . '/includes/' . $class . '.php');
 			if (is_file($file)) {
 				require_once($file);

@@ -8,8 +8,8 @@
 /**
  * Recovery Readiness: the verification ledger, the vault-code DRY RUN (the
  * whole point: a correct code passes WITHOUT being consumed), custody
- * refusal (client-custody codes never verify server-side), and the ceremony
- * verifier's failure path.
+ * refusal (client-custody codes never verify server-side), the ceremony
+ * verifier's failure path, and the backup items being core.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -177,11 +177,32 @@ check($outcome['ok'] === false && stripos($outcome['message'], 'client') !== fal
 // ── Ceremony verifier (failure path is deterministic everywhere) ────────
 section('Recovery key ceremony verifier');
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryReadinessItems.php'));
-$outcome = RecoveryReadinessItems::verify_recovery_key(array('escrow_proof' => 'not the proof sentence'));
+$outcome = BackupReadinessItems::verify_recovery_key(array('escrow_proof' => 'not the proof sentence'));
 check($outcome['ok'] === false, 'a wrong proof never verifies');
-$outcome = RecoveryReadinessItems::verify_recovery_key(array());
+$outcome = BackupReadinessItems::verify_recovery_key(array());
 check($outcome['ok'] === false, 'a missing proof never verifies');
+
+// ── The backup items are core ───────────────────────────────────────────
+// Every site lists its backup recovery key, whatever plugins it runs: on a
+// site without server_manager the Backups page's Verify link once led to a
+// page whose only box took vault codes.
+section('Backup items are core');
+
+$backup_items = (new ReflectionMethod('RecoveryReadiness', 'backupItems'))->invoke(null);
+$keys = array_map(function ($i) { return $i['key']; }, $backup_items);
+check(($keys[0] ?? null) === 'backup_recovery_key', 'the backup recovery key is the first core item');
+check(array_key_exists('_plugin', $backup_items[0] ?? array()) && $backup_items[0]['_plugin'] === null, 'and no plugin provides it');
+check(($backup_items[0]['verify'] ?? null) === 'ceremony', 'it is verified by the key ceremony, never as a vault code');
+$declared = 0;
+foreach (glob(PathHelper::getIncludePath('plugins') . '/*/plugin.json') as $manifest) {
+	$json = json_decode((string)file_get_contents($manifest), true);
+	foreach ((array)($json['recoveryReadiness'] ?? array()) as $decl) {
+		if (strpos((string)($decl['call'] ?? ''), 'BackupReadinessItems') !== false || strpos((string)($decl['call'] ?? ''), 'RecoveryReadinessItems') !== false) {
+			$declared++;
+		}
+	}
+}
+check($declared === 0, 'no plugin declares the backup items too (no second card on a management node)');
 
 // ── Cleanup ─────────────────────────────────────────────────────────────
 foreach ($cleanup_vaults as $vault_id) {
