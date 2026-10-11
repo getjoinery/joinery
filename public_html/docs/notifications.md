@@ -19,8 +19,8 @@ conventions, and declaring/subscribing — see [Signal Bus](signals.md).
   `purchase.completed`).
 - **Topic recipient** — any user who opts in to a signal via their preferences.
 - **Targeted recipient** — a user the dispatch names explicitly via a
-  `recipients` payload key. Supported but unused by current signals; reserved for
-  future user-facing notifications.
+  `recipients` payload key. Used by the signals that notify particular people
+  (mailbox, site, server-manager and Boards signals).
 - **Channels** — in-app is the baseline (always created); email is a secondary,
   opt-in channel layered on top.
 

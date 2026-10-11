@@ -533,13 +533,21 @@ if [[ "$(db_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "
     db_psql -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
     echo "postgres: created role ${DB_ROLE}"
 fi
+# iea_handler (handler aliases, which accept +tag sub-addresses) is created by
+# update_database; on a box whose schema has not caught up yet the grant leaves it
+# out, and the validate-then-swap probe below keeps the old recipient query until a
+# later run finds the column.
+ALIAS_GRANT_COLUMNS="iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled, iea_delete_time"
+if [[ "$(db_psql -c "SELECT 1 FROM information_schema.columns WHERE table_name = 'iea_inbound_email_aliases' AND column_name = 'iea_handler'")" == "1" ]]; then
+    ALIAS_GRANT_COLUMNS="${ALIAS_GRANT_COLUMNS}, iea_handler"
+fi
 # The password is set over stdin, never argv, so it stays out of the process list.
 db_psql <<SQL
 ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT CONNECTION LIMIT 10 PASSWORD '${ROLE_PW}';
 GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
 GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
 GRANT SELECT ON ied_inbound_email_domains TO "${DB_ROLE}";
-GRANT SELECT (iea_ied_inbound_email_domain_id, iea_alias, iea_is_enabled, iea_delete_time) ON iea_inbound_email_aliases TO "${DB_ROLE}";
+GRANT SELECT (${ALIAS_GRANT_COLUMNS}) ON iea_inbound_email_aliases TO "${DB_ROLE}";
 SQL
 echo "postgres: role ${DB_ROLE} configured (SELECT on ied_inbound_email_domains, and on the alias columns the recipient lookup reads)"
 

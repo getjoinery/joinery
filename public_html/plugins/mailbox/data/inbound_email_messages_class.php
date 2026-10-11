@@ -2382,6 +2382,99 @@ class InboundEmailMessage extends SystemBase {
 		}
 		return array('removed' => $purged, 'message' => $message);
 	}
+
+	/**
+	 * The bare lowercase address the message says it is from, parsed out of
+	 * iem_sender ("Name" <addr>), or '' when it cannot be read — an unparseable
+	 * sender, or a sealed row while the vault is locked. Never throws.
+	 */
+	public function senderAddress(): string {
+		try {
+			$parsed = MailboxContacts::parseAddress((string)$this->get('iem_sender'));
+		} catch (\Throwable $e) {
+			return '';
+		}
+		return $parsed === null ? '' : $parsed[0];
+	}
+
+	/**
+	 * Did the sending domain vouch for this message's From address? One rule for
+	 * every handler, built on the verdicts the router recorded at ingest
+	 * (iem_dmarc_result, iem_dkim_result, iem_spf_result):
+	 *
+	 *   - DMARC pass; or, because some providers report no DMARC verdict,
+	 *   - DKIM pass whose signing domain (d=) is the From domain, or
+	 *   - SPF pass whose envelope domain (Return-Path) is the From domain.
+	 *
+	 * The aligned domain is read from the verifying server's own
+	 * Authentication-Results line when the verdict came from one (our milter or the
+	 * relay's): a forged DKIM-Signature header naming the victim's domain beside a
+	 * valid one for another cannot pass that way. Where the provider gave only a
+	 * verdict (Mailgun and the like), the DKIM-Signature and Return-Path headers
+	 * stand in.
+	 *
+	 * False for anything it cannot establish: unverified mail, a sealed row, no From.
+	 */
+	public function senderAttested(): bool {
+		$address = $this->senderAddress();
+		$at = strrpos($address, '@');
+		if ($at === false) {
+			return false;
+		}
+		$from_domain = substr($address, $at + 1);
+
+		if (strtolower(trim((string)$this->get('iem_dmarc_result'))) === 'pass') {
+			return true;
+		}
+
+		$headers = (string)$this->get('iem_raw_headers');
+		$dkim_pass = strtolower(trim((string)$this->get('iem_dkim_result'))) === 'pass';
+		$spf_pass = strtolower(trim((string)$this->get('iem_spf_result'))) === 'pass';
+		if (!$dkim_pass && !$spf_pass) {
+			return false;
+		}
+		$domainOf = function (?string $v): string {
+			$v = strtolower(trim((string)$v));
+			$a = strrpos($v, '@');
+			return $a === false ? $v : substr($v, $a + 1);
+		};
+
+		$source = strtolower(trim((string)$this->get('iem_auth_source')));
+		$trusted_line = null;
+		if (in_array($source, array('milter', 'relay'), true) && $headers !== '') {
+			$authserv = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname')));
+			$trusted_line = AuthenticationResults::fromMessage($headers, $authserv);
+		}
+
+		if ($dkim_pass) {
+			if ($trusted_line !== null) {
+				if ($domainOf($trusted_line->dkimDomain()) === $from_domain) {
+					return true;
+				}
+			} else {
+				foreach (AuthenticationResults::extractHeaders($headers, 'dkim-signature') as $sig) {
+					if (preg_match('/(?:^|[;\s])d\s*=\s*([^;\s]+)/i', $sig, $m) && strtolower(trim($m[1])) === $from_domain) {
+						return true;
+					}
+				}
+			}
+		}
+		if ($spf_pass) {
+			if ($trusted_line !== null) {
+				if ($domainOf($trusted_line->spfDomain()) === $from_domain) {
+					return true;
+				}
+			} else {
+				foreach (AuthenticationResults::extractHeaders($headers, 'return-path') as $rp) {
+					$parsed = MailboxContacts::parseAddress(trim($rp));
+					if ($parsed !== null && $domainOf($parsed[0]) === $from_domain) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
 }
 
 class MultiInboundEmailMessage extends SystemMultiBase {

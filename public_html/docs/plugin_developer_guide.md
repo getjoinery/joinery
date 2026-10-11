@@ -76,6 +76,8 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
 | Signals your plugin emits, or reactions to existing signals | `signals` / `signalSubscribers` keys in `plugin.json` | [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative) |
 | A cloud-offload store profile (move rows' bytes to a bucket) | `storage_profiles` array in `plugin.json` — a `StorageProfile` class name | [Storage Profiles](#storage-profiles-declarative) |
+| Receiving email addressed to a feature of your plugin | `inboundHandlers` key in `plugin.json` — handler key → `InboundAddressHandler` class | [Mailbox: email handlers](../plugins/mailbox/docs/overview.md#email-handlers-and-personal-addresses) |
+| A button on a message in the mailbox reader | `mailboxMessageActions` key in `plugin.json` — action key → label, icon, same-site url | [Mailbox: buttons on a message](../plugins/mailbox/docs/overview.md#buttons-on-a-message-in-the-reader) |
 | A cross-instance payload kind on the Joinery Direct channel | `directKinds` key in `plugin.json` — kind name → handler class (`gate`/`ingest`) | [Joinery Direct](joinery_direct.md#serving-a-kind-the-plugin-surface) |
 | Other initial data (seed rows, categories, etc.) | `.sql` file in `migrations/`, numbered for order, idempotent | [Migration System](#migration-system) |
 | Activate/deactivate logic | `activate.php`, `deactivate.php` at the plugin root, each defining `{plugin}_activate()` / `_deactivate()` | [Plugin Lifecycle](#plugin-lifecycle) |
@@ -317,7 +319,7 @@ Routes outside the namespace are dropped with a logged warning.
 > declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
 > The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
-> `directKinds`, `host_installer`, `receives_upgrades`, `included_in_publish`,
+> `directKinds`, `inboundHandlers`, `mailboxMessageActions`, `host_installer`, `receives_upgrades`, `included_in_publish`,
 > `audience`, `status`, and `deprecated`/`superseded_by`.
 
 #### Licensing and maturity metadata

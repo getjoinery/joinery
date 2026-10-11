@@ -29,6 +29,7 @@
  * no SRS secret. The forwarding domains stay: bounces of the forwards this site
  * sends return to them, and the relay spools those too.
  *
+ * @version 2.6 - a handler alias (iea_handler) is marked accepts_tag, so the relay takes its +tag sub-addresses
  * @version 2.5 - no forward instructions: every recipient and a forwarding catch-all are
  *                spooled, and the site forwards at pull (specs/relay_receive_only_forwarding.md)
  * @version 2.4 - a Fortress mailbox under the Seal at the relay add-on seals to the owner's
@@ -178,6 +179,12 @@ class RelayMapExporter {
 					'mode'              => 'store',
 					'forwarding_domain' => $forwarding_domain,
 				);
+				// A handler alias also takes `local+tag@domain` (RelayVersion::
+				// ACCEPTS_SUBADDRESSES). Present only when true, so an older relay
+				// and an unchanged routing state see the same fragment as before.
+				if (trim((string)$alias->get('iea_handler')) !== '') {
+					$fragment['recipients'][$address]['accepts_tag'] = true;
+				}
 				if ($key_kind === 'client') {
 					$fragment['recipients'][$address]['key_scope'] = InboundEmailMessage::SEAL_SCOPE_FORTRESS;
 				}

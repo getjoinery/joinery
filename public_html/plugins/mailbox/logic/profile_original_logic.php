@@ -46,9 +46,7 @@ function profile_original_logic(array $input): LogicResult {
 
 	// Grant check — the same rule the reader applies to the message itself.
 	$viewer = MailboxViewer::fromSession($session);
-	$alias_id = intval($message->get('iem_iea_inbound_email_alias_id'));
-	$allowed = $alias_id > 0 ? $viewer->canAccess($alias_id) : $viewer->isAllAccess();
-	if (!$allowed) {
+	if (!$viewer->canReadMessage($message)) {
 		return _profile_original_error($session, $settings, 'You do not have access to this mailbox.', $reader_url);
 	}
 

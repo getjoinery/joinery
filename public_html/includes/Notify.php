@@ -93,8 +93,8 @@ class Notify {
 
 		$source_user_id = isset($payload['source_user_id']) ? (int)$payload['source_user_id'] : null;
 
-		// Targeted recipients — uid => true. (No core signal targets directly
-		// today; kept so a future direct-notify signal can pass `recipients`.)
+		// Targeted recipients — uid => true. Signals that notify particular people
+		// (mailbox, site, server-manager and plugin signals) pass `recipients`.
 		$targeted = array();
 		if (isset($payload['recipients'])) {
 			$recips = is_array($payload['recipients']) ? $payload['recipients'] : array($payload['recipients']);

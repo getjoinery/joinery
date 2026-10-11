@@ -1,0 +1,232 @@
+{
+    "name": "Joinery Boards",
+    "version": "0.2.0",
+    "description": "Kanban boards, lists and cards for clubs, nonprofits and small teams, wired into the site's members, notifications, calendar and files. One price, no seat or board limits.",
+    "author": "Joinery",
+    "license": "Joinery-Commercial",
+    "status": "beta",
+    "requires_entitlement": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "tags": [
+        "boards",
+        "kanban",
+        "tasks",
+        "projects"
+    ],
+    "styles": [
+        "assets/css/boards.css"
+    ],
+    "bootstrap": "includes/bootstrap.php",
+    "profileMenu": [
+        {
+            "slug": "boards",
+            "title": "Boards",
+            "url": "/profile/boards",
+            "icon": "tasks",
+            "visibility": "in",
+            "permission": 0,
+            "order": 57,
+            "settingActivate": "boards_active"
+        }
+    ],
+    "adminMenu": [
+        {
+            "slug": "boards-admin",
+            "title": "Boards",
+            "url": "/plugins/boards/admin/admin_boards",
+            "icon": "tasks",
+            "permission": 10,
+            "order": 17,
+            "settingActivate": "boards_active"
+        }
+    ],
+    "settingsGroups": {
+        "boards": "Boards",
+        "boards_limits": "Limits",
+        "boards_polling": "Refresh rate"
+    },
+    "settings": [
+        {
+            "name": "boards_active",
+            "default": "1",
+            "group": "boards",
+            "label": "Boards enabled",
+            "type": "checkbox",
+            "helptext": "Turns the Boards app on. With it off the app and its API actions refuse; existing boards are untouched."
+        },
+        {
+            "name": "boards_due_reminder_hours",
+            "default": "24",
+            "group": "boards",
+            "label": "Due reminder (hours before)",
+            "type": "text",
+            "helptext": "How long before a card or checklist item is due its members are reminded. Each reminder goes out once, and again only if the due date moves."
+        },
+        {
+            "name": "boards_max_attachment_mb",
+            "default": "25",
+            "group": "boards_limits",
+            "label": "Largest attachment (MB)",
+            "type": "text",
+            "helptext": "Per file. The server's own upload limit still applies on top of this."
+        },
+        {
+            "name": "boards_max_cards_per_board",
+            "default": "5000",
+            "group": "boards_limits",
+            "label": "Most cards on one board",
+            "type": "text",
+            "helptext": "A safety ceiling against runaway automation or import loops, not a plan limit."
+        },
+        {
+            "name": "boards_poll_seconds",
+            "default": "5",
+            "group": "boards_polling",
+            "label": "Open board (seconds)",
+            "type": "text",
+            "helptext": "How often an open board asks for changes. Lower feels more instant and costs more queries."
+        }
+    ],
+    "signals": {
+        "boards.assigned": {
+            "label": "Added to a card",
+            "description": "Someone adds you to a card or to a checklist item.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "card_title": "Card title",
+                "card_url": "Link to the card",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{board_name}] {card_title}",
+                "body_template": "{summary}",
+                "link_template": "{card_url}"
+            }
+        },
+        "boards.mentioned": {
+            "label": "Mentioned on a card",
+            "description": "Someone mentions you in a comment or a card description.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "card_title": "Card title",
+                "card_url": "Link to the card",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{board_name}] {card_title}",
+                "body_template": "{summary}",
+                "link_template": "{card_url}"
+            }
+        },
+        "boards.card_activity": {
+            "label": "Activity on a card you watch",
+            "description": "A comment, a move to another list, a new due date, done, or an attachment on a card you are on or watch.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "card_title": "Card title",
+                "card_url": "Link to the card",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{board_name}] {card_title}",
+                "body_template": "{summary}",
+                "link_template": "{card_url}"
+            }
+        },
+        "boards.card_created": {
+            "label": "New card on a board you watch",
+            "description": "A card is added to a board where you chose to hear about every new card.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "card_title": "Card title",
+                "card_url": "Link to the card",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{board_name}] {card_title}",
+                "body_template": "{summary}",
+                "link_template": "{card_url}"
+            }
+        },
+        "boards.due_soon": {
+            "label": "Card or checklist item due soon",
+            "description": "A card or a checklist item assigned to you is coming due.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "card_title": "Card title",
+                "card_url": "Link to the card",
+                "summary": "What is due, in a sentence",
+                "recipients": "User ids to tell"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{board_name}] {card_title}",
+                "body_template": "{summary}",
+                "link_template": "{card_url}"
+            }
+        },
+        "boards.email_refused": {
+            "label": "An email to your board address wasn't used",
+            "description": "An email sent to your board email address came from an address that isn't yours, so no card was made.",
+            "category": "Boards",
+            "payload": {
+                "board_name": "Board name",
+                "board_url": "Link to the board",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": false,
+                "title_template": "[{board_name}] Email not used",
+                "body_template": "{summary}",
+                "link_template": "{board_url}"
+            }
+        }
+    },
+    "inboundHandlers": {
+        "boards": {
+            "class": "BoardsInboundHandler",
+            "label": "Boards"
+        }
+    },
+    "mailboxMessageActions": {
+        "boards_make_card": {
+            "label": "Make a card",
+            "icon": "tasks",
+            "url": "/profile/boards/from_message"
+        }
+    }
+}

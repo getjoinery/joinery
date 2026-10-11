@@ -1478,15 +1478,15 @@ class MultiUser extends SystemMultiBase {
         }
 
         if (isset($this->options['first_name_like'])) {
-            $filters['usr_first_name'] = 'ILIKE \'%'.$this->options['first_name_like'].'%\'';
+            $filters['usr_first_name'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['first_name_like'].'%');
         }
 
         if (isset($this->options['last_name_like'])) {
-            $filters['usr_last_name'] = 'ILIKE \'%'.$this->options['last_name_like'].'%\'';
+            $filters['usr_last_name'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['last_name_like'].'%');
         }
         
         if (isset($this->options['nickname_like'])) {
-            $filters['usr_nickname'] = 'ILIKE \'%'.$this->options['nickname_like'].'%\'';
+            $filters['usr_nickname'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['nickname_like'].'%');
         }
 
         if (isset($this->options['name_like'])) {
@@ -1500,7 +1500,7 @@ class MultiUser extends SystemMultiBase {
         }
 
         if (isset($this->options['email_like'])) {
-            $filters['usr_email'] = 'ILIKE \'%'.$this->options['email_like'].'%\'';
+            $filters['usr_email'] = 'ILIKE '.DbConnector::get_instance()->get_db_link()->quote('%'.$this->options['email_like'].'%');
         }
 
         if (isset($this->options['email_verified'])) {

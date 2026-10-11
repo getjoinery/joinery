@@ -69,13 +69,14 @@ function rlk_domain(string $kind, string $suffix, array $fields, array &$ids): s
 	return $name;
 }
 
-function rlk_alias(string $domain, string $local, bool $enabled): void {
+function rlk_alias(string $domain, string $local, bool $enabled, ?string $handler = null): void {
 	$d = InboundEmailDomain::GetByDomain($domain);
 	$a = new InboundEmailAlias(NULL);
 	$a->set('iea_ied_inbound_email_domain_id', (int)$d->key);
 	$a->set('iea_alias', $local);
 	$a->set('iea_delivery_mode', 'store');
 	$a->set('iea_is_enabled', $enabled);
+	if ($handler !== null) { $a->set('iea_handler', $handler); }
 	$a->save();
 }
 
@@ -93,6 +94,8 @@ $imap    = rlk_domain('imap', $suffix, array('ied_reject_unmatched' => true, 'ie
 rlk_alias($imap, 'feed', true);
 rlk_alias($reject, 'box', true);
 rlk_alias($reject, 'gone', false);
+rlk_alias($reject, 'hdl', true, 'hdl');
+rlk_alias($reject, 'hdloff', false, 'hdloff');
 
 $map = shell_exec('IEMAP_PASSWORD=x ' . escapeshellarg(PHP_BINARY) . ' '
 	. escapeshellarg(PathHelper::getIncludePath('plugins/mailbox/provisioning/render_pgsql_map.php'))
@@ -116,6 +119,14 @@ $refused = '550 5.1.1 No such address here';
 $cases = array(
 	array('box@' . $reject,                    'OK',     'an enabled alias'),
 	array('gone@' . $reject,                   $refused, 'a disabled alias is no alias'),
+	array('hdl@' . $reject,                    'OK',     'a handler alias'),
+	array('hdl+r7k2abc@' . $reject,            'OK',     'a handler alias accepts a +tag'),
+	array('HDL+R7K2@' . $reject,               'OK',     'in any case'),
+	array('box+tag@' . $reject,                $refused, 'an alias without a handler is never sub-addressed: it follows the unknown-address rule'),
+	array('unknown+tag@' . $reject,            $refused, 'an unknown base with a +tag is refused where unmatched mail is refused'),
+	array('hdloff+tag@' . $reject,             $refused, 'a disabled handler alias takes no +tag'),
+	array('+tag@' . $reject,                   $refused, 'a +tag with no base is refused'),
+	array('hdl+tag@' . $discard,               '',       'a handler alias that does not exist on this domain: the domain\'s rule applies'),
 	array('nobody@' . $reject,                 $refused, 'an unknown address on a domain that refuses unmatched mail'),
 	array("o'brien@" . $reject,                $refused, 'an address with a quote in it is answered, not broken'),
 	array('postmaster@' . $reject,             'OK',     'postmaster, with no alias, on a domain that refuses unmatched mail'),
@@ -157,10 +168,14 @@ $raw = function (string $to) {
 		. "Date: " . gmdate('D, d M Y H:i:s') . " +0000\r\n\r\nhello\r\n";
 };
 $router = new InboundEmailRouter();
-foreach (array('gone@' . $reject, 'nobody@' . $reject, 'nobody@' . $fwd) as $address) {
+foreach (array('gone@' . $reject, 'nobody@' . $reject, 'nobody@' . $fwd, 'box+tag@' . $reject, 'unknown+tag@' . $reject) as $address) {
 	check($router->processEmail($raw($address), $address) === 67,
 		'refused by both: ' . $address, $lookup($address));
 }
+check($router->processEmail($raw('hdl+r7k2@' . $reject), 'hdl+r7k2@' . $reject) === 0,
+	'a +tag on a handler alias is accepted and stored by the router, as the lookup said');
+$sub = new MultiInboundEmailMessage(array('recipient' => 'hdl+r7k2@' . $reject));
+check(count($sub) === 1, 'and the message is stored under the handler alias');
 check($router->processEmail($raw('feed@' . $imap), 'feed@' . $imap) === 67,
 	'the router does not route a feed\'s anchor domain either');
 check($router->processEmail($raw('postmaster@' . $reject), 'postmaster@' . $reject) === 0,
@@ -212,8 +227,13 @@ $installer = file_get_contents(PathHelper::getIncludePath('plugins/mailbox/provi
 preg_match_all('/\b(iea_[a-z_]+)\b/', $query, $read);
 $read = array_values(array_diff(array_unique($read[1]), array('iea_inbound_email_aliases')));
 sort($read);
-preg_match('/GRANT SELECT \(([^)]*)\) ON iea_inbound_email_aliases/', $installer, $g);
+// The column list is built in the script: a base list, plus iea_handler once update_database has created it.
+preg_match('/ALIAS_GRANT_COLUMNS="([^"]*)"/', $installer, $g);
 $granted = array_map('trim', explode(',', $g[1] ?? ''));
+check(strpos($installer, 'GRANT SELECT (${ALIAS_GRANT_COLUMNS}) ON iea_inbound_email_aliases') !== false
+	&& strpos($installer, 'ALIAS_GRANT_COLUMNS="${ALIAS_GRANT_COLUMNS}, iea_handler"') !== false,
+	'the grant uses that list, with iea_handler added once the column exists');
+$granted[] = 'iea_handler';
 sort($granted);
 check($read === $granted, 'the map role is granted exactly the alias columns the lookup reads',
 	implode(',', $read) . ' vs ' . implode(',', $granted));

@@ -55,6 +55,11 @@ type routingEntry struct {
 	// it frames the sealed DEK, which is how the browser knows which of its
 	// keys opens it.
 	KeyScope string `json:"key_scope"`
+	// True for a handler alias (InboundEmailAlias iea_handler): `base+tag@domain`
+	// is delivered to it as `base@domain`, and the tag rides in the envelope
+	// recipient for the site to read. Absent (false) for every other recipient,
+	// which accepts its exact address only. An older relay ignores the field.
+	AcceptsTag bool `json:"accepts_tag,omitempty"`
 }
 
 // domainEntry captures the domain-level catch-all posture, used when no exact
@@ -249,6 +254,18 @@ func (m *routingMap) resolve(recipient string) (routingEntry, bool) {
 
 	dom := domainOf(recipient)
 
+	// A sub-address of a handler alias: `boards+tag@dom` is delivered as
+	// `boards@dom`. Only a recipient marked accepts_tag takes it; an unknown
+	// base, a plain alias and the catch-all behave exactly as for any address.
+	if base, ok := subaddressBase(recipient); ok {
+		if entry, ok := m.Recipients[base+"@"+dom]; ok && entry.AcceptsTag {
+			if entry.ForwardingDomain == "" {
+				entry.ForwardingDomain = dom
+			}
+			return entry, true
+		}
+	}
+
 	// SRS bounce returning to a forwarding domain: store it (sealed to the
 	// owning tenant's transport key) so the pull consumer can decode the
 	// delivery-failure notice. It matches no alias and its domain may be a
@@ -365,6 +382,17 @@ func (m *routingMap) tenantOfForwardingDomain(dom string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// subaddressBase splits `base+tag@domain` and returns base. ok=false when the
+// local part has no '+', or nothing on either side of it.
+func subaddressBase(address string) (string, bool) {
+	local := localPartOf(address)
+	plus := strings.Index(local, "+")
+	if plus <= 0 || plus == len(local)-1 {
+		return "", false
+	}
+	return local[:plus], true
 }
 
 func localPartOf(address string) string {

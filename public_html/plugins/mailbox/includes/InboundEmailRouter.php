@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.54 - handler aliases: `base+tag` resolves to a handler alias and each newly stored message is handed to the plugin handler (handOver)
  * @version 1.53 - comments: a never_spam rule does not lift a message the From domain disowned
  * @version 1.52 - authFromRelayMeta() takes the policy from the line that gave the dmarc verdict; readAuthResults' provider branch passes it through (relay path)
  * @version 1.51 - the DMARC policy rides with the verdicts (readAuthResults, iem_dmarc_policy): a fail under p=none is not spam by the auth rule and is a dmarc_monitored_fail meta token for the corpus
@@ -655,6 +656,12 @@ class InboundEmailRouter {
 				$domain->key,
 				$saved['message'] ? intval($saved['message']->key) : null
 			);
+
+			// A handler alias hands the stored message to its plugin. After the store has
+			// committed and been logged: nothing the handler does can lose the mail.
+			if (!$saved['dedup'] && $saved['message'] && $alias && $alias->has_handler()) {
+				$this->handOver($alias, $saved['message'], $parsed, $envelope_recipient, $domain);
+			}
 			return 0;
 		} catch (MailboxAtDiskAllowance $e) {
 			return $this->deferAtDiskAllowance($parsed, $alias, $envelope_recipient, $domain);
@@ -710,6 +717,65 @@ class InboundEmailRouter {
 	 *                                       when it was sent, not when it was read in
 	 *   is_read / is_starred / is_archived (bool) source state carried across
 	 */
+	/**
+	 * Hand a stored message to the plugin handler its alias names (InboundHandlerRegistry).
+	 *
+	 * The message is already stored and logged, so spam checks, duplicate detection,
+	 * attachment Files and retention have all happened and a failing handler loses
+	 * nothing: the mail stays readable in the mailbox. Every outcome is written to the
+	 * routing log. Never throws.
+	 *
+	 * Withheld (stored, not handed over): an alias that seals content; mail the spam
+	 * decision filed for a hard reason (failed authentication or the scanner's high
+	 * score). A junk verdict from the learned guesses (sender_history, bayes) does not
+	 * withhold it: nobody trains a handler alias's mailbox, so a wrong guess would
+	 * silently drop a genuine message.
+	 */
+	private function handOver(InboundEmailAlias $alias, InboundEmailMessage $msg, array $parsed, string $envelope_recipient, $domain): void {
+		$key = $alias->handler_key();
+		$log = function (string $outcome, ?string $error = null) use ($parsed, $alias, $envelope_recipient, $domain, $msg, $key) {
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_HANDLER, $envelope_recipient,
+				$key . ': ' . $outcome, $error, $domain->key, intval($msg->key));
+		};
+		try {
+			if ($alias->seals_content()) {
+				$log('withheld (the mailbox seals its content)');
+				return;
+			}
+			if ($msg->get('iem_spam_verdict') === InboundEmailMessage::SPAM_VERDICT_SPAM
+					&& in_array((string)$msg->get('iem_spam_reason'), array('auth', 'scanner'), true)) {
+				$log('withheld (filed as junk: ' . $msg->get('iem_spam_reason') . ')');
+				return;
+			}
+			$handler = InboundHandlerRegistry::handlerFor($key);
+			if ($handler === null) {
+				$log('handler not available');
+				return;
+			}
+			$tag = $this->subaddressTag($envelope_recipient, $alias);
+			$handled = $handler->handle($msg, $tag);
+			$log($handled ? 'handled' : 'not mine');
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: handler "' . $key . '" threw on message ' . $msg->key . ': ' . $e->getMessage());
+			try {
+				$log('error', substr($e->getMessage(), 0, 500));
+			} catch (\Throwable $ignored) {
+			}
+		}
+	}
+
+	/**
+	 * The `+tag` a recipient used on a handler alias, or null for the bare address.
+	 */
+	private function subaddressTag(string $envelope_recipient, InboundEmailAlias $alias): ?string {
+		$local = strtolower(explode('@', $envelope_recipient, 2)[0]);
+		if ($local === strtolower((string)$alias->get('iea_alias'))) {
+			return null;
+		}
+		$plus = strpos($local, '+');
+		return $plus === false ? null : substr($local, $plus + 1);
+	}
+
 	/**
 	 * A message deferred because this site is at its disk allowance
 	 * (DiskAllowance): the sender retries, and it stores once room is made.
@@ -2592,28 +2658,16 @@ class InboundEmailRouter {
 	}
 
 	/**
-	 * Look up an alias for the given local part and domain.
+	 * Look up an alias for the given local part and domain. `base+tag` finds
+	 * `base` when that is a handler alias (InboundEmailAlias::resolveRecipient).
 	 *
 	 * @param string $local_part Local part of the address
 	 * @param InboundEmailDomain $domain Domain object
 	 * @return InboundEmailAlias|null
 	 */
 	public function lookupAlias($local_part, $domain) {
-		$results = new MultiInboundEmailAlias(array(
-			'domain_id' => $domain->key,
-			'alias' => strtolower($local_part),
-			'deleted' => false
-		));
-		$results->load();
-
-		if (count($results)) {
-			$alias = $results->get(0);
-			if ($alias->get('iea_is_enabled')) {
-				return $alias;
-			}
-		}
-
-		return null;
+		list($alias) = InboundEmailAlias::resolveRecipient(intval($domain->key), (string)$local_part);
+		return $alias;
 	}
 
 	/**

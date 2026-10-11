@@ -1,20 +1,18 @@
-# Boards Plugin Spec (Trello-style kanban)
+# Boards Plugin Spec (kanban)
 
-**Purpose:** A Trello-style board, list and card tool that runs inside a Joinery site. Clubs, nonprofits and small teams use it to track work. It is tied into the site's members, email, calendar and files. It is sold once at one price: there are no tiers, no seat limits and no board limits.
+**Purpose:** A kanban-style board, list and card tool that runs inside a Joinery site. Clubs, nonprofits and small teams use it to track work. It is tied into the site's members, email, calendar and files. It is sold once at one price: there are no tiers, no seat limits and no board limits.
 
-**Status:** Active — not yet implemented. No open questions.
+**Status:** Built (2026-10-11, uncommitted): all of P1, including the email features (§5.2 email-to-board, §5.5 Make a card) on the prerequisite below, which is also built. Remaining for release: the relay release (relay version 3.9) that lets relay-fronted domains carry personal addresses. Reply-by-email (§5.3) was dropped by the owner on 2026-10-11. The plugin's developer doc is `plugins/boards/docs/overview.md`. Decisions taken while building are marked **Built as:** in the sections they touch. No open questions.
 
 **Plugin name:** `boards`. The product name is "Joinery Boards".
 
-**Prerequisite:** **Core Improvements for Plugins**, Part 2 (Email handlers and reply addresses). It provides the general platform pieces that the email features in §5 are built on:
+**Prerequisite (built):** **Core Improvements for Plugins**, Part 2 (Email handlers and personal addresses). It provides the general platform pieces that the email features in §5 are built on:
 
 - plugin-owned email addresses;
-- secret reply addresses;
-- Reply-To and threading headers on notification emails;
-- reply text extraction;
+- secret per-member addresses;
 - buttons in the mailbox message reader.
 
-The rest of Boards can be built in parallel, but §5.2, §5.3 and §5.5 can't ship before it.
+The rest of Boards can be built in parallel, but §5.2 and §5.5 can't ship before it.
 
 The same spec's Part 1 (recurrence, calendar invites, calendar de-duplication) is for the sibling plugins; Boards does not depend on it.
 
@@ -31,7 +29,7 @@ What users value, from the most-cited to the least:
 3. **Card basics.** Members, due dates, labels, checklists, comments and attachments.
 4. **Templates** for repeatable work.
 5. **The three most-recommended Power-Ups:** Calendar, Custom Fields and Butler automation.
-6. **Email-to-board** and reply-by-email.
+6. **Email-to-board** and reply-by-email. (Reply-by-email is not built: see §5.3.)
 
 What users complain about, and our answer:
 
@@ -77,7 +75,7 @@ Sources are listed at the end.
   - Watch button
 - **Filters:** keyword, label, member, and due state (overdue / due this week / no date). Filters are kept in the URL.
 - **My cards:** every card assigned to me across all boards, grouped by due date.
-- **Board and card templates.** The plugin ships four starter boards: Event planning, Volunteer tasks, Content calendar and Simple pipeline.
+- **Board and card templates.** The plugin ships four starter boards: Event planning, Volunteer tasks, Content calendar and Simple pipeline. **Built as:** the starters are definitions in `includes/starter_boards.json` laid down on a new board when chosen — no seeded rows, so there is nothing to keep in step on upgrade. A board an admin marks as a template is copied the same way (lists, labels, cards with their checklists; no people or history).
 - **Keyboard shortcuts:**
 
   | Key | Action |
@@ -90,9 +88,9 @@ Sources are listed at the end.
   | `?` | Show the shortcut list |
 
 - **Access:** two board visibility settings (Invite only / Open to all members), three roles, and whole groups as members (§4).
-- **Email:** board address, reply-by-email, notifications, due-date reminders, and "Make a card" from the mailbox reader (§5).
+- **Email:** board address (email-to-board), notifications, due-date reminders, and "Make a card" from the mailbox reader (§5). Notifications are not replyable.
 - **Joinery wiring:** personal calendar, board-only attachments, mobile apps, member dashboard and Joinery AI (§7).
-- **Trello import** (§8).
+- **Board import** from another kanban tool's JSON export (§8).
 
 ### P2 — next release, same price
 
@@ -116,7 +114,7 @@ Sources are listed at the end.
 - **Map view.**
 - **Card mirroring.**
 - **Start dates.**
-- **Sealed (encrypted) boards.** A shared board would need key grants for many people at once, as in messenger groups. P1 runs at the Standard protection level.
+- **Sealed (encrypted) boards.** A shared board would need key grants for many people at once, as in messenger groups. P1 runs at the Standard protection level. A one-person board has no grants to manage, so a sealed personal board (Private level, for a member's own to-do list) is the cheaper first step if this is ever built. Because "Make a card" is Standard-only (§5.5), a sealed board would also need its own way to bring mail in.
 - **Live push updates.** Polling is the platform's design (§7), and a few seconds' delay is fine for a board.
 
 ---
@@ -129,11 +127,11 @@ Foreign-key columns follow the platform convention of owner prefix, then the ref
 
 | Class / table | Key columns |
 |---|---|
-| `Board` / `bbd_boards` | `bbd_name`, `bbd_description`, `bbd_visibility` (`invite_only` / `all_members`, shown as "Invite only" and "Open to all members"), `bbd_background` (color or image File id), `bbd_is_template`, `bbd_usr_user_id_owner`, `bbd_archived_time`, `bbd_delete_time` |
+| `Board` / `bbd_boards` | `bbd_name`, `bbd_ied_inbound_email_domain_id` (nullable: the mail domain this board's email addresses use; null means the default; added with the email features, declared `array('action' => 'null', 'source_table' => 'ied_inbound_email_domains')`), `bbd_description`, `bbd_visibility` (`invite_only` / `all_members`, shown as "Invite only" and "Open to all members"), `bbd_background` (color or image File id), `bbd_is_template`, `bbd_usr_user_id_owner`, `bbd_archived_time`, `bbd_delete_time` |
 | `BoardMember` / `bbm_board_members` | `bbm_bbd_board_id`, `bbm_usr_user_id` **or** `bbm_grp_group_id` (exactly one), `bbm_role` (`admin`/`editor`/`viewer`). Unique per (board, user) and per (board, group). |
 | `BoardWatcher` / `bbw_board_watchers` | `bbw_bbd_board_id`, `bbw_usr_user_id`. A row means "tell me about every new card on this board". It is separate from membership, so it works the same for someone who is on the board only through a group. Rows are removed when the user loses access. |
-| `BoardList` / `bls_lists` | `bls_bbd_board_id`, `bls_name`, `bls_position` (float8), `bls_archived_time` |
-| `BoardCard` / `bcd_cards` | `bcd_bls_list_id`, `bcd_bbd_board_id` (denormalized for one-query board loads and access checks), `bcd_title`, `bcd_description`, `bcd_due_time` (UTC), `bcd_is_done`, `bcd_reminder_sent_for_due_time`, `bcd_position` (float8), `bcd_cover_fil_file_id`, `bcd_is_template`, `bcd_source` (`web`/`email`/`import`/`ai`), `bcd_iem_message_id` (see below), `bcd_usr_user_id_creator`, `bcd_archived_time`, `bcd_delete_time` |
+| `BoardList` / `bls_lists` | `bls_bbd_board_id`, `bls_name`, `bls_position` (numeric(20,6) — see Ordering), `bls_archived_time` |
+| `BoardCard` / `bcd_cards` | `bcd_bls_list_id`, `bcd_bbd_board_id` (denormalized for one-query board loads and access checks), `bcd_title`, `bcd_description`, `bcd_due_time` (UTC), `bcd_is_done`, `bcd_reminder_sent_for_due_time`, `bcd_position` (numeric(20,6)), `bcd_cover_fil_file_id`, `bcd_is_template`, `bcd_source` (`web`/`email`/`import`/`ai`), `bcd_iem_message_id` (added with the email features; see below), `bcd_usr_user_id_creator`, `bcd_archived_time`, `bcd_delete_time` |
 | `BoardCardMember` / `bcm_card_members` | `bcm_bcd_card_id`, `bcm_usr_user_id` |
 | `BoardCardWatcher` / `bcw_card_watchers` | `bcw_bcd_card_id`, `bcw_usr_user_id`, `bcw_muted` (true means the user unwatched explicitly) |
 | `BoardLabel` / `blb_labels` | `blb_bbd_board_id`, `blb_name`, `blb_color` (one of 10 fixed tokens), `blb_position` |
@@ -141,16 +139,18 @@ Foreign-key columns follow the platform convention of owner prefix, then the ref
 | `BoardChecklist` / `bck_checklists` | `bck_bcd_card_id`, `bck_title`, `bck_position` |
 | `BoardChecklistItem` / `bci_checklist_items` | `bci_bck_checklist_id`, `bci_text`, `bci_is_done`, `bci_usr_user_id` (nullable), `bci_due_time` (nullable), `bci_reminder_sent_for_due_time`, `bci_position` |
 | `BoardComment` / `bco_comments` | `bco_bcd_card_id`, `bco_usr_user_id`, `bco_body` (Markdown), `bco_source` (`web`/`email`/`ai`), `bco_edited_time`, `bco_delete_time` |
-| `BoardAttachment` / `bat_attachments` | `bat_bcd_card_id`, `bat_fil_file_id`, `bat_usr_user_id` |
+| `BoardAttachment` / `bat_attachments` | `bat_bcd_card_id`, `bat_fil_file_id` **or** (`bat_url` and `bat_name`) for a link, `bat_usr_user_id` |
 | `BoardActivity` / `bac_activity` | `bac_bbd_board_id`, `bac_bcd_card_id` (nullable), `bac_usr_user_id` (nullable for system/email), `bac_verb`, `bac_data` (jsonb), `bac_create_time` |
 
-**`bcd_iem_message_id`** is a plain nullable int8 holding the stored mailbox message the card came from. It has **no** `$foreign_key_actions` entry, because the mailbox plugin may be inactive or absent. If the message is deleted, the card stays intact and its back link reads "The original email is no longer available".
+**Built as:** `bcd_iem_message_id`, `bbd_ied_inbound_email_domain_id` and two landing columns on the board (`bbd_email_bls_list_id`, `bbd_email_position`, which the spec's "admin picks the list and top or bottom" needs) are created with the email features. Positions, labels, checklist and item positions are `numeric(20,6)` because the platform has no float column type.
 
-**Ordering.** Positions are floats. A drop between two cards takes the midpoint, so one drag is one row update. When the gap between two neighbours drops below 1e-6, that list is renumbered 1024, 2048, … in the same transaction.
+**`bcd_iem_message_id`** is a nullable int8 holding the stored mailbox message the card came from. Decided 2026-10-11: its `$foreign_key_actions` entry is `array('action' => 'null', 'source_table' => 'iem_inbound_email_messages')` and it has **no** `foreign_key` field-spec entry, so there is no database constraint across plugins. The explicit `source_table` resolves whether or not the mailbox plugin is active, and the rule only runs when a mailbox message is deleted. (Without the declaration, the column's `iem` prefix would register it as `prevent` once the mailbox plugin is active, and purging the email would be refused.) If the message is deleted, the card stays intact and its back link reads "The original email is no longer available". The column is unique among live cards (a partial unique index), so a message delivered twice cannot make two cards; the handler treats a unique violation as "already handled".
+
+**Ordering.** Positions are fractions. A drop between two cards takes the midpoint, so one drag is one row update. When the gap between two neighbours drops below `Boards::MIN_POSITION_GAP` (1e-5, ten times the stored resolution), that list is renumbered 1024, 2048, … in the same transaction. **Built as:** the browser sends the neighbouring ids (`prev_id`, `next_id`), not a position; the server reads their real positions, so a stale drag still lands beside the right cards.
 
 **Activity feed.** `bac_activity` serves as both the card's history and the change feed the poll action reads (§7). The P2 digest reads it too.
 
-Verbs: `card.created`, `card.moved`, `card.renamed`, `card.described`, `card.due_set`, `card.done`, `card.archived`, `card.restored`, `member.added`, `member.removed`, `label.added`, `label.removed`, `checklist.item_done`, `comment.added`, `attachment.added`, `list.created`, `list.moved`, `list.archived`.
+Verbs: `card.created`, `card.moved`, `card.renamed`, `card.described`, `card.due_set`, `card.done`, `card.archived`, `card.restored`, `card.updated` (any other change to a card; carries `quiet: true` so it feeds the poll without cluttering the history), `member.added`, `member.removed`, `label.added`, `label.removed`, `checklist.item_done`, `comment.added`, `attachment.added`, `list.created`, `list.moved`, `list.archived`.
 
 **Deletion.** See the deletion system doc.
 
@@ -167,7 +167,7 @@ Verbs: `card.created`, `card.moved`, `card.renamed`, `card.described`, `card.due
 
 ## 4. Access
 
-There is one helper and one rule: `Boards::roleFor(Board $board, int $user_id): ?string`. It returns `admin`, `editor`, `viewer` or `null`. Every logic action calls `Boards::require($board, $user_id, 'editor')` (or the needed level) before doing anything.
+There is one helper and one rule: `Boards::roleFor(Board $board, int $user_id): ?string`. It returns `admin`, `editor`, `viewer` or `null`. Every logic action calls `Boards::boardFor()` / `Boards::cardFor()` (which call `Boards::requireRole($board, $user_id, 'editor')`, or the needed level) before doing anything.
 
 Resolution order:
 
@@ -193,80 +193,65 @@ Resolution order:
 
 ## 5. Email
 
-This is the headline feature. The mechanics come from **Core Improvements for Plugins**, Part 2 (Email handlers and reply addresses):
+This is the headline feature. The mechanics come from **Core Improvements for Plugins**, Part 2 (Email handlers and personal addresses):
 
 - handler aliases;
-- reply addresses;
-- the `thread` and `reply_address` notify keys;
-- reply text extraction;
+- secret per-member addresses;
 - reader buttons.
 
 This section covers only what Boards does with them.
 
-If the mailbox plugin is inactive, the inbound features (5.2, 5.3, 5.5) are hidden, and outbound notifications still work. This is checked with `class_exists('InboundReplyAddress')`.
+If the mailbox plugin is inactive, the inbound features (5.2, 5.5) are hidden, and outbound notifications still work. This is checked with `class_exists('InboundPersonalAddress')`.
 
 ### 5.1 The Boards address
 
 Boards declares one handler (`"inboundHandlers": {"boards": {"class": "BoardsInboundHandler", "label": "Boards"}}`) and so owns one alias, `boards@<domain>`.
 
-- **Choosing the domain.** The `boards_email_domain` setting picks one of `InboundHandlerRegistry::eligibleDomains()`, defaulting to the first. `sync.php` calls `InboundHandlerRegistry::ensureAlias('boards', $domain)` on activation and whenever the setting changes.
+- **Choosing the domain (decided 2026-10-11: per board).** Each board has its own mail domain, so a site with several domains can keep each board's addresses on the right one (Club A's board on `clubA.org`, Club B's on `clubB.org`). The choice is one of `InboundHandlerRegistry::eligibleDomains()`; a board that has not chosen uses `defaultDomain()`. A board admin sees the picker in the board's email panel **only when two or more domains are eligible** — on a one-domain site there is nothing to choose and nothing to show. Choosing a domain calls `InboundHandlerRegistry::ensureAlias('boards', $domain)` (and `sync.php` does so for the default on activation). Members' addresses on a board keep the same token when its domain changes; one already given out at the old domain keeps working, because the alias there is never removed. There is no `boards_email_domain` setting.
 - **No eligible domain.** The board's email panel says email-to-board needs the mailbox plugin with a Standard-level domain, and shows nothing else.
+- **The board's domain stops being eligible** (the domain is raised to Private, or its relay is behind): the panel says email is off for this board and why, instead of showing addresses that do nothing.
 - **Stored copies.** Every message to the alias is stored like any store-mode mail, so the `boards@` mailbox keeps a copy that admins can open under the usual mailbox grants.
 
 `BoardsInboundHandler::handle($msg, $tag)` runs the standard check from the core-improvements spec:
 
-1. `InboundReplyAddress::resolve('boards', $tag)`.
+1. `InboundPersonalAddress::resolve('boards', $tag)`.
 2. `senderIs()`.
 3. The board role.
 
-It then dispatches on the address's `ref_type`:
-
-- `board`: an email to the board (§5.2);
-- `card`: a reply to a notification (§5.3).
+The address's `ref_type` is always `board`: it is an email to the board (§5.2).
 
 Anything that fails a check is left stored and not acted on.
 
+**Built as (§5):** the `boards@` alias is made the first time a board's email panel needs it (or when a board admin chooses a domain), not at plugin sync, so a site that never uses email gets no extra mailbox. The panel is the board menu's **Email to this board** section, served by the `boards_email` action (not offered to Joinery AI). The sender-mismatch notice is the in-app-only signal `boards.email_refused`, sent at most once an hour per member so a leaked address cannot flood them. The card's back link opens the reader through `/profile/mailbox/mailbox?open=N`, which the mailbox reader gained for it. An `@name` shortcut matches a board member's nickname, first name, first+last name or display name, case-insensitively and ignoring spaces, dots and dashes, and only when it names exactly one member; `#label` works the same on label names.
+
 ### 5.2 Email-to-board
 
-Every board member who is a user has a secret address for each board: `InboundReplyAddress::addressFor('boards', $user_id, 'board', $board_id)`. The board menu's **Email to this board** panel shows it, with a copy button and a **Reset address** button. Reset revokes the address and mints a new one.
+Every board member who is a user has a secret address for each board: `InboundPersonalAddress::addressFor('boards', $user_id, 'board', $board_id)`. The board menu's **Email to this board** panel shows it, with a copy button and a **Reset address** button. Reset revokes the address and mints a new one.
 
 - **Who is the sender.** The address decides it: the card is created *as that member*. If `senderIs()` fails, no card is made, and the member gets one in-app notification: "An email to your board address came from an address that isn't yours, so no card was made."
 - **The card:**
   - The subject becomes the title (after stripping `Fwd:`/`Fw:`).
   - The plain body becomes the description, with signatures stripped.
-  - The stored message's attachment Files are copied as board-gated card attachments.
+  - The stored message's attachment Files are adopted as board-gated card attachments (no bytes copied; `BoardsUploads::adopt()`).
   - `bcd_iem_message_id` points at the stored message.
   - `bcd_source` is `email`.
 - **Where it lands.** The board admin picks the list and whether new cards go to the top or the bottom. The default is the first list, at the bottom.
 - **Subject shortcuts.** `#labelname` applies a board label and `@username` adds a board member. Unknown names stay in the title.
 - **Roles.** Viewers have no address; adding a card needs `editor`.
 
-### 5.3 Reply-by-email
+### 5.3 Reply-by-email — dropped
 
-Each Boards signal about a card declares, in its notify block:
+**Decision (owner, 2026-10-11): reply-by-email is not built.** A notification email links to the card, and the comment is written there. It carries no Reply-To, no thread headers and no per-recipient address, so Notify and the outbound email path are unchanged.
 
-```json
-"thread": "card-{card_id}",
-"reply_address": { "handler": "boards", "ref_type": "card", "ref_id": "{card_id}" }
-```
+Why: it carried nearly all of the email feature's security and support risk (a forgeable `From` header guarding a secret address, reply-text extraction across every mail client, per-recipient plumbing in Notify) for a saving of one click. Email-to-board (§5.2) has no equivalent in the app and stays.
 
-Every notification email about a card therefore carries:
+**When addresses are revoked** (board addresses only):
 
-- the recipient's own reply address as Reply-To;
-- `In-Reply-To` / `References: <card-{card_id}@{site host}>`.
+- When a member resets their address (the **Reset address** button).
+- When a board is permanently deleted: all of its addresses.
+- When the member's account is deleted (the address table's own deletion rule).
 
-The title template is `[{board_name}] {card_title}`, so the subject is stable and one card is one thread in the member's mail program. Boards writes no email code for this.
-
-**When a reply comes back** (it has passed the §5.1 checks, and the user still has `editor`):
-
-1. Pull out the new text with `EmailReplyText::extract()`. If nothing is left, do nothing.
-2. Add a comment with `bco_source = email`. The reply's attachment Files are copied as card attachments.
-
-**When addresses are revoked:**
-
-- When a user loses access to a board: all of their `board` and `card` addresses for that board.
-- When a card is permanently deleted: `revokeAllFor('boards', 'card', $card_id)`.
-- When a board is permanently deleted: the board's addresses and all of its cards' addresses.
+Losing access to a board does not revoke anything: the handler checks the board role and that the account is active at the moment a message arrives, so a stale address does nothing.
 
 ### 5.4 Notifications and watching
 
@@ -284,7 +269,6 @@ Watching follows Trello's model, but quieter by default.
 **Signals** are declared in `plugin.json`. Each has a `notify` block with `"default_email": true`, and is dispatched with `recipients`.
 
 - `default_email` matters: without it, a targeted recipient with no saved preference gets no email at all.
-- The card signals also carry the `thread` and `reply_address` keys from §5.3.
 
 | Signal | Recipients | When |
 |---|---|---|
@@ -315,11 +299,12 @@ When the mailbox plugin is active, the message reader gains a **Make a card** bu
 }
 ```
 
-- **The picker page.** It reads the message through the mailbox's own access checks and shows a small picker: board, list, and a title prefilled from the subject. If the user isn't an editor on any board, it says so.
+- **Standard-level mailboxes only** (decided 2026-10-11). The button is hidden on messages in Private and Fortress mailboxes, and the picker page refuses a sealing mailbox before reading anything: copying decrypted mail into a Standard-level card would break the level's promise.
+- **The picker page.** It reads the message through `MailboxViewer::canReadMessage()` and shows a small picker: board, list, and a title prefilled from the subject. If the user isn't an editor on any board, it says so.
 - **What the card gets:**
   - the message's plain body as the description, plus a link back to the message;
   - `bcd_iem_message_id` set;
-  - the message's attachments, copied as board-gated card attachments.
+  - the message's attachments, adopted as board-gated card attachments without copying bytes (`BoardsUploads::adopt()`, which calls `File::createFromExistingBlob()` and attaches the new File).
 - **Who can see what.** The card's back link opens the message only for people who can already read that mailbox, under the existing mailbox access grants. Anyone else sees "From an email in a mailbox you can't open".
 
 ---
@@ -342,7 +327,7 @@ The two meet only at **Make a card** (§5.5): an email in a shared mailbox can b
 
 | System | How Boards uses it |
 |---|---|
-| **API** | Every action is a logic action with a `_logic_descriptor()`, exposed at `/api/v1/action/boards/{action}` and called from page JS through the session + CSRF client. No `/ajax/` endpoints. Actions: `boards_board`, `boards_card`, `boards_card_save`, `boards_card_move`, `boards_list_save`, `boards_list_move`, `boards_comment_save`, `boards_checklist_save`, `boards_members_save`, `boards_upload`, `boards_poll`, `boards_my_cards`, `boards_import_trello`, `boards_email_panel`, `boards_make_card_from_message`. |
+| **API** | Every action is a logic action with a `_logic_descriptor()`, exposed at `/api/v1/action/boards/{action}` and called from page JS through the session + CSRF client. No `/ajax/` endpoints. Actions: `boards_board`, `boards_card`, `boards_card_save`, `boards_card_move`, `boards_list_save`, `boards_list_move`, `boards_comment_save`, `boards_checklist_save`, `boards_members_save`, `boards_upload`, `boards_poll`, `boards_my_cards`, `boards_import`, `boards_email_panel`, `boards_make_card_from_message`. **Built as:** also `boards_board_save` (create, update, archive, restore, delete, template, watch) and `boards_label_save`; `boards_email_panel` and `boards_make_card_from_message` wait for §5. |
 | **Live updates** | `boards_poll(board_id, after_activity_id)` returns the activity rows above the cursor, plus the current state of each card and list they touch. `joinery-poll.js` calls it every `boards_poll_seconds` (default 5) while the board is visible, and stops while the tab is hidden. This is modeled on `messenger_poll`. |
 | **Files** | Attachments are `File` rows with `fil_private` set and the access provider `boards_board` and the board id as the ref. `BoardsAttachmentGate implements AccessGateProvider` answers "has any role on that board", copying `MessengerAttachmentGate`. Uploads go through an `UploadPurposeRegistry` purpose registered in the bootstrap. Thumbnails, range requests and cloud offload come for free. |
 | **Calendar** | `BoardsCalendarItemSource` in `includes/calendar_item_sources/` projects not-done cards with a due date where the subject is a card member, plus checklist items assigned to them. They appear as all-day items when the time is midnight local, timed otherwise, and link to the card. The calendar's own summaries and the native apps pick them up automatically. |
@@ -350,7 +335,7 @@ The two meet only at **Make a card** (§5.5): an email in a shared mailbox can b
 | **Groups** | Groups can be board members (§4). The @mention picker uses the board's resolved member list. |
 | **Member dashboard** | A `ProfileDashboardRegistry` section, "My cards due this week". |
 | **Mobile apps** | A `profileMenu` entry (`/profile/boards`, icon `tasks`, an existing icon) puts Boards in the iOS and Android apps as a web view. Drag and drop must work with touch, using pointer events. |
-| **Joinery AI** | `BoardCard` and `BoardComment` set `$ai_readable`, with `bco_body` and `bcd_description` in `$ai_untrusted_fields`, because email-born text came from outside. `$ai_writable_fields` on `BoardCard`: title, description, due time, list. Every AI write goes through the existing approval queue. AI then gets "summarize this board" and "draft cards from this email thread" for free. |
+| **Joinery AI** | **Built as:** the models are NOT AI-queryable (`$ai_readable` / `$ai_writable_fields` omitted) — the AI read path never calls `authenticate_read()`, so it would let a site admin (5–9) read boards they cannot open; the `boards_*` actions declare `ai_agent: confirm` instead. Re-enabling reads needs a row-scope hook in joinery_ai. Original text: `BoardCard` and `BoardComment` set `$ai_readable`, with `bco_body` and `bcd_description` in `$ai_untrusted_fields`, because email-born text came from outside. `$ai_writable_fields` on `BoardCard`: title, description, due time, list. Every AI write goes through the existing approval queue. AI then gets "summarize this board" and "draft cards from this email thread" for free. |
 | **Admin** | One admin page, `/plugins/boards/admin/admin_boards`, for superadmins only (permission 10): every board with owner, member count, card count and last activity; open, archive, restore and delete (all POST buttons); and the plugin settings. |
 
 **Pages** (all under `/profile/boards`, auto-routed from `views/profile/`):
@@ -367,7 +352,7 @@ The two meet only at **Make a card** (§5.5): an email in a shared mailbox can b
 
 ---
 
-## 8. Trello import
+## 8. Board import
 
 `/profile/boards/import` accepts Trello's board JSON export (Board menu → Print, export and share → Export as JSON).
 
@@ -401,7 +386,7 @@ The two meet only at **Make a card** (§5.5): an email in a shared mailbox can b
 
 - `plugin.json`: `"license": "Joinery-Commercial"`, `"requires_entitlement": true`, and `"status": "beta"` until the full P1 checklist below passes.
 - Sold as one store product with perpetual updates, through the existing ownership / license-key path.
-- **One-line pitch:** *Trello's simplicity, every feature included, no per-seat pricing, on your own site and wired into your email.*
+- **One-line pitch:** *Kanban simplicity, every feature included, no per-seat pricing, on your own site and wired into your email.*
 
 ---
 
@@ -426,27 +411,24 @@ Each item below is a test. Every test uses the shared harness and an `@joinery-t
 - Email-to-board creates a card as the address's user.
 - A `From` mismatch makes no card and notifies the user, and the message stays stored.
 - A reset board address stops working.
-- A reply to a notification adds a comment, and only the new text is kept.
-- A revoked address, a viewer, or an empty reply adds nothing.
-- Leaving a board revokes that user's addresses for it.
+- A revoked address, a viewer, or an empty message adds nothing.
 
 **`plugins/boards/tests/boards_notify_test.php`** (test-db):
 
 - Recipients for each signal are correct.
 - A recipient with no saved preference gets email (`default_email`).
 - `mentioned` suppresses `card_activity` for the same person.
-- Notification emails carry the recipient's reply address and the card thread headers.
 - A due reminder goes out once, and again only after the due date moves.
 - Board watchers who gain access through a group get `card_created`, and stop when they leave the group.
 
-**`plugins/boards/tests/boards_import_test.php`** (test-db): imports a fixture Trello export with several checklists per card, archived lists and unmatched members.
+**`plugins/boards/tests/boards_import_test.php`** (test-db): imports a fixture board export with several checklists per card, archived lists and unmatched members.
 
 The mailbox and core tests for the shared email pieces belong to the core-improvements spec.
 
 **Live walk:**
 
 - Create a board from a template, drag cards, and assign yourself.
-- Receive the notification at the dev inbound domain, reply to it from a real mail client, and see the comment appear.
+- Receive a notification at the dev inbound domain and follow its link to the card.
 - Forward an email to the board address and see the card.
 - Do this on a phone width as well.
 
@@ -459,6 +441,7 @@ The mailbox and core tests for the shared email pieces belong to the core-improv
 - **Visibility is named "Invite only" / "Open to all members"** (owner, 2026-10-10). "Private" and "Fortress" are reserved for the encryption levels.
 - **Only superadmins (10) can open every board** (owner, 2026-10-10). Admins at 5–9 get no override.
 - **Simplicity wins ties** (owner, 2026-10-10). A feature that adds clutter without a strong case is deferred.
+- **Reply-by-email is dropped** (owner, 2026-10-11). See §5.3. Email-to-board and Make a card stay.
 
 ---
 

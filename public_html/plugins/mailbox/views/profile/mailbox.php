@@ -98,6 +98,7 @@ if (!$has_mailboxes) {
 		'attachment_url_base' => '/profile/mailbox/attachment',
 		'setup_url_base'      => $is_operator ? '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=' : null,
 		'fortress'            => $fortress_visible,
+		'open_message'        => $open_message ?? null,
 	));
 
 	if ($ai_panel_active) {

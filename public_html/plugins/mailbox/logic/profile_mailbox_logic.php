@@ -8,6 +8,7 @@
  * per-session reader CSRF token the admin mount uses, so the shared AJAX
  * endpoints accept either mount.
  *
+ * @version 1.4.0 - ?open=N hands the reader a message to open (open_message)
  * @version 1.3.0 - no device_ai_site_model: Email settings is where the site's model is offered
  * @version 1.2.0 - device_ai_site_model: the site's own model, offered with one click
  * @version 1.1.0 - device_ai_origin: the member's registered model origin
@@ -42,10 +43,33 @@ function profile_mailbox_logic(array $input): LogicResult {
 	$has_mailboxes = !empty($initial_mailboxes['all_access'])
 		|| count($initial_mailboxes['mailboxes'] ?? array()) > 0;
 
+	// ?open=N opens that message's conversation, for a link from another feature (a Boards
+	// card's "Open the original email"). Only a message this viewer may read: anything else
+	// opens the mailbox as usual and says nothing about whether the message exists.
+	$open_message = null;
+	$open_id = intval($input['open'] ?? 0);
+	if ($open_id > 0) {
+		$probe = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT iem_iea_inbound_email_alias_id, iem_thread_key FROM iem_inbound_email_messages
+			  WHERE iem_inbound_email_message_id = ? AND iem_delete_time IS NULL');
+		$probe->execute(array($open_id));
+		$row = $probe->fetch(PDO::FETCH_ASSOC);
+		if ($row && intval($row['iem_iea_inbound_email_alias_id']) > 0 && $viewer->canAccess(intval($row['iem_iea_inbound_email_alias_id']))
+				&& (string)$row['iem_thread_key'] !== '') {
+			$open_message = array('alias_id' => intval($row['iem_iea_inbound_email_alias_id']), 'thread_key' => (string)$row['iem_thread_key']);
+			// The subject heads the open conversation; a sealing mailbox's is not readable here.
+			$open_alias = new InboundEmailAlias($open_message['alias_id'], TRUE);
+			if ($open_alias->key && !$open_alias->seals_content()) {
+				$open_message['subject'] = (string)(new InboundEmailMessage($open_id, TRUE))->get('iem_subject');
+			}
+		}
+	}
+
 	return LogicResult::render(array(
 		'session'           => $session,
 		'settings'          => $settings,
 		'csrf_token'        => $csrf_token,
+		'open_message'      => $open_message,
 		'initial_mailboxes' => $initial_mailboxes,
 		'has_mailboxes'     => $has_mailboxes,
 		// Where the member's own AI model answers, if they registered one

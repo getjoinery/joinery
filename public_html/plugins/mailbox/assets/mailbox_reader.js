@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -2836,6 +2836,18 @@
 		return span;
 	}
 
+	// Do plugin-declared message actions apply to this message? Only to mail in a
+	// Standard-level mailbox that is readable as plain text (never a sealed row),
+	// and never to mail with no mailbox (a catch-all, whose level is its domain's).
+	function messageActionsApply(m) {
+		if (!CFG.messageActions || !CFG.messageActions.length) return false;
+		if (!m || m.sealed || m.fortress_placeholder || !m.alias_id) return false;
+		var box = (state.mailboxes || []).filter(function (b) {
+			return String(b.alias_id) === String(m.alias_id);
+		})[0];
+		return !!box && (!box.security_level || box.security_level === 'standard');
+	}
+
 	// Gmail-style per-message kebab (⋮) menu — the per-message actions that are
 	// not worth a button, kept out of the way until asked for.
 	//
@@ -2881,6 +2893,22 @@
 			print.rel = 'noopener';
 			print.addEventListener('click', function () { closeAllKebabs(); });
 			menu.appendChild(print);
+		}
+
+		// Actions other plugins declare (plugin.json mailboxMessageActions), such as
+		// Boards' "Make a card". Offered only on a message the server holds in the clear
+		// at a Standard-level mailbox: the target page reads it through the same checks,
+		// and putting decrypted text into a plugin's tables would break the promise of
+		// the Private and Fortress levels.
+		if (messageActionsApply(m)) {
+			(CFG.messageActions || []).forEach(function (a) {
+				var item = el('a', 'mbx-kebab-item', a.label);
+				item.href = a.url + (a.url.indexOf('?') === -1 ? '?' : '&') + 'message_id=' + encodeURIComponent(m.id);
+				item.target = '_blank';
+				item.rel = 'noopener';
+				item.addEventListener('click', function () { closeAllKebabs(); });
+				menu.appendChild(item);
+			});
 		}
 
 		// Every message has a history — an arrival, a send, or at least a saved
@@ -5428,6 +5456,16 @@
 			if (pick === true) { /* already selected the unmatched box above */ }
 			else if (pick) { selectMailbox(pick.alias_id, pick.address); }
 			else { selectMailbox(seed.mailboxes[0].alias_id, seed.mailboxes[0].address); }
+			// A link from another feature (?open=N, a Boards card's "Open the original
+			// email") names a conversation in one of the mailboxes the page was seeded with.
+			var deep = CFG.openMessage;
+			if (deep && deep.thread_key) {
+				var box = seed.mailboxes.filter(function (m) { return String(m.alias_id) === String(deep.alias_id); })[0];
+				if (box) {
+					selectMailbox(box.alias_id, box.address);
+					openThread({ thread_key: deep.thread_key, subject: deep.subject || '', unread_count: 0 }, null);
+				}
+			}
 		} else {
 			$('#mbx-threads').appendChild(emptyRow(seed.all_access
 				? 'No mailboxes yet.'

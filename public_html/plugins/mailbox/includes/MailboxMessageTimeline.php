@@ -280,6 +280,10 @@ class MailboxMessageTimeline {
 				$title = 'Held as spam — not forwarded';
 				$detail = null;
 				break;
+			case InboundEmailLog::STATUS_HANDLER:
+				$title = 'Handed to a plugin';
+				$detail = $dest !== '' ? $dest : ($error !== '' ? $error : null);
+				break;
 			case InboundEmailLog::STATUS_UNCONFIRMED:
 				$title = 'Not forwarded — destination not confirmed yet';
 				$detail = $dest !== '' ? 'to ' . str_replace(',', ', ', $dest) : null;
