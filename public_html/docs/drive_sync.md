@@ -824,7 +824,10 @@ towards it, which is somebody else's delete arriving rather than anything wrong
 here: the same index walk that carries the delete trashes this device's copy of
 the folder, and work inside it the server never took is rescued out first and
 raised as `rescued_from_trash`. Reading the refusal as a failure instead would
-retry it forever against a folder that is not coming back.
+retry it forever against a folder that is not coming back. Sealed work is
+rescued only into a folder that is itself in a vault, from where it goes up
+sealed; carried out of the vault it would go up in the clear, so there it stays
+and goes to the trash with the folder, and `sealed_not_rescued` says so.
 
 That local trash waits for one thing: a child the server has moved elsewhere
 whose directory is still inside the folder here, because its new name cannot

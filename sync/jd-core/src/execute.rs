@@ -6216,16 +6216,16 @@ fn rescue_unsynced(
                 }
                 // A rescue carries a file OUT of the folder it was in and lets
                 // the scan pick it up as something new. Out of an ENCRYPTED
-                // folder that is a disclosure: the rescued copy stands in a
-                // plain directory, is minted as a plain file, and goes up with
-                // its real name and its bytes in the clear. The user sealed
-                // it; no engine housekeeping may unseal it.
-                //
-                // Leaving it costs nothing that cannot be recovered: the trash
-                // is a rename, so the file goes to the trash WITH its folder
-                // and can be brought back from there. The issue raised by the
-                // caller says exactly that.
-                if sealed {
+                // folder into a PLAIN one that is a disclosure: the rescued
+                // copy is minted as a plain file and goes up with its real name
+                // and its bytes in the clear. The user sealed it; no engine
+                // housekeeping may unseal it. Into a folder that is itself in
+                // the vault it discloses nothing -- it goes up sealed from
+                // there -- so a vault subfolder deleted elsewhere gives up its
+                // unsent work like any other (B-E3, hostile2 74716). A file
+                // left goes to the trash WITH its folder and can be brought
+                // back from there; the issue raised by the caller says so.
+                if sealed && !sealed_dirs.contains(into) {
                     refused.push(child.name.clone());
                     continue;
                 }

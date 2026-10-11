@@ -19404,3 +19404,31 @@ fn a_folder_made_again_keeps_its_new_file(hidden: bool) {
     assert_eq!(mac.fs.peek("Shared/new.txt").as_deref(), Some(&new[..]), "{:?}", disk_tree(mac));
     assert_converged(&world);
 }
+
+/// Sealed work never sent, in a vault subfolder a peer deleted: rescued into
+/// the folder above, which is in the vault too, and sent sealed from there.
+/// The rescue refused every sealed file, wherever it was going, and the file
+/// went to this device's trash with the folder (B-E3, hostile2 74716).
+#[test]
+fn unsent_sealed_work_in_a_vault_subfolder_deleted_elsewhere_is_rescued_into_the_vault() {
+    let (world, _private, _out) = a_vault_of_two(9_981, &["holder", "peer"]);
+    let holder = world.device("holder");
+    let peer = world.device("peer");
+    holder.fs.user_mkdir("Private/Sub");
+    assert!(world.settle().is_some());
+    let body = b"sealed, and never sent";
+    holder.fs.user_write("Private/Sub/new.txt", body);
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(holder);
+    peer.fs.user_remove("Private/Sub");
+    world.pass(peer);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "never settled");
+
+    assert_eq!(holder.fs.peek("Private/new.txt").as_deref(), Some(&body[..]), "{:?}", disk_tree(holder));
+    let seen = jd_sim::scenario::owner_view_of_the_server(&world);
+    assert_eq!(seen.get("Private/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(body)), "{seen:?}");
+    assert!(world.server.plaintext_inside_a_vault().is_empty(), "it went up in the clear");
+    assert_converged(&world);
+}
