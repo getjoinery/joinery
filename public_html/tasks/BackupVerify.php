@@ -19,6 +19,8 @@
  * verify and says so, as a skip — a management node's backups of it are
  * verified from that management node.
  *
+ * @version 1.2 - holds off for BackupVerifyLauncher::COOLDOWN_SECONDS after any verify on this machine, a management
+ *                node's included, so the two never read back to back
  * @version 1.1 - weekly by default: retention keeps the newest verified backup (specs/storage_targets.md F1)
  * @version 1.0
  */
@@ -34,6 +36,12 @@ class BackupVerify implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 		$due = BackupVerifyLauncher::due(self::every_days());
 		if (!$due['due']) {
 			return array('status' => 'skipped', 'message' => $due['reason']);
+		}
+		$wait = BackupVerifyLauncher::cooldown_left();
+		if ($wait > 0) {
+			return array('status' => 'skipped', 'message' => 'Another verification finished on this machine less than '
+				. (int)(BackupVerifyLauncher::COOLDOWN_SECONDS / 3600) . ' hours ago; this one waits so the two do not read '
+				. 'from backup storage back to back. Next try in about ' . max(1, (int)ceil($wait / 3600)) . ' hour(s).');
 		}
 		try {
 			$result = BackupVerifyLauncher::run($due['run'], BackupVerifier::LEVEL_READ);

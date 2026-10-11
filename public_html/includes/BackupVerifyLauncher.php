@@ -19,6 +19,9 @@
  * level in the background the way Run now starts a backup, and the result
  * lands on the run's own history row where Recent backups shows it.
  *
+ * @version 1.4 - note_verified() / cooldown_left(): every verify leaves a machine-wide stamp, and the site's own
+ *                scheduled verify waits out COOLDOWN_SECONDS after any verify, so a management node's verify and the
+ *                site's never read back to back (the provider's inbound-traffic alert averages over 2 hours)
  * @version 1.3 - a run is verified on the target it went to (BackupRunner::plan_for_run()), not the one configured now
  * @version 1.2 - offloaded files travel with the request (specs/implemented/backup_offloaded_files.md § Verification):
  *                the run's index is read from backup storage, a link is signed for each epoch envelope it
@@ -77,6 +80,29 @@ class BackupVerifyLauncher {
 			array('bkh_verify_time' => 'DESC'), 1, 0);
 		foreach ($rows as $row) { return $row; }
 		return null;
+	}
+
+	/** How long after any verify finished the site's own scheduled verify holds off. */
+	const COOLDOWN_SECONDS = 21600;   // 6 hours
+
+	/** The stamp every finished verify leaves; its mtime is when. */
+	private static function stamp_path() {
+		return rtrim(BackupRunner::output_dir(), '/') . '/.jy_last_verify';
+	}
+
+	/** A verify (anyone's) has just read from backup storage. */
+	public static function note_verified() {
+		@touch(self::stamp_path());
+	}
+
+	/** Seconds until the site's own scheduled verify may start; 0 when it may. */
+	public static function cooldown_left($now = null) {
+		$path = self::stamp_path();
+		$mtime = file_exists($path) ? filemtime($path) : false;
+		if ($mtime === false) {
+			return 0;
+		}
+		return max(0, $mtime + self::COOLDOWN_SECONDS - ($now ?? time()));
 	}
 
 	/**

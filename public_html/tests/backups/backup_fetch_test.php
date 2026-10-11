@@ -142,4 +142,41 @@ check(count(glob($dir . '/*') ?: array()) === 0 && count(glob($dir . '/.*.part')
 check(strpos($got['error'], 'https://') === false,
 	'the signed link is never quoted back into the transcript', $got['error']);
 
+// ── Asking again ────────────────────────────────────────────────────────────
+section('A transient storage failure is asked again; a refusal is not');
+
+BackupFetch::$retry_pause_scale = 0;
+harness_defer(function () { BackupFetch::$retry_pause_scale = 1; BackupFetch::$attempt_hook = null; });
+$link = 'https://bucket.example.com/x?X-Amz-Signature=abc';
+
+$calls = 0;
+BackupFetch::$attempt_hook = function () use (&$calls) {
+	$calls++;
+	return $calls < 3
+		? array('ok' => false, 'error' => 'HTTP 503 from storage', 'transient' => true)
+		: array('ok' => true, 'error' => '');
+};
+$got = BackupFetch::fetch($link, $tmp . '/retry');
+check($got['ok'] && $calls === 3, 'two 503s then success: the object arrives on the third attempt');
+check(!array_key_exists('transient', $got), 'the retry marker does not leak to callers');
+
+$calls = 0;
+BackupFetch::$attempt_hook = function () use (&$calls) {
+	$calls++;
+	return array('ok' => false, 'error' => 'HTTP 503 from storage', 'transient' => true);
+};
+$got = BackupFetch::fetch($link, $tmp . '/retry');
+check(!$got['ok'] && $calls === BackupFetch::RETRY_ATTEMPTS, 'a storage that keeps answering 503 is tried RETRY_ATTEMPTS times, then given up on');
+check(strpos($got['error'], 'after ' . BackupFetch::RETRY_ATTEMPTS . ' attempts') !== false, 'and the error says how many times it was tried');
+
+$calls = 0;
+BackupFetch::$attempt_hook = function () use (&$calls) {
+	$calls++;
+	return array('ok' => false, 'error' => 'HTTP 403 from storage');
+};
+$got = BackupFetch::fetch($link, $tmp . '/retry');
+check(!$got['ok'] && $calls === 1, 'a 403 (expired or wrong signature) is final: one attempt');
+BackupFetch::$attempt_hook = null;
+BackupFetch::$retry_pause_scale = 1;
+
 harness_finish();
