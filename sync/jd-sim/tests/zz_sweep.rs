@@ -709,6 +709,26 @@ struct Custody {
     removal_unattributed: usize,
     /// Chaos swaps whose directories have been given handles.
     swaps_noted: usize,
+    /// Every body the workload wrote, in the order of the user's acts: the
+    /// subjects of the edit oracle
+    /// ([`assert_no_edit_was_lost_to_an_act_that_never_saw_it`]).
+    written: Vec<Written>,
+    /// Per device, every body its disk was seen holding: written there by the
+    /// user, or standing there at a pass point.
+    held: std::collections::HashMap<usize, std::collections::HashSet<String>>,
+    /// Per server folder the user deleted, who deleted it and every body that
+    /// device's disk had been seen holding by then.
+    removed_by: std::collections::BTreeMap<i64, Vec<(usize, std::collections::HashSet<String>)>>,
+}
+
+/// One body the workload wrote: what, to which file, where, and when among
+/// the user's acts.
+struct Written {
+    hash: String,
+    key: usize,
+    order: u64,
+    device: usize,
+    path: String,
 }
 
 impl Custody {
@@ -755,7 +775,16 @@ impl Custody {
         if let Some(h) = self.handle_of(di, device, Self::parent_of(path)) {
             self.placed[key].push(h);
         }
-        self.intents.push((jd_sim::sha256_hex(body), key));
+        let hash = jd_sim::sha256_hex(body);
+        self.held.entry(di).or_default().insert(hash.clone());
+        self.written.push(Written {
+            hash: hash.clone(),
+            key,
+            order: device.fs.last_user_write_order().unwrap_or(0),
+            device: di,
+            path: path.to_string(),
+        });
+        self.intents.push((hash, key));
     }
 
     /// The user renamed the file at `from` to `to` on this device; called after.
@@ -798,6 +827,9 @@ impl Custody {
             match id {
                 Some(id) => {
                     self.user_removed_folders.insert(id);
+                    let mut had = self.held.get(&di).cloned().unwrap_or_default();
+                    had.extend(jd_sim::scenario::disk_tree(device).into_values().flatten());
+                    self.removed_by.entry(id).or_default().push((di, had));
                 }
                 None => self.removal_unattributed += 1,
             }
@@ -962,6 +994,8 @@ impl Custody {
     }
 
     fn learn(&mut self, di: usize, device: &jd_sim::engine::Device, late: bool) {
+        let held = self.held.entry(di).or_default();
+        held.extend(jd_sim::scenario::disk_tree(device).into_values().flatten());
         self.learn_files(di, device);
         let unlearned: Vec<u64> = self
             .handles
@@ -1318,6 +1352,268 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     );
 }
 
+/// No edit the user made is lost to an act that never saw it.
+///
+/// `docs/drive_sync.md`, Deciding what happens: an edit beats a delete, in
+/// both directions, because a delete that loses is recoverable from a trash
+/// and an edit that loses is gone. No other oracle can see that break:
+/// `nothing_lost` counts a body in a trash or in the server's history as
+/// found, and custody judges only live files. So an edit the engine sent to
+/// the trash with a folder deleted elsewhere (B-O1) passed every oracle.
+///
+/// One rule: an act of the user's wins only over content it saw. Every body
+/// the workload wrote is a subject, unless a later act of a user's hand took
+/// it off a disk it stood on (saved over it, renamed over it, deleted it or
+/// its folder) -- `MemFs::user_superseded`, ordered against the write. A
+/// subject must be LIVE at the end: on some device's disk outside any trash,
+/// or the head of a live server file as the vault's holder reads it.
+///
+/// Excused: a subject that reached the server and went to its trash with a
+/// folder a user deleted on a device that never had the file -- no body of
+/// the file's own history was seen on that disk before the delete
+/// (`never_had`). The doctrine says so in as many words: what arrives under
+/// a folder deleted here that this device never had is not an edit it lost,
+/// and goes with the folder. Read by server identity: each server file that
+/// holds the body, its folder and the folders above it, and who deleted
+/// which -- as `Custody::removing` resolved the directory at the moment of
+/// the delete. A delete that resolved to no folder (`removal_unattributed`)
+/// excuses nothing, so a fire can be the attribution's rather than the
+/// engine's; its line lists every delete to read it by.
+///
+/// Not excused: the one race the doctrine leaves standing -- an edit that
+/// reaches the server after the deleting device last read the change feed
+/// and before its folder's trash lands goes to the trash with the folder.
+/// Telling it from a device that pulled the edit and trashed anyway needs
+/// that device's cursor at the moment the trash ran, which the harness does
+/// not keep, so the race fires, and its fire is read by hand.
+///
+/// Counted, not yet firing: a subject whose file was written again later by
+/// an act that did not see it (`superseded_blind`, the edit-edit shape, where
+/// the loser should be a conflict copy).
+///
+/// Blind, by the hash: a body written twice (a duplicate's copy) is one
+/// subject, judged from its last write, and deleting the copy with sight
+/// excuses the loss of the original. And `superseded_blind` also absorbs a
+/// loss where two files share one custody key (both devices saving
+/// `contested.txt` at once), until it is promoted to firing.
+fn assert_no_edit_was_lost_to_an_act_that_never_saw_it(world: &World, custody: &Custody, seed: u64) {
+    let verdict = edits_lost_to_acts_that_never_saw_them(world, custody, seed);
+    assert!(
+        verdict.lost.is_empty(),
+        "seed {seed}: {} edit(s) the user made are only in a trash or the server's history, and no act of a user's saw them go: {}",
+        verdict.lost.len(),
+        verdict.lost.join("; ")
+    );
+}
+
+/// What the edit oracle excused and what it found lost, for the pins that
+/// prove each class is reached. The rest is on its line.
+#[derive(Debug, Default)]
+struct EditVerdict {
+    superseded_seen: usize,
+    never_had: usize,
+    lost: Vec<String>,
+}
+
+fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed: u64) -> EditVerdict {
+    let mut live: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for d in &world.devices {
+        live.extend(jd_sim::scenario::disk_tree(d).into_values().flatten());
+    }
+    live.extend(jd_sim::scenario::owner_view_of_the_server(world).into_values().flatten());
+    let mut superseded: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut removes: Vec<(usize, String, u64)> = Vec::new();
+    for (di, d) in world.devices.iter().enumerate() {
+        for (h, o) in d.fs.user_superseded() {
+            let last = superseded.entry(h).or_insert(o);
+            *last = (*last).max(o);
+        }
+        removes.extend(d.fs.user_removes().into_iter().map(|(p, o)| (di, p, o)));
+    }
+    // Which server files ever held each body, in the vault's holder's
+    // terms: ciphertext is opened once here, not once per subject.
+    let mut files_of: std::collections::HashMap<String, std::collections::BTreeSet<i64>> = Default::default();
+    let versions = world.server.all_versions();
+    let file_of_version: std::collections::HashMap<&str, i64> =
+        versions.iter().map(|v| (v.sha256.as_str(), v.file_id)).collect();
+    for v in &versions {
+        files_of.entry(v.sha256.clone()).or_default().insert(v.file_id);
+    }
+    for vault in &world.vaults {
+        for held in world.server.encrypted_contents() {
+            let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
+                &held.wrapped_file_key,
+                &vault.secret_key_pkcs8,
+                &vault.public_key_b64,
+            ) else {
+                continue;
+            };
+            for ciphertext in &held.ciphertexts {
+                let Some(file) = file_of_version.get(jd_sim::sha256_hex(ciphertext).as_str()) else {
+                    continue;
+                };
+                if let Ok(plain) = jd_crypto::drive::decrypt_content(ciphertext, &file_key, &held.content_id) {
+                    files_of.entry(jd_sim::sha256_hex(&plain)).or_default().insert(*file);
+                }
+            }
+        }
+    }
+    let server_files = world.server.files();
+    let file_folder: std::collections::HashMap<i64, Option<i64>> =
+        server_files.iter().map(|f| (f.id, f.folder)).collect();
+    let file_trashed: std::collections::HashMap<i64, bool> = server_files.iter().map(|f| (f.id, f.trashed)).collect();
+    let server_folders = world.server.folders();
+    let folder_parent: std::collections::HashMap<i64, Option<i64>> =
+        server_folders.iter().map(|f| (f.id, f.parent)).collect();
+    let folder_trashed: std::collections::HashMap<i64, bool> = server_folders.iter().map(|f| (f.id, f.trashed)).collect();
+    // Where a body stands on the server: each file holding it, trashed or
+    // not, and the folders above it, for the line a fire prints.
+    let standing = |hash: &str| -> String {
+        let mark = |t: Option<&bool>| if t.copied().unwrap_or(false) { "(trashed)" } else { "" };
+        files_of
+            .get(hash)
+            .map(|files| {
+                files
+                    .iter()
+                    .map(|f| {
+                        let mut chain = vec![format!("file {f}{}", mark(file_trashed.get(f)))];
+                        let mut at = file_folder.get(f).copied().flatten();
+                        while let Some(folder) = at {
+                            chain.push(format!("{folder}{}", mark(folder_trashed.get(&folder))));
+                            at = folder_parent.get(&folder).copied().flatten();
+                            if chain.len() > 64 {
+                                break;
+                            }
+                        }
+                        chain.join(" in ")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            })
+            .unwrap_or_default()
+    };
+    // A file's own history, body by body: each save by a user's hand, and
+    // the body it saved over on that disk. Chaos saves included, since they
+    // go through the same calls.
+    let mut wrote_order: std::collections::HashMap<String, Vec<u64>> = Default::default();
+    let mut replaced_at: std::collections::HashMap<u64, String> = Default::default();
+    for d in &world.devices {
+        let writes = d.fs.user_writes();
+        let orders: std::collections::HashSet<u64> = writes.iter().map(|w| w.order).collect();
+        for w in writes {
+            wrote_order.entry(w.sha256).or_default().push(w.order);
+        }
+        for (h, o) in d.fs.user_superseded() {
+            if orders.contains(&o) {
+                replaced_at.insert(o, h);
+            }
+        }
+    }
+    let lineage = |hash: &str| -> std::collections::HashSet<String> {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut todo = vec![hash.to_string()];
+        while let Some(b) = todo.pop() {
+            if !seen.insert(b.clone()) {
+                continue;
+            }
+            for o in wrote_order.get(&b).map(Vec::as_slice).unwrap_or(&[]) {
+                if let Some(before) = replaced_at.get(o) {
+                    todo.push(before.clone());
+                }
+            }
+        }
+        seen
+    };
+    // The last write of each body.
+    let mut subjects: std::collections::BTreeMap<&str, &Written> = std::collections::BTreeMap::new();
+    for w in &custody.written {
+        let e = subjects.entry(w.hash.as_str()).or_insert(w);
+        if w.order > e.order {
+            *e = w;
+        }
+    }
+    let (mut alive, mut seen, mut blind, mut never_had) = (0usize, 0usize, 0usize, 0usize);
+    let mut lost = Vec::new();
+    for (hash, w) in &subjects {
+        if live.contains(*hash) {
+            alive += 1;
+            continue;
+        }
+        if superseded.get(*hash).is_some_and(|o| *o > w.order) {
+            seen += 1;
+            continue;
+        }
+        if custody.written.iter().any(|x| x.key == w.key && x.order > w.order && x.hash != w.hash) {
+            blind += 1;
+            continue;
+        }
+        // This file's bodies: the body and every body its saves replaced.
+        // Not every body written to its custody key -- two devices saving
+        // `contested.txt` at once write one key and two files.
+        let key_bodies = lineage(hash);
+        // A folder, or one above it, that a user deleted on a device none of
+        // this file's bodies was ever seen on.
+        let deleted_by_one_who_never_had = |start: Option<i64>| {
+            let mut at = start;
+            let mut hops = 0;
+            while let Some(folder) = at {
+                let deleters = custody.removed_by.get(&folder).map(Vec::as_slice).unwrap_or(&[]);
+                if deleters.iter().any(|(_, had)| !key_bodies.iter().any(|b| had.contains(b))) {
+                    return true;
+                }
+                at = folder_parent.get(&folder).copied().flatten();
+                hops += 1;
+                if hops > 64 {
+                    break;
+                }
+            }
+            false
+        };
+        // Only a body that reached the server ARRIVES under a folder: one
+        // never sent is the writer's own work, and work the server never
+        // took is rescued out of a folder trashed elsewhere (docs, the
+        // `parent_trashed` refusal), so it stays a subject.
+        let went_with_a_folder_its_deleter_never_had = files_of
+            .get(*hash)
+            .is_some_and(|files| files.iter().any(|f| deleted_by_one_who_never_had(file_folder.get(f).copied().flatten())));
+        if went_with_a_folder_its_deleter_never_had {
+            never_had += 1;
+            continue;
+        }
+        let found = jd_sim::scenario::locate(world, hash);
+        let deletes: Vec<String> = removes
+            .iter()
+            .map(|(di, p, o)| {
+                let held = custody.held.get(di);
+                let had_body = held.is_some_and(|h| h.contains(*hash));
+                let had_file = held.is_some_and(|h| key_bodies.iter().any(|b| h.contains(b)));
+                format!("{}:{p:?}@{o} had_body={had_body} had_file={had_file}", world.devices[*di].name)
+            })
+            .collect();
+        lost.push(format!(
+            "{} written at {:?} on {} @{} found={found:?} server=[{}] removes=[{}]",
+            &hash[..8],
+            w.path,
+            world.devices[w.device].name,
+            w.order,
+            standing(hash),
+            deletes.join(", ")
+        ));
+    }
+    let deleted: Vec<String> = custody
+        .removed_by
+        .iter()
+        .map(|(f, by)| format!("{f} by {}", by.iter().map(|(d, _)| world.devices[*d].name.as_str()).collect::<Vec<_>>().join("+")))
+        .collect();
+    eprintln!(
+        "EDIT-ORACLE seed={seed} subjects={} live={alive} superseded_seen={seen} superseded_blind={blind} never_had={never_had} lost={} lost_lines={lost:?}{}",
+        subjects.len(),
+        lost.len(),
+        if lost.is_empty() { String::new() } else { format!(" deleted_folders={deleted:?}") }
+    );
+    EditVerdict { superseded_seen: seen, never_had, lost }
+}
+
 fn workload_core(
     seed: u64,
     steps: usize,
@@ -1449,6 +1745,9 @@ fn workload_core_with(
         })),
         ("every_file_in_a_folder_the_user_put_it_in", Box::new(|| {
             assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
+        })),
+        ("no_edit_lost_to_an_act_that_never_saw_it", Box::new(|| {
+            assert_no_edit_was_lost_to_an_act_that_never_saw_it(&world, &custody, seed)
         })),
     ];
     if vault.any() {
@@ -2612,6 +2911,87 @@ fn a_harness_write_is_credited_to_the_folder_it_was_written_into() {
     let f = world.server.files().into_iter().find(|f| !f.trashed && f.sha256 == body).expect("the hand's body is on the server");
     assert_eq!(f.folder, Some(second), "the engine keeps it in the folder it was written into");
     assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+}
+
+/// Two devices with `A/f.txt` written on mac and edited on pc, settled.
+fn an_edited_file_in_a_shared_folder(seed: u64) -> (World, Custody) {
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mut custody = Custody::default();
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/f.txt", b"the first body");
+    custody.wrote(0, mac, "A/f.txt", b"the first body");
+    assert!(world.settle().is_some());
+    pc.fs.user_write("A/f.txt", b"the edit");
+    custody.wrote(1, pc, "A/f.txt", b"the edit");
+    assert!(world.settle().is_some());
+    (world, custody)
+}
+
+/// The edit oracle sees an edit the trash took without any user's delete:
+/// here the folder is trashed on the server by no device's user, and the
+/// edit goes with it. No other oracle fires on that -- the body is in the
+/// server's history, so `nothing_lost` counts it found, and custody judges
+/// only live files -- which is how B-O1 passed every sweep.
+#[test]
+fn an_edit_the_trash_took_without_a_users_delete_fires_the_edit_oracle() {
+    let seed = 9_948;
+    let (world, custody) = an_edited_file_in_a_shared_folder(seed);
+    let a = world.server.folder_id_at("A").expect("A went up");
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": a }))
+        .expect("the trash should be accepted");
+    assert!(world.settle().is_some());
+    let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
+    assert_eq!(verdict.superseded_seen, 1, "pc saw the first body when it saved over it: {verdict:?}");
+    assert_eq!(verdict.lost.len(), 1, "the edit went to the trash and no user's act saw it go: {verdict:?}");
+    let fired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_no_edit_was_lost_to_an_act_that_never_saw_it(&world, &custody, seed)
+    }));
+    assert!(fired.is_err(), "the edit oracle fires on an edit lost to the trash");
+}
+
+/// A delete made with the edit in sight wins: mac has pc's edit on its disk
+/// when its user deletes the folder, so the edit is the user's to throw away.
+#[test]
+fn a_delete_that_saw_the_edit_does_not_fire_the_edit_oracle() {
+    let seed = 9_949;
+    let (world, mut custody) = an_edited_file_in_a_shared_folder(seed);
+    let mac = world.device("mac");
+    assert_eq!(mac.fs.peek("A/f.txt").as_deref(), Some(&b"the edit"[..]), "the edit reached mac");
+    custody.removing(0, mac, "A");
+    mac.fs.user_remove("A");
+    assert!(world.settle().is_some());
+    let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
+    assert_eq!(verdict.superseded_seen, 2, "both bodies were taken off a disk they stood on: {verdict:?}");
+    assert!(verdict.lost.is_empty(), "{verdict:?}");
+}
+
+/// What arrives under a folder deleted on a device that never had it goes
+/// with the folder (docs/drive_sync.md, an edit beats a delete): mac puts a
+/// new file in `A` and sends it, and pc's user deletes `A` before pc has
+/// ever seen the file. Read through the server: the file's folder is the
+/// one pc deleted, and nothing of the file was ever on pc's disk.
+#[test]
+fn a_file_its_folders_deleter_never_had_does_not_fire_the_edit_oracle() {
+    let seed = 9_950;
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mut custody = Custody::default();
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("A");
+    assert!(world.settle().is_some());
+    mac.fs.user_write("A/new.txt", b"a file pc never had");
+    custody.wrote(0, mac, "A/new.txt", b"a file pc never had");
+    world.pass(mac);
+    assert!(pc.fs.peek("A/new.txt").is_none(), "pc has not seen the file");
+    custody.removing(1, pc, "A");
+    pc.fs.user_remove("A");
+    assert!(world.settle().is_some());
+    let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
+    assert_eq!(verdict.never_had, 1, "the file went with the folder pc deleted without having it: {verdict:?}");
+    assert!(verdict.lost.is_empty(), "{verdict:?}");
 }
 
 /// The server never learned what anything in the vault is called.
@@ -6464,3 +6844,18 @@ fn frozen_two_renames_onto_each_others_names_seed() {
     workload_core_with(75_102, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::Off);
 }
 
+/// rings-hostile-2dev 74560, 74656 and 74776: a device swaps the vault with a
+/// plain ring while a peer rotates all three, and the peer's rotation lands
+/// while the swap is still queued. The vault's record is left agreed at the
+/// path the plain ring now holds, and the server is moving another plain
+/// ring onto the name its directory stands at, so its claim waits for that
+/// move. Read as gone while it waited, its own directory was minted as a new
+/// plain folder in the same pass, and a file the user then put in the vault
+/// went up in the clear under the sealed file's name. Every oracle quiet is
+/// asserted.
+#[test]
+fn frozen_a_waiting_vault_keeps_its_directory_seeds() {
+    for seed in [74_560, 74_656, 74_776] {
+        workload_core(seed, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary);
+    }
+}
