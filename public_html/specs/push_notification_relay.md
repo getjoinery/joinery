@@ -35,10 +35,13 @@ deployment that does not gets polling.
   level}`, after commit (the signal bus, `docs/signals.md`). A push
   subscriber turns it into one nudge per registered device of the
   mailbox's holders that opted in to that mailbox.
-- **Device tokens.** New core model `PushDeviceToken`
-  (`pdt_push_device_tokens`: user, `apk_api_key_id`, platform, token,
-  `client_app`, mailboxes opted in, create and last-seen times, failure
-  count). `push_register` (session key only) upserts by key; sign-out and
+- **Device tokens.** Rows of core's shared push destinations table
+  (`psh_push_destinations`, the push layer in `community_shared_components.md`) with
+  `kind` `ios` or `android`: user, `apk_api_key_id`, token, and in the
+  JSON `details` column `client_app` and the mailboxes opted in; failure
+  count and last-seen are columns. The relay client in this spec is the
+  `native` driver of that layer's sender, and the content rule (a native
+  push is always generic) is the layer's. `push_register` (session key only) upserts by key; sign-out and
   revocation delete the key's tokens (a revoked key's tokens go with it,
   the `SyncDevice` cascade pattern). A machine key can never register.
 - **The nudge carries nothing readable.** Payload `{site: <deployment
@@ -79,7 +82,7 @@ deployment that does not gets polling.
 ### WP1. Platform
 
 - The `mailbox.message_arrived` signal from the three store paths;
-  `PushDeviceToken` and `push_register`; the push subscriber and the relay
+  the native driver and `push_register`; the push subscriber and the relay
   client (Direct-identity-signed POST, `push_relay_url` setting, failure
   backoff, token retirement after repeated rejections); token deletion on
   sign-out and revocation.
