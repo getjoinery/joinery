@@ -72,6 +72,10 @@ function vault_status_logic(array $input): LogicResult {
 	return LogicResult::render($common + [
 		'set_up'                    => true,
 		'unlocked'                  => VaultUnlock::isOpen($user->key, UserEncryptionVault::SCOPE_USER),
+		// Programs reading through a window borrowed from the person's unlock
+		// (an app credential whose purpose borrows it): device name, purpose
+		// label, and when the window's absolute cap ends it.
+		'borrowed'                  => VaultUnlock::borrowedWindows((int)$user->key),
 		// False: codes made on the server before sets existed, which the next
 		// passkey unlock replaces with a browser-made set (§ R6).
 		'has_code_set'              => UserEncryptionWrapping::hasCodeSet((int)$vault->key),
@@ -84,6 +88,7 @@ function vault_status_logic(array $input): LogicResult {
 	]);
 }
 
+// @version 1.2 - borrowed: the open windows app credentials borrowed from this unlock
 // @version 1.1 - root and content keyring views, has_code_set, passphrase_allowed
 function vault_status_logic_descriptor() {
 	return [

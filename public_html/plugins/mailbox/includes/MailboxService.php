@@ -49,6 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.60 - viewScopeSql(): what each view of a mailbox holds, defined once; the
+ *   reader's list composes its WHERE from the same fragments
  * @version 1.59 - a search lists threads strictly newest first, never sectioned unread/starred/other
  * @version 1.58 - allowSender() and Not spam (setSpamVerdict ham) refuse a message its sender's domain disowns; the reader carries spam_disowned
  * @version 1.57 - allowSender's SELECT carries the verdict columns decryptThreadRow() reads
@@ -447,6 +449,92 @@ class MailboxService {
 		return "iem_delete_time IS NULL AND iem_direction = 'draft'"
 			. ' AND iem_iea_inbound_email_alias_id IN (' . $in . ')'
 			. ' AND iem_draft_author_user_id = ' . intval($this->viewer->getUserId());
+	}
+
+	// ---------------------------------------------------------------- views
+
+	/**
+	 * What each view of a mailbox holds, defined once. The reader's list
+	 * (listThreads()) composes its WHERE from these same fragments, and any
+	 * other reader of a mailbox's folders (the mail apps plugin's IMAP folders)
+	 * asks viewScopeSql() — so "what Inbox means" cannot drift between them.
+	 */
+
+	/** The Inbox: not archived, and not mail the member sent — except a message
+	 *  they addressed to this mailbox, which was delivered here
+	 *  (iem_self_delivered). "= false", not IS NOT TRUE: the column is NOT
+	 *  NULL, so they mean the same thing, and only the equality lets the
+	 *  planner seek the (mailbox, archived) index range — the Inbox is a
+	 *  fraction of a percent of a large mailbox. */
+	const INBOX_SQL = "iem_is_archived = false AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)";
+
+	/** Sent: messages the member sent (the direction column, so local and IMAP
+	 *  mailboxes alike). */
+	const SENT_SQL = "iem_direction = 'outbound'";
+
+	/** Archive: mail moved out of the Inbox — what the Inbox would show if
+	 *  it were not archived. */
+	const ARCHIVE_SQL = "iem_is_archived = true AND (iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)";
+
+	/** The views viewScopeSql() answers for. */
+	const VIEWS = array('inbox', 'sent', 'drafts', 'archive', 'spam', 'trash', 'all', 'label');
+
+	/** Judged spam (the Spam view), or everything else (every other view but Trash). */
+	private static function spamSql(bool $spam): string {
+		return $spam ? "iem_spam_verdict = 'spam'" : "iem_spam_verdict IS DISTINCT FROM 'spam'";
+	}
+
+	/** Messages carrying custom label $labelId. */
+	private static function labelSql(int $labelId): string {
+		return 'iem_inbound_email_message_id IN (SELECT ilm_iem_inbound_email_message_id
+					FROM ilm_inbound_label_members
+					WHERE ilm_ilb_inbound_email_label_id = ' . intval($labelId) . ' AND ilm_present_local = true)';
+	}
+
+	/**
+	 * One WHERE fragment over iem_inbound_email_messages selecting what one
+	 * view of one mailbox holds, for this viewer: its grants, the delete pin
+	 * (Trash inverts it), drafts only in Drafts and only the viewer's own, spam
+	 * only in Spam. Per message, not per thread.
+	 *
+	 *   inbox    the Inbox (INBOX_SQL), spam excluded
+	 *   sent     mail the member sent
+	 *   drafts   the viewer's own drafts
+	 *   archive  archived mail (ARCHIVE_SQL)
+	 *   spam     judged spam
+	 *   trash    discarded mail, spam included
+	 *   all      All Mail: everything but spam, trash and drafts
+	 *   label    All Mail narrowed to custom label $labelId
+	 *
+	 * An unknown view, a label view without a label, or a mailbox the viewer
+	 * cannot read matches nothing.
+	 */
+	public function viewScopeSql(int $aliasId, string $view, ?int $labelId = null): string {
+		if ($aliasId <= 0 || !in_array($view, self::VIEWS, true)) {
+			return '1=0';
+		}
+		switch ($view) {
+			case 'drafts':
+				return $this->draftScopeSql($aliasId) . ' AND ' . self::spamSql(false);
+			case 'trash':
+				return $this->trashScopeSql($aliasId);
+			case 'spam':
+				return $this->readScopeSql($aliasId) . ' AND ' . self::spamSql(true);
+		}
+		$parts = array($this->readScopeSql($aliasId), self::spamSql(false));
+		if ($view === 'inbox') {
+			$parts[] = self::INBOX_SQL;
+		} elseif ($view === 'sent') {
+			$parts[] = self::SENT_SQL;
+		} elseif ($view === 'archive') {
+			$parts[] = self::ARCHIVE_SQL;
+		} elseif ($view === 'label') {
+			if ($labelId === null || $labelId <= 0) {
+				return '1=0';
+			}
+			$parts[] = self::labelSql($labelId);
+		}
+		return implode(' AND ', $parts);
 	}
 
 	/**
@@ -1045,11 +1133,7 @@ class MailboxService {
 		// Trash is the exception: it holds everything discarded, spam-judged included,
 		// or mail a filter trashed on arrival would be invisible in both views.
 		if (!$trash) {
-			if (!empty($filters['spam'])) {
-				$where[] = "iem_spam_verdict = 'spam'";
-			} else {
-				$where[] = "iem_spam_verdict IS DISTINCT FROM 'spam'";
-			}
+			$where[] = self::spamSql(!empty($filters['spam']));
 		}
 
 		// Inbox view (specs/implemented/inbound_email_filters.md): the default list
@@ -1080,7 +1164,7 @@ class MailboxService {
 		// nowhere else), and drafts are already outside every read scope.
 		$sent = !$trash && !$drafts && !empty($filters['sent']);
 		if ($sent) {
-			$where[] = "iem_direction = 'outbound'";
+			$where[] = self::SENT_SQL;
 		}
 
 		// A SEARCH is never narrowed by this default tab: the Inbox flag shapes
@@ -1095,13 +1179,7 @@ class MailboxService {
 		// with no term: the browser found the ids and kept the words.
 		$searching = !empty($filters['q']) || !empty($filters['device_search']);
 		if (!$trash && !$sent && !empty($filters['inbox']) && !$searching) {
-			// "= false", not IS NOT TRUE: the column is NOT NULL, so they mean
-			// the same thing, and only the equality lets the planner seek the
-			// (mailbox, archived) index range — the Inbox is a fraction of a
-			// percent of a large mailbox, and IS NOT TRUE is not a btree
-			// operator, so it read the whole mailbox to find it.
-			$where[] = "iem_is_archived = false";
-			$where[] = "(iem_direction IS DISTINCT FROM 'outbound' OR iem_self_delivered)";
+			$where[] = self::INBOX_SQL;
 		}
 
 		// Label dimension: restrict to messages carrying the chosen custom label.
@@ -1109,10 +1187,7 @@ class MailboxService {
 		// unlabeled messages are reachable at the mailbox root. Each message row is
 		// unique, so the thread aggregation is not double-counted.
 		if ($folderId !== null && $folderId > 0) {
-			$where[] = 'iem_inbound_email_message_id IN (SELECT ilm_iem_inbound_email_message_id
-						FROM ilm_inbound_label_members
-						WHERE ilm_ilb_inbound_email_label_id = ? AND ilm_present_local = true)';
-			$params[] = $folderId;
+			$where[] = self::labelSql($folderId);
 		}
 
 		// Full-text search (specs/implemented/inbound_email_encryption_at_rest.md §

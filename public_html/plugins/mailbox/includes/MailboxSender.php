@@ -53,6 +53,8 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.25 - sendRaw(): send what a mail program composed (whole MIME + envelope) through
+ *   the same pipeline, carried over part for part; storeRawOutbound(): store one as Sent
  * @version 1.24 - a send records its recipients in the sender records and a reply teaches its source ham
  *   (spam_learning_in_core.md)
  * @version 1.23.1 - review of 2026-09-27: a Fortress mailbox sends only a browser-sealed or hollow
@@ -116,8 +118,14 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_doma
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_accounts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachments_class.php'));
 
-/** A user-facing send failure (bad input, transport unavailable, original gone). */
-class MailboxSenderException extends Exception {}
+/**
+ * A user-facing send failure (bad input, transport unavailable, original gone).
+ * The code says whether trying again could help: REFUSED for the message
+ * itself (it will be refused again as it is), 0 for anything else.
+ */
+class MailboxSenderException extends Exception {
+	const REFUSED = 554;
+}
 
 /**
  * A send blocked because the vault window is closed — a content action under the
@@ -413,6 +421,463 @@ class MailboxSender {
 		// effect of traffic, in either direction.
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
+	}
+
+	/**
+	 * Send a message a mail program composed — whole MIME plus its envelope —
+	 * AS $alias, through the same pipeline as a reader send: the send
+	 * capability (connected account or hosted alias, the hidden-origin rules),
+	 * EmailSender with the injected transport (in-app DKIM, test mode, Joinery
+	 * Direct, the hot-turn egress rule), the attempt record and the spam
+	 * filter's sender records. The program's bytes are not replayed: the
+	 * message is carried over part for part into an EmailMessage and sent as
+	 * Joinery sends everything, so it leaves signed as this mailbox.
+	 *
+	 * What carries over: From display name (the address must be this mailbox),
+	 * To, Cc, the envelope's other recipients as Bcc, Subject, Reply-To,
+	 * In-Reply-To / References, the plain and HTML bodies, attachments, and
+	 * inline (cid:) parts with their Content-IDs. The Message-ID is kept when
+	 * its right side is this mailbox's domain, otherwise one is minted here.
+	 * What cannot: a message signed or encrypted as a whole (PGP/MIME,
+	 * S/MIME) — re-sending it part for part would break the signature, so it is
+	 * refused, saying why.
+	 *
+	 * The Sent copy is the program's own message (Bcc kept, local headers and
+	 * the program's Message-ID replaced as sent), stored through
+	 * storeRawOutbound().
+	 *
+	 * @param string   $mail_from the program's envelope sender, kept for the
+	 *        record only: the envelope sender is always the mailbox's own,
+	 *        decided by its transport (hidden origin, SRS), whatever a program asks
+	 * @param string[] $rcpt_to the envelope recipients
+	 * @return array{ok:bool, outbound_id:int, message_id:string, warning?:string}
+	 * @throws MailboxSenderException (MailboxLockedException when the signing key
+	 *         needs an unlock that is not open)
+	 */
+	public function sendRaw(InboundEmailAlias $alias, string $raw_mime, string $mail_from, array $rcpt_to): array {
+		if (!$alias->key || $alias->get('iea_delete_time')) {
+			throw new MailboxSenderException('That mailbox no longer exists.', MailboxSenderException::REFUSED);
+		}
+		if (!$this->viewer->canAccess(intval($alias->key))) {
+			throw new MailboxSenderException('You do not have access to this mailbox.', MailboxSenderException::REFUSED);
+		}
+		if ($alias->is_fortress()) {
+			throw new MailboxSenderException('Fortress mail is sent from your own devices only.', MailboxSenderException::REFUSED);
+		}
+		if (strlen($raw_mime) > self::MAX_TOTAL_BYTES + 2097152) {
+			throw new MailboxSenderException('This message is larger than the 25 MB this mailbox sends.', MailboxSenderException::REFUSED);
+		}
+		$alias_address = strtolower($alias->get_full_address());
+
+		$capability = self::sendCapabilityFor($alias);
+		if (!$capability['ok']) {
+			throw new MailboxSenderException($capability['error'], MailboxSenderException::REFUSED);
+		}
+		$account = $capability['account'];
+		$transport = $capability['transport'];
+		$from_address = $transport->fromAddress ?: $alias_address;
+
+		$carried = $this->carryOverRaw($raw_mime, $rcpt_to, $alias, $from_address);
+		$email = $carried['email'];
+		$message_id = $carried['message_id'];
+		$to = $carried['to'];
+		$cc = $carried['cc'];
+		$bcc = $carried['bcc'];
+		$source = $carried['source'];
+
+		$sender = new EmailSender();
+		$attempt = function (string $outcome, ?string $error, ?int $row_id, ?string $sent_copy = null)
+				use ($sender, $alias, $account, $transport, $source, $message_id, $from_address, $to, $cc, $bcc) {
+			$this->recordAttempt($sender->lastSendReport(), $outcome, $error, $row_id, $sent_copy,
+				$alias, $account, $transport, $source, null, $message_id, $from_address, $to, $cc, $bcc);
+		};
+
+		try {
+			// The person wrote this message and handed it to their own mail
+			// program to send as their own mailbox — the same claim a reader
+			// send makes (EmailSender::EGRESS_USER_COMPOSE).
+			$ok = $sender->send($email, false, $transport->transport, EmailSender::EGRESS_USER_COMPOSE);
+		} catch (VaultLockedException $e) {
+			throw new MailboxLockedException('Your vault is locked — unlock it to send from this address.');
+		} catch (Throwable $e) {
+			error_log('MailboxSender: raw send threw for alias ' . $alias->key . ': ' . $e->getMessage());
+			$attempt(MailboxSendAttempt::OUTCOME_FAILED, $e->getMessage(), null);
+			throw new MailboxSenderException('The message could not be sent: ' . $e->getMessage());
+		}
+		if (!$ok) {
+			$report = $sender->lastSendReport();
+			$attempt(MailboxSendAttempt::OUTCOME_FAILED, $report['error'] ?: 'The transport refused the message.', null);
+			throw new MailboxSenderException('The message could not be sent. Check the mailbox connection and try again.');
+		}
+
+		$sent_copy = MailboxSendAttempt::SENT_COPY_NOT_APPLICABLE;
+		if ($account && $account->showCompose()) {
+			if ($transport->filesSent) {
+				$sent_copy = MailboxSendAttempt::SENT_COPY_PROVIDER;
+			} else {
+				$sent_copy = $this->appendSentCopy($account, $email)
+					? MailboxSendAttempt::SENT_COPY_APPENDED : MailboxSendAttempt::SENT_COPY_APPEND_FAILED;
+			}
+		}
+
+		$mode = $carried['mode'];
+		try {
+			$row_id = $this->storeRawOutbound($alias, $carried['stored_raw']);
+		} catch (Throwable $e) {
+			$attempt(MailboxSendAttempt::OUTCOME_SENT, null, null, $sent_copy);
+			$this->recordForSpamFilter($alias, $mode, $to, $cc, $bcc, $source, null);
+			$ref = self::errorReference();
+			error_log('MailboxSender [' . $ref . ']: raw send for alias ' . $alias->key . ' left, but the Sent copy could not be stored: '
+				. get_class($e) . ': ' . $e->getMessage());
+			return array('ok' => true, 'outbound_id' => 0, 'message_id' => $message_id,
+				'warning' => self::unsavedCopyWarning($sent_copy, $ref));
+		}
+		$attempt(MailboxSendAttempt::OUTCOME_SENT, null, $row_id, $sent_copy);
+		$this->recordForSpamFilter($alias, $mode, $to, $cc, $bcc, $source, $row_id);
+		return array('ok' => true, 'outbound_id' => $row_id, 'message_id' => $message_id);
+	}
+
+	/**
+	 * Store a message a mail program composed as an outbound (Sent) row of
+	 * $alias, without sending it: the program put it in Sent itself (its copy of
+	 * something it sent elsewhere, or a sent message it moved there). The same
+	 * store an archive's Sent mail takes (InboundEmailRouter::storeMessage(),
+	 * direction outbound): attachments split into private Files, the header
+	 * block kept, sealed where the mailbox seals, read. Returns the row id — the
+	 * existing row's when this Message-ID is already stored as this mailbox's
+	 * Sent mail.
+	 *
+	 * @throws MailboxSenderException
+	 */
+	public function storeRawOutbound(InboundEmailAlias $alias, string $raw_mime): int {
+		if (!$alias->key || $alias->get('iea_delete_time')) {
+			throw new MailboxSenderException('That mailbox no longer exists.');
+		}
+		if (!$this->viewer->canAccess(intval($alias->key))) {
+			throw new MailboxSenderException('You do not have access to this mailbox.');
+		}
+		if ($alias->is_fortress()) {
+			throw new MailboxSenderException('Fortress mail is stored from your own devices only.');
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+		$router = new InboundEmailRouter();
+		$parsed = $router->parseEmail($raw_mime);
+		$domain = new InboundEmailDomain(intval($alias->get('iea_ied_inbound_email_domain_id')), TRUE);
+
+		// iem_recipient on an outbound row is who it went to (content), the To
+		// and Cc as the message carried them.
+		$lists = $router->addressListsFromHeaders($parsed['headers'] ?? array());
+		$recipients = array();
+		foreach (array('to', 'cc') as $kind) {
+			try {
+				foreach ($this->parseAddressList(self::withoutGroups((string)($lists[$kind] ?? ''))) as $r) {
+					$recipients[] = $r['email'];
+				}
+			} catch (MailboxSenderException $e) {
+				// A list that does not parse still stores; the message carries it.
+			}
+		}
+
+		$date = (string)(is_array($parsed['headers']['date'] ?? null)
+			? $parsed['headers']['date'][0] : ($parsed['headers']['date'] ?? ''));
+		$ts = $date !== '' ? strtotime($date) : false;
+		$received = ($ts !== false && $ts > 0 && $ts <= time() + 86400) ? gmdate('Y-m-d H:i:s', $ts) : gmdate('Y-m-d H:i:s');
+
+		$stored = $router->storeMessage($raw_mime, $parsed, $alias, $domain, implode(', ', $recipients),
+			array('spf' => 'unverified', 'dkim' => 'unverified', 'dmarc' => 'unverified', 'source' => 'none'),
+			array('score' => null, 'decision' => array('verdict' => null, 'reason' => null, 'meta' => null, 'fingerprint' => null)),
+			array('direction' => 'outbound', 'is_read' => true, 'run_filters' => false, 'received_time' => $received));
+		if (!empty($stored['message'])) {
+			return intval($stored['message']->key);
+		}
+		$message_id_header = trim((string)(is_array($parsed['headers']['message-id'] ?? null)
+			? $parsed['headers']['message-id'][0] : ($parsed['headers']['message-id'] ?? '')));
+		$existing = $message_id_header !== ''
+			? $router->duplicateMessageId(substr($message_id_header, 0, 255), implode(', ', $recipients), 'outbound') : null;
+		if ($existing === null) {
+			throw new MailboxSenderException('The message could not be stored.');
+		}
+		return intval($existing);
+	}
+
+	/**
+	 * Carry a program-composed MIME message over into an EmailMessage sent as
+	 * $alias (see sendRaw()), and the copy to store as Sent.
+	 *
+	 * @return array{email:EmailMessage, message_id:string, to:array, cc:array, bcc:array,
+	 *               source:?InboundEmailMessage, stored_raw:string}
+	 * @throws MailboxSenderException
+	 */
+	private function carryOverRaw(string $raw_mime, array $rcpt_to, InboundEmailAlias $alias, string $from_address): array {
+		require_once(PathHelper::getIncludePath('includes/MimeParse.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
+		$router = new InboundEmailRouter();
+		$parsed = $router->parseEmail($raw_mime);
+		$headers = $parsed['headers'] ?? array();
+		$first = function (string $name) use ($headers): string {
+			$v = $headers[$name] ?? '';
+			return trim((string)(is_array($v) ? ($v[0] ?? '') : $v));
+		};
+		$decode = function (string $value): string {
+			$decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+			return $decoded === false ? $value : $decoded;
+		};
+
+		try {
+			$mime = MimeParse::parseMessage($raw_mime);
+		} catch (Throwable $e) {
+			throw new MailboxSenderException('The message could not be read: ' . $e->getMessage(), MailboxSenderException::REFUSED);
+		}
+		$top = strtolower((string)$mime->getType());
+		if (in_array($top, array('multipart/signed', 'multipart/encrypted', 'application/pkcs7-mime',
+				'application/x-pkcs7-mime'), true)) {
+			throw new MailboxSenderException('This mailbox signs everything it sends as itself, which would break a '
+				. 'message signed or encrypted as a whole (PGP/MIME or S/MIME). Send it without that, or use inline PGP.', MailboxSenderException::REFUSED);
+		}
+
+		// The From must be this mailbox. The display name the program set is kept.
+		$from_list = $this->parseAddressList($decode($first('from')));
+		if (count($from_list) !== 1 || !in_array(strtolower($from_list[0]['email']),
+				array(strtolower($alias->get_full_address()), strtolower($from_address)), true)) {
+			throw new MailboxSenderException('This message is not from ' . $alias->get_full_address()
+				. ', so it cannot be sent as this mailbox.', MailboxSenderException::REFUSED);
+		}
+
+		// The envelope is the authority on who receives it; the headers say who
+		// was To and who was Cc, and everyone else on the envelope was Bcc.
+		$envelope = array();
+		foreach ($rcpt_to as $r) {
+			$r = strtolower(trim((string)$r, " \t<>"));
+			if ($r === '') {
+				continue;
+			}
+			// A recipient the program was told would be tried, and that cannot
+			// be sent to, is refused by name: never dropped while the rest go.
+			if (!filter_var($r, FILTER_VALIDATE_EMAIL)) {
+				throw new MailboxSenderException('This mailbox cannot send to ' . $r . '.', MailboxSenderException::REFUSED);
+			}
+			$envelope[$r] = true;
+		}
+		if (!$envelope) {
+			throw new MailboxSenderException('Add at least one recipient.', MailboxSenderException::REFUSED);
+		}
+		$keep = function (array $list) use (&$envelope): array {
+			$out = array();
+			foreach ($list as $r) {
+				$addr = strtolower($r['email']);
+				if (isset($envelope[$addr])) {
+					$out[] = $r;
+					unset($envelope[$addr]);
+				}
+			}
+			return $out;
+		};
+		$to = $keep($this->parseAddressList(self::withoutGroups($decode(implode(', ', (array)($headers['to'] ?? array()))))));
+		$cc = $keep($this->parseAddressList(self::withoutGroups($decode(implode(', ', (array)($headers['cc'] ?? array()))))));
+		$bcc = array();
+		foreach (array_keys($envelope) as $addr) {
+			$bcc[] = array('email' => $addr, 'name' => '');
+		}
+		if (!$to && !$cc) {
+			// Everyone was Bcc ("To: undisclosed-recipients:;" is how a program
+			// writes that). The message still needs a To, and it must name none
+			// of them, or each would see every other: it is addressed to the
+			// mailbox itself, and every recipient stays Bcc.
+			$to = array(array('email' => $from_address, 'name' => ''));
+		}
+
+		// Keep the program's Message-ID when it names this mailbox's domain;
+		// otherwise it may name the machine it was written on, so mint one.
+		$domain = strtolower(substr(strrchr($alias->get_full_address(), '@') ?: '@', 1));
+		$their_id = $first('message-id');
+		$message_id = (preg_match('/^<[^<>@\s]+@([^<>@\s]+)>$/', $their_id, $m) && strtolower($m[1]) === $domain)
+			? $their_id : $this->generateMessageId($from_address);
+
+		$email = new EmailMessage();
+		$email->from($from_address, $from_list[0]['name'] !== '' ? $from_list[0]['name'] : ($alias->get('iea_description') ?: null));
+		foreach ($to as $r) { $email->to($r['email'], $r['name'] !== '' ? $r['name'] : null); }
+		foreach ($cc as $r) { $email->cc($r['email'], $r['name'] !== '' ? $r['name'] : null); }
+		foreach ($bcc as $r) { $email->bcc($r['email'], null); }
+		$email->subject($decode($first('subject')));
+		$email->messageId($message_id);
+		$reply_to = $this->parseAddressList($decode($first('reply-to')));
+		if ($reply_to) {
+			$email->replyTo($reply_to[0]['email']);
+		}
+		// Threading, and the headers a person sets in their program that change
+		// what the recipient's program does: a read-receipt request, priority,
+		// language, the Autocrypt/OpenPGP key announcements. Nothing else is
+		// carried — every other header is Joinery's to write.
+		foreach (array('in-reply-to' => 'In-Reply-To', 'references' => 'References',
+				'disposition-notification-to' => 'Disposition-Notification-To', 'x-priority' => 'X-Priority',
+				'importance' => 'Importance', 'priority' => 'Priority', 'content-language' => 'Content-Language',
+				'organization' => 'Organization', 'autocrypt' => 'Autocrypt', 'openpgp' => 'OpenPGP',
+				'user-agent' => 'User-Agent') as $key => $name) {
+			$value = trim(preg_replace('/\s+/', ' ', $first($key)));
+			if ($value !== '') {
+				$email->header($name, substr($value, 0, 4000));
+			}
+		}
+
+		// Bodies and parts.
+		$plain = null;
+		$html = null;
+		$total = 0;
+		$inside = null; // the MIME id of an attached message whose parts are its own, not ours
+		foreach ($mime->partIterator() as $part) {
+			$mime_id = (string)$part->getMimeId();
+			if ($inside !== null && strpos($mime_id, $inside . '.') === 0) {
+				continue;
+			}
+			if ($part->getPrimaryType() === 'multipart') {
+				continue;
+			}
+			// A forwarded message attached whole ("forward as attachment") is
+			// one part; the iterator would otherwise walk into it and send its
+			// insides again as loose attachments.
+			if ($part->getPrimaryType() === 'message') {
+				$inside = $mime_id;
+			}
+			$type = strtolower((string)$part->getType());
+			$name = (string)($part->getName() ?? '');
+			$disposition = strtolower((string)$part->getDisposition());
+			$content_id = trim((string)$part->getContentId(), '<> ');
+			$is_body_text = ($type === 'text/plain' || $type === 'text/html') && $disposition !== 'attachment' && $name === '';
+			if ($is_body_text && $content_id === '') {
+				$text = (string)$part->getContents();
+				$charset = (string)$part->getCharset();
+				if ($charset !== '' && strtolower($charset) !== 'utf-8' && strtolower($charset) !== 'us-ascii') {
+					$converted = @mb_convert_encoding($text, 'UTF-8', $charset);
+					$text = $converted === false ? $text : $converted;
+				}
+				if ($type === 'text/plain' && $plain === null) { $plain = $text; continue; }
+				if ($type === 'text/html' && $html === null) { $html = $text; continue; }
+			}
+			$bytes = (string)$part->getContents();
+			$total += strlen($bytes);
+			if ($total > self::MAX_TOTAL_BYTES) {
+				throw new MailboxSenderException('This message is larger than the 25 MB this mailbox sends.', MailboxSenderException::REFUSED);
+			}
+			if ($name === '') {
+				$name = ($type === 'text/calendar') ? 'invite.ics'
+					: (($type === 'message/rfc822') ? 'forwarded-message.eml' : 'attachment');
+			}
+			$content_type = $type;
+			if ($type === 'text/calendar' && ($method = $part->getContentTypeParameter('method'))) {
+				$content_type .= '; method=' . preg_replace('/[^A-Za-z]/', '', (string)$method);
+			}
+			if ($content_id !== '' && $disposition !== 'attachment') {
+				$email->attachInlineData($bytes, $content_id, $name, $content_type);
+			} else {
+				$email->attachData($bytes, $name, $content_type);
+			}
+		}
+		if ($html !== null && trim($html) !== '') {
+			$email->html($html);
+			$email->text($plain !== null ? $plain : MailboxHtmlSanitizer::toPlainText($html));
+		} else {
+			$email->text($plain !== null ? $plain : '');
+		}
+
+		// The replied-to message, when it is in this mailbox: the attempt record
+		// and the spam filter hear a reply as a reply.
+		$source = null;
+		$parent = $first('in-reply-to');
+		if (preg_match('/<[^<>]+>/', $parent, $pm)) {
+			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+				"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+				 WHERE iem_message_id_header = ? AND iem_iea_inbound_email_alias_id = ?
+				   AND iem_delete_time IS NULL AND iem_direction IS DISTINCT FROM 'draft'
+				 ORDER BY iem_inbound_email_message_id DESC LIMIT 1");
+			$stmt->execute(array(substr($pm[0], 0, 255), intval($alias->key)));
+			$sid = intval($stmt->fetchColumn());
+			if ($sid > 0) {
+				$source = new InboundEmailMessage($sid, TRUE);
+			}
+		}
+
+		// A forward names its original in X-Forwarded-Message-Id (and in
+		// In-Reply-To too): the spam filter hears it as a forward, not a reply.
+		$mode = $first('x-forwarded-message-id') !== '' ? self::MODE_FORWARD
+			: ($source !== null ? self::MODE_REPLY : self::MODE_NEW);
+
+		return array(
+			'email'      => $email,
+			'message_id' => $message_id,
+			'to'         => $to,
+			'cc'         => $cc,
+			'bcc'        => $bcc,
+			'source'     => $source,
+			'mode'       => $mode,
+			'stored_raw' => self::sentCopyOf($raw_mime, $message_id, array_column($bcc, 'email')),
+		);
+	}
+
+	/**
+	 * An address list with RFC 5322 group syntax taken apart: an empty group
+	 * ("undisclosed-recipients:;", what a program writes when everyone is Bcc)
+	 * goes, and a named group's members stay as plain addresses.
+	 */
+	private static function withoutGroups(string $list): string {
+		$list = preg_replace('/(^|,)\s*[^,:<>"@]+:\s*;/', '$1', $list);
+		$list = preg_replace('/(^|,)\s*[^,:<>"@]+:/', '$1', $list);
+		return trim(str_replace(';', ',', $list), " ,");
+	}
+
+	/**
+	 * The program's message as this mailbox keeps it in Sent: its own bytes,
+	 * minus the headers that describe the machine it was written on (Received,
+	 * X-Originating-IP), with the Message-ID it was sent under. Bcc stays —
+	 * the Sent copy is the sender's own record of who they wrote to — and
+	 * when the program left it out (a submission carries none; the envelope
+	 * named those recipients), it is written in from $bcc.
+	 *
+	 * @param string[] $bcc envelope recipients that were neither To nor Cc
+	 */
+	public static function sentCopyOf(string $raw_mime, string $message_id, array $bcc = array()): string {
+		$split = strpos($raw_mime, "\r\n\r\n");
+		$eol = "\r\n";
+		if ($split === false) {
+			$split = strpos($raw_mime, "\n\n");
+			$eol = "\n";
+		}
+		if ($split === false) {
+			return $raw_mime;
+		}
+		$head = substr($raw_mime, 0, $split);
+		$body = substr($raw_mime, $split);
+		$lines = preg_split('/\r?\n/', $head);
+		$out = array();
+		$skip = false;
+		$had_id = false;
+		foreach ($lines as $line) {
+			if ($line !== '' && ($line[0] === ' ' || $line[0] === "\t")) {
+				if (!$skip) { $out[] = $line; }
+				continue;
+			}
+			$name = strtolower(trim((string)strstr($line, ':', true)));
+			$skip = in_array($name, array('received', 'x-originating-ip', 'message-id'), true);
+			if ($name === 'message-id') {
+				$out[] = 'Message-ID: ' . $message_id;
+				$had_id = true;
+				continue;
+			}
+			if (!$skip) { $out[] = $line; }
+		}
+		if (!$had_id) {
+			$out[] = 'Message-ID: ' . $message_id;
+		}
+		$had_bcc = false;
+		foreach ($out as $line) {
+			if (stripos($line, 'bcc:') === 0) {
+				$had_bcc = true;
+			}
+		}
+		$bcc = array_values(array_filter($bcc, function ($a) { return filter_var($a, FILTER_VALIDATE_EMAIL); }));
+		if (!$had_bcc && $bcc) {
+			$out[] = 'Bcc: ' . implode(', ', $bcc);
+		}
+		return implode($eol, $out) . $body;
 	}
 
 	/**
@@ -1667,7 +2132,7 @@ class MailboxSender {
 				return;
 			}
 			if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-				throw new MailboxSenderException('Not a valid email address: ' . $email);
+				throw new MailboxSenderException('Not a valid email address: ' . $email, MailboxSenderException::REFUSED);
 			}
 			$key = strtolower($email);
 			if (!isset($out[$key])) {

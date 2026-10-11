@@ -30,7 +30,11 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.6.0
+ * @version 1.7.0
+ * @changelog 1.7.0 - A sessionless action refuses a request carrying the app-access
+ *   headers. Action and form dispatch hand the descriptor's top-level
+ *   `app_purpose` to ApiAuth::authorize(), which admits that purpose's app
+ *   credentials there and nothing else.
  * @changelog 1.6.0 - An exception escaping a logic file or a form builder is
  *   recorded in err_general_errors (and the file log) like any uncaught error,
  *   and the caller gets a user-safe message plus `error_ref` instead of the raw
@@ -175,7 +179,26 @@ class ApiLogicEndpoint {
 			return;
 		}
 
+		// An app credential reaches only its purpose's actions, which are all
+		// sessioned. Presented to a sessionless one it would run unauthenticated
+		// with the pre-auth rate limits switched off (apiv1.php meters
+		// app-shaped requests after authentication), so it is refused here.
+		if (self::presentsAppCredential()) {
+			require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
+			api_error($action_label . ' is not available to an app credential', 'AuthenticationError', 403);
+		}
+
 		self::executeAction($action_label, $meta, $logic_function, NULL);
+	}
+
+	/** Whether the request carries the app-access headers (ApiAuth § App credentials). */
+	protected static function presentsAppCredential(): bool {
+		foreach (getallheaders() as $name => $value) {
+			if (str_replace('-', '_', strtolower($name)) === 'x_joinery_app_secret') {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -191,6 +214,10 @@ class ApiLogicEndpoint {
 		// authorize() denies it 401 unless the contract declares allow_guest.
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_WRITE];
+		// An action for one app purpose declares it at the top of its descriptor
+		// (`'app_purpose' => 'mail'`); authorize() admits that purpose's
+		// credentials there and nothing else, and refuses them everywhere else.
+		$auth['app_purpose'] = $meta['app_purpose'] ?? null;
 		ApiAuth::authorize($auth, $api_entry,
 			$api_user ? $api_user->get('usr_permission') : null, 'Action', $action_label);
 
@@ -697,6 +724,7 @@ class ApiLogicEndpoint {
 		// gate); a descriptor may override via its ['auth'] block.
 		require_once(PathHelper::getIncludePath('includes/ApiAuth.php'));
 		$auth = ($meta['auth'] ?? []) + ['capability' => ApiAuth::CAP_READ];
+		$auth['app_purpose'] = $meta['app_purpose'] ?? null;
 		ApiAuth::authorize($auth, $api_entry, $api_user->get('usr_permission'), 'Form');
 
 		// Session simulation so the builder sees the acting user's timezone

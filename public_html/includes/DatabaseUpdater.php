@@ -6,6 +6,8 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.4 - `inet` is a declarable column type (an address compared as an address, IPv4 or
+ *   IPv6 alike).
  * @version 1.3 - carryRenamedRows(): a migration that renames a table copies its rows with
  *   the columns the old table actually has. A fixed column map written against the newest
  *   old schema failed on a node that skipped the release that added one of those columns
@@ -2699,6 +2701,9 @@ class DatabaseUpdater {
         else if($data_type == 'time without time zone'){
             return 'time';
         }
+        else if($data_type == 'inet'){
+            return 'inet';
+        }
         else{
             echo 'ERROR: Unrecognized data type '.$data_type;
         }
@@ -2732,6 +2737,7 @@ class DatabaseUpdater {
              . '|time(\(\d+\))?(\s+with(out)?\s+time\s+zone)?'
              . '|timestamp(\(\d+\))?(\s+with\s+time\s+zone)?'
              . '|json|jsonb'
+             . '|inet'
              . ')$/i';
     }
 }

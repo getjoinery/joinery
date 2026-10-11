@@ -12,6 +12,9 @@ function vault_lock_logic(array $input): LogicResult {
 	$user = new User($session->get_user_id(), TRUE);
 
 	VaultUnlock::close($user->key, UserEncryptionVault::SCOPE_USER);
+	// Lock means "lock my mail", wherever it is being read: the windows the
+	// person's mail apps borrowed from an unlock end with it.
+	VaultUnlock::lockBorrowed($user->key);
 
 	return LogicResult::render(['locked' => true]);
 }

@@ -353,7 +353,7 @@ function security_logic(array $input): LogicResult{
 	if ($action === 'revoke_app_session') {
 		$key_id = (int)($input['apk_api_key_id'] ?? 0);
 		$api_key = $key_id ? new ApiKey($key_id, TRUE) : NULL;
-		if ($api_key && $api_key->key && $api_key->is_session()
+		if ($api_key && $api_key->key && ($api_key->is_session() || $api_key->is_app_credential())
 			&& $api_key->get('apk_usr_user_id') == $user->key
 			&& !$api_key->get('apk_delete_time')) {
 			$api_key->soft_delete();
@@ -428,12 +428,18 @@ function security_logic(array $input): LogicResult{
 		$page_vars['qr_uri'] = _build_qr_data_uri($page_vars['provisioning_uri']);
 	}
 
-	$app_sessions = new MultiApiKey(array(
+	// Every credential a person's own device holds: signed-in apps (session
+	// keys) and app credentials for one purpose (a mail app's app password).
+	// Machine keys are an administrator's integrations, listed elsewhere.
+	$app_sessions = array();
+	foreach (new MultiApiKey(array(
 		'user_id' => $user->key,
-		'type' => ApiKey::TYPE_SESSION,
 		'deleted' => false,
-	), array('create_time' => 'DESC'));
-	$app_sessions->load();
+	), array('create_time' => 'DESC')) as $api_key) {
+		if ($api_key->is_session() || $api_key->is_app_credential()) {
+			$app_sessions[] = $api_key;
+		}
+	}
 	$page_vars['app_sessions'] = $app_sessions;
 
 	// Recovery-code cards (specs/recovery_readiness.md): the user's own vault

@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.55 - a part inside an attached message (message/*, forward as attachment) is never this message's body: extractBodies() and enumerateNonTextParts() skip it as a body and still list it as a part
  * @version 1.54 - handler aliases: `base+tag` resolves to a handler alias and each newly stored message is handed to the plugin handler (handOver)
  * @version 1.53 - comments: a never_spam rule does not lift a message the From domain disowned
  * @version 1.52 - authFromRelayMeta() takes the policy from the line that gave the dmarc verdict; readAuthResults' provider branch passes it through (relay path)
@@ -2054,6 +2055,7 @@ class InboundEmailRouter {
 		$message = MimeParse::parseMessage($raw_email);
 
 		$bodyPlainId = null; $bodyHtmlId = null; $parts = array();
+		$enclosing = array();
 		foreach ($message->partIterator() as $part) {
 			if ($part->getPrimaryType() === 'multipart') { continue; }
 			$id   = (string)$part->getMimeId();
@@ -2061,13 +2063,32 @@ class InboundEmailRouter {
 			$name = $part->getName();
 			$disp = $part->getDisposition();
 			$isInlineText = ($type === 'text/plain' || $type === 'text/html')
-				&& $disp !== 'attachment' && ($name === null || $name === '');
+				&& $disp !== 'attachment' && ($name === null || $name === '')
+				&& !self::insideAttachedMessage($id, $enclosing);
+			if ($part->getPrimaryType() === 'message') { $enclosing[] = $id . '.'; }
 			if ($isInlineText && $type === 'text/plain' && $bodyPlainId === null) { $bodyPlainId = $id; continue; }
 			if ($isInlineText && $type === 'text/html'  && $bodyHtmlId  === null) { $bodyHtmlId  = $id; continue; }
 			$parts[] = $part;
 		}
 
 		return $parts;
+	}
+
+	/**
+	 * True when MIME id $id sits inside an attached message (a message/* part,
+	 * "forward as attachment") whose id-plus-dot prefix is in $enclosing. Such a
+	 * part is the attached message's own body or attachment, never this one's:
+	 * it is not a body here, whatever its type (extractBodies() and
+	 * enumerateNonTextParts() both ask, so they agree). It is still listed as a
+	 * part, so every part an earlier enumeration recorded is still found.
+	 */
+	private static function insideAttachedMessage(string $id, array $enclosing): bool {
+		foreach ($enclosing as $prefix) {
+			if (strpos($id, $prefix) === 0) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Hard-delete every manifest row for a message (rollback of a failed split). */
@@ -3901,13 +3922,17 @@ class InboundEmailRouter {
 			$message = MimeParse::parseMessage($raw_email);
 
 			$result = ['plain' => '', 'html' => ''];
+			$enclosing = array();
 			foreach ($message->partIterator() as $part) {
 				if ($part->getPrimaryType() === 'multipart') { continue; }
+				$id   = (string)$part->getMimeId();
 				$type = strtolower((string)$part->getType());
 				$name = $part->getName();
 				$disp = $part->getDisposition();
 				$isInlineText = ($type === 'text/plain' || $type === 'text/html')
-					&& $disp !== 'attachment' && ($name === null || $name === '');
+					&& $disp !== 'attachment' && ($name === null || $name === '')
+					&& !self::insideAttachedMessage($id, $enclosing);
+				if ($part->getPrimaryType() === 'message') { $enclosing[] = $id . '.'; }
 				if (!$isInlineText) { continue; }
 				$text = $this->toUtf8((string)$part->getContents(), $part->getCharset());
 				if ($type === 'text/html' && $result['html'] === '') {

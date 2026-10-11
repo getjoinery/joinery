@@ -161,22 +161,22 @@ public_key: {your_public_key}
 secret_key: {your_secret_key}
 ```
 
-There is one auth story with **three credentials**: two key types, distinguished by `apk_type` in the shared `apk_api_keys` table, plus the browser session for page JavaScript. Key headers always take precedence — the browser-session path only runs when a request carries no key headers.
+There is one auth story with **four credentials**: three key types, distinguished by `apk_type` in the shared `apk_api_keys` table, plus the browser session for page JavaScript. Key headers always take precedence — the browser-session path only runs when a request carries no key headers.
 
-| | Machine keys (`machine`) | Session keys (`session`) | Browser session |
-|---|---|---|---|
-| Sent as | Key headers | Key headers | Web session cookie + `X-Joinery-Csrf` header |
-| Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` | Logging in on the website; the page emits the CSRF token as a `<meta name="joinery-api-csrf">` tag |
-| Identity | The user account the admin attached | The user who logged in | The web session's user, exactly as pages see it (login-as included) |
-| Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request | n/a — the token is compared constant-time against the session's stored value |
-| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate | Same as a session key: full capability (4); the user's role and per-record authorization are the effective gates |
-| Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) | The web session's lifetime |
-| Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
-| Management API | Allowed (with superadmin owner) | **Never** | **Never** |
+| | Machine keys (`machine`) | Session keys (`session`) | App credentials (`app_password`) | Browser session |
+|---|---|---|---|---|
+| Sent as | Key headers | Key headers | The app-access headers (`X-Joinery-App-Secret`, `X-Joinery-App-Username`), relayed by the program's gateway | Web session cookie + `X-Joinery-Csrf` header |
+| Provisioned by | An administrator via **Admin > API Keys** | The user, via `POST /api/v1/auth/login` | The person, through `app_password_create` (browser session + step-up), for one declared purpose and one named device | Logging in on the website; the page emits the CSRF token as a `<meta name="joinery-api-csrf">` tag |
+| Identity | The user account the admin attached | The user who logged in | The person who made it | The web session's user, exactly as pages see it (login-as included) |
+| Secret hashing | Slow hash (phpass) — appropriate for admin-chosen secrets | SHA-256 — the secret is a random 256-bit value, so a slow KDF buys nothing and would cost on every request | SHA-256, as session keys | n/a — the token is compared constant-time against the session's stored value |
+| Permission | Chosen by the admin (1–4) | Always 4; per-record authorization (owner-or-staff by default — see [Per-record authorization](#per-record-authorization)) is the effective gate | Its purpose: only actions declaring that `app_purpose` | Same as a session key: full capability (4); the user's role and per-record authorization are the effective gates |
+| Expiry | Optional, set by the admin | Always set, from the `api_session_key_lifetime_days` setting (default 365) | None; it ends when its purpose's plugin is deactivated | The web session's lifetime |
+| Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | `app_credential_revoke`, the profile **App Sessions** page and the purpose's own page, and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
+| Management API | Allowed (with superadmin owner) | **Never** | **Never** | **Never** |
 
 Three channels are not keys at all and do not appear in that table. The **relay birth channel**, `/api/v1/relay/*`, is how a relay born from first-boot user-data fetches its bundle (`GET relay/bundle?run=&sha256=`) and posts its signed birth report (`POST relay/born`); its credential is a one-time run token in `X-Joinery-Relay-Run-Token` plus, for the report, an Ed25519 signature by the relay's own identity key, and the plane believes the report only after the provider's address answers a pinned ping (see [Mailbox § Relay-fronted receiving](../plugins/mailbox/docs/overview.md)). It is dispatched before key authentication, metered in its own bucket, and exists only where the `mailbox` plugin is active. The other is the **agent channel**. `/api/v1/agent/*` is how a managed node's Go agent takes work from its management node, and it authenticates with an Ed25519 signature over a canonical message rather than a shared secret — the plane stores only the node's public key, so it holds nothing that could act as the node. It is dispatched before key authentication, has its own rate limit (`api_agent_rate_limit_requests`, counted per node for a signed request and per address for the rest), and exists only where the `server_manager` plugin is active. See [Server Manager § The agent channel](../plugins/server_manager/docs/overview.md#the-agent-channel). The third is the **backup broker**, `/api/v1/broker/{begin,sign,finish,abort}`: a Managed node's backup run asks its management node for a signed link per write, with the token of the one broker run its job carries in `X-Joinery-Broker-Token`; it is dispatched before key authentication, metered in its own bucket, and exists only where the `server_manager` plugin is active. See [Server Manager § The backup broker](../plugins/server_manager/docs/overview.md#the-backup-broker).
 
-A password change revokes **all** of the user's session keys (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
+A password change revokes **all** of the user's session keys and app credentials (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
 
 ### Browser sessions (page JavaScript)
 
@@ -224,11 +224,13 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 |----------|-------------|
 | `public_key` | Public identifier sent in requests |
 | `secret_key` | Secret, verified against a stored hash (scheme per key type, above) |
-| `type` | `machine` or `session` |
+| `type` | `machine`, `session` or `app_password` |
 | `is_active` | Key must be active to authenticate |
 | `start_time` | If set, key is rejected before this time (UTC) |
 | `expires_time` | If set, key is rejected after this time (UTC) |
-| `last_used_time` | Updated by the auth path at most once per hour |
+| `last_used_time` | Updated by the auth path at most once per hour, or when the address changes |
+| `last_used_ip` | The address the key was last used from (`inet`, IPv4 or IPv6), stamped beside `last_used_time` |
+| `purpose` | An app credential's purpose (see [App credentials](#app-credentials)); null for machine and session keys |
 | `ip_restriction` | Comma-separated list of allowed IPs (optional, machine keys) |
 | `permission` | Access level (see Permission Levels below) |
 | `scope` | Comma-separated action names (machine keys only; empty = unscoped). A scoped key can call only those actions — see [Scoped machine keys](#scoped-machine-keys) |
@@ -243,6 +245,29 @@ A machine key that sits on another machine should be able to do one job and noth
 The check lives in `ApiAuth::authorize()`, which action dispatch calls with the action's name; CRUD, forms and management pass no name, and no scope can name them. The route families that never reach `authorize()` after authentication refuse a scoped key in `apiv1.php` (`ApiAuth::refuseScopedKeyOutsideActions()`). Sessionless actions (`requires_session: false`) run before authentication and never see a key; anyone may call them.
 
 Only a machine key may be scoped (`ApiKey::save()` refuses otherwise). Scoped keys are minted by the feature that owns the action, never typed: the admin API key page shows a key's scope and does not offer to edit a scoped key, since saving that form would hand the key to the admin who submitted it.
+
+### App credentials
+
+A program that cannot do a passkey sign-in — a mail app today — signs in with an **app credential**: one device, one purpose, revocable by the person. Two things are kept apart on purpose:
+
+- **The purpose** — what the credential may do. A plugin declares it in its `plugin.json` under `appAccess` (`includes/AppAccess.php`):
+
+  ```json
+  "appAccess": {
+      "mail": { "label": "Mail apps", "borrowsUnlock": true }
+  }
+  ```
+
+  `label` is what the person sees. `requiresSetting` names a declared setting that switches the purpose on: while it is off, no credential of the purpose is made, every one is refused, and none borrows a window (`AppAccess::isAvailable()`). `borrowsUnlock` lets the credential read sealed content through a window it borrows from the person's website unlock ([Sealed Vault § Borrowed windows](sealed_vault.md#borrowed-windows)). A purpose two plugins claim is refused for both.
+- **The kind** — how the program proves it is that device. The one kind is the **app password** (`apk_type = 'app_password'`), shown once as `jm-{public}-{secret}` and typed into the program. Browser sign-in (OAuth) would be a second kind in the same table, with the same purpose column.
+
+Every rule is written against the purpose and the credential's `apk_api_keys` id, never against the kind; `tests/unit/app_access_kind_blind_test.php` fails if anything but `ApiKey`, `ApiAuth` and the mint/revoke logic names the kind.
+
+- **Minting.** `POST /api/v1/action/app_password_create` `{purpose, device_name}`: browser session only, after a step-up (`requires_stepup` otherwise). An undeclared purpose is refused. Answers the password once.
+- **Presenting.** The program speaks its own protocol to a gateway on this host, which calls the API over loopback with `X-Joinery-App-Username` (the name the program signed in as), `X-Joinery-App-Secret` (the password exactly as typed — `ApiAuth` resolves it; spaces and case are forgiven) and `X-Joinery-Client-Ip` (the program's address, believed only from loopback). An app credential sent in the ordinary key headers is refused.
+- **Reach.** It reaches only actions whose descriptor declares `'app_purpose' => '{purpose}'` (top level, beside `description`), and those actions admit nothing else — no browser session, session key, machine key, or credential of another purpose. Every other route family refuses it (`ApiAuth::refuseAppCredentialOutsideActions()`), including `auth/*` and the web-session bridge. `requires_person_credential` and `requires_browser_session` refuse it: an app credential cannot unlock, set up, rotate, approve a device or change a protection level.
+- **Turning off.** A purpose stops being declared when its plugin is deactivated, and every credential of that purpose is refused from then on.
+- **Revoking.** `POST /api/v1/action/app_credential_revoke` `{credential_id}` (browser session), any kind. Revoking ends the window the credential borrowed.
 
 ## Auth Endpoints
 
@@ -381,6 +406,8 @@ function catalog_logic_descriptor(): array {
     ];
 }
 ```
+
+An action for one app purpose declares it at the top of its descriptor, beside `description`: `'app_purpose' => 'mail'`. It then admits that purpose's app credentials and nothing else (see [App credentials](#app-credentials)).
 
 Resolution order for each field: explicit `auth` value → router default → `ApiAuth::authorize` built-in default. Surface defaults:
 
@@ -772,6 +799,10 @@ Who is counted depends on the credential:
 | General requests (key-based and keyless) | IP address | 1,000 | Per hour | `api_rate_limit_requests` / `_window` |
 | Requests from a signed-in browser session | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
 | Failed auth attempts | IP address | 10 | Per 15 minutes | `api_auth_rate_limit_requests` / `_window` |
+| Requests on an app credential | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
+| Failed app sign-ins (`app_access_auth`) | Source network (IPv4 address, IPv6 /64); and username | 60; 600 | Per 15 minutes | — |
+
+An app password is 256 random bits, so the app sign-in limits bound load, not guessing. The per-username limit sits far above the per-network one so that a stranger who knows an address — or the person's own device retrying a revoked password — cannot lock the person's other devices out. Only an action request is app-shaped: the app-access headers switch no limiter off on any other route, and a sessionless action refuses them.
 | Agent channel, device link, Drive upload | IP address | own buckets | Per hour | `api_agent_*`, `api_device_link_*`, `api_upload_*` |
 
 A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. Key-based and keyless traffic is metered by address before authentication.

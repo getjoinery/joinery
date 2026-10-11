@@ -24,6 +24,8 @@
  * is enough to tie an open to its close and useless to anyone reading the log.
  * No secret key, no wrapping, and no sealed content passes through here.
  *
+ * @version 1.2 - VIA_APP_BORROW and REASON_APP_REVOKED for an app credential's borrowed
+ *   window; handle() names a borrowed slot's credential instead of hashing it.
  * @version 1.1 - rows are written as a declared content-free site, so a window
  *               closing on a request that opened sealed content is still recorded
  * @version 1.0.1 - comment wording: the hardened idle cap
@@ -42,6 +44,9 @@ class VaultAudit {
 	const VIA_ROTATE     = 'rotate';
 	const VIA_REENROLL   = 'reenroll';
 	const VIA_UNKNOWN    = 'unknown';
+	// An app credential's borrowed window, armed by the person's website unlock
+	// (VaultUnlock::armBorrowers()). The session field names the credential.
+	const VIA_APP_BORROW = 'app_borrow';
 
 	// Why a window ended. The first four are policy end-events the platform
 	// decided on; the last three are things that happened to the session.
@@ -53,6 +58,7 @@ class VaultAudit {
 	const REASON_LOGOUT           = 'logout';
 	const REASON_IP_CHANGE        = 'ip_change';
 	const REASON_CREDENTIAL_EVENT = 'credential_event';  // password change/reset, recovery-code use, 2FA change
+	const REASON_APP_REVOKED      = 'app_credential_revoked'; // the app credential borrowing the window was revoked
 
 	/**
 	 * A window was armed. $caps is the resolved end-event policy, recorded
@@ -95,6 +101,11 @@ class VaultAudit {
 	public static function handle(?string $session_id): string {
 		if ($session_id === null || $session_id === '') {
 			return 'none';
+		}
+		// A borrowed window's "session" is the app credential's slot name
+		// (~apk{key id}): not a secret, and the one thing worth reading here.
+		if (strpos($session_id, VaultUnlock::CREDENTIAL_SLOT_PREFIX) === 0) {
+			return substr($session_id, 1);
 		}
 		return substr(hash('sha256', $session_id), 0, 12);
 	}

@@ -47,7 +47,24 @@
  * that never reach authorize(). An action whose auth block declares
  * requires_scoped_key admits only a key scoped to it.
  *
- * @version 1.4.0
+ * APP CREDENTIALS — a credential limited to one app purpose (AppAccess; an app
+ * password is the one kind today). A program that cannot do a passkey sign-in
+ * presents it through the app-access headers (X-Joinery-App-Secret, with the
+ * username it signed in as in X-Joinery-App-Username); it reaches ONLY the
+ * actions whose descriptor declares that purpose (`app_purpose`), and those
+ * actions accept nothing else. Its failed sign-ins count in their own bucket,
+ * app_access_auth, per source network and per username. A purpose whose
+ * declaring plugin is inactive is refused outright. Every rule here is keyed to
+ * the purpose and the key's id, never to the kind
+ * (specs/mail_apps_plugin.md § Core: app access).
+ *
+ * @version 1.5.0
+ * @changelog 1.5.0 - App credentials: authenticate() resolves the app-access
+ *   headers, refuses an undeclared purpose, opens the credential's borrowed
+ *   unlock window (VaultUnlock::useCredentialWindow()) and limits failed
+ *   app sign-ins in the app_access_auth bucket; authorize() matches a
+ *   credential's purpose against the action's app_purpose both ways;
+ *   refuseAppCredentialOutsideActions() keeps one off every other route family.
  * @changelog 1.4.0 - requires_person_credential: browser session or app session
  *   key, never a machine key (specs/fortress_mobile_apps.md § R8).
  * @changelog 1.3.0 - Scoped machine keys: authorize() takes the endpoint's
@@ -122,6 +139,22 @@ class ApiAuth {
 		$public_key = isset($headers['public_key']) ? $headers['public_key'] : null;
 		$secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
 
+		// An app credential arrives as the person typed it into their program,
+		// relayed unchanged by whatever spoke the program's protocol (the mail
+		// gateway). Resolving it is this class's job alone.
+		if (isset($headers['x_joinery_app_secret'])) {
+			self::$app_access_attempt = (string)($headers['x_joinery_app_username'] ?? '');
+			self::$app_client_ip = self::appClientIp($headers);
+			$source_ip = self::$app_client_ip;
+			self::refuseOverAppAccessLimit(self::$app_access_attempt);
+			$split = ApiKey::SplitAppPassword((string)$headers['x_joinery_app_secret']);
+			if ($split === null) {
+				self::auth_failure(401, 'App credential not in a recognised form', 'Incorrect username or app password');
+			}
+			$public_key = $split['public_key'];
+			$secret_key = $split['secret_key'];
+		}
+
 		if (!$public_key || !$secret_key) {
 			// No key headers — the request may instead carry the browser-session
 			// credential (web session cookie + X-Joinery-Csrf header). Keys always
@@ -189,11 +222,36 @@ class ApiAuth {
 			self::auth_failure(401, 'Incorrect secret key', 'Incorrect secret key');
 		}
 
+		// An app credential is good only while its purpose is declared: the
+		// declaring plugin's deactivation is what turns its credentials off.
+		// And one presented through the ordinary key headers is refused — the
+		// app-access path is the one that counts its failures where they belong.
+		if ($api_entry->is_app_credential()) {
+			if (self::$app_access_attempt === null) {
+				self::auth_failure(401, 'App credential presented as an API key', 'Incorrect secret key');
+			}
+			if (!AppAccess::isAvailable($api_entry->purpose())) {
+				self::auth_failure(401, 'App purpose "' . $api_entry->purpose() . '" is not declared by an active plugin, or is switched off',
+					'Access for this kind of app is turned off on this site');
+			}
+		} elseif (self::$app_access_attempt !== null) {
+			self::auth_failure(401, 'App-access headers carried a key that is not an app credential',
+				'Incorrect username or app password');
+		}
+
 		// Authentication passed — stamp the key type onto every subsequent log
-		// row and record key usage (written at most once per hour).
+		// row and record key usage (written at most once per hour, or when the
+		// address changes).
 		RequestLogger::set_api_key_type($api_entry->get('apk_type'));
-		$api_entry->touch_last_used();
+		$api_entry->touch_last_used($source_ip);
 		self::$current_api_key = $api_entry;
+
+		// A credential whose purpose borrows the website unlock reads sealed
+		// content in its own window slot, armed whenever the person unlocks on
+		// the website (docs/sealed_vault.md § Borrowed windows).
+		if ($api_entry->is_app_credential() && AppAccess::borrowsUnlock($api_entry->purpose())) {
+			VaultUnlock::useCredentialWindow((int)$api_entry->key, (int)$api_user->key);
+		}
 
 		return array(
 			'api_entry' => $api_entry,
@@ -306,14 +364,126 @@ class ApiAuth {
 	/**
 	 * Log an authentication failure to the api_auth feature (feeding the
 	 * failed-auth rate limiter) and exit via api_error(). Always exits.
+	 *
+	 * A failed app sign-in counts in app_access_auth instead, twice: once for
+	 * the network it came from and once for the username it tried, so neither
+	 * a guesser hopping usernames nor one hopping addresses gets far.
 	 */
 	private static function auth_failure($status_code, $note, $message) {
+		if (self::$app_access_attempt !== null) {
+			foreach (self::appAccessBucketKeys(self::$app_access_attempt) as $key) {
+				RequestLogger::log(self::APP_ACCESS_FEATURE, 'auth_failure', false, [
+					'status_code' => $status_code,
+					'error_type'  => 'AuthenticationError',
+					'note'        => $note,
+					'key'         => $key,
+				]);
+			}
+			api_error($message, 'AuthenticationError', $status_code);
+		}
 		RequestLogger::log('api_auth', 'auth_failure', false, [
 			'status_code' => $status_code,
 			'error_type'  => 'AuthenticationError',
 			'note'        => $note,
 		]);
 		api_error($message, 'AuthenticationError', $status_code);
+	}
+
+	// ====================================================================
+	// App access — failed sign-in limits
+	// ====================================================================
+
+	/** Requests an app credential's person may make per hour (at least; the browser-session limit when higher). */
+	const APP_REQUEST_LIMIT = 20000;
+
+	/** The request-log feature failed app sign-ins count in. */
+	const APP_ACCESS_FEATURE = 'app_access_auth';
+	/**
+	 * Failed app sign-ins allowed in the window, per source network and per
+	 * username. An app password is 256 random bits, so these bound load, not
+	 * guessing — which is why the per-username limit sits far above the
+	 * per-network one: a stranger who knows an address, or one of the person's
+	 * own devices retrying with a revoked password, must not be able to lock
+	 * the person's other devices out by failing in their name.
+	 */
+	const APP_ACCESS_NETWORK_FAILURE_LIMIT = 60;
+	const APP_ACCESS_USERNAME_FAILURE_LIMIT = 600;
+	const APP_ACCESS_FAILURE_WINDOW = 900;
+
+	/**
+	 * The username an app sign-in claimed, when this request presented an app
+	 * credential; null otherwise. Set first thing in authenticate().
+	 * @var string|null
+	 */
+	private static $app_access_attempt = null;
+
+	/**
+	 * The two buckets a failed app sign-in counts in: the source network (an
+	 * IPv4 address, or an IPv6 /64 — one subscriber's whole prefix) and the
+	 * username, lowercased and hashed (the request log is not where mailbox
+	 * addresses should collect).
+	 *
+	 * @return string[]
+	 */
+	private static function appAccessBucketKeys(string $username): array {
+		$keys = array('net:' . self::sourceNetwork(self::$app_client_ip ?? ($_SERVER['REMOTE_ADDR'] ?? '')));
+		$username = strtolower(trim($username));
+		if ($username !== '') {
+			$keys[] = 'user:' . substr(hash('sha256', $username), 0, 32);
+		}
+		return $keys;
+	}
+
+	/** @var string|null The address the app sign-in came from (see appClientIp()). */
+	private static $app_client_ip = null;
+
+	/**
+	 * Where an app sign-in really came from. The program speaks its own
+	 * protocol to a gateway on this host (the mail gateway), which calls the
+	 * API over loopback and names the program's address in X-Joinery-Client-Ip
+	 * — believed only from loopback, as a front proxy's forwarding header is,
+	 * because only a process on this machine can be there. Anything else is
+	 * the connection's own address (behind a front proxy, the one mod_remoteip
+	 * already resolved). IPv4 and IPv6 alike, compared as addresses.
+	 */
+	public static function appClientIp(array $headers): string {
+		$remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+		$packed = @inet_pton($remote);
+		$loopback = $packed !== false && ($packed === inet_pton('::1')
+			|| (strlen($packed) === 4 && ord($packed[0]) === 127)
+			|| (strlen($packed) === 16 && substr($packed, 0, 12) === str_repeat("\0", 10) . "\xff\xff"
+				&& ord($packed[12]) === 127));
+		$claimed = trim((string)($headers['x_joinery_client_ip'] ?? ''));
+		if ($loopback && $claimed !== '' && @inet_pton($claimed) !== false) {
+			return inet_ntop(inet_pton($claimed));
+		}
+		return $remote;
+	}
+
+	/** An address's limiting unit: itself for IPv4, its /64 for IPv6. */
+	private static function sourceNetwork(string $ip): string {
+		$packed = @inet_pton(trim($ip));
+		if ($packed === false) {
+			return 'unknown';
+		}
+		if (strlen($packed) === 16) {
+			return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
+		}
+		return inet_ntop($packed);
+	}
+
+	/** Refuse an app sign-in once its network or its username is over the limit. Exits when over. */
+	private static function refuseOverAppAccessLimit(string $username): void {
+		foreach (self::appAccessBucketKeys($username) as $key) {
+			$per_user = strpos($key, 'user:') === 0;
+			$limit = $per_user ? self::APP_ACCESS_USERNAME_FAILURE_LIMIT : self::APP_ACCESS_NETWORK_FAILURE_LIMIT;
+			$state = RequestLogger::rate_limit_state(self::APP_ACCESS_FEATURE, $limit,
+				self::APP_ACCESS_FAILURE_WINDOW, false, null, $key);
+			if (!$state['allowed']) {
+				api_rate_limited($state, $per_user ? 'This username' : 'This address',
+					$limit, self::APP_ACCESS_FAILURE_WINDOW, 'failed sign-in attempts');
+			}
+		}
 	}
 
 	/**
@@ -385,6 +555,23 @@ class ApiAuth {
 		if ($user_permission === null && empty($auth['allow_guest'])) {
 			api_error($message_prefix . ' requires authentication', 'AuthenticationError', 401);
 		}
+		// App-purpose gate, both ways. A credential limited to a purpose reaches
+		// only an endpoint declaring that purpose (CRUD, forms and management
+		// declare none, so they always refuse it); and an endpoint declaring a
+		// purpose is for that purpose's credentials alone — its logic runs on the
+		// credential's identity (its borrowed unlock window, its message
+		// numbering), which nothing else has.
+		$credential_purpose = ($api_entry && $api_entry->is_app_credential()) ? $api_entry->purpose() : null;
+		$endpoint_purpose = isset($auth['app_purpose']) && $auth['app_purpose'] !== '' ? (string)$auth['app_purpose'] : null;
+		if ($credential_purpose !== null && $credential_purpose !== $endpoint_purpose) {
+			api_error($message_prefix . ': this credential is limited to ' . AppAccess::label($credential_purpose),
+				'AuthenticationError', 403);
+		}
+		if ($endpoint_purpose !== null && $credential_purpose !== $endpoint_purpose) {
+			api_error($message_prefix . ' is available only to ' . AppAccess::label($endpoint_purpose),
+				'AuthenticationError', 403);
+		}
+
 		// Scope gate. A scoped key reaches only the endpoints its scope names;
 		// a surface with no name is never among them.
 		if ($api_entry && $api_entry->is_scoped()
@@ -462,6 +649,22 @@ class ApiAuth {
 		if ($api_entry && $api_entry->is_scoped()) {
 			api_error(($family !== '' ? $family : 'This endpoint') . ': this key is limited to '
 				. implode(', ', $api_entry->scope()), 'AuthenticationError', 403);
+		}
+	}
+
+	/**
+	 * Refuse an app credential on a route family other than action dispatch —
+	 * auth/* (the web-session bridge included), app/*, forms, CRUD,
+	 * management, drive_upload, the actions listing. Its purpose names only
+	 * actions; authorize() then matches it against each action's app_purpose.
+	 *
+	 * @param ApiKey|null $api_entry The authenticated key (null for a browser session).
+	 * @param string      $family    The route family, for the 403 body.
+	 */
+	public static function refuseAppCredentialOutsideActions($api_entry, $family) {
+		if ($api_entry && $api_entry->is_app_credential()) {
+			api_error(($family !== '' ? $family : 'This endpoint') . ': this credential is limited to '
+				. AppAccess::label($api_entry->purpose()), 'AuthenticationError', 403);
 		}
 	}
 
