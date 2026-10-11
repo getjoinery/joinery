@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.6 - disable_agent needs the typed words "disable agent" (the page dialog asks; this refuses without)
  * @version 1.5 - admin_management_node_cli_join_request(): a CLI join naming the URL of a request not yet
  *                answered keeps that request, so the agent keeps its staged key; the page's Connect
  *                stays a fresh ask
@@ -46,7 +47,12 @@ function admin_management_node_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_management_node?agent=on');
 	}
 
+	// Turning the agent off is refused unless the words were typed; the page's
+	// dialog enforces it in the browser, this enforces it for everything else.
 	if (isset($input['action']) && $input['action'] === 'disable_agent') {
+		if (strtolower(trim((string)($input['confirm_text'] ?? ''))) !== 'disable agent') {
+			return LogicResult::redirect('/admin/admin_management_node?error=' . urlencode('The agent was left on: the confirmation words were not typed.'));
+		}
 		Setting::put('agent_enabled', '');
 		return LogicResult::redirect('/admin/admin_management_node?agent=off');
 	}
