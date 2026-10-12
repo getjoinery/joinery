@@ -25,6 +25,10 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.10 - publish() takes $source: the agent is built from a copy of its source commit, so an
+ *                 uncommitted edit in the agent source is not compiled into a release; uncommittedAdvice()
+ *                 no longer names agent changes, which are left out rather than in the way;
+ *                 readCommittedVersion(): the version at HEAD, which is what a release builds
  * @version 2.9 - uncommittedAdvice() names only the held changes (ReleaseCommit::heldPath()): a release is
  *                built from the commit, so other uncommitted work is left out, not in the way
  * @version 2.8 - uncommittedAdvice(): what stops a publish from this box before it is queued, so the form is not offered
@@ -102,11 +106,15 @@ class AgentDistPublisher {
 	 *
 	 * @param string $full_site_dir e.g. /var/www/html/joinerytest
 	 * @param callable|null $out    line-output callback (publish_output)
+	 * @param array|null $source    ['dir' => a copy of the agent source at one commit
+	 *                              (ReleaseCommit::exportCommit()), 'commit' => that commit]:
+	 *                              what a release builds from. Null builds from sourcePath()
+	 *                              and records its HEAD.
 	 * @return array{status:string, message:string, source_version:?string, bundled_version:?string}
 	 *         status is one of the STATUS_* constants. Only STATUS_FAILED means
 	 *         the release would ship an artifact known to be wrong.
 	 */
-	public static function publish($full_site_dir, $out = null) {
+	public static function publish($full_site_dir, $out = null, $source = null) {
 		$say = function ($msg) use ($out) { if ($out) { call_user_func($out, $msg); } };
 
 		$result = function ($status, $message, $source_version = null, $bundled_version = null) {
@@ -129,7 +137,8 @@ class AgentDistPublisher {
 			$manifest = self::readManifest($dist_dir);
 			$bundled_version = $manifest['version'] ?? null;
 
-			$src = self::sourcePath();
+			$src = $source['dir'] ?? self::sourcePath();
+			$source_commit = $source['commit'] ?? ReleaseCommit::head($src);
 			if (!is_dir($src) || !file_exists($src . '/main.go')) {
 				if ($bundled_version) {
 					$msg = "Agent artifact: source not present on this box - carrying forward v{$bundled_version}";
@@ -183,7 +192,7 @@ class AgentDistPublisher {
 				// HEAD when they match. Different bytes at the same version
 				// would ship a binary nobody can rebuild from the named
 				// commit, so the version has to move first.
-				$head = ReleaseCommit::head($src);
+				$head = $source_commit;
 				if ($head !== null && ($manifest['source_commit'] ?? null) !== $head) {
 					$rebuild_required = true;
 					$changed = self::rebuildDiffers($src, $agent_version, $manifest, $dist_dir . '.check');
@@ -261,7 +270,7 @@ class AgentDistPublisher {
 			}
 
 			$manifest_json = json_encode(
-				array('version' => $agent_version, 'source_commit' => ReleaseCommit::head($src),
+				array('version' => $agent_version, 'source_commit' => $source_commit,
 				      'go_toolchain' => $go_toolchain, 'binaries' => $binaries,
 				      'signing_public_key' => $keys['public_b64'],
 				      // What the binaries above were built with. The lists beside
@@ -344,9 +353,6 @@ class AgentDistPublisher {
 			$lines[] = 'The core repository has uncommitted changes that a release reads from this box rather than from the commit: '
 				. $show($b['core']) . '.';
 		}
-		if ($b['agent']) {
-			$lines[] = 'The agent repository (' . self::sourcePath() . ') has uncommitted changes: ' . $show($b['agent']) . '.';
-		}
 		foreach ($b['unreadable'] as $why) {
 			$lines[] = ucfirst($why) . '.';
 		}
@@ -413,6 +419,19 @@ class AgentDistPublisher {
 	public static function readSourceVersion($src) {
 		$main = @file_get_contents($src . '/main.go');
 		if ($main && preg_match('/var\s+version\s*=\s*"([^"]+)"/', $main, $m)) {
+			return $m[1];
+		}
+		return null;
+	}
+
+	/**
+	 * The agent version at the source's HEAD commit: what a release builds
+	 * (publish builds from the commit, not the working tree). Null when the
+	 * source is not a git checkout or main.go names no version there.
+	 */
+	public static function readCommittedVersion($src) {
+		$r = ReleaseCommit::git($src, array('show', 'HEAD:main.go'));
+		if ($r['exit'] === 0 && preg_match('/var\s+version\s*=\s*"([^"]+)"/', implode("\n", $r['out']), $m)) {
 			return $m[1];
 		}
 		return null;

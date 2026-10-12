@@ -240,7 +240,7 @@ section('One publish goes from a committed tree to a release');
 // install SQL and version bumps and needed a second run by hand.
 $at = function ($needle) use ($publisher_src) { $p = strpos($publisher_src, $needle); return $p === false ? -1 : $p; };
 $owner_check = $at('publish_require_committed(publish_release_repos($full_site_dir), $version, false)');
-$own_commit  = $at("publish_require_committed(publish_release_repos(\$full_site_dir), \$version, true, \$base_commits['core'])");
+$own_commit  = $at("publish_require_committed(publish_release_repos(\$full_site_dir), \$version, true, \$base_commits)");
 check($owner_check > 0 && $owner_check < $at('publish_output("Wrote version') && $owner_check < $at('AgentDistPublisher::publish($full_site_dir'),
     'the owner\'s work is checked before anything is written');
 check($own_commit > $at('Updated on-disk install SQL') && $own_commit > $at('$component_plan = publish_plan_components('),
@@ -276,8 +276,12 @@ check(strpos($publisher_src, "escapeshellarg(\$full_site_dir . '/public_html/')"
 check(strpos($publisher_src, "TreeManifestPublisher::write(\$build_root, \$build_root, \$manifest_authority['keys'], null, \$full_site_dir)") !== false,
     'this site\'s own live manifest lists what was released, so an uncommitted edit here does not verify',
     'signing the working tree would have this site\'s agent run an uncommitted edit as root');
-check(strpos($publisher_src, 'a commit landed while this publish ran') !== false,
-    'publish commits only onto the commit its version bumps were decided from');
+check(strpos($publisher_src, 'a commit landed in the {$name} repository while this publish ran') !== false,
+    'publish commits only onto the commits it was built from, in either repository');
+check(strpos($publisher_src, "AgentDistPublisher::publish(\$full_site_dir, 'publish_output',\n\t\t\t\tarray('dir' => publish_agent_build_tree(\$base_commits['agent'], \$version), 'commit' => \$base_commits['agent']))") !== false,
+    'the agent is built from a copy of the agent source commit just checked, not its working tree');
+check(strpos($publisher_src, "\$name === 'agent' || !ReleaseCommit::heldPath(\$path)") !== false,
+    'so uncommitted agent work is left out of the release, not in the way');
 
 // The deploy tier tests the code that ships: on a box with a release staging
 // site, the commit is copied there and the tier runs there, so a file another

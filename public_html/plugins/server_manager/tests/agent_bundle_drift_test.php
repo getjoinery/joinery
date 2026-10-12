@@ -69,16 +69,19 @@ if (!$has_source) {
 	// a run on the wrong box cannot be mistaken for a passing drift check.
 	harness_skip('drift check not applicable', "no agent source at {$src}");
 } else {
-	$source_version  = AgentDistPublisher::readSourceVersion($src);
+	// A release builds the agent from the source's HEAD commit, not its
+	// working tree, so that is what the bundle is held to: an uncommitted
+	// bump in the checkout is another session's work in progress, not drift.
+	$source_version  = AgentDistPublisher::readCommittedVersion($src);
 	$bundled_version = $manifest['version'] ?? null;
 
-	check($source_version !== null, 'agent source version is readable',
-		"could not read 'var version' from {$src}/main.go");
+	check($source_version !== null, 'agent source version is readable at HEAD',
+		"could not read 'var version' from main.go at the HEAD of {$src}");
 
 	check(
 		$source_version !== null && $source_version === $bundled_version,
-		'bundled agent version matches the agent source',
-		"agent source is v" . var_export($source_version, true)
+		'bundled agent version matches the agent source commit',
+		"the agent source's HEAD is v" . var_export($source_version, true)
 		. " but agent_dist is v" . var_export($bundled_version, true)
 		. " - the last publish from this box shipped a stale agent; rebuild the bundle"
 	);

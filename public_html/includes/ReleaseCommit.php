@@ -34,8 +34,9 @@
  * specs/, uploads/, cache/, logs/, backups/, .claude/, node_modules/, .git,
  * top-level config/ and vendor/).
  *
- * For the agent repository every untracked, un-ignored file blocks: all of it
- * is source.
+ * The agent repository is built from its commit the same way (exportCommit()),
+ * and nothing in it is read from the working tree, so none of it is held:
+ * every uncommitted change there is left out.
  *
  * What SHIPS from the joinery repository is narrower than what sits on disk:
  * a file git knows (tracked, or untracked and not ignored - the second kind
@@ -56,6 +57,8 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.5 - the agent is built from its commit too (exportCommit()); uncommitted agent work is left out,
+ *                like the core's, instead of refusing the release
  * @version 1.4 - a release is built from the commit (exportTree(), commitFiles()); only a HELD path
  *                (heldPath()) still refuses while uncommitted, everything else is left out and named
  * @version 1.3 - commitRelease() adds its paths before committing them, so a file new to git is committed too
@@ -311,15 +314,42 @@ class ReleaseCommit {
 		if ($paths === array()) {
 			return array('ok' => false, 'reason' => 'commit ' . $commit . ' holds none of the paths a release ships');
 		}
+		$archived = self::archiveInto($repo_root, $commit, $paths, $to_dir);
+		return $archived['ok'] ? self::overlayGenerated($repo_root, $to_dir) : $archived;
+	}
+
+	/**
+	 * Write the whole of $commit into the empty directory $to_dir: the agent
+	 * source a release's agent is built from, so an uncommitted edit beside it
+	 * is not compiled into the release.
+	 *
+	 * @return array{ok:bool, reason:string}
+	 */
+	public static function exportCommit($repo_root, $commit, $to_dir) {
+		$to_dir = rtrim($to_dir, '/');
+		if (!preg_match('/^[0-9a-f]{40}$/', (string)$commit)) {
+			return array('ok' => false, 'reason' => 'not a commit id: ' . $commit);
+		}
+		if (!is_dir($to_dir) || (new FilesystemIterator($to_dir))->valid()) {
+			return array('ok' => false, 'reason' => $to_dir . ' is not an empty directory');
+		}
+		return self::archiveInto(rtrim($repo_root, '/'), $commit, array(), $to_dir);
+	}
+
+	/** git archive $commit (limited to $paths when any are given) into $to_dir. */
+	private static function archiveInto($repo_root, $commit, array $paths, $to_dir) {
+		$args = array('archive', '--format=tar', $commit);
+		if ($paths !== array()) {
+			$args = array_merge($args, array('--'), $paths);
+		}
 		$out = array();
 		$exit = 0;
-		exec('bash -c ' . escapeshellarg('set -o pipefail; '
-			. self::gitCommand($repo_root, array_merge(array('archive', '--format=tar', $commit, '--'), $paths))
+		exec('bash -c ' . escapeshellarg('set -o pipefail; ' . self::gitCommand($repo_root, $args)
 			. ' | tar -xf - --no-same-owner -C ' . escapeshellarg($to_dir)) . ' 2>&1', $out, $exit);
 		if ($exit !== 0) {
 			return array('ok' => false, 'reason' => 'git archive of ' . $commit . ' failed: ' . trim(implode(' | ', array_slice($out, -3))));
 		}
-		return self::overlayGenerated($repo_root, $to_dir);
+		return array('ok' => true, 'reason' => '');
 	}
 
 	/**
@@ -398,14 +428,16 @@ class ReleaseCommit {
 	/**
 	 * Everything uncommitted that would stop a publish from this box, before
 	 * the publish is queued: the HELD changes in the core repository
-	 * (heldPath(); not the files a publish writes itself) and every change in
-	 * the agent source. The check the publish job makes first, asked ahead of
-	 * it so the button is not offered while the job could only refuse. The
-	 * core's other uncommitted changes are in 'left_out': they do not refuse,
-	 * they are simply not in the release.
+	 * (heldPath(); not the files a publish writes itself), and any repository
+	 * git cannot read. The check the publish job makes first,
+	 * asked ahead of it so the button is not offered while the job could only
+	 * refuse. Every other uncommitted change, in the core or the agent source,
+	 * is in 'left_out' (agent paths prefixed 'agent: '): it does not refuse, it
+	 * is simply not in the release.
 	 *
 	 * @param string|null $agent_root null when the box has no agent source path
-	 * @return array{core:string[], left_out:string[], agent:string[], unreadable:string[]}
+	 * @return array{core:string[], left_out:string[], agent:string[], unreadable:string[]} 'agent' is
+	 *         always empty: nothing in the agent source is held
 	 *         'unreadable' names a repository git could not read, with the reason
 	 */
 	public static function ownerBlockers($core_root, $agent_root) {
@@ -433,7 +465,9 @@ class ReleaseCommit {
 			if ($agent === null) {
 				$out['unreadable'][] = 'the agent repository at ' . $agent_root . ' could not be read by git';
 			} else {
-				$out['agent'] = $agent;
+				foreach ($agent as $path) {
+					$out['left_out'][] = 'agent: ' . $path;
+				}
 			}
 		}
 		return $out;
