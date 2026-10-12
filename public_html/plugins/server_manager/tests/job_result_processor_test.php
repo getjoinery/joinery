@@ -450,9 +450,18 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 22 && array_key_exists('data_root_encryption', $capped),
+check(!isset($capped['surprise']) && count($capped) === 23 && array_key_exists('data_root_encryption', $capped)
+	&& array_key_exists('mail_gateway', $capped),
 	'unknown keys are dropped and every known key is present (data_root_encryption among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
+check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
+$mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
+	'up_seconds' => -5, 'connections' => 3, 'sites' => array(array('site' => 'shop', 'name' => 'mail.shop.example', 'imap' => 'ok',
+	'submission' => 'maybe', 'days_left' => 40), array('site' => '', 'imap' => 'ok'), 'junk'))))['mail_gateway'];
+check($mg['version'] === '1.0.0x' && $mg['state'] === 'unknown' && $mg['restarts'] === 2 && $mg['up_seconds'] === 'unknown'
+	&& count($mg['sites']) === 1 && $mg['sites'][0]['imap'] === 'ok' && $mg['sites'][0]['submission'] === 'unknown' && $mg['sites'][0]['days_left'] === 40,
+	'mail_gateway is bounded: names reduced, an unknown state or answer reads unknown, a site with no name dropped', json_encode($mg));
+check(JobResultProcessor::sanitise_host_report(array('mail_gateway' => 'none'))['mail_gateway'] === 'none', 'mail_gateway none is kept');
 check($capped['cpus'] === 'unknown', 'a processor count that is not a count reads unknown');
 check(JobResultProcessor::sanitise_host_report(array('cpus' => 4))['cpus'] === 4, 'a processor count is kept');
 $quiet = JobResultProcessor::sanitise_host_report(array('answers' => array('apache2' => 'yes', 'php-fpm' => 'quiet', 'postgresql' => 'maybe')));

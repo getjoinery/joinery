@@ -93,6 +93,9 @@ type limitedConn struct {
 	net.Conn
 	once    sync.Once
 	release func()
+	// relayed: the connection came through a relay in proxy_from and its
+	// PROXY line was read; RemoteAddr is then the program's (proxy.go).
+	relayed bool
 }
 
 func (c *limitedConn) Close() error {
@@ -118,28 +121,86 @@ func (c *limitedConn) SetDeadline(t time.Time) error {
 // tlsListener accepts raw connections, applies the limits, and hands out
 // server-side *tls.Conn (so the IMAP and SMTP libraries see TLS and allow
 // sign-in). The handshake itself happens on the connection's own goroutine.
+// A connection from a relay in proxy_from first has its PROXY line read, on
+// its own goroutine too, so a slow relay holds up nobody; the limits then
+// count the program's address, not the relay's.
 type tlsListener struct {
 	net.Listener
 	cfg     *tls.Config
 	limiter *ConnLimiter
 	proto   string
+	trusts  func(ip string) bool // nil: no PROXY lines anywhere
+
+	once     sync.Once
+	initOnce sync.Once
+	ready    chan net.Conn
+	errc     chan error
+	done     chan struct{}
+	shut     sync.Once
+}
+
+func (l *tlsListener) init() {
+	l.initOnce.Do(func() { l.done = make(chan struct{}) })
+}
+
+func (l *tlsListener) start() {
+	l.init()
+	l.ready = make(chan net.Conn)
+	l.errc = make(chan error, 1)
+	go func() {
+		for {
+			c, err := l.Listener.Accept()
+			if err != nil {
+				l.errc <- err
+				return
+			}
+			go l.admit(c)
+		}
+	}()
 }
 
 func (l *tlsListener) Accept() (net.Conn, error) {
-	for {
-		c, err := l.Listener.Accept()
+	l.once.Do(l.start)
+	select {
+	case c := <-l.ready:
+		return c, nil
+	case err := <-l.errc:
+		return nil, err
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *tlsListener) Close() error {
+	l.init()
+	l.shut.Do(func() { close(l.done) })
+	return l.Listener.Close()
+}
+
+func (l *tlsListener) admit(c net.Conn) {
+	var conn net.Conn = c
+	relayed := false
+	if l.trusts != nil && l.trusts(remoteIP(c.RemoteAddr())) {
+		pc, err := readProxyHeader(c)
 		if err != nil {
-			return nil, err
-		}
-		ip := remoteIP(c.RemoteAddr())
-		key := sourceKey(ip)
-		if !l.limiter.acquire(key) {
-			logf("%s: refused connection from %s: too many connections", l.proto, ip)
+			logf("%s: refused connection from relay %s: %v", l.proto, remoteIP(c.RemoteAddr()), err)
 			c.Close()
-			continue
+			return
 		}
-		lc := &limitedConn{Conn: c, release: func() { l.limiter.release(key) }}
-		return tls.Server(lc, l.cfg), nil
+		conn, relayed = pc, true
+	}
+	ip := remoteIP(conn.RemoteAddr())
+	key := sourceKey(ip)
+	if !l.limiter.acquire(key) {
+		logf("%s: refused connection from %s: too many connections", l.proto, ip)
+		c.Close()
+		return
+	}
+	lc := &limitedConn{Conn: conn, release: func() { l.limiter.release(key) }, relayed: relayed}
+	select {
+	case l.ready <- tls.Server(lc, l.cfg):
+	case <-l.done:
+		lc.Close()
 	}
 }
 

@@ -8,6 +8,11 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.20 - mail_gateway: the mail apps gateway (plugins/mail_apps, install_mail_gateway.sh) where
+#                it is installed - its version, its unit's state, how often systemd restarted it
+#                and for how long it has been up, its open connections, and for each site turned
+#                on whether IMAP (993) and submission (465) greet under that site's mail name and
+#                how many days its certificate has left; "none" where it is not installed.
 # Version: 1.19 - data_root_encryption: an encrypted data root's state - open or locked, what opened
 #                it, the unlock identity's public half, the escrow holder and slot, the recovery
 #                recipient's fingerprint and the break-glass box (sealed, so public); "none" where
@@ -1059,6 +1064,72 @@ emit_containers() {
 }
 
 # ---------------------------------------------------------------------------
+# The mail apps gateway (plugins/mail_apps, install_mail_gateway.sh): one
+# process on the machine serving every site turned on, each under its own mail
+# host name (SNI). Asked the way a mail program asks: a TLS connection to the
+# site's name on 993 and 465 must reach a greeting, which a process that runs
+# but no longer answers does not give. "none" where it is not installed.
+# ---------------------------------------------------------------------------
+GATEWAY_DIR=/etc/joinery/mail-gateway
+GATEWAY_BIN=/usr/local/lib/joinery/mail-gateway
+GATEWAY_UNIT=joinery-mail-gateway.service
+GATEWAY_IMAP_PORT=993
+GATEWAY_SUBMISSION_PORT=465
+
+# A plain string field of a site entry, however the JSON is laid out.
+gateway_field() {
+    grep -o "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$1" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/'
+}
+
+# ok when a TLS connection to 127.0.0.1:PORT under NAME greets with PREFIX, else no_answer.
+gateway_greets() {
+    local port="$1" name="$2" prefix="$3" say="$4" line
+    line="$(printf '%s\r\n' "$say" | timeout "$CMD_TIMEOUT" openssl s_client -connect "127.0.0.1:${port}" \
+        -servername "$name" -quiet 2>/dev/null | head -n 1)"
+    [[ "$line" == "$prefix"* ]] && printf 'ok' || printf 'no_answer'
+}
+
+emit_mail_gateway() {
+    local version restarts since since_s up connections f site name end end_s days now first=1 n=0
+    [[ -e "$GATEWAY_BIN" || -d "$GATEWAY_DIR/sites" ]] || { printf '"none"'; return; }
+    now="$(date -u +%s)"
+    version="$(run "$GATEWAY_BIN" -version | awk '{print $NF; exit}')"
+    restarts="$(run systemctl show -p NRestarts --value "$GATEWAY_UNIT")"
+    up=""
+    since="$(run systemctl show -p ActiveEnterTimestamp --value "$GATEWAY_UNIT")"
+    if [[ -n "$since" && "$since" != "n/a" ]] && since_s="$(date -u -d "$since" +%s 2>/dev/null)"; then
+        up=$(( now - since_s ))
+    fi
+    connections="$(run ss -Htn state established "( sport = :${GATEWAY_IMAP_PORT} or sport = :${GATEWAY_SUBMISSION_PORT} )" | wc -l)"
+    printf '{"version":%s,"state":"%s","restarts":%s,"up_seconds":%s,"connections":%s,"sites":[' \
+        "$(json_str "${version:-unknown}")" "$(unit_state "$GATEWAY_UNIT")" "$(json_num_or_unknown "$restarts")" \
+        "$(json_num_or_unknown "$up")" "$(json_num_or_unknown "$connections")"
+    for f in "$GATEWAY_DIR"/sites/*.enabled; do
+        [[ -e "$f" ]] || continue
+        (( n < MAX_SITES )) || break
+        site="$(basename "$f" .enabled)"
+        name="$(gateway_field "$GATEWAY_DIR/sites/${site}.json" mail_hostname)"
+        [[ -n "$name" ]] || name="$(gateway_field "$GATEWAY_DIR/sites/${site}.json" hostname)"
+        days='"unknown"'
+        if [[ -n "$name" ]]; then
+            end="$(run openssl s_client -connect "127.0.0.1:${GATEWAY_IMAP_PORT}" -servername "$name" < /dev/null | run openssl x509 -noout -enddate)"
+            end="${end#notAfter=}"
+            if [[ -n "$end" ]] && end_s="$(date -u -d "$end" +%s 2>/dev/null)"; then
+                days=$(( (end_s - now) / 86400 ))
+            fi
+        fi
+        (( first )) || printf ','
+        first=0
+        printf '{"site":%s,"name":%s,"imap":"%s","submission":"%s","days_left":%s}' \
+            "$(json_str "$site")" "$(json_str "$name")" \
+            "$([[ -n "$name" ]] && gateway_greets "$GATEWAY_IMAP_PORT" "$name" '* OK' 'a LOGOUT' || printf 'no_answer')" \
+            "$([[ -n "$name" ]] && gateway_greets "$GATEWAY_SUBMISSION_PORT" "$name" '220' 'QUIT' || printf 'no_answer')" "$days"
+        n=$((n+1))
+    done
+    printf ']}'
+}
+
+# ---------------------------------------------------------------------------
 # The object. One line, every key, in this order.
 # ---------------------------------------------------------------------------
 limits_read
@@ -1084,6 +1155,7 @@ printf '"answers":%s,' "$(emit_answers)"
 printf '"served_certificates":%s,' "$(emit_served_certificates)"
 printf '"containers":%s,' "$(emit_containers)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
+printf '"mail_gateway":%s,' "$(emit_mail_gateway)"
 printf '"generated_at":%s' "$(date -u +%s)"
 printf '}\n'
 exit 0

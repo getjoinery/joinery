@@ -42,9 +42,10 @@ public_html/agent_dist.*
 # archive tars the live directory, which git does not gate) but they are build
 # output, regenerated from the tracked .go sources beside them.
 public_html/plugins/mailbox/provisioning/bin/
-# The mail apps gateway binaries, build output of the .go sources in
-# plugins/mail_apps/provisioning/mail-gateway/. No publish step builds them
-# yet, so they do not ship: the archive carries only what its manifest lists.
+# Prebuilt mail gateway binaries - cross-compiled into the mail_apps plugin by
+# MailGatewayPublisher on every publish that needs them. They SHIP (a generated
+# directory, ReleaseCommit::JOINERY_GENERATED_DIRS) but they are build output,
+# regenerated from the tracked .go sources in provisioning/mail-gateway/.
 public_html/plugins/mail_apps/provisioning/bin/
 
 # Data directories (not tracked in git)

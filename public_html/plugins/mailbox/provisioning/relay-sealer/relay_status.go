@@ -109,7 +109,12 @@ func (s *relayServer) buildPing(tenant string) map[string]any {
 	ping["listeners"] = map[string]any{
 		"25":  map[string]any{"bound": portListening(25), "accepted_1h": priv.Postfix.Connections1h},
 		"443": map[string]any{"bound": portListening(443), "accepted_1h": s.countSince(s.conns443, time.Hour)},
+		"993": map[string]any{"bound": portListening(993)},
+		"465": map[string]any{"bound": portListening(465)},
 	}
+
+	// --- mail apps pass-through (mailapps_pass.go) ---------------------------
+	ping["mail_apps"] = s.mailApps.status()
 
 	// --- tls -----------------------------------------------------------------
 	tlsGroup := map[string]any{"acme_certificate": false}

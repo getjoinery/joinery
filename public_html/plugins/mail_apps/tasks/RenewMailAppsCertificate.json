@@ -1,0 +1,6 @@
+{
+  "name": "Renew the mail apps certificate through the relay",
+  "description": "On a site whose mail arrives through a relay, mail programs connect to the relay's name and the mail gateway here holds a certificate for it, issued through the relay. Once a day, when that certificate has fewer than 30 days left, a new key is made here and the relay obtains the new certificate for it. Does nothing on a site that reaches mail programs directly (certbot renews that certificate) or with mail apps off.",
+  "activate_on_install": true,
+  "default_frequency": "daily"
+}

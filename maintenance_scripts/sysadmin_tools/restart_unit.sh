@@ -3,6 +3,7 @@
 # restart_unit.sh - restart one of the host's expected units, and say what its
 # state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.2 - joinery-mail-gateway, the mail apps gateway (host_report 1.20 mail_gateway)
 # Version: 1.1 - php-fpm resolves to the ACTIVE unit, else the newest installed
 #                (review B13): the first unit file alphabetically could be a
 #                leftover 8.1 beside the 8.3 the host serves.
@@ -39,8 +40,9 @@ RESTART_TIMEOUT=90      # a PostgreSQL restart flushes; give it room
 SETTLE_SECONDS=10       # how long "activating" may last before after is read
 
 # THE CLOSED LIST: host_report.sh's expected units, less nothing, because the
-# agent is not one of them.
-UNITS=(fail2ban apache2 php-fpm cron postgresql)
+# agent is not one of them, then the mail apps gateway (host_report's
+# mail_gateway).
+UNITS=(fail2ban apache2 php-fpm cron postgresql joinery-mail-gateway)
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }
 json_safe() {

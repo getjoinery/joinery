@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.64 - Services: a Mail apps gateway row (host_report 1.20 mail_gateway) with Restart and Why?
+ * @version 1.63 - Hosted at no longer says '(not hosted by us)' twice for a machine hosted elsewhere
  * @version 1.62 - under the address, a provision's one line: "Data root: encrypted by us · provider's disk encryption: off"
  *                 (or on / unknown), shown once it knows (specs/hosted_data_promise_disk_encryption.md D1a)
  * @version 1.61 - the Encrypted data root card (overview_encryption.php): its state, what this management node holds
@@ -1159,6 +1161,66 @@
 				}
 				echo '</td></tr>';
 			}
+			// The mail apps gateway (host_report 1.20), where it is installed.
+			// Idle by design while no site has mail apps on; otherwise it must
+			// run and greet each site's mail programs (plane:mail_gateway).
+			$mg = $hr['mail_gateway'] ?? null;
+			if (is_array($mg)) {
+				$mg_unit = 'joinery-mail-gateway';
+				$mg_sites = $mg['sites'];
+				$mg_silent = array();
+				foreach ($mg_sites as $mg_site) {
+					if ($mg_site['imap'] === 'no_answer' || $mg_site['submission'] === 'no_answer') {
+						$mg_silent[] = $mg_site['name'] !== '' ? $mg_site['name'] : $mg_site['site'];
+					}
+				}
+				if (!$mg_sites) {
+					list($text, $cls) = array('Off: no site has mail apps on', 'secondary');
+				} elseif ($mg['state'] === 'active' && $mg_silent) {
+					list($text, $cls) = array('Not answering', 'danger');
+				} else {
+					list($text, $cls) = $svc_status($mg['state']);
+				}
+				$mg_note = 'version ' . $mg['version'] . ', ' . count($mg_sites) . ' site(s) on'
+					. (is_int($mg['connections']) ? ', ' . $mg['connections'] . ' connection(s)' : '');
+				foreach ($mg_sites as $mg_site) {
+					if (is_int($mg_site['days_left']) && $mg_site['days_left'] < IncidentSourceMailGateway::WARNING_DAYS) {
+						$mg_note .= '; ' . ($mg_site['name'] !== '' ? $mg_site['name'] : $mg_site['site']) . ' certificate: '
+							. $mg_site['days_left'] . ' days left';
+					}
+				}
+				if ($mg_silent) {
+					$mg_note .= '; not answering for ' . implode(', ', $mg_silent);
+				}
+				echo '<tr><td>Mail apps gateway <span class="text-muted small">' . $hr_str($mg_unit) . '</span></td>';
+				echo '<td><span class="badge bg-' . $cls . '">' . htmlspecialchars($text) . '</span>'
+					. '<div class="small text-muted">' . htmlspecialchars($mg_note) . '</div></td><td class="text-end">';
+				if ($mg_sites && $can_restart && array_key_exists($mg_unit, JobCommandBuilder::RESTART_UNIT_UNITS)) {
+					$form_id = 'nodeActionRestartUnit_mail_gateway';
+					$confirm = 'Restart the mail apps gateway on this machine now? Mail programs connected to it reconnect; nothing stored is lost.';
+					echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+							. json_encode($form_id) . ').submit(); })') . '">Restart</button>';
+					echo '<form id="' . $hr_str($form_id) . '" method="post" action="'
+						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+						. '<input type="hidden" name="action" value="restart_unit">'
+						. '<input type="hidden" name="unit" value="' . $hr_str($mg_unit) . '">'
+						. SmAdminCsrf::field() . '</form>';
+				}
+				if (JobCommandBuilder::has_primitive($node, 'unit_journal') && JobCommandBuilder::log_access_refusal($node) === null
+						&& array_key_exists($mg_unit, JobCommandBuilder::UNIT_JOURNAL_UNITS)) {
+					echo ' <button type="submit" form="nodeActionUnitJournal_mail_gateway"'
+						. ' class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+						. ' title="Read the gateway\'s state, its exit status and the last 100 lines of its journal, redacted on the node">Why?</button>';
+					echo '<form id="nodeActionUnitJournal_mail_gateway" method="post" action="'
+						. htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+						. '<input type="hidden" name="action" value="unit_journal">'
+						. '<input type="hidden" name="unit" value="' . $hr_str($mg_unit) . '">'
+						. '<input type="hidden" name="lines" value="100">'
+						. SmAdminCsrf::field() . '</form>';
+				}
+				echo '</td></tr>';
+			}
 			echo '</tbody></table>';
 			// A Docker host's site containers, each with a Restart.
 			$containers = $hr['containers'] ?? null;
@@ -1971,8 +2033,10 @@
 			. ' <a href="' . $base_url . '&tab=backups" class="small ms-1">Move</a>'
 		);
 	}
-	$conn_row('Hosted at', htmlspecialchars(CloudAccounts::hosted_at_label(CloudAccounts::hosted_at($node)))
-		. (CloudAccounts::is_ours($node) ? '' : ' <span class="text-muted">(not hosted by us)</span>'));
+	// 'Elsewhere' says it is not hosted by us in its own label.
+	$hosted_at = CloudAccounts::hosted_at($node);
+	$conn_row('Hosted at', htmlspecialchars(CloudAccounts::hosted_at_label($hosted_at))
+		. (CloudAccounts::is_ours($node) || $hosted_at === CloudAccounts::EXTERNAL ? '' : ' <span class="text-muted">(not hosted by us)</span>'));
 	if ($node->get('mgn_notes')) {
 		$conn_row('Notes', nl2br(htmlspecialchars($node->get('mgn_notes'))));
 	}

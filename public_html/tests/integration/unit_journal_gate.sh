@@ -153,7 +153,7 @@ chk "the third argument is ignored" "$(jv "$T/extra.json" "" keys)" "$KEYS"
 chk "the unit is still the one named" "$(jv "$T/extra.json" unit)" "cron.service"
 
 echo "=== Static pins ==="
-chk "the unit list holds twelve names" "$(sed -n '/^UNITS=(/,/^)/p' "$SCRIPT" | tr ' ' '\n' | grep -c -E '^[a-z0-9][a-z0-9._-]*$')" "12"
+chk "the unit list holds thirteen names" "$(sed -n '/^UNITS=(/,/^)/p' "$SCRIPT" | tr ' ' '\n' | grep -c -E '^[a-z0-9][a-z0-9._-]*$')" "13"
 chk "sshd is not one of them" "$(sed -n '/^UNITS=(/,/^)/p' "$SCRIPT" | grep -c -w -E 'sshd|ssh')" "0"
 chk "the line cap is 200" "$(grep -c '^MAX_LINES=200' "$SCRIPT")" "1"
 chk "every command runs under the per-command timeout" "$(grep -c '^run() { timeout "\$CMD_TIMEOUT"' "$SCRIPT")" "1"

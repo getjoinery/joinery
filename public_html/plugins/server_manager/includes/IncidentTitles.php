@@ -7,6 +7,7 @@
  * carries its reason, which is shown under the title as the node's account,
  * escaped. So a forged reason can never pose as the plane's verdict.
  *
+ * @version 1.1 - mail_gateway
  * @version 1.0
  */
 class IncidentTitles {
@@ -18,6 +19,7 @@ class IncidentTitles {
 		'container_health'   => 'A site container is down or not answering',
 		'disk_headroom'      => 'The disk is nearly full',
 		'fail2ban'           => 'fail2ban is not running',
+		'mail_gateway'       => 'The mail apps gateway is down and a restart did not fix it',
 		'service_health'     => 'The database, PHP or the web server is not answering',
 	);
 

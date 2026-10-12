@@ -81,7 +81,7 @@ func (g *Gateway) Reload() error {
 // TLSListener wraps a raw listener: limits, then server-side TLS with the
 // certificate chosen by SNI.
 func (g *Gateway) TLSListener(ln net.Listener, proto string) net.Listener {
-	return &tlsListener{Listener: ln, cfg: g.reg.TLSConfig(), limiter: g.limiter, proto: proto}
+	return &tlsListener{Listener: ln, cfg: g.reg.TLSConfig(), limiter: g.limiter, proto: proto, trusts: g.reg.TrustsProxy}
 }
 
 // imapCaps is what the gateway advertises. go-imap v2 adds SASL-IR,

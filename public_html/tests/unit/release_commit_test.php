@@ -154,6 +154,8 @@ $file_ships = array(
 	'public_html/admin_users.png'                                        => false,
 	'public_html/plugins/mailbox/provisioning/relay-sealer/relay-sealer' => false,
 	'public_html/plugins/mailbox/provisioning/bin/relay-sealer-x86_64'   => true,
+	'public_html/plugins/mail_apps/provisioning/bin/mail-gateway-aarch64' => true,
+	'public_html/plugins/mail_apps/provisioning/mail-gateway/mail-gateway' => false,
 	'public_html/agent_dist/manifest.json'                               => true,
 	'public_html/agent_dist.old/manifest.json'                           => false,
 	'public_html/LICENSE.md'                                             => true,
@@ -245,10 +247,17 @@ foreach ($held as $path => $expected) {
 }
 check(strpos(implode(' ', ReleaseCommit::JOINERY_HELD_DIRS), ParserJailPublisher::SOURCE_SUBDIR . '/') !== false,
 	'the parser jail source held is the one its publisher compiles');
-$sealer_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php'));
-check(preg_match("~SOURCE_SUBDIR\s*=\s*'([^']+)'~", $sealer_src, $sm) === 1
-	&& in_array($sm[1] . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
-	'and the relay sealer source held is the one its publisher compiles');
+$plugin_publishers = GoBinaryPublisher::pluginPublishers();
+check(in_array('RelaySealerPublisher', $plugin_publishers, true) && in_array('MailGatewayPublisher', $plugin_publishers, true),
+	'the relay sealer and the mail gateway are both plugin Go programs publish builds', json_encode($plugin_publishers));
+foreach ($plugin_publishers as $publisher) {
+	check(in_array($publisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
+		'  ' . $publisher::LABEL . ': the source held is the one its publisher compiles');
+	check(in_array($publisher::BIN_SUBDIR . '/', ReleaseCommit::JOINERY_GENERATED_DIRS, true),
+		'  ' . $publisher::LABEL . ': the bin/ it writes ships as a generated directory');
+	check($publisher::artifactName('x86_64') === $publisher::BINARY . '/x86_64',
+		'  ' . $publisher::LABEL . ': the statement names its binaries ' . $publisher::BINARY . '/<uname -m>');
+}
 
 $buildr = $tmp . '/buildr';
 mkdir($buildr . '/public_html/includes', 0755, true);

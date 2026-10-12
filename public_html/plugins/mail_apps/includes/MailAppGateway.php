@@ -16,6 +16,10 @@
  * listener switch's pattern. A site in a container has no host to change; its
  * host's management node turns it on.
  *
+ * @version 1.3.0 - through a relay: mailHostname() is the relay's name; cannotTurnOn() says what the relay lacks;
+ *                turnOn() obtains the gateway's certificate through the relay (csr, mailAppsCertificate,
+ *                install-cert) and serves the site via_relay; renewRelayCertificate() for the daily task
+ * @version 1.2.0 - run('remove'), for the plugin's uninstall (install_mail_gateway.sh 1.4)
  * @version 1.1.0 - programs connect to the mail host name (servedName()); cannotTurnOn()
  * @version 1.0.0
  */
@@ -75,35 +79,161 @@ class MailAppGateway {
 	}
 
 	/**
-	 * The name mail programs connect to: the deployment's mail host name
-	 * (`mailbox_mail_hostname`, its MX target), which points at this server.
-	 * Not the web name, which often sits behind a CDN that carries web ports
-	 * only (specs/mail_apps_plugin.md § Where programs connect). Null when no
-	 * mail host name is set.
+	 * The name mail programs connect to. Directly: the deployment's mail host
+	 * name (`mailbox_mail_hostname`, its MX target), which points at this
+	 * server. Not the web name, which often sits behind a CDN that carries web
+	 * ports only. Through a relay: the relay's own mail host name, which the
+	 * relay passes through to this server, so this server's address stays
+	 * hidden (specs/mail_apps_plugin.md § Where programs connect). Null when
+	 * there is none.
 	 */
 	public static function mailHostname(): ?string {
-		$host = strtolower(trim((string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname')));
+		$relay = self::relay();
+		$host = $relay !== null ? (string)$relay->get('mrl_mx_hostname')
+			: (string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname');
+		$host = strtolower(trim($host));
 		return $host !== '' ? $host : null;
+	}
+
+	/** The relay this deployment's mail arrives through, or null. */
+	public static function relay(): ?MailboxRelay {
+		return class_exists('MailboxRelay') ? MailboxRelay::active() : null;
+	}
+
+	/** This server's public IPv4, which the relay reaches the gateway on, or null. */
+	public static function originAddress(): ?string {
+		$ip = trim((string)Globalvars::get_instance()->get_setting('mailbox_public_ip'));
+		return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+			? $ip : null;
 	}
 
 	/**
 	 * Why mail apps cannot be turned on here, in words, or null when they can.
-	 * A relay-fronted deployment waits for the relay's pass-through, so this
-	 * server's address stays hidden.
 	 */
 	public static function cannotTurnOn(): ?string {
 		if (self::inContainer()) {
 			return 'This site runs in a container. Its host runs the mail gateway; turn mail apps on for this site '
 				. 'from the host\'s management node.';
 		}
-		if (class_exists('MailboxRelay') && MailboxRelay::active() !== null) {
-			return 'Mail arrives here through a relay, which keeps this server\'s address hidden. Mail apps will reach '
-				. 'this server through the relay once the relay can pass them through; until then they are not offered.';
+		$relay = self::relay();
+		if ($relay !== null) {
+			if ($relay->get('mrl_is_hosted')) {
+				return 'Mail arrives here through a shared relay. Mail apps pass through a relay this deployment has '
+					. 'to itself; a shared one carries other deployments\' mail and passes none.';
+			}
+			$running = trim($relay->provisionedVersion());
+			if (!RelayVersion::passesMailApps($running)) {
+				return 'Mail arrives here through a relay, which keeps this server\'s address hidden, and mail programs '
+					. 'reach this server through it. The relay runs version ' . ($running !== '' ? $running : 'unknown')
+					. '; passing mail programs through needs ' . RelayVersion::PASSES_MAIL_APPS
+					. '. Upgrade the relay from the Relay section of the Mailbox setup page.';
+			}
+			if (self::mailHostname() === null || trim((string)$relay->get('mrl_public_ip')) === '') {
+				return 'The relay has no mail host name or public address yet. Mail apps wait until it does.';
+			}
+			if (self::originAddress() === null) {
+				return 'This server\'s public IPv4 address is not set (the Mailbox setting mailbox_public_ip). The relay '
+					. 'reaches the mail gateway on it.';
+			}
+			return null;
 		}
 		if (self::mailHostname() === null) {
 			return 'This site has no mail host name yet. Set it on the Mailbox setup page; mail programs connect to it.';
 		}
 		return null;
+	}
+
+	/** A certificate with fewer days than this left is renewed through the relay. */
+	const RELAY_CERT_RENEW_DAYS = 30;
+
+	/**
+	 * Turn the gateway on for this site. Through a relay, first make sure the
+	 * gateway holds a certificate for the relay's name with RELAY_CERT_RENEW_DAYS
+	 * left (obtained through the relay if not), then serve the site via_relay,
+	 * reachable from the relay's address alone. Never throws.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function turnOn(): array {
+		$name = self::mailHostname();
+		$relay = self::relay();
+		if ($relay === null) {
+			return self::helper(array('on', self::siteName(), (string)$name), 'GATEWAY_ON');
+		}
+		$expires = self::relayCertificateExpires();
+		if ($expires === null || $expires - time() < self::RELAY_CERT_RENEW_DAYS * 86400) {
+			$got = self::obtainRelayCertificate($relay, (string)$name);
+			if (!$got['ok']) {
+				return $got;
+			}
+		}
+		return self::helper(array('on', self::siteName(), (string)$name, trim((string)$relay->get('mrl_public_ip'))), 'GATEWAY_ON');
+	}
+
+	/** Turn the gateway off for this site. Never throws. */
+	public static function turnOff(): array {
+		return self::helper(array('off', self::siteName()), 'GATEWAY_OFF');
+	}
+
+	/**
+	 * The daily renewal (RenewMailAppsCertificate): while mail apps are on
+	 * through a relay and the certificate is inside RELAY_CERT_RENEW_DAYS of
+	 * expiry, obtain a new one; the helper restarts the gateway onto it.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function renewRelayCertificate(): array {
+		$relay = self::relay();
+		if ($relay === null || !Globalvars::get_instance()->get_setting('mail_apps_enabled') || !self::helperInstalled()) {
+			return array('ok' => true, 'message' => 'Mail apps are not on through a relay; nothing to renew.');
+		}
+		$expires = self::relayCertificateExpires();
+		if ($expires !== null && $expires - time() >= self::RELAY_CERT_RENEW_DAYS * 86400) {
+			return array('ok' => true, 'message' => 'The certificate is good until ' . gmdate('Y-m-d', $expires) . '.');
+		}
+		$name = self::recordedName() ?? (string)self::mailHostname();
+		return self::obtainRelayCertificate($relay, $name);
+	}
+
+	/**
+	 * A new key and request here, the certificate from the relay (which
+	 * completes the CA's order for its own name), installed by the helper.
+	 * The key never leaves this server.
+	 */
+	public static function obtainRelayCertificate(MailboxRelay $relay, string $name): array {
+		$csr = self::helper(array('csr', self::siteName(), $name), 'GATEWAY_CSR');
+		if (!$csr['ok'] || !preg_match('/-----BEGIN CERTIFICATE REQUEST-----.+?-----END CERTIFICATE REQUEST-----/s', $csr['message'], $m)) {
+			return array('ok' => false, 'message' => 'The certificate request could not be made: ' . $csr['message']);
+		}
+		try {
+			$answer = $relay->withApi(function (RelayClient $c) use ($m) {
+				return $c->mailAppsCertificate($m[0] . "\n");
+			});
+		} catch (\Throwable $e) {
+			return array('ok' => false, 'message' => 'The relay could not be reached for the certificate: ' . $e->getMessage());
+		}
+		if (!is_array($answer) || empty($answer['ok'])) {
+			return array('ok' => false, 'message' => 'The relay did not issue the certificate: '
+				. (is_array($answer) ? (string)($answer['reason'] ?? 'no answer') : 'no answer'));
+		}
+		$installed = self::helper(array('install-cert', self::siteName(), $name), 'GATEWAY_CERT_INSTALLED', (string)$answer['chain']);
+		if (!$installed['ok']) {
+			return array('ok' => false, 'message' => 'The relay issued a certificate, but it was not installed: ' . $installed['message']);
+		}
+		return array('ok' => true, 'message' => 'Certificate for ' . $name . ' issued through the relay, valid until '
+			. substr((string)($answer['not_after'] ?? ''), 0, 10) . '.');
+	}
+
+	/** When the certificate obtained through the relay expires (unix time), or null when there is none. */
+	public static function relayCertificateExpires(): ?int {
+		if (!self::helperInstalled()) {
+			return null;
+		}
+		$status = self::helper(array('status', self::siteName()), 'GATEWAY_STATUS');
+		if (!$status['ok'] || !preg_match('/^relay_cert_expires=(\d+)$/m', $status['message'], $m)) {
+			return null;
+		}
+		return (int)$m[1];
 	}
 
 	/** A site container has no host of its own to change. */
@@ -184,11 +314,11 @@ class MailAppGateway {
 	 * Run one helper verb as root via the sudoers rule and demand its success
 	 * marker. Never throws.
 	 *
-	 * @param string $verb on | off | status
+	 * @param string $verb on | off | status | remove (the plugin's uninstall)
 	 * @return array{ok:bool, message:string}
 	 */
 	public static function run(string $verb): array {
-		if (!in_array($verb, array('on', 'off', 'status'), true)) {
+		if (!in_array($verb, array('on', 'off', 'status', 'remove'), true)) {
 			return array('ok' => false, 'message' => 'Unknown verb.');
 		}
 		if (!self::helperInstalled()) {
@@ -196,15 +326,37 @@ class MailAppGateway {
 				. 'installer puts it in place within a few minutes of the plugin being switched on; or run once as '
 				. 'root: sudo bash plugins/mail_apps/provisioning/install_mail_gateway.sh');
 		}
-		$marker = array('on' => 'GATEWAY_ON', 'off' => 'GATEWAY_OFF', 'status' => 'GATEWAY_STATUS')[$verb];
-		$output = array();
-		$code = 1;
-		$args = ' ' . escapeshellarg($verb) . ' ' . escapeshellarg(self::siteName());
-		if ($verb === 'on' && self::mailHostname() !== null) {
-			$args .= ' ' . escapeshellarg(self::mailHostname());
+		if ($verb === 'on') {
+			return self::turnOn();
 		}
-		exec('sudo -n ' . escapeshellarg(self::HELPER) . $args . ' 2>&1', $output, $code);
-		$text = trim(implode("\n", $output));
+		$marker = array('off' => 'GATEWAY_OFF', 'status' => 'GATEWAY_STATUS', 'remove' => 'GATEWAY_REMOVED')[$verb];
+		return self::helper(array($verb, self::siteName()), $marker);
+	}
+
+	/**
+	 * Run the root helper with these arguments (and $stdin on its standard
+	 * input) through the sudoers rule, and demand its success marker. Never throws.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	private static function helper(array $args, string $marker, ?string $stdin = null): array {
+		if (!self::helperInstalled()) {
+			return array('ok' => false, 'message' => 'The mail gateway is not installed on this server yet. The host '
+				. 'installer puts it in place within a few minutes of the plugin being switched on; or run once as '
+				. 'root: sudo bash plugins/mail_apps/provisioning/install_mail_gateway.sh');
+		}
+		$cmd = 'sudo -n ' . escapeshellarg(self::HELPER) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+		$proc = proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes);
+		if (!is_resource($proc)) {
+			return array('ok' => false, 'message' => 'The mail gateway helper could not be started.');
+		}
+		if ($stdin !== null) {
+			fwrite($pipes[0], $stdin);
+		}
+		fclose($pipes[0]);
+		$text = trim((string)stream_get_contents($pipes[1]));
+		fclose($pipes[1]);
+		$code = proc_close($proc);
 		if ($code !== 0 || strpos($text, $marker) === false) {
 			return array('ok' => false, 'message' => 'The mail gateway helper did not finish (exit ' . intval($code) . '): '
 				. ($text !== '' ? $text : 'no output'));

@@ -164,7 +164,7 @@ While the window is shut:
 
 A program's `APPEND` of its copy to Sent is recognised by Message-ID (or the one it gave before a minted one replaced it), so nothing is stored twice.
 
-**`APPEND` answers a number (`APPENDUID`) only when the message it names is served byte for byte as appended.** A program that gets a number keeps its own copy under it and never fetches it. A copy to Sent matched to the site's own, a draft saved through mailbox's drafts, and a message stored the usual way (headers and decoded parts) are all served differently from what was appended. So no number is answered, and the program fetches the message as the site holds it. Every device then holds the same bytes.
+**`APPEND` always answers the message's number (`APPENDUID`).** A program keeps the bytes it appended under that number and does not fetch them again. What the site serves for the same number can differ in encoding, because a copy to Sent is matched to the site's own sent copy, a draft is saved through mailbox's drafts, and other mail is stored as headers and decoded parts. It is the same message, but a program's own copy of something it appended can differ in such details from what another device downloads. The number cannot be left out: Thunderbird reads a missing one as the number of the last message it fetched, then files its copy and runs its after-send filters under that wrong number.
 
 ## Drafts and other added messages
 
@@ -174,7 +174,7 @@ A program's `APPEND` of its copy to Sent is recognised by Message-ID (or the one
 ## Finding the server
 
 The Mail apps page always shows the manual settings:
-- IMAP: the deployment's mail host name (`mailbox_mail_hostname`, its MX target), port 993, SSL/TLS. Not the web name, which may sit behind a CDN that carries web ports only.
+- IMAP: the deployment's mail host name (`mailbox_mail_hostname`, its MX target), port 993, SSL/TLS. Not the web name, which may sit behind a CDN that carries web ports only. Where mail arrives through a relay, the relay's mail host name (`mrl_mx_hostname`; see *Through a relay*).
 - SMTP: the same host name, port 465, SSL/TLS.
 - Username: the mailbox address.
 - Password: the app password.
@@ -183,11 +183,20 @@ Thunderbird finds them itself from `https://{maildomain}/.well-known/autoconfig/
 
 ## Turning it on
 
-The **Allow mail apps** switch (`/plugins/mail_apps/admin/admin_mail_apps`, permission 9) runs the root helper `/usr/local/sbin/joinery-mail-gateway on|off|status|refresh SITE` through sudo.
+The **Allow mail apps** switch (`/plugins/mail_apps/admin/admin_mail_apps`, permission 9) runs the root helper `/usr/local/sbin/joinery-mail-gateway on|off|status|refresh|remove SITE` through sudo.
 
 **On** takes the site's mail host name and, when it has no certificate yet, issues one with the system's certbot. It does so only if the name's A/AAAA records include this machine's own address, and at most once an hour. The Apache method adds the challenge to the port-80 sites, with the webroot of Apache's default port-80 site as the fallback; no script from the site's tree runs as root. It then serves the site by that name (recorded as `mail_apps_served_name`, which the pages advertise while mail apps are on), starts the `joinery-mail-gateway` service, and opens 993/tcp and 465/tcp (IPv4 and IPv6, through ufw when active). **Off** stops serving the site. When no site is left, it stops the service and closes the ports. The switch records `mail_apps_enabled`, which the Mail apps page and autoconfig read. Both settings are `managed`: the Mail apps admin page is the only switch, because the gateway and the borrowed windows follow it.
 
-The host installer (`provisioning/install_mail_gateway.sh`) puts these in place, switched off:
+**The binaries are built at publish.** `MailGatewayPublisher` (listed in `GoBinaryPublisher::PLUGIN_PUBLISHERS`, beside the mailbox plugin's relay sealer) cross-compiles `provisioning/mail-gateway/` with the toolchain its `go.mod` pins into `provisioning/bin/mail-gateway-x86_64` and `-aarch64`, stamped with the source they were built from (`.source_sha256`). A publish that owes a build and cannot make it is refused. The directory is ignored by git and ships as a generated directory; the release statement records each binary as `mail-gateway/<uname -m>`, and `verify_release` rebuilds it from the commit and compares the bytes.
+
+**Through a relay.** A deployment whose mail arrives through a relay of its own keeps this server's address hidden, so mail programs connect to the relay's mail host name and the relay passes them through, TLS unopened (relay 3.11, `RelayVersion::PASSES_MAIL_APPS`; the mailbox overview's *The mail apps pass-through*). Allow mail apps there:
+1. Makes a key and a certificate request on this server (helper `csr SITE NAME`; the key stays here, root only), sends the request to the relay (`RelayClient::mailAppsCertificate`), which obtains the certificate for its own name, and installs the chain (helper `install-cert SITE NAME`, which checks it names NAME and matches the key). Skipped while the installed one has 30 days left.
+2. Turns the site on through the relay (helper `on SITE NAME RELAY_IP`): the entry is marked `via_relay`, 993 and 465 open to the relay's address only, and the relay is listed in `proxy_from`. The gateway believes a PROXY line from a listed address alone, so its limits and the address the site is told name the program; and it serves a `via_relay` site only to a connection that came through the relay, or from this machine, so a scan of this server finds nothing.
+3. Pushes the fragment, which then carries this server's IPv4 (`mail_apps_origins`), so the relay starts passing programs through. Disallowing and deactivating push it again, empty.
+
+It is offered when the relay is this deployment's own (not a shared one), runs 3.11 or later, has its name and address, and `mailbox_public_ip` is set; the admin page says which is missing. The scheduled task **RenewMailAppsCertificate** renews the certificate through the relay daily once it has fewer than 30 days left; the relay issues at most one every 12 hours.
+
+The host installer (`provisioning/install_mail_gateway.sh`) runs as root on every converge of a site with the plugin active, and puts these in place, switched off:
 - the binary and the `joinery-mailgw` user;
 - the site's entry in `/etc/joinery/mail-gateway/sites/{site}.json` (web name for the loopback upstream, the mail host name programs connect to, certificate files);
 - the helper, its sudoers rule, and the unit;
@@ -196,6 +205,10 @@ The host installer (`provisioning/install_mail_gateway.sh`) puts these in place,
 The service runs unprivileged with `CAP_NET_BIND_SERVICE`. systemd hands it each served site's certificate and key (`LoadCredential`), so it never reads a private key on disk.
 
 A site container has no host of its own. Its host's management node runs the gateway.
+
+**Watching it.** The agent's host report carries `mail_gateway`: the gateway's version, its unit's state, systemd's restarts, its open connections, and for each site turned on whether a TLS connection under the site's mail name reaches an IMAP and a submission greeting, and the days left on that certificate. On the node page it is the **Mail apps gateway** row of Services, with **Restart** and **Why?** (its journal). The agent's `mail_gateway` recipe restarts a gateway that a site has on and that is stopped or no longer greets, and opens a case when restarting does not help. The management node raises `plane:mail_gateway` when a site has mail apps on and the gateway is not running, does not greet, keeps restarting, or a certificate is under 14 days. systemd restarts a gateway that exits, five seconds later.
+
+**Deactivating** the plugin turns the site off (helper `off`). **Uninstalling** it runs `uninstall.php`, which calls the helper's `remove`: the site's entry is forgotten, and once no site on the machine has the plugin the unit, the binary, the `joinery-mailgw` user, the renewal hook, the sudoers rule and the helper itself are removed and the ports closed. The mail host's certificate is kept: that name is the mailbox plugin's too. A removal that fails keeps the plugin installed, so the uninstall can be run again.
 
 The admin page shows:
 - whether the gateway answers on both ports;
@@ -213,10 +226,15 @@ The admin page shows:
 | `plugins/mail_apps/tests/mail_apps_rebuild_test.php` | byte-identical rebuilds across processes over a corpus of shapes, size told = size served |
 | `plugins/mail_apps/tests/mail_apps_private_test.php` | locked behaviour and the lock notice through a borrowed window |
 | `plugins/mail_apps/tests/mail_apps_send_test.php` | submission rules, the Sent copy and its dedupe, drafts |
+| `plugins/mail_apps/tests/mail_gateway_publish_test.php` | the publisher and the installer agree on the binary names; publish, the statement and the verifier reach it |
+| `plugins/mail_apps/tests/mail_gateway_helper_gate.sh` | the helper through a relay (csr, install-cert refusing another name or key, `on` with relay addresses, the firewall and `proxy_from`, off) and its `remove` |
+| `plugins/mail_apps/tests/mail_apps_relay_test.php` | through a relay: the version gate, the relay's name, what `cannotTurnOn()` names, the fragment's `mail_apps_origins` |
+| `provisioning/mail-gateway` `proxy_test.go` | PROXY lines believed from `proxy_from` only, a `via_relay` site refused to anyone else |
+| `plugins/server_manager/tests/incident_sources_test.php` | `plane:mail_gateway`'s conditions and severities |
 | `provisioning/mail-gateway` (`go test`) | the gateway's IMAP and SMTP sessions against a fake site |
 
 **Where it is not offered yet:**
-- A relay-fronted deployment: mail apps will reach it through a pass-through on the relay, which keeps this server's address hidden.
+- A deployment on a shared relay (a hosted fleet slot).
 - A site container.
 - A site with no mail host name set.
 

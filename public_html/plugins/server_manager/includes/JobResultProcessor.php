@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.77 - a host report's mail_gateway (host_report 1.20) is kept
  * @version 1.76 - process_data_root_enrol; a host report's data_root_encryption (host_report 1.19) is kept
  *                 and handed to DataRootEscrowSync (specs/hosted_data_promise_disk_encryption.md WP2)
  * @version 1.75 - a lost apply_update keeps its own message ("what it did is unknown"), never "finished but
@@ -3469,6 +3470,8 @@ HTML;
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
+			// The mail apps gateway (host_report 1.20): none where it is not installed.
+			'mail_gateway'                 => array_key_exists('mail_gateway', $in) ? self::host_report_mail_gateway($in['mail_gateway']) : null,
 			'generated_at'                 => self::host_report_count($in['generated_at'] ?? null),
 		];
 	}
@@ -3535,6 +3538,43 @@ HTML;
 				'primary' => ($c['primary'] ?? false) === true];
 		}
 		return $out;
+	}
+
+	/**
+	 * The mail apps gateway: {version, state, restarts, up_seconds, connections,
+	 * sites: [{site, name, imap, submission, days_left}]}, none where it is not
+	 * installed, or unknown. imap and submission are ok or no_answer: whether a
+	 * TLS connection under the site's mail name reached a greeting.
+	 */
+	private static function host_report_mail_gateway($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		$answer = function ($a) {
+			return in_array($a, ['ok', 'no_answer'], true) ? $a : 'unknown';
+		};
+		$sites = [];
+		foreach (array_slice(array_values(is_array($v['sites'] ?? null) ? $v['sites'] : []), 0, self::HOST_REPORT_MAX_SITES) as $s) {
+			if (!is_array($s)) { continue; }
+			$site = self::host_report_name($s['site'] ?? '');
+			if ($site === '') { continue; }
+			$days = $s['days_left'] ?? null;
+			$sites[] = [
+				'site'       => $site,
+				'name'       => self::host_report_name($s['name'] ?? ''),
+				'imap'       => $answer($s['imap'] ?? null),
+				'submission' => $answer($s['submission'] ?? null),
+				'days_left'  => is_int($days) ? max(-100000, min(100000, $days)) : 'unknown',
+			];
+		}
+		$state = $v['state'] ?? null;
+		return [
+			'version'     => self::host_report_name($v['version'] ?? '') ?: 'unknown',
+			'state'       => in_array($state, self::HOST_REPORT_UNIT_STATES, true) ? $state : 'unknown',
+			'restarts'    => self::host_report_count($v['restarts'] ?? null),
+			'up_seconds'  => self::host_report_count($v['up_seconds'] ?? null),
+			'connections' => self::host_report_count($v['connections'] ?? null),
+			'sites'       => $sites,
+		];
 	}
 
 	/** Site containers: [{name, state, health, answers}], or none, or unknown. */

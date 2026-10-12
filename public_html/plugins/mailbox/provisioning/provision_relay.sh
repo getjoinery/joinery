@@ -14,6 +14,11 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.11 - the mail apps pass-through (RelayVersion::PASSES_MAIL_APPS): 993/tcp and 465/tcp are
+#                open, and relay-serve splices a mail program's TLS, unopened, to the deployment's
+#                server on the same port when the program names this relay's mail hostname
+#                (one-tenant relays only); it also issues the gateway's certificate for that name
+#                from a CSR the server sends (specs/mail_apps_plugin.md § Where programs connect).
 # Version: 3.10 - Postfix's own address-extension stripping is off (recipient_delimiter empty): Ubuntu
 #                ships it set to +, which made the recipient access map treat plain+anything@
 #                as plain@ and accept it at SMTP time, only for the sealer to drop it afterwards.
@@ -99,7 +104,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.10"
+RELAY_VERSION="3.11"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -255,6 +260,11 @@ converge_firewall() {
     # signed /relay/ routes for the plane, plus the port its ACME certificate is
     # obtained on (TLS-ALPN-01, in-process).
     ufw_allow_once "${rules}" '443/tcp'
+    # 993 and 465: mail programs reaching the deployment's mail gateway through
+    # the relay. relay-serve passes their TLS through unopened, and only while
+    # the deployment has mail apps on; otherwise it closes the connection.
+    ufw_allow_once "${rules}" '993/tcp'
+    ufw_allow_once "${rules}" '465/tcp'
 
     if [[ "${KEEP_SSHD}" -eq 1 ]]; then
         ufw_allow_once "${rules}" '22/tcp'

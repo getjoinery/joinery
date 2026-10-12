@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.119 - joinery-mail-gateway may be restarted and its journal read (agent 1.74.0)
  * @version 1.118 - build_data_root_rekey: re-encrypt a data root under a new volume key (D8)
  * @version 1.117 - build_install_node: encrypted_data_root with recovery_public_key passes install.sh docker / server
  *                  --encrypted-data-root --recovery-public-key=KEY (hosted_data_promise_disk_encryption D1a, D2)
@@ -446,6 +447,7 @@ class JobCommandBuilder {
 		'apt-daily-upgrade'   => 'apt-daily-upgrade',
 		'fstrim'              => 'fstrim',
 		'e2scrub_all'         => 'e2scrub_all',
+		'joinery-mail-gateway' => 'Mail apps gateway',
 	];
 
 	/**
@@ -1884,8 +1886,8 @@ class JobCommandBuilder {
 	/**
 	 * The units restart_unit may restart, and how the plane labels them. A
 	 * mirror of restartUnitUnits in the agent (primitives/operate_restart_unit.go)
-	 * and UNITS in restart_unit.sh: host_report's expected units. The agent is
-	 * never among them (it restarts only through restart_agent), nor sshd.
+	 * and UNITS in restart_unit.sh: host_report's expected units, then the mail
+	 * apps gateway (host_report's mail_gateway). The agent is never among them (it restarts only through restart_agent), nor sshd.
 	 */
 	const RESTART_UNIT_UNITS = [
 		'fail2ban'   => 'fail2ban',
@@ -1893,6 +1895,7 @@ class JobCommandBuilder {
 		'php-fpm'    => 'PHP-FPM',
 		'cron'       => 'cron',
 		'postgresql' => 'PostgreSQL',
+		'joinery-mail-gateway' => 'Mail apps gateway',
 	];
 
 	/**

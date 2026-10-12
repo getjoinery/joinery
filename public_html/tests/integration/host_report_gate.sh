@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -99,6 +99,7 @@ chk "served certificates is a list or unknown" "$( t=$(jv "$T/real.json" served_
 chk "containers is a list, none or unknown" "$( t=$(jv "$T/real.json" containers type); v=$(jv "$T/real.json" containers); [ "$t" = list ] || [ "$v" = none ] || [ "$v" = unknown ]; echo $? )" "0"
 chk "outbound_limits names its four parts" "$(jv "$T/real.json" outbound_limits keys)" "state,reason,since,web_user_dropped"
 chk "outbound_limits is a known state" "$( case "$(jv "$T/real.json" outbound_limits.state)" in on|off|refused|absent|none|unknown) echo ok ;; esac )" "ok"
+chk "mail_gateway is none or names its parts" "$( v=$(jv "$T/real.json" mail_gateway); k=$(jv "$T/real.json" mail_gateway keys); [ "$v" = none ] || [ "$k" = "version,state,restarts,up_seconds,connections,sites" ]; echo $? )" "0"
 chk "generated_at is now" "$( g=$(jv "$T/real.json" generated_at); n=$(date -u +%s); [ "$g" -le "$n" ] && [ "$g" -ge $((n-60)) ]; echo $? )" "0"
 
 echo "=== The release-upgrade cache, read as Ubuntu writes it ==="

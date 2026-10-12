@@ -641,35 +641,36 @@
 		}
 
 		// =====================================================
-		// Cross-compile the relay sealer into the mailbox plugin
+		// Cross-compile the Go programs plugins ship prebuilt
 		// =====================================================
-		// A mail relay has no compiler: provision_relay.sh consumes a prebuilt
-		// relay-sealer from provisioning/bin/relay-sealer-<uname -m> and refuses
-		// to run without one. The publish is the only place that has the source
-		// and knows a release is being cut, so it builds them.
+		// The machines that run them have no compiler: a relay installs the
+		// mailbox plugin's relay sealer from provisioning/bin/relay-sealer-<uname -m>,
+		// a server installs the mail_apps gateway from
+		// provisioning/bin/mail-gateway-<uname -m>. The publish is the only place
+		// that has the source and knows a release is being cut, so it builds them
+		// (GoBinaryPublisher::PLUGIN_PUBLISHERS lists them).
 		//
-		// Runs HERE, before the plugin loop, because bin/ lives inside the
-		// mailbox plugin tree: the binaries must be on disk in time to be
-		// hashed by component_tree_hash, covered by the plugin's signed
-		// RELEASE_MANIFEST, and tarred with the plugin.
+		// Runs HERE, before the plugin loop, because each bin/ lives inside its
+		// plugin's tree: the binaries must be on disk in time to be hashed by
+		// component_tree_hash, covered by the plugin's signed RELEASE_MANIFEST,
+		// and tarred with the plugin.
 		//
 		// A failure REFUSES the release, like a stale agent and unlike a stale
-		// support bundle. There is no degraded mode to fall back to: a mailbox
-		// plugin shipped without its binaries is one whose provisioning script
-		// stops on the first relay that runs it, and that failure would surface
-		// on a customer's machine mid-provision rather than here.
-		$relay_sealer_path = PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php');
-		if (!$republish && file_exists($relay_sealer_path)) {
-			publish_output("Building relay sealer binaries...");
-			require_once($relay_sealer_path);
-			$relay_sealer = RelaySealerPublisher::publish($full_site_dir, 'publish_output');
-
-			if ($relay_sealer['status'] === RelaySealerPublisher::STATUS_FAILED) {
-				publish_output("\nRefusing to publish {$version} — the mailbox plugin ships "
-					. "provisioning/bin/relay-sealer-<arch>, and the build failed. Publishing now "
-					. "would ship a relay provisioning script with nothing for it to install.");
-				publish_output("Fix the sealer build and publish again. Nothing has been written.");
-				exit(1);
+		// support bundle. There is no degraded mode to fall back to: a plugin
+		// shipped without its binaries is one whose installer stops on the first
+		// machine that runs it, and that failure would surface on a customer's
+		// machine rather than here.
+		if (!$republish) {
+			foreach (GoBinaryPublisher::pluginPublishers() as $go_publisher) {
+				publish_output('Building ' . $go_publisher::LABEL . ' binaries...');
+				$go_built = $go_publisher::publish($full_site_dir, 'publish_output');
+				if ($go_built['status'] === GoBinaryPublisher::STATUS_FAILED) {
+					publish_output("\nRefusing to publish {$version} — " . $go_publisher::BIN_SUBDIR . '/'
+						. $go_publisher::BINARY . '-<arch> ships with its plugin, and the build failed. Publishing now '
+						. 'would ship an installer with nothing for it to install.');
+					publish_output('Fix the ' . $go_publisher::LABEL . ' build and publish again. Nothing has been written.');
+					exit(1);
+				}
 			}
 		}
 

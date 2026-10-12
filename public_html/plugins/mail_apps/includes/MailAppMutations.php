@@ -32,7 +32,7 @@
  * it by comparing the truth with what programs were told, the same as a
  * change made in the web reader.
  *
- * @version 1.0.0
+ * @version 1.0.1 - APPEND always answers its number (APPENDUID)
  */
 
 class MailAppMutations {
@@ -342,19 +342,13 @@ class MailAppMutations {
 
 		$state = MailAppFolders::reconcile($ctx, $folder);
 		$uid = MailAppFolders::uidOf($ctx, $folder['key'], $id);
-		// A number answered for an APPEND tells the program "these bytes are
-		// that message": it keeps its own copy under it and never fetches it.
-		// Where what is stored is not byte for byte what it sent — a copy to
-		// Sent matched to the one the site sent, a draft saved through
-		// mailbox's drafts, a message already here — no number is answered
-		// (IMAP allows that), and the program fetches the message as the site
-		// holds it, so every device sees the same bytes (J3).
-		if ($uid !== null) {
-			$served = MailAppRebuild::bytes($ctx, $id);
-			if (!$served['ok'] || $served['bytes'] !== $raw) {
-				$uid = null;
-			}
-		}
+		// The number is always answered (APPENDUID); only a message deleted in the
+		// meantime has none. A server that offers UIDPLUS must, and Thunderbird reads a missing one as the UID of the last message
+		// it fetched on that connection, then files its copy and runs its after-send
+		// filters under that wrong number. The program keeps the bytes it appended
+		// under this number; what the site serves for it may differ in encoding
+		// (a copy to Sent matched to the site's own, a draft, a message stored as
+		// headers and decoded parts), but it is the same message.
 		return array('uid' => $uid, 'uidvalidity' => $state['uidvalidity']);
 	}
 

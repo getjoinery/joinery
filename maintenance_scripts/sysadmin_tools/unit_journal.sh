@@ -4,6 +4,7 @@
 # object on stdout: the unit's state, the result systemd recorded, its exit
 # status, when it last ran, and the last N lines of its journal.
 #
+# Version: 1.2 - joinery-mail-gateway, the mail apps gateway
 # Version: 1.1 - postgresql reads the cluster unit (postgresql@16-main): the umbrella
 #                postgresql.service is a /bin/true oneshot with no journal, so the word
 #                answered -- No entries -- for the database on every node
@@ -60,6 +61,7 @@ UNITS=(
     man-db unattended-upgrades logrotate
     apt-daily apt-daily-upgrade
     fstrim e2scrub_all
+    joinery-mail-gateway
 )
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }

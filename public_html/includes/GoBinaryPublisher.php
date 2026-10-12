@@ -31,6 +31,8 @@
  * publish() never throws — a broken build must not abort an unrelated platform
  * publish by exception; it reports a status and the caller decides.
  *
+ * @version 1.5 - PLUGIN_PUBLISHERS: the one list of Go programs a plugin ships prebuilt, which publish,
+ *                the release statement and the verifier each walk; artifactName()
  * @version 1.4 - built binaries are written 0644: no installer runs one from the tree, and a 755 file
  *                under a converger that holds the tree at 644 is a permanent mode-only git diff
  * @version 1.3 - officialGo() names Go's proxy and checksum database itself rather than inheriting them
@@ -84,6 +86,38 @@ abstract class GoBinaryPublisher {
 
 	/** @var callable|null fn(): ?string — test seam for findGo(). */
 	public static $go_locator = null;
+
+	/**
+	 * Every Go program a plugin ships prebuilt: publisher class => its file,
+	 * relative to plugins/. Publish builds each one before the plugin archives,
+	 * the release statement records each binary as artifactName(), and the
+	 * verifier rebuilds each from the commit. A plugin's classes resolve by name
+	 * only where it is active, and these run with no site, so pluginPublishers()
+	 * loads them by path. A plugin whose file is absent here is skipped.
+	 */
+	const PLUGIN_PUBLISHERS = array(
+		'RelaySealerPublisher' => 'mailbox/includes/RelaySealerPublisher.php',
+		'MailGatewayPublisher' => 'mail_apps/includes/MailGatewayPublisher.php',
+	);
+
+	/** @return string[] the plugin publisher classes present on this box, loaded */
+	public static function pluginPublishers(): array {
+		$out = array();
+		foreach (self::PLUGIN_PUBLISHERS as $class => $file) {
+			$path = PathHelper::getIncludePath('plugins/' . $file);
+			if (!file_exists($path)) {
+				continue;
+			}
+			require_once($path);
+			$out[] = $class;
+		}
+		return $out;
+	}
+
+	/** The release statement's name for one binary: `<BINARY>/<uname -m>`, e.g. relay-sealer/x86_64. */
+	public static function artifactName($machine) {
+		return static::BINARY . '/' . $machine;
+	}
 
 	/** A rebuild was required and completed. */
 	const STATUS_BUILT = 'built';

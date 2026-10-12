@@ -35,6 +35,7 @@
  * Runs on the publisher only, from publish_upgrade.php. A republishing site
  * never writes one: it carries what it received, as a listed file.
  *
+ * @version 1.3 - binaryArtifacts() records every GoBinaryPublisher::PLUGIN_PUBLISHERS binary, not the relay sealer by name
  * @version 1.2 - verifyDocument() checks the entry against every key the release installs for its log (review B7a)
  * @version 1.1 - held() keeps every log key a release installed, origin => list (WP7 review B7)
  * @version 1.0
@@ -161,7 +162,8 @@ class ReleaseStatementPublisher {
 	/**
 	 * The hashes the statement records beside the manifests: each agent
 	 * binary's raw sha256 as the bundle manifest records it, the support
-	 * bundle, and each relay sealer binary.
+	 * bundle, and each binary of a Go program a plugin ships prebuilt
+	 * (GoBinaryPublisher::PLUGIN_PUBLISHERS: the relay sealer, the mail gateway).
 	 *
 	 * @return array<string,string> artifact name => sha256 hex
 	 */
@@ -178,8 +180,13 @@ class ReleaseStatementPublisher {
 		if (is_file($bundle)) {
 			$out['support_bundle'] = hash_file('sha256', $bundle);
 		}
-		foreach (glob($site . '/public_html/plugins/mailbox/provisioning/bin/relay-sealer-*') ?: array() as $sealer) {
-			$out['relay-sealer/' . substr(basename($sealer), strlen('relay-sealer-'))] = hash_file('sha256', $sealer);
+		foreach (GoBinaryPublisher::pluginPublishers() as $publisher) {
+			foreach (array_keys($publisher::ARCHES) as $machine) {
+				$file = $site . '/' . $publisher::BIN_SUBDIR . '/' . $publisher::BINARY . '-' . $machine;
+				if (is_file($file)) {
+					$out[$publisher::artifactName($machine)] = hash_file('sha256', $file);
+				}
+			}
 		}
 		ksort($out);
 		return $out;

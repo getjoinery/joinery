@@ -75,6 +75,11 @@ type mapFragment struct {
 	DirectSpoolDomainCap    int64    `json:"direct_spool_domain_cap_bytes"`
 	DirectSpoolAddressCap   int64    `json:"direct_spool_address_cap_bytes"`
 	DirectSessionTTLSeconds int      `json:"direct_session_ttl"`
+
+	// The mail apps pass-through (mailapps_pass.go): the public addresses of
+	// the tenant's server, which mail programs reach through this relay on 993
+	// and 465. Empty turns the pass-through off.
+	MailAppsOrigins []string `json:"mail_apps_origins"`
 }
 
 // tenantLimits mirrors tenants/<slug>/limits.json (shard policy, root-owned).
@@ -190,6 +195,8 @@ func runMerge() int {
 			DirectSpoolDomainCap:    frag.DirectSpoolDomainCap,
 			DirectSpoolAddressCap:   frag.DirectSpoolAddressCap,
 			DirectSessionTTLSeconds: frag.DirectSessionTTLSeconds,
+
+			MailAppsOrigins: normalizeOrigins(frag.MailAppsOrigins),
 		}
 		for addr, e := range frag.Recipients {
 			e.Tenant = slug
@@ -376,6 +383,14 @@ func validateFragment(frag *mapFragment, slug string, allow []string, claimed ma
 	}
 	if len(frag.Domains) > 10000 || len(frag.Recipients) > 200000 {
 		return fmt.Errorf("fragment exceeds sanity limits")
+	}
+	if len(frag.MailAppsOrigins) > mailAppsMaxOrigins {
+		return fmt.Errorf("mail_apps_origins names more than %d addresses", mailAppsMaxOrigins)
+	}
+	for _, o := range frag.MailAppsOrigins {
+		if !publicAddress(o) {
+			return fmt.Errorf("mail_apps_origins %q is not a public IP address", o)
+		}
 	}
 	if frag.TransportPublicKey != "" {
 		if _, err := decodePublicKey(frag.TransportPublicKey); err != nil {

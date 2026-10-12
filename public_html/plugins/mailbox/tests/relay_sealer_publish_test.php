@@ -200,11 +200,14 @@ ok('STATUS_FAILED is the only refusing status',
     RelaySealerPublisher::STATUS_FAILED === 'failed');
 $publisher_call = (string)@file_get_contents(
     PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
-ok('publish_upgrade.php refuses the release on it',
-    strpos($publisher_call, "RelaySealerPublisher::STATUS_FAILED") !== false
-    && strpos($publisher_call, 'RelaySealerPublisher::publish($full_site_dir') !== false);
-ok('the sealer is built before the plugin archives are made',
-    strpos($publisher_call, 'RelaySealerPublisher::publish')
+ok('publish_upgrade.php builds every plugin Go program and refuses the release on a failure',
+    strpos($publisher_call, 'GoBinaryPublisher::pluginPublishers()') !== false
+    && strpos($publisher_call, '$go_publisher::publish($full_site_dir') !== false
+    && strpos($publisher_call, 'GoBinaryPublisher::STATUS_FAILED') !== false);
+ok('  and the relay sealer is one of them',
+    in_array('RelaySealerPublisher', GoBinaryPublisher::pluginPublishers(), true));
+ok('the plugin Go programs are built before the plugin archives are made',
+    strpos($publisher_call, 'GoBinaryPublisher::pluginPublishers()')
         < strpos($publisher_call, 'Creating individual plugin archives'));
 
 // A box with no mailbox plugin at all publishes fine.
