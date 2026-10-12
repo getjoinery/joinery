@@ -404,6 +404,11 @@ leaves that entry's collisions alone: its agreement still names the slot it is
 leaving, and a duplicate or clash read against that slot would release the copy
 the operation is about to place. A verdict about the entry's own name still
 stands.
+An entry this device has never agreed on that wears another device's scratch
+name is not landed here at all, not even by a download planned before the park
+arrived: under the scratch name the walk cannot see it, and the next pass would
+read it as deleted here. It waits for the park to end and arrives under its
+real name.
 A park nobody is coming back for — its operation withdrawn, or dropped after a
 kill — is put back by the next pass under the name both sides last agreed, or
 the next free one there, and said as a `reconcile` issue. It goes back into

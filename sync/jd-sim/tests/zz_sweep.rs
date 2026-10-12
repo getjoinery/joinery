@@ -6872,3 +6872,14 @@ fn frozen_a_create_planned_before_a_move_stands_down_seed() {
         workload_core_with(75_125, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
     }
 }
+
+/// Kill2 75281: a download planned before a peer parked the file on the
+/// server ran under the scratch name, the copy was given up for its reserved
+/// name, the next scan read the file as deleted here, and the peer's edit went
+/// to the server's trash. Every oracle quiet is asserted.
+#[test]
+fn frozen_a_download_queued_before_a_peers_park_waits_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(75_281, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}

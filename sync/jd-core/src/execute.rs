@@ -1846,6 +1846,16 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     if already_holds_the_head(env, &entry)? {
         return Ok(OpOutcome::Overtaken("this computer already holds the server's bytes".into()));
     }
+    // A peer's park reached the record after this download was planned: the
+    // server has the file under a scratch name, and with no agreement here
+    // that name is the only place there is to land it. Landed there, the
+    // walk could not see it, naming gave the copy up for its reserved name,
+    // and the next scan read the file as deleted here and trashed it on the
+    // server, with a peer's edit this device never had (kill2 75281). The
+    // planner already waits on such an entry; the download waits with it.
+    if entry.waiting_on_a_park() {
+        return Ok(OpOutcome::Overtaken("a peer is renaming it; waiting for its real name".into()));
+    }
     let mut path = match local_path(env, &entry)? {
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
