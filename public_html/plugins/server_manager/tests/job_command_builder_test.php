@@ -2506,7 +2506,8 @@ section('unit_journal / disk_usage: why a unit failed, and where the disk went (
 	}
 	check(!array_key_exists('sshd', JobCommandBuilder::UNIT_JOURNAL_UNITS),
 		'sshd is not on the list: that journal is who connected and from where, which host_report counts and refuses to quote');
-	check(count(JobCommandBuilder::UNIT_JOURNAL_UNITS) === 12, 'the mirrored list is the twelve units the spec names');
+	check(count(JobCommandBuilder::UNIT_JOURNAL_UNITS) === 13 && array_key_exists('joinery-mail-gateway', JobCommandBuilder::UNIT_JOURNAL_UNITS),
+		'the mirrored list is the twelve units disk_headroom_and_unit_diagnosis.md names, plus the mail apps gateway (mail_apps_plugin.md, Running the gateway)');
 
 	$built = JobCommandBuilder::build_disk_usage($ask_node);
 	check($built === array('primitive' => 'disk_usage', 'params' => array()),
