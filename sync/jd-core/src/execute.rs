@@ -3978,6 +3978,39 @@ fn never_sent_again(env: &ExecEnv, id: EntityId) -> Result<(), ExecError> {
     Ok(())
 }
 
+/// Is this entry's local trash on the list?
+fn trash_local_is_queued(env: &ExecEnv, entity: EntityId) -> Result<bool, ExecError> {
+    Ok(env.store.queued_ops()?.iter().any(|o| o.kind == "trash_local" && o.entity == entity))
+}
+
+/// A folder parked aside under a scratch name whose directory never left its
+/// own name: the park was killed after its record was written and before the
+/// rename. Where the directory stands, if it is there -- by the directory's id
+/// where the volume keeps one, else by the path alone.
+pub(crate) fn parked_directory_left_at_its_name(env: &ExecEnv, entry: &Entry) -> Result<Option<PathBuf>, ExecError> {
+    if entry.id.entity_type != EntityType::Folder
+        || !entry.local_name.as_deref().is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))
+    {
+        return Ok(None);
+    }
+    let Placed::At(parked) = local_path(env, entry)? else {
+        return Ok(None);
+    };
+    if env.vfs.read_dir(&parked).is_ok() {
+        return Ok(None);
+    }
+    let at = parked.with_file_name(&entry.agreed_placement().name);
+    if env.vfs.read_dir(&at).is_err() {
+        return Ok(None);
+    }
+    let own = entry.synced_fingerprint.map(|f| f.file_id).filter(|id| *id != 0);
+    let here = env.vfs.directory_id(&at)?.filter(|id| *id != 0);
+    Ok(match (own, here) {
+        (Some(own), Some(here)) if own != here => None,
+        _ => Some(at),
+    })
+}
+
 fn create_local_folder(
     env: &ExecEnv,
     op: &Op,
@@ -4112,6 +4145,14 @@ fn create_local_folder(
             if other.id.is_provisional() {
                 continue;
             }
+            // A park of a leaving folder that died between its record and its
+            // rename: the record says the scratch name, the directory still
+            // stands here under the folder's own. Finished now, so the create
+            // never takes the directory the record already gave away.
+            if other.remote_deleted && parked_directory_left_at_its_name(env, &other)?.as_deref() == Some(path.as_path()) {
+                env.vfs.rename(&path, &path.with_file_name(other.effective_local_name()))?;
+                continue;
+            }
             // And by the directory's own id, on a volume whose ids hold: a
             // directory another server-backed folder knows as its own is that
             // folder's, wherever its record says it is. A folder the user
@@ -4126,6 +4167,33 @@ fn create_local_folder(
                     env.vfs.directory_id(&path).ok().flatten() == Some(own)
                 });
             if its_directory || matches!(local_path(env, &other), Ok(Placed::At(ref theirs)) if *theirs == path) {
+                // A folder the server deleted, whose trash here is queued, is
+                // leaving: its directory is parked aside under a scratch name
+                // and this folder gets a directory of its own. Waiting for the
+                // trash instead can close a ring -- the trash waits for a child
+                // the server has moved into THIS folder, and the child's move
+                // waits for this folder to exist -- which a park breaks, as a
+                // rename cycle on the server is broken (B-E1, reviewer probe
+                // seed 9982). The record is written first, as every park is,
+                // so the directory is never nobody's; the trash finds it by
+                // that spelling and takes it, rescuing unsent work beside it.
+                // With no trash queued nobody is coming for it, and a park
+                // would hide the user's folder under a dot-name for good. Nor
+                // one whose directory wears a spelling of this disk's own (a
+                // name the volume cannot hold, escaped): the park overwrites
+                // that spelling, and a park killed before its rename is found
+                // again only at the folder's own name. It waits, as any rival.
+                if other.remote_deleted && other.local_name.is_none() && trash_local_is_queued(env, other.id)? {
+                    let scratch = crate::order::tagged_swap_name(
+                        &env.store.park_tag(&op.idempotency_key)?,
+                        &op.idempotency_key,
+                    );
+                    let mut leaving = other.clone();
+                    leaving.local_name = Some(scratch.clone());
+                    env.store.put_entry(&leaving)?;
+                    env.vfs.rename(&path, &path.with_file_name(&scratch))?;
+                    continue;
+                }
                 // Not this folder's directory, and not this operation's
                 // problem to solve. Standing down re-derives the plan next
                 // pass, which is where the answer comes from: naming keeps
@@ -6664,6 +6732,18 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             "{} is not the file the server deleted; deciding again from what is there now",
             path.display(),
         )));
+    }
+    // Parked aside by the create that took its name, and killed before the
+    // rename: the record says the scratch name, the directory still stands at
+    // the folder's own. Read as already gone, the trash would record itself
+    // done and leave the directory for the create to take. The park is
+    // undone instead, and the next round parks it again with the moves out
+    // of it in hand, so the parked state lasts no longer than it has to.
+    if op.entity.entity_type == EntityType::Folder && parked_directory_left_at_its_name(env, &entry)?.is_some() {
+        let mut home = entry.clone();
+        home.local_name = None;
+        env.store.put_entry(&home)?;
+        return Ok(OpOutcome::Overtaken("its park never happened; deciding again from where it stands".into()));
     }
     if op.entity.entity_type == EntityType::Folder {
         // A file standing at the folder's path is not the folder. The folder

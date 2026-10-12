@@ -3928,3 +3928,39 @@ fn a_held_file_set_aside_by_a_download_on_a_usb_stick_keeps_its_record() {
     );
     assert_eq!(after.remote, held.remote, "the held record's server side moved");
 }
+
+/// A leaving folder's park killed after its record and before its rename:
+/// the record says the scratch name, the directory still stands at the
+/// folder's own, and the folder's trash is still on the list. The create
+/// that comes for the name finishes the park and makes a directory of its
+/// own, rather than taking the one the record has already given away
+/// (B-E1).
+#[test]
+fn a_create_finishes_a_leaving_folders_park_killed_before_its_rename() {
+    let (_clock, _server, device) = world();
+    device.fs.user_mkdir("Shared");
+    device.fs.user_write("Shared/kept.txt", b"in the leaving folder");
+    let park = ".jd-swap-00000000-park";
+    let old = EntityId::folder(501);
+    let mut leaving = fresh(old, None, "Shared", LocalStatus::Synced);
+    leaving.synced_placement = Some(Placement { parent: None, name: "Shared".into() });
+    leaving.remote_deleted = true;
+    leaving.local_name = Some(park.into());
+    device.store.put_entry(&leaving).unwrap();
+    device.store.queue_op("trash_local", old, "{}", "key-trash").unwrap();
+
+    let new = EntityId::folder(502);
+    device.store.put_entry(&fresh(new, None, "Shared", LocalStatus::PendingDownload)).unwrap();
+    let op_id = device
+        .store
+        .queue_op("create_local_folder", new, &serde_json::json!({ "parent": null, "name": "Shared" }).to_string(), "key-mkdir")
+        .unwrap();
+    let now = device.now();
+    let e = env(&device, &now);
+    let op = device.store.queued_ops().unwrap().into_iter().find(|o| o.op_id == op_id).unwrap();
+    let outcome = jd_core::execute::run_one(&e, &op).unwrap();
+
+    assert!(matches!(outcome, OpOutcome::Done), "{outcome:?}");
+    assert_eq!(device.fs.peek(&format!("{park}/kept.txt")).as_deref(), Some(&b"in the leaving folder"[..]), "the park was not finished: {:?}", device.fs.all_paths());
+    assert!(device.fs.exists("Shared") && !device.fs.exists("Shared/kept.txt"), "the new folder took the leaving one's directory: {:?}", device.fs.all_paths());
+}

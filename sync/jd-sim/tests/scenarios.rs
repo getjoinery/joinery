@@ -19432,3 +19432,273 @@ fn unsent_sealed_work_in_a_vault_subfolder_deleted_elsewhere_is_rescued_into_the
     assert!(world.server.plaintext_inside_a_vault().is_empty(), "it went up in the clear");
     assert_converged(&world);
 }
+
+/// Three waits that closed a ring (B-E1, reviewer probe): a peer moves a
+/// subfolder out, deletes its folder, makes the folder again and moves the
+/// subfolder back into the new one, with a new file in it. Here the old
+/// folder's local trash waits for its child's directory, which the server has
+/// put in the new folder; the new folder's create stood down for the old
+/// folder's directory; and the child's move waits for the new folder. The
+/// create parks the leaving folder's directory aside instead, and everything
+/// lands. Unsent plain work in the old folder would be rescued into its
+/// parent, beside the new folder, not inside it.
+#[test]
+fn a_subfolder_moved_into_the_folder_made_again_settles() {
+    a_subfolder_moved_into_the_folder_made_again(false, 0);
+}
+
+#[test]
+fn a_subfolder_moved_into_the_folder_made_again_settles_hidden() {
+    a_subfolder_moved_into_the_folder_made_again(true, 0);
+}
+
+/// The same, with the park killed between its record and its rename: the
+/// record says the scratch name while the directory still stands at the
+/// folder's own. Read as already gone, the trash would record itself done
+/// and leave the directory for the create to take. The leaving folder's
+/// trash, later in the same round, undoes the park, and the next round parks
+/// again with the moves in hand.
+#[test]
+fn a_park_killed_before_its_rename_is_undone_by_the_trash() {
+    a_subfolder_moved_into_the_folder_made_again(false, 1);
+}
+
+#[test]
+fn a_park_killed_before_its_rename_is_undone_by_the_trash_hidden() {
+    a_subfolder_moved_into_the_folder_made_again(true, 1);
+}
+
+fn a_subfolder_moved_into_the_folder_made_again(hidden: bool, kills: u32) {
+    let world = World::new(9_982, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    let old = b"in the subfolder";
+    mac.fs.user_write("Shared/Sub/a.txt", old);
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Shared/Sub", "Sub-out");
+    pc.fs.user_remove("Shared");
+    world.pass(pc);
+    pc.fs.user_mkdir("Shared");
+    pc.fs.user_rename("Sub-out", "Shared/Sub");
+    let new = b"in the subfolder, in the new folder";
+    pc.fs.user_write("Shared/Sub/new.txt", new);
+    world.pass(pc);
+    world.pass(pc);
+    if kills > 0 {
+        mac.fs.fail_next(FsOp::Rename, Some("Shared"), FailureKind::Io, kills);
+        world.pass(mac);
+        let parked = mac
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .any(|e| e.remote_deleted && e.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap-")));
+        let kept = mac.fs.all_paths().iter().any(|p| p.ends_with("/Sub/a.txt"));
+        // The trash undid the park.
+        assert!(!parked && kept, "not the killed park: {:?}", mac.fs.all_paths());
+        assert!(mac.fs.exists("Shared"), "{:?}", mac.fs.all_paths());
+        world.power_cycle(mac);
+    }
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    for body in [&old[..], &new[..]] {
+        assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(body)), "{:?} is not live: {live:?}", String::from_utf8_lossy(body));
+    }
+    assert_eq!(mac.fs.peek("Shared/Sub/new.txt").as_deref(), Some(&new[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("Shared/Sub/a.txt").as_deref(), Some(&old[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+/// The park standing across a pass boundary after the new folder is made:
+/// the folder's own name taken by the new directory, the child the server
+/// moved into it still inside the park. Read by the walk, which does not go
+/// into a scratch directory, the child was gone -- re-made empty at its new
+/// place and its files trashed on the server. What a leaving folder's park
+/// holds is held, present and unmoved, and the child's move runs from there.
+#[test]
+fn a_child_left_in_a_leaving_folders_park_moves_out_of_it() {
+    a_child_left_in_a_leaving_folders_park(false);
+}
+
+#[test]
+fn a_child_left_in_a_leaving_folders_park_moves_out_of_it_hidden() {
+    a_child_left_in_a_leaving_folders_park(true);
+}
+
+/// A leaving folder's park counts as live only while its trash is on the
+/// list: with the folder's record and its work gone, the scratch directory
+/// is litter, and the walk sweeps it as before.
+#[test]
+fn a_leaving_folders_park_nobody_owns_is_swept() {
+    let world = World::new(9_979, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Shared/Sub/a.txt", b"in the subfolder");
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Shared/Sub", "Sub-out");
+    pc.fs.user_remove("Shared");
+    world.pass(pc);
+    pc.fs.user_mkdir("Shared");
+    pc.fs.user_rename("Sub-out", "Shared/Sub");
+    world.pass(pc);
+    world.pass(pc);
+    mac.fs.fail_next(FsOp::CreateDir, Some("Shared"), FailureKind::Io, 1);
+    world.pass(mac);
+    let park = mac
+        .fs
+        .all_paths()
+        .into_iter()
+        .find(|p| p.starts_with(".jd-swap-") && !p.contains('/'))
+        .unwrap_or_else(|| panic!("no park: {:?}", mac.fs.all_paths()));
+    let leaving = mac
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote_deleted && e.local_name.as_deref() == Some(park.as_str()))
+        .expect("the leaving folder's record")
+        .id;
+    for op in mac.store.queued_ops().unwrap() {
+        if op.entity == leaving {
+            mac.store.drop_op(op.op_id).unwrap();
+        }
+    }
+    mac.store.delete_subtree(leaving).unwrap();
+    world.pass(mac);
+    assert!(!mac.fs.exists(&park), "{:?}", mac.fs.all_paths());
+    assert!(mac.fs.trashed().iter().any(|(p, _)| *p == park), "{:?}", mac.fs.trashed().iter().map(|(p, _)| p).collect::<Vec<_>>());
+}
+
+fn a_child_left_in_a_leaving_folders_park(hidden: bool) {
+    let world = World::new(9_980, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    let old = b"in the subfolder";
+    mac.fs.user_write("Shared/Sub/a.txt", old);
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Shared/Sub", "Sub-out");
+    pc.fs.user_remove("Shared");
+    world.pass(pc);
+    pc.fs.user_mkdir("Shared");
+    pc.fs.user_rename("Sub-out", "Shared/Sub");
+    let new = b"in the subfolder, in the new folder";
+    pc.fs.user_write("Shared/Sub/new.txt", new);
+    world.pass(pc);
+    world.pass(pc);
+    // The park lands, the new folder's directory does not.
+    mac.fs.fail_next(FsOp::CreateDir, Some("Shared"), FailureKind::Io, 1);
+    world.pass(mac);
+    let park = mac
+        .fs
+        .all_paths()
+        .into_iter()
+        .find(|p| p.starts_with(".jd-swap-") && !p.contains('/'))
+        .unwrap_or_else(|| panic!("no park: {:?}", mac.fs.all_paths()));
+    // The new folder is made; the child's move out of the park does not run.
+    mac.fs.fail_next(FsOp::Rename, Some(&format!("{park}/Sub")), FailureKind::Io, 1);
+    world.clock.advance_secs(20 * 60);
+    world.pass(mac);
+    assert!(
+        mac.fs.exists("Shared") && mac.fs.exists(&format!("{park}/Sub/a.txt")),
+        "not a park standing beside the new folder: {:?}",
+        mac.fs.all_paths()
+    );
+    world.power_cycle(mac);
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    for body in [&old[..], &new[..]] {
+        assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(body)), "{:?} is not live: {live:?}", String::from_utf8_lossy(body));
+    }
+    assert_eq!(mac.fs.peek("Shared/Sub/a.txt").as_deref(), Some(&old[..]), "{:?}", mac.fs.all_paths());
+    assert_eq!(mac.fs.peek("Shared/Sub/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert!(!mac.fs.all_paths().iter().any(|p| p.starts_with(".jd-swap-")), "the park outlived its trash: {:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// A leaving folder's park killed between its record and its rename, met by
+/// the next pass's scan before anything finishes or undoes it: the record says
+/// the scratch name while the directory stands at the folder's own. On a disk
+/// whose ids are only positions the children are known by their paths alone,
+/// and those run through the record's scratch spelling: read by the disk they
+/// were taken for gone, and came back at the drive root rather than in the
+/// folder the user put them in. The hold keeps them there. Where ids hold, the pairing
+/// finds them by id and this cannot happen. Built by hand -- the park lands,
+/// the directory is put back at its name, and the ids turn positional --
+/// since the simulator has no death between two steps of one operation.
+#[test]
+fn a_park_killed_before_its_rename_holds_its_children_for_the_next_scan() {
+    let world = World::new(9_978, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    let old = b"in the subfolder";
+    mac.fs.user_write("Shared/Sub/a.txt", old);
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Shared/Sub", "Sub-out");
+    pc.fs.user_remove("Shared");
+    world.pass(pc);
+    pc.fs.user_mkdir("Shared");
+    pc.fs.user_rename("Sub-out", "Shared/Sub");
+    let new = b"in the subfolder, in the new folder";
+    pc.fs.user_write("Shared/Sub/new.txt", new);
+    world.pass(pc);
+    world.pass(pc);
+    mac.fs.fail_next(FsOp::CreateDir, Some("Shared"), FailureKind::Io, 1);
+    world.pass(mac);
+    let park = mac
+        .fs
+        .all_paths()
+        .into_iter()
+        .find(|p| p.starts_with(".jd-swap-") && !p.contains('/'))
+        .unwrap_or_else(|| panic!("no park: {:?}", mac.fs.all_paths()));
+    // The record says the park; the directory never left its name.
+    mac.fs.user_rename(&park, "Shared");
+    mac.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    world.clock.advance_secs(20 * 60);
+    world.pass(mac);
+    let a = world.server.files().into_iter().find(|f| f.sha256 == jd_sim::sha256_hex(old)).expect("a.txt on the server");
+    assert!(!a.trashed, "the scan read the parked folder's child as deleted: {:?}", mac.fs.all_paths());
+    assert!(world.settle().is_some(), "never settled");
+
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    for body in [&old[..], &new[..]] {
+        assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(body)), "{:?} is not live: {live:?}", String::from_utf8_lossy(body));
+    }
+    assert_eq!(mac.fs.peek("Shared/Sub/a.txt").as_deref(), Some(&old[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// A leaving folder whose directory wears a name of this disk's own -- `CON`,
+/// escaped on Windows -- is not parked: the park would overwrite that
+/// spelling, and a park killed before its rename is found again only at the
+/// folder's own name. It waits, and the new folder's file still lands.
+#[test]
+fn a_leaving_folder_with_an_escaped_name_is_not_parked() {
+    let world = World::of(9_977, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+    boxd.fs.user_write("CON/old.txt", b"the old folder's file");
+    assert!(world.settle().is_some());
+    assert!(pc.fs.exists("%43ON/old.txt"), "{:?}", pc.fs.all_paths());
+    boxd.fs.user_remove("CON");
+    world.pass(boxd);
+    let new = b"made after the delete";
+    boxd.fs.user_write("CON/new.txt", new);
+    world.pass(boxd);
+    world.pass(boxd);
+    assert!(world.settle().is_some(), "never settled");
+    // The old folder went to the trash under its own name: it was never
+    // parked. A park is trashed under its scratch name.
+    let trashed: Vec<String> = pc.fs.trashed().into_iter().map(|(p, _)| p).collect();
+    assert!(trashed.iter().any(|p| p == "%43ON"), "{trashed:?}");
+    assert!(!trashed.iter().any(|p| p.starts_with(".jd-swap-")), "parked: {trashed:?}");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert!(live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(new)), "the new file is not live: {live:?}");
+    assert_eq!(pc.fs.peek("%43ON/new.txt").as_deref(), Some(&new[..]), "{:?}", pc.fs.all_paths());
+    assert_converged(&world);
+}

@@ -404,7 +404,7 @@ pub fn run_pass(
     say_whether_renames_can_be_tracked(env)?;
     let (followed, traded_with_a_vault) =
         follow_parked_vaults_by_their_contents(env, &observed, &dirs_on_disk, &dir_tie_breaks, &tie_breaks, &mut folder_ids)?;
-    let folders = detect_folder_moves(
+    let mut folders = detect_folder_moves(
         env,
         &observed,
         &dirs_on_disk,
@@ -414,6 +414,7 @@ pub fn run_pass(
         &followed,
         &traded_with_a_vault,
     )?;
+    hold_what_a_leaving_park_holds(env, &mut folders)?;
     lapse_parked_vaults_that_stand_nowhere(env, &folders, &followed, &mut folder_ids)?;
     point_paths_at_the_folders_whose_directories_they_are(env, &dir_identity, &mut folder_ids)?;
     note_the_tie_breaks_of_the_folders(env, &folder_ids, &dir_tie_breaks, &tie_breaks)?;
@@ -2637,13 +2638,14 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         .store
         .every_entry()?
         .into_iter()
-        .filter(|e| !e.remote_deleted)
         .flat_map(|e| {
-            let remote = e
-                .remote
-                .name
-                .starts_with(crate::order::SWAP_PREFIX)
+            let remote = (!e.remote_deleted && e.remote.name.starts_with(crate::order::SWAP_PREFIX))
                 .then(|| e.remote.name.clone());
+            // A local park counts while something is on the list for it --
+            // a deleted folder's too: the create that took its name parks a
+            // leaving folder's directory aside for its trash to take (B-E1),
+            // and swept as litter first, the children inside that the server
+            // has moved elsewhere went to the trash with it.
             let local = e
                 .local_name
                 .as_deref()
@@ -3535,6 +3537,66 @@ fn folder_delta(entry: &Entry, folders: &FolderScan) -> Delta {
         return Delta::Deleted;
     }
     Delta::None
+}
+
+/// Where a leaving folder's park stands: a folder the server deleted, its
+/// directory parked aside under a scratch name by the create that took its
+/// name (B-E1), its trash still to come. Relative paths, of parks whose
+/// directory stands at the scratch name -- or still at the folder's own, the
+/// park killed between its record and its rename: the record already says
+/// the scratch name, so its children's paths run through it and, unheld,
+/// read as deleted before the trash or the create could finish or undo it.
+fn leaving_parks(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder
+            || !entry.remote_deleted
+            || !entry.local_name.as_deref().is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))
+        {
+            continue;
+        }
+        if let Some(rel) = relative_path(env, &entry)? {
+            if env.vfs.read_dir(&root.join(&rel)).is_ok()
+                || crate::execute::parked_directory_left_at_its_name(env, &entry)?.is_some()
+            {
+                out.push(rel);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn under_one_of(parks: &[String], path: &str) -> bool {
+    parks.iter().any(|p| path == p || path.starts_with(&format!("{p}/")))
+}
+
+/// What a leaving folder's park holds is held, not judged. The walk does not
+/// go into a scratch directory, so read by the walk, a child the server has
+/// moved elsewhere and whose directory is still in the park -- the very child
+/// the park's trash waits for -- was gone: re-made empty at its new place,
+/// and the files in it read as deleted here and trashed on the server. So
+/// every folder recorded under the park is present and unmoved, and its
+/// remote move is planned from where it stands; the files under it are left
+/// out of the file scan (`known_local`). Once the child has moved out, the
+/// trash takes the park.
+fn hold_what_a_leaving_park_holds(env: &ExecEnv, folders: &mut FolderScan) -> Result<(), ExecError> {
+    let parks = leaving_parks(env)?;
+    if parks.is_empty() {
+        return Ok(());
+    }
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder {
+            continue;
+        }
+        if relative_path(env, &entry)?.is_some_and(|rel| under_one_of(&parks, &rel)) {
+            folders.present.insert(entry.id);
+            folders.moves.remove(&entry.id);
+        }
+    }
+    Ok(())
 }
 
 /// What the local scan found out about folders.
@@ -6029,6 +6091,7 @@ fn bind_never_sent_own_ids(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), Exec
 }
 
 fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec<KnownLocal>, ExecError> {
+    let parks = leaving_parks(env)?;
     let positional = env.vfs.personality().positional_file_ids;
     let mut out = Vec::new();
     let mut deleted = Vec::new();
@@ -6067,6 +6130,11 @@ fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec
         let Some(path) = relative_path(env, &entry)? else {
             continue;
         };
+        // Held in a leaving folder's park: not judged this pass
+        // (`hold_what_a_leaving_park_holds`).
+        if under_one_of(&parks, &path) {
+            continue;
+        }
         // A sealed file held outside its vault is kept away from where the
         // server keeps it on purpose; its own file back in that slot is the
         // file come home (scan, `arrived_by_a_trade`).
