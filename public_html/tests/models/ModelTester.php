@@ -563,6 +563,12 @@ class ModelTester {
                     } else {
                         $model3->set($test_field, $this->vary_scalar_value($test_field, $value));
                     }
+                } elseif (!in_array($test_field, $all_fields, true)
+                    && !empty($model_class::$field_specifications[$test_field]['unique'])
+                    && !is_numeric($value)) {
+                    // A column that is unique on its own (a token) would reject the
+                    // row for its own reason, hiding what is being tested here.
+                    $model3->set($test_field, $this->vary_scalar_value($test_field, $value));
                 } else {
                     $model3->set($test_field, $value);
                 }

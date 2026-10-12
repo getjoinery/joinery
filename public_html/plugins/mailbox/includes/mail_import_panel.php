@@ -23,7 +23,9 @@
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - the archive upload opens and finishes through upload_init / upload_complete, so it
+ *   works with Drive off.
  * @changelog 1.6 - the finished-run summary calls the skipped bucket 'in
  *   excluded folders' instead of 'left out'.
  * @changelog 1.5 - a moving run shows a live countdown to the worker's next
@@ -463,7 +465,7 @@ function mailbox_import_panel_script(): void {
 	 * rejected chunk comes back with the offset to continue from.
 	 */
 	function uploadInChunks(file) {
-		return coreApi('drive_upload_init', {
+		return coreApi('upload_init', {
 			purpose: 'mail_import_archive',
 			name: file.name,
 			size_bytes: file.size,
@@ -512,7 +514,7 @@ function mailbox_import_panel_script(): void {
 			say('Uploading 0% of ' + humanBytes(total) + '...');
 			return sendNext().then(function () {
 				say('Finishing the upload...');
-				return coreApi('drive_upload_complete', { upload_token: token });
+				return coreApi('upload_complete', { upload_token: token });
 			}).then(function (j2) {
 				var f = (j2 && j2.data && j2.data.file) || null;
 				if (!f || !f.id) { throw new Error(errorOf(j2)); }

@@ -185,6 +185,9 @@ $db->exec("UPDATE ied_inbound_email_domains SET ied_security_level = 'private', 
 $off = BoardsEmail::panel($board, $editor, 'editor');
 check($off['status'] === 'domain_off' && $off['address'] === null && stripos((string)$off['reason'], 'off for this board') !== false,
 	'a chosen domain raised to Private turns email off for the board, and the panel says why', (string)$off['reason']);
+$off_admin = BoardsEmail::panel($board, $owner, 'admin');
+check(!empty($off_admin['domains']),
+	'an admin of a board whose domain went off is still offered the eligible domains');
 $db->exec("UPDATE ied_inbound_email_domains SET ied_security_level = 'standard' WHERE ied_inbound_email_domain_id = " . (int)$d2->key);
 BoardsEmail::setDomain($board, null);
 $back = BoardsEmail::addressFor($board, $editor);

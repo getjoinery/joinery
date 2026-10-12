@@ -1060,22 +1060,29 @@ Uploads use a resumable protocol rather than a single multipart POST:
 #### Uploading something that is not a Drive file
 
 The transport above is the only way a file larger than one web request reaches the
-server, so it is not reserved for Drive. `drive_upload_init` takes an optional
-**`purpose`**, defaulting to `drive`; any other value names an entry in
-`UploadPurposeRegistry`, which supplies the policy — who may upload, what origin
-tag the resulting `File` carries, and what happens once it exists.
+server, so it is not reserved for Drive. A subsystem that registered a purpose
+opens its uploads with **`upload_init`** (a required **`purpose`**, plus `name`,
+`size_bytes`, optional `sha256` and `mime_type`, and whatever the purpose's
+`authorize` hook reads) and finishes them with **`upload_complete`**. Both are
+ungated, so a site with Drive switched off still takes the upload. The purpose
+names an entry in `UploadPurposeRegistry`, which supplies the policy: who may
+upload, what origin tag the resulting `File` carries, and what happens once it
+exists. Both refuse a Drive upload; Drive's own `drive_upload_init` and
+`drive_upload_complete` keep their `drive_active` gate.
 
-The endpoint names are historical. They serve every purpose, and are not renamed
-because three shipped clients address them.
+The bytes travel over the same `PUT /api/v1/drive_upload/{token}` transport, whose
+name is historical.
 
 A non-Drive purpose takes the same three steps and skips everything Drive-specific:
 no quota, no folder, no encryption, no dedup short-circuit. The purpose is recorded
 on the upload at init (`fup_purpose`), so an upload cannot be opened under one
-purpose and completed as another to borrow its policy. `drive_upload_complete`
+purpose and completed as another to borrow its policy. `upload_complete`
 returns `{file: {id, name, size_bytes, mime_type, source}}` for these.
 
 Shipped purposes: **`mail_import_archive`** (a mail archive being imported into a
-mailbox — see the [Mailbox plugin](../plugins/mailbox/docs/overview.md)). Adding one
+mailbox — see the [Mailbox plugin](../plugins/mailbox/docs/overview.md)) and
+**`boards_attachment`** (a file attached to a board card — see the
+[Boards plugin](../plugins/boards/docs/overview.md)). Adding one
 is a single `UploadPurposeRegistry::register()` call from the owning subsystem's
 bootstrap; see `specs/implemented/chunked_upload_purposes.md`.
 
