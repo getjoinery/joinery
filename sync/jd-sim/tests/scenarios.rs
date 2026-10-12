@@ -19702,3 +19702,59 @@ fn a_leaving_folder_with_an_escaped_name_is_not_parked() {
     assert_eq!(pc.fs.peek("%43ON/new.txt").as_deref(), Some(&new[..]), "{:?}", pc.fs.all_paths());
     assert_converged(&world);
 }
+
+/// Kill2 75281: a download this device planned and could not finish, still
+/// queued when a peer's park reached the file on the server. Run under the
+/// scratch name, it landed the peer's file where the walk cannot see it;
+/// naming then gave the copy up for its reserved name, the next scan read the
+/// file as deleted here, and it went to the server's trash with the peer's
+/// edit in it. The download waits for the park to end, as the planner does,
+/// and the file arrives under its real name.
+#[test]
+fn a_download_queued_before_a_peers_park_waits_for_the_park_to_end() {
+    let world = World::new(9_976, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    let body = b"the peer's document";
+    pc.fs.user_write("Docs/doc.txt", body);
+    for _ in 0..4 {
+        world.pass(pc);
+    }
+    let doc = world.server.files().into_iter().find(|f| f.name == "doc.txt").expect("pc's file is up").id;
+    // Mac's first pass plans the download and cannot land it; the op stays
+    // queued.
+    mac.fs.fail_next(FsOp::Spool, None, FailureKind::Io, 1);
+    world.pass(mac);
+    assert!(mac.fs.peek("Docs/doc.txt").is_none(), "the download landed after all: {:?}", mac.fs.all_paths());
+    assert!(
+        mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "download" && o.entity.server_id == doc),
+        "no download left queued: {:?}",
+        mac.store.queued_ops().unwrap()
+    );
+    // Pc parks the file on the server, as one step of a rename it has not
+    // finished yet.
+    let tag = pc.store.park_tag("a rename pc is making").unwrap();
+    let scratch = jd_core::order::tagged_swap_name(&tag, "0123456789abcdef");
+    world
+        .server
+        .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": doc, "name": scratch }))
+        .expect("pc's park lands");
+    for n in 0..4 {
+        world.clock.advance_secs(20 * 60);
+        world.pass(mac);
+        assert!(
+            !mac.fs.all_paths().iter().any(|p| p.contains(".jd-")),
+            "pass {n}: mac landed pc's file under the scratch name: {:?}",
+            mac.fs.all_paths()
+        );
+        assert!(
+            world.server.files().into_iter().any(|f| f.id == doc && !f.trashed),
+            "pass {n}: the file went to the trash"
+        );
+    }
+    assert!(world.settle().is_some(), "never settled once pc put its park back");
+    assert!(world.server.files().into_iter().any(|f| f.id == doc && !f.trashed), "the file went to the trash");
+    assert_eq!(mac.fs.peek("Docs/doc.txt").as_deref(), Some(&body[..]), "{:?}", mac.fs.all_paths());
+    no_scratch_and_no_conflict_names(&world);
+    assert_converged(&world);
+}
