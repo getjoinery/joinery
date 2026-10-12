@@ -608,7 +608,10 @@
 			publish_output("Agent artifact: carried as received (v" . ($agent_bundle['bundled_version'] ?: 'none') . ")");
 		} else {
 			publish_output("Bundling management agent artifact...");
-			$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output');
+			// Built from a copy of the agent source's commit, like the core:
+			// an uncommitted edit in the agent source is not compiled in.
+			$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output',
+				array('dir' => publish_agent_build_tree($base_commits['agent'], $version), 'commit' => $base_commits['agent']));
 		}
 
 		if ($agent_bundle['status'] === AgentDistPublisher::STATUS_FAILED) {
@@ -840,7 +843,7 @@
 		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output', $ships, $build_root);
 		$release_commits = array('core' => null, 'agent' => null);
 		if (!$republish) {
-			$release_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, true, $base_commits['core']);
+			$release_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, true, $base_commits);
 			// The archives are cut from the release commit itself.
 			exec('rm -rf ' . escapeshellarg($build_root));
 			list($build_root, $ships) = publish_build_tree($full_site_dir, $release_commits['core'], $version);
@@ -1741,21 +1744,22 @@
 	 * Refuse unless both repositories are committed and on the public remote
 	 * (spec release_transparency D1), and return the commit of each.
 	 *
-	 * A release is built from the commit, so in the core only a HELD path
+	 * A release is built from the commits, so only a HELD path in the core
 	 * (ReleaseCommit::heldPath()) refuses while uncommitted; every other
-	 * uncommitted change is left out of the release and named. The agent
-	 * repository is all source: anything uncommitted there refuses.
+	 * uncommitted change, in the core or the agent source, is left out of the
+	 * release and named.
 	 *
 	 * Before anything is written ($commit_own_writes false), publish's own
 	 * leftovers are written again and the rest is sorted as above. After the
 	 * writes ($commit_own_writes true), publish's own files in the core are
 	 * committed and pushed as 'Release <version>' (ReleaseCommit::commitRelease())
-	 * - but only while HEAD is still $base_head, the commit the version bumps
-	 * were decided from - and the HEAD is then checked.
+	 * - but only while each repository's HEAD is still the one in $base_commits,
+	 * which the version bumps were decided from and the agent was built from -
+	 * and the HEAD is then checked.
 	 *
 	 * @return array{core:?string, agent:?string}
 	 */
-	function publish_require_committed(array $repos, $version, $commit_own_writes, $base_head = null) {
+	function publish_require_committed(array $repos, $version, $commit_own_writes, array $base_commits = array()) {
 		$commits = array('core' => null, 'agent' => null);
 		$refused = false;
 		foreach ($repos as $name => $root) {
@@ -1776,7 +1780,7 @@
 			foreach ($blockers as $path) {
 				if ($name === 'core' && ReleaseCommit::publishWrite($root, $path)) {
 					$own[] = $path;
-				} elseif ($name === 'core' && !ReleaseCommit::heldPath($path)) {
+				} elseif ($name === 'agent' || !ReleaseCommit::heldPath($path)) {
 					$left_out[] = $path;
 				} else {
 					$owners[] = $path;
@@ -1794,17 +1798,18 @@
 				continue;
 			}
 			if (!$commit_own_writes && $left_out !== array()) {
-				publish_output("\nLeft out of this release — uncommitted, so in no commit (" . count($left_out) . '):');
+				publish_output("\nLeft out of this release — uncommitted in the {$name} repository, so in no commit (" . count($left_out) . '):');
 				foreach ($left_out as $path) {
 					publish_output("  - {$path}");
 				}
 			}
-			if ($commit_own_writes && $name === 'core' && $base_head !== null) {
+			$base_head = $base_commits[$name] ?? null;
+			if ($commit_own_writes && $base_head !== null) {
 				$now = ReleaseCommit::head($root);
 				if ($now !== $base_head) {
-					publish_output("\nRefusing to publish {$version} — a commit landed while this publish ran ("
-						. substr((string)$base_head, 0, 12) . ' -> ' . substr((string)$now, 0, 12) . '), after the version bumps were decided from '
-						. substr((string)$base_head, 0, 12) . '. Publish again; it decides from the new commit.');
+					publish_output("\nRefusing to publish {$version} — a commit landed in the {$name} repository while this publish ran ("
+						. substr((string)$base_head, 0, 12) . ' -> ' . substr((string)$now, 0, 12) . '), after this release was built from '
+						. substr((string)$base_head, 0, 12) . '. Publish again; it builds from the new commit.');
 					$refused = true;
 					continue;
 				}
@@ -1873,6 +1878,27 @@
 			return ReleaseCommit::joineryFileShips($rel, $files);
 		};
 		return array($dir, $ships);
+	}
+
+	/**
+	 * A copy of the agent source at $commit, in a temporary directory removed
+	 * when the run ends (publish_build_tree()'s cleanup), for the agent to be
+	 * built from. Refuses the publish when it cannot be had.
+	 */
+	function publish_agent_build_tree($commit, $version) {
+		$dir = sys_get_temp_dir() . '/joinery_build_' . getmypid() . '_agent_' . uniqid();
+		if (!mkdir($dir, 0755, true)) {
+			publish_output("\nRefusing to publish {$version} — could not create the agent build directory {$dir}. Nothing has been written.");
+			exit(1);
+		}
+		$export = ReleaseCommit::exportCommit(AgentDistPublisher::sourcePath(), (string)$commit, $dir);
+		if (!$export['ok']) {
+			exec('rm -rf ' . escapeshellarg($dir));
+			publish_output("\nRefusing to publish {$version} — the agent could not be built from commit {$commit}: {$export['reason']}. Nothing has been written.");
+			exit(1);
+		}
+		publish_output('Building the agent from commit ' . substr((string)$commit, 0, 12));
+		return $dir;
 	}
 
 	/**

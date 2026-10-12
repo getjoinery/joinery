@@ -315,6 +315,15 @@ mkdir($empty, 0755);
 check(!ReleaseCommit::exportTree($buildr, 'HEAD', $empty)['ok'], 'and anything but a full commit id');
 check(!ReleaseCommit::exportTree($buildr, str_repeat('0', 40), $empty)['ok'], 'and a commit that does not exist');
 
+// The agent source is built from its commit the same way, whole.
+$whole = $tmp . '/whole';
+mkdir($whole, 0755);
+check(ReleaseCommit::exportCommit($buildr, $commit, $whole)['ok']
+	&& (string)@file_get_contents($whole . '/public_html/includes/A.php') === "<?php // committed\n"
+	&& is_file($whole . '/strategy/plan.md') && !file_exists($whole . '/public_html/includes/B.php'),
+	'exportCommit() writes the whole commit, committed bytes only, nothing untracked');
+check(!ReleaseCommit::exportCommit($buildr, $commit, $whole)['ok'], 'and refuses a directory that is not empty');
+
 // ---------------------------------------------------------------------------
 section('On the remote');
 
@@ -485,8 +494,10 @@ file_put_contents($own_core . '/public_html/VERSION', "9.9.9\n");          // a 
 file_put_contents($own_agent . '/main.go', "package main\n");              // untracked in the agent: always a blocker
 $b = ReleaseCommit::ownerBlockers($own_core, $own_agent);
 check($b['core'] === array('public_html/data/x_class.php'), 'a held change in the core blocks, the file publish writes itself does not', json_encode($b['core']));
-check($b['left_out'] === array('public_html/a.php'), 'and any other edit is left out of the release, not in the way', json_encode($b['left_out']));
-check($b['agent'] === array('main.go'), 'any change in the agent source blocks, untracked included', json_encode($b['agent']));
+check($b['left_out'] === array('public_html/a.php', 'agent: main.go'), 'and any other edit is left out of the release, not in the way', json_encode($b['left_out']));
+check($b['agent'] === array() && in_array('agent: main.go', $b['left_out'], true),
+	'a change in the agent source is left out of the release, not in the way: the agent is built from its commit',
+	json_encode($b));
 
 $nogit = $tmp . '/no_agent_here';
 mkdir($nogit, 0755, true);

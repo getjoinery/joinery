@@ -126,18 +126,21 @@ cat ARCHIVE_ROOT/public_html/VERSION
 
 ### A release is a commit
 
-`publish_upgrade.php` builds only from a committed, pushed commit, so a release
-is a public commit anyone can regenerate the archives from. It never builds
-from the working tree: it writes the commit's shipping paths into a temporary
-build directory (`ReleaseCommit::exportTree()`), copies in the files it builds
-itself, and cuts every archive, manifest and tree hash from there. Several
-sessions can share one working tree, and work one of them has not committed is
-simply not in the release. One run goes from a commit to a release:
+`publish_upgrade.php` builds only from committed, pushed commits, so a release
+is a pair of public commits anyone can regenerate the archives from. It never
+builds from a working tree: it writes the platform commit's shipping paths into
+a temporary build directory (`ReleaseCommit::exportTree()`), copies in the files
+it builds itself, and cuts every archive, manifest and tree hash from there; and
+it compiles the agent from a copy of the agent source's commit
+(`ReleaseCommit::exportCommit()`). Several sessions can share one working tree,
+and work one of them has not committed is simply not in the release. One run
+goes from a commit to a release:
 
 1. Before writing anything, it checks both repositories — the platform at the
    site root and the agent source at `server_manager_agent_source_path` — with
    `ReleaseCommit`. HEAD must be an ancestor of `origin/main` after a fetch.
-   In the agent source, any uncommitted change refuses the release. In the
+   In the agent source, every uncommitted change is left out of the release
+   and listed: nothing there is read from the working tree. In the
    platform, an uncommitted change (a tracked file modified or deleted, or an
    untracked file on a path that ships: `public_html/` and
    `maintenance_scripts/` minus `specs/`, `uploads/`, `cache/`, `logs/`,
@@ -170,8 +173,9 @@ simply not in the release. One run goes from a commit to a release:
    repository's owner with the owner's home, so the commit carries the
    owner's identity and the push uses the owner's key, whoever started the
    publish. A held change found at this point (made while the publish ran)
-   refuses the release, and so does a commit that landed while it ran: the
-   version bumps were decided from the commit before it.
+   refuses the release, and so does a commit that landed in either repository
+   while it ran: the version bumps were decided from, and the agent built from,
+   the commits before it.
 5. Writes the release commit into a fresh build directory and builds every
    archive from it.
 6. Records both commits on the release row (`upg_core_commit`,
