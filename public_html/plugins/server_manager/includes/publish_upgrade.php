@@ -1791,10 +1791,18 @@
 				publish_output("\nRefusing to publish {$version} — the {$name} repository has changes that are not committed"
 					. ($commit_own_writes ? ' (made while this publish was running)' : '')
 					. ($name === 'core' ? ', on paths a release reads from this box rather than from the commit' : '') . ':');
+				$notes = $name === 'core' ? ReleaseCommit::blockerNotes($root, $owners) : array();
 				foreach ($owners as $path) {
 					publish_output("  - {$path}");
+					foreach ($notes[$path] ?? array() as $note) {
+						publish_output("      {$note}");
+					}
 				}
 				publish_output('Commit and push them, then publish again. Publish commits only the files it writes itself.');
+				if ($name === 'core') {
+					publish_output('Which session changed them: work --owners ' . implode(' ', array_map('escapeshellarg', $owners))
+						. '  (a file no session claims was changed outside Claude; read git diff before committing it).');
+				}
 				$refused = true;
 				continue;
 			}

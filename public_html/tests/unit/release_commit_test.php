@@ -518,5 +518,30 @@ check(count($u['unreadable']) === 1 && strpos($u['unreadable'][0], 'not a git ch
 	'an agent source that is not a git checkout is named, not skipped', json_encode($u['unreadable']));
 check(count(ReleaseCommit::ownerBlockers($own_core, null)['unreadable']) === 1, 'and so is no agent source path at all');
 
+// ---------------------------------------------------------------------------
+section('What each refusing file is, and who holds it (blockerNotes)');
+
+// A held data class with a new method and a version line; and a session that has
+// already prepared it in its private index.
+file_put_contents($own_core . '/public_html/data/x_class.php',
+	"<?php\n/**\n * @version 1.2 - address_moved() moves the rows\n */\nclass X {\n\tpublic static function address_moved(int \$n): int { return 0; }\n}\n");
+exec('git -C ' . escapeshellarg($own_core) . ' add -N public_html/data/x_class.php 2>&1');
+$prep = $own_core . '/.git/work-commits/some-session';
+mkdir($prep, 0755, true);
+file_put_contents($prep . '/paths', "public_html/data/x_class.php\0");
+file_put_contents($prep . '/message', "Move the escrow addresses with an IP swap\n\n- bullet\n");
+$notes = ReleaseCommit::blockerNotes($own_core, array('public_html/data/x_class.php', 'public_html/a.php'));
+$held_text = implode(' | ', $notes['public_html/data/x_class.php'] ?? array());
+check(strpos($held_text, 'last written') !== false, 'a note says when the file was last written', $held_text);
+check(strpos($held_text, 'adds: @version 1.2') !== false,
+	'it says what the change adds (a version line or function)', $held_text);
+check(strpos($held_text, "session 'some-session'") !== false && strpos($held_text, 'work some-session --commit') !== false,
+	'and names the session whose prepared commit already holds the file, with the command that commits it', $held_text);
+$other = implode(' | ', $notes['public_html/a.php'] ?? array());
+check(strpos($other, 'no session has prepared this file') !== false, 'a file nobody prepared says so', $other);
+check(strpos($other, '+1 -1 lines') !== false, 'and gives the size of the change', $other);
+check(ReleaseCommit::blockerNotes($tmp . '/no_agent_here', array('x.php'))['x.php'] !== array(),
+	'a path in a repository git cannot read still gets an answer, not a failure');
+
 exec('rm -rf ' . escapeshellarg($tmp));
 harness_finish();
