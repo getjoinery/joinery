@@ -211,8 +211,12 @@ function harness_unmet_needs(array $needs) {
 					// carried out and the read-only tree gate would fail on a
 					// box that is simply missing its timer, which is a
 					// different problem with a different fix.
+					// A release staging site (setup_release_staging.sh) is
+					// not one a converger maintains: publish fills it, and
+					// its tree and vhost are not a site install's.
 					$facts = HostConvergerNotice::facts();
-					$cache[$need] = !empty($facts['installed']);
+					$cache[$need] = !empty($facts['installed'])
+						&& !is_file(PathHelper::getSiteRoot() . '/config/release_staging');
 					break;
 				case 'parser-jail':
 					// The launcher is installed by root (install_parser_jail.sh);
