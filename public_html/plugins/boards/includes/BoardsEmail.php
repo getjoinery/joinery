@@ -14,6 +14,7 @@
  * Nothing in Boards reads mail addressed to anyone outside the site: only a board
  * member's own address, and only that member's own messages, make cards.
  *
+ * @version 1.0.1 - an admin whose board's domain went off is offered the eligible domains, even one
  * @version 1.0.0
  */
 
@@ -189,12 +190,13 @@ class BoardsEmail {
 		$out['domain'] = $state['domain'] ? (string)$state['domain']->get('ied_domain') : null;
 		if ($role === Boards::ROLE_ADMIN) {
 			$out['is_admin'] = true;
-			// The picker shows only when there is a real choice.
+			// The picker shows when there is a real choice.
 			$domains = array();
 			foreach (InboundHandlerRegistry::eligibleDomains() as $d) {
 				$domains[] = array('id' => (int)$d->key, 'name' => (string)$d->get('ied_domain'));
 			}
-			$out['domains'] = count($domains) >= 2 ? $domains : array();
+			// A board whose own domain went off needs a way out, however few remain.
+			$out['domains'] = (count($domains) >= 2 || ($state['status'] === 'domain_off' && count($domains) >= 1)) ? $domains : array();
 			$out['domain_id'] = $state['domain'] ? (int)$state['domain']->key : null;
 			$landing = self::landingList($board);
 			$out['landing'] = array(

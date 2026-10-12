@@ -30,7 +30,11 @@
  *
  * Run: php tests/run.php db --filter=upload_purposes
  *
- * @version 1.0
+ *  - upload_init / upload_complete open and finish a purpose's upload on a site with
+ *    Drive off: their descriptors name no feature gate, Drive's still does, and a
+ *    Drive upload is refused by them
+ *
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../lib/harness.php');
@@ -40,6 +44,8 @@ require_once(PathHelper::getIncludePath('data/file_uploads_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('logic/drive_upload_init_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_upload_complete_logic.php'));
+require_once(PathHelper::getIncludePath('logic/upload_init_logic.php'));
+require_once(PathHelper::getIncludePath('logic/upload_complete_logic.php'));
 
 class UploadPurposesTest {
 
@@ -67,6 +73,7 @@ class UploadPurposesTest {
 			$this->testLargerThanOneRequest();
 			$this->testPurposeCannotBeSwapped();
 			$this->testInvisibleToDrive();
+			$this->testWithoutDrive();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -278,6 +285,38 @@ class UploadPurposesTest {
 				'purpose swap: it kept the purpose it was OPENED under, not the one requested',
 				(string)$file->get('fil_source'));
 		}
+	}
+
+	private function testWithoutDrive() {
+		section('Purposes without Drive');
+		foreach (array('drive_upload_init_logic_descriptor', 'drive_upload_complete_logic_descriptor') as $fn) {
+			$meta = $fn();
+			check(($meta['requires_setting'] ?? '') === 'drive_active', $fn . ': Drive\'s own action is still gated on drive_active');
+		}
+		foreach (array('upload_init_logic_descriptor', 'upload_complete_logic_descriptor') as $fn) {
+			$meta = $fn();
+			check(empty($meta['requires_setting']), $fn . ': a purpose\'s action names no Drive gate');
+		}
+
+		$bytes = str_repeat('x', 4096);
+		$init = upload_init_logic(array('purpose' => self::PURPOSE, 'name' => 'nodrive.bin', 'size_bytes' => strlen($bytes)));
+		check($init->error === null, 'upload_init opens a purpose\'s upload', (string)$init->error);
+		$token = (string)(is_array($init->data) ? ($init->data['upload_token'] ?? '') : '');
+		check($token !== '', 'upload_init issues a token');
+		$this->deliver($token, $bytes);
+		$done = upload_complete_logic(array('upload_token' => $token));
+		check($done->error === null, 'upload_complete finishes it', (string)$done->error);
+		if (is_array($done->data) && !empty($done->data['file']['id'])) {
+			$this->file_ids[] = intval($done->data['file']['id']);
+		}
+		check(intval($done->data['file']['size_bytes'] ?? 0) === strlen($bytes), 'the file has the uploaded size');
+
+		$drive = upload_init_logic(array('purpose' => 'drive', 'name' => 'd.bin', 'size_bytes' => 10));
+		check($drive->error !== null, 'upload_init refuses a Drive upload');
+		$none = upload_init_logic(array('name' => 'd.bin', 'size_bytes' => 10));
+		check($none->error !== null, 'upload_init refuses an upload that names no purpose');
+		$missing = upload_complete_logic(array('upload_token' => 'no-such-token'));
+		check($missing->error !== null, 'upload_complete refuses a token that does not exist');
 	}
 
 	private function testInvisibleToDrive() {

@@ -23,6 +23,8 @@
  * board drawing - drag and drop - filters - card back - pickers - board menu -
  * shortcuts - live updates - start.
  *
+ * @version 1.0.2 - a large attachment opens and finishes through upload_init / upload_complete, so it works with Drive off
+ * @version 1.0.1 - a board whose mail domain went off still shows its admin the domain picker
  * @version 1.0.0
  */
 (function () {
@@ -2004,12 +2006,12 @@
 		// Big file: open the resumable upload, PUT it in chunks, then claim it onto the card.
 		var maxMb = (S.settings && S.settings.max_attachment_mb) || 25;
 		if (f.size > maxMb * 1048576) { problem(new Error('Files can be up to ' + maxMb + ' MB. That one is larger.')); return; }
-		api.post('drive_upload_init', { purpose: 'boards_attachment', board_id: S.board.id, name: f.name, size_bytes: f.size, mime_type: f.type || 'application/octet-stream' })
+		api.post('upload_init', { purpose: 'boards_attachment', board_id: S.board.id, name: f.name, size_bytes: f.size, mime_type: f.type || 'application/octet-stream' })
 			.then(function (init) {
 				var chunk = init.chunk_bytes || 8388608, offset = 0;
 				function next() {
 					if (offset >= f.size) {
-						return api.post('drive_upload_complete', { upload_token: init.upload_token });
+						return api.post('upload_complete', { upload_token: init.upload_token });
 					}
 					var end = Math.min(offset + chunk, f.size);
 					return fetch('/api/v1/drive_upload/' + encodeURIComponent(init.upload_token), {
@@ -2321,6 +2323,7 @@
 		clear(box);
 		if (em.status !== 'ok') {
 			box.appendChild(el('p', { class: 'jy-boards-muted', text: em.reason || 'Email is not available for this board.' }));
+			if (em.is_admin) { drawDomainPicker(box, section, em); }
 			return;
 		}
 		if (!em.can_have_address) {
@@ -2359,15 +2362,19 @@
 		box.appendChild(el('h4', { text: 'Cards made by email' }));
 		box.appendChild(el('div', { class: 'jy-boards-row' }, [field('Land in', listSel), field('At', posSel), landingBtn]));
 
-		if (em.domains && em.domains.length >= 2) {
-			var domSel = select(em.domains.map(function (d) { return [d.id, d.name]; }), em.domain_id);
-			box.appendChild(el('h4', { text: 'Address domain' }));
-			box.appendChild(el('div', { class: 'jy-boards-row' }, [field('Use', domSel),
-				button('Save', 'btn-secondary btn-sm', function () {
-					loadEmailPanel(box, section, { op: 'set_domain', board_id: S.board.id, domain_id: domSel.value });
-				})]));
-			box.appendChild(el('small', { class: 'jy-boards-muted', text: 'Addresses people already have keep working at the old domain.' }));
-		}
+		drawDomainPicker(box, section, em);
+	}
+
+	/** The admin's choice of mail domain, when the panel offers one. */
+	function drawDomainPicker(box, section, em) {
+		if (!em.domains || !em.domains.length) { return; }
+		var domSel = select(em.domains.map(function (d) { return [d.id, d.name]; }), em.domain_id);
+		box.appendChild(el('h4', { text: 'Address domain' }));
+		box.appendChild(el('div', { class: 'jy-boards-row' }, [field('Use', domSel),
+			button('Save', 'btn-secondary btn-sm', function () {
+				loadEmailPanel(box, section, { op: 'set_domain', board_id: S.board.id, domain_id: domSel.value });
+			})]));
+		box.appendChild(el('small', { class: 'jy-boards-muted', text: 'Addresses people already have keep working at the old domain.' }));
 	}
 
 	function drawPeople(box, admin) {
