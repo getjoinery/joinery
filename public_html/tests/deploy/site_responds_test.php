@@ -28,6 +28,7 @@
  *
  * Run: php tests/deploy/site_responds_test.php
  *
+ * @version 1.1.0 - a site whose protocol_mode is http is asked over HTTP only
  * @version 1.0.0
  */
 
@@ -69,6 +70,14 @@ if ($host === '') {
 	harness_skip('the site answers on /', 'no webDir or site_url to build a request from');
 	harness_finish();
 	return;
+}
+
+// Globalvars strips the scheme from webDir, so the scheme above is a default.
+// A site set to answer over HTTP only says so in protocol_mode, and is asked
+// over HTTP only: on 443 this machine's other vhost would answer for it, and
+// that site's page would pass as this one's.
+if ((string)$settings->get_setting('protocol_mode', true, true) === 'http') {
+	$scheme = 'http';
 }
 
 // A site installed on a bare IP has no name to send, and forcing the loopback

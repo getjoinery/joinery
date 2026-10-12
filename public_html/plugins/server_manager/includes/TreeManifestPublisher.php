@@ -49,6 +49,9 @@
  * here is that rule. vendor/ is excluded at the site root only: a plugin's
  * Composer tree ships with the plugin and is listed (specs/package_signing.md WP0).
  *
+ * @version 1.7 - write() takes $to_dir: the live tree's manifest is built from the release's build
+ *                directory (the commit) and written into the live tree, so this site's own agent
+ *                trusts what was released and not an uncommitted edit sitting beside it
  * @version 1.6 - archiveMembers(): an archive carries exactly what its manifest lists; build(), write()
  *                and publish_artifact() take $ships: on the publishing box only a file the
  *                repository knows, or one publish builds, is listed (ReleaseCommit::joineryFileShips())
@@ -271,20 +274,22 @@ class TreeManifestPublisher {
 	}
 
 	/**
-	 * Write a signed manifest covering $dir into $dir.
+	 * Write a signed manifest covering $dir into $dir, or into $to_dir.
 	 *
 	 * @param string $dir        Directory to walk (the artifact's own tree)
 	 * @param string $site_root  Root the recorded paths are relative to
 	 * @param array  $keys       ['secret' => ..., 'public' => ...] from AgentDistPublisher::ensureKeys()
 	 * @param callable|null $ships fn(string $rel): bool, which files may be listed (see build())
+	 * @param string|null $to_dir Where the manifest goes when not into $dir: the live tree, whose
+	 *                           manifest describes the release built beside it
 	 * @return array ['files' => int, 'manifest' => path]
 	 * @throws Exception when the manifest cannot be written or does not verify
 	 */
-	public static function write($dir, $site_root, array $keys, $ships = null) {
+	public static function write($dir, $site_root, array $keys, $ships = null, $to_dir = null) {
 		$body = self::build($dir, $site_root, $ships);
 
-		$manifest_path  = rtrim($dir, '/') . '/' . self::MANIFEST_NAME;
-		$signature_path = rtrim($dir, '/') . '/' . self::SIGNATURE_NAME;
+		$manifest_path  = rtrim($to_dir ?: $dir, '/') . '/' . self::MANIFEST_NAME;
+		$signature_path = rtrim($to_dir ?: $dir, '/') . '/' . self::SIGNATURE_NAME;
 
 		$signature = sodium_crypto_sign_detached($body, $keys['secret']);
 

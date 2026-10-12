@@ -240,13 +240,60 @@ section('One publish goes from a committed tree to a release');
 // install SQL and version bumps and needed a second run by hand.
 $at = function ($needle) use ($publisher_src) { $p = strpos($publisher_src, $needle); return $p === false ? -1 : $p; };
 $owner_check = $at('publish_require_committed(publish_release_repos($full_site_dir), $version, false)');
-$own_commit  = $at('publish_require_committed(publish_release_repos($full_site_dir), $version, true)');
+$own_commit  = $at("publish_require_committed(publish_release_repos(\$full_site_dir), \$version, true, \$base_commits['core'])");
 check($owner_check > 0 && $owner_check < $at('publish_output("Wrote version') && $owner_check < $at('AgentDistPublisher::publish($full_site_dir'),
     'the owner\'s work is checked before anything is written');
 check($own_commit > $at('Updated on-disk install SQL') && $own_commit > $at('$component_plan = publish_plan_components('),
     'publish\'s own files are committed after the last of them is written');
 check($own_commit < $at('Create CORE archive'), 'and before anything is built from the commit');
 check(strpos($publisher_src, 'ReleaseCommit::commitRelease(') !== false, 'publish commits and pushes its own files');
+
+
+section('A release is built from the commit, not the working tree');
+
+// Another session's uncommitted edit in the shared tree is left out of the
+// release instead of stopping it, so nothing that ships may be read from the
+// working tree: every archive source is the build directory, a copy of the
+// commit (ReleaseCommit::exportTree()).
+$export_a = $at("publish_build_tree(\$full_site_dir, \$base_commits['core'], \$version)");
+$export_b = $at("publish_build_tree(\$full_site_dir, \$release_commits['core'], \$version)");
+check($export_a > $owner_check && $export_a < $at('a default bundle names a plugin this release cannot carry'),
+    'the commit just checked is copied out before the bundle guard reads it');
+check($export_a < $at('SupportBundlePublisher::publish(') && $export_a < $at('$component_plan = publish_plan_components('),
+    'and the support bundle and the version decisions read that copy');
+check(strpos($publisher_src, "SupportBundlePublisher::publish(\$full_site_dir, 'publish_output', \$build_root)") !== false,
+    'the support bundle copies its scripts from the commit');
+check($export_b > $own_commit && $export_b < $at('Create CORE archive'),
+    'the release commit is copied out once publish has made it, before anything is built');
+foreach (array("\$build_root . '/public_html/'", "\$build_root . '/public_html/theme'", "\$build_root . '/public_html/plugins'",
+        "\$build_root . '/maintenance_scripts/'") as $source) {
+    check(strpos($publisher_src, $source) !== false, 'the archives read ' . $source);
+}
+check(strpos($publisher_src, "escapeshellarg(\$full_site_dir . '/public_html/')") === false
+    && strpos($publisher_src, "\$theme_base_dir = \$full_site_dir") === false
+    && strpos($publisher_src, "\$plugin_base_dir = \$full_site_dir") === false,
+    'and none reads the working tree');
+check(strpos($publisher_src, "TreeManifestPublisher::write(\$build_root, \$build_root, \$manifest_authority['keys'], null, \$full_site_dir)") !== false,
+    'this site\'s own live manifest lists what was released, so an uncommitted edit here does not verify',
+    'signing the working tree would have this site\'s agent run an uncommitted edit as root');
+check(strpos($publisher_src, 'a commit landed while this publish ran') !== false,
+    'publish commits only onto the commit its version bumps were decided from');
+
+// The deploy tier tests the code that ships: on a box with a release staging
+// site, the commit is copied there and the tier runs there, so a file another
+// session left half-edited in the working tree neither refuses the release
+// nor stands in for a file the commit lacks.
+$staged_fill = $at('publish_fill_staging($build_root, $staging_dir, $version)');
+$staged_gate = $at("publish_deploy_gate(\$staging_dir . '/public_html/tests/run.php'");
+check($staged_fill > $export_a && $staged_gate > $staged_fill,
+    'with a staging site, the commit is copied into it and the deploy tier runs there');
+check($staged_gate < $at('a default bundle names a plugin this release cannot carry') && $staged_gate < $at('Wrote version'),
+    'before anything is written');
+check($at("publish_deploy_gate(\$full_site_dir . '/public_html/tests/run.php'") > 0
+    && $at('if ($staging_dir === null) {') < $at("publish_deploy_gate(\$full_site_dir . '/public_html/tests/run.php'"),
+    'without one, the tier runs on the working tree as before');
+check(strpos($publisher_src, "is_file(\$dir . '/config/release_staging')") !== false,
+    'a directory is the staging site only when setup_release_staging.sh marked it, never a site of its own');
 
 
 harness_finish();

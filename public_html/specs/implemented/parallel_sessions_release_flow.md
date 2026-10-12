@@ -1,6 +1,37 @@
 # Parallel sessions and the release flow
 
-**Status:** Ideas, 2026-10-08. Nothing built; the owner is deciding.
+**Status:** IMPLEMENTED 2026-10-12: I4, I2 and section 6, I1, and Q3's release
+staging site. Verified: the unit and source-order suites; the private-index commit
+flow in a throwaway repo; a staging dry run on dev. The first real publish and the
+launched-session paths are in the live verification queue. I3 and I5 were dropped: they were stopgaps until I4.
+- **I4:** `ReleaseCommit` 1.4 (`exportTree()`, `overlayGenerated()`,
+  `commitFiles()`, `heldPath()`), plus `publish_upgrade.php`,
+  `TreeManifestPublisher` 1.7, `SupportBundlePublisher` 1.18 and
+  `AgentDistPublisher` 2.9. Docs are in `deploy_and_upgrade.md` § A release is
+  a commit. The first real publish is the end-to-end test.
+- **I1:** the script is `~/.claude/scripts/edit_log.py`, hooked into
+  `~/.claude/settings.json` (Bash before and after, and Edit, Write, MultiEdit
+  and NotebookEdit after), and the reader is `work --owners`. The publish
+  refusal does not name owners: product code does not read `~/.claude`, and
+  publish now refuses only on held paths.
+- **I2 + section 6:** `work` 1.4 (`--prepare-commit`, `NAME --commit`,
+  `--commits`, `--owners`), and `/committhis` and `/commitall` prepare into the
+  private index.
+
+Q2 is moot (I3 was dropped). Q3 is settled (2026-10-12): the deploy tier runs
+on a release staging site holding the commit. That site is `<site root>_test`,
+served by the existing vhost as `test.<domain>`, and it uses dev's own
+database. It answers this machine only. `setup_release_staging.sh` makes it
+once, as root. Publish fills it from the build directory
+(`publish_fill_staging()`) and runs the tier there (`publish_deploy_gate()`).
+A box without one tests its working tree as before.
+Dry run on dev on 2026-10-12, with HEAD copied into staging: the deploy tier
+passed, and Apache refuses the box's public IPv4 and IPv6 with a 403. The dry
+run found and fixed B3: `site_responds_test` asked over https whatever the
+site's `protocol_mode`, so for an http-only site a different vhost on 443
+answered, and that site's page passed as this one's. It now asks over http
+when `protocol_mode` is `http` (1.1.0).
+
 Easy-to-medium changes only; no restructuring of how sessions work. Section 6
 adds the `work <name> --commit` integration the owner asked for.
 

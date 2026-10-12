@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.18 - publish() takes $source_root: the scripts are copied from the release's build
+ *                 directory (the commit, ReleaseCommit::exportTree()), not the working tree
  * @version 1.17 - carries joinery_data_root.sh and _docker_daemon_json.sh: the host converger's data-root
  *                 gate and growth tick, and the disk pool's check, which reads the data root
  *                 (one_data_root WP1)
@@ -221,10 +223,14 @@ class SupportBundlePublisher {
 	 *
 	 * @param string $full_site_dir e.g. /var/www/html/joinerytest
 	 * @param callable|null $out    line-output callback (publish_output)
+	 * @param string|null $source_root where the carried files are read from: the release's build
+	 *                    directory (the commit plus what publish built), so an uncommitted edit in
+	 *                    the working tree never rides in the bundle. Null reads $full_site_dir.
 	 * @return array{status:string, message:string, version:?string, files:int}
 	 */
-	public static function publish($full_site_dir, $out = null) {
+	public static function publish($full_site_dir, $out = null, $source_root = null) {
 		$say = function ($msg) use ($out) { if ($out) { call_user_func($out, $msg); } };
+		$source_root = rtrim($source_root ?: $full_site_dir, '/');
 
 		$dist_dir = $full_site_dir . '/public_html/agent_dist';
 		$staging  = $dist_dir . '/.support_bundle_staging';
@@ -232,7 +238,7 @@ class SupportBundlePublisher {
 		try {
 			$missing = array();
 			foreach (self::$contents as $rel) {
-				if (!file_exists($full_site_dir . '/' . $rel)) {
+				if (!file_exists($source_root . '/' . $rel)) {
 					$missing[] = $rel;
 				}
 			}
@@ -271,7 +277,7 @@ class SupportBundlePublisher {
 				if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0755, true)) {
 					throw new Exception("cannot create the directory for {$rel}");
 				}
-				if (!copy($full_site_dir . '/' . $rel, $target)) {
+				if (!copy($source_root . '/' . $rel, $target)) {
 					throw new Exception("cannot copy {$rel} into the bundle");
 				}
 				// Scripts ship executable; nothing here ships setuid. The agent

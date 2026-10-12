@@ -25,6 +25,8 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.9 - uncommittedAdvice() names only the held changes (ReleaseCommit::heldPath()): a release is
+ *                built from the commit, so other uncommitted work is left out, not in the way
  * @version 2.8 - uncommittedAdvice(): what stops a publish from this box before it is queued, so the form is not offered
  * @version 2.7 - every key pinned for a log ships, so a key the log rotates to reaches nodes first (WP7 review B7)
  * @version 2.6 - builds with the official toolchain go.mod pins (GoBinaryPublisher::officialGo), never the
@@ -339,7 +341,8 @@ class AgentDistPublisher {
 			return implode(', ', $shown) . (count($paths) > 12 ? ' and ' . (count($paths) - 12) . ' more' : '');
 		};
 		if ($b['core']) {
-			$lines[] = 'The core repository has uncommitted changes: ' . $show($b['core']) . '.';
+			$lines[] = 'The core repository has uncommitted changes that a release reads from this box rather than from the commit: '
+				. $show($b['core']) . '.';
 		}
 		if ($b['agent']) {
 			$lines[] = 'The agent repository (' . self::sourcePath() . ') has uncommitted changes: ' . $show($b['agent']) . '.';

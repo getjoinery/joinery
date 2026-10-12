@@ -197,7 +197,7 @@ mkdir($unpacked);
 exec(sprintf('tar -xzf %s -C %s 2>&1', escapeshellarg($tarball), escapeshellarg($unpacked)), $o, $x2);
 $verdict = PackageSignature::verify($unpacked, $keys_file, array('fresh' => true));
 check($x === 0 && $x2 === 0 && !is_file($unpacked . '/public_html/admin_users.png'), 'a tar of that list unpacks without the screenshot');
-check($verdict->signed(), 'and the unpacked archive verifies as a fresh signed archive', $verdict->verdict . ': ' . $verdict->reason);
+check($verdict->signed(), 'and the unpacked archive verifies as a fresh signed archive', $verdict->verdict . ': ' . $verdict->detail);
 
 mkdir($shipr . '/public_html/plugins/p', 0755, true);
 file_put_contents($shipr . '/public_html/plugins/p/plugin.json', '{}');
@@ -210,6 +210,110 @@ check(TreeManifestPublisher::archiveMembers($shipr . '/public_html/plugins', 'p'
 	'a manifest describing another directory gives no member list');
 check(TreeManifestPublisher::archiveMembers($tmp, 'nothing', 'public_html/plugins/nothing') === null,
 	'no manifest, no member list');
+
+// ---------------------------------------------------------------------------
+section('A release is built from the commit; only a held path refuses');
+
+// Several sessions share one working tree. A release is built from the
+// commit, so one session's uncommitted edit is left out instead of stopping
+// another's release - except where the release reads this box rather than
+// the commit, which still refuses (spec parallel_sessions_release_flow I4).
+$held = array(
+	'public_html/data/users_class.php'                                  => true,  // schema the install SQL is dumped with
+	'public_html/migrations/migrations.php'                             => true,
+	'public_html/plugins/store/data/orders_class.php'                   => true,
+	'public_html/plugins/boards/migrations/m1.php'                      => true,
+	'public_html/plugins/store/plugin.json'                             => true,  // publish writes the version bump here
+	'public_html/theme/default/theme.json'                              => true,
+	'public_html/settings.json'                                         => true,
+	'public_html/admin_menus.json'                                      => true,
+	'public_html/install_bundles.json'                                  => true,
+	'public_html/utils/create_install_sql.php'                          => true,
+	'maintenance_scripts/install_tools/release_keys/release/k.pub'      => true,  // copied into the agent bundle
+	'maintenance_scripts/install_tools/joinery_jail/src/main.rs'        => true,  // compiled on this box
+	'public_html/plugins/mailbox/provisioning/relay-sealer/src/main.rs' => true,
+	'public_html/includes/DriveHelper.php'                              => false,
+	'public_html/logic/drive_trash_logic.php'                           => false,
+	'public_html/plugins/store/includes/Cart.php'                       => false,
+	'public_html/plugins/store/data_export.php'                         => false,
+	'public_html/theme/default/views/index.php'                         => false,
+	'maintenance_scripts/install_tools/_plugin_installers_start.sh'     => false,
+	'public_html/utils/upgrade.php'                                     => false,
+);
+foreach ($held as $path => $expected) {
+	check(ReleaseCommit::heldPath($path) === $expected, ($expected ? 'held:      ' : 'left out:  ') . $path);
+}
+check(strpos(implode(' ', ReleaseCommit::JOINERY_HELD_DIRS), ParserJailPublisher::SOURCE_SUBDIR . '/') !== false,
+	'the parser jail source held is the one its publisher compiles');
+$sealer_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php'));
+check(preg_match("~SOURCE_SUBDIR\s*=\s*'([^']+)'~", $sealer_src, $sm) === 1
+	&& in_array($sm[1] . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
+	'and the relay sealer source held is the one its publisher compiles');
+
+$buildr = $tmp . '/buildr';
+mkdir($buildr . '/public_html/includes', 0755, true);
+mkdir($buildr . '/public_html/data', 0755, true);
+mkdir($buildr . '/maintenance_scripts/install_tools', 0755, true);
+mkdir($buildr . '/strategy', 0755, true);
+rc_git($buildr, array('init', '-q', '-b', 'main'));
+rc_git($buildr, array('config', 'user.email', 'test@example.com'));
+rc_git($buildr, array('config', 'user.name', 'test'));
+file_put_contents($buildr . '/.gitignore', "/public_html/agent_dist/\n");
+file_put_contents($buildr . '/LICENSE.md', "license\n");
+file_put_contents($buildr . '/public_html/includes/A.php', "<?php // committed\n");
+file_put_contents($buildr . '/public_html/data/x_class.php', "<?php // committed\n");
+file_put_contents($buildr . '/maintenance_scripts/install_tools/install.sh', "#!/bin/sh\n");
+file_put_contents($buildr . '/strategy/plan.md', "not shipped\n");
+rc_git($buildr, array('add', '-A'));
+rc_git($buildr, array('commit', '-q', '-m', 'first'));
+$commit = ReleaseCommit::head($buildr);
+
+// Another session's work, uncommitted: an edit, a new file, a staged new file.
+file_put_contents($buildr . '/public_html/includes/A.php', "<?php // half-finished edit\n");
+file_put_contents($buildr . '/public_html/includes/B.php', "<?php // untracked\n");
+file_put_contents($buildr . '/public_html/includes/C.php', "<?php // staged, not committed\n");
+rc_git($buildr, array('add', '--', 'public_html/includes/C.php'));
+// What publish builds and no commit holds.
+mkdir($buildr . '/public_html/agent_dist', 0755, true);
+file_put_contents($buildr . '/public_html/agent_dist/manifest.json', '{"built":1}');
+
+$b = ReleaseCommit::ownerBlockers($buildr, null);
+check($b['core'] === array(), 'nothing held is uncommitted, so nothing refuses', json_encode($b));
+check($b['left_out'] === array('public_html/includes/A.php', 'public_html/includes/B.php', 'public_html/includes/C.php'),
+	'the edit, the new file and the staged file are left out, and named', json_encode($b['left_out']));
+file_put_contents($buildr . '/public_html/data/x_class.php', "<?php // schema change\n");
+$b = ReleaseCommit::ownerBlockers($buildr, null);
+check($b['core'] === array('public_html/data/x_class.php'), 'an uncommitted data class refuses', json_encode($b));
+
+$files = ReleaseCommit::commitFiles($buildr, $commit);
+check(is_array($files) && isset($files['public_html/includes/A.php']) && !isset($files['public_html/includes/C.php']),
+	'commitFiles() is the commit, not the index: a staged file is not in it', json_encode($files));
+check(ReleaseCommit::commitFiles($tmp . '/not-a-repo', $commit) === null, 'commitFiles() of a non-repository is null');
+
+$out = $tmp . '/build';
+mkdir($out, 0755);
+$export = ReleaseCommit::exportTree($buildr, $commit, $out);
+check($export['ok'], 'exportTree() builds the commit', $export['reason']);
+check((string)@file_get_contents($out . '/public_html/includes/A.php') === "<?php // committed\n",
+	'the release holds the committed bytes, not the edit beside them');
+check((string)@file_get_contents($out . '/public_html/data/x_class.php') === "<?php // committed\n",
+	'every file is the committed one');
+check(!file_exists($out . '/public_html/includes/B.php') && !file_exists($out . '/public_html/includes/C.php'),
+	'an untracked file and a staged one are not in it');
+check(is_file($out . '/LICENSE.md') && is_file($out . '/maintenance_scripts/install_tools/install.sh'),
+	'the root license and maintenance_scripts are in it');
+check(!file_exists($out . '/strategy') && !file_exists($out . '/.gitignore'), 'nothing outside the shipping paths is');
+check((string)@file_get_contents($out . '/public_html/agent_dist/manifest.json') === '{"built":1}',
+	'what publish built is copied in beside the commit');
+file_put_contents($buildr . '/public_html/agent_dist/manifest.json', '{"built":2}');
+$again = ReleaseCommit::overlayGenerated($buildr, $out);
+check($again['ok'] && (string)@file_get_contents($out . '/public_html/agent_dist/manifest.json') === '{"built":2}',
+	'overlayGenerated() refreshes it after a later build');
+check(!ReleaseCommit::exportTree($buildr, $commit, $out)['ok'], 'exportTree() refuses a directory that is not empty');
+$empty = $tmp . '/build2';
+mkdir($empty, 0755);
+check(!ReleaseCommit::exportTree($buildr, 'HEAD', $empty)['ok'], 'and anything but a full commit id');
+check(!ReleaseCommit::exportTree($buildr, str_repeat('0', 40), $empty)['ok'], 'and a commit that does not exist');
 
 // ---------------------------------------------------------------------------
 section('On the remote');
@@ -375,10 +479,13 @@ check($clean['core'] === array() && $clean['agent'] === array() && $clean['unrea
 	'two clean repositories block nothing', json_encode($clean));
 
 file_put_contents($own_core . '/public_html/a.php', "<?php // edited\n");
+mkdir($own_core . '/public_html/data', 0755, true);
+file_put_contents($own_core . '/public_html/data/x_class.php', "<?php // new\n"); // held: shapes the install SQL
 file_put_contents($own_core . '/public_html/VERSION', "9.9.9\n");          // a file publish writes itself
 file_put_contents($own_agent . '/main.go', "package main\n");              // untracked in the agent: always a blocker
 $b = ReleaseCommit::ownerBlockers($own_core, $own_agent);
-check($b['core'] === array('public_html/a.php'), 'the owner\'s edit in the core blocks, the file publish writes itself does not', json_encode($b['core']));
+check($b['core'] === array('public_html/data/x_class.php'), 'a held change in the core blocks, the file publish writes itself does not', json_encode($b['core']));
+check($b['left_out'] === array('public_html/a.php'), 'and any other edit is left out of the release, not in the way', json_encode($b['left_out']));
 check($b['agent'] === array('main.go'), 'any change in the agent source blocks, untracked included', json_encode($b['agent']));
 
 $nogit = $tmp . '/no_agent_here';
