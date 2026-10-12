@@ -29,6 +29,7 @@
  *                 uncommitted edit in the agent source is not compiled into a release; uncommittedAdvice()
  *                 no longer names agent changes, which are left out rather than in the way;
  *                 readCommittedVersion(): the version at HEAD, which is what a release builds
+ * @version 2.10 - uncommittedAdvice() says what each held file is and which session prepared it (ReleaseCommit::blockerNotes)
  * @version 2.9 - uncommittedAdvice() names only the held changes (ReleaseCommit::heldPath()): a release is
  *                built from the commit, so other uncommitted work is left out, not in the way
  * @version 2.8 - uncommittedAdvice(): what stops a publish from this box before it is queued, so the form is not offered
@@ -352,6 +353,11 @@ class AgentDistPublisher {
 		if ($b['core']) {
 			$lines[] = 'The core repository has uncommitted changes that a release reads from this box rather than from the commit: '
 				. $show($b['core']) . '.';
+			$notes = ReleaseCommit::blockerNotes(PathHelper::getSiteRoot(), array_slice($b['core'], 0, 12));
+			foreach ($notes as $path => $about) {
+				$lines[] = $path . ' - ' . implode('; ', $about) . '.';
+			}
+			$lines[] = 'To see which session changed them, run: work --owners ' . implode(' ', array_map('escapeshellarg', array_slice($b['core'], 0, 12)));
 		}
 		foreach ($b['unreadable'] as $why) {
 			$lines[] = ucfirst($why) . '.';

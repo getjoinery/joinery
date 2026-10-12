@@ -57,6 +57,7 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.6 - blockerNotes(): what each refusing file is, when it was written, and which session prepared it
  * @version 1.5.2 - the mail gateway's bin/ is generated and its source held, beside the relay sealer's
  * @version 1.5.1 - the build is written 644/755 (tar.umask 0022), not git's group-writable default
  * @version 1.5 - the agent is built from its commit too (exportCommit()); uncommitted agent work is left out,
@@ -486,6 +487,78 @@ class ReleaseCommit {
 			}
 		}
 		return $out;
+	}
+
+	/**
+	 * What a person needs to deal with each file that refuses a publish: how big
+	 * the change is, what it adds (the first added @version line, function or
+	 * class), when the file was last written, the commit that last touched it,
+	 * and the session whose prepared commit already holds it. The refusal alone
+	 * names a file and nothing else, and the person publishing often did not
+	 * make the change.
+	 *
+	 * A prepared commit is a session's private index under .git/work-commits/NAME
+	 * (its 'paths' file is NUL-separated, repository-relative; 'message' is the
+	 * commit message); a box without them says nothing about it.
+	 *
+	 * @param string[] $paths repository-relative
+	 * @return array<string,string[]> path => short lines
+	 */
+	public static function blockerNotes($repo_root, array $paths) {
+		$prepared = array();
+		$dir = $repo_root . '/.git/work-commits';
+		foreach (is_dir($dir) ? (scandir($dir) ?: array()) : array() as $name) {
+			if ($name === '.' || $name === '..' || !is_file("{$dir}/{$name}/paths")) {
+				continue;
+			}
+			$held = array_filter(explode("\0", (string)@file_get_contents("{$dir}/{$name}/paths")));
+			$message = (string)@file_get_contents("{$dir}/{$name}/message");
+			foreach ($held as $held_path) {
+				$prepared[$held_path][] = array($name, trim((string)strtok($message, "\n")));
+			}
+		}
+		$notes = array();
+		foreach ($paths as $path) {
+			$lines = array();
+			$abs = $repo_root . '/' . $path;
+			$stat = self::git($repo_root, array('diff', '--numstat', 'HEAD', '--', $path));
+			$numstat = ($stat['exit'] === 0 && isset($stat['out'][0])) ? preg_split('/\s+/', trim($stat['out'][0])) : null;
+			if (!is_file($abs)) {
+				$what = 'deleted';
+			} elseif ($numstat !== null && count($numstat) >= 2) {
+				$what = '+' . $numstat[0] . ' -' . $numstat[1] . ' lines';
+			} else {
+				$what = 'a new file';
+			}
+			$when = is_file($abs) ? ', last written ' . gmdate('Y-m-d H:i', (int)filemtime($abs)) . ' UTC' : '';
+			$lines[] = $what . $when;
+			$diff = self::git($repo_root, array('diff', '-U0', 'HEAD', '--', $path));
+			$adds = array();
+			foreach ($diff['exit'] === 0 ? $diff['out'] : array() as $d) {
+				if (isset($d[0]) && $d[0] === '+' && strpos($d, '+++') !== 0
+					&& preg_match('/@version|function\s+\w+\s*\(|^\+\s*class\s+\w+|"version"/', $d)) {
+					$adds[] = trim(substr($d, 1), " \t*/");
+				}
+				if (count($adds) >= 2) {
+					break;
+				}
+			}
+			foreach ($adds as $a) {
+				$lines[] = 'adds: ' . (strlen($a) > 110 ? substr($a, 0, 107) . '...' : $a);
+			}
+			$last = self::git($repo_root, array('log', '-1', '--format=%h %cd %s', '--date=format:%Y-%m-%d', '--', $path));
+			if ($last['exit'] === 0 && isset($last['out'][0]) && $last['out'][0] !== '') {
+				$lines[] = 'last commit: ' . (strlen($last['out'][0]) > 100 ? substr($last['out'][0], 0, 97) . '...' : $last['out'][0]);
+			}
+			foreach ($prepared[$path] ?? array() as $p) {
+				$lines[] = "already prepared by session '{$p[0]}' ({$p[1]}): it commits with: work {$p[0]} --commit";
+			}
+			if (empty($prepared[$path])) {
+				$lines[] = 'no session has prepared this file';
+			}
+			$notes[$path] = $lines;
+		}
+		return $notes;
 	}
 
 	/** The files that stop the agent repository from being a release: all of them. */

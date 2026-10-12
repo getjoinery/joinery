@@ -146,7 +146,14 @@ goes from a commit to a release:
    `maintenance_scripts/` minus `specs/`, `uploads/`, `cache/`, `logs/`,
    `backups/`, `.claude/`) is one of three kinds:
    - **Held** (`ReleaseCommit::heldPath()`) — refuses the release, naming every
-     file, with nothing written. These are the paths a release reads from this
+     file, with nothing written. Each file carries a note
+     (`ReleaseCommit::blockerNotes()`): the size of the change, when the file
+     was last written, what it adds, the commit that last touched it, and the
+     session whose prepared commit (`.git/work-commits/NAME`) already holds it,
+     with `work NAME --commit` as the way to land it. The refusal ends with
+     `work --owners <the files>`, which names every session that changed each
+     one and how sure that is; a file no session claims was changed outside
+     Claude. The Publish form shows the same notes before it is offered. These are the paths a release reads from this
      box rather than from the commit: data classes and migrations, core and
      plugin (the install SQL is dumped from this box's database, which
      `update_database` may already have changed); `settings.json`,
