@@ -1,5 +1,6 @@
 <?php
 // PathHelper, Globalvars, SessionControl are pre-loaded by the front controller.
+// @version 1.2 - no menu entry of its own: reached from Add New on Plugins and Themes, so the sidebar shows Plugins
 // @version 1.1 - shows the root request panel for a queued install (specs/package_signing.md WP4)
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_marketplace_logic.php'));
@@ -31,7 +32,7 @@ $altlinks = array();
 $altlinks['Refresh'] = '/admin/admin_marketplace';
 
 $page->admin_header(array(
-	'menu-id' => 'system-marketplace',
+	'menu-id' => 'system-plugins',
 	'page_title' => 'Marketplace',
 	'readable_title' => 'Marketplace',
 	'breadcrumbs' => array(

@@ -35,10 +35,10 @@ if (empty($file)) {
 $page = new AdminPage();
 $page->admin_header(
     array(
-        'menu-id' => 'settings',
+        'menu-id' => 'system-specs',
         'breadcrumbs' => array(
-            'Settings' => '/admin/admin_settings',
-            'Specifications' => '/admin/admin_specs',
+            'Server Manager' => '/admin/server_manager',
+            'Specifications' => '/admin/server_manager/specs',
             $title => '',
         ),
         'session' => $session,
@@ -56,7 +56,7 @@ $page->admin_header(
         <?php else: ?>
             <span class="badge bg-warning text-dark">Active</span>
         <?php endif; ?>
-        <a href="/admin/admin_specs" class="btn btn-secondary btn-sm ms-2">Back to List</a>
+        <a href="/admin/server_manager/specs" class="btn btn-secondary btn-sm ms-2">Back to List</a>
     </div>
 </div>
 

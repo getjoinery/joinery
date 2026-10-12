@@ -1735,3 +1735,14 @@
 	$migration['migration_file'] = 'drop_report_problem_profile_menu.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The Marketplace leaves the System menu; it is reached from Add New on the
+	// Plugins and Themes pages. admin_menus.json dropped system-marketplace, but
+	// core menu seeding never prunes, so the existing row is deleted here
+	// (insert-only precedent, same as v140 and v213).
+	$migration = array();
+	$migration['database_version'] = '214';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'drop_marketplace_system_menu.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
