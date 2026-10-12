@@ -44,7 +44,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/products_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_addrs_class.php'));
 	require_once(PathHelper::getIncludePath('data/phone_numbers_class.php'));
-	require_once(PathHelper::getIncludePath('plugins/store/data/product_details_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_codes_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/store/data/coupon_code_uses_class.php'));
 	require_once(PathHelper::getIncludePath('data/notifications_class.php'));

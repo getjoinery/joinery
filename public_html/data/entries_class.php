@@ -26,6 +26,7 @@ class CalendarEntryException extends SystemBaseException {}
  * quick-create popover, the API save and an approved AI proposal all work
  * with the window closed. Editing sealed content needs the window.
  *
+ * @version 1.2 - recurrence arithmetic lives in RecurrenceRule; the public methods delegate to it
  * @version 1.1 - sealed content columns on a Private calendar; cal_level_attempt_time
  *   lets a level change pass by a row that just failed to convert
  */
@@ -282,20 +283,21 @@ class CalendarEntry extends SystemBase {
 
 	/**
 	 * Check whether a specific date (Y-m-d) matches the recurrence pattern.
-	 * Uses cal_start_local as the anchor — wall-clock is the source of truth.
-	 * Non-existent dates (e.g. "every 31st" in November) return false; no clamping.
+	 * Uses cal_start_local as the anchor: wall-clock is the source of truth.
+	 * A date that does not exist in a month (the 31st in November) never matches;
+	 * there is no clamping.
 	 */
 	public function date_matches_pattern(string $date): bool {
-		$anchor = $this->_recurrence_anchor();
-		return $anchor !== null && $this->_date_matches($date, $anchor);
+		$rule = $this->recurrence_rule();
+		return $rule !== null && $rule->matches($date);
 	}
 
 	/**
-	 * Precompute the anchor date and recurrence parameters once, so a day-by-day
-	 * walk (compute_dates_in_range) doesn't rebuild DateTimes on every iteration.
-	 * Returns null when this entry isn't a usable recurring parent.
+	 * This entry's recurrence as a RecurrenceRule (the one copy of the date
+	 * arithmetic), anchored on its local start date. Null when this isn't a usable
+	 * recurring parent. Built on each call so a changed field is never stale.
 	 */
-	private function _recurrence_anchor(): ?array {
+	private function recurrence_rule(): ?RecurrenceRule {
 		if (!$this->is_recurring_parent()) {
 			return null;
 		}
@@ -304,114 +306,15 @@ class CalendarEntry extends SystemBase {
 		if (!$local_start) {
 			return null;
 		}
-		$start_date = substr($local_start, 0, 10); // Y-m-d
-		$start_dt   = new DateTime($start_date);
-		$epoch_mon  = new DateTime('1970-01-05'); // 1970-01-05 is a Monday
-		return array(
-			'start_date'    => $start_date,
-			'start_dt'      => $start_dt,
-			'start_dow'     => (int)$start_dt->format('w'),
-			'start_day'     => (int)$start_dt->format('j'),
-			'start_month'   => (int)$start_dt->format('n'),
-			'start_year'    => (int)$start_dt->format('Y'),
-			'start_week'    => (int)floor($epoch_mon->diff($start_dt)->days / 7),
-			'epoch'         => $epoch_mon,
-			'type'          => $this->get('cal_recurrence_type'),
-			'interval'      => max(1, (int)$this->get('cal_recurrence_interval')),
-			'days_of_week'  => $this->get('cal_recurrence_days_of_week'),
-			'week_of_month' => $this->get('cal_recurrence_week_of_month'),
-			'end_date'      => $this->get('cal_recurrence_end_date'),
+		return RecurrenceRule::fromArray(
+			$this->get('cal_recurrence_type'),
+			$this->get('cal_recurrence_interval'),
+			$this->get('cal_recurrence_days_of_week'),
+			$this->get('cal_recurrence_week_of_month'),
+			$this->get('cal_recurrence_end_date'),
+			$local_start,
+			RecurrenceRule::MONTH_END_SKIP
 		);
-	}
-
-	/** Per-date pattern test against a precomputed anchor (see _recurrence_anchor). */
-	private function _date_matches(string $date, array $a): bool {
-		if ($date < $a['start_date']) {
-			return false;
-		}
-		if ($a['end_date'] && $date > $a['end_date']) {
-			return false;
-		}
-
-		$interval = $a['interval'];
-		$check_dt = new DateTime($date);
-
-		switch ($a['type']) {
-			case 'daily':
-				$diff_days = (int)$a['start_dt']->diff($check_dt)->days;
-				return ($diff_days % $interval) === 0;
-
-			case 'weekly':
-				$check_dow = (int)$check_dt->format('w'); // 0=Sun
-				if ($a['days_of_week'] !== null && $a['days_of_week'] !== '') {
-					$allowed = array_map('intval', explode(',', $a['days_of_week']));
-					if (!in_array($check_dow, $allowed)) {
-						return false;
-					}
-				} elseif ($check_dow !== $a['start_dow']) {
-					return false;
-				}
-
-				// Week interval: count weeks since the epoch Monday (1970-01-05 = Mon).
-				$check_week = (int)floor($a['epoch']->diff($check_dt)->days / 7);
-				return (abs($check_week - $a['start_week']) % $interval) === 0;
-
-			case 'monthly':
-				$month_diff = ((int)$check_dt->format('Y') - $a['start_year']) * 12
-				            + ((int)$check_dt->format('n') - $a['start_month']);
-				if ($month_diff < 0 || ($month_diff % $interval) !== 0) {
-					return false;
-				}
-
-				$week_of_month = $a['week_of_month'];
-				if ($week_of_month !== null && $week_of_month !== '') {
-					// By weekday: e.g. "2nd Tuesday".
-					// DOW from cal_recurrence_days_of_week (single digit), fallback to start date.
-					$target_dow = ($a['days_of_week'] !== null && $a['days_of_week'] !== '')
-						? (int)$a['days_of_week']
-						: $a['start_dow'];
-					if ((int)$check_dt->format('w') !== $target_dow) {
-						return false;
-					}
-					$target_wom = (int)$week_of_month;
-					if ($target_wom === -1) {
-						// Last occurrence of this weekday in the month.
-						$next_week = clone $check_dt;
-						$next_week->modify('+7 days');
-						return $next_week->format('m') !== $check_dt->format('m');
-					}
-					return $this->_get_week_of_month($check_dt) === $target_wom;
-				} else {
-					// By day-of-month. Skip months that don't have this day (no clamping).
-					$days_in_month = (int)$check_dt->format('t');
-					if ($a['start_day'] > $days_in_month) {
-						return false; // e.g. "every 31st" in November
-					}
-					return (int)$check_dt->format('j') === $a['start_day'];
-				}
-
-			case 'yearly':
-				$year_diff = (int)$check_dt->format('Y') - $a['start_year'];
-				if ($year_diff < 0 || ($year_diff % $interval) !== 0) {
-					return false;
-				}
-				if ((int)$check_dt->format('n') !== $a['start_month']) {
-					return false;
-				}
-				$days_in_month = (int)$check_dt->format('t');
-				if ($a['start_day'] > $days_in_month) {
-					return false; // e.g. Feb 29 in a non-leap year
-				}
-				return (int)$check_dt->format('j') === $a['start_day'];
-
-			default:
-				return false;
-		}
-	}
-
-	/** Week-of-month ordinal (1 = first, 2 = second, etc.). */
-	private function _get_week_of_month(DateTime $dt): int {
-		return (int)ceil((int)$dt->format('j') / 7);
 	}
 
 	/**
@@ -420,29 +323,8 @@ class CalendarEntry extends SystemBase {
 	 * @return string[]  Y-m-d
 	 */
 	public function compute_dates_in_range(string $start_date, string $end_date): array {
-		$anchor = $this->_recurrence_anchor();
-		if ($anchor === null) {
-			return [];
-		}
-		$dates   = [];
-		$current = new DateTime($start_date);
-		$end_dt  = new DateTime($end_date);
-		$rec_end = $anchor['end_date'];
-		$limit   = 3650; // safety cap (~10 years of daily)
-		$i       = 0;
-
-		while ($current <= $end_dt && $i++ < $limit) {
-			$d = $current->format('Y-m-d');
-			// Early exit if past the series end.
-			if ($rec_end && $d > $rec_end) {
-				break;
-			}
-			if ($this->_date_matches($d, $anchor)) {
-				$dates[] = $d;
-			}
-			$current->modify('+1 day');
-		}
-		return $dates;
+		$rule = $this->recurrence_rule();
+		return $rule === null ? [] : $rule->datesInRange($start_date, $end_date);
 	}
 
 	/**
@@ -467,28 +349,8 @@ class CalendarEntry extends SystemBase {
 	 * @param int    $count       1-based occurrence number to find
 	 */
 	public function nth_occurrence_date(string $anchor_date, int $count): ?string {
-		if ($count < 1) {
-			return null;
-		}
-		$anchor = $this->_recurrence_anchor();
-		if ($anchor === null) {
-			return null;
-		}
-		$current   = new DateTime($anchor_date);
-		$max_days  = min($count * 1500, 400000) + 366; // ~4y/occurrence, capped
-		$found     = 0;
-		$last      = null;
-		for ($i = 0; $i < $max_days; $i++) {
-			$d = $current->format('Y-m-d');
-			if ($this->_date_matches($d, $anchor)) {
-				$last = $d;
-				if (++$found >= $count) {
-					return $d;
-				}
-			}
-			$current->modify('+1 day');
-		}
-		return $last;
+		$rule = $this->recurrence_rule();
+		return $rule === null ? null : $rule->nthOccurrence($count, $anchor_date);
 	}
 
 	/**
@@ -620,71 +482,8 @@ class CalendarEntry extends SystemBase {
 	 * e.g. "Every Monday and Wednesday" or "Every month on the 15th"
 	 */
 	public function get_recurrence_description(): string {
-		if (!$this->is_recurring_parent()) {
-			return '';
-		}
-
-		$type     = $this->get('cal_recurrence_type');
-		$interval = max(1, (int)$this->get('cal_recurrence_interval'));
-		$parts    = [];
-
-		$local_start = $this->get('cal_start_local') ?: $this->get('cal_start_utc');
-
-		switch ($type) {
-			case 'daily':
-				$parts[] = $interval === 1 ? 'Every day' : 'Every ' . $interval . ' days';
-				break;
-
-			case 'weekly':
-				$prefix = $interval === 1 ? 'Every week' : 'Every ' . $interval . ' weeks';
-				$days_of_week = $this->get('cal_recurrence_days_of_week');
-				if ($days_of_week !== null && $days_of_week !== '') {
-					$day_names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-					$day_nums  = array_map('intval', explode(',', $days_of_week));
-					$labels    = array_map(function($d) use ($day_names) { return $day_names[$d]; }, $day_nums);
-					if (count($labels) > 1) {
-						$last = array_pop($labels);
-						$parts[] = $prefix . ' on ' . implode(', ', $labels) . ' and ' . $last;
-					} else {
-						$parts[] = $prefix . ' on ' . $labels[0];
-					}
-				} else {
-					$dow = $local_start ? date('l', strtotime($local_start)) : '';
-					$parts[] = $prefix . ($dow ? ' on ' . $dow : '');
-				}
-				break;
-
-			case 'monthly':
-				$prefix = $interval === 1 ? 'Every month' : 'Every ' . $interval . ' months';
-				$week_of_month = $this->get('cal_recurrence_week_of_month');
-				if ($week_of_month !== null && $week_of_month !== '') {
-					$ordinals = [1 => '1st', 2 => '2nd', 3 => '3rd', 4 => '4th', -1 => 'last'];
-					$ordinal  = $ordinals[(int)$week_of_month] ?? ((int)$week_of_month . 'th');
-					$full_days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-					$dow_raw   = $this->get('cal_recurrence_days_of_week');
-					$dow       = ($dow_raw !== null && $dow_raw !== '' && isset($full_days[(int)$dow_raw]))
-						? $full_days[(int)$dow_raw]
-						: ($local_start ? date('l', strtotime($local_start)) : '');
-					$parts[]  = $prefix . ' on the ' . $ordinal . ($dow ? ' ' . $dow : '');
-				} else {
-					$day     = $local_start ? date('jS', strtotime($local_start)) : '';
-					$parts[] = $prefix . ($day ? ' on the ' . $day : '');
-				}
-				break;
-
-			case 'yearly':
-				$prefix  = $interval === 1 ? 'Every year' : 'Every ' . $interval . ' years';
-				$date_str = $local_start ? date('F jS', strtotime($local_start)) : '';
-				$parts[] = $prefix . ($date_str ? ' on ' . $date_str : '');
-				break;
-		}
-
-		$end_date = $this->get('cal_recurrence_end_date');
-		if ($end_date) {
-			$parts[] = 'until ' . date('M j, Y', strtotime($end_date));
-		}
-
-		return implode(' ', $parts);
+		$rule = $this->recurrence_rule();
+		return $rule === null ? '' : $rule->describe();
 	}
 
 	/**

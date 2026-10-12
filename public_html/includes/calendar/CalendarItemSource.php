@@ -25,4 +25,9 @@ interface CalendarItemSource {
         string $end_utc,
         string $visibility
     ): array;
+
+    // Optional: public function priority(): int. A source that has it is asked in
+    // descending order, and when two sources produce the same source_key the one
+    // asked first is kept. The default is 0; a source that only echoes another
+    // system's copy of something the platform owns returns a negative number.
 }

@@ -44,3 +44,6 @@ Returns a mixed array of Event objects and virtual stdClass instances. Handles a
 - `$parent->materialize_instance($date)` — creates DB row, returns Event
 - `$parent->compute_occurrence_dates($from, $count)` — pure date math
 - `$parent->get_recurrence_description()` — human-readable pattern text
+- `$parent->date_matches_pattern($date)` — does this date fall on the series
+
+The date arithmetic behind these is `RecurrenceRule` (`includes/RecurrenceRule.php`), shared with calendar entries. An event series anchors on its start date in its own timezone, and a day missing from a month (the 31st in November, February 29 in a common year) lands on the month's last day, so a series never loses a month.

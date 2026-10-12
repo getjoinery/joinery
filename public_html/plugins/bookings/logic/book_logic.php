@@ -216,23 +216,18 @@ function booking_send_confirmation($booking, $type, $host, $client, $settings) {
 	}
 }
 
-/** Minimal RFC5545 VEVENT for a booking. */
+/**
+ * The invite for a booking: one VEVENT through IcsHelper, so text is escaped and the
+ * UID is booking-{id}@{site host}, the form a copy of the booking on another calendar
+ * is recognised by. Folded for the attachment.
+ */
 function booking_build_ics($booking, $type, $host) {
-	$fmt = function ($utc) { return gmdate('Ymd\THis\Z', strtotime($utc)); };
-	$uid = 'booking-' . $booking->key . '@joinery';
-	$summary = str_replace(["\r", "\n"], ' ', $type->get('bty_name'));
-	$lines = array(
-		'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Joinery//Bookings//EN', 'BEGIN:VEVENT',
-		'UID:' . $uid,
-		'DTSTAMP:' . $fmt(gmdate('Y-m-d H:i:s')),
-		'DTSTART:' . $fmt($booking->get('bkn_start_time')),
-		'DTEND:' . $fmt($booking->get('bkn_end_time')),
-		'SUMMARY:' . $summary,
-	);
-	if ($type->get('bty_location_details')) {
-		$lines[] = 'LOCATION:' . str_replace(["\r", "\n"], ' ', $type->get('bty_location_details'));
-	}
-	$lines[] = 'END:VEVENT';
-	$lines[] = 'END:VCALENDAR';
-	return implode("\r\n", $lines);
+	$vevent = IcsHelper::buildVevent(array(
+		'uid'       => IcsHelper::uid('booking', $booking->key),
+		'start_utc' => $booking->get('bkn_start_time'),
+		'end_utc'   => $booking->get('bkn_end_time'),
+		'summary'   => $type->get('bty_name'),
+		'location'  => $type->get('bty_location_details'),
+	));
+	return IcsHelper::foldLines(IcsHelper::wrapInVcalendar($vevent));
 }

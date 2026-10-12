@@ -46,6 +46,8 @@ interface CalendarItemSource {
 - **NativeCalendarItemSource** (core) — native `cal_entries` entries.
 - **BookingItemSource** (bookings plugin) — confirmed bookings and active paid holds where the subject is host.
 
+**One meeting, one item.** When two sources produce an item with the same `source_key` (a booking and its copy on an external calendar), the registry keeps the first and drops the rest; an item with no key is never merged. Sources are asked in descending order of an optional `priority()` (default 0, discovery order among equals), so a source that only echoes another system's copy returns a negative number and the native record wins. Visibility is reduced before the key is looked at, so a `busy` request never leaks a title through it, and availability is unaffected because busy blocks are merged by time range.
+
 The registry being the only coupling point is why this lives in core: a new source appears on every calendar and gates every availability calculation with no change to the grid, the slot generator, or any other source.
 
 ## Busy projection
@@ -112,7 +114,7 @@ see [Mobile Apps](mobile_apps.md#joinerycalendarkit-native-calendar-module).
 
 ## Recurring native entries
 
-A native entry can repeat on a schedule ("every Tuesday 9–10am"). A recurring entry stays **one row** — the parent `cal_entries` record — and its occurrences are computed on the fly; there is no materialization step. `cal_recurrence_type IS NOT NULL` is the authoritative test for "this is a recurring parent." This mirrors the events expansion pattern (see [Recurring Events](recurring_events.md)).
+A native entry can repeat on a schedule ("every Tuesday 9–10am"). A recurring entry stays **one row** — the parent `cal_entries` record — and its occurrences are computed on the fly; there is no materialization step. `cal_recurrence_type IS NOT NULL` is the authoritative test for "this is a recurring parent." This mirrors the events expansion pattern (see [Recurring Events](recurring_events.md)). The date arithmetic is one class, `RecurrenceRule` (`includes/RecurrenceRule.php`), shared by `CalendarEntry` and `Event`: built from the type, interval, weekdays, week of month, end date and the start date, with no database access, it answers `matches($date)`, `datesInRange($from, $to)`, `nthOccurrence($count)`, `nextDates($from, $count)` and `describe()`. Each model builds its rule from its own columns and keeps its own public methods, which delegate to it. They differ in one place on purpose: a day missing from a month is skipped for a calendar entry and moved to the month's last day for an event series.
 
 **Pattern fields** (on `cal_entries`): `cal_recurrence_type` (`daily`/`weekly`/`monthly`/`yearly`), `cal_recurrence_interval` (every N), `cal_recurrence_days_of_week` (weekly: comma list `0=Sun…6=Sat`; monthly-by-weekday: a single weekday digit), `cal_recurrence_week_of_month` (monthly: `1`–`4`, or `-1` for last), and `cal_recurrence_end_date` (NULL = open-ended). The pattern anchors on the entry's wall-clock start (`cal_start_local`), so it follows the owner's local time.
 
@@ -131,6 +133,10 @@ A native entry can repeat on a schedule ("every Tuesday 9–10am"). A recurring 
 "Ends after N occurrences" is converted to an end date at save time by `CalendarEntry::nth_occurrence_date()` — it walks the pattern to the Nth match using the same engine as expansion, so the count→date conversion has a single source of truth. A count-based series is therefore stored as a `cal_recurrence_end_date`; reopening it for edit shows "Ends → on date" with that date (the behavior major calendars use).
 
 **The authoring form is declarative.** The recurrence editor on `/profile/calendar` is a plain FormWriter form: the "Repeats" checkbox, the frequency dropdown, the monthly-pattern radios, and the "Ends" radios are real FormWriter inputs whose show/hide is driven entirely by [`visibility_rules`](formwriter.md#6-field-visibility--custom-scripts) — there is no hand-rolled toggle JavaScript and no hidden-field marshalling. The fields submit their own values; the logic reads them directly (`entry_repeats`, `rec_frequency`, `rec_interval`, `rec_days[]`, `rec_monthly_mode`, `rec_week`, `rec_dow`, `rec_ends`, `rec_end_date`, `rec_count`) and maps them onto the `cal_recurrence_*` columns. The all-day checkbox hides the time fields the same declarative way. The edit-scope and delete-scope choices remain small modal flows (they set a `scope` field), which are not field show/hide and so stay as JavaScript.
+
+## Writing calendar invites
+
+Every `.ics` the platform writes goes through `IcsHelper`: `buildVevent()` writes one VEVENT (UID, UTC start and end, summary, description, location, URL and status, with text escaped and empty fields left out), `wrapInVcalendar()` wraps it, `foldLines()` folds lines over 75 octets, and `outputIcs()` serves it. `uid($kind, $id, $instance)` is the one UID rule, `{kind}-{id}[-{instance}]@{site host}`, so the same thing always has the same UID and a copy of it on another calendar can be recognised. `generateVevent()` maps an `Event` onto the builder, and the booking confirmation does the same with a booking (`booking-{id}@{site host}`). The vendored `includes/calendar-links/Generators/Ics.php` is third-party and separate.
 
 ## Importing .ics files
 

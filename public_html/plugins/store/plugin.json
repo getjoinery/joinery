@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.5.12",
+    "version": "1.6.0",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
     "license": "Joinery-Commercial",
@@ -33,14 +33,6 @@
                     "title": "Stripe Payments",
                     "url": "/plugins/store/admin/admin_stripe_orders",
                     "order": 2,
-                    "permission": 5,
-                    "settingActivate": "products_active"
-                },
-                {
-                    "slug": "shadow-sessions",
-                    "title": "Shadow Sessions",
-                    "url": "/plugins/store/admin/admin_shadow_sessions",
-                    "order": 15,
                     "permission": 5,
                     "settingActivate": "products_active"
                 }

@@ -2,9 +2,9 @@
 
 **Purpose:** The one list of core, store and mailbox-plugin work that the plugin specs depend on. Small changes to existing core and store code that the Boards, Volunteers, Donations and Bookings plugin specs depend on or are simpler for. Each one removes duplicated code or closes a gap that more than one plugin would otherwise work around. They are collected here so they are built once, before the plugins that need them.
 
-**Status:** Active, not yet implemented. Written 2026-10-10 from reviewer1's findings on the Volunteers, Donations and Bookings specs.
+**Status:** IMPLEMENTED 2026-10-12. Part 2 (email handlers and personal addresses, A, B, E) was built and released with Boards. Part 1 (C1, C2, C10, C11) was built and tested on 2026-10-12: the full db gate passed, and a recurring event page and the calendar were checked on dev. C9 (waitlist promotion and attendance helpers) is deferred in its own spec, `waitlist_promotion_and_attendance.md`. Written 2026-10-10 from reviewer1's findings on the Volunteers, Donations and Bookings specs. **Built as** notes sit under each item.
 
-**Layout:** Part 1 is the calendar and store cleanups (C1, C2, C9, C10, C11). Part 2 is email handlers and personal addresses (A, B, E), for Boards. (C and D, which served reply-by-email, were removed on 2026-10-11 when the owner dropped that feature.) Each plugin has its own spec and points here for anything it needs from core.
+**Layout:** Part 1 is the calendar and store cleanups (C1, C2, C10, C11; C9 moved to `waitlist_promotion_and_attendance.md`). Part 2 is email handlers and personal addresses (A, B, E), for Boards. (C and D, which served reply-by-email, were removed on 2026-10-11 when the owner dropped that feature.) Each plugin has its own spec and points here for anything it needs from core.
 
 **Scope rule:** every item changes code that already exists and has tests nearby. Nothing here adds a feature a site owner would see; the visible gain arrives with the plugins.
 
@@ -14,7 +14,7 @@
 | C2 | One VEVENT builder | Volunteers, Bookings | Now |
 | C10 | Retire the dormant session counter | Bookings (N2 credits) | Now |
 | C11 | Calendar registry collapses duplicate items | Bookings (calendar sync) | Now |
-| C9 | Waitlist promotion and attendance helpers | Event Manager, Volunteers | Open (Q1) |
+| C9 | Waitlist promotion and attendance helpers | Event Manager, Volunteers | Deferred: `waitlist_promotion_and_attendance.md` |
 
 Part 2 below holds the email pieces (A–E) that the Boards spec needs. The store changes Donations needs (S1–S6) stay in the Donations spec §4, because they are specific to it.
 
@@ -47,6 +47,8 @@ Volunteers would add a third. All three read the same five columns (`*_recurrenc
 
 **Tests.** `tests/calendar/recurrence_nth_occurrence_test.php` and `plugins/event_manager/tests/event_recurrence_test.php` must pass unchanged. Add a `RecurrenceRule` unit test that runs the same rule table through both models and through the class directly.
 
+
+**Built as (2026-10-12):** `includes/RecurrenceRule.php` (`fromArray`, `matches`, `datesInRange`, `nthOccurrence`, `nextDates`, `describe`). `nextDates()` was added because Event's `compute_occurrence_dates()` needs a forward walk, and `fromArray()` takes a seventh argument for the one deliberate difference: a day missing from a month is skipped for a calendar entry and clamped to the month's last day for an event series. `CalendarEntry` and `Event` keep their public methods and delegate. The two implementations were diffed over 150 rules and 4 years of dates: `CalendarEntry` agreed everywhere; `Event` differed in two shapes, both settled. A weekly rule on Sunday only (`days_of_week` = `0`) was treated as 'the start weekday' because `'0'` is falsy in Event; it now lands on Sundays. A monthly-by-weekday rule with a weekday digit in `days_of_week` was ignored by Event, which never stores one (its form clears it for anything but weekly), so nothing changes in practice. Event descriptions now name the weekday in the event's own zone rather than in UTC. Test: `tests/unit/recurrence_rule_test.php`; the two existing recurrence tests pass unchanged.
 ---
 
 ## C2. One VEVENT builder
@@ -77,6 +79,8 @@ A UID helper, `IcsHelper::uid($kind, $id, $instance = null)`, returns `{kind}-{i
 
 The vendored `includes/calendar-links/Generators/Ics.php` is third-party and is left alone.
 
+
+**Built as (2026-10-12):** `IcsHelper::buildVevent()` and `IcsHelper::uid()`; `generateVevent()` maps an `Event` onto the builder with byte-identical output, `foldLines()` is public, and `booking_build_ics()` is a mapper (UID `booking-{id}@{site host}`, escaped and folded, wrapped by `wrapInVcalendar()`). The `timezone` input in the design was left out: every time is a UTC instant. An instance in `uid()` has its dashes dropped so existing event UIDs do not change. Tests: `tests/unit/ics_vevent_test.php` and `plugins/bookings/tests/booking_ics_test.php`; `event_ics` passes unchanged.
 ---
 
 ## C10. Retire the dormant session counter
@@ -93,6 +97,8 @@ The vendored `includes/calendar-links/Generators/Ics.php` is third-party and is 
 
 **Tests.** The deletion and AI-surface suites cover the removed references. No new test is needed beyond running them.
 
+
+**Built as (2026-10-12):** The model, both admin pages, the logic file, the store menu entry and the stray `require_once` are gone. `update_database` never drops a table, so migration `product_details_dropped.php` (database version 215, core, following `blocklist_domains_dropped.php`) drops `prd_product_details` and its sequence, and only when the table is empty: a node with rows keeps it and says so. Dev had no rows. The deletion and AI-surface suites pass.
 ---
 
 ## C11. Calendar registry collapses duplicate items
@@ -109,22 +115,13 @@ The vendored `includes/calendar-links/Generators/Ics.php` is third-party and is 
 
 **Tests.** Add to `tests/calendar/calendar_core_test.php`: two fake sources returning the same key give one item; items with empty keys both survive; the winner is the higher-priority source.
 
+
+**Built as (2026-10-12):** `CalendarItemSourceRegistry::getItems()` drops an item whose non-empty `source_key` an earlier source already produced, after visibility is reduced; sources are asked in descending optional `priority()` (default 0). `useSources()` lets a test supply sources. No source returns a negative priority yet: the external-calendar source that would does not exist. Tests in `tests/calendar/calendar_core_test.php`.
 ---
 
-## C9. Waitlist promotion and attendance helpers (open, Q1)
+## C9. Waitlist promotion and attendance helpers
 
-**What it does for the user:** when someone cancels a full event or shift, the first person waiting gets the seat automatically, and organizers can mark who showed up.
-
-**Today.**
-
-- Event Manager: the waiting list (`ewl_waiting_lists`) is only a list. An admin views it and emails it by hand. Nothing promotes anyone into a freed seat, and `evr_event_registrants` has no attended mark. A registration runs through a store product, so a promoted person would need a payment link, not a silent confirmation.
-- Volunteers: designed with automatic promotion and an attendance status on its own sign-up table.
-
-**Design if built.** A small class `SeatLedger` that takes callbacks so each plugin keeps its own tables: `takeSeat` (lock the parent row, count confirmed, confirm or waitlist), `freeSeat` (promote the oldest waiting person in the same transaction and return who was promoted, so the caller sends notifications after commit) and `markAttendance` (status plus an optional hook). Each plugin supplies "count confirmed", "list waiting, oldest first" and "confirm this person".
-
-**Who else could use it.** Only Event Manager and Volunteers have capacity today. Bookings sends group classes to Event Manager, and Boards and Donations have no capacity. A Courses plugin with cohorts, or Bookings resource pools, would be future users but neither is specified. The case that stands on its own is Event Manager's missing promotion.
-
-**Recommendation.** Build it against Event Manager's waiting list first, with Volunteers as the second user, or leave it out until a third plugin needs it. Volunteers carries its own short version until then.
+Deferred by the owner on 2026-10-12 and moved to its own spec, `waitlist_promotion_and_attendance.md`. Nothing here depends on it.
 
 ---
 
@@ -140,7 +137,7 @@ Update `docs/calendar.md` for C1, C2 and C11, and the store overview for C10, as
 
 ## Questions
 
-- **Q1. Include C9?** *Yes:* Event Manager gets automatic waitlist promotion and attendance, and Volunteers uses the shared code. The catch is designing for a payment link on promotion, and a second caller that does not yet exist for anything else. *No:* Volunteers carries its own version and the code is lifted into core when a third user appears. Recommend yes only if the Event Manager gap is worth fixing on its own.
+None open. Q1 (include C9?) was answered on 2026-10-12: no, deferred to `waitlist_promotion_and_attendance.md`.
 
 ---
 
