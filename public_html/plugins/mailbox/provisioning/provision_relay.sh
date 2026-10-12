@@ -14,6 +14,10 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.10 - Postfix's own address-extension stripping is off (recipient_delimiter empty): Ubuntu
+#                ships it set to +, which made the recipient access map treat plain+anything@
+#                as plain@ and accept it at SMTP time, only for the sealer to drop it afterwards.
+#                A +tag is now taken only through the explicit rule for a handler alias.
 # Version: 3.9 - a handler alias takes sub-addresses (RelayVersion::ACCEPTS_SUBADDRESSES): the
 #                merge writes a regexp line per alias the map marks accepts_tag into the
 #                regexp accept map (joinery-srs), and the sealer delivers boards+tag@ as boards@.
@@ -95,7 +99,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.9"
+RELAY_VERSION="3.10"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -588,6 +592,12 @@ postconf_set "transport_maps" "hash:${MAP_TRANSPORT}"
 # an answer refuses nobody, and the status report says Spamhaus is not
 # answering this relay (relay_status.go).
 postconf_set "smtpd_recipient_restrictions" "reject_unauth_destination, reject_rbl_client zen.spamhaus.org=127.0.0.[2..11], reject_rhsbl_helo dbl.spamhaus.org=127.0.1.[2..99], reject_rhsbl_sender dbl.spamhaus.org=127.0.1.[2..99], check_recipient_access hash:${MAP_DEFERRED}, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+# No address-extension stripping. Ubuntu's stock main.cf sets recipient_delimiter to +,
+# and with it the recipient access map above looks up plain+anything@ as plain@ and
+# accepts it, when the answer for an address that is not a mailbox is a refusal at SMTP
+# time (a refusal after acceptance is a bounce to a sender who may be forged). A handler
+# alias's +tag is accepted by the explicit regexp line in MAP_SRS, which needs no delimiter.
+postconf_set "recipient_delimiter" ""
 echo "main.cf: relay_domains, transport, recipient validation, RBL, anvil limits set"
 
 

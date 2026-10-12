@@ -1,6 +1,6 @@
 {
     "name": "Joinery Boards",
-    "version": "0.2.0",
+    "version": "0.2.1",
     "description": "Kanban boards, lists and cards for clubs, nonprofits and small teams, wired into the site's members, notifications, calendar and files. One price, no seat or board limits.",
     "author": "Joinery",
     "license": "Joinery-Commercial",
@@ -198,7 +198,7 @@
         },
         "boards.email_refused": {
             "label": "An email to your board address wasn't used",
-            "description": "An email sent to your board email address came from an address that isn't yours, so no card was made.",
+            "description": "An email sent to your board email address made no card: it came from an address that isn't yours, or the board could not take it (archived, view-only, no list yet).",
             "category": "Boards",
             "payload": {
                 "board_name": "Board name",
