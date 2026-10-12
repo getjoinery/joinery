@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.5 - PASSES_MAIL_APPS 3.11: the relay that passes mail programs through to the mail gateway
  * @version 1.4 - ACCEPTS_SUBADDRESSES 3.9: the relay that accepts and delivers a handler alias's +tag addresses
  * @version 1.3 - ANSWERS_HEALTH 3.7: the relay that answers GET /health, so the plane watches it over HTTPS
  * @version 1.2 - SEALS_FOR_BROWSERS 3.2: the relay that also answers the seal-target statement
@@ -133,6 +134,22 @@ class RelayVersion {
 		$running = trim($running);
 		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
 			&& version_compare($running, self::ACCEPTS_SUBADDRESSES, '>=');
+	}
+
+	/**
+	 * The first relay version that passes mail programs through to this server's
+	 * mail gateway on 993 and 465 and issues the gateway's certificate for the
+	 * relay's name (the mail_apps plugin; specs/mail_apps_plugin.md § Where
+	 * programs connect). Mail apps are offered on a relay-fronted site only
+	 * when its relay reports this or later.
+	 */
+	const PASSES_MAIL_APPS = '3.11';
+
+	/** Does a relay running $running pass mail apps through? Unknown reads as no. */
+	public static function passesMailApps(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::PASSES_MAIL_APPS, '>=');
 	}
 
 	/**

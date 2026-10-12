@@ -115,9 +115,9 @@ chk "still exit 0 with an object" "$rc/$(jv "$T/refused.json" unit)" "0/cron.ser
 chk "restarted false, after still failed" "$(jv "$T/refused.json" restarted)/$(jv "$T/refused.json" after.active_state)" "false/failed"
 
 echo "=== Static pins ==="
-chk "the list is host_report's expected units" \
+chk "the list is host_report's expected units, then the mail apps gateway" \
     "$(sed -n 's/^UNITS=(\(.*\))$/\1/p' "$SCRIPT")" \
-    "$(grep -o '"[a-z0-9-]*":"%s"' "$REPORT" | sed -n '1,5p' | sed 's/":"%s"//; s/"//' | tr '\n' ' ' | sed 's/ $//')"
+    "$(grep -o '"[a-z0-9-]*":"%s"' "$REPORT" | sed -n '1,5p' | sed 's/":"%s"//; s/"//' | tr '\n' ' ' | sed 's/ $//') joinery-mail-gateway"
 chk "the agent is not one of them" "$(grep -c -w 'joinery-agent' <<< "$(grep '^UNITS=' "$SCRIPT")")" "0"
 CODE="$(grep -v -E '^\s*#' "$SCRIPT")"
 chk "restart is run once, only with the resolved unit" \

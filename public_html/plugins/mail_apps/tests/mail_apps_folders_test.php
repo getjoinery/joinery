@@ -27,7 +27,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_folders_test.php
  *
- * @version 1.0
+ * @version 1.1 - APPEND to INBOX answers its number (APPENDUID)
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -185,8 +185,8 @@ if ($app_mid) {
 	harness_register_model('InboundEmailMessage', $app_mid);
 }
 check(count($new) === 1 && $app_mid !== null, 'It is stored and numbered');
-check($appended['uid'] === null,
-	'No APPENDUID: what is stored is not byte for byte what was sent, so the program fetches it (J3)', json_encode($appended));
+check($app_mid !== null && $appended['uid'] === array_search($app_mid, mafx_live($ctx, 'inbox'), true),
+	'It answers the number the message has in the Inbox (APPENDUID)', json_encode($appended));
 check($app_mid && $db->query("SELECT iem_is_read FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $app_mid")->fetchColumn(),
 	'With the \\Seen flag it was appended with');
 

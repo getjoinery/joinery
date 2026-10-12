@@ -25,7 +25,7 @@
  *
  * Run: php -d apc.enable_cli=1 plugins/mail_apps/tests/mail_apps_send_test.php
  *
- * @version 1.0
+ * @version 1.1 - APPEND answers its number (APPENDUID) for Sent and Drafts
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
@@ -140,8 +140,8 @@ check($marks && in_array($marks['mam_is_forwarded'], array(true, 't', 1, '1'), t
 
 section('A program\'s copy to Sent is recognised');
 $appended = MailAppMutations::append($ctx, $sent_folder, $raw, array('\\Seen'), null);
-check($appended['uid'] === null && array_search((int)$sent['outbound_id'], mafx_live($ctx, 'sent'), true) === $sent_uid,
-	'APPEND of the same message answers no number, so the program fetches the copy the site sent (J3)', json_encode($appended));
+check($appended['uid'] === $sent_uid && array_search((int)$sent['outbound_id'], mafx_live($ctx, 'sent'), true) === $sent_uid,
+	'APPEND of the same message answers the number of the copy the site sent', json_encode($appended));
 $count = (int)$db->query("SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_message_id_header = " . $db->quote($their_id))->fetchColumn();
 check($count === 1, 'Nothing new was stored');
 $other_raw = $compose('<' . $address . '>', '<elsewhere-' . bin2hex(random_bytes(4)) . '@' . $domain_name . '>');
@@ -236,12 +236,13 @@ $draft_raw = "From: <$address>\r\nTo: bob@example.org\r\nSubject: Half written\r
 	. "--d1\r\nContent-Type: application/octet-stream; name=\"notes.bin\"\r\nContent-Disposition: attachment; filename=\"notes.bin\"\r\n"
 	. "Content-Transfer-Encoding: base64\r\n\r\n" . base64_encode('draft attachment bytes') . "\r\n--d1--\r\n";
 $before = mafx_live($ctx, $drafts['key']);
-MailAppMutations::append($ctx, $drafts, $draft_raw, array('\\Draft', '\\Seen'), null);
+$draft_appended = MailAppMutations::append($ctx, $drafts, $draft_raw, array('\\Draft', '\\Seen'), null);
 $new = array_diff_key(mafx_live($ctx, $drafts['key']), $before);
 $draft_id = $new ? reset($new) : null;
 $draft_uid = $new ? key($new) : null;
 $track((int)$draft_id);
-check($draft_id !== null, 'It becomes a Joinery draft, numbered in Drafts');
+check($draft_id !== null && $draft_appended['uid'] === $draft_uid, 'It becomes a Joinery draft, numbered in Drafts, and that number is answered',
+	json_encode($draft_appended));
 $drow = $db->query("SELECT iem_direction, iem_subject FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = " . (int)$draft_id)->fetch(PDO::FETCH_ASSOC);
 check($drow && $drow['iem_direction'] === 'draft' && $drow['iem_subject'] === 'Half written', 'With its subject');
 $att = (int)$db->query("SELECT COUNT(*) FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = " . (int)$draft_id)->fetchColumn();

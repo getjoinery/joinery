@@ -32,6 +32,10 @@ type SiteConfig struct {
 	UpstreamInsecureTLS bool   `json:"upstream_insecure_tls"`
 	CertFile            string `json:"cert_file"`
 	KeyFile             string `json:"key_file"`
+	// ViaRelay: mail programs reach this site through its mail relay
+	// (proxy.go). It is served only to a connection that came through a relay
+	// listed in proxy_from, or from this machine.
+	ViaRelay bool `json:"via_relay"`
 }
 
 // Site is a loaded, enabled site.
@@ -42,8 +46,9 @@ type Site struct {
 }
 
 type siteSet struct {
-	byHost map[string]*Site
-	list   []*Site
+	byHost    map[string]*Site
+	list      []*Site
+	proxyFrom map[string]bool // relay addresses whose PROXY line is believed (proxy.go)
 }
 
 // Registry holds the enabled sites. Reload swaps the whole set atomically, so
@@ -72,6 +77,7 @@ func (r *Registry) Reload() error {
 	}
 	set := &siteSet{byHost: map[string]*Site{}}
 	var problems []string
+	set.proxyFrom, problems = loadProxyFrom(r.dir)
 	for _, e := range entries {
 		name := e.Name()
 		if e.IsDir() || !strings.HasSuffix(name, ".json") {
@@ -229,6 +235,9 @@ func (r *Registry) TLSConfig() *tls.Config {
 			site := r.Lookup(hello.ServerName)
 			if site == nil {
 				return nil, fmt.Errorf("no site serves %q", hello.ServerName)
+			}
+			if site.ViaRelay && !mayServeRelayedSite(hello.Conn) {
+				return nil, fmt.Errorf("%q is served through its relay only", hello.ServerName)
 			}
 			return site.cert, nil
 		},

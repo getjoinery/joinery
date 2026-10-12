@@ -21,6 +21,8 @@
  *
  * @version 1.3 - plane:release_log_entry and plane:release_log_tail_blind (release_transparency O5)
  * @version 1.2 - plane:agent_update_refused (release_transparency O7)
+ * @version 1.2 - plane:mail_gateway: quiet with no site on or a failed unit; critical when a site does not
+ *                answer or its certificate is under a week; a warning for restarts and a two-week certificate
  * @version 1.1 - plane:machine_transfer is registered (its conditions: machine_transfer_test)
  * @version 1.0
  */
@@ -65,7 +67,7 @@ $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
-	'plane:release_log_entry', 'plane:release_log_tail_blind') as $want) {
+	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
@@ -89,6 +91,45 @@ $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(ar
 check($units->evaluate($node) === null, 'A report that could not list units does not');
 $set(array('mgn_last_host_report' => null));
 check($units->evaluate($node) === null, 'No report does not');
+
+// ---------------------------------------------------------------------------
+section('Mail apps gateway');
+
+$mg = new IncidentSourceMailGateway();
+$gw = function (array $over = array(), array $site = array()) {
+	$g = array_merge(array('version' => '1.0.0', 'state' => 'active', 'restarts' => 0, 'up_seconds' => 86400, 'connections' => 4,
+		'sites' => array(array_merge(array('site' => 'shop', 'name' => 'mail.shop.example', 'imap' => 'ok', 'submission' => 'ok',
+			'days_left' => 60), $site))), $over);
+	return JobResultProcessor::sanitise_host_report(array('mail_gateway' => $g));
+};
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('mail_gateway' => 'none'))));
+check($mg->evaluate($node) === null, 'Not installed: nothing');
+$set(array('mgn_last_host_report' => $gw(array('state' => 'inactive', 'sites' => array()))));
+check($mg->evaluate($node) === null, 'Installed with no site turned on, and stopped: nothing');
+$set(array('mgn_last_host_report' => $gw()));
+check($mg->evaluate($node) === null, 'Running, every site answering, certificate fine: nothing');
+$set(array('mgn_last_host_report' => $gw(array('state' => 'inactive'), array('imap' => 'no_answer', 'submission' => 'no_answer'))));
+$v = $mg->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'The mail apps gateway is not running',
+	'A site on and the unit stopped: critical', json_encode($v));
+$set(array('mgn_last_host_report' => $gw(array(), array('imap' => 'no_answer'))));
+$v = $mg->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'The mail apps gateway does not answer mail programs'
+	&& $v['detail']['Not answering'] === 'mail.shop.example: IMAP (993)', 'Running but not greeting on 993: critical, naming the site', json_encode($v));
+$set(array('mgn_last_host_report' => $gw(array('state' => 'failed'), array('imap' => 'no_answer', 'submission' => 'no_answer'))));
+check($mg->evaluate($node) === null, 'The unit failed outright: left to plane:failed_units, one incident for one fault');
+$set(array('mgn_last_host_report' => $gw(array('restarts' => 5, 'up_seconds' => 120))));
+$v = $mg->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'The mail apps gateway keeps restarting', 'Five restarts, up two minutes: a warning', json_encode($v));
+$set(array('mgn_last_host_report' => $gw(array('restarts' => 5, 'up_seconds' => 7200))));
+check($mg->evaluate($node) === null, 'Restarts long ago, up two hours since: nothing');
+$set(array('mgn_last_host_report' => $gw(array(), array('days_left' => 10))));
+$v = $mg->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'A mail apps certificate is about to expire', 'Ten days on the certificate: a warning', json_encode($v));
+$set(array('mgn_last_host_report' => $gw(array(), array('days_left' => 3))));
+check(($mg->evaluate($node)['severity'] ?? '') === 'critical', 'Three days: critical');
+$set(array('mgn_last_host_report' => null));
+check($mg->evaluate($node) === null, 'No report: nothing');
 
 // ---------------------------------------------------------------------------
 section('Certificate');

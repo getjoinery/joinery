@@ -189,5 +189,25 @@ $ping_after = RelayClient::forRelay($relay)->ping();
 check(intval($ping_after['direct']['egress_1h'] ?? -1) === $egress_before + 1, 'the relay counted one signed egress call',
 	$egress_before . ' -> ' . ($ping_after['direct']['egress_1h'] ?? '?'));
 
+// ---------------------------------------------------------------------------
+section('The mail apps certificate route answers, and refuses a shared relay');
+
+// This probe holds two tenants, so the relay issues nothing: a shared relay
+// would otherwise hand one tenant a certificate for a name another uses.
+$csr_key = openssl_pkey_new(array('private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1'));
+$csr = openssl_csr_new(array('commonName' => 'mx.probe.test'), $csr_key, array('digest_alg' => 'sha256'));
+openssl_csr_export($csr, $csr_pem);
+try {
+	$cert = RelayClient::forRelay($relay)->mailAppsCertificate($csr_pem);
+	check($cert['ok'] === false && $cert['status'] === 403 && strpos((string)($cert['reason'] ?? ''), 'one tenant') !== false,
+		'a relay with two tenants refuses, and says why', json_encode($cert));
+} catch (RelayClientException $e) {
+	check(false, 'the certificate route answers', $e->failure_class . ': ' . $e->getMessage());
+}
+$ping = RelayClient::forRelay($relay)->ping();
+check(isset($ping['mail_apps']['listening']) && array_key_exists('spliced_1h', $ping['mail_apps'])
+	&& ($ping['mail_apps']['off_because'] ?? '') === 'a relay with more than one tenant passes nothing',
+	'the ping reports the pass-through, off on a shared relay', json_encode($ping['mail_apps'] ?? null));
+
 $probe->stop();
 harness_finish();

@@ -24,16 +24,17 @@
  *     one the statement records; and every line of that manifest is a file in
  *     C with the same bytes, or a file publish builds that passes its own
  *     check (below).
- *  6. With the pinned Go toolchain, the agent rebuilt from A and the relay
- *     sealer rebuilt from C are byte-identical to what the statement records.
+ *  6. With the pinned Go toolchain, the agent rebuilt from A and each Go
+ *     program a plugin ships prebuilt (the relay sealer, the mail gateway),
+ *     rebuilt from C, are byte-identical to what the statement records.
  *
  * WHAT PUBLISH BUILDS, and how each is checked: the agent binaries
  * (decompressed, against the statement; rebuilt in 6), the agent bundle's
  * manifest.json (its signatures verify, its keys are C's), the agent's
  * systemd unit (A's file), the support bundle (the statement's hash; its own
  * signed manifest; every file in it from C or a relay sealer the statement
- * records), the support bundle's index, the relay sealer binaries and their
- * source stamp, the license copies (C's files) and every RELEASE_STATEMENT
+ * records), the support bundle's index, each plugin's prebuilt Go binaries
+ * (GoBinaryPublisher::PLUGIN_PUBLISHERS) and their source stamp, the license copies (C's files) and every RELEASE_STATEMENT
  * (the statement itself).
  *
  * WHERE THINGS COME FROM. The commits are fetched from the public
@@ -46,6 +47,8 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.3 - plugin Go binaries are checked and rebuilt for every GoBinaryPublisher::PLUGIN_PUBLISHERS
+ *                entry; a release that records none of a program's binaries shipped none of them
  * @version 1.2 - the core check runs both ways: every file the core commit ships must be listed, so an archive
  *                that drops one is refused (WP7 review B5)
  * @version 1.1 - rebuilds with the official toolchain each go.mod pins, fetched checksum-verified by any
@@ -323,24 +326,38 @@ class ReleaseVerifier {
 	}
 
 	/**
-	 * The prebuilt Go binaries an extension ships (the relay sealer, in the
-	 * mailbox plugin): each binary as the statement records it, and the stamp
-	 * of the source in C it was built from. Returns '' or why it cannot.
+	 * The prebuilt Go binaries an extension ships (GoBinaryPublisher::
+	 * PLUGIN_PUBLISHERS: the relay sealer in mailbox, the mail gateway in
+	 * mail_apps): each binary as the statement records it, and the stamp of the
+	 * source in C it was built from. A release that predates a program records
+	 * none of its binaries and shipped none, so nothing is added for it; one that
+	 * records some must record every architecture. Returns '' or why it cannot.
 	 */
 	private function addBuiltBinaries($root, array &$entries) {
-		$bin = RelaySealerPublisher::BIN_SUBDIR;
-		if (strpos($bin . '/', $root . '/') !== 0) {
-			return '';
-		}
-		foreach (array_keys(RelaySealerPublisher::ARCHES) as $machine) {
-			$sha = $this->payload['artifacts']['relay-sealer/' . $machine] ?? null;
-			if ($sha === null) {
-				return "the statement records no relay-sealer/{$machine}";
+		foreach (GoBinaryPublisher::pluginPublishers() as $publisher) {
+			$bin = $publisher::BIN_SUBDIR;
+			if (strpos($bin . '/', $root . '/') !== 0) {
+				continue;
 			}
-			$entries[$bin . '/' . RelaySealerPublisher::BINARY . '-' . $machine] = $sha;
+			$recorded = array();
+			foreach (array_keys($publisher::ARCHES) as $machine) {
+				$sha = $this->payload['artifacts'][$publisher::artifactName($machine)] ?? null;
+				if ($sha !== null) {
+					$recorded[$machine] = $sha;
+				}
+			}
+			if (!$recorded) {
+				continue;
+			}
+			foreach (array_keys($publisher::ARCHES) as $machine) {
+				if (!isset($recorded[$machine])) {
+					return 'the statement records no ' . $publisher::artifactName($machine);
+				}
+				$entries[$bin . '/' . $publisher::BINARY . '-' . $machine] = $recorded[$machine];
+			}
+			$entries[$bin . '/' . $publisher::STAMP_FILE] = hash('sha256',
+				$publisher::sourceHash($this->c_dir . '/' . $publisher::SOURCE_SUBDIR) . "\n");
 		}
-		$entries[$bin . '/' . RelaySealerPublisher::STAMP_FILE] = hash('sha256',
-			RelaySealerPublisher::sourceHash($this->c_dir . '/' . RelaySealerPublisher::SOURCE_SUBDIR) . "\n");
 		return '';
 	}
 
@@ -584,13 +601,19 @@ class ReleaseVerifier {
 			}
 		}
 
-		$src = $this->c_dir . '/' . RelaySealerPublisher::SOURCE_SUBDIR;
-		if (!is_dir($src) || ($go = $official($src, 'The relay sealer')) === null) {
-			return;
-		}
-		foreach (RelaySealerPublisher::ARCHES as $machine => $goarch) {
-			$this->compareBuild($go['go'], $src, $goarch, '-s -w', $this->payload['artifacts']['relay-sealer/' . $machine] ?? '',
-				"The relay sealer for {$machine}, built from the core commit");
+		foreach (GoBinaryPublisher::pluginPublishers() as $publisher) {
+			$machines = array_filter(array_keys($publisher::ARCHES), function ($machine) use ($publisher) {
+				return isset($this->payload['artifacts'][$publisher::artifactName($machine)]);
+			});
+			$src = $this->c_dir . '/' . $publisher::SOURCE_SUBDIR;
+			if (!$machines || !is_dir($src) || ($go = $official($src, $publisher::LABEL)) === null) {
+				continue;
+			}
+			foreach ($machines as $machine) {
+				$this->compareBuild($go['go'], $src, $publisher::ARCHES[$machine], '-s -w',
+					$this->payload['artifacts'][$publisher::artifactName($machine)],
+					$publisher::LABEL . " for {$machine}, built from the core commit");
+			}
 		}
 	}
 
@@ -660,9 +683,10 @@ class ReleaseVerifier {
 	 */
 	public static function requirePluginClasses() {
 		foreach (array('server_manager/includes/TreeManifestPublisher.php', 'server_manager/includes/AgentDistPublisher.php',
-				'server_manager/includes/ReleaseStatementPublisher.php', 'mailbox/includes/RelaySealerPublisher.php') as $file) {
+				'server_manager/includes/ReleaseStatementPublisher.php') as $file) {
 			require_once(PathHelper::getIncludePath('plugins/' . $file));
 		}
+		GoBinaryPublisher::pluginPublishers();
 	}
 
 	private static function download($url, $path) {

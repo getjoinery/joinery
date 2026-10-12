@@ -2755,8 +2755,9 @@ blobs. Its own IP appears in no mail DNS.
 A relay is **a relay without a shell** (`provision_relay.sh`,
 `specs/relay_without_a_shell.md`):
 
-- two listeners, Postfix on 25 and the
-  sealer binary's `relay-serve` mode on 443, and no other way in — no sshd, no
+- Postfix on 25 and the sealer binary's `relay-serve` mode on 443 (and, from
+  relay 3.11, on 993 and 465 for the mail apps pass-through below), and no
+  other way in — no sshd, no
   tunnel, no tenant Unix accounts, no sudoers rules, and no credential held
   by the platform. It is born configured by its provider's first-boot
   user-data (`provisioning/relay_first_boot.sh`, rendered by the plane), fetches
@@ -2833,6 +2834,8 @@ loopback never crosses one. Server Manager watches a relay here
 Once a relay fronts a deployment it is the MX for **all** that deployment's
 hosted domains (a mixed MX would leak the origin). The security level controls
 where mail is *sealed*, never where it is *routed*.
+
+**The mail apps pass-through (relay 3.11, `RelayVersion::PASSES_MAIL_APPS`).** On a relay with one tenant, `relay-serve` also listens on 993 and 465 for the mail_apps plugin (`mailapps_pass.go`). A mail program connects to the relay's own mail host name. The relay reads the server name in its TLS hello without opening it, and passes the connection to the tenant's server on the same port, IPv4 (`mail_apps_origins` in the fragment, which `RelayMapExporter` fills with `mailbox_public_ip` while mail apps are on through this relay and empties otherwise), after a PROXY protocol v1 line naming the program's address. Any other name, a relay with more than one registered tenant, and a tenant with no origins are closed. Caps: 20 connections per program address (IPv6 by /64), 1,000 in all. The server's gateway holds a certificate for the relay's name: it makes the key and a request, and `POST /relay/mail-apps/certificate` (tenant-signed; `RelayClient::mailAppsCertificate`) has the relay complete the ACME order with its own Let's Encrypt account, answering TLS-ALPN-01 on 443 ahead of autocert, for a request that names exactly its hostname, at most once every 12 hours (`mailapps_cert.go`). The ping's `mail_apps` group carries the listeners, the origins count, connections passed and refused in the last hour, the last refusal, and the last certificate issued or failed. See plugins/mail_apps/docs/overview.md.
 
 ### The sealing binary
 
@@ -5726,7 +5729,7 @@ run resumes against it rather than needing a re-upload.
 
 **Uploading has no size limit.** The archive goes up through the platform's
 resumable chunk transport under the `mail_import_archive` upload purpose
-(docs/api.md § Uploading something that is not a Drive file), so the bytes never
+(`upload_init` / `upload_complete`, docs/api.md § Uploading something that is not a Drive file; Drive does not need to be on), so the bytes never
 ride in a single request and `upload_max_filesize` never applies. A dropped
 connection resumes from the server's byte count rather than starting the archive
 again, which on a large export is the difference between a hiccup and an afternoon.

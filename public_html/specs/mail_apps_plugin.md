@@ -2,9 +2,9 @@
 
 **Purpose:** Let a person read and send their Joinery mail from a desktop mail program — Thunderbird first, and any client that speaks standard IMAP and SMTP submission (Apple Mail, K-9/Thunderbird for Android, Outlook's IMAP mode). Joinery mail today is reachable only through the web reader and the native app's JSON API.
 
-**Last Updated:** 2026-10-11
+**Last Updated:** 2026-10-12
 
-**Status:** Built on dev, not committed. Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). Two pieces are not built: the managed-node / container path and the shared certificate automation. Three owner decisions are open (§ Open decisions).
+**Status:** Released in 0.8.484 (J1–J4 in 0.8.485). Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). The gateway's life cycle (§ Running the gateway) is built on dev and uncommitted: A1 build at publish, A2 watching and self-repair, A3 removal; so are the J3 re-fix (APPENDUID always) and the relay pass-through (§ Where programs connect). Not built: A4 (container sites and managed nodes), and the shared certificate automation.
 
 **Plugin name:** `mail_apps` — depends on `mailbox`.
 
@@ -58,7 +58,7 @@ The rig is in `plugins/mail_apps/tests/thunderbird_rig/`: real Thunderbird drive
 The tests listed in § Tests pass, including a live run: the real gateway on dev, IMAP and SMTP against a real mailbox.
 
 **Not built:**
-- The managed-node / container path: the host-level gateway for a multi-tenant host, the agent's `mail_gateway_status` primitive, and turning it on through the agent.
+- The managed-node / container path (A4, § Running the gateway), which needs the relay pass-through first.
 - The shared front-door certificate automation for `autoconfig.` names.
 - Measuring a 100,000-message folder.
 - Re-running the rig against the built gateway on the Mac mini and the Windows VM.
@@ -87,7 +87,7 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
 - The site entry carries `mail_hostname`, and the gateway selects the site by it while still calling the site under its web name.
 - Allow mail apps is refused, saying why, on a relay-fronted deployment (until the pass-through exists) and where no mail host name is set.
 
-**Not built yet:** the relay pass-through (paused for commits: another session's relay changes are uncommitted in the same files).
+**Built (relay-fronted), 2026-10-12, uncommitted:** the pass-through below, end to end: relay 3.11 (`mailapps_pass.go`, `mailapps_cert.go`, 993/465 open), the gateway's PROXY handling and `via_relay` (`proxy.go`), the helper's `csr` / `install-cert` / `on SITE NAME RELAY_IPS` with the firewall and `proxy_from` kept in step, `MailAppGateway::turnOn()` through the relay, the fragment's `mail_apps_origins`, and the daily renewal. Tested: Go tests on both sides, the helper gate, PHP against the real relay binary, and a local chain on dev (a TLS client through relay-serve to the gateway greeting on IMAP and SMTP; a wrong name cut off). Not yet tested live: a real relay upgraded to 3.11, the Let's Encrypt order, Thunderbird through it (live verification queue).
 
 **Design:**
 
@@ -105,23 +105,48 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
 - Connection caps apply per source and per tenant.
 - Health reports the pass-through's state.
 
+**Build design (W2, 2026-10-12)**, after reading the relay as it is. Three things the sketch above assumed are not so: the relay never dials the server (no tunnel since provision_relay.sh 3.0; the server pulls), a self-hosted relay has no operator key (only the tenant `main` key), and a relay is never updated in place (Upgrade re-images it from the support bundle). So:
+- **Where it runs: a relay with one tenant.** A self-hosted relay serves one deployment, and its mail host name (`mrl_mx_hostname`) is the relay's own `--hostname`, the name it already holds an ACME certificate for on 443. The pass-through serves exactly that name, on a relay whose routing holds exactly one tenant. A shared shard does nothing (fleet slots are out of scope, above), which also means no tenant can ever have the relay issue a certificate for a name another tenant uses.
+- **The server's address reaches the relay in the tenant's fragment** (`mail_apps_origins`: up to four public IPv4/IPv6 addresses), signed with the tenant key like the rest of its routing, merged into `routing.json`. An empty list turns the pass-through off. `RelayMapSync` puts `mailbox_public_ip` and the detected IPv6 there while mail apps are on.
+- **Splice:** relay-serve peeks the ClientHello (SNI, offered ALPN) without consuming it, dials the origin on the same port (IPv4 first, then IPv6), writes a PROXY protocol v1 line carrying the program's address, replays the hello and copies both ways. Caps: 20 connections per source address (IPv6 by /64), 1,000 in all, 10 s to read the hello, 10 s to dial.
+- **The program's address survives.** The gateway accepts a PROXY line only from addresses listed in `/etc/joinery/mail-gateway/proxy_from` (the relay's), so its per-address caps, its sign-in throttle and the `X-Joinery-Client-Ip` it sends the site name the program, not the relay.
+- **The origin stays hidden.** A site entry marked `via_relay` is served only to a connection that came through a listed relay (or loopback, for the host report and the admin page's round trip): anyone else reaching the server's 993 directly gets no handshake, so a scan cannot find a gateway holding the relay's certificate. The server's firewall opens 993/465 to the relay's addresses only.
+- **Certificate:** the root helper makes the key and a CSR (`csr SITE NAME`; the key never leaves the server); the site sends the CSR to `POST /relay/mail-apps/certificate` with its tenant signature; the relay checks the CSR names only its own hostname, completes an ACME order with its own Let's Encrypt account (TLS-ALPN-01: its 443 answers the `acme-tls/1` hello from the order's challenge certificate before autocert's), and returns the chain; the helper installs it (`install-cert SITE`, which checks it matches the key). At most one issue per tenant per 12 hours, because the relay's own certificate shares Let's Encrypt's duplicate-certificate limit for that name. Renewed by a daily task inside 30 days of expiry.
+- **Version gate:** relay 3.11 (`RelayVersion::PASSES_MAIL_APPS`). An older relay is named in the refusal, with Upgrade as the way forward.
+- **Health:** the relay's ping carries `mail_apps`: origins set, connections spliced and refused in the last hour, the last certificate issued and the last error.
+- **Decided while building:**
+  - The relay reaches the server over **IPv4 only**: the deployment records the relay's IPv4 (`mrl_public_ip`) and not its IPv6, and the server can trust only an address it knows. Programs still reach the relay over IPv6, and their IPv6 address reaches the gateway in the PROXY line.
+  - "One tenant" is counted from the relay's **registrations** (`tenants/`), not the merged map, which lists only tenants that have pushed: a shard whose second tenant has not pushed yet is still shared.
+
 **Hosted fleet slots** are not covered: the fleet is not customer-facing, and its shared zone needs per-tenant names issued by the fleet.
 
 **Thunderbird settings** (the Mail apps page and autoconfig) name whichever host above applies.
 
 **Not affected:** `checkOriginHidden`. Direct deployments publish nothing new. Relay-fronted ones point programs at the relay, not the server.
 
-## Gateway binaries
+## Running the gateway: build, install, watch, remove (owner 2026-10-12)
 
-`plugins/mail_apps/provisioning/bin/` is git-ignored build output. **It does not ship.** A plugin archive carries only what its signed manifest lists, and the release's own build programs (`GoBinaryPublisher` subclasses: the relay-sealer, the parser jail, the agent) are the only binaries listed. Release 0.8.484 published `mail_apps` 1.0.0 without them. On any machine but dev the host installer stops at its "no prebuilt gateway" check and installs nothing.
+The owner asked for the whole life cycle of the gateway program to be automatic: built into every release, installed and kept current, watched, restarted or escalated when it fails, and removed with the plugin. Four pieces.
 
-To ship, the gateway becomes a `GoBinaryPublisher` the way `RelaySealerPublisher` is:
-- built at publish;
-- its source tree named in `ReleaseCommit`;
-- its artifacts in the release statement;
-- rebuilt reproducibly by `ReleaseVerifier`.
+**A1 — built at publish. BUILT.** `plugins/mail_apps/provisioning/bin/` was git-ignored build output that no publish step made, so 0.8.484 and 0.8.485 shipped mail_apps without its binaries and the host installer stopped at "no prebuilt gateway" everywhere but dev.
+- `MailGatewayPublisher` (a `GoBinaryPublisher`) cross-compiles the gateway with the toolchain `go.mod` pins, stamps the source (`.source_sha256`), and leaves `bin/` byte-identical when nothing changed. A build owed and not made refuses the release.
+- The relay sealer was hard-coded by name in seven places. Both are now on one list, `GoBinaryPublisher::PLUGIN_PUBLISHERS`, which publish, `ReleaseStatementPublisher::binaryArtifacts()` and `ReleaseVerifier` (manifest entries, rebuild) each walk. `ReleaseCommit` holds the gateway's source and generates its `bin/`.
+- A release that records none of a program's binaries shipped none, so older releases (0.8.484, 0.8.485) still verify.
+- Verified on dev: the publisher built both binaries, skipped on a second run, and an independent rebuild with the verifier's flags is byte-identical; `verify_release` passes on 0.8.485.
 
-That is core release-pipeline work, needed before mail apps run anywhere but dev.
+**A2 — watched, restarted, escalated. BUILT; agent change awaits its version (below).**
+- *Status:* `host_report.sh` 1.20 carries `mail_gateway`: version, unit state, systemd's `NRestarts`, uptime, open connections, and per site turned on whether a TLS connection under its mail name reaches an IMAP and a submission greeting, and the certificate's days left. A process that runs and no longer answers fails the greeting. This replaces the separate `mail_gateway_status` word the spec first named: the host report is already run hourly by the plane and every ten minutes by the agent's recipes, and a new script key needs no new agent word.
+- *Alarm:* `plane:mail_gateway` (`IncidentSourceMailGateway`). Quiet where no site has mail apps on, and where the unit has failed outright (`plane:failed_units` names it: one fault, one incident). Critical when a site's programs cannot connect or a certificate is under seven days; a warning for three or more restarts within the hour, or a certificate under 14 days.
+- *Self-repair:* agent recipe `mail_gateway`: while a site has mail apps on, the gateway runs and greets, or `restart_unit joinery-mail-gateway`; a case after the recipe's attempts. systemd's `Restart=on-failure` already covers a gateway that exits.
+- *By hand:* `joinery-mail-gateway` joins `restart_unit` and `unit_journal` / `reset_failed_unit` (agent, scripts and plane mirrors). The node page's Services gains a Mail apps gateway row with Restart and Why?.
+- The agent part needs a release of the agent: `one-data-root` holds an uncommitted 1.73.1 in `main.go`. Whichever agent commit lands second bumps to 1.74.0 (agreed with that session); until then an older agent refuses the new unit name in `restart_unit` with a plain refusal.
+
+**A3 — removed with the plugin. BUILT.** There is no platform hook for undoing a host installer, and `uninstall.php` runs as the web user. So the root helper gains `remove SITE`, and the plugin gains `uninstall.php`, which calls it the way the deactivate hook calls `off`. It forgets the site, and once no site on the machine has the plugin it removes the unit and drop-in, the binary, the `joinery-mailgw` user, the renewal hook, the sudoers rule and the helper, and closes the ports. The mail host's certificate stays: the name is the mailbox plugin's too. A failure returns false, which keeps the plugin installed so the uninstall can be retried.
+
+**A4 — container sites and managed nodes. NOT BUILT; the relay pass-through it needed is built (§ Where programs connect).**
+- A site container's mail always arrives through a relay (multi_tenant_docker_hosts WP9: no container runs Postfix), so a container site is relay-fronted, and mail programs reach a relay-fronted deployment only through the pass-through (§ Where programs connect), which is not built.
+- What A4 adds once it is: a Machine word on the host's agent, modeled on `suspended_page` / `site_limits`, that installs the gateway from the support bundle (which then carries `mail-gateway-*` and the helper) and writes a container site's entry with `upstream` = the container's published loopback port (`/etc/joinery/sites/<site>/run_spec`), each site under its own mail name (the gateway refuses two sites with one served name); the site's admin switch asks its host's management node for it. The host report, alarm and recipe above already cover a host gateway serving several sites.
+- Open for A4: a Docker host is not known to have the `php` CLI the helper uses for JSON; the helper should not depend on it there.
 
 ## Second code review (reviewer2, 2026-10-11)
 
@@ -195,7 +220,7 @@ Real Thunderbird 157.0.1 against the real gateway and dev. Every scenario passed
 **Decided and fixed (2026-10-12):**
 - **J1:** `$Junk` and `$NotJunk` are no longer offered (FLAGS and PERMANENTFLAGS are `\Seen \Flagged \Answered \Deleted \Draft $Forwarded`). A STORE of them is dropped by the gateway, and `store()` no longer maps them to a verdict. Only a move into or out of Spam sets one.
 - **J2:** there is no All Mail folder.
-- **J3:** `APPEND` answers `APPENDUID` only when the bytes served for that message equal the bytes appended. Otherwise it answers none, and the program fetches the site's copy. In practice that is every APPEND, because arrival keeps headers and decoded parts rather than the original. Not yet re-run against real Thunderbird.
+- **J3:** first fixed by answering `APPENDUID` only when the served bytes equal the appended ones, which in practice was never. The Thunderbird re-run (2026-10-12, on 0.8.485) showed that is wrong. Thunderbird with UIDPLUS takes a missing `APPENDUID` as the UID of the last message fetched on that connection. It files its copy under it and runs its after-send filters on it, and after every send it showed 'Your message has been sent and saved, but there was an error while running message filters on it.' Changed: `APPEND` always answers its number (`MailAppMutations` 1.0.1). Thunderbird keeps its own appended bytes under it. Other devices download the site's copy, which can differ in encoding (`Content-Language`, `format=flowed`, transfer encoding). That difference is accepted. Making the bytes identical would need mailbox to keep the original of every appended message.
 - **J4:** open. Labels are one site-wide set by design (`MailboxService::deleteLabel()`: "one shared concept across every mailbox"), so it is a mailbox design question, not a listing fix.
 
 ## Code review (reviewer2, 2026-10-11)
@@ -586,7 +611,7 @@ The MX-based lookup is not served in v1 (D2), and may be added later as an opt-i
 - Deactivating the plugin turns the site's switch off. Its app passwords stop working at once (§ Core: app passwords, Expiry). Its tables are kept. Uninstalling drops the tables and deletes the plugin's app passwords.
 - Health on the admin page: listening, certificate valid for the mail host name, and a round trip — sign in with a throwaway app password, `SELECT INBOX`, sign out, revoke.
 
-**Managed nodes.** The helper is installed with the node's provisioning, and turning it on goes through the agent like the mail-listener action. The agent gains `mail_gateway_status` (listening, version, connection count) as a read primitive.
+**Managed nodes.** On a site's own machine the host installer puts the helper in place and the site's switch runs it; the host report, `plane:mail_gateway` and the agent's `mail_gateway` recipe watch it (§ Running the gateway, A2). A container site's host gateway is A4.
 
 ---
 
@@ -642,7 +667,7 @@ Plus the person-facing page actions (browser session): `mail_apps/status` for th
 - Mail apps profile page, admin page with the switch and health
 - autoconfig views and DNS row
 - `joinery-mail-gateway` root helper, provisioning
-- server manager agent: `mail_gateway_status`
+- server manager: host report `mail_gateway`, `plane:mail_gateway`, agent recipe `mail_gateway`, `restart_unit` / `unit_journal` for the gateway (§ Running the gateway)
 
 **Shared** — front-door certificate automation, with spec `mailbox_encrypted_interop`
 

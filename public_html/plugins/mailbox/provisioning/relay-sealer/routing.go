@@ -119,6 +119,9 @@ type tenantConfig struct {
 	DirectSpoolDomainCap    int64 `json:"direct_spool_domain_cap_bytes"`
 	DirectSpoolAddressCap   int64 `json:"direct_spool_address_cap_bytes"`
 	DirectSessionTTLSeconds int   `json:"direct_session_ttl"`
+
+	// The mail apps pass-through's server addresses (mailapps_pass.go).
+	MailAppsOrigins []string `json:"mail_apps_origins,omitempty"`
 }
 
 // servesKind reports whether this tenant serves a payload kind. The relay never

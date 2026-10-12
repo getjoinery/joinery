@@ -3,6 +3,7 @@
 # reset_failed_unit.sh - clear systemd's record that one unit failed, and say
 # what the unit's state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.1 - joinery-mail-gateway, as unit_journal.sh 1.2
 # Version: 1.0 - the reset_failed_unit operate word of
 #                specs/disk_headroom_and_unit_diagnosis.md § 9. The agent runs
 #                this file, verified against the release manifest, with one
@@ -32,7 +33,7 @@ export LC_ALL=C
 
 CMD_TIMEOUT=20          # seconds per external command
 
-# THE CLOSED LIST. The same twelve as unit_journal.sh, and a mirror of
+# THE CLOSED LIST. The same thirteen as unit_journal.sh, and a mirror of
 # unitJournalUnits in the agent. The unit that can be asked why is the unit
 # that can be cleared once the answer is known.
 UNITS=(
@@ -41,6 +42,7 @@ UNITS=(
     man-db unattended-upgrades logrotate
     apt-daily apt-daily-upgrade
     fstrim e2scrub_all
+    joinery-mail-gateway
 )
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }

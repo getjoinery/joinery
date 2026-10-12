@@ -1458,7 +1458,13 @@ return [
 				return true;
 			}
 
-			$db->beginTransaction();
+			// The plugin installer already holds a transaction around its migrations;
+			// open one only when this run is not inside one, and leave a surrounding
+			// one for its owner to commit or roll back.
+			$ownTransaction = !$db->inTransaction();
+			if ($ownTransaction) {
+				$db->beginTransaction();
+			}
 			try {
 				$labels = $db->query("SELECT ilb_inbound_email_label_id AS id, ilb_name AS name FROM ilb_inbound_email_labels
 					WHERE ilb_iea_inbound_email_alias_id IS NULL AND ilb_delete_time IS NULL
@@ -1543,9 +1549,13 @@ return [
 				$staleFilters = $db->exec("UPDATE ief_inbound_email_filters SET ief_action_ilb_inbound_email_label_id = NULL
 					WHERE ief_action_ilb_inbound_email_label_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ilb_inbound_email_labels
 					  WHERE ilb_inbound_email_label_id = ief_action_ilb_inbound_email_label_id AND ilb_delete_time IS NULL)");
-				$db->commit();
+				if ($ownTransaction) {
+					$db->commit();
+				}
 			} catch (\Throwable $e) {
-				$db->rollBack();
+				if ($ownTransaction && $db->inTransaction()) {
+					$db->rollBack();
+				}
 				throw $e;
 			}
 			echo "ilb_001: " . $owned . " label(s) given their mailbox, " . $split . " copy(ies) for other mailboxes, "

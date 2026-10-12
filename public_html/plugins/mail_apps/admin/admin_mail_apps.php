@@ -9,6 +9,8 @@
  * request — a round trip with a throwaway app password (sign in, open INBOX,
  * sign out, revoke).
  *
+ * @version 1.2.0 - through a relay: allow obtains the certificate through the relay and sends the relay this
+ *                server's address (a fragment push); disallow takes the address back
  * @version 1.1.0 - names the mail host name programs connect to; says why mail apps cannot be turned on
  * @version 1.0.0
  */
@@ -32,7 +34,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 		} elseif (MailAppGateway::inContainer()) {
 			$flash($why_not, 'Nothing changed');
 		} else {
-			$run = MailAppGateway::run($action === 'allow' ? 'on' : 'off');
+			$run = $action === 'allow' ? MailAppGateway::turnOn() : MailAppGateway::turnOff();
 			if ($run['ok']) {
 				Setting::put('mail_apps_enabled', $action === 'allow');
 				Setting::put('mail_apps_served_name', $action === 'allow' ? (string)MailAppGateway::mailHostname() : '');
@@ -41,9 +43,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 					// on (AppAccess::isAvailable()); their borrowed windows end now.
 					ApiKey::LockBorrowedWindowsForPurpose('mail');
 				}
-				$flash($action === 'allow'
-					? 'Mail apps are on: the mail gateway answers on ports 993 and 465 for ' . MailAppGateway::servedName() . '.'
-					: 'Mail apps are off: the gateway no longer answers for this site, and members\' app passwords stop working at once.',
+				// Through a relay: the relay learns this server's address (or
+				// forgets it) from the next fragment, pushed now. A push that
+				// fails is retried by the relay reconcile task.
+				$relay_note = '';
+				if (($relay = MailAppGateway::relay()) !== null) {
+					$push = RelayMapSync::push($relay);
+					$relay_note = ($push['status'] ?? '') === 'error'
+						? ' The relay has not taken the change yet (' . $push['message'] . '); it is retried within minutes.'
+						: ($action === 'allow' ? ' The relay passes mail programs through to this server.' : ' The relay no longer passes them through.');
+				}
+				$flash(($action === 'allow'
+					? 'Mail apps are on: mail programs connect to ' . MailAppGateway::servedName() . ' on ports 993 and 465.'
+					: 'Mail apps are off: the gateway no longer answers for this site, and members\' app passwords stop working at once.')
+					. $relay_note,
 					$action === 'allow' ? 'Mail apps on' : 'Mail apps off');
 			} else {
 				$flash($run['message'], 'Nothing changed');

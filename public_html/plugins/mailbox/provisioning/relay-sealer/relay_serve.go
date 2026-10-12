@@ -35,6 +35,7 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -57,12 +58,22 @@ type relayServer struct {
 	routingPath  string
 	defaultSpool string
 	certCache    string
+	stateDir     string
 	auth         *relayAuth
 	identity     *relayIdentity
 	direct       *directHandler
 	acme         *autocert.Manager
 	// verdictWait is a field so the tests can shorten it.
 	verdictWait time.Duration
+
+	// The mail apps pass-through (mailapps_pass.go) and the certificate it
+	// obtains for the deployment's gateway (mailapps_cert.go): the pending
+	// TLS-ALPN-01 answers, one order at a time, and the CA (a field so the
+	// tests can point it elsewhere).
+	mailApps       *mailAppsPass
+	alpnCerts      sync.Map
+	mailAppsCertMu sync.Mutex
+	acmeDirectory  string
 
 	mu                sync.Mutex
 	conns443          []time.Time
@@ -89,6 +100,12 @@ func runRelayServe() int {
 	certDir := fs.String("cert-cache", "", "ACME certificate cache (default <home>/acme)")
 	stateDir := fs.String("state", "", "Direct state directory (default <home>/direct)")
 	httpsAddr := fs.String("listen", ":443", "HTTPS listen address")
+	imapAddr := fs.String("mail-apps-imap", ":993", "mail apps pass-through, IMAP (empty: off)")
+	submissionAddr := fs.String("mail-apps-submission", ":465", "mail apps pass-through, submission (empty: off)")
+	// The server's ports the pass-through dials: 993 and 465, a flag only so a
+	// test on one machine can stand a gateway on unprivileged ports.
+	imapTarget := fs.Int("mail-apps-imap-target", 993, "server port the IMAP pass-through dials")
+	submissionTarget := fs.Int("mail-apps-submission-target", 465, "server port the submission pass-through dials")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return 2
 	}
@@ -115,6 +132,13 @@ func runRelayServe() int {
 
 	s := newRelayServer(paths, strings.ToLower(strings.TrimSpace(*hostname)), *routing, *spoolRoot, *certDir, *stateDir, identity)
 
+	if *imapAddr != "" {
+		go s.mailApps.listen(*imapAddr, "993", *imapTarget)
+	}
+	if *submissionAddr != "" {
+		go s.mailApps.listen(*submissionAddr, "465", *submissionTarget)
+	}
+
 	stop := make(chan struct{})
 	go func() {
 		t := time.NewTicker(time.Minute)
@@ -125,6 +149,7 @@ func runRelayServe() int {
 				s.direct.state.sweep()
 				s.auth.sweep()
 				s.sweepCounters()
+				s.mailApps.sweep()
 			case <-stop:
 				return
 			}
@@ -166,7 +191,7 @@ func runRelayServe() int {
 }
 
 func newRelayServer(paths relayPaths, hostname, routing, defaultSpool, certDir, stateDir string, identity *relayIdentity) *relayServer {
-	return &relayServer{
+	s := &relayServer{
 		paths:        paths,
 		hostname:     hostname,
 		routingPath:  routing,
@@ -180,8 +205,12 @@ func newRelayServer(paths relayPaths, hostname, routing, defaultSpool, certDir, 
 			HostPolicy: autocert.HostWhitelist(hostname),
 			Cache:      autocert.DirCache(certDir),
 		},
-		verdictWait: verdictWait,
+		verdictWait:   verdictWait,
+		stateDir:      stateDir,
+		acmeDirectory: acme.LetsEncryptURL,
 	}
+	s.mailApps = newMailAppsPass(s)
+	return s
 }
 
 // tlsConfig selects the certificate by SNI. The mail hostname is the ACME
@@ -190,6 +219,11 @@ func (s *relayServer) tlsConfig() *tls.Config {
 	return &tls.Config{
 		GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 			name := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
+			// An order for the mail gateway's certificate (mailapps_cert.go)
+			// answers its own TLS-ALPN-01 challenge; autocert answers its own.
+			if c := s.alpnChallengeCert(hello, name); c != nil {
+				return c, nil
+			}
 			if name == s.hostname {
 				cert, err := s.acme.GetCertificate(hello)
 				s.mu.Lock()
@@ -342,6 +376,9 @@ func (s *relayServer) serveRelay(w http.ResponseWriter, r *http.Request) {
 
 	case rest == "seal-target" && r.Method == http.MethodGet:
 		s.sealTarget(w, r, tenant)
+
+	case rest == "mail-apps/certificate" && r.Method == http.MethodPost:
+		s.mailAppsCertificate(w, tenant, body)
 
 	case strings.HasPrefix(rest, "tenants/"):
 		s.tenantRoute(w, r, tenant, strings.TrimPrefix(rest, "tenants/"), body)

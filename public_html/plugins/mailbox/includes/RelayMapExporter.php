@@ -29,6 +29,7 @@
  * no SRS secret. The forwarding domains stay: bounces of the forwards this site
  * sends return to them, and the relay spools those too.
  *
+ * @version 2.7 - mail_apps_origins: this server's addresses while mail apps reach it through the relay (relay 3.11)
  * @version 2.6 - a handler alias (iea_handler) is marked accepts_tag, so the relay takes its +tag sub-addresses
  * @version 2.5 - no forward instructions: every recipient and a forwarding catch-all are
  *                spooled, and the site forwards at pull (specs/relay_receive_only_forwarding.md)
@@ -96,6 +97,12 @@ class RelayMapExporter {
 		// map update rather than a relay release — RELAY_VERSION moves only when
 		// the shared layer itself changes.
 		$fragment = array_merge($fragment, $this->directFragment());
+
+		// The mail apps pass-through (relay 3.11; specs/mail_apps_plugin.md §
+		// Where programs connect): while this site has mail apps on through the
+		// relay, the relay passes mail programs to these addresses on 993 and
+		// 465. Always present, so turning mail apps off empties it at the edge.
+		$fragment['mail_apps_origins'] = $this->mailAppsOrigins();
 
 		// SRS-bounce accept (specs/mailbox_relay_fix_pack.md § Fix 6): bounces to
 		// mail this site forwarded return to SRS0=...@forwardingdomain, whose MX is
@@ -201,6 +208,29 @@ class RelayMapExporter {
 		return array(
 			'fragment' => json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
 		);
+	}
+
+	/**
+	 * This server's public addresses while the mail_apps plugin serves mail
+	 * programs through this relay: its switch is on and the name it serves is
+	 * the relay's mail host name. Read from mail_apps' own settings, which do
+	 * not exist where that plugin is not installed, so mailbox depends on
+	 * nothing of it. Never a private or reserved address: the relay refuses
+	 * those, and would refuse the whole fragment with them.
+	 */
+	private function mailAppsOrigins(): array {
+		$name = strtolower(trim((string)$this->settings->get_setting('mail_apps_served_name')));
+		if (!$this->settings->get_setting('mail_apps_enabled') || $name === ''
+				|| $name !== strtolower(trim((string)$this->relay->get('mrl_mx_hostname')))) {
+			return array();
+		}
+		// IPv4 only: the relay dials this server from the address this
+		// deployment records for it (mrl_public_ip, IPv4), which is the one the
+		// server's firewall and gateway can trust. A program's own IPv6 address
+		// still reaches the gateway, in the PROXY line.
+		$ip = InboundEmailHealth::originAddresses()['ipv4'];
+		return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+			? array($ip) : array();
 	}
 
 	/**

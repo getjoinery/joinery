@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.2 - mailAppsCertificate(): the mail gateway's certificate for the relay's name, from a CSR
  * @version 1.1 - sealTarget(): the signed seal-target statement, raw
  * @version 1.0
  */
@@ -58,6 +59,8 @@ class RelayClient {
 	const FRAGMENT_TIMEOUT = 45;
 	/** A spool artifact can be tens of MB. */
 	const FETCH_TIMEOUT = 300;
+	// A certificate order: the relay gives the CA up to three minutes.
+	const MAIL_APPS_CERT_TIMEOUT = 200;
 
 	/**
 	 * Test seam: ip => base URL. A test relay listens on a loopback port, and
@@ -188,6 +191,26 @@ class RelayClient {
 				'The relay answered the fragment push with no verdict (HTTP ' . $status . ').', $status);
 		}
 		return $verdict;
+	}
+
+	/**
+	 * POST /relay/mail-apps/certificate (relay 3.11): the relay completes an
+	 * ACME order for its own mail hostname with this CSR and answers the chain.
+	 * The key stays on this server. A refusal is an answer, not a transport
+	 * failure: one relay tenant only (403), the CSR names another name (422),
+	 * an order already running (409), one issued within twelve hours (429), the
+	 * CA did not issue (502).
+	 * @return array{ok:bool, chain?:string, not_after?:string, status:int, reason?:string}
+	 */
+	public function mailAppsCertificate(string $csr_pem): array {
+		list($status, $body) = $this->request('POST', '/relay/mail-apps/certificate', json_encode(array('csr' => $csr_pem)),
+			self::MAIL_APPS_CERT_TIMEOUT, null, array(403, 409, 422, 429, 502));
+		$answer = json_decode($body, true);
+		if ($status === 200 && is_array($answer) && is_string($answer['chain'] ?? null)) {
+			return array('ok' => true, 'chain' => $answer['chain'], 'not_after' => (string)($answer['not_after'] ?? ''), 'status' => 200);
+		}
+		return array('ok' => false, 'status' => $status,
+			'reason' => is_array($answer) && isset($answer['error']) ? (string)$answer['error'] : 'HTTP ' . $status);
 	}
 
 	/**

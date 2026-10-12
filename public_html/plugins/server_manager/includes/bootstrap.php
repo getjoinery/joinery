@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.15 - plane:mail_gateway (IncidentSourceMailGateway)
  * @version 1.14 - plane:data_root_locked (specs/hosted_data_promise_disk_encryption.md D2b)
  * @version 1.13 - plane:customer_backups (specs/storage_targets.md F1, F2)
  * @version 1.12 - plane:agent_bundle_refused (spec release_transparency, WP7 review)
@@ -39,7 +40,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceMonitoringBroken', 'IncidentSourceMachineTransfer', 'IncidentSourceReleaseLog', 'IncidentSourceReleaseLogBlind',
 	'IncidentSourceTestCloudCleanup', 'IncidentSourceAgentUpdateRefused', 'IncidentSourceAgentBundleRefused',
 	'IncidentSourceReleaseLogEntry', 'IncidentSourceReleaseLogTailBlind', 'IncidentSourceCustomerBackups',
-	'IncidentSourceDataRootLocked') as $incident_source) {
+	'IncidentSourceDataRootLocked', 'IncidentSourceMailGateway') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // Incident analysis spends model tokens through joinery_ai; they count toward

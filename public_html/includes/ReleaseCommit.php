@@ -20,9 +20,9 @@
  * - HELD paths (heldPath()), whose uncommitted change still refuses, because
  *   the release reads them from somewhere other than the commit: the install
  *   SQL is dumped from this box's database, so a data class or migration
- *   update_database already applied is in it; the parser jail and the relay
- *   sealer are compiled from their source on this disk; the release key lists
- *   are read from this disk into the agent bundle; a plugin or theme manifest
+ *   update_database already applied is in it; the parser jail, the relay
+ *   sealer and the mail gateway are compiled from their source on this
+ *   disk; the release key lists are read from this disk into the agent bundle; a plugin or theme manifest
  *   is where publish writes its version bump and commits the whole file;
  * - everything else, which is LEFT OUT: named in the publish output, absent
  *   from the release, and no reason to refuse it.
@@ -41,8 +41,8 @@
  * What SHIPS from the joinery repository is narrower than what sits on disk:
  * a file git knows (tracked, or untracked and not ignored - the second kind
  * is a blocker above, so at build time it is always the first), or one of the
- * few files publish builds itself (D2: the agent bundle, the relay sealer
- * binaries, the license copies, each release statement). An ignored file is
+ * few files publish builds itself (D2: the agent bundle, the relay sealer and
+ * mail gateway binaries, the license copies, each release statement). An ignored file is
  * never shipped, whatever directory it sits in: a screenshot left in
  * public_html, a stray build output beside its source, a local test corpus.
  * knownFiles() and joineryFileShips() are that rule; the manifest builder,
@@ -57,6 +57,7 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.5.2 - the mail gateway's bin/ is generated and its source held, beside the relay sealer's
  * @version 1.5.1 - the build is written 644/755 (tar.umask 0022), not git's group-writable default
  * @version 1.5 - the agent is built from its commit too (exportCommit()); uncommitted agent work is left out,
  *                like the core's, instead of refusing the release
@@ -80,10 +81,15 @@ class ReleaseCommit {
 	/**
 	 * Repository-relative directories whose files publish builds and ships
 	 * though no commit holds them (spec release_transparency D2): the agent
-	 * bundle and the relay sealer binaries. Each is checked by the release
+	 * bundle and the bin/ of every Go program a plugin ships prebuilt
+	 * (GoBinaryPublisher::PLUGIN_PUBLISHERS). Each is checked by the release
 	 * statement's own record of it, not by the commit.
 	 */
-	const JOINERY_GENERATED_DIRS = array('public_html/agent_dist/', 'public_html/plugins/mailbox/provisioning/bin/');
+	const JOINERY_GENERATED_DIRS = array(
+		'public_html/agent_dist/',
+		'public_html/plugins/mailbox/provisioning/bin/',    // RelaySealerPublisher::BIN_SUBDIR
+		'public_html/plugins/mail_apps/provisioning/bin/',  // MailGatewayPublisher::BIN_SUBDIR
+	);
 
 	/** Repository-relative files publish writes into the core: the root license files, copied in. */
 	const JOINERY_GENERATED_FILES = array('public_html/LICENSE.md', 'public_html/LICENSE-BUSINESS.md');
@@ -243,6 +249,7 @@ class ReleaseCommit {
 		'maintenance_scripts/install_tools/release_keys/',         // copied into the agent bundle from this disk
 		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
 		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
+		'public_html/plugins/mail_apps/provisioning/mail-gateway/', // MailGatewayPublisher::SOURCE_SUBDIR, compiled here
 	);
 
 	/**

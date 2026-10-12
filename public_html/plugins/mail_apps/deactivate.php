@@ -9,6 +9,7 @@
  * The credentials themselves are refused from this moment anyway — the `mail`
  * purpose is no longer declared (AppAccess) — and the tables are kept.
  *
+ * @version 1.1.0 - a relay-fronted site's relay is sent the change, so it stops passing mail programs through
  * @version 1.0.0
  */
 
@@ -23,6 +24,12 @@ function mail_apps_deactivate() {
 		}
 		Setting::put('mail_apps_enabled', false);
 		Setting::put('mail_apps_served_name', '');
+		// A relay passing mail programs through learns from the next fragment
+		// that this server takes none any more (RelayMapExporter reads the two
+		// settings just cleared).
+		if (class_exists('RelayMapSync')) {
+			RelayMapSync::onChange();
+		}
 	} catch (\Throwable $e) {
 		error_log('mail_apps deactivate: ' . $e->getMessage());
 	}

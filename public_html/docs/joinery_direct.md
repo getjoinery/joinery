@@ -332,8 +332,9 @@ address the relay exists to conceal, so the target is the relay — the same
 posture MX already takes.
 
 The relay serves the channel from the same Go binary that seals its mail:
-`relay-sealer relay-serve`, the `joinery-relay-serve` service, one listener on
-443 whose certificate is chosen by SNI, the mail hostname's ACME certificate for
+`relay-sealer relay-serve`, the `joinery-relay-serve` service, its listener on
+443 whose certificate is chosen by SNI (relay 3.11 adds 993 and 465 for the
+mail apps pass-through, which carries no Direct traffic), the mail hostname's ACME certificate for
 Direct callers and the relay's own identity certificate for its plane
 (`specs/relay_without_a_shell.md`):
 
