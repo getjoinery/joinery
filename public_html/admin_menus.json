@@ -404,6 +404,14 @@
             "order": 11,
             "permission": 10,
             "parent": "system"
+        },
+        {
+            "slug": "report-problem",
+            "title": "Report a problem",
+            "url": "/report_problem",
+            "order": 90,
+            "permission": 5,
+            "icon": "question-circle"
         }
     ],
     "profileMenu": [
@@ -487,15 +495,6 @@
             "order": 110,
             "permission": 5,
             "icon": "question-circle"
-        },
-        {
-            "slug": "core-report-problem",
-            "title": "Report a problem",
-            "url": "/report_problem",
-            "order": 115,
-            "permission": 0,
-            "icon": "question-circle",
-            "visibility": "in"
         },
         {
             "slug": "core-admin-settings",

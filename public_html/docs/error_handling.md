@@ -183,6 +183,6 @@ carries only the row's withheld reference.
 | `problem_reports_auto_send` | off | Report unexpected errors automatically, with no one reviewing the report first. Needs sending on. |
 | `problem_reports_retention_days` | 90 | Days to keep reports and their images; the daily retention sweep deletes older ones. 0 keeps them. |
 
-Both are under **Settings › Problem reports**. The menu entry **Report a problem** is in
-the signed-in user menu, next to Admin Help, and reaches the mobile apps through the same
-menu.
+Both are under **Settings › Problem reports**. **Report a problem** is an item in the admin
+menu, for administrators; the member menu has none. Members reach `/report_problem` from the
+report links on error pages, error messages and the 404 page.
