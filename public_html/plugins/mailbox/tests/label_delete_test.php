@@ -8,13 +8,14 @@
 /**
  * Deleting a custom label from the reader's Labels panel.
  *
- * A label is one shared name across the site, so deleting it has to reach every
- * message that carries it and every feed binding that mirrors it — and reach
- * NOTHING else. The things worth pinning:
+ * A label belongs to one mailbox, so deleting it has to reach every message of
+ * that mailbox that carries it and every feed binding that mirrors it — and
+ * reach NOTHING else (per_mailbox_labels_test pins that it never reaches
+ * another mailbox's). The things worth pinning:
  *
  *  1. The messages stay. Deleting a label is not deleting mail: every message
  *     that carried the label is still there, only its membership row is gone.
- *  2. The label leaves every mailbox. The switcher no longer lists it, and the
+ *  2. The label leaves its mailbox. The switcher no longer lists it, and the
  *     ilb_ row is soft-deleted.
  *  3. A feed binding is unbound and untracked, so the next sync neither
  *     re-materializes memberships nor re-mints the label from the folder name.
@@ -219,7 +220,7 @@ check(!$switcher_lists($service, $feed_alias, $bound_id), 'the feed mailbox no l
 $rediscovered = InboundImapFolder::upsert((int)$account->key, $fname, null, true);
 check((int)$rediscovered->key === (int)$folder->key && !(bool)$rediscovered->get('iif_is_tracked'),
 	'rediscovery of the folder keeps it untracked');
-check(!$switcher_lists($service, $feed_alias, $bound_id) && InboundEmailLabel::getByName($fname) === null,
+check(!$switcher_lists($service, $feed_alias, $bound_id) && InboundEmailLabel::getByName($feed_alias, $fname) === null,
 	'and nothing re-mints the label from the folder name');
 
 // ── 5: scope ─────────────────────────────────────────────────────────────────

@@ -49,6 +49,9 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.61 - a label belongs to one mailbox: the no-feed rail lists the mailbox's own, setMembership()
+ *   touches only messages of the label's mailbox, deleteLabel() and a listThreads() label refuse another
+ *   mailbox's (mailbox_per_mailbox_labels.md)
  * @version 1.60 - viewScopeSql(): what each view of a mailbox holds, defined once; the
  *   reader's list composes its WHERE from the same fragments
  * @version 1.59 - a search lists threads strictly newest first, never sectioned unread/starred/other
@@ -863,13 +866,13 @@ class MailboxService {
 
 	/**
 	 * The label rail for a mailbox (folder rail + the move/labels control), keyed by the
-	 * custom-label id (ilb_) — a label is global, so the same id space spans local and
-	 * IMAP mail and the reader never sees IMAP folder ids.
+	 * custom-label id (ilb_). A label belongs to one mailbox, and the same id spans the
+	 * mailbox's local and IMAP mail, so the reader never sees IMAP folder ids.
 	 *
 	 * A mailbox with a bound IMAP feed lists that feed's tracked custom-label folders
 	 * (each carries its bound label id, displayed by its remote folder name), and the
-	 * feed's cardinality drives Move-vs-Labels. A mailbox with no feed lists the global
-	 * custom labels — applying one is pure (clean) membership with no remote to sync.
+	 * feed's cardinality drives Move-vs-Labels. A mailbox with no feed lists its own
+	 * labels — applying one is pure (clean) membership with no remote to sync.
 	 * Special-use folders (Sent/Trash/Junk/…) and the \All coverage view are excluded:
 	 * their state is a column on iem_inbound_email_messages, not a label.
 	 *
@@ -904,14 +907,14 @@ class MailboxService {
 				'has_feed' => true);
 		}
 
-		// No feed: the global custom-label set, applied as pure membership (never synced).
-		$labels = new MultiInboundEmailLabel(array('deleted' => false), array('ilb_name' => 'ASC'));
-		$labels->load();
+		// No feed: the mailbox's own labels, applied as pure membership (never synced).
+		$labels = new MultiInboundEmailLabel(array('alias_id' => $aliasId, 'deleted' => false),
+			array('ilb_label_name' => 'ASC'));
 		$out = array();
 		foreach ($labels as $l) {
 			$out[] = array(
 				'id'   => intval($l->key),
-				'name' => $l->get('ilb_name'),
+				'name' => $l->get('ilb_label_name'),
 				'role' => InboundImapFolder::ROLE_CUSTOM,
 			);
 		}
@@ -956,18 +959,20 @@ class MailboxService {
 		if (!count($ids) || $labelId <= 0) {
 			return 0;
 		}
-		// The label must still exist (a stale rail entry no-ops rather than mis-applies).
-		$lk = $this->db()->prepare(
-			'SELECT 1 FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL LIMIT 1');
-		$lk->execute(array($labelId));
-		if (!$lk->fetchColumn()) {
+		// The label must still exist (a stale rail entry no-ops rather than mis-applies),
+		// and only messages of its own mailbox are touched: a label belongs to one
+		// mailbox, so another mailbox's message never carries it. This is the one check
+		// every path shares — reader, mobile apps, mail apps, filters.
+		$labelAlias = InboundEmailLabel::aliasOf($labelId);
+		if ($labelAlias === null) {
 			return 0;
 		}
 
 		$in = implode(',', $ids);
 		$rows = $this->db()->query(
 			"SELECT iem_inbound_email_message_id AS id FROM iem_inbound_email_messages
-			 WHERE iem_inbound_email_message_id IN ($in) AND " . $this->mutationScopeSql())
+			 WHERE iem_inbound_email_message_id IN ($in) AND iem_iea_inbound_email_alias_id = " . intval($labelAlias)
+			. " AND " . $this->mutationScopeSql())
 			->fetchAll(PDO::FETCH_COLUMN);
 
 		$count = 0;
@@ -987,7 +992,7 @@ class MailboxService {
 	 * Create a label for a mailbox from the reader, returning {id (the label id), name,
 	 * role} or null when the viewer can't mutate the mailbox or the name is empty.
 	 *
-	 * A label is an ilb_ row in the global namespace. When the mailbox has an IMAP feed,
+	 * A label is an ilb_ row of this mailbox. When the mailbox has an IMAP feed,
 	 * the label is also bound to a tracked, pending `iif_` folder that does not yet exist
 	 * on the source — the sync push issues the IMAP CREATE and clears the pending flag
 	 * (§14) so the label materializes as a remote folder. With no feed the label is
@@ -1003,8 +1008,8 @@ class MailboxService {
 			return null;
 		}
 
-		// The label (global namespace) — created regardless of feed.
-		$label = InboundEmailLabel::findOrCreate($name);
+		// The mailbox's label — created regardless of feed.
+		$label = InboundEmailLabel::findOrCreate($aliasId, $name);
 		if ($label === null) {
 			return null;
 		}
@@ -1040,23 +1045,23 @@ class MailboxService {
 			}
 			$folder->ensureLabel(); // bind the folder to the (same-named) label
 		}
-		return array('id' => $labelId, 'name' => $label->get('ilb_name'),
+		return array('id' => $labelId, 'name' => $label->get('ilb_label_name'),
 			'role' => InboundImapFolder::ROLE_CUSTOM);
 	}
 
 	/**
-	 * Delete a custom label from the site. The label is one shared concept across
-	 * every mailbox (its name is the global key), so this takes it off every message
-	 * that carries it and out of every mailbox's list — the messages themselves
-	 * are not touched. Every feed folder bound to it is unbound and untracked, so
+	 * Delete one of a mailbox's labels. It comes off every message that carries it
+	 * (all of them this mailbox's) and out of the mailbox's list — the messages
+	 * themselves are not touched. Every feed folder bound to it is unbound and untracked, so
 	 * the next sync neither re-materializes memberships nor re-mints the label from
 	 * the folder name (rediscovery never flips iif_is_tracked on an existing row).
 	 * The remote folder/label on the source is left as it is: nothing is deleted
 	 * on a provider by this call.
 	 *
 	 * Not reversible. Returns the deleted label's name and how many messages
-	 * carried it, or null when the label does not exist, is already deleted, or
-	 * the viewer cannot act on the mailbox the request came from.
+	 * carried it, or null when the label does not exist, is already deleted, is
+	 * another mailbox's, or the viewer cannot act on the mailbox the request came
+	 * from (one answer for all four).
 	 */
 	public function deleteLabel(int $aliasId, int $labelId): ?array {
 		if ($labelId <= 0 || $aliasId <= 0) {
@@ -1066,11 +1071,8 @@ class MailboxService {
 			return null;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('SELECT 1 FROM ilb_inbound_email_labels
-			WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL');
-		$stmt->execute(array($labelId));
-		if (!$stmt->fetchColumn()) {
-			return null; // unknown, or already deleted
+		if (InboundEmailLabel::aliasOf($labelId) !== $aliasId) {
+			return null; // unknown, already deleted, or another mailbox's
 		}
 		$label = new InboundEmailLabel($labelId, TRUE);
 
@@ -1079,7 +1081,7 @@ class MailboxService {
 		$stmt->execute(array($labelId));
 		$carried = intval($stmt->fetchColumn());
 
-		// Every feed binding, on every account: unbind and stop tracking. A folder
+		// Every feed binding (all of them this mailbox's feeds'): unbind and stop tracking. A folder
 		// still pending its remote CREATE is simply never created.
 		$bindings = new MultiInboundImapFolder(array('label_id' => $labelId));
 		$bindings->load();
@@ -1092,7 +1094,7 @@ class MailboxService {
 			$folder->save();
 		}
 
-		$name = (string)$label->get('ilb_name');
+		$name = (string)$label->get('ilb_label_name');
 		$label->softDelete(); // drops every membership row, then stamps the label
 		return array('id' => $labelId, 'name' => $name, 'messages' => $carried);
 	}
@@ -1187,7 +1189,10 @@ class MailboxService {
 		// unlabeled messages are reachable at the mailbox root. Each message row is
 		// unique, so the thread aggregation is not double-counted.
 		if ($folderId !== null && $folderId > 0) {
-			$where[] = self::labelSql($folderId);
+			// A label of another mailbox (or none at all) lists nothing.
+			$labelAlias = InboundEmailLabel::aliasOf($folderId);
+			$where[] = ($labelAlias === null || ($aliasId !== null && $aliasId > 0 && $labelAlias !== $aliasId))
+				? 'FALSE' : self::labelSql($folderId);
 		}
 
 		// Full-text search (specs/implemented/inbound_email_encryption_at_rest.md §

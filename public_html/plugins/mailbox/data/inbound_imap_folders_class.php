@@ -17,6 +17,8 @@
  *
  * See specs/two_way_imap_sync.md (§5, §6) and ImapSyncer.
  *
+ * @version 1.4 - ensureLabel() binds the feed's mailbox's label and replaces a binding to a gone or
+ *   foreign one; clearLabelBindingsForAccount() for an account pointed at another mailbox
  * @version 1.3
  * @changelog 1.3 - UIDVALIDITY churn counter and the folder pause it trips
  *   (specs/implemented/imap_client_hardening.md F9)
@@ -57,7 +59,7 @@ class InboundImapFolder extends SystemBase {
 		'iif_iia_inbound_imap_account_id' => array('type'=>'int8', 'is_nullable'=>false, 'unique_with'=>array('iif_name')),
 		'iif_name'                        => array('type'=>'varchar(255)', 'is_nullable'=>false),
 		// The custom label this folder is a binding for: the folder mirrors the label
-		// (ilb_) to this one remote feed, shared across feeds by the label's global name.
+		// (ilb_) of the feed's mailbox to this one remote feed.
 		// NULL for special-use (Sent/Trash/Junk/…) and coverage (\All) folders — their
 		// state is a column on iem_inbound_email_messages, never a label. See ensureLabel().
 		'iif_ilb_inbound_email_label_id'  => array('type'=>'int8'),
@@ -132,27 +134,52 @@ class InboundImapFolder extends SystemBase {
 	/**
 	 * Find-or-create the custom label this folder binds to and persist
 	 * iif_ilb_inbound_email_label_id, returning the label id — or null for a special-use
-	 * or coverage folder, which is a column, not a label. A label is keyed by the folder
-	 * name in the global namespace, so the same label is shared across feeds and shown in
-	 * the reader.
+	 * or coverage folder, which is a column, not a label. The label is the feed's
+	 * mailbox's label of the folder's name: two mailboxes' feeds with a folder of the
+	 * same name get two labels. A binding to a label that is gone, or that is not the
+	 * feed's mailbox's (the account was pointed at another mailbox), is replaced.
 	 */
 	function ensureLabel(): ?int {
 		if (!$this->bindsLabel()) {
 			return null; // special-use / coverage: a column, never a label
 		}
+		$alias_id = $this->accountAliasId();
 		$existing = $this->labelId();
-		if ($existing) {
+		if ($existing && $alias_id !== null && InboundEmailLabel::aliasOf($existing) === $alias_id) {
 			return $existing;
 		}
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_labels_class.php'));
-		$label = InboundEmailLabel::findOrCreate((string)$this->get('iif_name'));
-		if ($label === null) {
-			return null;
+		$label = $alias_id !== null ? InboundEmailLabel::findOrCreate($alias_id, (string)$this->get('iif_name')) : null;
+		$label_id = $label !== null ? intval($label->key) : null;
+		if ($label_id !== $existing) {
+			$this->set('iif_ilb_inbound_email_label_id', $label_id);
+			$this->prepare();
+			$this->save();
 		}
-		$this->set('iif_ilb_inbound_email_label_id', intval($label->key));
-		$this->prepare();
-		$this->save();
-		return intval($label->key);
+		return $label_id;
+	}
+
+	/** The mailbox this folder's feed (account) delivers to, or null. */
+	function accountAliasId(): ?int {
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT iia_iea_inbound_email_alias_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id = ?');
+		$stmt->execute(array(intval($this->get('iif_iia_inbound_imap_account_id'))));
+		$alias = $stmt->fetchColumn();
+		return ($alias !== false && $alias !== null) ? intval($alias) : null;
+	}
+
+	/**
+	 * Clear every label binding of an account's folders: called when the account is
+	 * pointed at another mailbox. ensureLabel() then mints the new mailbox's labels on
+	 * the next sync; messages already stored keep their own mailbox's labels.
+	 */
+	static function clearLabelBindingsForAccount(int $account_id): void {
+		if ($account_id <= 0) {
+			return;
+		}
+		DbConnector::get_instance()->get_db_link()->prepare(
+			'UPDATE iif_inbound_imap_folders SET iif_ilb_inbound_email_label_id = NULL
+			 WHERE iif_iia_inbound_imap_account_id = ? AND iif_ilb_inbound_email_label_id IS NOT NULL')
+			->execute(array($account_id));
 	}
 
 	/** The bound InboundEmailLabel, find-or-creating it if needed, or null for special-use/coverage. */

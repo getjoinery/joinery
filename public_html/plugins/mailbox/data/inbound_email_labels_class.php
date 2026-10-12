@@ -1,18 +1,27 @@
 <?php
 /**
- * InboundEmailLabel - a custom inbound-email label (the global name registry).
+ * InboundEmailLabel - a custom inbound-email label of one mailbox.
  *
  * A custom label is an arbitrary, user-named bucket a message can carry ("Receipts",
  * "Work"). Standard buckets (Inbox, Read, Starred, Spam, Trash, Sent) are NOT labels —
  * they are scalar columns on iem_inbound_email_messages. Only custom labels live here,
  * with genuine many-to-many membership in ilm_inbound_label_members.
  *
- * The name is globally unique, so a label is one shared concept across every mailbox: a
- * label applied to local mail and to an IMAP feed is the same label. An IMAP folder
- * binds to a label (iif_ilb_inbound_email_label_id) to mirror it to one feed.
+ * A label belongs to exactly one mailbox (ilb_iea_inbound_email_alias_id), its name is
+ * unique within that mailbox, and a message carries only labels of its own mailbox: only
+ * the mailbox's members see a label, deleting one touches only that mailbox, and two
+ * mailboxes can each have a "Receipts". A label applied to the mailbox's local mail and
+ * to its IMAP feed is the same label; an IMAP folder binds to one
+ * (iif_ilb_inbound_email_label_id) to mirror it to the feed.
  *
- * See specs/inbound_email_labels.md.
+ * The name lives in ilb_label_name. ilb_name, the column of the site-wide namespace this
+ * replaced, is retired: the schema updater never drops a uniqueness rule, so its
+ * site-wide one stays on a column new rows leave NULL (NULLs never collide).
  *
+ * See mailbox_per_mailbox_labels.md.
+ *
+ * @version 2.0 - a label belongs to one mailbox: ilb_iea_inbound_email_alias_id, ilb_label_name
+ *   unique within the mailbox; getByName()/findOrCreate() take the mailbox; belongsTo()
  * @version 1.0
  */
 
@@ -25,10 +34,20 @@ class InboundEmailLabel extends SystemBase {
 	public static $tablename = 'ilb_inbound_email_labels';
 	public static $pkey_column = 'ilb_inbound_email_label_id';
 
+	protected static $foreign_key_actions = array(
+		// A mailbox's labels go with it; permanent_delete so each label's own rules
+		// run (its memberships go, folder bindings are cleared).
+		'ilb_iea_inbound_email_alias_id' => array('action' => 'permanent_delete'),
+	);
+
 	public static $field_specifications = array(
 		'ilb_inbound_email_label_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		// One global namespace — a label name is unique across the platform.
-		'ilb_name'        => array('type'=>'varchar(255)', 'is_nullable'=>false, 'unique'=>true),
+		// The owning mailbox. Every write path sets it; nullable only so the rows of
+		// the site-wide namespace could be given theirs by the mailbox migration.
+		'ilb_iea_inbound_email_alias_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
+		// Unique within the mailbox.
+		'ilb_label_name'  => array('type'=>'varchar(255)', 'is_nullable'=>true,
+			'unique_with'=>array('ilb_iea_inbound_email_alias_id')),
 		'ilb_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'ilb_update_time' => array('type'=>'timestamp(6)'),
 		'ilb_delete_time' => array('type'=>'timestamp(6)'),
@@ -45,37 +64,61 @@ class InboundEmailLabel extends SystemBase {
 		$this->set('ilb_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
-	/** The non-deleted label with this name, or null. */
-	static function getByName(string $name): ?InboundEmailLabel {
+	/** The mailbox's non-deleted label with this name, or null. */
+	static function getByName(int $alias_id, string $name): ?InboundEmailLabel {
 		$name = trim($name);
-		if ($name === '') {
+		if ($name === '' || $alias_id <= 0) {
 			return null;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			'SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels
-			 WHERE ilb_name = ? AND ilb_delete_time IS NULL LIMIT 1');
-		$stmt->execute(array($name));
+			 WHERE ilb_iea_inbound_email_alias_id = ? AND ilb_label_name = ? AND ilb_delete_time IS NULL LIMIT 1');
+		$stmt->execute(array($alias_id, substr($name, 0, 255)));
 		$id = $stmt->fetchColumn();
 		return $id ? new InboundEmailLabel(intval($id), TRUE) : null;
 	}
 
-	/** Find-or-create the label with this name (the global namespace), or null if blank. */
-	static function findOrCreate(string $name): ?InboundEmailLabel {
+	/** Find-or-create the mailbox's label with this name, or null if blank or no mailbox. */
+	static function findOrCreate(int $alias_id, string $name): ?InboundEmailLabel {
 		$name = trim($name);
-		if ($name === '') {
+		if ($name === '' || $alias_id <= 0) {
 			return null;
 		}
-		$existing = self::getByName($name);
+		$existing = self::getByName($alias_id, $name);
 		if ($existing) {
 			return $existing;
 		}
 		$label = new InboundEmailLabel(NULL);
-		$label->set('ilb_name', substr($name, 0, 255));
+		$label->set('ilb_iea_inbound_email_alias_id', $alias_id);
+		$label->set('ilb_label_name', substr($name, 0, 255));
 		$label->prepare();
 		$label->save();
 		$label->load();
 		return $label;
+	}
+
+	/** True when this label is a live label of mailbox $alias_id. */
+	function belongsTo(int $alias_id): bool {
+		return $alias_id > 0 && $this->key
+			&& intval($this->get('ilb_iea_inbound_email_alias_id')) === $alias_id
+			&& !$this->get('ilb_delete_time');
+	}
+
+	/**
+	 * The mailbox a live label belongs to, or null (no such label, deleted, or one of
+	 * the site-wide namespace not yet given a mailbox). One query, no model load.
+	 */
+	static function aliasOf(int $label_id): ?int {
+		if ($label_id <= 0) {
+			return null;
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT ilb_iea_inbound_email_alias_id FROM ilb_inbound_email_labels
+			 WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL');
+		$stmt->execute(array($label_id));
+		$alias = $stmt->fetchColumn();
+		return ($alias !== false && $alias !== null) ? intval($alias) : null;
 	}
 
 	/** Soft-delete the label and drop every membership it carries. */
@@ -94,8 +137,11 @@ class MultiInboundEmailLabel extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = array();
 
+		if (isset($this->options['alias_id'])) {
+			$filters['ilb_iea_inbound_email_alias_id'] = array(intval($this->options['alias_id']), PDO::PARAM_INT);
+		}
 		if (isset($this->options['name'])) {
-			$filters['ilb_name'] = array($this->options['name'], PDO::PARAM_STR);
+			$filters['ilb_label_name'] = array($this->options['name'], PDO::PARAM_STR);
 		}
 
 

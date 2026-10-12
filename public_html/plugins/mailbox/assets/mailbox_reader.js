@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
+ * No framework. @version 2.95 — the conversation's label control acts on the conversation's own mailbox (in the all-mailboxes view too); @version 2.94 — a link from another feature can open a conversation (CFG.openMessage, ?open=N); @version 2.93 — the Spam view offers no "Always allow" or "Not spam" for a message its
  *   sender's domain disowned (spam_disowned): it explains that the domain says the message is not from them
  * @version 2.92 — the contacts pane lists contacts with a pencil each (and one in its
  * header) to the Contacts page; its add/import form and delete button moved there; a quieter locked note
@@ -2042,7 +2042,7 @@
 			if (info.exclusive) {
 				var item = el('div', 'mbx-folder-opt' + (current[String(f.id)] ? ' current' : ''), f.name);
 				item.addEventListener('click', function () {
-					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: state.aliasId,
+					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: aliasId,
 						folderId: f.id, present: true })
 						.then(function () { panel.hidden = true; closeThread(); refreshMailboxes(); refreshThreads(); });
 				});
@@ -2053,7 +2053,7 @@
 				cb.type = 'checkbox';
 				cb.checked = !!current[String(f.id)];
 				cb.addEventListener('change', function () {
-					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: state.aliasId,
+					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: aliasId,
 						folderId: f.id, present: cb.checked })
 						.then(function () {
 							current[String(f.id)] = cb.checked;

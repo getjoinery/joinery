@@ -34,6 +34,7 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.7 - pointing an account at another mailbox clears its folders' label bindings
  * @version 1.6 - no plaintext encryption mode; resolveImapHost() refuses internal
  *   addresses and pins the connection; DUE_SQL backs off failing feeds
  *   (specs/implemented/imap_client_hardening.md Q1, F17, F14)
@@ -894,7 +895,22 @@ class InboundImapAccount extends SystemBase {
 	 * actually looking at the mailbox — run live.
 	 */
 	function save($debug = false) {
+		// The mailbox it delivered to before this save, read from the row itself (a
+		// new account has none). Labels belong to one mailbox, so when the account is
+		// pointed at another its folders' label bindings are cleared, and the next
+		// sync binds the new mailbox's labels (InboundImapFolder::ensureLabel()).
+		$was_alias = null;
+		if ($this->key) {
+			$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+				'SELECT iia_iea_inbound_email_alias_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id = ?');
+			$stmt->execute(array(intval($this->key)));
+			$was_alias = $stmt->fetchColumn();
+		}
 		$result = parent::save($debug);
+		if ($was_alias !== null && $was_alias !== false
+				&& intval($was_alias) !== intval($this->get('iia_iea_inbound_email_alias_id'))) {
+			InboundImapFolder::clearLabelBindingsForAccount(intval($this->key));
+		}
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_memory.php'));
 		mailbox_setup_status_forget(intval($this->get('iia_iea_inbound_email_alias_id')));
 		return $result;

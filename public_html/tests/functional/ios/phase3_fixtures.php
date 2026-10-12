@@ -104,8 +104,8 @@ if (!$sender_alias_id) {
 	$sender_alias_id = $alias->key;
 }
 
-// 3. One global custom label, so the Move/Labels control is visible.
-$base_label = InboundEmailLabel::findOrCreate('Phase3 Base');
+// 3. One label of the user's mailbox, so the Move/Labels control is visible.
+$base_label = InboundEmailLabel::findOrCreate((int)$mailbox_alias_id, 'Phase3 Base');
 if (!$base_label || !$base_label->key) {
 	fwrite(STDERR, "base label could not be created\n");
 	exit(1);

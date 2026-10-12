@@ -58,7 +58,6 @@ class MailArchiveImportTest {
 	private $run_ids = array();
 	private $fixtures;
 	// Highest label id before this run. Everything above it, this run minted.
-	private $label_id_floor = 0;
 
 	function __construct() {
 		$this->db = DbConnector::get_instance()->get_db_link();
@@ -97,9 +96,6 @@ class MailArchiveImportTest {
 		$this->suffix = substr(md5(uniqid('mai', true)), 0, 8);
 		// Taken before anything imports: an id, not a clock, so no timezone or
 		// server-time assumption sits between this and teardown.
-		$this->label_id_floor = (int)$this->db->query(
-			'SELECT COALESCE(MAX(ilb_inbound_email_label_id), 0) FROM ilb_inbound_email_labels')->fetchColumn();
-
 		$domain = new InboundEmailDomain(NULL);
 		$domain->set('ied_domain', 'import-test-' . $this->suffix . '.example');
 		$domain->set('ied_is_enabled', true);
@@ -346,7 +342,7 @@ class MailArchiveImportTest {
 
 			// A source folder that is not one of the platform's own buckets becomes
 			// a label of the same name.
-			$label = InboundEmailLabel::getByName('Receipts');
+			$label = InboundEmailLabel::getByName(intval($this->alias->key), 'Receipts');
 			check($label !== null && InboundLabelMember::isMember(intval($receipt->key), intval($label->key)),
 				'import: the source label is reproduced');
 		}
@@ -870,6 +866,11 @@ class MailArchiveImportTest {
 			$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN
 				(SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 				 WHERE iem_iea_inbound_email_alias_id IN ($ain))");
+			// A label belongs to one mailbox, so every label of these fixture
+			// mailboxes is one this suite's runs made.
+			$this->db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_ilb_inbound_email_label_id IN
+				(SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels WHERE ilb_iea_inbound_email_alias_id IN ($ain))");
+			$this->db->exec("DELETE FROM ilb_inbound_email_labels WHERE ilb_iea_inbound_email_alias_id IN ($ain)");
 			$this->db->exec("DELETE FROM ief_inbound_email_filters WHERE ief_iea_inbound_email_alias_id IN ($ain)");
 		}
 		$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = " . $domainId);
@@ -881,11 +882,6 @@ class MailArchiveImportTest {
 		try {
 			$this->db->exec("DELETE FROM evl_event_logs WHERE evl_event LIKE '"
 				. MailArchiveImporter::RUN_EVENT . "%' AND evl_note LIKE '%takeout%'");
-
-			// Every label name this suite's runs could have invented, read from the
-			// entries while they still exist. A fixed list cannot work: a run names a
-			// folder after its own archive, and those names carry a random suffix.
-			$invented = $this->labelNamesCreated();
 
 			foreach ($this->run_ids as $rid) {
 				$this->db->exec('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id = ' . intval($rid));
@@ -912,31 +908,6 @@ class MailArchiveImportTest {
 					if ($file->key) { $file->permanent_delete(); }
 				} catch (\Throwable $e) {}
 			}
-			// Labels this import invented, so a re-run starts from the same place.
-			// Anything still holding mail is somebody's real filing and stays.
-			//
-			// The lookup cannot go through getByName(): undo soft-deletes the
-			// labels it emptied (MailArchiveImporter::removeEmptyLabels), and
-			// getByName() sees live rows only, so every run this suite undid left
-			// its label standing as a tombstone that nothing could find again.
-			// Matching on the id floor instead is also what keeps a real person's
-			// label of the same name safe — 'Receipts' is an ordinary thing to
-			// call a label — since only rows this run minted sit above it.
-			$named = $this->db->prepare('SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels
-				WHERE ilb_name = ? AND ilb_inbound_email_label_id > ?');
-			$held = $this->db->prepare('SELECT 1 FROM ilm_inbound_label_members
-				WHERE ilm_ilb_inbound_email_label_id = ? LIMIT 1');
-			foreach ($invented as $name) {
-				$named->execute(array($name, $this->label_id_floor));
-				foreach ($named->fetchAll(PDO::FETCH_COLUMN) as $lid) {
-					$held->execute(array(intval($lid)));
-					if ($held->fetchColumn() !== false) {
-						continue; // still filing somebody's mail
-					}
-					$label = new InboundEmailLabel(intval($lid), TRUE);
-					if ($label->key) { $label->permanent_delete(); }
-				}
-			}
 		} catch (\Throwable $e) {
 			// A teardown that cannot clean up is this suite's OWN failure. Left
 			// silent, its debris reds referential_integrity later with no leaker
@@ -945,34 +916,6 @@ class MailArchiveImportTest {
 		}
 	}
 
-	/**
-	 * The label names this suite's runs would have created — their entries' own
-	 * labels plus any non-standard source folder. Read before the entries go.
-	 *
-	 * @return string[]
-	 */
-	private function labelNamesCreated(): array {
-		if (!$this->run_ids) {
-			return array('Receipts', 'Finance');
-		}
-		$ids = implode(',', array_map('intval', $this->run_ids));
-		$rows = $this->db->query('SELECT DISTINCT mie_labels, mie_source_folder
-			FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id IN (' . $ids . ')')
-			->fetchAll(PDO::FETCH_ASSOC);
-
-		$names = array('Receipts' => true, 'Finance' => true);
-		foreach ($rows as $row) {
-			$candidates = preg_split('/\r\n|\r|\n/', (string)$row['mie_labels']) ?: array();
-			$candidates[] = (string)$row['mie_source_folder'];
-			foreach ($candidates as $name) {
-				$name = trim($name);
-				if ($name !== '' && !MailArchiveImporter::isStandardFolder($name)) {
-					$names[$name] = true;
-				}
-			}
-		}
-		return array_keys($names);
-	}
 }
 
 $test = new MailArchiveImportTest();

@@ -189,18 +189,16 @@ func TestThunderbirdPaths(t *testing.T) {
 		t.Errorf("LSUB answered %d folders: %v", n, lines)
 	}
 
-	// FLAGS and PERMANENTFLAGS include $Junk and $NotJunk, never \*.
+	// FLAGS and PERMANENTFLAGS are exactly the flags Joinery keeps: no
+	// $Junk/$NotJunk (owner decision J1), never \*.
 	rc.cmd("ENABLE UTF8=ACCEPT")
 	lines = rc.cmd(`SELECT "INBOX"`)
-	fl := find(lines, `^\* FLAGS `)
-	pf := find(lines, `PERMANENTFLAGS`)
-	for _, f := range []string{`\Seen`, `\Flagged`, `\Answered`, `\Deleted`, `\Draft`, `$Forwarded`, `$Junk`, `$NotJunk`} {
-		if !strings.Contains(fl, f) || !strings.Contains(pf, f) {
-			t.Errorf("%s missing: %q / %q", f, fl, pf)
-		}
+	want := `(\Seen \Flagged \Answered \Deleted \Draft $Forwarded)`
+	if fl := find(lines, `^\* FLAGS `); fl != `* FLAGS `+want {
+		t.Errorf("FLAGS: %q", fl)
 	}
-	if strings.Contains(pf, `\*`) {
-		t.Errorf("PERMANENTFLAGS offers \\*: %q", pf)
+	if pf := find(lines, `PERMANENTFLAGS`); !strings.HasPrefix(pf, `* OK [PERMANENTFLAGS `+want+`]`) {
+		t.Errorf("PERMANENTFLAGS: %q", pf)
 	}
 
 	// A locked message: NO [UNAVAILABLE] in plain ASCII, and the +FLAGS
@@ -225,11 +223,19 @@ func TestThunderbirdPaths(t *testing.T) {
 		t.Errorf("after refused fetch: seen=%v flagged=%v (want false, true)", seen, flagged)
 	}
 
-	// The Junk button: $Junk reaches the site.
+	// Thunderbird's junk marks stay in Thunderbird (owner decision J1): a
+	// STORE +FLAGS ($Junk) is answered OK, never passed to the site, and the
+	// flags answered do not claim it.
 	calls := h.site.Calls("mail_store")
-	rc.cmd(fmt.Sprintf(`UID STORE %d +FLAGS ($Junk)`, u1))
-	if h.site.Calls("mail_store") != calls+1 {
-		t.Errorf("$Junk was not passed to the site")
+	lines = rc.cmd(fmt.Sprintf(`UID STORE %d +FLAGS ($Junk)`, u1))
+	if last := lines[len(lines)-1]; !strings.Contains(last, " OK ") {
+		t.Errorf("STORE $Junk: %q", last)
+	}
+	if h.site.Calls("mail_store") != calls {
+		t.Errorf("$Junk was passed to the site")
+	}
+	if strings.Contains(strings.Join(lines, "\n"), "$Junk") {
+		t.Errorf("$Junk reported back: %v", lines)
 	}
 
 	// APPEND in the form Thunderbird uses once UTF8=ACCEPT is on.

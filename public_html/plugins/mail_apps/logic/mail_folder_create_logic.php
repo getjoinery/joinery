@@ -1,8 +1,8 @@
 <?php
 /**
  * mail_apps/mail_folder_create — a mail program creates a folder (IMAP
- * CREATE): a label, through the reader's own createFolder(). Labels are one
- * set for the whole site, so the label is the same one the web reader lists.
+ * CREATE): one of the mailbox's labels, through the reader's own
+ * createFolder(), so it is the same label the web reader lists for the mailbox.
  * A name of one of the fixed folders is refused.
  *
  * @version 1.0.0

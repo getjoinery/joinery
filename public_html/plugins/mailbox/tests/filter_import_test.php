@@ -217,9 +217,11 @@ class FilterImportTest {
 
 		// Reuse an existing label by name; create a new one; both find-or-create.
 		$name = 'ImportTest_' . substr(md5(uniqid('', true)), 0, 8);
-		$first = InboundEmailLabel::findOrCreate($name);
+		$alias_id = (int)DbConnector::get_instance()->get_db_link()->query(
+			'SELECT iea_inbound_email_alias_id FROM iea_inbound_email_aliases ORDER BY 1 LIMIT 1')->fetchColumn();
+		$first = InboundEmailLabel::findOrCreate($alias_id, $name);
 		$this->ok($first && $first->key, 'findOrCreate mints a new label');
-		$again = InboundEmailLabel::findOrCreate($name);
+		$again = InboundEmailLabel::findOrCreate($alias_id, $name);
 		$this->eq(intval($first->key), intval($again->key), 're-resolving the same name reuses the row');
 
 		// Signature stability: same fields + same label id -> identical signature.

@@ -349,10 +349,10 @@ class MailboxMessageTimeline {
 
 	private function currentLabels(): array {
 		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('SELECT ilb_name FROM ilm_inbound_label_members
+		$stmt = $db->prepare('SELECT ilb_label_name FROM ilm_inbound_label_members
 			JOIN ilb_inbound_email_labels ON ilb_inbound_email_label_id = ilm_ilb_inbound_email_label_id
 			WHERE ilm_iem_inbound_email_message_id = ? AND ilm_present_local = true AND ilb_delete_time IS NULL
-			ORDER BY ilb_name');
+			ORDER BY ilb_label_name');
 		$stmt->execute(array(intval($this->message->key)));
 		return $stmt->fetchAll(PDO::FETCH_COLUMN) ?: array();
 	}

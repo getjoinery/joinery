@@ -169,8 +169,13 @@ func TestChangeSetIsCompact(t *testing.T) {
 		{UID: 3, Flags: []string{`\Seen`, `$Junk`}, ModSeq: 9, Date: "2026-10-05T10:00:00Z", Size: &size},
 	}, Vanished: []uint32{1}}
 	cs := compactChanges(res)
-	if len(cs.msgs) != 1 || !cs.msgs[0].has(imap.FlagSeen) || !cs.msgs[0].has(imap.FlagJunk) || cs.msgs[0].size != 10 {
+	if len(cs.msgs) != 1 || !cs.msgs[0].has(imap.FlagSeen) || cs.msgs[0].size != 10 {
 		t.Errorf("compact: %+v", cs.msgs)
+	}
+	// A flag the gateway does not keep ($Junk, owner decision J1) is not
+	// reported, even when the site's list carries it.
+	if cs.msgs[0].has(imap.FlagJunk) || len(cs.msgs[0].flagList()) != 1 {
+		t.Errorf("unkept flag reported: %v", cs.msgs[0].flagList())
 	}
 	if cs.cost() != messageBytes+4+64 {
 		t.Errorf("cost %d", cs.cost())

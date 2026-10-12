@@ -29,6 +29,7 @@
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.10 - labels are the run's mailbox's (mailbox_per_mailbox_labels.md)
  * @version 1.9
  * @changelog 1.9 - readerAndPath() retired with the To/Cc backfill
  * @changelog 1.8 - readerAndPath(): the run's archive opened for a reader outside the
@@ -624,8 +625,8 @@ class MailArchiveImporter {
 	// see AttachmentByteCustody.
 
 	/**
-	 * Reproduce the source's filing. A folder becomes a label of the same name, so
-	 * "Receipts" in the old account is "Receipts" here; the standard buckets are
+	 * Reproduce the source's filing. A folder becomes a label of the same name in the
+	 * mailbox the run imports into, so "Receipts" in the old account is "Receipts" here; the standard buckets are
 	 * columns on the message and are handled by the store, not by a label.
 	 */
 	private function applyLabels(int $messageId, MailImportEntry $entry, string $folder): void {
@@ -638,7 +639,7 @@ class MailArchiveImporter {
 				continue;
 			}
 			try {
-				$label = InboundEmailLabel::findOrCreate($name);
+				$label = InboundEmailLabel::findOrCreate(intval($this->run->get('mir_iea_inbound_email_alias_id')), $name);
 				if ($label !== null) {
 					InboundLabelMember::apply($messageId, intval($label->key));
 				}
@@ -837,7 +838,7 @@ class MailArchiveImporter {
 		// that then failed to store, or whose membership could not be written, holds
 		// nothing and would otherwise survive undo forever as an empty folder.
 		foreach ($this->labelNamesNamedBy($runId) as $name) {
-			$label = InboundEmailLabel::getByName($name);
+			$label = InboundEmailLabel::getByName(intval($this->run->get('mir_iea_inbound_email_alias_id')), $name);
 			if ($label !== null && $label->key) {
 				$labelIds[] = intval($label->key);
 			}

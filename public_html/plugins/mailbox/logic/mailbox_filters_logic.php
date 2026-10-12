@@ -21,6 +21,8 @@
  *
  * @see specs/implemented/inbound_email_filters.md
  * @see specs/inbound_email_filter_import.md
+ * @version 2.1 - labels are the filter's mailbox's; a domain-wide filter cannot apply one
+ *   (mailbox_per_mailbox_labels.md)
  * @version 2.0
  */
 
@@ -407,22 +409,28 @@ function _filter_alias_is_filterable(InboundEmailAlias $alias): bool {
 }
 
 /**
- * Label options: every custom label (the global label namespace). A label is an ilb_
- * row, not a per-mailbox IMAP folder, so the same list applies to any scope — including
- * a domain-wide bucket. The reader and IMAP sync share these labels. Keyed by label id;
- * returns [] only when no labels exist yet (the view still offers "Create new label…").
+ * Label options: the labels of the filter's mailbox (a label belongs to one mailbox;
+ * the reader and IMAP sync share them). A domain-wide filter has no mailbox and so no
+ * labels — the panel shows the control disabled, saying why. Keyed by label id.
  */
 function _filter_label_options(string $scopeValue = ''): array {
+	if (strncmp($scopeValue, 'alias:', 6) !== 0) {
+		return array();
+	}
 	$labels = new MultiInboundEmailLabel(
-		array('deleted' => false),
-		array('ilb_name' => 'ASC')
+		array('alias_id' => intval(substr($scopeValue, 6)), 'deleted' => false),
+		array('ilb_label_name' => 'ASC')
 	);
-	$labels->load();
 	$options = array();
 	foreach ($labels as $label) {
-		$options[intval($label->key)] = $label->get('ilb_name');
+		$options[intval($label->key)] = $label->get('ilb_label_name');
 	}
 	return $options;
+}
+
+/** Why a domain-wide filter cannot apply a label, as the panel and the save say it. */
+function _filter_domain_label_reason(): string {
+	return 'A label belongs to one mailbox, so a filter for every mailbox in a domain cannot apply one. To label mail, make the filter for a single mailbox.';
 }
 
 /** A blank value set for a new filter. */
@@ -597,10 +605,9 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 		$filter->set('ief_match_size_bytes', null);
 	}
 
-	// Actions. A label is an ilb_ row, not a mailbox-scoped folder, so the apply-label
-	// action is valid for every scope, domain-wide buckets included. The selection
-	// is a label id, or 'new' to mint a label inline (Gmail's "New label…").
-	$filter->set('ief_action_ilb_inbound_email_label_id', _filter_resolve_label($v));
+	// Actions. The label is one of the filter's mailbox's — a label id, or 'new' to
+	// mint one inline (Gmail's "New label…"); a domain-wide filter cannot apply one.
+	$filter->set('ief_action_ilb_inbound_email_label_id', _filter_resolve_label($v, $alias_id));
 	$filter->set('ief_action_star', $v['ief_action_star']);
 	$filter->set('ief_action_mark_read', $v['ief_action_mark_read']);
 	$filter->set('ief_action_archive', $v['ief_action_archive']);
@@ -639,23 +646,33 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 }
 
 /**
- * Resolve the filter's label selection to a label id (or null). '0'/empty means no
- * label; 'new' find-or-creates a custom label from the typed name; an integer selects an
- * existing label. Returns null when nothing valid is chosen, so an unset action stores
- * cleanly.
+ * Resolve the filter's label selection to a label id (or null) of mailbox $alias_id.
+ * '0'/empty means no label; 'new' find-or-creates one of the mailbox's labels from the
+ * typed name; an integer selects an existing label, which must be the mailbox's. A
+ * domain-wide filter ($alias_id null) cannot apply a label. Returns null when nothing is
+ * chosen, so an unset action stores cleanly.
+ *
+ * @throws InboundEmailFilterException for a label on a domain-wide filter, or a label
+ *   that is not the mailbox's
  */
-function _filter_resolve_label(array $v): ?int {
+function _filter_resolve_label(array $v, ?int $alias_id): ?int {
 	$sel = (string)($v['ief_action_ilb_inbound_email_label_id'] ?? '0');
+	$chosen = ($sel === 'new') ? trim((string)($v['ief_action_label_new'] ?? '')) !== '' : intval($sel) > 0;
+	if (!$chosen) {
+		return null;
+	}
+	if ($alias_id === null || $alias_id <= 0) {
+		throw new InboundEmailFilterException(_filter_domain_label_reason());
+	}
 	if ($sel === 'new') {
-		$name = trim((string)($v['ief_action_label_new'] ?? ''));
-		if ($name === '') {
-			return null;
-		}
-		$label = InboundEmailLabel::findOrCreate($name);
+		$label = InboundEmailLabel::findOrCreate($alias_id, trim((string)$v['ief_action_label_new']));
 		return $label ? intval($label->key) : null;
 	}
 	$lid = intval($sel);
-	return $lid > 0 ? $lid : null;
+	if (InboundEmailLabel::aliasOf($lid) !== $alias_id) {
+		throw new InboundEmailFilterException('That label is not one of this mailbox\'s. Pick another, or create one.');
+	}
+	return $lid;
 }
 
 /**
@@ -810,18 +827,28 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 	// Signatures already present in this scope, for the re-import skip.
 	$existing = _filter_existing_signatures($alias_id, $domain_id);
 
-	$created = 0; $newLabels = 0; $dupes = 0; $deleteFlagged = 0;
+	$created = 0; $newLabels = 0; $dupes = 0; $deleteFlagged = 0; $labelsDropped = 0; $labelOnly = 0;
 	foreach ($candidates as $i => $cand) {
 		if (empty($cand['importable']) || !isset($checkedSet[$i])) {
 			continue;
 		}
 		// Resolve the label only now (a DB write the parser deliberately deferred).
+		// A label is the mailbox's; a domain-wide import cannot apply one, so the
+		// filter keeps its other actions — and one with nothing else to do is skipped.
 		$labelId = null;
 		if (!empty($cand['label'])) {
-			$pre = InboundEmailLabel::getByName($cand['label']);
-			$label = InboundEmailLabel::findOrCreate($cand['label']);
-			$labelId = $label ? intval($label->key) : null;
-			if ($label && !$pre) { $newLabels++; }
+			if ($alias_id === null) {
+				if (!_filter_candidate_has_other_action($cand['fields'])) {
+					$labelOnly++;
+					continue;
+				}
+				$labelsDropped++;
+			} else {
+				$pre = InboundEmailLabel::getByName($alias_id, $cand['label']);
+				$label = InboundEmailLabel::findOrCreate($alias_id, $cand['label']);
+				$labelId = $label ? intval($label->key) : null;
+				if ($label && !$pre) { $newLabels++; }
+			}
 		}
 		$sig = _filter_signature($cand['fields'], $labelId);
 		if (isset($existing[$sig])) {
@@ -841,6 +868,13 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 	if ($dupes > 0) {
 		$summary .= '; ' . $dupes . ' already present';
 	}
+	if ($labelsDropped > 0 || $labelOnly > 0) {
+		// A label belongs to one mailbox, so a filter for a whole domain cannot apply one.
+		$summary .= '; a filter for every mailbox in a domain cannot apply a label, so '
+			. ($labelsDropped > 0 ? $labelsDropped . ' imported without ' . ($labelsDropped === 1 ? 'its label' : 'their labels') : '')
+			. ($labelsDropped > 0 && $labelOnly > 0 ? ' and ' : '')
+			. ($labelOnly > 0 ? $labelOnly . ' that only applied a label ' . ($labelOnly === 1 ? 'was' : 'were') . ' skipped' : '');
+	}
 	if ($deleteFlagged > 0) {
 		// Fix 9: a "delete on arrival" rule must never silently switch on during
 		// a migration, so delete-action filters land disabled and are called out.
@@ -849,6 +883,17 @@ function _filter_import_confirm(string $xml, array $checked, string $scope, arra
 			: '; ' . $deleteFlagged . ' filters delete mail and were imported disabled — review and enable them';
 	}
 	return $summary . '.';
+}
+
+/** True when a parsed candidate does something besides apply a label. */
+function _filter_candidate_has_other_action(array $fields): bool {
+	foreach (array('ief_action_archive', 'ief_action_mark_read', 'ief_action_star', 'ief_action_delete',
+			'ief_action_never_spam', 'ief_action_mark_spam') as $c) {
+		if (!empty($fields[$c])) {
+			return true;
+		}
+	}
+	return isset($fields['ief_action_forward_to']) && trim((string)$fields['ief_action_forward_to']) !== '';
 }
 
 /** Persist one parsed candidate as a filter in the given scope. */

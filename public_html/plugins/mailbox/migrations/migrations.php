@@ -308,9 +308,24 @@ return [
 				if (in_array(strtolower(trim((string)$g['grp_name'])), $skip, true)) {
 					continue;
 				}
-				$label = InboundEmailLabel::findOrCreate((string)$g['grp_name']);
-				if ($label) {
-					$groupLabel[intval($g['grp_group_id'])] = intval($label->key);
+				// The site-wide label of that name, as labels were then (ilb_name);
+				// ilb_001 later gives each label its mailbox.
+				$name = substr(trim((string)$g['grp_name']), 0, 255);
+				if ($name === '') {
+					continue;
+				}
+				$find = $dblink->prepare("SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels
+					WHERE ilb_name = ? AND ilb_delete_time IS NULL LIMIT 1");
+				$find->execute(array($name));
+				$lid = $find->fetchColumn();
+				if (!$lid) {
+					$ins = $dblink->prepare("INSERT INTO ilb_inbound_email_labels (ilb_name, ilb_create_time)
+						VALUES (?, now()) RETURNING ilb_inbound_email_label_id");
+					$ins->execute(array($name));
+					$lid = $ins->fetchColumn();
+				}
+				if ($lid) {
+					$groupLabel[intval($g['grp_group_id'])] = intval($lid);
 				}
 			}
 
@@ -1414,6 +1429,129 @@ return [
 				WHERE iem_raw_storage_driver = 'cloud' AND iem_raw_bkt_backup_target_id IS NULL");
 			$u->execute(array((int)$target->key, $target->prefix()));
 			echo "iem_019: " . $u->rowCount() . " offloaded raw message(s) record their file store and key.\n";
+			return true;
+		},
+	],
+	[
+		// A label belongs to one mailbox (mailbox_per_mailbox_labels.md).
+		// Each label of the site-wide namespace gets its mailbox: the one its
+		// messages, folder bindings and per-mailbox filters belong to. A label
+		// used by several mailboxes is split — the mailbox with the most messages
+		// keeps the row, every other gets its own label of the same name, and its
+		// memberships, bindings and filters move to it. A label nothing uses is
+		// deleted. Memberships on mail of no mailbox (catch-all) go, as do
+		// domain-wide filters' labels, and references to labels that are gone are
+		// cleared. Waits for the columns; only labels with no mailbox yet are
+		// touched, so a second run changes nothing.
+		'id' => 'ilb_001_labels_belong_to_a_mailbox',
+		'version' => '1.141.0',
+		'up' => function($dbconnector) {
+			$db = $dbconnector->get_db_link();
+			$cols = $db->query("SELECT column_name FROM information_schema.columns
+				WHERE table_schema = 'public' AND table_name = 'ilb_inbound_email_labels'")->fetchAll(PDO::FETCH_COLUMN);
+			if (!in_array('ilb_label_name', $cols, true) || !in_array('ilb_iea_inbound_email_alias_id', $cols, true)) {
+				echo "ilb_001: the label's mailbox columns are not there yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+			if (!in_array('ilb_name', $cols, true)) {
+				echo "ilb_001: no labels of the site-wide namespace on this install.\n";
+				return true;
+			}
+
+			$db->beginTransaction();
+			try {
+				$labels = $db->query("SELECT ilb_inbound_email_label_id AS id, ilb_name AS name FROM ilb_inbound_email_labels
+					WHERE ilb_iea_inbound_email_alias_id IS NULL AND ilb_delete_time IS NULL
+					ORDER BY ilb_inbound_email_label_id")->fetchAll(PDO::FETCH_ASSOC);
+
+				$members = $db->prepare("SELECT iem_iea_inbound_email_alias_id AS alias, COUNT(*) AS n
+					FROM ilm_inbound_label_members JOIN iem_inbound_email_messages ON iem_inbound_email_message_id = ilm_iem_inbound_email_message_id
+					WHERE ilm_ilb_inbound_email_label_id = ? AND iem_iea_inbound_email_alias_id IS NOT NULL
+					GROUP BY iem_iea_inbound_email_alias_id");
+				$bound = $db->prepare("SELECT DISTINCT iia_iea_inbound_email_alias_id FROM iif_inbound_imap_folders
+					JOIN iia_inbound_imap_accounts ON iia_inbound_imap_account_id = iif_iia_inbound_imap_account_id
+					WHERE iif_ilb_inbound_email_label_id = ? AND iia_iea_inbound_email_alias_id IS NOT NULL");
+				$filtered = $db->prepare("SELECT DISTINCT ief_iea_inbound_email_alias_id FROM ief_inbound_email_filters
+					WHERE ief_action_ilb_inbound_email_label_id = ? AND ief_iea_inbound_email_alias_id IS NOT NULL");
+				$own = $db->prepare("UPDATE ilb_inbound_email_labels SET ilb_iea_inbound_email_alias_id = ?, ilb_label_name = ?
+					WHERE ilb_inbound_email_label_id = ?");
+				$existing = $db->prepare("SELECT ilb_inbound_email_label_id FROM ilb_inbound_email_labels
+					WHERE ilb_iea_inbound_email_alias_id = ? AND ilb_label_name = ? AND ilb_delete_time IS NULL LIMIT 1");
+				$copy = $db->prepare("INSERT INTO ilb_inbound_email_labels (ilb_iea_inbound_email_alias_id, ilb_label_name, ilb_create_time)
+					VALUES (?, ?, now()) RETURNING ilb_inbound_email_label_id");
+				$moveMembers = $db->prepare("UPDATE ilm_inbound_label_members SET ilm_ilb_inbound_email_label_id = ?
+					WHERE ilm_ilb_inbound_email_label_id = ? AND ilm_iem_inbound_email_message_id IN
+					  (SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages WHERE iem_iea_inbound_email_alias_id = ?)");
+				$moveBindings = $db->prepare("UPDATE iif_inbound_imap_folders SET iif_ilb_inbound_email_label_id = ?
+					WHERE iif_ilb_inbound_email_label_id = ? AND iif_iia_inbound_imap_account_id IN
+					  (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_iea_inbound_email_alias_id = ?)");
+				$moveFilters = $db->prepare("UPDATE ief_inbound_email_filters SET ief_action_ilb_inbound_email_label_id = ?
+					WHERE ief_action_ilb_inbound_email_label_id = ? AND ief_iea_inbound_email_alias_id = ?");
+				$retire = $db->prepare("UPDATE ilb_inbound_email_labels SET ilb_delete_time = now() WHERE ilb_inbound_email_label_id = ?");
+
+				$owned = 0; $split = 0; $unused = 0;
+				foreach ($labels as $l) {
+					$id = intval($l['id']);
+					$name = substr(trim((string)$l['name']), 0, 255);
+					$weight = array(); // alias => messages carrying the label
+					$members->execute(array($id));
+					foreach ($members->fetchAll(PDO::FETCH_ASSOC) as $r) {
+						$weight[intval($r['alias'])] = intval($r['n']);
+					}
+					foreach (array($bound, $filtered) as $q) {
+						$q->execute(array($id));
+						foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $a) {
+							$weight += array(intval($a) => 0);
+						}
+					}
+					if (!$weight || $name === '') {
+						$retire->execute(array($id));
+						$unused++;
+						continue;
+					}
+					// The keeper: most messages, then the lowest mailbox id.
+					uksort($weight, function ($a, $b) use ($weight) {
+						return ($weight[$b] <=> $weight[$a]) ?: ($a <=> $b);
+					});
+					$aliases = array_keys($weight);
+					$keeper = array_shift($aliases);
+					$own->execute(array($keeper, $name, $id));
+					$owned++;
+					foreach ($aliases as $alias) {
+						$existing->execute(array($alias, $name));
+						$new = $existing->fetchColumn();
+						if (!$new) {
+							$copy->execute(array($alias, $name));
+							$new = $copy->fetchColumn();
+						}
+						$new = intval($new);
+						$moveMembers->execute(array($new, $id, $alias));
+						$moveBindings->execute(array($new, $id, $alias));
+						$moveFilters->execute(array($new, $id, $alias));
+						$split++;
+					}
+				}
+
+				// What no mailbox can own.
+				$catchall = $db->exec("DELETE FROM ilm_inbound_label_members WHERE ilm_iem_inbound_email_message_id IN
+					(SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages WHERE iem_iea_inbound_email_alias_id IS NULL)");
+				$domainWide = $db->exec("UPDATE ief_inbound_email_filters SET ief_action_ilb_inbound_email_label_id = NULL
+					WHERE ief_iea_inbound_email_alias_id IS NULL AND ief_action_ilb_inbound_email_label_id IS NOT NULL");
+				$staleBindings = $db->exec("UPDATE iif_inbound_imap_folders SET iif_ilb_inbound_email_label_id = NULL
+					WHERE iif_ilb_inbound_email_label_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ilb_inbound_email_labels
+					  WHERE ilb_inbound_email_label_id = iif_ilb_inbound_email_label_id AND ilb_delete_time IS NULL)");
+				$staleFilters = $db->exec("UPDATE ief_inbound_email_filters SET ief_action_ilb_inbound_email_label_id = NULL
+					WHERE ief_action_ilb_inbound_email_label_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM ilb_inbound_email_labels
+					  WHERE ilb_inbound_email_label_id = ief_action_ilb_inbound_email_label_id AND ilb_delete_time IS NULL)");
+				$db->commit();
+			} catch (\Throwable $e) {
+				$db->rollBack();
+				throw $e;
+			}
+			echo "ilb_001: " . $owned . " label(s) given their mailbox, " . $split . " copy(ies) for other mailboxes, "
+				. $unused . " unused label(s) deleted; cleared " . $catchall . " membership(s) on mail of no mailbox, "
+				. $domainWide . " domain-wide filter label(s), " . $staleBindings . " folder binding(s) and "
+				. $staleFilters . " filter label(s) to labels that are gone.\n";
 			return true;
 		},
 	],

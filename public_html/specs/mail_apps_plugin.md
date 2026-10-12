@@ -113,7 +113,15 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
 
 ## Gateway binaries
 
-`plugins/mail_apps/provisioning/bin/` is git-ignored build output, like the relay-sealer's. The plugin archive tars the publisher's live tree, so the binaries ship. No publish step rebuilds them from the `.go` sources yet: whoever changes the gateway source rebuilds both architectures before publishing. The open item is a general "a plugin builds its programs at publish" step, generalised from `RelaySealerPublisher`; that is core work.
+`plugins/mail_apps/provisioning/bin/` is git-ignored build output. **It does not ship.** A plugin archive carries only what its signed manifest lists, and the release's own build programs (`GoBinaryPublisher` subclasses: the relay-sealer, the parser jail, the agent) are the only binaries listed. Release 0.8.484 published `mail_apps` 1.0.0 without them. On any machine but dev the host installer stops at its "no prebuilt gateway" check and installs nothing.
+
+To ship, the gateway becomes a `GoBinaryPublisher` the way `RelaySealerPublisher` is:
+- built at publish;
+- its source tree named in `ReleaseCommit`;
+- its artifacts in the release statement;
+- rebuilt reproducibly by `ReleaseVerifier`.
+
+That is core release-pipeline work, needed before mail apps run anywhere but dev.
 
 ## Second code review (reviewer2, 2026-10-11)
 
@@ -183,6 +191,12 @@ Real Thunderbird 157.0.1 against the real gateway and dev. Every scenario passed
 - **J4 Labels from other mailboxes:** a mailbox with no feed lists every label on the site, so a new mailbox showed another member's label ("Meditation"). This is mailbox's existing reader behaviour, which IMAP now exposes too.
 
 **Fixed from the run:** SMTP replies drop their closing full stop (Thunderbird adds its own).
+
+**Decided and fixed (2026-10-12):**
+- **J1:** `$Junk` and `$NotJunk` are no longer offered (FLAGS and PERMANENTFLAGS are `\Seen \Flagged \Answered \Deleted \Draft $Forwarded`). A STORE of them is dropped by the gateway, and `store()` no longer maps them to a verdict. Only a move into or out of Spam sets one.
+- **J2:** there is no All Mail folder.
+- **J3:** `APPEND` answers `APPENDUID` only when the bytes served for that message equal the bytes appended. Otherwise it answers none, and the program fetches the site's copy. In practice that is every APPEND, because arrival keeps headers and decoded parts rather than the original. Not yet re-run against real Thunderbird.
+- **J4:** open. Labels are one site-wide set by design (`MailboxService::deleteLabel()`: "one shared concept across every mailbox"), so it is a mailbox design question, not a listing fix.
 
 ## Code review (reviewer2, 2026-10-11)
 
