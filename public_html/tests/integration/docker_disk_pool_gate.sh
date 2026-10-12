@@ -89,7 +89,7 @@ mkdir -p "$(dirname "$DJ")"; printf '{"userns-remap": "default"}\n' > "$DJ"
 out="$(run create 1G 2>&1)"; rc=$?
 chk "create on a host with no data root: exit 0" "$rc" "0"
 chk "the data root is made at the size given: a 1G file, formatted with ftype=1" \
-    "$(grep -c "^fallocate -l 1073741824 $T/root/srv/joinery.img$" "$LOG")|$(grep -c "^mkfs.xfs -q -n ftype=1 $T/root/srv/joinery.img$" "$LOG")" "1|1"
+    "$(grep -c "^fallocate -l 1073741824 $T/root/srv/joinery.img$" "$LOG")|$(grep -c "^mkfs.xfs -q -n ftype=1 -s size=4096 $T/root/srv/joinery.img$" "$LOG")" "1|1"
 chk "fstab: one line, at /srv/joinery, loop, prjquota, nofail" \
     "$(grep -c '^/srv/joinery.img /srv/joinery xfs loop,prjquota,nofail 0 0$' "$T/root/etc/fstab")" "1"
 chk "Docker and containerd each require the data root" \

@@ -79,6 +79,8 @@ echo "$action $name" >> "$T/calls"
 case "$action" in
     start)
         [ -e "$T/fail_$name" ] && exit 1
+        # Apache refuses to start over a pid file it cannot read (AH00058).
+        [ "$name" = apache2 ] && [ -e "$T/refuse_stale" ] && [ -e "$pf" ] && exit 1
         "$T/fake/$comm" 3600 < /dev/null > /dev/null 2>&1 &
         echo $! > "$pf"; echo $! >> "$T/allpids" ;;
     stop) kill "$(cat "$pf" 2>/dev/null)" 2>/dev/null; rm -f "$pf" ;;
@@ -190,6 +192,16 @@ wait "$SUP_PID"; code=$?
 SUP_PID=""
 chk "exits 0" "$code" "0"
 chk "stops Apache, PHP-FPM, cron, then PostgreSQL" "$(calls | tr '\n' ',')" "stop apache2,stop php8.5-fpm,stop cron,stop postgresql,"
+
+echo "== a pid file a power cut left half written =="
+for s in postgresql php8.5-fpm cron; do PATH="$T/bin:$PATH" service "$s" start; done
+printf '\0\0' > "$RUN/var/run/apache2/apache2.pid"; touch "$T/refuse_stale"
+SUPERVISOR_TEST_INTERVAL=0.5 PATH="$T/bin:$PATH" bash "$SUP" testsite > "$T/out" 2>&1 &
+SUP_PID=$!
+wait_for 5 logged "running; watching"
+chk "Apache starts: the stale file goes first" "$(sup --check >/dev/null; echo $?)|$(grep -c 'Apache did not start' "$T/out")" "0|0"
+kill -TERM "$SUP_PID"; wait_for 5 bash -c "! kill -0 $SUP_PID 2>/dev/null"; wait "$SUP_PID" 2>/dev/null; SUP_PID=""
+rm -f "$T/refuse_stale"
 
 echo "== where it is wired in =="
 TPL="$ROOT/maintenance_scripts/install_tools/Dockerfile.template"

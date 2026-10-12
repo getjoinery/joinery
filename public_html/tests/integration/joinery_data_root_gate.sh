@@ -146,13 +146,23 @@ cp "$T/systemctl.ok" "$T/bin/systemctl"
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/etc/systemd" "$T/root/run"
 : > "$LOG"
 
+echo "=== create: a small root disk keeps room for the rest of the install ==="
+figs root 25*G 5*G 20*G
+out="$(run create 2>&1)"; rc=$?
+chk "25 GiB root, 20 free: reserve 6 and 2 for the install, so 12 GiB (not 14)" \
+    "$rc|$(grep -c "^fallocate -l $((12 * G)) $T/root/srv/joinery.img$" "$LOG")" "0|1"
+unmount
+rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/etc/systemd" "$T/root/run"
+: > "$LOG"
+figs root 100*G 20*G 80*G
+
 echo "=== create: a file of the first size D7 gives ==="
 : > "$T/root/lib/systemd/system/php8.5-fpm.service"
 out="$(run create 2>&1)"; rc=$?
 chk "exit 0" "$rc" "0"
 chk "first size: a quarter of the root disk, 25 GiB (above 16)" \
     "$(grep -c "^fallocate -l $((25 * G)) $T/root/srv/joinery.img$" "$LOG")" "1"
-chk "formatted XFS with ftype=1" "$(grep -c "^mkfs.xfs -q -n ftype=1 $T/root/srv/joinery.img$" "$LOG")" "1"
+chk "formatted XFS with ftype=1 and 4096-byte sectors" "$(grep -c "^mkfs.xfs -q -n ftype=1 -s size=4096 $T/root/srv/joinery.img$" "$LOG")" "1"
 chk "recorded: a file, at /srv/joinery.img" \
     "$(grep -c '^backing=file$' "$T/root/etc/joinery/data_root")|$(grep -c '^source=/srv/joinery.img$' "$T/root/etc/joinery/data_root")" "1|1"
 chk "fstab: one line, loop, prjquota, nofail" \
@@ -580,10 +590,10 @@ rm -f "$T/bin/dockerd" "$T/bin/docker" "$T/active_units"
 
 echo "=== a device ==="
 rm -rf "$T/root/etc/joinery" "$T/root/etc/fstab" "$T/root/srv/joinery.img" "$T/root/srv/joinery" "$SD" "$T/root/run"
-unmount; : > "$LOG"
+unmount; : > "$LOG"; echo $((50 * G)) > "$T/devsize"
 out="$(run create /dev/sdb 2>&1)"; rc=$?
-chk "create on a device: exit 0, formatted, recorded with its UUID" \
-    "$rc|$(grep -c '^mkfs.xfs -q -n ftype=1 /dev/sdb$' "$LOG")|$(grep -c '^backing=device$' "$T/root/etc/joinery/data_root")|$(grep -c '^uuid=0b9c5a6e-1111-4222-8333-944455556666$' "$T/root/etc/joinery/data_root")" "0|1|1|1"
+chk "create on a device: exit 0, formatted 32 MiB short of its end (an in-place encrypt's header), recorded with its UUID" \
+    "$rc|$(grep -c "^mkfs.xfs -q -n ftype=1 -s size=4096 -d size=$(( 50 * G - 32 * 1024 * 1024 )) /dev/sdb$" "$LOG")|$(grep -c '^backing=device$' "$T/root/etc/joinery/data_root")|$(grep -c '^uuid=0b9c5a6e-1111-4222-8333-944455556666$' "$T/root/etc/joinery/data_root")" "0|1|1|1"
 chk "fstab mounts it by UUID, prjquota, nofail; no loop, no direct I/O unit" \
     "$(grep -c '^UUID=0b9c5a6e-1111-4222-8333-944455556666 /srv/joinery xfs prjquota,nofail 0 0$' "$T/root/etc/fstab")|$(grep -c '^fallocate' "$LOG")|$( [ -e "$SD/joinery-data-dio.service" ] && echo dio || echo none)" "1|0|none"
 figs data 50*G 45*G 5*G
@@ -596,7 +606,7 @@ chk "and reads the device by its UUID, which a reboot cannot rename (reviewer2 F
     "$(grep -c '^blockdev --getsize64 /dev/disk/by-uuid/0b9c5a6e-1111-4222-8333-944455556666$' "$LOG")" "1"
 echo $((80 * G)) > "$T/devsize"
 out="$(run tick 2>&1)"
-chk "once the provider has grown it, the filesystem follows" "$(grep -c "^xfs_growfs $T/root/srv/joinery$" "$LOG")" "1"
+chk "once the provider has grown it, the filesystem follows, to 32 MiB short of its end" "$(grep -c "^xfs_growfs -D $(( (80 * G - 32 * 1024 * 1024) / 4096 )) $T/root/srv/joinery$" "$LOG")" "1"
 out="$(run grow 90G 2>&1)"; rc=$?
 chk "grow SIZE on a device is refused: the provider grows it" "$rc|$(grep -c 'when its provider grows the device' <<< "$out")" "1|1"
 
@@ -668,7 +678,7 @@ chk "a TPM2 chip is enrolled (PCR 7), then the first slot goes" \
 chk "opened with no keyring and the key size, never with discards" \
     "$(grep -c '^cryptsetup open --disable-keyring --key-size 512 --volume-key-file .*/volume.key /dev/loop7 joinery-data$' "$LOG")|$(grep -c 'allow-discards' "$LOG")" "1|0"
 chk "XFS on the mapping, not the image" \
-    "$(grep -c "^mkfs.xfs -q -n ftype=1 $R/dev/mapper/joinery-data$" "$LOG")|$(grep -c "^mkfs.xfs.*joinery.img" "$LOG")" "1|0"
+    "$(grep -c "^mkfs.xfs -q -n ftype=1 -s size=4096 $R/dev/mapper/joinery-data$" "$LOG")|$(grep -c "^mkfs.xfs.*joinery.img" "$LOG")" "1|0"
 chk "the key material in /run is gone" "$(ls "$R/run/joinery" | grep -c data-root-key)" "0"
 chk "the unlock identity is made for the escrow holder to know it by (D3)" "$(grep -c '^agent data-root identity$' "$LOG")" "1"
 # The agent adds escrow slots itself (escrow.go): its slot settings are these.
@@ -808,7 +818,7 @@ chk "the new volume key and the driving key sealed before anything is written" \
     "agent data-root seal --recipient,agent data-root seal --recipient,cryptsetup reencrypt --init-only --batch-mode"
 chk "the new key's pending copy: 64 bytes, a 512-bit key" "$(grep -c '"sealed_bytes": 64' "$R/srv/joinery.img.recovery.pending")" "1"
 chk "LUKS2 re-encryption under that key, through the driving slot, the standard slot settings, no keyring" \
-    "$(grep -c -- '^cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000 --volume-key-file .*/new.vk --key-slot 4 --key-file .*/slot.key /dev/loop7$' "$LOG")" "1"
+    "$(grep -c -- '^cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 --hotzone-size 8M --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000 --volume-key-file .*/new.vk --key-slot 4 --key-file .*/slot.key /dev/loop7$' "$LOG")" "1"
 chk "recorded: re-encrypting, its driving slot, the pending copy; the new key itself not kept" \
     "$(grep -c -e '^reencrypt=reencrypt$' -e '^driving_slot=4$' -e '^rekey_sidecar=/srv/joinery.img.recovery.pending$' "$C")|$( [ -e "$R/run/joinery/data-root-encrypt/new.vk" ] && echo kept || echo gone)" "3|gone"
 out="$(run decrypt 2>&1)"; rc=$?
@@ -844,8 +854,29 @@ printf 'backing=file\nsource=/srv/joinery.img\n' > "$C"
 printf '%s\n/srv/joinery.img /srv/joinery xfs loop,prjquota,nofail 0 0\n' '# joinery-data-root (joinery_data_root.sh)' > "$R/etc/fstab"
 touch "$T/mounted"; figs data 8*G 1*G 7*G
 stub xfs_info 'echo "meta-data=/dev/loop7 isize=512 agcount=4 agsize=524288 blks"; echo "         =                       sectsz=512   attr=2, projid32bit=1"; echo "data     =                       bsize=4096   blocks=2097152, imaxpct=25"'
+# A bind something holds open (T-F2: a message being queued) keeps the filesystem
+# mounted after the data root's own mount stops.
+mkdir -p "$R/proc/self"
+printf '%s\n' '36 25 7:7 / /srv/joinery rw,relatime - xfs /dev/loop7 rw' '41 25 7:7 /mail/postfix /var/spool/postfix rw,relatime - xfs /dev/loop7 rw' > "$R/proc/self/mountinfo"
 : > "$LOG"
 out="$(run encrypt 2>&1)"; rc=$?
+chk "encrypt with the filesystem still mounted at a busy bind: refused, nothing written, the data root started again" \
+    "$rc|$(grep -c 'still mounted at /srv/joinery /var/spool/postfix' <<< "$out")|$(grep -c -e '^cryptsetup reencrypt' -e '^fallocate' "$LOG")|$(grep -c '^systemctl start joinery-data.target$' "$LOG")|$( [ -e "$R/etc/joinery/data-root/driving-slot.recovery" ] && echo sealed || echo none)" \
+    "1|1|0|1|none"
+# The same bind held by a service (rsyslog's socket in Postfix's chroot): stopped for
+# the start, the bind unmounted, and the run goes on.
+printf '%s\n' '36 25 7:7 / /srv/joinery rw,relatime - xfs /dev/loop7 rw' '41 25 7:7 /mail/postfix /var/spool/postfix rw,relatime - xfs /dev/loop7 rw' > "$R/proc/self/mountinfo"
+mkdir -p "$R/proc/4242"; echo '0::/system.slice/rsyslog.service' > "$R/proc/4242/cgroup"
+stub fuser 'case "$*" in *var/spool/postfix*) echo 4242 ;; esac'
+cp "$T/bin/systemctl" "$T/systemctl.d5"
+stub systemctl 'case "$*" in "stop srv-joinery.mount") sed -i "\# /srv/joinery #d" "$GATE_T/root/proc/self/mountinfo" ;; "stop var-spool-postfix.mount") sed -i "\# /var/spool/postfix #d" "$GATE_T/root/proc/self/mountinfo" ;; esac
+exec "$GATE_T/systemctl.d5" "$@"'
+touch "$T/mounted"
+: > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "a service that keeps a file on a bind: stopped for the start, the bind unmounted, started again after" \
+    "$(grep -c 'rsyslog.service keep a file on it' <<< "$out")|$(grep -c '^systemctl stop rsyslog.service$' "$LOG")|$(grep -c '^systemctl stop var-spool-postfix.mount$' "$LOG")|$(grep -c '^systemctl start .*rsyslog.service' "$LOG")" "1|1|1|1"
+cp "$T/systemctl.d5" "$T/bin/systemctl"; rm -f "$T/bin/fuser"; rm -rf "$R/proc"
 chk "encrypt: exit 0, and says it encrypts in the background" "$rc|$(grep -c 'encrypting in the background' <<< "$out")" "0|1"
 chk "the image grows by the 32 MiB the header takes, which XFS never sees" "$(grep -c "^fallocate -l $(( 8 * G + 32 * 1024 * 1024 )) $R/srv/joinery.img$" "$LOG")" "1"
 chk "both keys sealed before the volume is written: the volume key, then the driving slot's" \
@@ -864,6 +895,95 @@ out="$(run encrypt 2>&1)"; rc=$?
 chk "a second encrypt: refused, it is running" "$rc|$(grep -c 'encrypted already' <<< "$out")" "1|1"
 : > "$LOG"; run tick >/dev/null 2>&1
 chk "no growth while it runs: the table is the run's" "$(grep -c -e '^fallocate' -e '^dmsetup reload' "$LOG")" "0"
+# A boot that opened the volume and never started the run (T-F2, after a cut in a decrypt).
+mkdir -p "$R/dev/mapper"; : > "$R/dev/mapper/joinery-data"; cp "$T/bin/systemctl" "$T/systemctl.run"
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"; [ "$2" = is-active ] && exit 3; exit 0'
+: > "$LOG"; out="$(run tick 2>&1)"
+chk "a recorded run that is not running: the tick starts it again" \
+    "$(grep -c '^systemctl start --no-block joinery-data-encrypt.service$' "$LOG")|$(grep -c 'encryption was not running; started again' <<< "$out")" "1|1"
+cp "$T/systemctl.run" "$T/bin/systemctl"; : > "$LOG"; run tick >/dev/null 2>&1
+chk "and leaves a running one alone" "$(grep -c '^systemctl start --no-block joinery-data-encrypt.service$' "$LOG")" "0"
+rm -f "$R/dev/mapper/joinery-data"
+
+echo "--- an encrypt cut off in its start, after cryptsetup wrote the header (T-F2) ---"
+# The header a power cut left on a 1 GB Linode, 2026-10-12: cryptsetup had moved the first
+# 16 MiB to the room at the end and written the header; nothing was encrypted.
+cat > "$T/cut_dump.txt" <<'DUMP'
+LUKS header information
+Version:       	2
+Epoch:         	4
+Metadata area: 	16384 [bytes]
+Keyslots area: 	16744448 [bytes]
+UUID:          	5b264164-ba43-42ea-88d7-09410efd180a
+Label:         	(no label)
+Subsystem:     	(no subsystem)
+Flags:       	(no flags)
+Requirements:	online-reencrypt-v2 
+
+Data segments:
+  0: linear
+	offset: 11827937280 [bytes]
+	length: 16777216 [bytes]
+	cipher: (no SW encryption)
+
+  1: linear
+	offset: 16777216 [bytes]
+	length: 11794382848 [bytes]
+	cipher: (no SW encryption)
+
+  2: linear
+	offset: 11827937280 [bytes]
+	length: 16777216 [bytes]
+	cipher: (no SW encryption)
+	flags : backup-moved-segment
+
+  3: linear
+	offset: 0 [bytes]
+	length: 11811160064 [bytes]
+	cipher: (no SW encryption)
+	flags : backup-previous
+
+  4: crypt
+	offset: 16777216 [bytes]
+	length: (whole device)
+	cipher: aes-xts-plain64
+	sector: 512 [bytes]
+	flags : backup-final
+
+Keyslots:
+  1: reencrypt (unbound)
+	Key:        8 bits
+	Priority:   ignored
+	Mode:       encrypt
+	Direction:  backward
+	Resilience: datashift
+	Shift size: 16777216[bytes]
+	Area offset:290816 [bytes]
+	Area length:4096 [bytes]
+	Digest ID:  1
+Tokens:
+DUMP
+cp "$C" "$T/conf.running"; cp "$T/bin/cryptsetup" "$T/cryptsetup.ok"
+printf 'backing=file\nsource=/srv/joinery.img\n' > "$C"
+printf '%s\n/srv/joinery.img /srv/joinery xfs loop,prjquota,nofail 0 0\n' '# joinery-data-root (joinery_data_root.sh)' > "$R/etc/fstab"
+rm -f "$T/mounted"; truncate -s 11844714496 "$R/srv/joinery.img"; figs data 11*G 1*G 10*G
+: > "$R/etc/joinery/data-root/driving-slot.recovery"; : > "$R/srv/joinery.img.recovery"
+stub dd 'echo "dd $*" >> "$GATE_LOG"'
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in isLuks) exit 1 ;; esac; exit 0'
+: > "$LOG"; run tick >/dev/null 2>&1
+chk "cut off before the header: nothing to undo" "$(grep -c '^dd ' "$LOG")|$(stat -c %s "$R/srv/joinery.img")" "0|11844714496"
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in isLuks) exit 0 ;; luksDump) cat "$GATE_T/cut_dump.txt" ;; esac; exit 0'
+: > "$LOG"; out="$(run tick 2>&1)"
+chk "cut off after the header: the moved 16 MiB goes back over it" \
+    "$(grep -c "^dd if=$R/srv/joinery.img of=$R/srv/joinery.img bs=1M iflag=skip_bytes,count_bytes oflag=seek_bytes conv=notrunc,fsync skip=11827937280 seek=0 count=16777216 status=none$" "$LOG")" "1"
+chk "the image back to its length, the record still plain, its sealed copies gone, mounted again" \
+    "$(stat -c %s "$R/srv/joinery.img")|$(grep -c '^backing=file$' "$C")|$(ls "$R/etc/joinery/data-root/driving-slot.recovery" "$R/srv/joinery.img.recovery" 2>/dev/null | wc -l)|$(grep -c '^systemctl start joinery-data.target$' "$LOG")|$(grep -c 'start is undone' <<< "$out")" \
+    "11811160064|1|0|1|1"
+sed 's/^  1: linear$/  1: crypt/' "$T/cut_dump.txt" > "$T/cut_dump2.txt"
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in isLuks) exit 0 ;; luksDump) cat "$GATE_T/cut_dump2.txt" ;; esac; exit 0'
+truncate -s 11844714496 "$R/srv/joinery.img"; rm -f "$T/mounted"; : > "$LOG"; out="$(run tick 2>&1)"
+chk "a header with data encrypted already: left for a person, nothing written" "$(grep -c '^dd ' "$LOG")|$(grep -c 'left as it is for a person' <<< "$out")" "0|1"
+rm -f "$T/bin/dd"; cp "$T/conf.running" "$C"; cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"; touch "$T/mounted"
 
 echo "--- each site's config/ onto the encrypted data root, once its encryption is done (D9) ---"
 touch "$T/hide_on_mount"; rm -rf "${T:?}/hidden"

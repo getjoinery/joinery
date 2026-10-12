@@ -3,6 +3,8 @@
 # install_host_converger.sh - give this machine one root process that keeps
 # its host converged to the tree deployed on it (specs/host_converger.md).
 #
+# Version: 1.7 - Every host with a data root logs to the journal, not only an encrypted one: a plain data root
+#                that failed to mount stopped the converger, and with it the tick that repairs it (T-F2).
 # Version: 1.6 - The path trigger is not ordered before paths.target: its queue is under cache/,
 #                which an encrypted data root mounts only after the unlock (D10).
 # Version: 1.5 - On an encrypted data root the unit logs to the journal: its log
@@ -214,7 +216,11 @@ if command -v systemctl >/dev/null 2>&1 && [[ -d /run/systemd/system ]]; then
     fi
     OUTPUT_TEXT="StandardOutput=append:${LOG_FILE}
 StandardError=append:${LOG_FILE}"
-    if grep -q '^backing=luks-' /etc/joinery/data_root 2>/dev/null; then
+    # A host with a data root logs to the journal: the log file's folder is
+    # on the data root, and while that is not mounted (locked, or failed to
+    # mount) systemd would fail the unit before it starts, every minute, and
+    # the tick that repairs the data root would never run.
+    if [[ -f /etc/joinery/data_root ]]; then
         OUTPUT_TEXT="StandardOutput=journal
 StandardError=journal"
     fi

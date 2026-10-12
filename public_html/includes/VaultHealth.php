@@ -22,6 +22,7 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.11 - the converger's advice names the journal: on a host with a data root it logs there
  * @version 1.10 - on an encrypted data root, a row for its break-glass copy: there is one, sealed to a
  *                 key that is held (specs/hosted_data_promise_disk_encryption.md WP4)
  * @version 1.9 - the unsigned row also lists extensions recorded 'unlogged' (signed by us, not in the
@@ -242,11 +243,11 @@ class VaultHealth {
 		}
 		if ($facts['outcome'] === 'installer-failed') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-				'reason' => 'The host converger ran but an installer failed; see logs/host_converger.log on the host.'];
+				'reason' => 'The host converger ran but an installer failed; see journalctl -u joinery-host-converger on the host (logs/host_converger.log on a host with no data root).'];
 		}
 		if ($facts['outcome'] === 'installer-refused') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
-				'reason' => 'The host converger refused to run an installer it could not attribute — one is owned by the wrong account or is writable by more than its owner. See logs/host_converger.log on the host.'];
+				'reason' => 'The host converger refused to run an installer it could not attribute — one is owned by the wrong account or is writable by more than its owner. See journalctl -u joinery-host-converger on the host (logs/host_converger.log on a host with no data root).'];
 		}
 		// The converger is also what carries out root requests, so a queue that
 		// is not moving is the same fact as a converger that is not running,

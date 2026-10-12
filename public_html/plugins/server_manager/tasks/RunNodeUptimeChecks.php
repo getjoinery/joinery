@@ -21,6 +21,7 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.11 - a probe that does not find it locked ends the locked state (one failure after an unlock left it shown locked)
  * @version 2.10 - locked is its own state (mgn_uptime_locked_since), from either check, never down
  *                 (specs/hosted_data_promise_disk_encryption.md D2b)
  * @version 2.9 - a claim past its budget is failed as lost (ManagementJob::failStaleClaims), never returned to the queue
@@ -432,7 +433,14 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	private function apply_state($node, bool $ok, string $message = ''): string {
 		$prev_status = $node->get('mgn_uptime_last_status');
 
+		// A probe that did not find it locked ends the locked state: it is
+		// unlocked, and a failure counts toward down as on any machine that
+		// was up, rather than leaving it shown as locked.
 		$node->set('mgn_uptime_locked_since', NULL);
+		if ($prev_status === 'locked') {
+			$node->set('mgn_uptime_last_status', 'up');
+			$prev_status = 'up';
+		}
 		if ($ok) {
 			$node->set('mgn_uptime_last_status', 'up');
 			$node->set('mgn_uptime_consecutive_failures', 0);
