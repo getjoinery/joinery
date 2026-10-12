@@ -7,6 +7,9 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.7 - The lists state their own bullets (the admin theme resets list-style, so "What the agent does" showed as
+ *                plain lines); Extra permissions names every log and host file the switch opens, as always-visible bullets,
+ *                in place of the "What can it read?" disclosure
  * @version 1.6 - Page heading; one Management card (status, connection, fingerprint, connect/disconnect), a list of what the
  *                agent does, a Log access section, and a guarded foot: turning the agent off needs the words
  *                "disable agent" typed into a confirmation dialog
@@ -191,9 +194,11 @@ if ($is_managed) {
 echo '</div></div>';
 
 // ---- What the agent does (illustrative, not exhaustive) -------------------
+// The admin theme resets every list to list-style:none, so the lists on this page state their own bullets.
+$bullets = 'list-style:disc;padding-left:1.25rem;margin:0 0 .75rem;';
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">What the agent does</h5>';
-echo '<ul class="mb-0">'
+echo '<ul style="' . $bullets . '">'
    . '<li>Takes and checks backups of this site</li>'
    . '<li>Applies code upgrades and database updates</li>'
    . '<li>Checks that the site, database and disk are healthy</li>'
@@ -214,17 +219,54 @@ if ($log_access_switched === 'on') {
 }
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">Extra permissions: logs and host configuration <span class="badge ' . ($log_access ? 'bg-success' : 'bg-secondary') . '">' . ($log_access ? 'On' : 'Off') . '</span></h5>';
-echo '<p class="text-muted mb-2">Lets a connected management node read redacted log excerpts and host configuration. '
-   . 'Member data and keys are never sent. On by default; no effect until connected.</p>';
-echo '<details class="mb-3"><summary>What can it read?</summary>'
-   . '<p class="text-muted mt-2 mb-0">A management node this machine is connected to can ask for: the last lines of the site\'s '
-   . 'error and task logs; the newest rows of the login, request, event, form-error and webhook logs; the last lines of a '
-   . 'service\'s journal (Apache, PostgreSQL, cron, fail2ban and the agent among them); and the first lines of the host\'s '
-   . 'configuration files (fail2ban, Apache, PHP, logging, scheduled tasks, updates, Docker, mail settings). '
-   . 'Member data and keys are never sent: member addresses, submitted forms and raw payloads are left out entirely, files that '
-   . 'hold a key or a password are never read, and passwords, tokens, addresses and the personal half of email addresses are '
-   . 'masked on this machine before anything is sent. '
-   . 'When off, every such request is refused here, and the management node is told why.</p></details>';
+echo '<p class="mb-2">Turning this on lets a connected management node read the files below, and only these. '
+   . 'On by default; it has no effect until this machine is connected.</p>';
+
+echo '<p class="mb-1"><strong>Site logs</strong> <span class="text-muted small">(last 200 lines, and the previous day\'s copy)</span></p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>Error log: <code>logs/error.log</code></li>'
+   . '<li>Scheduled tasks log: <code>logs/cron_scheduled_tasks.log</code></li>'
+   . '<li>AI worker log: <code>logs/joinery_ai_worker.log</code></li>'
+   . '<li>Install executor log: <code>logs/install_executor.log</code></li>'
+   . '<li>Host converger log: <code>logs/host_converger.log</code></li>'
+   . '<li>PostgreSQL cluster log</li>'
+   . '</ul>';
+
+echo '<p class="mb-1"><strong>Database logs</strong> <span class="text-muted small">(newest 200 rows, selected columns only)</span></p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>Logins: who and when, not the address</li>'
+   . '<li>Requests: feature, action, result and timing, not the address</li>'
+   . '<li>Events</li>'
+   . '<li>Form errors: the error and the page, not what was typed</li>'
+   . '<li>Webhooks: provider, event and result, not the payload</li>'
+   . '</ul>';
+
+echo '<p class="mb-1"><strong>System service logs</strong> <span class="text-muted small">(last 200 lines)</span></p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>Apache, PostgreSQL, cron, fail2ban and the Joinery agent</li>'
+   . '<li>Unattended upgrades, apt-daily, apt-daily-upgrade, logrotate, fstrim, e2scrub_all and man-db</li>'
+   . '</ul>';
+
+echo '<p class="mb-1"><strong>Host configuration files</strong> <span class="text-muted small">(first 400 lines)</span></p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>fail2ban: <code>/etc/fail2ban/jail.local</code>, <code>jail.d/joinery-sshd.local</code>, <code>jail.d/joinery-apache.local</code></li>'
+   . '<li>Apache: <code>/etc/apache2/apache2.conf</code>, <code>mods-available/mpm_event.conf</code>, <code>conf-available/joinery-remoteip.conf</code>, this site\'s <code>sites-available</code> files</li>'
+   . '<li>PHP-FPM: <code>/etc/php/*/fpm/php.ini</code></li>'
+   . '<li>Logging: <code>/etc/systemd/journald.conf.d/size-limit.conf</code>, this site\'s <code>/etc/logrotate.d</code> file</li>'
+   . '<li>Scheduled tasks: this site\'s, the agent\'s and certbot\'s files in <code>/etc/cron.d/</code></li>'
+   . '<li>Updates: <code>/etc/apt/apt.conf.d/20auto-upgrades</code>, <code>50unattended-upgrades</code></li>'
+   . '<li>Docker: <code>/etc/docker/daemon.json</code></li>'
+   . '<li>Hardening: <code>/etc/sysctl.d/99-security.conf</code></li>'
+   . '<li>Mail: <code>/etc/postfix/main.cf</code>, <code>master.cf</code>, and the rspamd files in <code>/etc/rspamd/local.d/</code> and <code>override.d/options.inc</code></li>'
+   . '</ul>';
+
+echo '<p class="mb-1"><strong>Never read or sent</strong></p>';
+echo '<ul style="' . $bullets . '">'
+   . '<li>Member addresses, submitted form contents and webhook payloads</li>'
+   . '<li>Files holding keys or passwords, such as the mail signing keys, the certificates and <code>Globalvars_site.php</code></li>'
+   . '<li>Passwords, tokens and the personal half of email addresses are masked on this machine before anything leaves it</li>'
+   . '</ul>';
+echo '<p class="text-muted small mb-3">When this is off, every such request is refused here and the management node is told why.</p>';
 echo '<form method="POST" action="' . $self . '" class="d-inline">'
    . '<input type="hidden" name="action" value="' . ($log_access ? 'log_access_off' : 'log_access_on') . '">'
    . '<button type="submit" class="btn btn-sm ' . ($log_access ? 'btn-outline-secondary' : 'btn-primary') . '">'
