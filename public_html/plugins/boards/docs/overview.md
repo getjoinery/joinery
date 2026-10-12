@@ -129,7 +129,7 @@ Six signals, declared in `plugin.json`. Five have `default_email: true` (a perso
 | `boards.card_activity` | the card's watchers | a comment, a move to another list, a due date change, done, an attachment |
 | `boards.card_created` | board watchers | a new card on the board |
 | `boards.due_soon` | card members (or the item's assignee) | `boards_due_reminder_hours` before the due time |
-| `boards.email_refused` | the member whose address it was | an email to their board address came from an address that isn't theirs (at most once an hour) |
+| `boards.email_refused` | the member whose address it was | an email to their board address made no card: it came from an address that isn't theirs, or the board could not take it (archived, view-only, no list yet); at most one an hour |
 
 A card's watchers are its members, anyone who commented and anyone who pressed Watch, minus anyone who pressed Unwatch, and only people who can still open the board. Nobody is told about their own action, and when one action would reach a person twice (an @mention in a comment on a card they watch) only the mention is sent. A mention counts only when the person's `@name` is in the text and they can open the board. `BoardsDueReminders` (every run) reminds once per due time: it records the due time it reminded about in `*_reminder_sent_for_due_time`, so it sends again only if the date moves. Done, archived and template cards are skipped.
 

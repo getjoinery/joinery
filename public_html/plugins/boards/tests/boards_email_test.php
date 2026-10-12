@@ -299,18 +299,43 @@ bem_send($wrong_board_addr, $editor_mail, 'Using someone else\'s address', 'x', 
 check(count(bem_cards((int)$other_board->key)) === $other_cards_before && count(bem_cards((int)$board->key)) === $cards_now,
 	'a member\'s mail to the owner\'s address is not the owner: no card anywhere');
 
+// A member who can still see the board is told why their mail made no card, within the same
+// once-an-hour allowance, so each case below starts with the earlier notice an hour old.
+$age_notices = function () use ($db, $editor) {
+	$db->exec("UPDATE ntf_notifications SET ntf_create_time = now() - interval '2 hours' WHERE ntf_usr_user_id = " . (int)$editor . " AND ntf_title LIKE '%Email not used'");
+};
+$told_with = function (string $phrase) use ($notes, $editor): bool {
+	$notes->execute(array($editor));
+	foreach ($notes->fetchAll(PDO::FETCH_ASSOC) as $n) {
+		if (stripos($n['ntf_body'], $phrase) !== false) { return true; }
+	}
+	return false;
+};
+
+$age_notices();
 BoardsManager::setRole($board, BoardsManager::memberOn($board, boards_member_id($board, $editor)), 'viewer');
 Boards::forgetRoles();
 bem_send($back, $editor_mail, 'After being demoted', 'x', $pass);
 check(count(bem_cards((int)$board->key)) === $cards_now, 'an editor demoted to viewer since the address was made: no card, though the address still resolves');
+check($told_with('only view this board'), 'and the member is told they can only view the board');
 check(InboundPersonalAddress::resolve('boards', $token) !== null, 'and the address was not revoked on access loss');
 BoardsManager::setRole($board, BoardsManager::memberOn($board, boards_member_id($board, $editor)), 'editor');
 Boards::forgetRoles();
 
+$age_notices();
 BoardsManager::archiveBoard($board);
 bem_send($back, $editor_mail, 'To an archived board', 'x', $pass);
 check(count(bem_cards((int)$board->key)) === $cards_now, 'an archived board is read-only: no card');
+check($told_with('archived'), 'and the member is told the board is archived');
 BoardsManager::restoreBoard($board);
+
+$age_notices();
+$empty_board = BoardsManager::createBoard($editor, 'No lists ' . $suffix);
+harness_register_model('Board', (int)$empty_board->key);
+$empty_addr = BoardsEmail::addressFor($empty_board, $editor);
+bem_send($empty_addr, $editor_mail, 'To a board with no list', 'x', $pass);
+check(count(bem_cards((int)$empty_board->key)) === 0, 'a board with no list has nowhere to put a card');
+check($told_with('no list yet'), 'and the member is told to add a list');
 
 $db->exec("UPDATE usr_users SET usr_is_disabled = true WHERE usr_user_id = " . $editor);
 bem_send($back, $editor_mail, 'From a disabled account', 'x', $pass);

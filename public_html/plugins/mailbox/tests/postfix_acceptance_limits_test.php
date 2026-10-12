@@ -114,4 +114,14 @@ check(preg_match('/const spamhausTestName = "' . preg_quote(InboundEmailSetupChe
 	(string)@file_get_contents($dir . 'provisioning/relay-sealer/relay_apply.go')) === 1,
 	'a relay asks the same test entry');
 
+section('A +tag is accepted only through the handler alias rule');
+
+// Ubuntu's stock Postfix has recipient_delimiter = +, and with it the recipient access
+// map answers plain+anything@ from plain@'s entry: accepted at SMTP time, then dropped
+// by the sealer, which is a bounce to a sender who may be forged. A relay empties it.
+check(preg_match('/^postconf_set "recipient_delimiter" ""$/m', $relay) === 1,
+	'a relay turns address-extension stripping off');
+check(preg_match('/^RELAY_VERSION="(\d+\.\d+)"/m', $relay, $m) === 1 && version_compare($m[1], '3.10', '>='),
+	'and the relay that does so is 3.10 or later', $m[1] ?? '');
+
 harness_finish();

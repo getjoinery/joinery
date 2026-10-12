@@ -423,7 +423,7 @@ private static function UcName($string) {
 			$user->set('usr_last_name', strip_tags(trim($last_name)));	
 			$user->set('usr_password', $temp_password_hashed);	
 			$user->set('usr_signup_ip', $_SERVER['REMOTE_ADDR']);
-			if($data['usr_nickname']){
+			if(!empty($data['usr_nickname'])){
 				$user->set('usr_nickname', strip_tags(trim($data['usr_nickname'])));
 			}		
 
@@ -490,7 +490,7 @@ private static function UcName($string) {
 					$tdata['password'] = $data['password'];
 				}
 
-				if($data['usr_nickname']){
+				if(!empty($data['usr_nickname'])){
 					$tdata['usr_nickname'] = $data['usr_nickname'];
 				}
 

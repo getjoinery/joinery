@@ -13,7 +13,7 @@ function admin_user_add_logic(array $input): LogicResult {
 
 	if (LibraryFunctions::isFormSubmission()){
 
-		$user = User::CreateCompleteNew($input, $input['send_activation_email'], false, false);
+		$user = User::CreateCompleteNew($input, !empty($input['send_activation_email']), false, false);
 
 		//NOW REDIRECT
 		$session = SessionControl::get_instance();

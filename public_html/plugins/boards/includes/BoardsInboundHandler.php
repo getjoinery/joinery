@@ -12,20 +12,22 @@
  *      (InboundPersonalAddress::senderIs);
  *   3. their account is active, the board is open to them as an editor, and it is not archived.
  *
- * Mail that fails a check is left stored and not acted on. Only a failure of the second check
- * tells the member anything ("an email to your board address came from an address that isn't
- * yours"), and only once an hour, so a leaked address cannot be used to flood their
- * notifications.
+ * Mail that fails a check is left stored and not acted on. The member is told why, in the app,
+ * when the sender is not their address, or when it is their address and the board cannot take
+ * the card (archived, view-only, no list yet): one notice an hour in all, so a leaked address
+ * cannot be used to flood their notifications. A member who has lost access to the board, or
+ * whose account is not active, is told nothing.
  *
  * Declared in plugin.json (`inboundHandlers`). Implements the mailbox plugin's interface, so
  * it exists only while that plugin is active.
  *
+ * @version 1.1.0 - the member is told why when their own email could not become a card
  * @version 1.0.0
  */
 
 class BoardsInboundHandler implements InboundAddressHandler {
 
-	/** Seconds between two "came from an address that isn't yours" notices for one member. */
+	/** Seconds between two "Email not used" notices for one member. */
 	const REFUSAL_NOTICE_INTERVAL = 3600;
 
 	public function handle(InboundEmailMessage $msg, ?string $tag): bool {
@@ -52,19 +54,30 @@ class BoardsInboundHandler implements InboundAddressHandler {
 		}
 
 		if (!InboundPersonalAddress::senderIs($msg, $user)) {
-			self::tellRefused($user_id, $board);
+			self::tellRefused($user_id, $board, 'An email to your board address came from an address that isn\'t yours, so no card was made.');
 			return false;
 		}
 
 		// The role is read now, not when the address was made: an address held by someone
-		// who has since lost access is harmless.
-		if (!Boards::roleAtLeast(Boards::roleFor($board, $user_id), Boards::ROLE_EDITOR) || $board->is_archived()) {
+		// who has since lost access is harmless, and says nothing about the board. A member
+		// who can still see the board is told why their email made no card.
+		$role = Boards::roleFor($board, $user_id);
+		if ($role === null) {
+			return false;
+		}
+		if ($board->is_archived()) {
+			self::tellRefused($user_id, $board, 'This board is archived, so your email did not make a card.');
+			return false;
+		}
+		if (!Boards::roleAtLeast($role, Boards::ROLE_EDITOR)) {
+			self::tellRefused($user_id, $board, 'You can only view this board, so your email did not make a card.');
 			return false;
 		}
 
 		$list = BoardsEmail::landingList($board);
 		if ($list === null) {
-			return false;      // a board with no list has nowhere to put a card
+			self::tellRefused($user_id, $board, 'This board has no list yet, so your email had nowhere to go. Add a list and send it again.');
+			return false;
 		}
 
 		try {
@@ -86,7 +99,7 @@ class BoardsInboundHandler implements InboundAddressHandler {
 	 * Rate-limited per member: the address is a secret, but a leaked one should not turn
 	 * into a notification flood.
 	 */
-	private static function tellRefused(int $user_id, Board $board): void {
+	private static function tellRefused(int $user_id, Board $board, string $summary): void {
 		$q = DbConnector::GetPreparedStatement(
 			"SELECT 1 FROM ntf_notifications WHERE ntf_usr_user_id = ? AND ntf_title LIKE ? AND ntf_create_time > now() - (? * interval '1 second') LIMIT 1");
 		$q->execute(array($user_id, '[%] Email not used', self::REFUSAL_NOTICE_INTERVAL));
@@ -96,7 +109,7 @@ class BoardsInboundHandler implements InboundAddressHandler {
 		SignalBus::dispatch('boards.email_refused', array(
 			'board_name' => mb_substr(trim(preg_replace('/\s+/', ' ', (string)$board->get('bbd_name'))), 0, 80),
 			'board_url'  => '/profile/boards/board?id=' . (int)$board->key,
-			'summary'    => 'An email to your board address came from an address that isn\'t yours, so no card was made.',
+			'summary'    => $summary,
 			'recipients' => array($user_id),
 		));
 	}
