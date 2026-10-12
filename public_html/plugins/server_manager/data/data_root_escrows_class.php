@@ -28,6 +28,7 @@
  * known (seen from its node's host report, never enrolled: a holder unlock can
  * still answer it), retired.
  *
+ * @version 1.2 - address_moved(): an IP swap this management node makes moves the rows' stated and seen addresses
  * @version 1.1 - Tier 2 (D3): the provider event that refused a boot, and the owner's excuse for it
  * @version 1.0
  */
@@ -248,6 +249,41 @@ class DataRootEscrow extends SystemBase {
 			$seen[] = inet_ntop(IpAddress::binary($addr));
 			$this->set('dre_seen_addresses', json_encode(array_slice($seen, -16)));
 		}
+	}
+
+	/**
+	 * This management node moved a machine's address (IpSwapMove): the rows of
+	 * node $node_id that state or have seen $from name $to instead, so the
+	 * machine's next boot asks from an address it may, and whatever machine
+	 * holds $from now does not inherit its standing. Calling it again changes
+	 * nothing. Returns how many rows changed.
+	 */
+	public static function address_moved(int $node_id, string $from, string $to): int {
+		if (!$node_id || IpAddress::binary($from) === null || IpAddress::binary($to) === null) {
+			return 0;
+		}
+		$n = 0;
+		foreach (new MultiDataRootEscrow(array('node' => $node_id, 'live' => true)) as $row) {
+			$changed = false;
+			foreach (array('dre_addresses', 'dre_seen_addresses') as $col) {
+				$list = self::list_of($row->get($col));
+				$out = array();
+				foreach ($list as $a) {
+					$moved = IpAddress::same($a, $from);
+					$changed = $changed || $moved;
+					$a = $moved ? $to : $a;
+					if (!IpAddress::in($a, $out)) {
+						$out[] = $a;
+					}
+				}
+				$row->set($col, json_encode($out));
+			}
+			if ($changed) {
+				$row->save();
+				$n++;
+			}
+		}
+		return $n;
 	}
 
 	public function address_allowed(string $addr): bool {

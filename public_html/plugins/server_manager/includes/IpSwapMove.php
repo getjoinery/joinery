@@ -36,6 +36,7 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.3 - an escrow row held here follows its machine's address (encrypted data root D3)
  * @version 1.2 - each of our accounts is its own account: two servers swap only within one (cloud_accounts_list)
  * @version 1.1 - a container site's shared server is never swapped or powered off
  * @version 1.0
@@ -371,6 +372,11 @@ class IpSwapMove {
 			if (!$node_id || !isset($ip_of[$inst])) {
 				continue;
 			}
+			// An encrypted data root's escrow holder here answers its boot
+			// only from addresses it knows (D3): the one this machine gave up
+			// becomes the one it holds now.
+			$gave_up = (string)$ip_of[$inst] === $old[0] ? $old[1] : $old[0];
+			DataRootEscrow::address_moved($node_id, $gave_up, (string)$ip_of[$inst]);
 			$node = new ManagedNode($node_id, TRUE);
 			$host = trim((string)$node->get('mgn_host'));
 			$packed = @inet_pton($host);

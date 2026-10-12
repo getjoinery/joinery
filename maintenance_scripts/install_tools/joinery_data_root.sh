@@ -4,6 +4,26 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.15 - A change of volume key keeps its rewrite area to 8 MiB, so the open after a crash part-way is
+#                 minutes, not most of an hour, on network block storage (T-F2).
+# Version: 1.14 - The filesystem is made with 4096-byte sectors: an in-place encryption keeps the filesystem's sector
+#                 size, and with 512 it read sequentially at 527 MB/s against 1246 on a 1 GB Linode (T-S).
+# Version: 1.13 - A change of several keys in the record is one rename (T-F2: a cut between two left half a
+#                 change); the undo has udev re-read a device it put back.
+# Version: 1.12 - What a boot or a recovery relies on is fsynced before it is relied on: the record, units, fstab,
+#                 the sealed copies and the decrypt header (T-F2: a cut left the run's unit empty, so masked).
+# Version: 1.11 - The tick starts an encryption's (or its undo's) run that is recorded and not running.
+# Version: 1.10 - A plain data root on a device keeps its last 32 MiB outside the filesystem, made and grown: the
+#                 tick grew into the room an in-place encrypt's header needs (T-F2).
+# Version: 1.9 - encrypt starts only once every mount of the data root's filesystem is gone: a busy bind kept it
+#                live on its old loop device while the volume was written (T-F2). Services that keep a file there
+#                (rsyslog's socket in Postfix's chroot) are stopped for the start and started again.
+# Version: 1.8 - An encrypt cut off in its start after cryptsetup wrote the header, before any data was encrypted,
+#                is undone by the next tick (T-F2): the moved data goes back and the data root mounts plain.
+# Version: 1.7 - A first size made without SIZE leaves 2 GiB above the root disk's reserve for the rest of
+#                the install; reopen_logs no longer reports a finished move as failed.
+# Version: 1.6 - The agent is always /usr/local/bin/joinery-agent: install.sh places the release's binary there
+#                before create --encrypted, so no other path is taken from the environment.
 # Version: 1.5 - move-in REL TARGET: a folder that holds data moved onto the data root where it
 #                stands, with no moment its path is missing. On an encrypted data root each
 #                bare-metal site's config/ is moved in once its encryption is finished (encrypt,
@@ -250,9 +270,6 @@ UNLOCK_UNIT="joinery-data-unlock.service"
 # The agent binary seals and opens the break-glass copy and opens the volume
 # at boot; it is on the root disk, so it needs nothing from the data root.
 AGENT_BIN="${ROOT}/usr/local/bin/joinery-agent"
-# An install that has not placed the agent yet names the release's own binary,
-# unpacked for this run (install.sh encrypted_data_root_prepare).
-[[ -n "${JOINERY_AGENT_BIN:-}" && -x "${JOINERY_AGENT_BIN}" ]] && AGENT_BIN="$JOINERY_AGENT_BIN"
 DATA_ROOT_DIR="${ROOT}/etc/joinery/data-root"
 RECIPIENT="${DATA_ROOT_DIR}/recovery_recipient"
 # The break-glass copy: beside the image, or, for a device, on the root disk.
@@ -300,6 +317,8 @@ FIRST_ROOT_PCT=25               # ...and this share of the root disk
 CREATE_FLOOR=$((4 * GIB))       # less than this to give: not made
 RESERVE_MIN=$((6 * GIB))        # the root disk keeps the larger of this...
 RESERVE_PCT=15                  # ...and this share of itself
+INSTALL_ROOM=$((2 * GIB))       # a first size made without SIZE also leaves this: the rest of an
+                                # install lands on the root disk after it (1.1 GiB measured, bare metal)
 GROW_WHEN_MIN=$((8 * GIB))      # grow when free is under the larger of this...
 GROW_WHEN_PCT=20                # ...and this share of the data root
 GROW_PLUS=$((12 * GIB))         # grow to at least used plus this
@@ -420,6 +439,29 @@ bind_ok() {  # REL TARGET
 }
 
 # The data root is mounted at /srv/joinery, XFS, with project quotas on.
+# The device number (major:minor) of the filesystem mounted at a path, or nothing.
+fs_id_at() {  # PATH
+    awk -v m="$1" '$5 == m { print $3; exit }' "${ROOT}/proc/self/mountinfo" 2>/dev/null || true
+}
+
+# The services whose processes keep a file under these mountpoints, but never
+# the agent, the journal, cron (a job would die), ssh or the data root's own.
+holder_units() {  # MOUNTPOINT...
+    local m pid
+    for m in "$@"; do
+        for pid in $(fuser -m "${ROOT}${m}" 2>/dev/null); do
+            sed -n 's#^0::/system\.slice/\(.*/\)\{0,1\}\([^/]*\.service\)$#\2#p' "${ROOT}/proc/${pid}/cgroup" 2>/dev/null
+        done
+    done | sort -u | grep -v -x -e joinery-agent.service -e systemd-journald.service -e cron.service -e ssh.service \
+        -e "$UNLOCK_UNIT" -e "$ENCRYPT_UNIT" || true
+}
+
+# Every mountpoint where the filesystem with this device number is still mounted.
+mounts_of_fs() {  # MAJ:MIN
+    [[ -n "$1" ]] || return 0
+    { awk -v d="$1" '$3 == d { print $5 }' "${ROOT}/proc/self/mountinfo" 2>/dev/null || true; } | paste -sd' '
+}
+
 mounted_ok() {
     local fstype opts
     read -r fstype opts < <(findmnt -n -o FSTYPE,OPTIONS --mountpoint "$MNT" 2>/dev/null || true) || true
@@ -745,6 +787,19 @@ consumer_units() {
 }
 
 # Write PATH with TEXT when it differs: 0 written, 1 already right, 2 failed.
+# A file a boot or a recovery relies on is on disk, and so is its folder's
+# entry for it. A new file's data is otherwise lost to a power cut seconds
+# after it is written (ext4 keeps only a replaced file's): T-F2 found the
+# encryption run's unit empty, so masked, after one.
+durable() {  # PATH...
+    local p
+    for p in "$@"; do
+        [[ -e "$p" ]] && sync -- "$p" 2>/dev/null
+        sync -- "$(dirname "$p")" 2>/dev/null
+    done
+    return 0
+}
+
 write_if_changed() {  # PATH TEXT
     if [[ -f "$1" ]] && [[ "$(cat "$1")" == "$2" ]]; then
         return 1
@@ -752,7 +807,8 @@ write_if_changed() {  # PATH TEXT
     { mkdir -p "$(dirname "$1")" \
         && printf '%s\n' "$2" > "$1.tmp.$$" \
         && chmod 644 "$1.tmp.$$" \
-        && mv -f "$1.tmp.$$" "$1"; } || { rm -f "$1.tmp.$$"; return 2; }
+        && { sync -- "$1.tmp.$$" 2>/dev/null; mv -f "$1.tmp.$$" "$1"; }; } || { rm -f "$1.tmp.$$"; return 2; }
+    durable "$1"
     return 0
 }
 
@@ -843,7 +899,7 @@ ensure_units() {
         fi
         systemctl enable "$TARGET_UNIT" >/dev/null 2>&1 || true
         [[ "$backing" == "file" ]] && { systemctl enable "$DIO_UNIT" >/dev/null 2>&1 || true; }
-        [[ -n "$(conf_get reencrypt)" ]] && { systemctl enable "$ENCRYPT_UNIT" >/dev/null 2>&1 || true; }
+        [[ -n "$(conf_get reencrypt)" ]] && { systemctl enable "$ENCRYPT_UNIT" >/dev/null 2>&1 || true; durable "${SYSTEMD_DIR}/${TARGET_UNIT}.wants/${ENCRYPT_UNIT}"; }
         [[ -f "${SYSTEMD_DIR}/${JOURNAL_FLUSH_UNIT}" ]] && { systemctl enable "$JOURNAL_FLUSH_UNIT" >/dev/null 2>&1 || true; }
         say "data root: units written"
     fi
@@ -922,6 +978,7 @@ luks_make() {  # DEV SIDECAR_REAL
         || { rm -f "${sidecar}.tmp.$$"; die "could not seal the volume key to the recovery key"; }
     chmod 600 "${sidecar}.tmp.$$"
     mv -f "${sidecar}.tmp.$$" "$sidecar"
+    durable "$sidecar"
     CREATE_MADE+=("$sidecar")
     say "Encrypting the data root (LUKS2, aes-xts-plain64, 512-bit key)..."
     cryptsetup luksFormat --batch-mode "${LUKS_FORMAT[@]}" "${LUKS_SLOT[@]}" --key-slot 0 \
@@ -1019,7 +1076,15 @@ do_create() {
             fs_dev="$device"
         fi
         say "Formatting ${device} for the data root..."
-        mkfs.xfs -q -n ftype=1 "$fs_dev" || die "could not format ${device}"
+        local -a fs_size=()
+        if (( ! encrypted )); then
+            # The last 32 MiB stay outside the filesystem: an in-place encrypt
+            # puts its header there, with nothing to ask of the provider (D5).
+            local dbytes
+            dbytes="$(blockdev --getsize64 "${ROOT}${device}" 2>/dev/null || true)"
+            [[ "$dbytes" =~ ^[0-9]+$ ]] && (( dbytes > 2 * ENCRYPT_HEADER_ROOM )) && fs_size=(-d "size=$(( (dbytes - ENCRYPT_HEADER_ROOM) / 4096 * 4096 ))")
+        fi
+        mkfs.xfs -q -n ftype=1 -s size=4096 "${fs_size[@]}" "$fs_dev" || die "could not format ${device}"
         mkdir -p "$(dirname "$CONF")"
         if (( encrypted )); then
             printf '# Written by joinery_data_root.sh (specs/hosted_data_promise_disk_encryption.md). What backs %s.\nbacking=luks-device\nsource=%s\nuuid=%s\nsidecar=%s\n' \
@@ -1042,9 +1107,16 @@ do_create() {
             # D7: modest, and grown as it fills.
             local rsize
             read -r rsize _ _ < <(df_bytes "$(root_disk_path)") || die "could not read the root disk's size"
+            # The install goes on writing to the root disk after this (its
+            # packages, the site's tree), so the first size leaves room for
+            # that above the reserve: otherwise a small root disk ends the
+            # install under its reserve, where the data root cannot grow, an
+            # in-place encrypt has no room for its header, and disk_headroom
+            # opens a case on a new machine.
+            local room=$(( givable > INSTALL_ROOM ? givable - INSTALL_ROOM : 0 ))
             bytes="$(max "$FIRST_MIN" $(( rsize * FIRST_ROOT_PCT / 100 / GIB * GIB )))"
-            (( bytes <= givable )) || bytes=$(( givable / GIB * GIB ))
-            (( bytes >= CREATE_FLOOR )) || die "the root disk can give the data root only $(gib "$givable") above its reserve; a data root needs at least $(gib "$CREATE_FLOOR")"
+            (( bytes <= room )) || bytes=$(( room / GIB * GIB ))
+            (( bytes >= CREATE_FLOOR )) || die "the root disk can give the data root only $(gib "$room") above its reserve and the $(gib "$INSTALL_ROOM") an install still needs; a data root needs at least $(gib "$CREATE_FLOOR")"
         fi
         say "Allocating the data root: $(gib "$bytes") at ${IMAGE_REAL}..."
         mkdir -p "$(dirname "$IMAGE")"
@@ -1060,7 +1132,7 @@ do_create() {
         fi
         # ftype=1: overlay2, Docker's storage driver, needs the file type in
         # directory entries; a data root is the same filesystem everywhere.
-        mkfs.xfs -q -n ftype=1 "$fs_dev" || { rm -f "$IMAGE"; die "could not format the data root"; }
+        mkfs.xfs -q -n ftype=1 -s size=4096 "$fs_dev" || { rm -f "$IMAGE"; die "could not format the data root"; }
         mkdir -p "$(dirname "$CONF")"
         if (( encrypted )); then
             printf '# Written by joinery_data_root.sh (specs/hosted_data_promise_disk_encryption.md). What backs %s.\nbacking=luks-file\nsource=%s\nsidecar=%s\n' \
@@ -1345,8 +1417,9 @@ reopen_logs() {
                 say "data root: WARNING: ${unit} still writes a log it had open on the root disk; it moves at its next restart"
             fi
         done
-        [[ "$pass" == reload ]] && sleep 2
+        if [[ "$pass" == reload ]]; then sleep 2; fi
     done
+    return 0
 }
 
 log_holders() {
@@ -2112,6 +2185,12 @@ INSTALLED_SELF_REAL="/usr/local/sbin/joinery-data-root"
 # Room past the end of the filesystem for the LUKS2 header (D5): the default
 # 16 MiB of metadata and keyslots, doubled, as cryptsetup's own example.
 ENCRYPT_HEADER_ROOM=$((32 * 1024 * 1024))
+# A change of volume key keeps a checksum of each sector of the area it is
+# rewriting, and after a crash rewrites that area sector by sector before the
+# volume opens. Left to cryptsetup the area is as large as the header has room
+# for checksums: with 512-byte sectors on network block storage the next open
+# took longer than 15 minutes (T-F2). Capped, that open takes a minute or two.
+REKEY_HOTZONE="8M"
 
 encrypt_unit_text() {
     cat <<EOF
@@ -2155,23 +2234,32 @@ install_self() {
 
 # The fstab line of an unencrypted data root: there, or gone.
 fstab_line() {  # present|absent
-    local uuid line
-    awk -v m="$FSTAB_MARK" 'BEGIN { skip = 0 } $0 == m { skip = 1; next } skip == 1 { skip = 0; next } { print }' "$FSTAB" > "${FSTAB}.tmp.$$" 2>/dev/null \
-        && mv -f "${FSTAB}.tmp.$$" "$FSTAB" || rm -f "${FSTAB}.tmp.$$"
-    [[ "$1" == "present" ]] || return 0
-    case "$(conf_get backing)" in
-        file)   line="${IMAGE_REAL} ${MNT_REAL} xfs loop,prjquota,nofail 0 0" ;;
-        device) uuid="$(conf_get uuid)"; line="UUID=${uuid} ${MNT_REAL} xfs prjquota,nofail 0 0" ;;
-        *) return 0 ;;
-    esac
-    printf '%s\n%s\n' "$FSTAB_MARK" "$line" >> "$FSTAB"
+    local uuid line=""
+    if [[ "$1" == "present" ]]; then
+        case "$(conf_get backing)" in
+            file)   line="${IMAGE_REAL} ${MNT_REAL} xfs loop,prjquota,nofail 0 0" ;;
+            device) uuid="$(conf_get uuid)"; line="UUID=${uuid} ${MNT_REAL} xfs prjquota,nofail 0 0" ;;
+        esac
+    fi
+    { awk -v m="$FSTAB_MARK" 'BEGIN { skip = 0 } $0 == m { skip = 1; next } skip == 1 { skip = 0; next } { print }' "$FSTAB" 2>/dev/null
+      [[ -z "$line" ]] || printf '%s\n%s\n' "$FSTAB_MARK" "$line"; } > "${FSTAB}.tmp.$$" \
+        && sync -- "${FSTAB}.tmp.$$" 2>/dev/null && mv -f "${FSTAB}.tmp.$$" "$FSTAB" && durable "$FSTAB" || rm -f "${FSTAB}.tmp.$$"
+    return 0
 }
 
-conf_set() {  # KEY VALUE ('' removes it)
-    local k="$1" v="${2:-}"
-    awk -F= -v k="$k" '$1 != k' "$CONF" > "${CONF}.tmp.$$" || { rm -f "${CONF}.tmp.$$"; return 1; }
-    [[ -z "$v" ]] || printf '%s=%s\n' "$k" "$v" >> "${CONF}.tmp.$$"
-    chmod 644 "${CONF}.tmp.$$" && mv -f "${CONF}.tmp.$$" "$CONF"
+# KEY VALUE [KEY VALUE...] ('' removes one): every pair in one rename, so a
+# crash between two of them can never leave half a change recorded (T-F2: the
+# start of an encryption recorded its backing, and not its run).
+conf_set() {
+    local keys="" i
+    for (( i = 1; i <= $#; i += 2 )); do keys+="${!i}"$'\n'; done
+    awk -F= -v ks="$keys" 'BEGIN { n = split(ks, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") drop[a[i]] = 1 } !($1 in drop)' "$CONF" > "${CONF}.tmp.$$" \
+        || { rm -f "${CONF}.tmp.$$"; return 1; }
+    while (( $# >= 1 )); do
+        [[ -z "${2:-}" ]] || printf '%s=%s\n' "$1" "$2" >> "${CONF}.tmp.$$"
+        shift; (( $# >= 1 )) && shift
+    done
+    chmod 644 "${CONF}.tmp.$$" && sync -- "${CONF}.tmp.$$" 2>/dev/null; mv -f "${CONF}.tmp.$$" "$CONF" && durable "$CONF"
 }
 
 # What holds the volume now: the image's loop device, made if need be, or the device.
@@ -2295,6 +2383,8 @@ do_encrypt() {
         && chmod 600 "${ROOT}${DRIVING_SIDECAR_REAL}.tmp.$$" && mv -f "${ROOT}${DRIVING_SIDECAR_REAL}.tmp.$$" "${ROOT}${DRIVING_SIDECAR_REAL}" \
         || die "could not seal the driving slot's secret to the recovery key. Nothing was changed."
     "$AGENT_BIN" data-root identity >/dev/null || die "could not make this machine's unlock identity. Nothing was changed."
+    durable "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}" "${DATA_ROOT_DIR}/unlock_identity"
+    sync
     trap - EXIT
 
     # Step 3: offline, seconds. Every consumer stops with the mount (each one
@@ -2303,11 +2393,44 @@ do_encrypt() {
     mapfile -t sockets < <(consumer_sockets | sort -u)
     mapfile -t running < <({ active_consumers; printf '%s\n' "${sockets[@]}"; } | grep -v '^$' | sort -u)
     say "Stopping the data root and its services for the start (seconds)..."
+    # Which filesystem the data root is, so that every mount of it, the
+    # binds included, can be seen to be gone before the volume is written.
+    local fs_id held
+    fs_id="$(fs_id_at "$MNT_REAL")"
     (( ${#sockets[@]} == 0 )) || systemctl stop "${sockets[@]}" || true
     if ! systemctl stop "$MOUNT_UNIT"; then
         (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" 2>/dev/null || true
         rm -f "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}"; rm -rf "$keys"
         die "the data root did not stop; nothing was changed"
+    fi
+    # A bind that something holds open (a cron job's log, a message being
+    # queued) does not unmount, and keeps the filesystem live on its old
+    # loop device: writing the volume under it would interleave with its
+    # writes (T-F2). Nothing starts until it is gone.
+    held="$(mounts_of_fs "$fs_id")"
+    if [[ -n "$held" ]]; then
+        # Services that keep a file there: rsyslog keeps its socket in
+        # Postfix's chroot (/var/spool/postfix/dev/log) on every Ubuntu host.
+        # Stopped for the start and started again with the rest.
+        local -a holders=()
+        # shellcheck disable=SC2086
+        mapfile -t holders < <(holder_units $held)
+        if (( ${#holders[@]} > 0 )); then
+            say "data root: ${holders[*]} keep a file on it; stopping them for the start"
+            systemctl stop "${holders[@]}" 2>/dev/null || true
+            running+=("${holders[@]}")
+            local m
+            for m in $held; do
+                systemctl stop "$(systemd-escape -p --suffix=mount "$m")" 2>/dev/null || umount "$m" 2>/dev/null || true
+            done
+            held="$(mounts_of_fs "$fs_id")"
+        fi
+    fi
+    if [[ -n "$held" ]]; then
+        systemctl start "$TARGET_UNIT" 2>/dev/null || true
+        (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" 2>/dev/null || true
+        rm -f "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}"; rm -rf "$keys"
+        die "the data root's filesystem is still mounted at ${held}: something there would not let go. Nothing was changed; its services are started again. Try again when it is idle."
     fi
     if [[ "$backing" == "file" ]]; then
         losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
@@ -2330,14 +2453,17 @@ do_encrypt() {
     mv -f "${keys}/slot.key" "${ENCRYPT_RUN_DIR}/slot.key"
     rmdir "$keys" 2>/dev/null || true
     # From here the data root is the encrypted volume: no fstab line, its own units.
-    conf_set backing "luks-${backing}"
-    conf_set sidecar "$sidecar_real"
-    [[ "$backing" == "device" ]] && conf_set uuid "$(cryptsetup luksUUID "$dev")"
-    conf_set reencrypt encrypt
-    conf_set driving_slot 0
-    conf_set driving_sidecar "$DRIVING_SIDECAR_REAL"
+    local luks_uuid=""
+    [[ "$backing" == "device" ]] && luks_uuid="$(cryptsetup luksUUID "$dev")"
+    if [[ -n "$luks_uuid" ]]; then
+        conf_set backing "luks-${backing}" sidecar "$sidecar_real" uuid "$luks_uuid" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
+    else
+        conf_set backing "luks-${backing}" sidecar "$sidecar_real" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
+    fi
     fstab_line absent
     ensure_units || say "WARNING: the units could not all be written; see above"
+    # The record, the units and the run's enable link on disk before anything runs on them.
+    sync
     systemctl start "$TARGET_UNIT" || say "WARNING: ${TARGET_UNIT} did not start; see: systemctl status ${MOUNT_UNIT}"
     (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" || say "WARNING: not every service started again: ${running[*]}"
     mounted_ok || die "the encryption has started, but ${MNT_REAL} is not mounted; see: systemctl status ${MOUNT_UNIT}"
@@ -2386,7 +2512,7 @@ do_encrypt_resume() {
         # of volume key has two slots behind the one secret, the old key's
         # and the new key's, and cryptsetup refuses --key-slot for it.
         local slot_args=(--key-slot "$slot")
-        [[ "$mode" == "reencrypt" ]] && slot_args=()
+        [[ "$mode" == "reencrypt" ]] && slot_args=(--hotzone-size "$REKEY_HOTZONE")
         # Line-buffered: into a pipe cryptsetup's reports would otherwise
         # arrive only when it exits.
         set +e
@@ -2427,7 +2553,7 @@ encrypt_finish() {  # DEV KEYFILE
     rm -f "${ROOT}${HEADER_BACKUP_REAL}"
     cryptsetup luksHeaderBackup "$dev" --header-backup-file "${ROOT}${HEADER_BACKUP_REAL}" \
         && chmod 600 "${ROOT}${HEADER_BACKUP_REAL}" || say "data root: WARNING: the header backup was not taken"
-    conf_set reencrypt ""; conf_set driving_slot ""; conf_set driving_sidecar ""
+    conf_set reencrypt "" driving_slot "" driving_sidecar ""
     # Each site's config/ moves in now, so its secrets are never in a part-plain volume (D9).
     luks_moves_due || say "data root: WARNING: something on the root disk did not move onto it (above); the tick tries again each minute"
     luks_hardening
@@ -2481,18 +2607,16 @@ do_rekey() {
         rekey_undo; die "could not seal the driving key to the recovery key. Nothing was changed."
     fi
     chmod 600 "${ROOT}${DRIVING_SIDECAR_REAL}"
+    durable "${ROOT}${pending}" "${ROOT}${DRIVING_SIDECAR_REAL}"
     slot="$("$AGENT_BIN" data-root add-slot "$dev" < "${keys}/slot.key")" || { rekey_undo; die "could not add the driving key slot. Nothing was changed."; }
     [[ "$slot" =~ ^[0-9]+$ ]] || { rekey_undo; die "the driving key slot's number did not come back"; }
-    conf_set driving_slot "$slot"
-    conf_set driving_sidecar "$DRIVING_SIDECAR_REAL"
-    conf_set rekey_sidecar "$pending"
-    conf_set reencrypt reencrypt
+    conf_set driving_slot "$slot" driving_sidecar "$DRIVING_SIDECAR_REAL" rekey_sidecar "$pending" reencrypt reencrypt
     say "Re-encrypting the data root under a new volume key, online, at idle priority..."
-    if ! cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 \
+    if ! cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 --hotzone-size "$REKEY_HOTZONE" \
             --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations "$LUKS_ITERATIONS" \
             --volume-key-file "${keys}/new.vk" --key-slot "$slot" --key-file "${keys}/slot.key" "$dev"; then
         cryptsetup luksRemoveKey --batch-mode "$dev" "${keys}/slot.key" >/dev/null 2>&1 || true
-        conf_set reencrypt ""; conf_set driving_slot ""; conf_set driving_sidecar ""; conf_set rekey_sidecar ""
+        conf_set reencrypt "" driving_slot "" driving_sidecar "" rekey_sidecar ""
         rekey_undo
         die "cryptsetup could not start the re-encryption; the data root is as it was"
     fi
@@ -2500,6 +2624,7 @@ do_rekey() {
     rm -f "${keys}/new.vk"
     ensure_units >/dev/null || true
     systemctl enable "$ENCRYPT_UNIT" >/dev/null 2>&1 || true
+    sync
     systemctl restart --no-block "$ENCRYPT_UNIT" || say "WARNING: ${ENCRYPT_UNIT} did not start"
     say "The data root is re-encrypting under a new volume key in the background (joinery_data_root.sh status shows how far)."
 }
@@ -2528,8 +2653,7 @@ rekey_finish() {  # DEV KEYFILE
     rm -f "${ROOT}${HEADER_BACKUP_REAL}"
     cryptsetup luksHeaderBackup "$dev" --header-backup-file "${ROOT}${HEADER_BACKUP_REAL}" \
         && chmod 600 "${ROOT}${HEADER_BACKUP_REAL}" || say "data root: WARNING: the header backup was not taken"
-    conf_set reencrypt ""; conf_set driving_slot ""; conf_set driving_sidecar ""; conf_set rekey_sidecar ""
-    conf_set escrow_rekey_due 1
+    conf_set reencrypt "" driving_slot "" driving_sidecar "" rekey_sidecar "" escrow_rekey_due 1
     luks_escrow_rekey_due || true
     "$AGENT_BIN" data-root report addresses >/dev/null 2>&1 || true
     ensure_units >/dev/null || true
@@ -2578,7 +2702,8 @@ do_decrypt() {
     else
         ( umask 077; head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "${keys}/slot.key" ) || die "could not make the driving key"
         "$AGENT_BIN" data-root seal --recipient "$RECIPIENT" --slot < "${keys}/slot.key" > "${ROOT}${DRIVING_SIDECAR_REAL}" \
-            && chmod 600 "${ROOT}${DRIVING_SIDECAR_REAL}" || die "could not seal the driving key to the recovery key. Nothing was changed."
+            && chmod 600 "${ROOT}${DRIVING_SIDECAR_REAL}" && durable "${ROOT}${DRIVING_SIDECAR_REAL}" \
+            || die "could not seal the driving key to the recovery key. Nothing was changed."
         # The agent adds the slot, authorised by the volume key it reads from
         # the open mapping; both reach cryptsetup through pipes.
         slot="$("$AGENT_BIN" data-root add-slot "$dev" < "${keys}/slot.key")" \
@@ -2586,19 +2711,19 @@ do_decrypt() {
         [[ "$slot" =~ ^[0-9]+$ ]] || die "the driving key slot's number did not come back"
     fi
     rm -f "${ROOT}${DECRYPT_HEADER_REAL}"
-    conf_set driving_slot "$slot"
-    conf_set driving_sidecar "$DRIVING_SIDECAR_REAL"
-    conf_set decrypt_header "$DECRYPT_HEADER_REAL"
-    conf_set reencrypt decrypt
+    conf_set driving_slot "$slot" driving_sidecar "$DRIVING_SIDECAR_REAL" decrypt_header "$DECRYPT_HEADER_REAL" reencrypt decrypt
+    sync
     say "Decrypting the data root online, at idle priority..."
     if ! cryptsetup reencrypt --decrypt --init-only --batch-mode --disable-keyring --header "${ROOT}${DECRYPT_HEADER_REAL}" \
             --key-slot "$slot" --key-file "${keys}/slot.key" "$dev"; then
-        conf_set reencrypt "$mode"; conf_set decrypt_header ""
-        [[ -n "$mode" ]] || { conf_set driving_slot ""; conf_set driving_sidecar ""; }
+        if [[ -n "$mode" ]]; then conf_set reencrypt "$mode" decrypt_header ""
+        else conf_set reencrypt "" decrypt_header "" driving_slot "" driving_sidecar ""; fi
         die "cryptsetup could not start the decryption; the data root is as it was"
     fi
+    durable "${ROOT}${DECRYPT_HEADER_REAL}"
     ensure_units >/dev/null || true
     systemctl enable "$ENCRYPT_UNIT" >/dev/null 2>&1 || true
+    sync
     systemctl restart --no-block "$ENCRYPT_UNIT" || say "WARNING: ${ENCRYPT_UNIT} did not start"
     say "The data root is decrypting in the background (joinery_data_root.sh status shows how far)."
 }
@@ -2632,10 +2757,13 @@ decrypt_finish() {  # DEV
     fi
     [[ "$plain" == "file" ]] && losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
     # From here the record says plain.
-    conf_set backing "$plain"
-    conf_set reencrypt ""; conf_set driving_slot ""; conf_set driving_sidecar ""; conf_set decrypt_header ""
-    conf_set sidecar ""
-    [[ "$plain" == "device" ]] && conf_set uuid "$(blkid -s UUID -o value "$(conf_get source)" 2>/dev/null)"
+    local plain_uuid=""
+    [[ "$plain" == "device" ]] && plain_uuid="$(blkid -s UUID -o value "$(conf_get source)" 2>/dev/null)"
+    if [[ -n "$plain_uuid" ]]; then
+        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar "" uuid "$plain_uuid"
+    else
+        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar ""
+    fi
     rm -f "${SYSTEMD_DIR}/${MOUNT_UNIT}" "${SYSTEMD_DIR}/${UNLOCK_UNIT}" "${SYSTEMD_DIR}/${ENCRYPT_UNIT}"
     rm -rf "${SYSTEMD_DIR}/$(systemd-escape -p --suffix=device "$MAPPER_REAL").d"
     local u
@@ -2892,7 +3020,13 @@ grow_device() {
     read -r fsize _ _ < <(df_bytes "$MNT") || return 0
     [[ "$dsize" =~ ^[0-9]+$ ]] || return 0
     (( dsize > fsize + GIB )) || return 1
-    xfs_growfs "$MNT" >/dev/null || die "${dev} is $(gib "$dsize"), but the filesystem did not grow with it; run: xfs_growfs ${MNT_REAL}"
+    # To 32 MiB short of the device: an in-place encrypt puts its header there,
+    # and a filesystem grown into all of it would leave none (D5).
+    local bsize
+    bsize="$(xfs_info "$MNT" 2>/dev/null | sed -n 's/^data *= *bsize=\([0-9]*\).*/\1/p')"
+    [[ "$bsize" =~ ^[0-9]+$ ]] || bsize=4096
+    xfs_growfs -D $(( (dsize - ENCRYPT_HEADER_ROOM) / bsize )) "$MNT" >/dev/null \
+        || die "${dev} is $(gib "$dsize"), but the filesystem did not grow with it; run: xfs_growfs ${MNT_REAL}"
     read -r fsize _ _ < <(df_bytes "$MNT") || true
     say "data root: grew with ${dev} to $(gib "$fsize")"
 }
@@ -2949,8 +3083,17 @@ tick_upkeep() {
         luks_log_sweep || true
     fi
     # While the volume is being encrypted or decrypted its table is the run's:
-    # no reload, so no growth until it is done.
-    [[ -n "$(conf_get reencrypt)" ]] && return 0
+    # no reload, so no growth until it is done. The run itself is kept going:
+    # a boot that opened the volume and did not start it (T-F2: after a cut
+    # during a decrypt) leaves it waiting for nothing.
+    if [[ -n "$(conf_get reencrypt)" ]]; then
+        if is_luks && mapping_open && ! systemctl -q is-active "$ENCRYPT_UNIT" 2>/dev/null \
+            && ! systemctl -q is-active joinery-data-decrypt-finish.service 2>/dev/null; then
+            say "data root: its $(conf_get reencrypt)ion was not running; started again"
+            systemctl start --no-block "$ENCRYPT_UNIT" 2>/dev/null || true
+        fi
+        return 0
+    fi
     case "$(conf_get backing)" in
         file|luks-file)
             loop_no_discard
@@ -3010,8 +3153,65 @@ encrypted=0"
     write_if_changed "$STATUS_PUBLIC" "$out" >/dev/null || true
 }
 
+# An encrypt whose start was cut off (a crash or a power cut) after
+# cryptsetup wrote the volume's header and before this script recorded it:
+# the record still says a plain file or device, so the boot mounts the
+# header as a filesystem and fails. Nothing was encrypted yet (the record
+# changes before the run starts), and cryptsetup's start keeps the data
+# plain: it moved the first 16 MiB to the room added at the end and wrote
+# the header where it was. The key slot it was writing need not have
+# reached the disk (T-F2: it had not), so the start is undone rather than
+# opened: the moved data goes back over the header, the image back to its
+# length, and the data root mounts plain. encrypt can run again.
+encrypt_start_undo() {
+    [[ -f "$CONF" ]] && ! is_luks || return 0
+    local backing dev plan req mode moved_off moved_len prev_len live
+    backing="$(conf_get backing)"
+    case "$backing" in file) dev="$IMAGE" ;; device) dev="$(luks_source)" ;; *) return 0 ;; esac
+    mounted_ok && return 0
+    [[ -e "$dev" ]] && cryptsetup isLuks "$dev" 2>/dev/null || return 0
+    plan="$(cryptsetup luksDump "$dev" 2>/dev/null | awk '
+        /^Requirements:/ && /online-reencrypt/ { req = 1 }
+        /^Data segments:/ { seg = 1; next }
+        /^Keyslots:/ { seg = 0; ks = 1 }
+        /^Tokens:/ { ks = 0 }
+        ks && /^\tMode:/ { mode = $2 }
+        seg && /^  [0-9]+: / { n = $1; type[n] = $2; order[++c] = n; next }
+        seg && /^\toffset:/ { off[n] = $2 }
+        seg && /^\tlength:/ { len[n] = $2 }
+        seg && /^\tflags :/ { flags[n] = $3 }
+        END {
+            for (i = 1; i <= c; i++) { k = order[i]
+                if (flags[k] == "backup-moved-segment") { mo = off[k]; ml = len[k] }
+                else if (flags[k] == "backup-previous") { pl = len[k] }
+                else if (flags[k] == "" && type[k] != "linear") { live = live " " type[k] }
+            }
+            printf "%s %s %s %s %s %s\n", (req ? "req" : "-"), (mode ? mode : "-"), (mo ? mo : "-"), (ml ? ml : "-"), (pl ? pl : "-"), (live == "" ? "plain" : "encrypted")
+        }')"
+    read -r req mode moved_off moved_len prev_len live <<< "$plan"
+    [[ "$req" == req && "$mode" == encrypt ]] || return 0
+    if [[ "$live" != plain || ! "$moved_off" =~ ^[0-9]+$ || ! "$moved_len" =~ ^[0-9]+$ || ! "$prev_len" =~ ^[0-9]+$ ]]; then
+        say "data root: ${dev#"$ROOT"} holds an encryption that started and is not recorded here (${plan}); it is left as it is for a person"
+        return 1
+    fi
+    need_root
+    take_lock nowait || return 0
+    say "data root: an encryption's start was cut off before any data was encrypted; undoing it (the data stays where it is)"
+    dd if="$dev" of="$dev" bs=1M iflag=skip_bytes,count_bytes oflag=seek_bytes conv=notrunc,fsync \
+        skip="$moved_off" seek=0 count="$moved_len" status=none || { say "data root: WARNING: could not put the first ${moved_len} bytes back; ${dev#"$ROOT"} is left as it is"; return 1; }
+    [[ "$backing" == file ]] && truncate -s "$prev_len" "$IMAGE"
+    [[ "$backing" == device ]] && { udevadm trigger --action=change "$dev" 2>/dev/null; udevadm settle 2>/dev/null; } || true
+    rm -f "${ROOT}${SIDECAR_FILE_REAL}" "${ROOT}${SIDECAR_DEVICE_REAL}" "${ROOT}${DRIVING_SIDECAR_REAL}"
+    systemctl reset-failed "$MOUNT_UNIT" 2>/dev/null || true
+    systemctl start "$TARGET_UNIT" 2>/dev/null || true
+    # What the boot could not start without the data root starts now.
+    systemctl start --no-block default.target 2>/dev/null || true
+    say "data root: the encryption's start is undone and the data root is plain again; run encrypt again when ready"
+}
+
 do_tick() {
     local rc=0 rel target
+    encrypt_start_undo || true
     write_public_status
     # Locked, waiting for its key: not ready, and nothing to say every minute
     # (check and status say why).

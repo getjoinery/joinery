@@ -5,6 +5,8 @@
 # run: provision_spam_scanner.sh (a deployment's own box) and provision_relay.sh
 # (a relay) both source it and write the same files from it.
 #
+# Version: 1.3 - rspamd_milter_answers waits up to 30 seconds: asked straight after a restart, a
+#                one-CPU box was not listening yet, and the installer left Postfix's milters as they were.
 # Version: 1.2 - The milter listens on the loopback only, and "local" means the loopback
 #                only (override.d/options.inc): rspamd signs local mail and leaves its
 #                headers alone, so neither may be reachable or claimable from outside
@@ -195,9 +197,16 @@ rspamd_dkim_forget_old_key() {
     fi
 }
 
-# Is rspamd answering Postfix on its milter port?
+# Is rspamd answering Postfix on its milter port? Asked straight after a
+# restart, so it waits up to 30 seconds for rspamd to load its rules and
+# listen: on a one-CPU box that takes longer than the restart itself.
 rspamd_milter_answers() {
-    (echo >/dev/tcp/127.0.0.1/11332) >/dev/null 2>&1
+    local i
+    for i in $(seq 1 30); do
+        (echo >/dev/tcp/127.0.0.1/11332) >/dev/null 2>&1 && return 0
+        sleep 1
+    done
+    return 1
 }
 
 # opendkim and opendmarc did what rspamd does alone. Call this only AFTER

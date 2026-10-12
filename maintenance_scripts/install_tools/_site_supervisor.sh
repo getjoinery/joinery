@@ -2,6 +2,8 @@
 #
 # _site_supervisor.sh - keep a site container's four main processes running.
 #
+# Version: 1.1 - A service is started over a stale pid file: one a power cut left half written stopped
+#                Apache for good (the container restarted forever).
 # Version: 1.0 (specs/multi_tenant_docker_hosts.md WP2 item 2)
 #
 # When a container runs out of memory, the kernel kills its biggest process. A
@@ -100,6 +102,10 @@ say() {
 }
 
 start_service() {
+    # Not running, yet its pid file is there: a crash or a power cut left it,
+    # perhaps half written, and Apache refuses to start over a corrupt one
+    # (encrypted data root T-F2: both sites of a host looped on it), so it goes.
+    is_running "$1" || rm -f "$(pidfile_of "$1")"
     case "$1" in
         postgresql) service postgresql start ;;
         php-fpm)    service "$FPM_SERVICE" start ;;

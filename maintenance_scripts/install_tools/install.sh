@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.11 - --encrypted-data-root places the release's agent binary first (no unit, no identity), checked
+#              against the manifest's hash of the unpacked binary; it was unpacked into /run, which is noexec
 #VERSION 3.10 - install.sh server|docker --encrypted-data-root --recovery-public-key=KEY: the data root is born on a
 #              LUKS2 volume whose break-glass copy is sealed to KEY; the agent binary is placed first, switched off
 #              (specs/hosted_data_promise_disk_encryption.md WP3).
@@ -2959,11 +2961,14 @@ SERVER_DATA_BINDS=("postgresql /var/lib/postgresql" "mail/postfix /var/spool/pos
 # --encrypted-data-root, with --recovery-public-key=KEY, the recovery key's
 # public half its break-glass copy is sealed to (a hosted machine's is its
 # management node's own; a self-hosted owner's is the one they already hold).
-# The agent seals the copy. Where none is installed yet, the release's own
-# binary (agent_dist, checked against its manifest) is unpacked into /run for
-# this and nothing else: the agent itself lands where it always does, with the
-# site install, or the Docker host's at the end of install.sh docker, and that
-# is the one that opens the volume at every boot.
+# The agent seals the copy and opens the volume at every boot
+# (joinery-data-unlock.service runs /usr/local/bin/joinery-agent), so where
+# none is installed yet the release's own binary (agent_dist, checked against
+# its manifest) is placed there first: the binary only, with no unit, no
+# identity and no join. A reboot before the site install then still opens the
+# volume. The agent's service comes where it always does, with the site
+# install or at the end of install.sh docker, which keeps a binary of the
+# version it ships.
 ENCRYPTED_DATA_ROOT=0
 RECOVERY_PUBLIC_KEY=""
 encrypted_data_root_prepare() {
@@ -2973,23 +2978,31 @@ encrypted_data_root_prepare() {
         return 1
     fi
     if [ ! -x /usr/local/bin/joinery-agent ]; then
-        local arch gz want got
+        local arch gz want got stage
         case "$(uname -m)" in
             x86_64) arch="linux-amd64" ;;
             aarch64) arch="linux-arm64" ;;
             *) print_error "No agent build for $(uname -m): an encrypted data root needs the agent"; return 1 ;;
         esac
         gz="$dist_dir/joinery-agent-${arch}.gz"
+        # Unpacked on the root disk: /run is mounted noexec.
+        stage="$(mktemp -d /var/tmp/joinery-agent.XXXXXX)" || { print_error "Could not make a folder to unpack the agent in"; return 1; }
+        if ! gunzip -c "$gz" > "$stage/joinery-agent" 2>/dev/null; then
+            rm -rf "$stage"
+            print_error "Could not unpack the release's agent ($gz)"
+            return 1
+        fi
+        # The manifest records the unpacked binary's sha256, as the agent's own update checks it.
         want="$(tr -d '\n ' < "$dist_dir/manifest.json" 2>/dev/null | grep -o "\"${arch}\":{[^}]*}" | grep -o '"sha256":"[0-9a-f]*"' | cut -d'"' -f4)"
-        got="$(sha256sum "$gz" 2>/dev/null | awk '{ print $1 }')"
+        got="$(sha256sum "$stage/joinery-agent" | awk '{ print $1 }')"
         if [ -z "$want" ] || [ "$want" != "$got" ]; then
+            rm -rf "$stage"
             print_error "The release's agent ($gz) does not match its manifest; an encrypted data root is not made with it"
             return 1
         fi
-        mkdir -p /run/joinery && chmod 755 /run/joinery
-        gunzip -c "$gz" > /run/joinery/agent-for-install && chmod 700 /run/joinery/agent-for-install \
-            || { print_error "Could not unpack the release's agent"; return 1; }
-        export JOINERY_AGENT_BIN=/run/joinery/agent-for-install
+        install -m 755 "$stage/joinery-agent" /usr/local/bin/joinery-agent
+        rm -rf "$stage"
+        print_info "Placed the release's agent binary (switched off): it opens the data root at boot"
     fi
     bash "$tool" recipient "$RECOVERY_PUBLIC_KEY" || { print_error "That recovery public key was refused (above)"; return 1; }
 }

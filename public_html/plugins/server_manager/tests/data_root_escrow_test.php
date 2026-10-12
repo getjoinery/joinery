@@ -233,6 +233,20 @@ check(($vouched['data']['status'] ?? '') === 'enrolled' && strlen((string)base64
 	&& (int)$brow->get('dre_mgn_managed_node_id') === (int)$node->key,
 	'Signed by its node\'s key for this holder: the secret at once, and the row is that node\'s');
 
+section('An IP swap this holder made moves the node\'s addresses (IpSwapMove)');
+$brow->set('dre_addresses', json_encode(array('198.51.100.30', '2001:db8::30')));
+$brow->set('dre_seen_addresses', json_encode(array('198.51.100.30')));
+$brow->save();
+$moved = DataRootEscrow::address_moved((int)$node->key, '198.51.100.30', '198.51.100.31');
+$brow = escrow_row($b);
+check($moved === 1 && json_decode($brow->get('dre_addresses'), true) === array('198.51.100.31', '2001:db8::30')
+	&& json_decode($brow->get('dre_seen_addresses'), true) === array('198.51.100.31')
+	&& $brow->address_allowed('198.51.100.31') && !$brow->address_allowed('198.51.100.30'),
+	'Its next boot asks from the address it holds now; the one it gave up is no longer its own');
+check(DataRootEscrow::address_moved((int)$node->key, '198.51.100.30', '198.51.100.31') === 0
+	&& DataRootEscrow::address_moved((int)$node->key + 1000000, '198.51.100.31', '198.51.100.32') === 0,
+	'Asked again, or for another node: nothing changes');
+
 section('The host report names the node\'s identity (DataRootEscrowSync)');
 $c = escrow_machine();
 $enc = JobResultProcessor::host_report_data_root_encryption(array('backing' => 'luks-file', 'open' => false, 'identity' => $c['pub'],
@@ -286,6 +300,15 @@ check(is_array($inc) && $inc['severity'] === IncidentRecord::SEVERITY_CRITICAL &
 check((new IncidentSourceSiteDown())->evaluate($locked_node) === null, 'and it is not "site down"');
 $inc = (new IncidentSourceDataRootLocked())->evaluate($node);
 check($inc === null, 'A node that is not locked opens none');
+// The next probe after an unlock is not locked: a failure ends the locked state and counts toward down.
+require_once(PathHelper::getIncludePath('plugins/server_manager/tasks/RunNodeUptimeChecks.php'));
+$apply_state = new ReflectionMethod('RunNodeUptimeChecks', 'apply_state');
+$apply_state->setAccessible(true);
+$apply_state->invoke(new RunNodeUptimeChecks(), $locked_node, false, 'HTTP 500');
+check($locked_node->get('mgn_uptime_last_status') === 'up' && !$locked_node->get('mgn_uptime_locked_since')
+	&& (int)$locked_node->get('mgn_uptime_consecutive_failures') === 1
+	&& (new IncidentSourceDataRootLocked())->evaluate($locked_node) === null,
+	'Unlocked, one failing probe: no longer locked, the incident closes, the failure counts toward down');
 
 // Cleanup.
 foreach ($made_escrows as $id) {

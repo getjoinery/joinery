@@ -1,8 +1,9 @@
 # Encrypted data root: data encrypted at rest, with the key held off the machine
 
-**Build status, 2026-10-11:** every work package is BUILT (WP1-WP10, each
+**Build status, 2026-10-12:** every work package is BUILT (WP1-WP10, each
 marked in its entry), shipped dormant behind `data_root_encryption_offered`;
-uncommitted, awaiting the owner's commit and a release for the Linode phase.
+committed 2026-10-12 (3fcf7b8f, agent d84bf16) and released in 0.8.484. The
+Linode phase is below.
 Proven on the Mac mini VM (Ubuntu 24.04 arm64, swtpm), each by the test named:
 - **Born encrypted:** T-V1, and T-K1 (a marker written into `config/` is
   absent from the raw root disk; a control marker on it is found).
@@ -40,6 +41,75 @@ Proven on the Mac mini VM (Ubuntu 24.04 arm64, swtpm), each by the test named:
   - the root request (103), vault health (81), installer contract (878) and
     host report (171) tests;
   - the agent's `go test`.
+
+**Linode phase, 2026-10-12** (release 0.8.484, committed as 3fcf7b8f, with that
+day's fixes copied over it; test account, us-east). Passed, by test:
+- **Born encrypted:** T-P6 and T-V1 on a 1 GB Nanode with the provider's
+  layer off; the volume key is absent from the raw root disk and Linode's swap
+  disk. That swap disk is turned off at create and stays off.
+- **Escrow and boot:** T-E1 (secret in no job row, journal or log), T-E2 (open
+  7 s after the unlock starts), T-E3, T-E7 (IPv4 only), T-E8 (a second ask
+  inside 15 minutes refused; a lost answer waited out), T-E10 (every request
+  through Cloudflare), T-E11 (X25519MLKEM768 from a Go 1.27 client).
+- **Unlock page and monitoring:** T-U1 without Cloudflare, T-U2, T-U5, T-U6 (a
+  multi-tenant host serves each site's own certificate while locked), T-U7.
+- **The claims:** T-A1 (a backup's copy holds only ciphertext), T-A2/T-E5 (the
+  copy is refused), T-A3/T-A4 under Tier 1 (answered: the known gap) and under
+  Tier 2 (refused, with the event), T-A6 (only "I did this myself" or a copy).
+  T-E6: an IP swap leaves no provider event; Tier 2's instance check refuses a
+  copy at a moved address.
+- **Shapes:** T-V9 (the tick grew an encrypted file volume, the key never on
+  disk), T-V11 (see O-PBKDF2), T-V12 and T-M2 (a multi-tenant host, born
+  encrypted, then undone and encrypted again in place with both sites up).
+- **T-F2, the reliability campaign:**
+  - Cuts on 1 GB and 4 GB file-backed data roots and a 1 GB Block Storage
+    device, with PostgreSQL under pgbench, 38 in all: in the start, mid
+    run, during the finish, and during the undo.
+  - Every run ends encrypted or decrypted, with checksums, `pg_amcheck` and
+    `xfs_repair -n` clean.
+- **T-S:** a 1 GB box, plain against encrypted in place: −80% sequential read,
+  −37% random read, −20% random write, −11% pgbench. A 4 GB box: −64%, −22%,
+  −9%, −1%. The sequential loss is the 512-byte sectors an in-place run
+  keeps: a 1 GB box born encrypted reads 1246 MB/s against 527.
+
+Found and fixed in that run (uncommitted), each with a gate case:
+- **The installer** checked the wrong hash of its agent and unpacked it where
+  nothing can run. The binary is now placed first, which also lets a reboot
+  before the site install open the volume.
+- **The first size** of the data root left the root disk under its reserve:
+  no growth, no in-place encrypt, a disk case on every new Nanode.
+- **A cut during encrypt's start** left a LUKS header under a record saying
+  plain. The tick now undoes such a start, which had encrypted nothing.
+- **A busy bind** (rsyslog's socket in Postfix's chroot, on every host) kept
+  the plain filesystem live while the volume was written. The start now stops
+  the services that hold one, or refuses.
+- **The converger** could not start while a plain data root was unmounted, so
+  nothing could repair it. It logs to the journal now.
+- **A device's filesystem** grew into the room the header needs. It now keeps
+  its last 32 MiB.
+- **A new unit file** written just before a cut came back empty, so masked,
+  and the decrypt never resumed. Every file a boot relies on is now fsynced,
+  and the tick starts a recorded run that is not running.
+- **A record change** of several keys could stop half way. It is now one
+  rename.
+- **An IP swap** did not move the escrow rows' addresses. This fix is set
+  aside as a patch until commit: its data class blocked a publish.
+- **Container sites** looped forever on a pid file a cut left behind.
+- **An interrupted rekey** on network storage took over half an hour to
+  open. Its rewrite area is capped at 8 MiB.
+- **Speed:** data roots are formatted with 4096-byte sectors.
+- **Agent 1.73.1** fixes its help text and what `enable` says on a site.
+
+Not run on Linode, and why:
+- **T-V5 and Lish:** no Lish access from here. The console prompt is proven on
+  the VM.
+- **T-U3/T-U4:** proven on the VM; the code is the same.
+- **T-P1/T-P2/T-P4:** they need `data_root_encryption_offered` on dev, the
+  plane that provisions.
+- **T-P5, T-K2, T-K5:** they need a verified backup, so a backup target.
+- **T-R2, T-M1/T-M1b, T-E9, T-E12, T-E13:** they need throwaway management
+  nodes. They are the D7 rehearsal.
+- **T-V8:** needs a filesystem that refuses direct I/O.
 
 **Status:** DRAFT 2026-10-07, rewritten the same day from the owner's framing
 (below). Decided beyond the framing: one standard LUKS configuration for
