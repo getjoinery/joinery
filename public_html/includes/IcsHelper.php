@@ -4,6 +4,8 @@
  *
  * Generates .ics files for single event downloads and multi-event calendar feeds.
  *
+ * @version 1.2 - buildVevent() is the one VEVENT writer and uid() the one UID rule; generateVevent()
+ *                maps an Event onto them, and the Bookings invite does the same. foldLines() is public.
  * @version 1.1 - the calendar name reads site_name, the declared setting. It
  *                read siteName, which nothing declares, so every feed was
  *                titled with the "Events" fallback.
@@ -31,22 +33,6 @@ class IcsHelper {
 			$event_id = $event->parent_event_id;
 		}
 
-		$lines = [];
-		$lines[] = 'BEGIN:VEVENT';
-		$lines[] = 'UID:' . self::generateUid($event_id, $instance_date);
-		$lines[] = 'DTSTAMP:' . self::formatUtcDateTime(gmdate('Y-m-d H:i:s'));
-		$lines[] = 'DTSTART:' . self::formatUtcDateTime($start_time);
-
-		$end_time = self::getField($event, 'evt_end_time');
-		if ($end_time) {
-			$lines[] = 'DTEND:' . self::formatUtcDateTime($end_time);
-		}
-
-		$name = self::getField($event, 'evt_name');
-		if ($name) {
-			$lines[] = 'SUMMARY:' . self::escapeText($name);
-		}
-
 		$description = self::getField($event, 'evt_short_description');
 		if ($description) {
 			// Strip HTML tags and truncate to 500 chars
@@ -54,30 +40,77 @@ class IcsHelper {
 			if (mb_strlen($description) > 500) {
 				$description = mb_substr($description, 0, 497) . '...';
 			}
-			$lines[] = 'DESCRIPTION:' . self::escapeText($description);
 		}
 
-		$location = self::getLocationString($event);
-		if ($location) {
-			$lines[] = 'LOCATION:' . self::escapeText($location);
-		}
+		return self::buildVevent([
+			'uid'         => self::uid('event', $event_id, $instance_date),
+			'start_utc'   => $start_time,
+			'end_utc'     => self::getField($event, 'evt_end_time'),
+			'summary'     => self::getField($event, 'evt_name'),
+			'description' => $description,
+			'location'    => self::getLocationString($event),
+			'url'         => self::getEventUrl($event, $instance_date),
+			// 1 (active) and 2 (completed) are CONFIRMED, 3 (canceled) is CANCELLED
+			'status'      => self::getField($event, 'evt_status') == 3 ? 'CANCELLED' : 'CONFIRMED',
+		]);
+	}
 
-		$url = self::getEventUrl($event, $instance_date);
-		if ($url) {
-			$lines[] = 'URL:' . $url;
+	/**
+	 * The one VEVENT writer. Every invite and feed on the platform goes through it,
+	 * so text is escaped and times are written the same way everywhere.
+	 *
+	 * @param array $f 'uid' and 'start_utc' (Y-m-d H:i:s, UTC) are required. Optional:
+	 *                 'end_utc', 'summary', 'description', 'location', 'url' (written as is),
+	 *                 'status' ('CONFIRMED' by default, or 'CANCELLED'). A field that is empty
+	 *                 is left out. Times are UTC instants; there is no zone to carry.
+	 * @return string one VEVENT block, or '' when the uid or the start is missing
+	 */
+	public static function buildVevent(array $f) {
+		if (empty($f['uid']) || empty($f['start_utc'])) {
+			return '';
 		}
-
-		// STATUS mapping: 1 (active) → CONFIRMED, 2 (completed) → CONFIRMED, 3 (canceled) → CANCELLED
-		$status = self::getField($event, 'evt_status');
-		if ($status == 3) {
-			$lines[] = 'STATUS:CANCELLED';
-		} else {
-			$lines[] = 'STATUS:CONFIRMED';
+		$lines = [];
+		$lines[] = 'BEGIN:VEVENT';
+		$lines[] = 'UID:' . $f['uid'];
+		$lines[] = 'DTSTAMP:' . self::formatUtcDateTime(gmdate('Y-m-d H:i:s'));
+		$lines[] = 'DTSTART:' . self::formatUtcDateTime($f['start_utc']);
+		if (!empty($f['end_utc'])) {
+			$lines[] = 'DTEND:' . self::formatUtcDateTime($f['end_utc']);
 		}
-
+		foreach (['summary' => 'SUMMARY', 'description' => 'DESCRIPTION', 'location' => 'LOCATION'] as $key => $name) {
+			if (!empty($f[$key])) {
+				$lines[] = $name . ':' . self::escapeText($f[$key]);
+			}
+		}
+		if (!empty($f['url'])) {
+			$lines[] = 'URL:' . $f['url'];
+		}
+		$lines[] = 'STATUS:' . (($f['status'] ?? 'CONFIRMED') === 'CANCELLED' ? 'CANCELLED' : 'CONFIRMED');
 		$lines[] = 'END:VEVENT';
-
 		return implode("\r\n", $lines);
+	}
+
+	/**
+	 * The UID of a thing on a calendar: {kind}-{id}[-{instance}]@{site host}. The same
+	 * thing always gets the same UID, and the kind and id can be read back from it, which
+	 * is how a copy of it on another calendar is recognised. An instance is a date or
+	 * other tag; its dashes are dropped (2026-10-12 is written 20261012).
+	 *
+	 * @param string $kind 'event', 'booking', ...
+	 * @param int|string $id the record's primary key
+	 * @param string|null $instance for one occurrence of a repeating thing
+	 */
+	public static function uid($kind, $id, $instance = null) {
+		$settings = Globalvars::get_instance();
+		$domain = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'];
+		$domain = preg_replace('#^https?://#', '', $domain);
+		$domain = rtrim($domain, '/');
+
+		$uid = $kind . '-' . $id;
+		if ($instance) {
+			$uid .= '-' . str_replace('-', '', $instance);
+		}
+		return $uid . '@' . $domain;
 	}
 
 	/**
@@ -163,26 +196,6 @@ class IcsHelper {
 	private static function formatUtcDateTime($datetime_string) {
 		$dt = new DateTime($datetime_string, new DateTimeZone('UTC'));
 		return $dt->format('Ymd\THis\Z');
-	}
-
-	/**
-	 * Generate a deterministic UID for a calendar event.
-	 *
-	 * @param int $event_id Event primary key
-	 * @param string|null $instance_date Date for recurring instances (YYYY-MM-DD)
-	 * @return string UID string
-	 */
-	private static function generateUid($event_id, $instance_date = null) {
-		$settings = Globalvars::get_instance();
-		$domain = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'];
-		$domain = preg_replace('#^https?://#', '', $domain);
-		$domain = rtrim($domain, '/');
-
-		if ($instance_date) {
-			$date_clean = str_replace('-', '', $instance_date);
-			return 'event-' . $event_id . '-' . $date_clean . '@' . $domain;
-		}
-		return 'event-' . $event_id . '@' . $domain;
 	}
 
 	/**
@@ -279,7 +292,7 @@ class IcsHelper {
 	 * @param string $ics_string Raw iCal string
 	 * @return string Folded iCal string
 	 */
-	private static function foldLines($ics_string) {
+	public static function foldLines($ics_string) {
 		$lines = explode("\r\n", $ics_string);
 		$folded = [];
 

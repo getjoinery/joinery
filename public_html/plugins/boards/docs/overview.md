@@ -185,4 +185,4 @@ Descriptions and comments are Markdown. They are rendered on the server with `Ma
 
 ## Not built yet
 
-The deferred list (guests, public links, voting, table view, dependencies, start dates, sealed boards, live push) is in `specs/boards_plugin.md`.
+The second release's features (daily digest, custom fields, calendar view, repeating cards, automation rules, event planning boards) and the deferred list (guests, public links, voting, table view, dependencies, start dates, sealed boards, live push) are not scheduled; they are described in `specs/implemented/boards_plugin.md`.

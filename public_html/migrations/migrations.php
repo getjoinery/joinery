@@ -1746,3 +1746,13 @@
 	$migration['migration_file'] = 'drop_marketplace_system_menu.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The store's dormant session counter (prd_product_details) is retired with
+	// its model and admin pages (core_improvements_for_plugins.md C10).
+	// update_database never drops a table, so it goes here, and only when empty.
+	$migration = array();
+	$migration['database_version'] = '215';
+	$migration['test'] = "SELECT CASE WHEN to_regclass('public.prd_product_details') IS NULL THEN 1 ELSE 0 END";
+	$migration['migration_file'] = 'product_details_dropped.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

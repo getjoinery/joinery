@@ -689,142 +689,32 @@ function get_leader() {
 	 * @return bool
 	 */
 	public function date_matches_pattern($date) {
-		if (!$this->is_recurring_parent()) {
-			return false;
-		}
-
-		$tz = $this->get('evt_timezone') ?: 'America/New_York';
-		$start_date = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
-		$check_date = date('Y-m-d', strtotime($date));
-
-		// Can't be before start date
-		if ($check_date < $start_date) {
-			return false;
-		}
-
-		// Can't be after end date
-		$end_date = $this->get('evt_recurrence_end_date');
-		if ($end_date && $check_date > $end_date) {
-			return false;
-		}
-
-		$type = $this->get('evt_recurrence_type');
-		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
-
-		$start_dt = new DateTime($start_date);
-		$check_dt = new DateTime($check_date);
-
-		switch ($type) {
-			case 'daily':
-				$diff_days = (int) $start_dt->diff($check_dt)->days;
-				return ($diff_days % $interval) === 0;
-
-			case 'weekly':
-				$days_of_week = $this->get('evt_recurrence_days_of_week');
-				$check_dow = (int) $check_dt->format('w'); // 0=Sun, 6=Sat
-
-				if ($days_of_week) {
-					$allowed_days = array_map('intval', explode(',', $days_of_week));
-					if (!in_array($check_dow, $allowed_days)) {
-						return false;
-					}
-				} else {
-					// Default to the same day of week as start
-					$start_dow = (int) $start_dt->format('w');
-					if ($check_dow !== $start_dow) {
-						return false;
-					}
-				}
-
-				// Check interval: weeks since start
-				$diff_days = (int) $start_dt->diff($check_dt)->days;
-				$start_week = (int) floor($start_dt->format('U') / (7 * 86400));
-				$check_week = (int) floor($check_dt->format('U') / (7 * 86400));
-				// Use ISO week calculation for proper interval checking
-				$start_week_num = (int) ($start_dt->diff(new DateTime('1970-01-05'))->days / 7);
-				$check_week_num = (int) ($check_dt->diff(new DateTime('1970-01-05'))->days / 7);
-				$week_diff = abs($check_week_num - $start_week_num);
-				return ($week_diff % $interval) === 0;
-
-			case 'monthly':
-				$week_of_month = $this->get('evt_recurrence_week_of_month');
-
-				if ($week_of_month !== null && $week_of_month !== '') {
-					// By week: e.g., 2nd Tuesday
-					$start_dow = (int) $start_dt->format('w');
-					$check_dow = (int) $check_dt->format('w');
-					if ($check_dow !== $start_dow) {
-						return false;
-					}
-
-					$check_wom = $this->_get_week_of_month($check_dt);
-					$target_wom = (int) $week_of_month;
-
-					// Handle -1 (last)
-					if ($target_wom === -1) {
-						// Check if this is the last occurrence of this weekday in the month
-						$next_week = clone $check_dt;
-						$next_week->modify('+7 days');
-						if ($next_week->format('m') === $check_dt->format('m')) {
-							return false; // Not the last one
-						}
-					} else {
-						if ($check_wom !== $target_wom) {
-							return false;
-						}
-					}
-				} else {
-					// By date: same day of month as start
-					$start_day = (int) $start_dt->format('j');
-					$check_day = (int) $check_dt->format('j');
-					$days_in_month = (int) $check_dt->format('t');
-
-					// Handle months shorter than start day
-					$target_day = min($start_day, $days_in_month);
-					if ($check_day !== $target_day) {
-						return false;
-					}
-				}
-
-				// Check interval: months since start
-				$month_diff = ((int) $check_dt->format('Y') - (int) $start_dt->format('Y')) * 12
-					+ ((int) $check_dt->format('n') - (int) $start_dt->format('n'));
-				return ($month_diff % $interval) === 0;
-
-			case 'yearly':
-				$start_month = (int) $start_dt->format('n');
-				$start_day = (int) $start_dt->format('j');
-				$check_month = (int) $check_dt->format('n');
-				$check_day = (int) $check_dt->format('j');
-
-				if ($check_month !== $start_month) {
-					return false;
-				}
-
-				// Handle leap year: Feb 29 -> Feb 28 in non-leap years
-				$days_in_month = (int) $check_dt->format('t');
-				$target_day = min($start_day, $days_in_month);
-				if ($check_day !== $target_day) {
-					return false;
-				}
-
-				$year_diff = (int) $check_dt->format('Y') - (int) $start_dt->format('Y');
-				return ($year_diff % $interval) === 0;
-
-			default:
-				return false;
-		}
+		$rule = $this->recurrence_rule();
+		return $rule !== null && $rule->matches(date('Y-m-d', strtotime($date)));
 	}
 
 	/**
-	 * Get the week-of-month number for a date (1=first, 2=second, etc.)
-	 *
-	 * @param DateTime $dt
-	 * @return int
+	 * This event's recurrence as a RecurrenceRule (the one copy of the date
+	 * arithmetic), anchored on its start date in the event's own timezone. A day
+	 * that is missing from a month (the 31st in November, February 29 in a common
+	 * year) lands on the month's last day, so a series never loses a month.
+	 * Null when this is not a recurring parent. Built on each call so a changed
+	 * field is never stale.
 	 */
-	private function _get_week_of_month($dt) {
-		$day = (int) $dt->format('j');
-		return (int) ceil($day / 7);
+	private function recurrence_rule() {
+		if (!$this->is_recurring_parent()) {
+			return null;
+		}
+		$tz = $this->get('evt_timezone') ?: 'America/New_York';
+		return RecurrenceRule::fromArray(
+			$this->get('evt_recurrence_type'),
+			(int) $this->get('evt_recurrence_interval') ?: 1,
+			$this->get('evt_recurrence_days_of_week'),
+			$this->get('evt_recurrence_week_of_month'),
+			$this->get('evt_recurrence_end_date'),
+			LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d'),
+			RecurrenceRule::MONTH_END_CLAMP
+		);
 	}
 
 	/**
@@ -835,80 +725,8 @@ function get_leader() {
 	 * @return array Array of date strings (Y-m-d)
 	 */
 	public function compute_occurrence_dates($from_date, $count) {
-		if (!$this->is_recurring_parent() || $count <= 0) {
-			return [];
-		}
-
-		$dates = [];
-		$type = $this->get('evt_recurrence_type');
-		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
-		$end_date = $this->get('evt_recurrence_end_date');
-		$tz = $this->get('evt_timezone') ?: 'America/New_York';
-		$start_date = LibraryFunctions::convert_time($this->get('evt_start_time'), 'UTC', $tz, 'Y-m-d');
-
-		$start_month = (int) date('n', strtotime($start_date));
-		$start_day = (int) date('j', strtotime($start_date));
-
-		// Start from whichever is later: from_date or start_date
-		$current = new DateTime(max($from_date, $start_date));
-
-		// Safety limit. Every type but yearly is walked a day at a time, so the
-		// budget has to cover the longest stride a pattern can ask for — a
-		// monthly series with an interval of 6 leaves ~186 days between
-		// occurrences. Too small a budget does not raise anything: it silently
-		// returns a short list, which reads as "the series ended".
-		$max_iterations = ($type === 'yearly')
-			? ($count * $interval + 10)
-			: ($count * 31 * $interval + 366);
-		$iterations = 0;
-
-		while (count($dates) < $count && $iterations < $max_iterations) {
-			$iterations++;
-			$date_str = $current->format('Y-m-d');
-
-			// Check end date
-			if ($end_date && $date_str > $end_date) {
-				break;
-			}
-
-			if ($this->date_matches_pattern($date_str)) {
-				$dates[] = $date_str;
-			}
-
-			// A yearly pattern only ever matches in its start month, so step
-			// straight to the next anniversary. Walking a day at a time would
-			// spend a year of iterations per occurrence, and jumping by a fixed
-			// number of months drifts out of the start month and lands on
-			// anniversaries years apart. Every other type is dense enough that a
-			// day at a time is both correct and cheap.
-			if ($type === 'yearly') {
-				$year = (int) $current->format('Y');
-				$candidate = self::_anniversary_in_year($year, $start_month, $start_day);
-				if ($candidate <= $current->format('Y-m-d')) {
-					$candidate = self::_anniversary_in_year($year + 1, $start_month, $start_day);
-				}
-				$current = new DateTime($candidate);
-			} else {
-				$current->modify('+1 day');
-			}
-		}
-
-		return $dates;
-	}
-
-	/**
-	 * The anniversary date within a given year, clamped to the length of the
-	 * month. A series starting Feb 29 lands on Feb 28 in a common year rather
-	 * than rolling forward into March.
-	 *
-	 * @param int $year
-	 * @param int $month
-	 * @param int $day
-	 * @return string Y-m-d
-	 */
-	private static function _anniversary_in_year($year, $month, $day) {
-		$days_in_month = (int) date('t', mktime(0, 0, 0, $month, 1, $year));
-		return sprintf('%04d-%02d-%02d', $year, $month, min($day, $days_in_month));
+		$rule = $this->recurrence_rule();
+		return ($rule === null || $count <= 0) ? [] : $rule->nextDates($from_date, $count);
 	}
 
 	/**
@@ -1278,67 +1096,8 @@ function get_leader() {
 	 * @return string
 	 */
 	public function get_recurrence_description() {
-		if (!$this->is_recurring_parent()) {
-			return '';
-		}
-
-		$type = $this->get('evt_recurrence_type');
-		$interval = (int) $this->get('evt_recurrence_interval') ?: 1;
-		$parts = [];
-
-		switch ($type) {
-			case 'daily':
-				$parts[] = ($interval === 1) ? 'Every day' : 'Every ' . $interval . ' days';
-				break;
-
-			case 'weekly':
-				$prefix = ($interval === 1) ? 'Every week' : 'Every ' . $interval . ' weeks';
-				$days_of_week = $this->get('evt_recurrence_days_of_week');
-				if ($days_of_week) {
-					$day_names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-					$day_nums = array_map('intval', explode(',', $days_of_week));
-					$day_labels = array_map(function($d) use ($day_names) { return $day_names[$d]; }, $day_nums);
-
-					if (count($day_labels) > 1) {
-						$last = array_pop($day_labels);
-						$parts[] = $prefix . ' on ' . implode(', ', $day_labels) . ' and ' . $last;
-					} else {
-						$parts[] = $prefix . ' on ' . $day_labels[0];
-					}
-				} else {
-					$start_dow = date('l', strtotime($this->get('evt_start_time')));
-					$parts[] = $prefix . ' on ' . $start_dow;
-				}
-				break;
-
-			case 'monthly':
-				$prefix = ($interval === 1) ? 'Every month' : 'Every ' . $interval . ' months';
-				$week_of_month = $this->get('evt_recurrence_week_of_month');
-				if ($week_of_month !== null && $week_of_month !== '') {
-					$ordinals = [1 => '1st', 2 => '2nd', 3 => '3rd', 4 => '4th', -1 => 'last'];
-					$ordinal = isset($ordinals[(int)$week_of_month]) ? $ordinals[(int)$week_of_month] : $week_of_month . 'th';
-					$dow = date('l', strtotime($this->get('evt_start_time')));
-					$parts[] = $prefix . ' on the ' . $ordinal . ' ' . $dow;
-				} else {
-					$day = date('jS', strtotime($this->get('evt_start_time')));
-					$parts[] = $prefix . ' on the ' . $day;
-				}
-				break;
-
-			case 'yearly':
-				$prefix = ($interval === 1) ? 'Every year' : 'Every ' . $interval . ' years';
-				$date_str = date('F jS', strtotime($this->get('evt_start_time')));
-				$parts[] = $prefix . ' on ' . $date_str;
-				break;
-		}
-
-		// Add end date
-		$end_date = $this->get('evt_recurrence_end_date');
-		if ($end_date) {
-			$parts[] = 'until ' . date('M j, Y', strtotime($end_date));
-		}
-
-		return implode(' ', $parts);
+		$rule = $this->recurrence_rule();
+		return $rule === null ? '' : $rule->describe();
 	}
 
 }

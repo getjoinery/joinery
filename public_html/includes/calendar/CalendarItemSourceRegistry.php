@@ -7,6 +7,9 @@ require_once(PathHelper::getIncludePath('includes/calendar/CalendarItemSource.ph
  * and gates every availability calculation with no change to the grid, the slot
  * generator, or any other source — which is the whole reason this lives in core.
  *
+ * An item whose source_key was already produced by an earlier source is dropped, so the
+ * same meeting never shows twice (a booking and its copy on an external calendar).
+ *
  * Two derived views come out of the one upstream contract (items):
  *   - getItems()      — everything to render, at a visibility.
  *   - getBusyBlocks() — the merged busy projection the availability engine consumes.
@@ -75,16 +78,54 @@ class CalendarItemSourceRegistry {
         string $visibility = CalendarItem::VIS_DETAILS
     ): array {
         $items = [];
-        foreach (self::discover() as $source) {
+        $seen = [];   // source_key => true: the same thing from a second source is not a second item
+        foreach (self::ordered() as $source) {
             $produced = $source->getItems($subject, $start_utc, $end_utc, $visibility);
             foreach ($produced as $item) {
                 if (!($item instanceof CalendarItem)) {
                     continue;
                 }
-                $items[] = $item->atVisibility($visibility);
+                $item = $item->atVisibility($visibility);
+                // Visibility has been reduced before the key is looked at, so a
+                // 'busy' request never leaks a title through it. An item with no
+                // key is never merged with anything.
+                $key = (string)$item->source_key;
+                if ($key !== '') {
+                    if (isset($seen[$key])) {
+                        continue;
+                    }
+                    $seen[$key] = true;
+                }
+                $items[] = $item;
             }
         }
         return $items;
+    }
+
+    /**
+     * The sources in the order they are asked: higher priority() first, and
+     * discovery order (core, then each active plugin) among equals. A source with
+     * no priority() has 0, so the native record outranks an external echo of it
+     * (which returns a negative number) and the first source discovered wins a tie.
+     *
+     * @return CalendarItemSource[]
+     */
+    private static function ordered(): array {
+        $sources = array_values(self::discover());
+        $rank = [];
+        foreach ($sources as $i => $source) {
+            $rank[$i] = method_exists($source, 'priority') ? (int)$source->priority() : 0;
+        }
+        $order = array_keys($sources);
+        usort($order, function ($a, $b) use ($rank) {
+            return ($rank[$b] <=> $rank[$a]) ?: ($a <=> $b);
+        });
+        return array_map(function ($i) use ($sources) { return $sources[$i]; }, $order);
+    }
+
+    /** Use exactly these sources (tests), keyed by source key; null returns to discovery. */
+    public static function useSources(?array $sources): void {
+        self::$sources = $sources;
     }
 
     /**
