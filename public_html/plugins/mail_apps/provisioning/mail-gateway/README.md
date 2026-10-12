@@ -135,9 +135,12 @@ Thunderbird shows anything else garbled.
 - **`SELECT`/`EXAMINE`** calls `mail_sync` for the whole list (number, flags,
   change number, date, size) and keeps it; sequence numbers are ascending UID
   order. `FLAGS` and `PERMANENTFLAGS` are `\Seen \Flagged \Answered \Deleted
-  \Draft $Forwarded $Junk $NotJunk` — no `\*`, so a program keeps its own tags
-  itself. (Thunderbird's Junk button stores `$Junk`/`$NotJunk` only when both
-  are listed; the site takes them as the spam verdict.) `STATUS` is
+  \Draft $Forwarded` — no `\*`, so a program keeps its own tags itself. That
+  includes Thunderbird's junk marks, `$Junk`/`$NotJunk`: its automatic
+  classifier sets them on messages the person never touched, and a program's
+  classifier must not set the server's spam verdict (owner decision J1). A
+  `STORE` of them is answered and not passed on, and they are never reported;
+  only a move to Spam, or out of it, reaches the site. `STATUS` is
   `mail_sync` with `status_only`.
 - **New mail and changes.** After a command (at most every 5 seconds per
   connection) and every 30 seconds while in `IDLE`, the connection asks
@@ -389,7 +392,7 @@ and an SMTP submission (good send, `454 4.7.0` while locked, `550 5.7.1` for a
 foreign From, `535 5.7.8` for a wrong password). `thunderbird_paths_test.go`
 checks the wire the way Thunderbird 157 speaks it (Phase 0 rig): capabilities
 in the greeting and sign-in replies, two-step `AUTHENTICATE PLAIN`,
-`\Noinferiors` and special-use on a plain `LIST`, `LSUB`, `$Junk`/`$NotJunk` in
-the flags, ASCII refusals, `\Seen` kept off a refused message, `APPEND` in the
+`\Noinferiors` and special-use on a plain `LIST`, `LSUB`, exactly the kept
+flags (no `$Junk`/`$NotJunk`) and a junk mark not passed on, ASCII refusals, `\Seen` kept off a refused message, `APPEND` in the
 `UTF8` form, one `EXPUNGE` per `MOVE`, offline-sync batching with `more`, `gone`,
 and the 23 MB limit on `APPEND` and `DATA`.

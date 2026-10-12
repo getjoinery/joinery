@@ -140,14 +140,17 @@ check($marks && in_array($marks['mam_is_forwarded'], array(true, 't', 1, '1'), t
 
 section('A program\'s copy to Sent is recognised');
 $appended = MailAppMutations::append($ctx, $sent_folder, $raw, array('\\Seen'), null);
-check($appended['uid'] === $sent_uid, 'APPEND of the same message answers the stored number', json_encode($appended));
+check($appended['uid'] === null && array_search((int)$sent['outbound_id'], mafx_live($ctx, 'sent'), true) === $sent_uid,
+	'APPEND of the same message answers no number, so the program fetches the copy the site sent (J3)', json_encode($appended));
 $count = (int)$db->query("SELECT COUNT(*) FROM iem_inbound_email_messages WHERE iem_message_id_header = " . $db->quote($their_id))->fetchColumn();
 check($count === 1, 'Nothing new was stored');
 $other_raw = $compose('<' . $address . '>', '<elsewhere-' . bin2hex(random_bytes(4)) . '@' . $domain_name . '>');
-$appended = MailAppMutations::append($ctx, $sent_folder, $other_raw, array('\\Seen'), null);
-$other_id = mafx_live($ctx, 'sent')[$appended['uid']] ?? null;
+$before = mafx_live($ctx, 'sent');
+MailAppMutations::append($ctx, $sent_folder, $other_raw, array('\\Seen'), null);
+$new = array_diff_key(mafx_live($ctx, 'sent'), $before);
+$other_id = $new ? reset($new) : null;
 $track((int)$other_id);
-check($appended['uid'] !== null && $other_id !== null, 'A message sent elsewhere and APPENDed to Sent is stored there');
+check($other_id !== null, 'A message sent elsewhere and APPENDed to Sent is stored there');
 
 section('A minted Message-ID when the program\'s names another machine');
 $raw2 = $compose('<' . $address . '>', '<abc@my-laptop.local>');
@@ -182,8 +185,10 @@ foreach (MimeParse::parseMessage($rebuilt['bytes'] ?? '')->getParts() as $p) {
 }
 check($served === array('Inner.eml'), 'The copy a program is served holds the forwarded message once, its insides not loose beside it',
 	json_encode($served));
-$dfa = MailAppMutations::append($ctx, MailAppFolders::byKey($ctx, 'drafts:' . $uid), $outer, array('\\Draft'), null);
-$dfa_id = mafx_live($ctx, 'drafts:' . $uid)[$dfa['uid']] ?? null;
+$before = mafx_live($ctx, 'drafts:' . $uid);
+MailAppMutations::append($ctx, MailAppFolders::byKey($ctx, 'drafts:' . $uid), $outer, array('\\Draft'), null);
+$new = array_diff_key(mafx_live($ctx, 'drafts:' . $uid), $before);
+$dfa_id = $new ? reset($new) : null;
 $track((int)$dfa_id);
 mafx_register_files((int)$dfa_id);
 $names = $db->query("SELECT ima_filename FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = "
@@ -230,8 +235,11 @@ $draft_raw = "From: <$address>\r\nTo: bob@example.org\r\nSubject: Half written\r
 	. "Content-Type: multipart/mixed; boundary=\"d1\"\r\n\r\n--d1\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nNot done yet\r\n"
 	. "--d1\r\nContent-Type: application/octet-stream; name=\"notes.bin\"\r\nContent-Disposition: attachment; filename=\"notes.bin\"\r\n"
 	. "Content-Transfer-Encoding: base64\r\n\r\n" . base64_encode('draft attachment bytes') . "\r\n--d1--\r\n";
-$appended = MailAppMutations::append($ctx, $drafts, $draft_raw, array('\\Draft', '\\Seen'), null);
-$draft_id = mafx_live($ctx, $drafts['key'])[$appended['uid']] ?? null;
+$before = mafx_live($ctx, $drafts['key']);
+MailAppMutations::append($ctx, $drafts, $draft_raw, array('\\Draft', '\\Seen'), null);
+$new = array_diff_key(mafx_live($ctx, $drafts['key']), $before);
+$draft_id = $new ? reset($new) : null;
+$draft_uid = $new ? key($new) : null;
 $track((int)$draft_id);
 check($draft_id !== null, 'It becomes a Joinery draft, numbered in Drafts');
 $drow = $db->query("SELECT iem_direction, iem_subject FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = " . (int)$draft_id)->fetch(PDO::FETCH_ASSOC);
@@ -239,10 +247,10 @@ check($drow && $drow['iem_direction'] === 'draft' && $drow['iem_subject'] === 'H
 $att = (int)$db->query("SELECT COUNT(*) FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = " . (int)$draft_id)->fetchColumn();
 check($att === 1, 'And its attachment');
 mafx_register_files((int)$draft_id);
-check(MailAppSearch::uids($ctx, $drafts, 'message-id', $draft_mid) === array($appended['uid']), 'Found again by its Message-ID');
+check(MailAppSearch::uids($ctx, $drafts, 'message-id', $draft_mid) === array($draft_uid), 'Found again by its Message-ID');
 $bytes = MailAppRebuild::bytes($ctx, (int)$draft_id);
 check($bytes['ok'] && strpos($bytes['bytes'], 'Message-ID: ' . $draft_mid) !== false, 'Served back under the Message-ID the program gave it');
-MailAppMutations::store($ctx, $drafts, array($appended['uid']), 'add', array('\\Deleted'));
+MailAppMutations::store($ctx, $drafts, array($draft_uid), 'add', array('\\Deleted'));
 MailAppMutations::expunge($ctx, $drafts);
 check(!$db->query("SELECT 1 FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = " . (int)$draft_id)->fetchColumn(),
 	'EXPUNGE in Drafts deletes the draft');

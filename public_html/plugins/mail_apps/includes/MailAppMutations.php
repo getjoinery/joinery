@@ -12,8 +12,11 @@
  *   move / copy into a label            setMembership(true); a move out of Inbox
  *                                       also archives, and out of a label also
  *                                       removes that label
- *   move -> Spam, or STORE $Junk         setSpamVerdict('spam')
- *   move out of Spam, or STORE $NotJunk  setSpamVerdict('ham')
+ *   move -> Spam                        setSpamVerdict('spam')
+ *   move out of Spam                    setSpamVerdict('ham')
+ *   (STORE $Junk / $NotJunk is not offered: a program's automatic junk
+ *   classifier sets them on mail the person never touched, and they would
+ *   become server verdicts. The program keeps them locally. Owner decision J1.)
  *   move out of Trash                   restoreFromTrash()
  *   \Deleted + EXPUNGE in Trash         purgeFromTrash() — gone for good
  *   \Deleted + EXPUNGE in a label       the label comes off (the message stays)
@@ -72,17 +75,6 @@ class MailAppMutations {
 			}
 			if (($v = $want(MailAppFolders::FLAG_FLAGGED)) !== null) {
 				$ctx->service->setStarred($message_ids, $v);
-			}
-			// A program's Junk / Not Junk buttons set these keywords: they are the
-			// reader's Mark as spam / Not spam, and teach the filter the same way.
-			// Never stored as flags, so they are only ever added.
-			if ($op !== 'remove') {
-				$keywords = array_map('strtolower', $flags);
-				if (in_array('$junk', $keywords, true) || in_array('junk', $keywords, true)) {
-					$ctx->service->setSpamVerdict($message_ids, 'spam');
-				} elseif (in_array('$notjunk', $keywords, true) || in_array('notjunk', $keywords, true)) {
-					$ctx->service->setSpamVerdict($message_ids, 'ham');
-				}
 			}
 			$answered = $want(MailAppFolders::FLAG_ANSWERED);
 			$forwarded = $want(MailAppFolders::FLAG_FORWARDED);
@@ -192,7 +184,7 @@ class MailAppMutations {
 		if ($move && $from_view === 'label' && $to_view !== 'trash') {
 			$svc->setMembership($ids, intval($from['label_id']), false);
 		}
-		if ($move && $from_view === 'inbox' && ($to_view === 'label' || $to_view === 'all')) {
+		if ($move && $from_view === 'inbox' && $to_view === 'label') {
 			$svc->setArchived($ids, true);
 		}
 
@@ -319,9 +311,9 @@ class MailAppMutations {
 				}
 				break;
 			default:
-				// Into Archive, All Mail or a label: out of the Inbox, the way a move there is.
+				// Into Archive or a label: out of the Inbox, the way a move there is.
 				$id = self::storeInbound($ctx, $raw, $bits, $date,
-					in_array($folder['view'], array('archive', 'all', 'label'), true));
+					in_array($folder['view'], array('archive', 'label'), true));
 				$placement = $folder['view'];
 				if ($placement === 'trash') {
 					$ctx->service->softDelete(array($id));
@@ -349,7 +341,21 @@ class MailAppMutations {
 		}
 
 		$state = MailAppFolders::reconcile($ctx, $folder);
-		return array('uid' => MailAppFolders::uidOf($ctx, $folder['key'], $id), 'uidvalidity' => $state['uidvalidity']);
+		$uid = MailAppFolders::uidOf($ctx, $folder['key'], $id);
+		// A number answered for an APPEND tells the program "these bytes are
+		// that message": it keeps its own copy under it and never fetches it.
+		// Where what is stored is not byte for byte what it sent — a copy to
+		// Sent matched to the one the site sent, a draft saved through
+		// mailbox's drafts, a message already here — no number is answered
+		// (IMAP allows that), and the program fetches the message as the site
+		// holds it, so every device sees the same bytes (J3).
+		if ($uid !== null) {
+			$served = MailAppRebuild::bytes($ctx, $id);
+			if (!$served['ok'] || $served['bytes'] !== $raw) {
+				$uid = null;
+			}
+		}
+		return array('uid' => $uid, 'uidvalidity' => $state['uidvalidity']);
 	}
 
 	/**

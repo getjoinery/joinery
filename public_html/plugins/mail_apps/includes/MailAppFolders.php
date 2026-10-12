@@ -13,7 +13,6 @@
  *   Archive   archive    \Archive
  *   Spam      spam       \Junk
  *   Trash     trash      \Trash
- *   All Mail  all        \All
  *   {label}   label:{id}            — "Labels/{name}" when a label's name is
  *                                     one of the names above
  *
@@ -36,6 +35,7 @@
  * change made in the web reader while no mail program was connected is found
  * on the next reconcile, and mailbox needs to know none of this.
  *
+ * @version 1.1.0 - no All Mail; a label:<id> key names only the mailbox's own label
  * @version 1.0.0
  */
 
@@ -71,8 +71,10 @@ class MailAppFolders {
 		'archive' => array('Archive',  '\\Archive', 'archive'),
 		'spam'    => array('Spam',     '\\Junk',    'spam'),
 		'trash'   => array('Trash',    '\\Trash',   'trash'),
-		'all'     => array('All Mail', '\\All',     'all'),
 	);
+	// No All Mail (\All): Thunderbird downloads it for offline use like any
+	// folder, which stored every message twice (owner decision J2). Archive
+	// and the labels already reach everything the Inbox does not.
 
 	/** Where a label whose name collides with a fixed folder is listed. */
 	const LABEL_PARENT = 'Labels';
@@ -153,9 +155,10 @@ class MailAppFolders {
 		if (!preg_match('/^label:(\d+)$/', $key, $m)) {
 			return null;
 		}
-		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT ilb_name FROM ilb_inbound_email_labels
-			WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL');
-		$stmt->execute(array(intval($m[1])));
+		// Only this mailbox's label: another mailbox's is no folder here.
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare('SELECT ilb_label_name FROM ilb_inbound_email_labels
+			WHERE ilb_inbound_email_label_id = ? AND ilb_iea_inbound_email_alias_id = ? AND ilb_delete_time IS NULL');
+		$stmt->execute(array(intval($m[1]), $ctx->alias_id));
 		$name = $stmt->fetchColumn();
 		if ($name === false) {
 			return null;

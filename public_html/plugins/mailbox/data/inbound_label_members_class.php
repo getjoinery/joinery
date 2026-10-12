@@ -27,6 +27,7 @@
  *
  * See specs/inbound_email_labels.md and ImapSyncer.
  *
+ * @version 1.1 - apply() adds only a live label of the message's own mailbox
  * @version 1.0
  */
 
@@ -131,13 +132,25 @@ class InboundLabelMember extends SystemBase {
 	// ── truth mutations (reader / filters) ───────────────────────────────────
 
 	/**
-	 * Apply a label to a message (idempotent). Resolves the binding on the message's own
+	 * Apply a label to a message (idempotent; nothing for a label that is gone or is
+	 * another mailbox's). Resolves the binding on the message's own
 	 * feed: with a binding the row is a bound shadow (present_base=false → a dirty add the
 	 * sync push COPYs); without one it is unbound (present_base=present_local → clean,
 	 * never pushed). Re-applying a not-yet-pushed remove simply cancels it.
 	 */
 	static function apply(int $messageId, int $labelId): void {
 		if ($messageId <= 0 || $labelId <= 0) {
+			return;
+		}
+		// A message carries only live labels of its own mailbox: a label belongs to
+		// one mailbox (mailbox_per_mailbox_labels.md). Every apply — reader,
+		// mobile apps, mail apps, filters, the archive importer — passes through here.
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = $db->prepare('SELECT 1 FROM iem_inbound_email_messages
+			JOIN ilb_inbound_email_labels ON ilb_iea_inbound_email_alias_id = iem_iea_inbound_email_alias_id
+			WHERE iem_inbound_email_message_id = ? AND ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL');
+		$own->execute(array($messageId, $labelId));
+		if (!$own->fetchColumn()) {
 			return;
 		}
 		$binding = self::resolveBinding($messageId, $labelId);

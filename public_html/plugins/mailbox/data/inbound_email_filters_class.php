@@ -37,6 +37,7 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.9 - a filter's label is applied only to messages of the label's own mailbox
  * @version 1.8 - never_spam does not lift a message its sender's domain disowns (InboundEmailMessage::senderDomainDisowns)
  * @version 1.7 - a rule that sets the spam verdict records iem_spam_reason = rule
  * @version 1.6 - device-run rules: deviceRule(), applyDeviceMatches() (a rule of the message's own scope switched
@@ -393,16 +394,6 @@ class InboundEmailFilter extends SystemBase {
 		return $out;
 	}
 
-	/** True if the custom label still exists and is not deleted. */
-	private static function labelExists(int $labelId): bool {
-		if ($labelId <= 0) { return false; }
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			'SELECT 1 FROM ilb_inbound_email_labels WHERE ilb_inbound_email_label_id = ? AND ilb_delete_time IS NULL LIMIT 1');
-		$stmt->execute(array($labelId));
-		return (bool)$stmt->fetchColumn();
-	}
-
 	/** True if the message has at least one attachment manifest row. */
 	private function messageHasAttachment(int $messageId): bool {
 		if ($messageId <= 0) { return false; }
@@ -625,11 +616,12 @@ class InboundEmailFilter extends SystemBase {
 		}
 
 		// 3a. Labels — apply each custom label to the message (same write as the
-		// reader's Labels control). InboundLabelMember::apply is idempotent. Guard for a
-		// since-deleted label so a stale filter action is simply skipped.
+		// reader's Labels control). InboundLabelMember::apply is idempotent and adds only
+		// a live label of the message's own mailbox; the guard here keeps a stale filter
+		// action out of the done list.
 		foreach (($a['label_ids'] ?? array()) as $lid) {
 			$lid = intval($lid);
-			if ($lid > 0 && self::labelExists($lid)) {
+			if ($lid > 0 && InboundEmailLabel::aliasOf($lid) === intval($msg->get('iem_iea_inbound_email_alias_id'))) {
 				InboundLabelMember::apply($mid, $lid);
 				$done[] = 'label:' . $lid;
 			}

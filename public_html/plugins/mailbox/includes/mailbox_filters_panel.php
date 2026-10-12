@@ -11,6 +11,7 @@
  * Everything is FormWriter, and every mutation is a POST: Edit is the one GET,
  * because it only opens the form.
  *
+ * @version 1.2 - a domain-wide filter shows "Apply the label" disabled, saying why
  * @version 1.1 - "Never send it to Spam" says what it cannot lift (mail the sender's domain disowned)
  * @version 1.0
  */
@@ -122,21 +123,31 @@ function mailbox_render_filter_form($page, array $vars, string $base, array $pag
 			$formwriter->hiddeninput('ief_match_has_attachment', '', array('value' => '1'));
 		}
 
-		// Apply a label — a custom label (ilb_) in the global namespace, shared with the
+		// Apply a label — one of the filter's mailbox's labels (ilb_), shared with the
 		// reader and IMAP sync. "Create new label…" reveals a name field and mints the
-		// label on save (Gmail's inline "New label…").
-		$formwriter->dropinput('ief_action_ilb_inbound_email_label_id', 'Apply the label', array(
-			'options' => array('0' => '— none —') + ($vars['label_options'] ?? array()) + array('new' => 'Create new label…'),
-			'value' => (string)$v['ief_action_ilb_inbound_email_label_id'],
-			'visibility_rules' => array(
-				'new'     => array('show' => array('ief_action_label_new'), 'hide' => array()),
-				'default' => array('show' => array(), 'hide' => array('ief_action_label_new')),
-			),
-		));
-		$formwriter->textinput('ief_action_label_new', 'New label name', array(
-			'value' => $v['ief_action_label_new'],
-			'helptext' => 'Creates this label and applies it.',
-		));
+		// label on save (Gmail's inline "New label…"). A filter for every mailbox in a
+		// domain has no mailbox to own a label: the control is shown disabled, saying why.
+		if (strncmp((string)$v['scope'], 'alias:', 6) === 0) {
+			$formwriter->dropinput('ief_action_ilb_inbound_email_label_id', 'Apply the label', array(
+				'options' => array('0' => '— none —') + ($vars['label_options'] ?? array()) + array('new' => 'Create new label…'),
+				'value' => (string)$v['ief_action_ilb_inbound_email_label_id'],
+				'visibility_rules' => array(
+					'new'     => array('show' => array('ief_action_label_new'), 'hide' => array()),
+					'default' => array('show' => array(), 'hide' => array('ief_action_label_new')),
+				),
+			));
+			$formwriter->textinput('ief_action_label_new', 'New label name', array(
+				'value' => $v['ief_action_label_new'],
+				'helptext' => 'Creates this label and applies it.',
+			));
+		} else {
+			$formwriter->dropinput('ief_action_ilb_inbound_email_label_id', 'Apply the label', array(
+				'options'  => array('0' => '— none —'),
+				'value'    => '0',
+				'disabled' => true,
+				'helptext' => _filter_domain_label_reason(),
+			));
+		}
 
 		$formwriter->checkboxinput('ief_action_star', 'Star it', array('checked' => $v['ief_action_star']));
 		$formwriter->checkboxinput('ief_action_mark_read', 'Mark as read', array('checked' => $v['ief_action_mark_read']));

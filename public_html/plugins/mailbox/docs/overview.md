@@ -904,7 +904,8 @@ sees it:
 - **The relay:** the exported routing map marks a handler alias's recipient entry
   `accepts_tag`, and the relay's `resolve()` falls back to the base for a
   `base+tag` address only when that entry carries it. The relay also writes an
-  accept line for the base's `+tag` addresses into its recipient access map. A
+  accept line for the base's `+tag` addresses into its recipient access map. The relay's Postfix has `recipient_delimiter` empty (Ubuntu ships it as `+`, which would make the
+  access map accept `plain+anything@` from `plain@`'s entry), so only that accept line takes a `+tag`. A
   relay older than `RelayVersion::ACCEPTS_SUBADDRESSES` ignores the marker, so
   `ensureAlias()` refuses a relay-fronted domain until the relay reports that
   version.
@@ -4865,10 +4866,12 @@ received today.
   spam, never send to spam, forward to an address, delete.
 
 **Scope of a rule.** A filter belongs to a mailbox, or to *all mailboxes in a
-domain* (a domain-wide rule). A label is a custom label (an `ilb_inbound_email_labels`
-row) with a single global namespace rather than belonging to one mailbox — every scope,
-domain-wide rules included, can apply a label. The *Apply the label* dropdown lists
-the existing labels and offers **Create new label…** to mint one inline.
+domain* (a domain-wide rule). A label belongs to one mailbox, so only a mailbox's
+rule can apply one: its *Apply the label* dropdown lists that mailbox's labels and
+offers **Create new label…** to mint one inline. A domain-wide rule shows the control
+disabled, saying why, and its save refuses a label; the rule's other actions are
+unaffected. At apply time a rule's label is applied only to a message of the label's
+own mailbox.
 
 **Engine.** The match and action logic lives on the `InboundEmailFilter` model.
 `runForMessage()` loads every in-scope enabled filter (the mailbox's own plus the
@@ -4937,9 +4940,11 @@ then confirms to create the checked rows. An imported filter is an ordinary
 - **Criteria** map directly: `from`, `to`, `subject`, `hasTheWord` → *Has the words*,
   `doesNotHaveTheWord` → *Doesn't have*, `hasAttachment`, and `size`.
 - **Actions** map directly too: archive, mark-read, star, trash → delete, never-spam,
-  and forward. Gmail's `label` action **find-or-creates a custom label** by name (a
-  nested `Parent/Child` name is kept verbatim); new labels are created on confirm and
-  their count is shown in the summary.
+  and forward. Gmail's `label` action **find-or-creates one of the mailbox's labels**
+  by name (a nested `Parent/Child` name is kept verbatim); new labels are created on
+  confirm and their count is shown in the summary. Imported into a domain-wide scope,
+  a filter keeps its other actions and loses its label, and one that only applied a
+  label is skipped; the summary says how many of each.
 - **Skipped:** importance (`shouldAlwaysMarkAsImportant` / `shouldNeverMarkAsImportant`),
   categories (`smartLabelToApply`), and chat exclusion have no platform concept and are
   dropped visibly, listed per row in the preview.
@@ -5438,11 +5443,19 @@ changes the verdict only on a row with no unsent correction. On a Read-only feed
 correction stays local and is never sent.
 
 **Custom labels are rows; folders are bindings.** A custom label is an
-`ilb_inbound_email_labels` row, and a message *has* it iff it carries an
+`ilb_inbound_email_labels` row of one mailbox (`ilb_iea_inbound_email_alias_id`), its
+name (`ilb_label_name`) unique within that mailbox: only the mailbox's members see it,
+and two mailboxes can each have a "Receipts". A message *has* a label iff it carries an
 `ilm_inbound_label_members` row with `ilm_present_local` — the same truth for
-locally-received and IMAP mail. An IMAP folder (`iif_inbound_imap_folders`) is a
-**binding** that mirrors one label to a remote folder on one feed
-(`iif_ilb_inbound_email_label_id`). Special-use folders (Inbox, Sent, Trash, Junk) and
+locally-received and IMAP mail — and a message carries only labels of its own mailbox:
+`InboundLabelMember::apply()` adds nothing else, whichever path asks (the reader, the
+mobile apps, mail apps, filters, the archive importer). An IMAP folder
+(`iif_inbound_imap_folders`) is a **binding** that mirrors one of its feed's mailbox's
+labels to a remote folder on that feed (`iif_ilb_inbound_email_label_id`);
+`ensureLabel()` binds the label of the folder's name, and replaces a binding to a label
+that is gone or is another mailbox's. Pointing an account at another mailbox clears its
+folders' bindings, so the next sync binds the new mailbox's labels; mail already stored
+keeps its own mailbox's. Special-use folders (Inbox, Sent, Trash, Junk) and
 the `\All` coverage view bind no label — their state is a message column, not a label.
 The membership row is also the IMAP **shadow**: `ilm_present_base` records whether the
 message was in the bound folder at the last sync, alongside the folder UID, so truth
@@ -5489,7 +5502,7 @@ the selection, which removes those rows from that label's view.
 **Creating a label/folder.** The same control has a **New label… / New folder…**
 field, and is present on every mailbox — one with no labels yet shows the button
 with just that field, since it is the one place a first label is made. Creating
-one makes an `ilb_` label; on a mailbox with an IMAP feed it also makes
+one makes an `ilb_` label of the mailbox; on a mailbox with an IMAP feed it also makes
 a tracked binding flagged `iif_pending_remote_create` (the remote folder does not
 exist yet) and files the thread into it. The folder is materialized on the source
 **during the sync push** — `ImapSyncer` issues the IMAP `CREATE`, clears the pending
@@ -5502,17 +5515,24 @@ the mailbox editor to start syncing it.
 edge, shown when the row is hovered (always shown on a touch screen). It opens a
 confirmation that states the consequences and takes the label's name typed back before
 the **Delete label** button enables; the act is not reversible. `delete_label`
-(`MailboxService::deleteLabel`) removes the label from the site: a label is one shared
-name across every mailbox, so it comes off every message that carries it (the `ilm_`
-rows are dropped) and out of every mailbox's list, and the `ilb_` row is soft-deleted.
+(`MailboxService::deleteLabel`) removes one of the mailbox's labels: it comes off every
+message that carries it (all of them the mailbox's; the `ilm_` rows are dropped) and out
+of the mailbox's list, and the `ilb_` row is soft-deleted. Another mailbox's label is
+refused with the same answer as an unknown one.
 **No message is deleted.** Every feed folder bound to the label is unbound and untracked,
 so the next sync neither re-materializes memberships nor re-mints the label from the
 folder name (rediscovery never flips `iif_is_tracked` on an existing row); the
 folder/label on the source itself is left as it is — nothing is deleted on a provider.
 A list filtered to the deleted label falls back to the mailbox's Inbox. A filter whose
 action applies the label keeps matching and simply skips the label. The name is free
-again: the uniqueness index on `ilb_name` covers live rows only, so creating the same
-name afterwards makes a fresh label.
+again: the uniqueness index on (`ilb_label_name`, mailbox) covers live rows only, so
+creating the same name afterwards makes a fresh label.
+
+A label id that arrives with a request is the request's mailbox's or nothing:
+`set_membership` changes only messages of the label's own mailbox, `delete_label` and a
+`thread_list` `folder_id` refuse another mailbox's, and so do a filter's save and mail
+apps' `label:<id>` folders. `ilb_name`, the column of the site-wide namespace labels
+had before, is retired and read by nothing.
 
 **The `\All` coverage view (Gmail All Mail).** An all-mail folder is tracked as a
 **coverage source**, not a navigable label: it ingests every message — including

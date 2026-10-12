@@ -312,7 +312,7 @@ else
                         FROM ilm_inbound_label_members ilm
                         JOIN ilb_inbound_email_labels ilb
                           ON ilb.ilb_inbound_email_label_id = ilm.ilm_ilb_inbound_email_label_id
-                        WHERE ilb.ilb_name = '$MAIL_FOLDER'
+                        WHERE ilb.ilb_label_name = '$MAIL_FOLDER'
                           AND ilb.ilb_delete_time IS NULL
                           AND ilm.ilm_iem_inbound_email_message_id = ${PICKER_SEEDED:-0}
                           AND ilm.ilm_present_local = true LIMIT 1")

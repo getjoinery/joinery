@@ -59,9 +59,11 @@ $trash = MailAppFolders::byKey($ctx, 'trash');
 section('The folder list');
 $names = array_column(MailAppFolders::listFor($ctx), 'special_use', 'name');
 foreach (array('INBOX' => null, 'Sent' => '\\Sent', 'Drafts' => '\\Drafts', 'Archive' => '\\Archive',
-		'Spam' => '\\Junk', 'Trash' => '\\Trash', 'All Mail' => '\\All') as $name => $use) {
+		'Spam' => '\\Junk', 'Trash' => '\\Trash') as $name => $use) {
 	check(array_key_exists($name, $names) && $names[$name] === $use, "$name is listed" . ($use ? " as $use" : ''));
 }
+check(!array_key_exists('All Mail', $names) && MailAppFolders::byKey($ctx, 'all') === null,
+	'There is no All Mail (a program would store every message twice)');
 $label = $ctx->service->createFolder($ctx->alias_id, 'Projects ' . bin2hex(random_bytes(3)));
 harness_register_row('ilb_inbound_email_labels', 'ilb_inbound_email_label_id', (int)$label['id']);
 $collide = $ctx->service->createFolder($ctx->alias_id, 'Archive');
@@ -159,31 +161,40 @@ MailAppMutations::expunge($ctx, $trash);
 check(!$db->query("SELECT 1 FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $m2")->fetchColumn(),
 	'EXPUNGE in Trash deletes it for good');
 
-section('The Junk button');
+section('Junk is a move to Spam, never a keyword');
 $m4 = mafx_deliver($alias, $domain, mafx_raw($address, 'Maybe spam', 'buy now'));
 MailAppFolders::reconcile($ctx, $inbox);
 MailAppMutations::store($ctx, $inbox, array($uid_of($inbox, $m4)), 'add', array('$Junk'));
-check($db->query("SELECT iem_spam_verdict FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $m4")->fetchColumn() === 'spam',
-	'STORE $Junk marks it spam, as the reader\'s button does');
+$verdict = function () use ($db, $m4) {
+	return $db->query("SELECT iem_spam_verdict FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $m4")->fetchColumn();
+};
+check($verdict() !== 'spam', 'STORE $Junk sets no verdict (a program\'s own classifier sets it on mail nobody touched)');
 $spam = MailAppFolders::byKey($ctx, 'spam');
+MailAppMutations::place($ctx, $inbox, array($uid_of($inbox, $m4)), $spam, true);
+check($verdict() === 'spam', 'A move to Spam marks it spam, as the reader\'s button does');
 MailAppFolders::reconcile($ctx, $spam);
-MailAppMutations::store($ctx, $spam, array($uid_of($spam, $m4)), 'add', array('$NotJunk'));
-check($db->query("SELECT iem_spam_verdict FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $m4")->fetchColumn() === 'ham',
-	'STORE $NotJunk marks it not spam');
+MailAppMutations::place($ctx, $spam, array($uid_of($spam, $m4)), $inbox, true);
+check($verdict() === 'ham', 'A move out of Spam marks it not spam');
 
 section('APPEND to INBOX');
+$before = mafx_live($ctx, 'inbox');
 $appended = MailAppMutations::append($ctx, $inbox, mafx_raw($address, 'Appended', 'from a program'), array('\\Seen'), null);
-$app_mid = mafx_live($ctx, 'inbox')[$appended['uid']] ?? null;
+$new = array_diff_key(mafx_live($ctx, 'inbox'), $before);
+$app_mid = $new ? reset($new) : null;
 if ($app_mid) {
 	harness_register_model('InboundEmailMessage', $app_mid);
 }
-check($appended['uid'] !== null && $app_mid !== null, 'It is stored and numbered (APPENDUID)', json_encode($appended));
+check(count($new) === 1 && $app_mid !== null, 'It is stored and numbered');
+check($appended['uid'] === null,
+	'No APPENDUID: what is stored is not byte for byte what was sent, so the program fetches it (J3)', json_encode($appended));
 check($app_mid && $db->query("SELECT iem_is_read FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $app_mid")->fetchColumn(),
 	'With the \\Seen flag it was appended with');
 
 section('APPEND to a label');
-$labelled = MailAppMutations::append($ctx, $label_folder, mafx_raw($address, 'Into the label', 'filed'), array(), null);
-$lab_mid = mafx_live($ctx, $label_folder['key'])[$labelled['uid']] ?? null;
+$before = mafx_live($ctx, $label_folder['key']);
+MailAppMutations::append($ctx, $label_folder, mafx_raw($address, 'Into the label', 'filed'), array(), null);
+$new = array_diff_key(mafx_live($ctx, $label_folder['key']), $before);
+$lab_mid = $new ? reset($new) : null;
 if ($lab_mid) { harness_register_model('InboundEmailMessage', $lab_mid); }
 check($lab_mid !== null && InboundLabelMember::isMember($lab_mid, (int)$label['id']), 'It is stored and carries the label');
 check($lab_mid && (bool)$db->query("SELECT iem_is_archived FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = $lab_mid")->fetchColumn(),

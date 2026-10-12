@@ -288,7 +288,9 @@ change is immediately visible in both:
   non-exclusive feed (Gmail-style custom labels) gets checkbox "Labels" that
   toggle membership independently. Both end with a create-folder/label row.
   All three operations ride the existing `mailbox/thread_action`
-  (`set_membership`, `create_folder`) — no server change. The button is
+  (`set_membership`, `create_folder`) — no server change. The labels are the
+  thread's mailbox's own (a label belongs to one mailbox), and the server
+  changes only messages of the label's mailbox. The button is
   hidden entirely when the thread's mailbox has no tracked folders yet,
   matching the web and Android pickers exactly (there is no empty-state
   affordance to create the first one from the button itself).
@@ -723,7 +725,9 @@ suites) but no client code:
   feed (Gmail) gets "Labels" checkboxes (toggling calls `set_membership`
   per change). Both end with a create row (`create_folder`, which also
   files the thread into the new folder). Current membership comes from the
-  `thread` action's `folders` ids.
+  `thread` action's `folders` ids. The labels are that mailbox's own (a label
+  belongs to one mailbox), and the server changes only messages of the
+  label's mailbox.
 - **Compose** (`ComposeSheet`) — reply / reply-all / forward / new message
   with To/Cc/Subject and body, as a full-screen dialog. Same lean contract
   as iOS: the server quotes, normalizes the subject, applies threading

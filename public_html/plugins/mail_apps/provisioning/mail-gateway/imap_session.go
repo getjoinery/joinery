@@ -14,10 +14,14 @@ import (
 // Anything else — a program's own tags — the program keeps locally, which is
 // why there is no \* in PERMANENTFLAGS.
 //
-// $Junk and $NotJunk are listed too: Thunderbird's Junk button stores them
-// only when both appear, and the site takes them as the spam verdict.
+// $Junk and $NotJunk are deliberately not among them (owner decision J1: a
+// program's automatic classifier must not set server verdicts). Thunderbird's
+// junk filter stores them on messages the person never touched; left out of
+// PERMANENTFLAGS, they stay in the program, a STORE of them is dropped like
+// any other program keyword, and they are never reported in FLAGS. Only a
+// move to Spam, or out of it, reaches the site as a verdict.
 var keptFlags = []imap.Flag{imap.FlagSeen, imap.FlagFlagged, imap.FlagAnswered, imap.FlagDeleted, imap.FlagDraft,
-	imap.FlagForwarded, imap.FlagJunk, imap.FlagNotJunk}
+	imap.FlagForwarded}
 
 func isKeptFlag(f imap.Flag) (imap.Flag, bool) {
 	for _, k := range keptFlags {

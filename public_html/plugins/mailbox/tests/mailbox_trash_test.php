@@ -188,7 +188,7 @@ check(count($keys($super->listThreads(MailboxService::UNMATCHED, array('trash' =
 // ---- the mutation pin ----------------------------------------------------
 section('every other mutation refuses a trashed row');
 
-$label = InboundEmailLabel::findOrCreate('TrashTestLabel-' . bin2hex(random_bytes(3)));
+$label = InboundEmailLabel::findOrCreate((int)$mine_alias, 'TrashTestLabel-' . bin2hex(random_bytes(3)));
 harness_register_row('ilb_inbound_email_labels', 'ilb_inbound_email_label_id', (int)$label->key);
 
 check($svc->markRead(array($m_trash), true) === 0, 'markRead refuses it');

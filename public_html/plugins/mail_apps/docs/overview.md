@@ -66,12 +66,13 @@ Joinery uses labels, not folders. A program sees them the way Gmail presents lab
 | `Archive` | `\Archive` | `archive` |
 | `Spam` | `\Junk` | `spam` |
 | `Trash` | `\Trash` | `trash` |
-| `All Mail` | `\All` | `all` |
-| one per label | | `label` (a label named like a fixed folder is listed as `Labels/{name}`) |
+| one per label of the mailbox | | `label` (a label named like a fixed folder is listed as `Labels/{name}`) |
 
 `viewScopeSql()` is mailbox's own definition of each view, the same one its reader lists from.
 
-The gateway names folders by **key** (`inbox`, `sent`, `drafts:{user id}`, `archive`, `spam`, `trash`, `all`, `label:{label id}`); the program sees names.
+There is no All Mail (`\All`) folder. A program downloads every folder for offline use, so it would store every message twice; Archive and the labels already reach everything outside the Inbox.
+
+The gateway names folders by **key** (`inbox`, `sent`, `drafts:{user id}`, `archive`, `spam`, `trash`, `label:{label id}`); the program sees names. A `label:{label id}` key names only one of the mailbox's own labels; another mailbox's is no folder here.
 
 ### What a program's actions do
 
@@ -82,16 +83,18 @@ The gateway names folders by **key** (`inbox`, `sent`, `drafts:{user id}`, `arch
 | Move Inbox → Archive | `setArchived(true)` |
 | Move anything → Trash | `softDelete()`; a draft is deleted |
 | Move or copy into a label | `setMembership(true)`; a move out of Inbox also archives, and out of a label also removes that label |
-| Move → Spam, or the Junk button | `setSpamVerdict('spam')` |
+| Move → Spam | `setSpamVerdict('spam')` |
 | Move out of Spam | `setSpamVerdict('ham')` |
 | Move out of Trash | `restoreFromTrash()` |
 | `\Deleted` + `EXPUNGE` in Trash | `purgeFromTrash()` — gone for good |
 | `\Deleted` + `EXPUNGE` in a label | the label comes off; the message stays |
 | `\Deleted` + `EXPUNGE` in Drafts | the draft is deleted |
 | `\Deleted` + `EXPUNGE` elsewhere | `softDelete()` |
-| Create / delete a folder | `createFolder()` / `deleteLabel()` (labels are one set for the whole site) |
+| Create / delete a folder | `createFolder()` / `deleteLabel()` (one of the mailbox's own labels) |
 | Rename a folder | refused: labels cannot be renamed |
 | Move into Sent or Drafts | refused |
+
+The junk keywords `$Junk` and `$NotJunk` are not offered (they are in neither `FLAGS` nor `PERMANENTFLAGS`), so a program keeps its junk marks to itself. A program's automatic junk classifier sets them on mail the person never touched, and as server verdicts they would move that mail out of the Inbox everywhere. Only a move into or out of Spam sets a verdict.
 
 Flags Joinery does not keep (a program's own tags such as `$label1`) are left out of `PERMANENTFLAGS`, so the program keeps them locally.
 
@@ -160,6 +163,8 @@ While the window is shut:
 5. The message it replies to gets `\Answered`; a forward's original gets `$Forwarded`.
 
 A program's `APPEND` of its copy to Sent is recognised by Message-ID (or the one it gave before a minted one replaced it), so nothing is stored twice.
+
+**`APPEND` answers a number (`APPENDUID`) only when the message it names is served byte for byte as appended.** A program that gets a number keeps its own copy under it and never fetches it. A copy to Sent matched to the site's own, a draft saved through mailbox's drafts, and a message stored the usual way (headers and decoded parts) are all served differently from what was appended. So no number is answered, and the program fetches the message as the site holds it. Every device then holds the same bytes.
 
 ## Drafts and other added messages
 
