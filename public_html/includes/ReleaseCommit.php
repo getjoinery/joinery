@@ -8,17 +8,31 @@
  * can regenerate every manifest line, which an archive built from an uncommitted
  * working tree can never offer.
  *
- * What "clean" means here, for the joinery repository:
+ * A release is BUILT FROM THE COMMIT, not from the working tree: exportTree()
+ * writes the commit's shipping paths into a build directory, and every archive,
+ * manifest and tree hash is cut from there. Uncommitted work in the tree -
+ * another session's half-finished edit in a shared checkout - is simply not
+ * in the release, so it does not stop one.
  *
- * - no tracked file is modified or deleted anywhere in the repository (a tracked
- *   file anywhere may be included by something that ships), and
- * - no untracked, un-ignored file sits on a path that SHIPS: under public_html/
- *   or maintenance_scripts/, except paths the archive never carries, which are
- *   exactly the ones the release manifest never lists (PackageSignature::excluded():
- *   specs/, uploads/, cache/, logs/, backups/, .claude/, node_modules/, .git,
- *   top-level config/ and vendor/). A half-written spec does not block a release
- *   because it cannot reach a node; an untracked public_html/includes/Foo.php
- *   does, because it would.
+ * What is uncommitted is still read (joineryBlockers()), and split three ways:
+ *
+ * - publish's own files (publishWrite()), which it commits itself;
+ * - HELD paths (heldPath()), whose uncommitted change still refuses, because
+ *   the release reads them from somewhere other than the commit: the install
+ *   SQL is dumped from this box's database, so a data class or migration
+ *   update_database already applied is in it; the parser jail and the relay
+ *   sealer are compiled from their source on this disk; the release key lists
+ *   are read from this disk into the agent bundle; a plugin or theme manifest
+ *   is where publish writes its version bump and commits the whole file;
+ * - everything else, which is LEFT OUT: named in the publish output, absent
+ *   from the release, and no reason to refuse it.
+ *
+ * Which paths count: every tracked file modified or deleted anywhere, and
+ * every untracked, un-ignored file on a path that SHIPS: under public_html/ or
+ * maintenance_scripts/, except paths the archive never carries, which are
+ * exactly the ones the release manifest never lists (PackageSignature::excluded():
+ * specs/, uploads/, cache/, logs/, backups/, .claude/, node_modules/, .git,
+ * top-level config/ and vendor/).
  *
  * For the agent repository every untracked, un-ignored file blocks: all of it
  * is source.
@@ -42,6 +56,8 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.4 - a release is built from the commit (exportTree(), commitFiles()); only a HELD path
+ *                (heldPath()) still refuses while uncommitted, everything else is left out and named
  * @version 1.3 - commitRelease() adds its paths before committing them, so a file new to git is committed too
  * @version 1.2 - publishWrite() and commitRelease(): publish commits and pushes the files it writes; git runs
  *                with the repository owner's home, so the owner's identity and key are the ones used
@@ -76,6 +92,14 @@ class ReleaseCommit {
 	 * @return array{exit:int, out:string[]}
 	 */
 	public static function git($repo_root, array $args) {
+		$out = array();
+		$exit = 0;
+		exec(self::gitCommand($repo_root, $args) . ' 2>&1', $out, $exit);
+		return array('exit' => (int)$exit, 'out' => $out);
+	}
+
+	/** The shell command git() runs, for a caller that pipes its output instead of reading lines. */
+	private static function gitCommand($repo_root, array $args) {
 		$cmd = 'git -c ' . escapeshellarg('safe.directory=' . $repo_root) . ' -C ' . escapeshellarg($repo_root);
 		foreach ($args as $arg) {
 			$cmd .= ' ' . escapeshellarg($arg);
@@ -94,10 +118,7 @@ class ReleaseCommit {
 			$cmd = 'runuser -u ' . escapeshellarg($owner) . ' -- sh -c '
 				. escapeshellarg(($home !== '' ? 'HOME=' . escapeshellarg($home) . ' ' : '') . $cmd);
 		}
-		$out = array();
-		$exit = 0;
-		exec($cmd . ' 2>&1', $out, $exit);
-		return array('exit' => (int)$exit, 'out' => $out);
+		return $cmd;
 	}
 
 	/**
@@ -200,6 +221,138 @@ class ReleaseCommit {
 	}
 
 	/**
+	 * Repository-relative paths whose uncommitted change still refuses a
+	 * release built from the commit, because the release reads them from this
+	 * box and not from the commit. See the class comment for why each is here.
+	 */
+	const JOINERY_HELD_FILES = array(
+		'public_html/settings.json',             // seeded into the database the install SQL is dumped from
+		'public_html/admin_menus.json',          // likewise
+		'public_html/install_bundles.json',      // read from this disk by publish's own bundle guard
+		'public_html/utils/create_install_sql.php', // what dumps the install SQL
+	);
+
+	/** Repository-relative directories held the same way. */
+	const JOINERY_HELD_DIRS = array(
+		'public_html/data/',                                       // the schema the install SQL is dumped with
+		'public_html/migrations/',                                 // likewise
+		'maintenance_scripts/install_tools/release_keys/',         // copied into the agent bundle from this disk
+		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
+		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
+	);
+
+	/**
+	 * Whether an uncommitted path refuses a release (held) rather than being
+	 * left out of it. Pure, so the rule can be asserted directly. A plugin's or
+	 * theme's manifest is held because publish writes its version bump into
+	 * that file and commits the whole file; a plugin's data classes and
+	 * migrations for the same reason as core's.
+	 */
+	public static function heldPath($rel) {
+		$rel = ltrim(str_replace('\\', '/', $rel), '/');
+		if (in_array($rel, self::JOINERY_HELD_FILES, true)) {
+			return true;
+		}
+		foreach (self::JOINERY_HELD_DIRS as $dir) {
+			if (strpos($rel, $dir) === 0) {
+				return true;
+			}
+		}
+		return (bool)preg_match('~^public_html/(plugins/[^/]+/(data|migrations)/|plugins/[^/]+/plugin\.json$|theme/[^/]+/theme\.json$)~', $rel);
+	}
+
+	/**
+	 * The files of one commit, keyed by repository-relative path: knownFiles()
+	 * for a release built from that commit. Read from the commit, not the
+	 * index, so another session's staging cannot add to or take from it.
+	 *
+	 * @return array<string,bool>|null null when git failed
+	 */
+	public static function commitFiles($repo_root, $commit) {
+		$r = self::git($repo_root, array('ls-tree', '-r', '-z', '--name-only', $commit));
+		if ($r['exit'] !== 0) {
+			return null;
+		}
+		$files = array();
+		foreach (explode("\0", implode("\n", $r['out'])) as $path) {
+			if ($path !== '') {
+				$files[$path] = true;
+			}
+		}
+		return $files;
+	}
+
+	/**
+	 * Write $commit's shipping paths (JOINERY_SHIP_ROOTS, JOINERY_SHIP_FILES)
+	 * into the empty directory $to_dir, laid out like the repository, then copy
+	 * in from the working tree the directories publish builds and no commit
+	 * holds (overlayGenerated()). That directory is the release: what the
+	 * commit says, plus what publish built. Nothing else in the working tree
+	 * reaches it.
+	 *
+	 * @return array{ok:bool, reason:string}
+	 */
+	public static function exportTree($repo_root, $commit, $to_dir) {
+		$repo_root = rtrim($repo_root, '/');
+		$to_dir = rtrim($to_dir, '/');
+		if (!preg_match('/^[0-9a-f]{40}$/', (string)$commit)) {
+			return array('ok' => false, 'reason' => 'not a commit id: ' . $commit);
+		}
+		if (!is_dir($to_dir) || (new FilesystemIterator($to_dir))->valid()) {
+			return array('ok' => false, 'reason' => $to_dir . ' is not an empty directory');
+		}
+		$paths = array();
+		foreach (array_merge(self::JOINERY_SHIP_ROOTS, self::JOINERY_SHIP_FILES) as $path) {
+			// git archive refuses a pathspec that matches nothing.
+			if (self::git($repo_root, array('cat-file', '-e', $commit . ':' . $path))['exit'] === 0) {
+				$paths[] = $path;
+			}
+		}
+		if ($paths === array()) {
+			return array('ok' => false, 'reason' => 'commit ' . $commit . ' holds none of the paths a release ships');
+		}
+		$out = array();
+		$exit = 0;
+		exec('bash -c ' . escapeshellarg('set -o pipefail; '
+			. self::gitCommand($repo_root, array_merge(array('archive', '--format=tar', $commit, '--'), $paths))
+			. ' | tar -xf - --no-same-owner -C ' . escapeshellarg($to_dir)) . ' 2>&1', $out, $exit);
+		if ($exit !== 0) {
+			return array('ok' => false, 'reason' => 'git archive of ' . $commit . ' failed: ' . trim(implode(' | ', array_slice($out, -3))));
+		}
+		return self::overlayGenerated($repo_root, $to_dir);
+	}
+
+	/**
+	 * Copy the directories publish builds (JOINERY_GENERATED_DIRS) from the
+	 * working tree into a build directory, replacing what is there: called by
+	 * exportTree(), and again by a publish whose builds ran after its export.
+	 *
+	 * @return array{ok:bool, reason:string}
+	 */
+	public static function overlayGenerated($repo_root, $to_dir) {
+		$repo_root = rtrim($repo_root, '/');
+		$to_dir = rtrim($to_dir, '/');
+		foreach (self::JOINERY_GENERATED_DIRS as $dir) {
+			$from = $repo_root . '/' . rtrim($dir, '/');
+			$to = $to_dir . '/' . rtrim($dir, '/');
+			$out = array();
+			$exit = 0;
+			exec('rm -rf ' . escapeshellarg($to) . ' 2>&1', $out, $exit);
+			if (!is_dir($from)) {
+				continue;
+			}
+			if (!is_dir(dirname($to)) && !mkdir(dirname($to), 0755, true)) {
+				return array('ok' => false, 'reason' => 'could not create ' . dirname($to));
+			}
+			exec('cp -a ' . escapeshellarg($from) . ' ' . escapeshellarg($to) . ' 2>&1', $out, $exit);
+			if ($exit !== 0) {
+				return array('ok' => false, 'reason' => 'could not copy ' . $dir . ' into the build: ' . trim(implode(' | ', array_slice($out, -3))));
+			}
+		}
+		return array('ok' => true, 'reason' => '');
+	}
+
+	/**
 	 * Every file git does not ignore: the tracked files, and untracked ones no
 	 * ignore rule covers. Keys are repository-relative paths.
 	 *
@@ -244,24 +397,31 @@ class ReleaseCommit {
 
 	/**
 	 * Everything uncommitted that would stop a publish from this box, before
-	 * the publish is queued: the owner's changes in the core repository (not
-	 * the files a publish writes itself) and every change in the agent source.
-	 * The check the publish job makes first, asked ahead of it so the button
-	 * is not offered while the job could only refuse.
+	 * the publish is queued: the HELD changes in the core repository
+	 * (heldPath(); not the files a publish writes itself) and every change in
+	 * the agent source. The check the publish job makes first, asked ahead of
+	 * it so the button is not offered while the job could only refuse. The
+	 * core's other uncommitted changes are in 'left_out': they do not refuse,
+	 * they are simply not in the release.
 	 *
 	 * @param string|null $agent_root null when the box has no agent source path
-	 * @return array{core:string[], agent:string[], unreadable:string[]} 'unreadable'
-	 *         names a repository git could not read, with the reason
+	 * @return array{core:string[], left_out:string[], agent:string[], unreadable:string[]}
+	 *         'unreadable' names a repository git could not read, with the reason
 	 */
 	public static function ownerBlockers($core_root, $agent_root) {
-		$out = array('core' => array(), 'agent' => array(), 'unreadable' => array());
+		$out = array('core' => array(), 'left_out' => array(), 'agent' => array(), 'unreadable' => array());
 		$core = self::joineryBlockers($core_root);
 		if ($core === null) {
 			$out['unreadable'][] = 'the core repository at ' . $core_root . ' could not be read by git';
 		} else {
 			foreach ($core as $path) {
-				if (!self::publishWrite($core_root, $path)) {
+				if (self::publishWrite($core_root, $path)) {
+					continue;
+				}
+				if (self::heldPath($path)) {
 					$out['core'][] = $path;
+				} else {
+					$out['left_out'][] = $path;
 				}
 			}
 		}

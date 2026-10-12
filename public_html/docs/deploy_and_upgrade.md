@@ -126,40 +126,65 @@ cat ARCHIVE_ROOT/public_html/VERSION
 
 ### A release is a commit
 
-`publish_upgrade.php` builds only from a committed, pushed tree, so a release
-is a public commit anyone can regenerate the archives from. One run goes from
-a committed tree to a release:
+`publish_upgrade.php` builds only from a committed, pushed commit, so a release
+is a public commit anyone can regenerate the archives from. It never builds
+from the working tree: it writes the commit's shipping paths into a temporary
+build directory (`ReleaseCommit::exportTree()`), copies in the files it builds
+itself, and cuts every archive, manifest and tree hash from there. Several
+sessions can share one working tree, and work one of them has not committed is
+simply not in the release. One run goes from a commit to a release:
 
 1. Before writing anything, it checks both repositories — the platform at the
    site root and the agent source at `server_manager_agent_source_path` — with
-   `ReleaseCommit`. A tree is clean when no tracked file is modified or deleted
-   and no untracked file sits on a path that ships (anything the release
-   manifest would list: `public_html/` and `maintenance_scripts/` minus
-   `specs/`, `uploads/`, `cache/`, `logs/`, `backups/`, `.claude/`), and its
-   HEAD must be an ancestor of `origin/main` after a fetch. Uncommitted or
-   unpushed work refuses the release, naming every file, with nothing written:
-   the owner commits and pushes their own work. Uncommitted changes publish
-   writes itself (`ReleaseCommit::publishWrite()`: `VERSION`, the install SQL,
-   the parser jail binaries, a plugin or theme manifest whose only change is
-   its version), left by an earlier run that stopped, do not count; they are
-   written again, and a `VERSION` that names a version with no release row is
-   published as-is rather than bumped.
-2. Writes the files a release generates — `public_html/VERSION`, the install
+   `ReleaseCommit`. HEAD must be an ancestor of `origin/main` after a fetch.
+   In the agent source, any uncommitted change refuses the release. In the
+   platform, an uncommitted change (a tracked file modified or deleted, or an
+   untracked file on a path that ships: `public_html/` and
+   `maintenance_scripts/` minus `specs/`, `uploads/`, `cache/`, `logs/`,
+   `backups/`, `.claude/`) is one of three kinds:
+   - **Held** (`ReleaseCommit::heldPath()`) — refuses the release, naming every
+     file, with nothing written. These are the paths a release reads from this
+     box rather than from the commit: data classes and migrations, core and
+     plugin (the install SQL is dumped from this box's database, which
+     `update_database` may already have changed); `settings.json`,
+     `admin_menus.json`, `install_bundles.json` and `create_install_sql.php`;
+     the parser jail and relay sealer sources (compiled here); `release_keys/`
+     (copied into the agent bundle); and every `plugin.json` and `theme.json`
+     (publish writes its version bump into the file and commits the whole file).
+   - **Publish's own** (`ReleaseCommit::publishWrite()`: `VERSION`, the install
+     SQL, the parser jail binaries, a plugin or theme manifest whose only change
+     is its version), left by an earlier run that stopped — written again, and a
+     `VERSION` that names a version with no release row is published as-is
+     rather than bumped.
+   - **Everything else** — left out of the release and listed under *Left out
+     of this release* in the publish output.
+2. Writes the commit into a build directory. The default-bundle check, the
+   support bundle's scripts and the version decisions below all read it.
+3. Writes the files a release generates — `public_html/VERSION`, the install
    SQL at `maintenance_scripts/install_tools/joinery-install.sql.gz`, any
    rebuilt launcher binaries, and the patch bumps of every theme or plugin
    whose content changed since the last release (`plugin.json` / `theme.json`).
-3. Commits exactly those files as `Release <version>` and pushes
+4. Commits exactly those files as `Release <version>` and pushes
    (`ReleaseCommit::commitRelease()`). The paths are named on the commit, so
    nothing else staged in the shared index goes with them. Git runs as the
    repository's owner with the owner's home, so the commit carries the
    owner's identity and the push uses the owner's key, whoever started the
-   publish. Any other change found at this point (made while the publish ran)
-   refuses the release.
-4. Records both commits on the release row (`upg_core_commit`,
+   publish. A held change found at this point (made while the publish ran)
+   refuses the release, and so does a commit that landed while it ran: the
+   version bumps were decided from the commit before it.
+5. Writes the release commit into a fresh build directory and builds every
+   archive from it.
+6. Records both commits on the release row (`upg_core_commit`,
    `upg_agent_commit`).
 
+The publishing site's own live tree gets the manifests of what was released:
+its root manifest is built from the build directory, and each plugin's and
+theme's manifest is copied into its live directory. A file edited on this box
+and not committed therefore does not verify, and the site's own agent will not
+run it as root until it is committed and released.
+
 Every byte in an archive is then derivable from those commits. What ships is
-a file git knows or one publish builds itself (`ReleaseCommit::joineryFileShips()`):
+a file the commit holds or one publish builds itself (`ReleaseCommit::joineryFileShips()`):
 the agent bundle under `public_html/agent_dist/`, the relay sealer binaries
 under the mailbox plugin's `provisioning/bin/`, the license files copied into
 `public_html/`, and each release statement. A file git ignores never ships,
@@ -556,7 +581,7 @@ These conditions stop a publish before anything is written — no VERSION change
 1. The requested version is lower than the one already in the `VERSION` file.
 2. `LICENSE.md` is missing or empty (every archive carries the license text).
 3. A default install bundle names a plugin this release cannot carry.
-4. **The tree fails its own tests.** The publisher runs the `deploy` tier (every deployable file compiles, the core classes load, the database answers, the manifests parse, the site answers over HTTP — seconds, all reads) — see [The deploy tier](#the-deploy-tier). The development tiers are not a publish precondition: they are the developer's working loop and pre-checkin gate ([Testing](testing.md#what-each-tier-costs)), and the publisher runs as root inside the plane's own `publish_upgrade` primitive, where they cannot run. Per-suite PASS lines are left out of the publish output; failures, skips and the summary are kept. There is no flag to skip the gate: the fix is the failing test or the code it caught.
+4. **The release fails its own tests.** The publisher runs the `deploy` tier (every deployable file compiles, the core classes load, the database answers, the manifests parse, the site answers over HTTP — seconds, all reads) — see [The deploy tier](#the-deploy-tier). Where the publishing site has a **release staging site**, the tier runs there, on the commit being released: publish copies the commit's `public_html/`, `maintenance_scripts/install_tools/`, `maintenance_scripts/sysadmin_tools/` and root license files into it and runs that copy's own test runner, so the pages are served by Apache from the code that ships, and a file another session has left half-edited in the working tree neither refuses the release nor hides a file the commit lacks. Without one, the tier runs on the working tree. The staging site is `<site root>_test`, served by the rendered vhost's test-site block as `test.<domain>`. `maintenance_scripts/dev_tools/setup_release_staging.sh`, run once as root, makes it: its config requires the site's own config (the same database) and overrides only the paths, `webDir` (`http://test.<domain>`) and `protocol_mode` (`http`), and it answers 127.0.0.1 and ::1 only, since the vhost is plain HTTP on every address. Publish uses the directory only when its `config/release_staging` marker is present, so a real companion test site there is never written to. The development tiers are not a publish precondition: they are the developer's working loop and pre-checkin gate ([Testing](testing.md#what-each-tier-costs)), and the publisher runs as root inside the plane's own `publish_upgrade` primitive, where they cannot run. Per-suite PASS lines are left out of the publish output; failures, skips and the summary are kept. There is no flag to skip the gate: the fix is the failing test or the code it caught.
 5. This box holds agent source newer than the bundled agent artifact and the rebuild fails (see [Server Manager](../plugins/server_manager/docs/overview.md)).
 6. The mailbox plugin's relay sealer binaries cannot be built.
 

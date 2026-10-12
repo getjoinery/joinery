@@ -399,6 +399,79 @@
 		}
 
 		// =====================================================
+		// Guard: the tree must pass the deploy tier
+		// =====================================================
+		// Before anything is written, the code runs the `deploy` tier: every
+		// deployable file compiles, the core
+		// classes load, the database answers, the manifests parse, the site
+		// answers over HTTP. Seconds, all reads, runs on any machine; it is the
+		// same tier a node runs after the swap. The development tiers are not
+		// a publish precondition: they are the developer's working loop and
+		// pre-checkin gate (docs/testing.md), and this publisher is root on the
+		// local job queue, where their sandboxes do not hold.
+		//
+		// A failure refuses the release. There is no flag to skip this: a
+		// release that cannot pass its own tests is exactly the one the gate is
+		// for, and the fix is the failing test or the failing code, not the gate.
+		//
+		// Where this site has a release staging site
+		// (maintenance_scripts/dev_tools/setup_release_staging.sh), the tier runs
+		// there instead, once the commit has been copied out below: on the code
+		// that ships, through Apache, not on a working tree another session may
+		// have left half-edited. Without one, it runs on this tree, here.
+		$staging_dir = DeploymentHelper::mayMintReleaseVersion() ? publish_release_staging($full_site_dir) : null;
+		if ($staging_dir === null) {
+			publish_deploy_gate($full_site_dir . '/public_html/tests/run.php', $version, 'this tree');
+		}
+
+		// A site running exactly what upstream delivered republishes that
+		// release rather than its own tree: every archive is built from the
+		// files its received, signed manifest lists, each checked as it is
+		// copied (TreeManifestPublisher::republish_artifact()), and nothing is
+		// rebuilt or regenerated first. A rebuild would only write bytes the
+		// manifest does not list, and the check would refuse them.
+		$republish = !DeploymentHelper::mayMintReleaseVersion();
+		if ($republish) {
+			publish_output("\nThis site republishes the release it received: every archive is built from its signed manifest, file for file.");
+		}
+
+		// =====================================================
+		// The owner's work is committed and public (D1)
+		// =====================================================
+		// Checked before anything is written. What the owner changed has to be
+		// committed and pushed by the owner; what this publish writes (VERSION,
+		// the install SQL, version bumps, rebuilt binaries) it commits and
+		// pushes itself, below, once it has written it. Leftovers of an earlier
+		// run that stopped are publish's own files and are written again.
+		$base_commits = array('core' => null, 'agent' => null);
+		if (!$republish) {
+			$base_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, false);
+		}
+
+		// =====================================================
+		// The release is built from the commit, not the working tree
+		// =====================================================
+		// Everything that ships is read from a build directory holding the
+		// commit's shipping paths plus what publish builds itself
+		// (ReleaseCommit::exportTree()), never from this working tree, so an
+		// edit another session has not committed is simply not in the release.
+		// This first copy is of the commit just checked; it decides the
+		// version bumps and feeds the support bundle. Once publish has
+		// committed its own files, a second copy, of that release commit, is
+		// what the archives are cut from. A republishing site builds from the
+		// files its received manifest lists instead, and needs neither.
+		$build_root = $full_site_dir;
+		$build_ships = null;
+		if (!$republish) {
+			list($build_root, $build_ships) = publish_build_tree($full_site_dir, $base_commits['core'], $version);
+		}
+		if ($staging_dir !== null) {
+			publish_fill_staging($build_root, $staging_dir, $version);
+			publish_deploy_gate($staging_dir . '/public_html/tests/run.php', $version,
+				'the release staging site ' . $staging_dir . ', holding commit ' . substr((string)$base_commits['core'], 0, 12));
+		}
+
+		// =====================================================
 		// Guard: a release must be able to deliver its default bundles
 		// =====================================================
 		// install_bundles.json names the plugins a fresh install turns on, and a
@@ -407,12 +480,14 @@
 		// other, so a bundle could name a plugin this site had never heard of and
 		// every install from the release would come up without it, silently.
 		//
-		// Checked here, beside the license check and before anything is written,
-		// for the same reason: a publish that cannot keep its promise should stop
-		// while stopping is still free. The condition tested is the one that
-		// decides whether an archive gets built at all -- present on disk, not
-		// excluded, not deprecated. specs/publish_delivers_what_it_promises.md
-		$bundles_file = $full_site_dir . '/public_html/install_bundles.json';
+		// Checked before anything is written, like the license check: a publish
+		// that cannot keep its promise should stop while stopping is still free.
+		// The condition tested is the one that decides whether an archive gets
+		// built at all -- present in the release, not excluded, not deprecated --
+		// read from the build directory, which is what ships: a plugin directory
+		// sitting uncommitted in the working tree is not in the release.
+		// specs/publish_delivers_what_it_promises.md
+		$bundles_file = $build_root . '/public_html/install_bundles.json';
 		if (is_readable($bundles_file)) {
 			$bundle_data = json_decode((string)file_get_contents($bundles_file), true);
 			$undeliverable = [];
@@ -424,7 +499,7 @@
 						continue;
 					}
 					foreach (($definition['plugins'] ?? []) as $wanted_plugin) {
-						$manifest_path = $full_site_dir . '/public_html/plugins/' . $wanted_plugin . '/plugin.json';
+						$manifest_path = $build_root . '/public_html/plugins/' . $wanted_plugin . '/plugin.json';
 						if (!is_readable($manifest_path)) {
 							$undeliverable[] = "{$bundle_name} needs {$wanted_plugin}, which is not on this site";
 							continue;
@@ -447,67 +522,13 @@
 					publish_output("  - {$gap}");
 				}
 				publish_output("\nEvery install from this release would come up without it.");
-				publish_output("Put the plugin directory in public_html/plugins/ here and publish again; it does");
-				publish_output("not need to be installed or activated on this site, only present.");
+				publish_output("Commit the plugin directory under public_html/plugins/ and publish again; it does");
+				publish_output("not need to be installed or activated on this site, only committed.");
 				publish_output("Nothing has been written.");
 				exit(1);
 			}
 		}
 
-		// =====================================================
-		// Guard: the tree must pass the deploy tier
-		// =====================================================
-		// The archive is built from whatever is on this disk at this moment,
-		// half-finished edits included, so before anything is written the tree
-		// runs the `deploy` tier: every deployable file compiles, the core
-		// classes load, the database answers, the manifests parse, the site
-		// answers over HTTP. Seconds, all reads, runs on any machine; it is the
-		// same tier a node runs after the swap. The development tiers are not
-		// a publish precondition: they are the developer's working loop and
-		// pre-checkin gate (docs/testing.md), and this publisher is root on the
-		// local job queue, where their sandboxes do not hold.
-		//
-		// A failure refuses the release. There is no flag to skip this: a
-		// release that cannot pass its own tests is exactly the one the gate is
-		// for, and the fix is the failing test or the failing code, not the gate.
-		$runner = $full_site_dir . '/public_html/tests/run.php';
-		publish_output("\nRunning the deploy test tier before anything is written...");
-		$gate = PublishTestGate::run($runner, 'deploy', 'publish_output');
-		if (!$gate['started']) {
-			publish_output("Refusing to publish {$version} — the test runner at {$runner} could not be started, so the release cannot be tested before it ships.");
-			publish_output("Nothing has been written.");
-			exit(1);
-		}
-		if (!$gate['ok']) {
-			publish_output("\nRefusing to publish {$version} — the deploy test tier failed (exit {$gate['exit_code']}).");
-			publish_output("Fix the failing test or the code it caught and publish again.");
-			publish_output("Nothing has been written.");
-			exit(1);
-		}
-		publish_output("The deploy tier passed.");
-
-		// A site running exactly what upstream delivered republishes that
-		// release rather than its own tree: every archive is built from the
-		// files its received, signed manifest lists, each checked as it is
-		// copied (TreeManifestPublisher::republish_artifact()), and nothing is
-		// rebuilt or regenerated first. A rebuild would only write bytes the
-		// manifest does not list, and the check would refuse them.
-		$republish = !DeploymentHelper::mayMintReleaseVersion();
-		if ($republish) {
-			publish_output("\nThis site republishes the release it received: every archive is built from its signed manifest, file for file.");
-		}
-
-		// =====================================================
-		// The owner's work is committed and public (D1)
-		// =====================================================
-		// Checked before anything is written. What the owner changed has to be
-		// committed and pushed by the owner; what this publish writes (VERSION,
-		// the install SQL, version bumps, rebuilt binaries) it commits and
-		// pushes itself, below, once it has written it. Leftovers of an earlier
-		// run that stopped are publish's own files and are written again.
-		if (!$republish) {
-			publish_require_committed(publish_release_repos($full_site_dir), $version, false);
-		}
 
 		// =====================================================
 		// The public log this release will be written to
@@ -687,9 +708,20 @@
 		// fleet; a stale bundle affects only machines with no site, and carrying
 		// the previous one forward leaves those machines exactly where they were
 		// rather than blocking a release the rest of the fleet needs.
+		//
+		// Its scripts come from the build directory, the commit. The binaries
+		// just built are copied into it first, so the bundle and the version
+		// decisions below both see the ones this release ships.
+		if (!$republish) {
+			$overlay = ReleaseCommit::overlayGenerated($full_site_dir, $build_root);
+			if (!$overlay['ok']) {
+				publish_output("\nRefusing to publish {$version} — {$overlay['reason']}. Nothing has been written.");
+				exit(1);
+			}
+		}
 		if (!$republish && SupportBundlePublisher::hasConsumer()) {
 			publish_output("Bundling agent support bundle...");
-			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');
+			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output', $build_root);
 		}
 
 		// Write the new version to public_html/VERSION so it ships in the tarball and
@@ -783,37 +815,35 @@
 		// Everything this publish writes INTO the tree has now been written:
 		// VERSION, the install SQL, the rebuilt launcher binaries, and - decided
 		// here, before the check, so they ship committed rather than dirtying
-		// the tree after the fact - the plugin and theme version bumps. From
-		// this point the publish reads the tree and never writes it, so the
-		// commit the check names is the commit the archives are built from.
+		// the tree after the fact - the plugin and theme version bumps.
 		//
 		// Publish commits and pushes exactly what it wrote, as 'Release
-		// <version>', and builds from that commit. Anything else uncommitted
-		// is the owner's work and refuses the release; it was checked before
-		// anything was written, so it can only appear here if something
-		// changed the tree while this publish ran. There is no --allow-dirty.
+		// <version>', and builds from that commit. Other uncommitted work is
+		// left out of the release, except a held path (ReleaseCommit::heldPath()),
+		// which refuses; held paths were checked before anything was written, so
+		// one can only appear here if something changed the tree while this
+		// publish ran. There is no --allow-dirty.
 		//
-		// What ships is what git knows plus what publish builds
-		// (ReleaseCommit::joineryFileShips()): the manifests, the component
-		// tree hashes and the archives are all cut by that one rule, so a file
-		// git ignores - a screenshot, a stray build output, a local corpus -
-		// never reaches a node however it got into the tree. A republishing
-		// site ships its received listings instead and needs no rule.
-		$ships = null;
-		if (!$republish) {
-			$known_files = ReleaseCommit::knownFiles($full_site_dir);
-			if ($known_files === null) {
-				publish_output("\nRefusing to publish {$version} — the core repository at {$full_site_dir} could not be read by git, so what ships cannot be told from what is only on this disk.");
-				exit(1);
-			}
-			$ships = function ($rel) use ($known_files) {
-				return ReleaseCommit::joineryFileShips($rel, $known_files);
-			};
-		}
-		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output', $ships);
+		// What ships is what the commit holds plus what publish builds
+		// (ReleaseCommit::joineryFileShips(), over ReleaseCommit::commitFiles()):
+		// the manifests, the component tree hashes and the archives are all cut
+		// by that one rule, so a file git ignores - a screenshot, a stray build
+		// output, a local corpus - never reaches a node however it got into the
+		// tree. A republishing site ships its received listings instead and
+		// needs no rule.
+		//
+		// The tree hashes are read from the build directory (the commit), and
+		// a bump is written into the working tree's manifest, which is held
+		// clean (ReleaseCommit::heldPath()), for publish to commit. The commit
+		// is made only if HEAD is still the commit those hashes were read from.
+		$ships = $build_ships;
+		$component_plan = publish_plan_components($full_site_dir, $republish, 'publish_output', $ships, $build_root);
 		$release_commits = array('core' => null, 'agent' => null);
 		if (!$republish) {
-			$release_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, true);
+			$release_commits = publish_require_committed(publish_release_repos($full_site_dir), $version, true, $base_commits['core']);
+			// The archives are cut from the release commit itself.
+			exec('rm -rf ' . escapeshellarg($build_root));
+			list($build_root, $ships) = publish_build_tree($full_site_dir, $release_commits['core'], $version);
 		}
 
 		// =====================================================
@@ -915,7 +945,7 @@
 				// worst. Verified the hard way: 0.8.355 carried one.
 				'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/agent_dist.*" --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
 				$agent_excludes_str,
-				escapeshellarg($full_site_dir . '/public_html/'),
+				escapeshellarg($build_root . '/public_html/'),
 				escapeshellarg($core_temp_dir . '/public_html/')
 			);
 			exec($rsync_core_cmd, $output, $exit_code);
@@ -936,13 +966,15 @@
 			// laid down once by install.sh and never refreshed, so every upgraded site
 			// would keep whatever license it was born with. The canonical copy stays at
 			// the repo root, where GitHub and license scanners look for it.
-			if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
-				publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
+			// Copied from the build directory, so the text that ships is the
+			// committed text.
+			if (!copy($build_root . substr($license_source, strlen($full_site_dir)), $core_temp_dir . '/public_html/LICENSE.md')) {
+				publish_output("ERROR: Failed to copy LICENSE.md into the core archive (is it committed?).");
 				exit(1);
 			}
 
 			if ($business_source !== '') {
-				if (!copy($business_source, $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
+				if (!copy($build_root . substr($business_source, strlen($full_site_dir)), $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
 					publish_output("ERROR: Failed to copy LICENSE-BUSINESS.md into the core archive.");
 					exit(1);
 				}
@@ -950,15 +982,16 @@
 			}
 
 			// Copy config template
-			if (file_exists($maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
-				copy($maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
+			$build_maintenance_dir = $build_root . '/maintenance_scripts/';
+			if (file_exists($build_maintenance_dir . 'install_tools/default_Globalvars_site.php')) {
+				copy($build_maintenance_dir . 'install_tools/default_Globalvars_site.php', $core_temp_dir . '/config/default_Globalvars_site.php');
 			}
 
 			// Copy maintenance_scripts. .git and .gitignore stay behind, as they do
 			// for public_html: the signed manifest never lists them, so shipping one
 			// is shipping a file nothing verifies.
 			foreach (['install_tools', 'sysadmin_tools'] as $dir) {
-				$source_dir = $maintenance_dir . $dir . '/';
+				$source_dir = $build_maintenance_dir . $dir . '/';
 				$dest_dir = $core_temp_dir . '/maintenance_scripts/' . $dir . '/';
 				if (is_dir($source_dir)) {
 					mkdir($dest_dir, 0755, true);
@@ -978,6 +1011,10 @@
 			// matching what it describes: the staging tree that ships and is deleted
 			// after the tar, and its own live tree, so the publishing plane is not
 			// the one machine in the fleet whose own script primitives never verify.
+			// The live tree's manifest is built from the build directory and
+			// written into the live tree: it lists what was released, so a file
+			// edited here and not committed does not verify, and this site's own
+			// agent will not run it as root.
 			// A site that may NOT sign carries the manifest it received forward into
 			// the archive and leaves its live tree exactly as upstream delivered it;
 			// re-signing that tree with a key its own agent does not hold is how a
@@ -994,7 +1031,7 @@
 					? "Core tree manifest carried forward as received ({$staged_manifest['files']} files)"
 					: "Core tree manifest signed ({$staged_manifest['files']} files)");
 				if ($manifest_authority['may_sign']) {
-					TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_authority['keys']);
+					TreeManifestPublisher::write($build_root, $build_root, $manifest_authority['keys'], null, $full_site_dir);
 				}
 			} catch (Exception $e) {
 				publish_output("ERROR: core tree manifest failed: " . $e->getMessage());
@@ -1085,7 +1122,7 @@
 			publish_output("Wiped {$wiped} existing theme archive(s) before regeneration");
 		}
 
-		$theme_base_dir = $full_site_dir . '/public_html/theme';
+		$theme_base_dir = $build_root . '/public_html/theme';
 		foreach (glob($theme_base_dir . '/*/theme.json') as $theme_json) {
 			$theme_dir = dirname($theme_json);
 			$theme_name = basename($theme_dir);
@@ -1114,11 +1151,12 @@
 			$current_hash = $component_plan['themes'][$theme_name]['tree_hash'];
 			$new_state['themes'][$theme_name] = array('version' => $theme_version, 'tree_hash' => $current_hash);
 
-			// Per-artifact signed manifest (component G): written into the LIVE
-			// theme directory after the version decision, so it records the
-			// theme.json bytes that actually ship; the tar below archives the
-			// live directory, so the manifest ships and this box keeps its copy.
-			// A site that may not sign ships the manifest already in that
+			// Per-artifact signed manifest (component G): written into the
+			// theme's directory in the build after the version decision, so it
+			// records the theme.json bytes that actually ship; the tar below
+			// archives that directory, and the live directory is given the same
+			// manifest once the archives exist, so this box keeps its copy.
+			// A site that may not sign ships the manifest already in the live
 			// directory, the one that arrived with the theme.
 			// A republishing site tars a staged copy holding exactly what the
 			// theme's received manifest lists, each file checked.
@@ -1131,12 +1169,13 @@
 						$theme_stage . '/' . $theme_name, 'public_html/theme/' . $theme_name, $manifest_authority);
 					$theme_tar_base = $theme_stage;
 				} else {
-					$unlisted = publish_unlisted_members($theme_dir, $full_site_dir, $ships);
+					$unlisted = publish_unlisted_members($theme_dir, $build_root, $ships);
 					if ($unlisted) {
 						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
 							. 'move or remove it');
 					}
-					TreeManifestPublisher::publish_artifact($theme_dir, $full_site_dir, $manifest_authority, null, $ships);
+					TreeManifestPublisher::publish_artifact($theme_dir, $build_root, $manifest_authority,
+						$full_site_dir . '/public_html/theme/' . $theme_name, $ships);
 					if ($logs_release) {
 						$statement_subjects['theme/' . $theme_name] = PackageSignature::statementSubject(
 							(string)file_get_contents($theme_dir . '/' . PackageSignature::MANIFEST_NAME));
@@ -1154,6 +1193,7 @@
 			$pending_archives[] = array('label' => $theme_name, 'archive' => $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz',
 				'base' => $theme_tar_base, 'member' => $theme_name, 'root' => 'public_html/theme/' . $theme_name, 'stage' => $theme_stage,
 				'statement_dir' => $republish ? null : $theme_dir, 'statement_rel' => 'public_html/theme/' . $theme_name . '/' . PackageSignature::STATEMENT_NAME,
+				'live_dir' => $republish ? null : $full_site_dir . '/public_html/theme/' . $theme_name,
 				'subject' => 'theme/' . $theme_name);
 			publish_output("- {$theme_name}-{$theme_version}: manifest signed");
 		}
@@ -1176,7 +1216,7 @@
 			publish_output("Wiped {$wiped} existing plugin archive(s) before regeneration");
 		}
 
-		$plugin_base_dir = $full_site_dir . '/public_html/plugins';
+		$plugin_base_dir = $build_root . '/public_html/plugins';
 		foreach (glob($plugin_base_dir . '/*/plugin.json') as $plugin_json) {
 			$plugin_dir = dirname($plugin_json);
 			$plugin_name = basename($plugin_dir);
@@ -1217,12 +1257,13 @@
 						$plugin_stage . '/' . $plugin_name, 'public_html/plugins/' . $plugin_name, $manifest_authority);
 					$plugin_tar_base = $plugin_stage;
 				} else {
-					$unlisted = publish_unlisted_members($plugin_dir, $full_site_dir, $ships);
+					$unlisted = publish_unlisted_members($plugin_dir, $build_root, $ships);
 					if ($unlisted) {
 						throw new Exception('it holds ' . implode(', ', $unlisted) . ', on a path no manifest lists, so it would ship unverified; '
 							. 'move or remove it');
 					}
-					TreeManifestPublisher::publish_artifact($plugin_dir, $full_site_dir, $manifest_authority, null, $ships);
+					TreeManifestPublisher::publish_artifact($plugin_dir, $build_root, $manifest_authority,
+						$full_site_dir . '/public_html/plugins/' . $plugin_name, $ships);
 					if ($logs_release) {
 						$statement_subjects['plugin/' . $plugin_name] = PackageSignature::statementSubject(
 							(string)file_get_contents($plugin_dir . '/' . PackageSignature::MANIFEST_NAME));
@@ -1240,6 +1281,7 @@
 			$pending_archives[] = array('label' => $plugin_name, 'archive' => $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz',
 				'base' => $plugin_tar_base, 'member' => $plugin_name, 'root' => 'public_html/plugins/' . $plugin_name, 'stage' => $plugin_stage,
 				'statement_dir' => $republish ? null : $plugin_dir, 'statement_rel' => 'public_html/plugins/' . $plugin_name . '/' . PackageSignature::STATEMENT_NAME,
+				'live_dir' => $republish ? null : $full_site_dir . '/public_html/plugins/' . $plugin_name,
 				'subject' => 'plugin/' . $plugin_name);
 			publish_output("- {$plugin_name}-{$plugin_version}: manifest signed");
 		}
@@ -1316,6 +1358,9 @@
 			);
 			// This site's own live tree, last, so its manifest lists every
 			// statement this publish wrote into it with the bytes now on disk.
+			// A plugin or theme is built in the build directory, so its live
+			// directory is given its own copy of the statement; one with no live
+			// directory (removed here and not committed) has nowhere to take one.
 			$live_files = array(
 				"public_html/{$statement_name}" => "{$full_site_dir}/public_html/{$statement_name}",
 				"public_html/agent_dist/{$statement_name}" => "{$agent_dist_dir}/{$statement_name}");
@@ -1323,7 +1368,9 @@
 				if (!empty($pending['statement_dir'])) {
 					$placements[] = array('dir' => $pending['statement_dir'], 'subject' => $pending['subject'],
 						'files' => array($pending['statement_rel'] => $pending['statement_dir'] . '/' . $statement_name));
-					$live_files[$pending['statement_rel']] = $pending['statement_dir'] . '/' . $statement_name;
+					if (!empty($pending['live_dir']) && is_dir($pending['live_dir'])) {
+						$live_files[$pending['statement_rel']] = $pending['live_dir'] . '/' . $statement_name;
+					}
 				}
 			}
 			$placements[] = array('dir' => $full_site_dir, 'subject' => null, 'files' => $live_files);
@@ -1402,6 +1449,21 @@
 			}
 			$size = filesize($pending['archive']);
 			publish_output('- ' . basename($pending['archive']) . ' (' . ($size >= 1048576 ? round($size / 1048576, 2) . ' MB' : round($size / 1024, 1) . ' KB') . ')');
+		}
+		// Each plugin and theme was signed in the build directory; its live
+		// directory gets the same manifest, so this site's own agent verifies
+		// a plugin's files (its host installer among them) against what was
+		// released. A file edited here and not committed then does not verify.
+		foreach ($pending_archives as $pending) {
+			if (empty($pending['live_dir']) || !is_dir($pending['live_dir'])) {
+				continue;
+			}
+			foreach (array(PackageSignature::MANIFEST_NAME, PackageSignature::SIGNATURE_NAME) as $name) {
+				if (!copy($pending['statement_dir'] . '/' . $name, $pending['live_dir'] . '/' . $name)) {
+					publish_output("WARNING: could not copy {$pending['label']}'s {$name} into {$pending['live_dir']}; "
+						. "this site's own agent will not verify that {$pending['subject']} until the next publish.");
+				}
+			}
 		}
 		if ($statement_bytes !== null) {
 			$upgrade->set('upg_release_statement', $statement_bytes);
@@ -1679,16 +1741,21 @@
 	 * Refuse unless both repositories are committed and on the public remote
 	 * (spec release_transparency D1), and return the commit of each.
 	 *
-	 * Before anything is written ($commit_own_writes false), every
-	 * uncommitted change but publish's own leftovers is the owner's and
-	 * refuses. After the writes ($commit_own_writes true), publish's own
-	 * files in the core are committed and pushed as 'Release <version>'
-	 * (ReleaseCommit::commitRelease()) before the HEAD is checked, and
-	 * anything else still refuses.
+	 * A release is built from the commit, so in the core only a HELD path
+	 * (ReleaseCommit::heldPath()) refuses while uncommitted; every other
+	 * uncommitted change is left out of the release and named. The agent
+	 * repository is all source: anything uncommitted there refuses.
+	 *
+	 * Before anything is written ($commit_own_writes false), publish's own
+	 * leftovers are written again and the rest is sorted as above. After the
+	 * writes ($commit_own_writes true), publish's own files in the core are
+	 * committed and pushed as 'Release <version>' (ReleaseCommit::commitRelease())
+	 * - but only while HEAD is still $base_head, the commit the version bumps
+	 * were decided from - and the HEAD is then checked.
 	 *
 	 * @return array{core:?string, agent:?string}
 	 */
-	function publish_require_committed(array $repos, $version, $commit_own_writes) {
+	function publish_require_committed(array $repos, $version, $commit_own_writes, $base_head = null) {
 		$commits = array('core' => null, 'agent' => null);
 		$refused = false;
 		foreach ($repos as $name => $root) {
@@ -1705,22 +1772,42 @@
 			}
 			$own = array();
 			$owners = array();
+			$left_out = array();
 			foreach ($blockers as $path) {
 				if ($name === 'core' && ReleaseCommit::publishWrite($root, $path)) {
 					$own[] = $path;
+				} elseif ($name === 'core' && !ReleaseCommit::heldPath($path)) {
+					$left_out[] = $path;
 				} else {
 					$owners[] = $path;
 				}
 			}
 			if ($owners !== array()) {
 				publish_output("\nRefusing to publish {$version} — the {$name} repository has changes that are not committed"
-					. ($commit_own_writes ? ' (made while this publish was running)' : '') . ':');
+					. ($commit_own_writes ? ' (made while this publish was running)' : '')
+					. ($name === 'core' ? ', on paths a release reads from this box rather than from the commit' : '') . ':');
 				foreach ($owners as $path) {
 					publish_output("  - {$path}");
 				}
 				publish_output('Commit and push them, then publish again. Publish commits only the files it writes itself.');
 				$refused = true;
 				continue;
+			}
+			if (!$commit_own_writes && $left_out !== array()) {
+				publish_output("\nLeft out of this release — uncommitted, so in no commit (" . count($left_out) . '):');
+				foreach ($left_out as $path) {
+					publish_output("  - {$path}");
+				}
+			}
+			if ($commit_own_writes && $name === 'core' && $base_head !== null) {
+				$now = ReleaseCommit::head($root);
+				if ($now !== $base_head) {
+					publish_output("\nRefusing to publish {$version} — a commit landed while this publish ran ("
+						. substr((string)$base_head, 0, 12) . ' -> ' . substr((string)$now, 0, 12) . '), after the version bumps were decided from '
+						. substr((string)$base_head, 0, 12) . '. Publish again; it decides from the new commit.');
+					$refused = true;
+					continue;
+				}
 			}
 			if ($commit_own_writes && $own !== array()) {
 				$result = ReleaseCommit::commitRelease($root, $own, 'Release ' . $version);
@@ -1750,6 +1837,119 @@
 	}
 
 	/**
+	 * The build directory for one commit: its shipping paths plus the
+	 * directories publish builds (ReleaseCommit::exportTree()), in a fresh
+	 * temporary directory removed when the run ends, and the rule for what in
+	 * it ships (ReleaseCommit::joineryFileShips() over the commit's files).
+	 * Refuses the publish when either cannot be had.
+	 *
+	 * @return array{0:string, 1:callable} the directory, and fn(string $rel): bool
+	 */
+	function publish_build_tree($full_site_dir, $commit, $version) {
+		static $cleanup_registered = false;
+		if (!$cleanup_registered) {
+			register_shutdown_function(function () {
+				foreach (glob(sys_get_temp_dir() . '/joinery_build_' . getmypid() . '_*') ?: array() as $leftover) {
+					exec('rm -rf ' . escapeshellarg($leftover));
+				}
+			});
+			$cleanup_registered = true;
+		}
+		$dir = sys_get_temp_dir() . '/joinery_build_' . getmypid() . '_' . uniqid();
+		if (!mkdir($dir, 0755, true)) {
+			publish_output("\nRefusing to publish {$version} — could not create the build directory {$dir}. Nothing has been built.");
+			exit(1);
+		}
+		$export = ReleaseCommit::exportTree($full_site_dir, (string)$commit, $dir);
+		$files = $export['ok'] ? ReleaseCommit::commitFiles($full_site_dir, (string)$commit) : null;
+		if (!$export['ok'] || $files === null) {
+			exec('rm -rf ' . escapeshellarg($dir));
+			publish_output("\nRefusing to publish {$version} — the release could not be built from commit {$commit}: "
+				. ($export['ok'] ? 'its file list could not be read by git' : $export['reason']) . '. Nothing has been built.');
+			exit(1);
+		}
+		publish_output('Building from commit ' . substr((string)$commit, 0, 12) . ' (' . count($files) . ' files in the commit)');
+		$ships = function ($rel) use ($files) {
+			return ReleaseCommit::joineryFileShips($rel, $files);
+		};
+		return array($dir, $ships);
+	}
+
+	/**
+	 * Run the deploy test tier and refuse the publish unless it passes.
+	 * Called before anything is written, so every refusal says so.
+	 */
+	function publish_deploy_gate($runner, $version, $where) {
+		publish_output("\nRunning the deploy test tier on {$where} before anything is written...");
+		$gate = PublishTestGate::run($runner, 'deploy', 'publish_output');
+		if (!$gate['started']) {
+			publish_output("Refusing to publish {$version} — the test runner at {$runner} could not be started, so the release cannot be tested before it ships.");
+			publish_output("Nothing has been written.");
+			exit(1);
+		}
+		if (!$gate['ok']) {
+			publish_output("\nRefusing to publish {$version} — the deploy test tier failed on {$where} (exit {$gate['exit_code']}).");
+			publish_output("Fix the failing test or the code it caught and publish again.");
+			publish_output("Nothing has been written.");
+			exit(1);
+		}
+		publish_output("The deploy tier passed.");
+	}
+
+	/**
+	 * This site's release staging site, or null: <site root>_test, when
+	 * setup_release_staging.sh made it (its config/release_staging marker).
+	 * A directory there without the marker is a site of its own and is never
+	 * written to.
+	 */
+	function publish_release_staging($full_site_dir) {
+		$dir = rtrim($full_site_dir, '/') . '_test';
+		return (is_file($dir . '/config/release_staging') && is_file($dir . '/config/Globalvars_site.php')
+			&& is_dir($dir . '/public_html')) ? $dir : null;
+	}
+
+	/**
+	 * Put a build directory's code into the release staging site: public_html,
+	 * the shipping maintenance_scripts directories and the root license files,
+	 * each replacing what the last publish left. Owned as the staging site is,
+	 * so a hand publish by its owner can replace it next time.
+	 */
+	function publish_fill_staging($build_root, $staging_dir, $version) {
+		$owner = function_exists('posix_getpwuid') ? (posix_getpwuid(fileowner($staging_dir . '/public_html'))['name'] ?? '') : '';
+		$chown = (function_exists('posix_geteuid') && posix_geteuid() === 0 && $owner !== '')
+			? ' --chown=' . escapeshellarg($owner . ':' . $owner) : '';
+		$pairs = array('public_html' => 'public_html');
+		foreach (array('install_tools', 'sysadmin_tools') as $dir) {
+			if (is_dir($build_root . '/maintenance_scripts/' . $dir)) {
+				$pairs['maintenance_scripts/' . $dir] = 'maintenance_scripts/' . $dir;
+			}
+		}
+		foreach ($pairs as $from => $to) {
+			if (!is_dir($staging_dir . '/' . $to) && !mkdir($staging_dir . '/' . $to, 0755, true)) {
+				publish_output("\nRefusing to publish {$version} — could not create {$staging_dir}/{$to}. Nothing has been written.");
+				exit(1);
+			}
+			$out = array();
+			$exit = 0;
+			exec('rsync -a --delete' . $chown . ' ' . escapeshellarg($build_root . '/' . $from . '/') . ' '
+				. escapeshellarg($staging_dir . '/' . $to . '/') . ' 2>&1', $out, $exit);
+			if ($exit !== 0) {
+				publish_output("\nRefusing to publish {$version} — the release could not be copied into the staging site ({$to}): "
+					. trim(implode(' | ', array_slice($out, -3))) . '. Nothing has been written.');
+				exit(1);
+			}
+		}
+		foreach (ReleaseCommit::JOINERY_SHIP_FILES as $file) {
+			if (is_file($build_root . '/' . $file)) {
+				copy($build_root . '/' . $file, $staging_dir . '/' . $file);
+			} elseif (is_file($staging_dir . '/' . $file)) {
+				unlink($staging_dir . '/' . $file);
+			}
+		}
+		publish_output("Release staging: {$staging_dir} now holds the commit being released.");
+	}
+
+	/**
 	 * Every theme's and plugin's version decision for this release, made once,
 	 * BEFORE the commit check, so an auto-bump is committed with the release
 	 * (specs/release_transparency.md D1). The rules are the ones the archive
@@ -1767,7 +1967,10 @@
 	 *
 	 * @return array{baseline:array, themes:array, plugins:array, bumped:string[], warnings:string[]}
 	 */
-	function publish_plan_components($full_site_dir, $republish, $out, $ships = null) {
+	function publish_plan_components($full_site_dir, $republish, $out, $ships = null, $build_root = null) {
+		// Hashes are read from the build directory; a bump goes into the
+		// working tree's manifest, which publish then commits.
+		$build_root = rtrim($build_root ?: $full_site_dir, '/');
 		// Baseline = the most recent prior release row carrying a parseable,
 		// non-empty component snapshot. Rows without one (an aborted publish,
 		// every row from before snapshots existed) are skipped, so the baseline
@@ -1786,8 +1989,8 @@
 
 		$plan = array('baseline' => $baseline, 'themes' => array(), 'plugins' => array(), 'bumped' => array(), 'warnings' => array());
 		$kinds = array(
-			'themes'  => array('dir' => $full_site_dir . '/public_html/theme',   'manifest' => 'theme.json',  'label' => 'theme'),
-			'plugins' => array('dir' => $full_site_dir . '/public_html/plugins', 'manifest' => 'plugin.json', 'label' => 'plugin'),
+			'themes'  => array('dir' => $build_root . '/public_html/theme',   'manifest' => 'theme.json',  'label' => 'theme'),
+			'plugins' => array('dir' => $build_root . '/public_html/plugins', 'manifest' => 'plugin.json', 'label' => 'plugin'),
 		);
 		foreach ($kinds as $kind => $k) {
 			foreach (glob($k['dir'] . '/*/' . $k['manifest']) ?: array() as $manifest_path) {
@@ -1801,7 +2004,7 @@
 					$plan[$kind][$name] = array('version' => $current_version, 'tree_hash' => $last['tree_hash'] ?? null, 'skipped' => true);
 					continue;
 				}
-				$tree_hash = component_tree_hash($dir, $k['manifest'], $ships, $full_site_dir);
+				$tree_hash = component_tree_hash($dir, $k['manifest'], $ships, $build_root);
 				if ($last === null) {
 					// Rule 1.
 				} elseif (version_compare($current_version, $last['version'], '>')) {
@@ -1810,7 +2013,7 @@
 					$plan['warnings'][] = "{$k['label']} {$name}: version went backward ({$last['version']} -> {$current_version}); recorded and archived as-is";
 					call_user_func($out, "- WARNING: {$name} version went backward: {$last['version']} -> {$current_version}");
 				} elseif (!$republish && (!isset($last['tree_hash']) || $last['tree_hash'] !== $tree_hash)) {
-					$new_version = component_bump_manifest_version($manifest_path, $current_version);
+					$new_version = component_bump_manifest_version($full_site_dir . substr($manifest_path, strlen($build_root)), $current_version);
 					call_user_func($out, "- {$name}: content changed since {$current_version}, auto-bumped to {$new_version}");
 					$plan['bumped'][] = "{$name} ({$current_version} -> {$new_version})";
 					$current_version = $new_version;

@@ -17,6 +17,7 @@
  *
  * Run: php tests/run.php safe --filter=publish_test_gate
  *
+ * @version 1.3 - the gate is publish_deploy_gate(), on the release staging site when there is one
  * @version 1.2 - only the deploy tier gates a publish
  * @version 1.1
  * @version 1.0
@@ -109,12 +110,17 @@ PHP
 	section('publish_upgrade.php gates before it writes, with no bypass');
 	// -----------------------------------------------------------------------
 	$src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
-	$gate_at   = strpos($src, 'PublishTestGate::run(');
+	// The gate is publish_deploy_gate(), called in one of two places: on the
+	// release staging site once the commit is copied there, or on this tree
+	// when there is none. Every call must come before the first write.
 	$bundle_at = strpos($src, 'Bundle the management agent artifact');
 	$version_at = strpos($src, "file_put_contents(\$version_file");
-	check($gate_at !== false, 'publish_upgrade.php runs PublishTestGate');
-	check($bundle_at !== false && $gate_at < $bundle_at, 'the gate runs before the agent bundle is built');
-	check($version_at === false || $gate_at < $version_at, 'the gate runs before the VERSION file is written');
+	preg_match_all('/publish_deploy_gate\(\$(staging_dir|full_site_dir) \./', $src, $calls, PREG_OFFSET_CAPTURE);
+	$gate_calls = array_map(function ($c) { return $c[1]; }, $calls[0]);
+	check(strpos($src, 'PublishTestGate::run(') !== false && count($gate_calls) === 2,
+		'publish_upgrade.php runs PublishTestGate, from its two call sites', json_encode($gate_calls));
+	check($bundle_at !== false && $gate_calls && max($gate_calls) < $bundle_at, 'the gate runs before the agent bundle is built');
+	check($version_at === false || ($gate_calls && max($gate_calls) < $version_at), 'the gate runs before the VERSION file is written');
 	// The publisher is root on the local job queue. It must never run a
 	// development tier (2026-09-02: a safe-tier gate run as root installed the
 	// agent over itself and stopped it). Only deploy is ever handed to run().
