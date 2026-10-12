@@ -1724,3 +1724,14 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "UPDATE bkt_backup_targets SET bkt_node_credentials = NULL WHERE bkt_node_credentials IS NOT NULL";
 	$migrations[] = $migration;
+
+	// Report a problem leaves the member menu and becomes an admin-menu item.
+	// admin_menus.json dropped core-report-problem from profileMenu, but core
+	// menu seeding never prunes, so the existing row is deleted here
+	// (insert-only precedent, same as v140).
+	$migration = array();
+	$migration['database_version'] = '213';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'drop_report_problem_profile_menu.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
