@@ -57,6 +57,7 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.5.1 - the build is written 644/755 (tar.umask 0022), not git's group-writable default
  * @version 1.5 - the agent is built from its commit too (exportCommit()); uncommitted agent work is left out,
  *                like the core's, instead of refusing the release
  * @version 1.4 - a release is built from the commit (exportTree(), commitFiles()); only a HELD path
@@ -336,9 +337,14 @@ class ReleaseCommit {
 		return self::archiveInto(rtrim($repo_root, '/'), $commit, array(), $to_dir);
 	}
 
-	/** git archive $commit (limited to $paths when any are given) into $to_dir. */
+	/**
+	 * git archive $commit (limited to $paths when any are given) into $to_dir.
+	 * With tar.umask 0022: git's default (0002) writes every file group-writable,
+	 * and the build is what the archives are cut from, so they would ship 664
+	 * files where a site's tree is held at 644.
+	 */
 	private static function archiveInto($repo_root, $commit, array $paths, $to_dir) {
-		$args = array('archive', '--format=tar', $commit);
+		$args = array('-c', 'tar.umask=0022', 'archive', '--format=tar', $commit);
 		if ($paths !== array()) {
 			$args = array_merge($args, array('--'), $paths);
 		}
@@ -374,7 +380,9 @@ class ReleaseCommit {
 			if (!is_dir(dirname($to)) && !mkdir(dirname($to), 0755, true)) {
 				return array('ok' => false, 'reason' => 'could not create ' . dirname($to));
 			}
-			exec('cp -a ' . escapeshellarg($from) . ' ' . escapeshellarg($to) . ' 2>&1', $out, $exit);
+			// Group and other write cleared, as the export's are: whatever mode
+			// the working tree's copy had, the archive carries no writable file.
+			exec('cp -a ' . escapeshellarg($from) . ' ' . escapeshellarg($to) . ' && chmod -R go-w ' . escapeshellarg($to) . ' 2>&1', $out, $exit);
 			if ($exit !== 0) {
 				return array('ok' => false, 'reason' => 'could not copy ' . $dir . ' into the build: ' . trim(implode(' | ', array_slice($out, -3))));
 			}

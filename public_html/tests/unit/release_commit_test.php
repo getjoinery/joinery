@@ -303,6 +303,9 @@ check(!file_exists($out . '/public_html/includes/B.php') && !file_exists($out . 
 check(is_file($out . '/LICENSE.md') && is_file($out . '/maintenance_scripts/install_tools/install.sh'),
 	'the root license and maintenance_scripts are in it');
 check(!file_exists($out . '/strategy') && !file_exists($out . '/.gitignore'), 'nothing outside the shipping paths is');
+exec('find ' . escapeshellarg($out) . ' \\( -perm -g+w -o -perm -o+w \\) -print', $writable);
+check($writable === array(), 'nothing in the build is group- or other-writable: archives are cut from it',
+	implode(', ', array_slice($writable, 0, 5)));
 check((string)@file_get_contents($out . '/public_html/agent_dist/manifest.json') === '{"built":1}',
 	'what publish built is copied in beside the commit');
 file_put_contents($buildr . '/public_html/agent_dist/manifest.json', '{"built":2}');

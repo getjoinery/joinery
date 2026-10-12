@@ -446,7 +446,8 @@ echo "== remove_plugin: the file half of an uninstall, refused unless the row an
 # row that is uninstalled and not active). The checks themselves run in
 # tests/unit/root_request_test.php against a scratch tree; here the wiring.
 DISPATCHER="$(dirname "$RUNNER")/../../public_html/utils/root_request.php"
-chk "the runner admits remove_plugin" "$(grep -c 'write_agent_files|save_doc|set_receives_upgrades|remove_plugin) : ;;' "$RUNNER")" "1"
+# In the runner's known-kinds case list, wherever that list wraps.
+chk "the runner admits remove_plugin" "$(grep -cE '^[[:space:]]*write_agent_files\|save_doc\|set_receives_upgrades\|remove_plugin[|)]' "$RUNNER")" "1"
 chk "the dispatcher handles it" "$(grep -c "^	case 'remove_plugin':" "$DISPATCHER")" "1"
 chk "and asks the checks before it removes" \
     "$( [ "$(grep -n 'PluginRemoval::refusal(\$name, \$plugins_dir, \$row)' "$DISPATCHER" | cut -d: -f1)" -lt "$(grep -n 'PluginRemoval::remove(\$name, \$plugins_dir)' "$DISPATCHER" | cut -d: -f1)" ] && echo yes )" "yes"

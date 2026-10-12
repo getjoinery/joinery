@@ -22,6 +22,7 @@
 #
 # Safe to run again. Refuses a directory that holds a site of its own.
 #
+# @version 1.1 - the config and marker are root:www-data 0640, as the site's own config is
 # @version 1.0
 
 set -euo pipefail
@@ -80,7 +81,7 @@ require '${LIVE_CONFIG}';
 \$this->settings['webDir']           = 'http://${STAGING_HOST}';
 \$this->settings['protocol_mode']    = 'http';
 PHP
-chown "$OWNER:$WEB_GROUP" "$CONFIG_TMP"
+chown "root:$WEB_GROUP" "$CONFIG_TMP"
 chmod 640 "$CONFIG_TMP"
 mv -f "$CONFIG_TMP" "${STAGING}/config/Globalvars_site.php"
 
@@ -90,7 +91,7 @@ Publish fills public_html/ and maintenance_scripts/ with each release's commit
 and runs the deploy test tier here. Made by
 maintenance_scripts/dev_tools/setup_release_staging.sh.
 TXT
-chown "$OWNER:$WEB_GROUP" "$MARKER"
+chown "root:$WEB_GROUP" "$MARKER"
 chmod 640 "$MARKER"
 
 echo "Release staging ready at ${STAGING}, served as http://${STAGING_HOST} to this machine only."
