@@ -1,6 +1,6 @@
 {
     "name": "Mail Apps",
-    "version": "1.0.3",
+    "version": "1.1.0",
     "description": "Read and send Joinery mail from a desktop or phone mail program (Thunderbird, Apple Mail, any IMAP and SMTP client) with an app password. Standard and Private mailboxes; Private ones while the vault is unlocked on the website.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -39,6 +39,18 @@
             "default": "",
             "managed": true,
             "helptext": "The mail host name the gateway was turned on with, recorded by the Allow mail apps switch. What the Mail apps page and autoconfig tell programs to connect to while mail apps are on."
+        },
+        {
+            "name": "mail_apps_route",
+            "default": "",
+            "managed": true,
+            "helptext": "How mail programs reach this site, recorded with mail_apps_served_name by the Allow mail apps switch: direct, or relay (through this deployment's own relay). Kept until the admin presses Switch, or until the route can no longer work (KeepMailAppsReachable)."
+        },
+        {
+            "name": "mail_apps_route_notice",
+            "default": "",
+            "managed": true,
+            "helptext": "The last change KeepMailAppsReachable made without the admin (a relay that is gone), as time|text. Shown on the Mail apps admin page until dismissed."
         }
     ],
     "adminMenu": [

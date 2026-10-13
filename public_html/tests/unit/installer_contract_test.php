@@ -3461,6 +3461,17 @@ $runner_machine = (string)file_get_contents(dirname(PathHelper::getRootDir())
     . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
 check(preg_match('/^HOST_INSTALLERS="host_housekeeping\.sh install_host_converger\.sh"$/m', $runner_machine) === 1,
     'the runner names the host installer set: housekeeping and the host timer, nothing else');
+check(preg_match('/^HOST_PLUGIN_INSTALLERS="mail_apps\/provisioning\/install_mail_gateway\.sh"$/m', $runner_machine) === 1,
+	'a machine runs one plugin host installer too: the mail gateway, for its container sites');
+check(strpos($runner_machine, 'bash "${HOST_PLUGIN_PATH}" --machine "${SITE_ROOT}"') !== false
+	&& strpos($runner_machine, 'installer_is_trusted "${HOST_PLUGIN_PATH}"') !== false,
+	'  told --machine ROOT, and only once it passes the trust check every installer does');
+$bundle_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/SupportBundlePublisher.php'));
+foreach (array('public_html/plugins/mail_apps/provisioning/install_mail_gateway.sh',
+		'public_html/plugins/mail_apps/provisioning/bin/mail-gateway-x86_64',
+		'public_html/plugins/mail_apps/provisioning/bin/mail-gateway-aarch64') as $carried) {
+	check(strpos($bundle_src, "'" . $carried . "'") !== false, '  the support bundle carries ' . basename($carried));
+}
 check(strpos($runner_machine, 'MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"') !== false,
     'rooted by default at the agent\'s verified bundle (bundle.go bundleRootDefault)');
 check(strpos($runner_machine, '--machine)      MACHINE=1 ;;') !== false,

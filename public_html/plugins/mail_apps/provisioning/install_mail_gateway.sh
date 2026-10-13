@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 1.6 - a Docker host (--machine ROOT, from the support bundle): the gateway installed switched off, no
+#                sudoers rule, and a timer that runs the helper's new converge verb every minute, serving each
+#                container site that asks in its own storage (mail_apps/request.json) and answering beside it;
+#                the helper uses python3, not php, for its JSON (a Docker host has no PHP); refresh takes no site.
 # Version: 1.5 - through a relay (specs/mail_apps_plugin.md § Where programs connect): the helper's csr and
 #                install-cert verbs make the key here and install the chain the relay issued for its name;
 #                on SITE MAILHOST RELAY_IPS serves the site via_relay, opens 993/465 to the relays only and
@@ -46,6 +50,28 @@ if [[ ${EUID} -ne 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --machine ROOT: a Docker host, run from the agent's support bundle by the
+# host's machine-mode installers. It has no site of its own and no PHP; its
+# container sites ask for mail apps in their own storage, and the converge
+# timer installed below acts on it (specs/mail_apps_plugin.md § A4).
+MACHINE=0
+if [[ "${1:-}" == "--machine" ]]; then
+    MACHINE=1
+fi
+
+if [[ "${MACHINE}" == "1" ]]; then
+    if ! command -v docker >/dev/null 2>&1 || [[ ! -d /etc/joinery/sites ]]; then
+        echo "mail gateway: not a Docker host (no docker, or no /etc/joinery/sites) - nothing to install."
+        exit 0
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "mail gateway: no python3 on this host; the helper needs it - nothing installed." >&2
+        exit 0
+    fi
+    SITE_NAME=""
+    HOST=""
+else
 SITE_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 SITE_NAME="$(basename "${SITE_ROOT}")"
 CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
@@ -81,6 +107,7 @@ if [[ -z "${HOST}" ]]; then
     echo "mail gateway: the site has no webDir (host name) yet - nothing installed."
     exit 0
 fi
+fi
 
 ARCH="$(uname -m)"
 BIN_SRC="${SCRIPT_DIR}/bin/mail-gateway-${ARCH}"
@@ -104,7 +131,8 @@ if ! cmp -s "${BIN_SRC}" /usr/local/lib/joinery/mail-gateway; then
     CHANGED=1
 fi
 
-# --- 3. this site's entry -------------------------------------------------------
+# --- 3. this site's entry (a site machine; a Docker host's entries are the converge's) ---
+if [[ "${MACHINE}" == "0" ]]; then
 # Apache serves the site itself on 443 here, with the certificate for its name:
 # the gateway calls it over loopback and checks that certificate. A site whose
 # certificate is not a public one (no Let's Encrypt lineage) is called without
@@ -155,6 +183,9 @@ if ! cmp -s "${CANDIDATE}" "${SITE_JSON}"; then
     CHANGED=1
 fi
 rm -f "${CANDIDATE}"
+else
+    install -d -m 755 /etc/joinery/mail-gateway /etc/joinery/mail-gateway/sites
+fi
 
 # --- 4. the root helper -----------------------------------------------------------
 HELPER="/usr/local/sbin/joinery-mail-gateway"
@@ -162,6 +193,7 @@ CANDIDATE="$(mktemp)"
 cat > "${CANDIDATE}" <<'HELPERSCRIPT'
 #!/usr/bin/env bash
 # joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE [MAILHOST [RELAY_IPS]]
+# joinery-mail-gateway converge
 # on:      serve SITE (sites/SITE.enabled) by MAILHOST — the deployment's mail
 #          host name, which reaches this server even when the web name sits
 #          behind a CDN. Issues MAILHOST's certificate with certbot when there
@@ -184,8 +216,14 @@ cat > "${CANDIDATE}" <<'HELPERSCRIPT'
 # remove:  the plugin is uninstalled on SITE: forget the site, and with no
 #          site left take the gateway off this machine - unit, binary, user,
 #          renewal hook, sudoers rule, this helper                         -> GATEWAY_REMOVED
-# Installed by plugins/mail_apps/provisioning/install_mail_gateway.sh; run
-# through sudo by the web user. Takes a site name, never a path.
+# converge: a Docker host (every minute, joinery-mail-gateway-converge.timer):
+#          each container site with a run spec asks for mail apps in its own
+#          storage (mail_apps/request.json: {"on", "name"}); serve it, or stop,
+#          to match, and write mail_apps/answer.json beside the request. An
+#          entry whose container is gone is forgotten                      -> GATEWAY_CONVERGED
+# Installed by plugins/mail_apps/provisioning/install_mail_gateway.sh; on a
+# site machine run through sudo by the web user, on a Docker host by root's
+# timer. Takes a site name, never a path.
 set -euo pipefail
 VERB="${1:-}"
 SITE="${2:-}"
@@ -197,7 +235,10 @@ UNIT=joinery-mail-gateway
 DROPIN_DIR=/etc/systemd/system/${UNIT}.service.d
 
 # remove may find its site already forgotten (a second run): that is done, not an error.
-if [[ ! "${SITE}" =~ ^[a-z0-9_-]+$ ]] || { [[ "${VERB}" != "remove" ]] && [[ ! -f "${DIR}/sites/${SITE}.json" ]]; }; then
+# converge takes no site; refresh without one re-hands every served site's.
+if [[ "${VERB}" == "converge" || ( "${VERB}" == "refresh" && -z "${SITE}" ) ]]; then
+    :
+elif [[ ! "${SITE}" =~ ^[a-z0-9_-]+$ ]] || { [[ "${VERB}" != "remove" ]] && [[ ! -f "${DIR}/sites/${SITE}.json" ]]; }; then
     echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE (an installed site)" >&2
     exit 2
 fi
@@ -215,7 +256,13 @@ served_sites() {
 }
 
 json_field() {
-    php -r '$j = json_decode(file_get_contents($argv[1]), true); echo is_array($j) && isset($j[$argv[2]]) ? $j[$argv[2]] : "";' "$1" "$2"
+    python3 -c 'import json, sys
+try:
+    j = json.load(open(sys.argv[1]))
+except Exception:
+    j = None
+v = j.get(sys.argv[2], "") if isinstance(j, dict) else ""
+print("" if v is None else (str(v).lower() if isinstance(v, bool) else v))' "$1" "$2"
 }
 
 # Each served site's certificate and key, handed to the service by systemd:
@@ -302,16 +349,32 @@ issue_certificate() {
 
 # Set fields of the site's entry: name=value pairs, a value of true/false a boolean.
 set_entry() {
-    php -r '
-        $p = $argv[1]; $j = json_decode(file_get_contents($p), true);
-        if (!is_array($j)) { fwrite(STDERR, "unreadable site entry\n"); exit(1); }
-        foreach (array_slice($argv, 2) as $kv) {
-            list($k, $v) = explode("=", $kv, 2);
-            $j[$k] = $v === "true" ? true : ($v === "false" ? false : $v);
-        }
-        $tmp = $p . ".new"; file_put_contents($tmp, json_encode($j, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
-        chmod($tmp, 0644); rename($tmp, $p);
-    ' "${DIR}/sites/${SITE}.json" "$@"
+    entry_write "${DIR}/sites/${SITE}.json" "$@"
+}
+
+# Write fields of a site entry (path, then name=value pairs; true/false a
+# boolean), creating it when absent: written whole beside it, then renamed.
+entry_write() {
+    python3 -c 'import json, os, sys
+p = sys.argv[1]
+j = {}
+if os.path.exists(p):
+    try:
+        j = json.load(open(p))
+    except Exception:
+        sys.stderr.write("unreadable site entry\n")
+        sys.exit(1)
+    if not isinstance(j, dict):
+        sys.stderr.write("unreadable site entry\n")
+        sys.exit(1)
+for kv in sys.argv[2:]:
+    k, v = kv.split("=", 1)
+    j[k] = True if v == "true" else (False if v == "false" else v)
+tmp = p + ".new"
+with open(tmp, "w") as f:
+    f.write(json.dumps(j, indent=4, sort_keys=False) + "\n")
+os.chmod(tmp, 0o644)
+os.rename(tmp, p)' "$@"
 }
 
 valid_host() {
@@ -319,7 +382,11 @@ valid_host() {
 }
 
 valid_ip() {
-    php -r 'exit(filter_var($argv[1], FILTER_VALIDATE_IP) === false ? 1 : 0);' "$1"
+    python3 -c 'import ipaddress, sys
+try:
+    ipaddress.ip_address(sys.argv[1])
+except ValueError:
+    sys.exit(1)' "$1"
 }
 
 # The relays every site turned on through one is reached from, one a line.
@@ -413,6 +480,178 @@ set_relay_host() {
         "key_file=${CERTS}/${SITE}/privkey.pem" "via_relay=true"
 }
 
+# --- A Docker host's container sites (converge) -------------------------------
+# A container site asks in its own storage volume, which the container writes
+# and this root process reads: every read and write goes through a directory
+# opened without following links (O_NOFOLLOW at each step), so nothing the
+# container plants - a link to a host file, a FIFO, a giant file - is read or
+# written outside its own folder. Answers: none | off | on NAME | bad REASON.
+docker_root() {
+    local r
+    r="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
+    [[ "${r}" == /* && "${r}" != *..* && -d "${r}" ]] || return 1
+    echo "${r%/}"
+}
+
+storage_io() {
+    python3 -c 'import json, os, re, stat, sys
+root, site, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+D = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+try:
+    top = os.open(os.path.join(root, "volumes", site + "_storage", "_data"), D)
+    d = os.open("mail_apps", D, dir_fd=top)
+except OSError:
+    if mode == "read":
+        print("none"); sys.exit(0)
+    sys.exit(3)
+if mode == "read":
+    try:
+        fd = os.open("request.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=d)
+    except FileNotFoundError:
+        print("none"); sys.exit(0)
+    except OSError:
+        print("bad the request cannot be read"); sys.exit(0)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_size > 4096:
+        print("bad the request is not a small file"); sys.exit(0)
+    try:
+        j = json.loads(os.read(fd, 4097).decode("utf-8"))
+    except Exception:
+        print("bad the request is not JSON"); sys.exit(0)
+    if not isinstance(j, dict) or not isinstance(j.get("on"), bool):
+        print("bad the request has no on: true or false"); sys.exit(0)
+    if not j["on"]:
+        print("off"); sys.exit(0)
+    name = str(j.get("name", "")).strip().lower()
+    if not re.fullmatch(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+", name):
+        print("bad the request names no host name"); sys.exit(0)
+    print("on " + name)
+else:
+    body = sys.stdin.buffer.read(65536)
+    tmp = ".answer.json.new"
+    try:
+        os.unlink(tmp, dir_fd=d)
+    except FileNotFoundError:
+        pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=d)
+    os.write(fd, body)
+    os.fchmod(fd, 0o644)
+    os.close(fd)
+    os.rename(tmp, "answer.json", src_dir_fd=d, dst_dir_fd=d)' "$@"
+}
+
+# The answer the site's admin page reads: written only when it changes.
+answer() {
+    local root="$1" site="$2" state="$3" name="$4" error="$5" expires="" body
+    if [[ -n "${name}" && -f "/etc/letsencrypt/live/${name}/fullchain.pem" ]]; then
+        expires="$(date -u -d "$(openssl x509 -in "/etc/letsencrypt/live/${name}/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2)" +%s 2>/dev/null || true)"
+    fi
+    body="$(python3 -c 'import json, sys
+s, n, e, x = sys.argv[1:5]
+print(json.dumps({"state": s, "name": n or None, "cert_expires": int(x) if x.isdigit() else None, "error": e or None}))' \
+        "${state}" "${name}" "${error}" "${expires}")"
+    if [[ "$(cat "${DIR}/sites/${site}.answer" 2>/dev/null || true)" == "${body}" ]]; then
+        return 0
+    fi
+    if printf '%s' "${body}" | python3 -c 'import json, sys, time
+j = json.loads(sys.stdin.read()); j["time"] = int(time.time()); sys.stdout.write(json.dumps(j))' \
+            | storage_io "${root}" "${site}" write; then
+        printf '%s' "${body}" > "${DIR}/sites/${site}.answer"
+    fi
+}
+
+# The name the host's front door serves the site under (its vhost's ServerName).
+front_door_name() {
+    awk 'tolower($1) == "servername" { print tolower($2); exit }' "/etc/apache2/sites-available/$1.conf" 2>/dev/null
+}
+
+# A container site's entry: the gateway reaches it through the host's front
+# door, under its web name, as on a site machine. Its mail name and
+# certificate are the on verb's (set_mail_host).
+container_entry() {
+    local site="$1" web="$2" cert_dir insecure
+    if [[ -f "/etc/letsencrypt/live/${web}/fullchain.pem" ]]; then
+        cert_dir="/etc/letsencrypt/live/${web}"; insecure=false
+    else
+        cert_dir="/etc/ssl/joinery/${web}"; insecure=true
+    fi
+    if [[ ! -f "${DIR}/sites/${site}.json" ]]; then
+        entry_write "${DIR}/sites/${site}.json" "site=${site}" "hostname=${web}" "mail_hostname=" \
+            "upstream=https://127.0.0.1:443" "upstream_insecure_tls=${insecure}" \
+            "cert_file=${cert_dir}/fullchain.pem" "key_file=${cert_dir}/privkey.pem" "via_relay=false" "container=true"
+    elif [[ "$(json_field "${DIR}/sites/${site}.json" hostname)" != "${web}" ]]; then
+        entry_write "${DIR}/sites/${site}.json" "hostname=${web}" "upstream_insecure_tls=${insecure}"
+    fi
+}
+
+converge() {
+    local root spec site want name web out rc key last now
+    install -d -m 755 "${DIR}" "${DIR}/sites"
+    root="$(docker_root)" || { echo "GATEWAY_CONVERGED"; return 0; }
+    for spec in /etc/joinery/sites/*/run_spec; do
+        [[ -f "${spec}" ]] || continue
+        site="$(basename "$(dirname "${spec}")")"
+        [[ "${site}" =~ ^[a-z0-9_-]{1,50}$ ]] || continue
+        want="$(storage_io "${root}" "${site}" read 2>/dev/null || echo "bad the request could not be read")"
+        if [[ "${want}" == on\ * ]]; then
+            name="${want#on }"
+            web="$(front_door_name "${site}")"
+            if [[ -z "${web}" ]]; then
+                answer "${root}" "${site}" failed "${name}" "This host has no front door (vhost) for the site."
+                continue
+            fi
+            if [[ "${name}" != "${web}" ]]; then
+                answer "${root}" "${site}" failed "${name}" "Mail programs can only use the site's web name, ${web}, for now."
+                continue
+            fi
+            if [[ -e "${DIR}/sites/${site}.enabled" && "$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null)" == "${name}" ]]; then
+                answer "${root}" "${site}" on "${name}" ""
+                continue
+            fi
+            # A request that failed is tried again after an hour, not every minute.
+            key="${name}"
+            now="$(date +%s)"
+            last="$(cat "${DIR}/sites/${site}.failed" 2>/dev/null || true)"
+            if [[ "${last%% *}" == "${key}" && "${last##* }" =~ ^[0-9]+$ ]] && (( now - ${last##* } < 3600 )); then
+                continue
+            fi
+            container_entry "${site}" "${web}"
+            rc=0
+            out="$("$0" on "${site}" "${name}" 2>&1)" || rc=$?
+            if [[ "${rc}" == 0 ]]; then
+                rm -f "${DIR}/sites/${site}.failed"
+                answer "${root}" "${site}" on "${name}" ""
+            else
+                echo "${key} ${now}" > "${DIR}/sites/${site}.failed"
+                answer "${root}" "${site}" failed "${name}" "$(printf '%s' "${out}" | grep -v '^[[:space:]]*$' | grep -iv 'GATEWAY_' | head -3 | tr '\n' ' ' | cut -c1-500)"
+            fi
+        else
+            if [[ -e "${DIR}/sites/${site}.enabled" && "$(json_field "${DIR}/sites/${site}.json" container)" == "true" ]]; then
+                "$0" off "${site}" >/dev/null 2>&1 || true
+            fi
+            rm -f "${DIR}/sites/${site}.failed"
+            case "${want}" in
+                none) ;;
+                off)  answer "${root}" "${site}" off "" "" ;;
+                *)    answer "${root}" "${site}" failed "" "${want#bad }" ;;
+            esac
+        fi
+    done
+    # A container that is gone takes its entry with it.
+    local entry s
+    for entry in "${DIR}"/sites/*.json; do
+        [[ -f "${entry}" ]] || continue
+        s="$(basename "${entry}" .json)"
+        [[ "$(json_field "${entry}" container)" == "true" && ! -f "/etc/joinery/sites/${s}/run_spec" ]] || continue
+        if [[ -e "${DIR}/sites/${s}.enabled" ]]; then
+            "$0" off "${s}" >/dev/null 2>&1 || true
+        fi
+        rm -f "${DIR}/sites/${s}".{json,mailhost,relay,certattempt,failed,answer}
+        rm -rf "${CERTS:?}/${s}"
+    done
+    echo "GATEWAY_CONVERGED"
+}
+
 case "${VERB}" in
     on)
         if [[ -n "${MAILHOST}" && -n "${RELAY_IPS}" ]]; then
@@ -459,6 +698,9 @@ case "${VERB}" in
             systemctl reload "${UNIT}"
         fi
         echo "GATEWAY_OFF"
+        ;;
+    converge)
+        converge
         ;;
     refresh)
         if [[ -n "$(served_sites)" ]]; then
@@ -561,7 +803,7 @@ case "${VERB}" in
         echo "GATEWAY_STATUS"
         ;;
     *)
-        echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE" >&2
+        echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE, or converge" >&2
         exit 2
         ;;
 esac
@@ -571,7 +813,9 @@ if ! cmp -s "${CANDIDATE}" "${HELPER}"; then
 fi
 rm -f "${CANDIDATE}"
 
-# --- 5. sudoers ---------------------------------------------------------------------
+# --- 5. sudoers (a site machine: the web user runs the helper) ----------------------
+# A Docker host has no web user of its own; only root's converge timer runs it.
+if [[ "${MACHINE}" == "0" ]]; then
 WEB_USER="www-data"
 if ! id "${WEB_USER}" >/dev/null 2>&1; then
     WEB_USER="apache"
@@ -587,6 +831,27 @@ else
     echo "mail gateway: the sudoers rule did not validate - not installed" >&2
 fi
 rm -f "${CANDIDATE}"
+else
+    # Every minute, the container sites' requests (the helper's converge).
+    CONVERGE_UNIT=/etc/systemd/system/joinery-mail-gateway-converge.service
+    CONVERGE_TIMER=/etc/systemd/system/joinery-mail-gateway-converge.timer
+    CANDIDATE="$(mktemp)"
+    printf '%s\n' '[Unit]' 'Description=Joinery mail gateway: serve the container sites that ask for mail apps' '' \
+        '[Service]' 'Type=oneshot' "ExecStart=${HELPER} converge" > "${CANDIDATE}"
+    if ! cmp -s "${CANDIDATE}" "${CONVERGE_UNIT}"; then
+        install -m 644 "${CANDIDATE}" "${CONVERGE_UNIT}"
+        CHANGED=1
+    fi
+    printf '%s\n' '[Unit]' 'Description=Joinery mail gateway: container sites, every minute' '' \
+        '[Timer]' 'OnBootSec=1min' 'OnUnitActiveSec=1min' '' '[Install]' 'WantedBy=timers.target' > "${CANDIDATE}"
+    if ! cmp -s "${CANDIDATE}" "${CONVERGE_TIMER}"; then
+        install -m 644 "${CANDIDATE}" "${CONVERGE_TIMER}"
+        CHANGED=1
+    fi
+    rm -f "${CANDIDATE}"
+    systemctl daemon-reload
+    systemctl enable --now joinery-mail-gateway-converge.timer >/dev/null 2>&1 || true
+fi
 
 # --- 6. systemd unit ---------------------------------------------------------------
 UNIT_FILE="/etc/systemd/system/joinery-mail-gateway.service"
@@ -640,7 +905,11 @@ fi
 
 # --- 8. a served site picks up a new binary or entry --------------------------------
 if [[ "${CHANGED}" == "1" ]]; then
-    "${HELPER}" refresh "${SITE_NAME}" >/dev/null || true
+    "${HELPER}" refresh ${SITE_NAME:+"${SITE_NAME}"} >/dev/null || true
 fi
 
-echo "mail gateway: installed for ${SITE_NAME} (${HOST}); $(if [[ -e "/etc/joinery/mail-gateway/sites/${SITE_NAME}.enabled" ]]; then echo serving; else echo 'off until Allow mail apps'; fi)."
+if [[ "${MACHINE}" == "1" ]]; then
+    echo "mail gateway: installed on this Docker host; serving $(ls /etc/joinery/mail-gateway/sites/*.enabled 2>/dev/null | wc -l) container site(s) that asked."
+else
+    echo "mail gateway: installed for ${SITE_NAME} (${HOST}); $(if [[ -e "/etc/joinery/mail-gateway/sites/${SITE_NAME}.enabled" ]]; then echo serving; else echo 'off until Allow mail apps'; fi)."
+fi

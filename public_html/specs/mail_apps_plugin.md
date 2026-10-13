@@ -2,9 +2,9 @@
 
 **Purpose:** Let a person read and send their Joinery mail from a desktop mail program — Thunderbird first, and any client that speaks standard IMAP and SMTP submission (Apple Mail, K-9/Thunderbird for Android, Outlook's IMAP mode). Joinery mail today is reachable only through the web reader and the native app's JSON API.
 
-**Last Updated:** 2026-10-12
+**Last Updated:** 2026-10-13
 
-**Status:** Released in 0.8.484 (J1–J4 in 0.8.485). Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). The gateway's life cycle (§ Running the gateway: A1 build at publish, A2 watching and self-repair, A3 removal), the J3 re-fix (APPENDUID always) and the relay pass-through (§ Where programs connect) are released in 0.8.486; their live checks are in the live verification queue. The pass-through's live test (mailapps-walk.joinerytest.com with its own 3.11 relay) found that gateway 1.0.0 listened on IPv6 only; 1.0.1 listens on IPv4 and IPv6, and the test resumes on the release carrying it. Not built: A4 (container sites and managed nodes), and the shared certificate automation.
+**Status:** Released in 0.8.484 (J1–J4 in 0.8.485). Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). The gateway's life cycle (§ Running the gateway: A1 build at publish, A2 watching and self-repair, A3 removal), the J3 re-fix (APPENDUID always) and the relay pass-through (§ Where programs connect) are released in 0.8.486; their live checks are in the live verification queue. The pass-through's live test (mailapps-walk.joinerytest.com with its own 3.11 relay) found that gateway 1.0.0 listened on IPv6 only; 1.0.1 listens on IPv4 and IPv6, and the test resumes on the release carrying it. A4 build steps 1–4 are built and tested on dev (2026-10-13): the kept-route rule for single-site servers (§ Which route a deployment uses), the helper's converge verb, the gateway on Docker hosts, and the container admin page; their live run (step 5) waits on a release. Not built: a separate mail name for container sites behind Cloudflare (step 6), the pass-through on shared hosted relays (step 7), and the shared certificate automation.
 
 **Plugin name:** `mail_apps` — depends on `mailbox`.
 
@@ -58,7 +58,7 @@ The rig is in `plugins/mail_apps/tests/thunderbird_rig/`: real Thunderbird drive
 The tests listed in § Tests pass, including a live run: the real gateway on dev, IMAP and SMTP against a real mailbox.
 
 **Not built:**
-- The managed-node / container path (A4, § Running the gateway).
+- Container sites (A4, § Running the gateway), and the kept route (§ Which route a deployment uses).
 - The shared front-door certificate automation for `autoconfig.` names.
 - Re-running the rig against the built gateway on the Mac mini and the Windows VM.
 
@@ -84,7 +84,7 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
 - `MailAppGateway::servedName()` is `mailbox_mail_hostname` (while mail apps are on, the name recorded at switch-on).
 - The helper's `on SITE MAILHOST` issues that name's certificate with the system's certbot, only when the name points at this machine (review S1, S3, S4).
 - The site entry carries `mail_hostname`, and the gateway selects the site by it while still calling the site under its web name.
-- Allow mail apps is refused, saying why, on a relay-fronted deployment (until the pass-through exists) and where no mail host name is set.
+- Allow mail apps is refused, saying why, where no mail host name is set.
 
 **Built (relay-fronted), 2026-10-12, uncommitted:** the pass-through below, end to end: relay 3.11 (`mailapps_pass.go`, `mailapps_cert.go`, 993/465 open), the gateway's PROXY handling and `via_relay` (`proxy.go`), the helper's `csr` / `install-cert` / `on SITE NAME RELAY_IPS` with the firewall and `proxy_from` kept in step, `MailAppGateway::turnOn()` through the relay, the fragment's `mail_apps_origins`, and the daily renewal. Tested: Go tests on both sides, the helper gate, PHP against the real relay binary, and a local chain on dev (a TLS client through relay-serve to the gateway greeting on IMAP and SMTP; a wrong name cut off). Not yet tested live: a real relay upgraded to 3.11, the Let's Encrypt order, Thunderbird through it (live verification queue).
 
@@ -97,6 +97,23 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
 | Certificate for that name | issued on the server: the root helper serves the ACME HTTP-01 challenge for the mail host name through Apache (a small vhost it writes) and runs certbot `certonly --webroot` | **issued through the relay for the server's key**: the gateway makes a key and a CSR; the plane sends the CSR over the signed relay API; the relay completes the order with its own ACME account (TLS-ALPN-01 on its 443, as it already does for itself) and returns the certificate. The private key never leaves the server. Renewed the same way |
 | Server firewall | 993/465 open to all | 993/465 open to the relay's address only (IPv4 and IPv6) |
 | What the relay is told | — | the server's address and the names to route, as part of the operator-signed tenant routes |
+
+### Which route a deployment uses (owner, 2026-10-13)
+
+**The rule: a relay passes mail programs through only where it hides the server's address.**
+- *A server with a site of its own,* whose mail arrives through a relay of its own (one tenant, version 3.11 or later): through the relay.
+- *A server with a site of its own and no relay* (direct receiving): direct, under `mailbox_mail_hostname`.
+- *A server with a site of its own on a shared hosted relay:* through the relay, under its slot's mail name (step 7, § Shared hosted relays). Until step 7 is built: refused, saying why, because a direct name would publish the address the relay hides.
+- *A site in a container:* always direct to its Docker host (A4). A container's relay hides nothing: the host's address is already public in its neighbours' DNS, which is why mailbox drops the hidden-origin rules for containers too (plugin docs, "A container's relay hides nothing"). Routing it through the relay would add a host-to-relay trust link to buy two conveniences (no extra DNS row, moves invisible to programs).
+
+**The route is kept, not followed (owner, 2026-10-13, option 2).** Mail programs store the name they connect to, so changing it silently breaks every member's setup.
+- Allow mail apps records the route (`mail_apps_route`: `direct` or `relay`) beside the name (`mail_apps_served_name`).
+- When the rule later prefers the other route (a relay of its own is added), the admin page says so: which name programs use now, which they would use, that each member must change the server name in their mail program, and that until the switch the direct name keeps this server's address public (mailbox's hidden-origin check fails on it too). A **Switch** button turns mail apps on by the new route and records it. Nothing changes until the admin presses it.
+- Where the recorded route can no longer work, it changes by itself, through the hourly task `KeepMailAppsReachable` (it keeps mail apps reachable: the certificate, the route and the relay's address), and the admin page says what happened and that members must change the server name:
+  - *Relay route, and the relay it was turned on with is gone* (deleted, or the deployment moved between its own relay and a hosted slot): mail apps are turned on by whatever the rule now picks (the new relay's name, or direct when mail arrives directly again). If that cannot be done, mail apps are turned off and the page says why.
+- *Relay route, and the relay's address changed* (re-provisioned, or re-sharded): the server's firewall and the gateway's trusted-relay list follow it within the hour, so programs keep working (reviewer2 A3, 2026-10-13).
+- *Relay route, and the relay is only disabled* (mailbox's emergency stop): not gone. Its row stays, programs wait for it as mail does, and nothing goes direct, which would publish the address it hides.
+- One predicate decides all of it: the name the rule picks now against the recorded name and route. The existing name-drift notice (`nameDrift()`) is that predicate for a changed mail host name, and is folded into it.
 
 **Relay side** (`relay-sealer`, `relay-serve` mode): two new listeners, 993 and 465.
 - Each reads the TLS ClientHello's SNI, looks the name up in the tenant routes, and splices the TCP stream to that tenant's server on the same port. It never terminates TLS.
@@ -117,7 +134,7 @@ The tests listed in § Tests pass, including a live run: the real gateway on dev
   - The relay reaches the server over **IPv4 only**: the deployment records the relay's IPv4 (`mrl_public_ip`) and not its IPv6, and the server can trust only an address it knows. Programs still reach the relay over IPv6, and their IPv6 address reaches the gateway in the PROXY line.
   - "One tenant" is counted from the relay's **registrations** (`tenants/`), not the merged map, which lists only tenants that have pushed: a shard whose second tenant has not pushed yet is still shared.
 
-**Hosted fleet slots** are not covered: the fleet is not customer-facing, and its shared zone needs per-tenant names issued by the fleet.
+**Hosted fleet slots** pass nothing through until step 7 (§ Shared hosted relays). A container site on one connects directly to its host either way (§ Which route a deployment uses).
 
 **Thunderbird settings** (the Mail apps page and autoconfig) name whichever host above applies.
 
@@ -142,10 +159,57 @@ The owner asked for the whole life cycle of the gateway program to be automatic:
 
 **A3 — removed with the plugin. BUILT.** There is no platform hook for undoing a host installer, and `uninstall.php` runs as the web user. So the root helper gains `remove SITE`, and the plugin gains `uninstall.php`, which calls it the way the deactivate hook calls `off`. It forgets the site, and once no site on the machine has the plugin it removes the unit and drop-in, the binary, the `joinery-mailgw` user, the renewal hook, the sudoers rule and the helper, and closes the ports. The mail host's certificate stays: the name is the mailbox plugin's too. A failure returns false, which keeps the plugin installed so the uninstall can be retried.
 
-**A4 — container sites and managed nodes. NOT BUILT; the relay pass-through it needed is built (§ Where programs connect).**
-- A site container's mail always arrives through a relay (multi_tenant_docker_hosts WP9: no container runs Postfix), so a container site is relay-fronted, and mail programs reach a relay-fronted deployment only through the pass-through (§ Where programs connect), which is not built.
-- What A4 adds once it is: a Machine word on the host's agent, modeled on `suspended_page` / `site_limits`, that installs the gateway from the support bundle (which then carries `mail-gateway-*` and the helper) and writes a container site's entry with `upstream` = the container's published loopback port (`/etc/joinery/sites/<site>/run_spec`), each site under its own mail name (the gateway refuses two sites with one served name); the site's admin switch asks its host's management node for it. The host report, alarm and recipe above already cover a host gateway serving several sites.
-- Open for A4: a Docker host is not known to have the `php` CLI the helper uses for JSON; the helper should not depend on it there.
+**A4 — container sites. Steps 1–4 BUILT, 5–7 not. Design decided (owner, 2026-10-13), simplified after review (reviewer2, 2026-10-13).**
+
+A container site's programs connect **directly to its Docker host**, never through a relay (§ Which route a deployment uses). The host runs one gateway for all its container sites, each served under its own mail name. **The host reads each site's request itself**: no management-node channel, no new agent word. The management node sees the outcome through what already exists (`host_report`'s `mail_gateway` section, `plane:mail_gateway`).
+
+**How it works.**
+1. **The site asks.** Allow mail apps on a container site writes `storage/mail_apps/request.json`: `{"on": true|false, "name": "<mail name>"}`. `storage/` is the site's own volume (`<site>_storage`); the site root itself is root-owned, and a new top-level folder would die with the container.
+2. **The host acts.** `install_mail_gateway.sh --machine` runs from the support bundle as the runner's one `HOST_PLUGIN_INSTALLERS` entry (`_plugin_installers_start.sh` 2.33), on a new bundle and daily. On a Docker host it installs the gateway switched off (binary, unit, user, helper, renewal hook; no sudoers rule, since only root calls the helper there) and the timer `joinery-mail-gateway-converge.timer`, which runs the helper's `converge` every minute. The machine-mode runner alone would act on a request only when the next bundle or day came round.
+   - `converge` finds Docker's root (`docker info -f '{{.DockerRootDir}}'`, as the agent's `victim.go` does) and reads `<root>/volumes/<site>_storage/_data/mail_apps/request.json` for every site that has a run spec (`/etc/joinery/sites/<site>/run_spec`: only the host's own sites count, and the site name comes from the host's record, never from the file).
+   - The folder belongs to the container, so every read and write opens each step without following links (python3, `O_NOFOLLOW` with directory descriptors): a link, a FIFO or a large file the container plants is never followed, and nothing is written outside its folder.
+   - A site asking for on, under its front door's name, is given a container entry (`container: true`) and turned on with the helper's own `on`; a site no longer asking is turned off; an entry whose container is gone is forgotten. A request that fails is tried again after an hour, not every minute. A pass that finds everything as asked changes nothing.
+   - The gateway stays installed, switched off, on a Docker host with no site asking: it is part of the host's tooling, like the relay pieces the bundle carries.
+3. **The host answers.** Beside the request it writes `storage/mail_apps/answer.json`: `{"state": "on"|"off"|"failed", "name", "cert_expires", "error", "time"}`. The site's admin page reads it.
+4. **Trust.** Whoever can write the site's storage volume can ask: the site itself, or root. That is the same boundary the agent's signed claim draws. The request is data, never a command: `on` is a boolean, and the name must be the site's own web name (below), checked against the host's own vhost for the site.
+
+**How the gateway reaches the site: through the host's front door.** The entry's upstream is `https://127.0.0.1:443` with the site's web name, exactly as on bare metal. The front door's vhost for that name proxies into the container (`default_proxy_vhost.conf`). The gateway already sends `X-Forwarded-For` with the program's address, the front door appends its own, and the container's Apache trusts the chain from the Docker bridge and 127.0.0.1 (`host_housekeeping.sh` remoteip), so `ApiAuth::appClientIp()` sees the program's address with no change. A suspended site's front door answers 503, so its mail programs stop with its website.
+
+**The mail name.** First version: the site's web name, which must point straight at the host (not through Cloudflare, which carries no 993/465). The host already holds that name's certificate, so `set_mail_host` reuses the lineage and no certificate is ordered. The admin page says so, and says why when the web name is proxied. A separate mail name (for a site behind Cloudflare) is a later addition: it needs a permanent port-80 vhost for the name that serves only `/.well-known/acme-challenge/`, sorted after `000-joinery-no-site.conf`, and certbot `--webroot` against it (renewal reuses the recorded webroot).
+
+**What changes where.**
+| Piece | Change |
+|---|---|
+| Support bundle (`SupportBundlePublisher`) | Carries `mail-gateway-x86_64`, `-aarch64`, `.source_sha256` and `install_mail_gateway.sh` |
+| `install_mail_gateway.sh` | A `--machine` mode (above); the helper's three `php -r` JSON calls become `python3 -c` (every host with certbot has python3) |
+| Helper | `converge` verb, run by root's timer on a Docker host; `refresh` without a site; on a site machine nothing else changes |
+| `_plugin_installers_start.sh` | `HOST_PLUGIN_INSTALLERS`: the gateway's installer, run `--machine ROOT` after the host installers |
+| `MailAppGateway` | In a container: `mailHostname()` is the web name (checked before any relay), Allow writes the request, status reads the answer, and `listening()` / `certificate()` / `roundTrip()` dial the mail name instead of 127.0.0.1 |
+| Watching | Nothing new: `host_report` already reports each site in `/etc/joinery/mail-gateway/sites/`, and the recipe and alarm run on the host's node |
+
+**Moves.** A site copied to another host carries its storage, so the new host reads the same request and turns it on. The old host forgets its entry on the first pass after the old container's run spec is gone.
+
+**Build order.**
+1. *Kept route and relay address* on single-site servers (§ Which route a deployment uses): `mail_apps_route`, the Switch notice, the automatic changes, and following a relay's new address (reviewer2 A3). **BUILT 2026-10-13, uncommitted:** `MailAppGateway` 1.4.0 (`preferredRoute()`, `recordedRoute()`, `routeState()` with offer / exposed / gone, `allow()` / `disallow()`, `relayAddressMoved()`, `keepReachable()`), the hourly task `KeepMailAppsReachable` (replaces `RenewMailAppsCertificate`, retired on sync), settings `mail_apps_route` and `mail_apps_route_notice`, admin page 1.3.0 (Switch, the public-address warning, the change notice), test `mail_apps_route` 31/31. A relay that is only disabled is not gone (going direct would publish the address it hides).
+2. *Helper without PHP*, and its `converge` verb. **BUILT 2026-10-13, uncommitted** (`install_mail_gateway.sh` 1.6; helper gate 60/60, with converge on a fake Docker root: on, idempotent pass, another name refused, off, planted links never followed, failure waits an hour, gone container forgotten, other entries left).
+3. *Gateway on a Docker host:* the bundle entries, `--machine` mode, the converge timer. **BUILT 2026-10-13, uncommitted** (`SupportBundlePublisher` 1.19, runner 2.33, `installer_contract` pins).
+4. *The container admin page.* **BUILT 2026-10-13, uncommitted** (`MailAppGateway` 1.5.0, admin page 1.4.0, deactivate 1.3.0, uninstall 1.1.0; `mail_apps_route` 42/42 with the container stood in for).
+5. *Live:* a container site on a test Docker host, Allow, Thunderbird; a second site on the same host; then off, and uninstall.
+6. *A separate mail name for a container site* (the challenge vhost).
+7. *Shared hosted relays pass mail programs through* (§ Shared hosted relays).
+
+**Tests.** The helper gate with a fake Docker root: a request turns a site on, a withdrawn or missing request turns it off, a request from a volume with no run spec is ignored, a name other than the site's vhost name is refused, the last site off removes the gateway, the answer file is written each time. The kept-route rules (each automatic change, the Switch notice, nothing changes without the button). Following a relay's new address.
+
+**Shared hosted relays (step 7). NOT BUILT. Decided (owner, 2026-10-13).** A server with a site of its own on a hosted fleet slot gets the same pass-through as one with a relay of its own, so its address stays hidden and its members can still use mail programs. Each slot has its own mail name, `<slug>.<mailbox_fleet_mx_zone>` (slug `t<id>`), an operator-controlled A record pointing at the shard. Today that name lives only on the plane's slot row (`mft_mx_hostname`) and the tenant's `mrl_mx_hostname`; the shard does not hold it (reviewer2, 2026-10-13).
+- *The shard learns each slot's name:* the operator-signed tenant route gains `mx_hostname` (`relay_serve.go` route body, `registerTenant`'s root-owned files in `relay_apply.go`), sent by `FleetService::applyTenant`. The pass-through's name-to-tenant map is built from it.
+- *Routing:* the shard splices by the name the program asked for (SNI) to the tenant whose slot name it is, at that tenant's `mail_apps_origins` (tenant-signed, as today). An unknown name, or a slot with no origins, is closed.
+- *Certificates, the one rule that must hold:* the shard issues a certificate only for the slot name the operator assigned to the tenant whose signature is on the request. A CSR naming anything else, or a tenant with no assigned name, is refused. The check reads the operator-signed `mx_hostname`, never anything the tenant sent. One issue per tenant per 12 hours, recorded per tenant. TLS-ALPN-01 for a slot name already works: the challenge certificate is answered before autocert for any name.
+- *Code that assumes one tenant today:* the SNI match against the relay's own hostname (`mailapps_pass.go`), `soleTenant()`, the CSR check and ACME order against the relay's hostname and the single 12-hour record (`mailapps_cert.go`), and the relay-wide `mail_apps` group in the ping, which on a shard is reported per calling tenant (`relay_status.go`).
+- *Caps per tenant* as well as per source and in total. The per-tenant cap is applied after the ClientHello is read, since the name is not known before.
+- *What the tenant sees:* programs connect to the slot name. Re-sharding moves the slot name's A record and the shard's address changes; the daily task follows the new address (build step 1), and the certificate lives on the tenant's server, so programs keep working. A shard re-image drops every tenant's program connections once; programs reconnect.
+- *Let's Encrypt:* every slot name is under one registered domain (the fleet zone), and new certificates for a registered domain are limited per week. Renewals of an unchanged name do not count against it. A fleet that adds more slots a week than the limit allows needs the limit raised with Let's Encrypt.
+- *Tests:* a CSR for another tenant's slot name is refused; a CSR for the shard's own name is refused; a tenant with no assigned name is refused; routing by slot name reaches the right origin and an unknown name is closed; per-tenant caps; per-tenant 12-hour records.
+- `cannotTurnOn()`'s shared-relay refusal is removed in the same change, and the version gate names the relay version that carries it.
 
 ## Second code review (reviewer2, 2026-10-11)
 

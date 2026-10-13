@@ -1,0 +1,7 @@
+{
+  "name": "Keep mail apps reachable",
+  "description": "While mail apps are on, once an hour: when this deployment's relay has moved to a new address, the mail gateway's firewall and trusted list follow it; when the relay mail programs connected through is gone, mail apps are turned on by the route that works now (or off), with a notice on the Mail apps admin page; and a certificate obtained through the relay is renewed when it has fewer than 30 days left. Never changes a route that works. Does nothing with mail apps off.",
+  "activate_on_install": true,
+  "default_frequency": "hourly",
+  "replaces": ["RenewMailAppsCertificate"]
+}

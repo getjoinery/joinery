@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.33 - HOST_PLUGIN_INSTALLERS: a plugin's host installer a machine runs too, from the bundle, after
+#                 the host installers: the mail gateway on a Docker host (specs/mail_apps_plugin.md § A4).
 # Version: 2.32 - On a host that refuses unsigned code the publishing-box exemption never applies: every
 #                 plugin's host installer waits on its signature (specs/host_restrictions.md D4).
 # Version: 2.31 - Root requests data_root_encrypt, data_root_reseal and data_root_rekey (a self-hosted site's
@@ -257,6 +259,14 @@ CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.
 # whole of what --only may name under --machine. The agent's bundle carries
 # exactly these two plus what they read.
 HOST_INSTALLERS="host_housekeeping.sh install_host_converger.sh"
+
+# A plugin's host installer that a machine with no site runs too, from the
+# bundle (plugin/path under public_html/plugins), after the host installers.
+# Only for a plugin whose host half serves the machine's container sites: the
+# mail gateway, which a Docker host runs for every site in a container
+# (specs/mail_apps_plugin.md § A4). Each is told --machine ROOT and decides for
+# itself whether this machine is one it serves. The bundle carries each.
+HOST_PLUGIN_INSTALLERS="mail_apps/provisioning/install_mail_gateway.sh"
 
 # Where a siteless machine's tree is: the support bundle the agent verified
 # and unpacked (bundle.go bundleRootDefault). --site-root= overrides it for a
@@ -1193,6 +1203,26 @@ INSTALLER_SET="${CORE_INSTALLERS}"
 for CORE_INSTALLER in ${INSTALLER_SET}; do
     run_core_installer "${CORE_INSTALLER}"
 done
+if [[ "${MACHINE}" == "1" ]]; then
+    for HOST_PLUGIN_INSTALLER in ${HOST_PLUGIN_INSTALLERS}; do
+        HOST_PLUGIN_PATH="${SITE_ROOT}/public_html/plugins/${HOST_PLUGIN_INSTALLER}"
+        if [[ ! -f "${HOST_PLUGIN_PATH}" ]]; then
+            echo "host plugin installers: ${HOST_PLUGIN_INSTALLER} is not in this bundle - skipping"
+            continue
+        fi
+        if ! installer_is_trusted "${HOST_PLUGIN_PATH}"; then
+            CONVERGE_OUTCOME="installer-refused"
+            continue
+        fi
+        echo "host plugin installers: running ${HOST_PLUGIN_INSTALLER}"
+        if bash "${HOST_PLUGIN_PATH}" --machine "${SITE_ROOT}"; then
+            echo "host plugin installers: ${HOST_PLUGIN_INSTALLER}: ok"
+        else
+            echo "host plugin installers: WARNING - ${HOST_PLUGIN_INSTALLER} failed" >&2
+            CONVERGE_OUTCOME="installer-failed"
+        fi
+    done
+fi
 
 # The database is the only persistent signal of which plugins are active:
 # after a rebuild /etc carries base defaults, but the database (on the config
