@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.18 - the owner's commands fetch the release and name the upgrade server from ReleaseStream: a
+ *                 management node that serves no releases sends them to its own source (B38)
  * @version 1.17 - copy_born_encrypted(): the copy's new server is born with its data root encrypted by the form's tick,
  *                 on by default in one of our accounts, and never while data_root_encryption_offered is off
  *                 (specs/hosted_data_promise_disk_encryption.md D1a, C-2)
@@ -681,17 +683,20 @@ class SiteCopyRunner {
 		$source = new ManagedNode((int)$copy->get('scp_source_node_id'), TRUE);
 		$plane = self::plane_url();
 		$release = (string)$copy->get('scp_release');
+		// The release and the upgrades after come from whoever serves this
+		// plane's releases: itself, or its own source when it serves none.
+		$stream = ReleaseStream::source_for($plane, $release);
 		$key = trim((string)$source->get('mgn_agent_public_key'));
 		$lines = array(
 			'mkdir -p /root/joinery-copy && cd /root/joinery-copy',
-			'curl -sL ' . escapeshellarg($plane . '/utils/latest_release?version=' . $release) . ' | tar xz',
+			'curl -sL ' . escapeshellarg($stream . '/utils/latest_release?version=' . $release) . ' | tar xz',
 			'cd maintenance_scripts/install_tools',
 			'POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d \'/+=\' | head -c 24)',
 			'echo "$POSTGRES_PASSWORD" > /root/.joinery_postgres_password && chmod 600 /root/.joinery_postgres_password',
 			'POSTGRES_PASSWORD="$POSTGRES_PASSWORD" ./install.sh -y -q server',
 			'./install.sh -y -q site --bare-metal ' . escapeshellarg(self::site_name($source))
 				. ' --password-file=/root/.joinery_postgres_password ' . escapeshellarg(self::site_domain($source))
-				. ' --enable-agent --management-node=' . escapeshellarg($plane) . ' --upgrade-server=' . escapeshellarg($plane)
+				. ' --enable-agent --management-node=' . escapeshellarg($plane) . ' --upgrade-server=' . escapeshellarg($stream)
 				. ' --dormant --copy-of=' . (int)$source->key . ' --copy-of-key=' . escapeshellarg($key),
 		);
 		return implode("\n", $lines);

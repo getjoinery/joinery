@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.34 - The agent's on/off switch (agent_enabled) is part of what "changed" means: turned on from
+#                 the site's Management Node page, the agent is installed and started at the next tick, not at
+#                 the next release or the daily run (B24).
 # Version: 2.33 - HOST_PLUGIN_INSTALLERS: a plugin's host installer a machine runs too, from the bundle, after
 #                 the host installers: the mail gateway on a Docker host (specs/mail_apps_plugin.md § A4).
 # Version: 2.32 - On a host that refuses unsigned code the publishing-box exemption never applies: every
@@ -879,6 +882,34 @@ read_active_plugins() {
     ' "${CONFIG_FILE}" 2>/dev/null
 }
 
+# The site's settings that switch what a host installer does, as one line each
+# (name=value), for the change hash: install_agent.sh reads agent_enabled, and
+# a switch flipped on the site's page is a reason to converge now. Exit 3 when
+# the database cannot be read.
+read_host_switches() {
+    php -r '
+        $config = file_get_contents($argv[1]);
+        $val = function ($key) use ($config) {
+            return preg_match("/settings\[.".$key.".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
+        };
+        $name = $val("dbname");
+        $user = $val("dbusername");
+        $pass = $val("dbpassword");
+        $host = $val("dbhost") ?: "localhost";
+        if ($name === "" || $user === "") { fwrite(STDERR, "no-db-config\n"); exit(3); }
+        try {
+            $pdo = new PDO("pgsql:host={$host};dbname={$name}", $user, $pass,
+                [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 10]);
+            $q = $pdo->query("SELECT stg_value FROM stg_settings WHERE stg_name = \x27agent_enabled\x27");
+            $row = $q->fetch(PDO::FETCH_NUM);
+            echo "agent_enabled=" . ($row === false ? "" : (string)$row[0]) . "\n";
+        } catch (Exception $e) {
+            fwrite(STDERR, "db-unreachable\n");
+            exit(3);
+        }
+    ' "${CONFIG_FILE}" 2>/dev/null
+}
+
 # One plugin's declared host_installer: resolved through its own plugin.json,
 # refused when the path escapes the plugin directory, when root did not put it
 # there, or when we did not build the package. The one body the full run and
@@ -1110,6 +1141,7 @@ converge_hash() {
         cat "${TOOLS_DIR}"/*.sh "${TOOLS_DIR}"/default_*.conf "${TOOLS_DIR}"/vhost_history/*.conf 2>/dev/null
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
+        echo "${HOST_SWITCHES_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1
 }
 
@@ -1154,6 +1186,9 @@ fi
 # --- Converge only when something changed (--when-changed) -------------------
 if [[ "${WHEN_CHANGED}" == "1" ]]; then
     ACTIVE_PLUGINS_FOR_HASH="$(read_active_plugins 2>/dev/null || echo "db-unreachable")"
+    if [[ "${MACHINE}" == "0" ]]; then
+        HOST_SWITCHES_FOR_HASH="$(read_host_switches 2>/dev/null || echo "db-unreachable")"
+    fi
     CONVERGE_NOW_HASH="$(converge_hash)"
     last_hash="$(cat "${STAMP_FILE}" 2>/dev/null || true)"
     last_time="$(cut -d' ' -f1 "${LAST_FILE}" 2>/dev/null || echo 0)"

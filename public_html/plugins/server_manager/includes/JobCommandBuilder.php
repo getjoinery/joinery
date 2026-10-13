@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.120 - install_node fetches its release, and names its upgrade server, from ReleaseStream: this plane
+ *                  when it serves releases, else this plane's own upgrade source (B38: a management node built
+ *                  from a release serves none, and its servers came up with no themes or plugins)
  * @version 1.119 - joinery-mail-gateway may be restarted and its journal read (agent 1.74.0)
  * @version 1.118 - build_data_root_rekey: re-encrypt a data root under a new volume key (D8)
  * @version 1.117 - build_install_node: encrypted_data_root with recovery_public_key passes install.sh docker / server
@@ -5147,22 +5150,13 @@ class JobCommandBuilder {
 		$remote_install_dir = "/opt/joinery-install/{$transfer_id}";
 		$remote_tools_dir = "{$remote_install_dir}/maintenance_scripts/install_tools";
 
-		// Management node URL — where the target fetches the Joinery release tarball from.
-		// Uses the webDir config setting (our site's own hostname).
+		// This plane's own address, for the machine to join, from the webDir
+		// setting (our site's own hostname). It passes the same acceptance
+		// rule as the node's own page and CLI, so a bad webDir fails here,
+		// loudly, rather than as a join that never arrives. The join stays a
+		// request an operator approves; naming the plane enrolls nothing.
 		$settings = Globalvars::get_instance();
 		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'dev.getjoinery.com';
-		$release_url = "https://{$webdir}/utils/latest_release";
-		if ($copy_release !== '') {
-			$release_url .= '?version=' . $copy_release;
-		}
-		$release_url_esc = escapeshellarg($release_url);
-
-		// This plane's own address, for the machine to join. It comes from the
-		// same setting as the release URL — the target already reaches this
-		// host to fetch the release — and passes the same acceptance rule as
-		// the node's own page and CLI, so a bad webDir fails here, loudly,
-		// rather than as a join that never arrives. The join stays a request
-		// an operator approves; naming the plane enrolls nothing.
 		require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
 		$plane_url = 'https://' . preg_replace('#^https?://#', '', rtrim($webdir, '/'));
 		$refusal = admin_management_node_url_refusal($plane_url);
@@ -5170,6 +5164,18 @@ class JobCommandBuilder {
 			throw new Exception("install_node cannot name a management node for the target to join ({$plane_url}): {$refusal}");
 		}
 		$plane_url_esc = escapeshellarg($plane_url);
+
+		// Where the target fetches the release, and upgrades from after: this
+		// plane when it serves releases, else where this plane takes its own
+		// (ReleaseStream). A plane that serves none would leave the site with
+		// no themes or plugins, and a pinned copy with a 404.
+		$stream_url = ReleaseStream::source_for($plane_url, $copy_release);
+		$stream_url_esc = escapeshellarg($stream_url);
+		$release_url = $stream_url . '/utils/latest_release';
+		if ($copy_release !== '') {
+			$release_url .= '?version=' . $copy_release;
+		}
+		$release_url_esc = escapeshellarg($release_url);
 
 		$sitename_esc = escapeshellarg($sitename);
 		$domain_esc   = escapeshellarg($domain);
@@ -5237,19 +5243,19 @@ class JobCommandBuilder {
 				// DNS is not here yet. `-` generates the container's own
 				// Postgres password. --enable-agent --management-node: the
 				// site's agent asks to join too.
-				// --upgrade-server names THIS plane: the release the box just
-			// fetched came from here, so the core overlay, the theme and
-			// plugin downloads, and the site's upgrade_source all stay on
-			// the same stream — and the agent baked into the container is
-			// the one this plane built and signed. Without it install.sh
-			// defaults to getjoinery.com, overlays that core and that
-			// agent over the plane's, and the site's agent then trusts a
-			// key this plane does not hold: every script primitive from
-			// here, apply_update first, is refused for the life of the
-			// container. Invisible on the production plane, where the two
-			// are the same machine.
+				// --upgrade-server names the stream the release the box just
+			// fetched came from (this plane, or this plane's own source when
+			// it serves none), so the core overlay, the theme and plugin
+			// downloads, and the site's upgrade_source all stay on it — and
+			// the agent baked into the container is the one that stream
+			// built and signed. Without it install.sh defaults to
+			// getjoinery.com, overlays that core and that agent over the
+			// plane's, and the site's agent then trusts a key this plane does
+			// not hold: every script primitive from here, apply_update first,
+			// is refused for the life of the container. Invisible on the
+			// production plane, where the two are the same machine.
 			$lines[] = "./install.sh -y -q site --docker {$sitename_esc} - {$domain_esc}{$port_arg}"
-				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}";
+				         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}";
 			}
 		} else {
 			// Bare metal: prerequisites, then the site. install.sh server
@@ -5275,7 +5281,7 @@ class JobCommandBuilder {
 			         . ' ./install.sh -y -q server' . self::outbound_install_flags() . $encrypted_flags . ';'
 			         . ' fi';
 			$lines[] = "./install.sh -y -q site --bare-metal {$sitename_esc} --password-file=/root/.joinery_postgres_password {$domain_esc}"
-			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$plane_url_esc}{$admin_flags}{$copy_flags}";
+			         . " --enable-agent --management-node={$plane_url_esc} --upgrade-server={$stream_url_esc}{$admin_flags}{$copy_flags}";
 		}
 		$lines[] = 'echo INSTALL_SUCCESS';
 

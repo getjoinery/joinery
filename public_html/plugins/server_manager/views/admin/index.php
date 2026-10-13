@@ -3,6 +3,7 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.54 - the approve list leaves out this management node's own row, and the approve refuses it (B29)
  * @version 1.53 - machines asking to have their encrypted data root's key held here (C-3): approved or refused
  *                 after comparing the fingerprint their machine printed (specs/hosted_data_promise_disk_encryption.md)
  * @version 1.52 - a provision with no node yet, and a join from its address, sit on the tab of the account it is in
@@ -178,6 +179,9 @@ if ($_POST && in_array($_POST['action'] ?? '', ['escrow_approve', 'escrow_refuse
 				$n = new ManagedNode($as_node, TRUE);
 				if (!$n->key || $n->get('mgn_delete_time')) {
 					throw new Exception('That node no longer exists.');
+				}
+				if ($n->is_self()) {
+					throw new Exception('That is this management node\'s own row: its key is held by another management node, never by itself.');
 				}
 				$dre->set('dre_mgn_managed_node_id', $n->key);
 			}
@@ -418,6 +422,11 @@ foreach (new MultiDataRootEscrow(array('status' => 'pending'), array('dre_reques
 $escrow_node_choices = array();
 if ($pending_escrows) {
 	foreach (new MultiManagedNode(array('deleted' => false), array('mgn_name' => 'ASC')) as $en) {
+		// Never this management node's own row: its key is held by another
+		// management node, never by itself.
+		if ($en->is_self()) {
+			continue;
+		}
 		$escrow_node_choices[(int)$en->key] = (string)$en->get('mgn_name');
 	}
 }

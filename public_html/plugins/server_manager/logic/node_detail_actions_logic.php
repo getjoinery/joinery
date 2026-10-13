@@ -19,6 +19,11 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.59 - retry_install is refused only when this plane no longer holds the install password, for any
+ *                shape: a failed install keeps it (B37: a bare-metal install that never reached its server was
+ *                refused on the old belief that its setup turned password login off); data_root_enrol is refused
+ *                while this holder takes no new enrolments (B22); restore_chain is refused for a run no Prepare
+ *                has put on the node (B39)
  * @version 1.58 - the encrypted data root (specs/hosted_data_promise_disk_encryption.md WP2, WP8):
  *                data_root_enrol queues its enrolment here, data_root_unlock keeps the value a person
  *                worked out in their browser for the locked machine's next ask, data_root_escrow_retire
@@ -435,6 +440,10 @@ class NodeDetailActions {
 					self::fail($session, $page_regex, 'This is the management node\'s own machine: its key is held by another management node, never by itself (enrol it there).');
 					return $base_url;
 				}
+				if (!DataRootEscrow::takes_new_enrolments()) {
+					self::fail($session, $page_regex, DataRootEscrow::NO_NEW_ENROLMENTS);
+					return $base_url;
+				}
 				$built = JobCommandBuilder::build_data_root_enrol($node);
 				$job = ManagementJob::createFromBuild($node->key, 'data_root_enrol', $built, null, $uid);
 				return self::jobUrl($job);
@@ -652,6 +661,14 @@ class NodeDetailActions {
 					'domain'        => trim($_POST['restore_domain'] ?? ''),
 					'skip_database' => empty($_POST['restore_database']),
 				];
+				// Only a run a Prepare has put on the node: the node refuses any
+				// other, after the job was queued and approved for nothing.
+				$prepared = BackupChainListHelper::staged_runs($node)[$params['chain_id']] ?? array();
+				if ($params['seq'] === '' || !in_array((int)$params['seq'], $prepared, true)) {
+					self::fail($session, $page_regex, 'That backup is not prepared on the node. Press Prepare on its row first: '
+						. 'it downloads what restoring that run needs onto the node, and Restore is offered once it is done.');
+					return $base_url . '&tab=backups';
+				}
 				$built = JobCommandBuilder::build_restore_chain($node, $params);
 				$job = ManagementJob::createFromBuild($node->key, 'restore_chain', $built, $params, $uid);
 				return self::jobUrl($job);
@@ -775,15 +792,16 @@ class NodeDetailActions {
 				}
 				$params = $prev->get('mjb_parameters');
 				if (is_string($params)) { $params = json_decode($params, true); }
-				// A keyless bare-metal bootstrap is one-shot: install.sh server
-				// disabled root password login, and the root password was the
-				// only credential. A retry would wait five minutes for SSH the
-				// box no longer answers. Say so instead.
-				if (($params['docker_mode'] ?? '') === 'bare-metal' && !$node->get('mgn_ssh_key_path')) {
+				// A retry logs in with the install password, as the first run
+				// did, whatever the shape. A failed install keeps it; only a
+				// finished one retires it (the server refuses it, and this
+				// plane erases it). Without it the retry could only wait out
+				// the SSH budget, so say so instead.
+				if (!InstallJobExecutor::holds_install_password($node)) {
 					self::fail($session, $page_regex,
-						'A bare-metal install cannot be retried: its server setup already disabled root password login, '
-						. 'and the root password was this plane\'s only way in. Finish the site by hand from the provider console, '
-						. 'or delete the instance and provision again.');
+						'This install cannot be retried: this plane no longer holds the server\'s install password, '
+						. 'its only way in (it is retired once an install finishes). Finish the site by hand from the '
+						. 'provider console, or delete the instance and provision again.');
 					return $base_url;
 				}
 				// An install made by the retired Clone (mode from_backup) has no

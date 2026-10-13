@@ -276,6 +276,43 @@ CALLERS=$(grep -rn -- "--no-pre-restore-dump\|--pre-restore-dump-dir" \
     | grep -v "/tests/" | grep -v "restore_database.sh:" | grep -v "^\s*#" | wc -l)
 chk "no caller still passes a removed flag" "$CALLERS" "0"
 
+# --- The recovery key a site holds proven survives a restore (B41) -------------
+# A dump from before a key rotation names the key rotated away from. Loaded as it
+# is, the site would seal its next backups to it, and its management node would
+# re-seal every machine's break-glass copy to it.
+KEY_OLD="$(head -c 32 /dev/urandom | base64)"; FPR_OLD="$(printf '%s' "$KEY_OLD" | base64 -d | sha256sum | awk '{ print $1 }')"
+KEY_NEW="$(head -c 32 /dev/urandom | base64)"; FPR_NEW="$(printf '%s' "$KEY_NEW" | base64 -d | sha256sum | awk '{ print $1 }')"
+settings_db() {  # DB KEY PROOF
+    dropdb -U postgres --if-exists "$1" >/dev/null 2>&1; createdb -U postgres "$1"
+    psql -U postgres -d "$1" -q -v k="$2" -v p="$3" >/dev/null 2>&1 <<'SQL'
+CREATE TABLE stg_settings (stg_setting_id bigserial PRIMARY KEY, stg_name varchar(100) UNIQUE, stg_value text,
+    stg_usr_user_id int, stg_create_time timestamp DEFAULT now(), stg_update_time timestamp DEFAULT now(), stg_group_name varchar(255));
+INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) VALUES
+    ('backup_recovery_public_key', :'k', 'backups'), ('backup_recovery_public_key_proven_fpr', :'p', 'backups'), ('site_name', 'before', 'general');
+SQL
+}
+key_now() { psql -U postgres -d "$1" -XtA -F'|' -c "SELECT (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key'), (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key_proven_fpr')" 2>/dev/null; }
+settings_db "$SRC" "$KEY_OLD" "$FPR_OLD"
+OLDDUMP="$WORK/old_key.sql"; pg_dump -U postgres "$SRC" > "$OLDDUMP"
+settings_db "$DST" "$KEY_NEW" "$FPR_NEW"
+psql -U postgres -d "$DST" -q -c "UPDATE stg_settings SET stg_value = 'after' WHERE stg_name = 'site_name'" >/dev/null 2>&1
+OUT=$(bash "$ENGINE" "$DST" "$OLDDUMP" --non-interactive --db-user postgres 2>&1 >/dev/null)
+chk "a restore from before a rotation keeps the site's proven key and its proof, and says so" \
+    "$(key_now "$DST")|$(grep -c "Kept this site's recovery key ${FPR_NEW:0:16}. The backup names ${FPR_OLD:0:16}" <<< "$OUT")" "$KEY_NEW|$FPR_NEW|1"
+chk "and everything else is the backup's" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT stg_value FROM stg_settings WHERE stg_name = 'site_name'")" "before"
+settings_db "$DST" "$KEY_NEW" ""
+bash "$ENGINE" "$DST" "$OLDDUMP" --non-interactive --db-user postgres >/dev/null 2>&1
+chk "a key not yet proven gives way to the backup's" "$(key_now "$DST")" "$KEY_OLD|$FPR_OLD"
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+bash "$ENGINE" "$DST" "$OLDDUMP" --non-interactive --db-user postgres >/dev/null 2>&1
+chk "a database with no key of its own takes the backup's" "$(key_now "$DST")" "$KEY_OLD|$FPR_OLD"
+psql -U postgres -d "$SRC" -q -c "DELETE FROM stg_settings WHERE stg_name LIKE 'backup_recovery%'" >/dev/null 2>&1
+pg_dump -U postgres "$SRC" > "$WORK/no_key.sql"
+settings_db "$DST" "$KEY_NEW" "$FPR_NEW"
+bash "$ENGINE" "$DST" "$WORK/no_key.sql" --non-interactive --db-user postgres >/dev/null 2>&1
+chk "a backup from before any key: the site's proven key is written in" "$(key_now "$DST")" "$KEY_NEW|$FPR_NEW"
+
 echo
 if [ "$failed" -eq 0 ]; then
     echo "RESULT: PASS $passed $failed"

@@ -200,7 +200,24 @@ chk "mounted as another filesystem: exit 1" "$rc|$(grep -c 'mounted as ext4' <<<
 rm -f "$T/fstype"
 out="$(run tick 2>&1)"; rc=0; unmount; run tick >/dev/null 2>&1 || rc=$?
 chk "tick exits as check: 1 when not mounted" "$rc" "1"
+rm -f "$T/root/run/joinery/data-root.not-mounted"; : > "$LOG"
+out="$(run tick 2>&1)"; out2="$(run tick 2>&1)"
+chk "not mounted, and no run has it: each tick starts it, and says once that it would not mount (B42)" \
+    "$(grep -c '^systemctl start joinery-data.target$' "$LOG")|$(grep -c 'did not mount when started' <<< "$out")|$(grep -c 'did not mount' <<< "$out2")" "2|1|0"
+cp "$T/bin/systemctl" "$T/systemctl.b42"
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"; [ "$*" = "start joinery-data.target" ] && touch "$GATE_T/mounted"; exit 0'
+out="$(run tick 2>&1)"; rc=$?
+chk "and when it mounts: exit 0, said, and the once-said note cleared" \
+    "$rc|$(grep -c 'mounted it again' <<< "$out")|$( [ -e "$T/root/run/joinery/data-root.not-mounted" ] && echo flag || echo none)" "0|1|none"
+unmount; : > "$LOG"
+( exec 8>>"$T/root/run/joinery/data-root.lock"; flock 8; run tick >/dev/null 2>&1 )
+chk "while a run holds the data root's lock (an encrypt's start): left stopped" "$(grep -c '^systemctl start joinery-data.target$' "$LOG")" "0"
+cp "$T/systemctl.b42" "$T/bin/systemctl"
 touch "$T/mounted"
+mkdir -p "$T/root/run/joinery/data-root-key.Ab12Cd" "$T/root/etc/joinery/data-root"; : > "$T/root/srv/joinery.img.recovery"; : > "$T/root/etc/joinery/data-root/driving-slot.recovery"
+out="$(run tick 2>&1)"; out2="$(run tick 2>&1)"
+chk "plain and mounted: the keys and sealed copies a cut-off start left go, said once (B42)" \
+    "$(ls -d "$T"/root/run/joinery/data-root-key.* "$T/root/srv/joinery.img.recovery" "$T/root/etc/joinery/data-root/driving-slot.recovery" 2>/dev/null | wc -l)|$(grep -c 'start left behind' <<< "$out")|$(grep -c 'start left behind' <<< "$out2")" "0|1|0"
 
 echo "=== tick: the units ==="
 : > "$LOG"
@@ -807,6 +824,11 @@ run recipient --set-by=operator "$NEWPUB" >/dev/null 2>&1
 chk "--set-by=operator: recorded" "$(grep -c '^set_by=operator$' "$R/etc/joinery/data-root/recovery_recipient")" "1"
 out="$(run recipient --set-by=someone "$NEWPUB" 2>&1)"; rc=$?
 chk "--set-by names site, operator or install only" "$rc|$(grep -c 'site, operator or install' <<< "$out")" "1|1"
+chk "the key it replaced is recorded as one this machine was moved off" "$(grep -c "^${FPR} 20[0-9-]*T[0-9:]*Z$" "$R/etc/joinery/data-root/retired_recipients")" "1"
+cp "$R/etc/joinery/data-root/recovery_recipient" "$T/recipient.now"
+out="$(run recipient --set-by=operator "$PUB" 2>&1)"; rc=$?
+chk "a key it was moved off: refused, nothing changed, and it says why (B41: a restore from before a rotation)" \
+    "$rc|$(grep -c 'moved off the recovery key' <<< "$out")|$(cmp -s "$T/recipient.now" "$R/etc/joinery/data-root/recovery_recipient" && echo same)" "1|1|same"
 echo "--- the TPM2 chip did not open this boot, something else did: sealed again to this boot (D2) ---"
 mkdir -p "$R/dev" "$R/run/joinery"; : > "$R/dev/tpmrm0"; echo "2026-10-11 21:13:00 UTC" > "$R/run/joinery/data-root.tpm2-failed"
 : > "$LOG"; out="$(run tick 2>&1)"
@@ -876,16 +898,45 @@ chk "encrypt with the filesystem still mounted at a busy bind: refused, nothing 
 # The same bind held by a service (rsyslog's socket in Postfix's chroot): stopped for
 # the start, the bind unmounted, and the run goes on.
 printf '%s\n' '36 25 7:7 / /srv/joinery rw,relatime - xfs /dev/loop7 rw' '41 25 7:7 /mail/postfix /var/spool/postfix rw,relatime - xfs /dev/loop7 rw' > "$R/proc/self/mountinfo"
-mkdir -p "$R/proc/4242"; echo '0::/system.slice/rsyslog.service' > "$R/proc/4242/cgroup"
-stub fuser 'case "$*" in *var/spool/postfix*) echo 4242 ;; esac'
+mkdir -p "$R/proc/4242" "$R/proc/4343"; echo '0::/system.slice/rsyslog.service' > "$R/proc/4242/cgroup"
+# The run's own service keeps one too: a site's Backups page asks through the
+# host converger (B42). Stopping it would stop this run part-way.
+echo '0::/system.slice/joinery-host-converger.service' > "$R/proc/4343/cgroup"; cp "$R/proc/4343/cgroup" "$R/proc/self/cgroup"
+stub fuser 'case "$*" in *var/spool/postfix*) echo 4242 4343 ;; esac'
 cp "$T/bin/systemctl" "$T/systemctl.d5"
 stub systemctl 'case "$*" in "stop srv-joinery.mount") sed -i "\# /srv/joinery #d" "$GATE_T/root/proc/self/mountinfo" ;; "stop var-spool-postfix.mount") sed -i "\# /var/spool/postfix #d" "$GATE_T/root/proc/self/mountinfo" ;; esac
 exec "$GATE_T/systemctl.d5" "$@"'
-touch "$T/mounted"
+held_binds() { printf '%s\n' '36 25 7:7 / /srv/joinery rw,relatime - xfs /dev/loop7 rw' '41 25 7:7 /mail/postfix /var/spool/postfix rw,relatime - xfs /dev/loop7 rw' > "$R/proc/self/mountinfo"; }
+# A start that ends after the services stopped, however it ends, starts them again
+# on the data root as it was, and leaves no keys or sealed copies behind (B42).
+start_undone() {  # what the transcript says
+    printf '%s' "$(grep -c '^systemctl start joinery-data.target$' "$LOG")|$(grep -c '^systemctl start .*rsyslog.service' "$LOG")|$(grep -c 'as it was, unencrypted, and its services started again' <<< "$1")|$( [ -e "$R/srv/joinery.img.recovery" ] || [ -e "$R/etc/joinery/data-root/driving-slot.recovery" ] && echo sealed || echo none)|$(ls -d "$R"/run/joinery/data-root-key.* 2>/dev/null | wc -l)|$(grep -c '^backing=file$' "$C")"
+}
+cp "$T/bin/fallocate" "$T/fallocate.ok"
+stub fallocate 'echo "fallocate $*" >> "$GATE_LOG"; exit 1'
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "a step that fails after the stop: exit 1, the data root and its services started again, nothing kept" \
+    "$rc|$(start_undone "$out")" "1|1|1|1|none|0|1"
+stub fallocate 'kill -TERM $PPID; exit 1'
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "a TERM part-way (whatever ran it was stopped): the same, exit 143" "$rc|$(start_undone "$out")" "143|1|1|1|none|0|1"
+cp "$T/fallocate.ok" "$T/bin/fallocate"
+cp "$T/bin/cryptsetup" "$T/cryptsetup.ok"
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; [ "$1" = reencrypt ] && exit 1; exit 0'
+held_binds; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "cryptsetup's start fails: its loop device let go, a header it left undone, then the same" \
+    "$rc|$(awk '/^cryptsetup reencrypt/ { f = 1 } f && /^losetup -d \/dev\/loop7$/ { n++ } END { print n + 0 }' "$LOG")|$(grep -c '^cryptsetup luksDump' "$LOG")|$(start_undone "$out")" "1|1|1|1|1|1|none|0|1"
+cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"
+truncate -s $(( 8 * G )) "$R/srv/joinery.img"
+held_binds; touch "$T/mounted"
 : > "$LOG"
 out="$(run encrypt 2>&1)"; rc=$?
 chk "a service that keeps a file on a bind: stopped for the start, the bind unmounted, started again after" \
     "$(grep -c 'rsyslog.service keep a file on it' <<< "$out")|$(grep -c '^systemctl stop rsyslog.service$' "$LOG")|$(grep -c '^systemctl stop var-spool-postfix.mount$' "$LOG")|$(grep -c '^systemctl start .*rsyslog.service' "$LOG")" "1|1|1|1"
+chk "but never the service this run is part of (B42)" "$(grep -c 'joinery-host-converger' "$LOG")|$(grep -c 'joinery-host-converger' <<< "$out")" "0|0"
 cp "$T/systemctl.d5" "$T/bin/systemctl"; rm -f "$T/bin/fuser"; rm -rf "$R/proc"
 chk "encrypt: exit 0, and says it encrypts in the background" "$rc|$(grep -c 'encrypting in the background' <<< "$out")" "0|1"
 chk "the image grows by the 32 MiB the header takes, which XFS never sees" "$(grep -c "^fallocate -l $(( 8 * G + 32 * 1024 * 1024 )) $R/srv/joinery.img$" "$LOG")" "1"
@@ -901,6 +952,10 @@ chk "the run's unit: never SIGKILLed, never the OOM killer's, after the data roo
     "$(grep -c -e '^SendSIGKILL=no$' -e '^OOMScoreAdjust=-1000$' -e '^IOSchedulingClass=idle$' -e '^After=joinery-data.target$' "$SD/joinery-data-encrypt.service")|$(grep -c '^Requires=' "$SD/joinery-data-encrypt.service")" "4|0"
 chk "and it is started, without waiting" "$(grep -c '^systemctl start --no-block joinery-data-encrypt.service$' "$LOG")" "1"
 chk "the driving secret is kept in /run for the run" "$( [ -s "$R/run/joinery/data-root-encrypt/slot.key" ] && echo kept)" "kept"
+rm -f "$R/run/joinery/data-root-encrypt.progress"; mkdir -p "$R/dev/mapper"; : > "$R/dev/mapper/joinery-data"
+chk "status before cryptsetup's first progress line: starting, not a question mark (B27)" \
+    "$(run status 2>&1 | grep -c "running: encryption, starting, at idle")" "1"
+rm -f "$R/dev/mapper/joinery-data"
 out="$(run encrypt 2>&1)"; rc=$?
 chk "a second encrypt: refused, it is running" "$rc|$(grep -c 'encrypted already' <<< "$out")" "1|1"
 : > "$LOG"; run tick >/dev/null 2>&1
@@ -981,7 +1036,9 @@ rm -f "$T/mounted"; truncate -s 11844714496 "$R/srv/joinery.img"; figs data 11*G
 stub dd 'echo "dd $*" >> "$GATE_LOG"'
 stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in isLuks) exit 1 ;; esac; exit 0'
 : > "$LOG"; run tick >/dev/null 2>&1
-chk "cut off before the header: nothing to undo" "$(grep -c '^dd ' "$LOG")|$(stat -c %s "$R/srv/joinery.img")" "0|11844714496"
+chk "cut off before the header: nothing to undo, and the data root started again (B42)" \
+    "$(grep -c '^dd ' "$LOG")|$(stat -c %s "$R/srv/joinery.img")|$(grep -c '^systemctl start joinery-data.target$' "$LOG")" "0|11844714496|1"
+rm -f "$T/mounted"
 stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in isLuks) exit 0 ;; luksDump) cat "$GATE_T/cut_dump.txt" ;; esac; exit 0'
 : > "$LOG"; out="$(run tick 2>&1)"
 chk "cut off after the header: the moved 16 MiB goes back over it" \

@@ -390,6 +390,22 @@ check(strpos($metal_cmd, "install.sh -y -q site --bare-metal 'metalsite' --passw
 check(strpos($metal_cmd, 'install.sh -y -q docker') === false, 'and no Docker');
 check(preg_match("#--management-node=('https://[^']+') --upgrade-server=\\1#", $metal_cmd) === 1,
 	'bare metal too installs and upgrades from this plane', $metal_cmd);
+
+// B38: a plane that serves no releases (built from one, never published from)
+// sends its servers to where it takes its own; one that publishes keeps them.
+$p = 'https://mgr-a.example.net';
+check(ReleaseStream::choose($p, true, false, 'https://getjoinery.com', false) === $p,
+	'a plane that serves releases is its servers\' stream');
+check(ReleaseStream::choose($p, true, false, 'https://getjoinery.com', false, '0.8.487') === $p,
+	'and a version it lacks is not passed upstream: its numbers name its own builds');
+check(ReleaseStream::choose($p, false, false, 'https://getjoinery.com/', false) === 'https://getjoinery.com',
+	'a plane that serves none: its own upgrade source');
+check(ReleaseStream::choose($p, false, false, 'getjoinery.com', false, '0.8.487') === 'https://getjoinery.com',
+	'pinned too, and a bare host is given its scheme');
+check(ReleaseStream::choose($p, false, false, '', false) === $p && ReleaseStream::choose($p, false, false, 'https://x.example', true) === $p,
+	'with no upstream (or as the origin) it stays the plane, and the preflight says what is missing');
+check(ReleaseStream::serves_releases() === (count(glob(PathHelper::getSiteRoot() . '/static_files/joinery-core-*.tar.gz') ?: array()) > 0),
+	'serves_releases reads this site\'s own published archives');
 check(strpos($metal_cmd, 'grep dbpassword') === false,
 	'no password is harvested from another site\'s config — a machine this plane creates has none');
 check(strpos($metal_cmd, "test -n \"\$POSTGRES_PASSWORD\"") !== false && strpos($metal_cmd, 'export POSTGRES_PASSWORD;') !== false,

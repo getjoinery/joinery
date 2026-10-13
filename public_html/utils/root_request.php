@@ -24,6 +24,8 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.5 - data_root_encrypt lets go of its transcript for the start (it is on the data root, and the start
+ *                stops what keeps a file there) and writes what the start said after.
  * @version 1.4 - data_root_encrypt, data_root_reseal, data_root_rekey: this server's data root encrypted, and its
  *                break-glass copy sealed, to this site's own proven recovery key (WP4)
  * @version 1.3 - install_package: --replace from the request's `replace`
@@ -364,7 +366,19 @@ switch ($kind) {
 			}
 			exit((int)$code);
 		}
-		passthru('bash ' . $tool . ' encrypt', $code);
+		// The start stops everything that keeps a file on the data root, and
+		// this request's transcript is one: logs/ is a bind on it. Held open
+		// here, it keeps the filesystem mounted and the start refuses. So
+		// this process lets go of it for the start and adds what the start
+		// said once it is over.
+		$transcript = $site_root . '/' . RootRequest::LOG_DIR . '/' . $request_id . '.log';
+		ini_set('display_errors', '0');
+		fflush(STDOUT);
+		fclose(STDOUT);
+		fclose(STDERR);
+		$said = array();
+		exec('bash ' . $tool . ' encrypt 2>&1 </dev/null', $said, $code);
+		file_put_contents($transcript, implode("\n", $said) . "\n", FILE_APPEND);
 		exit((int)$code);
 	}
 }

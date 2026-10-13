@@ -7,6 +7,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.8 - The agent switch says it takes effect at the host converger's next run, within a minute or two (B24)
  * @version 1.7 - The lists state their own bullets (the admin theme resets list-style, so "What the agent does" showed as
  *                plain lines); Extra permissions names every log and host file the switch opens, as always-visible bullets,
  *                in place of the "What can it read?" disclosure
@@ -78,7 +79,7 @@ echo '<p class="text-muted" style="max-width:46rem;">The agent runs backups, upg
 if ($agent_switched === 'on') {
 	echo '<div class="alert alert-info" role="alert">The agent is switched on for this machine.</div>';
 } elseif ($agent_switched === 'off') {
-	echo '<div class="alert alert-info" role="alert">The agent is switched off. It stops at the next container start, upgrade, or installer run; the agent itself stays installed.</div>';
+	echo '<div class="alert alert-info" role="alert">The agent is switched off. It stops within a minute or two, at the host converger\'s next run; the agent itself stays installed.</div>';
 }
 
 // The agent comes first: with it off, everything below describes work this
@@ -93,8 +94,8 @@ if (!$agent_enabled) {
 	   . '</form>';
 	echo '<p class="text-muted" style="max-width:46rem;margin-top:12px;">'
 	   . ($agent_installed
-		? 'Starts at the next container start, upgrade, or installer run.'
-		: 'Installs and starts at the next container start, upgrade, or installer run.')
+		? 'Starts within a minute or two, at the host converger\'s next run.'
+		: 'Installs and starts within a minute or two, at the host converger\'s next run.')
 	   . ' Connecting to a management node is a separate step afterwards.</p>';
 	$page->admin_footer();
 	return;
@@ -102,7 +103,7 @@ if (!$agent_enabled) {
 
 if (!$agent_installed) {
 	echo '<div class="alert alert-warning" role="alert">'
-	   . '<strong>Switched on, not installed yet.</strong> It installs by itself at the next container start or upgrade. To install now, run this on the machine:'
+	   . '<strong>Switched on, not installed yet.</strong> It installs by itself at the host converger\'s next run, within a minute or two. If it has not after that, run this on the machine:'
 	   . '<div class="mt-2"><code>' . htmlspecialchars($installer_hint) . '</code></div>'
 	   . '</div>';
 }

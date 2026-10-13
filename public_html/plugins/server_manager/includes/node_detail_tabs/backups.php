@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.21 - Prepare stages its own row's run (it staged only the newest), and Restore is offered for a run
+ *                 once it is prepared on the node, never queued for the node to refuse (B39, B40)
  * @version 1.20 - a scan that finishes while a dialog is open offers a reload instead of reloading under it, which
  *                 threw away a restore the operator was in the middle of confirming
  * @version 1.19 - each run shows its manifest and the sha256 recorded when it was written, and a backup set whose
@@ -590,6 +592,9 @@
 					'level' => BackupVerifier::level_name((int)($vres['level'] ?? 0)));
 			}
 
+			// Which runs a Prepare has put on the node: a restore is offered
+			// for those, and the node would refuse any other.
+			$staged_runs = BackupChainListHelper::staged_runs($node);
 			echo '<table class="table table-striped table-sm">';
 			echo '<thead><tr><th>When</th><th>Backup</th><th>Taken by</th><th>Size</th><th>Verified</th><th>Actions</th></tr></thead><tbody>';
 			foreach ($shelf_runs as $entry) {
@@ -626,7 +631,9 @@
 				// from this machine's own key, and destroys nothing; the restore
 				// replays them over live data and has to be approved on the node.
 				$sa = htmlspecialchars(json_encode($c['chain_id'])) . ', '
-				    . htmlspecialchars(json_encode($c['profile'])) . ', this';
+				    . htmlspecialchars(json_encode($c['profile'])) . ', ' . (int)$r['seq'] . ', this';
+				$is_staged = in_array((int)$r['seq'], $staged_runs[$c['chain_id']] ?? array(), true);
+				$restore_id = 'restore_' . preg_replace('/[^A-Za-z0-9_-]/', '', (string)$c['chain_id']) . '_' . (int)$r['seq'];
 				// Verify: prove this run restorable on the node without restoring
 				// it. The room a rehearsal needs is worked out here from the runs'
 				// recorded sizes, the same arithmetic the node applies before it
@@ -648,7 +655,9 @@
 				    . htmlspecialchars(json_encode(BackupChainListHelper::format_size($needs))) . ', this';
 				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
 				echo '<button type="button" class="btn btn-outline-secondary btn-sm me-1" onclick="openVerifyModal(' . $va . ')">Verify</button>';
-				echo '<button type="button" class="btn btn-outline-warning btn-sm" onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
+				echo '<button type="button" class="btn btn-outline-warning btn-sm" id="' . $restore_id . '"'
+				   . ($is_staged ? '' : ' disabled title="Prepare this backup first: it downloads what restoring this run needs onto the node."')
+				   . ' onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
 				echo '</td></tr>';
 			}
 			echo '</tbody></table>';
@@ -660,7 +669,8 @@
 			echo '<p class="text-muted small mb-0">Restoring a backup rebuilds the site as it was at that run: the '
 			   . 'last full backup before it, then every incremental up to it, in order. Each file is checked '
 			   . 'against its recorded size and hash before anything is written. <strong>Prepare first</strong> '
-			   . '&mdash; that downloads what the restore needs onto the node and recovers its data key there; '
+			   . '&mdash; that downloads what restoring that run needs onto the node and recovers its data key there, '
+			   . 'and Restore is offered for it once it is done; '
 			   . 'the restore itself then has to be approved on the node\'s own Backups page with its backup '
 			   . 'recovery key.</p>';
 		}
@@ -831,6 +841,8 @@ foreach ((($chain_list ?? [])['chains'] ?? []) as $c) {
 ?>
 var backupSpaceOfPath = <?php echo json_encode((object)$space_of_path); ?>;
 var backupSpaceOfChain = <?php echo json_encode((object)$space_of_chain); ?>;
+// The runs prepared on the node, by chain: only those are offered for restore.
+var backupStagedRuns = <?php echo json_encode((object)($staged_runs ?? array())); ?>;
 // Cap on how many times polling retries after a transport error before it gives
 // up and shows a reload notice — without this the poll retried forever, and a
 // {}-swallowed error looked like "complete" and reloaded, minting a new scan job.
@@ -944,8 +956,11 @@ function openChainRestoreModal(chainId, profile, runs, chosenSeq) {
 	var sel = document.getElementById('cm_seq');
 	sel.innerHTML = '';
 	var chosenTime = '';
+	var staged = backupStagedRuns[chainId] || [];
 	for (var i = runs.length - 1; i >= 0; i--) {
 		var r = runs[i];
+		// Only a run prepared on the node: the node refuses any other.
+		if (staged.indexOf(r.seq) === -1) { continue; }
 		var opt = document.createElement('option');
 		opt.value = r.seq;
 		opt.textContent = (r.time || 'unknown time') + ' UTC'
@@ -1073,7 +1088,7 @@ function downloadBackupFailed(btn, html) {
 
 // Download a whole chain onto the node and recover its data key there. Nothing
 // is destroyed by this, which is why it is a separate button from Restore.
-function stageChain(chainId, profile, btn) {
+function stageChain(chainId, profile, seq, btn) {
 	var status = document.getElementById('backupScanStatus');
 	if (btn) { btn.disabled = true; btn.textContent = 'Preparing...'; }
 	status.style.display = 'block';
@@ -1081,14 +1096,18 @@ function stageChain(chainId, profile, btn) {
 		+ smEsc(chainId) + ' onto the node and recovering its key there...</span>';
 
 	smApiPost('backup_actions', { action: 'stage_chain', node_id: backupNodeId,
-			chain_id: chainId, profile: profile, space_id: backupSpaceOfChain[chainId] || 0 })
+			chain_id: chainId, profile: profile, seq: seq, space_id: backupSpaceOfChain[chainId] || 0 })
 		.then(function(data) {
 			if (!data.success) {
 				stageChainFailed(btn, smEsc(data.message));
 				return;
 			}
 			pollTransferJob(data.job_id, btn, 'Prepare',
-				'Ready on the node. Restore now, and approve it on the node\'s own Backups page.');
+				'Ready on the node. Restore now, and approve it on the node\'s own Backups page.', function() {
+					(backupStagedRuns[chainId] = backupStagedRuns[chainId] || []).push(seq);
+					var restoreBtn = document.getElementById('restore_' + chainId.replace(/[^A-Za-z0-9_-]/g, '') + '_' + seq);
+					if (restoreBtn) { restoreBtn.disabled = false; restoreBtn.removeAttribute('title'); }
+				});
 		})
 		.catch(function() {
 			stageChainFailed(btn, 'Request failed');

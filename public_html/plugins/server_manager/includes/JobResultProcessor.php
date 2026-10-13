@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.79 - script_text(): a script primitive's own text out of the agent's envelope; a host report's disk_pool keeps the device a data root on a device sits on (host_report 1.22)
  * @version 1.78 - a host report's host_restrictions and each container's code_check (host_report 1.21,
  *                 specs/host_restrictions.md D8) are kept
  * @version 1.77 - a host report's mail_gateway (host_report 1.20) is kept
@@ -812,6 +813,16 @@ class JobResultProcessor {
 		return (($folded['backup_recovery_state'] ?? '') === 'proven')
 			? self::RECOVERY_REPORT_PROVEN_SECONDS
 			: self::RECOVERY_REPORT_PENDING_SECONDS;
+	}
+
+	/**
+	 * A script primitive's own text, out of the agent's envelope when it is in
+	 * one (its contract lines are escaped inside the JSON), else the output as
+	 * it stands.
+	 */
+	public static function script_text(string $output): string {
+		$data = self::extract_api_envelope_data($output);
+		return (is_array($data) && isset($data['output'])) ? (string)$data['output'] : $output;
 	}
 
 	/**
@@ -3968,9 +3979,12 @@ HTML;
 	private static function host_report_disk_pool($v) {
 		if ($v === 'none' || $v === 'not_mounted') { return $v; }
 		if (!is_array($v)) { return 'unknown'; }
+		$device = (string)($v['device'] ?? '');
 		return self::host_report_gauge($v) + [
 			'avail_bytes' => self::host_report_count($v['avail_bytes'] ?? null),
 			'prjquota'    => ($v['prjquota'] ?? null) === true,
+			// On a device (a Block Storage volume), which one (host_report 1.22).
+			'device'      => preg_match('#^/dev/[A-Za-z0-9._/:-]{1,200}$#', $device) ? $device : '',
 		];
 	}
 

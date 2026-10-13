@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.22 - disk_pool.device: the device a data root on a device sits on (a Block Storage volume's
+#                 by-id path), so the provider's layer under it is the volume's, not the server's disk's.
 # Version: 1.21 - host_restrictions: what the machine refuses its sites (its restrictions file), and each
 #                site container carries code_check, from its config/code_check: whether its code is what
 #                was shipped, on a host that refuses unsigned code (specs/host_restrictions.md D8).
@@ -411,6 +413,7 @@ emit_disk() {
 # (/etc/joinery/data_root) and /srv/joinery is not a mount of its own.
 emit_disk_pool() {
     local mp="${HOST_REPORT_DATA_ROOT:-/srv/joinery}" fstype opts line used total avail
+    local conf="${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}" backing device=""
     read -r fstype opts < <(run findmnt -n -o FSTYPE,OPTIONS --mountpoint "$mp") || true
     if [[ -z "${fstype:-}" ]]; then
         # Declared and down is not the same answer as never made.
@@ -419,10 +422,16 @@ emit_disk_pool() {
     fi
     line="$(run df -B1 --output=used,size,avail "$mp" | tail -n 1)"
     read -r used total avail <<< "$line"
-    printf '{"path":"%s","fstype":%s,"prjquota":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s}' \
+    # On a device (a Block Storage volume), which one: the provider's own
+    # encryption under it is that volume's, not the server's disk's.
+    backing="$(awk -F= '$1=="backing" { print $2; exit }' "$conf" 2>/dev/null)"
+    if [[ "$backing" == device || "$backing" == luks-device ]]; then
+        device="$(awk -F= '$1=="source" { sub(/^[^=]*=/, ""); print; exit }' "$conf" 2>/dev/null | tr -cd 'A-Za-z0-9._/:-' | head -c 200)"
+    fi
+    printf '{"path":"%s","fstype":%s,"prjquota":%s,"used_bytes":%s,"total_bytes":%s,"avail_bytes":%s,"device":"%s"}' \
         "$(printf '%s' "$mp" | tr -cd 'A-Za-z0-9._/-' | head -c 200)" "$(json_str "$fstype")" \
         "$([[ ",${opts:-}," == *",prjquota,"* ]] && echo true || echo false)" \
-        "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" "$(json_num_or_unknown "${avail:-}")"
+        "$(json_num_or_unknown "${used:-}")" "$(json_num_or_unknown "${total:-}")" "$(json_num_or_unknown "${avail:-}")" "$device"
 }
 
 # The encrypted data root (specs/hosted_data_promise_disk_encryption.md D3,

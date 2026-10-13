@@ -538,6 +538,11 @@ pool="$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/pooldir" emit_disk_poo
 chk "a data root: its own figures, xfs, with project quotas" \
     "$(php -r '$o=json_decode($argv[1],true); echo $o["fstype"], "/", var_export($o["prjquota"], true), "/", is_int($o["total_bytes"]) && is_int($o["avail_bytes"]) ? "figures" : "none";' "$pool")" "xfs/true/figures"
 chk "no mount of its own: none" "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" HOST_REPORT_DATA_ROOT_CONF="$T/no_conf" emit_disk_pool)" '"none"'
+printf 'backing=file\nsource=/srv/joinery.img\n' > "$T/dr_file"
+printf 'backing=luks-device\nsource=/dev/disk/by-id/scsi-0Linode_Volume_mgr-b-vol\n' > "$T/dr_dev"
+chk "on a device, which one (a volume's own encryption is the provider's layer under it); in a file, none" \
+    "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/pooldir" HOST_REPORT_DATA_ROOT_CONF="$T/dr_dev" emit_disk_pool | php -r 'echo json_decode(stream_get_contents(STDIN), true)["device"];')|$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/pooldir" HOST_REPORT_DATA_ROOT_CONF="$T/dr_file" emit_disk_pool | php -r 'echo json_decode(stream_get_contents(STDIN), true)["device"];')" \
+    "/dev/disk/by-id/scsi-0Linode_Volume_mgr-b-vol|"
 : > "$T/data_root_conf"
 chk "declared and not mounted: not_mounted, never none (one_data_root WP4)" \
     "$(PATH="$T/poolbin:$PATH" HOST_REPORT_DATA_ROOT="$T/elsewhere" HOST_REPORT_DATA_ROOT_CONF="$T/data_root_conf" emit_disk_pool)" '"not_mounted"'

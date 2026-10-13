@@ -524,8 +524,13 @@ check(JobResultProcessor::sanitise_host_report(array('host_restrictions' => 'non
 // A Docker host's disk pool (host_report 1.15): its figures kept, none kept,
 // anything else unknown, an older report's absence kept absent (null).
 $dp = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true, 'evil' => '<b>')))['disk_pool'];
-check($dp === array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true),
+check($dp === array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true, 'device' => ''),
 	'a disk pool keeps its figures and quota state, nothing else', var_export($dp, true));
+$dv = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4,
+	'prjquota' => true, 'device' => '/dev/disk/by-id/scsi-0Linode_Volume_mgr-b-vol')))['disk_pool']['device'];
+$dx = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('device' => '/dev/x; rm -rf /')))['disk_pool']['device'];
+check($dv === '/dev/disk/by-id/scsi-0Linode_Volume_mgr-b-vol' && $dx === '',
+	'and the device it is on, held to the shape of a device path (host_report 1.22)');
 check(JobResultProcessor::sanitise_host_report(array('disk_pool' => 'not_mounted'))['disk_pool'] === 'not_mounted',
 	'a data root declared and not mounted stays not_mounted, never none (host_report 1.18)');
 check(JobResultProcessor::sanitise_host_report(array('disk_pool' => 'none'))['disk_pool'] === 'none'

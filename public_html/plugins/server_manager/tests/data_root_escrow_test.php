@@ -93,6 +93,17 @@ $tampered = $r; $tampered[1] = str_replace('b1', 'b2', $tampered[1]);
 check((escrow_call($tampered, '203.0.113.9')['code'] ?? 0) === 401, 'A body changed after signing: 401');
 check((escrow_call(array('nonsense', $r[1], $r[2]), '203.0.113.9')['code'] ?? 0) === 404, 'An unknown action: 404');
 
+section('No new enrolment until this holder takes them (D7: not before the release keys are rotated)');
+harness_set_setting_mem('data_root_encryption_offered', '0');
+$m0 = escrow_machine();
+$r0 = escrow_call(escrow_req($m0, 'enrol', array('report_key' => base64_encode(random_bytes(32)), 'hostname' => 'gated',
+	'addresses' => array('192.0.2.30'))), '192.0.2.30');
+check($r0['code'] === 403 && strpos((string)($r0['error'] ?? ''), 'takes no new escrow enrolments') !== false
+	&& escrow_row($m0) === null, 'Switched off: an enrolment is refused, saying why, and nothing is recorded', json_encode($r0));
+check(!DataRootEscrow::takes_new_enrolments(), 'and the auto-enrolment from host reports and the node page ask the same rule');
+harness_set_setting_mem('data_root_encryption_offered', '1');
+check(DataRootEscrow::takes_new_enrolments(), 'Switched on: taken');
+
 section('Enrolment without its node vouching waits for a person (C-3)');
 $enrol = function (array $m, array $extra = array()) use ($box) {
 	return escrow_req($m, 'enrol', array_merge(array('addresses' => array('192.0.2.10', '2001:db8::10'), 'box' => $box,
@@ -203,9 +214,36 @@ check(base64_decode((string)($u2['data']['secret'] ?? ''), true) === $new_secret
 $a = $new;
 
 section('Retired');
+$enrolled_row = escrow_row($a);
+check(EscrowHolderBackup::enrolment_uncovered($enrolled_row, null)
+	&& EscrowHolderBackup::enrolment_uncovered($enrolled_row, '2000-01-01 00:00:00')
+	&& !EscrowHolderBackup::enrolment_uncovered($enrolled_row, gmdate('Y-m-d H:i:s', time() + 60)),
+	'O11: an enrolment newer than the holder\'s newest backup (or with none at all) is not covered by it; one older is');
 escrow_row($a)->retire();
 check(escrow_call(escrow_req($a, 'unlock', array('boot_id' => 'r1')), '192.0.2.10')['code'] === 403
 	&& escrow_row($a)->secret() === null, 'A retired row answers nothing, and keeps no secret');
+check(escrow_row($a)->get('dre_retired_time') && !EscrowHolderBackup::enrolment_uncovered(escrow_row($a), null),
+	'O11: giving a key up is recorded as an escrow change, and a retired row needs no backup note');
+list($c_old, $c_new) = EscrowHolderBackup::changes_since(gmdate('Y-m-d H:i:s', time() - 30));
+check($c_new !== null, 'and it is among the changes since before it');
+
+section('O11: the holder backs itself up within the hour of an escrow change');
+$t = 1790000000;
+$at = function ($ago) use ($t) { return gmdate('Y-m-d H:i:s', $t - $ago); };
+check(!EscrowHolderBackup::decide(null, null, null, $t)['due'], 'nothing changed since the last backup: none');
+check(!EscrowHolderBackup::decide($at(120), $at(60), null, $t)['due'], 'a change a minute old: it waits for quiet');
+check(EscrowHolderBackup::decide($at(900), $at(700), null, $t)['due'], 'ten quiet minutes: due');
+check(EscrowHolderBackup::decide($at(46 * 60), $at(30), null, $t)['due'], 'a burst that will not end: due 45 minutes after its first change');
+check(!EscrowHolderBackup::decide($at(900), $at(700), array('start' => $at(300), 'outcome' => 'running'), $t)['due'],
+	'a backup running since the change: none');
+check(!EscrowHolderBackup::decide($at(900), $at(700), array('start' => $at(300), 'outcome' => 'failed'), $t)['due'],
+	'one that failed since the change: not again at once');
+check(EscrowHolderBackup::decide($at(9000), $at(8000), array('start' => $at(3700), 'outcome' => 'failed'), $t)['due'],
+	'but an hour after it');
+check(!EscrowHolderBackup::decide($at(900), $at(700), array('start' => $at(300), 'outcome' => 'success'), $t)['due'],
+	'one that succeeded without reaching backup storage counts as not backed up, and is not repeated every minute');
+check(EscrowHolderBackup::decide($at(900), $at(700), array('start' => $at(5000), 'outcome' => 'failed'), $t)['due'],
+	'a failure from before the change does not hold it back');
 
 section('This plane\'s own node vouching (enrolment after the join)');
 $node = new ManagedNode(NULL);
@@ -232,6 +270,8 @@ $brow = escrow_row($b);
 check(($vouched['data']['status'] ?? '') === 'enrolled' && strlen((string)base64_decode((string)($vouched['data']['secret'] ?? ''), true)) === 32
 	&& (int)$brow->get('dre_mgn_managed_node_id') === (int)$node->key,
 	'Signed by its node\'s key for this holder: the secret at once, and the row is that node\'s');
+check((string)$brow->get('dre_hostname') === 'HarnessTest escrow node',
+	'and it is named by its node, not by the hostname its image was born with (B21)', (string)$brow->get('dre_hostname'));
 
 section('An IP swap this holder made moves the node\'s addresses (IpSwapMove)');
 $brow->set('dre_addresses', json_encode(array('198.51.100.30', '2001:db8::30')));
@@ -259,6 +299,18 @@ check($crow && $crow->get('dre_status') === 'known' && (int)$crow->get('dre_mgn_
 	'A known row for its node, with its box, so the holder can unlock it before it enrols');
 check(!DataRootEscrowSync::should_enrol($node, $crow, array_merge($enc, array('holder' => 'https://elsewhere.example'))),
 	'Its machine names another holder: not enrolled here');
+harness_set_setting_mem('data_root_encryption_offered', '0');
+check(!DataRootEscrowSync::should_enrol($node, $crow, $enc), 'No enrolment job while this holder takes no new enrolments (D7)');
+harness_set_setting_mem('data_root_encryption_offered', '1');
+// B35: the same key is sent once an hour at most; a rotated one at once.
+$key_a = base64_encode(random_bytes(32));
+$key_b = base64_encode(random_bytes(32));
+$sent = ManagementJob::createFromBuild($node->key, 'data_root_recipient',
+	array('primitive' => 'data_root_recipient', 'params' => array('public_key' => $key_a)), null, null);
+$recent = new ReflectionMethod('DataRootEscrowSync', 'recipient_sent_recently');
+$recent->setAccessible(true);
+check($recent->invoke(null, $node, $key_a) && !$recent->invoke(null, $node, $key_b),
+	'A recipient sent within the hour holds back only that key again; a rotated key goes at once (B35)');
 check(JobResultProcessor::host_report_data_root_encryption('none') === 'none'
 	&& JobResultProcessor::host_report_data_root_encryption(array('identity' => 'not base64!', 'holder' => 'http://x', 'slot' => 99))['identity'] === '',
 	'The report section is held to its shape');
