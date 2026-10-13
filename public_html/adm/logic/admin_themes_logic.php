@@ -4,6 +4,9 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_themes_logic — the Themes page.
  *
+ * @version 1.4 - `edited`: shipped themes whose files changed here since
+ *                install, for Edited since install and Keep my changes
+ *                (specs/local_edits_detected.md)
  * @version 1.3 - an upload of an installed name shows the replace panel
  *                (Replace / Discard) instead of queueing; the Local fork badge
  *                with the shipped version beside it (specs/package_replace_on_upload.md WP2, WP3)
@@ -256,12 +259,28 @@ function admin_themes_logic(array $input): LogicResult {
 		}
 	}
 
+	// Shipped themes whose files were changed on this site since install:
+	// name => the first differing file. A fork is left out (deploys already
+	// keep it). Reads only the files and the node's own key, so a page load
+	// asks nothing of the upgrade source or of root.
+	$edited = array();
+	foreach ($themes as $entry) {
+		if (empty($entry['theme']) || !$entry['directory_exists'] || !$entry['theme']->receives_upgrades()) {
+			continue;
+		}
+		$verdict = PackageSignature::editedSinceInstall(PathHelper::getAbsolutePath('theme/' . $entry['name']));
+		if ($verdict !== null) {
+			$edited[$entry['name']] = (string)$verdict->file;
+		}
+	}
+
 	return LogicResult::render(array(
 		'message' => $message,
 		'error' => $error,
 		'themes' => $themes,
 		'replace_panel' => $replace_panel,
 		'fork_versions' => $fork_versions,
+		'edited' => $edited,
 		// The two slots: the page theme and the look (specs/style_themes.md).
 		'page_theme' => (string)Globalvars::get_instance()->get_setting('theme_template', true, true),
 		'look' => $theme_manager->activeLook(),

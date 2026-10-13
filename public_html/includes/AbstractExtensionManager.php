@@ -14,6 +14,8 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.6 - writeManifestReceivesUpgrades() changes the one value in place, so writing back the
+ *                shipped value restores the signed bytes (specs/local_edits_detected.md, reviewer2 F1)
  * @version 1.5 - keys a package proves that cannot be recorded stop the refresh before the live copy is replaced
  * @version 1.4 - a downloaded package is verified as a fresh archive, with the release log where the
  *                node requires it; a key its chain proves is persisted when root runs this
@@ -1038,9 +1040,23 @@ abstract class AbstractExtensionManager {
                 'included_in_publish' => true
             );
         } else {
-            $manifest = json_decode((string)file_get_contents($manifest_path), true);
+            $contents = (string)file_get_contents($manifest_path);
+            $manifest = json_decode($contents, true);
             if (!is_array($manifest)) {
                 return false;
+            }
+            // The one value changed in place, every other byte kept: the
+            // manifest is a signed file, so writing back the value it shipped
+            // with must give back the bytes that were signed, or the package
+            // reads as edited (specs/local_edits_detected.md). Re-encoded
+            // only when the member is missing or the in-place edit did not
+            // land on the top-level member.
+            $value = $receives_upgrades ? 'true' : 'false';
+            $in_place = preg_replace('/("receives_upgrades"\s*:\s*)(true|false)/', '${1}' . $value, $contents, 1, $count);
+            $check = $count === 1 ? json_decode((string)$in_place, true) : null;
+            if (is_array($check) && ($check['receives_upgrades'] ?? null) === (bool)$receives_upgrades
+                && array_diff_key($check, array('receives_upgrades' => 1)) == array_diff_key($manifest, array('receives_upgrades' => 1))) {
+                return file_put_contents($manifest_path, $in_place);
             }
             $manifest['receives_upgrades'] = (bool)$receives_upgrades;
         }

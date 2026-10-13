@@ -3,9 +3,16 @@
 ## Status
 
 Spec written 2026-10-03 as the follow-up the Replacing an Installed Package
-from an Upload spec names. Not started. Depends on that spec's fork model
-(a local fork is a live manifest saying `receives_upgrades: false`, which
-every deploy preserves) being built first.
+from an Upload spec names. **Built 2026-10-13**, on that spec's fork model (a
+local fork is a live manifest saying `receives_upgrades: false`, which every
+deploy preserves): `PackageSignature::editedSinceInstall()` (1.5), the Plugins
+and Themes pages and their logic, and the deploy's extension table in
+`utils/upgrade.php` (1.18). A system theme shows the badge without Keep my
+changes, since it cannot be forked. Verified 2026-10-13: package_signature
+51/51; badge and confirm on dev in the browser; the deploy table rendered from
+upgrade.php's own functions; reviewed by reviewer2 (F1 fork-mark writer fixed).
+Acceptance 2 and 3 (Keep my changes, then a deploy) are in the live
+verification queue.
 
 ## Problem
 
@@ -54,8 +61,16 @@ health panel already uses it to list unsigned packages.
 extension, cached for the request. `signed` means untouched; `tampered`,
 `extra_file` or `missing_file` means edited here, and the verdict names the
 file. `unsigned` and `unknown_key` are not edits: they are the Unsigned
-badge's business. The health panel's existing unsigned listing is the model
-for where the check runs and how its cost is kept off every request.
+badge's business. The check runs only on the Plugins and Themes pages and
+the deploy, and the per-request cache is the whole cost model: one walk per
+package per page load (about 0.3 s per page on dev). A file the page cannot
+read is not an edit.
+
+The fork mark is itself written into the signed manifest, so its writer
+(`AbstractExtensionManager::writeManifestReceivesUpgrades()`) changes the one
+value in place: writing back the value a package shipped with gives back the
+signed bytes, and Disable upgrade then Allow upgrade leaves an untouched
+package untouched.
 
 The deploy's `get_installed_extension_info()` adds `edited` from the same
 check, and the extension table it prints says "edited here, will be

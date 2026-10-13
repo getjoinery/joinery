@@ -4,6 +4,9 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.4 - `edited`: shipped plugins whose files changed here since
+ *                install, for Edited since install and Keep my changes
+ *                (specs/local_edits_detected.md)
  * @version 1.3 - an upload of an installed name shows the replace panel
  *                (Replace / Discard) instead of queueing; Disable upgrade /
  *                Allow upgrade for a plugin, the Local fork badge with the
@@ -377,6 +380,23 @@ function admin_plugins_logic(array $input): LogicResult {
 		}
 	}
 
+	// Shipped plugins whose files were changed on this site since install:
+	// name => the first differing file. A fork is left out (deploys already
+	// keep it), and so is anything with no files to check. Reads only the
+	// files and the node's own key, so a page load asks nothing of the
+	// upgrade source or of root.
+	$edited = array();
+	foreach ($plugins as $entry) {
+		if (!$entry['plugin'] || !$entry['directory_exists'] || $entry['plugin']->is_uninstalled()
+			|| !$entry['plugin']->receives_upgrades()) {
+			continue;
+		}
+		$verdict = PackageSignature::editedSinceInstall(PathHelper::getAbsolutePath('plugins/' . $entry['name']));
+		if ($verdict !== null) {
+			$edited[$entry['name']] = (string)$verdict->file;
+		}
+	}
+
 	// Determine which active plugins declare provisioners. This only reads
 	// plugin.json manifests — no provisioning checks are run here; those run
 	// asynchronously via ajax/check_provisioning.php after the page renders.
@@ -400,6 +420,7 @@ function admin_plugins_logic(array $input): LogicResult {
 		'unsigned_warning' => $unsigned_warning,
 		'replace_panel' => $replace_panel,
 		'fork_versions' => $fork_versions,
+		'edited' => $edited,
 		'root_actor_notice' => AdminPage::root_actor_notice()
 	));
 }

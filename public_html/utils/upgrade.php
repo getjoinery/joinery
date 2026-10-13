@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.18 - the extension table says "Edited here, will be replaced" for a package the deploy
+	 *                replaces whose files changed since install, naming the first one (specs/local_edits_detected.md)
 	 * @version 1.17 - only the run a self-update re-execs (JOINERY_UPGRADE_RERUN=1) resumes from staging; any
 	 *                other run downloads into an empty staging. A continuation killed after merging the theme
 	 *                and plugin archives left staging the core archive's check refused, on every later run
@@ -2468,12 +2470,21 @@
 			$will_upgrade = ($published_set !== null)
 				? (isset($published_set[$name]) && $receives_upgrades !== false)
 				: ($receives_upgrades === true);
+			// Changed here since it was installed: the first file that
+			// differs from its signed listing, '' when none does. Only a
+			// package the deploy will replace needs the warning.
+			$edited = '';
+			if ($will_upgrade && class_exists('PackageSignature')) {
+				$verdict = PackageSignature::editedSinceInstall(dirname($json_file));
+				$edited = $verdict !== null ? (string)$verdict->file : '';
+			}
 			$info[$name] = [
 				'name' => $name,
 				'display_name' => $data['display_name'] ?? $name,
 				'version' => $data['version'] ?? 'unknown',
 				'receives_upgrades' => $receives_upgrades,
 				'will_upgrade' => $will_upgrade,
+				'edited' => $edited,
 			];
 		}
 		ksort($info);
@@ -2539,7 +2550,9 @@
 			echo str_pad("Name", 25) . str_pad("Version", 12) . str_pad("Upgrades", 10) . "Status\n";
 			echo str_repeat("-", 60) . "\n";
 			foreach ($components as $info) {
-				if ($info['will_upgrade']) {
+				if ($info['will_upgrade'] && $info['edited'] !== '') {
+					$status = '⚠ Edited here, will be replaced (' . $info['edited'] . ')';
+				} elseif ($info['will_upgrade']) {
 					$status = '✓ Will upgrade';
 				} elseif ($info['receives_upgrades'] === false) {
 					$status = '⊘ Local fork, preserved';
@@ -2559,7 +2572,11 @@
 			echo '<th style="padding: 8px; text-align: left; border: 1px solid #dee2e6;">Status</th>';
 			echo '</tr>';
 			foreach ($components as $info) {
-				if ($info['will_upgrade']) {
+				if ($info['will_upgrade'] && $info['edited'] !== '') {
+					$row_style = 'background-color: #f8d7da;';
+					$status = '<span style="color: #721c24;">⚠ Edited here, will be replaced ('
+						. htmlspecialchars($info['edited']) . ')</span>';
+				} elseif ($info['will_upgrade']) {
 					$row_style = 'background-color: #d4edda;';
 					$status = '<span style="color: #155724;">✓ Will upgrade</span>';
 				} elseif ($info['receives_upgrades'] === false) {
