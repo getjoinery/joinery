@@ -4,6 +4,8 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.18 - The tick leaves swap in compressed memory (zram) on: it never reaches a disk. It switched it
+#                 off every minute, and systemd made it again (B32).
 # Version: 1.17 - An encrypt's start that ends after it stopped the data root, however it ends (a refusal, a
 #                 failure, a signal), starts the data root and its services again and leaves no keys behind
 #                 (B42); it never stops the service it runs in (a site's Backups page asks through the host
@@ -1503,12 +1505,13 @@ luks_hardening() {
             systemctl try-reload-or-restart "$unit" >/dev/null 2>&1 || true
         fi
     done
-    # A swap device that is not encrypted (a provider's own swap disk) is let go.
+    # A swap device that is not encrypted (a provider's own swap disk) is let
+    # go. Compressed memory (zram, host_swap.sh) never reaches a disk.
     if [[ -z "$ROOT" ]]; then
         local dev
         while read -r dev; do
             [[ -n "$dev" ]] || continue
-            case "$(readlink -f "$dev")" in /dev/dm-*|/dev/mapper/*) continue ;; esac
+            case "$(readlink -f "$dev")" in /dev/dm-*|/dev/mapper/*|/dev/zram*) continue ;; esac
             if swapoff "$dev" 2>/dev/null; then
                 say "data root: swap on ${dev} is not encrypted; it is no longer used"
             fi

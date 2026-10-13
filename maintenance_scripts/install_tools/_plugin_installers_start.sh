@@ -5,7 +5,10 @@
 #
 # Version: 2.34 - The agent's on/off switch (agent_enabled) is part of what "changed" means: turned on from
 #                 the site's Management Node page, the agent is installed and started at the next tick, not at
-#                 the next release or the daily run (B24).
+#                 the next release or the daily run (B24). host_swap.sh is a core and a host installer: swap
+#                 is compressed memory, never the encrypted file a 1 GB machine locked up on (B32). A tick
+#                 that refreshes the root copy of this runner runs the refreshed copy, so what a new release
+#                 adds converges at once, not at the next daily run.
 # Version: 2.33 - HOST_PLUGIN_INSTALLERS: a plugin's host installer a machine runs too, from the bundle, after
 #                 the host installers: the mail gateway on a Docker host (specs/mail_apps_plugin.md § A4).
 # Version: 2.32 - On a host that refuses unsigned code the publishing-box exemption never applies: every
@@ -255,13 +258,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
 # This list is also the whole of what --only may name.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh site_housekeeping.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
 # subset of CORE_INSTALLERS by construction (each is also a site's), and the
 # whole of what --only may name under --machine. The agent's bundle carries
-# exactly these two plus what they read.
-HOST_INSTALLERS="host_housekeeping.sh install_host_converger.sh"
+# exactly these three plus what they read.
+HOST_INSTALLERS="host_housekeeping.sh host_swap.sh install_host_converger.sh"
 
 # A plugin's host installer that a machine with no site runs too, from the
 # bundle (plugin/path under public_html/plugins), after the host installers.
@@ -284,6 +287,8 @@ ONLY_PLUGIN=""
 EXPLICIT_ROOT=""
 MACHINE=0
 POSITIONAL=()
+# As called, for a run that hands itself to a refreshed copy of this runner.
+CALLED_WITH=("$@")
 for arg in "$@"; do
     case "${arg}" in
         --when-changed) WHEN_CHANGED=1 ;;
@@ -1028,6 +1033,7 @@ refresh_converger_entry() {
 
     if install -o root -g root -m 755 "${source}" "${entry}" 2>/dev/null; then
         echo "converger entry: refreshed ${entry} from the deployed release"
+        CONVERGER_ENTRY_REFRESHED="${entry}"
     else
         echo "converger entry: WARNING - could not refresh ${entry}" >&2
     fi
@@ -1117,6 +1123,15 @@ fi
 # which the guard read as "untrusted", and the copy never refreshed. A stale
 # copy then stayed stale for good.
 refresh_converger_entry
+# This run is the copy just replaced: the rest of it is the old release's,
+# and the stamp below would mark the new release converged by the old one's
+# installer list, so an installer the new release adds would wait for the
+# daily run. The new copy runs instead, once, with the same arguments.
+if [[ -n "${CONVERGER_ENTRY_REFRESHED:-}" && -z "${JOINERY_CONVERGER_REEXEC:-}" ]] \
+   && [[ "$(readlink -f "${BASH_SOURCE[0]}")" == "$(readlink -f "${CONVERGER_ENTRY_REFRESHED}")" ]]; then
+    echo "converger entry: running the refreshed copy"
+    JOINERY_CONVERGER_REEXEC=1 exec /bin/bash "${CONVERGER_ENTRY_REFRESHED}" "${CALLED_WITH[@]+"${CALLED_WITH[@]}"}"
+fi
 apply_tree_permissions
 
 # --- The host converger's stamp (--when-changed) ------------------------------

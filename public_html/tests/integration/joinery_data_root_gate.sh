@@ -1076,6 +1076,9 @@ m="$(stat -c %a "$T/hidden$S/config")"; chmod 700 "$T/hidden$S/config"
 chk "the root disk's copy deleted, and the folder left a locked mountpoint" "$m|$(ls -A "$T/hidden$S/config" | wc -l)" "0|0"
 chk "the freed blocks handed back to the provider" "$(grep -c '^fstrim' "$LOG")" "1"
 echo "--- the rest of the root disk (D10) ---"
+# Read, not run: the swap rule acts only on a real machine (no fixture root).
+chk "a plain swap device is let go, an encrypted one and compressed memory (zram) never (B32)" \
+    "$(grep -c '/dev/dm-\*|/dev/mapper/\*|/dev/zram\*) continue' "$SCRIPT")" "1"
 chk "/var/log, PHP's sessions and temporary files moved onto the data root" \
     "$(grep -c -e '^log /var/log$' -e '^php/sessions /var/lib/php/sessions$' -e '^php/tmp /var/lib/php/tmp$' "$B")|$(cat "$R/srv/joinery/log/syslog")|$(cat "$R/srv/joinery/log/apt/history.log")|$(cat "$R/srv/joinery/php/sessions/sess_1")" "3|boot|history|s"
 chk "no DKIM keys here, so no move for them" "$(grep -c 'mail/dkim' "$B")" "0"

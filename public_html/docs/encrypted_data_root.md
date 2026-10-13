@@ -22,7 +22,7 @@ Also on an encrypted machine:
 - **PHP's temporary files** go to `/var/lib/php/tmp` (`upload_tmp_dir`, `sys_temp_dir` in each PHP-FPM version's `conf.d/99-joinery-data-root.ini`).
 - **`/tmp` is a tmpfs** from the next boot (`/etc/systemd/system/tmp.mount`, `size=50%`, enabled and not started).
 - **Core dumps are off**: `DefaultLimitCORE=0` (`system.conf.d`), `Storage=none` (`coredump.conf.d`), `kernel.core_pattern=|/bin/false` (`sysctl.d/60-joinery-data-root.conf`).
-- **A swap device that is not dm-crypt** is turned off by the tick. The install's own swap is the encrypted `/swapfile`.
+- **A swap device that is neither dm-crypt nor compressed memory** is turned off by the tick. The host's own swap is compressed memory (zram, `host_swap.sh`), which never reaches a disk.
 - **The agent's kept job results** go to `/srv/joinery/agent-outbox` while the data root is mounted, and to `/etc/joinery-agent/outbox` while it is not.
 - **A container's `/tmp`** is in its writable layer, under Docker's data root (`/srv/joinery/docker`), so it is covered already.
 

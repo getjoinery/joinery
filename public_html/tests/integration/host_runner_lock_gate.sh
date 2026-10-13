@@ -295,7 +295,7 @@ done
 chmod 755 "$BT"/*.sh
 echo "bundle-stamp-1" > "$B.version"
 BR="$BT/_plugin_installers_start.sh"
-chk "HOST_INSTALLERS is the two host installers" "$(sed -n 's/^HOST_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER")" "host_housekeeping.sh install_host_converger.sh"
+chk "HOST_INSTALLERS is the three host installers" "$(sed -n 's/^HOST_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER")" "host_housekeeping.sh host_swap.sh install_host_converger.sh"
 chk "each of which is also a core installer" "$(for h in $(sed -n 's/^HOST_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER"); do case " $(sed -n 's/^CORE_INSTALLERS="\([^"]*\)".*/\1/p' "$RUNNER") " in *" $h "*) ;; *) echo "$h not core";; esac; done)" ""
 chk "the machine root is the agent's bundle" "$(grep -c '^MACHINE_ROOT_DEFAULT="/opt/joinery-agent/tree"$' "$RUNNER")" "1"
 chk "the mode is an argument, never derived" "$(grep -c '^        --machine)      MACHINE=1 ;;$' "$RUNNER")" "1"
@@ -314,7 +314,7 @@ chk "--only=<host installer> runs that one" "$rc:$(printf '%s\n' "$out" | grep -
 chk "and not the other" "$(printf '%s\n' "$out" | grep -c 'stub-converger')" "0"
 out="$(bash "$BR" --machine --only=install_agent.sh --site-root="$B" 2>&1)"; rc=$?
 chk "--only=<site installer> is refused before the lock, exit 2" "$rc" "2"
-chk "naming the host set" "$(printf '%s\n' "$out" | grep -c 'is not a host installer (one of: host_housekeeping.sh install_host_converger.sh) - refused')" "1"
+chk "naming the host set" "$(printf '%s\n' "$out" | grep -c 'is not a host installer (one of: host_housekeeping.sh host_swap.sh install_host_converger.sh) - refused')" "1"
 out="$(bash "$BR" --machine somesite --site-root="$B" 2>&1)"; rc=$?
 chk "a site name under --machine is refused, exit 2" "$rc" "2"
 chk "and says so" "$(printf '%s\n' "$out" | grep -c -- '--machine takes no site name')" "1"
