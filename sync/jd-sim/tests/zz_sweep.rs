@@ -1368,17 +1368,14 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
 /// subject must be LIVE at the end: on some device's disk outside any trash,
 /// or the head of a live server file as the vault's holder reads it.
 ///
-/// Excused: a subject that reached the server and went to its trash with a
-/// folder a user deleted on a device that never had the file -- no body of
-/// the file's own history was seen on that disk before the delete
-/// (`never_had`). The doctrine says so in as many words: what arrives under
-/// a folder deleted here that this device never had is not an edit it lost,
-/// and goes with the folder. Read by server identity: each server file that
-/// holds the body, its folder and the folders above it, and who deleted
-/// which -- as `Custody::removing` resolved the directory at the moment of
-/// the delete. A delete that resolved to no folder (`removal_unattributed`)
-/// excuses nothing, so a fire can be the attribution's rather than the
-/// engine's; its line lists every delete to read it by.
+/// Counted, and judged like any other: a subject that reached the server and
+/// went to its trash with a folder a user deleted on a device that never had
+/// the file -- no body of the file's own history was seen on that disk
+/// before the delete (`never_had`). New content beats a delete as an edit
+/// does (owner decision D1), so such a file stays live, and one that does
+/// not is lost. Read by server identity: each server file that holds the
+/// body, its folder and the folders above it, and who deleted which -- as
+/// `Custody::removing` resolved the directory at the moment of the delete.
 ///
 /// Not excused: the one race the doctrine leaves standing -- an edit that
 /// reaches the server after the deleting device last read the change feed
@@ -1578,7 +1575,6 @@ fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed
             .is_some_and(|files| files.iter().any(|f| deleted_by_one_who_never_had(file_folder.get(f).copied().flatten())));
         if went_with_a_folder_its_deleter_never_had {
             never_had += 1;
-            continue;
         }
         let found = jd_sim::scenario::locate(world, hash);
         let deletes: Vec<String> = removes
@@ -2968,13 +2964,13 @@ fn a_delete_that_saw_the_edit_does_not_fire_the_edit_oracle() {
     assert!(verdict.lost.is_empty(), "{verdict:?}");
 }
 
-/// What arrives under a folder deleted on a device that never had it goes
-/// with the folder (docs/drive_sync.md, an edit beats a delete): mac puts a
-/// new file in `A` and sends it, and pc's user deletes `A` before pc has
-/// ever seen the file. Read through the server: the file's folder is the
-/// one pc deleted, and nothing of the file was ever on pc's disk.
+/// A new file under a folder deleted on a device that never had it keeps
+/// the folder (owner decision D1): mac puts a new file in `A` and sends it,
+/// and pc's user deletes `A` before pc has ever seen the file. The file is
+/// live at the end, so nothing is lost and nothing is set aside as never
+/// had.
 #[test]
-fn a_file_its_folders_deleter_never_had_does_not_fire_the_edit_oracle() {
+fn a_file_its_folders_deleter_never_had_stays_live() {
     let seed = 9_950;
     let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
     let mut custody = Custody::default();
@@ -2990,8 +2986,9 @@ fn a_file_its_folders_deleter_never_had_does_not_fire_the_edit_oracle() {
     pc.fs.user_remove("A");
     assert!(world.settle().is_some());
     let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
-    assert_eq!(verdict.never_had, 1, "the file went with the folder pc deleted without having it: {verdict:?}");
+    assert_eq!(verdict.never_had, 0, "the file went with the folder pc deleted without having it: {verdict:?}");
     assert!(verdict.lost.is_empty(), "{verdict:?}");
+    assert_eq!(world.server.tree().get("A/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"a file pc never had")), "{:?}", world.server.tree());
 }
 
 /// The server never learned what anything in the vault is called.
@@ -6980,4 +6977,36 @@ fn frozen_a_file_moved_into_a_folder_deleted_elsewhere_is_kept_seeds() {
 fn frozen_a_file_edited_in_a_vault_mid_conversion_is_held_seeds() {
     workload_core_with(75_390, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
     workload_core_with(75_486, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Clean2 74230 and kill2 75224 (owner decision D1): a folder deleted on one
+/// device took to the server's trash a file another device had just saved
+/// into it, which the deleting device never had. Every oracle quiet is
+/// asserted, the edit oracle's included.
+#[test]
+fn frozen_a_new_file_beats_its_folders_delete_seeds() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(74_230, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps);
+        workload_core_with(75_224, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}
+
+/// Clean3 74927 (B-E8): a file moved out of a folder deleted here, renamed and
+/// edited by a peer meanwhile, went to the server's trash with the folder
+/// before this side's move reached the server. The edit oracle is quiet.
+///
+/// Only that oracle, for now: custody's `every_file_in_a_folder_the_user_put_it_in`
+/// fires on this seed once the file lives -- it stands in Sub 0, where one
+/// device's user moved it, while custody's candidates for the other device's
+/// edit lack that folder. The end state is the doctrine's (a move on one side
+/// and a rename on the other both survive); custody's model of a peer's move is
+/// what is short, traced under B-E8 in the drive follow-ups. Back to every
+/// oracle quiet when that closes.
+#[test]
+fn frozen_a_move_out_of_a_deleted_folder_lands_before_its_trash_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        never_fires(&["no_edit_lost_to_an_act_that_never_saw_it"], move || {
+            workload_core_with(74_927, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps);
+        });
+    }
 }

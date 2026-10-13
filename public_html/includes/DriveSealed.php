@@ -18,7 +18,9 @@
  * mail and chat use. The 'drive' scope is CLIENT custody and belongs to Fortress
  * folders, whose keys the server must never hold.
  *
- * @version 1.3.0
+ * @version 1.4.0
+ * @changelog 1.4.0 - createSealedFile() split into sealForCreate() and
+ *   createFromSealed(), so an upload seals outside the owner's trash lock
  * @changelog 1.3.0 - registers the drive scope's client-custody resealer
  *   (VaultUnlock::clientReseal, assets/js/drive-reseal.js)
  * @changelog 1.2.0 - DriveSealedStream::prepare() honors a redeemed serve
@@ -143,40 +145,70 @@ class DriveSealed {
 	 * @return File
 	 */
 	public static function createSealedFile($part_path, $display_name, $mime_hint, $owner_id, array $restrictions = array()) {
-		$vault = self::requireVault($owner_id);
+		$sealed = self::sealForCreate($part_path, $mime_hint, $owner_id);
+		try {
+			return self::createFromSealed($sealed, $part_path, $display_name, $owner_id, $restrictions);
+		} finally {
+			self::discardSealed($sealed);
+		}
+	}
 
+	/**
+	 * The byte work of createSealedFile(), on its own: sniff the plaintext,
+	 * mint the file key and seal the upload into a container beside it. A
+	 * caller that holds a lock while the row lands (drive_upload_complete holds
+	 * the owner's trash lock) does this first, outside the lock, so the lock is
+	 * held for the insert and not for the seal. Pair with createFromSealed(),
+	 * and with discardSealed() in a finally.
+	 */
+	public static function sealForCreate($part_path, $mime_hint, $owner_id) {
+		$vault = self::requireVault($owner_id);
 		$sniffed = File::detect_mime_file($part_path);
 		if ($sniffed === null || $sniffed === '') {
 			$sniffed = $mime_hint ?: 'application/octet-stream';
 		}
-
 		$crypto = new VaultCrypto();
 		$fk = $crypto->newItemDek();
-
 		$tmp = self::tempPath('seal');
 		try {
 			$info = SealedFileContainer::sealStream($part_path, $tmp, $fk);
-
-			$restrictions = array_merge($restrictions, array(
-				'fil_protection_level'  => ProtectionLevel::PRIVATE_,
-				'fil_plain_size_bytes'  => (int)$info['plain_size'],
-				// createFromUpload sets fil_type from the blob's magic bytes — which
-				// for a container is meaningless. Restrictions are applied after
-				// that, so this is what sticks.
-				'fil_type'              => $sniffed,
-			));
-
-			// createFromUpload consumes its source; hand it the container.
-			$file = File::createFromUpload($tmp, $display_name, $sniffed, $owner_id, $restrictions);
-		} finally {
+		} catch (Exception $e) {
 			if (is_file($tmp)) { @unlink($tmp); }
+			throw $e;
 		}
+		return array('vault' => $vault, 'fk' => $fk, 'tmp' => $tmp, 'sniffed' => $sniffed, 'plain_size' => (int)$info['plain_size']);
+	}
 
-		File::recordSealedKey($file->key, $vault, $fk);
+	/**
+	 * The row of createSealedFile(): the file made from a container
+	 * sealForCreate() wrote, its key recorded, and its thumbnail rendered from
+	 * the plaintext still at $part_path.
+	 */
+	public static function createFromSealed(array $sealed, $part_path, $display_name, $owner_id, array $restrictions = array()) {
+		$restrictions = array_merge($restrictions, array(
+			'fil_protection_level'  => ProtectionLevel::PRIVATE_,
+			'fil_plain_size_bytes'  => $sealed['plain_size'],
+			// createFromUpload sets fil_type from the blob's magic bytes — which
+			// for a container is meaningless. Restrictions are applied after
+			// that, so this is what sticks.
+			'fil_type'              => $sealed['sniffed'],
+		));
+
+		// createFromUpload consumes its source; hand it the container.
+		$file = File::createFromUpload($sealed['tmp'], $display_name, $sealed['sniffed'], $owner_id, $restrictions);
+
+		File::recordSealedKey($file->key, $sealed['vault'], $sealed['fk']);
 		$file->load(); // pick up the wrapping columns the targeted UPDATE wrote
 
-		self::storeSealedThumbnail($file, $part_path, $fk, $sniffed);
+		self::storeSealedThumbnail($file, $part_path, $sealed['fk'], $sealed['sniffed']);
 		return $file;
+	}
+
+	/**
+	 * Remove a container sealForCreate() wrote that never became a file.
+	 */
+	public static function discardSealed(array $sealed) {
+		if (is_file($sealed['tmp'])) { @unlink($sealed['tmp']); }
 	}
 
 	/**

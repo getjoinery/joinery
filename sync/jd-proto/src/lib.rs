@@ -188,6 +188,18 @@ impl ProtoError {
         }
     }
 
+    /// Whether the server refused a trash because something in it changed
+    /// after the cursor the client sent (`unchanged_since`). Read off the
+    /// marker, as `parent_trashed` is.
+    pub fn changed_since(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => {
+                data.get("reason").and_then(Value::as_str) == Some("changed_since")
+            }
+            _ => false,
+        }
+    }
+
     /// The folder a `parent_trashed` refusal names, when it names one.
     ///
     /// A client cannot infer this. The destination it sent may not be the one

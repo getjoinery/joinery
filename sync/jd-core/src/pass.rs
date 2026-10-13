@@ -196,6 +196,21 @@ pub fn run_pass(
     if !still_stranded {
         env.store.withdraw_issues("store_inconsistent")?;
     }
+    // A walk of the index -- a feed reset, a folder restored, a record with no
+    // way back to the root -- learns things whose rows are behind the cursor:
+    // a file this device never had under a folder whose trash is still in the
+    // journal, its head older than the change the trash was decided at. Run as
+    // decided, the walk-learned file is not newer than the decision, the
+    // executor's stand-down does not see it, and the cascade takes a file new
+    // content should have kept (D1). Every queued folder trash is decided
+    // again by this pass's round instead, against what the walk found.
+    if out.reset {
+        for op in env.store.queued_ops()? {
+            if op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder {
+                env.store.drop_op(op.op_id)?;
+            }
+        }
+    }
     // A file held outside its vault says so while it is: gone, or back where
     // the server keeps it, and the sentence is false.
     for issue in env.store.open_issues()? {
@@ -2105,13 +2120,14 @@ pub fn run_pass(
         out.round.plan.ops = kept;
     }
     let queued = journal(env.store, &out.round.plan, key_for)?;
-    // A folder's trash carries the change it was decided at: whatever the
-    // server had changed under it by then, this round has judged, and only
-    // what changes after is the executor's to stand it down for
-    // (`trash_remote`, B-O1).
+    // A trash carries the change it was decided at: whatever the server had
+    // changed under it by then, this round has judged, and only what changes
+    // after is the executor's to stand it down for (`trash_remote`, B-O1) and
+    // the server's to refuse it for (`unchanged_since`). Fixed in the op, so a
+    // retry sends the same request under the same key.
     let queued: std::collections::HashSet<i64> = queued.into_iter().collect();
     for op in env.store.queued_ops()? {
-        if queued.contains(&op.op_id) && op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder {
+        if queued.contains(&op.op_id) && op.kind == "trash_remote" {
             env.store.set_op_params(op.op_id, &serde_json::json!({ "decided_at": next_cursor }).to_string())?;
         }
     }

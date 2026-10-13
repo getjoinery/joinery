@@ -332,6 +332,11 @@ fn reconcile_summary(detail: &str) -> String {
         }
         return "Deleted in one place and edited in another. The edit was kept — a delete can be undone, an edit cannot.".into();
     }
+    // Said on the file that came back: the user deleted its folder here,
+    // and without this would find it back with no word why.
+    if detail.starts_with("ArrivalKeptFolder") {
+        return "Its folder was deleted here while another device was still sending this file into it. The folder came back with the new file in it — a delete can be undone, a new file that is lost cannot.".into();
+    }
     if detail.starts_with("RescuedFromDeletedFolder") {
         return "A folder was deleted elsewhere while it still held unsaved changes here. Those files were kept and re-uploaded.".into();
     }
@@ -395,6 +400,14 @@ mod tests {
         assert!(folder.contains("so was the folder it is in"), "{folder}");
         // A detail written before the folder was told apart says what it always did.
         assert_eq!(reconcile_summary("DeleteLostToEdit { side: Local }"), file);
+    }
+
+    /// A folder that came back for a file another device was still sending
+    /// says so, on that file.
+    #[test]
+    fn a_new_file_that_kept_a_deleted_folder_says_the_folder_came_back() {
+        let text = reconcile_summary("ArrivalKeptFolder");
+        assert!(text.contains("folder came back") && text.contains("another device"), "{text}");
     }
 
     /// A move race is described by the half it lost: the whole move only

@@ -7011,10 +7011,13 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // (`round`, B-O1). What the server had changed when the trash was
     // decided, that round judged (`decided_at`); stood down for that too, a
     // file moved in from elsewhere with an edit -- which no round keeps a
-    // folder for -- held the trash every pass for ever. A file this device
-    // never agreed on is not counted: it is content arriving under a folder
-    // the user deleted, which goes with it. Walked down the server's tree as
-    // this store has it, folder by folder.
+    // folder for -- held the trash every pass for ever. A file another device
+    // saved that this device never had counts the same, once it arrived after
+    // the trash was decided: new content beats a delete as an edit does, and
+    // the next round keeps the folder for it (owner decision D1). Not this
+    // device's own file never sent, which goes with the folder its user
+    // deleted. Walked down the server's tree as this store has it, folder by
+    // folder.
     if op.entity.entity_type == EntityType::Folder {
         let decided_at = serde_json::from_str::<Value>(&op.params)
             .ok()
@@ -7037,15 +7040,37 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                                 e.id.server_id
                             )));
                         }
+                        if !e.remote_deleted && e.head_change_id > decided_at && !e.is_established() && !e.id.is_provisional() {
+                            return Ok(OpOutcome::Overtaken(format!(
+                                "a new file arrived in it since this was decided ({})",
+                                e.id.server_id
+                            )));
+                        }
                     }
                 }
             }
         }
     }
-    let body = json!({
+    // What this device had heard of when the trash was decided, so the server
+    // refuses it if something inside changed after: an edit or a new file
+    // that reached the server between this device's last read of the feed
+    // and this request, which no walk above can see (clean3 74927;
+    // `specs/drive_trash_unchanged_since.md`): the change the round was
+    // decided at, fixed in the op so a retry sends the same request under the
+    // same key. Left out when there is none -- an op journalled before trashes
+    // carried one -- rather than sent as zero, which the server reads as
+    // "nothing agreed".
+    let unchanged_since = serde_json::from_str::<Value>(&op.params)
+        .ok()
+        .and_then(|p| p.get("decided_at").and_then(Value::as_i64))
+        .filter(|c| *c > 0);
+    let mut body = json!({
         "entity_type": op.entity.entity_type.to_string(),
         "entity_id": op.entity.server_id,
     });
+    if let Some(since) = unchanged_since {
+        body["unchanged_since"] = json!(since);
+    }
     match env
         .api
         .action_idempotent("drive_trash", body, &op.idempotency_key)
@@ -7053,6 +7078,14 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Ok(_) => {}
         // Already gone from the server is the outcome we wanted.
         Err(ProtoError::Api { status: 404, .. }) => {}
+        // Something inside changed after this was decided. Nothing is wrong:
+        // somebody else's work arrived. The next pass reads it and decides
+        // again, keeping the folder for it (B-O1, D1). A refusal in prose
+        // alone keeps its ordinary reading -- withdrawn, and said -- since
+        // nothing says it was this one.
+        Err(e) if e.changed_since() => {
+            return Ok(OpOutcome::Overtaken("something in it changed on the server since this was decided".into()));
+        }
         Err(e) => return Err(e.into()),
     }
     // The server took the folder, and its own cascade takes what was inside it,

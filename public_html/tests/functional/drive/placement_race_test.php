@@ -32,6 +32,7 @@
  * A build without the placement lock leaves a live file under a trashed folder
  * and fails the invariant below.
  *
+ * @version 1.2.0 - the dedup race holds the owner's trash lock, which a write takes before the placement lock
  * @version 1.1.0
  */
 
@@ -491,7 +492,11 @@ check(race_unreachable_count($owner_id) === 0, 'no live file sits under a trashe
 // placement lock, so a worker that asks for it is provably past the top check
 // and stopped at the write. A build without the guard never asks -- it creates
 // the file on the spot -- which is exactly what the checks below separate.
-$dblink->prepare("SELECT pg_advisory_lock(?, ?)")->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+// A trash takes the owner's lock first, before the destination's placement
+// lock, and every write takes its shared side first too (DriveHelper::
+// owner_write_lock). Held here as a trash in progress holds it, so the worker
+// is caught waiting for the trash before it can write.
+$dblink->prepare("SELECT pg_advisory_lock(?, ?)")->execute(array(DriveHelper::TRASH_LOCK_CLASS, $owner_id));
 
 $descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
 $env = $_ENV; $env['PATH'] = getenv('PATH');
@@ -507,7 +512,7 @@ if (is_resource($procD)) {
 		  WHERE locktype = 'advisory' AND classid = ? AND objid = ? AND NOT granted");
 	$deadlineD = microtime(true) + 30.0;
 	while (microtime(true) < $deadlineD) {
-		$waitingD->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+		$waitingD->execute(array(DriveHelper::TRASH_LOCK_CLASS, $owner_id));
 		if ((int)$waitingD->fetchColumn() > 0) { $arrivedD = true; break; }
 		usleep(20000);
 	}
@@ -517,7 +522,7 @@ if (is_resource($procD)) {
 // advisory lock is re-entrant within one session, so it runs straight through
 // on this connection and leaves the original hold in place.
 drive_trash_logic(array('entity_type' => 'folder', 'entity_id' => $folder4));
-$dblink->prepare("SELECT pg_advisory_unlock(?, ?)")->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+$dblink->prepare("SELECT pg_advisory_unlock(?, ?)")->execute(array(DriveHelper::TRASH_LOCK_CLASS, $owner_id));
 
 $outD = '';
 if (is_resource($procD)) {
@@ -532,8 +537,8 @@ if (is_resource($procD)) {
 }
 if (preg_match('/RESULT:CREATED:(\d+)/', $outD, $mD)) { $made_files[] = (int)$mD[1]; }
 
-check($arrivedD, 'the dedup short-circuit asked for the destination lock before writing',
-	'no waiter appeared on the placement lock, so the write was never held: ' . trim($outD));
+check($arrivedD, 'the dedup short-circuit waited for the trash in progress before writing',
+	'no waiter appeared on the owner lock, so the write was never held: ' . trim($outD));
 
 check(strpos($outD, 'RESULT:REFUSED:parent_trashed:' . $folder4 . ':') !== false,
 	'and it refuses as parent_trashed once the destination has gone to the trash',
