@@ -22,6 +22,8 @@
  * so tests/vault/vault_health_test.php can hand it a fixture and cover every
  * branch on any box.
  *
+ * @version 1.12 - the converger row reads HostConvergerNotice::runState(): one installed minutes ago that has
+ *                 not run yet is unknown rather than unmet
  * @version 1.11 - the converger's advice names the journal: on a host with a data root it logs there
  * @version 1.10 - on an encrypted data root, a row for its break-glass copy: there is one, sealed to a
  *                 key that is held (specs/hosted_data_promise_disk_encryption.md WP4)
@@ -233,11 +235,16 @@ class VaultHealth {
 			return ['key' => $key, 'label' => $label, 'state' => 'unknown',
 				'reason' => 'No host converger is installed on this machine. A container converges at every start and a managed node through its upgrade job; a bare-metal box upgraded from the browser needs one: ' . HostConvergerNotice::installCommand()];
 		}
-		if ($facts['last_run'] === null) {
+		$run = HostConvergerNotice::runState($facts, $now);
+		if ($run === 'starting') {
+			return ['key' => $key, 'label' => $label, 'state' => 'unknown',
+				'reason' => 'The host converger was installed minutes ago and has not had its first run yet; it runs within a minute.'];
+		}
+		if ($run === 'never') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 				'reason' => 'The host converger is installed and has never run. On the host: ' . HostConvergerNotice::installCommand()];
 		}
-		if ($now - $facts['last_run'] >= HostConvergerNotice::STALE_AFTER) {
+		if ($run === 'stale') {
 			return ['key' => $key, 'label' => $label, 'state' => 'unmet',
 				'reason' => 'The host converger last ran ' . gmdate('Y-m-d H:i', $facts['last_run']) . ' UTC, over a day ago. On the host: ' . HostConvergerNotice::installCommand()];
 		}
