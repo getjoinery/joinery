@@ -93,7 +93,11 @@ the file to another record.
   exFAT (positional ids), a volume that reports no birth or a birth that is
   not the moment the file was made, one the probe catches changing an id or
   that cannot number files uniquely (ReFS), and one the probe cannot write
-  to are weak.
+  to are weak. Every FAT or exFAT drive carries a standing notice saying that
+  renames there cannot be tracked: files with identical contents that swap
+  names may get their histories mixed up, each such pair named when it
+  happens, and a folder renamed while files inside it are being moved may be
+  read as deleted, its copy on the server going to the trash.
 - **The scan pairs by identity first** on a strong volume: a record's own file
   is that record's wherever it stands, and the path decides only for a file no
   record owns. A weak volume pairs path-first. Where a record's file stands

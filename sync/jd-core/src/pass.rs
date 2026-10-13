@@ -3340,33 +3340,39 @@ pub(crate) fn held_by_a_weak_volume_park(env: &ExecEnv) -> Result<std::collectio
     }
 }
 
-/// The standing notice on a drive whose ids cannot even break a tie
-/// (Windows FAT and exFAT): renames there are read from contents and paths
-/// alone, and the one thing that cannot be read -- two files with identical
-/// contents elsewhere trading names -- is reported, not hidden (owner
-/// decision 2026-09-29: such drives may work badly, but they fail loudly).
+/// The standing notice on every FAT or exFAT drive (`positional_file_ids`):
+/// renames there are read from contents and paths alone, and what cannot be
+/// read is reported, not hidden -- files with identical contents trading
+/// names, named pair by pair (`say_where_two_files_may_have_swapped`), and a
+/// folder renamed while files inside it are moved, which may be read as
+/// deleted, its copy on the server going to the trash (owner decisions
+/// 2026-09-29: such drives may work badly, but they fail loudly; 2026-10-13:
+/// the folder reading is an accepted limit, and every FAT drive is told).
 pub(crate) const RENAMES_UNTRACKED: &str = "renames_untracked_on_this_drive";
+
+/// What the standing notice says. A notice already open in other words is
+/// replaced, so a drive told before the words changed is told the same.
+const RENAMES_UNTRACKED_TEXT: &str = "This drive is formatted FAT or exFAT, which cannot keep track of files \
+     and folders when they are renamed. Syncing still works, but two things can go wrong: files with \
+     identical contents that swap names may get their version histories mixed up (you will be told \
+     which files each time), and a folder renamed while files inside it are being moved may be read \
+     as deleted, sending its copy on the server to the trash, where it can be restored. For important \
+     work, use the computer's own drive.";
 
 /// Raised per pair when it happens (`say_where_two_files_may_have_swapped`).
 pub(crate) const NAMES_MAY_HAVE_SWAPPED: &str = "names_may_have_swapped";
 
 fn say_whether_renames_can_be_tracked(env: &ExecEnv) -> Result<(), ExecError> {
-    let personality = env.vfs.personality();
-    let untracked = personality.positional_file_ids && personality.id_tie_break == jd_vfs::IdTieBreak::None;
+    let untracked = env.vfs.personality().positional_file_ids;
     let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == RENAMES_UNTRACKED).collect();
-    if untracked && open.is_empty() {
-        env.store.raise_issue(
-            None,
-            RENAMES_UNTRACKED,
-            "This drive (FAT or exFAT on Windows) cannot keep track of files when they are renamed. \
-             Syncing still works, but if files with identical contents swap names, their version \
-             histories may get mixed up. Each time that may have happened you will be told which files.",
-            (env.now_ms)() as i64,
-        )?;
-    } else if !untracked {
-        for issue in open {
+    let current = open.iter().any(|i| i.detail == RENAMES_UNTRACKED_TEXT);
+    for issue in &open {
+        if !untracked || issue.detail != RENAMES_UNTRACKED_TEXT {
             env.store.dismiss_issue(issue.issue_id)?;
         }
+    }
+    if untracked && !current {
+        env.store.raise_issue(None, RENAMES_UNTRACKED, RENAMES_UNTRACKED_TEXT, (env.now_ms)() as i64)?;
     }
     Ok(())
 }
