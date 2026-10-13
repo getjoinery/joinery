@@ -44,6 +44,7 @@
  * each addressed to every superadmin. Notify gives each the bell, and email
  * by the signal's default (critical: on) or their own preference.
  *
+ * @version 1.8 - the signals declare their audience (superadmins); the payload names no recipients
  * @version 1.7 - a full pass leaves test fixture nodes alone (ManagedNode::is_fixture_name()): their
  *                incidents rang every superadmin's bell, and a suite's own incidents were cleared under it.
  *                Removed nodes stay in it, so their cleared incidents are still settled
@@ -415,15 +416,12 @@ class IncidentReconciler {
 		return '#' . (int)$node->key . ' ' . (string)$node->get('mgn_name');
 	}
 
-	/** Tell every superadmin: the bell, and email by the signal's default or their choice. $summary says what happened. */
+	/**
+	 * Tell every superadmin: the bell, and email by the signal's default or their
+	 * choice. Both signals declare `audience: superadmins`, so Notify reads who
+	 * that is. $summary says what happened.
+	 */
 	private static function notify(IncidentRecord $inc, ManagedNode $node, string $summary): void {
-		$recipients = array();
-		foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => false, 'not_system_users' => true)) as $u) {
-			$recipients[] = (int)$u->key;
-		}
-		if (count($recipients) === 0) {
-			return;
-		}
 		$payload = array(
 			'incident_id' => (int)$inc->key,
 			'node_id'     => (int)$node->key,
@@ -432,7 +430,6 @@ class IncidentReconciler {
 			'severity'    => (string)$inc->get('inc_severity'),
 			'summary'     => $summary,
 			'link'        => IncidentViews::url((int)$inc->key),
-			'recipients'  => $recipients,
 		);
 		$signal = $inc->is_critical() ? self::SIGNAL_CRITICAL : self::SIGNAL_WARNING;
 		if (self::$dispatch !== null) {

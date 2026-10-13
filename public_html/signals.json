@@ -67,12 +67,12 @@
             "label": "Human name of the affected secret (or a batch summary)",
             "feature": "Feature the secret belongs to",
             "count": "How many secrets this alert covers",
-            "link": "Admin surface to act on it",
-            "recipients": "Admin user ids to notify (the in-system leg must always land)"
+            "link": "Admin surface to act on it"
         },
         "notify": {
             "ntf_type": "system",
             "supports_topic": true,
+            "audience": "superadmins",
             "default_email": true,
             "title_template": "Secret unreadable: {label}",
             "body_template": "{feature}: a stored secret cannot be decrypted here. Re-enter it, or acknowledge a re-mint, on the secrets health page.",
@@ -86,12 +86,12 @@
         "payload": {
             "sent": "What the server has sent this month, in words",
             "since": "When counting began this month",
-            "detail": "The whole sentence: how much, and where to check the allowance",
-            "recipients": "Superadmin user ids"
+            "detail": "The whole sentence: how much, and where to check the allowance"
         },
         "notify": {
             "ntf_type": "system",
             "supports_topic": true,
+            "audience": "superadmins",
             "default_email": true,
             "title_template": "This server has sent {sent} this month",
             "body_template": "{detail}",

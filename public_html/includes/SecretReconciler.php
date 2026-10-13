@@ -25,6 +25,7 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.4 - the unreadable signal declares its audience (superadmins); the payload names no recipients
  * @version 1.3 - the locator path asks for a table only when it exists (to_regclass), so a plugin
  *   never activated here leaves no ERROR in the PostgreSQL log on every census
  * @version 1.2 - census(): the read-only count of stored and dead secrets and the canary's
@@ -509,9 +510,8 @@ class SecretReconciler {
 
 		// The in-system leg must always land — the outbound-mail path can itself
 		// depend on a sealed credential, so it may be dead in exactly this
-		// incident. Target every admin directly so a persistent notification is
-		// created regardless of anyone's topic subscription.
-		$recipients = self::admin_recipients();
+		// incident. The signal declares `audience: superadmins`, so every
+		// superadmin gets a persistent notification without subscribing.
 
 		// One batched alert for a mass event, not a dozen — whether the canary
 		// diagnosed a key mismatch, or simply many secrets died at once this run
@@ -523,7 +523,6 @@ class SecretReconciler {
 				'feature'    => $out['key_mismatch'] ? 'Environment key mismatch' : 'Multiple secrets unreadable',
 				'count'      => $n,
 				'link'       => '/admin/admin_sealed_secrets',
-				'recipients' => $recipients,
 			));
 			return;
 		}
@@ -534,20 +533,8 @@ class SecretReconciler {
 				'feature'    => (string)$row->get('ssr_feature'),
 				'count'      => 1,
 				'link'       => '/admin/admin_sealed_secrets',
-				'recipients' => $recipients,
 			));
 		}
-	}
-
-	/** Every superadmin's user id — the people who must see a dead secret. */
-	private static function admin_recipients(): array {
-		$ids = array();
-		try {
-			$dblink = DbConnector::get_instance()->get_db_link();
-			$q = $dblink->query('SELECT usr_user_id FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL');
-			foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) $ids[] = (int)$id;
-		} catch (\Throwable $e) { /* nobody to tell; the pill still shows */ }
-		return $ids;
 	}
 
 	private static function audit(string $event, int $user_id, string $note): void {

@@ -14,9 +14,15 @@
  * and email enqueueing are unchanged; only the entry point and input (a
  * structured payload, not a pre-rendered message) differ.
  *
+ * A signal that always goes to a fixed group of people declares that group as
+ * its `audience`; Notify resolves it at send time, and the preferences pages
+ * read the same declaration to show each person what they will get.
+ *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 2.2
+ * @version 2.3
+ * @changelog 2.3 - A declared `audience` names the targeted recipients; the
+ *   preference state and save rules for both preferences pages live here.
  * @changelog 2.2 - A recipient deleted since the recipients were read gets
  *   nothing on either channel.
  * @changelog 2.1 - Placeholder users (system, deleted) are never recipients on
@@ -45,6 +51,110 @@ class Notify {
 			}
 		}
 		return $notifiable;
+	}
+
+	/**
+	 * The user ids a declared `audience` names, read now. NULL for an audience
+	 * Notify does not know.
+	 *
+	 * - `superadmins` — every superadmin who is a person (not the system or
+	 *   deleted placeholder).
+	 */
+	public static function audience_ids($audience) {
+		if ($audience === 'superadmins') {
+			$ids = array();
+			foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => false, 'not_system_users' => true)) as $u) {
+				$ids[] = (int)$u->key;
+			}
+			return $ids;
+		}
+		return null;
+	}
+
+	/**
+	 * What a user gets from a signal while they have no saved preference — the
+	 * same rule delivery applies. A signal is on for the people it addresses:
+	 * everyone, for one sent only to the people it is about (no topic
+	 * subscription), and the members of its declared audience. Email follows
+	 * the signal's `default_email`. Anything else waits for an opt-in.
+	 *
+	 * @param array $meta     the signal's declaration (with its notify block)
+	 * @param array $audiences audience => ids, for reuse across signals
+	 * @return array  array('subscribed' => bool, 'email' => bool)
+	 */
+	public static function default_preference(array $meta, $user_id, array &$audiences = array()) {
+		$notify = isset($meta['notify']) && is_array($meta['notify']) ? $meta['notify'] : array();
+		$on = empty($notify['supports_topic']);
+		if (!$on && isset($notify['audience'])) {
+			$audience = $notify['audience'];
+			if (!array_key_exists($audience, $audiences)) {
+				$audiences[$audience] = (array)self::audience_ids($audience);
+			}
+			$on = in_array((int)$user_id, $audiences[$audience], true);
+		}
+		return array('subscribed' => $on, 'email' => $on && !empty($notify['default_email']));
+	}
+
+	/**
+	 * Each signal's state for a user: their saved row where they have one,
+	 * otherwise default_preference().
+	 *
+	 * @param array $signals  signal_name => declaration
+	 * @return array  signal_name => array('subscribed' => bool, 'email' => bool)
+	 */
+	public static function preference_states($user_id, array $signals) {
+		require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
+
+		$saved = array();
+		foreach (new MultiNotificationPreference(array('user_id' => $user_id, 'deleted' => false)) as $pref) {
+			$saved[$pref->get('ntp_signal_name')] = array(
+				'subscribed' => (bool)$pref->get('ntp_subscribed'),
+				'email'      => (bool)$pref->get('ntp_email_enabled'),
+			);
+		}
+
+		$states = array();
+		$audiences = array();
+		foreach ($signals as $name => $meta) {
+			$states[$name] = isset($saved[$name])
+				? $saved[$name]
+				: self::default_preference($meta, $user_id, $audiences);
+		}
+		return $states;
+	}
+
+	/**
+	 * Save what a preferences form submitted. $subscribed_signals and
+	 * $email_signals are the ticked signal names; email needs subscribed. A
+	 * signal with a saved row is updated. One without a row gets one only when
+	 * the choice differs from the default, so a default that changes later —
+	 * the signal's own, or an admin promoted into its audience — still reaches
+	 * someone who never chose otherwise.
+	 *
+	 * @param array $signals  signal_name => declaration: the signals the form showed
+	 */
+	public static function save_preferences($user_id, array $signals, array $subscribed_signals, array $email_signals) {
+		require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
+
+		$audiences = array();
+		foreach ($signals as $signal_name => $meta) {
+			$subscribed = in_array($signal_name, $subscribed_signals, true);
+			$email      = $subscribed && in_array($signal_name, $email_signals, true);
+
+			$pref = NotificationPreference::get_for($user_id, $signal_name);
+			if (!$pref) {
+				$default = self::default_preference($meta, $user_id, $audiences);
+				if ($default['subscribed'] === $subscribed && $default['email'] === $email) {
+					continue;
+				}
+				$pref = new NotificationPreference(NULL);
+				$pref->set('ntp_usr_user_id', $user_id);
+				$pref->set('ntp_signal_name', $signal_name);
+			}
+			$pref->set('ntp_subscribed', $subscribed);
+			$pref->set('ntp_email_enabled', $email);
+			$pref->save();
+		}
 	}
 
 	/**
@@ -94,12 +204,29 @@ class Notify {
 		$source_user_id = isset($payload['source_user_id']) ? (int)$payload['source_user_id'] : null;
 
 		// Targeted recipients — uid => true. Signals that notify particular people
-		// (mailbox, site, server-manager and plugin signals) pass `recipients`.
+		// (mailbox and Boards signals) pass `recipients`; signals that always go to
+		// one group declare it as their `audience`.
 		$targeted = array();
 		if (isset($payload['recipients'])) {
 			$recips = is_array($payload['recipients']) ? $payload['recipients'] : array($payload['recipients']);
 			foreach ($recips as $r) {
 				$targeted[(int)$r] = true;
+			}
+		}
+		if (isset($notify['audience'])) {
+			// A failed read still lets the topic subscribers hear.
+			try {
+				$ids = self::audience_ids($notify['audience']);
+			} catch (Throwable $e) {
+				$ids = array();
+				error_log('[Notify] ' . $signal . ': could not read audience ' . $notify['audience'] . ': ' . $e->getMessage());
+			}
+			if ($ids === null) {
+				$ids = array();
+				error_log('[Notify] ' . $signal . ' declares an unknown audience: ' . $notify['audience']);
+			}
+			foreach ($ids as $id) {
+				$targeted[(int)$id] = true;
 			}
 		}
 

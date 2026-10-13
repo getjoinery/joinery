@@ -40,6 +40,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.6 - the incident signal is addressed by its declared audience, not a recipient list
  * @version 1.5 - a full pass leaves fixture nodes alone, removed nodes kept in it; fixture node names carry the
  *                prefix, and outside a test process no node takes it
  * @version 1.4 - a cleared incident nobody had settled is resolved (settle_cleared)
@@ -126,7 +127,8 @@ if ($inc !== null) {
 		'Its evidence is what the check saw and the site', json_encode($detail));
 	check($kinds((int)$inc->key) === array('opened'), 'One opened event');
 	check(count($signals) === 1 && $signals[0][0] === IncidentReconciler::SIGNAL_CRITICAL
-		&& (int)$signals[0][1]['incident_id'] === (int)$inc->key && count($signals[0][1]['recipients']) > 0
+		&& (int)$signals[0][1]['incident_id'] === (int)$inc->key
+		&& (SignalBus::signals()[IncidentReconciler::SIGNAL_CRITICAL]['notify']['audience'] ?? '') === 'superadmins'
 		&& $signals[0][1]['link'] === '/admin/server_manager/incident?id=' . (int)$inc->key,
 		'One incident.opened_critical, to the superadmins, linking the incident', json_encode($signals));
 }

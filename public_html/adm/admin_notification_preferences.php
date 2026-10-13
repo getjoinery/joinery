@@ -5,7 +5,7 @@
  * Admin page where an admin opts in to notification signal alerts and chooses
  * which should also be emailed.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_notification_preferences_logic.php'));
@@ -40,10 +40,11 @@ foreach ($notifiable_signals as $name => $meta) {
 	$label    = isset($meta['label']) ? $meta['label'] : $name;
 	$options[$name] = $category . ' — ' . $label;
 
-	if (isset($prefs[$name]) && $prefs[$name]['subscribed']) {
+	// What this admin actually gets: their saved choice, or delivery's default.
+	if ($prefs[$name]['subscribed']) {
 		$subscribed_checked[] = $name;
 	}
-	if (isset($prefs[$name]) && $prefs[$name]['email']) {
+	if ($prefs[$name]['email']) {
 		$email_checked[] = $name;
 	}
 }

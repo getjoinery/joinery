@@ -30,6 +30,7 @@
  * on a site the operator hosts on its own account (hosted_plan_state): the
  * management node watches that machine from the provider's figure.
  *
+ * @version 1.2 - the signal declares its audience (superadmins); the payload names no recipients
  * @version 1.1 - an interface new under the same boot is a baseline (a default-route flap counted
  *                its whole since-boot counter); a reading with no interface changes nothing;
  *                'since' the 1st only when the last reading was within a day of the turn
@@ -191,22 +192,14 @@ class OutboundTransferMeter {
 		return number_format($gb, $gb >= 100 ? 0 : 1) . ' GB';
 	}
 
+	/** The signal declares `audience: superadmins`; Notify reads who that is. */
 	private static function email(array $state): void {
-		$ids = array();
-		try {
-			$q = DbConnector::get_instance()->get_db_link()
-				->query('SELECT usr_user_id FROM usr_users WHERE usr_permission >= 10 AND usr_delete_time IS NULL');
-			$ids = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
-		} catch (Exception $e) {
-			error_log('OutboundTransferMeter: could not list the superadmins: ' . $e->getMessage());
-		}
 		$month = self::month($state);
 		$send = self::$dispatch ?? array('SignalBus', 'dispatch');
 		$send(self::SIGNAL, array(
-			'sent'       => self::gb($month['sent_bytes']),
-			'since'      => gmdate('F j', $month['since']),
-			'detail'     => self::sentence($month),
-			'recipients' => $ids,
+			'sent'   => self::gb($month['sent_bytes']),
+			'since'  => gmdate('F j', $month['since']),
+			'detail' => self::sentence($month),
 		));
 	}
 

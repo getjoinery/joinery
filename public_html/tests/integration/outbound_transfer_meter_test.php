@@ -21,6 +21,7 @@
  *
  * Run: php tests/integration/outbound_transfer_meter_test.php
  *
+ * @version 1.2 - the email is addressed by the signal's declared audience, not a recipient list
  * @version 1.1 - an interface new or back under the same boot adds nothing; an empty reading changes nothing;
  *                a gap since early last month is not a turn (review R1, R6)
  * @version 1.0
@@ -101,7 +102,9 @@ harness_set_setting_mem(OutboundTransferMeter::NOTICE_SETTING, '10');
 check(OutboundTransferMeter::over(null, $t + 900), '15 GB is past a 10 GB figure');
 $s = OutboundTransferMeter::tick($t + 1200, $counters(8 * $GB, 4 * $GB, 'boot-b|net:[2]'));
 check(count($sent) === 1 && $sent[0][0] === OutboundTransferMeter::SIGNAL, 'one email signal goes');
-check(is_array($sent[0][1]['recipients']), 'it is addressed to the superadmins by id');
+$decl = SignalBus::signals()[OutboundTransferMeter::SIGNAL] ?? array();
+check(($decl['notify']['audience'] ?? '') === 'superadmins' && !isset($sent[0][1]['recipients']),
+	'it is addressed to the superadmins, by the signal\'s declared audience');
 check(strpos($sent[0][1]['detail'], 'This server has sent 16.0 GB since October 6') === 0, 'in plain words: ' . $sent[0][1]['detail']);
 OutboundTransferMeter::tick($t + 1500, $counters(9 * $GB, 4 * $GB, 'boot-b|net:[2]'));
 check(count($sent) === 1, 'and only once that month');

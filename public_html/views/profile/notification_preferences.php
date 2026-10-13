@@ -40,13 +40,10 @@
                 $email_checked = array();
                 foreach ($page_vars['signals'] as $name => $meta) {
                     $options[$name] = ($meta['category'] ?? 'Other') . ' — ' . ($meta['label'] ?? $name);
-                    $pref = $page_vars['prefs'][$name] ?? null;
-                    // No saved row means the signal's default: notify in-app,
-                    // email if the signal declares default_email.
-                    $subscribed = ($pref !== null) ? $pref['subscribed'] : true;
-                    $email      = ($pref !== null) ? $pref['email'] : !empty($meta['notify']['default_email']);
-                    if ($subscribed) { $sub_checked[] = $name; }
-                    if ($email) { $email_checked[] = $name; }
+                    // Their saved choice, or what delivery does with none.
+                    $state = $page_vars['prefs'][$name];
+                    if ($state['subscribed']) { $sub_checked[] = $name; }
+                    if ($state['email']) { $email_checked[] = $name; }
                 }
                 asort($options);
 

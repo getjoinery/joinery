@@ -1756,3 +1756,12 @@
 	$migration['migration_file'] = 'product_details_dropped.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Notification preferences written before ntp_hook_point became
+	// ntp_signal_name take their signal name back; rows naming no signal go.
+	$migration = array();
+	$migration['database_version'] = '216';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'ntp_notification_preferences' AND column_name = 'ntp_hook_point') OR EXISTS(SELECT 1 FROM ntp_notification_preferences WHERE ntp_signal_name IS NULL OR ntp_signal_name = '') THEN 0 ELSE 1 END AS count";
+	$migration['migration_file'] = 'notification_preferences_signal_name.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
