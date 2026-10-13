@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 1.9 - --machine installs on any Docker host, with or without sites yet: on a host built before its
+#                sites (install.sh docker, then install.sh site) the gateway arrived only with the next daily run.
+#                converge forgets a container site with no request at all (its plugin uninstalled), as it
+#                does one whose container is gone: entry and certificate, not only switched off.
+# Version: 1.8 - refresh (run after every update that changes something) re-applies the firewall and proxy_from,
+#                so a site already on through a relay gets 10465 opened to it by the update itself.
 # Version: 1.7 - a relay reaches submission on 10465 (RELAY_SUBMISSION_PORT), opened to the relays only: cloud
 #                providers block a relay's outbound 465, so programs still use 465 at the relay and the relay
 #                dials 10465 onward (the gateway's -relay-smtp-listen, 1.0.2). Never opened to everyone.
@@ -64,8 +70,13 @@ if [[ "${1:-}" == "--machine" ]]; then
 fi
 
 if [[ "${MACHINE}" == "1" ]]; then
-    if ! command -v docker >/dev/null 2>&1 || [[ ! -d /etc/joinery/sites ]]; then
-        echo "mail gateway: not a Docker host (no docker, or no /etc/joinery/sites) - nothing to install."
+    # Docker is the test, not a site: a host is built first (install.sh docker,
+    # which runs this from the bundle) and its sites come later, and the host's
+    # installers run again only when a bundle arrives or once a day. Installed
+    # here, switched off, the converge timer serves a site within a minute of
+    # it asking, however soon after the host was built.
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "mail gateway: not a Docker host (no docker) - nothing to install."
         exit 0
     fi
     if ! command -v python3 >/dev/null 2>&1; then
@@ -205,7 +216,8 @@ cat > "${CANDIDATE}" <<'HELPERSCRIPT'
 # off:     stop serving SITE; stop the gateway and close the ports when no
 #          site is left                                                    -> GATEWAY_OFF
 # status:  the unit, the ports, the sites served                           -> GATEWAY_STATUS
-# refresh: re-hand the certificates and restart, when any site is served   -> GATEWAY_REFRESHED
+# refresh: re-apply the firewall and proxy_from, then re-hand the
+#          certificates and restart, when any site is served             -> GATEWAY_REFRESHED
 # on SITE MAILHOST RELAY_IPS: the deployment's mail arrives through a relay,
 #          and programs reach the relay's name (MAILHOST); the relay splices
 #          their TLS here (specs/mail_apps_plugin.md § Where programs connect).
@@ -641,7 +653,9 @@ converge() {
             fi
             rm -f "${DIR}/sites/${site}.failed"
             case "${want}" in
-                none) ;;
+                # No request at all: the site does not have mail apps (never
+                # had, or uninstalled them), so a container entry is forgotten.
+                none) [[ "$(json_field "${DIR}/sites/${site}.json" container 2>/dev/null)" == "true" ]] && forget_container_entry "${site}" ;;
                 off)  answer "${root}" "${site}" off "" "" ;;
                 *)    answer "${root}" "${site}" failed "" "${want#bad }" ;;
             esac
@@ -653,13 +667,19 @@ converge() {
         [[ -f "${entry}" ]] || continue
         s="$(basename "${entry}" .json)"
         [[ "$(json_field "${entry}" container)" == "true" && ! -f "/etc/joinery/sites/${s}/run_spec" ]] || continue
-        if [[ -e "${DIR}/sites/${s}.enabled" ]]; then
-            "$0" off "${s}" >/dev/null 2>&1 || true
-        fi
-        rm -f "${DIR}/sites/${s}".{json,mailhost,relay,certattempt,failed,answer}
-        rm -rf "${CERTS:?}/${s}"
+        forget_container_entry "${s}"
     done
     echo "GATEWAY_CONVERGED"
+}
+
+# A container site's entry and certificate, gone: off first if it was served.
+forget_container_entry() {
+    local s="$1"
+    if [[ -e "${DIR}/sites/${s}.enabled" ]]; then
+        "$0" off "${s}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${DIR}/sites/${s}".{json,mailhost,relay,certattempt,failed,answer}
+    rm -rf "${CERTS:?}/${s}"
 }
 
 case "${VERB}" in
@@ -713,6 +733,10 @@ case "${VERB}" in
         converge
         ;;
     refresh)
+        # The firewall and proxy_from are derived from the served sites, so an
+        # update that changes which ports a route needs (10465 for relays, 1.7)
+        # takes effect here, with no Stop and Allow.
+        converge_access
         if [[ -n "$(served_sites)" ]]; then
             write_credentials
             systemctl restart "${UNIT}"

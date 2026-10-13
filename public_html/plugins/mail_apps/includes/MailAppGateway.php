@@ -17,6 +17,7 @@
  * asks its Docker host in its own storage, and the host's converge timer
  * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.7.0 - withdrawFromHost(): an uninstalled container site takes its request away, so its host forgets it
  * @version 1.6.0 - relayReport(): the relay's own view of the pass-through, from the report the site already keeps
  *                  (whether the server answers on each onward port, the last connection it refused and why)
  * @version 1.5.0 - a site in a container: programs connect to its web name on its Docker host; Allow and Stop write
@@ -611,6 +612,25 @@ class MailAppGateway {
 			return array('ok' => false, 'message' => 'This site could not write its request for the host.');
 		}
 		return array('ok' => true, 'message' => $on ? 'GATEWAY_ON' : 'GATEWAY_OFF');
+	}
+
+	/**
+	 * In a container, on uninstall: take the request away (and the host's last
+	 * answer with it). A site with no request is one the host no longer knows:
+	 * its next converge stops serving it if it was, and forgets its entry and
+	 * certificate. Never throws.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function withdrawFromHost(): array {
+		$dir = self::storageDir();
+		foreach (array('request.json', 'answer.json') as $f) {
+			if (file_exists($dir . '/' . $f) && !@unlink($dir . '/' . $f)) {
+				return array('ok' => false, 'message' => 'This site could not take back its request for the host (' . $dir . '/' . $f . ').');
+			}
+		}
+		@rmdir($dir);
+		return array('ok' => true, 'message' => 'GATEWAY_WITHDRAWN');
 	}
 
 	/**

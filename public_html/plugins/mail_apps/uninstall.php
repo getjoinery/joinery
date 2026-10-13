@@ -7,12 +7,13 @@
  * forgets this site and, once no site on the machine has the plugin, removes
  * the unit, the binary, the joinery-mailgw user, the renewal hook, the sudoers
  * rule and the helper itself (install_mail_gateway.sh 1.4). A site container
- * has none of it: it asks its Docker host to stop serving it. A failure keeps the plugin installed, so the uninstall can be
+ * has none of it: it takes back its request, and its Docker host forgets it. A failure keeps the plugin installed, so the uninstall can be
  * run again rather than leave a root service behind with nothing to manage it.
  *
  * The plugin is already inactive here, so its classes do not resolve by name:
  * MailAppGateway is loaded by path.
  *
+ * @version 1.2.0 - a site in a container takes its request away, so its host forgets it (not only stops)
  * @version 1.1.0 - a site in a container asks its host to stop serving it
  * @version 1.0.0
  */
@@ -20,10 +21,11 @@
 function mail_apps_uninstall() {
 	require_once(PathHelper::getIncludePath('plugins/mail_apps/includes/MailAppGateway.php'));
 	if (MailAppGateway::inContainer()) {
-		// The host serves a container site only while it asks: ask it to stop.
-		$off = MailAppGateway::turnOff();
-		if (!$off['ok']) {
-			error_log('mail_apps uninstall: the host was not asked to stop serving this site: ' . $off['message']);
+		// The host serves a container site only while it asks: take the request
+		// away, and the host stops serving it and forgets it within a minute.
+		$gone = MailAppGateway::withdrawFromHost();
+		if (!$gone['ok']) {
+			error_log('mail_apps uninstall: ' . $gone['message']);
 		}
 		return true;
 	}

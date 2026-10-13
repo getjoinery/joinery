@@ -14,6 +14,7 @@ package main
 import (
 	"bufio"
 	"errors"
+	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -75,6 +76,12 @@ func (c *proxiedConn) RemoteAddr() net.Addr       { return c.remote }
 
 // readProxyHeader reads the v1 line from a relay's connection. UNKNOWN keeps
 // the relay's own address; anything malformed is refused.
+// errRelayCheck: a relay connected and closed without sending a byte. The
+// relay checks once a minute that it reaches this server on each port
+// (relay-sealer checkServer); that is not a refused program, so it is not
+// logged.
+var errRelayCheck = errors.New("closed before sending anything (the relay's reachability check)")
+
 func readProxyHeader(c net.Conn) (*proxiedConn, error) {
 	_ = c.SetReadDeadline(time.Now().Add(proxyHeaderTimeout))
 	defer c.SetReadDeadline(time.Time{})
@@ -83,6 +90,9 @@ func readProxyHeader(c net.Conn) (*proxiedConn, error) {
 	for len(line) < proxyLineMax {
 		b, err := br.ReadByte()
 		if err != nil {
+			if len(line) == 0 && errors.Is(err, io.EOF) {
+				return nil, errRelayCheck
+			}
 			return nil, err
 		}
 		line = append(line, b)

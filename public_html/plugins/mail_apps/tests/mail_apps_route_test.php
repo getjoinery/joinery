@@ -233,6 +233,11 @@ check(MailAppGateway::routeState() === null, 'no public-address warning in a con
 check(MailAppGateway::checkAddress() === $web, 'the checks dial the served name, the host, not the container\'s own loopback');
 $kept = MailAppGateway::keepReachable();
 check($kept['ok'] && $calls === array(), 'the hourly task leaves a container to its host');
+file_put_contents($box . '/answer.json', '{"state": "off"}');
+$gone = MailAppGateway::withdrawFromHost();
+check($gone['ok'] && !file_exists($box . '/request.json') && !file_exists($box . '/answer.json'),
+	'uninstall takes the request and the answer away, so the host forgets the site (not only stops serving it)');
+check(MailAppGateway::withdrawFromHost()['ok'], '  and a second time is still fine');
 MailAppGateway::standInForContainer(null);
 
 harness_finish();

@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -142,5 +143,21 @@ func TestListenerReadsTheRelaysLine(t *testing.T) {
 	}
 	if _, relayed, err := run(false); err == nil || relayed {
 		t.Fatalf("an untrusted sender's line was believed (relayed=%v err=%v)", relayed, err)
+	}
+}
+
+// The relay's once-a-minute reachability check connects and closes without a
+// byte: that is errRelayCheck, which the listener closes without logging. A
+// relay that sends part of a line and stops is still an error worth logging.
+func TestARelayCheckIsNotARefusal(t *testing.T) {
+	a, b := net.Pipe()
+	go func() { a.Close() }()
+	if _, err := readProxyHeader(b); !errors.Is(err, errRelayCheck) {
+		t.Fatalf("connect and close: got %v, want errRelayCheck", err)
+	}
+	a, b = net.Pipe()
+	go func() { _, _ = io.WriteString(a, "PROXY TCP4 1.2"); a.Close() }()
+	if _, err := readProxyHeader(b); err == nil || errors.Is(err, errRelayCheck) {
+		t.Fatalf("a cut-off line: got %v, want a logged error", err)
 	}
 }

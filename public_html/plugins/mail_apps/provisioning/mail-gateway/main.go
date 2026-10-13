@@ -20,7 +20,7 @@ import (
 )
 
 // Version is stamped at build time (-ldflags "-X main.Version=...").
-var Version = "1.0.2"
+var Version = "1.0.3"
 
 func main() {
 	configDir := flag.String("config-dir", "/etc/joinery/mail-gateway", "directory holding sites/<site>.json and sites/<site>.enabled")
