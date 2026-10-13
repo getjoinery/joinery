@@ -534,8 +534,11 @@ pub fn apply_naming(
             if entry.status == LocalStatus::OutOfScope {
                 continue;
             }
-            // Only while the operation that parked it is still open. A park
-            // nobody is coming back for -- a kill dropped its finisher -- is
+            // Only while an operation is open on it: the one that parked it,
+            // or the finish queued for a park of this device's own that
+            // stands with nothing left to finish it
+            // (`pass::finish_stranded_local_parks`). A park nobody can come
+            // back for -- another device's tag, or its directory gone -- is
             // judged, parked for its reserved prefix, swept, and the entry
             // re-downloaded; that is the abandoned-park path and it stays.
             if parked_locally(&entry) && busy.contains(&entry.id) {
@@ -800,6 +803,21 @@ pub fn apply_naming(
         }
     }
 
+    // A stranded park's finish is an arrival like any other, and its
+    // destination is judged as one. Queued straight to the server's name, it
+    // carried a name this disk refuses to the disk every pass, for ever, and
+    // a name a sibling here already holds would have been made room for by
+    // setting the user's own folder aside. Judged, a name it cannot have
+    // gives up its copy here as any arrival's does, and the pass drops the
+    // finish with it.
+    let stranded: std::collections::HashSet<EntityId> = env
+        .store
+        .queued_ops()?
+        .iter()
+        .filter(|op| crate::pass::is_a_stranded_finish(op))
+        .map(|op| op.entity)
+        .collect();
+    let busy: std::collections::HashSet<EntityId> = busy.difference(&stranded).copied().collect();
     judge_destinations(
         env,
         personality,

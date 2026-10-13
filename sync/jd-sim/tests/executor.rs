@@ -3964,3 +3964,72 @@ fn a_create_finishes_a_leaving_folders_park_killed_before_its_rename() {
     assert_eq!(device.fs.peek(&format!("{park}/kept.txt")).as_deref(), Some(&b"in the leaving folder"[..]), "the park was not finished: {:?}", device.fs.all_paths());
     assert!(device.fs.exists("Shared") && !device.fs.exists("Shared/kept.txt"), "the new folder took the leaving one's directory: {:?}", device.fs.all_paths());
 }
+
+/// The arm beside it: the server has moved the file too, and something that
+/// is staying holds the server's placement here -- a file held outside its
+/// vault. A move race goes to the server, so the file is due there whatever
+/// the user's move says, and standing down, the park was judged again every
+/// pass for ever (hostile2 84411). It acts on the record's own file where it
+/// stands, as it does for a name the disk cannot hold: holding the agreed
+/// bytes, the moved copy goes to the OS trash and the record is parked; the
+/// held file is untouched. A file never sent at that name gives it up by
+/// itself -- it goes up under a name of its own -- and there the park stands
+/// down as before.
+#[test]
+fn a_file_parked_at_a_taken_server_placement_gives_up_its_moved_copy_only_for_a_holder_that_stays() {
+    for staying in [true, false] {
+        let label = if staying { "a held file at the name" } else { "a file never sent at the name" };
+        let (_clock, _server, device) = world();
+        let body = b"this record's own bytes, moved by the user";
+        let holder = b"what stands at the server's name here";
+        device.fs.user_write("slot-2.dat", body);
+        device.fs.user_write("slot-1.dat", holder);
+        let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+        let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("slot-2.dat")).unwrap().expect("the moved file");
+        let theirs_fp = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("slot-1.dat")).unwrap().expect("their file");
+        if staying {
+            let mut vault = fresh(EntityId::folder(700), None, "Vault", LocalStatus::Synced);
+            vault.is_encrypted = true;
+            vault.synced_placement = Some(vault.remote.clone());
+            device.store.put_entry(&vault).unwrap();
+            let mut held = fresh(EntityId::file(1_877), Some(700), "kept.dat", LocalStatus::Synced);
+            held.is_encrypted = true;
+            held.synced_placement = Some(Placement { parent: None, name: "slot-1.dat".into() });
+            held.synced_fingerprint = Some(theirs_fp);
+            held.own_file = Some(theirs_fp.identity());
+            held.synced_content = Some(ContentId { sha256: sha256_hex(holder), size: holder.len() as u64 });
+            device.store.put_entry(&held).unwrap();
+        } else {
+            let mut new = fresh(EntityId::file(-1), None, "slot-1.dat", LocalStatus::PendingUpload);
+            new.own_file = Some(theirs_fp.identity());
+            new.last_seen_sha = Some(sha256_hex(holder));
+            device.store.put_entry(&new).unwrap();
+        }
+        let id = EntityId::file(1_876);
+        let mut entry = fresh(id, None, "slot-1.dat", LocalStatus::Synced);
+        entry.synced_placement = Some(Placement { parent: None, name: "slot-3.dat".into() });
+        entry.synced_fingerprint = Some(mine);
+        entry.own_file = Some(mine.identity());
+        entry.synced_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+        entry.last_seen_sha = Some(sha256_hex(body));
+        device.store.put_entry(&entry).unwrap();
+
+        let report = do_one(
+            &device,
+            id,
+            Action::UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason::DuplicateName { with: "slot-1.dat".into() } },
+        );
+        assert_eq!(device.fs.peek("slot-1.dat").as_deref(), Some(&holder[..]), "{label}: what stands at the server's name was disturbed");
+        if staying {
+            assert_eq!(report.done, 1, "{label}: {report:?}");
+            assert!(device.fs.peek("slot-2.dat").is_none(), "{label}: the moved copy is still on the disk");
+            assert!(device.fs.trashed().iter().any(|(_, b)| b.as_deref() == Some(&body[..])), "{label}: the moved copy did not go to the OS trash");
+            let after = device.store.get_entry(id).unwrap().unwrap();
+            assert!(matches!(after.status, LocalStatus::Unsyncable(_)), "{label}: {:?}", after.status);
+        } else {
+            assert_eq!((report.done, report.overtaken), (0, 1), "{label}: {report:?}");
+            assert_eq!(device.store.get_entry(id).unwrap().unwrap(), entry, "{label}: the park stands down and changes nothing");
+            assert_eq!(device.fs.peek("slot-2.dat").as_deref(), Some(&body[..]), "{label}: the moved file is untouched");
+        }
+    }
+}

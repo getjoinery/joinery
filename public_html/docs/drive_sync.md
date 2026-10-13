@@ -116,10 +116,16 @@ the file to another record.
   next scan decides from where that file is. A park whose record's own file
   stands elsewhere on the disk stands down too, record untouched, rather than
   give the record up: the user moved the file, and the move the next scan finds
-  ends the clash naming judged. An upload or an adoption opens
-  the file once (`Vfs::open_file`) and reads its identity, its hash and the
-  bytes it sends from that one handle, so a file renamed over the path part
-  way through cannot go up as this record's. On a weak volume every op acts
+  ends the clash naming judged. Not where the server has moved the file as
+  well and what holds the server's placement here is staying -- a file held
+  outside its vault, or one the server keeps at that name: a move race goes to
+  the server, so the file is due there whatever the move here says, and the
+  park acts on the file where it stands, as it does for a name the disk cannot
+  hold. A holder on its way out, or a file never sent that will go up under a
+  name of its own, leaves the name to the move a pass later. An upload or an
+  adoption opens the file once (`Vfs::open_file`) and reads its identity, its
+  hash and the bytes it sends from that one handle, so a file renamed over the
+  path part way through cannot go up as this record's. On a weak volume every op acts
   on its path, and a swap between the scan and the op is corrected only by
   the next scan.
 
@@ -127,7 +133,10 @@ the file to another record.
 
 A folder record keeps its directory's identity the same way: the directory's
 id and birth, recorded when the record is minted, when it moves, and from the
-directory standing at its agreed path on each scan.
+directory standing at its agreed path on each scan -- and from the one new
+directory an empty vault folder is read as renamed into, when it is gone from
+its place with exactly one new empty directory beside it, so the move that
+follows takes that directory as the vault's own.
 
 - **Proven: id and birth both match**, on a strong volume. The folder follows
   its directory wherever it went, whatever is inside it, even when every file
@@ -383,7 +392,17 @@ two wait on each other (the server replaced a folder with a namesake and moved
 the old one inside it) the mover is parked under a scratch name in place, the
 folder is created, and the mover moves in. A local park is recorded as the
 spelling on disk, never as the agreement, and naming leaves a parked entry
-alone.
+alone. The walk does not read inside a scratch directory, so while a park
+stands -- its finish refused, or a pass stopped between the two -- nothing
+under it is judged: it is all held, present and unmoved, until the finish
+lands. A park this device made that nothing is left to finish is finished:
+moved from where it stands to where the server has it, since the name it left
+belongs by then to the other half of the swap. That finish is judged as any
+arrival is: a name this disk cannot hold, or one a sibling here already holds,
+gives up the copy here as it would for any folder renamed to such a name, and a
+finish overtaken for any other reason is said until the park ends. A move into
+a name whose holder is still being parked out of it waits for the park, and a
+park's finish waits for its own park to land.
 
 A rename the server refuses because the name is taken lands beside what holds
 it, under a conflict name, and the disk follows; what holds a name this device
@@ -855,7 +874,11 @@ here: the same index walk that carries the delete trashes this device's copy of
 the folder, and work inside it the server never took is rescued out first and
 raised as `rescued_from_trash`. That includes a file the user moved in here
 whose move never landed: the server has the file, but somewhere else, so it is
-carried out beside the folder and its move goes up from there. Reading the
+carried out beside the folder and its move goes up from there. A rescued file's
+record goes with it, so the file is never nobody's -- into a folder the server
+has deleted as well, where one deleted folder stood inside another, whose own
+trash rescues it again and the record follows on. A file saved in a vault and
+carried out of it before it was sent stays held wherever it lands. Reading the
 refusal as a failure instead would retry it forever against a folder that is not
 coming back. Sealed work is rescued only into a folder that is itself in a
 vault, from where it goes up sealed; carried out of the vault it would go up in

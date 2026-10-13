@@ -258,6 +258,13 @@ struct MemFsState {
     listed_in_a_vault: Vec<(String, String, Option<i64>)>,
     /// The server's change id now, for stamping a listing when it is made.
     change_clock: Option<ChangeClock>,
+    /// How many passes the world has started, on any device: the order of a
+    /// pass and of anything done between passes, which a change id cannot
+    /// give when nothing reached the server in between.
+    pass_clock: Option<ChangeClock>,
+    /// Per body, the pass in which the engine here could first have known it
+    /// was sealed (`know_sealed`), on `pass_clock`.
+    sealed_known_pass: BTreeMap<String, i64>,
     /// Every directory answers 0 for its identity. See
     /// [`MemFs::directory_ids_unreadable`].
     directory_ids_unreadable: bool,
@@ -381,6 +388,8 @@ impl MemFs {
                 sealed_names_known: BTreeSet::new(),
                 listed_in_a_vault: Vec::new(),
                 change_clock: None,
+                pass_clock: None,
+                sealed_known_pass: BTreeMap::new(),
                 directory_ids_unreadable: false,
             })),
             personality,
@@ -779,12 +788,33 @@ impl MemFs {
     /// as of `as_of`: the server's change id when the pass that earned the
     /// knowledge started. A body keeps the earliest.
     pub fn know_sealed(&self, found: impl IntoIterator<Item = (String, String)>, as_of: i64) {
+        let pass = self.passes_now();
         let mut st = self.state.lock().unwrap();
         for (sha, name) in found {
+            if let Some(pass) = pass {
+                let first = st.sealed_known_pass.entry(sha.clone()).or_insert(pass);
+                *first = (*first).min(pass);
+            }
             let at = st.sealed_known.entry(sha).or_insert(as_of);
             *at = (*at).min(as_of);
             st.sealed_names_known.insert(name);
         }
+    }
+
+    /// Per body, the pass in which this device's engine could first have
+    /// known it was sealed. See [`MemFs::know_sealed`].
+    pub fn sealed_known_passes(&self) -> BTreeMap<String, i64> {
+        self.state.lock().unwrap().sealed_known_pass.clone()
+    }
+
+    /// How many passes the world has started, where it has set the clock.
+    pub fn passes_now(&self) -> Option<i64> {
+        let clock = self.state.lock().unwrap().pass_clock.clone();
+        clock.map(|c| (c.0)())
+    }
+
+    pub fn set_pass_clock(&self, clock: ChangeClock) {
+        self.state.lock().unwrap().pass_clock = Some(clock);
     }
 
     /// Bodies and leaf names this device's engine could have known were
