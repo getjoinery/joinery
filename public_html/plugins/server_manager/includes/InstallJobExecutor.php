@@ -43,6 +43,9 @@
  * It writes the same mjb_output / mjb_status contract the agent's runner wrote,
  * so JobResultProcessor::process_install_node reads a completed job unchanged.
  *
+ * @version 1.10 - a management node without sshpass or ssh fails the job before any step, naming the tool
+ *                 (B36), instead of waiting out the SSH budget and blaming the server; holds_install_password()
+ *                 says whether a retry can log in (B37)
  * @version 1.9 - Clone is retired (site_copy.md WP9): no 'clone_key' stdin source
  * @version 1.8 - a step's stdin names a list: 'clone_key' joins 'admin_password', so a clone's export
  *                key reaches the bootstrap on its stdin and never on a command line (B7)
@@ -164,6 +167,18 @@ class InstallJobExecutor {
 		);
 		if ($ctx['host'] === '') {
 			$this->finish($job, false, 'The target node has no host address.');
+			return;
+		}
+		// Every remote step runs through sshpass and ssh on THIS machine. One
+		// missing fails here, by name, before anything reaches the server,
+		// rather than as a server that never answered.
+		$missing = self::missing_tools(getenv('PATH') ?: '');
+		if ($missing) {
+			$this->append($job, '[this management node has no ' . implode(' or ', $missing) . "]\n", 0);
+			$this->finish($job, false, 'This management node cannot run the install: ' . implode(' and ', $missing)
+				. ' ' . (count($missing) > 1 ? 'are' : 'is') . ' not installed here. The Server Manager plugin declares it, '
+				. 'and the host converger installs it within a few minutes (or: apt-get install ' . implode(' ', $missing)
+				. '). Nothing was done on the server; retry the install once it is there.');
 			return;
 		}
 
@@ -359,6 +374,43 @@ class InstallJobExecutor {
 			}
 			sleep(min(self::REFUSAL_PROBE_INTERVAL, max(1, $budget - (time() - $started))));
 		}
+	}
+
+	/**
+	 * Whether this plane still holds the install password for the node: the
+	 * one way the bootstrap logs in. It is held from the provision through
+	 * the install, and retired (erased here, refused by the server) once an
+	 * install has finished and the node's agents are admitted. A failed
+	 * install keeps it, so it can be run again.
+	 */
+	public static function holds_install_password($node): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT cvp_root_pass_sealed FROM cvp_customer_cloud_provisions " .
+			"WHERE cvp_mgn_managed_node_id = ? AND cvp_delete_time IS NULL " .
+			"ORDER BY cvp_customer_cloud_provision_id DESC LIMIT 1"
+		);
+		$q->execute([(int)$node->key]);
+		return trim((string)$q->fetchColumn()) !== '';
+	}
+
+	/** The tools a remote step needs, those not found on PATH. Pure over PATH, for the test. */
+	public static function missing_tools(string $path): array {
+		$dirs = array_filter(explode(':', $path !== '' ? $path : '/usr/local/bin:/usr/bin:/bin'));
+		$missing = array();
+		foreach (array('sshpass', 'ssh') as $tool) {
+			$found = false;
+			foreach ($dirs as $dir) {
+				if (is_file($dir . '/' . $tool) && is_executable($dir . '/' . $tool)) {
+					$found = true;
+					break;
+				}
+			}
+			if (!$found) {
+				$missing[] = $tool;
+			}
+		}
+		return $missing;
 	}
 
 	/**

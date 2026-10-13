@@ -931,6 +931,10 @@ as a deliberate rotation. Three properties make it safe:
 - **The next run starts a fresh chain.** A chain cannot change recipients
   mid-life, so the runner ends the current chain when the recovery recipient no
   longer matches (`recovery_rotated`) and the new chain seals to the new key.
+- **A restore never undoes it.** A database restored from before a rotation
+  holds the key rotated away from. `restore_database.sh` reads the proven key
+  the database holds before the load and writes it back after, saying so; an
+  unproven key (none yet, or one mid-rotation) gives way to the backup's.
 
 Standing re-verification lives on **Recovery Readiness**, so "did I really save
 it?" has an answer on demand rather than only at setup time.

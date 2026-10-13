@@ -16,15 +16,15 @@
  * products, not layers: the personal suite and a creator-hosting product
  * share nothing, so composition would buy indirection and no reuse.
  *
- * Usage:
- *   sudo -u www-data php install_bundle.php [--bundle=NAME] [--plugins=a,b]
- *                                           [--list] [--dry-run]
+ * Usage (as root: the code tree is root's, and a fetched plugin is unpacked into it):
+ *   sudo php install_bundle.php [--bundle=NAME] [--plugins=a,b] [--list] [--dry-run] [--help]
  *
  *   --bundle=NAME   Bundle from install_bundles.json. Default: personal.
  *   --plugins=a,b   Install exactly these, ignoring the file. For one-offs
  *                   and for testing; nothing in the install path uses it.
  *   --list          Print the available bundles and exit.
  *   --dry-run       Say what would be installed, change nothing.
+ *   --help          Print this and exit. Any other option is refused, never ignored.
  *
  * Safe to re-run: a plugin that is already installed is left alone, and one
  * that is installed but inactive is activated.
@@ -37,6 +37,8 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 1.3 - the usage names root (as www-data a fetched plugin cannot be unpacked into the root-owned tree);
+ *                --help prints the usage, and an option it does not know is refused instead of ignored
  * @version 1.2 - a plugin already switched on (plg_active) is reported active, whatever its status says
  * @version 1.1
  */
@@ -142,22 +144,40 @@ function ib_fetch_missing(array $wanted, $dry_run = false) {
     return ['errors' => $errors, 'planned' => $planned];
 }
 
-/** Minimal --flag / --flag=value parser. */
+/** The usage, from this file's own header. */
+function ib_usage() {
+    $src = (string)file_get_contents(__FILE__);
+    if (preg_match('#\n \* Usage[^\n]*\n(.*?)\n \*\n \* Safe to re-run#s', $src, $m)) {
+        return preg_replace('/^ \* ?/m', '', " * Usage (as root: the code tree is root's, and a fetched plugin is unpacked into it):\n" . $m[1]) . "\n";
+    }
+    return "Usage: sudo php install_bundle.php [--bundle=NAME] [--plugins=a,b] [--list] [--dry-run] [--help]\n";
+}
+
+/**
+ * Minimal --flag / --flag=value parser. An option it does not know is
+ * refused: ignored, a mistyped --dry-run would run for real.
+ */
 function ib_opts(array $argv) {
+    $known = ['bundle' => true, 'plugins' => true, 'list' => false, 'dry-run' => false, 'help' => false];
     $opts = [];
     for ($i = 1; $i < count($argv); $i++) {
         $arg = $argv[$i];
         if (strpos($arg, '--') !== 0) {
-            fwrite(STDERR, "ERROR: unexpected argument '{$arg}'.\n");
+            fwrite(STDERR, "ERROR: unexpected argument '{$arg}'.\n" . ib_usage());
             exit(2);
         }
         $body = substr($arg, 2);
-        if (strpos($body, '=') !== false) {
-            list($key, $value) = explode('=', $body, 2);
-            $opts[$key] = $value;
-        } else {
-            $opts[$body] = true;
+        $has_value = strpos($body, '=') !== false;
+        list($key, $value) = $has_value ? explode('=', $body, 2) : [$body, true];
+        if (!array_key_exists($key, $known) || $known[$key] !== $has_value) {
+            fwrite(STDERR, "ERROR: '{$arg}' is not an option of this tool. Nothing was changed.\n" . ib_usage());
+            exit(2);
         }
+        $opts[$key] = $value;
+    }
+    if (isset($opts['help'])) {
+        fwrite(STDOUT, ib_usage());
+        exit(0);
     }
     return $opts;
 }

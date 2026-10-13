@@ -75,12 +75,13 @@ bash "$RUNNER" --site-root="$T" >/dev/null 2>&1   # a plain run writes no stamp
 # The stamp the runner would compute for this tree; written by hand so the
 # next tick sees "unchanged". Mirrors converge_hash() in the runner: VERSION,
 # every script in the fixture's install_tools, the vhost templates and their
-# history, every plugin manifest, and the active-plugin list (unreachable here).
+# history, every plugin manifest, the active-plugin list and the host switches
+# the site's settings hold, agent_enabled (both unreachable here).
 expected_stamp() {
     local tools="$T/maintenance_scripts/install_tools"
     { cat "$T/public_html/VERSION" "$tools"/*.sh "$tools"/default_*.conf "$tools"/vhost_history/*.conf 2>/dev/null
       for m in "$T"/public_html/plugins/*/plugin.json; do [ -f "$m" ] && cat "$m"; done
-      echo "db-unreachable"; } | sha256sum | cut -d' ' -f1
+      echo "db-unreachable"; echo "db-unreachable"; } | sha256sum | cut -d' ' -f1
 }
 expected_stamp > "$STAMP"
 out=$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)

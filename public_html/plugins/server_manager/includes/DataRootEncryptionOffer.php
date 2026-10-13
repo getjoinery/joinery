@@ -22,6 +22,9 @@
  *     the exception D-L makes for the machines that predate the rule.
  * The 32 MiB past the end of the backing the script checks for itself.
  *
+ * @version 1.2 - provider_layer(): a data root on a storage volume is under the volume's encryption, which the
+ *                provider is asked (B28), not the server's disk's
+ * @version 1.1 - what it says names no spec ids, and the provider-layer refusal reads "on for this machine" (B26)
  * @version 1.0
  */
 
@@ -39,14 +42,56 @@ class DataRootEncryptionOffer {
 		return is_array($hr) ? ($hr[$key] ?? null) : null;
 	}
 
-	/** The provider's disk encryption on this node's machine: 'enabled', 'disabled' or 'unknown'. */
+	/** What provider_layer() has read this request, by node: the volume case asks the provider. */
+	private static $layer_seen = array();
+
+	/**
+	 * The provider's own encryption under this node's data root: 'enabled',
+	 * 'disabled' or 'unknown'. The server's disk's, recorded on its
+	 * provision; but a data root on a storage volume (its host report names
+	 * the device) sits under the volume's, which the provider is asked.
+	 */
 	public static function provider_layer(ManagedNode $node): string {
+		$key = (int)$node->key;
+		if (!isset(self::$layer_seen[$key])) {
+			self::$layer_seen[$key] = self::read_provider_layer($node);
+		}
+		return self::$layer_seen[$key];
+	}
+
+	private static function read_provider_layer(ManagedNode $node): string {
 		$provision = IpSwapMove::provision_of($node);
 		if (!$provision) {
 			return 'unknown';
 		}
+		$pool = self::report($node, 'disk_pool');
+		$device = is_array($pool) ? (string)($pool['device'] ?? '') : '';
+		if ($device !== '') {
+			$volume = self::volume_layer($provision, $device);
+			if ($volume !== '') {
+				return $volume;
+			}
+		}
 		$v = (string)$provision->get('cvp_provider_disk_encryption');
 		return in_array($v, array('enabled', 'disabled'), true) ? $v : 'unknown';
+	}
+
+	/** The volume's layer, '' where the device is a disk of the server itself, 'unknown' where it cannot be read. */
+	private static function volume_layer(CustomerCloudProvision $provision, string $device): string {
+		$oca_id = (int)$provision->get('cvp_oca_operator_cloud_account_id');
+		$account = $oca_id ? new OperatorCloudAccount($oca_id, TRUE) : null;
+		if (!$account || !$account->key || !$account->usable()) {
+			return 'unknown';
+		}
+		try {
+			$driver = $account->driver();
+			if (!($driver instanceof CloudVolumeFacts)) {
+				return 'unknown';
+			}
+			return $driver->volumeEncryption((string)$provision->get('cvp_instance_id'), $device);
+		} catch (Exception $e) {
+			return 'unknown';
+		}
 	}
 
 	/**
@@ -61,7 +106,7 @@ class DataRootEncryptionOffer {
 		$ours = DataRootEscrowSync::sealed_to_operator($node);
 		$out[] = array('label' => 'In one of our accounts', 'ok' => $ours,
 			'note' => $ours ? 'its break-glass copy is sealed to this management node\'s recovery key'
-				: 'it is in its owner\'s account: it is encrypted from its own Backups page, sealed to its owner\'s recovery key (D2)');
+				: 'it is in its owner\'s account: it is encrypted from its own Backups page, sealed to its owner\'s recovery key');
 		$out[] = array('label' => 'A data root, not encrypted',
 			'ok' => is_array($pool) && $enc === 'none',
 			'note' => is_array($pool) ? ($enc === 'none' ? '' : 'it is encrypted already, or its host report does not say') : 'this host has no data root (move its data there first)');
@@ -104,8 +149,8 @@ class DataRootEncryptionOffer {
 			}
 		}
 		if (self::provider_layer($node) !== 'disabled' && !$keep_provider_layer) {
-			$why[] = 'The provider\'s disk encryption is ' . (self::provider_layer($node) === 'enabled' ? 'on' : 'not known to be off')
-				. ' on this machine: one layer only (D1a). A copy of the site onto a new server born encrypted gives one layer;'
+			$why[] = 'The provider\'s disk encryption ' . (self::provider_layer($node) === 'enabled' ? 'is on for' : 'is not known to be off for')
+				. ' this machine: one layer only. A copy of the site onto a new server born encrypted gives one layer;'
 				. ' keeping the provider\'s layer as well is for the machines that predate that rule.';
 		}
 		if ($why) {

@@ -17,6 +17,10 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.4 - its escrow holder is this management node from the moment the enrolment is confirmed, not
+ *                from its next host report (B30); what only a holder has to say (its answers, its refusals,
+ *                where it may ask from, Stop holding its key, the unlock) shows only where its key is held
+ *                here (B34); a machine enrolled since this holder's newest backup says so (O11)
  * @version 1.3 - Tier 2 (D3): what the holder reads before it answers, the event that refused a boot, and
  *                the two ways on (I did this myself; a copy from backups)
  * @version 1.2 - Re-encrypt under a new key (D8); the re-encryption's progress
@@ -64,6 +68,12 @@ if (is_array($dre_enc) || $dre_row) {
 	};
 	$dre_open = is_array($dre_enc) ? !empty($dre_enc['open']) : null;
 	$dre_status = $dre_row ? (string)$dre_row->get('dre_status') : '';
+	// Its key is held here, or is on its way to being: what only a holder has
+	// to say (answers, refusals, addresses, the unlock) is about such a row.
+	$held_here = in_array($dre_status, array('enrolled', 'approved', 'pending'), true);
+	$own = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
+	$report_holder = is_array($dre_enc) ? (string)$dre_enc['holder'] : '';
+	$names_other = $report_holder !== '' && strcasecmp($report_holder, $own) !== 0;
 
 	echo '<div id="node-data-root-encryption"></div>';
 	$page->begin_box(['title' => 'Encrypted data root']);
@@ -83,7 +93,7 @@ if (is_array($dre_enc) || $dre_row) {
 		}
 		$layer_now = DataRootEncryptionOffer::provider_layer($node);
 		$row_out('Layers', $layer_now === 'enabled'
-			? '<strong>two</strong>: the provider\'s disk encryption and ours. This machine predates the one-layer rule (D-L); it ends when the machine is replaced.'
+			? '<strong>two</strong>: the provider\'s disk encryption and ours. This machine predates the one-layer rule; it ends when the machine is replaced.'
 			: ($layer_now === 'disabled' ? 'one: ours (the provider\'s disk encryption is off)' : 'ours; the provider\'s disk encryption is not known'));
 		// What is not on the encrypted volume, each with its reason (D10).
 		$row_out('Stays on the root disk', '<span class="small">TLS private keys (the unlock page needs them); the SSH host keys '
@@ -103,9 +113,16 @@ if (is_array($dre_enc) || $dre_row) {
 				. $dre_h(LibraryFunctions::time_ago(gmdate('Y-m-d H:i:s', (int)$hm[1]), SessionControl::get_instance()->get_timezone()))
 				. ': ' . $dre_h($hm[2]) . '. The old kernel runs until its escrow holder answers.</span>');
 		}
-		$row_out('Its escrow holder', $dre_enc['holder'] !== ''
-			? $dre_h($dre_enc['holder']) . (is_int($dre_enc['slot']) ? ' &middot; key slot ' . (int)$dre_enc['slot'] : '')
-			: '<span class="text-muted">none yet: it opens by its recovery key</span>');
+		// The host report says it once the machine next reports; an enrolment
+		// confirmed here is this management node from that moment.
+		if ($report_holder !== '') {
+			$holder_html = $dre_h($report_holder) . (is_int($dre_enc['slot']) ? ' &middot; key slot ' . (int)$dre_enc['slot'] : '');
+		} elseif ($dre_status === 'enrolled') {
+			$holder_html = 'this management node &middot; key slot ' . (int)$dre_row->get('dre_slot');
+		} else {
+			$holder_html = '<span class="text-muted">none yet: it opens by its recovery key</span>';
+		}
+		$row_out('Its escrow holder', $holder_html);
 	}
 	if ($dre_row) {
 		$held = array(
@@ -115,7 +132,24 @@ if (is_array($dre_enc) || $dre_row) {
 			'known'    => 'not enrolled: known from its host report only',
 			'retired'  => 'no longer held here',
 		);
-		$row_out('Held here', $dre_h($held[$dre_status] ?? $dre_status));
+		$row_out('Held here', $dre_h($held[$dre_status] ?? $dre_status)
+			. (!$held_here && $names_other ? ' &middot; its key is held by ' . $dre_h($report_holder) : ''));
+		// O11: rebuilt from a backup older than the enrolment, this holder
+		// would not hold the key.
+		if ($dre_status === 'enrolled') {
+			$dre_last_backup = EscrowHolderBackup::last_backup();
+			if (EscrowHolderBackup::enrolment_uncovered($dre_row, $dre_last_backup)) {
+				$row_out('This holder\'s backup', '<span class="text-warning">' . ($dre_last_backup === null
+					? 'This management node has no backup in backup storage: rebuilt, it would hold no key, and this machine would open by its recovery key at its next boot.'
+					: 'Enrolled after this management node\'s newest backup ('
+						. $dre_h(LibraryFunctions::convert_time($dre_last_backup, 'UTC', SessionControl::get_instance()->get_timezone(), 'M j, Y g:i a'))
+						. '): rebuilt from that backup, it would not hold this key, and this machine would open by its recovery key. '
+						. 'A backup runs within the hour of an enrolment where this site takes backups of its own.')
+					. '</span>');
+			}
+		}
+	}
+	if ($dre_row && $held_here) {
 		if ($dre_row->get('dre_answered_time')) {
 			$row_out('Last answer', $dre_h($dre_when('dre_answered_time') . ', to ' . $dre_row->get('dre_answered_address'))
 				. ($dre_row->get('dre_unlocked_time') && strtotime($dre_row->get('dre_unlocked_time')) >= strtotime($dre_row->get('dre_answered_time'))
@@ -153,10 +187,10 @@ if (is_array($dre_enc) || $dre_row) {
 	echo '</tbody></table>';
 
 	// Enrol here: when this plane is its holder (its machine names none, or this one).
-	$own = rtrim((string)LibraryFunctions::get_absolute_url(), '/');
-	$names_other = is_array($dre_enc) && $dre_enc['holder'] !== '' && strcasecmp($dre_enc['holder'], $own) !== 0;
-	if (!$node->is_self() && $dre_open && !$names_other && !in_array($dre_status, array('enrolled', 'pending'), true)
-			&& JobCommandBuilder::has_primitive($node, 'data_root_enrol')) {
+	$may_enrol = !$node->is_self() && $dre_open && !$names_other && !in_array($dre_status, array('enrolled', 'pending'), true);
+	if ($may_enrol && !DataRootEscrow::takes_new_enrolments()) {
+		echo '<p class="text-muted small mb-2">' . $dre_h(DataRootEscrow::NO_NEW_ENROLMENTS) . '</p>';
+	} elseif ($may_enrol && JobCommandBuilder::has_primitive($node, 'data_root_enrol')) {
 		echo '<form id="data_root_enrol_form" method="post" action="' . $base_url . '" class="d-inline">'
 			. '<input type="hidden" name="action" value="data_root_enrol">' . SmAdminCsrf::field()
 			. '<button type="submit" class="btn btn-sm btn-primary">Enrol with this management node</button></form> ';
@@ -168,7 +202,8 @@ if (is_array($dre_enc) || $dre_row) {
 	// Unlock from here (D2b): a locked machine, and the box to open. Locked is
 	// what its host report says, or, sooner, what its own asks say: a locked
 	// machine asks this holder every ten seconds, and has not said it is open.
-	$parts = $dre_row ? $dre_row->box_parts() : null;
+	// Only where this holder is the one it asks.
+	$parts = ($dre_row && !$names_other && in_array($dre_status, array('enrolled', 'approved'), true)) ? $dre_row->box_parts() : null;
 	$asking_now = $dre_row && $dre_row->is_asking_now();
 	if (($dre_open === false || $asking_now) && $parts !== null) {
 		$asking = (string)$dre_row->get('dre_last_request_address');
@@ -213,7 +248,7 @@ if (is_array($dre_enc) || $dre_row) {
 			. '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="JoineryModal.confirm(\'Decrypt this data root, back to plain, online? It runs in the background for hours; its data is readable in a copy of its disk from then on.\', function(){ document.getElementById(\'data_root_decrypt_form\').submit(); })">Decrypt (undo)</button></form>';
 	}
 
-	if ($dre_row && $dre_status !== 'retired') {
+	if ($dre_row && $held_here) {
 		echo '<form id="data_root_escrow_retire_form" method="post" action="' . $base_url . '" class="mt-3">'
 			. '<input type="hidden" name="action" value="data_root_escrow_retire">' . SmAdminCsrf::field()
 			. '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm(\'Stop holding this machine\\\'s key? It opens by its recovery key at every boot until it is enrolled again.\', function(){ document.getElementById(\'data_root_escrow_retire_form\').submit(); })">Stop holding its key</button></form>';

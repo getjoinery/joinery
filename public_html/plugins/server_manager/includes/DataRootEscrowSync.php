@@ -21,6 +21,8 @@
  * (data_root_recipient), and its tick seals the copy again; the Backups page
  * counts them (sealing_counts()).
  *
+ * @version 1.3 - a rotated key is sent at once: the hour between sends holds back only the same key again (B35)
+ * @version 1.2 - no enrolment job while this holder takes no new enrolments (DataRootEscrow::takes_new_enrolments)
  * @version 1.1 - hosted machines sealed to an older operator key are sent the current one (D8)
  * @version 1.0
  */
@@ -66,6 +68,9 @@ class DataRootEscrowSync {
 
 	/** Whether this plane should enrol the node's data root now. */
 	public static function should_enrol(ManagedNode $node, DataRootEscrow $row, array $enc): bool {
+		if (!DataRootEscrow::takes_new_enrolments()) {
+			return false;
+		}
 		if (in_array((string)$row->get('dre_status'), array('enrolled', 'pending'), true)) {
 			return false;
 		}
@@ -82,6 +87,15 @@ class DataRootEscrowSync {
 
 	private static function enrol_job_recent(ManagedNode $node): bool {
 		return self::job_recent($node, 'data_root_enrol');
+	}
+
+	/** A data_root_recipient job carrying this very key, made within the retry window. */
+	private static function recipient_sent_recently(ManagedNode $node, string $key): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT 1 FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'data_root_recipient'
+			AND mjb_commands->'params'->>'public_key' = ? AND mjb_create_time > now() - (? * interval '1 second') LIMIT 1");
+		$q->execute(array($node->key, $key, self::ENROL_RETRY_SECONDS));
+		return (bool)$q->fetchColumn();
 	}
 
 	private static function job_recent(ManagedNode $node, string $type): bool {
@@ -118,11 +132,17 @@ class DataRootEscrowSync {
 			return;
 		}
 		$fpr = self::operator_fingerprint();
-		if ($fpr === '' || ($enc['recipient_fingerprint'] ?? '') === $fpr || self::job_recent($node, 'data_root_recipient')) {
+		if ($fpr === '' || ($enc['recipient_fingerprint'] ?? '') === $fpr) {
+			return;
+		}
+		$key = base64_encode(BackupRecoveryKey::public_key());
+		// The same key once an hour at most; a new key (a rotation) at once,
+		// whatever was sent before it.
+		if (self::recipient_sent_recently($node, $key)) {
 			return;
 		}
 		try {
-			$built = JobCommandBuilder::build_data_root_recipient($node, base64_encode(BackupRecoveryKey::public_key()));
+			$built = JobCommandBuilder::build_data_root_recipient($node, $key);
 			ManagementJob::createFromBuild($node->key, 'data_root_recipient', $built, null, null);
 		} catch (Exception $e) {
 			// An agent too old for the word: the node page says so.

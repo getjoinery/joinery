@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.13 - The recovery key the database holds proven is put back after the load: a dump from before a
+#              key rotation names the key rotated away from, and loaded as it is the site would seal its next
+#              backups to it and its management node would re-seal every machine's break-glass copy to it
 #Version 3.12 - A loaded dump is analyzed before RESTORE_OK: a dump carries no planner statistics
 #Version 3.11 - Comment only: the stage holds the gz and the dump together while gunzip runs
 #Version 3.10 - The dump stages beside the archive, not in /tmp. On Ubuntu 26.04 /tmp is a tmpfs
@@ -60,6 +63,9 @@
 #     failure exits with it untouched.
 #   * Roles: a role the dump names and the server lacks is created without
 #     login before anything is dropped (stage 1c).
+#   * The recovery key survives: a key the target holds proven (the
+#     backup_recovery_public_key setting and its proof) is written back over
+#     whatever the dump holds. It changes only by its rotation ceremony.
 #   * Key resolution order: --key-file -> the envelope sidecar beside the
 #     archive (opened with this machine's own config/backup_site_key) ->
 #     $BACKUP_ENCRYPTION_KEY -> ~/.joinery_backup_key -> interactive prompt
@@ -504,6 +510,47 @@ if ! DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datna
     echo "DB_UNREACHABLE"
     exit 7
 fi
+# The recovery key this site has proven. Backups and the encrypted data root
+# are sealed to it, and it changes only by its rotation ceremony: a dump taken
+# before a rotation names the key rotated away from (perhaps because it may
+# have been seen), and loaded as it is, the site would seal its next backups
+# to that key, and its management node would re-seal every machine's
+# break-glass copy to it. So it is put back after the load. A key that is not
+# proven (none yet, or one being rotated to) gives way to the dump's.
+KEPT_KEY=""; KEPT_PROOF=""
+recovery_key_settings() {  # -> "KEY<TAB>PROOF" from DB_NAME, or nothing
+    psql -U "$DB_USER" -d "$DB_NAME" -XtA -F $'\t' -c "SELECT
+        (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key'),
+        (SELECT stg_value FROM stg_settings WHERE stg_name = 'backup_recovery_public_key_proven_fpr')" 2>/dev/null || true
+}
+if [ "$DB_EXISTS" = "1" ]; then
+    IFS=$'\t' read -r CUR_KEY CUR_PROOF < <(recovery_key_settings) || true
+    CUR_KEY="$(printf '%s' "${CUR_KEY:-}" | tr -d '[:space:]')"
+    if [ -n "$CUR_KEY" ] && [ -n "${CUR_PROOF:-}" ] \
+        && [ "$(printf '%s' "$CUR_KEY" | base64 -d 2>/dev/null | sha256sum | awk '{ print $1 }')" = "$CUR_PROOF" ]; then
+        KEPT_KEY="$CUR_KEY"; KEPT_PROOF="$CUR_PROOF"
+    fi
+fi
+keep_recovery_key() {
+    [ -n "$KEPT_KEY" ] || return 0
+    local loaded loaded_fpr
+    IFS=$'\t' read -r loaded _ < <(recovery_key_settings) || true
+    loaded="$(printf '%s' "${loaded:-}" | tr -d '[:space:]')"
+    [ "$loaded" = "$KEPT_KEY" ] && return 0
+    loaded_fpr="$(printf '%s' "$loaded" | base64 -d 2>/dev/null | sha256sum | awk '{ print $1 }')"
+    if printf '%s\n' \
+        "UPDATE stg_settings SET stg_value = :'k', stg_update_time = now() WHERE stg_name = 'backup_recovery_public_key';" \
+        "INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) SELECT 'backup_recovery_public_key', :'k', 'backups' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_recovery_public_key');" \
+        "UPDATE stg_settings SET stg_value = :'p', stg_update_time = now() WHERE stg_name = 'backup_recovery_public_key_proven_fpr';" \
+        "INSERT INTO stg_settings (stg_name, stg_value, stg_group_name) SELECT 'backup_recovery_public_key_proven_fpr', :'p', 'backups' WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'backup_recovery_public_key_proven_fpr');" \
+        | psql -U "$DB_USER" -d "$DB_NAME" -XqA -v ON_ERROR_STOP=1 -v k="$KEPT_KEY" -v p="$KEPT_PROOF" --single-transaction 1>&2; then
+        info "🔑 Kept this site's recovery key ${KEPT_PROOF:0:16}. The backup names $( [ -n "$loaded" ] && printf '%s, a key it was rotated from' "${loaded_fpr:0:16}" || printf 'none')."
+    else
+        info "⚠ The backup's recovery key ${loaded_fpr:0:16} could not be replaced with this site's own ${KEPT_PROOF:0:16}."
+        info "  Backups will be sealed to the backup's key until the recovery key is rotated again on the Backups page."
+    fi
+}
+
 if [ "$DB_EXISTS" = "1" ]; then
     info "🧹 Replacing schema (DROP SCHEMA public CASCADE; CREATE SCHEMA public)..."
     if ! psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
@@ -523,6 +570,7 @@ fi
 
 info "📥 Loading dump under ON_ERROR_STOP..."
 if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
+    keep_recovery_key
     # A dump carries no planner statistics: until ANALYZE, every table reads as
     # never analyzed and the site plans its queries blind (the nightly Database
     # maintenance task would catch it, up to a day later). The restore has

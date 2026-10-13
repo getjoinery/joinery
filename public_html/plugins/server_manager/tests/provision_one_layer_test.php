@@ -212,6 +212,24 @@ $threw = false;
 try { $d->regionInfo(' '); } catch (CloudComputeException $e) { $threw = true; }
 check($threw, 'regionInfo refuses a blank region rather than reading the whole list');
 
+// B28: a data root on a Block Storage volume sits under the volume's encryption.
+$vols = pol_json(array('data' => array(
+	array('id' => 18488612, 'label' => 'mgr-b-vol', 'encryption' => 'enabled'),
+	array('id' => 18488613, 'label' => 'plain-vol', 'encryption' => 'disabled'),
+), 'page' => 1, 'pages' => 1));
+$d = pol_driver(array($vols, $vols), $h);
+check($d->volumeEncryption('880006', '/dev/disk/by-id/scsi-0Linode_Volume_mgr-b-vol') === 'enabled'
+	&& $d->volumeEncryption('880006', '/dev/disk/by-id/scsi-0Linode_Volume_plain-vol') === 'disabled'
+	&& pol_requests($h)[0][0] === 'GET /v4/linode/instances/880006/volumes',
+	'volumeEncryption reads the attached volume by the label in its device path', json_encode(pol_requests($h)));
+$d = pol_driver(array(), $h);
+check($d->volumeEncryption('880006', '/dev/sdb') === '' && count($h) === 0,
+	'a device that is not a volume is the server\'s own disk: no answer of the volume\'s, and nothing asked');
+$d = pol_driver(array($vols), $h);
+$threw = false;
+try { $d->volumeEncryption('880006', '/dev/disk/by-id/scsi-0Linode_Volume_gone'); } catch (CloudComputeException $e) { $threw = true; }
+check($threw, 'a volume this instance does not have is an error, never a guess');
+
 // ---------------------------------------------------------------------------
 section('The pipeline: an encrypted provision is born with the provider\'s layer off and no swap disk');
 

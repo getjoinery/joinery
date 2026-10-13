@@ -28,6 +28,9 @@
  * known (seen from its node's host report, never enrolled: a holder unlock can
  * still answer it), retired.
  *
+ * @version 1.3 - takes_new_enrolments(): only where data_root_encryption_offered is on (D7: none before the release
+ *                keys are rotated); approve() refuses otherwise. dre_retired_time: when this holder gave a key up, an escrow change its own backup must
+ *                follow (O11, EscrowHolderBackup)
  * @version 1.2 - address_moved(): an IP swap this management node makes moves the rows' stated and seen addresses
  * @version 1.1 - Tier 2 (D3): the provider event that refused a boot, and the owner's excuse for it
  * @version 1.0
@@ -95,6 +98,9 @@ class DataRootEscrow extends SystemBase {
 		'dre_approved_time'   => array('type'=>'timestamp(6)'),
 		'dre_approved_usr_user_id' => array('type'=>'int4'),
 		'dre_enrolled_time'   => array('type'=>'timestamp(6)'),
+		// When this holder gave the key up (retire). With the enrolment time,
+		// what this holder's own backup has to follow (O11).
+		'dre_retired_time'    => array('type'=>'timestamp(6)'),
 		// The last answer, and what the machine said since.
 		'dre_answered_time'   => array('type'=>'timestamp(6)'),
 		'dre_answered_boot_id' => array('type'=>'varchar(64)'),
@@ -365,10 +371,26 @@ class DataRootEscrow extends SystemBase {
 		$this->set('dre_refusal_address', $addr);
 	}
 
+	/**
+	 * Whether this holder takes NEW enrolments: only where encrypting is
+	 * switched on (data_root_encryption_offered). Until the release signing
+	 * keys are rotated, no machine enrols anywhere: whoever holds the old keys
+	 * could ship a release that reads every escrow secret out of the holder.
+	 * Enrolments made already keep answering.
+	 */
+	public static function takes_new_enrolments(): bool {
+		return DataRootEncryptionOffer::offered();
+	}
+
+	const NO_NEW_ENROLMENTS = 'This management node takes no new escrow enrolments yet: none is made anywhere until the release signing keys are rotated. Machines already enrolled here keep opening.';
+
 	/** A person approves a waiting enrolment (C-3), after comparing fingerprints. */
 	public function approve(int $user_id): void {
 		if ((string)$this->get('dre_status') !== 'pending') {
 			throw new DataRootEscrowException('Only an enrolment that is waiting can be approved.');
+		}
+		if (!self::takes_new_enrolments()) {
+			throw new DataRootEscrowException(self::NO_NEW_ENROLMENTS);
 		}
 		$this->set('dre_status', 'approved');
 		$this->set('dre_approved_time', gmdate('Y-m-d H:i:s'));
@@ -381,6 +403,11 @@ class DataRootEscrow extends SystemBase {
 	 * go, and it opens by its recovery key until it enrols again.
 	 */
 	public function retire(): void {
+		// A key it held, given up: an escrow change its own backup must follow.
+		// A request refused before any key was handed over is not one.
+		if (trim((string)$this->get('dre_secret')) !== '') {
+			$this->set('dre_retired_time', gmdate('Y-m-d H:i:s'));
+		}
 		$this->set('dre_status', 'retired');
 		$this->set('dre_secret', null);
 		$this->set('dre_report_key', null);

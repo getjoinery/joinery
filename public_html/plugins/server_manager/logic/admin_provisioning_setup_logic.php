@@ -9,6 +9,8 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.1 - an account added, or a key replaced, is said as done, and a scope its token lacks (or a check
+ *   that failed) beside it as a warning, not the whole as an error (B25)
  * @version 2.0 - tabs; the Hosting tab's cloud accounts: add by API key or Connect with Linode, check, replace a key,
  *   make default, remove (cloud_accounts_list WP4); the hosted card no longer takes a token; the cleanup preview
  *   covers every test account
@@ -80,6 +82,9 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 
 	if ($action !== '') {
 		$message = null;
+		// Done, with something that still needs a person: said beside the
+		// success, never as an error.
+		$warning = null;
 		$error = null;
 		$return_tab = SMPS_ACTION_TABS[$action] ?? $tab;
 		$account_of = function () use ($input): OperatorCloudAccount {
@@ -102,9 +107,8 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				}
 				$missing = $account->missing_scopes();
 				if ($missing) {
-					$error = $message . ' Its token lacks ' . implode(', ', array_keys($missing))
+					$warning = 'Its token lacks ' . implode(', ', array_keys($missing))
 						. '; what needs them will be refused. Replace the key with one that has them.';
-					$message = null;
 				}
 			} elseif ($action === 'connect_account' || $action === 'reconnect_account') {
 				$account_id = 0;
@@ -150,11 +154,10 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				$account->store_credential($token);
 				$account->set('oca_status', OperatorCloudAccount::STATUS_ACTIVE);
 				$account->save();
+				$message = 'Replaced the key for ' . $account->label() . '.';
 				$why = $account->check();
 				if ($why !== '') {
-					$error = 'The key was replaced, but ' . lcfirst($why);
-				} else {
-					$message = 'Replaced the key for ' . $account->label() . '.';
+					$warning = $why;
 				}
 			} elseif ($action === 'default_account') {
 				$account = $account_of();
@@ -236,6 +239,10 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 		if ($message) {
 			$session->save_message(new DisplayMessage($message, 'Success', $page_regex,
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		}
+		if ($warning) {
+			$session->save_message(new DisplayMessage($warning, 'Warning', $page_regex,
+				DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		}
 		if ($error) {
 			$session->save_message(new DisplayMessage($error, 'Error', $page_regex,

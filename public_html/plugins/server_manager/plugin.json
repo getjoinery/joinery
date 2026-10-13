@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.66",
+  "version": "1.30.67",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -8,6 +8,9 @@
   "requires_entitlement": true,
   "receives_upgrades": true,
   "included_in_publish": true,
+  "requires": {
+    "packages": ["sshpass"]
+  },
   "bootstrap": "includes/bootstrap.php",
   "styles": [
     "assets/css/server_manager.css"

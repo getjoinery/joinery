@@ -38,6 +38,8 @@
  * volume is ciphertext, cannot make one, so it can neither move the address
  * check to its own address nor reset the one-answer rule.
  *
+ * @version 1.2 - a vouched enrolment is named by its node (B21); enrol refuses a new enrolment while this holder takes none (DataRootEscrow::takes_new_enrolments,
+ *                D7); one approved or enrolled carries on
  * @version 1.1 - rekey (D8); Tier 2 (D3): the provider's activity log read before an unlock is answered,
  *                and before a preflight says it would be
  * @version 1.0
@@ -204,6 +206,12 @@ class EscrowEndpoint {
 		}
 		$node = self::node_proof($identity, $body, $host);
 		$row = DataRootEscrow::find_by_identity($identity);
+		// An enrolment under way (approved) or made (enrolled) carries on; a
+		// new one waits until this holder takes them.
+		if (!DataRootEscrow::takes_new_enrolments()
+				&& !($row && in_array((string)$row->get('dre_status'), array('approved', 'enrolled'), true))) {
+			throw new EscrowRefusal(DataRootEscrow::NO_NEW_ENROLMENTS, 'PermissionError', 403);
+		}
 		if (!$row) {
 			if (!$node && count(new MultiDataRootEscrow(array('status' => 'pending'))) >= DataRootEscrow::MAX_PENDING) {
 				throw new EscrowRefusal('Too many enrolments are waiting for approval on this holder. Try again later.', 'RateLimitError', 429);
@@ -226,7 +234,9 @@ class EscrowEndpoint {
 		// it changes nothing, and it must ask from where it said it would.
 		self::note_request($row, $addr);
 		if ($node || $status !== 'approved') {
-			$row->set('dre_hostname', substr(trim((string)($body['hostname'] ?? '')), 0, 255));
+			// Its node's name where its node vouches: a machine's own name may
+			// be the "localhost" its image was born with.
+			$row->set('dre_hostname', substr($node ? (string)$node->get('mgn_name') : trim((string)($body['hostname'] ?? '')), 0, 255));
 			$row->set_stated_addresses((array)($body['addresses'] ?? array()));
 			$row->note_seen_address($addr);
 			$row->note_box((string)($body['box'] ?? ''));

@@ -11,6 +11,8 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.10 - staged_runs(): which runs of which chains a Prepare has put on the node, from its stage
+ *                  jobs' STAGE_CHAIN / STAGE_SEQ lines; a restore is offered only for those (B39, B40)
  * @version 1.9 - each run names its own manifest and the sha256 the broker recorded for it, and a chain whose
  *                newest manifest in backup storage differs from the recorded one says so (specs/storage_targets.md WP5)
  * @version 1.8 - the object store totals read keys through BackupObjects::location_of(), offloaded mail included
@@ -233,5 +235,24 @@ class BackupChainListHelper {
 	/** Bytes as a short human string — BackupRunner::human(), the one backup-size format. */
 	public static function format_size($bytes) {
 		return BackupRunner::human((int)$bytes);
+	}
+
+	/**
+	 * The runs a Prepare has put on this node, as [chain_id => [seq, ...]]:
+	 * each finished stage_chain job says which chain and which run it staged.
+	 * Staging is per run (a run needs its own full and incrementals, not the
+	 * newest run's), and the node's workspace for a chain keeps what every
+	 * Prepare of it fetched, so each staged run stays restorable.
+	 */
+	public static function staged_runs(ManagedNode $node): array {
+		$out = array();
+		foreach (new MultiManagementJob(array('node_id' => (int)$node->key, 'job_type' => 'stage_chain', 'status' => 'completed',
+				'deleted' => false), array('mjb_management_job_id' => 'DESC'), 100) as $job) {
+			$text = JobResultProcessor::script_text((string)$job->get('mjb_output'));
+			if (preg_match('/^STAGE_CHAIN=(chain-[0-9_]+)\s*$/m', $text, $c) && preg_match('/^STAGE_SEQ=(\d+)\s*$/m', $text, $q)) {
+				$out[$c[1]][(int)$q[1]] = true;
+			}
+		}
+		return array_map(function ($seqs) { return array_keys($seqs); }, $out);
 	}
 }

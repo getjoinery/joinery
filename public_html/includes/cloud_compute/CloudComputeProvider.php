@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.10 - CloudVolumeFacts: the provider's own encryption of a storage volume at a device path
  * @version 1.9 - CloudProviderEvents: an instance's activity log, and the instance an address belongs to
  *                (Tier 2 of specs/hosted_data_promise_disk_encryption.md D3)
  * @version 1.8 - createInstance() takes disk_encryption and swap_size; the instance array reports disk_encryption;
@@ -317,6 +318,25 @@ interface CloudRegionFacts {
 	 * @throws CloudComputeException
 	 */
 	public function regions(): array;
+}
+
+/**
+ * Optional capability: what the provider says of a storage volume attached to
+ * an instance (specs/hosted_data_promise_disk_encryption.md D1a). A data root
+ * on a volume sits under the volume's encryption, not the server's disk's.
+ * The caller asks `instanceof CloudVolumeFacts`.
+ */
+interface CloudVolumeFacts {
+
+	/**
+	 * The provider's own encryption of the storage volume at this device path
+	 * on the instance: 'enabled' or 'disabled', 'unknown' when it does not
+	 * say, and '' when the path is not one of the provider's volumes (a disk
+	 * of the instance itself, under the instance's own encryption).
+	 *
+	 * @throws CloudComputeException when the path names a volume this instance does not have, or it cannot be read
+	 */
+	public function volumeEncryption(string $instance_id, string $device): string;
 }
 
 /**

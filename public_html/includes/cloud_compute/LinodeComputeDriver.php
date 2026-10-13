@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.17 - CloudVolumeFacts: a Block Storage volume's own encryption, by the path Linode gives it on the
+ *                  instance (/dev/disk/by-id/scsi-0Linode_Volume_<label>)
  * @version 1.16 - CloudProviderEvents: account/events for one instance (its disks' and backups' too), and the
  *                instance an address belongs to
  * @version 1.15 - createInstance() sends disk_encryption only where the region offers Linode's "Disk Encryption"
@@ -54,7 +56,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents, CloudVolumeFacts {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -795,6 +797,24 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 	 */
 	public function accountCompany(): string {
 		return trim((string)($this->request('GET', 'account')['company'] ?? ''));
+	}
+
+	/** Linode names an attached volume's device by its label. */
+	const VOLUME_DEVICE_PREFIX = '/dev/disk/by-id/scsi-0Linode_Volume_';
+
+	public function volumeEncryption(string $instance_id, string $device): string {
+		if (strpos($device, self::VOLUME_DEVICE_PREFIX) !== 0) {
+			return '';
+		}
+		$label = substr($device, strlen(self::VOLUME_DEVICE_PREFIX));
+		$result = $this->request('GET', 'linode/instances/' . rawurlencode($instance_id) . '/volumes?page_size=100');
+		foreach ((array)($result['data'] ?? array()) as $volume) {
+			if ((string)($volume['label'] ?? '') === $label) {
+				$v = (string)($volume['encryption'] ?? '');
+				return in_array($v, array('enabled', 'disabled'), true) ? $v : 'unknown';
+			}
+		}
+		throw new CloudComputeException("Instance {$instance_id} has no volume labelled '{$label}' attached.");
 	}
 
 	public function listVolumes(): array {

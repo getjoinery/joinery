@@ -218,6 +218,39 @@ check(strpos((string)$job6->get('mjb_output'), 'waiting for the target to accept
 check($took < 60, 'the budget is honoured', round($took) . 's');
 
 // ---------------------------------------------------------------------------
+section('A management node without sshpass fails the job by name, before anything reaches the server (B36)');
+
+$bin = sys_get_temp_dir() . '/ijetest-bin-' . $suffix;
+@mkdir($bin);
+file_put_contents($bin . '/ssh', "#!/bin/sh\nexit 0\n");
+chmod($bin . '/ssh', 0755);
+check(InstallJobExecutor::missing_tools($bin) === array('sshpass'), 'missing_tools names the one not on PATH');
+check(InstallJobExecutor::missing_tools('/usr/bin:/bin:' . $bin) === (is_executable('/usr/bin/sshpass') ? array() : array('sshpass')),
+	'and finds what is');
+$path_was = getenv('PATH');
+putenv('PATH=' . $bin);
+$node7 = ije_node('ijetest-nosshpass-' . $suffix, 'Aa1!' . bin2hex(random_bytes(10)));
+$job7 = ije_job($node7, array(array('type' => 'ssh', 'label' => 'Ensure curl is installed', 'cmd' => 'echo never')));
+$t0 = microtime(true);
+(new InstallJobExecutor())->execute($job7);
+$took = microtime(true) - $t0;
+putenv('PATH=' . $path_was);
+$job7->load();
+check($job7->get('mjb_status') === 'failed'
+	&& strpos((string)$job7->get('mjb_error_message'), 'sshpass is not installed here') !== false
+	&& strpos((string)$job7->get('mjb_error_message'), 'Nothing was done on the server') !== false,
+	'the failure names sshpass and says the server was not touched', (string)$job7->get('mjb_error_message'));
+check(strpos((string)$job7->get('mjb_output'), '=== [Step 1') === false && $took < 10,
+	'no step ran and nothing waited for the server', round($took) . 's');
+@unlink($bin . '/ssh');
+@rmdir($bin);
+check(InstallJobExecutor::holds_install_password($node7), 'that failed install still holds its install password, so Retry Install may run it again (B37)');
+check(!InstallJobExecutor::holds_install_password($node2), 'a node whose provision holds none cannot be retried');
+$decl = json_decode((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true);
+check(in_array('sshpass', $decl['requires']['packages'] ?? array(), true),
+	'the plugin declares sshpass, so the host converger installs it wherever the plugin is');
+
+// ---------------------------------------------------------------------------
 section('The worker script: one instance at a time, and it says which case it hit');
 
 $worker = PathHelper::getIncludePath('plugins/server_manager/utils/run_install_executor.php');

@@ -4,6 +4,15 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.17 - An encrypt's start that ends after it stopped the data root, however it ends (a refusal, a
+#                 failure, a signal), starts the data root and its services again and leaves no keys behind
+#                 (B42); it never stops the service it runs in (a site's Backups page asks through the host
+#                 converger). A tick finds a data root not mounted with no run holding it and starts it again,
+#                 and on a plain one removes keys and sealed copies a cut-off start left. decrypt's finish
+#                 holds the lock while the data root is stopped. recipient refuses a key this machine was moved
+#                 off (retired_recipients): a management node restored from before a rotation names it (B41).
+#                 status says "starting" until cryptsetup writes its first progress line (B27). No spec ids in what
+#                 it says.
 # Version: 1.16 - Key slots are PBKDF2-SHA256 at 1,000,000 iterations, about a second on a 1 GB Linode: a
 #                 512-bit key takes two PBKDF2 blocks, so 2,000,000 took 1.5-2.5 s (T-V11). check accepts a slot at
 #                 either count this platform has made (LUKS_ITERATIONS_MADE), and no other.
@@ -206,6 +215,8 @@ FSTAB="${ROOT}/etc/fstab"
 SYSTEMD_DIR="${ROOT}/etc/systemd/system"
 LOCK_FILE="${ROOT}/run/joinery/data-root.lock"
 CANNOT_GROW_FLAG="${ROOT}/run/joinery/data-root.cannot-grow"
+# The tick said once that the data root would not mount again.
+NOT_MOUNTED_FLAG="${ROOT}/run/joinery/data-root.not-mounted"
 BINDS="${ROOT}/etc/joinery/data_binds"
 TARGET_UNIT="joinery-data.target"
 MOUNT_UNIT="srv-joinery.mount"
@@ -279,6 +290,8 @@ UNLOCK_UNIT="joinery-data-unlock.service"
 AGENT_BIN="${ROOT}/usr/local/bin/joinery-agent"
 DATA_ROOT_DIR="${ROOT}/etc/joinery/data-root"
 RECIPIENT="${DATA_ROOT_DIR}/recovery_recipient"
+# Every recovery key this machine was moved off, one fingerprint and when per line.
+RETIRED_RECIPIENTS="${DATA_ROOT_DIR}/retired_recipients"
 # The break-glass copy: beside the image, or, for a device, on the root disk.
 SIDECAR_FILE_REAL="${IMAGE_REAL}.recovery"
 SIDECAR_DEVICE_REAL="/etc/joinery/data-root/volume.recovery"
@@ -452,16 +465,25 @@ fs_id_at() {  # PATH
     awk -v m="$1" '$5 == m { print $3; exit }' "${ROOT}/proc/self/mountinfo" 2>/dev/null || true
 }
 
+# The service a process runs in, from its /proc/PID/cgroup, or nothing.
+unit_of() {  # CGROUP_FILE
+    sed -n 's#^0::/system\.slice/\(.*/\)\{0,1\}\([^/]*\.service\)$#\2#p' "$1" 2>/dev/null || true
+}
+
 # The services whose processes keep a file under these mountpoints, but never
-# the agent, the journal, cron (a job would die), ssh or the data root's own.
+# the agent, the journal, cron (a job would die), ssh, the data root's own, or
+# the one this run is part of: a site's Backups page asks through the host
+# converger, and stopping that would stop this run part-way (B42). A file the
+# caller keeps there keeps the filesystem mounted, and the start says so.
 holder_units() {  # MOUNTPOINT...
-    local m pid
+    local m pid own
+    own="$(unit_of "${ROOT}/proc/self/cgroup")"
     for m in "$@"; do
         for pid in $(fuser -m "${ROOT}${m}" 2>/dev/null); do
-            sed -n 's#^0::/system\.slice/\(.*/\)\{0,1\}\([^/]*\.service\)$#\2#p' "${ROOT}/proc/${pid}/cgroup" 2>/dev/null
+            unit_of "${ROOT}/proc/${pid}/cgroup"
         done
     done | sort -u | grep -v -x -e joinery-agent.service -e systemd-journald.service -e cron.service -e ssh.service \
-        -e "$UNLOCK_UNIT" -e "$ENCRYPT_UNIT" || true
+        -e "$UNLOCK_UNIT" -e "$ENCRYPT_UNIT" ${own:+-e "$own"} || true
 }
 
 # Every mountpoint where the filesystem with this device number is still mounted.
@@ -1209,10 +1231,18 @@ do_recipient() {
         || die "that is not a recovery public key: give the one base64 line (44 characters) the Backups page shows for it"
     fpr="$(printf '%s' "$key" | base64 -d | sha256sum | awk '{ print $1 }')"
     cur="$(recipient_get fingerprint)"
-    if [[ -n "$cur" && "$cur" != "$fpr" ]] && is_luks; then
-        say "the break-glass copy is sealed to ${cur:0:16}; the next tick seals it again to this key (D8)"
-    fi
+    # A key this machine was moved off is never taken again: a rotation is
+    # made because the old key may have been seen, and a management node or
+    # site restored from before it names the old key (B41).
+    local retired
+    retired="$(awk -v f="$fpr" '$1 == f { print $2; exit }' "$RETIRED_RECIPIENTS" 2>/dev/null || true)"
+    [[ -z "$retired" ]] || die "refused: this machine was moved off the recovery key ${fpr:0:16} on ${retired}, and a key rotated away from is never sealed to again. Whatever sent it holds a key from before that rotation (a restore from an older backup does that): rotate its recovery key again from its Backups page."
     mkdir -p "$DATA_ROOT_DIR"
+    if [[ -n "$cur" && "$cur" != "$fpr" ]]; then
+        printf '%s %s\n' "$cur" "$(date -u +%Y-%m-%dT%H:%MZ)" >> "$RETIRED_RECIPIENTS" \
+            || die "could not record the key it replaces in ${RETIRED_RECIPIENTS}"
+        is_luks && say "the break-glass copy is sealed to ${cur:0:16}; the next tick seals it again to this key"
+    fi
     printf '# Written by joinery_data_root.sh (specs/hosted_data_promise_disk_encryption.md D2).\n# The recovery public key the encrypted data root'"'"'s break-glass copy is sealed to.\npublic_key=%s\nfingerprint=%s\nset_by=%s\n' \
         "$key" "$fpr" "$set_by" > "${RECIPIENT}.tmp.$$" && chmod 644 "${RECIPIENT}.tmp.$$" && mv -f "${RECIPIENT}.tmp.$$" "$RECIPIENT" \
         || { rm -f "${RECIPIENT}.tmp.$$"; die "could not write ${RECIPIENT}"; }
@@ -2396,21 +2426,23 @@ do_encrypt() {
     trap - EXIT
 
     # Step 3: offline, seconds. Every consumer stops with the mount (each one
-    # requires the target, which requires the mount).
-    local -a running=() sockets=()
+    # requires the target, which requires the mount). From the first stop to
+    # the last start, any way this run ends (a refusal, a failure, a signal)
+    # starts again what it stopped (encrypt_start_exit).
+    local -a sockets=()
     mapfile -t sockets < <(consumer_sockets | sort -u)
-    mapfile -t running < <({ active_consumers; printf '%s\n' "${sockets[@]}"; } | grep -v '^$' | sort -u)
+    mapfile -t ENC_RUNNING < <({ active_consumers; printf '%s\n' "${sockets[@]}"; } | grep -v '^$' | sort -u)
+    ENC_KEYS="$keys"
+    ENC_STAGE=stopped
+    trap encrypt_start_exit EXIT
+    trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
     say "Stopping the data root and its services for the start (seconds)..."
     # Which filesystem the data root is, so that every mount of it, the
     # binds included, can be seen to be gone before the volume is written.
     local fs_id held
     fs_id="$(fs_id_at "$MNT_REAL")"
     (( ${#sockets[@]} == 0 )) || systemctl stop "${sockets[@]}" || true
-    if ! systemctl stop "$MOUNT_UNIT"; then
-        (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" 2>/dev/null || true
-        rm -f "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}"; rm -rf "$keys"
-        die "the data root did not stop; nothing was changed"
-    fi
+    systemctl stop "$MOUNT_UNIT" || die "the data root did not stop; nothing was changed"
     # A bind that something holds open (a cron job's log, a message being
     # queued) does not unmount, and keeps the filesystem live on its old
     # loop device: writing the volume under it would interleave with its
@@ -2425,8 +2457,8 @@ do_encrypt() {
         mapfile -t holders < <(holder_units $held)
         if (( ${#holders[@]} > 0 )); then
             say "data root: ${holders[*]} keep a file on it; stopping them for the start"
+            ENC_RUNNING+=("${holders[@]}")
             systemctl stop "${holders[@]}" 2>/dev/null || true
-            running+=("${holders[@]}")
             local m
             for m in $held; do
                 systemctl stop "$(systemd-escape -p --suffix=mount "$m")" 2>/dev/null || umount "$m" 2>/dev/null || true
@@ -2434,27 +2466,23 @@ do_encrypt() {
             held="$(mounts_of_fs "$fs_id")"
         fi
     fi
-    if [[ -n "$held" ]]; then
-        systemctl start "$TARGET_UNIT" 2>/dev/null || true
-        (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" 2>/dev/null || true
-        rm -f "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}"; rm -rf "$keys"
-        die "the data root's filesystem is still mounted at ${held}: something there would not let go. Nothing was changed; its services are started again. Try again when it is idle."
-    fi
+    [[ -z "$held" ]] || die "the data root's filesystem is still mounted at ${held}: something there would not let go. Nothing was changed; its services are started again. Try again when it is idle."
     if [[ "$backing" == "file" ]]; then
         losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
-        fallocate -l $(( $(image_bytes) + ENCRYPT_HEADER_ROOM )) "$IMAGE" || encrypt_start_failed "could not add 32 MiB to ${IMAGE_REAL}" "${running[@]}"
-        dev="$(loop_attach)" || encrypt_start_failed "could not attach ${IMAGE_REAL} to a loop device" "${running[@]}"
+        fallocate -l $(( $(image_bytes) + ENCRYPT_HEADER_ROOM )) "$IMAGE" || die "could not add 32 MiB to ${IMAGE_REAL}"
+        dev="$(loop_attach)" || die "could not attach ${IMAGE_REAL} to a loop device"
     else
         dev="$(luks_source)"
     fi
     say "Starting the encryption (LUKS2, aes-xts-plain64, 512-bit key, ${sector}-byte sectors)..."
-    if ! cryptsetup reencrypt --encrypt --init-only --batch-mode --disable-keyring --type luks2 \
-            --cipher aes-xts-plain64 --key-size 512 --sector-size "$sector" "${LUKS_SLOT[@]}" \
-            --reduce-device-size "$ENCRYPT_HEADER_ROOM" --volume-key-file "${keys}/volume.key" \
-            --key-slot 0 --key-file "${keys}/slot.key" "$dev" "$MAPPING"; then
-        [[ "$backing" == "file" ]] && losetup -d "$dev" 2>/dev/null
-        encrypt_start_failed "cryptsetup could not start the encryption" "${running[@]}"
-    fi
+    # From here the volume may hold the header: an end before it is recorded
+    # is undone as the tick undoes a start a power cut left (encrypt_start_undo).
+    ENC_STAGE=header
+    cryptsetup reencrypt --encrypt --init-only --batch-mode --disable-keyring --type luks2 \
+        --cipher aes-xts-plain64 --key-size 512 --sector-size "$sector" "${LUKS_SLOT[@]}" \
+        --reduce-device-size "$ENCRYPT_HEADER_ROOM" --volume-key-file "${keys}/volume.key" \
+        --key-slot 0 --key-file "${keys}/slot.key" "$dev" "$MAPPING" \
+        || die "cryptsetup could not start the encryption"
     rm -f "${keys}/volume.key"
     # The driving secret, where the run (and a resumed one) reads it.
     mkdir -p "$ENCRYPT_RUN_DIR"; chmod 700 "$ENCRYPT_RUN_DIR"
@@ -2468,27 +2496,65 @@ do_encrypt() {
     else
         conf_set backing "luks-${backing}" sidecar "$sidecar_real" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
     fi
+    ENC_STAGE=recorded
     fstab_line absent
     ensure_units || say "WARNING: the units could not all be written; see above"
     # The record, the units and the run's enable link on disk before anything runs on them.
     sync
     systemctl start "$TARGET_UNIT" || say "WARNING: ${TARGET_UNIT} did not start; see: systemctl status ${MOUNT_UNIT}"
-    (( ${#running[@]} == 0 )) || systemctl start "${running[@]}" || say "WARNING: not every service started again: ${running[*]}"
+    (( ${#ENC_RUNNING[@]} == 0 )) || systemctl start "${ENC_RUNNING[@]}" || say "WARNING: not every service started again: ${ENC_RUNNING[*]}"
+    ENC_STAGE=""
+    trap - EXIT HUP INT TERM
     mounted_ok || die "the encryption has started, but ${MNT_REAL} is not mounted; see: systemctl status ${MOUNT_UNIT}"
     # Step 4: online, at idle priority.
     systemctl start --no-block "$ENCRYPT_UNIT" || say "WARNING: ${ENCRYPT_UNIT} did not start; see: systemctl status ${ENCRYPT_UNIT}"
     say "The data root is back, and encrypting in the background (joinery_data_root.sh status shows how far). A reboot part-way opens it with the recovery key."
 }
 
-# The start step failed after the services stopped: start them on the data root as it was.
-encrypt_start_failed() {  # REASON UNIT...
-    local reason="$1"; shift
-    # The copies sealed for a volume that was not made go too.
-    rm -f "${ROOT}${SIDECAR_FILE_REAL}" "${ROOT}${SIDECAR_DEVICE_REAL}" "${ROOT}${DRIVING_SIDECAR_REAL}"
-    rm -rf "${ROOT}/run/joinery/data-root-key."*
-    systemctl start "$TARGET_UNIT" 2>/dev/null
-    (( $# == 0 )) || systemctl start "$@" 2>/dev/null
-    die "${reason}; the data root is as it was, unencrypted, and its services started again"
+# The start's end, whichever way it came, once the services were stopped:
+# what it stopped starts again, on the data root as the volume now is.
+#   stopped:  nothing written to the volume; its sealed copies and keys go,
+#             and the data root starts plain, as it was.
+#   header:   cryptsetup may have written the header and the record does
+#             not say so: the start is undone (the data stays where it is),
+#             then as stopped.
+#   recorded: the record says encrypting: the data root starts on the
+#             volume, and the run with it.
+ENC_STAGE=""
+ENC_KEYS=""
+ENC_RUNNING=()
+encrypt_start_exit() {
+    local rc=$?
+    trap - EXIT HUP INT TERM
+    set +e
+    case "$ENC_STAGE" in
+        stopped|header)
+            if [[ "$ENC_STAGE" == header ]]; then
+                # The loop device this start attached; nothing else has the image now.
+                [[ "$(conf_get backing)" == file ]] && losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
+                if ! encrypt_start_undo; then
+                    # A header it does not know: left for a person, with the
+                    # keys that open it (sealed beside it, and in /run).
+                    say "data root: NOT STARTED AGAIN: the volume holds a start this cannot undo; its services stay stopped"
+                    exit "$rc"
+                fi
+            fi
+            # The copies sealed for a volume that was not made go too.
+            rm -f "${ROOT}${SIDECAR_FILE_REAL}" "${ROOT}${SIDECAR_DEVICE_REAL}" "${ROOT}${DRIVING_SIDECAR_REAL}" "${ENCRYPT_RUN_DIR}/slot.key"
+            [[ -z "$ENC_KEYS" ]] || rm -rf "$ENC_KEYS"
+            systemctl start "$TARGET_UNIT" 2>/dev/null
+            (( ${#ENC_RUNNING[@]} == 0 )) || systemctl start "${ENC_RUNNING[@]}" 2>/dev/null
+            say "data root: as it was, unencrypted, and its services started again"
+            ;;
+        recorded)
+            [[ -z "$ENC_KEYS" ]] || rm -rf "$ENC_KEYS"
+            systemctl start "$TARGET_UNIT" 2>/dev/null
+            (( ${#ENC_RUNNING[@]} == 0 )) || systemctl start "${ENC_RUNNING[@]}" 2>/dev/null
+            systemctl start --no-block "$ENCRYPT_UNIT" 2>/dev/null
+            say "data root: the encryption is recorded; the data root and its services started again on the volume"
+            ;;
+    esac
+    exit "$rc"
 }
 
 # The run: encrypt (or decrypt) online until done, then finish. The unit's.
@@ -2745,6 +2811,8 @@ do_decrypt() {
 # that is already plain XFS comes here to finish it.
 decrypt_finish() {  # DEV
     local dev="$1" backing plain
+    # The tick starts a data root it finds unmounted unless a run has the lock.
+    take_lock
     backing="$(conf_get backing)"; plain="${backing#luks-}"
     local -a running=() sockets=()
     mapfile -t sockets < <(consumer_sockets | sort -u)
@@ -3078,9 +3146,24 @@ do_grow() {
 # The upkeep a tick does on a mounted data root: its units, and growth. Runs
 # in a subshell where errexit does not reach, so each step checks itself; a
 # die in it ends only the subshell.
+# A plain data root, mounted, with no run of this script going: copies
+# sealed and keys made for a volume an encrypt's start never made (one cut
+# off where nothing could start it again, B42) are left over, and go.
+plain_leftovers() {
+    local f gone=0
+    for f in "${ROOT}${SIDECAR_FILE_REAL}" "${ROOT}${SIDECAR_DEVICE_REAL}" "${ROOT}${DRIVING_SIDECAR_REAL}" \
+             "${ENCRYPT_RUN_DIR}/slot.key" "${ROOT}/run/joinery/data-root-key."*; do
+        [[ -e "$f" ]] || continue
+        rm -rf "$f" && gone=1
+    done
+    (( gone == 0 )) || say "data root: removed the keys and sealed copies an encrypt's start left behind; the data root is plain"
+    return 0
+}
+
 tick_upkeep() {
     ensure_units || return 1
     migrate_forget_old || true
+    is_luks || plain_leftovers
     if is_luks; then
         luks_reboot_policy || true
         luks_reseal_if_due || true
@@ -3227,6 +3310,22 @@ do_tick() {
         return 1
     fi
     do_check ready >/dev/null 2>&1 || rc=$?
+    # Not mounted, and no run of this script has it (an encrypt holds the
+    # lock while the data root is stopped for its start): a start that ended
+    # without starting it again (B42), or a stop by hand. Started again, and
+    # said once while it will not mount.
+    if (( rc == 1 )) && ! mounted_ok; then
+        need_root
+        if take_lock nowait; then
+            if systemctl start "$TARGET_UNIT" 2>/dev/null && mounted_ok; then
+                rm -f "$NOT_MOUNTED_FLAG"
+                say "data root: it was not mounted; mounted it again"
+            elif [[ ! -f "$NOT_MOUNTED_FLAG" ]]; then
+                touch "$NOT_MOUNTED_FLAG"
+                say "data root: not mounted, and it did not mount when started: $(ready_reason)"
+            fi
+        fi
+    fi
     # The filesystem is mounted and a bind on it is not: mount it again.
     if (( rc == 1 )) && mounted_ok; then
         need_root
@@ -3281,9 +3380,12 @@ luks_status() {
     opened="$(cat "${ROOT}/run/joinery/data-root.opened-by" 2>/dev/null || true)"
     [[ -z "$opened" ]] || say "opened this boot by: ${opened}"
     if [[ -n "$(reencrypt_mode)" ]]; then
-        local p
+        local p done_text
         p="$(reencrypt_progress)"
-        say "running: ${p%% *}ion, ${p#* }% done, at idle I/O priority (${ENCRYPT_UNIT}); a reboot part-way opens with the recovery key, then it resumes"
+        # cryptsetup writes its first progress line some seconds in.
+        done_text="${p#* }% done"
+        [[ "${p#* }" == "?" ]] && done_text="starting"
+        say "running: ${p%% *}ion, ${done_text}, at idle I/O priority (${ENCRYPT_UNIT}); a reboot part-way opens with the recovery key, then it resumes"
     fi
     local problem
     problem="$(luks_slot_problem)"

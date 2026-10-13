@@ -1,0 +1,7 @@
+{
+  "name": "Back Up After an Escrow Change",
+  "description": "When a key this management node holds as escrow holder changes (a machine enrolled, its key changed, a key given up), this management node backs itself up within the hour: rebuilt from an older backup, it would not hold the newer keys, and those machines would open by their recovery keys. Waits ten minutes of quiet so a burst of enrolments gets one backup. Does nothing where nothing changed, or where this site takes no backups of its own (the node page of each machine says so).",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {}
+}

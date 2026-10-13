@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.7 - the switch takes effect at the host converger's next tick, which counts it as a change (B24)
  * @version 1.6 - disable_agent needs the typed words "disable agent" (the page dialog asks; this refuses without)
  * @version 1.5 - admin_management_node_cli_join_request(): a CLI join naming the URL of a request not yet
  *                answered keeps that request, so the agent keeps its staged key; the page's Connect
@@ -39,9 +40,10 @@ function admin_management_node_logic(array $input): LogicResult {
 	$settings = Globalvars::get_instance();
 
 	// Whether this machine runs an agent at all. Recorded here; acted on by the
-	// installer at the next root moment, because a web request has no root and
-	// cannot install a service. The page says so rather than implying the
-	// switch took effect the moment it was flipped.
+	// agent installer at the host converger's next tick (the switch is part of
+	// what it counts as a change), because a web request has no root and cannot
+	// install a service. The page says so rather than implying the switch took
+	// effect the moment it was flipped.
 	if (isset($input['action']) && $input['action'] === 'enable_agent') {
 		Setting::put('agent_enabled', '1');
 		return LogicResult::redirect('/admin/admin_management_node?agent=on');
