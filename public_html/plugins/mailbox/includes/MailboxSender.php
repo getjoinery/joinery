@@ -357,7 +357,7 @@ class MailboxSender {
 			$report = $sender->lastSendReport();
 			$attempt(MailboxSendAttempt::OUTCOME_FAILED,
 				$report['error'] ?: 'The transport refused the message.', $draft_row_id);
-			throw new MailboxSenderException('The message could not be sent. Check the mailbox connection and try again.');
+			throw new MailboxSenderException(self::refusedMessage($report));
 		}
 
 		// §9 Sent / compose interop, only when the feed opted into compose/Sent sync.
@@ -507,7 +507,7 @@ class MailboxSender {
 		if (!$ok) {
 			$report = $sender->lastSendReport();
 			$attempt(MailboxSendAttempt::OUTCOME_FAILED, $report['error'] ?: 'The transport refused the message.', null);
-			throw new MailboxSenderException('The message could not be sent. Check the mailbox connection and try again.');
+			throw new MailboxSenderException(self::refusedMessage($report));
 		}
 
 		$sent_copy = MailboxSendAttempt::SENT_COPY_NOT_APPLICABLE;
@@ -2158,6 +2158,25 @@ class MailboxSender {
 			$add($token, '');
 		}
 		return array_values($out);
+	}
+
+	/**
+	 * What the person sees when the transport refused the message: the reason
+	 * the send report gives (no email service is configured, the service is
+	 * missing its settings, the provider refused it), so a reader compose or a
+	 * mail program's 451 says what to fix. Only a refusal with no reason falls
+	 * back to checking the mailbox connection.
+	 */
+	public static function refusedMessage(array $report): string {
+		$why = trim((string)($report['error'] ?? ''));
+		if ($why === '') {
+			return 'The message could not be sent. Check the mailbox connection and try again.';
+		}
+		if (preg_match('/^No email service is configured/i', $why)) {
+			return 'The message could not be sent: this site has no email service for sending yet. '
+				. 'An administrator chooses one under Settings, Email.';
+		}
+		return 'The message could not be sent: ' . rtrim($why, '.') . '.';
 	}
 }
 ?>
