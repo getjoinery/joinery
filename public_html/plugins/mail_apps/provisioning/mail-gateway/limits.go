@@ -183,7 +183,9 @@ func (l *tlsListener) admit(c net.Conn) {
 	if l.trusts != nil && l.trusts(remoteIP(c.RemoteAddr())) {
 		pc, err := readProxyHeader(c)
 		if err != nil {
-			logf("%s: refused connection from relay %s: %v", l.proto, remoteIP(c.RemoteAddr()), err)
+			if !errors.Is(err, errRelayCheck) {
+				logf("%s: refused connection from relay %s: %v", l.proto, remoteIP(c.RemoteAddr()), err)
+			}
 			c.Close()
 			return
 		}

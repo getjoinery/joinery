@@ -154,6 +154,10 @@ chk "993 and 465 open to each relay address" "$(grep -c 'ufw allow proto tcp fro
 chk "  and not to everyone" "$(grep -c 'ufw allow 993/tcp\|ufw allow 465/tcp' "$T/calls")" "0"
 chk "  10465 open to each relay address (the relay cannot dial 465 onward)" "$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465\|ufw allow proto tcp from 2001:db8::7 to any port 10465' "$T/calls")" "2"
 chk "  and never to everyone" "$(grep -c 'ufw allow 10465' "$T/calls")" "0"
+: > "$T/calls"
+out="$(helper refresh one)"; rc=$?
+chk "refresh re-applies the relay's rules, 10465 included (an update opens a new port with no Stop and Allow)" \
+    "$rc/$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465\|ufw allow proto tcp from 2001:db8::7 to any port 10465' "$T/calls")" "0/2"
 sed 's/"one"/"two"/' "$SB/sites/one.json" > "$SB/sites/two.json"
 out="$(helper status one)"
 chk "status says when the relay's certificate expires" "$(grep -c -E '^relay_cert_expires=[0-9]{10}$' <<< "$out")" "1"
@@ -230,6 +234,16 @@ touch "$R/etc/letsencrypt/live/alpha.example/fullchain.pem"
 rm -f "$SB/sites/alpha.failed"
 helper converge > /dev/null
 chk "served once it can be met" "$( [ -e "$SB/sites/alpha.enabled" ]; echo $? )" "0"
+ask beta '{"on": true, "name": "beta.example"}'
+helper converge > /dev/null
+chk "a second site on the same host is served beside the first" \
+    "$( [ -e "$SB/sites/beta.enabled" ]; echo $? )/$( [ -e "$SB/sites/alpha.enabled" ]; echo $? )" "0/0"
+rm -f "$DR/volumes/beta_storage/_data/mail_apps/request.json" "$DR/volumes/beta_storage/_data/mail_apps/answer.json"
+mkdir -p "$SB/certs/beta" && touch "$SB/certs/beta/cert.pem"
+helper converge > /dev/null
+chk "a site that took its request back (plugin uninstalled) is forgotten: entry and certificate" \
+    "$(ls "$SB/sites" | grep -c '^beta\.')/$( [ -e "$SB/certs/beta" ]; echo $? )" "0/1"
+chk "  and the other site is still served" "$( [ -e "$SB/sites/alpha.enabled" ]; echo $? )" "0"
 printf '{\n    "site": "gamma",\n    "hostname": "gamma.example",\n    "cert_file": "/nonexistent",\n    "key_file": "/nonexistent"\n}\n' > "$SB/sites/gamma.json"
 touch "$SB/sites/gamma.enabled"
 rm -rf "$R/etc/joinery/sites/alpha"
@@ -238,5 +252,9 @@ chk "a gone container's entry is forgotten" "$(ls "$SB/sites" | grep -c '^alpha\
 chk "an entry that is not a container's is left alone" "$( [ -e "$SB/sites/gamma.json" ] && [ -e "$SB/sites/gamma.enabled" ]; echo $? )" "0"
 
 echo
+echo "=== The installer on a Docker host with no sites yet ==="
+chk "--machine installs on any Docker host, sites or not (a host is built before its sites)" \
+    "$(grep -c 'command -v docker >/dev/null 2>&1 || \[\[ ! -d /etc/joinery/sites' "$INSTALLER")/$(grep -c 'not a Docker host (no docker) - nothing to install' "$INSTALLER")" "0/1"
+
 echo "mail_gateway_helper gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
