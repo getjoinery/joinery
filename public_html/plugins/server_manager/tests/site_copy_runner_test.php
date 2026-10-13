@@ -158,6 +158,18 @@ foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 
 }
 $sw_prov->save();
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $sw_prov->key);
+// Each machine's escrow row: its unlock identity is on that machine's disk.
+$sw_escrow = array();
+foreach (array('old' => $sw_src, 'copy' => $sw_copy) as $which => $on) {
+	$e = new DataRootEscrow(NULL);
+	$e->set('dre_identity_key', base64_encode(random_bytes(32)));
+	$e->set('dre_status', 'enrolled');
+	$e->set('dre_hostname', 'HarnessTest swap ' . $which);
+	$e->set('dre_mgn_managed_node_id', (int)$on->key);
+	$e->save();
+	harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $e->key);
+	$sw_escrow[$which] = $e;
+}
 
 // The source runs in a container: its container is part of the old machine.
 $sw_src->set('mgn_container_name', 'scpswapsite');
@@ -185,6 +197,10 @@ check((string)$sw_copy->get('mgn_agent_public_key') === $source_key && (string)$
 	&& $sw_copy->get('mgn_install_state') === 'retired',
 	'the copy\'s row takes the old machine and its key, retired, for the way back');
 check((int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_src->key, 'the provision follows its machine to the node');
+$sw_escrow['old']->load(); $sw_escrow['copy']->load();
+check((int)$sw_escrow['copy']->get('dre_mgn_managed_node_id') === (int)$sw_src->key
+	&& (int)$sw_escrow['old']->get('dre_mgn_managed_node_id') === (int)$sw_copy->key,
+	'so does each machine\'s escrow row: the node\'s page shows the key of the machine it holds now (B56)');
 check((string)$sw_src->get('mgn_container_name') === '' && (string)$sw_copy->get('mgn_container_name') === 'scpswapsite',
 	'a container source\'s container stays with the old machine: the node is bare metal now');
 check((string)$sw_copy->get('mgn_name') === $sw_src->get('mgn_name') . ' (old container)',
@@ -198,6 +214,10 @@ check((string)$sw_src->get('mgn_agent_public_key') === $source_key && $sw_src->g
 	&& (int)$sw_prov->get('cvp_mgn_managed_node_id') === (int)$sw_copy->key,
 	'the way back puts both machines back, the node frozen for its owner to unfreeze');
 check((string)$sw_src->get('mgn_container_name') === 'scpswapsite', 'and the container comes back with its machine');
+$sw_escrow['old']->load(); $sw_escrow['copy']->load();
+check((int)$sw_escrow['old']->get('dre_mgn_managed_node_id') === (int)$sw_src->key
+	&& (int)$sw_escrow['copy']->get('dre_mgn_managed_node_id') === (int)$sw_copy->key,
+	'and each escrow row with its machine');
 check((string)$sw_copy->get('mgn_name') === $sw_src->get('mgn_name') . ' (copy)', 'and the other row is the copy again, by name',
 	(string)$sw_copy->get('mgn_name'));
 $sw_src->set('mgn_container_name', null);

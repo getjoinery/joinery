@@ -32,8 +32,8 @@
  * (decompressed, against the statement; rebuilt in 6), the agent bundle's
  * manifest.json (its signatures verify, its keys are C's), the agent's
  * systemd unit (A's file), the support bundle (the statement's hash; its own
- * signed manifest; every file in it from C or a relay sealer the statement
- * records), the support bundle's index, each plugin's prebuilt Go binaries
+ * signed manifest; every file in it from C or a plugin's prebuilt Go binary
+ * the statement records), the support bundle's index, each plugin's prebuilt Go binaries
  * (GoBinaryPublisher::PLUGIN_PUBLISHERS) and their source stamp, the license copies (C's files) and every RELEASE_STATEMENT
  * (the statement itself).
  *
@@ -47,6 +47,8 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.5 - the support bundle may carry every plugin's prebuilt Go binary the statement records, not only
+ *                the relay sealer: 0.8.489's carried the mail gateway and failed (B57)
  * @version 1.4 - the working directory is removed after a rebuild too (Go's module cache is read-only)
  * @version 1.3 - plugin Go binaries are checked and rebuilt for every GoBinaryPublisher::PLUGIN_PUBLISHERS
  *                entry; a release that records none of a program's binaries shipped none of them
@@ -538,7 +540,7 @@ class ReleaseVerifier {
 		return '';
 	}
 
-	/** The support bundle: the statement's hash, its own signed manifest, every file from C or a relay sealer the statement records. */
+	/** The support bundle: the statement's hash, its own signed manifest, every file from C or a prebuilt Go binary the statement records. */
 	private function supportBundle($abs) {
 		if (($this->payload['artifacts']['support_bundle'] ?? '') !== hash_file('sha256', $abs)) {
 			return 'it is not the support bundle the statement records';
@@ -553,14 +555,16 @@ class ReleaseVerifier {
 		if (!$verdict->signed()) {
 			return 'its own manifest does not verify: ' . $verdict->line();
 		}
-		$sealers = array();
-		foreach (array_keys(RelaySealerPublisher::ARCHES) as $machine) {
-			$sealers[RelaySealerPublisher::BIN_SUBDIR . '/' . RelaySealerPublisher::BINARY . '-' . $machine] = $this->payload['artifacts']['relay-sealer/' . $machine] ?? '';
+		$built = array();
+		foreach (GoBinaryPublisher::pluginPublishers() as $publisher) {
+			foreach (array_keys($publisher::ARCHES) as $machine) {
+				$built[$publisher::BIN_SUBDIR . '/' . $publisher::BINARY . '-' . $machine] = $this->payload['artifacts'][$publisher::artifactName($machine)] ?? '';
+			}
 		}
 		foreach (PackageSignature::parse((string)file_get_contents($dir . '/' . PackageSignature::MANIFEST_NAME)) as $rel => $sha) {
-			$want = $sealers[$rel] ?? $this->commitHash($rel);
+			$want = $built[$rel] ?? $this->commitHash($rel);
 			if ($want === null || !hash_equals((string)$want, $sha)) {
-				return "its {$rel} is neither the commit's file nor a relay sealer the statement records";
+				return "its {$rel} is neither the commit's file nor a prebuilt Go binary the statement records";
 			}
 		}
 		return '';

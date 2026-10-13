@@ -11,8 +11,8 @@
  *                    reports) and leaves `switching`: it is the node, now on the
  *                    new machine. The copy's row takes S's old machine and
  *                    becomes `retired`, kept out of every automation, holding
- *                    the key the way back needs. Provision rows follow their
- *                    machines.
+ *                    the key the way back needs. Provision rows and escrow
+ *                    rows follow their machines.
  *   go_back(N, R)    the inverse: the node takes back the machine on the
  *                    retired row and returns to `switching` (its owner unfreezes
  *                    it); the other row becomes `copy` again.
@@ -29,6 +29,8 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.5 - an escrow row follows its machine: it stayed on the node, whose page then showed, and whose Stop
+ *                holding its key gave up, the other machine's key (B56)
  * @version 1.4 - the agent's support-bundle verdict moves with the machine
  * @version 1.3 - the agent's self-update state moves with the machine
  * @version 1.2 - the other row is renamed with what it holds: (old container) or (old server) once retired,
@@ -143,6 +145,13 @@ class SiteCopySwap {
 				'UPDATE cvp_customer_cloud_provisions SET cvp_mgn_managed_node_id = CASE cvp_mgn_managed_node_id
 				   WHEN ?::bigint THEN ?::bigint WHEN ?::bigint THEN ?::bigint END
 				 WHERE cvp_mgn_managed_node_id IN (?::bigint, ?::bigint)');
+			$q->execute(array((int)$node->key, (int)$other->key, (int)$other->key, (int)$node->key,
+				(int)$node->key, (int)$other->key));
+			// So does an escrow row: its unlock identity is on that machine's disk.
+			$q = $db->prepare(
+				'UPDATE dre_data_root_escrows SET dre_mgn_managed_node_id = CASE dre_mgn_managed_node_id
+				   WHEN ?::bigint THEN ?::bigint WHEN ?::bigint THEN ?::bigint END
+				 WHERE dre_mgn_managed_node_id IN (?::bigint, ?::bigint)');
 			$q->execute(array((int)$node->key, (int)$other->key, (int)$other->key, (int)$node->key,
 				(int)$node->key, (int)$other->key));
 
