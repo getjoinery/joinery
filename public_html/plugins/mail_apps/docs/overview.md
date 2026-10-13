@@ -46,7 +46,7 @@ Core owns everything about app credentials (`docs/api.md` § App credentials, `d
 - A member makes one on the Mail apps page, through core's `app_password_create` action, after confirming it is them (step-up). It is shown once, as `jm-{public}-{secret}`.
 - It reaches only actions whose descriptor declares `'app_purpose' => 'mail'` — the `mail_*` actions here. Those actions admit nothing else.
 - Failed sign-ins count in their own bucket (`app_access_auth`): 60 per 15 minutes per source network, 600 per username.
-- The plugin declares `"requiresSetting": "mail_apps_enabled"` on the purpose. While Allow mail apps is off, no app password is made and every one is refused, and its borrowed windows end.
+- The plugin declares `"requiresSetting": "mail_apps_enabled"` on the purpose. While Allow mail apps is off, no app password is made and every one is refused, and its borrowed windows end. The member's page still lists the ones they have, saying they do not work now and work again when mail apps are back on, with Revoke beside each.
 
 The gateway relays what the program presented, unchanged, in `X-Joinery-App-Username` / `X-Joinery-App-Secret`, and the program's address in `X-Joinery-Client-Ip`. `ApiAuth` resolves the credential and believes the address header only from loopback. The gateway never decides whether a credential is good.
 
@@ -159,6 +159,7 @@ While the window is shut:
    - The envelope decides who receives it.
    - Envelope recipients not in To or Cc are Bcc.
    - The program's Message-ID is kept when it names this mailbox's domain, and minted there otherwise.
+   - A send the site's transport refuses is answered `451 4.3.0` with the reason it gave (no email service yet, a service missing its settings, the provider's refusal; `MailboxSender::refusedMessage()`), so the program shows what to fix.
 4. The Sent copy is the program's own message, stored once through `storeRawOutbound()`, without `Received` and `X-Originating-IP`.
 5. The message it replies to gets `\Answered`; a forward's original gets `$Forwarded`.
 

@@ -12,6 +12,8 @@
  * Making a password calls core's app_password_create (which asks the person
  * to confirm it is them), revoking calls app_credential_revoke.
  *
+ * @version 1.1.0 - Your app passwords shows whenever the person has any, mail apps on or off, so a password can
+ *                  be revoked while an administrator has mail apps off (it works again when they are turned back on)
  * @version 1.0.0
  */
 
@@ -130,8 +132,19 @@ $asset = PathHelper::getIncludePath('plugins/mail_apps/assets/mail_apps.js');
 				</table>
 			</div>
 
+			<?php endif; ?>
+
+			<?php $can_add = $page_vars['enabled'] && $page_vars['any_offered']; ?>
+			<?php if ($can_add || $page_vars['credentials']): ?>
 			<div class="jy-panel">
 				<h2>Your app passwords</h2>
+			<?php if (!$can_add): ?>
+				<p class="jy-muted"><?php echo $page_vars['enabled']
+					? 'None of your mailboxes can be opened in a mail program now, so these do not work.'
+					: 'Mail programs are turned off for this site, so these do not work now.'; ?>
+					They work again if that changes. Revoke any you no longer use.</p>
+				<div class="jy-alert" role="status" data-mail-apps-result hidden></div>
+			<?php endif; ?>
 			<?php if (!$page_vars['credentials']): ?>
 				<p class="jy-muted">None yet.</p>
 			<?php else: ?>
@@ -156,7 +169,6 @@ $asset = PathHelper::getIncludePath('plugins/mail_apps/assets/mail_apps.js');
 				</table>
 			<?php endif; ?>
 			</div>
-
 			<?php endif; ?>
 
 			<?php echo PublicPage::settings_layout_end(); ?>
