@@ -1,4 +1,5 @@
 <?php
+// @version 1.5 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited plugin (specs/local_edits_detected.md)
 // @version 1.4 - Deactivate / Activate and the active count read plg_active (is_active()), never
 //                plg_status: a running plugin whose status says 'stale' was offered Activate and Uninstall
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Disable upgrade / Allow upgrade (specs/package_replace_on_upload.md WP2, WP3)
@@ -39,6 +40,10 @@ $unsigned_warning = $page_vars['unsigned_warning'] ?? null;
 $replace_panel = $page_vars['replace_panel'] ?? null;
 // name => version the source ships, for the Local fork badge; null when unknown.
 $fork_versions = $page_vars['fork_versions'] ?? null;
+// name => the first file that differs from the signed listing, for a shipped
+// plugin changed here since install (specs/local_edits_detected.md).
+$edited = $page_vars['edited'] ?? array();
+$edited_help = 'Changed on this site since Joinery shipped it (first difference: %s). The next deploy replaces it with the shipped version unless Keep my changes is pressed.';
 $fork_help = 'Uploaded here. Deploys leave it alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.';
 
 // Build Options dropdown links
@@ -207,6 +212,11 @@ $page->begin_box(array('altlinks' => $altlinks));
                             $status_cell .= '<br><small class="text-muted">shipped version is ' . htmlspecialchars($shipped) . '</small>';
                         }
                     }
+                    // Shipped by Joinery and changed here since: the next deploy
+                    // replaces it unless the operator keeps the changes.
+                    if (isset($edited[$plugin['name']])) {
+                        $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars(sprintf($edited_help, $edited[$plugin['name']])) . '">Edited since install</span>';
+                    }
                     // Installed on the owner's acknowledgement of the warning:
                     // not built by Joinery, its host installer never runs, and
                     // the badge stays for as long as the row does.
@@ -343,7 +353,12 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // ends a fork, and the next deploy replaces the files, so
                     // it asks first; Disable upgrade starts one and asks nothing.
                     if ($plugin['plugin'] && $plugin_status !== Plugin::STATUS_UNINSTALLED) {
-                        if ($plugin['plugin']->receives_upgrades()) {
+                        if (isset($edited[$plugin['name']])) {
+                            // The same mark as Disable upgrade, offered as what
+                            // it means for an edited plugin, with its cost.
+                            $keep_warning = "Deploys will leave $plugin_name alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.";
+                            $actions['Keep my changes'] = "javascript:confirmPluginAction('mark_preserved', '$plugin_name', '$keep_warning')";
+                        } elseif ($plugin['plugin']->receives_upgrades()) {
                             $actions['Disable upgrade'] = "javascript:submitPluginAction('mark_preserved', '$plugin_name')";
                         } else {
                             $allow_warning = "The next deploy will replace your copy of $plugin_name with the version Joinery ships. Your copy is not kept.";

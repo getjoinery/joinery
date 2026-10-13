@@ -1987,7 +1987,11 @@ missing, but should be declared explicitly:
   that says the cost: no updates from Joinery, including security fixes,
   until Allow upgrade is pressed, and how far behind the shipped version it
   is when the catalog is known. A marketplace install of a fork's name is
-  refused with the same way out. The database column
+  refused with the same way out. A shipped package whose files were changed on
+  the site itself is not a fork: it shows an **Edited since install** badge
+  naming the first file that differs from its signed listing, offers **Keep
+  my changes** (which writes `false`), and is replaced by the next deploy
+  until that is pressed. The database column
   (`thm_receives_upgrades` / `plg_receives_upgrades`) mirrors the live
   manifest on every sync; the manifest is the one that counts. A system
   extension (`is_system`) is pulled fresh by every deploy and cannot be

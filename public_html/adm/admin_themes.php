@@ -1,4 +1,5 @@
 <?php
+// @version 1.4 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited theme (specs/local_edits_detected.md)
 // @version 1.3 - the replace panel for an upload of an installed name; the Local fork badge with the shipped version; Allow upgrade asks first (specs/package_replace_on_upload.md WP2, WP3)
 // @version 1.2 - the Kind column, the two slot lines, Apply and Remove for a style theme; the Unsigned badge on page themes only (specs/style_themes.md WP4)
 // @version 1.1 - the Unsigned badge, the warning block and the request panel's hand-off (specs/package_signing.md WP6)
@@ -36,6 +37,10 @@ $look_help = 'A styling theme changes colours, fonts and images on the pages you
 $replace_panel = $page_vars['replace_panel'] ?? null;
 // name => version the source ships, for the Local fork badge; null when unknown.
 $fork_versions = $page_vars['fork_versions'] ?? null;
+// name => the first file that differs from the signed listing, for a shipped
+// theme changed here since install (specs/local_edits_detected.md).
+$edited = $page_vars['edited'] ?? array();
+$edited_help = 'Changed on this site since Joinery shipped it (first difference: %s). The next deploy replaces it with the shipped version';
 $fork_help = 'Uploaded here. Deploys leave it alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.';
 
 $page = new AdminPage();
@@ -195,6 +200,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                                         $badges[] = '<small class="text-muted">shipped version is ' . htmlspecialchars($shipped) . '</small>';
                                     }
                                 }
+                                // Shipped by Joinery and changed here since: the next
+                                // deploy replaces it unless the operator keeps the
+                                // changes, which a system theme has no way to do.
+                                if (isset($edited[$theme_name])) {
+                                    $badges[] = '<span class="badge bg-warning" title="'
+                                        . htmlspecialchars(sprintf($edited_help, $edited[$theme_name]) . ($is_system ? '.' : ' unless Keep my changes is pressed.'))
+                                        . '">Edited since install</span>';
+                                }
                                 // Installed on the owner's acknowledgement of
                                 // the warning: not built by Joinery. Stays for
                                 // as long as the row does. A style theme's row
@@ -263,7 +276,14 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     // upgrade ends a fork and the next deploy replaces the
                                     // files, so it asks first.
                                     if (!$is_system) {
-                                        if ($receives_upgrades) {
+                                        if (isset($edited[$theme_name])) {
+                                            // The same mark as Disable upgrade, offered as
+                                            // what it means for an edited theme, with its cost.
+                                            $keep_json = htmlspecialchars(json_encode('Deploys will leave ' . $theme_name
+                                                . ' alone, so it gets no updates from Joinery, including security fixes, until Allow upgrade is pressed.'));
+                                            $name_json = htmlspecialchars(json_encode($theme_name));
+                                            $actions['Keep my changes'] = "javascript:JoineryModal.confirm($keep_json, function(){ submitAction('mark_preserved', $name_json); }, { confirmLabel: 'Keep my changes' })";
+                                        } elseif ($receives_upgrades) {
                                             $actions['Disable upgrade'] = "javascript:submitAction('mark_preserved', '$theme_name')";
                                         } else {
                                             $allow_json = htmlspecialchars(json_encode('The next deploy will replace your copy of ' . $theme_name

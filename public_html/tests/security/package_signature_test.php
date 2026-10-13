@@ -21,6 +21,10 @@
  *
  * Run: php tests/run.php --only=tests/security/package_signature_test.php
  *
+ * @version 1.3 - the fork mark written false then true leaves a package unedited; an unreadable file is not
+ *                an edit (reviewer2 F1, F4)
+ * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
+ *                and a stranger's key are not; one answer per request (specs/local_edits_detected.md)
  * @version 1.1 - verifyTree(): a whole site root, every failure listed, style themes passed over, data
  *                folders never walked, the machine's keys and never the tree's (specs/host_restrictions.md)
  * @version 1.0
@@ -289,6 +293,74 @@ copy($keys_file, $tree . '/config/release_verify_keys');
 $f = PackageSignature::verifyTree($tree);
 check($f !== array() && $f[0]['kind'] === 'core' && in_array($f[0]['verdict']->verdict, array(PackageSignature::UNKNOWN_KEY, PackageSignature::NO_KEYS), true),
 	'with no key file named, the running site\'s own keys decide, not a key file inside the tree', $f ? $f[0]['verdict']->line() : 'no failure');
+
+section('Edited since install: only a changed, added or removed file counts (specs/local_edits_detected.md)');
+
+list($site, $plugin) = $signed_plugin('edit_none', $files);
+check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'an untouched package is not edited');
+
+list($site, $plugin) = $signed_plugin('edit_changed', $files);
+file_put_contents($plugin . '/includes/Fixture.php', "<?php class Fixture { /* mine */ }\n");
+$e = PackageSignature::editedSinceInstall($plugin, $keys_file);
+check($e !== null && $e->file === 'includes/Fixture.php', 'a changed file is an edit, and the file is named', $e ? $e->line() : 'null');
+
+list($site, $plugin) = $signed_plugin('edit_added', $files);
+file_put_contents($plugin . '/includes/Mine.php', "<?php\n");
+$e = PackageSignature::editedSinceInstall($plugin, $keys_file);
+check($e !== null && $e->file === 'includes/Mine.php', 'an added file is an edit', $e ? $e->line() : 'null');
+
+list($site, $plugin) = $signed_plugin('edit_removed', $files);
+unlink($plugin . '/config/defaults.php');
+$e = PackageSignature::editedSinceInstall($plugin, $keys_file);
+check($e !== null && $e->verdict === PackageSignature::MISSING_FILE, 'a removed file is an edit', $e ? $e->line() : 'null');
+
+// Not edits: no listing to compare against, or a key this machine does not
+// trust. Those are the Unsigned badge's business.
+list($site, $plugin) = $signed_plugin('edit_unsigned', $files);
+unlink($plugin . '/' . PackageSignature::MANIFEST_NAME);
+check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'an unsigned package is never reported as edited');
+
+list($site, $plugin) = $signed_plugin('edit_stranger', $files);
+$stranger_keys = $work . '/stranger_keys';
+file_put_contents($stranger_keys, base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())) . "\n");
+file_put_contents($plugin . '/includes/Fixture.php', "<?php // changed\n");
+check(PackageSignature::editedSinceInstall($plugin, $stranger_keys) === null, 'nor is one signed by a key this machine does not trust');
+
+// The fork mark is written into the signed manifest. Writing back the value
+// it shipped with gives back the signed bytes, so Disable upgrade then Allow
+// upgrade on an untouched package leaves it untouched (reviewer2 F1). The
+// fixture's manifest is laid out the way json_encode would NOT write it.
+list($site, $plugin) = $signed_plugin('edit_fork_mark', array_merge($files, array(
+	'plugin.json' => "{\n  \"name\": \"fixture\",\n  \"version\": \"1.0.0\",\n  \"description\": \"a/b\",\n  \"receives_upgrades\": true\n}\n",
+)));
+$writer = new class extends PluginManager {
+	public $dir = '';
+	protected function getExtensionPath($name) { return $this->dir; }
+};
+$writer->dir = $plugin;
+$writer->writeManifestReceivesUpgrades('fixture', false);
+$m = json_decode((string)file_get_contents($plugin . '/plugin.json'), true);
+check(($m['receives_upgrades'] ?? null) === false && ($m['description'] ?? null) === 'a/b',
+	'Disable upgrade writes false and keeps every other member', json_encode($m));
+$writer->writeManifestReceivesUpgrades('fixture', true);
+check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null,
+	'then Allow upgrade restores the signed bytes: not edited', (string)file_get_contents($plugin . '/plugin.json'));
+
+// A file this process cannot read is no evidence of an edit (a deploy midway
+// through putting permissions back). Root reads anything, so only as non-root.
+if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+	list($site, $plugin) = $signed_plugin('edit_unreadable', $files);
+	chmod($plugin . '/includes/Fixture.php', 0000);
+	check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'an unreadable file is not an edit');
+	chmod($plugin . '/includes/Fixture.php', 0644);
+}
+
+// Once per request: the page asks for each package once, and a second ask is
+// the first answer, not a second walk.
+list($site, $plugin) = $signed_plugin('edit_cached', $files);
+check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'the first answer is read from the files');
+file_put_contents($plugin . '/includes/Fixture.php', "<?php // later\n");
+check(PackageSignature::editedSinceInstall($plugin, $keys_file) === null, 'and the same request gets the same answer');
 
 section('The parser refuses a listing that reaches outside itself');
 

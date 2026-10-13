@@ -37,6 +37,8 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.5 - editedSinceInstall(): whether a live package's files still match its signed listing, the
+ *                first differing file named, once per request (specs/local_edits_detected.md)
  * @version 1.4 - verifyTree(): every package in a site root, core included, each against its own
  *                manifest, every failure listed (specs/host_restrictions.md D5, D8); verify() takes
  *                'walk', 'skip' and 'name'; publisherBox() is never true on a host that refuses
@@ -507,6 +509,43 @@ class PackageSignature {
 				. $logged['why'], $root, $verified_by, null, count($listed));
 		}
 		return $signed;
+	}
+
+	/** The verdicts that mean the files on disk changed after a signed package was installed. */
+	const EDIT_VERDICTS = array(self::TAMPERED, self::EXTRA_FILE, self::MISSING_FILE);
+
+	/** editedSinceInstall()'s answers this request, by directory. */
+	private static $edit_cache = array();
+
+	/**
+	 * Has this installed package been edited on this machine? (specs/local_edits_detected.md)
+	 *
+	 * The verdict naming the first file that differs from the package's signed
+	 * listing, or null when the files are the ones shipped. Only a changed, added
+	 * or removed file is an edit: an unsigned package has no listing to compare
+	 * against, and a stranger's key or a missing release log is the Unsigned and
+	 * Unlogged badges' business, not this one's, and a file this process cannot
+	 * read is not evidence of a change. Answered once per directory per request,
+	 * which is what keeps the cost to one walk per package per page load.
+	 *
+	 * @param string      $dir       A live plugin or theme directory
+	 * @param string|null $keys_file The key file; the node's own when null
+	 */
+	public static function editedSinceInstall(string $dir, ?string $keys_file = null): ?PackageVerdict {
+		$cache_key = rtrim($dir, '/') . "\0" . (string)$keys_file;
+		if (!array_key_exists($cache_key, self::$edit_cache)) {
+			$verdict = self::verify($dir, $keys_file);
+			$edited = in_array($verdict->verdict, self::EDIT_VERDICTS, true);
+			// A file this process cannot read (a deploy midway through
+			// putting permissions back) is `tampered` to verify(), which is
+			// right for an install and is no evidence of an edit.
+			if ($edited && $verdict->verdict === self::TAMPERED && $verdict->file !== null
+				&& !is_readable(rtrim($dir, '/') . '/' . $verdict->file)) {
+				$edited = false;
+			}
+			self::$edit_cache[$cache_key] = $edited ? $verdict : null;
+		}
+		return self::$edit_cache[$cache_key];
 	}
 
 	/** The code directories of a site root, and the package directories inside them. */
