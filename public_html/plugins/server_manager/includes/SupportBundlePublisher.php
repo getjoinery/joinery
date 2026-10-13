@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.19 - carries the mail gateway's installer and binaries: a Docker host runs it --machine for its
+ *                 container sites (HOST_PLUGIN_INSTALLERS, specs/mail_apps_plugin.md § A4)
  * @version 1.18 - publish() takes $source_root: the scripts are copied from the release's build
  *                 directory (the commit, ReleaseCommit::exportTree()), not the working tree
  * @version 1.17 - carries joinery_data_root.sh and _docker_daemon_json.sh: the host converger's data-root
@@ -212,6 +214,14 @@ class SupportBundlePublisher {
 		'public_html/plugins/mailbox/provisioning/rspamd_stateless.sh',
 		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-x86_64',
 		'public_html/plugins/mailbox/provisioning/bin/relay-sealer-aarch64',
+		// The mail gateway on a Docker host: the runner's HOST_PLUGIN_INSTALLERS
+		// runs this installer --machine, which installs the gateway switched off
+		// and the timer that serves each container site that asks for mail apps
+		// (specs/mail_apps_plugin.md § A4). Its binaries are built by
+		// MailGatewayPublisher, which publish runs before this publisher.
+		'public_html/plugins/mail_apps/provisioning/install_mail_gateway.sh',
+		'public_html/plugins/mail_apps/provisioning/bin/mail-gateway-x86_64',
+		'public_html/plugins/mail_apps/provisioning/bin/mail-gateway-aarch64',
 	);
 
 	/**

@@ -194,7 +194,17 @@ The **Allow mail apps** switch (`/plugins/mail_apps/admin/admin_mail_apps`, perm
 2. Turns the site on through the relay (helper `on SITE NAME RELAY_IP`): the entry is marked `via_relay`, 993 and 465 open to the relay's address only, and the relay is listed in `proxy_from`. The gateway believes a PROXY line from a listed address alone, so its limits and the address the site is told name the program; and it serves a `via_relay` site only to a connection that came through the relay, or from this machine, so a scan of this server finds nothing.
 3. Pushes the fragment, which then carries this server's IPv4 (`mail_apps_origins`), so the relay starts passing programs through. Disallowing and deactivating push it again, empty.
 
-It is offered when the relay is this deployment's own (not a shared one), runs 3.11 or later, has its name and address, and `mailbox_public_ip` is set; the admin page says which is missing. The scheduled task **RenewMailAppsCertificate** renews the certificate through the relay daily once it has fewer than 30 days left; the relay issues at most one every 12 hours.
+It is offered when the relay is this deployment's own (not a shared one), runs 3.11 or later, has its name and address, and `mailbox_public_ip` is set; the admin page says which is missing.
+
+**The route is kept.** Mail programs store the name they connect to, so the switch records the route with the name (`mail_apps_route`: `direct` or `relay`, beside `mail_apps_served_name`) and keeps it. The rule (`MailAppGateway::preferredRoute()`): through a relay of this deployment's own, otherwise direct; never directly while a relay hides this server's address, since a direct name would publish it. `MailAppGateway::routeState()` compares the recorded name and route with what the rule picks now:
+- **offer**: the rule picks another name or route (a relay of its own was added, or the mail host name changed). The admin page says so, says each member must change the server name in their mail program, and offers **Switch**, which is Allow again by the new route. Nothing changes until it is pressed.
+- **exposed**: programs connect directly while mail now arrives through a relay that cannot pass them through (a shared one, or one older than 3.11). There is nothing to switch to; the page warns that this server's address is public.
+- **gone**: programs connect through a relay this deployment no longer has. A relay that is only disabled (mailbox's emergency stop) is not gone: its row stays, and programs wait for it as mail does.
+
+The scheduled task **KeepMailAppsReachable** (hourly, `MailAppGateway::keepReachable()`) never changes a working route. It:
+- re-points a **gone** route by whatever the rule picks now (Allow again), or turns mail apps off when nothing can carry them, and leaves the admin page a notice (`mail_apps_route_notice`) until it is dismissed;
+- follows a relay that moved to a new address (re-provisioned, or moved to another shard): the helper's `status` names the relay addresses it was told, and when the relay's `mrl_public_ip` is not among them, `on` runs again so the firewall and `proxy_from` follow;
+- renews the certificate obtained through the relay once it has fewer than 30 days left; the relay issues at most one every 12 hours.
 
 The host installer (`provisioning/install_mail_gateway.sh`) runs as root on every converge of a site with the plugin active, and puts these in place, switched off:
 - the binary and the `joinery-mailgw` user;
@@ -204,7 +214,12 @@ The host installer (`provisioning/install_mail_gateway.sh`) runs as root on ever
 
 The service runs unprivileged with `CAP_NET_BIND_SERVICE`. systemd hands it each served site's certificate and key (`LoadCredential`), so it never reads a private key on disk.
 
-A site container has no host of its own. Its host's management node runs the gateway.
+**A site in a container** connects mail programs straight to its Docker host, under the site's web name, which must point at the host directly (a name proxied by Cloudflare carries no mail ports, and the switch says so). A container's relay hides nothing, so it is never in the path. The host runs one gateway for all its container sites:
+- The support bundle carries the installer and both binaries. The host's machine-mode runner runs the installer `--machine` (its one `HOST_PLUGIN_INSTALLERS` entry), which installs the gateway switched off, with no sudoers rule, and the timer `joinery-mail-gateway-converge.timer`.
+- The site's switch writes `storage/mail_apps/request.json` (`{"on": true, "name": ...}`, or `{"on": false}`) in its own storage volume. Every minute the helper's `converge` reads each container site's request, for sites the host has a run spec for, opening each step without following links. It serves the site through the host's front door (`https://127.0.0.1:443`, the web name), with the certificate the host already holds for that name, or turns it off. It writes `answer.json` beside the request: `on`, `off` or `failed` with the reason, which the admin page shows. A failed request is tried again after an hour; an entry whose container is gone is forgotten.
+- The program's address reaches the site as on a site machine: the gateway sends it in `X-Forwarded-For`, and the container's Apache trusts the front door's chain.
+- The admin page's checks connect to the web name, the host, rather than the container's own loopback.
+- Deactivating and uninstalling write the off request.
 
 **Watching it.** The agent's host report carries `mail_gateway`: the gateway's version, its unit's state, systemd's restarts, its open connections, and for each site turned on whether a TLS connection under the site's mail name reaches an IMAP and a submission greeting, and the days left on that certificate. On the node page it is the **Mail apps gateway** row of Services, with **Restart** and **Why?** (its journal). The agent's `mail_gateway` recipe restarts a gateway that a site has on and that is stopped or no longer greets, and opens a case when restarting does not help. The management node raises `plane:mail_gateway` when a site has mail apps on and the gateway is not running, does not greet, keeps restarting, or a certificate is under 14 days. systemd restarts a gateway that exits, five seconds later.
 
@@ -227,7 +242,8 @@ The admin page shows:
 | `plugins/mail_apps/tests/mail_apps_private_test.php` | locked behaviour and the lock notice through a borrowed window |
 | `plugins/mail_apps/tests/mail_apps_send_test.php` | submission rules, the Sent copy and its dedupe, drafts |
 | `plugins/mail_apps/tests/mail_gateway_publish_test.php` | the publisher and the installer agree on the binary names; publish, the statement and the verifier reach it |
-| `plugins/mail_apps/tests/mail_gateway_helper_gate.sh` | the helper through a relay (csr, install-cert refusing another name or key, `on` with relay addresses, the firewall and `proxy_from`, off) and its `remove` |
+| `plugins/mail_apps/tests/mail_gateway_helper_gate.sh` | the helper through a relay (csr, install-cert refusing another name or key, `on` with relay addresses, the firewall and `proxy_from`, off), its `remove`, and `converge` on a fake Docker root (on, a pass that changes nothing, another name refused, off, planted links never followed, a failure waits, a gone container forgotten) |
+| `plugins/mail_apps/tests/mail_apps_route_test.php` | the kept route: offers, the public-address warning, following a moved relay, re-pointing a gone one, a disabled relay left alone; a site in a container asking its host |
 | `plugins/mail_apps/tests/mail_apps_relay_test.php` | through a relay: the version gate, the relay's name, what `cannotTurnOn()` names, the fragment's `mail_apps_origins` |
 | `provisioning/mail-gateway` `proxy_test.go` | PROXY lines believed from `proxy_from` only, a `via_relay` site refused to anyone else |
 | `plugins/server_manager/tests/incident_sources_test.php` | `plane:mail_gateway`'s conditions and severities |

@@ -13,9 +13,17 @@
  * root helper, /usr/local/sbin/joinery-mail-gateway on|off|status SITE,
  * installed with the plugin's host installer (provisioning/
  * install_mail_gateway.sh), run through sudo by the web user — the mailbox
- * listener switch's pattern. A site in a container has no host to change; its
- * host's management node turns it on.
+ * listener switch's pattern. A site in a container has no host to change: it
+ * asks its Docker host in its own storage, and the host's converge timer
+ * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.5.0 - a site in a container: programs connect to its web name on its Docker host; Allow and Stop write
+ *                storage/mail_apps/request.json for the host's converge, hostAnswer() reads its answer, the checks
+ *                dial the served name (checkAddress()), and a web name behind Cloudflare is refused
+ * @version 1.4.0 - the route is recorded and kept (mail_apps_route): routeState() is the one predicate for a changed
+ *                name or route (Switch offer), a public address under a relay, and a gone relay; allow()/disallow()
+ *                hold the switch; keepReachable() follows a relay's new address, re-points a gone route and renews;
+ *                standInForHelper() for tests; nameDrift() folded into routeState()
  * @version 1.3.0 - through a relay: mailHostname() is the relay's name; cannotTurnOn() says what the relay lacks;
  *                turnOn() obtains the gateway's certificate through the relay (csr, mailAppsCertificate,
  *                install-cert) and serves the site via_relay; renewRelayCertificate() for the daily task
@@ -55,22 +63,268 @@ class MailAppGateway {
 		return $name !== '' ? $name : null;
 	}
 
+	const ROUTE_DIRECT = 'direct';
+	const ROUTE_RELAY = 'relay';
+
 	/**
-	 * When mail apps are on and the mail host name has changed since the
-	 * gateway was turned on, the two names (served, set); null otherwise.
-	 *
-	 * @return array{served:string, setting:?string}|null
+	 * The route the rule picks now (specs/mail_apps_plugin.md § Which route a
+	 * deployment uses): through a relay of this deployment's own, else direct;
+	 * null where mail apps cannot be on, and cannotTurnOn() says why.
 	 */
-	public static function nameDrift(): ?array {
-		if (!Globalvars::get_instance()->get_setting('mail_apps_enabled')) {
+	public static function preferredRoute(): ?string {
+		if (self::cannotTurnOn() !== null) {
 			return null;
 		}
+		return self::relay() !== null ? self::ROUTE_RELAY : self::ROUTE_DIRECT;
+	}
+
+	/**
+	 * The route mail apps were turned on with, or null while they are off. A
+	 * site turned on before the route was recorded is through the relay when
+	 * the name it serves is the active relay's.
+	 */
+	public static function recordedRoute(): ?string {
+		$settings = Globalvars::get_instance();
+		if (!$settings->get_setting('mail_apps_enabled')) {
+			return null;
+		}
+		$route = (string)$settings->get_setting('mail_apps_route');
+		if ($route === self::ROUTE_DIRECT || $route === self::ROUTE_RELAY) {
+			return $route;
+		}
+		return self::relayCarries(self::recordedName()) ? self::ROUTE_RELAY : self::ROUTE_DIRECT;
+	}
+
+	/** Whether any relay this deployment still has (enabled or not) is named $name. */
+	private static function relayRowCarries(string $name): bool {
+		if (!class_exists('MultiMailboxRelay')) {
+			return false;
+		}
+		foreach (new MultiMailboxRelay(array('deleted' => false)) as $relay) {
+			if (strtolower(trim((string)$relay->get('mrl_mx_hostname'))) === $name) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Whether the active relay's mail host name is $name. */
+	private static function relayCarries(?string $name): bool {
+		$relay = self::relay();
+		return $relay !== null && $name !== null && strtolower(trim((string)$relay->get('mrl_mx_hostname'))) === $name;
+	}
+
+	/**
+	 * Where mail apps stand against the rule, one answer for every case
+	 * (specs/mail_apps_plugin.md § Which route a deployment uses). Null while
+	 * mail apps are off or match the rule. Otherwise:
+	 *   offer    the rule picks another name or route; nothing changes until
+	 *            the admin presses Switch (members must change the server name)
+	 *   exposed  on directly while mail now arrives through a relay that cannot
+	 *            pass programs through: the direct name keeps this server's
+	 *            address public; no switch target
+	 *   gone     on through a relay that no longer carries the name (deleted,
+	 *            or replaced): keepReachable() re-points or turns off by itself
+	 *
+	 * A relay that moved address is not a state of the route; keepReachable()
+	 * follows it (relayAddressMoved()).
+	 *
+	 * @return array{state:string, served:string, route:string, name:?string, preferred:?string, reason:?string}|null
+	 */
+	public static function routeState(): ?array {
+		$route = self::recordedRoute();
 		$served = self::recordedName();
-		$setting = self::mailHostname();
-		if ($served === null || $served === $setting) {
+		if ($route === null || $served === null) {
 			return null;
 		}
-		return array('served' => $served, 'setting' => $setting);
+		$preferred = self::preferredRoute();
+		$name = self::mailHostname();
+		$answer = array('served' => $served, 'route' => $route, 'name' => $name, 'preferred' => $preferred,
+			'reason' => self::cannotTurnOn());
+		if ($route === self::ROUTE_RELAY && !self::relayCarries($served)) {
+			// A relay the admin only disabled (mailbox's emergency stop) still
+			// has its row: programs wait for it like mail does. Going direct
+			// then would publish the address it hides.
+			return self::relayRowCarries($served) && self::relay() === null ? null : array('state' => 'gone') + $answer;
+		}
+		if ($preferred === null) {
+			// Mail arrives through a relay that passes nothing through (shared,
+			// or older than 3.11), while programs still reach this server
+			// directly: nothing to switch to, but the address is public.
+			return ($route === self::ROUTE_DIRECT && self::relay() !== null && !self::inContainer())
+				? array('state' => 'exposed') + $answer : null;
+		}
+		if ($preferred !== $route || $name !== $served) {
+			return array('state' => 'offer') + $answer;
+		}
+		return null;
+	}
+
+	/**
+	 * Turn mail apps on by the route the rule picks now, and record it: the
+	 * Allow and Switch buttons, and keepReachable() re-pointing a gone route.
+	 * A relay that passes programs through is sent this server's address.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function allow(): array {
+		$why_not = self::cannotTurnOn();
+		if ($why_not !== null) {
+			return array('ok' => false, 'message' => $why_not);
+		}
+		$route = self::preferredRoute();
+		$run = self::turnOn();
+		if (!$run['ok']) {
+			return $run;
+		}
+		Setting::put('mail_apps_enabled', true);
+		Setting::put('mail_apps_served_name', (string)self::mailHostname());
+		Setting::put('mail_apps_route', (string)$route);
+		if (self::inContainer()) {
+			return array('ok' => true, 'message' => 'Asked this site\'s server to let mail programs connect to '
+				. self::servedName() . ' on ports 993 and 465. It does so within a minute; this page shows its answer.');
+		}
+		return array('ok' => true, 'message' => 'Mail apps are on: mail programs connect to ' . self::servedName()
+			. ' on ports 993 and 465.' . self::pushRelay($route === self::ROUTE_RELAY
+				? ' The relay passes mail programs through to this server.' : ''));
+	}
+
+	/**
+	 * Turn mail apps off and record it: the gateway stops serving this site,
+	 * and every borrowed window a mail credential holds ends now.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function disallow(): array {
+		$was_through = self::recordedRoute() === self::ROUTE_RELAY && self::relayCarries(self::recordedName());
+		$run = self::turnOff();
+		if (!$run['ok']) {
+			return $run;
+		}
+		Setting::put('mail_apps_enabled', false);
+		Setting::put('mail_apps_served_name', '');
+		Setting::put('mail_apps_route', '');
+		// Credentials of a switched-off purpose are refused from now on
+		// (AppAccess::isAvailable()); their borrowed windows end now.
+		ApiKey::LockBorrowedWindowsForPurpose('mail');
+		return array('ok' => true, 'message' => 'Mail apps are off: the gateway no longer answers for this site, and '
+			. 'members\' app passwords stop working at once.' . self::pushRelay($was_through
+				? ' The relay no longer passes them through.' : ''));
+	}
+
+	/**
+	 * Send the active relay the change now (RelayMapExporter reads the
+	 * settings just written); a push that fails is retried by the relay
+	 * reconcile task. Returns $done, what to tell the admin when it went
+	 * through, or why it has not; '' with no relay.
+	 */
+	private static function pushRelay(string $done): string {
+		if (($relay = self::relay()) === null) {
+			return '';
+		}
+		$push = RelayMapSync::push($relay);
+		if (($push['status'] ?? '') === 'error') {
+			return ' The relay has not taken the change yet (' . $push['message'] . '); it is retried within minutes.';
+		}
+		return $done;
+	}
+
+	/**
+	 * Through a relay, whether the relay's address has changed since the
+	 * gateway was told it (re-provisioned, or moved to another shard): the
+	 * firewall and the gateway's trusted list still name the old one, so
+	 * programs cannot reach this server until it is followed.
+	 */
+	public static function relayAddressMoved(): bool {
+		$relay = self::relay();
+		if (self::recordedRoute() !== self::ROUTE_RELAY || $relay === null || !self::relayCarries(self::recordedName())) {
+			return false;
+		}
+		$status = self::helper(array('status', self::siteName()), 'GATEWAY_STATUS');
+		if (!$status['ok'] || !preg_match('/^relays=(.*)$/m', $status['message'], $m)) {
+			return false;
+		}
+		$told = preg_split('/\s+/', trim($m[1]), -1, PREG_SPLIT_NO_EMPTY);
+		return !in_array(trim((string)$relay->get('mrl_public_ip')), $told, true);
+	}
+
+	/**
+	 * Keep mail programs able to connect (the task KeepMailAppsReachable,
+	 * hourly): follow a relay that moved address, re-point a route that can no
+	 * longer work, and renew a certificate obtained through the relay. Never
+	 * changes a working route: a better one is the admin's Switch.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function keepReachable(): array {
+		if (!Globalvars::get_instance()->get_setting('mail_apps_enabled') || self::inContainer() || !self::helperInstalled()) {
+			return array('ok' => true, 'message' => 'Mail apps are off here; nothing to keep.');
+		}
+		$state = self::routeState();
+		if ($state !== null && $state['state'] === 'gone') {
+			return self::repoint($state);
+		}
+		$messages = array();
+		if (self::relayAddressMoved()) {
+			$run = self::turnOn();
+			if (!$run['ok']) {
+				return array('ok' => false, 'message' => 'The relay moved to ' . trim((string)self::relay()->get('mrl_public_ip'))
+					. ' and the gateway could not follow it: ' . $run['message']);
+			}
+			$messages[] = 'Followed the relay to its new address, ' . trim((string)self::relay()->get('mrl_public_ip')) . '.';
+		}
+		$renewed = self::renewRelayCertificate();
+		$messages[] = $renewed['message'];
+		return array('ok' => $renewed['ok'], 'message' => implode(' ', $messages));
+	}
+
+	/**
+	 * The relay mail apps were turned on through is gone: turn them on by
+	 * whatever the rule picks now, or off when nothing can carry them, and
+	 * leave the admin a notice (members must change the server name).
+	 */
+	private static function repoint(array $state): array {
+		$old = $state['served'];
+		if ($state['preferred'] !== null) {
+			$run = self::allow();
+			if ($run['ok']) {
+				self::noteRouteChange('Mail programs connected to ' . $old . ' through a relay that no longer carries it. '
+					. 'They now connect to ' . self::servedName() . '. Each member must change the server name in their '
+					. 'mail program to ' . self::servedName() . '.');
+				return array('ok' => true, 'message' => 'Re-pointed mail apps from ' . $old . ' to ' . self::servedName() . '.');
+			}
+			$why = $run['message'];
+		} else {
+			$why = (string)$state['reason'];
+		}
+		$off = self::disallow();
+		self::noteRouteChange('Mail programs connected to ' . $old . ' through a relay that no longer carries it, and '
+			. 'they cannot be carried another way, so mail apps were turned off: ' . $why);
+		return array('ok' => $off['ok'], 'message' => 'Turned mail apps off: the relay no longer carries ' . $old . ' ('
+			. $why . ')' . ($off['ok'] ? '' : '; turning the gateway off failed too: ' . $off['message']));
+	}
+
+	/** Record a change made without the admin, for the admin page to show until it is dismissed. */
+	private static function noteRouteChange(string $text): void {
+		Setting::put('mail_apps_route_notice', gmdate('Y-m-d H:i:s') . '|' . $text);
+	}
+
+	/**
+	 * The last change made without the admin, or null.
+	 *
+	 * @return array{time:string, text:string}|null
+	 */
+	public static function routeNotice(): ?array {
+		$raw = (string)Globalvars::get_instance()->get_setting('mail_apps_route_notice');
+		if (strpos($raw, '|') === false) {
+			return null;
+		}
+		list($time, $text) = explode('|', $raw, 2);
+		return array('time' => $time, 'text' => $text);
+	}
+
+	public static function dismissRouteNotice(): void {
+		Setting::put('mail_apps_route_notice', '');
 	}
 
 	/** The site's public web host name (how the gateway reaches the site over loopback). */
@@ -88,6 +342,13 @@ class MailAppGateway {
 	 * there is none.
 	 */
 	public static function mailHostname(): ?string {
+		if (self::inContainer()) {
+			// A container's programs connect straight to its Docker host under
+			// the site's web name, never through a relay (§ Which route a
+			// deployment uses, A4).
+			$host = strtolower(trim(self::hostname()));
+			return $host !== '' ? $host : null;
+		}
 		$relay = self::relay();
 		$host = $relay !== null ? (string)$relay->get('mrl_mx_hostname')
 			: (string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname');
@@ -112,8 +373,19 @@ class MailAppGateway {
 	 */
 	public static function cannotTurnOn(): ?string {
 		if (self::inContainer()) {
-			return 'This site runs in a container. Its host runs the mail gateway; turn mail apps on for this site '
-				. 'from the host\'s management node.';
+			$name = self::mailHostname();
+			if ($name === null) {
+				return 'This site has no web name yet; mail programs connect to it.';
+			}
+			if (self::behindCloudflare($name)) {
+				return 'Mail programs connect to ' . $name . ', which goes through Cloudflare. Cloudflare carries web '
+					. 'pages only, not mail (ports 993 and 465). Turn Cloudflare\'s proxy off for this name (DNS only) '
+					. 'so it points straight at this site\'s server.';
+			}
+			if (!is_dir(self::storageDir()) && !@mkdir(self::storageDir(), 0755, true)) {
+				return 'This site cannot write its request for the host (' . self::storageDir() . ').';
+			}
+			return null;
 		}
 		$relay = self::relay();
 		if ($relay !== null) {
@@ -156,6 +428,9 @@ class MailAppGateway {
 	 */
 	public static function turnOn(): array {
 		$name = self::mailHostname();
+		if (self::inContainer()) {
+			return self::askHost(true, $name);
+		}
 		$relay = self::relay();
 		if ($relay === null) {
 			return self::helper(array('on', self::siteName(), (string)$name), 'GATEWAY_ON');
@@ -172,11 +447,14 @@ class MailAppGateway {
 
 	/** Turn the gateway off for this site. Never throws. */
 	public static function turnOff(): array {
+		if (self::inContainer()) {
+			return self::askHost(false, null);
+		}
 		return self::helper(array('off', self::siteName()), 'GATEWAY_OFF');
 	}
 
 	/**
-	 * The daily renewal (RenewMailAppsCertificate): while mail apps are on
+	 * The renewal (keepReachable()): while mail apps are on
 	 * through a relay and the certificate is inside RELAY_CERT_RENEW_DAYS of
 	 * expiry, obtain a new one; the helper restarts the gateway onto it.
 	 *
@@ -184,7 +462,8 @@ class MailAppGateway {
 	 */
 	public static function renewRelayCertificate(): array {
 		$relay = self::relay();
-		if ($relay === null || !Globalvars::get_instance()->get_setting('mail_apps_enabled') || !self::helperInstalled()) {
+		if ($relay === null || self::recordedRoute() !== self::ROUTE_RELAY || !self::relayCarries(self::recordedName())
+				|| !self::helperInstalled()) {
 			return array('ok' => true, 'message' => 'Mail apps are not on through a relay; nothing to renew.');
 		}
 		$expires = self::relayCertificateExpires();
@@ -236,18 +515,102 @@ class MailAppGateway {
 		return (int)$m[1];
 	}
 
+	/** Whether $name resolves to a Cloudflare edge address (a proxied name carries no mail ports). */
+	public static function behindCloudflare(string $name): bool {
+		$records = @dns_get_record($name, DNS_A | DNS_AAAA);
+		foreach (is_array($records) ? $records : array() as $r) {
+			$ip = $r['ip'] ?? ($r['ipv6'] ?? '');
+			if ($ip !== '' && SessionControl::ip_is_cloudflare_edge($ip)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * In a container: where the site asks its Docker host for mail apps and
+	 * reads the answer (storage/mail_apps/request.json and answer.json). The
+	 * host's converge timer reads the request from this volume and writes the
+	 * answer beside it (install_mail_gateway.sh, helper converge).
+	 */
+	public static function storageDir(): string {
+		if (self::$container_stand_in !== null) {
+			return self::$container_stand_in;
+		}
+		return rtrim(PathHelper::getSiteRoot(), '/') . '/storage/mail_apps';
+	}
+
+	/** @var string|null A storage folder standing in for a container's (tests only; see standInForContainer()). */
+	private static $container_stand_in = null;
+
+	/** Tests only: behave as a site in a container whose storage/mail_apps is $dir; null ends it. */
+	public static function standInForContainer(?string $dir): void {
+		self::$container_stand_in = $dir;
+	}
+
+	/** In a container: ask the host to serve this site under $name, or to stop. */
+	private static function askHost(bool $on, ?string $name): array {
+		$dir = self::storageDir();
+		if (!is_dir($dir) && !@mkdir($dir, 0755, true)) {
+			return array('ok' => false, 'message' => 'This site cannot write its request for the host (' . $dir . ').');
+		}
+		$body = json_encode($on ? array('on' => true, 'name' => (string)$name) : array('on' => false)) . "\n";
+		$tmp = $dir . '/.request.json.' . getmypid();
+		if (@file_put_contents($tmp, $body) === false || !@rename($tmp, $dir . '/request.json')) {
+			@unlink($tmp);
+			return array('ok' => false, 'message' => 'This site could not write its request for the host.');
+		}
+		return array('ok' => true, 'message' => $on ? 'GATEWAY_ON' : 'GATEWAY_OFF');
+	}
+
+	/**
+	 * In a container: the host's last answer, or null before it has given one.
+	 *
+	 * @return array{state:string, name:?string, cert_expires:?int, error:?string, time:?int}|null
+	 */
+	public static function hostAnswer(): ?array {
+		$raw = @file_get_contents(self::storageDir() . '/answer.json');
+		$j = is_string($raw) ? json_decode($raw, true) : null;
+		if (!is_array($j) || !in_array($j['state'] ?? '', array('on', 'off', 'failed'), true)) {
+			return null;
+		}
+		return array('state' => (string)$j['state'], 'name' => isset($j['name']) ? (string)$j['name'] : null,
+			'cert_expires' => isset($j['cert_expires']) ? (int)$j['cert_expires'] : null,
+			'error' => isset($j['error']) ? (string)$j['error'] : null, 'time' => isset($j['time']) ? (int)$j['time'] : null);
+	}
+
+	/** Where checks connect: this machine's loopback, or in a container the name programs use (its host). */
+	public static function checkAddress(): string {
+		return self::inContainer() ? self::servedName() : '127.0.0.1';
+	}
+
 	/** A site container has no host of its own to change. */
 	public static function inContainer(): bool {
+		if (self::$container_stand_in !== null) {
+			return true;
+		}
 		return Globalvars::get_instance()->get_setting('deployment_environment', true, true) === 'docker';
 	}
 
 	public static function helperInstalled(): bool {
-		return is_file(self::HELPER);
+		return self::$helper_stand_in !== null || is_file(self::HELPER);
 	}
 
-	/** Whether something accepts connections on $port on this machine. */
+	/** @var callable|null Answers helper calls in place of the root helper (tests only; see standInForHelper()). */
+	private static $helper_stand_in = null;
+
+	/**
+	 * Tests only: answer helper calls with $fn(array $args, ?string $stdin):
+	 * array{code:int, output:string} instead of running the root helper, and
+	 * count it as installed. Null puts the real helper back.
+	 */
+	public static function standInForHelper(?callable $fn): void {
+		self::$helper_stand_in = $fn;
+	}
+
+	/** Whether something accepts connections on $port: on this machine, or in a container on its host. */
 	public static function listening(int $port): bool {
-		$sock = @stream_socket_client('tcp://127.0.0.1:' . $port, $errno, $errstr, 2);
+		$sock = @stream_socket_client('tcp://' . self::checkAddress() . ':' . $port, $errno, $errstr, 2);
 		if ($sock) {
 			@fclose($sock);
 			return true;
@@ -266,7 +629,7 @@ class MailAppGateway {
 		// Verified as a mail program verifies it: the chain to a public root
 		// and the name. A self-signed or broken chain fails here, as it would
 		// in Thunderbird; the unverified look below only says why.
-		$verified = @stream_socket_client('ssl://127.0.0.1:' . $port, $verrno, $verrstr, 5, STREAM_CLIENT_CONNECT,
+		$verified = @stream_socket_client('ssl://' . self::checkAddress() . ':' . $port, $verrno, $verrstr, 5, STREAM_CLIENT_CONNECT,
 			stream_context_create(array('ssl' => array(
 				'verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true, 'peer_name' => $host))));
 		if ($verified) {
@@ -279,7 +642,7 @@ class MailAppGateway {
 			'SNI_enabled'       => true,
 			'peer_name'         => $host,
 		)));
-		$sock = @stream_socket_client('ssl://127.0.0.1:' . $port, $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $ctx);
+		$sock = @stream_socket_client('ssl://' . self::checkAddress() . ':' . $port, $errno, $errstr, 5, STREAM_CLIENT_CONNECT, $ctx);
 		if (!$sock) {
 			return array('ok' => false, 'covers' => false, 'expires' => null, 'error' => $errstr ?: 'no TLS answer');
 		}
@@ -345,18 +708,24 @@ class MailAppGateway {
 				. 'installer puts it in place within a few minutes of the plugin being switched on; or run once as '
 				. 'root: sudo bash plugins/mail_apps/provisioning/install_mail_gateway.sh');
 		}
-		$cmd = 'sudo -n ' . escapeshellarg(self::HELPER) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
-		$proc = proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes);
-		if (!is_resource($proc)) {
-			return array('ok' => false, 'message' => 'The mail gateway helper could not be started.');
+		if (self::$helper_stand_in !== null) {
+			$answer = (self::$helper_stand_in)($args, $stdin);
+			$text = trim((string)($answer['output'] ?? ''));
+			$code = (int)($answer['code'] ?? 0);
+		} else {
+			$cmd = 'sudo -n ' . escapeshellarg(self::HELPER) . ' ' . implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
+			$proc = proc_open($cmd, array(0 => array('pipe', 'r'), 1 => array('pipe', 'w')), $pipes);
+			if (!is_resource($proc)) {
+				return array('ok' => false, 'message' => 'The mail gateway helper could not be started.');
+			}
+			if ($stdin !== null) {
+				fwrite($pipes[0], $stdin);
+			}
+			fclose($pipes[0]);
+			$text = trim((string)stream_get_contents($pipes[1]));
+			fclose($pipes[1]);
+			$code = proc_close($proc);
 		}
-		if ($stdin !== null) {
-			fwrite($pipes[0], $stdin);
-		}
-		fclose($pipes[0]);
-		$text = trim((string)stream_get_contents($pipes[1]));
-		fclose($pipes[1]);
-		$code = proc_close($proc);
 		if ($code !== 0 || strpos($text, $marker) === false) {
 			return array('ok' => false, 'message' => 'The mail gateway helper did not finish (exit ' . intval($code) . '): '
 				. ($text !== '' ? $text : 'no output'));
@@ -399,7 +768,7 @@ class MailAppGateway {
 				// certificate Thunderbird refuses proves nothing.
 				'verify_peer' => true, 'verify_peer_name' => true, 'SNI_enabled' => true, 'peer_name' => self::servedName(),
 			)));
-			$sock = @stream_socket_client('ssl://127.0.0.1:' . self::IMAP_PORT, $errno, $errstr, 8, STREAM_CLIENT_CONNECT, $ctx);
+			$sock = @stream_socket_client('ssl://' . self::checkAddress() . ':' . self::IMAP_PORT, $errno, $errstr, 8, STREAM_CLIENT_CONNECT, $ctx);
 			if (!$sock) {
 				throw new RuntimeException('No TLS connection to port ' . self::IMAP_PORT . ': ' . $errstr);
 			}
