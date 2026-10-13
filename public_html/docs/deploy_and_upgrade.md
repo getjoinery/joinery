@@ -982,6 +982,18 @@ The marketplace has no acknowledgement path: it is first-party only, so a
 marketplace archive that does not verify is a publishing defect and
 `install_plugin` / `install_theme` refuse it outright.
 
+**On a host that refuses unsigned packages** (`unsigned_packages=refuse` in
+`/etc/joinery/host_restrictions/restrictions`, read through `HostRestrictions`;
+a multi-tenant host, see [Installation](installation.md)) there is no way past
+the refusal. The page shows "This host installs only signed plugins and themes"
+with the package's facts and no button, `PackageAcknowledgement::mint()` refuses
+before any step-up, and `install_extension.php` refuses an unverified plugin or
+page theme with or without `--acknowledged`, and from disk even when its row
+already says `unsigned`. A style theme still installs. Each refusal exits 3, as
+any unverified package does. `PackageSignature::publisherBox()` is false there
+whatever `config/` holds, and the host converger never takes the publishing-box
+shortcut there.
+
 The shell form still works for a self-hoster with one, and is the same code:
 
 ```

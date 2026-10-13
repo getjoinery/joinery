@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -261,7 +261,7 @@ case "$1 $2" in
             case "$c" in
                 # siteone's process is the gate's own, so its cgroup and network
                 # namespace are real files to read; sitetwo has no process.
-                siteone)  echo "/siteone|SITENAME=siteone|running|none|$GATE_PID|2026-09-28T18:01:15.123456789Z|8081|$GATE_VOL/one_data $GATE_VOL/one_uploads " ;;
+                siteone)  echo "/siteone|SITENAME=siteone|running|none|$GATE_PID|2026-09-28T18:01:15.123456789Z|8081|$GATE_VOL/one_data $GATE_VOL/one_uploads $GATE_VOL/siteone_config/_data " ;;
                 sitetwo)  echo "/sitetwo|SITENAME=sitetwo|running|none|0|0001-01-01T00:00:00Z|8082|" ;;
                 impostor) echo "/impostor|SITENAME=siteone|running|none|0|0001-01-01T00:00:00Z|8083|" ;;
                 *)        echo "/$c||running|none|0|0001-01-01T00:00:00Z||" ;;
@@ -272,6 +272,11 @@ STUB
 chmod 755 "$T/bin"/*
 mkdir -p "$T/vol/one_data" "$T/vol/one_uploads"
 head -c 100000 /dev/zero > "$T/vol/one_data/db"; head -c 300000 /dev/zero > "$T/vol/one_uploads/photo"
+# siteone's config volume holds the code check site_housekeeping.sh writes on a
+# host that refuses unsigned code (specs/host_restrictions.md D8).
+mkdir -p "$T/vol/siteone_config/_data"
+printf 'failed 2026-10-13T01:40:00Z\nfail\tcore\t\ttampered\tpublic_html/includes/Mail Guard.php\nfail\tplugin\tmailbox\textra_file\tincludes/x.php\nnot a line\n' \
+    > "$T/vol/siteone_config/_data/code_check"
 export GATE_PID=$$ GATE_VOL="$T/vol"
 # sitetwo is held stopped by hold_container (a switch-over's old container).
 mkdir -p "$T/etc/joinery/sites/sitetwo"; printf 'restart=unless-stopped\n' > "$T/etc/joinery/sites/sitetwo/held"
@@ -337,15 +342,43 @@ chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv
 # network namespace of the process docker names - here the gate's own.
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
 chk "containers: a held container says so, and only it" "$(jv "$T/root.json" containers.0.held)/$(jv "$T/root.json" containers.1.held)" "false/true"
-chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,outbound_dropped,disk_bytes"
+chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,outbound_dropped,disk_bytes,code_check"
+chk "code_check: the state and when, from the site's config volume" \
+    "$(jv "$T/root.json" containers.0.code_check.state)/$(jv "$T/root.json" containers.0.code_check.at)" "failed/2026-10-13T01:40:00Z"
+chk "code_check: each failure, and nothing that is not one" "$(jv "$T/root.json" containers.0.code_check.failures count)" "2"
+chk "code_check: kind, name, verdict and file; a file name reduced to safe characters" \
+    "$(jv "$T/root.json" containers.0.code_check.failures.0.kind)|$(jv "$T/root.json" containers.0.code_check.failures.0.file)|$(jv "$T/root.json" containers.0.code_check.failures.1.name)|$(jv "$T/root.json" containers.0.code_check.failures.1.verdict)" \
+    "core|public_html/includes/MailGuard.php|mailbox|extra_file"
+chk "code_check: a site whose config volume is not found is unknown" "$(jv "$T/root.json" containers.1.code_check)" "unknown"
 chk "started_at is the container's start, as a Unix time" "$(jv "$T/root.json" containers.0.started_at)" "$(date -u -d 2026-09-28T18:01:15Z +%s)"
 chk "memory in use, its peak and its kill count are numbers" "$(jv "$T/root.json" containers.0.memory.used_bytes type)/$(jv "$T/root.json" containers.0.memory.peak_bytes type)/$(jv "$T/root.json" containers.0.memory.oom_kills type)" "integer/integer/integer"
 chk "the memory and process ceilings are a number or none" "$(int_or_none "$(jv "$T/root.json" containers.0.memory.limit_bytes)")/$(int_or_none "$(jv "$T/root.json" containers.0.pids.limit)")" "ok/ok"
 chk "CPU used and processes running are numbers" "$(jv "$T/root.json" containers.0.cpu.usage_usec type)/$(jv "$T/root.json" containers.0.pids.current type)" "integer/integer"
 chk "bytes sent is a number" "$(jv "$T/root.json" containers.0.net_tx_bytes type)" "integer"
-chk "disk is the sum of the site's volumes, measured" "$(jv "$T/root.json" containers.0.disk_bytes)" "$(( $(du -s -B1 "$T/vol/one_data" | cut -f1) + $(du -s -B1 "$T/vol/one_uploads" | cut -f1) ))"
+chk "disk is the sum of the site's volumes, measured" "$(jv "$T/root.json" containers.0.disk_bytes)" "$(( $(du -s -B1 "$T/vol/one_data" | cut -f1) + $(du -s -B1 "$T/vol/one_uploads" | cut -f1) + $(du -s -B1 "$T/vol/siteone_config/_data" | cut -f1) ))"
 chk "a site with no process says unknown for every figure" "$(jv "$T/root.json" containers.1.started_at)/$(jv "$T/root.json" containers.1.memory.used_bytes)/$(jv "$T/root.json" containers.1.cpu.usage_usec)/$(jv "$T/root.json" containers.1.net_tx_bytes)" "unknown/unknown/unknown/unknown"
 chk "a site with no volumes has no disk figure" "$(jv "$T/root.json" containers.1.disk_bytes)" "unknown"
+printf 'ok 2026-10-13T02:00:00Z\n' > "$T/vol/siteone_config/_data/code_check"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/cc.json" 2>/dev/null
+chk "code_check: ok, with no failures" "$(jv "$T/cc.json" containers.0.code_check.state)/$(jv "$T/cc.json" containers.0.code_check.failures count)" "ok/0"
+printf 'whatever\n' > "$T/vol/siteone_config/_data/code_check"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/cc.json" 2>/dev/null
+chk "code_check: a file not in the form the site writes is unknown, never ok" "$(jv "$T/cc.json" containers.0.code_check)" "unknown"
+rm -f "$T/vol/siteone_config/_data/code_check"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/cc.json" 2>/dev/null
+chk "code_check: none where the site keeps no file (a host that does not refuse unsigned code)" "$(jv "$T/cc.json" containers.0.code_check)" "none"
+chk "host_restrictions: none where the machine has no restrictions file" \
+    "$(HOST_REPORT_RESTRICTIONS="$T/norestr/restrictions" PATH="$T/bin:$PATH" bash "$SCRIPT" 2>/dev/null > "$T/hr.json"; jv "$T/hr.json" host_restrictions)" "none"
+mkdir -p "$T/restr"
+printf '# joinery-managed\nunsigned_packages=refuse\n\n' > "$T/restr/restrictions"
+HOST_REPORT_RESTRICTIONS="$T/restr/restrictions" PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/hr.json" 2>/dev/null
+chk "host_restrictions: each name and value the file holds" "$(jv "$T/hr.json" host_restrictions.unsigned_packages)|$(jv "$T/hr.json" host_restrictions count)" "refuse|1"
+printf 'unsigned_packages=refuse\nnot a line\n' > "$T/restr/restrictions"
+HOST_REPORT_RESTRICTIONS="$T/restr/restrictions" PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/hr.json" 2>/dev/null
+chk "host_restrictions: a file not in the form it is written is unknown (the sites read it as all on)" "$(jv "$T/hr.json" host_restrictions)" "unknown"
+rm -f "$T/restr/restrictions"
+HOST_REPORT_RESTRICTIONS="$T/restr/restrictions" PATH="$T/bin:$PATH" bash "$SCRIPT" > "$T/hr.json" 2>/dev/null
+chk "host_restrictions: the directory without its file is unknown, never none" "$(jv "$T/hr.json" host_restrictions)" "unknown"
 chk "root_ssh lists each key line with its fingerprint" "$(jv "$T/root.json" root_ssh.keys count)" "3"
 chk "a bare key is carried, with its type, key and comment" "$(jv "$T/root.json" root_ssh.keys.0.carry)/$(jv "$T/root.json" root_ssh.keys.0.type)/$(jv "$T/root.json" root_ssh.keys.0.comment)" "true/ssh-ed25519/gate@key"
 chk "a key line with options is listed, never carried" "$(jv "$T/root.json" root_ssh.keys.1.carry)/$(jv "$T/root.json" root_ssh.keys.1.key)" "false/"

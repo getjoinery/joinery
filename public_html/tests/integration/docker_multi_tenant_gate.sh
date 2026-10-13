@@ -161,7 +161,10 @@ chk "the helper runs multi_tenant_host.sh install beside install.sh" \
 chk "the helper runs proxy_default_site.sh install beside install.sh, after the walls" \
     "$(printf '%s\n' "$WALLS_FN" | grep -n -e 'multi_tenant_host.sh" install' -e 'proxy_default_site.sh" install' | cut -d: -f2- | sed -E 's/.*SCRIPT_DIR\/([a-z_]+\.sh).*/\1/' | tr '\n' ' ')" \
     "multi_tenant_host.sh proxy_default_site.sh "
-chk "and refuses the host when either fails" "$(printf '%s\n' "$WALLS_FN" | grep -c 'return 1')" "2"
+chk "the helper writes the host's restrictions after the default site (specs/host_restrictions.md D7)" \
+    "$(printf '%s\n' "$WALLS_FN" | grep -n -e 'proxy_default_site.sh" install' -e 'host_restrictions.sh" multi-tenant' | cut -d: -f2- | sed -E 's/.*SCRIPT_DIR\/([a-z_]+\.sh).*/\1/' | tr '\n' ' ')" \
+    "proxy_default_site.sh host_restrictions.sh "
+chk "and refuses the host when any of the three fails" "$(printf '%s\n' "$WALLS_FN" | grep -c 'return 1')" "3"
 chk "--multi-tenant is an option of install.sh docker" "$(printf '%s\n' "$DOCKER_FN" | grep -c -- '--multi-tenant) MULTI_TENANT=1 ;;')" "1"
 
 echo "=== Nothing writes container ids into a volume from the host ==="

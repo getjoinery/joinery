@@ -397,8 +397,9 @@ domain and cuts DNS afterwards, while a rehearsal must not claim it, and the sam
 backup on the same box wants opposite answers. The dashboard pre-fills the field
 from the node's recorded URL.
 
-**Two files in a backup are the machine's, not the backup's**, and the target's
-own copies survive every restore:
+**Some files in a backup are the machine's, not the backup's**, and the
+target's own copies survive every restore. Both restore scripts read the one
+list, `MACHINE_CONFIG_FILES` in `install_tools/_restore_guard.sh`:
 
 - `config/Globalvars_site.php` holds this machine's database password and its
   `secret_box_key`. Restoring the source's copy is what turns a clean-looking
@@ -408,6 +409,49 @@ own copies survive every restore:
   backups. Two machines sharing it means one machine's key opens the other's
   archives. `backup_envelope.php` mints a fresh one on first use, so absent is
   the correct state.
+- The files that decide what the machine trusts, or that its host writes:
+  `release_verify_keys`, `release_statement_keys`, `transparency_log_keys`,
+  `release_log_required`, `release_log_optional`, `tree_owner`,
+  `agent_signing_key`, `release_statement_key`, `disk_allowance` and
+  `code_check`. A backup's copy would make its maker's signature count as ours,
+  hand the code tree to the web user, or opt the machine out of the public log.
+  Where the machine has none of its own, the backup's copy is used, which is how
+  a management node rebuilt from its own backup gets its signing key back.
+  On a host that runs only signed code it never is: the host converger writes
+  what belongs there.
+
+### Restoring onto a host that runs only signed code
+
+A host whose restrictions refuse unsigned code (`unsigned_packages=refuse`,
+written by `install.sh docker --multi-tenant`; see
+[Installation](installation.md)) carries sites for other people. A copy or
+restore there brings the source's whole code tree and its `config/`, so both
+restore scripts check the archive **before anything is written or the database
+is loaded**, and refuse it whole if any check fails:
+
+- **Only a site's own folders.** The archive may hold nothing at the site root
+  but `public_html`, `maintenance_scripts`, `config`, `uploads`, `static_files`,
+  `storage` and the release manifest. Anything else (a `vendor/`, say) holds
+  code no signature covers, and is named in the refusal. An upgrade's own
+  trees are never restored on any host (below), so an older archive carrying
+  them is not refused for it.
+- **Code exactly as shipped.** Core, every plugin and every theme are checked
+  against their own signed manifests (`utils/verify_package.php --tree`, over
+  `PackageSignature::verifyTree()`). The verifier and the keys are the
+  machine's: the tree the restore script runs from, never anything inside the
+  archive. An unsigned style theme passes; nothing in it runs. Each package that
+  fails is named.
+- **The machine's trust files.** The archive's copies are never used (above).
+
+`restore_project.sh` checks the archive it has already unpacked. `restore_chain.sh`
+(which a site copy runs) applies its archives straight into the live site, so on
+such a host it first unpacks the chain into a scratch directory beside the site,
+leaving out `uploads`, `static_files` and `storage`, which hold nothing that
+runs. It checks that copy, removes it, and only then applies. A dry run of
+`restore_project.sh` reports the same refusal.
+
+The fix for a refusal is on the source: remove what is named (or upgrade it to
+a current release), take a new backup, and restore that.
 
 **The serving config is always regenerated** from the platform's own templates,
 in every case. On bare metal that is `virtualhost_update_script.sh` for the site
@@ -488,10 +532,14 @@ restore re-bases the same way; an in-place restore keeps the data's inodes and
 the data increments. A directory the data archive leaves out (`vendor/`,
 `cache/`, …) can be recreated without re-basing anything.
 
-The data archive leaves out `public_html/`, `public_html_*` (an upgrade's
-rollback and failed trees), `upgrades/` and `upgrade_archives/` (its staging
-area, which holds a whole code tree mid-upgrade, and its downloads) and
-`deploy/` (a container's deploy volume, which holds all of them). Neither
+The data archive leaves out `public_html/`, and every archive but the code
+part leaves out an upgrade's own trees: `public_html_*` (its rollback and
+failed trees), `upgrades/` and `upgrade_archives/` (its staging area, which
+holds a whole code tree mid-upgrade, and its downloads) and `deploy/` (a
+container's deploy volume, which holds all of them). `backup_project.sh`
+leaves the same trees out. They are the machine's: neither restore script
+takes them from an archive, on any host (`restore_project.sh` sets them aside
+from what it unpacked; `restore_chain.sh` never extracts them). Neither
 `upgrades/` nor `upgrade_archives/` counts toward the data's identity: an
 upgrade makes its staging anew. These are anchored to the site
 directory, so a `public_html` deeper in the tree — a worktree under `sync/`,
@@ -1895,7 +1943,7 @@ plaintext and hand the restore engine a file it will not decrypt.
 | `backup_verify_every_days` | `7` | Days between verifications of the newest backup by opening and reading it; 0 never |
 | `backup_retention_days` | `28` | Days of restore points kept offsite; blank reads as 28 |
 | `backup_output_dir` | `/backups` | Working directory backups are built in |
-| `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |
+| `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`cache`, `tmp`, `logs`, …) too. `vendor/` is skipped at the site root only: there it is Composer's tree; inside `public_html` (`assets/vendor`, a plugin's own) it is signed code and is archived |
 | `backup_local_retention_days` | `7` | Days kept locally; 0 never sweeps |
 | `backup_delete_local_after_upload` | on | Remove what a run left on disk — the metadata artifact, a standalone run's envelope sidecar — once uploaded; archives and dumps stream and are never on disk |
 | `backup_path_slug` | project dir | Folder in the bucket this site files under |

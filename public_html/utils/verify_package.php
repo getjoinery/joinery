@@ -9,6 +9,7 @@
  * WP5). A shell script cannot read an Ed25519 signature; this can.
  *
  *   php utils/verify_package.php <dir> [--keys=<file>]
+ *   php utils/verify_package.php --tree <site root> [--tsv] [--keys=<file>]
  *
  * Prints one line, `verdict: <name>: <why>`, and exits 0 for `signed` and 1
  * for anything else. --keys names a key file other than the node's own
@@ -25,6 +26,7 @@
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.3 - --tree: every package in a site root, core included (specs/host_restrictions.md D5, D8)
  * @version 1.2 - keys a package proves that cannot be recorded exit 1, so the host installer waits for the next converge
  * @version 1.1 - the release log: `unlogged`, and proven keys persisted by root
  * @version 1.0
@@ -40,16 +42,50 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 $dir = '';
 $keys_file = null;
+$tree = false;
+$tsv = false;
 foreach (array_slice($argv, 1) as $arg) {
 	if (strpos($arg, '--keys=') === 0) {
 		$keys_file = substr($arg, strlen('--keys='));
+	} elseif ($arg === '--tree') {
+		$tree = true;
+	} elseif ($arg === '--tsv') {
+		$tsv = true;
 	} elseif ($arg !== '' && $arg[0] !== '-') {
 		$dir = $arg;
 	}
 }
 if ($dir === '') {
-	fwrite(STDERR, "Usage: verify_package.php <dir> [--keys=<file>]\n");
+	fwrite(STDERR, "Usage: verify_package.php <dir> [--keys=<file>]\n"
+		. "       verify_package.php --tree <site root> [--tsv] [--keys=<file>]\n");
 	exit(2);
+}
+
+if ($tree) {
+	// Every package in a site root (PackageSignature::verifyTree()): one
+	// `fail: <what>: <verdict line>` per failure, one `style theme: <name>`
+	// per unsigned style theme passed over, `tree: ok` when nothing failed.
+	// Persists no keys: this reports, it installs nothing. --tsv prints each
+	// failure as `fail<TAB>kind<TAB>name<TAB>verdict<TAB>file` instead, for
+	// config/code_check (site_housekeeping.sh), which the host report reads.
+	$style = array();
+	$failures = PackageSignature::verifyTree($dir, $keys_file, $style);
+	foreach ($style as $name) {
+		echo ($tsv ? "style\ttheme\t" . $name : 'style theme: ' . $name . ' (unsigned; nothing in it runs)') . "\n";
+	}
+	foreach ($failures as $f) {
+		if ($tsv) {
+			$clean = function ($v) { return str_replace(array("\t", "\n", "\r"), ' ', (string)$v); };
+			echo implode("\t", array('fail', $f['kind'], $clean($f['name']), $f['verdict']->verdict,
+				$clean($f['verdict']->file ?? ''))) . "\n";
+		} else {
+			echo 'fail: ' . $f['what'] . ': ' . $f['verdict']->line() . "\n";
+		}
+	}
+	if (!$failures) {
+		echo "tree: ok\n";
+	}
+	exit($failures ? 1 : 0);
 }
 
 $verdict = PackageSignature::verify($dir, $keys_file);

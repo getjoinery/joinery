@@ -4,6 +4,8 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.4 - On a host that refuses unsigned code, every run checks the whole code tree against what
+#                was shipped and writes config/code_check for the host report (specs/host_restrictions.md D8).
 # Version: 1.3 - A cron entry that is the platform's own earlier rendering, every 15 or every 5
 #                minutes, is rewritten to every minute: a slow task held every other task up
 #                until the next tick, a quarter of an hour later. Any other file is still never touched.
@@ -37,6 +39,8 @@
 #   - in a container, {site}/RELEASE_MANIFEST(.sig) and its kept copy in
 #     {site}/config/release_manifest/ agree, and are the release the code
 #     matches. Neither is ever replaced by one the code does not match.
+#   - on a host that refuses unsigned code, {site}/config/code_check: whether the
+#     code is what was shipped, rewritten on every run.
 #
 # Absent-only, so an owner's edit survives every converge; moving a file
 # aside (the agent's reclaim_managed_file, which keeps a dated copy) is how it
@@ -179,6 +183,70 @@ else
     else
         warn "the code matches neither the release manifest at the site root nor the kept copy; the agent refuses scripts until the next upgrade"
         mkdir -p "${HELD}" && printf '%s\n' "${PAIR_KEY}" > "${HELD}/unmatched"
+    fi
+fi
+
+# --- the code check (a host that refuses unsigned code) -------------------------
+# Signing checks code when it is installed, not afterwards: a file edited in
+# place by someone with root, or a plugin directory copied in, goes through no
+# install. On a host that refuses unsigned code every converge (daily, and after
+# an upgrade, a plugin change or a root request) checks the whole tree against
+# what was shipped - core, every plugin, every theme - and writes the answer to
+# config/code_check, which the host report carries to the management node, where
+# a failure is an incident (specs/host_restrictions.md D8). It reports; nothing
+# is turned off. A host that does not refuse unsigned code keeps no such file.
+#
+#   ok 2026-10-13T01:40:00Z
+# or
+#   failed 2026-10-13T01:40:00Z
+#   fail<TAB>plugin<TAB>mailbox<TAB>tampered<TAB>includes/x.php     one line per package that failed
+# (kind core|plugin|theme|check, the directory's name, the verdict, the file it
+# is about where there is one: utils/verify_package.php --tree --tsv).
+CODE_CHECK="${SITE_ROOT}/config/code_check"
+VERIFY_TOOL="${SITE_ROOT}/public_html/utils/verify_package.php"
+[[ "$(id -u)" != "0" && -n "${JOINERY_VERIFY_PACKAGE:-}" ]] && VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE}"
+if [[ -d "${SITE_ROOT}/config" && -f "${SCRIPT_DIR}/_host_restrictions.sh" ]]; then
+    # shellcheck source=_host_restrictions.sh
+    . "${SCRIPT_DIR}/_host_restrictions.sh"
+    if host_restriction_on "${SITE_ROOT}/public_html" unsigned_packages; then
+        CHECKED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        if [[ -f "${VERIFY_TOOL}" ]] && command -v php > /dev/null 2>&1; then
+            CHECK_OUT="$(php "${VERIFY_TOOL}" --tree --tsv "${SITE_ROOT}" 2>/dev/null)"
+            CHECK_RC=$?
+        else
+            CHECK_OUT=""
+            CHECK_RC=1
+        fi
+        CHECK_TMP="$(mktemp "${SITE_ROOT}/config/.code_check.XXXXXX" 2>/dev/null)" || CHECK_TMP=""
+        if [[ -z "${CHECK_TMP}" ]]; then
+            warn "could not write ${CODE_CHECK}"
+            FAILED=1
+        else
+            if [[ "${CHECK_RC}" == 0 ]]; then
+                printf 'ok %s\n' "${CHECKED_AT}" > "${CHECK_TMP}"
+            else
+                { printf 'failed %s\n' "${CHECKED_AT}"
+                  printf '%s\n' "${CHECK_OUT}" | grep $'^fail\t' | head -50
+                  # The verifier did not run, or answered nothing we can read.
+                  printf '%s\n' "${CHECK_OUT}" | grep -q $'^fail\t' || printf 'fail\tcheck\t\tunreadable\t\n'
+                } > "${CHECK_TMP}"
+            fi
+            chmod 644 "${CHECK_TMP}"
+            [[ "$(id -u)" == "0" ]] && chown root:root "${CHECK_TMP}"
+            if mv -f "${CHECK_TMP}" "${CODE_CHECK}"; then
+                if [[ "${CHECK_RC}" == 0 ]]; then
+                    say "code check: the code is what was shipped"
+                else
+                    warn "code check: the code is not what was shipped ($(grep -c $'^fail\t' "${CODE_CHECK}") package(s)); see ${CODE_CHECK}"
+                fi
+            else
+                rm -f "${CHECK_TMP}"
+                warn "could not write ${CODE_CHECK}"
+                FAILED=1
+            fi
+        fi
+    elif [[ -f "${CODE_CHECK}" ]]; then
+        rm -f "${CODE_CHECK}" && say "code check: this host no longer refuses unsigned code; removed ${CODE_CHECK}"
     fi
 fi
 

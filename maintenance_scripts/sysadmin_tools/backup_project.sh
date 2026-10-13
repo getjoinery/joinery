@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.9.0 - an upgrade's own trees at the site root (deploy/, upgrades/, upgrade_archives/,
+#                  public_html_*) are left out in both modes, as the chain's data part leaves them
+#                  out: they are the machine's, and no restore takes them (specs/host_restrictions.md D5).
+#                  vendor/ is left out at the site root only: public_html/assets/vendor and a plugin's
+#                  own vendor/ are signed code, and an archive without them restored a tree that was
+#                  not what was shipped
 # Version: 2.8.0 - `--exclude-from FILE` (stream mode): paths relative to the project directory,
 #                  one per line, left out of the archive — the local paths of every file the
 #                  backup's object store accounts for (specs/implemented/backup_offloaded_files.md). Literal
@@ -526,7 +532,18 @@ fi
 # backups/ is where this archive is being staged and where earlier archives
 # wait to be uploaded: an archive that carries them grows without limit.
 # target/ is Cargo's build output, regenerable and large.
-TREE_EXCLUDES=(vendor node_modules .git logs cache tmp sessions backups target)
+TREE_EXCLUDES=(node_modules .git logs cache tmp sessions backups target)
+# An upgrade's own trees, at the site root only: public_html_* (its rollback and
+# failed trees), upgrades/ and upgrade_archives/ (its staging, which holds a
+# whole code tree mid-upgrade, and its downloads) and deploy/ (a container's
+# deploy volume, which holds all of them). They are the machine's, the same set
+# the chain's data part leaves out, and no restore takes them
+# (specs/host_restrictions.md D5).
+UPGRADE_TREES=(deploy upgrades upgrade_archives 'public_html_*')
+# vendor/ is left out at the site root only, with the upgrade's trees: there it
+# is Composer's tree and regenerable; a vendor/ inside public_html is signed code
+# (public_html/assets/vendor, a plugin's own Composer tree).
+ROOT_ONLY_EXCLUDES=("${UPGRADE_TREES[@]}" vendor)
 
 if [ "$STREAM" = true ]; then
     # Stream mode archives the LIVE tree straight into the tar below (a second
@@ -566,6 +583,7 @@ fi
 # Excluded: TREE_EXCLUDES, as directories at any depth
 RSYNC_EXCLUDES=()
 for x in "${TREE_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="${x}/"); done
+for x in "${ROOT_ONLY_EXCLUDES[@]}"; do RSYNC_EXCLUDES+=(--exclude="/${x}/"); done
 RSYNC_STATUS=0
 $SUDO rsync -a "${RSYNC_EXCLUDES[@]}" \
     "$PROJECT_DIR/" "${TEMP_DIR}/${BACKUP_NAME}/project_files/" || RSYNC_STATUS=$?
@@ -704,6 +722,9 @@ if [ "$STREAM" = true ]; then
     # targets too, since they name another member of this same archive.
     TAR_EXCLUDES=()
     for x in "${TREE_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="$x"); done
+    TAR_EXCLUDES+=(--anchored)
+    for x in "${ROOT_ONLY_EXCLUDES[@]}"; do TAR_EXCLUDES+=(--exclude="./${x}"); done
+    TAR_EXCLUDES+=(--no-anchored)
     # The offloaded files' local paths, literal and unanchored, matched on the
     # member name before the rename (`./static_files/uploads/x.jpg`). Last, so
     # --no-wildcards reaches nothing else.

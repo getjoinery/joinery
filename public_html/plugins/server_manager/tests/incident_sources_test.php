@@ -19,6 +19,8 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
+ *                for a running site not checked on a host that refuses unsigned code (host_restrictions D8)
  * @version 1.3 - plane:release_log_entry and plane:release_log_tail_blind (release_transparency O5)
  * @version 1.2 - plane:agent_update_refused (release_transparency O7)
  * @version 1.2 - plane:mail_gateway: quiet with no site on or a failed unit; critical when a site does not
@@ -67,7 +69,7 @@ $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
-	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway') as $want) {
+	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
@@ -130,6 +132,66 @@ $set(array('mgn_last_host_report' => $gw(array(), array('days_left' => 3))));
 check(($mg->evaluate($node)['severity'] ?? '') === 'critical', 'Three days: critical');
 $set(array('mgn_last_host_report' => null));
 check($mg->evaluate($node) === null, 'No report: nothing');
+
+// ---------------------------------------------------------------------------
+section('Site code unverified (host_restrictions D8)');
+
+$code = new IncidentSourceSiteCodeUnverified();
+$now = time();
+$ok_at = gmdate('Y-m-d\TH:i:s\Z', $now - 3600);
+$site_c = function (string $name, $check, string $state = 'running') {
+	$c = array('name' => $name, 'state' => $state, 'health' => 'healthy', 'answers' => 'yes');
+	if ($check !== null) { $c['code_check'] = $check; }
+	return $c;
+};
+$hr = function (array $containers, $restrictions = array('unsigned_packages' => 'refuse')) use ($now) {
+	$r = array('containers' => $containers, 'generated_at' => $now);
+	if ($restrictions !== null) { $r['host_restrictions'] = $restrictions; }
+	return JobResultProcessor::sanitise_host_report($r);
+};
+$set(array('mgn_last_host_report' => $hr(array($site_c('acme', array('state' => 'ok', 'at' => $ok_at, 'failures' => array()))))));
+check($code->evaluate($node) === null, 'Every site checked and ok: nothing');
+$set(array('mgn_last_host_report' => $hr(array(
+	$site_c('acme', array('state' => 'failed', 'at' => $ok_at, 'failures' => array(
+		array('kind' => 'core', 'name' => '', 'verdict' => 'tampered', 'file' => 'public_html/includes/MailIdentityGuard.php'),
+		array('kind' => 'plugin', 'name' => 'mailbox', 'verdict' => 'extra_file', 'file' => 'includes/relay_admin.php'),
+		array('kind' => 'theme', 'name' => 'pagey', 'verdict' => 'unsigned', 'file' => '<script>'),
+	))),
+	$site_c('other', array('state' => 'ok', 'at' => $ok_at, 'failures' => array())),
+))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'Code on site acme is not what was shipped'
+	&& $v['detail']['Site acme'] === 'core: a file was changed: public_html/includes/MailIdentityGuard.php; '
+		. 'plugin mailbox: a file was added: includes/relay_admin.php; theme pagey: not built by Joinery (no signature)'
+	&& !isset($v['detail']['Site other']),
+	'A failed check: critical, naming the site and each package in plain words, and no other site', json_encode($v));
+$set(array('mgn_last_host_report' => $hr(array(
+	$site_c('acme', array('state' => 'failed', 'at' => $ok_at, 'failures' => array(array('kind' => 'core', 'name' => '', 'verdict' => 'missing_file', 'file' => 'x.php')))),
+	$site_c('beta', array('state' => 'failed', 'at' => $ok_at, 'failures' => array())),
+))));
+$v = $code->evaluate($node);
+check($v !== null && $v['title'] === 'Code on 2 sites is not what was shipped' && $v['detail']['Site beta'] === 'the check failed without naming a package',
+	'Two sites failing: one incident naming both; a failure with no package listed is still a failure', json_encode($v));
+$set(array('mgn_last_host_report' => $hr(array($site_c('acme', 'none'), $site_c('stale', array('state' => 'ok', 'at' => gmdate('Y-m-d\TH:i:s\Z', $now - 3 * 86400), 'failures' => array())),
+	$site_c('weird', array('state' => 'bogus')), $site_c('stopped', 'none', 'exited'), $site_c('old', null)))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'warning'
+	&& strpos($v['detail']['Not checked'], 'acme: no check on record') !== false
+	&& strpos($v['detail']['Not checked'], 'stale: last checked') !== false
+	&& strpos($v['detail']['Not checked'], 'weird: the check could not be read') !== false
+	&& strpos($v['detail']['Not checked'], 'old: no check on record') !== false
+	&& strpos($v['detail']['Not checked'], 'stopped') === false,
+	'A restricted host: a running site with no check, a stale one or an unreadable one is a warning; a stopped site is not', json_encode($v));
+$set(array('mgn_last_host_report' => $hr(array($site_c('acme', 'none')), 'none')));
+check($code->evaluate($node) === null, 'A host that does not refuse unsigned code: no check on record is nothing');
+$set(array('mgn_last_host_report' => $hr(array($site_c('acme', 'none')), 'unknown')));
+check(($code->evaluate($node)['severity'] ?? '') === 'warning', 'A host whose restrictions file cannot be read counts as restricted');
+$set(array('mgn_last_host_report' => $hr(array($site_c('acme', array('state' => 'failed', 'at' => $ok_at,
+	'failures' => array(array('kind' => 'plugin', 'name' => 'x', 'verdict' => 'tampered', 'file' => 'a.php'))))), 'none')));
+check(($code->evaluate($node)['severity'] ?? '') === 'critical', 'A failed check is critical whatever the host says of its restrictions');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
+check($code->evaluate($node) === null, 'A report with no containers: nothing');
+$set(array('mgn_last_host_report' => null));
 
 // ---------------------------------------------------------------------------
 section('Certificate');

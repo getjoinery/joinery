@@ -32,6 +32,7 @@
  * gate exists to be more than. Same rule as resetting another admin's factors
  * (adm/logic/admin_user_logic.php).
  *
+ * @version 1.3 - mint() refuses on a host that refuses unsigned packages (specs/host_restrictions.md D3)
  * @version 1.2 - warning() says which case it is: a package signed by Joinery but not in the public log
  *                gets its own words (spec release_transparency, D6)
  * @version 1.1 - the acknowledgement names its marker row, so root reads one
@@ -63,6 +64,10 @@ class PackageAcknowledgement {
 	 * and a page that forgot the gate must not be able to mint one.
 	 */
 	public static function mint(SessionControl $session): array {
+		if (HostRestrictions::has('unsigned_packages')) {
+			// Root refuses it whatever the answer; no step-up is asked for a no.
+			throw new Exception(HostRestrictions::UNSIGNED_SENTENCE);
+		}
 		$uid = (int)$session->get_user_id();
 		$user = $uid > 0 ? new User($uid, TRUE) : null;
 		if (!$user || !$user->key || (int)$user->get('usr_permission') < 10) {

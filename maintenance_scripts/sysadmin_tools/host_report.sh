@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.21 - host_restrictions: what the machine refuses its sites (its restrictions file), and each
+#                site container carries code_check, from its config/code_check: whether its code is what
+#                was shipped, on a host that refuses unsigned code (specs/host_restrictions.md D8).
 # Version: 1.20 - mail_gateway: the mail apps gateway (plugins/mail_apps, install_mail_gateway.sh) where
 #                it is installed - its version, its unit's state, how often systemd restarted it
 #                and for how long it has been up, its open connections, and for each site turned
@@ -172,6 +175,8 @@ safe_name() {
     printf '%s' "${s:0:$MAX_NAME}"
 }
 json_str() { printf '"%s"' "$(safe_name "$1")"; }
+# A file path inside a package: the same characters plus /, capped longer.
+json_path() { local drop='[^A-Za-z0-9._@:/-]' s; s="${1//$drop/}"; printf '"%s"' "${s:0:200}"; }
 # A number, or the string unknown when the value is not all digits.
 json_num_or_unknown() {
     if [[ "$1" =~ ^[0-9]+$ ]]; then printf '%s' "$1"; else printf '"unknown"'; fi
@@ -988,10 +993,61 @@ probe_sites() {
     wait
 }
 
+# Whether a site's code is what was shipped, from config/code_check, which
+# site_housekeeping.sh writes on a host that refuses unsigned code
+# (specs/host_restrictions.md D8): {"state":"ok"|"failed","at":...,"failures":[...]},
+# "none" where the site keeps no such file, "unknown" where its config volume
+# was not found or the file is not in the form the site writes.
+code_check_json() {  # CONFIG_DIR (on the host), or empty
+    local f="$1/code_check" first state at line kind name verdict file n=0 sep=""
+    [[ -n "$1" ]] || { printf '"unknown"'; return; }
+    [[ -f "$f" ]] || { printf '"none"'; return; }
+    first="$(head -n 1 "$f" 2>/dev/null)"
+    [[ "$first" =~ ^(ok|failed)\ ([0-9TZ:.-]{1,40})$ ]] || { printf '"unknown"'; return; }
+    state="${BASH_REMATCH[1]}"; at="${BASH_REMATCH[2]}"
+    printf '{"state":"%s","at":%s,"failures":[' "$state" "$(json_str "$at")"
+    # Tabs become \037 first: a tab is whitespace to read, which would fold the
+    # empty name of a core line into the next field.
+    while IFS=$'\037' read -r line kind name verdict file; do
+        [[ "$line" == "fail" ]] || continue
+        (( n < MAX_LIST )) || break
+        printf '%s{"kind":%s,"name":%s,"verdict":%s,"file":%s}' "$sep" \
+            "$(json_str "$kind")" "$(json_str "$name")" "$(json_str "$verdict")" "$(json_path "$file")"
+        sep=","; n=$((n+1))
+    done < <(tail -n +2 "$f" 2>/dev/null | head -n 200 | tr '\t' '\037')
+    printf ']}'
+}
+
+# What this machine refuses to let its sites do (host_restrictions.sh,
+# specs/host_restrictions.md): {name: value} from its restrictions file, "none"
+# where it has none, "unknown" where the file is there and cannot be read as
+# written - which the site side reads as every restriction on.
+emit_host_restrictions() {
+    local f="${HOST_REPORT_RESTRICTIONS:-/etc/joinery/host_restrictions/restrictions}" line sep="" n=0
+    if [[ ! -e "$f" ]]; then
+        if [[ -d "$(dirname "$f")" ]]; then printf '"unknown"'; else printf '"none"'; fi
+        return
+    fi
+    [[ -f "$f" && -r "$f" ]] || { printf '"unknown"'; return; }
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line//[[:space:]]/}"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        [[ "$line" =~ ^[a-z][a-z0-9_]*=[A-Za-z0-9_-]+$ ]] || { printf '"unknown"'; return; }
+    done < "$f"
+    printf '{'
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line//[[:space:]]/}"
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        (( n < MAX_LIST )) || break
+        printf '%s%s:%s' "$sep" "$(json_str "${line%%=*}")" "$(json_str "${line#*=}")"; sep=","; n=$((n+1))
+    done < "$f"
+    printf '}'
+}
+
 emit_containers() {
     local names c site state health pid started port vols answers n=0 i src sum bytes path
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
-    local -A src_site=() disk=() missing=() reply=() ports=()
+    local -A src_site=() disk=() missing=() reply=() ports=() cfg=()
     command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
     names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
     names="$(grep -E '^[a-z0-9_-]{1,50}$' <<< "$names")"
@@ -1018,6 +1074,7 @@ emit_containers() {
         for src in $vols; do
             [[ "$src" =~ ^/[A-Za-z0-9._/-]+$ && "$src" != *..* ]] || continue
             srcs+=("$src"); src_site[$src]="$c"; missing[$c]=$(( ${missing[$c]} + 1 ))
+            [[ "$src" == */"${c}_config/_data" ]] && cfg[$c]="$src"
         done
         n=$((n+1))
     done <<< "$inspected"
@@ -1056,9 +1113,9 @@ emit_containers() {
         sum=""
         (( ${missing[$c]:-1} == 0 )) && sum="${disk[$c]:-}"
         (( i == 0 )) || printf ','
-        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s","held":%s,%s,"disk_bytes":%s}' \
+        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s","held":%s,%s,"disk_bytes":%s,"code_check":%s}' \
             "$(json_str "$c")" "$(json_str "${states[$i]}")" "$(json_str "${healths[$i]}")" "${answered[$i]}" \
-            "${helds[$i]}" "${figures[$i]}" "$(json_num_or_unknown "$sum")"
+            "${helds[$i]}" "${figures[$i]}" "$(json_num_or_unknown "$sum")" "$(code_check_json "${cfg[$c]:-}")"
     done
     printf ']'
 }
@@ -1153,6 +1210,7 @@ printf '"unattended_upgrades_last_run":%s,' "$(emit_unattended_upgrades_last_run
 printf '"os":%s,' "$(emit_os)"
 printf '"answers":%s,' "$(emit_answers)"
 printf '"served_certificates":%s,' "$(emit_served_certificates)"
+printf '"host_restrictions":%s,' "$(emit_host_restrictions)"
 printf '"containers":%s,' "$(emit_containers)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"

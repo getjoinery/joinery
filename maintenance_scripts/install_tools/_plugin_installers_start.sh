@@ -3,6 +3,8 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.32 - On a host that refuses unsigned code the publishing-box exemption never applies: every
+#                 plugin's host installer waits on its signature (specs/host_restrictions.md D4).
 # Version: 2.31 - Root requests data_root_encrypt, data_root_reseal and data_root_rekey (a self-hosted site's
 #                 Backups page, specs/hosted_data_promise_disk_encryption.md WP4).
 # Version: 2.30 - A site whose config/ is on a data root that is not mounted (an encrypted
@@ -794,7 +796,9 @@ run_core_installer() {
 #
 # The publishing box is the one exemption: it holds the secret half of the
 # release key, every plugin there is the source the archives are built from,
-# and its live manifests are stale the moment a file is edited.
+# and its live manifests are stale the moment a file is edited. A site on a
+# host that refuses unsigned code is never the publishing box, whatever is in
+# its config/ (specs/host_restrictions.md D4).
 #
 # JOINERY_VERIFY_PACKAGE, JOINERY_VERIFY_KEYS and JOINERY_ACTIVE_PLUGINS point
 # a test at the real tool, a throwaway key and a fixture's plugin list. They
@@ -812,10 +816,16 @@ if [[ "$(id -u)" == "0" ]]; then
     done
 fi
 VERIFY_TOOL="${JOINERY_VERIFY_PACKAGE:-${PUBLIC_HTML}/utils/verify_package.php}"
+plugin_host_refuses_unsigned() {
+    [[ -f "${TOOLS_DIR}/_host_restrictions.sh" ]] || return 1
+    # shellcheck source=_host_restrictions.sh
+    . "${TOOLS_DIR}/_host_restrictions.sh"
+    host_restriction_on "${PUBLIC_HTML}" unsigned_packages
+}
 plugin_package_verified() {
     local plugin="$1"
     local dir="${PUBLIC_HTML}/plugins/${plugin}"
-    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]]; then
+    if [[ -f "${SITE_ROOT}/config/agent_signing_key" ]] && ! plugin_host_refuses_unsigned; then
         return 0
     fi
     if [[ ! -f "${VERIFY_TOOL}" ]]; then

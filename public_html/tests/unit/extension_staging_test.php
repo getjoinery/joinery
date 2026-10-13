@@ -19,6 +19,8 @@
  *
  * Run: php tests/unit/extension_staging_test.php
  *
+ * @version 1.4 - on a host that refuses unsigned packages the installer refuses before any acknowledgement,
+ *                in both forms (specs/host_restrictions.md D3)
  * @version 1.3 - the fork mark is the live manifest, written by the staged form (specs/package_replace_on_upload.md)
  * @version 1.2 - only an uploaded theme is preserved on deploy (review round 2, R2)
  * @version 1.1 - pins the verification step (specs/package_signing.md WP2)
@@ -163,6 +165,22 @@ $byname_branch = substr($installer, strpos($installer, "// ---- by name, from th
 $byname_branch = substr($byname_branch, 0, strpos($byname_branch, '// ---- the database half'));
 check(strpos($byname_branch, 'install_extension_mark_fork(') === false,
 	'and the by-name form never does: the catalog copy is ours');
+// On a host that refuses unsigned packages there is no way past the refusal
+// (specs/host_restrictions.md D3): asked before the acknowledgement in the
+// staged form, and before a row's 'unsigned' in the from-disk form.
+$restricted = "HostRestrictions::has('unsigned_packages')";
+$staged_restr = strpos($staged_branch, $restricted);
+check($staged_restr !== false && $staged_restr < strpos($staged_branch, '} elseif (!$acknowledged) {')
+	&& $staged_restr > strpos($staged_branch, "if (\$kind === 'style') {"),
+	'staged: a style theme still installs; then the host\'s restriction is asked, ahead of the acknowledgement');
+$disk_restr = strpos($byname_branch, $restricted);
+check($disk_restr !== false && $disk_restr < strpos($byname_branch, "in_array((string)\$existing->get(\$trust_column), array('unsigned', 'unlogged'), true)"),
+	'from disk: the restriction is asked before a row saying unsigned is taken as an acknowledgement');
+$refusal_exits = 0;
+foreach (explode('HostRestrictions::unsignedRefusal()', $installer) as $n => $after) {
+	if ($n > 0 && strpos(substr($after, 0, 120), 'exit(EXIT_UNVERIFIED);') !== false) { $refusal_exits++; }
+}
+check($refusal_exits === 2, 'both refusals say why and exit 3, so the page shows them in place of the warning', (string)$refusal_exits);
 $register_fn = substr($installer, strpos($installer, 'function install_extension_register('));
 $register_fn = substr($register_fn, 0, strpos($register_fn, "\n}\n"));
 check(strpos($register_fn, 'receives_upgrades') === false || strpos($register_fn, "->set(") === false,

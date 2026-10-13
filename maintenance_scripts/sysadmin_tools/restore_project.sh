@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.7.0 - an upgrade's own trees in an archive (deploy/, upgrades/, upgrade_archives/,
+#                  public_html_*) are never restored, on every host; this machine keeps its own copy of every file in MACHINE_CONFIG_FILES (_restore_guard.sh),
+#                  the trust files included; on a host that refuses unsigned code the archive is checked
+#                  before anything is written or loaded (top-level entries, and its code against the
+#                  machine's own verifier) and its trust files are never used (specs/host_restrictions.md D5)
 # Version: 1.6.1 - a site with folders mounted from the data root is not moved aside before a restore:
 #                  the restore says to run in place (--force) instead (one_data_root WP2, reviewer2 F6)
 # Version: 1.6.0 - holds the host runner lock (host_runner_lock.sh) from before the first write
@@ -650,8 +655,13 @@ perform_restore() {
             print_info "Keeping this machine's own config/backup-ledger"
         fi
 
-        # Two files are the MACHINE's, not the backup's, and are dropped from the
-        # staged copy before anything is written.
+        # Files that are the MACHINE's, not the backup's, are dropped from the
+        # staged copy before anything is written (MACHINE_CONFIG_FILES in
+        # _restore_guard.sh): the two below, and the files that decide what this
+        # machine trusts. Where this machine has none of its own the archive's
+        # copy is used (a machine rebuilt from its own backup gets its keys
+        # back), except on a host that refuses unsigned code, where the host
+        # converger writes what belongs there.
         #
         # config/Globalvars_site.php holds this machine's database password and
         # its secret_box_key. Restoring the source's copy is what makes every
@@ -665,7 +675,11 @@ perform_restore() {
         # other's archives and the envelope stops saying who made a backup.
         # backup_envelope.php mints a fresh one on first use, so absent is the
         # correct state, not a gap.
-        for keepmine in config/Globalvars_site.php config/backup_site_key; do
+        local machine_files=(config/Globalvars_site.php config/backup_site_key)
+        if [ -n "${MACHINE_CONFIG_FILES+x}" ]; then
+            machine_files=("${MACHINE_CONFIG_FILES[@]}")
+        fi
+        for keepmine in "${machine_files[@]}"; do
             if [ -f "$PROJECT_DIR/$keepmine" ]; then
                 if [ -f "$backup_dir/project_files/$keepmine" ]; then
                     rm -f "$backup_dir/project_files/$keepmine"
@@ -675,9 +689,12 @@ perform_restore() {
                 if [ "$keepmine" = "config/backup_site_key" ]; then
                     rm -f "$backup_dir/project_files/$keepmine"
                     print_info "Not restoring config/backup_site_key — a fresh one is minted on first use"
-                else
+                elif [ "$keepmine" = "config/Globalvars_site.php" ]; then
                     print_warning "This machine has no site config of its own, so the backup's is being used."
                     print_warning "Its database password is the SOURCE machine's — expect the reconcile step to refuse."
+                elif [ "$RESTORE_RESTRICTED" = true ]; then
+                    rm -f "$backup_dir/project_files/$keepmine"
+                    print_info "Not restoring $keepmine: on this host the machine supplies it"
                 fi
             fi
         done
@@ -788,6 +805,40 @@ echo ""
 # aborting the script at the assignment (and leaving the check unreachable).
 if ! BACKUP_DIR=$(verify_archive "$BACKUP_FILE" "$TEMP_DIR"); then
     print_error "Archive verification failed"
+    exit 1
+fi
+
+# On a host that refuses unsigned code (a multi-tenant host) nothing is written
+# or loaded until the archive is checked: no top-level entry a site's backup has
+# no reason to carry, and code that is exactly what was shipped, checked by
+# this machine's own verifier (_restore_guard.sh, specs/host_restrictions.md D5).
+# Before the dry run's exit, so a dry run says so too.
+RESTORE_RESTRICTED=false
+RESTORE_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")/../install_tools" 2>/dev/null && pwd)/_restore_guard.sh"
+if [ -f "$RESTORE_GUARD" ]; then
+    # shellcheck source=../install_tools/_restore_guard.sh
+    . "$RESTORE_GUARD"
+    # An upgrade's own trees (deploy/, public_html_last, ...) are the machine's on
+    # every host; an older archive may carry them, and none is restored.
+    if [ "$SKIP_FILES" = false ] && [ -d "$BACKUP_DIR/project_files" ]; then
+        restore_guard_drop_upgrade_trees "$BACKUP_DIR/project_files" \
+            || { print_error "Could not set an upgrade's tree aside from the archive; nothing was restored."; exit 1; }
+    fi
+    # This machine's own verifier: the tree this script runs from, never the archive's.
+    LIVE_PUBLIC_HTML="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../public_html" 2>/dev/null && pwd || true)"
+    if restore_guard_restricted "$LIVE_PUBLIC_HTML"; then
+        RESTORE_RESTRICTED=true
+        if [ "$SKIP_FILES" = false ] && [ -d "$BACKUP_DIR/project_files" ]; then
+            if ! restore_guard_check "$BACKUP_DIR/project_files" "$LIVE_PUBLIC_HTML"; then
+                print_error "Refused: this host runs only signed code (see above)."
+                exit 1
+            fi
+            print_info "This host runs only signed code: the archive's code is what was shipped"
+        fi
+    fi
+elif [ -d /etc/joinery/host_restrictions ]; then
+    print_error "This host restricts what its sites run, and ${RESTORE_GUARD} (which checks a restore"
+    print_error "against that) is missing. Nothing was restored."
     exit 1
 fi
 

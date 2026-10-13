@@ -450,9 +450,9 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 23 && array_key_exists('data_root_encryption', $capped)
-	&& array_key_exists('mail_gateway', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption among them)', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 24 && array_key_exists('data_root_encryption', $capped)
+	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -497,6 +497,30 @@ check(($held_c[0]['held'] ?? null) === true && !array_key_exists('held', $held_c
 	'a container held stopped keeps its mark; false or anything but true leaves none', var_export($held_c, true));
 check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['containers'] === 'none',
 	'a machine with no docker says none');
+// A site's code check and the host's restrictions (host_report 1.21, specs/host_restrictions.md D8).
+$cc = JobResultProcessor::sanitise_host_report(array('host_restrictions' => array('unsigned_packages' => 'refuse', 'Bad Name' => 'x', 'other' => '<b>'),
+	'containers' => array(
+	array('name' => 's1', 'state' => 'running', 'code_check' => array('state' => 'failed', 'at' => '2026-10-13T01:40:00Z', 'extra' => 1,
+		'failures' => array(array('kind' => 'plugin', 'name' => 'mail box<', 'verdict' => 'tampered', 'file' => 'inc/a b.php;rm'),
+			array('kind' => 'evil', 'name' => 'x', 'verdict' => 'whatever', 'file' => array()), 'junk'))),
+	array('name' => 's2', 'state' => 'running', 'code_check' => array('state' => 'ok', 'at' => 'yesterday')),
+	array('name' => 's3', 'state' => 'running', 'code_check' => 'none'),
+	array('name' => 's4', 'state' => 'running', 'code_check' => array('state' => 'fine')),
+	array('name' => 's5', 'state' => 'running'))));
+check($cc['host_restrictions'] === array('unsigned_packages' => 'refuse'),
+	'host restrictions keep a well-formed name and value only', var_export($cc['host_restrictions'], true));
+check($cc['containers'][0]['code_check'] === array('state' => 'failed', 'at' => '2026-10-13T01:40:00Z', 'failures' => array(
+		array('kind' => 'plugin', 'name' => 'mailbox', 'verdict' => 'tampered', 'file' => 'inc/ab.phprm'),
+		array('kind' => 'unknown', 'name' => 'x', 'verdict' => 'unknown', 'file' => ''))),
+	'a failed code check keeps each failure, every field reduced to what it may hold', var_export($cc['containers'][0]['code_check'], true));
+check($cc['containers'][1]['code_check']['state'] === 'ok' && $cc['containers'][1]['code_check']['at'] === 'unknown'
+	&& $cc['containers'][2]['code_check'] === 'none' && $cc['containers'][3]['code_check'] === 'unknown'
+	&& !array_key_exists('code_check', $cc['containers'][4]),
+	'a code check: a bad time is unknown, none kept, a state it does not know is unknown, an older report absent', var_export($cc['containers'], true));
+check(JobResultProcessor::sanitise_host_report(array('host_restrictions' => 'none'))['host_restrictions'] === 'none'
+	&& JobResultProcessor::sanitise_host_report(array('host_restrictions' => 'yes'))['host_restrictions'] === 'unknown'
+	&& JobResultProcessor::sanitise_host_report(array())['host_restrictions'] === null,
+	'host restrictions: none kept, anything else unknown, an older report absent');
 // A Docker host's disk pool (host_report 1.15): its figures kept, none kept,
 // anything else unknown, an older report's absence kept absent (null).
 $dp = JobResultProcessor::sanitise_host_report(array('disk_pool' => array('used_bytes' => 5, 'total_bytes' => 10, 'avail_bytes' => 4, 'prjquota' => true, 'evil' => '<b>')))['disk_pool'];

@@ -37,6 +37,8 @@
  * the URL, which carries only a request id or a staged directory name that
  * is checked against staging.
  *
+ * @version 1.4 - on a host that refuses unsigned packages the warning says so and offers no button,
+ *                and acknowledge() refuses (specs/host_restrictions.md D3)
  * @version 1.3 - the warning is the verdict's: an unlogged package gets the unlogged words
  * @version 1.2 - "This plugin is active" reads plg_active (Plugin::is_active()), not plg_status
  * @version 1.1 - the replace panel: upload() returns a pending outcome for an
@@ -297,6 +299,8 @@ class PackageInstallPage {
 			// A refused replacement is still a replacement once acknowledged.
 			'replace'    => (($args['replace'] ?? false) === true),
 			'warning'    => PackageAcknowledgement::warning($verdict),
+			// The host refuses it outright: the page says so and offers no button.
+			'restricted' => HostRestrictions::has('unsigned_packages'),
 		);
 	}
 
@@ -315,6 +319,9 @@ class PackageInstallPage {
 		$refused = self::refused($type, $request_id, $session, $why);
 		if ($refused === null) {
 			throw new Exception($why);
+		}
+		if ($refused['restricted']) {
+			throw new Exception(HostRestrictions::UNSIGNED_SENTENCE);
 		}
 		$stepup = $session->require_recent_second_factor($return_url, PackageAcknowledgement::STEP_UP_TTL);
 		if ($stepup) {
@@ -420,6 +427,20 @@ class PackageInstallPage {
 			$rows .= '<tr><th>' . $e($label) . '</th><td>' . $e($value) . '</td></tr>';
 		}
 		$replacing = !empty($refused['replace']);
+		if (!empty($refused['restricted'])) {
+			return '<div class="jy-unsigned-warning" role="alert">'
+				. '<style>'
+				. '.jy-unsigned-warning{margin:1rem 0;padding:1rem 1.2rem;border:2px solid #dc2626;border-radius:6px;background:#fef2f2;color:#7f1d1d}'
+				. '.jy-unsigned-warning h4{margin:0 0 .5rem;color:#991b1b}'
+				. '.jy-unsigned-warning table{margin:.75rem 0;border-collapse:collapse}'
+				. '.jy-unsigned-warning th{text-align:left;padding:.15rem .8rem .15rem 0;font-weight:600}'
+				. '.jy-unsigned-warning td{padding:.15rem 0}'
+				. '</style>'
+				. '<h4>This ' . $e($refused['type']) . ' was not built by Joinery</h4>'
+				. '<p>' . $e(HostRestrictions::UNSIGNED_SENTENCE) . ' It cannot be installed here.</p>'
+				. '<table>' . $rows . '</table>'
+				. '</div>';
+		}
 		$button = AdminPage::action_button($replacing ? 'Replace anyway' : 'Install anyway', $post_url, array(
 			'hidden' => array(
 				'action'      => 'install_anyway',

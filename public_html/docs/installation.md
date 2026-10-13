@@ -269,6 +269,21 @@ It then runs `install_tools/proxy_default_site.sh install`, which gives the host
 - It fails unless `apache2ctl -S` names the default site as the default on both ports, and the install stops with it.
 - `proxy_default_site.sh check` says the same and exits 1 if not.
 
+**What its sites may run.** Each site's superadmin on a shared host is a customer, so code we did not build never runs there. `install_tools/host_restrictions.sh multi-tenant` writes the host's restrictions to `/etc/joinery/host_restrictions/restrictions` (directory 755, file 644, both root's), one `name=value` per line:
+
+```
+unsigned_packages=refuse
+```
+
+- Every site container mounts `/etc/joinery/host_restrictions` read-only at the same path. It is the platform's mount, like the six capabilities: it is not a run spec line, and every rebuild adds it. On a host that remaps user ids, no site container is made without the directory.
+- A site reads the file through `HostRestrictions`. A file it cannot read as written (a bad line, a value the name does not take, writable by others) counts as every restriction on.
+- `unsigned_packages=refuse` means only signed plugins and page themes install. The Plugins and Themes pages show "This host installs only signed plugins and themes" in place of the warning and **Install anyway**, and root's installer refuses an unsigned package with or without an acknowledgement. Unsigned style themes still install: nothing in them runs.
+- A copy or restore onto the host is checked before anything is written. It must carry nothing at the site root but the site's own folders, and its code (core, every plugin, every theme) must be exactly what we shipped. See [Backups](backups.md#restoring-onto-a-host-that-runs-only-signed-code).
+- No site there is the publishing box, and its code tree is always root's.
+- Every converge checks each site's whole code tree and writes the result to the site's `config/code_check`. The host report carries it, and the management node raises an incident when a site's code is not what we shipped (see the Server Manager overview).
+- `host_restrictions.sh show` prints the file. Restrictions are set only here, at install.
+- Adding a restriction: its name and allowed values go in `HostRestrictions::KNOWN` and the same pair in `HOST_RESTRICTIONS_KNOWN` (`install_tools/_host_restrictions.sh`; `tests/unit/host_restrictions_test.php` fails when the two differ). Then add one `HostRestrictions::has()` check (or `host_restriction_on` in a root shell script) where it applies.
+
 **A suspended site.** Every container site's proxy vhost (`default_proxy_vhost.conf`) carries a switch. While the mark `/etc/joinery/sites/<site>/suspended` exists, the site's name answers on both ports with a plain "This site is suspended" page (503), and nothing reaches the container. The switch is read when Apache loads its configuration. The host agent's `suspended_page` word (`sysadmin_tools/suspended_page.sh show|clear <site>`) places or removes the mark, tests the configuration, reloads Apache, and then asks the proxy what it answers for the site's name.
 
 - A site whose proxy vhost carries no switch is refused.

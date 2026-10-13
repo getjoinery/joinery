@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.13 - install.sh docker --multi-tenant writes the host's restrictions (host_restrictions.sh:
+#               unsigned_packages=refuse), which every site container mounts read-only; install.sh site
+#               refuses, before it builds anything, on a remapping host without them
+#               (specs/host_restrictions.md D7).
 #VERSION 3.12 - docker installs the release's own support bundle through the agent (joinery-agent bundle install),
 #               so a host that never joins a management node has its host converger and data-root tick.
 #VERSION 3.11 - --encrypted-data-root places the release's agent binary first (no unit, no identity), checked
@@ -2427,7 +2431,8 @@ docker_multi_tenant_existing() {
 # The walls between each site and the host, between sites, and to port 25 and
 # the cloud's metadata address; a reboot after a kernel update
 # (multi_tenant_host.sh; specs/multi_tenant_docker_hosts.md WP5); and the
-# proxy's default site for a name no site claims (proxy_default_site.sh, WP8).
+# proxy's default site for a name no site claims (proxy_default_site.sh, WP8);
+# and what its sites may install (host_restrictions.sh, spec host_restrictions).
 # Run on every --multi-tenant install, so a host set up before either existed
 # gains it; a host without them is refused before its agent joins.
 multi_tenant_host_install() {
@@ -2445,6 +2450,16 @@ multi_tenant_host_install() {
         return 1
     fi
     print_success "Unknown names get a plain page, never another site"
+    # What the sites here may not do: each is a customer's, and its
+    # superadmin is not ours to trust with code we did not build
+    # (host_restrictions.sh; specs/host_restrictions.md). Every site
+    # container mounts the file read-only; a site is refused without it.
+    print_step "Restricting what the sites here may install..."
+    if ! bash "$SCRIPT_DIR/host_restrictions.sh" multi-tenant; then
+        print_error "The host's restrictions could not be written; this host must not take sites until they are. Run this again once the error above is fixed."
+        return 1
+    fi
+    print_success "Sites here install only signed plugins and themes"
 }
 
 do_docker_install() {
@@ -4884,6 +4899,11 @@ do_site_docker() {
     if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap >/dev/null 2>&1; then
         refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: $(bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap 2>&1 | sed 's/^docker_disk_pool: //') (install.sh docker --multi-tenant makes a host that can, on a new host)"
     fi
+    # A site never runs unrestricted on a host that restricts its sites: on a
+    # host whose Docker remaps user ids, the host's restrictions must be there
+    # (specs/host_restrictions.md D7). Asked here, before an image, a network
+    # or a run spec is made, so a refused site leaves nothing behind.
+    run_spec_restrictions_present || { print_error "Nothing was changed."; exit 1; }
     # The site's own outbound figures (outbound_limits.sh, WP5): the spec's,
     # with each one given on the command line in its place; default removes it.
     # Figures given say who set them: outbound_set_by=plane with

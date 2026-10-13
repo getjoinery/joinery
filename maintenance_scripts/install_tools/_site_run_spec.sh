@@ -3,6 +3,10 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.9 - Every site mounts the host's restrictions directory read-only
+#                (RUN_SPEC_RESTRICTIONS_DIR, specs/host_restrictions.md D7), the platform's like
+#                the capabilities; on a host whose Docker remaps user ids no site is run without
+#                it (run_spec_restrictions_present, fails closed). Adopt accepts exactly that bind.
 # Version: 1.8 - disk= : the site's disk allowance (4G) on a host with a disk pool
 #                (docker_disk_pool.sh, specs/multi_tenant_docker_hosts.md WP4), empty or absent
 #                for none. Not a run argument: the allowance is an XFS project on the site's
@@ -136,6 +140,13 @@ RUN_SPEC_LAYER_SIZE="1G"
 # bit on a file whose group root is not in is cleared. Nothing declared today
 # needs either (WP5 item 2).
 RUN_SPEC_CAPS=(CHOWN DAC_OVERRIDE FOWNER SETUID SETGID KILL)
+
+# The host's restrictions (host_restrictions.sh, specs/host_restrictions.md D7):
+# every site container mounts this directory read-only at the same path, so the
+# site reads what the host refuses it and nothing inside can change it. The
+# directory, not the file, so a rewrite on the host reaches a running site. The
+# platform's, like the capabilities: never a spec line, added for every site.
+RUN_SPEC_RESTRICTIONS_DIR="/etc/joinery/host_restrictions"
 
 run_spec_root() {
     if [[ "$(id -u)" != "0" && -n "${JOINERY_SITE_STATE_ROOT:-}" ]]; then
@@ -574,6 +585,7 @@ run_spec_args() {  # SITE
     p="$(run_spec_path "$site")" || return 1
     run_spec_check_file "$p" || return 1
     run_spec_fits_host "$p" || return 1
+    run_spec_restrictions_present || return 1
     run_spec_ensure_network "$site" || return 1
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
     v="$(run_spec_get "$site" network)"
@@ -594,7 +606,27 @@ run_spec_args() {  # SITE
     for v in "${RUN_SPEC_CAPS[@]}"; do printf '%s\0' "--cap-add=${v}"; done
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -v "$v"; done < <(run_spec_list "$site" volume)
+    v="$(run_spec_root)${RUN_SPEC_RESTRICTIONS_DIR}"
+    [[ -d "$v" ]] && printf '%s\0' -v "${v}:${RUN_SPEC_RESTRICTIONS_DIR}:ro"
     return 0
+}
+
+# A site is never run unrestricted on a host that restricts: where Docker remaps
+# user ids (a multi-tenant host, install.sh docker --multi-tenant), the host's
+# restrictions directory must exist before any container is made. Fails closed
+# when Docker does not say whether it remaps.
+run_spec_restrictions_present() {
+    local rc
+    [[ -d "$(run_spec_root)${RUN_SPEC_RESTRICTIONS_DIR}" ]] && return 0
+    run_spec_docker_remaps_ids
+    rc=$?
+    [[ "$rc" -eq 1 ]] && return 0
+    if [[ "$rc" -eq 0 ]]; then
+        echo "run spec: this host runs sites for others (Docker remaps user ids) but has no ${RUN_SPEC_RESTRICTIONS_DIR}; no site runs here without the host's restrictions. Run install.sh docker --multi-tenant to write them." >&2
+    else
+        echo "run spec: Docker did not say whether it remaps user ids, and this host has no ${RUN_SPEC_RESTRICTIONS_DIR}; refusing rather than run a site that may be unrestricted" >&2
+    fi
+    return 1
 }
 
 # Change one single-valued key and keep every other line.
@@ -637,7 +669,7 @@ run_spec_adopt() {  # SITE
     # nil, which len refuses, so each len is guarded (range over nil is empty).
     host_config="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.NetworkMode}}|{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{if .HostConfig.ExtraHosts}}{{len .HostConfig.ExtraHosts}}{{else}}0{{end}}|{{if .HostConfig.Devices}}{{len .HostConfig.Devices}}{{else}}0{{end}}|{{.HostConfig.CpuQuota}}|{{.HostConfig.CpusetCpus}}|{{.HostConfig.RestartPolicy.MaximumRetryCount}}|{{.HostConfig.MemorySwap}}|{{.HostConfig.Memory}}|{{.HostConfig.NanoCpus}}|{{if .HostConfig.PidsLimit}}{{.HostConfig.PidsLimit}}{{end}}|{{.HostConfig.RestartPolicy.Name}}|{{.Config.Hostname}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}' "$site")" \
         && ports="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$site")" \
-        && mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$site")" \
+        && mounts="$(docker inspect -f '{{range .Mounts}}{{.Type}}|{{.Name}}|{{.Destination}}|{{.RW}}|{{.Source}}{{println}}{{end}}' "$site")" \
         && networks="$(docker inspect -f '{{range $n, $c := .NetworkSettings.Networks}}{{$n}} {{end}}' "$site")" \
         || { echo "run spec: could not read ${site}'s settings from Docker; nothing was changed" >&2; return 1; }
     networks="${networks% }"
@@ -687,8 +719,12 @@ run_spec_adopt() {  # SITE
     cpus=""
     case "$nano" in ''|0) ;; *) cpus="$(awk -v n="$nano" 'BEGIN { s = sprintf("%.3f", n / 1e9); sub(/0+$/, "", s); sub(/\.$/, ".0", s); print s }')" ;; esac
     case "$pids" in ''|0|-1) pids="" ;; esac
-    while IFS='|' read -r type name dest rw; do
+    while IFS='|' read -r type name dest rw src; do
         [[ -z "$type" ]] && continue
+        # The host's restrictions, read-only from the host's own directory, is
+        # the platform's one bind mount; run_spec_args gives it back.
+        [[ "$type" == "bind" && "$dest" == "$RUN_SPEC_RESTRICTIONS_DIR" && "$rw" == "false" \
+            && "$src" == "$(run_spec_root)${RUN_SPEC_RESTRICTIONS_DIR}" ]] && continue
         [[ "$type" == "volume" ]] || problems="${problems}; a ${type} mount at ${dest}"
     done <<< "$mounts"
     if [[ -n "$problems" ]]; then
@@ -706,7 +742,7 @@ run_spec_adopt() {  # SITE
             [[ "$hip" == *:* ]] && hip="[${hip}]"
             printf 'publish=%s%s:%s%s\n' "${hip:+${hip}:}" "$hport" "${cport%%/*}" "$([[ "$proto" == tcp ]] || echo "/${proto}")"
         done <<< "$ports"
-        while IFS='|' read -r type name dest rw; do
+        while IFS='|' read -r type name dest rw src; do
             [[ "$type" == "volume" && -n "$name" ]] || continue
             printf 'volume=%s:%s%s\n' "$name" "$dest" "$([[ "$rw" == false ]] && echo ':ro')"
         done <<< "$mounts"

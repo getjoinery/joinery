@@ -37,6 +37,10 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.4 - verifyTree(): every package in a site root, core included, each against its own
+ *                manifest, every failure listed (specs/host_restrictions.md D5, D8); verify() takes
+ *                'walk', 'skip' and 'name'; publisherBox() is never true on a host that refuses
+ *                unsigned packages (D4)
  * @version 1.3 - the release log (spec release_transparency, D5, D6, WP4): on a node that requires it,
  *                `signed` also needs a release statement in the public log, else `unlogged`; the
  *                key chain is walked in memory and what it proves is returned as keys_proven for a
@@ -252,8 +256,15 @@ class PackageSignature {
 	 * the publisher trusts its own tree where a node would verify — the host
 	 * installers (WP5) and an install-by-name from disk. The file is root's
 	 * and 0600; only its existence is asked.
+	 *
+	 * A site on a host that refuses unsigned packages is never the publisher:
+	 * it is a customer's site, and the exemption would install anything on
+	 * disk unverified (specs/host_restrictions.md D4).
 	 */
 	public static function publisherBox(): bool {
+		if (HostRestrictions::has('unsigned_packages')) {
+			return false;
+		}
 		return is_file(PathHelper::getSiteRoot() . '/config/agent_signing_key');
 	}
 
@@ -408,22 +419,43 @@ class PackageSignature {
 		}
 
 		$root = self::commonRoot(array_keys($listed));
-		if ($root !== '' && basename($root) !== basename($dir)) {
+		$name = isset($opts['name']) ? (string)$opts['name'] : basename($dir);
+		if ($root !== '' && basename($root) !== $name) {
 			return new PackageVerdict(self::UNREADABLE,
-				'the manifest describes ' . $root . ', which is not ' . basename($dir));
+				'the manifest describes ' . $root . ', which is not ' . $name);
 		}
 		$prefix = $root === '' ? '' : $root . '/';
 
 		// Walk $dir. Every file found must be listed with a matching hash,
 		// unless the rule says a manifest never lists it. Symlinks are not
 		// followed: a link is not a file we signed, whatever it points at.
+		// A whole site root is walked only through the code directories
+		// verifyTree() names ('walk'), less the package directories it checks
+		// on their own ('skip'); a file at its top level is checked when listed.
+		$walk = isset($opts['walk']) ? (array)$opts['walk'] : null;
+		$skip = isset($opts['skip']) ? (array)$opts['skip'] : array();
 		$seen = array();
+		$filter = function ($current) use ($dir, $walk, $skip) {
+			if (!$current->isDir() || $current->isLink()) {
+				return true;
+			}
+			$sub = substr($current->getPathname(), strlen($dir) + 1);
+			if (in_array($sub, $skip, true)) {
+				return false;
+			}
+			return $walk === null || strpos($sub, '/') !== false || in_array($sub, $walk, true);
+		};
 		$it = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS),
+			new RecursiveCallbackFilterIterator(
+				new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS | FilesystemIterator::UNIX_PATHS),
+				$filter),
 			RecursiveIteratorIterator::SELF_FIRST);
 		foreach ($it as $entry) {
 			$sub = substr($entry->getPathname(), strlen($dir) + 1);
 			$rel = $prefix . $sub;
+			if ($walk !== null && strpos($sub, '/') === false && !in_array($sub, $walk, true) && !isset($listed[$rel])) {
+				continue;
+			}
 			if ($entry->isLink()) {
 				return new PackageVerdict(self::EXTRA_FILE, 'a symlink is present at ' . $sub . ', which no manifest lists',
 					$root, $verified_by, $sub);
@@ -475,6 +507,88 @@ class PackageSignature {
 				. $logged['why'], $root, $verified_by, null, count($listed));
 		}
 		return $signed;
+	}
+
+	/** The code directories of a site root, and the package directories inside them. */
+	const TREE_CODE_DIRS    = array('public_html', 'maintenance_scripts');
+	const TREE_PACKAGE_DIRS = array('plugin' => 'public_html/plugins', 'theme' => 'public_html/theme');
+
+	/**
+	 * Is the code in this site root exactly what we shipped? (specs/host_restrictions.md D5, D8)
+	 *
+	 * verify() answers for one package; a site root holds several, each with
+	 * its own manifest: the core release's at the site root (public_html and
+	 * maintenance_scripts, which lists nothing under plugins/ or theme/), and
+	 * one in every plugin and theme directory. This checks all of them and
+	 * returns EVERY failure, not the first, so a refusal names everything a
+	 * customer has to remove:
+	 *
+	 *   [['what' => 'core' | 'plugin <name>' | 'theme <name>', 'kind' => 'core' | 'plugin' | 'theme',
+	 *     'name' => '' | <directory name>, 'verdict' => PackageVerdict], ...]
+	 *
+	 * An empty list means the whole tree verified. Only the two code
+	 * directories are walked, so config/, uploads/, backups/ and the other
+	 * mutable folders at a site root are never in question. A file directly
+	 * in plugins/ or theme/ belongs to no package and fails. A set-aside copy
+	 * (<name>.replaced.<time>, install_extension.php --replace) is checked as
+	 * the package it was.
+	 *
+	 * An unsigned STYLE theme is not a failure: it holds nothing that runs
+	 * (ThemeHelper::styleThemeRefusal()), which is why it installs without
+	 * the warning. It is returned in $style_themes so a caller can say so.
+	 *
+	 * @param string      $site_root    The site root (the directory holding public_html)
+	 * @param string|null $keys_file    The key file; the node's own when null
+	 * @param array       $style_themes Out: names of unsigned style themes passed over
+	 * @return array<int, array{what:string, kind:string, name:string, verdict:PackageVerdict}>
+	 */
+	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null): array {
+		$site_root = rtrim($site_root, '/');
+		$style_themes = array();
+		$failures = array();
+
+		// The keys and the log rules are this machine's (null: the running
+		// site's own), never anything inside $site_root: a tree being restored
+		// carries a config/ of its own, and its keys are the archive's word.
+		$core = self::verify($site_root, $keys_file,
+			array('walk' => self::TREE_CODE_DIRS, 'skip' => array_values(self::TREE_PACKAGE_DIRS), 'name' => ''));
+		if (!$core->signed()) {
+			$failures[] = array('what' => 'core', 'kind' => 'core', 'name' => '', 'verdict' => $core);
+		}
+
+		foreach (self::TREE_PACKAGE_DIRS as $type => $rel) {
+			$parent = $site_root . '/' . $rel;
+			if (!is_dir($parent) || is_link($parent)) {
+				continue;
+			}
+			$names = @scandir($parent);
+			foreach (is_array($names) ? $names : array() as $entry) {
+				if ($entry === '.' || $entry === '..') {
+					continue;
+				}
+				$path = $parent . '/' . $entry;
+				if (is_link($path) || !is_dir($path)) {
+					if (self::excluded($rel . '/' . $entry)) {
+						continue;
+					}
+					$failures[] = array('what' => $type . ' ' . $entry, 'kind' => $type, 'name' => $entry,
+						'verdict' => new PackageVerdict(self::EXTRA_FILE,
+							$rel . '/' . $entry . ' is ' . (is_link($path) ? 'a symlink' : 'a file') . ' that belongs to no package'));
+					continue;
+				}
+				$name = preg_match('/^(.+)\.replaced\.[^\/]+$/', $entry, $m) ? $m[1] : $entry;
+				$verdict = self::verify($path, $keys_file, array('name' => $name));
+				if ($verdict->signed()) {
+					continue;
+				}
+				if ($type === 'theme' && ThemeHelper::styleThemeRefusal($path) === null) {
+					$style_themes[] = $entry;
+					continue;
+				}
+				$failures[] = array('what' => $type . ' ' . $entry, 'kind' => $type, 'name' => $entry, 'verdict' => $verdict);
+			}
+		}
+		return $failures;
 	}
 
 	/**
