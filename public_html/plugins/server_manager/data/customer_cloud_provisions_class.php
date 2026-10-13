@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.22 - data_root_line() takes what the machine reports now: a data root encrypted in place (or
+ *                 decrypted) after its provision read as it was born (B44)
  * @version 1.21 - cvp_data_root_encrypted and cvp_provider_disk_encryption: one layer of encryption, never two
  *                 (specs/hosted_data_promise_disk_encryption.md D1a); data_root_encryption_offered(),
  *                 born_encrypted_by_default(), provider_layer_reported(), two_layers_reason(), data_root_line()
@@ -615,10 +617,20 @@ class CustomerCloudProvision extends SystemBase {
 	/**
 	 * One line for the node page: whose encryption the server's data sits
 	 * under. Empty when nothing is known (a provision that was never asked).
+	 * What the machine reports now wins over how it was born: its host
+	 * report's data_root_encryption ('none', or the encrypted volume's facts)
+	 * and the provider's layer under the data root as the node page reads it
+	 * (DataRootEncryptionOffer::provider_layer()). A data root encrypted in
+	 * place after its provision read 'not encrypted by us' (B44).
 	 */
-	public function data_root_line(): string {
+	public function data_root_line($reported = null, ?string $provider_layer = null): string {
 		$encrypted = (bool)$this->get('cvp_data_root_encrypted');
-		$layer = (string)$this->get('cvp_provider_disk_encryption');
+		if ($reported === 'none') {
+			$encrypted = false;
+		} elseif (is_array($reported) && isset($reported['backing'])) {
+			$encrypted = strpos((string)$reported['backing'], 'luks-') === 0;
+		}
+		$layer = $provider_layer ?? (string)$this->get('cvp_provider_disk_encryption');
 		if (!$encrypted && $layer === '') {
 			return '';
 		}

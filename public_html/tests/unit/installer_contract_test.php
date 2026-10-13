@@ -3966,6 +3966,10 @@ check($gate_at !== false && $first_installer_run !== false && $gate_at < $first_
 	'the gate stands before any installer is defined to run, in every mode');
 check(strpos($runner_src, 'installer_is_trusted "${DATA_ROOT_TOOL}"') !== false,
 	'the data root tool runs as root only when it passes the installers\' trust check');
+$early_wait = strpos($runner_src, 'nothing runs until it opens');
+$early_tick = strpos($runner_src, 'joinery_file_is_trusted "${DATA_ROOT_TOOL}" root');
+check($early_wait !== false && $early_tick !== false && $early_tick < $early_wait,
+	'a site whose config/ is on a data root found unmounted runs the data root\'s tick before it waits, from a root-owned tool only (B50)');
 
 $bundle_src = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/SupportBundlePublisher.php'));
 check(strpos($bundle_src, "'maintenance_scripts/install_tools/joinery_data_root.sh'") !== false

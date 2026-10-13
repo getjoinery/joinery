@@ -125,7 +125,7 @@ $n->set('mgn_site_url', rtrim((string)LibraryFunctions::get_absolute_url(), '/')
 $why = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS));
 check(strpos($why, 'this management node') !== false, 'this management node itself is never copied, from backups either', $why);
 $n = new ManagedNode($src->key, TRUE);
-$n->set('mgn_joinery_version', JobCommandBuilder::COPY_SOURCE_MIN_VERSION);
+$n->set('mgn_joinery_version', '0.8.455');
 $why = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS));
 check(strpos($why, 'needs ' . JobCommandBuilder::COPY_FROM_BACKUPS_MIN_VERSION) !== false,
 	'a release without the copy\'s key page is refused for a copy from backups', $why);
@@ -136,7 +136,7 @@ check(IpSwapMove::provision_of($n) === null && strpos(implode(' ', IpSwapMove::r
 $threw = '';
 try { SiteCopyRunner::newest_chain($src); } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw !== '', 'a live copy needs a backup under a day old; this one is eight days old');
-$chain = SiteCopyRunner::newest_chain($src, SiteCopyRunner::chain_age_limit(SiteCopy::FROM_BACKUPS));
+$chain = SiteCopyRunner::newest_chain($src, null);
 check($chain['chain_id'] === $chain_id, 'a copy from backups takes the newest chain at any age');
 
 $copy = SiteCopyRunner::start_own_server($src, 1, SiteCopy::FROM_BACKUPS);

@@ -6,6 +6,8 @@
  * Menu migrations (sm_002 through sm_005) have been removed -- they are
  * already marked as applied in existing installations and are no longer needed.
  *
+ * @version 1.11 - sm_020 drops sm_001's full unique index on mgn_slug: the column's partial index (unique among
+ *                live nodes) is the rule, and the full one refused a new node the name of a removed one (B52)
  * @version 1.10 - sm_017 moves the fleet verify interval, and node policies, still at 30 days to the weekly default
  * @version 1.9 - sm_016 marks the boxes a test-account plane made since the token swap as test boxes
  * @version 1.8 - sm_013 moves incidents marked Looking to New (Looking is no longer a triage)
@@ -657,6 +659,25 @@ return [
 				return 'defer';
 			}
 			error_log('sm_019: ' . OperatorCloudAccount::migrate_operator_token($dblink) . '.');
+		},
+	],
+	[
+		// A node's slug is unique among live nodes: the field declares it, and
+		// update_database makes that a partial unique index. sm_001 made a full
+		// one by hand, which update_database never drops, so a removed node kept
+		// its slug from every new node: a copy discarded and made again failed its
+		// node row every minute (B52). Dropped once the partial index stands.
+		'id' => 'sm_020_slug_unique_among_live_nodes',
+		'version' => '1.30.68',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$partial = $dblink->query("SELECT 1 FROM pg_indexes WHERE tablename = 'mgn_managed_nodes'
+				AND indexdef LIKE 'CREATE UNIQUE INDEX%(mgn_slug)%WHERE (mgn_delete_time IS NULL)%'")->fetchColumn();
+			if (!$partial) {
+				// update_database makes the partial index after migrations; the next pass drops this.
+				return 'defer';
+			}
+			$dblink->exec('DROP INDEX IF EXISTS mgn_slug_unique');
 		},
 	],
 ];

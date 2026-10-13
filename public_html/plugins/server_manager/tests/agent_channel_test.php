@@ -898,6 +898,30 @@ check(count(array_map('intval', $db->query('SELECT mgh_managed_host_id FROM mgh_
 $second = AgentChannelEndpoint::freeSlug('agtest-Fresh Box.local');
 check($second === 'agtest-fresh-box-local-2', 'A second machine with the same name gets the next free slug', $second);
 
+// A slug is unique among live nodes: a removed node's is free again (B52).
+$gone = new ManagedNode(NULL);
+$gone->set('mgn_name', 'HarnessTest slug reuse');
+$gone->set('mgn_slug', 'harnesstest-slug-reuse');
+$gone->set('mgn_host', '203.0.113.81');
+$gone->set('mgn_uptime_enabled', false);
+$gone->save();
+$made_nodes[] = $gone->key;
+$db->prepare('UPDATE mgn_managed_nodes SET mgn_delete_time = now() WHERE mgn_managed_node_id = ?')->execute(array($gone->key));
+check(AgentChannelEndpoint::freeSlug('harnesstest slug reuse') === 'harnesstest-slug-reuse', 'A removed node\'s slug is free for a new one');
+$again = new ManagedNode(NULL);
+$again->set('mgn_name', 'HarnessTest slug reuse');
+$again->set('mgn_slug', 'harnesstest-slug-reuse');
+$again->set('mgn_host', '203.0.113.82');
+$again->set('mgn_uptime_enabled', false);
+$why = '';
+try {
+	$again->save();
+	$made_nodes[] = $again->key;
+} catch (Exception $e) {
+	$why = $e->getMessage();
+}
+check($why === '' && $again->key, 'and a new node takes it: the database holds the slug unique among live nodes only (B52)', $why);
+
 // A join that says it runs in a container makes a container site, grouped on
 // its Docker host's record (minted when none exists).
 section('A join from inside a container is named and placed as a container site');

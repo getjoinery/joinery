@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.65 - the provision's data root line reads what the machine reports now, as the encryption section does (B44)
  * @version 1.64 - Services: a Mail apps gateway row (host_report 1.20 mail_gateway) with Restart and Why?
  * @version 1.63 - Hosted at no longer says '(not hosted by us)' twice for a machine hosted elsewhere
  * @version 1.62 - under the address, a provision's one line: "Data root: encrypted by us · provider's disk encryption: off"
@@ -440,8 +441,14 @@
 		$addr_html .= '<div class="small fw-normal"><code>' . htmlspecialchars((string)$head_provision->get('cvp_instance_ipv6')) . '</code></div>';
 	}
 	// Whose encryption the server's data sits under: ours, the provider's, or
-	// unknown (one layer, never two). Said only once the provision knows.
-	$head_layers = $head_provision ? $head_provision->data_root_line() : '';
+	// unknown (one layer, never two). Said only once the provision knows, and
+	// as the machine reports it now, as the encryption section reads it.
+	$head_layers = '';
+	if ($head_provision) {
+		$head_report = json_decode((string)$node->get('mgn_last_host_report'), true);
+		$head_layers = $head_provision->data_root_line(is_array($head_report) ? ($head_report['data_root_encryption'] ?? null) : null,
+			class_exists('DataRootEncryptionOffer') ? DataRootEncryptionOffer::provider_layer($node) : null);
+	}
 	if ($head_layers !== '') {
 		$addr_html .= '<div class="small fw-normal text-muted">' . htmlspecialchars($head_layers) . '</div>';
 	}

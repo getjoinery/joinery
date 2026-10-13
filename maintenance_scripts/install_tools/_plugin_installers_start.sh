@@ -3,6 +3,10 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.35 - A site whose config/ is on the data root, found with the data root not mounted, runs the
+#                 data root's tick before it waits: a plain data root that is only unmounted (an encrypt's
+#                 start cut off) is mounted again by it, and the run goes on. The wait skipped the tick, so
+#                 the site stayed down until someone started it by hand (B50).
 # Version: 2.34 - The agent's on/off switch (agent_enabled) is part of what "changed" means: turned on from
 #                 the site's Management Node page, the agent is installed and started at the next tick, not at
 #                 the next release or the daily run (B24). host_swap.sh is a core and a host installer: swap
@@ -427,14 +431,35 @@ if [[ "${MACHINE}" == "0" ]] && [[ ! -f "${CONFIG_FILE}" ]]; then
     # D9): absent while the data root is not mounted, which is said once a boot, as below.
     if grep -q " ${SITE_ROOT}/config\$" /etc/joinery/data_binds 2>/dev/null \
        && ! findmnt -n --mountpoint "${SITE_ROOT}/config" >/dev/null 2>&1; then
-        if [[ ! -e /run/joinery/converger-locked ]]; then
-            echo "host installers: the data root is not mounted (locked, waiting for its key) - nothing runs until it opens"
-            mkdir -p /run/joinery 2>/dev/null && : > /run/joinery/converger-locked 2>/dev/null || true
+        # The data root's tick first: a plain data root that is only unmounted
+        # (an encrypt's start cut off) is mounted again by it, and this run
+        # goes on (B50); an encrypted one waits for its key. Root runs it only
+        # from a root-owned tree: the tree owner's record is in config/, which
+        # is not here.
+        DATA_ROOT_TOOL="${TOOLS_DIR}/joinery_data_root.sh"
+        if [[ "$(id -u)" == "0" && -f "${DATA_ROOT_TOOL}" && -f "${TOOLS_DIR}/_tree_trust.sh" ]]; then
+            # shellcheck source=_tree_trust.sh
+            . "${TOOLS_DIR}/_tree_trust.sh"
+            if joinery_file_is_trusted "${DATA_ROOT_TOOL}" root 2>/dev/null; then
+                bash "${DATA_ROOT_TOOL}" tick || true
+            fi
         fi
+        if [[ ! -f "${CONFIG_FILE}" ]]; then
+            if [[ ! -e /run/joinery/converger-locked ]]; then
+                if grep -q '^backing=luks-' /etc/joinery/data_root 2>/dev/null; then
+                    echo "host installers: the data root is not mounted (locked, waiting for its key) - nothing runs until it opens"
+                else
+                    echo "host installers: the data root is not mounted - nothing runs until it is (joinery_data_root.sh status says why)"
+                fi
+                mkdir -p /run/joinery 2>/dev/null && : > /run/joinery/converger-locked 2>/dev/null || true
+            fi
+            exit 0
+        fi
+        rm -f /run/joinery/converger-locked
+    else
+        echo "plugin installers: site not initialised yet - skipping"
         exit 0
     fi
-    echo "plugin installers: site not initialised yet - skipping"
-    exit 0
 fi
 
 # --- One runner at a time --------------------------------------------------

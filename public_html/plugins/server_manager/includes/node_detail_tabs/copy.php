@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.15 - a copy from the running site backs it up first: the note says so, and the step has its label (B53)
  * @version 1.14 - "Data root encrypted" on the new-server form where data_root_encryption_offered is on, ticked when
  *                 the first account offered is one of ours (specs/hosted_data_promise_disk_encryption.md C-2)
  * @version 1.13 - the Cloud account list is every account held, ours first with the default chosen (cloud_accounts_list)
@@ -47,6 +48,7 @@ $copy_h = function ($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8
 
 $copy_step_labels = array(
 	'host_report/copy'   => 'Check the new server has room',
+	'backup_run:run/source' => 'Back up this site now, so the copy is of it as it is, at its release',
 	'copy_export/source' => 'Export from this site (its owner approves it here, on the site\'s own Backups page)',
 	'copy_import/copy'   => 'Hand the export to the copy',
 	'copy_stage/copy'    => 'Download the backup onto the copy',
@@ -143,10 +145,13 @@ if (!$site_copy) {
 		$why = SiteCopyRunner::source_refusals($node, true, $from);
 		if (!$why) {
 			try {
-				$chain = SiteCopyRunner::newest_chain($node, SiteCopyRunner::chain_age_limit($from));
-				$copy_from_notes[$from] = 'Uses the backup of ' . gmdate('M j, H:i', (int)strtotime($chain['time'])) . ' UTC ('
-					. BackupRunner::human($chain['bytes']) . '); the new server needs about '
-					. BackupRunner::human(SiteCopyRunner::disk_needed($chain)) . ' free.';
+				$chain = SiteCopyRunner::newest_chain($node, null);
+				$copy_from_notes[$from] = ($from === SiteCopy::FROM_SOURCE
+					? 'Backs this site up first, so the copy is of it as it is now. Its newest backup ('
+						. gmdate('M j, H:i', (int)strtotime($chain['time'])) . ' UTC, ' . BackupRunner::human($chain['bytes']) . ') sizes it: '
+					: 'Uses the backup of ' . gmdate('M j, H:i', (int)strtotime($chain['time'])) . ' UTC ('
+						. BackupRunner::human($chain['bytes']) . '); ')
+					. 'the new server needs about ' . BackupRunner::human(SiteCopyRunner::disk_needed($chain)) . ' free.';
 			} catch (Exception $e) {
 				$why[] = $e->getMessage();
 			}

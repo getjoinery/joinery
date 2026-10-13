@@ -41,6 +41,24 @@ $made_escrows = array();
 $made_nodes = array();
 $host = 'dev.getjoinery.com';
 
+// Debris from a run killed before its teardown: the test node, and the rows
+// its machines left under their own names.
+$debris_nodes = $db->query("SELECT mgn_managed_node_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'escrowtest-%'")->fetchAll(PDO::FETCH_COLUMN);
+$db->exec("DELETE FROM dre_data_root_escrows WHERE dre_mgn_managed_node_id IS NULL
+	AND dre_hostname IN ('escrow-test', 'gated', 'HarnessTest escrow node')");
+
+// Teardown runs at finish and after a fatal error alike.
+harness_defer(function () use ($db, &$made_escrows, &$made_nodes, $debris_nodes) {
+	foreach ($made_escrows as $id) {
+		$db->prepare('DELETE FROM dre_data_root_escrows WHERE dre_data_root_escrow_id = ?')->execute(array($id));
+	}
+	foreach (array_merge($made_nodes, $debris_nodes) as $id) {
+		$db->prepare('DELETE FROM dre_data_root_escrows WHERE dre_mgn_managed_node_id = ?')->execute(array($id));
+		$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute(array($id));
+		$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute(array($id));
+	}
+});
+
 /** A machine: its unlock identity, report key, and how it signs. */
 function escrow_machine(): array {
 	$kp = sodium_crypto_sign_keypair();
@@ -302,6 +320,34 @@ check(!DataRootEscrowSync::should_enrol($node, $crow, array_merge($enc, array('h
 harness_set_setting_mem('data_root_encryption_offered', '0');
 check(!DataRootEscrowSync::should_enrol($node, $crow, $enc), 'No enrolment job while this holder takes no new enrolments (D7)');
 harness_set_setting_mem('data_root_encryption_offered', '1');
+// A dormant copy refuses an enrolment until it takes over its source's node:
+// it is known, and asked nothing.
+$dnode = new ManagedNode(NULL);
+$dnode->set('mgn_name', 'HarnessTest escrow copy');
+$dnode->set('mgn_slug', 'escrowtest-' . bin2hex(random_bytes(3)));
+$dnode->set('mgn_host', '127.0.0.1');
+$dnode->set('mgn_uptime_enabled', false);
+$dnode->set('mgn_install_state', 'copy');
+$dnode->set('mgn_agent_primitives', 'data_root_enrol,data_root_recipient,host_report');
+$dnode->set('mgn_agent_version', '1.75.2');
+$dnode->set('mgn_agent_public_key', base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())));
+$dnode->save();
+$made_nodes[] = $dnode->key;
+$d = escrow_machine();
+$denc = array_merge($enc, array('identity' => $d['pub'], 'open' => true));
+DataRootEscrowSync::from_host_report($dnode, $denc);
+$drow = escrow_row($d);
+if ($drow) { $made_escrows[] = $drow->key; }
+$asked = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$dnode->key
+	. " AND mjb_job_type IN ('data_root_enrol', 'data_root_recipient')")->fetchColumn();
+check($drow && $drow->get('dre_status') === 'known' && $asked === 0,
+	'A dormant copy, open: known, and sent no enrolment or recipient it would refuse every hour', 'jobs: ' . $asked);
+$dnode->set('mgn_install_state', null);
+$dnode->save();
+DataRootEscrowSync::from_host_report($dnode, $denc);
+$asked = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$dnode->key
+	. " AND mjb_job_type = 'data_root_enrol'")->fetchColumn();
+check($asked === 1, 'once it is the site, its next host report enrols it', 'jobs: ' . $asked);
 // B35: the same key is sent once an hour at most; a rotated one at once.
 $key_a = base64_encode(random_bytes(32));
 $key_b = base64_encode(random_bytes(32));
@@ -361,15 +407,5 @@ check($locked_node->get('mgn_uptime_last_status') === 'up' && !$locked_node->get
 	&& (int)$locked_node->get('mgn_uptime_consecutive_failures') === 1
 	&& (new IncidentSourceDataRootLocked())->evaluate($locked_node) === null,
 	'Unlocked, one failing probe: no longer locked, the incident closes, the failure counts toward down');
-
-// Cleanup.
-foreach ($made_escrows as $id) {
-	$db->prepare('DELETE FROM dre_data_root_escrows WHERE dre_data_root_escrow_id = ?')->execute(array($id));
-}
-foreach ($made_nodes as $id) {
-	$db->prepare('DELETE FROM dre_data_root_escrows WHERE dre_mgn_managed_node_id = ?')->execute(array($id));
-	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ?')->execute(array($id));
-	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_managed_node_id = ?')->execute(array($id));
-}
 
 harness_finish();
