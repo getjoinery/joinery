@@ -3,6 +3,15 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.4 - Docker's project ids and the sites' never meet (gvisor_site_sandbox_trial B1).
+#                create gives Docker's data-root DOCKER_PROJID_BASE, which every folder Docker
+#                makes inherits, so Docker numbers its layer caps above it however often it
+#                restarts; can-cap refuses a host whose Docker folders do not carry it. allow
+#                takes a site's id past every id in use on the pool as well as in /etc/projid,
+#                counts only the sites' limits against the pool, and checks before it moves
+#                any volume into a project. A site's backups and deploy projects are
+#                joinery_<site>.<volume>: joinery_a_deploy was also the project of a site
+#                named a_deploy, and release matched it.
 # Version: 2.3 - create --encrypted passes through: the data root under the pool is born on a
 #                LUKS2 volume (specs/hosted_data_promise_disk_encryption.md WP3).
 # Version: 2.2 - Every new Docker host has the data root (one_data_root WP2), so a data root no
@@ -33,14 +42,17 @@
 #                                        at /srv/joinery with project quotas, in
 #                                        a file of SIZE grown as it fills, or on
 #                                        DEVICE), and points Docker's data-root
-#                                        at /srv/joinery/docker.
+#                                        at /srv/joinery/docker, which carries
+#                                        the project Docker numbers its own
+#                                        above (TWO NUMBERINGS).
 #   docker_disk_pool.sh check            Exit 0 when the data root is mounted
 #                                        with project quotas on and Docker's
 #                                        data-root is in it; 1 when not.
 #   docker_disk_pool.sh can-cap          Exit 0 when a site's disk can be capped
-#                                        here: the pool in place, and Docker
-#                                        remapping user ids; 1, with the reason,
-#                                        when not.
+#                                        here: the pool in place, Docker
+#                                        remapping user ids, and Docker's
+#                                        project ids kept apart from the sites';
+#                                        1, with the reason, when not.
 #   docker_disk_pool.sh allow SITE SIZE  Root. Gives the site's volumes one
 #                                        allowance of SIZE: one project over all
 #                                        of them but backups and deploy, whose
@@ -74,9 +86,20 @@
 # limit, so a full site can still be backed up and upgraded. The hard limit is
 # the allowance plus 10%: the site refuses uploads and stored mail at the
 # allowance itself (DiskAllowance), and only the database, logs and system
-# writes can use the rest, so PostgreSQL never meets the wall first. Site
-# projects are numbered from SITE_PROJID_BASE, far above the ids Docker hands
-# out counting up for --storage-opt size, so the two never pool together.
+# writes can use the rest, so PostgreSQL never meets the wall first.
+#
+# TWO NUMBERINGS. Docker gives each writable layer capped with --storage-opt
+# size an XFS project of its own. It numbers them from one past the project id
+# of the folders it keeps them in, and at every start from one past the
+# highest id it finds in those folders, the sites' volumes among them (moby
+# daemon/internal/quota). Left at 0, the first restart after a site's
+# allowance would set Docker counting from the sites' ids, and a site and a
+# neighbour's layer would share one limit. So Docker's data-root carries
+# DOCKER_PROJID_BASE, with inheritance, from before Docker's first start:
+# every folder Docker makes is born with it, and Docker's ids all lie above
+# it. Site projects are numbered from SITE_PROJID_BASE, below it. A site's id
+# is one past every id in use in that range, on the pool as well as in
+# /etc/projid: a released site's files keep their id.
 #
 # Under user-namespace remapping the volumes live under
 # /srv/joinery/docker/<uid>.<gid>/volumes; the paths are asked of Docker, never
@@ -103,7 +126,12 @@ PROJECTS="${ROOT}/etc/projects"
 PROJID="${ROOT}/etc/projid"
 SITES_DIR="${ROOT}/etc/joinery/sites"
 SITE_PROJID_BASE=1000000000
-# The volumes outside the allowance, each in a project of its own.
+# Docker's own ids lie above this one (TWO NUMBERINGS); below 2^31, for any
+# tool that reads an id as signed.
+DOCKER_PROJID_BASE=2000000000
+# The volumes outside the allowance, each in a project of its own, named
+# joinery_<site>.<volume>: no site name holds a dot, so no other site's
+# joinery_<site> is ever one of them (a site may be named a_deploy).
 OWN_PROJECT_VOLUMES="backups deploy"
 HEADROOM_PCT=10
 # Where the site reads its allowance: a file in its config volume.
@@ -142,13 +170,42 @@ pool_mounted() {
     [[ "$dr" == "${DOCKER_DATA_ROOT}" ]]
 }
 
-# A site's disk can be capped here: the pool is in place, and root in a
-# container is not root on the host. Without remapping, a site's own
-# processes own its files and can move them out of its project (chattr -p).
+# A folder's own project id, not its contents', or nothing.
+dir_projid() { xfs_io -r -c lsproj "$1" 2>/dev/null | awk '$1 == "projid" { print $3; exit }'; }
+
+# Docker's data-root carries DOCKER_PROJID_BASE and passes it to every folder
+# made in it (TWO NUMBERINGS). That folder only: what is already in it keeps
+# its id.
+docker_base_ensure() {
+    local d="${ROOT}${DOCKER_DATA_ROOT}" id
+    id="$(dir_projid "$d")"
+    [[ "$id" =~ ^[0-9]+$ ]] && (( id >= DOCKER_PROJID_BASE )) && return 0
+    xfs_io -r -c "chproj ${DOCKER_PROJID_BASE}" -c 'chattr +P' "$d" >/dev/null \
+        || die "could not give ${DOCKER_DATA_ROOT} project ${DOCKER_PROJID_BASE}, which keeps Docker's project ids apart from the sites'"
+}
+
+# Docker numbers its layer caps above the sites': the folders it keeps the
+# layers and the volumes in, whose ids it starts from, carry the base.
+docker_ids_apart() {
+    local root home id
+    root="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null)" || return 1
+    [[ "$root" == /* ]] || return 1
+    for home in overlay2 volumes; do
+        id="$(dir_projid "${ROOT}${root}/${home}")"
+        [[ "$id" =~ ^[0-9]+$ ]] && (( id >= DOCKER_PROJID_BASE )) || return 1
+    done
+}
+
+# A site's disk can be capped here: the pool is in place, root in a container
+# is not root on the host, and Docker's project ids stay apart from the
+# sites'. Without remapping, a site's own processes own its files and can
+# move them out of its project (chattr -p).
 can_cap() {
     pool_mounted || { printf 'docker_disk_pool: this host has no disk pool\n' >&2; return 1; }
     [[ -n "$(docker_daemon_json_get userns-remap)" ]] \
         || { printf 'docker_disk_pool: Docker does not remap user ids here, so a site could move its own files out of its allowance\n' >&2; return 1; }
+    docker_ids_apart \
+        || { printf "docker_disk_pool: Docker's folders here do not carry project %s, so after a restart Docker would number its layer caps among the sites' allowances and a site could share a neighbour's limit\n" "$DOCKER_PROJID_BASE" >&2; return 1; }
 }
 
 do_create() {
@@ -165,6 +222,10 @@ do_create() {
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
 
     if pool_mounted; then
+        # A pool made before its data-root carried the base takes it here; it
+        # reaches only the folders Docker makes from now on, such as the
+        # ones a first start with remapping makes.
+        docker_base_ensure
         say "The disk pool is in place: Docker keeps its data on the data root, ${DOCKER_DATA_ROOT}"
         return 0
     fi
@@ -185,6 +246,8 @@ do_create() {
 
     mkdir -p "${ROOT}${DOCKER_DATA_ROOT}"
     chmod 710 "${ROOT}${DOCKER_DATA_ROOT}"
+    # Before Docker's first start, so every folder it makes is born with it.
+    docker_base_ensure
     docker_daemon_json_set data-root "\"${DOCKER_DATA_ROOT}\"" || die "could not set data-root in $(docker_daemon_json_path) (is it valid JSON?)"
     pool_mounted || die "the data root is mounted, but the pool is not in place; see: joinery_data_root.sh status"
     say "The disk pool is in place: Docker keeps its data at ${DOCKER_DATA_ROOT}, on the data root"
@@ -197,13 +260,20 @@ do_create() {
 # A project's id from /etc/projid, or nothing.
 projid_of() { awk -F: -v n="$1" '$1 == n { print $2; exit }' "$PROJID" 2>/dev/null || true; }
 
-# A project's id, made when it has none: the next one above every site project
-# on this host. Under the caller's lock.
+# Every project on the pool with usage or a limit, one line each: #id, then
+# blocks used, soft and hard limits in KiB.
+pool_report() { xfs_quota -x -c 'report -p -n -b -N' "$MNT" 2>/dev/null || true; }
+
+# A project's id, made when it has none: one past every id in the sites' range
+# in use, named in /etc/projid or holding files on the pool (INUSE, the ids
+# the report lists). Under the caller's lock.
 projid_ensure() {
-    local name="$1" id
+    local name="$1" inuse="$2" id
     id="$(projid_of "$name")"
     if [[ -z "$id" ]]; then
-        id="$(awk -F: -v b="$SITE_PROJID_BASE" '$2 >= b && $2 > m { m = $2 } END { print (m ? m + 1 : b + 1) }' "$PROJID" 2>/dev/null || echo $((SITE_PROJID_BASE + 1)))"
+        id="$( { awk -F: '{ print $2 }' "$PROJID"; printf '%s\n' "$inuse"; } \
+            | awk -v b="$SITE_PROJID_BASE" -v d="$DOCKER_PROJID_BASE" '$1 ~ /^[0-9]+$/ && $1 + 0 >= b && $1 + 0 < d && $1 + 0 > m { m = $1 + 0 } END { print (m ? m + 1 : b + 1) }')"
+        (( id < DOCKER_PROJID_BASE )) || die "no project id is left below Docker's, ${DOCKER_PROJID_BASE}"
         printf '%s:%s\n' "$name" "$id" >> "$PROJID"
     fi
     printf '%s' "$id"
@@ -264,7 +334,7 @@ allowance_files_write() {  # SITE BYTES|'' [CONFIG_MOUNTPOINT]
 }
 
 do_allow() {
-    local site="${1:-}" want="${2:-}" bytes hard id own_id suffix mp config_mp=""
+    local site="${1:-}" want="${2:-}" bytes hard id own_id suffix mp config_mp="" report inuse ours
     local -a mine=()
     local -A own=()
     site_name_ok "$site" || die "'${site}' is not a site name"
@@ -288,10 +358,26 @@ do_allow() {
     touch "$PROJID" "$PROJECTS"
     exec 9>>"$PROJID.lock"
     flock 9
-    id="$(projid_ensure "joinery_${site}")"
+    report="$(pool_report)"
+    # Every site's hard limit together must fit the pool: a site at its limit
+    # must never be able to fill the disk another site writes to. Under the
+    # lock, so two allowances set at once are counted together, and before
+    # anything is moved, so a refusal leaves the site as it was. The other
+    # sites' projects are the ones /etc/projid names; Docker's layer caps are
+    # not allowances.
+    local pool_total others
+    ours="$(awk -F: -v me="joinery_${site}" '$1 ~ /^joinery_/ && $1 != me { printf " %s", $2 }' "$PROJID")"
+    others="$(awk -v ours="${ours} " '{ p = $1; sub(/^#/, "", p) } p != "" && index(ours, " " p " ") { s += $4 } END { printf "%.0f", s * 1024 }' <<< "$report")"
+    pool_total="$(df -B1 --output=size "$MNT" | tail -n 1 | tr -d ' ' || true)"
+    if [[ "$pool_total" =~ ^[0-9]+$ ]] && (( ${others:-0} + hard > pool_total )); then
+        flock -u 9
+        die "${want} for ${site} would promise more than the pool holds: the other sites' limits come to $(( ${others:-0} / 1024 / 1024 )) MB, this one's $(( hard / 1024 / 1024 )) MB with its 10%, and the pool is $(( pool_total / 1024 / 1024 )) MB. Give a smaller allowance, or move a site to another host."
+    fi
+    inuse="$(awk '{ p = $1; sub(/^#/, "", p); print p }' <<< "$report")"
+    id="$(projid_ensure "joinery_${site}" "$inuse")"
     projects_set "$id" "${mine[@]}"
     for suffix in "${!own[@]}"; do
-        own_id="$(projid_ensure "joinery_${site}_${suffix}")"
+        own_id="$(projid_ensure "joinery_${site}.${suffix}" "$inuse")"
         projects_set "$own_id" "${own[$suffix]}"
         xfs_quota -x -c "project -s -p ${own[$suffix]} ${own_id}" "$MNT" >/dev/null
     done
@@ -300,17 +386,6 @@ do_allow() {
     for mp in "${mine[@]}"; do
         xfs_quota -x -c "project -s -p ${mp} ${id}" "$MNT" >/dev/null
     done
-    # Every site's hard limit together must fit the pool: a site at its limit
-    # must never be able to fill the disk another site writes to. Under the
-    # lock, so two allowances set at once are counted together.
-    local pool_total others
-    pool_total="$(df -B1 --output=size "$MNT" | tail -n 1 | tr -d ' ' || true)"
-    others="$(xfs_quota -x -c 'report -p -n -b -N' "$MNT" 2>/dev/null \
-        | awk -v base="$SITE_PROJID_BASE" -v me="$id" '{ p = $1; sub(/^#/, "", p) } p + 0 > base && p != me { s += $4 } END { printf "%.0f", s * 1024 }' || true)"
-    if [[ "$pool_total" =~ ^[0-9]+$ ]] && (( ${others:-0} + hard > pool_total )); then
-        flock -u 9
-        die "${want} for ${site} would promise more than the pool holds: the other sites' limits come to $(( ${others:-0} / 1024 / 1024 )) MB, this one's $(( hard / 1024 / 1024 )) MB with its 10%, and the pool is $(( pool_total / 1024 / 1024 )) MB. Give a smaller allowance, or move a site to another host."
-    fi
     xfs_quota -x -c "limit -p bhard=${hard} ${id}" "$MNT"
     flock -u 9
 
@@ -327,12 +402,12 @@ do_release() {
     [[ -f "$PROJID" ]] || return 0
     exec 9>>"$PROJID.lock"
     flock 9
-    for name in "joinery_${site}" $(for s in $OWN_PROJECT_VOLUMES; do printf 'joinery_%s_%s ' "$site" "$s"; done); do
+    for name in "joinery_${site}" $(for s in $OWN_PROJECT_VOLUMES; do printf 'joinery_%s.%s ' "$site" "$s"; done); do
         id="$(projid_of "$name")"
         [[ -n "$id" ]] || continue
         pool_mounted && xfs_quota -x -c "limit -p bhard=0 ${id}" "$MNT" >/dev/null 2>&1 || true
         projects_set "$id"
-        { grep -v "^${name}:" "$PROJID" || true; } > "${PROJID}.tmp.$$" && mv -f "${PROJID}.tmp.$$" "$PROJID"
+        awk -F: -v n="$name" '$1 != n' "$PROJID" > "${PROJID}.tmp.$$" && mv -f "${PROJID}.tmp.$$" "$PROJID"
     done
     flock -u 9
 }

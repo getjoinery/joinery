@@ -4,6 +4,12 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.16 - Every machine, a Docker host as much as a server, keeps the kernel from loading
+#                rare protocol modules any process could make it load (a site's web user loaded
+#                sctp, can and can_raw on a shared host) and unloads one loaded and unused; and
+#                sets dev.tty.ldisc_autoload=0, unprivileged BPF off, the kernel log and
+#                userfaultfd kept from unprivileged processes (gvisor_site_sandbox_trial.md
+#                B2). install.sh wrote the module list on a server only, appending each time.
 # Version: 1.15 - On a machine with the outbound limits installed, every run brings the installed
 #                joinery-limits up to this release's outbound_limits.sh (and the run spec helper
 #                beside it), and runs the unit when it changed: an upgrade delivers the limits'
@@ -901,6 +907,93 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${FS_ROOT}/etc/syste
     else
         warn "the outbound limits: $(printf '%s' "${OBL_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
+    fi
+fi
+
+# --- 11. The kernel loads nothing a site can ask for and no machine uses -------
+# Any process can make the kernel load a module: by opening a socket of a
+# family or protocol not loaded yet, by naming a netlink family, or by giving a
+# terminal a line discipline. A site's web user on a shared host made it load
+# sctp, can and can_raw (gvisor_site_sandbox_trial.md B2). Each one is
+# kernel code every site can then reach, and old protocol code is where many
+# kernel privilege escalations began. No site and no machine here uses these:
+# the kernel is told never to load them ("install NAME /bin/false" refuses even
+# modprobe NAME; "blacklist NAME" keeps their aliases from naming them), and
+# one already loaded and unused is unloaded. Line disciplines are refused as a
+# class: the kernel loads one for a process without CAP_SYS_MODULE only while
+# dev.tty.ldisc_autoload is 1. The other settings keep BPF, the kernel log and
+# userfaultfd out of an unprivileged process's reach. Off the list on purpose:
+# what a server's owner may run (WireGuard, IPsec's xfrm_user, ip_vs, nbd,
+# Open vSwitch) and af_alg, which cryptsetup uses. Both files are written whole
+# on every run.
+RARE_MODULES=(
+    # Socket families.
+    appletalk atm ax25 netrom rose x25 af_key llc2 rds tipc
+    can can_raw can_bcm can_gw can_isotp can_j1939 bluetooth ieee802154_socket
+    caif_socket nfc kcm qrtr smc rxrpc phonet pn_pep mpls_router
+    # Protocols over IPv4 and IPv6.
+    sctp dccp dccp_ipv4 dccp_ipv6 l2tp_core l2tp_ip l2tp_ip6 l2tp_ppp l2tp_netlink l2tp_eth
+    pppox pppoe pptp
+    # Netlink protocols and families.
+    crypto_user batman_adv gtp macsec
+    # Line disciplines a root process could still load.
+    n_gsm n_hdlc
+)
+KERNEL_SETTINGS=(
+    "dev.tty.ldisc_autoload = 0"
+    "kernel.unprivileged_bpf_disabled = 1"
+    "kernel.dmesg_restrict = 1"
+    "vm.unprivileged_userfaultfd = 0"
+)
+MODPROBE_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
+KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
+if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/modprobe.d" ]]; then
+    CANDIDATE="$(mktemp)"
+    {
+        echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."
+        echo "# Modules no site and no machine here uses, which any process could otherwise make"
+        echo "# the kernel load: never loaded, not even by modprobe NAME."
+        for m in "${RARE_MODULES[@]}"; do printf 'install %s /bin/false\nblacklist %s\n' "$m" "$m"; done
+    } > "${CANDIDATE}"
+    if install_file "${MODPROBE_CONF}" "${CANDIDATE}"; then
+        say "wrote ${MODPROBE_CONF}: ${#RARE_MODULES[@]} modules the kernel never loads"
+    fi
+    rm -f "${CANDIDATE}"
+    if [[ "${RUN_SYSTEM}" == 1 && -r /proc/modules ]]; then
+        for m in "${RARE_MODULES[@]}"; do
+            # /proc/modules: name, size, how many hold it.
+            held="$(awk -v n="$m" '$1 == n { print $3; exit }' /proc/modules)"
+            [[ -n "${held}" ]] || continue
+            if [[ "${held}" == 0 ]] && modprobe -r "$m" >/dev/null 2>&1; then
+                say "unloaded ${m}: the kernel had loaded it, and nothing held it"
+            else
+                warn "${m} is loaded and in use, so it stays until the next boot, which will not load it; find what uses it: lsmod | grep ${m}"
+            fi
+        done
+    fi
+fi
+if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
+    CANDIDATE="$(mktemp)"
+    {
+        echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."
+        echo "# What an unprivileged process may ask of the kernel: no line discipline loaded on"
+        echo "# its behalf, no BPF, no kernel log, no userfaultfd."
+        printf '%s\n' "${KERNEL_SETTINGS[@]}"
+    } > "${CANDIDATE}"
+    if install_file "${KERNEL_SYSCTL_CONF}" "${CANDIDATE}"; then
+        say "wrote ${KERNEL_SYSCTL_CONF}"
+    fi
+    rm -f "${CANDIDATE}"
+    if [[ "${RUN_SYSTEM}" == 1 ]]; then
+        # -e: a setting this kernel does not have is passed over, not an error.
+        sysctl -e -q -p "${KERNEL_SYSCTL_CONF}" >/dev/null 2>&1 || true
+        for setting in "${KERNEL_SETTINGS[@]}"; do
+            key="${setting%% =*}"; want="${setting##*= }"
+            proc="/proc/sys/${key//.//}"
+            [[ -r "${proc}" ]] || continue
+            got="$(cat "${proc}")"
+            [[ "${got}" == "${want}" ]] || warn "${key} is ${got}, not ${want}: a later file in /etc/sysctl.d or /etc/sysctl.conf sets it, or the kernel refused it"
+        done
     fi
 fi
 

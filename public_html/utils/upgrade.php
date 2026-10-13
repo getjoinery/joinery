@@ -34,6 +34,16 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.17 - only the run a self-update re-execs (JOINERY_UPGRADE_RERUN=1) resumes from staging; any
+	 *                other run downloads into an empty staging. A continuation killed after merging the theme
+	 *                and plugin archives left staging the core archive's check refused, on every later run
+	 *                (gvisor_site_sandbox_trial.md B3). And the staged VERSION waits beside staging from
+	 *                the self-update check to the deploy, so staging that carries it is the core archive
+	 *                alone, for an older upgrade.php the agent puts back after such a run too. The re-exec'd
+	 *                run marks a completed upgrade for its parent (JOINERY_UPGRADE_DEPLOYED_MARK), so a
+	 *                release reinstalled at its own version keeps the files it deployed: VERSION unchanged
+	 *                had the parent put the replaced ones back and say the upgrade stopped.
+	 * @version 1.16 - ?serve-upgrade on a site that has published no release answers 404 with why, not a fatal
 	 * @version 1.15 - the self-update check also runs when a run resumes from staging (only the download is
 	 *                skipped), and the unreachable browser Continue page is gone; a self-update that does
 	 *                not end in a deploy puts the deployment files back (and empties staging): a run that aborts after copying them left a new upgrade.php under the old release's
@@ -319,7 +329,15 @@
 			ob_flush();
 		}
 		flush();
-		$cmd = 'JOINERY_UPGRADE_RERUN=1 ' . escapeshellarg(PHP_BINARY);
+		// The child marks here that its upgrade completed. A release reinstalled
+		// at its own version (--force-upgrade, to repair a node's files) leaves
+		// VERSION as it was, so VERSION alone told the restore below that
+		// nothing deployed, and it put the files the run had replaced back.
+		$deployed_mark = self_update_deployed_mark();
+		if ($deployed_mark !== '') {
+			@unlink($deployed_mark);
+		}
+		$cmd = 'JOINERY_UPGRADE_RERUN=1 JOINERY_UPGRADE_DEPLOYED_MARK=' . escapeshellarg($deployed_mark) . ' ' . escapeshellarg(PHP_BINARY);
 		foreach ($argv as $arg) {
 			$cmd .= ' ' . escapeshellarg($arg);
 		}
@@ -332,19 +350,34 @@
 		}
 		$GLOBALS['APPLY_RESULT_SUPPRESS'] = true;
 		passthru($cmd, $exit_code);
-		self_update_restore();
+		self_update_restore(false, $deployed_mark);
 		exit($exit_code);
+	}
+
+	// Where the re-exec'd child marks a completed upgrade for its parent:
+	// beside the lock the self-update kept its originals under, or '' when
+	// nothing was kept.
+	function self_update_deployed_mark() {
+		$kept = $GLOBALS['SELF_UPDATE_ORIGINALS'] ?? null;
+		return (is_array($kept) && !empty($kept['lock'])) ? $kept['lock'] . '.deployed' : '';
 	}
 
 	// The self-update copies the release's deployment files over the live ones
 	// before anything else is checked, so a run that then stops short of a
 	// deploy has to put them back (DeploymentHelper::restoreSelfUpdateFiles
 	// says why and how). $in_process: the run that made the copy is still
-	// running, holding the lock, with its staging in use.
-	function self_update_restore($in_process = false) {
+	// running, holding the lock, with its staging in use. $deployed_mark: the
+	// file the re-exec'd child writes once its upgrade completed; then the
+	// files it deployed stay, whatever VERSION says.
+	function self_update_restore($in_process = false, $deployed_mark = '') {
 		global $stage_location;
 		$kept = $GLOBALS['SELF_UPDATE_ORIGINALS'] ?? null;
 		if (!$kept || !method_exists('DeploymentHelper', 'restoreSelfUpdateFiles')) return;
+		if ($deployed_mark !== '' && is_file($deployed_mark)) {
+			@unlink($deployed_mark);
+			unset($GLOBALS['SELF_UPDATE_ORIGINALS']);
+			return;
+		}
 		$r = DeploymentHelper::restoreSelfUpdateFiles($kept, $in_process, (string)($stage_location ?? ''));
 		if ($r['status'] === 'unknown_version' || $r['status'] === 'version_unreadable') {
 			echo "  Deployment files were not put back: this site's VERSION could not be read, so the tree was left as it is.\n";
@@ -681,6 +714,14 @@
 		$major = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'));
 		$major->load();
 		$upgrade =  $major->get(0);
+		if (!$upgrade) {
+			// A management node built from a release and never published from:
+			// it has nothing to serve, and says so rather than failing.
+			header("Content-Type: application/json");
+			http_response_code(404);
+			echo json_encode(array('error' => 'This site serves no releases; it takes its own from ' . (string)$settings->get_setting('upgrade_source'))) . PHP_EOL;
+			exit;
+		}
 		$version = $upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). '.'. $upgrade->get('upg_patch_version');
 		$response['system_version'] = $version;
 		$response['upgrade_name'] = $upgrade->get('upg_name');
@@ -965,12 +1006,19 @@
 		// =====================================================
 		// SELF-UPDATE RESUME DETECTION
 		// =====================================================
-		// If staging already has the target version's tarball extracted, a previous
-		// run must have self-updated deployment files and asked for a re-run.
-		// Skip download/extraction; pick up from the self-update check below.
+		// The run a self-update re-execs (self_update_cli_rerun sets
+		// JOINERY_UPGRADE_RERUN=1) picks up the staging its parent has just
+		// extracted, verified and copied the deployment files from, and skips
+		// the download and extraction; it picks up from the self-update check
+		// below. Only that run. Staging that any other run finds was left by a
+		// run that stopped or was killed, possibly after it had merged the theme
+		// and plugin archives in: the core archive's listing names none of
+		// those files, so resuming there refused every later run until staging
+		// was emptied by hand. Every other run downloads into an empty staging.
 		$resuming_after_self_update = false;
 		$staged_version_file = $stage_directory . '/VERSION';
-		if (file_exists($staged_version_file) && is_dir($stage_directory) && !is_dir_empty($stage_directory)) {
+		if (getenv('JOINERY_UPGRADE_RERUN') === '1'
+			&& file_exists($staged_version_file) && is_dir($stage_directory) && !is_dir_empty($stage_directory)) {
 			$staged_version = trim(file_get_contents($staged_version_file));
 			if ($staged_version !== '' && $staged_version === ($decode_response['system_version'] ?? '')) {
 				$resuming_after_self_update = true;
@@ -1257,8 +1305,9 @@
 				self_update_restore(true);
 				// Don't abort — proceed with old code, which is better than failing entirely
 			} else {
-				// Resume detection on re-run finds the staged VERSION file matching the
-				// target system_version and skips the download step. No marker needed.
+				// The re-run carries JOINERY_UPGRADE_RERUN=1, and on it resume
+				// detection finds the staged VERSION matching the target and skips
+				// the download.
 
 				// Only the command line gets here (a browser was sent to the Updates
 				// page above), and nobody is present to click Continue, so the run
@@ -1276,6 +1325,23 @@
 			if ($verbose) {
 				upgrade_echo('Self-update check: all deployment files are current.<br>');
 			}
+		}
+
+		// From here staging stops being the core archive alone: the theme and
+		// plugin archives go into it, then the live ones this deploy keeps. A
+		// run killed before the deploy leaves it that way, and an upgrade.php
+		// before 1.17 (the one the agent puts back after such a run) resumes
+		// from any staging whose VERSION is the target, and refuses it on every
+		// run, because the core archive's listing names none of those files. So
+		// the staged VERSION waits beside staging until the deploy: a staging
+		// that carries it is the verified core archive and nothing else,
+		// whichever upgrade.php reads it next.
+		$staged_version_path  = $stage_directory . '/VERSION';
+		$staged_version_aside = rtrim($stage_location, '/') . '/VERSION.until-deploy';
+		@unlink($staged_version_aside);
+		if (file_exists($staged_version_path) && !rename($staged_version_path, $staged_version_aside)) {
+			upgrade_abort('Staging could not be prepared',
+				'The staged VERSION could not be set aside before the themes and plugins were added. Nothing has been deployed.');
 		}
 
 		// =====================================================
@@ -1465,6 +1531,13 @@
 			$lines[] = '';
 			$lines[] = 'Preserved themes/plugins could not be carried over. Deploying without them would cause data loss.';
 			upgrade_abort('Theme/Plugin Preservation Failed', implode('<br>', $lines));
+		}
+
+		// The staged VERSION goes back for the deploy (set aside after the
+		// self-update check).
+		if (file_exists($staged_version_aside) && !rename($staged_version_aside, $staged_version_path)) {
+			upgrade_abort('Deployment stopped',
+				'The staged VERSION could not be put back, so the release would deploy without one. Nothing has been deployed.');
 		}
 
 		// ============================================
@@ -2263,6 +2336,12 @@
 		}
 
 		$GLOBALS['APPLY_RESULT']['outcome'] = 'completed';
+		// Run by a self-update's re-exec: tell the parent the upgrade completed,
+		// so its restore leaves the deployed files (self_update_cli_rerun).
+		$deployed_mark = (string)getenv('JOINERY_UPGRADE_DEPLOYED_MARK');
+		if ($deployed_mark !== '') {
+			@file_put_contents($deployed_mark, (string)($decode_response['system_version'] ?? '') . "\n");
+		}
 		upgrade_echo('<br><h2>✓ Upgrade Complete!</h2>');
 		upgrade_echo('System upgraded to version: ' . $decode_response['system_version'] . '<br>');
 	}

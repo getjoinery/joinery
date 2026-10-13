@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 3.16 - Swap is compressed memory (host_swap.sh), not an encrypted /swapfile: dm-crypt over a
+#               loop device over a file locked a 1 GB machine up under memory pressure (B32).
+#VERSION 3.15 - server no longer appends its four rare network modules to
+#               /etc/modprobe.d/blacklist-rare-network.conf: host_housekeeping.sh writes that file
+#               whole on every machine, Docker hosts included (gvisor_site_sandbox_trial B2).
+#VERSION 3.14 - docker --multi-tenant on a Docker host with no sites gives Docker's data-root the
+#               project id Docker numbers its layer caps above before the restart that turns
+#               remapping on, so the folders that restart makes carry it (docker_disk_pool.sh 2.4).
 #VERSION 3.13 - install.sh docker --multi-tenant writes the host's restrictions (host_restrictions.sh:
 #               unsigned_packages=refuse), which every site container mounts read-only; install.sh site
 #               refuses, before it builds anything, on a remapping host without them
@@ -2423,6 +2431,12 @@ docker_multi_tenant_existing() {
         print_error "--multi-tenant would strand this host's ${images} image(s) under Docker's old root, where nothing removes them. Nothing was changed. Remove them first (docker system prune -a), then run this again; joinery-base is rebuilt on the first site."
         return 1
     fi
+    # The folders the restart makes under remapping are born with the project
+    # Docker numbers its layer caps above (docker_disk_pool.sh, TWO
+    # NUMBERINGS); create gives Docker's data-root that project.
+    if bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" create >/dev/null || return 1
+    fi
     docker_daemon_json_set_userns_remap || return 1
     systemctl restart docker || { print_error "Docker did not restart with userns-remap"; return 1; }
     docker_assert_remaps_ids
@@ -2803,62 +2817,17 @@ host_housekeeping() {
         fi
     fi
 
-    # --- Swap: 1 GB, encrypted ---
-    # Swap stays on: a 1 GB box needs somewhere to put idle php-fpm workers
-    # and cold Postgres pages. But an idle worker's pages can hold an open
-    # vault window's key, so the device is dm-crypt with a throwaway key drawn
-    # from /dev/urandom at every boot (the standard Debian pattern; nothing to
-    # manage, nothing to lose). The size is a flat 1 GB on every box: no node
-    # has ever used more than half that, and more is only room to thrash in.
-    # Both lines carry nofail, so a box whose swap fails to come up boots
-    # without it and VaultHealth reports the gap, instead of hanging in the
-    # emergency shell.
+    # --- Swap: compressed memory ---
+    # host_swap.sh, the installer the host converger runs too: swap is zram,
+    # compressed memory that never reaches a disk, so an idle worker's pages
+    # (an open vault window's key among them) are never written anywhere. A
+    # swap file through dm-crypt over a loop device locked a 1 GB machine up
+    # under memory pressure; an encrypted one an older install made is retired.
     print_step "Configuring swap..."
-    local SWAPFILE="/swapfile"
-    local CRYPT_NAME="cryptswap"
-    local CRYPT_DEV="/dev/mapper/$CRYPT_NAME"
-    local SWAP_GB=1
-    local SWAP_KB
-    SWAP_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)
-    # The kernel names an active mapping by its resolved node (/dev/dm-N),
-    # never by the /dev/mapper alias, so compare resolved paths. Skip only
-    # when the mapping is up AT this size; anything else is replaced.
-    local CRYPT_NODE
-    CRYPT_NODE=$(readlink -f "$CRYPT_DEV" 2>/dev/null || echo "$CRYPT_DEV")
-    if swapon --show=NAME --noheadings 2>/dev/null | grep -qx "$CRYPT_NODE" \
-            && [ "${SWAP_KB:-0}" -ge $((SWAP_GB * 1000000)) ] \
-            && [ "${SWAP_KB:-0}" -le $((SWAP_GB * 1100000)) ]; then
-        print_info "Encrypted swap already active at $CRYPT_DEV ($((SWAP_KB / 1024))M) — keeping it"
+    if bash "$SCRIPT_DIR/host_swap.sh"; then
+        print_success "Swap: compressed memory (zram)"
     else
-        apt-get install -y cryptsetup > /dev/null 2>&1
-        swapoff -a 2>/dev/null || true
-        if [ -e "$CRYPT_DEV" ]; then
-            systemctl stop "systemd-cryptsetup@$CRYPT_NAME" 2>/dev/null || cryptsetup close "$CRYPT_NAME" 2>/dev/null || true
-        fi
-        rm -f "$SWAPFILE"
-        fallocate -l "${SWAP_GB}G" "$SWAPFILE"
-        chmod 600 "$SWAPFILE"
-        # crypttab: fresh key each boot; the swap option runs mkswap on the mapping.
-        touch /etc/crypttab
-        sed -i "/^$CRYPT_NAME[[:space:]]/d" /etc/crypttab
-        echo "$CRYPT_NAME $SWAPFILE /dev/urandom swap,cipher=aes-xts-plain64,size=256,nofail" >> /etc/crypttab
-        # Replace any existing swap entries (Linode's plain swap disk, an older
-        # plain /swapfile line) with the mapping.
-        sed -i '/[[:space:]]swap[[:space:]]/d' /etc/fstab
-        echo "$CRYPT_DEV none swap sw,nofail 0 0" >> /etc/fstab
-        systemctl daemon-reload
-        if systemctl start "systemd-cryptsetup@$CRYPT_NAME" && swapon "$CRYPT_DEV"; then
-            local ACTIVE
-            ACTIVE=$(swapon --show=NAME --noheadings 2>/dev/null | tr '\n' ' ')
-            CRYPT_NODE=$(readlink -f "$CRYPT_DEV" 2>/dev/null || echo "$CRYPT_DEV")
-            if [ "$(echo "$ACTIVE" | xargs)" = "$CRYPT_NODE" ]; then
-                print_success "Swap: ${SWAP_GB}G encrypted swap active at $CRYPT_DEV"
-            else
-                print_warning "Swap: expected only $CRYPT_DEV active, found: $ACTIVE"
-            fi
-        else
-            print_warning "Swap: could not bring up $CRYPT_DEV — the box runs without swap until check_vault_health.php is green"
-        fi
+        print_warning "Swap: host_swap.sh did not finish; the host converger tries again"
     fi
 
     # --- apport: off ---
@@ -3847,11 +3816,8 @@ EOF
         # Security hardening
         print_step "Applying security hardening..."
 
-        echo "install dccp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-        echo "install sctp /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-        echo "install rds /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-        echo "install tipc /bin/true" | tee -a /etc/modprobe.d/blacklist-rare-network.conf
-
+        # The modules the kernel never loads, and the kernel's own settings, are
+        # host_housekeeping.sh's (above), on every machine and every converge.
         tee /etc/sysctl.d/99-security.conf > /dev/null << 'EOF'
 # IP Spoofing protection
 net.ipv4.conf.default.rp_filter = 1

@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 2.14 - A site on a host with restrictions (install.sh docker --multi-tenant) mounts them
+#               read-only (_site_run_spec.sh 1.9), and that bind made every such site 'not one
+#               install.sh made': none could be removed. That one mount, exactly, is accepted.
+#VERSION 2.13 - A site's backups and deploy projects are joinery_<site>.backups and .deploy
+#               (docker_disk_pool.sh 2.4): removing site a took joinery_a_deploy, which is also
+#               the project of a site named a_deploy. Run from a folder with no install_tools
+#               beside it, the removal reaches its warning that joinery_data_root.sh is missing;
+#               finding that folder ended it silently, halfway, under set -e.
 #VERSION 2.12 - A bare-metal site on a data root (specs/one_data_root.md WP2): its folders are bind
 #               mounts of /srv/joinery/sites/<site>, so before its directory goes,
 #               joinery_data_root.sh remove-site takes those mounts away (the target first, so no
@@ -139,6 +147,10 @@ fi
 # alone and sources nothing (remove_account_gate checks the three agree).
 SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent deploy"
 
+# _site_run_spec.sh's RUN_SPEC_RESTRICTIONS_DIR: the host's restrictions, which
+# every site on a host that has them mounts read-only (specs/host_restrictions.md).
+HOST_RESTRICTIONS_DIR="/etc/joinery/host_restrictions"
+
 # A site's volumes that exist, one per line, by exact name: its sixteen, and
 # the old database rebase_site_container.sh keeps until a rebase finishes
 # (<site>_postgres_pg<major>). Never a prefix match: another site may be named
@@ -172,7 +184,8 @@ another_site() {
 # Why the site's container is not one install.sh made, or nothing when it is:
 # it runs the site's own image (joinery-<site>, any tag: a rebase's rollback
 # runs pre-rebase-pg<major>) and every mount is one of the site's own named
-# volumes. This script knows how to remove only that shape; a container made
+# volumes, or the host's restrictions read-only. This script knows how to
+# remove only that shape; a container made
 # by hand may hold a database, a bind mount or another site's volume.
 container_not_ours() {
     local image mounts m name suffix own
@@ -181,13 +194,20 @@ container_not_ours() {
         "joinery-${SITE_NAME}"|"joinery-${SITE_NAME}:"*) ;;
         *) echo "it runs the image '${image}', not joinery-${SITE_NAME}"; return 0 ;;
     esac
-    mounts=$(docker inspect -f '{{range .Mounts}}{{.Type}}:{{.Name}}:{{.Source}} {{end}}' "$SITE_NAME" 2>/dev/null) \
+    mounts=$(docker inspect -f '{{range .Mounts}}{{.Type}}:{{.Name}}:{{.Source}}:{{.Destination}}:{{.RW}} {{end}}' "$SITE_NAME" 2>/dev/null) \
         || { echo "its mounts could not be read"; return 0; }
+    local type src dest rw
     for m in $mounts; do
-        if [[ "$m" != volume:* ]]; then
-            echo "it has a ${m%%:*} mount (${m##*:})"; return 0
+        IFS=: read -r type name src dest rw <<< "$m"
+        # The host's restrictions, read-only, which install.sh gives every site
+        # on a host that has them: the host's, not the site's, so it stays.
+        if [[ "$type" == "bind" && "$dest" == "$HOST_RESTRICTIONS_DIR" && "$rw" == "false" \
+            && "$src" == "${FS}${HOST_RESTRICTIONS_DIR}" ]]; then
+            continue
         fi
-        name="${m#volume:}"; name="${name%%:*}"
+        if [[ "$type" != volume ]]; then
+            echo "it has a ${type} mount (${src})"; return 0
+        fi
         own=false
         for suffix in $SITE_VOLUME_SUFFIXES; do
             [ "$name" = "${SITE_NAME}_${suffix}" ] && own=true
@@ -267,18 +287,18 @@ clear_site_marks() {
     done
     # The site's XFS projects on a disk pool (docker_disk_pool.sh): the
     # allowance's and its own backups and deploy volumes', by exact name. Each
-    # is joinery_<site> or joinery_<site>_<volume>, so another site whose name
-    # begins with this one's keeps its own.
+    # is joinery_<site> or joinery_<site>.<volume>, and no site name holds a
+    # dot, so another site whose name begins with this one's keeps its own.
     local projid="${SITES_STATE%/joinery/sites}/projid" projects="${SITES_STATE%/joinery/sites}/projects" ids name
     [ -f "$projid" ] || return 0
     ids=""
-    for name in "joinery_${SITE_NAME}" "joinery_${SITE_NAME}_backups" "joinery_${SITE_NAME}_deploy"; do
+    for name in "joinery_${SITE_NAME}" "joinery_${SITE_NAME}.backups" "joinery_${SITE_NAME}.deploy"; do
         ids="$ids $(awk -F: -v n="$name" '$1 == n { print $2 }' "$projid")"
     done
     for f in "$projid" "$projects"; do
         [ -f "$f" ] || continue
         awk -F: -v ids=" $ids " -v site="$SITE_NAME" '
-            FILENAME ~ /projid$/ && ($1 == "joinery_" site || $1 == "joinery_" site "_backups" || $1 == "joinery_" site "_deploy") { next }
+            FILENAME ~ /projid$/ && ($1 == "joinery_" site || $1 == "joinery_" site ".backups" || $1 == "joinery_" site ".deploy") { next }
             FILENAME ~ /projects$/ && index(ids, " " $1 " ") { next }
             { print }' "$f" > "${f}.tmp.$$" && mv -f "${f}.tmp.$$" "$f"
     done
@@ -491,7 +511,9 @@ if [ "$IS_BAREMETAL" = true ]; then
     # mounts of /srv/joinery/sites/<site>: those go first, with the data
     # behind them, so rm meets ordinary directories.
     echo "Removing website directories..."
-    DATA_ROOT_TOOL="$(cd "$(dirname "${BASH_SOURCE[0]}")/../install_tools" 2>/dev/null && pwd)/joinery_data_root.sh"
+    # Not cd'd into: under set -e a missing directory would end the removal
+    # here, unsaid, instead of at the warning below.
+    DATA_ROOT_TOOL="$(dirname "${BASH_SOURCE[0]}")/../install_tools/joinery_data_root.sh"
     if [ -f "$DATA_ROOT_TOOL" ]; then
         for dr_site in "$SITE_NAME" $( [ "$OWN_TEST_SITE" = true ] && echo "${SITE_NAME}_test" ); do
             JOINERY_HOST_ROOT="$FS" bash "$DATA_ROOT_TOOL" remove-site "$dr_site" \

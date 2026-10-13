@@ -335,6 +335,39 @@ out="$(JOINERY_HOUSEKEEPING_ROOT="$RL" bash "$SCRIPT" 2>&1)"
 chk "a second converge changes nothing and says nothing about renewals" "$( [ "$(tree_sum "$RL")" = "$before" ] && echo same):$(printf '%s\n' "$out" | grep -c 'renewal:')" "same:0"
 chk "render_vhost.sh no longer defines or runs its own copy of the rule" "$(grep -cE '^[[:space:]]*heal_renewal_conf(\(\)| )' "$SITE_ROOT/maintenance_scripts/install_tools/render_vhost.sh")" "0"
 
+echo "=== The kernel loads nothing a site can ask for (gvisor_site_sandbox_trial B2) ==="
+RK="$T/kernel"
+mkdir -p "$RK/etc/modprobe.d" "$RK/etc/sysctl.d"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"; rc=$?
+MP="$RK/etc/modprobe.d/blacklist-rare-network.conf"; SC="$RK/etc/sysctl.d/90-joinery-kernel.conf"
+chk "exit 0" "$rc" "0"
+chk "what a site's web user made a shared host load is never loaded: sctp, can, can_raw" \
+    "$(grep -cxE 'install (sctp|can|can_raw) /bin/false' "$MP")|$(grep -cxE 'blacklist (sctp|can|can_raw)' "$MP")" "3|3"
+chk "nor a server's four, nor the line disciplines n_gsm and n_hdlc" "$(grep -cxE 'install (dccp|rds|tipc|n_gsm|n_hdlc) /bin/false' "$MP")" "5"
+chk "nothing a machine here uses: no netfilter, bridge, overlay, IPsec, WireGuard or af_alg" \
+    "$(grep -cE '^(install|blacklist) (nfnetlink|nf_tables|ip_tables|br_netfilter|bridge|llc|stp|overlay|veth|xfrm_user|wireguard|af_alg|af_packet|ipv6)( |$)' "$MP")" "0"
+chk "line disciplines are refused as a class" "$(grep -cx 'dev.tty.ldisc_autoload = 0' "$SC")" "1"
+chk "unprivileged BPF off; the kernel log and userfaultfd kept from unprivileged processes" \
+    "$(grep -cxE 'kernel.unprivileged_bpf_disabled = 1|kernel.dmesg_restrict = 1|vm.unprivileged_userfaultfd = 0' "$SC")" "3"
+# A server's list as install.sh appended it, on two installs.
+printf 'install dccp /bin/true\ninstall sctp /bin/true\ninstall rds /bin/true\ninstall tipc /bin/true\n%.0s' 1 2 > "$MP"
+JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1
+chk "a server's list, appended twice by install.sh, is written whole" "$(grep -c '^install sctp ' "$MP")|$(grep -c '/bin/true' "$MP")" "1|0"
+before="$(tree_sum "$RK")"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
+chk "a second run changes neither file and says nothing of them" \
+    "$(tree_sum "$RK")|$(grep -c 'blacklist-rare-network\|90-joinery-kernel' <<< "$out")" "$before|0"
+RKC="$T/kernel-container"
+mkdir -p "$RKC/etc/modprobe.d" "$RKC/etc/sysctl.d"; touch "$RKC/.dockerenv"
+JOINERY_HOUSEKEEPING_ROOT="$RKC" bash "$SCRIPT" >/dev/null 2>&1
+chk "in a container neither is written: the kernel is the host's" "$(ls "$RKC/etc/modprobe.d" "$RKC/etc/sysctl.d" | grep -c '\.conf$')" "0"
+chk "install.sh writes no module list of its own" "$(grep -v '^#' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh" | grep -c 'modprobe\.d')" "0"
+if command -v modprobe >/dev/null 2>&1; then
+    # modprobe itself, dry-run against the written list: the module is refused, not inserted.
+    chk "modprobe reads it: sctp would run /bin/false, not be inserted" \
+        "$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^install /bin/false')|$(modprobe -C "$MP" -n -v sctp 2>&1 | grep -c '^insmod')" "1|0"
+fi
+
 echo "=== PostgreSQL answers only locally ==="
 mkpg() {  # $1 root, $2 listen_addresses, $3 pg_hba body
     mkdir -p "$1/etc/postgresql/16/main/conf.d"
