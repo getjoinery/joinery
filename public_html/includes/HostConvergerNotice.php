@@ -12,10 +12,16 @@
  *
  * Reads two stored facts: whether a converger is installed on this machine
  * (its unit or cron file exists) and when it last ran (cache/host_converger.last,
- * written by the runner on every run). Silent when it ran within a day, and
- * silent on a box that never had one — a container converges at every start
+ * written by the runner on every run). Silent when it ran within a day, silent
+ * while one installed minutes ago waits for its first tick, and silent on a box
+ * that never had one — a container converges at every start
  * and a managed node through its upgrade job.
  *
+ * @version 1.2 - One rule for whether the converger is keeping up, runState(), which the root-request
+ *                warning and VaultHealth read too. A converger installed minutes ago that has not had its
+ *                first tick is starting, not dead: every new site's upload pages said its root actor had
+ *                not run recently until the first minute passed. A run just past a day old is the daily
+ *                run about to happen, not a dead converger: STALE_AFTER gives it an hour.
  * @version 1.1 - A run that stopped because the host's data root is not mounted (data-root-not-ready,
  *                specs/one_data_root.md D3) is named, with the command that says why; it was read
  *                as a healthy run and the notice stayed silent while nothing converged.
@@ -23,8 +29,23 @@
  */
 class HostConvergerNotice {
 
-	/** A run older than this is a dead converger. */
-	const STALE_AFTER = 86400;
+	/**
+	 * A run older than this is a dead converger. The runner converges again once
+	 * its last run is a day old (CONVERGE_MAX_AGE in _plugin_installers_start.sh),
+	 * at its next tick; the hour is that run's room, so a healthy box never reads
+	 * as dead at the turn of its day.
+	 */
+	const STALE_AFTER = 90000;
+
+	/**
+	 * A converger installed this recently that has never run is waiting for its
+	 * first tick, not dead. Ticks are a minute apart; the margin covers a box
+	 * still busy with the install that put the converger there.
+	 */
+	const FIRST_RUN_GRACE = 900;
+
+	/** What installs a converger: a systemd timer, or a cron entry where PID 1 is not systemd. */
+	const UNIT_FILES = array('/etc/systemd/system/joinery-host-converger.timer', '/etc/cron.d/joinery-host-converger');
 
 	public static function render(): string {
 		if ((int)($_SESSION['permission'] ?? 0) < 10) {
@@ -32,18 +53,48 @@ class HostConvergerNotice {
 		}
 		$facts = self::facts();
 		return self::forState($facts['installed'], $facts['last_run'], $facts['outcome'], time(),
-			self::installCommand(), (int)($facts['pending_requests'] ?? 0), $facts['oldest_request_age'] ?? null);
+			self::installCommand(), (int)($facts['pending_requests'] ?? 0), $facts['oldest_request_age'] ?? null,
+			$facts['installed_time']);
 	}
 
 	/**
-	 * The stored facts: installed (a unit or cron entry exists), last_run
-	 * (unix time of the last run, null when none), outcome (what that run
-	 * recorded).
+	 * Whether the converger is keeping up, from facts():
+	 *   absent   - none installed
+	 *   starting - installed under FIRST_RUN_GRACE ago and not run yet
+	 *   never    - installed longer ago than that and never run
+	 *   stale    - its last run is STALE_AFTER old or more
+	 *   fresh    - it ran within STALE_AFTER
+	 */
+	public static function runState(array $facts, int $now): string {
+		if (empty($facts['installed'])) {
+			return 'absent';
+		}
+		$last = $facts['last_run'] ?? null;
+		if ($last === null) {
+			$since = $facts['installed_time'] ?? null;
+			return ($since !== null && $now - (int)$since < self::FIRST_RUN_GRACE) ? 'starting' : 'never';
+		}
+		return ($now - (int)$last) < self::STALE_AFTER ? 'fresh' : 'stale';
+	}
+
+	/**
+	 * The stored facts: installed (a unit or cron entry exists), installed_time
+	 * (when that file was last written, null when none), last_run (unix time of
+	 * the last run, null when none), outcome (what that run recorded).
 	 */
 	public static function facts(?string $site_root = null): array {
 		$site_root = $site_root ?? PathHelper::getSiteRoot();
-		$installed = is_file('/etc/systemd/system/joinery-host-converger.timer')
-			|| is_file('/etc/cron.d/joinery-host-converger');
+		$installed = false;
+		$installed_time = null;
+		foreach (self::UNIT_FILES as $unit) {
+			if (is_file($unit)) {
+				$installed = true;
+				$t = @filemtime($unit);
+				if ($t !== false) {
+					$installed_time = max((int)$installed_time, (int)$t);
+				}
+			}
+		}
 		$last_run = null;
 		$outcome = '';
 		$raw = @file_get_contents($site_root . '/cache/host_converger.last');
@@ -64,6 +115,7 @@ class HostConvergerNotice {
 
 		return array(
 			'installed'          => $installed,
+			'installed_time'     => $installed_time,
 			'last_run'           => $last_run,
 			'outcome'            => $outcome,
 			'pending_requests'   => count($pending),
@@ -73,11 +125,12 @@ class HostConvergerNotice {
 
 	/** The notice for one set of facts. Public and pure so the wording can be tested. */
 	public static function forState(bool $installed, ?int $last_run, string $outcome, int $now,
-			string $command, int $pending = 0, ?int $oldest_age = null): string {
-		if (!$installed) {
+			string $command, int $pending = 0, ?int $oldest_age = null, ?int $installed_time = null): string {
+		$run = self::runState(array('installed' => $installed, 'installed_time' => $installed_time, 'last_run' => $last_run), $now);
+		if ($run === 'absent' || $run === 'starting') {
 			return '';
 		}
-		$fresh = $last_run !== null && ($now - $last_run) < self::STALE_AFTER;
+		$fresh = $run === 'fresh';
 
 		// A queue that is not moving is its own alarm, even on a converger that
 		// is otherwise healthy: the timer can tick while every request it picks

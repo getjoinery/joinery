@@ -25,6 +25,8 @@
  * that repairs a broken box would mean a box too broken to reach its database
  * is a box that cannot be repaired.
  *
+ * @version 1.5 - actorState() reads HostConvergerNotice::runState(): a converger installed minutes ago is
+ *                present while its first tick comes, so a new site's upload pages no longer say it has not run
  * @version 1.4 - data_root_encrypt, data_root_reseal and data_root_rekey: a self-hosted server's data root encrypted, and its
  *                break-glass copy sealed, to this site's own recovery key from its Backups page (WP4).
  * @version 1.3 - install_package carries `replace` (the operator confirmed
@@ -322,20 +324,24 @@ class RootRequest {
 	 * Whether this machine has a root actor, which decides whether a page
 	 * should promise that a request will be carried out.
 	 *
-	 * present — a converger is installed and has run recently.
-	 * stale   — installed, but its last run is older than a converger's day.
+	 * present — a converger is installed and has run recently, or was installed
+	 *           minutes ago and its first tick is coming.
+	 * stale   — installed, but its last run is older than a converger's day, or
+	 *           it has never run although it was installed long enough ago to.
 	 * absent  — no timer and no cron entry: nothing will pick a request up.
+	 *
+	 * HostConvergerNotice::runState() decides; this is its answer in three words.
 	 */
 	public static function actorState(): string {
-		$facts = HostConvergerNotice::facts();
-		if (empty($facts['installed'])) {
-			return 'absent';
+		switch (HostConvergerNotice::runState(HostConvergerNotice::facts(), time())) {
+			case 'absent':
+				return 'absent';
+			case 'fresh':
+			case 'starting':
+				return 'present';
+			default:
+				return 'stale';
 		}
-		$last = $facts['last_run'];
-		if ($last === null || (time() - (int)$last) >= HostConvergerNotice::STALE_AFTER) {
-			return 'stale';
-		}
-		return 'present';
 	}
 
 	/**

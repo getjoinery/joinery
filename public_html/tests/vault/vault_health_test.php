@@ -125,12 +125,42 @@ check(HostConvergerNotice::forState(true, $now - 300, 'converged', $now, 'cmd') 
 check(HostConvergerNotice::forState(false, null, '', $now, 'cmd') === '', 'and silent on a box with no converger');
 check(strpos(HostConvergerNotice::forState(true, $now - 2 * 86400, 'converged', $now, 'sudo bash x'), 'sudo bash x') !== false, 'a stale converger shows the command');
 check(strpos(HostConvergerNotice::forState(true, null, '', $now, 'cmd'), 'never run') !== false, 'a converger that never ran says so');
+
+// A new site: the converger's cron entry is written during the install, and its
+// first tick comes up to a minute later. Until then it has never run, which is
+// not the same as dead (every new site's upload pages said so).
+$hci = function ($installed_ago, $last) use ($now) {
+	return VaultHealth::checkHostConverger(['installed' => true, 'installed_time' => $now - $installed_ago,
+		'last_run' => $last, 'outcome' => ''], $now);
+};
+$starting = $hci(50, null);
+check($starting['state'] === 'unknown', 'installed 50 seconds ago and not run yet is unknown, not unmet', $starting['reason']);
+check(strpos($starting['reason'], 'first run') !== false, 'and says the first run is coming');
+check($hci(2 * 3600, null)['state'] === 'unmet', 'installed two hours ago and never run is unmet');
+check(HostConvergerNotice::forState(true, null, '', $now, 'cmd', 0, null, $now - 50) === '',
+	'the notice is silent while a just-installed converger waits for its first tick');
+check(strpos(HostConvergerNotice::forState(true, null, '', $now, 'cmd', 0, null, $now - 2 * 3600), 'never run') !== false,
+	'and speaks once it has had ample time to run');
+$rs = function ($installed_ago, $last_ago) use ($now) {
+	return HostConvergerNotice::runState(['installed' => true, 'installed_time' => $installed_ago === null ? null : $now - $installed_ago,
+		'last_run' => $last_ago === null ? null : $now - $last_ago], $now);
+};
+check(HostConvergerNotice::runState(['installed' => false], $now) === 'absent', 'runState: nothing installed is absent');
+check($rs(50, null) === 'starting', 'runState: installed moments ago, not run yet, is starting');
+check($rs(null, null) === 'never', 'runState: never run with no install time to go by is never');
+check($rs(HostConvergerNotice::FIRST_RUN_GRACE, null) === 'never', 'runState: never run past the first-run grace is never');
+// The runner converges again once its last run is a day old, at its next tick:
+// a run a day and a minute old is that run about to happen.
+check($rs(10 * 86400, 86400 + 60) === 'fresh', 'runState: a day and a minute since the last run is still fresh');
+check($hc(true, $now - 86400 - 60)['state'] === 'verified', 'and VaultHealth agrees');
+check($rs(10 * 86400, 2 * 86400) === 'stale', 'runState: two days since the last run is stale');
 $dr_notice = HostConvergerNotice::forState(true, $now - 60, 'data-root-not-ready', $now, 'cmd');
 check(strpos($dr_notice, 'data root') !== false && strpos($dr_notice, 'joinery_data_root.sh status') !== false && strpos($dr_notice, '>cmd<') === false,
 	'a fresh run stopped by an unmounted data root is named, with the status command, not the reinstall one');
 $facts = HostConvergerNotice::facts();
-check(array_key_exists('installed', $facts) && array_key_exists('last_run', $facts) && array_key_exists('outcome', $facts),
-	'the live fact reader returns the three facts the check decides on');
+check(array_key_exists('installed', $facts) && array_key_exists('installed_time', $facts)
+	&& array_key_exists('last_run', $facts) && array_key_exists('outcome', $facts),
+	'the live fact reader returns the facts the check decides on');
 
 // The converger also carries out root requests (specs/read_only_tree.md), so a
 // queue that is not moving is the same machine failing in a way the timer's own
