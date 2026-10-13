@@ -31,87 +31,97 @@ function drive_restore_logic(array $input): LogicResult {
 		return LogicResult::error('You do not have permission to restore this item.');
 	}
 
-	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
-		// If the folder's parent is itself still trashed, re-root the folder so
-		// it doesn't come back inside a folder that remains in the trash (which
-		// would make it unreachable in every view). Root sibling-name collisions
-		// are resolved with a suffix.
-		$parent_id = (int)$entity->get('fol_parent_folder_id');
-		if ($parent_id > 0) {
-			$parent = DriveHelper::load_folder($parent_id);
-			if (!$parent || ($parent->get('fol_delete_time') !== null && $parent->get('fol_delete_time') !== '')) {
-				$owner_id = (int)$entity->get('fol_usr_user_id');
-				$name = $entity->get('fol_name');
-				if (DriveHelper::folder_name_taken($owner_id, 0, $name, (int)$entity->key)) {
-					$base = $name . ' (restored)';
-					$name = $base;
-					for ($i = 2; DriveHelper::folder_name_taken($owner_id, 0, $name, (int)$entity->key) && $i < 100; $i++) {
-						$name = $base . ' ' . $i;
+	// Held against a trash of the owner's tree from the restore to its change
+	// row (DriveHelper::owner_write_lock): a restored subtree comes back with
+	// rows older than any cursor, and only this row says it came. Keyed on the
+	// item's owner, which the lock and the row are about, not on who asked.
+	$entity_owner = (int)$entity->get($entity_type === DriveHelper::ENTITY_FOLDER ? 'fol_usr_user_id' : 'fil_usr_user_id');
+	DriveHelper::owner_write_lock($entity_owner);
+	try {
+		if ($entity_type === DriveHelper::ENTITY_FOLDER) {
+			// If the folder's parent is itself still trashed, re-root the folder so
+			// it doesn't come back inside a folder that remains in the trash (which
+			// would make it unreachable in every view). Root sibling-name collisions
+			// are resolved with a suffix.
+			$parent_id = (int)$entity->get('fol_parent_folder_id');
+			if ($parent_id > 0) {
+				$parent = DriveHelper::load_folder($parent_id);
+				if (!$parent || ($parent->get('fol_delete_time') !== null && $parent->get('fol_delete_time') !== '')) {
+					$owner_id = (int)$entity->get('fol_usr_user_id');
+					$name = $entity->get('fol_name');
+					if (DriveHelper::folder_name_taken($owner_id, 0, $name, (int)$entity->key)) {
+						$base = $name . ' (restored)';
+						$name = $base;
+						for ($i = 2; DriveHelper::folder_name_taken($owner_id, 0, $name, (int)$entity->key) && $i < 100; $i++) {
+							$name = $base . ' ' . $i;
+						}
+						$entity->set('fol_name', substr($name, 0, 255));
 					}
-					$entity->set('fol_name', substr($name, 0, 255));
+					$entity->set('fol_parent_folder_id', null);
+					if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+						// Something else claimed the free name between the search
+						// above and here. The folder is still safely in the trash.
+						return LogicResult::error('That name was taken while restoring. Try again.');
+					}
 				}
-				$entity->set('fol_parent_folder_id', null);
-				if (!DriveHelper::save_folder_unless_name_taken($entity)) {
-					// Something else claimed the free name between the search
-					// above and here. The folder is still safely in the trash.
-					return LogicResult::error('That name was taken while restoring. Try again.');
+			}
+			// The re-rooting above read the parent; the cascade below writes. Held
+			// against that parent going to the trash in between, which would bring
+			// the whole subtree back somewhere nothing lists it.
+			try {
+				DriveHelper::place_into((int)$entity->get('fol_parent_folder_id'), function () use ($entity) {
+					DriveHelper::restore_folder_cascade($entity);
+				});
+			} catch (DriveDestinationTrashedException $e) {
+				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+			}
+		} else {
+			// If the file's folder is itself trashed, restore it to the root so it
+			// doesn't reappear inside a folder that is still in the trash.
+			$folder_id = (int)$entity->get('fil_fol_folder_id');
+			if ($folder_id > 0) {
+				$folder = DriveHelper::load_folder($folder_id);
+				if ($folder && $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '') {
+					$entity->set('fil_fol_folder_id', null);
+					$folder_id = 0;
 				}
 			}
-		}
-		// The re-rooting above read the parent; the cascade below writes. Held
-		// against that parent going to the trash in between, which would bring
-		// the whole subtree back somewhere nothing lists it.
-		try {
-			DriveHelper::place_into((int)$entity->get('fol_parent_folder_id'), function () use ($entity) {
-				DriveHelper::restore_folder_cascade($entity);
-			});
-		} catch (DriveDestinationTrashedException $e) {
-			return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
-		}
-	} else {
-		// If the file's folder is itself trashed, restore it to the root so it
-		// doesn't reappear inside a folder that is still in the trash.
-		$folder_id = (int)$entity->get('fil_fol_folder_id');
-		if ($folder_id > 0) {
-			$folder = DriveHelper::load_folder($folder_id);
-			if ($folder && $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '') {
-				$entity->set('fil_fol_folder_id', null);
-				$folder_id = 0;
+			// Asked wherever it lands, not only when it is re-rooted: while this file
+			// sat in the trash somebody may have made a new one by the same name in
+			// the same folder, and coming back on top of it is not a restore.
+			// Suffixed rather than refused — the user asked for their file back, and
+			// a name is a smaller thing to change than the answer.
+			$owner_id = (int)$entity->get('fil_usr_user_id');
+			$title    = $entity->get('fil_title');
+			if (DriveHelper::file_name_taken($owner_id, $folder_id, $title, (int)$entity->key)) {
+				$base = _drive_restore_suffixed($title, ' (restored)');
+				$name = $base;
+				for ($i = 2; DriveHelper::file_name_taken($owner_id, $folder_id, $name, (int)$entity->key) && $i < 100; $i++) {
+					$name = _drive_restore_suffixed($title, ' (restored) ' . $i);
+				}
+				$entity->set('fil_title', $name);
+			}
+			$entity->set('fil_delete_time', null);
+			try {
+				$saved = DriveHelper::place_into($folder_id, function () use ($entity) {
+					return DriveHelper::save_file_unless_name_taken($entity);
+				});
+			} catch (DriveDestinationTrashedException $e) {
+				// The folder was live when it was chosen above and is not now. The
+				// file stays in the trash rather than coming back invisible.
+				return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+			}
+			if (!$saved) {
+				// Something else claimed the free name between the search above and
+				// here. The file is still safely in the trash.
+				return LogicResult::error('That name was taken while restoring. Try again.');
 			}
 		}
-		// Asked wherever it lands, not only when it is re-rooted: while this file
-		// sat in the trash somebody may have made a new one by the same name in
-		// the same folder, and coming back on top of it is not a restore.
-		// Suffixed rather than refused — the user asked for their file back, and
-		// a name is a smaller thing to change than the answer.
-		$owner_id = (int)$entity->get('fil_usr_user_id');
-		$title    = $entity->get('fil_title');
-		if (DriveHelper::file_name_taken($owner_id, $folder_id, $title, (int)$entity->key)) {
-			$base = _drive_restore_suffixed($title, ' (restored)');
-			$name = $base;
-			for ($i = 2; DriveHelper::file_name_taken($owner_id, $folder_id, $name, (int)$entity->key) && $i < 100; $i++) {
-				$name = _drive_restore_suffixed($title, ' (restored) ' . $i);
-			}
-			$entity->set('fil_title', $name);
-		}
-		$entity->set('fil_delete_time', null);
-		try {
-			$saved = DriveHelper::place_into($folder_id, function () use ($entity) {
-				return DriveHelper::save_file_unless_name_taken($entity);
-			});
-		} catch (DriveDestinationTrashedException $e) {
-			// The folder was live when it was chosen above and is not now. The
-			// file stays in the trash rather than coming back invisible.
-			return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
-		}
-		if (!$saved) {
-			// Something else claimed the free name between the search above and
-			// here. The file is still safely in the trash.
-			return LogicResult::error('That name was taken while restoring. Try again.');
-		}
-	}
 
-	FileChange::record(FileChange::KIND_RESTORED, $entity_type, $entity_id, $user_id, $user_id);
+		FileChange::record(FileChange::KIND_RESTORED, $entity_type, $entity_id, $entity_owner, $user_id);
+	} finally {
+		DriveHelper::owner_write_unlock($entity_owner);
+	}
 
 	return LogicResult::render(array('ok' => true));
 }

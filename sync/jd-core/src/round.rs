@@ -98,10 +98,11 @@ pub fn run_round(
     // won, or this device's rename merged with a peer's move to another
     // folder, by halves), else where the server has it. The edit comes back
     // there, and so do its folders (below); a file whose own move here keeps
-    // it out of a folder is not kept for. Content this device never agreed on
-    // is not among them.
+    // it out of a folder is not kept for. So is a file another device saved
+    // that this device never had (`arrived`).
     let mut edit_kept: Vec<(EntityId, Option<i64>)> = Vec::new();
     let mut lost_a_delete: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    let mut arrivals: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
 
     for input in inputs {
         let res = reconcile(&input.entry, &input.local, &input.remote, ctx);
@@ -110,6 +111,20 @@ pub fn run_round(
             && input.entry.is_established()
             && input.remote.touched_content()
             && !matches!(input.remote, Delta::Created { .. });
+        // A file another device saved that this device never had, on its way
+        // here: content the delete of its folder here never saw. New content
+        // beats a delete as an edit does (owner decision D1). Not this
+        // device's own file never sent -- the user who deleted the folder is
+        // the one sending it -- and not one the server has trashed.
+        let arrived = input.entry.id.entity_type == crate::model::EntityType::File
+            && !input.entry.is_established()
+            && !input.entry.id.is_provisional()
+            && !input.entry.remote_deleted
+            && res.actions.iter().any(|a| matches!(a, Action::Download));
+        if arrived {
+            edit_kept.push((input.entry.id, input.entry.remote.parent));
+            arrivals.insert(input.entry.id);
+        }
         if lost || edited_there {
             let moved_to = res.actions.iter().find_map(|a| match a {
                 Action::ApplyRemoteMove { to, .. } | Action::ApplyLocalMove { to } => Some(to.parent),
@@ -133,13 +148,14 @@ pub fn run_round(
 
     // What arrives under a folder the user removed here is not brought in:
     // its trash runs, the server trashes the subtree, and the feed forgets
-    // what was under it. With one exception: a file whose delete here lost to
-    // an edit there is not an arrival. An edit beats a delete, and trashed
-    // with the folder, the server's cascade took the edit while its coming
-    // back was dropped as an arrival (B-O1). So every folder up the chain the
-    // server keeps that file in, that this round would trash, is put back
-    // here instead, at the server's placement; the edited file lands in it,
-    // and what nobody touched goes to the trash on its own.
+    // what was under it. Except content: a file whose delete here lost to an
+    // edit there, and a file another device saved that this device never had.
+    // An edit beats a delete, and so does new content; trashed with the
+    // folder, the server's cascade took it while its coming here was dropped
+    // as an arrival (B-O1; D1, clean2 74230, kill2 75224). So every folder up
+    // the chain the server keeps that file in, that this round would trash,
+    // is put back here instead, at the server's placement; the file lands in
+    // it, and what nobody touched goes to the trash on its own.
     //
     // Only what this round decides. A folder whose trash is still in the
     // journal from an earlier pass is not taken back here: that trash was
@@ -193,7 +209,9 @@ pub fn run_round(
             parent = parents.remote.get(&f).copied().flatten();
         }
         if folder_kept {
-            if lost_a_delete.contains(&id) {
+            if arrivals.contains(&id) {
+                out.issues.push((id, Issue::ArrivalKeptFolder));
+            } else if lost_a_delete.contains(&id) {
                 for (who, issue) in out.issues.iter_mut() {
                     if *who == id {
                         if let Issue::DeleteLostToEdit { side: Side::Local, folder_kept: kept } = issue {
@@ -212,6 +230,59 @@ pub fn run_round(
         for action in actions.iter_mut() {
             if put_back(input, action) {
                 *action = Action::CreateLocalFolder { placement: input.entry.remote.clone() };
+            }
+        }
+    }
+
+    // A move race this side kept the folder half of takes the file out of a
+    // folder the server still has it in: the file goes where this side put it,
+    // the agreement stays at the server's place, and the next scan sends the
+    // kept half as an ordinary move. A trash of that folder decided in the same
+    // round ran first, and the server's cascade took the file -- with whatever
+    // the server had of it, a peer's edit included (B-E8, clean3 74927). Such
+    // a folder's trash waits a round: the next one sends the move, and the
+    // trash waits for a move still on its way out (`trash_remote`).
+    let chain = |mut parent: Option<i64>| {
+        let mut out: Vec<i64> = Vec::new();
+        let mut guard = 0;
+        while let Some(id) = parent {
+            out.push(id);
+            guard += 1;
+            if guard > 512 {
+                break;
+            }
+            parent = parents.remote.get(&id).copied().flatten();
+        }
+        out
+    };
+    let mut left_by_a_kept_half: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for (_, actions) in resolved.iter() {
+        for action in actions {
+            if let Action::ApplyRemoteMove { to, agree_at: Some(server_place) } = action {
+                let going_to = chain(to.parent);
+                for f in chain(server_place.parent) {
+                    if !going_to.contains(&f) {
+                        left_by_a_kept_half.insert(f);
+                    }
+                }
+            }
+        }
+    }
+    // Withheld, the trash is as decided as one still in the journal: nothing
+    // arrives under such a folder meanwhile (`going`, below), or a move into it
+    // this round rebuilt the directory the user deleted and the next scan read
+    // the folder as present again. The executor's own guard (a move into a
+    // folder not on this disk is overtaken) already refuses that move; this
+    // keeps the round from planning it.
+    let mut withheld_trash: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    if !left_by_a_kept_half.is_empty() {
+        for (input, actions) in resolved.iter_mut() {
+            if input.entry.id.entity_type == crate::model::EntityType::Folder
+                && left_by_a_kept_half.contains(&input.entry.id.server_id)
+                && actions.iter().any(|a| matches!(a, Action::TrashRemote))
+            {
+                actions.retain(|a| !matches!(a, Action::TrashRemote));
+                withheld_trash.insert(input.entry.id.server_id);
             }
         }
     }
@@ -260,6 +331,7 @@ pub fn run_round(
     // below, deliberately: while that pause holds a folder's trash for a
     // person to answer, the arrivals under it wait with it.
     let mut going: std::collections::HashSet<i64> = trash_already_queued.clone();
+    going.extend(withheld_trash.iter().copied());
     going.extend(
         resolved
             .iter()

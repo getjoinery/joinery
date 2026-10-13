@@ -773,6 +773,134 @@ class DriveHelper {
 	}
 
 	// ------------------------------------------------------------------
+	// Trash against what it never saw — one lock per owner
+	// ------------------------------------------------------------------
+
+	const TRASH_LOCK_CLASS = 42004; // pg advisory lock namespace for trash-versus-write
+
+	/**
+	 * Hold an owner's Drive against a trash while a write lands (shared: writes
+	 * do not hold each other back).
+	 *
+	 * A trash that carries `unchanged_since` refuses when something it would
+	 * take changed after that cursor (drive_trash_unchanged_since). The check
+	 * means nothing unless nothing can land between it and the marking, so every
+	 * write the check reads — a placement, a content replace, a move, a restore
+	 * — holds this around its write AND its change row, and the trash holds it
+	 * exclusively around its check and every mark. Keyed on the entity's OWNER,
+	 * not the actor, so an editor's write into a shared folder is held by the
+	 * owner's lock; a move cannot cross owners, so a write has exactly one.
+	 *
+	 * One lock per request whatever the size of the tree: a lock per folder of
+	 * a subtree can exhaust Postgres's shared lock table on a large one.
+	 *
+	 * Order: always before a folder's placement lock, which the trash takes
+	 * after this one -- taken the other way round, a write holding a folder
+	 * and a trash holding the owner wait on each other for ever. The quota
+	 * lock, which a trash never takes, may come before it. Always pair with
+	 * owner_write_unlock() in a finally.
+	 */
+	public static function owner_write_lock($owner_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_lock_shared(?, ?)");
+		$q->execute(array(self::TRASH_LOCK_CLASS, (int)$owner_id));
+	}
+
+	public static function owner_write_unlock($owner_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_unlock_shared(?, ?)");
+		$q->execute(array(self::TRASH_LOCK_CLASS, (int)$owner_id));
+	}
+
+	/**
+	 * The trash's side of owner_write_lock(): exclusive, around the check and
+	 * every mark. A large trash holds the owner's writes back for its duration.
+	 * Always pair with owner_trash_unlock() in a finally.
+	 */
+	public static function owner_trash_lock($owner_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_lock(?, ?)");
+		$q->execute(array(self::TRASH_LOCK_CLASS, (int)$owner_id));
+	}
+
+	public static function owner_trash_unlock($owner_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_unlock(?, ?)");
+		$q->execute(array(self::TRASH_LOCK_CLASS, (int)$owner_id));
+	}
+
+	/**
+	 * The newest change after $since that a trash of this entity would take
+	 * without the caller having seen it, or null when there is none.
+	 *
+	 * Read on the same clock the change feed hands out (fch_file_change_id).
+	 * A cursor the feed would reset — older than the oldest retained change, or
+	 * any cursor while the feed is empty — proves nothing about the gap and is
+	 * answered with the cursor itself. Zero means nothing was agreed: any
+	 * retained change counts.
+	 *
+	 * For a folder, anywhere in its live subtree: a file created, edited, moved
+	 * or restored there, or a subfolder moved or restored there — its files
+	 * arrive with rows older than the cursor, and only its own row says it came.
+	 * A rename, a grant or level change, and an empty subfolder created there do
+	 * not count: none is content the caller failed to see. For a file, a create,
+	 * an edit or a restore of that file.
+	 *
+	 * Call it holding owner_trash_lock().
+	 */
+	public static function trash_changed_since($entity_type, $entity, $since) {
+		$since = (int)$since;
+		$dblink = DbConnector::get_instance()->get_db_link();
+		if ($since > 0) {
+			$min_id = $dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
+			if ($min_id === null || $min_id === false || $since + 1 < (int)$min_id) {
+				return $since;
+			}
+		}
+		$content_kinds = array(FileChange::KIND_CREATED, FileChange::KIND_CONTENT, FileChange::KIND_MOVED, FileChange::KIND_RESTORED);
+		if ($entity_type === self::ENTITY_FILE) {
+			$q = $dblink->prepare(
+				"SELECT MAX(fch_file_change_id) FROM fch_file_changes
+				  WHERE fch_file_change_id > ? AND fch_entity_type = ? AND fch_entity_id = ?
+				    AND fch_change_kind IN (?, ?, ?)");
+			$q->execute(array($since, self::ENTITY_FILE, (int)$entity->key,
+				FileChange::KIND_CREATED, FileChange::KIND_CONTENT, FileChange::KIND_RESTORED));
+			$newest = $q->fetchColumn();
+			return ($newest === null || $newest === false) ? null : (int)$newest;
+		}
+		$root = (int)$entity->key;
+		$subfolders = self::descendant_folder_ids($root);
+		$folders = array_merge(array($root), $subfolders);
+		$in = implode(',', array_map('intval', $folders));
+		$files = $dblink->query(
+			"SELECT fil_file_id FROM fil_files
+			  WHERE fil_fol_folder_id IN ($in) AND fil_delete_time IS NULL")->fetchAll(PDO::FETCH_COLUMN);
+		$newest = null;
+		if ($files) {
+			$file_in = implode(',', array_map('intval', $files));
+			$kind_in = implode(',', array_map(array($dblink, 'quote'), $content_kinds));
+			$q = $dblink->prepare(
+				"SELECT MAX(fch_file_change_id) FROM fch_file_changes
+				  WHERE fch_file_change_id > ? AND fch_entity_type = ?
+				    AND fch_entity_id IN ($file_in) AND fch_change_kind IN ($kind_in)");
+			$q->execute(array($since, self::ENTITY_FILE));
+			$found = $q->fetchColumn();
+			if ($found !== null && $found !== false) {
+				$newest = (int)$found;
+			}
+		}
+		if ($subfolders) {
+			$sub_in = implode(',', array_map('intval', $subfolders));
+			$q = $dblink->prepare(
+				"SELECT MAX(fch_file_change_id) FROM fch_file_changes
+				  WHERE fch_file_change_id > ? AND fch_entity_type = ?
+				    AND fch_entity_id IN ($sub_in) AND fch_change_kind IN (?, ?)");
+			$q->execute(array($since, self::ENTITY_FOLDER, FileChange::KIND_MOVED, FileChange::KIND_RESTORED));
+			$found = $q->fetchColumn();
+			if ($found !== null && $found !== false) {
+				$newest = max((int)$newest, (int)$found);
+			}
+		}
+		return $newest;
+	}
+
+	// ------------------------------------------------------------------
 	// Tree — depth, ancestry, cycles
 	// ------------------------------------------------------------------
 

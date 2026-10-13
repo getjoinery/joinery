@@ -185,18 +185,28 @@ function drive_move_logic(array $input): LogicResult {
 		// top and the write here — the depth, cycle and name checks all run in
 		// between, and landing a subtree under a trashed folder would hide all of
 		// it at once.
+		//
+		// And held against a trash of the owner's tree from the write to its
+		// change row, so a trash that checks what changed since a cursor cannot
+		// read this folder placed and not yet recorded (DriveHelper::
+		// owner_write_lock).
+		DriveHelper::owner_write_lock($owner_id);
 		try {
-			$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
-				$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
-				return DriveHelper::save_folder_unless_name_taken($entity);
-			});
-		} catch (DriveDestinationTrashedException $e) {
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			try {
+				$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
+					$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
+					return DriveHelper::save_folder_unless_name_taken($entity);
+				});
+			} catch (DriveDestinationTrashedException $e) {
+				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			}
+			if (!$saved) {
+				return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
+			}
+			FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner_id, $user_id);
+		} finally {
+			DriveHelper::owner_write_unlock($owner_id);
 		}
-		if (!$saved) {
-			return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
-		}
-		$owner = $owner_id;
 	} else {
 		$owner_id = (int)$entity->get('fil_usr_user_id');
 		// Asked before any conversion runs. Sealing or unsealing a file is byte
@@ -223,22 +233,26 @@ function drive_move_logic(array $input): LogicResult {
 			$entity = DriveHelper::load_file($entity_id);
 		}
 		// As above, and wider still for a file: the protection-level conversion
-		// between the check and here is byte work.
+		// between the check and here is byte work. The owner's lock is taken
+		// after it, around the write and its row only.
+		DriveHelper::owner_write_lock($owner_id);
 		try {
-			$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
-				$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
-				return DriveHelper::save_file_unless_name_taken($entity);
-			});
-		} catch (DriveDestinationTrashedException $e) {
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			try {
+				$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
+					$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
+					return DriveHelper::save_file_unless_name_taken($entity);
+				});
+			} catch (DriveDestinationTrashedException $e) {
+				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			}
+			if (!$saved) {
+				return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
+			}
+			FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner_id, $user_id);
+		} finally {
+			DriveHelper::owner_write_unlock($owner_id);
 		}
-		if (!$saved) {
-			return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
-		}
-		$owner = $owner_id;
 	}
-
-	FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner, $user_id);
 
 	return LogicResult::render(array(
 		'ok'   => true,

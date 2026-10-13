@@ -109,6 +109,10 @@ pub enum Issue {
     /// `folder_kept`: a folder deleted here comes back to hold it
     /// (`round`, B-O1).
     DeleteLostToEdit { side: Side, folder_kept: bool },
+    /// A folder deleted here came back to hold a file another device saved
+    /// into it that this device never had: new content beats a delete as an
+    /// edit does (`round`, owner decision D1).
+    ArrivalKeptFolder,
     /// A folder was removed remotely but held local edits; those were rescued
     /// to new server entries rather than going down with it.
     RescuedFromDeletedFolder { count: usize },

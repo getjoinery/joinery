@@ -32,15 +32,41 @@ function drive_trash_logic(array $input): LogicResult {
 		return LogicResult::error('You do not have permission to delete this item.');
 	}
 
-	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
-		DriveHelper::soft_delete_folder_cascade($entity);
-	} else {
-		$entity->soft_delete();
+	// A sync client sends the change it decided this trash at. Anything the
+	// trash would take that changed after it -- an edit or a new file that
+	// reached the server after the client last read the change feed -- the
+	// client never saw, and taking it would leave somebody's work only in the
+	// trash. Refused instead; the client reads what changed and decides again
+	// (drive_trash_unchanged_since). Checked and marked under the owner's lock,
+	// so nothing can land in between.
+	$since = (isset($input['unchanged_since']) && $input['unchanged_since'] !== '' && $input['unchanged_since'] !== null)
+		? (int)$input['unchanged_since'] : null;
+	$owner_id = (int)$entity->get($entity_type === DriveHelper::ENTITY_FOLDER ? 'fol_usr_user_id' : 'fil_usr_user_id');
+
+	DriveHelper::owner_trash_lock($owner_id);
+	try {
+		if ($since !== null) {
+			$newest = DriveHelper::trash_changed_since($entity_type, $entity, $since);
+			if ($newest !== null) {
+				return LogicResult::error('Something in it changed after you last looked; it was not moved to the trash.',
+					array('reason' => 'changed_since', 'newest' => $newest));
+			}
+		}
+		if ($entity_type === DriveHelper::ENTITY_FOLDER) {
+			DriveHelper::soft_delete_folder_cascade($entity);
+		} else {
+			$entity->soft_delete();
+		}
+		FileChange::record(FileChange::KIND_TRASHED, $entity_type, $entity_id, $user_id, $user_id);
+	} finally {
+		DriveHelper::owner_trash_unlock($owner_id);
 	}
 
-	FileChange::record(FileChange::KIND_TRASHED, $entity_type, $entity_id, $user_id, $user_id);
-
-	return LogicResult::render(array('ok' => true));
+	$out = array('ok' => true);
+	if ($since !== null) {
+		$out['checked_since'] = $since;
+	}
+	return LogicResult::render($out);
 }
 
 function drive_trash_logic_descriptor(): array {
@@ -52,6 +78,7 @@ function drive_trash_logic_descriptor(): array {
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
+			'unchanged_since' => array('type' => 'int', 'required' => false, 'label' => 'Change the trash was decided at; refused if anything it would take changed after'),
 		),
 	);
 }

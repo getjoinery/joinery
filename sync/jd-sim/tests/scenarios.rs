@@ -5198,36 +5198,36 @@ fn a_vault_folders_identity_never_claims_a_directory_inside_its_own_path() {
     assert_converged(&world);
 }
 
-/// A download never rebuilds a folder the user has just deleted (finding C2
-/// of the reset's WP1d, kill2 75112 and 75115).
+/// A download never rebuilds a folder the user has just deleted as a folder
+/// nobody made (finding C2 of the reset's WP1d, kill2 75112 and 75115).
 ///
-/// mac makes `Folder` and syncs it to pc; then mac adds `Folder/f.txt` and
-/// sends it up. Before pc's next pass, pc's user deletes `Folder`. That pass
-/// reads the feed (f.txt: new, pending download) and the disk (the folder:
-/// gone) and planned both in one round: `TrashRemote Folder` and `Download
-/// f.txt`. Transfers run before deletes, and a landing creates its parent
+/// mac makes `Folder` and syncs it to pc. Before pc's next pass, mac moves a
+/// file pc already has into `Folder`, and pc's user deletes `Folder`. That
+/// pass reads the feed (the file: moved in) and the disk (the folder: gone).
+/// Transfers and moves run before deletes, and a landing creates its parent
 /// directories -- on a real disk too (`fs::create_dir_all`) -- so the folder
-/// the user deleted was standing again, holding the download, before the
-/// trash ran; the next scan met a directory nobody knew and minted a new
-/// server folder for it. Content arriving under a folder this round removes
-/// on the user's word is not brought in: the trash runs, the server trashes
-/// the subtree, and the feed forgets the file.
+/// the user deleted was standing again before the trash ran, and the next
+/// scan met a directory nobody knew and minted a new server folder for it. A
+/// move into a folder this round removes on the user's word is not brought
+/// in: the trash runs and the server trashes the subtree, the moved file
+/// with it -- a file pc had, which pc's delete saw.
 /// Twice: once plain, once with pc's trash call refused by the network on
 /// its first try, so the folder is busy on the next pass -- out of the
-/// round, its trash still queued -- while the download is planned again.
+/// round, its trash still queued -- while the move is planned again.
 #[test]
-fn a_download_never_rebuilds_a_folder_the_user_has_just_deleted() {
+fn a_move_never_rebuilds_a_folder_the_user_has_just_deleted() {
     for trash_refused_once in [false, true] {
         let world = World::new(9_976, &["mac", "pc"]);
         let mac = world.device("mac");
         let pc = world.device("pc");
         mac.fs.user_mkdir("Folder");
+        mac.fs.user_write("f.txt", b"a file both devices have");
         assert!(world.settle().is_some());
         let folder = world.server.folder_id_at("Folder").unwrap();
-        assert!(pc.fs.exists("Folder"), "pc has the folder before the file exists");
-        mac.fs.user_write("Folder/f.txt", b"arrives after pc's delete");
+        assert!(pc.fs.exists("Folder") && pc.fs.peek("f.txt").is_some(), "pc has the folder and the file");
+        mac.fs.user_rename("f.txt", "Folder/f.txt");
         world.pass(mac);
-        assert!(world.server.tree().contains_key("Folder/f.txt"), "f.txt is on the server");
+        assert!(world.server.tree().contains_key("Folder/f.txt"), "the move is on the server");
         pc.fs.user_remove("Folder");
         if trash_refused_once {
             pc.net.set_faults(NetFaults {
@@ -5244,11 +5244,6 @@ fn a_download_never_rebuilds_a_folder_the_user_has_just_deleted() {
             world.pass(pc);
         }
         assert!(world.settle().is_some(), "never settled (trash refused once: {trash_refused_once})");
-
-        for d in &world.devices {
-            let issues = d.store.open_issues().unwrap();
-            eprintln!("{} (trash refused once: {trash_refused_once}): issues {:?}", d.name, issues.iter().map(|i| i.kind.as_str()).collect::<Vec<_>>());
-        }
         let folders = world.server.folders();
         let live: Vec<_> = folders.iter().filter(|f| !f.trashed).collect();
         assert!(live.is_empty(), "a folder stands on the server after the user deleted it (trash refused once: {trash_refused_once}): {folders:?}");
@@ -5257,6 +5252,39 @@ fn a_download_never_rebuilds_a_folder_the_user_has_just_deleted() {
         assert!(!mac.fs.exists("Folder"), "the deleted folder is back on mac: {:?}", disk_tree(mac).keys().collect::<Vec<_>>());
         assert_converged(&world);
     }
+}
+
+/// The same race with a NEW file: mac adds `Folder/f.txt` and sends it, and
+/// pc's user deletes `Folder` before pc has ever seen the file. New content
+/// beats a delete (owner decision D1): the folder comes back -- the same
+/// folder, never one nobody made -- holding the file, on both devices.
+#[test]
+fn a_new_file_brings_back_the_folder_the_user_just_deleted_not_a_new_one() {
+    let world = World::new(9_976, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("Folder");
+    assert!(world.settle().is_some());
+    let folder = world.server.folder_id_at("Folder").unwrap();
+    assert!(pc.fs.exists("Folder"), "pc has the folder before the file exists");
+    mac.fs.user_write("Folder/f.txt", b"arrives after pc's delete");
+    world.pass(mac);
+    assert!(world.server.tree().contains_key("Folder/f.txt"), "f.txt is on the server");
+    pc.fs.user_remove("Folder");
+    assert!(world.settle().is_some(), "never settled");
+    let folders = world.server.folders();
+    let live: Vec<_> = folders.iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 1, "one folder stands, the one that came back: {folders:?}");
+    assert_eq!(live[0].id, folder, "a folder nobody made stands instead: {folders:?}");
+    for d in [mac, pc] {
+        assert_eq!(d.fs.peek("Folder/f.txt").as_deref(), Some(&b"arrives after pc's delete"[..]), "{}: {:?}", d.name, d.fs.all_paths());
+    }
+    assert!(
+        pc.store.open_issues().unwrap().iter().any(|i| i.detail.starts_with("ArrivalKeptFolder")),
+        "pc was not told why the folder came back: {:?}",
+        pc.store.open_issues().unwrap()
+    );
+    assert_converged(&world);
 }
 
 /// An empty plain folder whose path another folder takes, by identity, is
@@ -19929,5 +19957,329 @@ fn a_file_carried_into_a_vault_and_straight_back_is_plain_again() {
         .count();
     assert_eq!((live, sealed), (1, 0), "{:?}", world.server.tree());
     assert_eq!(laptop.fs.peek("notes.txt").as_deref(), Some(ORIGINAL));
+    assert_converged(&world);
+}
+
+/// Owner decision D1 (clean2 74230, kill2 75224): a file another device saved
+/// into a folder deleted here, which this device never had. The delete never
+/// saw it; trashed with the folder, the peer's new file was only in the
+/// server's trash. New content beats a delete as an edit does: the folder
+/// comes back holding only the new file, what nobody touched goes to the
+/// trash, and the user here is told why.
+#[test]
+fn a_folder_deleted_here_comes_back_for_a_new_file_a_peer_saved_in_it() {
+    a_folder_deleted_here_keeps_a_peers_new_file(false);
+}
+
+/// The same on volumes that keep no file identities.
+#[test]
+fn a_folder_deleted_here_comes_back_for_a_new_file_a_peer_saved_in_it_hidden() {
+    a_folder_deleted_here_keeps_a_peers_new_file(true);
+}
+
+fn a_folder_deleted_here_keeps_a_peers_new_file(hidden: bool) {
+    let world = World::new(9_970, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(hidden);
+    pc.fs.hide_births(hidden);
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    let new = b"pc's new file";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    assert!(world.server.files().into_iter().any(|f| f.name == "new.txt" && !f.trashed), "construction: pc's file is up");
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 1, "only the new file stays: {live:?}");
+    assert_eq!(live[0].sha256, jd_sim::sha256_hex(new));
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    let told = mac.store.open_issues().unwrap().iter().any(|i| i.detail.starts_with("ArrivalKeptFolder"));
+    assert!(told, "mac was not told why the folder came back: {:?}", mac.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// The same when the folder's trash was decided here before the new file was
+/// heard of, and is still queued -- the process killed between the plan and
+/// the deletes. Run as decided, the server's cascade took the new file; it
+/// stands down, and the next round keeps the folder.
+#[test]
+fn a_folder_trash_queued_before_a_peers_new_file_stands_down_and_keeps_it() {
+    let world = World::new(9_969, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    mac.fs.user_remove("Art");
+    mac.fs.user_write("elsewhere.txt", b"sent in the same pass, before the deletes");
+    // Killed in the upload, before the deletes run.
+    mac.net.arm_death(2);
+    world.pass(mac);
+    assert!(
+        mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote" && o.entity.entity_type == jd_core::EntityType::Folder),
+        "construction: the folder's trash is queued: {:?}",
+        mac.store.queued_ops().unwrap()
+    );
+    let new = b"pc's new file, after the delete was decided";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.name != "elsewhere.txt").collect();
+    assert_eq!(live.len(), 1, "only the new file stays: {live:?}");
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// What reaches the server between a deleting device's last read of the feed
+/// and its folder's trash (`specs/drive_trash_unchanged_since.md`, clean3
+/// 74927). mac deletes `Art` and, in the same pass, sends another file first;
+/// while that upload completes, `arrive` lands something in `Art` on the
+/// server. mac's round never heard of it, so no walk of mac's can stand the
+/// trash down: the server refuses it, the next pass reads what arrived, and
+/// the folder comes back for it.
+fn something_landing_while_a_folder_trash_is_on_its_way_stays_live(
+    seed: u64,
+    arrive: impl Fn(&jd_sim::server::MockServer, i64, i64) + Send + 'static,
+) -> World {
+    let world = World::new(seed, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    mac.fs.user_write("Elsewhere/kept.txt", b"in a folder nobody deletes");
+    assert!(world.settle().is_some());
+    let art = world.server.folder_id_at("Art").unwrap();
+    let shot = world.server.files().into_iter().find(|f| f.name == "shot.psd").unwrap().id;
+    mac.fs.user_remove("Art");
+    mac.fs.user_write("sent first.txt", b"sent in the same pass, before the deletes");
+    let server = world.server.clone();
+    let done = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let once = done.clone();
+    world.server.while_completing_an_upload(move || {
+        let mut d = once.lock().unwrap();
+        if !*d {
+            *d = true;
+            arrive(&server, art, shot);
+        }
+    });
+    world.pass(mac);
+    world.server.while_completing_an_upload(|| {});
+    assert!(*done.lock().unwrap(), "construction: nothing landed mid-pass");
+    assert!(world.settle().is_some(), "never settled");
+    // Somebody else's work arriving is nothing wrong: the refused trash is
+    // decided again, not reported to the user as work that failed.
+    let withdrawn: Vec<_> = mac.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "withdrawn").collect();
+    assert!(withdrawn.is_empty(), "the refusal was reported as a failure: {withdrawn:?}");
+    assert_converged(&world);
+    world
+}
+
+#[test]
+fn a_peers_edit_landing_while_a_folder_trash_is_on_its_way_stays_live() {
+    const EDIT: &[u8] = b"a peer's edit, after mac read the feed";
+    let world = something_landing_while_a_folder_trash_is_on_its_way_stays_live(9_967, |server, _, shot| {
+        server.seed_version(shot, EDIT);
+    });
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(EDIT)), "{tree:?}");
+    assert_eq!(world.device("mac").fs.peek("Art/shot.psd").as_deref(), Some(EDIT));
+    assert!(!tree.contains_key("Art/other.txt"), "what nobody touched went to the trash: {tree:?}");
+}
+
+#[test]
+fn a_peers_new_file_landing_while_a_folder_trash_is_on_its_way_stays_live() {
+    const NEW: &[u8] = b"a peer's new file, after mac read the feed";
+    let world = something_landing_while_a_folder_trash_is_on_its_way_stays_live(9_966, |server, art, _| {
+        server.seed_file(Some(art), "new.txt", NEW);
+    });
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(NEW)), "{tree:?}");
+    assert_eq!(world.device("mac").fs.peek("Art/new.txt").as_deref(), Some(NEW));
+}
+
+/// A subfolder moved in carries its files, whose own rows are older than the
+/// cursor; only the folder's row says it arrived. Not taken with the trash:
+/// the move into a folder deleted here loses to the delete, as any move does,
+/// and the subfolder stands where it was, its file live.
+#[test]
+fn a_subfolder_moved_in_while_a_folder_trash_is_on_its_way_stays_live() {
+    let world = something_landing_while_a_folder_trash_is_on_its_way_stays_live(9_965, |server, art, _| {
+        let elsewhere = server.folder_id_at("Elsewhere").unwrap();
+        server
+            .action("drive_move", &serde_json::json!({ "entity_type": "folder", "entity_id": elsewhere, "parent_id": art }))
+            .expect("the peer's move lands");
+    });
+    let kept = jd_sim::sha256_hex(b"in a folder nobody deletes");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == kept).collect();
+    assert_eq!(live.len(), 1, "the subfolder's file went to the trash: {:?}", world.server.tree());
+}
+
+/// The file rule: a peer's edit landing while a trash of the FILE is on its
+/// way, after the deleting device read the feed. The server refuses it; the
+/// edit beats the delete and the file stays, with the edit.
+#[test]
+fn a_peers_edit_landing_while_a_file_trash_is_on_its_way_stays_live() {
+    const EDIT: &[u8] = b"a peer's edit, after mac read the feed";
+    let world = World::new(9_962, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("Art/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let shot = world.server.files().into_iter().find(|f| f.name == "shot.psd").unwrap().id;
+    mac.fs.user_remove("Art/shot.psd");
+    mac.fs.user_write("sent first.txt", b"sent in the same pass, before the deletes");
+    let server = world.server.clone();
+    let done = std::sync::Arc::new(std::sync::Mutex::new(false));
+    let once = done.clone();
+    world.server.while_completing_an_upload(move || {
+        let mut d = once.lock().unwrap();
+        if !*d {
+            *d = true;
+            server.seed_version(shot, EDIT);
+        }
+    });
+    world.pass(mac);
+    world.server.while_completing_an_upload(|| {});
+    assert!(*done.lock().unwrap(), "construction: nothing landed mid-pass");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(EDIT)), "{tree:?}");
+    assert_eq!(mac.fs.peek("Art/shot.psd").as_deref(), Some(EDIT));
+    let withdrawn: Vec<_> = mac.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "withdrawn").collect();
+    assert!(withdrawn.is_empty(), "the refusal was reported as a failure: {withdrawn:?}");
+    assert_converged(&world);
+}
+
+/// The same with identities hidden (M1).
+#[test]
+fn a_folder_trash_queued_before_a_peers_new_file_stands_down_and_keeps_it_hidden() {
+    let world = World::new(9_964, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.hide_births(true);
+    pc.fs.hide_births(true);
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    mac.fs.user_remove("Art");
+    mac.fs.user_write("elsewhere.txt", b"sent in the same pass, before the deletes");
+    mac.net.arm_death(2);
+    world.pass(mac);
+    assert!(
+        mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote" && o.entity.entity_type == jd_core::EntityType::Folder),
+        "construction: the folder's trash is queued: {:?}",
+        mac.store.queued_ops().unwrap()
+    );
+    let new = b"pc's new file, after the delete was decided";
+    pc.fs.user_write("Art/new.txt", new);
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(world.server.tree().get("Art/new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new)), "{:?}", world.server.tree());
+    assert_eq!(mac.fs.peek("Art/new.txt").as_deref(), Some(&new[..]), "{:?}", mac.fs.all_paths());
+    assert_converged(&world);
+}
+
+/// A folder trash still in the journal when an index walk brings back what
+/// this device never had (reviewer F1): pc restores a subfolder of `Art` with
+/// a file mac never saw, while mac's trash of `Art` waits from before. The
+/// walk learns the file with a head older than the trash's decision, so the
+/// executor's stand-down cannot see it; against a server that does not check
+/// `unchanged_since`, the cascade took it. The queued trash is decided again
+/// after the walk, and the folder is kept for the file.
+#[test]
+fn a_folder_trash_queued_before_a_restore_is_decided_again() {
+    let world = World::new(9_963, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    world.server.ignores_unchanged_since(true);
+    mac.fs.user_write("Art/other.txt", b"a file nobody touches");
+    assert!(world.settle().is_some());
+    let new = b"in a subfolder mac never saw";
+    pc.fs.user_write("Art/Sub/new.txt", new);
+    world.pass(pc);
+    pc.fs.user_remove("Art/Sub");
+    world.pass(pc);
+    let sub = world.server.folders().into_iter().find(|f| f.name == "Sub").expect("pc's subfolder").id;
+    assert!(world.server.folders().into_iter().any(|f| f.id == sub && f.trashed), "construction: Sub is in the server's trash");
+    mac.fs.user_remove("Art");
+    mac.fs.user_write("elsewhere.txt", b"sent in the same pass, before the deletes");
+    mac.net.arm_death(2);
+    world.pass(mac);
+    assert!(
+        mac.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_remote" && o.entity.entity_type == jd_core::EntityType::Folder),
+        "construction: the folder's trash is queued: {:?}",
+        mac.store.queued_ops().unwrap()
+    );
+    world
+        .server
+        .action("drive_restore", &serde_json::json!({ "entity_type": "folder", "entity_id": sub }))
+        .expect("pc's restore lands");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(new)).collect();
+    assert_eq!(live.len(), 1, "the restored file went to the trash: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// B-E8 (clean3 74927): this device moves a file out of a folder and deletes
+/// the folder; a peer renamed and edited the file on the server meanwhile. The
+/// move race keeps this side's folder half and the server's name -- the file
+/// goes where the user put it, the agreement stays at the server's place until
+/// the next scan sends the move -- and the folder's trash, decided in the same
+/// round, ran first: the server's cascade took the file with the peer's edit.
+/// The trash waits a round for the move, and the edit lives where the user put
+/// the file.
+#[test]
+fn a_file_moved_out_of_a_folder_deleted_here_keeps_a_peers_rename_and_edit() {
+    let world = World::new(9_961, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/x.txt", b"the first version");
+    mac.fs.user_write("Other/kept.txt", b"a folder to move it into");
+    assert!(world.settle().is_some());
+    const EDIT: &[u8] = b"pc's edit, under pc's new name";
+    pc.fs.user_rename("Art/x.txt", "Art/y.txt");
+    pc.fs.user_write("Art/y.txt", EDIT);
+    world.pass(pc);
+    mac.fs.user_rename("Art/x.txt", "Other/x.txt");
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(EDIT)).collect();
+    assert_eq!(live.len(), 1, "pc's edit went to the trash with the folder: {:?}", world.server.tree());
+    assert!(!world.server.tree().keys().any(|p| p.starts_with("Art")), "the folder mac deleted came back: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// The same, with the peer also moving a file this device has into the
+/// folder in the same pass. The folder's trash is withheld for a round, and
+/// withheld it is still going: the move into it is not brought in, or it
+/// rebuilt the directory the user deleted and the next scan read the folder
+/// as present again (the C2 class, `a_move_never_rebuilds_a_folder_the_user_has_just_deleted`).
+/// Two guards hold this: the round's (the folder is going) and the
+/// executor's (a move into a folder not on this disk is overtaken); the pin
+/// pins them together.
+#[test]
+fn a_folder_whose_trash_waits_for_a_move_out_is_not_rebuilt_by_a_move_in() {
+    let world = World::new(9_960, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/x.txt", b"the first version");
+    mac.fs.user_write("Other/kept.txt", b"a folder to move it into");
+    mac.fs.user_write("Third/z.txt", b"a file both devices have");
+    assert!(world.settle().is_some());
+    const EDIT: &[u8] = b"pc's edit, under pc's new name";
+    pc.fs.user_rename("Art/x.txt", "Art/y.txt");
+    pc.fs.user_write("Art/y.txt", EDIT);
+    pc.fs.user_rename("Third/z.txt", "Art/z.txt");
+    world.pass(pc);
+    mac.fs.user_rename("Art/x.txt", "Other/x.txt");
+    mac.fs.user_remove("Art");
+    world.pass(mac);
+    assert!(!mac.fs.exists("Art"), "a move into the folder rebuilt it: {:?}", mac.fs.all_paths());
+    assert!(world.settle().is_some(), "never settled");
+    let folders = world.server.folders();
+    assert!(folders.iter().filter(|f| f.name == "Art").all(|f| f.trashed), "the folder mac deleted came back: {folders:?}");
+    assert!(!mac.fs.exists("Art"), "the folder mac deleted is back on mac: {:?}", mac.fs.all_paths());
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(EDIT)).collect();
+    assert_eq!(live.len(), 1, "pc's edit went to the trash with the folder: {:?}", world.server.tree());
     assert_converged(&world);
 }

@@ -241,6 +241,11 @@ pub struct MockServer {
     /// any refusal invented after this client shipped. The soak rig found the
     /// consequence on a box whose folder rename refused without the marker.
     plain_refusals: Arc<Mutex<bool>>,
+    /// Answer as a server a version behind: `unchanged_since` is not read, and
+    /// a trash takes what is under it whatever changed. What a client meets
+    /// before its server has the check, and the only way to see what the
+    /// client does on its own (`specs/drive_trash_unchanged_since.md`).
+    ignores_unchanged_since: Arc<Mutex<bool>>,
 }
 
 impl std::fmt::Debug for MockServer {
@@ -429,6 +434,7 @@ impl MockServer {
             clock,
             during_upload: Arc::new(Mutex::new(None)),
             plain_refusals: Arc::new(Mutex::new(false)),
+            ignores_unchanged_since: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -448,6 +454,12 @@ impl MockServer {
     /// what kind of refusal it is. See [`MockServer::plain_refusals`].
     pub fn refuses_without_saying_why(&self, on: bool) {
         *self.plain_refusals.lock().unwrap() = on;
+    }
+
+    /// Stop reading `unchanged_since` on a trash. See
+    /// [`MockServer::ignores_unchanged_since`].
+    pub fn ignores_unchanged_since(&self, on: bool) {
+        *self.ignores_unchanged_since.lock().unwrap() = on;
     }
 
     /// Register a user's Drive vault public key.
@@ -744,6 +756,27 @@ impl MockServer {
             change_id,
         });
         id
+    }
+
+    /// A new version of a plain file, as another device's upload would land
+    /// it: the bytes, a `content` row, and the file's head moved to it. For a
+    /// scenario that needs a peer's edit to reach the server at a moment no
+    /// pass can reach -- mid-way through another device's pass.
+    pub fn seed_version(&self, file_id: i64, bytes: &[u8]) {
+        let sha = sha256_hex(bytes);
+        let mut st = self.state.lock().unwrap();
+        st.blobs.insert(sha.clone(), bytes.to_vec());
+        let change_id = Self::record(&mut st, "file", file_id, "content");
+        let f = st.files.get_mut(&file_id).expect("seed_version: no such file");
+        f.sha256 = sha.clone();
+        f.size = bytes.len() as u64;
+        f.head_change_id = change_id;
+        st.versions.push(VersionRow {
+            file_id,
+            sha256: sha,
+            size: bytes.len() as u64,
+            change_id,
+        });
     }
 
     /// Seed a file the server holds ENCRYPTED.
@@ -1518,6 +1551,57 @@ impl MockServer {
     fn drive_trash(&self, body: &Value) -> ServerResult {
         let (t, id) = Self::target(body)?;
         let mut st = self.state.lock().unwrap();
+        // The platform refuses a trash when something it would take changed
+        // after the cursor the client sent (`specs/drive_trash_unchanged_since.md`):
+        // a file created, edited, moved or restored there, or a subfolder moved
+        // or restored there, carrying files whose own rows are older. This
+        // mock is one lock, so the check and the marking below are atomic by
+        // construction -- the platform needs its owner lock for the same.
+        let since = body
+            .get("unchanged_since")
+            .and_then(Value::as_i64)
+            .filter(|_| !*self.ignores_unchanged_since.lock().unwrap());
+        if let Some(since) = since {
+            let newest = if since > 0 && since + 1 < st.retained_from {
+                // Older than the feed keeps, by the platform's own test
+                // (`cursor + 1 < MIN(id)`): nothing proves the gap. This mock's
+                // feed resets one cursor earlier (`cursor < retained_from`).
+                Some(since)
+            } else if t == "folder" {
+                let (folders, files) = Self::subtree(&st, id);
+                let live_file = |fid: &i64| st.files.get(fid).is_some_and(|f| !f.trashed);
+                let live_folder = |did: &i64| st.folders.get(did).is_some_and(|f| !f.trashed);
+                st.changes
+                    .iter()
+                    .filter(|c| c.change_id > since)
+                    .filter(|c| match (c.entity_type, c.kind) {
+                        ("file", "created" | "content" | "moved" | "restored") => {
+                            files.contains(&c.entity_id) && live_file(&c.entity_id)
+                        }
+                        ("folder", "moved" | "restored") => {
+                            folders.contains(&c.entity_id) && live_folder(&c.entity_id)
+                        }
+                        _ => false,
+                    })
+                    .map(|c| c.change_id)
+                    .max()
+            } else {
+                st.changes
+                    .iter()
+                    .filter(|c| c.change_id > since && c.entity_type == "file" && c.entity_id == id)
+                    .filter(|c| matches!(c.kind, "created" | "content" | "restored"))
+                    .map(|c| c.change_id)
+                    .max()
+            };
+            if let Some(newest) = newest {
+                return Err(ApiRefusal {
+                    status: 422,
+                    errortype: "ActionError",
+                    message: "Something in it changed since then.".into(),
+                    data: json!({ "reason": "changed_since", "newest": newest }),
+                });
+            }
+        }
         if t == "folder" {
             match st.folders.get_mut(&id) {
                 Some(f) => f.trashed = true,
@@ -1559,7 +1643,11 @@ impl MockServer {
             }
             Self::record(&mut st, "file", id, "trashed");
         }
-        Self::echo(&mut st, t, id)
+        let mut answer = Self::echo(&mut st, t, id)?;
+        if let Some(since) = since {
+            answer["checked_since"] = json!(since);
+        }
+        Ok(answer)
     }
 
     fn drive_restore(&self, body: &Value) -> ServerResult {

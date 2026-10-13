@@ -222,6 +222,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$expected = SealedFileContainer::cipherSizeFor($expected);
 	}
 	DriveHelper::quota_lock($owner_id);
+	// Each write below is held against a trash of the owner's tree from the
+	// moment it lands to its change row (DriveHelper::owner_write_lock): only
+	// that long, never across the byte work before it -- a trash waiting on a
+	// long seal would hold every other write of the owner back behind it. After
+	// the quota lock, which a trash never takes; before the destination's
+	// placement lock, which it does. Released here too if a write throws.
+	$owner_locked = false;
 	try {
 		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 		// Quota 0 is no quota; the disk-space reserve is the only bound then.
@@ -263,6 +270,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					// row never appears the promise has to be taken back: bytes
 					// with a reference nothing holds are never reclaimed, keep
 					// counting against the owner's quota, and cannot be reached.
+					DriveHelper::owner_write_lock($owner_id);
+					$owner_locked = true;
 					try {
 						FileVersion::save_new_content($target_file, $blob, $user_id);
 					} catch (Exception $e) {
@@ -281,6 +290,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				$up->discard();
 				DriveUsage::recompute($owner_id);
 				FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
+				DriveHelper::owner_write_unlock($owner_id);
+				$owner_locked = false;
 				DriveHelper::forget_sync_meta($target_file->key);
 				$fresh = DriveHelper::load_file($target_file->key);
 				return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh)));
@@ -289,6 +300,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			// See the sealed branch above: the fresh blob already counts the
 			// reference the version row is about to hold, so a failure here has
 			// to give it back or the bytes are pinned and unreachable for good.
+			DriveHelper::owner_write_lock($owner_id);
+			$owner_locked = true;
 			try {
 				FileVersion::save_new_content($target_file, $blob, $user_id);
 			} catch (Exception $e) {
@@ -320,6 +333,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			$up->discard();
 			DriveUsage::recompute($owner_id);
 			FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
+			DriveHelper::owner_write_unlock($owner_id);
+			$owner_locked = false;
 			DriveHelper::forget_sync_meta($target_file->key);
 			$fresh = DriveHelper::load_file($target_file->key);
 			$wrapped = $encrypted ? FileKeyGrant::wrapped_key_for($fresh->key, $user_id) : null;
@@ -345,6 +360,21 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		if (!$encrypted && $modified_time !== null) {
 			$restrictions['fil_content_modified_time'] = $modified_time;
 		}
+		// A sealed upload is sealed here, before the owner's lock: the seal is
+		// the long part, and only the row has to land under the lock.
+		$sealed_upload = null;
+		if ($sealed) {
+			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+			VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
+			try {
+				$sealed_upload = DriveSealed::sealForCreate($part, $mime, $owner_id);
+			} catch (DriveSealedException $e) {
+				$up->discard();
+				return LogicResult::error($e->getMessage());
+			}
+		}
+		DriveHelper::owner_write_lock($owner_id);
+		$owner_locked = true;
 		try {
 			// The trashed-destination check near the top of this function is a
 			// fast fail, made before the bytes were touched. It is not the
@@ -353,16 +383,15 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			// file live and unreachable underneath it. place_into re-asks the
 			// question with the destination held, so the cascade either sweeps
 			// this row or never starts.
-			$file = DriveHelper::place_into($folder_id, function () use ($sealed, $part, $name, $mime, $owner_id, $restrictions) {
-				if ($sealed) {
-					// Server custody: the bytes are sealed on the way into the blob, so
-					// the plaintext never lands in the file store at all. The type is
-					// sniffed from the plaintext first (sniffing a container would read
-					// application/octet-stream forever), and the thumbnail is rendered
-					// while the plaintext is still on disk.
-					require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-					VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
-					return DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
+			$file = DriveHelper::place_into($folder_id, function () use ($sealed_upload, $part, $name, $mime, $owner_id, $restrictions) {
+				if ($sealed_upload !== null) {
+					// Server custody: the bytes were sealed above on the way into
+					// the blob, so the plaintext never lands in the file store at
+					// all. The type was sniffed from the plaintext (sniffing a
+					// container would read application/octet-stream forever), and
+					// the thumbnail is rendered while the plaintext is still on
+					// disk.
+					return DriveSealed::createFromSealed($sealed_upload, $part, $name, $owner_id, $restrictions);
 				}
 				return File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
 			});
@@ -410,6 +439,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$up->discard();
 		DriveUsage::recompute($owner_id);
 		FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FILE, $file->key, $owner_id, $user_id);
+		DriveHelper::owner_write_unlock($owner_id);
+		$owner_locked = false;
 		DriveHelper::forget_sync_meta($file->key);
 
 		$wrapped = $encrypted ? (isset($wrapped_keys[$user_id]) ? $wrapped_keys[$user_id] : null) : null;
@@ -419,7 +450,14 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		}
 		return LogicResult::render($out);
 	} finally {
+		if ($owner_locked) {
+			DriveHelper::owner_write_unlock($owner_id);
+		}
 		DriveHelper::quota_unlock($owner_id);
+		// A container sealed for a file that never landed.
+		if (isset($sealed_upload) && $sealed_upload !== null) {
+			DriveSealed::discardSealed($sealed_upload);
+		}
 	}
 }
 
