@@ -7592,21 +7592,26 @@ fn a_refusal_the_client_cannot_read_does_not_end_in_a_quiet_disagreement() {
             "sub10-rename",
         )
         .unwrap();
-    // By the time it runs, a folder this device has never met is using that
-    // name. Nothing in its store can see the occupant, so the refusal is the
-    // only way it could find out -- which is the whole reason the refusal
-    // carries a marker saying what kind of refusal it is.
-    let unseen = world.server.seed_folder(None, "Sub 20");
-    world.server.seed_file(Some(unseen), "doc-2.txt", b"the other one");
+    // By the time it runs, another folder is using that name on the server.
+    // The pass reads the change feed before it runs what was queued, so the
+    // store knows that folder by then, and a refusal that will not say why is
+    // read as being about the name it holds.
+    let occupant = world.server.seed_folder(None, "Sub 20");
+    world.server.seed_file(Some(occupant), "doc-2.txt", b"the other one");
 
     world.server.refuses_without_saying_why(true);
     world.pass(laptop);
     world.server.refuses_without_saying_why(false);
 
-    // Unreadable, so the operation is withdrawn rather than re-planned: dropped,
-    // an issue raised, and the entry left saying exactly what it said before.
-    // That is the state the rig reached, and everything after this is about
-    // whether the device can still get out of it.
+    // Read as the name, the rename lands beside the occupant under a conflict
+    // name, as a refusal that says why lands: not withdrawn and derived again
+    // onto a name another live folder holds. Everything after this is about
+    // whether the fleet gets to a fixed point from there.
+    let renamed = world.server.folders().into_iter().find(|f| f.id == sub10).map(|f| f.name);
+    assert!(
+        renamed.as_deref().is_some_and(|n| n != "Sub 20" && n.starts_with("Sub 20")),
+        "the refusal has to actually be met, and answered with a conflict name: {renamed:?}"
+    );
     let withdrawn: Vec<String> = laptop
         .store
         .open_issues()
@@ -7615,11 +7620,7 @@ fn a_refusal_the_client_cannot_read_does_not_end_in_a_quiet_disagreement() {
         .filter(|i| i.kind == "withdrawn")
         .map(|i| i.detail)
         .collect();
-    assert_eq!(
-        withdrawn.len(),
-        1,
-        "the refusal has to actually be met, or this scenario proves nothing: {withdrawn:?}"
-    );
+    assert!(withdrawn.is_empty(), "stepped aside, not withdrawn: {withdrawn:?}");
 
     assert!(
         world.settle().is_some(),
@@ -20281,5 +20282,282 @@ fn a_folder_whose_trash_waits_for_a_move_out_is_not_rebuilt_by_a_move_in() {
     assert!(!mac.fs.exists("Art"), "the folder mac deleted is back on mac: {:?}", mac.fs.all_paths());
     let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(EDIT)).collect();
     assert_eq!(live.len(), 1, "pc's edit went to the trash with the folder: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A copy written beside a file and the original deleted before a pass is a
+/// move on disk, and the scan reads it as one on every kind of disk: by the
+/// bytes where identity is weak, as on a strong disk once the record's own
+/// file stands nowhere. The record keeps its history at the copy's place
+/// rather than going to the trash beside a new file. A file never sent has no
+/// record to keep, and its copy goes up as a new file. Custody's
+/// `copy_reads_as_move` in the sweep rests on this.
+#[test]
+fn a_copy_and_a_delete_of_its_original_read_as_a_move_on_every_disk() {
+    for (disk, model, hide_births) in [
+        ("stable", jd_sim::FileIds::Stable, false),
+        ("births hidden", jd_sim::FileIds::Stable, true),
+        ("FAT, data cluster", jd_sim::FileIds::DataCluster, false),
+        ("FAT, mount session", jd_sim::FileIds::MountSession, false),
+        ("FAT, directory slot", jd_sim::FileIds::DirectorySlot, false),
+    ] {
+        for sent in [true, false] {
+            let world = World::new(9_950, &["mac", "pc"]);
+            let mac = world.device("mac");
+            mac.fs.file_ids(model);
+            mac.fs.hide_births(hide_births);
+            let body: &[u8] = b"the bytes the copy carries";
+            mac.fs.user_write("Other/keep.txt", b"a folder to copy into");
+            if sent {
+                mac.fs.user_write("Art/a.txt", body);
+            }
+            assert!(world.settle().is_some());
+            if !sent {
+                mac.fs.user_write("Art/a.txt", body);
+            }
+            let original = world.server.files().into_iter().find(|f| f.name == "a.txt").map(|f| f.id);
+            mac.fs.user_write("Other/Copy of a.txt", body);
+            mac.fs.user_remove("Art/a.txt");
+            world.pass(mac);
+            let files = world.server.files();
+            let copy = files.iter().find(|f| f.name == "Copy of a.txt" && !f.trashed).map(|f| f.id);
+            assert!(copy.is_some(), "{disk}, sent={sent}: the copy is not on the server: {files:?}");
+            if sent {
+                assert_eq!(copy, original, "{disk}: the copy is a new file and the original went to the trash: {files:?}");
+            } else {
+                assert_eq!(original, None, "{disk}: a file never sent has a record: {files:?}");
+            }
+            assert!(world.settle().is_some(), "{disk}, sent={sent}: never settled");
+            assert_converged(&world);
+        }
+    }
+}
+
+/// A disk hands a deleted directory's id to the next directory made, with a
+/// new birth. Here mac's user deletes folder A's directory, and the same pass
+/// makes B, a folder pc added, which takes A's id; A's trash does not reach
+/// the server this pass, so A's record lives on into the next, still naming
+/// that id as its own directory. Every reader matching by id read B's
+/// directory as A's and B's file as A's (hostile2 74452, where the files were
+/// forgotten; here B was read as gone and trashed on the server, and its
+/// file with it, both put back up as new). The record forgets a directory
+/// the disk shows reborn, and B and its file keep their own records.
+#[test]
+fn a_directory_that_takes_a_deleted_folders_id_is_not_that_folder() {
+    let world = World::new(9_948, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.reuse_file_ids(true);
+    mac.fs.user_mkdir("A");
+    mac.fs.user_write("keep.txt", b"something at the top");
+    assert!(world.settle().is_some());
+    const BODY: &[u8] = b"pc's file in pc's new folder";
+    pc.fs.user_write("B/f.txt", BODY);
+    world.pass(pc);
+    let b = world.server.folders().into_iter().find(|f| f.name == "B").expect("pc's B is on the server").id;
+    let f = world.server.files().into_iter().find(|f| f.sha256 == jd_sim::sha256_hex(BODY)).expect("pc's file is on the server").id;
+    mac.fs.user_remove("A");
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_trash".into()), ..NetFaults::none() });
+    world.pass(mac);
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "never settled");
+    assert!(world.server.folders().iter().filter(|f| f.name == "A").all(|f| f.trashed), "A came back: {:?}", world.server.tree());
+    let folders = world.server.folders();
+    assert!(folders.iter().any(|x| x.id == b && !x.trashed), "pc's B was trashed: {folders:?}");
+    let files = world.server.files();
+    assert!(files.iter().any(|x| x.id == f && !x.trashed && x.folder == Some(b)), "pc's file left B or was trashed: {files:?}");
+    assert_eq!(files.iter().filter(|x| !x.trashed && x.name == "f.txt").count(), 1, "{files:?}");
+    assert_eq!(mac.fs.peek("B/f.txt").as_deref(), Some(BODY), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+/// Two devices rename two different folders onto one name at once, and the
+/// server refuses the later rename without saying why. The refused folder
+/// would wait for the name to free up, but what holds it is staying: mac's
+/// folder, which pc has to bring down to that very name, and whose arrival
+/// waits for pc's directory to leave it. Each waited on the other, refused
+/// and re-derived every pass for ever (kill2 75140, plat3 75636 and five
+/// more). Another live folder holds the name, one pc is not renaming away,
+/// so the occupant keeps the name and pc's folder steps aside under a
+/// conflict name, as a marked refusal has it.
+#[test]
+fn a_folder_refused_onto_a_name_a_staying_folder_holds_steps_aside() {
+    let world = World::new(9_947, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("One/a.txt", b"in the folder pc renames");
+    mac.fs.user_write("Two/b.txt", b"in the folder mac renames");
+    assert!(world.settle().is_some());
+    let id_of = |name: &str| world.server.folders().into_iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let (one, two) = (id_of("One"), id_of("Two"));
+    mac.fs.user_rename("Two", "Both");
+    world.pass(mac);
+    pc.fs.user_rename("One", "Both");
+    world.server.refuses_without_saying_why(true);
+    assert!(world.settle().is_some(), "never settled");
+    let folders = world.server.folders();
+    let named = |id: i64| folders.iter().find(|f| f.id == id && !f.trashed).map(|f| f.name.clone());
+    assert_eq!(named(two).as_deref(), Some("Both"), "mac's rename lost the name: {folders:?}");
+    let one_is = named(one).unwrap_or_else(|| panic!("pc's folder is gone: {folders:?}"));
+    assert!(one_is != "Both" && one_is.starts_with("Both"), "pc's folder did not step aside: {one_is}");
+    assert_eq!(pc.fs.peek(&format!("{one_is}/a.txt")).as_deref(), Some(&b"in the folder pc renames"[..]), "{:?}", disk_tree(pc));
+    assert_eq!(pc.fs.peek("Both/b.txt").as_deref(), Some(&b"in the folder mac renames"[..]), "{:?}", disk_tree(pc));
+    assert_converged(&world);
+}
+
+/// A plain file the user moves into a vault after this pass's scan, onto the
+/// name a sealed file is arriving at: the download makes room, setting the user's
+/// file aside under a conflict name, and the record of the file set aside
+/// does not follow it into the vault. A plain record agreed inside a vault
+/// had nothing left to convert: its owed move was refused, and once the
+/// server deleted the file its rescue went up in the clear into the vault,
+/// refused every pass (plat3 75603). Left where it was agreed, the next scan
+/// reads the move into the vault and converts it.
+#[test]
+fn a_plain_file_set_aside_inside_a_vault_is_converted_not_followed() {
+    let (world, private, _out) = a_vault_of_two(9_945, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    const MINE: &[u8] = b"plain, moved into the vault by hand";
+    const THEIRS: &[u8] = b"sealed, arriving at the same name";
+    mac.fs.user_write("Plain/x.txt", MINE);
+    mac.fs.user_write("Other/o.txt", b"a file pc renames");
+    assert!(world.settle().is_some());
+    pc.fs.user_write("Private/x.txt", THEIRS);
+    pc.fs.user_rename("Other/o.txt", "Other/o2.txt");
+    world.pass(pc);
+    // After mac's scan and before the download: on the engine's first rename
+    // this pass, applying pc's.
+    let fs = mac.fs.clone();
+    let moved = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = moved.clone();
+    mac.fs.while_renaming(move |from, _| {
+        if from.ends_with("Other/o.txt") && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            fs.user_rename("Plain/x.txt", "Private/x.txt");
+        }
+    });
+    world.pass(mac);
+    assert!(moved.load(std::sync::atomic::Ordering::SeqCst), "the premise: the file was moved in after the scan");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(world.server.plaintext_inside_a_vault().is_empty(), "plaintext in the vault: {:?}", world.server.plaintext_inside_a_vault());
+    let seen = jd_sim::scenario::owner_view_of_the_server(&world);
+    let in_vault: Vec<_> = seen.iter().filter(|(p, h)| p.starts_with("Private/x") && h.is_some()).map(|(_, h)| h.clone()).collect();
+    assert!(in_vault.contains(&Some(jd_sim::sha256_hex(MINE))), "mac's file is not sealed in the vault: {seen:?}");
+    assert!(in_vault.contains(&Some(jd_sim::sha256_hex(THEIRS))), "pc's file is not in the vault: {seen:?}");
+    assert!(world.server.files().iter().filter(|f| !f.trashed && f.folder != Some(private) && f.name.starts_with("x")).count() == 0, "a plain copy is still live outside the vault: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A never-sent file a scan has already given a record of its own is not
+/// folded into a record that owns no file at the same name. The two are two
+/// files: the scan had the file at the real record's path to give it (the
+/// safe-save) and did not. In kill2 75157 the real record was held -- the
+/// source of a conversion into a vault -- when a swap left a stranger at its
+/// old name; the user then deleted the vault copy, the hold lapsed, and the
+/// merge at the next pass folded the stranger's record into it, so one
+/// history held the bodies of two files. Built here from the state that
+/// leaves: the real record owning no file, the never-sent one owning the file
+/// at its name.
+#[test]
+fn a_never_sent_file_is_not_folded_into_a_record_that_owns_no_file() {
+    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+
+    let world = World::new(9_942, &["laptop"]);
+    let device = world.device("laptop");
+    const OLD: &[u8] = b"the file the record had";
+    const NEW: &[u8] = b"a different file, at the same name";
+    device.fs.user_write("notes.txt", OLD);
+    assert!(world.settle().is_some());
+    let real_id = world.server.files().into_iter().find(|f| f.name == "notes.txt").expect("it went up").id;
+    let real = device.store.get_entry(EntityId::file(real_id)).unwrap().expect("the record");
+    device.fs.user_remove("notes.txt");
+    device.fs.user_write("notes.txt", NEW);
+    let (fid, birth) = device.fs.true_identity_of("notes.txt").expect("the new file");
+    device.store.put_entry(&Entry { own_file: None, ..real }).unwrap();
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let here = Placement { parent: None, name: "notes.txt".into() };
+    device
+        .store
+        .put_entry(&Entry {
+            id,
+            remote: here.clone(),
+            remote_content: None,
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: LocalStatus::PendingUpload,
+            wrapped_file_key: None,
+            replaces: None,
+            stand_in: None,
+            stands_at: None,
+            own_file: Some(jd_vfs::FileIdentity { file_id: fid, birth_ns: birth }),
+            last_seen_sha: None,
+            own_file_seen_at: Some(here),
+        })
+        .unwrap();
+    assert!(world.settle().is_some(), "never settled");
+    let (old, new) = (jd_sim::sha256_hex(OLD), jd_sim::sha256_hex(NEW));
+    let mut histories: std::collections::BTreeMap<i64, Vec<String>> = Default::default();
+    for v in world.server.all_versions() {
+        histories.entry(v.file_id).or_default().push(v.sha256);
+    }
+    assert!(
+        !histories.values().any(|h| h.contains(&old) && h.contains(&new)),
+        "one history holds both files' bodies: {histories:?}"
+    );
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == new).collect();
+    assert_eq!(live.len(), 1, "the new file is not live: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+/// A sealed file saved in a vault and not yet sent, under a name that a held
+/// file comes to hold there after it was saved: the held file -- moved out
+/// of the vault here, so the server keeps it sealed in the vault -- is
+/// renamed onto that name by a peer while this file's upload waits, and held
+/// outside its vault there too, so no disk has it in the vault. The new
+/// file goes up beside the held one under a conflict name, as one saved there
+/// now would. Sent under the name it was saved with, two sealed files had one
+/// real name in one vault folder, which no device can put at one path (kill2
+/// 75391, where the held file's own lost-answer move landed on the name).
+#[test]
+fn a_waiting_sealed_upload_steps_aside_from_a_name_a_held_file_comes_to_hold() {
+    let (world, private, _out) = a_vault_of_two(9_941, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_rename("Private/out.txt", "out.txt");
+    world.pass(mac);
+    assert!(!held_issues(mac).is_empty(), "the premise: out.txt is held outside its vault on mac");
+    const BODY: &[u8] = b"saved in the vault, waiting to go up";
+    mac.fs.user_write("Private/new.txt", BODY);
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(mac);
+    mac.net.set_faults(NetFaults::none());
+    assert!(
+        world.server.files().iter().filter(|f| !f.trashed && f.folder == Some(private)).count() == 2,
+        "the premise: mac's new file has not gone up: {:?}",
+        world.server.tree()
+    );
+    pc.fs.user_rename("Private/out.txt", "Private/new.txt");
+    world.pass(pc);
+    // Held on both devices, as in the seed: no disk has the held file in the
+    // vault, so none could meet the two names at one path and settle them.
+    pc.fs.user_rename("Private/new.txt", "new.txt");
+    world.pass(pc);
+    assert!(!held_issues(pc).is_empty(), "the premise: it is held outside its vault on pc too");
+    assert!(world.settle().is_some(), "never settled");
+    let seen = jd_sim::scenario::owner_view_of_the_server(&world);
+    let body = jd_sim::sha256_hex(BODY);
+    assert!(
+        seen.iter().any(|(p, h)| p.starts_with("Private/new") && p != "Private/new.txt" && h.as_deref() == Some(body.as_str())),
+        "mac's file is not beside the held one under a conflict name: {seen:?}"
+    );
     assert_converged(&world);
 }

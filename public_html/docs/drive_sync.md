@@ -134,6 +134,10 @@ directory standing at its agreed path on each scan.
   the folder had was moved out first. A directory made where another was
   deleted can inherit its id (`rm -rf A; mkdir B` hands `B` `A`'s inode on
   ext4) but never its birth, so a proven directory is never a stranger.
+  The same pair says when the folder's directory is gone: its id standing on
+  a directory with another birth is a later directory that took it, so the
+  record forgets the id before the scan reads any directory, and learns the
+  directory standing at its agreed path.
   A vault whose proven directory stands where the server is moving another
   folder waits for that move to claim it, and waiting is not leaving: the
   vault is present and its directory held, never taken up as a new plain
@@ -381,6 +385,15 @@ folder is created, and the mover moves in. A local park is recorded as the
 spelling on disk, never as the agreement, and naming leaves a parked entry
 alone.
 
+A rename the server refuses because the name is taken lands beside what holds
+it, under a conflict name, and the disk follows; what holds a name this device
+is renaming away is waited for instead. A server that refuses without saying
+why is read the same way for a folder whose name this device knows another live
+folder holds there, one it is not itself renaming away: that folder's arrival
+waits on this one's directory leaving the name, so neither would ever move. Any
+other folder rename refused without a reason is withdrawn, and the next pass
+derives it again from the disk until the name frees up.
+
 A create claims a directory already standing at its path — a stand-in it was
 handed, or its own earlier attempt — and waits while that directory is one
 another live folder still holds, so the folder replacing a namesake never
@@ -562,7 +575,10 @@ record forgotten, and the next scan finds the bytes at their new path as an
 ordinary local creation and uploads them with the destination folder's
 protection. A plaintext folder is converted contents and all — until it is, the
 user is looking at a folder they believe is private while the server holds every
-file in it in the clear at the old path.
+file in it in the clear at the old path. A plaintext file found standing in a
+vault folder where a download is arriving, and set aside there under a conflict
+name, is converted the same way: its record stays where it was agreed, and the
+next scan reads the file moved into the vault.
 
 A file edited in the vault before its conversion has gone up belongs to the
 vault from that edit on. Carried out again, it is held like any file saved in a
@@ -599,7 +615,8 @@ While it is held:
   once the held record's delete has landed.
 - A file from the server that wants the held file's name here waits for it, and
   says so; a new file saved into the vault under the name the held file still
-  holds there takes a conflict name.
+  holds there takes a conflict name, and so does one saved there before the
+  held file came to hold that name, while it has not yet been sent.
 
 A vault folder dragged *out* is not converted: that would publish its contents
 in the clear on the strength of a drag. The client leaves the server's copy

@@ -483,8 +483,8 @@ fn record_folder_swap(world: &World, device: &jd_sim::engine::Device, x: &str, y
 ///
 /// Reports coverage, because an oracle that checked nothing would look
 /// identical to one that found nothing.
-fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
-    let (held, _) = swap_mixes(world, seed);
+fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, custody: Option<&Custody>, seed: u64) {
+    let held = swap_mixes(world, seed, custody).held;
     assert!(
         held.is_empty(),
         "seed {seed}: {} swap-separated pair(s) held by one entity: {}",
@@ -493,9 +493,17 @@ fn assert_no_entity_holds_both_sides_of_a_swap(world: &World, seed: u64) {
     );
 }
 
-/// The swap-separated pairs one entity's history holds, unannounced, and how
-/// many announced ones were excused (see below).
-fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
+/// What the chain oracle found: the swap-separated pairs one entity's history
+/// holds unexcused, and how many it excused, by why (see below).
+struct SwapMixes {
+    held: Vec<String>,
+    excused_by_issue: usize,
+    excused_by_custody: usize,
+    excused_unseen: usize,
+}
+
+/// The swap-separated pairs one entity's history holds, and the ones excused.
+fn swap_mixes(world: &World, seed: u64, custody: Option<&Custody>) -> SwapMixes {
     let pairs = world.swap_pairs();
     let versions = world.server.all_versions();
     let mut bodies: std::collections::BTreeMap<i64, Vec<Vec<u8>>> = Default::default();
@@ -548,6 +556,30 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
     // that same window. Anything a scan could have seen stays a failure.
     let unseen = world.unseen_readings();
     let mut excused_unseen = 0usize;
+    // A mix that is one file's own history: the user wrote BOTH bodies to the
+    // file this entity is, and the swap separated a copy of an earlier body
+    // from that file's later one (hostile2 74555: written, copied, written
+    // again, then the copy and the file traded names). Read from custody's
+    // own ledger only -- writes not carried by a copy, keyed to the custody
+    // file the entity was learned as, learned once and not ambiguous -- so a
+    // mix of bodies the user wrote to two different files always fires.
+    //
+    // Custody keys a write by the disk's identity where that names one file
+    // (`Custody::key_on`): a write made at a path a swap has since traded is
+    // credited to the file that now stands there. Where the disk's identity
+    // does not name one file it keys by the path, so a write at a traded path
+    // is credited to the file the path named before the trade -- the one
+    // residual, and only on such disks.
+    let mut excused_by_custody = 0usize;
+    let own_history = |id: i64, a: &str, b: &str| -> bool {
+        let Some(c) = custody else { return false };
+        if c.ambiguous.contains(&id) {
+            return false;
+        }
+        let Some(key) = c.file_of_server.get(&id) else { return false };
+        let wrote = |h: &str| c.written.iter().any(|w| !w.carried && w.key == *key && w.hash == h);
+        wrote(a) && wrote(b)
+    };
     for (pi, p) in pairs.iter().enumerate() {
         let (lo, hi) = if p.a <= p.b { (&p.a, &p.b) } else { (&p.b, &p.a) };
         let (sha_lo, sha_hi) = {
@@ -558,6 +590,18 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
             if chain.contains(lo) && chain.contains(hi) && reported.contains(&(*id, sha_lo.clone(), sha_hi.clone())) {
                 if seen.insert((*id, lo.clone(), hi.clone())) {
                     excused += 1;
+                }
+                continue;
+            }
+            if chain.contains(lo) && chain.contains(hi) && own_history(*id, &sha_lo, &sha_hi) {
+                if seen.insert((*id, lo.clone(), hi.clone())) {
+                    excused_by_custody += 1;
+                    eprintln!(
+                        "EXCUSED-CUSTODY seed={seed} record={id} bodies={}..{} separated_by={}",
+                        &sha_lo[..8],
+                        &sha_hi[..8],
+                        p.source
+                    );
                 }
                 continue;
             }
@@ -593,7 +637,7 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
     let by_source = |src: &str| pairs.iter().filter(|p| p.source == src).count();
     eprintln!(
         "CHAIN-ORACLE seed={seed} pairs={} chaos={} slots={} rotation={} folders={} \
-         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused} excused_unseen={excused_unseen}",
+         pairs_sealed={} entities_with_versions={} versions={} held_by_one_entity={} excused_by_issue={excused} excused_unseen={excused_unseen} excused_by_custody={excused_by_custody}",
         pairs.len(),
         by_source("chaos"),
         by_source("slots"),
@@ -604,7 +648,7 @@ fn swap_mixes(world: &World, seed: u64) -> (Vec<String>, usize) {
         versions.len(),
         held.len()
     );
-    (held, excused)
+    SwapMixes { held, excused_by_issue: excused, excused_by_custody, excused_unseen }
 }
 
 /// Where the user put each file: the custody oracle's record of intent.
@@ -719,6 +763,20 @@ struct Custody {
     /// Per server folder the user deleted, who deleted it and every body that
     /// device's disk had been seen holding by then.
     removed_by: std::collections::BTreeMap<i64, Vec<(usize, std::collections::HashSet<String>)>>,
+    /// New files the user wrote with the bytes of a file standing on the same
+    /// disk, not yet seen by a pass there ([`Custody::copy_reads_as_move`]).
+    copies: Vec<UserCopy>,
+}
+
+/// A file the user wrote as a copy of another on the same disk: where each
+/// stands now (kept through the user's renames of either) and the file each is.
+struct UserCopy {
+    device: usize,
+    original: String,
+    original_key: usize,
+    path: String,
+    key: usize,
+    hash: String,
 }
 
 /// One body the workload wrote: what, to which file, where, and when among
@@ -729,6 +787,10 @@ struct Written {
     order: u64,
     device: usize,
     path: String,
+    /// A copy the scan reads as its original moved
+    /// ([`Custody::copy_reads_as_move`]): the original's bytes carried to a
+    /// new place, so no body of the file's own and no later edit of it.
+    carried: bool,
 }
 
 impl Custody {
@@ -772,10 +834,14 @@ impl Custody {
     /// The user wrote `body` at `path` on this device; called after the write.
     fn wrote(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, body: &[u8]) {
         let key = self.key_on(di, device, path, path);
+        let minted = self.placed[key].is_empty();
         if let Some(h) = self.handle_of(di, device, Self::parent_of(path)) {
             self.placed[key].push(h);
         }
         let hash = jd_sim::sha256_hex(body);
+        if minted {
+            self.note_copy(di, device, path, key, &hash);
+        }
         self.held.entry(di).or_default().insert(hash.clone());
         self.written.push(Written {
             hash: hash.clone(),
@@ -783,12 +849,14 @@ impl Custody {
             order: device.fs.last_user_write_order().unwrap_or(0),
             device: di,
             path: path.to_string(),
+            carried: false,
         });
         self.intents.push((hash, key));
     }
 
     /// The user renamed the file at `from` to `to` on this device; called after.
     fn moved(&mut self, di: usize, device: &jd_sim::engine::Device, from: &str, to: &str) {
+        self.follow_copies(di, &[(from, to)]);
         let key = self.key_on(di, device, to, from);
         self.file_of_path.insert(to.to_string(), key);
         if let Some(h) = self.handle_of(di, device, Self::parent_of(to)) {
@@ -796,10 +864,106 @@ impl Custody {
         }
     }
 
+    /// A file the user just minted at `path` holds the bytes of exactly one
+    /// tracked file standing elsewhere on this disk: a copy, noted until a
+    /// pass here sees it.
+    fn note_copy(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str, key: usize, hash: &str) {
+        let twins: Vec<String> = device
+            .fs
+            .all_paths()
+            .into_iter()
+            .filter(|p| p != path)
+            .filter(|p| device.fs.peek(p).is_some_and(|b| jd_sim::sha256_hex(&b) == hash))
+            .collect();
+        let [twin] = twins.as_slice() else { return };
+        let by_id = device
+            .fs
+            .true_identity_of(twin)
+            .filter(|_| device.fs.identity_is_unique())
+            .and_then(|(id, birth)| self.file_of_id.get(&(di, id, birth)));
+        let Some(original_key) = by_id.or_else(|| self.file_of_path.get(twin.as_str())).copied() else {
+            return;
+        };
+        self.copies.push(UserCopy {
+            device: di,
+            original: twin.clone(),
+            original_key,
+            path: path.to_string(),
+            key,
+            hash: hash.to_string(),
+        });
+    }
+
+    /// The user is about to remove files on this device: those `going` names.
+    /// An original going while its one copy stands, both with the bytes they
+    /// had when the copy was made and no pass here between, is a move on this
+    /// disk -- what a file manager or a backup tool does, and nothing a scan
+    /// can tell apart from one, by identity or by bytes
+    /// (`a_move_is_recognized_by_content_even_when_the_inode_changed`). So
+    /// the original is placed where the copy stands, and the copy is the
+    /// original from here on: its folder, its intents, every act on it later,
+    /// and its write in the edit ledger, there marked carried -- the bytes the
+    /// original already had, so neither a new body of the file nor a later
+    /// edit of it. A folder renamed between the copy and the delete leaves a
+    /// note naming paths that no longer stand, and the rule stands down: the
+    /// folder oracle then fires as it would have, visibly.
+    fn copy_reads_as_move(&mut self, di: usize, device: &jd_sim::engine::Device, going: impl Fn(&str) -> bool) {
+        let holds = |path: &str, hash: &str| device.fs.peek(path).is_some_and(|b| jd_sim::sha256_hex(&b) == hash);
+        let mut moves: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+        for (i, c) in self.copies.iter().enumerate().filter(|(_, c)| c.device == di && going(&c.original)) {
+            let both_as_made = holds(&c.original, &c.hash) && holds(&c.path, &c.hash) && !going(&c.path);
+            let entry = moves.entry(c.original.clone()).or_default();
+            if both_as_made {
+                entry.push(i);
+            }
+        }
+        for copies in moves.values() {
+            let [i] = copies.as_slice() else { continue };
+            let (copy, original) = (self.copies[*i].key, self.copies[*i].original_key);
+            let to = self.placed[copy].clone();
+            self.placed[original].extend(to);
+            for (_, k) in self.intents.iter_mut().filter(|(_, k)| *k == copy) {
+                *k = original;
+            }
+            for k in self.file_of_path.values_mut().filter(|k| **k == copy) {
+                *k = original;
+            }
+            for k in self.file_of_id.values_mut().filter(|k| **k == copy) {
+                *k = original;
+            }
+            let hash = self.copies[*i].hash.clone();
+            for w in self.written.iter_mut().filter(|w| w.key == copy && w.hash == hash) {
+                w.key = original;
+                w.carried = true;
+            }
+        }
+        self.copies.retain(|c| c.device != di || !moves.contains_key(&c.original));
+    }
+
+    /// The user renamed `from` to `to` on this device: a noted copy, or its
+    /// original, stands at the new name.
+    fn follow_copies(&mut self, di: usize, moves: &[(&str, &str)]) {
+        for c in self.copies.iter_mut().filter(|c| c.device == di) {
+            if let Some((_, to)) = moves.iter().find(|(from, _)| *from == c.original) {
+                c.original = to.to_string();
+            }
+            if let Some((_, to)) = moves.iter().find(|(from, _)| *from == c.path) {
+                c.path = to.to_string();
+            }
+        }
+    }
+
+    /// The user is about to remove the file at `path` on this device.
+    fn removing_file(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str) {
+        self.copy_reads_as_move(di, device, |p| p == path);
+    }
+
     /// The user is about to remove the directory at `path` (and everything
     /// under it) on this device. Every directory of the subtree is resolved
     /// to its server folder now, while it stands.
     fn removing(&mut self, di: usize, device: &jd_sim::engine::Device, path: &str) {
+        let under = format!("{path}/");
+        self.copy_reads_as_move(di, device, |p| p.starts_with(&under));
         let mut dirs: Vec<String> = device
             .fs
             .all_paths()
@@ -840,6 +1004,7 @@ impl Custody {
     /// it, each destination path means the file that stood at its source.
     /// Set together, because the sources are also the destinations.
     fn rotated(&mut self, di: usize, device: &jd_sim::engine::Device, moves: &[(&str, &str)]) {
+        self.follow_copies(di, moves);
         let keys: Vec<usize> = moves.iter().map(|(from, to)| self.key_on(di, device, to, from)).collect();
         for ((_, to), key) in moves.iter().zip(keys) {
             self.file_of_path.insert(to.to_string(), key);
@@ -994,6 +1159,7 @@ impl Custody {
     }
 
     fn learn(&mut self, di: usize, device: &jd_sim::engine::Device, late: bool) {
+        self.copies.retain(|c| c.device != di);
         let held = self.held.entry(di).or_default();
         held.extend(jd_sim::scenario::disk_tree(device).into_values().flatten());
         self.learn_files(di, device);
@@ -1523,7 +1689,7 @@ fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed
     };
     // The last write of each body.
     let mut subjects: std::collections::BTreeMap<&str, &Written> = std::collections::BTreeMap::new();
-    for w in &custody.written {
+    for w in custody.written.iter().filter(|w| !w.carried) {
         let e = subjects.entry(w.hash.as_str()).or_insert(w);
         if w.order > e.order {
             *e = w;
@@ -1540,7 +1706,7 @@ fn edits_lost_to_acts_that_never_saw_them(world: &World, custody: &Custody, seed
             seen += 1;
             continue;
         }
-        if custody.written.iter().any(|x| x.key == w.key && x.order > w.order && x.hash != w.hash) {
+        if custody.written.iter().any(|x| x.key == w.key && x.order > w.order && x.hash != w.hash && !x.carried) {
             blind += 1;
             continue;
         }
@@ -1737,7 +1903,7 @@ fn workload_core_with(
             jd_sim::scenario::assert_no_two_records_on_one_directory(&world)
         })),
         ("no_entity_holds_both_sides_of_a_swap", Box::new(|| {
-            assert_no_entity_holds_both_sides_of_a_swap(&world, seed)
+            assert_no_entity_holds_both_sides_of_a_swap(&world, Some(&custody), seed)
         })),
         ("every_file_in_a_folder_the_user_put_it_in", Box::new(|| {
             assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
@@ -2274,14 +2440,14 @@ fn two_files_trading_names_on(platform: Platform) {
     laptop.fs.user_write("a.txt", a);
     laptop.fs.user_write("b.txt", b);
     assert!(world.settle().is_some(), "both files go up");
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let versions_before = world.server.all_versions().len();
     world.record_swap_pair(a, b, "slots", false, None);
     laptop.fs.user_rename("a.txt", ".swap.tmp");
     laptop.fs.user_rename("b.txt", "a.txt");
     laptop.fs.user_rename(".swap.tmp", "b.txt");
     assert!(world.settle().is_some(), "the swap settles");
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     assert_eq!(
         world.server.all_versions().len(),
         versions_before,
@@ -2334,7 +2500,7 @@ fn on_windows_an_upgrade_keeps_a_file_moved_while_the_client_was_off() {
     pc.fs.show_births_as_names(true);
     assert!(world.settle().is_some());
 
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let now = world.server.files().into_iter().find(|f| f.id == draft.id).unwrap();
     assert!(!now.trashed && now.name == "final.txt", "the draft lost its history: {now:?}");
     let tree = world.server.tree();
@@ -2476,7 +2642,7 @@ fn a_trade_with_a_download_the_user_saved_over_is_read_as_a_trade() {
     assert!(world.settle().is_some(), "the trade settles");
     assert_converged(&world);
     assert_one_record_per_file(&world);
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
 }
 
 /// Where a body stands: its paths on a disk, and on the server.
@@ -2559,7 +2725,7 @@ fn a_file_moved_onto_a_landing_download_keeps_the_users_move() {
     assert!(world.settle().is_some(), "the fleet settles");
     assert_converged(&world);
     assert_one_record_per_file(&world);
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let laptop = world.device("laptop");
     assert_eq!(laptop.fs.peek("incoming.txt").as_deref(), Some(&incoming[..]), "the download is at its name");
     let (disk, server) = paths_of(&world, "laptop", MINE);
@@ -2592,7 +2758,7 @@ fn a_file_moved_across_folders_onto_a_landing_download_stays_in_the_users_folder
     assert!(world.settle().is_some(), "the fleet settles");
     assert_converged(&world);
     assert_one_record_per_file(&world);
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let (disk, server) = paths_of(&world, "laptop", MINE);
     assert!(
         disk.len() == 1 && disk[0].starts_with("Sub/incoming (conflicted copy") && server == disk,
@@ -2619,7 +2785,7 @@ fn a_file_moved_onto_a_landing_download_survives_a_failed_set_aside() {
     assert!(world.settle().is_some(), "the fleet settles");
     assert_converged(&world);
     assert_one_record_per_file(&world);
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let laptop = world.device("laptop");
     assert_eq!(laptop.fs.peek("incoming.txt").as_deref(), Some(&incoming[..]), "the download is at its name");
     let (disk, server) = paths_of(&world, "laptop", MINE);
@@ -2694,7 +2860,7 @@ fn a_sealed_file_moved_onto_a_landing_download_keeps_the_users_move() {
     assert!(world.settle().is_some(), "the fleet settles");
     assert_converged(&world);
     assert_one_record_per_file(&world);
-    assert_no_entity_holds_both_sides_of_a_swap(&world, seed);
+    assert_no_entity_holds_both_sides_of_a_swap(&world, None, seed);
     let (disk, server) = paths_of(&world, "laptop", MINE);
     assert!(
         disk.len() == 1 && disk[0].starts_with("Private/incoming (conflicted copy") && server == disk,
@@ -3388,6 +3554,7 @@ fn drive(
             8 => {
                 if let Some(p) = rng.pick(&files).cloned() {
                     if device.fs.exists(&p) {
+                        custody.removing_file(di, device, &p);
                         device.fs.user_remove(&p);
                     }
                 }
@@ -6736,7 +6903,7 @@ fn a_copy_swap_on_a_windows_stick_is_announced() {
     let warned = swap_warnings(&world);
     assert_eq!(warned.len(), 2, "{warned:?}");
     assert!(warned[0].contains("A/one.txt") && warned[0].contains("A/two.txt"), "{warned:?}");
-    let (held, excused) = swap_mixes(&world, 0);
+    let SwapMixes { held, excused_by_issue: excused, .. } = swap_mixes(&world, 0, None);
     assert!(held.is_empty(), "{held:?}");
     assert_eq!(excused, 2, "both histories hold the pair, and both were announced");
     assert!(
@@ -6751,7 +6918,7 @@ fn a_copy_swap_on_a_windows_stick_is_announced() {
 fn a_copy_swap_on_a_windows_stick_is_not_excused_by_the_notice_alone() {
     let world = a_copy_swap_on(jd_sim::FileIds::DirectorySlot, false);
     world.devices[0].store.withdraw_issues("names_may_have_swapped").unwrap();
-    let (held, _) = swap_mixes(&world, 0);
+    let held = swap_mixes(&world, 0, None).held;
     assert_eq!(held.len(), 2, "{held:?}");
 }
 
@@ -6761,7 +6928,7 @@ fn a_copy_swap_on_a_windows_stick_is_not_excused_by_the_notice_alone() {
 #[test]
 fn a_copy_swap_on_a_linux_stick_is_never_excused() {
     let world = a_copy_swap_on(jd_sim::FileIds::MountSession, true);
-    let (held, excused) = swap_mixes(&world, 0);
+    let SwapMixes { held, excused_by_issue: excused, .. } = swap_mixes(&world, 0, None);
     assert_eq!(swap_warnings(&world).len(), 2, "construction: with no id since the remount, the engine warns");
     assert_eq!(excused, 0);
     assert_eq!(held.len(), 2, "a Linux stick's warning excused a mix: {held:?}");
@@ -6995,18 +7162,193 @@ fn frozen_a_new_file_beats_its_folders_delete_seeds() {
 /// edited by a peer meanwhile, went to the server's trash with the folder
 /// before this side's move reached the server. The edit oracle is quiet.
 ///
-/// Only that oracle, for now: custody's `every_file_in_a_folder_the_user_put_it_in`
-/// fires on this seed once the file lives -- it stands in Sub 0, where one
-/// device's user moved it, while custody's candidates for the other device's
-/// edit lack that folder. The end state is the doctrine's (a move on one side
-/// and a rename on the other both survive); custody's model of a peer's move is
-/// what is short, traced under B-E8 in the drive follow-ups. Back to every
-/// oracle quiet when that closes.
+/// Also the witness for custody reading a copy and a delete of its original as
+/// a move: the peer's user copied the file into Sub 0 and deleted the original,
+/// which the scan pairs as the move it is on disk, and the file stands in Sub 0.
 #[test]
 fn frozen_a_move_out_of_a_deleted_folder_lands_before_its_trash_seed() {
     for swaps in [Swaps::On, Swaps::Off] {
-        never_fires(&["no_edit_lost_to_an_act_that_never_saw_it"], move || {
-            workload_core_with(74_927, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps);
-        });
+        workload_core_with(74_927, 40, &[("a", Platform::Linux), ("b", Platform::Linux), ("c", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps);
+    }
+}
+
+/// A copy carries its original's bytes as they were: read as the original
+/// moved, it is neither a new body of the file nor a later edit of it. So a
+/// peer's edit the copy never saw is not excused by the copy when the edit
+/// is lost, and the body the copy carries is judged from the original's
+/// write, which the peer's edit superseded with sight. Here pc copies the
+/// file's old bytes and deletes the original without having heard of mac's
+/// edit; the edit lives on the moved file, and a trash no device made takes
+/// it. One loss, the edit's.
+#[test]
+fn a_copy_does_not_excuse_a_peers_edit_it_never_saw() {
+    let seed = 9_949;
+    let world = World::of(seed, &[("mac", Platform::Linux), ("pc", Platform::Linux)]);
+    let mut custody = Custody::default();
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    const OLD: &[u8] = b"the bytes both devices have";
+    const EDIT: &[u8] = b"mac's edit, which pc never saw";
+    mac.fs.user_write("Other/keep.txt", b"a folder to copy into");
+    mac.fs.user_write("Art/a.txt", OLD);
+    custody.wrote(0, mac, "Art/a.txt", OLD);
+    assert!(world.settle().is_some());
+    mac.fs.user_write("Art/a.txt", EDIT);
+    custody.wrote(0, mac, "Art/a.txt", EDIT);
+    world.pass(mac);
+    assert_eq!(pc.fs.peek("Art/a.txt").as_deref(), Some(OLD), "pc has not heard of the edit");
+    pc.fs.user_write("Other/Copy of a.txt", OLD);
+    custody.wrote(1, pc, "Other/Copy of a.txt", OLD);
+    custody.removing_file(1, pc, "Art/a.txt");
+    pc.fs.user_remove("Art/a.txt");
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    let edited = world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(EDIT))
+        .unwrap_or_else(|| panic!("mac's edit is not live: {:?}", world.server.files()));
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": edited.id }))
+        .expect("trashed");
+    assert!(world.settle().is_some(), "never settled after the trash");
+    let verdict = edits_lost_to_acts_that_never_saw_them(&world, &custody, seed);
+    let edit = &jd_sim::sha256_hex(EDIT)[..8];
+    assert!(
+        verdict.lost.len() == 1 && verdict.lost[0].contains(edit),
+        "the edit, and only the edit, is lost: {verdict:?}"
+    );
+}
+
+/// Hostile2 74452: a folder whose directory the user deleted lived on as a
+/// record naming that directory's id, which the disk then gave to the
+/// directory the engine made for another folder; that folder's conflict
+/// copies were read as the deleted folder's, looked for at its path, and
+/// forgotten, left in the vault owned by nothing.
+#[test]
+fn frozen_a_reborn_directory_id_is_not_the_deleted_folders_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(74_452, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, swaps);
+    }
+}
+
+/// Plat3 75603: a plain file the chaos swapper put inside a vault folder was
+/// set aside there by a download, and its record followed it into the vault.
+/// Nothing was left to convert; once the server deleted the file, its rescue
+/// went up in the clear into the vault and was refused every pass.
+#[test]
+fn frozen_a_plain_file_set_aside_in_a_vault_is_not_followed_there_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(75_603, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, swaps);
+    }
+}
+
+/// Kill2 75302 and 75324: a chaos swap traded a record's own file with a file
+/// no scan had seen, the user then deleted the record's own file, and a later
+/// scan read the stranger at the record's path as its next version -- a save
+/// by rename, as far as any scan could tell. The chain oracle excuses such a
+/// reading (`UnseenReading`), and missed these: on the Windows disk the swap
+/// gave both files new births, and a pass that died before its scan left the
+/// record behind its swapped file.
+#[test]
+fn frozen_a_reading_no_scan_could_tell_from_a_save_seed() {
+    for seed in [75_302, 75_324] {
+        for swaps in [Swaps::On, Swaps::Off] {
+            workload_core_with(seed, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+        }
+    }
+}
+
+/// Hostile2 74555: the user wrote a file, copied it, wrote the file again,
+/// and the copy and the file traded names. The file's history holds both
+/// bodies, and both are its own.
+#[test]
+fn frozen_one_files_own_history_is_not_a_swap_mix_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(74_555, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, swaps);
+    }
+}
+
+/// The chain oracle's pin, both ways: a mix of bodies the user wrote to two
+/// different files fires, however it got into one history.
+#[test]
+fn the_chain_oracle_fires_on_two_files_bodies_in_one_history() {
+    let seed = 9_944;
+    let world = World::of(seed, &[("mac", Platform::Linux)]);
+    let mut custody = Custody::default();
+    let mac = world.device("mac");
+    const A: &[u8] = b"the body the user wrote to f";
+    const B: &[u8] = b"the body the user wrote to g";
+    mac.fs.user_write("f.txt", A);
+    custody.wrote(0, mac, "f.txt", A);
+    mac.fs.user_write("g.txt", B);
+    custody.wrote(0, mac, "g.txt", B);
+    assert!(world.settle().is_some());
+    custody.learn(0, mac, false);
+    let f = world.server.files().into_iter().find(|x| x.name == "f.txt").expect("f went up").id;
+    world.record_swap_pair(A, B, "chaos", false, Some("mac"));
+    world.server.seed_version(f, B);
+    let mixes = swap_mixes(&world, seed, Some(&custody));
+    assert_eq!(
+        (mixes.held.len(), mixes.excused_by_custody, mixes.excused_unseen, mixes.excused_by_issue),
+        (1, 0, 0, 0),
+        "a mix of two files' bodies must fire: {:?}",
+        mixes.held
+    );
+}
+
+/// ...and a history that is one file's own is quiet: the user wrote the file,
+/// copied it, wrote the file again, and the copy and the file traded names
+/// (hostile2 74555).
+#[test]
+fn the_chain_oracle_is_quiet_on_one_files_own_history() {
+    let seed = 9_943;
+    let world = World::of(seed, &[("mac", Platform::Linux)]);
+    let mut custody = Custody::default();
+    let mac = world.device("mac");
+    const A: &[u8] = b"the file's first body";
+    const A2: &[u8] = b"the file's second body";
+    mac.fs.user_write("f.txt", A);
+    custody.wrote(0, mac, "f.txt", A);
+    assert!(world.settle().is_some());
+    custody.learn(0, mac, false);
+    mac.fs.user_write("Copy of f.txt", A);
+    custody.wrote(0, mac, "Copy of f.txt", A);
+    mac.fs.user_write("f.txt", A2);
+    custody.wrote(0, mac, "f.txt", A2);
+    assert!(world.settle().is_some());
+    custody.learn(0, mac, false);
+    world.record_swap_pair(A2, A, "chaos", false, Some("mac"));
+    let mixes = swap_mixes(&world, seed, Some(&custody));
+    assert_eq!(
+        (mixes.held.len(), mixes.excused_by_custody, mixes.excused_unseen, mixes.excused_by_issue),
+        (0, 1, 0, 0),
+        "one file's own history is not a mix: {:?}",
+        mixes.held
+    );
+}
+
+/// Kill2 75157: a plain file the chaos swapper carried into a vault was being
+/// converted, the user deleted the vault folder with the converted copy in it,
+/// and the record the conversion had taken the file from was folded together
+/// with a never-sent file a swap had left at its old name: one history held
+/// both bodies the swap had separated.
+#[test]
+fn frozen_a_record_owning_no_file_takes_no_never_sent_file_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(75_157, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}
+
+/// Kill2 75391: a sealed file saved in a vault waited to go up while a held
+/// file's move -- its answer lost -- landed on the same name there; sent under
+/// it, the server held one real name twice in one vault folder, and with the
+/// held file outside the vault on both devices nothing ever met the two.
+#[test]
+fn frozen_a_waiting_sealed_upload_clears_a_name_held_since_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(75_391, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
     }
 }

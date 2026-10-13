@@ -388,6 +388,7 @@ pub fn run_pass(
     // file inside a new folder cannot say where it lives until the folder has
     // one.
     let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births) = observed_dirs_and_tie_breaks(env)?;
+    forget_directories_the_disk_has_reborn(env, &dir_identity, &dir_births)?;
     let mut folder_ids = folder_paths(env, Some(&dir_identity))?;
     // What each folder record says its own path is, before this pass moves
     // anything: the only pairings a record may learn its directory from.
@@ -870,6 +871,30 @@ pub fn run_pass(
                         }
                     }
                     env.store.put_entry(&entry)?;
+                }
+            } else if matches!(scan.change_for(entry.id), Some(LocalChange::Unchanged | LocalChange::Edited { .. }))
+                && entry.is_encrypted
+                && entry.synced_placement.is_none()
+                && !entry.remote_deleted
+                && !held_and_never_sent(env, &entry)?
+            {
+                // A sealed file never sent, standing at its own path (the scan
+                // found it there, unchanged or edited): the name a
+                // held file holds in its vault folder can have come to it since
+                // the name was cleared, when this file was saved or moved there
+                // -- the held file's own move landing on it while this upload
+                // waited. Sent under it, two sealed files had one real name in
+                // one vault folder (kill2 75391). Cleared again, as a file
+                // arriving now would be; the queued upload, planned for the old
+                // name, stands down.
+                if let Some(path) = relative_path(env, &entry)? {
+                    let cleared = clear_of_a_held_name(env, &path, &entry.remote, Some(entry.id), &leaving_a_vault)?;
+                    if cleared != entry.remote {
+                        entry.own_file_seen_at = Some(cleared.clone());
+                        entry.remote = cleared;
+                        entry.local_name = None;
+                        env.store.put_entry(&entry)?;
+                    }
                 }
             }
         }
@@ -2895,6 +2920,45 @@ pub(crate) fn observed_dirs_and_tie_breaks(
     // need one.
     out.sort_by_key(|p| (depth_of(p), p.clone()));
     Ok((out, identity, tie_breaks, births))
+}
+
+/// A folder record forgets a directory the disk shows reborn: its id
+/// standing on a directory with another birth. A disk hands a deleted
+/// directory's id to the next one made (`rm -rf A; mkdir B` gives B A's
+/// inode on ext4) and never its birth, so the pair names a directory that no
+/// longer exists, and every reader that matches by id read the newcomer as
+/// this folder's own -- a folder the user deleted claimed the directory the
+/// engine then made for another, and that folder's files were read as this
+/// one's, looked for at its path, and forgotten (hostile2 74452). Such a
+/// record knows no directory from here; `record_directory_identities` gives
+/// it the one at its agreed path. Only where both births are known, on a
+/// volume whose identities hold.
+fn forget_directories_the_disk_has_reborn(
+    env: &ExecEnv,
+    dir_identity: &HashMap<String, u64>,
+    dir_births: &HashMap<String, u64>,
+) -> Result<(), ExecError> {
+    if !env.vfs.personality().stable_file_identity {
+        return Ok(());
+    }
+    let born: HashMap<u64, u64> = dir_identity
+        .iter()
+        .filter(|(_, id)| **id != 0)
+        .filter_map(|(path, id)| Some((*id, dir_births.get(path).copied().filter(|b| *b != 0)?)))
+        .collect();
+    for mut entry in env.store.every_entry()? {
+        if entry.id.entity_type != EntityType::Folder {
+            continue;
+        }
+        let Some(fp) = entry.synced_fingerprint.filter(|fp| fp.file_id != 0 && fp.birth_ns != 0) else {
+            continue;
+        };
+        if born.get(&fp.file_id).is_some_and(|b| *b != fp.birth_ns) {
+            entry.synced_fingerprint = None;
+            env.store.put_entry(&entry)?;
+        }
+    }
+    Ok(())
 }
 
 /// A folder record learns which directory is its own.
@@ -6992,6 +7056,20 @@ fn merge_duplicate_files(env: &ExecEnv) -> Result<Vec<(EntityId, EntityId)>, Exe
                 matches!((a, b), (Some(a), Some(b)) if a.is_strong() && b.is_strong() && a != b)
             };
             if strong_volume && two_files(r.own_file, e.own_file) {
+                continue;
+            }
+            // Nor a record that owns no file while the provisional owns one,
+            // where identities hold: the scan had the file at the record's
+            // path to give it (`pair_files` step 3, the safe-save) and did
+            // not -- the record was held, its file in a claimant's hands -- so
+            // the two are two files. Folded, a record read as deleted took a
+            // never-sent file seen at its name as its version (kill2 75157: a
+            // source whose claimant the user deleted with its vault folder
+            // took the stranger a swap had left at its old path).
+            if strong_volume
+                && e.own_file.is_some_and(|o| o.is_strong())
+                && !r.own_file.is_some_and(|o| o.is_strong())
+            {
                 continue;
             }
             // Without births the disk answers it, by the id the provisional

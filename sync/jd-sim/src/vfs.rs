@@ -1011,6 +1011,18 @@ impl MemFs {
         st.file_id_model != FileIds::DirectorySlot && !st.births_are_names
     }
 
+    /// Does a file's id alone name one file over the run on this disk? Where
+    /// births are names on a local NTFS volume: a name taken again hands its
+    /// birth to the next file, so a birth names a slot rather than a file,
+    /// while a freed MFT record comes back with its sequence raised
+    /// (`alloc_id`), so an id never repeats. Not on a share, which hands out
+    /// its server's inode as it is, and not where births are real, where ids
+    /// are recycled bare and the birth is what tells two files apart.
+    pub fn ids_alone_name_files(&self) -> bool {
+        let st = self.state.lock().unwrap();
+        st.file_id_model == FileIds::Stable && st.births_are_names && !st.network_share
+    }
+
     /// Every file on this disk by id, with the disk's own birth for it.
     pub fn true_identities(&self) -> std::collections::HashMap<u64, u64> {
         let st = self.state.lock().unwrap();
