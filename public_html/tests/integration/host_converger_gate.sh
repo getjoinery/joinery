@@ -213,6 +213,24 @@ chk "and nothing in it is an unresolved function" \
     "$(echo "$out" | grep -ci 'command not found')" "0"
 chk "a stale copy is brought up to date" \
     "$(cmp -s "$RUNNER" "$STALE" && echo current || echo stale)" "current"
+
+# The run that refreshed the copy is the old release: it hands itself to the
+# new copy, once, with the arguments it was called with, before the stamp. Run
+# as the stale copy itself (the timer runs the copy), with an install that
+# can place it unprivileged.
+mkdir -p "$T/instbin"
+printf '#!/bin/bash
+src="${@: -2:1}"; dst="${@: -1}"; cp "$src" "$dst" && chmod 755 "$dst"
+' > "$T/instbin/install"
+chmod 755 "$T/instbin/install"
+SELF="$T/entry_self.sh"
+cp "$T/nogate.sh" "$SELF"; echo '# stale' >> "$SELF"; chmod 755 "$SELF"
+out=$(PATH="$T/instbin:$PATH" JOINERY_CONVERGER_ENTRY="$SELF" bash "$SELF" --site-root="$T" 2>&1)
+chk "the run that refreshed its own copy runs the refreshed copy, with its arguments" \
+    "$(echo "$out" | grep -c 'running the refreshed copy')|$(echo "$out" | grep -c 'core installers: running')" "1|$CORE_COUNT"
+cp "$T/nogate.sh" "$SELF"; echo '# stale again' >> "$SELF"
+out=$(PATH="$T/instbin:$PATH" JOINERY_CONVERGER_ENTRY="$SELF" JOINERY_CONVERGER_REEXEC=1 bash "$SELF" --site-root="$T" 2>&1)
+chk "and only once" "$(echo "$out" | grep -c 'running the refreshed copy')" "0"
 chk "the unit runs the copy, not the tree (a site's command and a machine's)" \
     "$(grep -c 'COMMAND="/bin/bash \${RUN_TARGET}' "$INSTALLER")" "2"
 

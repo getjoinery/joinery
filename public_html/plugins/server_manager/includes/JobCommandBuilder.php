@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.121 - run_installer may name host_swap.sh (agent 1.75.2)
  * @version 1.120 - install_node fetches its release, and names its upgrade server, from ReleaseStream: this plane
  *                  when it serves releases, else this plane's own upgrade source (B38: a management node built
  *                  from a release serves none, and its servers came up with no themes or plugins)
@@ -2165,6 +2166,7 @@ class JobCommandBuilder {
 		'install_host_converger.sh' => 'Host timer',
 		'render_vhost.sh'           => 'Site vhost',
 		'host_housekeeping.sh'      => 'Host housekeeping (fail2ban, Apache, PHP, journald)',
+		'host_swap.sh'              => 'Swap (compressed memory)',
 		'site_housekeeping.sh'      => 'Site housekeeping (log rotation, scheduled tasks)',
 	];
 

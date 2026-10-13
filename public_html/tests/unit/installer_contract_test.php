@@ -3459,8 +3459,10 @@ foreach (['install_agent.sh', 'install_parser_jail.sh', 'render_vhost.sh', 'fix_
 }
 $runner_machine = (string)file_get_contents(dirname(PathHelper::getRootDir())
     . '/maintenance_scripts/install_tools/_plugin_installers_start.sh');
-check(preg_match('/^HOST_INSTALLERS="host_housekeeping\.sh install_host_converger\.sh"$/m', $runner_machine) === 1,
-    'the runner names the host installer set: housekeeping and the host timer, nothing else');
+check(preg_match('/^HOST_INSTALLERS="host_housekeeping\.sh host_swap\.sh install_host_converger\.sh"$/m', $runner_machine) === 1,
+    'the runner names the host installer set: housekeeping, the swap and the host timer, nothing else');
+check(strpos($bundle_src, "'maintenance_scripts/install_tools/host_swap.sh'") !== false,
+    'and the support bundle carries the swap installer a machine runs');
 check(preg_match('/^HOST_PLUGIN_INSTALLERS="mail_apps\/provisioning\/install_mail_gateway\.sh"$/m', $runner_machine) === 1,
 	'a machine runs one plugin host installer too: the mail gateway, for its container sites');
 check(strpos($runner_machine, 'bash "${HOST_PLUGIN_PATH}" --machine "${SITE_ROOT}"') !== false

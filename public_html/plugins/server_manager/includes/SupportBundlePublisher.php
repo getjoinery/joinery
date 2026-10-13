@@ -40,6 +40,7 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.20 - carries host_swap.sh, the host installer that keeps a machine's swap in compressed memory (B32)
  * @version 1.19 - carries the mail gateway's installer and binaries: a Docker host runs it --machine for its
  *                 container sites (HOST_PLUGIN_INSTALLERS, specs/mail_apps_plugin.md § A4)
  * @version 1.18 - publish() takes $source_root: the scripts are copied from the release's build
@@ -200,6 +201,8 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/_plugin_installers_start.sh',
 		'maintenance_scripts/install_tools/_tree_trust.sh',
 		'maintenance_scripts/install_tools/host_housekeeping.sh',
+		// The machine's swap: compressed memory, never a disk (B32).
+		'maintenance_scripts/install_tools/host_swap.sh',
 		'maintenance_scripts/install_tools/install_host_converger.sh',
 		'public_html/includes/cloudflare_ip_ranges.txt',
 		// host_housekeeping.sh runs proxy_default_site.sh install on a
