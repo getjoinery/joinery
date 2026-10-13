@@ -363,7 +363,7 @@ pub fn run_pass(
     // ---- what this computer did --------------------------------------------
     let observed = observe(env)?;
     let tie_breaks = tie_breaks_for_this_pass(env, &observed)?;
-    let known = known_local(env, &tie_breaks)?;
+    let known = known_local(env, &tie_breaks, &observed)?;
     let strong_volume = env.vfs.personality().stable_file_identity;
     let awaiting = awaiting_bytes(env)?;
     let scan = pair_files(&known, &observed, &awaiting, strong_volume);
@@ -2021,6 +2021,24 @@ pub fn run_pass(
             (env.now_ms)() as i64,
         )?;
     }
+    // A source whose claimant has landed waits only for its own trash. When a
+    // peer's edit wins over that delete, the source comes back here as the
+    // file it is, and nothing replaces it any more: still counted replaced,
+    // naming never judged it, so a file held outside its vault at its old
+    // name was never said to hold that name against it, and the download
+    // stood down on that file every pass, for ever (plat3 95424).
+    for (id, issue) in &out.round.issues {
+        if !matches!(issue, crate::reconcile::Issue::DeleteLostToEdit { side: crate::reconcile::Side::Local, .. }) {
+            continue;
+        }
+        for mut claimant in all_entries(env)?
+            .into_iter()
+            .filter(|e| e.replaces == Some(*id) && !e.id.is_provisional())
+        {
+            claimant.replaces = None;
+            env.store.put_entry(&claimant)?;
+        }
+    }
     // The duplicate-name renames first, and in their own batch. They exist to
     // free a name somebody else is waiting on, so running them ahead of the
     // round's own work is the point rather than an accident of ordering -- and
@@ -2700,7 +2718,8 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     let now_ns = (env.now_ms)().saturating_mul(1_000_000);
     let granularity = env.vfs.personality().mtime_granularity_ns.max(1);
     let positional = env.vfs.personality().positional_file_ids;
-    let vaults = if positional { vault_directories(env)? } else { Vec::new() };
+    let vault_dirs = vault_directories(env)?;
+    let vaults = if positional { vault_dirs.clone() } else { Vec::new() };
     while let Some((dir, rel)) = queue.pop() {
         guard += 1;
         if guard > 100_000 {
@@ -2804,11 +2823,13 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                     if let Some(vault) = vault_holding(&vaults, &path) {
                         env.store.note_vault_listed_bytes(vault, &sha)?;
                     }
+                    let in_a_vault = vault_holding(&vault_dirs, &path).is_some();
                     out.push(ObservedFile {
                         path,
                         fingerprint,
                         sha256: sha,
                         tie_break_id: child.tie_break_id,
+                        in_a_vault,
                     });
                 }
                 // Symlinks are flagged and never followed: following one walks
@@ -3739,6 +3760,65 @@ fn standing_parks(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
                 || crate::execute::parked_directory_left_at_its_name(env, &entry)?.is_some()
             {
                 out.push(rel);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Where each standing park's directory stands on this disk: at its scratch
+/// name (true), or still at the folder's own, the park killed before its
+/// rename (false). Relative paths.
+fn park_directories(env: &ExecEnv) -> Result<Vec<(String, bool)>, ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder
+            || !entry.local_name.as_deref().is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))
+        {
+            continue;
+        }
+        let Some(rel) = relative_path(env, &entry)? else {
+            continue;
+        };
+        if env.vfs.read_dir(&root.join(&rel)).is_ok() {
+            out.push((rel, true));
+        } else if let Some(at) = crate::execute::parked_directory_left_at_its_name(env, &entry)? {
+            if let Ok(rel) = at.strip_prefix(&root) {
+                out.push((rel.to_string_lossy().to_string(), false));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// The strong identities of every file standing under these directories.
+fn identities_under(env: &ExecEnv, dirs: &[String]) -> Result<std::collections::HashSet<jd_vfs::FileIdentity>, ExecError> {
+    let mut out = std::collections::HashSet::new();
+    let Some(root) = env.vfs.root() else {
+        return Ok(out);
+    };
+    let mut queue: Vec<std::path::PathBuf> = dirs.iter().map(|d| root.join(d)).collect();
+    let mut guard = 0;
+    while let Some(dir) = queue.pop() {
+        guard += 1;
+        if guard > 100_000 {
+            return Err(ExecError::Contract("the walk of a park does not end".into()));
+        }
+        let Ok(children) = env.vfs.read_dir_all(&dir) else {
+            continue;
+        };
+        for child in children {
+            match child.kind {
+                jd_vfs::EntryKind::File => {
+                    if let Some(identity) = child.fingerprint.map(|fp| fp.identity()).filter(|i| i.is_strong()) {
+                        out.insert(identity);
+                    }
+                }
+                jd_vfs::EntryKind::Directory => queue.push(dir.join(&child.name)),
+                _ => {}
             }
         }
     }
@@ -6280,8 +6360,29 @@ fn bind_never_sent_own_ids(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), Exec
     Ok(())
 }
 
-fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec<KnownLocal>, ExecError> {
+fn known_local(
+    env: &ExecEnv,
+    tie_breaks: &HashMap<EntityId, u64>,
+    observed: &[ObservedFile],
+) -> Result<Vec<KnownLocal>, ExecError> {
     let parks = standing_parks(env)?;
+    // What a park holds is known by identity alone, on a volume whose
+    // identities are strong: the walk does not go into a scratch directory.
+    // The files standing in a park the walk cannot see -- one at its scratch
+    // name -- and every file the walk saw outside every park's directory. A
+    // park left at the folder's own name is walked: what was carried into it
+    // is seen there and read by identity like anything else, and held, a
+    // record already followed lost its file to a new one minted there.
+    let parks_found = park_directories(env)?;
+    let park_dirs: Vec<String> = parks_found.iter().map(|(dir, _)| dir.clone()).collect();
+    let unwalked: Vec<String> = parks_found.iter().filter(|(_, at_scratch)| *at_scratch).map(|(dir, _)| dir.clone()).collect();
+    let in_parks = identities_under(env, &unwalked)?;
+    let seen_outside: std::collections::HashSet<jd_vfs::FileIdentity> = observed
+        .iter()
+        .filter(|o| !under_one_of(&park_dirs, &o.path))
+        .map(|o| o.fingerprint.identity())
+        .filter(|i| i.is_strong())
+        .collect();
     let positional = env.vfs.personality().positional_file_ids;
     let mut out = Vec::new();
     let mut deleted = Vec::new();
@@ -6321,8 +6422,24 @@ fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec
             continue;
         };
         // Held in a standing park: not judged this pass
-        // (`hold_what_a_standing_park_holds`).
-        if under_one_of(&parks, &path) {
+        // (`hold_what_a_standing_park_holds`) -- unless its own file stands
+        // outside every park now, carried out of it by the user: then it is
+        // read like any file, by its identity, and goes where its file went.
+        // Left out, nothing claimed that file, and the record whose name it
+        // was put under read it by path as its own edit and sent another
+        // file's bytes as its version -- a vault file's, carried out of a
+        // parked vault folder (kill2 95329).
+        let own = entry.own_file.filter(|o| o.is_strong());
+        if under_one_of(&parks, &path) && !own.is_some_and(|o| seen_outside.contains(&o)) {
+            continue;
+        }
+        // And the other way: its own file stands inside a park at its scratch
+        // name now, carried in by the user -- a directory the walk cannot
+        // list. Unheld it read as deleted and went to the server's trash.
+        // Held, as what the park holds is, until the park ends. A park left
+        // at the folder's own name is walked, and what was carried into it is
+        // read by its identity like anything else.
+        if own.is_some_and(|o| in_parks.contains(&o)) {
             continue;
         }
         // A sealed file held outside its vault is kept away from where the

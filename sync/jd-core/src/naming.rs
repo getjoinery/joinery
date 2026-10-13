@@ -449,7 +449,50 @@ pub fn apply_naming(
         std::collections::HashSet::new();
 
     for (parent, mut siblings) in by_parent {
-        siblings.sort_by_key(resolution_order);
+        // A file held outside its vault claims first. It reaches here only
+        // standing where its record says (`held_and_away` above), so it is on
+        // this disk under the name it claims -- and a record agreeing on the
+        // same name cannot be: its file is not there. Ranked by agreement, a
+        // source whose delete lost to a peer's edit outranked the held file at
+        // its old name, and parking the held file stood down on its unsent
+        // state every pass, for ever (plat3 95424).
+        let mut held_first = std::collections::HashSet::new();
+        for e in &siblings {
+            if crate::pass::held_outside_its_vault(env, e)? {
+                held_first.insert(e.id);
+            }
+        }
+        // The held file outranks a sibling only while that sibling holds no
+        // file here. One whose own file stands somewhere else on this disk,
+        // where the server has not moved it, has left the name -- carried
+        // into a vault, say, to go up sealed -- and the scan follows it there
+        // this pass: it is not judged at the name it left, as a park of it
+        // would stand down. Judged, it lost to the held file; the scan then
+        // handed its file to the vault's new record, so the park found no
+        // file of its own anywhere and gave the record up, its move into the
+        // vault was never read, and its plain copy stayed on the server in
+        // the clear (hostile2 74425). Where the server has moved it too, a
+        // move race goes to the server and it is judged as before.
+        if !held_first.is_empty() {
+            let key = |e: &Entry| jd_vfs::comparison_key(&competing_placement(e, &gone).name, personality);
+            let held_names: std::collections::HashSet<String> =
+                siblings.iter().filter(|e| held_first.contains(&e.id)).map(key).collect();
+            let mut left = std::collections::HashSet::new();
+            for e in &siblings {
+                if held_first.contains(&e.id) || !held_names.contains(&key(e)) {
+                    continue;
+                }
+                if e.remote != *e.agreed_placement() {
+                    continue;
+                }
+                let Some(own) = e.own_file.filter(|o| o.is_strong()) else { continue };
+                if crate::execute::where_file_stands(env, own)?.is_some() {
+                    left.insert(e.id);
+                }
+            }
+            siblings.retain(|e| !left.contains(&e.id));
+        }
+        siblings.sort_by_key(|e| (!held_first.contains(&e.id), resolution_order(e)));
         let names: Vec<String> = siblings
             .iter()
             .map(|e| competing_placement(e, &gone).name.clone())
@@ -881,8 +924,23 @@ fn judge_destinations(
         out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
     let (trading, pending) = trading_names(env, personality, settled, leaving_this_pass, busy)?;
     let parked = crate::pass::held_by_a_weak_volume_park(env)?;
-    for entry in crate::pass::all_entries(env)? {
+    let all = crate::pass::all_entries(env)?;
+    // A source a claimant replaces is going, as the main loop reads it: its
+    // file is the claimant's, and its trash follows the claimant's upload
+    // wherever the server has moved it. Judged at the server's new name, it
+    // was given up as a clash there, its record went with it, its trash never
+    // ran, and its plain copy stayed on the server beside the sealed one
+    // (plat3 75407).
+    let replaced: std::collections::HashSet<EntityId> = all
+        .iter()
+        .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
+        .filter_map(|e| e.replaces)
+        .collect();
+    for entry in all {
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+            continue;
+        }
+        if replaced.contains(&entry.id) {
             continue;
         }
         if entry.local_placement().parent.is_some_and(|p| parked.contains(&p)) {

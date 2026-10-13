@@ -4033,3 +4033,71 @@ fn a_file_parked_at_a_taken_server_placement_gives_up_its_moved_copy_only_for_a_
         }
     }
 }
+
+/// A file the server trashed goes up again as a new file, beside a peer's
+/// file at the name it was moved to, and the answer is lost. Before the
+/// retry the change feed names the new file, with nothing of it on this disk;
+/// the retry meets it holding the conflict name with this upload's bytes and
+/// takes it as its own. Taken as the trashed file's record, it kept that
+/// trash: the next pass read the trash as the new file's and took the copy
+/// here to the local trash, while the server kept the file (kill2 95117).
+#[test]
+fn a_trashed_file_sent_again_and_adopted_after_a_lost_answer_is_live() {
+    let (clock, server, device) = world();
+    let body = b"a file the server trashed, sent again";
+    let trashed = server.seed_file(None, "f.txt", body);
+    server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": trashed }))
+        .expect("trash");
+    server.seed_file(None, "g.txt", b"a peer's own file at the name it was moved to");
+    device.fs.user_write("g.txt", body);
+    let id = EntityId::file(trashed);
+    let mut entry = fresh(id, None, "f.txt", LocalStatus::Synced);
+    entry.remote_deleted = true;
+    entry.synced_placement = Some(Placement { parent: None, name: "f.txt".into() });
+    entry.synced_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    entry.own_file = Some(device.fs.fingerprint_at("g.txt").unwrap().identity());
+    device.store.put_entry(&entry).unwrap();
+
+    device.net.set_faults(NetFaults { lose_answer_to: Some("drive_upload_init".into()), ..NetFaults::none() });
+    let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "g.txt".into() } });
+    assert_eq!(report.retrying, 1, "construction: the answer is lost");
+    device.net.set_faults(NetFaults::none());
+    let new = server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.sha256 == sha256_hex(body))
+        .expect("construction: the upload landed on the server");
+    let mut learned = fresh(EntityId::file(new.id), None, &new.name, LocalStatus::PendingDownload);
+    learned.remote_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&learned).unwrap();
+
+    clock.advance_secs(30 * 60);
+    let now = device.now();
+    let e = env(&device, &now);
+    assert_eq!(run_queued(&e).unwrap().done, 1, "the retry lands");
+    let after = device.store.get_entry(EntityId::file(new.id)).unwrap().expect("the record is the new file's");
+    assert!(!after.remote_deleted, "the new file's record carries the trashed file's delete");
+}
+
+/// A rename this device sends for a record whose download has not landed
+/// here -- a vault file given a numbered name because another file holds
+/// its name on this disk -- moves the server alone: the record agrees on no
+/// placement here. Agreed, it read as having held its new name already, and
+/// a file the user saved there while the download was landing was taken as
+/// its edit, whose next move carried the record into a folder no one put it
+/// in (plat3 95640).
+#[test]
+fn a_rename_of_a_file_never_placed_here_agrees_on_nothing() {
+    let (_clock, server, device) = world();
+    let body = b"the server's file, not yet downloaded here";
+    let id = EntityId::file(server.seed_file(None, "a.txt", body));
+    let mut entry = fresh(id, None, "a.txt", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId { sha256: sha256_hex(body), size: body.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+    let report = do_one(&device, id, Action::ApplyLocalMove { to: Placement { parent: None, name: "a (2).txt".into() } });
+    assert_eq!(report.done, 1, "the rename goes through");
+    assert!(server.files().iter().any(|f| f.name == "a (2).txt"), "construction: the server took the rename");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(after.synced_placement, None, "a record never placed here agrees on a placement");
+}

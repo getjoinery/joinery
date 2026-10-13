@@ -220,6 +220,9 @@ struct MemFsState {
     /// renamed to a name that also exists sealed read as the sealed name
     /// reaching the server (seed 74000 on the two-device ring arm).
     user_renames: Vec<(String, bool)>,
+    /// Every file a user's move carried, by the disk's own id and birth, in
+    /// order: the file itself, or each file under a directory moved.
+    user_moved: Vec<(u64, u64)>,
     /// Every body the user's hand took off this disk while it stood here:
     /// saved over, renamed over, or deleted (a file, or everything under a
     /// folder). As (sha256, order), the order drawn from [`user_act_order`].
@@ -381,6 +384,7 @@ impl MemFs {
                 next_spool: 0,
                 user_writes: Vec::new(),
                 user_renames: Vec::new(),
+                user_moved: Vec::new(),
                 user_superseded: Vec::new(),
                 user_removes: Vec::new(),
                 sealed_dirs: BTreeSet::new(),
@@ -901,6 +905,14 @@ impl MemFs {
         if replaced && t != f {
             Self::supersede_under(&mut st, &t);
         }
+        let under = format!("{f}/");
+        let carried: Vec<(u64, u64)> = st
+            .file_ids
+            .iter()
+            .filter(|(k, _)| **k == f || k.starts_with(&under))
+            .filter_map(|(k, id)| st.file_births.get(k).map(|b| (*id, *b)))
+            .collect();
+        st.user_moved.extend(carried);
         Self::move_subtree(&mut st, &f, &t, self.clock.now_ns());
         let leaf = |p: &str| p.rsplit('/').next().unwrap_or(p).to_string();
         if matches!(st.nodes.get(&t), Some(Node::File { .. })) && !replaced && leaf(&f) != leaf(&t) {
@@ -934,6 +946,13 @@ impl MemFs {
         let given: Vec<(String, bool)> = if b_was_there { Vec::new() } else { st.user_renames[named..].to_vec() };
         st.user_renames.truncate(kept);
         st.user_renames.extend(given);
+    }
+
+    /// Every file a user's move carried since the `from`th, by the disk's own
+    /// id and birth, and how many there are in all.
+    pub fn user_moved_since(&self, from: usize) -> (Vec<(u64, u64)>, usize) {
+        let st = self.state.lock().unwrap();
+        (st.user_moved.get(from..).map(|m| m.to_vec()).unwrap_or_default(), st.user_moved.len())
     }
 
     /// Every file path the user has renamed something onto, in order, with
