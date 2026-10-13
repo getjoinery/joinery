@@ -5834,6 +5834,83 @@ fn a_file_an_engine_saw_in_a_vault_stays_counted_sealed() {
     }
 }
 
+/// What stands at a sealed record's vault path counts as held by the record
+/// only where it could hold it: its own file, or, with no own file bound, an
+/// established record's. A record for a download still to come holds nothing
+/// there, and bytes the user saved at its path and carried out before a scan
+/// were never in a vault on any engine's reading (kill2 75312). A file at the
+/// path that is not the record's own is not its either; its own file is
+/// counted where it stands.
+#[test]
+fn a_sealed_record_counts_only_what_it_could_hold_at_its_path() {
+    let seed = 9_995;
+    let vault = jd_sim::SimVault::new(seed);
+    let mut world = World::of(seed, &[("laptop", Platform::Linux)]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Private/base.txt", b"an established sealed file");
+    assert!(world.settle().is_some());
+    let base = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "base.txt" && e.is_encrypted && e.synced_content.is_some())
+        .expect("construction: an established sealed record");
+    laptop.fs.user_write("elsewhere.txt", b"d's own file, outside");
+    let identity = |p: &str| jd_vfs::FileIdentity {
+        file_id: laptop.fs.file_id_of(p).unwrap(),
+        birth_ns: laptop.fs.file_birth_of(p).unwrap_or(1),
+    };
+    for (n, name) in ["a.txt", "b.txt", "c.txt", "d.txt"].into_iter().enumerate() {
+        laptop.fs.user_write(&format!("Private/{name}"), format!("saved at {name}").as_bytes());
+        let mut e = base.clone();
+        e.id = jd_core::model::EntityId::file(990_001 + n as i64);
+        e.remote.name = name.into();
+        e.synced_placement = Some(e.remote.clone());
+        e.last_seen_sha = None;
+        match name {
+            // A download still to come: no agreement, no own file.
+            "a.txt" => {
+                e.synced_content = None;
+                e.synced_remote_content = None;
+                e.synced_fingerprint = None;
+                e.own_file = None;
+                e.status = jd_core::model::LocalStatus::PendingDownload;
+            }
+            // Established, no own file bound: the scan finds it by its path.
+            "b.txt" => e.own_file = None,
+            "c.txt" => e.own_file = Some(identity("Private/c.txt")),
+            _ => e.own_file = Some(identity("elsewhere.txt")),
+        }
+        laptop.store.put_entry(&e).unwrap();
+    }
+    let counted: std::collections::BTreeSet<String> =
+        jd_sim::scenario::recorded_in_a_vault(laptop, 1, 2).into_iter().map(|(h, _, _)| h).collect();
+    let body = |name: &str| jd_sim::sha256_hex(format!("saved at {name}").as_bytes());
+    assert!(!counted.contains(&body("a.txt")), "a record that never held a file counted what stands at its path");
+    assert!(counted.contains(&body("b.txt")), "an established record with no own file stopped counting its path");
+    assert!(counted.contains(&body("c.txt")), "a record's own file at its path is not counted");
+    assert!(!counted.contains(&body("d.txt")), "a file at the path that is not the record's own was counted");
+    assert!(
+        counted.contains(&jd_sim::sha256_hex(b"d's own file, outside")),
+        "the record's own file is not counted where it stands"
+    );
+}
+
+/// Kill2 75312: bytes the user saved at the vault path of a record whose
+/// download was still to come, after the walk, and traded out to a plain
+/// folder before the next one, went up plain. No engine saw them in a vault
+/// and no record held them, so the upload is the user's last act (Q4), and
+/// every oracle is quiet.
+#[test]
+fn frozen_bytes_no_engine_saw_in_a_vault_go_up_plain_seed() {
+    workload_core_with(75_312, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+}
+
 /// The same engine-made name at the top and in the vault, and a swap in the
 /// vault trades the conflict copy's name with another sealed file's. A swap
 /// gives no name -- both were given before -- so the plain file at the top
@@ -6882,4 +6959,25 @@ fn frozen_a_download_queued_before_a_peers_park_waits_seed() {
     for swaps in [Swaps::On, Swaps::Off] {
         workload_core_with(75_281, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
     }
+}
+
+/// Hostile2 74496 and kill2 75241: a file the user moved into a folder another
+/// device had deleted went to this device's trash with the folder, as a file
+/// the server already had -- somewhere else -- and the next scan sent its
+/// delete to the server (S3). Every oracle quiet is asserted.
+#[test]
+fn frozen_a_file_moved_into_a_folder_deleted_elsewhere_is_kept_seeds() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(74_496, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, swaps);
+        workload_core_with(75_241, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}
+
+/// Kill2 75390 and plat3 75486: a plain file carried into a vault and edited
+/// there was carried out mid-conversion, and its plain record took it back and
+/// sent the edit in the clear. Every oracle quiet is asserted.
+#[test]
+fn frozen_a_file_edited_in_a_vault_mid_conversion_is_held_seeds() {
+    workload_core_with(75_390, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    workload_core_with(75_486, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
 }

@@ -561,6 +561,11 @@ protection. A plaintext folder is converted contents and all — until it is, th
 user is looking at a folder they believe is private while the server holds every
 file in it in the clear at the old path.
 
+A file edited in the vault before its conversion has gone up belongs to the
+vault from that edit on. Carried out again, it is held like any file saved in a
+vault and moved out before it was uploaded, and the plain copy on the server
+keeps the bytes it had. Carried out unedited, it is the plain file again.
+
 **Out of a vault, a sealed file is held.** It stays where the user put it on
 this disk, the server keeps the sealed copy where it was, and one issue names
 the file and the two ways out: move it back into the vault, or download it in
@@ -828,11 +833,14 @@ destination folder went to the server's trash while this device was working
 towards it, which is somebody else's delete arriving rather than anything wrong
 here: the same index walk that carries the delete trashes this device's copy of
 the folder, and work inside it the server never took is rescued out first and
-raised as `rescued_from_trash`. Reading the refusal as a failure instead would
-retry it forever against a folder that is not coming back. Sealed work is
-rescued only into a folder that is itself in a vault, from where it goes up
-sealed; carried out of the vault it would go up in the clear, so there it stays
-and goes to the trash with the folder, and `sealed_not_rescued` says so.
+raised as `rescued_from_trash`. That includes a file the user moved in here
+whose move never landed: the server has the file, but somewhere else, so it is
+carried out beside the folder and its move goes up from there. Reading the
+refusal as a failure instead would retry it forever against a folder that is not
+coming back. Sealed work is rescued only into a folder that is itself in a
+vault, from where it goes up sealed; carried out of the vault it would go up in
+the clear, so there it stays and goes to the trash with the folder, and
+`sealed_not_rescued` says so.
 
 That local trash waits for one thing: a child the server has moved elsewhere
 whose directory is still inside the folder here, because its new name cannot

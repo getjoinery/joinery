@@ -646,7 +646,19 @@ pub fn pair_files(
     strong_volume: bool,
 ) -> ScanOutcome {
     if strong_volume {
-        let own = |k: &KnownLocal| k.own_file.filter(|o| o.is_strong());
+        // While a conversion is on its way up the file is its claimant's: the
+        // source it came from takes it back only as an undo, in the
+        // claimant's own arm (`pair_by`, step 2). Read by its own identity,
+        // the source took the file at home or followed it wherever it stood,
+        // with an edit made in the vault, and sent that in the clear (kill2
+        // 75390). A source counts while a live claimant in scope holds it
+        // (`held`), the set the pass keeps the source's path reading from.
+        let converting: HashSet<EntityId> = known
+            .iter()
+            .filter_map(|k| k.claimant_for)
+            .filter(|s| known.iter().any(|r| r.id == *s && r.held))
+            .collect();
+        let own = |k: &KnownLocal| k.own_file.filter(|o| o.is_strong() && !converting.contains(&k.id));
         if !known.iter().any(|k| own(k).is_some()) {
             return pair_with(known, observed, awaiting_bytes);
         }
@@ -869,15 +881,27 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
         let Some(c) = nearest(k, &mut names) else { continue };
         if let Some(source) = k.claimant_for {
             // Path-bound: the claimant stays for step 3, and its source takes
-            // the file where it stands.
+            // the file where it stands -- an undo, the file gone back holding
+            // the source's own bytes. Only then. A file edited after it was
+            // carried into a vault holds bytes only the claimant ever saw;
+            // taken by its plain source, it went up as that file's next
+            // version, in the clear (kill2 75390, plat3 75486). The claimant
+            // keeps it instead, a file never sent that has left its vault,
+            // which is held.
             let Some(s) = known.iter().position(|r| r.id == source).filter(|s| !settled[*s]) else {
                 continue;
             };
-            claimed[c] = true;
-            settled[s] = true;
             let obs = &observed[c];
-            out.bound.extend(bind(obs).map(|id| (known[s].id, id)));
-            out.changes.push((known[s].id, moved(&known[s], obs)));
+            claimed[c] = true;
+            if known[s].sha256.as_deref() == Some(obs.sha256.as_str()) {
+                settled[s] = true;
+                out.bound.extend(bind(obs).map(|id| (known[s].id, id)));
+                out.changes.push((known[s].id, moved(&known[s], obs)));
+            } else {
+                settled[n] = true;
+                out.bound.extend(bind(obs).map(|id| (k.id, id)));
+                out.changes.push((k.id, moved(k, obs)));
+            }
             continue;
         }
         // A file never sent, renamed over a record whose own file stands

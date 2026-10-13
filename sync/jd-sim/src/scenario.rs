@@ -2121,12 +2121,12 @@ pub fn held_waiting(device: &Device) -> Vec<(jd_core::model::EntityId, String)> 
 }
 
 /// Bodies and leaf names a record on this device places in a vault: an
-/// encrypted record's agreed body, the file standing at its path, and the
-/// file carrying its own id -- not on a volume whose ids are only
-/// positions, where the engine reads no own id and a slot's id names
-/// whatever stands in it now (win kill2 75125). Each with when it was
-/// known: `walked` for bytes the record itself holds or last saw, `now` for
-/// any other bytes found on the disk, which the walk did not read.
+/// encrypted record's agreed body, the file standing at its path where the
+/// record could hold it, and the file carrying its own id -- not on a volume
+/// whose ids are only positions, where the engine reads no own id and a slot's
+/// id names whatever stands in it now (win kill2 75125). Each with when it was
+/// known: `walked` for bytes the record itself holds or last saw, `now` for any
+/// other bytes found on the disk, which the walk did not read.
 pub fn recorded_in_a_vault(device: &Device, walked: i64, now: i64) -> Vec<(String, String, i64)> {
     if jd_vfs::Vfs::root(&device.fs).is_none() {
         return Vec::new();
@@ -2164,12 +2164,35 @@ pub fn recorded_in_a_vault(device: &Device, walked: i64, now: i64) -> Vec<(Strin
                 .unwrap()
                 .is_some_and(|f| f.is_encrypted)
         });
-        if let Some(bytes) = path.as_deref().filter(|_| in_a_vault).and_then(|p| device.fs.peek(p)) {
-            let sha = crate::sha256_hex(&bytes);
-            let at = seen(&sha);
-            out.push((sha, name.clone(), at));
-        }
         let positional = jd_vfs::Vfs::personality(&device.fs).positional_file_ids;
+        // And only what the record could hold there: anything, where ids are
+        // only positions and the path is the identity; its own file; or,
+        // with no own file bound, whatever the scan will find by the path of
+        // an established record. A record that never held a file on this disk
+        // -- a download still to come, or a file never sent with no own file
+        // bound -- holds nothing at its path, and bytes the user saved there
+        // after the walk and carried out before the next one were never in a
+        // vault on any engine's reading (kill2 75312).
+        //
+        // What a scan read in a vault is counted by the walk's listing, and
+        // only from a pass that completed: a pass that listed bytes in a vault,
+        // sent them plain and then died is caught by neither, for a record
+        // that never held them. That is Q4's "a scan that completed", kept.
+        let holds_at = |p: &str, sha: &str| {
+            positional
+                || e.last_seen_sha.as_deref() == Some(sha)
+                || match e.own_file.map(|o| o.file_id).filter(|i| *i != 0) {
+                    Some(own) => device.fs.file_id_of(p) == Some(own),
+                    None => e.synced_content.is_some(),
+                }
+        };
+        if let Some((p, bytes)) = path.as_deref().filter(|_| in_a_vault).and_then(|p| device.fs.peek(p).map(|b| (p, b))) {
+            let sha = crate::sha256_hex(&bytes);
+            if holds_at(p, &sha) {
+                let at = seen(&sha);
+                out.push((sha, name.clone(), at));
+            }
+        }
         if let Some(own) = e.own_file.map(|o| o.file_id).filter(|i| *i != 0 && !positional) {
             for p in files.iter().filter(|p| device.fs.file_id_of(p) == Some(own)) {
                 if let Some(bytes) = device.fs.peek(p) {

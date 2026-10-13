@@ -19758,3 +19758,176 @@ fn a_download_queued_before_a_peers_park_waits_for_the_park_to_end() {
     no_scratch_and_no_conflict_names(&world);
     assert_converged(&world);
 }
+
+/// S3 (hostile2 74496, kill2 75241): a file the user moves into a folder
+/// another device has deleted, before this device has heard. The move cannot
+/// land -- the folder is in the server's trash -- and the folder's local
+/// trash took the file with the directory, as a file the server already had.
+/// The server had it, but somewhere else: the next scan read the file as
+/// deleted here and the delete went to the server and to the other device.
+/// The file is rescued out beside the folder, and its move goes up from there.
+///
+/// Not covered, by the standing rules: a file moved in from a folder the same
+/// peer also deleted has its own record trashed by the server's cascade first,
+/// and goes with the folder -- a move is not an edit, and nothing is lost that
+/// is not already in the server's trash.
+#[test]
+fn a_file_moved_into_a_folder_deleted_elsewhere_is_kept() {
+    let world = World::new(9_975, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    let notes = b"the user's notes";
+    mac.fs.user_write("Old/kept.txt", b"left in the old folder");
+    mac.fs.user_write("Notes/notes.txt", notes);
+    assert!(world.settle().is_some());
+    pc.fs.user_remove("Old");
+    for _ in 0..3 {
+        world.pass(pc);
+    }
+    assert!(
+        world.server.files().into_iter().any(|f| f.name == "kept.txt" && f.trashed),
+        "pc's delete did not reach the server"
+    );
+    mac.fs.user_rename("Notes/notes.txt", "Old/notes.txt");
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert!(
+        live.iter().any(|f| f.sha256 == jd_sim::sha256_hex(notes)),
+        "the notes went to the trash: {:?}",
+        world.server.tree()
+    );
+    for d in [mac, pc] {
+        assert!(
+            disk_tree(d).values().any(|h| h.as_deref() == Some(jd_sim::sha256_hex(notes).as_str())),
+            "{} lost the notes: {:?}",
+            d.name,
+            d.fs.all_paths()
+        );
+    }
+    assert_converged(&world);
+}
+
+/// Kill2 75390, plat3 75486: a plain file carried into a vault, edited there,
+/// and carried out again while its conversion was still on its way up. The
+/// edit was seen only in the vault, by the sealed record minted for the file;
+/// the plain record it came from took the file back where it stood and sent
+/// the edit as its next version, in the clear. The sealed record keeps its
+/// file, and the file is held where the user put it, as any file saved in a
+/// vault and moved out before it was sent; moved back in, it goes up sealed.
+fn a_file_converted_and_edited_in_a_vault_is_held_when_carried_out_on(seed: u64, births: bool, out_to: &str) {
+    const ORIGINAL: &[u8] = b"a plain file, before it went into the vault";
+    const EDIT: &[u8] = b"edited inside the vault, never sent";
+    let (world, _, _) = a_vault_of_two_on(seed, &["laptop"], births);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("notes.txt", ORIGINAL);
+    assert!(world.settle().is_some());
+    let plain = world.server.files().into_iter().find(|f| f.sha256 == jd_sim::sha256_hex(ORIGINAL)).expect("up plain").id;
+    let refuse = || laptop.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    laptop.fs.user_rename("notes.txt", "Private/notes.txt");
+    refuse();
+    world.pass(laptop);
+    laptop.fs.user_write("Private/notes.txt", EDIT);
+    refuse();
+    world.pass(laptop);
+    laptop.net.set_faults(NetFaults::none());
+    assert!(
+        laptop.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional() && e.is_encrypted),
+        "construction: the conversion is still on its way up (births: {births})"
+    );
+    laptop.fs.user_mkdir("Out");
+    laptop.fs.user_rename("Private/notes.txt", out_to);
+    let _ = world.settle();
+    no_plaintext_of(&world, EDIT);
+    assert_eq!(laptop.fs.peek(out_to).as_deref(), Some(EDIT), "{:?}", laptop.fs.all_paths());
+    assert!(
+        laptop.store.open_issues().unwrap().iter().any(|i| i.kind == "held_outside_the_vault"),
+        "the user was not told it is held (births: {births}): {:?}",
+        laptop.store.open_issues().unwrap()
+    );
+    assert!(
+        world.server.all_versions().iter().filter(|v| v.file_id == plain).all(|v| v.sha256 == jd_sim::sha256_hex(ORIGINAL)),
+        "the plain file took another body (births: {births})"
+    );
+    laptop.fs.user_rename(out_to, "Private/notes.txt");
+    assert!(world.settle().is_some(), "never settled once it was back (births: {births})");
+    no_plaintext_of(&world, EDIT);
+    assert!(
+        !laptop.store.open_issues().unwrap().iter().any(|i| i.kind == "held_outside_the_vault"),
+        "still held once it was back in the vault (births: {births})"
+    );
+    if !births {
+        // A drive that keeps no identities syncs no vault (D3): the edit
+        // stays on this disk, in the vault, unsent.
+        assert_eq!(laptop.fs.peek("Private/notes.txt").as_deref(), Some(EDIT));
+        assert_converged(&world);
+        return;
+    }
+    let sealed: Vec<Option<String>> = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| world.server.files().into_iter().any(|l| l.id == f.id && !l.trashed))
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f).map(|(_, h)| h))
+        .collect();
+    assert!(sealed.contains(&Some(jd_sim::sha256_hex(EDIT))), "the edit is not in the vault (births: {births}): {sealed:?}");
+    assert_converged(&world);
+}
+
+#[test]
+fn a_file_converted_and_edited_in_a_vault_is_held_when_carried_out() {
+    a_file_converted_and_edited_in_a_vault_is_held_when_carried_out_on(9_974, true, "Out/notes.txt");
+}
+
+/// The same, carried back onto the plain file's own name. The source finding
+/// its own file at home with bytes it never agreed is witnessed by kill2 75390
+/// (`frozen_a_file_edited_in_a_vault_mid_conversion_is_held_seeds`), which with
+/// only the claimant's arm narrowed read it as the source's edit and never
+/// settled; this shape does not reach that reading.
+#[test]
+fn a_file_converted_and_edited_in_a_vault_and_carried_home_is_held() {
+    a_file_converted_and_edited_in_a_vault_is_held_when_carried_out_on(9_971, true, "notes.txt");
+}
+
+/// The same on a drive that keeps no identities, where the claimant's arm
+/// is not read and no vault is synced (D3): nothing of the edit goes up, in
+/// the clear or sealed. A guard, not a witness -- such a drive never starts
+/// the conversion.
+#[test]
+fn without_births_a_file_converted_and_edited_in_a_vault_is_held_when_carried_out() {
+    a_file_converted_and_edited_in_a_vault_is_held_when_carried_out_on(9_973, false, "Out/notes.txt");
+}
+
+/// The undo the claimant's hand-back exists for: a plain file carried into a
+/// vault and straight back out, unedited, while its conversion was on its way
+/// up. It is the plain file again, with no hold and no second copy.
+#[test]
+fn a_file_carried_into_a_vault_and_straight_back_is_plain_again() {
+    const ORIGINAL: &[u8] = b"a plain file that went in and came straight back";
+    let (world, _, _) = a_vault_of_two_on(9_972, &["laptop"], true);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("notes.txt", ORIGINAL);
+    assert!(world.settle().is_some());
+    laptop.fs.user_rename("notes.txt", "Private/notes.txt");
+    laptop.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    world.pass(laptop);
+    laptop.net.set_faults(NetFaults::none());
+    assert!(
+        laptop.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional() && e.is_encrypted),
+        "construction: the conversion is still on its way up"
+    );
+    laptop.fs.user_rename("Private/notes.txt", "notes.txt");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(!laptop.store.open_issues().unwrap().iter().any(|i| i.kind == "held_outside_the_vault"), "held");
+    let live = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(ORIGINAL)).count();
+    let sealed = world
+        .server
+        .vault_files()
+        .into_iter()
+        .filter(|f| world.server.files().into_iter().any(|l| l.id == f.id && !l.trashed))
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(&world, &f).and_then(|(_, h)| h))
+        .filter(|h| *h == jd_sim::sha256_hex(ORIGINAL))
+        .count();
+    assert_eq!((live, sealed), (1, 0), "{:?}", world.server.tree());
+    assert_eq!(laptop.fs.peek("notes.txt").as_deref(), Some(ORIGINAL));
+    assert_converged(&world);
+}
