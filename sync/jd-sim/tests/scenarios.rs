@@ -21708,3 +21708,555 @@ fn a_folder_given_up_here_carries_out_a_held_file_with_a_plain_copy_on_a_weak_di
         mac.store.open_issues().unwrap().iter().map(|i| (i.kind.clone(), i.entity)).collect::<Vec<_>>()
     );
 }
+
+// ---------------------------------------------------------------------------
+// The trash oracle (`World::trashes_no_delete_reached`): a server file goes
+// to the trash only through a delete that reached it.
+// ---------------------------------------------------------------------------
+
+/// The server file a path names, live or not.
+fn server_file_named(world: &World, name: &str) -> jd_sim::server::FileFact {
+    world.server.files().into_iter().find(|f| f.name == name).unwrap_or_else(|| panic!("no server file {name}: {:?}", world.server.files()))
+}
+
+/// The oracle's witness: a file the engine itself took off the disk, then
+/// read as deleted, is a trash no delete reached. Here the harness plays the
+/// engine's own hand (`Vfs::trash`), the shape of `trash_local` taking a held
+/// file with a folder a peer deleted (hostile2 74414 before fr).
+#[test]
+fn a_file_the_engine_took_off_the_disk_is_a_trash_no_delete_reached() {
+    let world = World::new(9_910, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("A/f.txt", b"a file nobody deletes");
+    assert!(world.settle().is_some());
+    jd_vfs::Vfs::trash(&mac.fs, std::path::Path::new("/sync/A/f.txt")).unwrap();
+    assert!(world.settle().is_some());
+    let f = server_file_named(&world, "f.txt");
+    assert!(f.trashed, "the premise: the engine read the file deleted and trashed it");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!(v.judged, 1, "{v:?}");
+    assert_eq!(v.unreached.len(), 1, "{v:?}");
+    assert!(v.unreached[0].starts_with(&format!("file {}:", f.id)), "{v:?}");
+}
+
+/// A file its user deleted: the trash mac sends is reached.
+#[test]
+fn a_file_its_user_deleted_is_a_trash_a_delete_reached() {
+    let world = World::new(9_909, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("A/f.txt", b"deleted by hand");
+    assert!(world.settle().is_some());
+    mac.fs.user_remove("A/f.txt");
+    assert!(world.settle().is_some());
+    assert!(server_file_named(&world, "f.txt").trashed, "the premise");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.removed), (1, 1), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// A folder its user deleted on the other device: the folder's trash is
+/// reached, and so is everything its cascade took.
+#[test]
+fn a_folder_its_user_deleted_reaches_everything_its_trash_took() {
+    let world = World::new(9_908, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/f.txt", b"one");
+    mac.fs.user_write("A/B/g.txt", b"two");
+    assert!(world.settle().is_some());
+    pc.fs.user_remove("A");
+    assert!(world.settle().is_some());
+    assert!(server_file_named(&world, "f.txt").trashed && server_file_named(&world, "g.txt").trashed, "the premise");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.removed), (2, 2), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// A trash made on the web, by no device: a person's own delete.
+#[test]
+fn a_folder_trashed_on_the_web_reaches_what_it_took() {
+    let world = World::new(9_907, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.user_write("A/f.txt", b"trashed on the web");
+    assert!(world.settle().is_some());
+    let a = world.server.folder_id_at("A").unwrap();
+    world.server.action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": a })).unwrap();
+    assert!(world.settle().is_some());
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.by_hand), (1, 1), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// A sealed file held outside its vault, deleted there by its user: its
+/// sealed copy goes to the trash by decision (owner decision D1), and the
+/// delete reached it -- the held file is the sealed file's own file here.
+#[test]
+fn a_held_file_its_user_deleted_reaches_its_sealed_copy() {
+    let (world, _private, out) = a_vault_of_two(9_906, &["holder", "peer"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Plain");
+    assert!(world.settle().is_some());
+    holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+    assert!(world.settle().is_some());
+    assert!(!held_issues(holder).is_empty(), "the premise: the vault file is held in Plain");
+    holder.fs.user_remove("Plain/out.txt");
+    assert!(world.settle().is_some());
+    assert!(world.server.files().iter().any(|f| f.id == out && f.trashed), "the premise: the sealed copy went: {:?}", world.server.files());
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.removed), (1, 1), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// A plain file the user carried into a vault: the sealed copy goes up and
+/// the plain one to the trash, by the conversion.
+#[test]
+fn a_file_carried_into_a_vault_reaches_its_plain_copy_by_conversion() {
+    let (world, _private, _out) = a_vault_of_two(9_905, &["holder", "peer"]);
+    let holder = world.device("holder");
+    // Declared sealed by its directory, as the sweep declares its vaults.
+    holder.fs.mark_sealed_dir("Private");
+    holder.fs.user_write("Plain/p.txt", b"plain, then carried in");
+    assert!(world.settle().is_some());
+    let plain = server_file_named(&world, "p.txt");
+    holder.fs.user_rename("Plain/p.txt", "Private/p.txt");
+    assert!(world.settle().is_some());
+    assert!(world.server.files().iter().any(|f| f.id == plain.id && f.trashed), "the premise: the plain copy went: {:?}", world.server.files());
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.carried), (1, 1), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// On a disk whose ids are positions the engine knows a file by its path
+/// and its bytes. A file the user moves and rewrites before any pass shows
+/// it neither: to the engine one file was deleted and another made, and
+/// nothing it is shown could have told it otherwise.
+#[test]
+fn a_file_moved_and_rewritten_on_a_disk_without_ids_is_unfollowable() {
+    let world = World::new(9_904, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    mac.fs.user_write("A/f.txt", b"before the move");
+    mac.fs.user_mkdir("B");
+    assert!(world.settle().is_some());
+    mac.fs.user_rename("A/f.txt", "B/g.txt");
+    mac.fs.user_write("B/g.txt", b"after the move, rewritten");
+    assert!(world.settle().is_some());
+    assert!(server_file_named(&world, "f.txt").trashed, "the premise: the engine read a delete and a new file");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.unfollowable), (1, 1), "{v:?}");
+    assert!(v.unreached.is_empty(), "{v:?}");
+}
+
+/// A conversion is the user's carry across a vault's edge, not any move of
+/// theirs: here the user only renames the plain file within its folder, and
+/// the ENGINE's own hand (`Vfs::rename`) takes it into the vault, which it
+/// then sends up sealed and trashes the plain copy for. No act of the user's
+/// reached that copy.
+#[test]
+fn an_engine_carry_into_a_vault_after_a_plain_rename_is_no_conversion() {
+    let (world, _private, _out) = a_vault_of_two(9_899, &["holder", "peer"]);
+    let holder = world.device("holder");
+    // Declared sealed, as in the conversion pin: what tells the two apart is
+    // whose hand crossed the edge, and nothing else.
+    holder.fs.mark_sealed_dir("Private");
+    holder.fs.user_write("Plain/p.txt", b"renamed by the user, carried by the engine");
+    assert!(world.settle().is_some());
+    let plain = server_file_named(&world, "p.txt");
+    holder.fs.user_rename("Plain/p.txt", "Plain/q.txt");
+    assert!(world.settle().is_some());
+    jd_vfs::Vfs::rename(&holder.fs, std::path::Path::new("/sync/Plain/q.txt"), std::path::Path::new("/sync/Private/q.txt")).unwrap();
+    assert!(world.settle().is_some());
+    assert!(world.server.files().iter().any(|f| f.id == plain.id && f.trashed), "the premise: the plain copy went: {:?}", world.server.files());
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.carried), (1, 0), "{v:?}");
+    assert_eq!(v.unreached.len(), 1, "{v:?}");
+}
+
+/// A move one look saw and a rewrite the next saw are two things the engine
+/// saw apart and could follow, on any disk: here, on a disk without ids, the
+/// user moves the file, a pass follows it by its bytes, the user rewrites
+/// it, and the engine's own hand (`Vfs::trash`) then takes it off the disk.
+/// Its trash is no delete's, and no unfollowable file's either.
+#[test]
+fn a_move_and_a_rewrite_seen_apart_are_followable() {
+    let world = World::new(9_898, &["mac", "pc"]);
+    let mac = world.device("mac");
+    mac.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    mac.fs.user_write("A/f.txt", b"moved, then a look, then rewritten");
+    mac.fs.user_mkdir("B");
+    assert!(world.settle().is_some());
+    mac.fs.user_rename("A/f.txt", "B/f.txt");
+    assert!(world.settle().is_some());
+    let f = server_file_named(&world, "f.txt");
+    assert_eq!(f.folder, world.server.folder_id_at("B"), "the premise: the pass followed the move");
+    mac.fs.user_write("B/f.txt", b"rewritten after the look");
+    jd_vfs::Vfs::trash(&mac.fs, std::path::Path::new("/sync/B/f.txt")).unwrap();
+    assert!(world.settle().is_some());
+    assert!(world.server.files().iter().any(|g| g.id == f.id && g.trashed), "the premise: the engine read it deleted");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.unfollowable), (1, 0), "{v:?}");
+    assert_eq!(v.unreached.len(), 1, "{v:?}");
+}
+
+/// A carry excuses the copy it left behind, not a copy made on the far side
+/// later. The user carries a plain file into a vault and the conversion
+/// settles: its plain copy's trash is the carry's. Then, with every id on the
+/// disk renumbered (a restore), the ENGINE's own hand (`Vfs::rename`) moves
+/// the sealed file and the user rewrites it before any look: the engine sends
+/// it up again under a new id and trashes the sealed copy. That trash is no
+/// carry of the user's, and no move of theirs left it unfollowable.
+#[test]
+fn a_carry_excuses_the_copy_it_left_not_one_made_on_the_far_side() {
+    let (world, _private, _) = a_vault_of_two(9_896, &["holder", "peer"]);
+    let holder = world.device("holder");
+    holder.fs.mark_sealed_dir("Private");
+    holder.fs.user_write("Plain/p.txt", b"carried in, then sent again by the engine");
+    assert!(world.settle().is_some());
+    let plain = server_file_named(&world, "p.txt");
+    let before: Vec<i64> = world.server.files().iter().map(|f| f.id).collect();
+    holder.fs.user_rename("Plain/p.txt", "Private/p.txt");
+    assert!(world.settle().is_some());
+    let sealed: Vec<i64> = world.server.files().iter().filter(|f| f.encrypted && !f.trashed && !before.contains(&f.id)).map(|f| f.id).collect();
+    let [sealed] = sealed.as_slice() else { panic!("the premise: one sealed copy of p.txt: {:?}", world.server.files()) };
+    holder.fs.renumber_every_id();
+    jd_vfs::Vfs::rename(&holder.fs, std::path::Path::new("/sync/Private/p.txt"), std::path::Path::new("/sync/Private/q.txt")).unwrap();
+    holder.fs.user_write("Private/q.txt", b"rewritten where the engine put it");
+    assert!(world.settle().is_some());
+    let files = world.server.files();
+    assert!(files.iter().any(|f| f.id == plain.id && f.trashed), "the premise: the plain copy went: {files:?}");
+    assert!(files.iter().any(|f| f.id == *sealed && f.trashed), "the premise: the sealed copy went: {files:?}");
+    let v = world.trashes_no_delete_reached();
+    assert_eq!((v.judged, v.carried, v.unfollowable), (2, 1, 0), "{v:?}");
+    assert_eq!(v.unreached.len(), 1, "{v:?}");
+    assert!(v.unreached[0].starts_with(&format!("file {sealed}:")), "{v:?}");
+}
+
+/// A peer moves a file, unedited, into a folder this device deletes: the file
+/// was never in the folder here, so it is not handed to it. It stays where
+/// this device has it as the same file, moved back there on the server --
+/// not trashed with the folder and sent up again as a new one, its history
+/// left in the trash.
+#[test]
+fn a_file_a_peer_moves_into_a_folder_deleted_here_keeps_its_record() {
+    let world = World::new(9_893, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/top.txt", b"untouched");
+    mac.fs.user_write("Other/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let shot = server_file_named(&world, "shot.psd").id;
+    pc.fs.user_rename("Other/shot.psd", "Art/shot.psd");
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(!tree.contains_key("Art") && !tree.contains_key("Art/top.txt"), "{tree:?}");
+    let f = world.server.files().into_iter().find(|f| f.id == shot).expect("the record is gone");
+    assert!(!f.trashed, "the file went to the trash with the folder: {:?}", world.server.files());
+    assert_eq!(tree.get("Other/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(b"the first version")), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// The same with the folder's trash sent in an earlier pass and refused, so
+/// still queued when the peer's move arrives.
+#[test]
+fn a_file_a_peer_moves_into_a_folder_whose_trash_is_queued_here_keeps_its_record() {
+    let world = World::new(9_895, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("Art");
+    mac.fs.user_write("Other/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let shot = server_file_named(&world, "shot.psd").id;
+    mac.fs.user_remove("Art");
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_trash".into()), ..NetFaults::none() });
+    world.pass(mac);
+    assert!(!mac.store.queued_ops().unwrap().is_empty(), "the premise: the trash is still queued");
+    assert!(world.server.tree().contains_key("Art"), "the premise: the folder is still live");
+    pc.fs.user_rename("Other/shot.psd", "Art/shot.psd");
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(!tree.contains_key("Art"), "{tree:?}");
+    let f = world.server.files().into_iter().find(|f| f.id == shot).expect("the record is gone");
+    assert!(!f.trashed, "the file went to the trash with the folder: {:?}", world.server.files());
+    assert_eq!(tree.get("Other/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(b"the first version")), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// A peer moves a FOLDER, unedited, into a folder this device deletes: the
+/// same, one level up. The folder and what is in it stay where this device
+/// has them, as the same records.
+#[test]
+fn a_folder_a_peer_moves_into_a_folder_deleted_here_keeps_its_records() {
+    let world = World::new(9_894, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/top.txt", b"untouched");
+    mac.fs.user_write("Other/Sub/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    let shot = server_file_named(&world, "shot.psd").id;
+    let sub = world.server.folders().into_iter().find(|f| f.name == "Sub").expect("no Sub").id;
+    pc.fs.user_rename("Other/Sub", "Art/Sub");
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(!tree.contains_key("Art") && !tree.contains_key("Art/top.txt"), "{tree:?}");
+    let folder = world.server.folders().into_iter().find(|f| f.id == sub).expect("the folder's record is gone");
+    assert!(!folder.trashed, "the folder went to the trash with the one it was moved into: {:?}", world.server.folders());
+    let f = world.server.files().into_iter().find(|f| f.id == shot).expect("the record is gone");
+    assert!(!f.trashed, "the file went to the trash with the folder: {:?}", world.server.files());
+    assert_eq!(tree.get("Other/Sub/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(b"the first version")), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// A peer moves a folder into a folder this device deletes and edits a file
+/// in it: the edit beats the delete, and the folder it was edited in comes
+/// back where the peer put it, with the one it was moved into (D1).
+#[test]
+fn a_folder_a_peer_moves_in_with_an_edit_comes_back_where_the_peer_put_it() {
+    let world = World::new(9_892, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/top.txt", b"untouched");
+    mac.fs.user_write("Other/Sub/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Other/Sub", "Art/Sub");
+    pc.fs.user_write("Art/Sub/shot.psd", b"pc's edit");
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/Sub/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(b"pc's edit")), "the peer's edit is not live where the peer put it: {tree:?}");
+    assert!(!tree.contains_key("Art/top.txt") && !tree.contains_key("Other/Sub"), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// A peer moves two files into a folder this device deletes and edits one:
+/// the folder comes back for the edit (D1), and the other, the folder no
+/// longer going, stays in it where the peer put it.
+#[test]
+fn a_file_a_peer_moves_into_a_folder_kept_for_an_edit_stays_where_the_peer_put_it() {
+    let world = World::new(9_891, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Art/top.txt", b"untouched");
+    mac.fs.user_write("Other/a.txt", b"moved, not edited");
+    mac.fs.user_write("Other/b.txt", b"the first version");
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("Other/a.txt", "Art/a.txt");
+    pc.fs.user_rename("Other/b.txt", "Art/b.txt");
+    pc.fs.user_write("Art/b.txt", b"pc's edit");
+    world.pass(pc);
+    mac.fs.user_remove("Art");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/b.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"pc's edit")), "{tree:?}");
+    assert_eq!(tree.get("Art/a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"moved, not edited")), "{tree:?}");
+    assert!(!tree.contains_key("Art/top.txt") && !tree.contains_key("Other/a.txt"), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// The same with the peer editing the file it moved in: the edit beats the
+/// delete, and lives where the peer put it, in the folder brought back for
+/// it -- the trash still queued from the earlier pass included.
+#[test]
+fn a_file_a_peer_moves_and_edits_in_a_folder_whose_trash_is_queued_here_lives_where_the_peer_put_it() {
+    let world = World::new(9_888, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_mkdir("Art");
+    mac.fs.user_write("Other/shot.psd", b"the first version");
+    assert!(world.settle().is_some());
+    mac.fs.user_remove("Art");
+    mac.net.set_faults(NetFaults { refuse_before: Some("drive_trash".into()), ..NetFaults::none() });
+    world.pass(mac);
+    assert!(!mac.store.queued_ops().unwrap().is_empty(), "the premise: the trash is still queued");
+    assert!(world.server.tree().contains_key("Art"), "the premise: the folder is still live");
+    pc.fs.user_rename("Other/shot.psd", "Art/shot.psd");
+    pc.fs.user_write("Art/shot.psd", b"pc's edit");
+    world.pass(pc);
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(b"pc's edit")), "the peer's edit is not live where the peer put it: {tree:?}");
+    assert!(!tree.contains_key("Other/shot.psd"), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// A held file dragged back into its vault on a stick whose ids mean
+/// nothing, alone or while a new file is saved at the name it was held at:
+/// the sealed copy stays where it is, nothing new goes up for it, its
+/// plaintext is never sent, and the new file goes up as a new plain file.
+/// RED before, with the new file saved: the held record,
+/// read by its path, took the new file as its own edit, held and never sent,
+/// and its own file back in the vault was minted again as a new file waiting
+/// to go up.
+#[test]
+fn a_held_file_dragged_home_on_a_usb_stick_is_released_unedited() {
+    for (label, model) in [("mount session", jd_sim::FileIds::MountSession), ("directory slot", jd_sim::FileIds::DirectorySlot)] {
+        for fresh in [false, true] {
+            let (world, private, out) = a_vault_of_two(9_889, &["holder"]);
+            let holder = world.device("holder");
+            holder.fs.file_ids(model);
+            holder.fs.user_mkdir("Plain");
+            holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+            assert!(world.settle().is_some(), "{label} {fresh}: the hold never settled");
+            let versions_of_out = |world: &World| world.server.all_versions().into_iter().filter(|v| v.file_id == out).count();
+            let versions = versions_of_out(&world);
+            let new_file = b"a new file saved where the held one stood";
+            holder.fs.user_rename("Plain/out.txt", "Private/out.txt");
+            if fresh {
+                holder.fs.user_write("Plain/out.txt", new_file);
+            }
+            assert!(world.settle().is_some(), "{label} {fresh}: never quiet");
+            no_plaintext_of(&world, HELD_BODY);
+            assert_eq!(server_folder_of(&world, out), Some(Some(private)), "{label} {fresh}: the sealed copy left the vault");
+            assert_eq!(versions_of_out(&world), versions, "{label} {fresh}: a version went up for a file that came home unedited");
+            if fresh {
+                assert_eq!(world.server.tree().get("Plain/out.txt").cloned().flatten(), Some(jd_sim::sha256_hex(new_file)), "{label}: {:?}", world.server.tree());
+            }
+            assert_converged(&world);
+        }
+    }
+}
+
+const CARRIED_INTO_THE_VAULT: &[u8] = b"a plain file carried into the parked vault";
+const PLAIN_ON_THE_STICK: &[u8] = b"another plain file on the stick";
+const EDITED_IN_THE_VAULT: &[u8] = b"edited in the parked vault, never to go up plain";
+
+/// A Windows FAT stick with the vault parked, two files saved in it, and a
+/// plain file traded by a swap into the vault: its record's bytes now stand
+/// at the first vault name, held by a sealed stand-in that keeps the
+/// server's plain copy until the file can go up sealed. Returns the world
+/// and the plain record's server id.
+fn a_plain_file_carried_into_a_parked_vault(seed: u64) -> (World, i64) {
+    let (world, _, _) = a_vault_of_two(seed, &["stick", "desk"]);
+    let desk = world.device("desk");
+    desk.fs.user_write("a.txt", CARRIED_INTO_THE_VAULT);
+    desk.fs.user_write("b.txt", PLAIN_ON_THE_STICK);
+    assert!(world.settle().is_some());
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    assert!(world.settle().is_some(), "the vault is parked on the stick");
+    stick.fs.user_write("Private/s.txt", FIRST_SAVED_IN_THE_PARKED_VAULT);
+    stick.fs.user_write("Private/z.txt", SECOND_SAVED_IN_THE_PARKED_VAULT);
+    assert!(world.settle().is_some());
+    let a = server_file_named(&world, "a.txt").id;
+    world.swap_names_by_chaos("stick", "a.txt", "Private/s.txt");
+    assert!(world.settle().is_some());
+    assert!(
+        stick.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional() && e.replaces.map(|r| r.server_id) == Some(a)),
+        "the shape needs a stand-in holding the plain file's conversion"
+    );
+    (world, a)
+}
+
+const ALSO_CARRIED_INTO_THE_VAULT: &[u8] = b"a second plain file carried into the parked vault";
+
+/// (C's shape, kill2 75109.) Two plain files carried into the parked vault,
+/// each held by its sealed stand-in, then a rotation through the vault before
+/// the engine looks: a third plain file onto the first stand-in's name, the
+/// first stand-in's bytes onto the second's, and the second's bytes out to
+/// the third file's name. Each stand-in follows its own bytes, and neither
+/// plain copy on the server is lost while its bytes stand on the stick. RED
+/// before: read by its path, the first stand-in was forgotten as a file
+/// created and removed again, and its bytes, at the second stand-in's name,
+/// were read as that one's edit; the first plain file's server copy was left
+/// with nothing on the stick to settle it, the device quiet and never
+/// converged. In the sweep's world the same forgetting sent the plain copy
+/// to the trash (frozen 75109).
+#[test]
+fn a_stand_in_rotated_within_a_parked_vault_on_a_stick_keeps_its_hold() {
+    let (world, _, _) = a_vault_of_two(9_887, &["stick", "desk"]);
+    let desk = world.device("desk");
+    desk.fs.user_write("a.txt", CARRIED_INTO_THE_VAULT);
+    desk.fs.user_write("c.txt", ALSO_CARRIED_INTO_THE_VAULT);
+    desk.fs.user_write("b.txt", PLAIN_ON_THE_STICK);
+    assert!(world.settle().is_some());
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    assert!(world.settle().is_some(), "the vault is parked on the stick");
+    stick.fs.user_write("Private/s.txt", FIRST_SAVED_IN_THE_PARKED_VAULT);
+    stick.fs.user_write("Private/z.txt", SECOND_SAVED_IN_THE_PARKED_VAULT);
+    assert!(world.settle().is_some());
+    let a = server_file_named(&world, "a.txt").id;
+    let c = server_file_named(&world, "c.txt").id;
+    world.swap_names_by_chaos("stick", "a.txt", "Private/s.txt");
+    assert!(world.settle().is_some());
+    world.swap_names_by_chaos("stick", "c.txt", "Private/z.txt");
+    assert!(world.settle().is_some());
+    let stands_in_for = |id: i64| stick.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional() && e.replaces.map(|r| r.server_id) == Some(id));
+    assert!(stands_in_for(a) && stands_in_for(c), "the shape needs a stand-in for each plain file");
+    world.swap_names_by_chaos("stick", "b.txt", "Private/s.txt");
+    world.swap_names_by_chaos("stick", "b.txt", "Private/z.txt");
+    assert!(world.settle().is_some(), "the device must go quiet");
+    for id in [a, c] {
+        let plain = world.server.files().into_iter().find(|f| f.id == id).expect("a plain record is gone");
+        assert!(!plain.trashed, "plain {id} went to the trash while its bytes stood on the stick: {:?}", world.server.tree());
+    }
+    let v = world.trashes_no_delete_reached();
+    assert!(v.unreached.is_empty(), "{v:?}");
+    no_plaintext_of(&world, FIRST_SAVED_IN_THE_PARKED_VAULT);
+    no_plaintext_of(&world, SECOND_SAVED_IN_THE_PARKED_VAULT);
+    no_plaintext_of(&world, HELD_BODY);
+    assert_converged(&world);
+}
+
+/// A stand-in's bytes carried OUT of the parked vault by a swap, onto a plain
+/// file's path that is not its source's. Unedited, they are its source's own
+/// file, back out: the plain file under another name. Edited in the vault
+/// first, they are a sealed file that has left its vault: held, and never
+/// sent in the clear.
+#[test]
+fn a_stand_in_carried_out_of_a_parked_vault_to_another_name_never_goes_up_plain() {
+    for edited in [false, true] {
+        let (world, a) = a_plain_file_carried_into_a_parked_vault(9_886);
+        let stick = world.device("stick");
+        if edited {
+            stick.fs.user_write("Private/s.txt", EDITED_IN_THE_VAULT);
+            assert!(world.settle().is_some(), "edited {edited}: the edit never settled");
+        }
+        world.swap_names_by_chaos("stick", "Private/s.txt", "b.txt");
+        assert!(world.settle().is_some(), "edited {edited}: the device must go quiet");
+        no_plaintext_of(&world, EDITED_IN_THE_VAULT);
+        no_plaintext_of(&world, FIRST_SAVED_IN_THE_PARKED_VAULT);
+        no_plaintext_of(&world, SECOND_SAVED_IN_THE_PARKED_VAULT);
+        no_plaintext_of(&world, HELD_BODY);
+        let v = world.trashes_no_delete_reached();
+        assert!(v.unreached.is_empty(), "edited {edited}: {v:?}");
+        if !edited {
+            let plain = world.server.files().into_iter().find(|f| f.id == a).expect("the plain record is gone");
+            assert!(!plain.trashed, "the plain file came back out and its copy went to the trash: {:?}", world.server.tree());
+        }
+        assert_converged(&world);
+    }
+}
+
+/// A sealed file held outside its vault on a stick whose ids mean nothing,
+/// dragged a second time, to a third name in another plain folder: it is the
+/// held file still, followed by its bytes, its hold and its sealed copy
+/// where they were, and its plaintext never sent.
+#[test]
+fn a_held_file_dragged_again_on_a_usb_stick_keeps_its_hold() {
+    for (label, model) in [("mount session", jd_sim::FileIds::MountSession), ("directory slot", jd_sim::FileIds::DirectorySlot)] {
+        let (world, private, out) = a_vault_of_two(9_885, &["holder"]);
+        let holder = world.device("holder");
+        holder.fs.file_ids(model);
+        holder.fs.user_mkdir("Plain");
+        holder.fs.user_mkdir("Other");
+        holder.fs.user_rename("Private/out.txt", "Plain/out.txt");
+        assert!(world.settle().is_some(), "{label}: the hold never settled");
+        assert_eq!(held_issues(holder).len(), 1, "{label}: {:?}", holder.store.open_issues().unwrap());
+        holder.fs.user_rename("Plain/out.txt", "Other/third.txt");
+        assert!(world.settle().is_some(), "{label}: the device must go quiet");
+        no_plaintext_of(&world, HELD_BODY);
+        assert_eq!(server_folder_of(&world, out), Some(Some(private)), "{label}: the sealed copy left the vault");
+        assert_eq!(held_issues(holder).len(), 1, "{label}: the hold did not follow: {:?}", holder.store.open_issues().unwrap());
+        let record = holder.store.get_entry(jd_core::model::EntityId::file(out)).unwrap().expect("the held record is gone");
+        assert_eq!(record.local_placement().name, "third.txt", "{label}: the held record did not follow its file");
+        let v = world.trashes_no_delete_reached();
+        assert!(v.unreached.is_empty(), "{label}: {v:?}");
+        assert_converged(&world);
+    }
+}

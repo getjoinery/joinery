@@ -5433,7 +5433,13 @@ fn detect_folder_moves(
                 // The server naming the path's own holder there is the name
                 // the holder is leaving in this chain, not another folder
                 // arriving.
-                || remote_wants.get(at).is_some_and(|w| *w != cur && tracked.get(at) != Some(w))
+                // Not where its own directory is proven, id and birth: that
+                // is where the folder is on this disk, whatever the server is
+                // naming the path for, and the race over the name is
+                // naming's. Refused, the folder was read as deleted and went
+                // to the trash with what was in it (kill2 75165, 75162).
+                || (remote_wants.get(at).is_some_and(|w| *w != cur && tracked.get(at) != Some(w))
+                    && proven_at.get(&cur) != Some(&at))
             {
                 break false;
             }

@@ -96,7 +96,13 @@ the file to another record.
   to are weak.
 - **The scan pairs by identity first** on a strong volume: a record's own file
   is that record's wherever it stands, and the path decides only for a file no
-  record owns. A weak volume pairs path-first.
+  record owns. A weak volume pairs path-first. Where a record's file stands
+  under several names, by its identity or by the bytes a weak volume follows
+  it by, one in its own folder is its file, then one that kept its name.
+  Where two records want one path, the one at home there — its own file, or
+  with no id its agreed bytes — owns the file at it: the other is not read as
+  having saved over it, and a file of the other's set aside beside it is that
+  record's, not its backup.
 - **A save by rename is an edit whichever pass sees it,** on a strong volume.
   A file never sent, renamed over a record whose own file stands nowhere, is
   that record's next version, as a file no record owns at that path is. The
@@ -140,7 +146,8 @@ follows takes that directory as the vault's own.
 
 - **Proven: id and birth both match**, on a strong volume. The folder follows
   its directory wherever it went, whatever is inside it, even when every file
-  the folder had was moved out first. A directory made where another was
+  the folder had was moved out first, and onto a path the server is giving
+  another folder in the same pass: the race over that name is naming's. A directory made where another was
   deleted can inherit its id (`rm -rf A; mkdir B` hands `B` `A`'s inode on
   ext4) but never its birth, so a proven directory is never a stranger.
   The same pair says when the folder's directory is gone: its id standing on
@@ -224,7 +231,11 @@ a file another device was still sending. This device's own files that were never
 sent go with the folder its user deleted. The server trashes a folder with
 everything in it, so an edit that reaches the server after this device last read
 the change feed and before its trash lands goes to the server's trash with the
-folder.
+folder. A file or folder this device holds outside a folder it deletes is not
+handed to that folder: where a peer's move would land it there, in a race with
+this device's own move of it or on its own, it stays where it stands here and is
+moved there on the server. Where the folder comes back for an edit, what the
+peer moved into it stays there.
 
 **Deletes only ever win against unchanged content.** A remote move with a local
 delete resolves as a delete only when the last-agreed hash still matches the
@@ -619,7 +630,11 @@ copy, and where a file held outside its vault now stands at its name, it waits
 for that name like any file from the server. A plaintext file found standing in
 a vault folder where a download is arriving, and set aside there under a
 conflict name, is converted the same way: its record stays where it was agreed,
-and the next scan reads the file moved into the vault.
+and the next scan reads the file moved into the vault. On a disk whose file ids
+cannot say which file is which, the record waiting to go up sealed knows its
+file by the bytes it was last seen with: when another file comes to stand at its
+name and those bytes stand at another, it follows them there, rather than being
+read as gone and letting its source's plain copy go to the trash.
 
 A file edited in the vault before its conversion has gone up belongs to the
 vault from that edit on. Carried out again, it is held like any file saved in a
@@ -636,7 +651,9 @@ While it is held:
 
 - Moving it again outside any vault — renaming it where it stands, or moving it
   to another plain folder — is this disk's side alone; the server is asked
-  nothing.
+  nothing. On a disk whose file ids cannot say which file is which, the held
+  file is known by the bytes it was last seen with once another file stands at
+  its path, and followed to them.
 - Moving it back into a vault lands it on the server's placement, a move within
   the vault when it goes to a different folder there. Its own file standing in
   the slot the server keeps it in is the file come home even when another file

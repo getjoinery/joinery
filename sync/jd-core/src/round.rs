@@ -234,6 +234,72 @@ pub fn run_round(
         }
     }
 
+    // A file or folder this device holds outside a folder it is deleting is
+    // not handed to that folder by a peer's move. Applied, the server's move
+    // lands it in the folder this device's own trash then takes, with
+    // nobody's delete behind it: the user's rotation of ring folders on FAT,
+    // read as a new folder and the old one gone, while the file's move to the
+    // new one raced a peer's move into the old (clean2 74014), and a file
+    // this device never moved that a peer moved into the folder going (plat3
+    // 75424, swaps off). It stays where it is here, and is moved there on the
+    // server, planned from where the server has it: that is the copy the move
+    // acts on, so the executor's move agrees with the plan, where planned from
+    // the agreed placement it is overtaken every pass. The folder's trash
+    // waits for that move: `trash_remote` retries while a queued move's
+    // entity still sits under it on the server. A folder D1 brought back
+    // above for an edit is not going, and what arrives in it stays: an
+    // edit's folders are all brought back, so this never meets an edit. A
+    // trash still in the journal from an earlier pass is not this round's:
+    // the server refuses it once the peer's move has changed the folder
+    // (`unchanged_since`), the executor stands it down, and the round that
+    // decides it again applies this.
+    let trashed_here: std::collections::HashSet<i64> = resolved
+        .iter()
+        .filter(|(input, actions)| {
+            input.entry.id.entity_type == crate::model::EntityType::Folder
+                && actions.iter().any(|a| matches!(a, Action::TrashRemote))
+        })
+        .map(|(input, _)| input.entry.id.server_id)
+        .collect();
+    if !trashed_here.is_empty() {
+        let under_a_trashed = |mut at: Option<i64>| {
+            let mut guard = 0;
+            while let Some(f) = at {
+                if trashed_here.contains(&f) {
+                    return true;
+                }
+                guard += 1;
+                if guard > 512 {
+                    break;
+                }
+                at = parents.remote.get(&f).copied().flatten();
+            }
+            false
+        };
+        for (input, actions) in resolved.iter_mut() {
+            let id = input.entry.id;
+            // Where this device holds it: where its user moved it, in a race
+            // the server won, or where it stands, for one only the server
+            // moved.
+            let raced = out.issues.iter().find_map(|(who, issue)| match issue {
+                Issue::MoveRaceServerWon { local_wanted, .. } if *who == id => Some(local_wanted.clone()),
+                _ => None,
+            });
+            let unmoved_here = input.local.is_none().then(|| input.entry.local_placement().clone());
+            let Some(local_wanted) = raced.or(unmoved_here) else {
+                continue;
+            };
+            let into_a_trashed = actions
+                .iter()
+                .any(|a| matches!(a, Action::ApplyRemoteMove { to, .. } if under_a_trashed(to.parent)));
+            if into_a_trashed && !under_a_trashed(local_wanted.parent) {
+                input.entry.synced_placement = Some(input.entry.remote.clone());
+                *actions = vec![Action::ApplyLocalMove { to: local_wanted }];
+                out.issues.retain(|(who, issue)| !(*who == id && matches!(issue, Issue::MoveRaceServerWon { .. })));
+            }
+        }
+    }
+
     // A move race this side kept the folder half of takes the file out of a
     // folder the server still has it in: the file goes where this side put it,
     // the agreement stays at the server's place, and the next scan sends the

@@ -306,10 +306,12 @@ impl SimNet {
             return Err(e);
         }
         self.server.acting_as(Some(&self.device));
+        self.server.calling_from(Some(&self.device));
         let out = match key {
             Some(k) => self.server.action_idempotent(name, body, k),
             None => self.server.action(name, body),
         };
+        self.server.calling_from(None);
         if netlog {
             match &out {
                 Ok(v) => {

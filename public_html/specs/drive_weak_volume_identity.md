@@ -397,8 +397,23 @@ The never-sent `a_backup` test is replaced by X's clauses.
   otherwise X would claim the copy's file.
 - **Twin at home:** if the file elsewhere stands at a path whose record is at
   home with it, X does not follow.
-- **Held records** reach X only through `home_again` (`server_home`). X never
-  turns a held file back at its server home into a plain move.
+- **Held records:** a source whose bytes a claimant holds is never keyed --
+  those bytes are the claimant's. A claimant, or a sealed file held outside its
+  vault (`server_home`), is keyed by its last-seen bytes only when its path no
+  longer holds them; at home it reads by its path, and its file names nobody
+  else (`home_of_the_unkeyed`). Away from home X follows it to its bytes, as
+  the strong reading follows it by identity: within a vault a claimant stays a
+  claimant at its new name; out of every vault onto its source's agreed bytes
+  it is its source's file again (the undo); a held file whose bytes stand at
+  its server home is home, and a new file at the path it was held at goes up as
+  new. The cut is witnessed both ways. Keyed at home too, a claimant and a copy
+  of its bytes named neither, and the copy stopped following (win hostile2
+  74407). Keyed for claimants only, a held file whose name a claimant's bytes
+  came back to read as deleted and its sealed copy went to the trash (kill2
+  75122). Unkeyed away from home, a claimant whose name another record's file
+  came to stand at was forgotten as a file created and removed again, and its
+  source's plain copy went to the trash while its bytes stood in the vault
+  (kill2 75109, 75118).
 - **Awaiting bytes** at the elsewhere path is already a trade
   (`mine_on_anothers_path`); X adds nothing there.
 
