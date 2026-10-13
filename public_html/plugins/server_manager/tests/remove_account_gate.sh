@@ -168,20 +168,22 @@ echo "getjoinery_postgres_pg16" >> "$D/volumes"
 echo "joinery-getjoinery:pre-rebase-pg16" >> "$D/images"
 mkdir -p "$T/fs/root/rebase/getjoinery" "$T/fs/root/rebase/getjoinery_orgs"
 touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended"
-# Its disk allowance on a disk pool (docker_disk_pool.sh), beside a neighbour's
-# whose name begins with getjoinery's.
+# Its disk allowance on a disk pool (docker_disk_pool.sh), beside two
+# neighbours' whose names begin with getjoinery's, one of them a site named
+# getjoinery_deploy, whose project's name is what getjoinery's deploy
+# project's was before it took a dot.
 touch "$T/fs/etc/joinery/sites/getjoinery/disk_allowance"
-printf 'joinery_getjoinery:1000000001\njoinery_getjoinery_backups:1000000002\njoinery_getjoinery_deploy:1000000003\njoinery_getjoinery_developers:1000000004\n' > "$T/fs/etc/projid"
-printf '1000000001:/v/getjoinery_uploads\n1000000001:/v/getjoinery_code\n1000000002:/v/getjoinery_backups\n1000000003:/v/getjoinery_deploy\n1000000004:/v/getjoinery_developers_uploads\n' > "$T/fs/etc/projects"
+printf 'joinery_getjoinery:1000000001\njoinery_getjoinery.backups:1000000002\njoinery_getjoinery.deploy:1000000003\njoinery_getjoinery_developers:1000000004\njoinery_getjoinery_deploy:1000000005\n' > "$T/fs/etc/projid"
+printf '1000000001:/v/getjoinery_uploads\n1000000001:/v/getjoinery_code\n1000000002:/v/getjoinery_backups\n1000000003:/v/getjoinery_deploy\n1000000004:/v/getjoinery_developers_uploads\n1000000005:/v/getjoinery_deploy_uploads\n' > "$T/fs/etc/projects"
 cp "$T/fs/etc/apache2/sites-available/getjoinery.conf" "$T/fs/etc/apache2/sites-available/getjoinery.conf.before-render.1"
 out="$(run getjoinery)"; rc=$?
 chk "A: getjoinery removal verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')" "1"
 chk "A: exit 0" "$rc" "0"
 chk "A: none of getjoinery's volumes left" "$(grep -cE '^getjoinery_[a-z_]+$' "$D/volumes" | tr -d ' ')" "48"
 chk "A: getjoinery's own sixteen gone" "$(for v in $mine; do grep -xF "getjoinery_$v" "$D/volumes"; done | wc -l | tr -d ' ')" "0"
-chk "A: its disk allowance's projects and mark go; the neighbour's stay" \
+chk "A: its disk allowance's projects and mark go; the neighbours' stay, a_deploy's too" \
     "$(cut -d: -f1 "$T/fs/etc/projid" | paste -sd,)|$(cut -d: -f1 "$T/fs/etc/projects" | sort -u | paste -sd,)|$(there /etc/joinery/sites/getjoinery/disk_allowance)" \
-    "joinery_getjoinery_developers|1000000004|no"
+    "joinery_getjoinery_developers,joinery_getjoinery_deploy|1000000004,1000000005|no"
 chk "A: the rebase's kept database gone" "$(grep -cxF getjoinery_postgres_pg16 "$D/volumes")" "0"
 chk "A: no docker call names a sibling" "$(grep -cE 'getjoinery_(developers|orgs|test)' "$D/log")" "0"
 chk "A: siblings' containers all there" "$(grep -cE '^getjoinery_(developers|orgs|test)$' "$D/containers")" "3"
@@ -292,7 +294,10 @@ chk "C3: refuses (exit 1)" "$rc" "1"
 chk "C3: proxy vhost kept" "$(there /etc/apache2/sites-available/getjoinery.conf)" "yes"
 
 # --- I: a container install.sh did not make is refused before anything goes.
-for case in image bind foreign rollback; do
+# The host's restrictions, read-only, are a mount install.sh gives every site on
+# a host that has them (specs/host_restrictions.md): that exact bind is ours; the
+# same directory writable, or another source at its path, is not.
+for case in image bind foreign rollback restrictions restrictions_rw restrictions_elsewhere; do
     reset
     container_site handmade
     case "$case" in
@@ -300,10 +305,15 @@ for case in image bind foreign rollback; do
         bind)     printf 'bind::/srv/handmade-data ' >> "$D/mounts_handmade" ;;
         foreign)  printf 'volume:getjoinery_orgs_postgres:/var/lib/docker/volumes/getjoinery_orgs_postgres/_data ' >> "$D/mounts_handmade" ;;
         rollback) echo "joinery-handmade:pre-rebase-pg16" > "$D/image_handmade" ;;
+        restrictions)           printf 'bind::%s/etc/joinery/host_restrictions:/etc/joinery/host_restrictions:false ' "$T/fs" >> "$D/mounts_handmade" ;;
+        restrictions_rw)        printf 'bind::%s/etc/joinery/host_restrictions:/etc/joinery/host_restrictions:true ' "$T/fs" >> "$D/mounts_handmade" ;;
+        restrictions_elsewhere) printf 'bind::/srv/handmade-rules:/etc/joinery/host_restrictions:false ' >> "$D/mounts_handmade" ;;
     esac
     out="$(run handmade)"; rc=$?
     if [ "$case" = rollback ]; then
         chk "I: a container on its rolled-back pre-rebase image is still ours" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED handmade$')" "1"
+    elif [ "$case" = restrictions ]; then
+        chk "I: a container with the host's restrictions mounted read-only is still ours" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED handmade$')" "1"
     else
         chk "I: $case: refused (exit 1)" "$rc" "1"
         chk "I: $case: says it is not install.sh's" "$(echo "$out" | grep -c "is not one install.sh made")" "1"

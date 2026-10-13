@@ -122,7 +122,44 @@ $src = file_get_contents(PathHelper::getIncludePath('utils/upgrade.php'));
 ok('the copy is preceded by keeping the originals', strpos($src, 'DeploymentHelper::keepSelfUpdateOriginals(') !== false
 	&& strpos($src, 'keepSelfUpdateOriginals(') < strpos($src, 'copy($staged_file, $live_file)'));
 ok('the re-exec parent restores after the child ends, whatever its exit', (bool)preg_match(
-	'/passthru\(\$cmd, \$exit_code\);\s*self_update_restore\(\);/', $src));
+	'/passthru\(\$cmd, \$exit_code\);\s*self_update_restore\(false, \$deployed_mark\);/', $src));
 ok('the self-update check is outside the resume skip', strpos($src, '} // end if (!$resuming_after_self_update)') < strpos($src, '// SELF-UPDATE CHECK'));
+// Staging another run left can hold theme and plugin archives merged in by a
+// continuation that was killed; resumed, its core check refused every later
+// run (gvisor_site_sandbox_trial B3). Only the re-exec'd run resumes.
+$resume_at = strpos($src, '$resuming_after_self_update = true;');
+$detect_at = strpos($src, '// SELF-UPDATE RESUME DETECTION');
+$guard = $detect_at !== false && $resume_at !== false ? substr($src, $detect_at, $resume_at - $detect_at) : '';
+ok('only the run a self-update re-execs resumes from staging', (bool)preg_match(
+	"/if \\(getenv\\('JOINERY_UPGRADE_RERUN'\\) === '1'\\s*&&/", $guard));
+ok('and the re-exec is what sets that mark', strpos($src, "\$cmd = 'JOINERY_UPGRADE_RERUN=1 ") !== false);
+// A release reinstalled at its own version leaves VERSION as it was: the
+// child's completed upgrade is marked for the parent, or the restore puts the
+// files it deployed back.
+$mark_clear = strpos($src, '@unlink($deployed_mark);');
+$mark_pass  = strpos($src, "JOINERY_UPGRADE_DEPLOYED_MARK=' . escapeshellarg(\$deployed_mark)");
+ok('the parent clears the mark, then hands its path to the child', $mark_clear !== false && $mark_pass !== false && $mark_clear < $mark_pass);
+$restore_fn = substr($src, strpos($src, 'function self_update_restore('), 900);
+ok('the restore leaves a completed upgrade alone, before it puts anything back',
+	strpos($restore_fn, 'is_file($deployed_mark)') !== false
+	&& strpos($restore_fn, 'is_file($deployed_mark)') < strpos($restore_fn, 'DeploymentHelper::restoreSelfUpdateFiles('));
+$completed_at = strpos($src, "\$GLOBALS['APPLY_RESULT']['outcome'] = 'completed';");
+$mark_write   = strpos($src, '@file_put_contents($deployed_mark,');
+ok('the child writes it only where the upgrade completed', $completed_at !== false && $mark_write !== false
+	&& $mark_write > $completed_at && $mark_write - $completed_at < 600
+	&& substr_count($src, '@file_put_contents($deployed_mark,') === 1);
+// An older upgrade.php (the agent puts it back after a killed run) resumes from
+// any staging whose VERSION is the target: so staging carries VERSION only
+// while it is the core archive alone.
+$aside_at   = strpos($src, '!rename($staged_version_path, $staged_version_aside)');
+$back_at    = strpos($src, '!rename($staged_version_aside, $staged_version_path)');
+$check_at   = strpos($src, '// SELF-UPDATE CHECK');
+$extras_at  = strpos($src, "out_step('Downloading Individual Themes and Plugins')");
+$keep_at    = strpos($src, "out_step('Preserving Themes/Plugins')");
+$deploy_at  = strpos($src, "out_step('Deploying Upgrade')");
+ok('the staged VERSION is set aside after the self-update check, before any theme or plugin goes into staging',
+	$aside_at !== false && $check_at < $aside_at && $aside_at < $extras_at);
+ok('and put back after the live extensions are kept, before the deploy',
+	$back_at !== false && $keep_at < $back_at && $back_at < $deploy_at);
 
 harness_finish();
