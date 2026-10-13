@@ -56,6 +56,9 @@ mkdir -p "$T/bin"
 cat > "$T/bin/docker" <<'STUB'
 #!/bin/bash
 echo "$*" >> "${STUB_CALLS:-/dev/null}"
+if [ "$1" = "info" ] && [ -n "${STUB_SECOPTS+x}" ] && printf '%s' "$*" | grep -q SecurityOptions; then
+    [ -n "$STUB_SECOPTS" ] && echo "$STUB_SECOPTS"; exit 0   # whether Docker remaps ids; empty says nothing
+fi
 if [ "$1" = "info" ]; then   # the CPUs Docker counts; STUB_NPROC= (empty) says nothing
     [ -n "${STUB_NPROC-2}" ] && echo "${STUB_NPROC-2}"; exit 0
 fi
@@ -222,6 +225,37 @@ STUB_INSPECT_FAIL=1 run_spec_adopt oldsite 2> "$T/err"; rc=$?
 chk "a failed read of the container is refused, not read as no limits" \
     "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)|$(grep -c 'could not read' "$T/err")" "1||1"
 
+echo "=== The host's restrictions: every site mounts them read-only; none runs without them where Docker remaps ids ==="
+RDIR="$T/root/etc/joinery/host_restrictions"
+chk "no restrictions directory and Docker not remapping ids: no mount, the site still runs" \
+    "$(args_of mysite | grep -c host_restrictions)" "0"
+STUB_SECOPTS='name=apparmor name=seccomp,profile=builtin name=userns ' run_spec_args mysite > /dev/null 2> "$T/err"; rc=$?
+chk "a host that remaps ids with no restrictions directory: refused, and the fix named" \
+    "$rc|$(grep -c 'install.sh docker --multi-tenant' "$T/err")" "1|1"
+STUB_SECOPTS='' run_spec_args mysite > /dev/null 2> "$T/err"; rc=$?
+chk "Docker silent on remapping, no restrictions directory: refused (fails closed)" \
+    "$rc|$(grep -c 'did not say' "$T/err")" "1|1"
+mkdir -p "$RDIR"
+A="$(STUB_SECOPTS='name=userns ' args_of mysite)"
+chk "with the directory: mounted read-only at the same path, after the site's volumes" \
+    "$(echo "$A" | grep -c -- "-v ${RDIR}:/etc/joinery/host_restrictions:ro \$")" "1"
+chk "a site with no limits gets it too: the platform's, not a spec line" \
+    "$(args_of bare | grep -c -- ":/etc/joinery/host_restrictions:ro ")|$(grep -c host_restrictions "$SPECS/bare/run_spec")" "1|0"
+rm -rf "$SPECS/oldsite"
+STUB_MOUNTS="volume|oldsite_code|/var/www/html/oldsite/public_html|true\nbind||/etc/joinery/host_restrictions|false|${RDIR}\n" \
+    run_spec_adopt oldsite 2> "$T/err"; rc=$?
+chk "adopt accepts the restrictions mount, and does not write it into the spec" \
+    "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)|$(grep -c host_restrictions "$SPECS/oldsite/run_spec")" "0|written|0"
+rm -rf "$SPECS/oldsite"
+for c in "writable:volume|oldsite_code|/x|true\nbind||/etc/joinery/host_restrictions|true|${RDIR}\n" \
+         "elsewhere:volume|oldsite_code|/x|true\nbind||/etc/joinery/host_restrictions|false|/srv/fake\n"; do
+    kind="${c%%:*}"; val="${c#*:}"
+    STUB_MOUNTS="$val" run_spec_adopt oldsite 2> "$T/err"; rc=$?
+    chk "adopt refuses any other bind at that path, by name: $kind" \
+        "$rc|$(test -f "$SPECS/oldsite/run_spec" && echo written)|$(grep -c 'a bind mount at /etc/joinery/host_restrictions' "$T/err")" "1||1"
+done
+rm -rf "$RDIR" "$SPECS/oldsite"
+
 echo "=== The environment travels as a file, and a failed read keeps the copy it has ==="
 run_spec_save_env oldsite "$T/env"
 chk "env file is owner-only" "$(stat -c %a "$T/env")" "600"
@@ -257,7 +291,7 @@ chk "install.sh's spec block is findable" "$(printf '%s\n' "$BLOCK" | grep -c 'e
 DEFAULTS="$(grep '^CONTAINER_PIDS_DEFAULT=\|^CONTAINER_PIDS_FLOOR=' "$INSTALL")"
 rebuild() {  # SITE MEMORY MEMORY_GIVEN [CPUS CPUS_GIVEN [PIDS PIDS_GIVEN]]
     bash -c 'SCRIPT_DIR="$1"; SITENAME="$2"; CONTAINER_MEMORY="$3"; CONTAINER_MEMORY_GIVEN="$4"
-        CONTAINER_CPUS="$5"; CONTAINER_CPUS_GIVEN="$6"; CONTAINER_PIDS="$7"; CONTAINER_PIDS_GIVEN="$8"
+        CONTAINER_CPUS="$5"; CONTAINER_CPUS_GIVEN="$6"; CONTAINER_PIDS="$7"; CONTAINER_PIDS_GIVEN="$8"; CONTAINER_DISK_GIVEN=0
         '"$DEFAULTS"'
         print_info() { :; }; print_error() { echo "ERR $*" >&2; }
         f() { '"$BLOCK"'

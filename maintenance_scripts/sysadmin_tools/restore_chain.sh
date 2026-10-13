@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.9.0 - an upgrade's own trees (deploy/, upgrades/, upgrade_archives/, public_html_*) are never
+#                  written from a chain, on every host; this machine keeps its own copy of every file in MACHINE_CONFIG_FILES (_restore_guard.sh);
+#                  on a host that refuses unsigned code the chain is unpacked into a scratch directory and
+#                  checked first (top-level entries, and its code against this machine's own verifier), and
+#                  its trust files are removed (specs/host_restrictions.md D5)
 # Version: 1.8.1 - a dry run with --skip-database says the database is left as it is, instead of naming a dump
 #                  it would not restore
 # Version: 1.8.0 - reads manifest version 3, whose runs each write their own manifest-NNNN.json:
@@ -110,16 +115,22 @@
 #   --force           Skip the confirmation prompt
 #   --help
 #
-# Two files are the MACHINE's, not the chain's, and survive the extraction:
-# config/Globalvars_site.php (this machine's database password and secret_box_key)
-# and config/backup_site_key (one machine's identity as a recipient of its own
-# backups). Inheriting either is how a clean-looking restore ends in
-# SQLSTATE[08006] on every page. --adopt-secret-key is the one exception, and it
-# takes one value out of the first, never the file.
+# Files that are the MACHINE's, not the chain's, survive the extraction
+# (MACHINE_CONFIG_FILES in ../install_tools/_restore_guard.sh):
+# config/Globalvars_site.php (this machine's database password and secret_box_key),
+# config/backup_site_key (one machine's identity as a recipient of its own
+# backups), and the files that decide what this machine trusts. Inheriting the
+# first is how a clean-looking restore ends in SQLSTATE[08006] on every page.
+# --adopt-secret-key is the one exception, and it takes one value out of the
+# first, never the file.
+#
+# On a host that refuses unsigned code (a multi-tenant host) the chain is checked
+# in a scratch directory before anything is written, and its trust files are
+# never used (specs/host_restrictions.md D5).
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.7.0"
+SCRIPT_VERSION="1.9.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -434,6 +445,68 @@ hold_host_runner_lock "$(basename "$PROJECT_DIR")" "$PROJECT_DIR" || exit 1
 
 mkdir -p "$PARENT"
 
+# ── On a host that refuses unsigned code, check before anything is written ──
+#
+# A copy onto a multi-tenant host brings the source site's whole code tree and
+# its config/, and the extraction below writes straight into the live site,
+# whose code then runs. So on such a host the chain is first extracted into a
+# scratch directory beside the site - everything but the three data folders,
+# which hold nothing that runs - and checked there by THIS machine's verifier,
+# the tree this script runs from, with this machine's keys
+# (_restore_guard.sh, specs/host_restrictions.md D5): no top-level entry a
+# site's backup has no reason to carry, and code that is exactly what was
+# shipped. Refused, nothing is written and the database is not touched.
+# An upgrade's own trees are the machine's on every host: an older whole-tree
+# archive may carry them, and neither pass below writes them.
+UPGRADE_TREE_EXCLUDES=(--exclude="${ARCHIVE_ROOT}/deploy" --exclude="${ARCHIVE_ROOT}/upgrades"
+    --exclude="${ARCHIVE_ROOT}/upgrade_archives" --exclude="${ARCHIVE_ROOT}/public_html_*")
+RESTORE_RESTRICTED=false
+LIVE_PUBLIC_HTML="$(cd "${SCRIPT_DIR}/../../public_html" 2>/dev/null && pwd || true)"
+RESTORE_GUARD="${SCRIPT_DIR}/../install_tools/_restore_guard.sh"
+if [ -f "$RESTORE_GUARD" ]; then
+    # shellcheck source=../install_tools/_restore_guard.sh
+    . "$RESTORE_GUARD"
+    if restore_guard_restricted "$LIVE_PUBLIC_HTML"; then
+        RESTORE_RESTRICTED=true
+    fi
+elif [ -d /etc/joinery/host_restrictions ]; then
+    print_error "This host restricts what its sites run, and ${RESTORE_GUARD} (which checks a restore"
+    print_error "against that) is missing. Nothing was restored."
+    exit 1
+fi
+if [ "$RESTORE_RESTRICTED" = true ]; then
+    CHECK_PARENT="$(${SUDO} mktemp -d "${PARENT}/.restore_check.XXXXXX")" \
+        || { print_error "Could not make a scratch directory in ${PARENT} to check the chain in; nothing was restored."; exit 1; }
+    CHECK_OK=true
+    for archive in "${FILES_ARCHIVES[@]}"; do
+        ( set -o pipefail
+          openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
+            | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$CHECK_PARENT" --anchored \
+                --exclude="${ARCHIVE_ROOT}/uploads" --exclude="${ARCHIVE_ROOT}/static_files" --exclude="${ARCHIVE_ROOT}/storage" \
+                "${UPGRADE_TREE_EXCLUDES[@]}" \
+        ) 3< "$KEY_FILE" || CHECK_OK=false
+    done
+    ${SUDO} mkdir -p "${CHECK_PARENT}/${ARCHIVE_ROOT}"
+    for archive in ${CODE_ARCHIVES[@]+"${CODE_ARCHIVES[@]}"}; do
+        ( set -o pipefail
+          openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
+            | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "${CHECK_PARENT}/${ARCHIVE_ROOT}" \
+        ) 3< "$KEY_FILE" || CHECK_OK=false
+    done
+    if [ "$CHECK_OK" != true ]; then
+        ${SUDO} rm -rf "${CHECK_PARENT:?}"
+        print_error "The chain could not be unpacked to check it; nothing was restored."
+        exit 1
+    fi
+    if ! restore_guard_check "${CHECK_PARENT}/${ARCHIVE_ROOT}" "$LIVE_PUBLIC_HTML"; then
+        ${SUDO} rm -rf "${CHECK_PARENT:?}"
+        print_error "Refused: this host runs only signed code (see above)."
+        exit 1
+    fi
+    ${SUDO} rm -rf "${CHECK_PARENT:?}"
+    print_info "This host runs only signed code: the chain's code is what was shipped"
+fi
+
 # ── Keep what belongs to this machine ───────────────────────────────────────
 #
 # Extraction is incremental, which means it overwrites and it deletes — it will
@@ -450,7 +523,16 @@ KEPT_FILES=()
 cleanup_kept() { rm -rf "${KEEP_TMP:?}"; }
 trap cleanup_kept EXIT
 
-for rel in config/Globalvars_site.php config/backup_site_key; do
+# Every file in MACHINE_CONFIG_FILES (_restore_guard.sh) is held the same way:
+# the two above, and the files that decide what this machine trusts. One this
+# machine has none of comes from the chain (a machine rebuilt from its own
+# backup gets its keys back), except on a host that refuses unsigned code,
+# where the chain's copy is removed after extraction.
+MACHINE_FILES=(config/Globalvars_site.php config/backup_site_key)
+if [ -n "${MACHINE_CONFIG_FILES+x}" ]; then
+    MACHINE_FILES=("${MACHINE_CONFIG_FILES[@]}")
+fi
+for rel in "${MACHINE_FILES[@]}"; do
     if [ -f "${PROJECT_DIR}/${rel}" ]; then
         mkdir -p "${KEEP_TMP}/$(dirname "$rel")"
         if cp -a "${PROJECT_DIR}/${rel}" "${KEEP_TMP}/${rel}" 2>/dev/null \
@@ -511,7 +593,7 @@ for archive in "${FILES_ARCHIVES[@]}"; do
     STATUS=0
     ( set -o pipefail
       openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive" 2>/dev/null \
-        | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PARENT" \
+        | ${SUDO} tar --incremental --warning=no-timestamp -xzf - -C "$PARENT" --anchored "${UPGRADE_TREE_EXCLUDES[@]}" --no-anchored \
     ) 3< "$KEY_FILE" || STATUS=$?
     if [ "$STATUS" -ne 0 ]; then
         print_error "Failed applying $(basename "$archive") (exit ${STATUS})."
@@ -582,6 +664,16 @@ for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
 done
 if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
     print_success "This machine's own ${KEPT_FILES[*]} kept"
+fi
+if [ "$RESTORE_RESTRICTED" = true ]; then
+    for rel in "${MACHINE_FILES[@]}"; do
+        restore_guard_trust_file "$rel" || continue
+        [[ " ${KEPT_FILES[*]-} " == *" ${rel} "* ]] && continue
+        if ${SUDO} test -e "${PROJECT_DIR}/${rel}"; then
+            ${SUDO} rm -f "${PROJECT_DIR:?}/${rel}"
+            print_info "Removed the chain's ${rel}: on this host the machine supplies it"
+        fi
+    done
 fi
 
 # ── --adopt-secret-key ──────────────────────────────────────────────────────

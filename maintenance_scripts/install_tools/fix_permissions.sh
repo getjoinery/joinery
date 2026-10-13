@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.9 - On a host that refuses unsigned code (host_restrictions.sh) the tree owner is root,
+#              whatever config/tree_owner records or the mode asks (specs/host_restrictions.md D6).
 #VERSION 4.8 - A site whose folders are on the data root waits for it: while it is not mounted
 #              (an encrypted one locked) this exits 0 saying so, and changes nothing
 #              (specs/hosted_data_promise_disk_encryption.md D9).
@@ -228,6 +230,17 @@ fi
 if ! id "$TREE_OWNER" >/dev/null 2>&1; then
     echo -e "${YELLOW}  WARNING: '$TREE_OWNER' is not an account here; falling back to root.${NC}"
     TREE_OWNER="root"
+fi
+# On a host that refuses unsigned code the tree is root's, whatever a record
+# says or the mode asks: its owner is what keeps the web user from writing code
+# into it (specs/host_restrictions.md D6). The record written below says root too.
+if [ "$TREE_OWNER" != "root" ] && [ -f "$SCRIPT_DIR/_host_restrictions.sh" ]; then
+    # shellcheck source=_host_restrictions.sh
+    . "$SCRIPT_DIR/_host_restrictions.sh"
+    if host_restriction_on "$SITE_ROOT/public_html" unsigned_packages; then
+        echo "  This host refuses unsigned code ($(host_restrictions_file)): the tree is root's, not '${TREE_OWNER}'."
+        TREE_OWNER="root"
+    fi
 fi
 TREE_GROUP="$(id -gn "$TREE_OWNER")"
 echo "  Tree owner: ${TREE_OWNER}:${TREE_GROUP}"

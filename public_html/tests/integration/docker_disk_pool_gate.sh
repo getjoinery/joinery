@@ -200,7 +200,7 @@ chk "the allowance is set once the volumes exist, after the container runs" \
 chk "the run spec takes disk= and checks it" "$(run_spec_check_line disk=4G && echo ok)|$(run_spec_check_line disk=4.5G || echo refused)" "ok|refused"
 mkdir -p "$T/rs/etc/joinery/sites/capped"
 printf 'spec_version=2\nhostname=capped\nrestart=unless-stopped\ndisk=4G\nvolume=capped_code:/var/www/html/capped/public_html\n' > "$T/rs/etc/joinery/sites/capped/run_spec"
-args="$(JOINERY_SITE_STATE_ROOT="$T/rs" bash -c '. "$1"; run_spec_fits_host() { return 0; }; run_spec_ensure_network() { return 0; }; run_spec_args capped | tr "\0" " "' _ "$TOOLS/_site_run_spec.sh")"
+args="$(JOINERY_SITE_STATE_ROOT="$T/rs" bash -c '. "$1"; run_spec_fits_host() { return 0; }; run_spec_ensure_network() { return 0; }; run_spec_restrictions_present() { return 0; }; run_spec_args capped | tr "\0" " "' _ "$TOOLS/_site_run_spec.sh")"
 chk "a site with an allowance runs with its writable layer capped at 1G" "$(grep -c -- '--storage-opt size=1G' <<< "$args")" "1"
 
 echo

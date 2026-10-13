@@ -21,6 +21,8 @@
  *
  * Run: php tests/run.php --only=tests/security/package_signature_test.php
  *
+ * @version 1.1 - verifyTree(): a whole site root, every failure listed, style themes passed over, data
+ *                folders never walked, the machine's keys and never the tree's (specs/host_restrictions.md)
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -226,6 +228,67 @@ file_put_contents($core . '/config/default_Globalvars_site.php', "<?php\n");
 TreeManifestPublisher::write($core, $core, $keys);
 $v = PackageSignature::verify($core, $keys_file);
 check($v->signed() && $v->root === '', 'a core archive verifies with an empty root', $v->line() . ' root=' . $v->root);
+
+section('A whole site root: core, every plugin, every theme (verifyTree, host_restrictions D5/D8)');
+
+// A node-shaped site root: core signed first (its manifest lists nothing under
+// plugins/ or theme/), then each package signed on its own.
+$tree = $work . '/tree';
+foreach (array('public_html/index.php' => "<?php echo 1;\n", 'public_html/includes/Core.php' => "<?php class Core {}\n",
+		'maintenance_scripts/install_tools/x.sh' => "#!/bin/bash\n") as $rel => $bytes) {
+	@mkdir(dirname($tree . '/' . $rel), 0770, true);
+	file_put_contents($tree . '/' . $rel, $bytes);
+}
+@mkdir($tree . '/public_html/plugins', 0770, true);
+@mkdir($tree . '/public_html/theme', 0770, true);
+TreeManifestPublisher::write($tree, $tree, $keys);
+$put = function (string $dir, array $files) {
+	foreach ($files as $rel => $bytes) {
+		@mkdir(dirname($dir . '/' . $rel), 0770, true);
+		file_put_contents($dir . '/' . $rel, $bytes);
+	}
+};
+$put($tree . '/public_html/plugins/good', array('plugin.json' => '{"name":"good"}', 'includes/G.php' => "<?php class G {}\n"));
+TreeManifestPublisher::write($tree . '/public_html/plugins/good', $tree, $keys);
+$put($tree . '/public_html/theme/shipped', array('theme.json' => '{"name":"shipped"}', 'index.php' => "<?php\n"));
+TreeManifestPublisher::write($tree . '/public_html/theme/shipped', $tree, $keys);
+// A set-aside copy from a --replace (the old directory, renamed, its manifest
+// still naming plugins/good) is checked as the package it was.
+exec('cp -a ' . escapeshellarg($tree . '/public_html/plugins/good') . ' ' . escapeshellarg($tree . '/public_html/plugins/good.replaced.20261013T000000Z'));
+// An unsigned style theme: stylesheets only, nothing that runs.
+$put($tree . '/public_html/theme/looks', array('theme.json' => '{"name":"looks","styles":["css/a.css"]}', 'css/a.css' => "body{}\n"));
+// Data folders and config/ are never walked: whatever is in them is not code the check owns.
+$put($tree, array('uploads/x.php' => "<?php evil();\n", 'config/anything.php' => "<?php\n", 'static_files/y.php' => "<?php\n"));
+$style = null;
+$f = PackageSignature::verifyTree($tree, $keys_file, $style);
+check($f === array(), 'a node-shaped tree of signed packages verifies, data folders and config/ never walked',
+	json_encode(array_map(function ($x) { return $x['what'] . ': ' . $x['verdict']->line(); }, $f)));
+check($style === array('looks'), 'an unsigned style theme is not a failure, and is named as passed over', json_encode($style));
+
+$put($tree . '/public_html/plugins/evil', array('plugin.json' => '{"name":"evil"}'));
+$put($tree . '/public_html/theme/pagey', array('theme.json' => '{"name":"pagey"}', 'index.php' => "<?php\n"));
+file_put_contents($tree . '/public_html/plugins/loose.php', "<?php\n");
+file_put_contents($tree . '/public_html/plugins/good/includes/G.php', "<?php class G { /* x */ }\n");
+file_put_contents($tree . '/maintenance_scripts/install_tools/extra.sh', "#!/bin/bash\n");
+$f = PackageSignature::verifyTree($tree, $keys_file);
+$got = array();
+foreach ($f as $x) { $got[$x['kind'] . ' ' . $x['name']] = $x['verdict']->verdict . ($x['verdict']->file ? ' ' . $x['verdict']->file : ''); }
+ksort($got);
+check($got === array(
+		'core ' => 'extra_file maintenance_scripts/install_tools/extra.sh',
+		'plugin evil' => 'unsigned',
+		'plugin good' => 'tampered includes/G.php',
+		'plugin loose.php' => 'extra_file',
+		'theme pagey' => 'unsigned',
+	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, an edited plugin, a loose file',
+	json_encode($got));
+
+// The keys are the machine's, never the tree's: a tree carrying a key file of
+// its own (an archive being restored) is not checked against it.
+copy($keys_file, $tree . '/config/release_verify_keys');
+$f = PackageSignature::verifyTree($tree);
+check($f !== array() && $f[0]['kind'] === 'core' && in_array($f[0]['verdict']->verdict, array(PackageSignature::UNKNOWN_KEY, PackageSignature::NO_KEYS), true),
+	'with no key file named, the running site\'s own keys decide, not a key file inside the tree', $f ? $f[0]['verdict']->line() : 'no failure');
 
 section('The parser refuses a listing that reaches outside itself');
 

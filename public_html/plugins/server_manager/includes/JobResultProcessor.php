@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.78 - a host report's host_restrictions and each container's code_check (host_report 1.21,
+ *                 specs/host_restrictions.md D8) are kept
  * @version 1.77 - a host report's mail_gateway (host_report 1.20) is kept
  * @version 1.76 - process_data_root_enrol; a host report's data_root_encryption (host_report 1.19) is kept
  *                 and handed to DataRootEscrowSync (specs/hosted_data_promise_disk_encryption.md WP2)
@@ -3467,6 +3469,8 @@ HTML;
 			'os'                           => self::host_report_os($in['os'] ?? null),
 			'answers'                      => array_key_exists('answers', $in) ? self::host_report_answers($in['answers']) : null,
 			'served_certificates'          => array_key_exists('served_certificates', $in) ? self::host_report_certificates($in['served_certificates']) : null,
+			// What the machine refuses its sites (host_report 1.21): name => value, none, or unknown.
+			'host_restrictions'            => array_key_exists('host_restrictions', $in) ? self::host_report_restrictions($in['host_restrictions']) : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
@@ -3644,7 +3648,58 @@ HTML;
 					$entry['since_last'] = $since;
 				}
 			}
+			// Whether the site's code is what was shipped (host_report 1.21, on a
+			// host that refuses unsigned code). Absent from an older node's report:
+			// kept absent.
+			if (array_key_exists('code_check', $c)) {
+				$entry['code_check'] = self::host_report_code_check($c['code_check']);
+			}
 			$out[] = $entry;
+		}
+		return $out;
+	}
+
+	/** The kinds of package a code check names, and the verdicts it can give (PackageSignature). */
+	const HOST_REPORT_CODE_KINDS = ['core', 'plugin', 'theme', 'check'];
+	const HOST_REPORT_CODE_VERDICTS = ['unsigned', 'unknown_key', 'no_keys', 'tampered', 'extra_file',
+		'missing_file', 'unreadable', 'unlogged'];
+
+	/**
+	 * A site's code check (site_housekeeping.sh's config/code_check, specs/host_restrictions.md D8):
+	 * {state ok|failed, at, failures: [{kind, name, verdict, file}]}, or none, or unknown. A failed
+	 * check whose failures cannot be read keeps state failed: it is never read as ok.
+	 */
+	private static function host_report_code_check($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v) || !in_array($v['state'] ?? null, ['ok', 'failed'], true)) { return 'unknown'; }
+		$at = (is_string($v['at'] ?? null) && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$/', $v['at']))
+			? $v['at'] : 'unknown';
+		$failures = [];
+		foreach (array_slice(array_values(is_array($v['failures'] ?? null) ? $v['failures'] : []), 0, self::HOST_REPORT_MAX_LIST) as $f) {
+			if (!is_array($f)) { continue; }
+			$kind = $f['kind'] ?? '';
+			$verdict = $f['verdict'] ?? '';
+			$file = is_string($f['file'] ?? null) ? substr(preg_replace('/[^A-Za-z0-9._@:\/-]/', '', $f['file']), 0, 200) : '';
+			$failures[] = [
+				'kind'    => in_array($kind, self::HOST_REPORT_CODE_KINDS, true) ? $kind : 'unknown',
+				'name'    => self::host_report_name($f['name'] ?? ''),
+				'verdict' => in_array($verdict, self::HOST_REPORT_CODE_VERDICTS, true) ? $verdict : 'unknown',
+				'file'    => $file,
+			];
+		}
+		return ['state' => $v['state'], 'at' => $at, 'failures' => $failures];
+	}
+
+	/** What the machine refuses its sites: name => value (each a short word), none, or unknown. */
+	private static function host_report_restrictions($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		$out = [];
+		foreach (array_slice($v, 0, self::HOST_REPORT_MAX_LIST, true) as $name => $value) {
+			if (is_string($name) && preg_match('/^[a-z][a-z0-9_]{0,40}$/', $name) && is_string($value)
+					&& preg_match('/^[A-Za-z0-9_-]{1,40}$/', $value)) {
+				$out[$name] = $value;
+			}
 		}
 		return $out;
 	}

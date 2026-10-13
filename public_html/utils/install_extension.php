@@ -36,6 +36,12 @@
  * has no acknowledgement path: an unverified archive from a first-party
  * source is a publishing defect, not a choice.
  *
+ * ON A HOST THAT REFUSES UNSIGNED PACKAGES (HostRestrictions,
+ * `unsigned_packages=refuse`: a multi-tenant host) there is no way past it:
+ * an unverified plugin or page theme is refused with or without
+ * --acknowledged, and a row already saying 'unsigned' is no acknowledgement
+ * either. A style theme still installs; nothing in it runs.
+ *
  *   php utils/install_extension.php plugin|theme --staged=<dir> [--replace] [--acknowledged]
  *   php utils/install_extension.php plugin|theme <name> --register   (the database half alone)
  *
@@ -55,6 +61,8 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.9 - on a host that refuses unsigned packages (specs/host_restrictions.md D3) an unverified
+ *                plugin or page theme is refused acknowledged or not, staged or from disk
  * @version 1.8 - keys a package proves that cannot be recorded stop the install
  * @version 1.7 - the release log (spec release_transparency, D6, WP4): a staged package is verified
  *                as a fresh archive; a package signed by us but not shown to be logged is
@@ -624,6 +632,14 @@ try {
 			if ($kind === 'style') {
 				$trust = $restricted;
 				echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
+			} elseif (HostRestrictions::has('unsigned_packages')) {
+				// The host's rule, ahead of any acknowledgement: on a box we host
+				// for other people the owner's yes is not ours to take
+				// (specs/host_restrictions.md D3).
+				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict). "
+					. HostRestrictions::unsignedRefusal() . "\n");
+				install_extension_rmtree($work);
+				exit(EXIT_UNVERIFIED);
 			} elseif (!$acknowledged) {
 				fwrite(STDERR, "install_extension: refusing to install an unverified $type ($verdict->verdict).\n"
 					. ($restricted === 'unlogged' ? '' : "This package was not built by Joinery. ")
@@ -768,6 +784,12 @@ try {
 						if ($kind === 'style') {
 							$trust = $restricted;
 							echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
+						} elseif (HostRestrictions::has('unsigned_packages')) {
+							// A row saying 'unsigned' is no acknowledgement here: it
+							// may have arrived in a restored database (D3).
+							fwrite(STDERR, "install_extension: refusing to install an unverified $type from disk ($verdict->verdict). "
+								. HostRestrictions::unsignedRefusal() . "\n");
+							exit(EXIT_UNVERIFIED);
 						} elseif ($existing && in_array((string)$existing->get($trust_column), array('unsigned', 'unlogged'), true)) {
 							$trust = (string)$existing->get($trust_column);
 							echo "$trust $type: previously acknowledged; installing under the unsigned restrictions\n";

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.6.0 - a whole-tree archive leaves out the upgrade's own trees too (public_html_*, upgrades/,
+#                  upgrade_archives/, uploads/upgrades/, deploy/), as the data part does.
+#                  vendor/ is left out at the site root only: public_html/assets/vendor and a plugin's own
+#                  vendor/ are signed code, and an archive without them restored a tree that was not what
+#                  was shipped (found by specs/host_restrictions.md's box test)
 # Version: 1.5.2 - the data part also leaves out upgrades/ and upgrade_archives/, where an upgrade
 #                  stages and downloads beside the code (specs/one_data_root.md D6), and neither
 #                  counts toward the data's identity: staging is made anew by every upgrade.
@@ -196,8 +201,12 @@ code_identity() {
 }
 
 # Top-level names no archive carries: excluded by name below, anywhere, and
-# (for the data part) the code and the upgrade's trees beside it.
-NAMED_EXCLUDES=(backups vendor node_modules target .git logs cache tmp sessions)
+# (for the data part) the code and the upgrade's trees beside it. vendor/ is
+# not among them: it is excluded at the site root only (below), where it is
+# Composer's tree and regenerable. A vendor/ inside public_html is signed code
+# (public_html/assets/vendor, a plugin's own Composer tree), and an archive
+# without it restores a tree that is not what was shipped.
+NAMED_EXCLUDES=(backups node_modules target .git logs cache tmp sessions)
 
 # The identity of the data tree: the inode of the site directory and the name
 # and inode of each directory directly inside it that the data archive
@@ -212,7 +221,7 @@ data_identity() {
     while IFS= read -r entry; do
         name="${entry%:*}"
         skip=false
-        case "$name" in public_html|public_html_*|upgrades|upgrade_archives) skip=true ;; esac
+        case "$name" in public_html|public_html_*|upgrades|upgrade_archives|vendor) skip=true ;; esac
         for x in "${NAMED_EXCLUDES[@]}" ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do
             [ "$name" = "$x" ] && skip=true
         done
@@ -317,9 +326,20 @@ BASE="$(basename "$PROJECT_DIR")"
 # depth, and a site can hold worktrees under sync/ each with a public_html of
 # its own. The by-name exclusions after them stay unanchored on purpose.
 if [ "$PART" = "data" ]; then
-    TAR_ARGS+=(--anchored --exclude="${BASE}/public_html" --exclude="${BASE}/public_html_*"
+    TAR_ARGS+=(--anchored --exclude="${BASE}/public_html" --no-anchored)
+fi
+# The upgrade's own trees are the machine's, in the data part and in a whole-tree
+# archive alike: no restore takes them (specs/host_restrictions.md D5).
+if [ "$PART" != "code" ]; then
+    TAR_ARGS+=(--anchored --exclude="${BASE}/public_html_*"
                --exclude="${BASE}/upgrades" --exclude="${BASE}/upgrade_archives"
                --exclude="${BASE}/uploads/upgrades" --exclude="${BASE}/deploy" --no-anchored)
+fi
+
+# The site root's Composer tree. The code part is rooted at public_html, so it
+# never sees it.
+if [ "$PART" != "code" ]; then
+    TAR_ARGS+=(--anchored --exclude="${BASE}/vendor" --no-anchored)
 fi
 
 for x in "${NAMED_EXCLUDES[@]}"; do
