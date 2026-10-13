@@ -14,6 +14,10 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.12 - the mail apps pass-through dials the server's submission on 10465, not 465 (relay-serve's
+#                mailAppsSubmissionTarget): cloud providers block outbound 25, 465 and 587, so the relay
+#                could not reach the server's 465. Programs still use 465 here. The ping's mail_apps group
+#                reports whether the server answers on each onward port (reaches_server), checked each minute.
 # Version: 3.11 - the mail apps pass-through (RelayVersion::PASSES_MAIL_APPS): 993/tcp and 465/tcp are
 #                open, and relay-serve splices a mail program's TLS, unopened, to the deployment's
 #                server on the same port when the program names this relay's mail hostname
@@ -104,7 +108,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.11"
+RELAY_VERSION="3.12"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

@@ -17,6 +17,8 @@
  * asks its Docker host in its own storage, and the host's converge timer
  * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.6.0 - relayReport(): the relay's own view of the pass-through, from the report the site already keeps
+ *                  (whether the server answers on each onward port, the last connection it refused and why)
  * @version 1.5.0 - a site in a container: programs connect to its web name on its Docker host; Allow and Stop write
  *                storage/mail_apps/request.json for the host's converge, hostAnswer() reads its answer, the checks
  *                dial the served name (checkAddress()), and a web name behind Cloudflare is refused
@@ -149,7 +151,7 @@ class MailAppGateway {
 		}
 		if ($preferred === null) {
 			// Mail arrives through a relay that passes nothing through (shared,
-			// or older than 3.11), while programs still reach this server
+			// or older than RelayVersion::PASSES_MAIL_APPS), while programs still reach this server
 			// directly: nothing to switch to, but the address is public.
 			return ($route === self::ROUTE_DIRECT && self::relay() !== null && !self::inContainer())
 				? array('state' => 'exposed') + $answer : null;
@@ -359,6 +361,54 @@ class MailAppGateway {
 	/** The relay this deployment's mail arrives through, or null. */
 	public static function relay(): ?MailboxRelay {
 		return class_exists('MailboxRelay') ? MailboxRelay::active() : null;
+	}
+
+	/**
+	 * The relay's own view of the pass-through, from the last report this site
+	 * stored (mailbox's relay health poll keeps the whole ping), or null when
+	 * mail apps are not on through a relay or no report has one. reaches maps
+	 * each program port (993, 465) to the server port the relay dials and
+	 * whether the server answered there at the relay's last check (relay 3.12):
+	 * a provider's outbound block or a firewall not opened to the relay shows
+	 * here before a member meets it.
+	 *
+	 * @return array{report_time:?int, reaches:?array, checked:?int, passed_1h:int, refused_1h:int,
+	 *               last_refusal:?string, last_refusal_time:?int}|null
+	 */
+	public static function relayReport(): ?array {
+		$relay = self::relay();
+		if ($relay === null || self::recordedRoute() !== self::ROUTE_RELAY) {
+			return null;
+		}
+		$health = json_decode((string)$relay->get('mrl_last_health_json'), true);
+		$group = is_array($health) ? ($health['ping']['mail_apps'] ?? null) : null;
+		if (!is_array($group)) {
+			return null;
+		}
+		$time = function ($v) {
+			$t = is_string($v) && $v !== '' ? strtotime($v) : false;
+			return $t === false ? null : $t;
+		};
+		$reaches = null;
+		if (is_array($group['reaches_server'] ?? null)) {
+			$reaches = array();
+			foreach ($group['reaches_server'] as $role => $r) {
+				if (is_array($r)) {
+					$reaches[(string)$role] = array('port' => (int)($r['port'] ?? 0), 'answers' => !empty($r['answers']));
+				}
+			}
+			ksort($reaches);
+		}
+		$report = (string)$relay->get('mrl_last_health_time');
+		return array(
+			'report_time'       => $report !== '' ? $time($report . ' UTC') : null,
+			'reaches'           => $reaches,
+			'checked'           => $time($group['reaches_server_utc'] ?? null),
+			'passed_1h'         => (int)($group['spliced_1h'] ?? 0),
+			'refused_1h'        => (int)($group['refused_1h'] ?? 0),
+			'last_refusal'      => isset($group['last_refusal']) ? (string)$group['last_refusal'] : null,
+			'last_refusal_time' => $time($group['last_refusal_utc'] ?? null),
+		);
 	}
 
 	/** This server's public IPv4, which the relay reaches the gateway on, or null. */

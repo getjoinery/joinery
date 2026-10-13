@@ -13,7 +13,7 @@
  *
  * On the test database, because a relay row here becomes the deployment's
  * active relay. Checks:
- *  - the version gate (RelayVersion::passesMailApps, 3.11);
+ *  - the version gate (RelayVersion::passesMailApps, 3.12);
  *  - the name programs use is the relay's mail host name;
  *  - cannotTurnOn() names what is missing, in order: a shared relay, an older
  *    relay, the relay's name or address, this server's IPv4;
@@ -36,11 +36,12 @@ harness_defer(function () use ($was) {
 });
 
 section('The version gate');
-check(RelayVersion::PASSES_MAIL_APPS === '3.11', 'Mail apps need relay 3.11');
-check(RelayVersion::passesMailApps('3.11') && RelayVersion::passesMailApps('3.12') && RelayVersion::passesMailApps('4.0'),
-	'3.11 and later pass mail programs through');
-check(!RelayVersion::passesMailApps('3.10') && !RelayVersion::passesMailApps('') && !RelayVersion::passesMailApps('garbage'),
-	'3.10, an unknown version and garbage do not');
+check(RelayVersion::PASSES_MAIL_APPS === '3.12', 'Mail apps need relay 3.12');
+check(RelayVersion::passesMailApps('3.12') && RelayVersion::passesMailApps('3.13') && RelayVersion::passesMailApps('4.0'),
+	'3.12 and later pass mail programs through');
+check(!RelayVersion::passesMailApps('3.11') && !RelayVersion::passesMailApps('3.10') && !RelayVersion::passesMailApps('')
+	&& !RelayVersion::passesMailApps('garbage'),
+	'3.11 (which dialed the server\'s 465 onward, blocked by cloud providers), 3.10, an unknown version and garbage do not');
 
 if (MailboxRelay::active() !== null) {
 	harness_skip('the test database already has an active relay');
@@ -69,15 +70,19 @@ check(MailAppGateway::mailHostname() === 'mx.relay.example', 'The name programs 
 section('What is missing, said in order');
 Setting::put('mailbox_public_ip', '');
 $why = (string)MailAppGateway::cannotTurnOn();
-check(strpos($why, 'runs version 3.10') !== false && strpos($why, '3.11') !== false && strpos($why, 'Upgrade the relay') !== false,
+check(strpos($why, 'runs version 3.10') !== false && strpos($why, '3.12') !== false && strpos($why, 'Upgrade the relay') !== false,
 	'A 3.10 relay: names its version, the one needed and the way forward', $why);
 $set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.11'))));
 $why = (string)MailAppGateway::cannotTurnOn();
-check(strpos($why, 'mailbox_public_ip') !== false, 'A 3.11 relay and no server IPv4: names the setting', $why);
+check(strpos($why, 'runs version 3.11') !== false && strpos($why, 'Upgrade the relay') !== false,
+	'A 3.11 relay is asked to upgrade too (its sending path is blocked)', $why);
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12'))));
+$why = (string)MailAppGateway::cannotTurnOn();
+check(strpos($why, 'mailbox_public_ip') !== false, 'A 3.12 relay and no server IPv4: names the setting', $why);
 Setting::put('mailbox_public_ip', '10.0.0.5');
 check(strpos((string)MailAppGateway::cannotTurnOn(), 'mailbox_public_ip') !== false, 'A private address is not one the relay can reach');
 Setting::put('mailbox_public_ip', '203.0.113.10');
-check(MailAppGateway::cannotTurnOn() === null, 'A 3.11 relay with a name and address, and the server\'s IPv4: allowed',
+check(MailAppGateway::cannotTurnOn() === null, 'A 3.12 relay with a name and address, and the server\'s IPv4: allowed',
 	(string)MailAppGateway::cannotTurnOn());
 $set(array('mrl_is_hosted' => true));
 check(strpos((string)MailAppGateway::cannotTurnOn(), 'shared relay') !== false, 'A shared relay passes none');
@@ -103,5 +108,29 @@ check($origins() === array(), 'On, but serving another name (not through this re
 Setting::put('mail_apps_served_name', 'mx.relay.example');
 Setting::put('mailbox_public_ip', '192.168.1.5');
 check($origins() === array(), 'Never a private address: the relay would refuse the whole fragment', json_encode($origins()));
+Setting::put('mailbox_public_ip', '203.0.113.10');
+
+section('The relay\'s own view of the pass-through, from the report the site keeps');
+Setting::put('mail_apps_route', 'relay');
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12'))));
+check(MailAppGateway::relayReport() === null, 'No report yet: nothing to show');
+$ping = array('mail_apps' => array('origins' => 1, 'spliced_1h' => 4, 'refused_1h' => 2,
+	'last_refusal' => 'the server did not answer on 10465', 'last_refusal_utc' => '2026-10-13T16:22:00Z',
+	'reaches_server' => array('993' => array('port' => 993, 'answers' => true), '465' => array('port' => 10465, 'answers' => false)),
+	'reaches_server_utc' => '2026-10-13T16:23:00Z'));
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12', 'ping' => $ping)),
+	'mrl_last_health_time' => '2026-10-13 16:23:30'));
+$report = MailAppGateway::relayReport();
+check($report !== null && $report['reaches']['993'] === array('port' => 993, 'answers' => true)
+	&& $report['reaches']['465'] === array('port' => 10465, 'answers' => false),
+	'Each program port: the server port the relay dials and whether the server answered', json_encode($report));
+check($report['passed_1h'] === 4 && $report['refused_1h'] === 2 && $report['last_refusal'] === 'the server did not answer on 10465'
+	&& $report['last_refusal_time'] === strtotime('2026-10-13T16:22:00Z') && $report['report_time'] === strtotime('2026-10-13 16:23:30 UTC'),
+	'  the hour\'s counts, the last refusal and when the relay reported', json_encode($report));
+unset($ping['mail_apps']['reaches_server'], $ping['mail_apps']['reaches_server_utc']);
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12', 'ping' => $ping))));
+check(MailAppGateway::relayReport()['reaches'] === null, '  a relay that has not checked yet: reaches is null, not all-clear');
+Setting::put('mail_apps_route', 'direct');
+check(MailAppGateway::relayReport() === null, 'On directly: no relay report');
 
 harness_finish();

@@ -152,6 +152,8 @@ chk "the entry is via_relay with the relay's certificate" \
     '[true,"mail.one.example","one"]'
 chk "993 and 465 open to each relay address" "$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 993\|ufw allow proto tcp from 198.51.100.7 to any port 465\|ufw allow proto tcp from 2001:db8::7 to any port 993\|ufw allow proto tcp from 2001:db8::7 to any port 465' "$T/calls")" "4"
 chk "  and not to everyone" "$(grep -c 'ufw allow 993/tcp\|ufw allow 465/tcp' "$T/calls")" "0"
+chk "  10465 open to each relay address (the relay cannot dial 465 onward)" "$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465\|ufw allow proto tcp from 2001:db8::7 to any port 10465' "$T/calls")" "2"
+chk "  and never to everyone" "$(grep -c 'ufw allow 10465' "$T/calls")" "0"
 sed 's/"one"/"two"/' "$SB/sites/one.json" > "$SB/sites/two.json"
 out="$(helper status one)"
 chk "status says when the relay's certificate expires" "$(grep -c -E '^relay_cert_expires=[0-9]{10}$' <<< "$out")" "1"
@@ -159,7 +161,7 @@ out="$(helper on two mail.two.example 198.51.100.8 2>&1)"; rc=$?
 chk "on through a relay with no certificate yet is refused" "$rc" "5"
 : > "$T/calls"
 out="$(helper off one)"; rc=$?
-chk "off takes the relay's rules away" "$rc/$(grep -c 'ufw delete allow proto tcp from 198.51.100.7' "$T/calls")/$(wc -c < "$SB/proxy_from" | tr -d ' ')" "0/2/0"
+chk "off takes the relay's rules away" "$rc/$(grep -c 'ufw delete allow proto tcp from 198.51.100.7' "$T/calls")/$(wc -c < "$SB/proxy_from" | tr -d ' ')" "0/3/0"
 out="$(helper on one 'mail.one.example' 'not-an-address' 2>&1)"; rc=$?
 chk "a relay address that is not an address is refused" "$rc" "2"
 

@@ -98,13 +98,13 @@ check((string)$settings->get_setting('mail_apps_served_name') === 'mail.direct.e
 	'the hourly task keeps the old name and calls nothing');
 Setting::put('mailbox_mail_hostname', 'mail.direct.example');
 
-// A relay of this deployment's own, 3.11, with its name and address.
+// A relay of this deployment's own, 3.12, with its name and address.
 $relay = new MailboxRelay(NULL);
 $relay->set('mrl_name', 'harnesstest route relay');
 $relay->set('mrl_is_enabled', true);
 $relay->set('mrl_mx_hostname', 'MX.Route.Example');
 $relay->set('mrl_public_ip', '198.51.100.7');
-$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.11')));
+$relay->set('mrl_last_health_json', json_encode(array('state' => 'ok', 'provisioned' => '3.12')));
 $relay->save();
 harness_register_row('mrl_mailbox_relays', 'mrl_mailbox_relay_id', intval($relay->key));
 $set = function (array $fields) use ($relay) {
@@ -125,9 +125,9 @@ check((string)$settings->get_setting('mail_apps_route') === 'direct' && $calls =
 section('A relay that cannot pass programs through: the address is public');
 $set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.10'))));
 $state = MailAppGateway::routeState();
-check($state !== null && $state['state'] === 'exposed' && strpos((string)$state['reason'], '3.11') !== false,
+check($state !== null && $state['state'] === 'exposed' && strpos((string)$state['reason'], '3.12') !== false,
 	'exposed, saying why the relay cannot carry them');
-$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.11'))));
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12'))));
 
 section('Switch: on through the relay');
 $calls = array();

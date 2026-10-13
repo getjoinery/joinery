@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 1.7 - a relay reaches submission on 10465 (RELAY_SUBMISSION_PORT), opened to the relays only: cloud
+#                providers block a relay's outbound 465, so programs still use 465 at the relay and the relay
+#                dials 10465 onward (the gateway's -relay-smtp-listen, 1.0.2). Never opened to everyone.
 # Version: 1.6 - a Docker host (--machine ROOT, from the support bundle): the gateway installed switched off, no
 #                sudoers rule, and a timer that runs the helper's new converge verb every minute, serving each
 #                container site that asks in its own storage (mail_apps/request.json) and answering beside it;
@@ -206,9 +209,10 @@ cat > "${CANDIDATE}" <<'HELPERSCRIPT'
 # on SITE MAILHOST RELAY_IPS: the deployment's mail arrives through a relay,
 #          and programs reach the relay's name (MAILHOST); the relay splices
 #          their TLS here (specs/mail_apps_plugin.md § Where programs connect).
-#          The certificate must be installed first (csr, install-cert); 993 and
-#          465 open to RELAY_IPS (comma-separated) only, whose PROXY line the
-#          gateway then believes (proxy_from), and the site answers nobody else.
+#          The certificate must be installed first (csr, install-cert); 993,
+#          465 and RELAY_SUBMISSION_PORT (where the relay dials submission) open
+#          to RELAY_IPS (comma-separated) only, whose PROXY line the gateway
+#          then believes (proxy_from), and the site answers nobody else.
 # csr:     a new key for SITE's relay name (kept here, root only) and its
 #          certificate request, printed                                    -> GATEWAY_CSR
 # install-cert SITE MAILHOST: the chain the relay issued, on stdin; it must
@@ -233,6 +237,11 @@ DIR=/etc/joinery/mail-gateway
 CERTS="${DIR}/certs"
 UNIT=joinery-mail-gateway
 DROPIN_DIR=/etc/systemd/system/${UNIT}.service.d
+# Where a relay reaches submission: the relay cannot dial 465 onward (cloud
+# providers block outbound 25, 465 and 587), so the gateway also listens here
+# and only the relays may connect. A mirror of RelaySubmissionPort (mail-gateway
+# main.go) and mailAppsSubmissionTarget (relay-sealer relay_serve.go).
+RELAY_SUBMISSION_PORT=10465
 
 # remove may find its site already forgotten (a second run): that is done, not an error.
 # converge takes no site; refresh without one re-hands every served site's.
@@ -401,7 +410,8 @@ relay_addresses() {
 
 # 993 and 465 as the served sites need them: open to everyone while a site is
 # reached directly; open to each relay's address while a site is reached
-# through it; closed otherwise. The relay rules this helper added are recorded
+# through it (with RELAY_SUBMISSION_PORT, which is never open to everyone);
+# closed otherwise. The relay rules this helper added are recorded
 # (ufw_relays) so a relay no longer used has its rules removed. The relays are
 # also the gateway's proxy_from: the addresses whose PROXY line it believes.
 converge_access() {
@@ -423,13 +433,13 @@ converge_access() {
     done
     for ip in $(cat "${DIR}/ufw_relays" 2>/dev/null); do
         if ! printf '%s\n' "${relays}" | grep -qxF "${ip}"; then
-            for port in 993 465; do
+            for port in 993 465 "${RELAY_SUBMISSION_PORT}"; do
                 ufw delete allow proto tcp from "${ip}" to any port "${port}" >/dev/null 2>&1 || true
             done
         fi
     done
     for ip in ${relays}; do
-        for port in 993 465; do
+        for port in 993 465 "${RELAY_SUBMISSION_PORT}"; do
             ufw allow proto tcp from "${ip}" to any port "${port}" >/dev/null 2>&1 || true
         done
     done
