@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.5 - Encrypt's confirm says the services stop again for a few seconds when it finishes (B45)
  * @version 1.4 - its escrow holder is this management node from the moment the enrolment is confirmed, not
  *                from its next host report (B30); what only a holder has to say (its answers, its refusals,
  *                where it may ask from, Stop holding its key, the unlock) shows only where its key is held
@@ -57,7 +58,7 @@ if ($dre_offer && !$dre_row) {
 			. '<label class="form-check-label small" for="keep_provider_layer">Keep the provider\'s layer as well (two layers; this node page will say so)</label></div>';
 	}
 	echo '<button type="button" class="btn btn-sm btn-primary"' . ($ready ? '' : ' disabled')
-		. ' onclick="JoineryModal.confirm(\'Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours. A reboot part-way opens it with the recovery key.\', function(){ document.getElementById(\'data_root_encrypt_form\').submit(); })">Encrypt the data root</button></form>';
+		. ' onclick="JoineryModal.confirm(\'Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours, and stop again for a few seconds when it finishes, as its logs move onto it. A reboot part-way opens it with the recovery key.\', function(){ document.getElementById(\'data_root_encrypt_form\').submit(); })">Encrypt the data root</button></form>';
 	$page->end_box();
 }
 if (is_array($dre_enc) || $dre_row) {

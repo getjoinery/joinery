@@ -30,6 +30,8 @@
  *   - the names the files engine never archives, at any depth
  *     (backup_files.sh NAMED_EXCLUDES; site_census_test pins the two lists
  *     equal), and the site's own backup_exclude names;
+ *   - vendor/ at the site root (Composer's, regenerable); a vendor/ inside
+ *     public_html is signed code and counted, as the archive carries it;
  *   - public_html_* beside the code, and upgrades, upgrade_archives and
  *     uploads/upgrades (the upgrade's staging and downloads, and where older
  *     releases staged);
@@ -40,6 +42,8 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.4 - vendor/ is left out at the site root only, as backup_files.sh 1.6.0 leaves it out: a vendor/
+ *               inside public_html (assets/vendor, a plugin's Composer tree) is signed code the archive carries
  * @version 1.3 - upgrades and upgrade_archives, where an upgrade stages beside the code, are left out
  * @version 1.2 - offloaded() asks each sampled file of the file store its record names
  * @version 1.1 - check(): one machine's census judged alone, for a copy from backups (site_copy.md WP10)
@@ -54,7 +58,7 @@ class SiteCensus {
 	 * Names no archive carries, at any depth: backup_files.sh's NAMED_EXCLUDES.
 	 * The census counts what a copy receives, so the two lists are one list.
 	 */
-	const NAMED_EXCLUDES = array('backups', 'vendor', 'node_modules', 'target', '.git', 'logs', 'cache', 'tmp', 'sessions');
+	const NAMED_EXCLUDES = array('backups', 'node_modules', 'target', '.git', 'logs', 'cache', 'tmp', 'sessions');
 
 	/** Paths, relative to the site root, each machine keeps as its own. */
 	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');
@@ -207,6 +211,7 @@ class SiteCensus {
 				$path = $rel === '' ? $name : $rel . '/' . $name;
 				if (isset($skip_paths[$path])) { continue; }
 				if ($rel === '' && strpos($name, 'public_html_') === 0) { continue; }
+				if ($rel === '' && $name === 'vendor') { continue; }
 				$group = $rel === '' ? (is_dir($root . '/' . $name) && !is_link($root . '/' . $name) ? $name : '.') : explode('/', $rel, 2)[0];
 				$full = $root . '/' . $path;
 				if (is_link($full)) {

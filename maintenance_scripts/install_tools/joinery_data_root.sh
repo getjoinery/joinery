@@ -4,6 +4,12 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.19 - An encrypt's start cut off while cryptsetup made the header is put back as it was: cryptsetup
+#                 opens the volume as it ends, and a signal waits for that, so the mapping held the loop device
+#                 and the data root would not mount again (B49). A tick closes such a mapping over a plain data
+#                 root, and a data root it mounts again brings back what stopped with it (B51). The root
+#                 copy a run's unit starts follows the tree at each tick once no run is recorded: it stayed
+#                 at the release that last encrypted the host, and answered `joinery-data-root status` (B46).
 # Version: 1.18 - The tick leaves swap in compressed memory (zram) on: it never reaches a disk. It switched it
 #                 off every minute, and systemd made it again (B32).
 # Version: 1.17 - An encrypt's start that ends after it stopped the data root, however it ends (a refusal, a
@@ -2273,6 +2279,20 @@ install_self() {
     install -o root -g root -m 755 "$SELF" "$INSTALLED_SELF_REAL" || die "could not install ${INSTALLED_SELF_REAL}"
 }
 
+# The root copy a run's unit starts, brought up to this one once no run is
+# recorded: a run resumes on the copy it started with, and between runs the
+# copy is what `joinery-data-root status` answers with (B46).
+refresh_installed_self() {
+    local dest="${ROOT}${INSTALLED_SELF_REAL}"
+    [[ -f "$dest" && -z "$(reencrypt_mode)" ]] || return 0
+    cmp -s "$SELF" "$dest" && return 0
+    if [[ -z "$ROOT" ]]; then
+        install -o root -g root -m 755 "$SELF" "$dest" 2>/dev/null || true
+    else
+        install -m 755 "$SELF" "$dest" 2>/dev/null || true
+    fi
+}
+
 # The fstab line of an unencrypted data root: there, or gone.
 fstab_line() {  # present|absent
     local uuid line=""
@@ -2533,6 +2553,10 @@ encrypt_start_exit() {
     case "$ENC_STAGE" in
         stopped|header)
             if [[ "$ENC_STAGE" == header ]]; then
+                # cryptsetup opens the volume as its start ends, and a signal
+                # waits for it to end: the mapping holds the loop device, and
+                # nothing mounts the image until it is closed (B49).
+                mapping_open && { cryptsetup close "$MAPPING" 2>/dev/null || say "data root: WARNING: ${MAPPER_REAL} did not close"; }
                 # The loop device this start attached; nothing else has the image now.
                 [[ "$(conf_get backing)" == file ]] && losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
                 if ! encrypt_start_undo; then
@@ -3307,6 +3331,7 @@ do_tick() {
     local rc=0 rel target
     encrypt_start_undo || true
     write_public_status
+    refresh_installed_self
     # Locked, waiting for its key: not ready, and nothing to say every minute
     # (check and status say why).
     if [[ -f "$CONF" ]] && is_luks && ! mapping_open; then
@@ -3320,9 +3345,18 @@ do_tick() {
     if (( rc == 1 )) && ! mounted_ok; then
         need_root
         if take_lock nowait; then
+            # Plain, with the volume's mapping still open: a start cut off
+            # after cryptsetup opened it (B49). The mapping holds the loop
+            # device the mount needs.
+            if ! is_luks && mapping_open; then
+                cryptsetup close "$MAPPING" 2>/dev/null || true
+            fi
             if systemctl start "$TARGET_UNIT" 2>/dev/null && mounted_ok; then
                 rm -f "$NOT_MOUNTED_FLAG"
-                say "data root: it was not mounted; mounted it again"
+                # Every consumer requires the target, so what it holds stopped
+                # with it and does not come back with it (B51).
+                systemctl start --no-block default.target 2>/dev/null || true
+                say "data root: it was not mounted; mounted it again, and started what stopped with it"
             elif [[ ! -f "$NOT_MOUNTED_FLAG" ]]; then
                 touch "$NOT_MOUNTED_FLAG"
                 say "data root: not mounted, and it did not mount when started: $(ready_reason)"

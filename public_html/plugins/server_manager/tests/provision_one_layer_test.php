@@ -525,5 +525,17 @@ check($line(true, 'disabled') === "Data root: encrypted by us · provider's disk
 check($line(true, 'unknown') === "Data root: encrypted by us · provider's disk encryption: unknown", 'encrypted, provider unknown');
 check($line(false, 'enabled') === "Data root: not encrypted by us · provider's disk encryption: on", 'an adopted server, provider on');
 check($line(false, null) === '', 'a provision that was never asked says nothing');
+$now = function (bool $born_encrypted, $reported, ?string $provider) {
+	$p = new CustomerCloudProvision(NULL);
+	$p->set('cvp_data_root_encrypted', $born_encrypted);
+	$p->set('cvp_provider_disk_encryption', 'enabled');
+	return $p->data_root_line($reported, $provider);
+};
+check($now(false, array('backing' => 'luks-device'), 'enabled') === "Data root: encrypted by us · provider's disk encryption: on",
+	'a server born plain and encrypted in place since: as it reports now, the line agreeing with its Layers (B44)', $now(false, array('backing' => 'luks-device'), 'enabled'));
+check($now(true, 'none', 'disabled') === "Data root: not encrypted by us · provider's disk encryption: off",
+	'one born encrypted and decrypted since: not encrypted, and the provider\'s layer as the page reads it');
+check($now(true, null, null) === "Data root: encrypted by us · provider's disk encryption: on",
+	'no report yet: as it was born');
 
 harness_finish();

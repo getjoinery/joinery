@@ -209,6 +209,28 @@ stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"; [ "$*" = "start joinery-data
 out="$(run tick 2>&1)"; rc=$?
 chk "and when it mounts: exit 0, said, and the once-said note cleared" \
     "$rc|$(grep -c 'mounted it again' <<< "$out")|$( [ -e "$T/root/run/joinery/data-root.not-mounted" ] && echo flag || echo none)" "0|1|none"
+chk "and what stopped with it (every consumer requires the target) is started again (B51)" \
+    "$(grep -c '^systemctl start --no-block default.target$' "$LOG")" "1"
+# A start cut off after cryptsetup opened the volume leaves its mapping over the
+# plain image, holding the loop device the mount needs (B49).
+cp "$T/bin/cryptsetup" "$T/cryptsetup.b49"
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; [ "$1" = close ] && rm -f "$GATE_T/root/dev/mapper/joinery-data"; exit 0'
+unmount; mkdir -p "$T/root/dev/mapper"; : > "$T/root/dev/mapper/joinery-data"; : > "$LOG"
+run tick >/dev/null 2>&1
+chk "plain, not mounted, the volume's mapping left open: closed, then the data root started (B49)" \
+    "$(grep -n -e '^cryptsetup close joinery-data$' -e '^systemctl start joinery-data.target$' "$LOG" | cut -d: -f2 | cut -d' ' -f1-2 | paste -sd,)|$( [ -e "$T/root/dev/mapper/joinery-data" ] && echo open || echo closed)" \
+    "cryptsetup close,systemctl start|closed"
+cp "$T/cryptsetup.b49" "$T/bin/cryptsetup"
+# The root copy a run's unit starts follows the tree once no run needs it (B46).
+mkdir -p "$T/root/usr/local/sbin"; echo '# an older release' > "$T/root/usr/local/sbin/joinery-data-root"
+run tick >/dev/null 2>&1
+chk "the root copy of this tool an older run installed: brought up to this one at the tick (B46)" \
+    "$(cmp -s "$T/root/usr/local/sbin/joinery-data-root" "$SCRIPT" && echo same || echo old)" "same"
+echo '# an older release' > "$T/root/usr/local/sbin/joinery-data-root"; echo 'reencrypt=encrypt' >> "$T/root/etc/joinery/data_root"
+run tick >/dev/null 2>&1
+chk "but never while a run is recorded: the run resumes on the copy it started with" \
+    "$(cmp -s "$T/root/usr/local/sbin/joinery-data-root" "$SCRIPT" && echo same || echo old)" "old"
+sed -i '/^reencrypt=/d' "$T/root/etc/joinery/data_root"; rm -rf "$T/root/usr/local/sbin"; : > "$LOG"
 unmount; : > "$LOG"
 ( exec 8>>"$T/root/run/joinery/data-root.lock"; flock 8; run tick >/dev/null 2>&1 )
 chk "while a run holds the data root's lock (an encrypt's start): left stopped" "$(grep -c '^systemctl start joinery-data.target$' "$LOG")" "0"
@@ -929,6 +951,14 @@ held_binds; touch "$T/mounted"; : > "$LOG"
 out="$(run encrypt 2>&1)"; rc=$?
 chk "cryptsetup's start fails: its loop device let go, a header it left undone, then the same" \
     "$rc|$(awk '/^cryptsetup reencrypt/ { f = 1 } f && /^losetup -d \/dev\/loop7$/ { n++ } END { print n + 0 }' "$LOG")|$(grep -c '^cryptsetup luksDump' "$LOG")|$(start_undone "$out")" "1|1|1|1|1|1|none|0|1"
+# The TERM that lands while cryptsetup's start runs waits for it to end, and it
+# ends with the volume open: the mapping goes before its loop device can (B49).
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; case "$1" in reencrypt) mkdir -p "$GATE_T/root/dev/mapper"; : > "$GATE_T/root/dev/mapper/joinery-data"; kill -TERM $PPID ;; close) rm -f "$GATE_T/root/dev/mapper/joinery-data" ;; esac; exit 0'
+held_binds; touch "$T/mounted"; rm -f "$R/dev/mapper/joinery-data"; : > "$LOG"
+out="$(run encrypt 2>&1)"; rc=$?
+chk "a TERM while cryptsetup's start opens the volume: the mapping closed before its loop device is let go, then the same (B49)" \
+    "$rc|$(awk '/^cryptsetup reencrypt/ { f = 1 } f && /^cryptsetup close joinery-data$/ && !c { c = NR } f && /^losetup -d \/dev\/loop7$/ && !l { l = NR } END { print (c && l && c < l) ? "close,detach" : "close=" c " detach=" l }' "$LOG")|$( [ -e "$R/dev/mapper/joinery-data" ] && echo open || echo closed)|$(start_undone "$out")" \
+    "143|close,detach|closed|1|1|1|none|0|1"
 cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"
 truncate -s $(( 8 * G )) "$R/srv/joinery.img"
 held_binds; touch "$T/mounted"

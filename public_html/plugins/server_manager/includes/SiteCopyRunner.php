@@ -98,6 +98,12 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.20 - a copy run from the running site backs it up first (backup_run, arg run) and copies the chain
+ *                that backup lands in: the newest backup could be a day old and from before the source's
+ *                upgrade, and its code was laid over the release the copy installed (B53). No age limit on the
+ *                source's backups to start one (chain_age_limit() is gone); the final backup keeps its own.
+ * @version 1.19 - a copy asks the source which release it runs as it starts and as its run begins: a site
+ *                upgraded outside this node kept its old release on record, and a copy installed it (B48)
  * @version 1.18 - the owner's commands fetch the release and name the upgrade server from ReleaseStream: a
  *                 management node that serves no releases sends them to its own source (B38)
  * @version 1.17 - copy_born_encrypted(): the copy's new server is born with its data root encrypted by the form's tick,
@@ -139,7 +145,7 @@
 class SiteCopyRunner {
 
 	/** The words the source must report: what a copy asks of it. */
-	const SOURCE_WORDS = array('copy_export', 'site_census');
+	const SOURCE_WORDS = array('backup_run', 'copy_export', 'site_census');
 
 	/** The words the copy must report before a run starts. */
 	const COPY_WORDS = array('host_report', 'copy_import', 'copy_stage', 'copy_restore', 'site_census');
@@ -191,9 +197,14 @@ class SiteCopyRunner {
 	/** How long one call of the probe step asks before it gives the worker back. */
 	const PROBE_CALL_SECONDS = 15;
 
-	/** The steps of one run, in order. */
+	/**
+	 * The steps of one run, in order. The source is backed up first, so the
+	 * copy is of the site as it is now, at the release the copy installed: its
+	 * newest backup could be from before an upgrade (B53).
+	 */
 	const RUN_STEPS = array(
 		array('op' => 'host_report',  'on' => 'copy'),
+		array('op' => 'backup_run',   'on' => 'source', 'arg' => 'run'),
 		array('op' => 'copy_export',  'on' => 'source'),
 		array('op' => 'copy_import',  'on' => 'copy'),
 		array('op' => 'copy_stage',   'on' => 'copy'),
@@ -476,7 +487,7 @@ class SiteCopyRunner {
 			throw new SiteCopyException('This site\'s server has not reported its memory, so the copy\'s size is not known. '
 				. 'Run a status check on it, then try again.');
 		}
-		$disk = self::disk_needed(self::newest_chain($source, self::chain_age_limit($from))) + self::OS_DISK;
+		$disk = self::disk_needed(self::newest_chain($source, null)) + self::OS_DISK;
 		foreach ($types() as $t) {
 			if ($t['memory_mb'] * 1048576 >= $memory && $t['disk_mb'] * 1048576 >= $disk) {
 				return $t['id'];
@@ -506,8 +517,10 @@ class SiteCopyRunner {
 	 * with the time of its newest run. Throws when there is none, the listing
 	 * fails, or it is older than BACKUP_MAX_AGE_HOURS.
 	 *
-	 * A copy from backups takes the newest chain at any age ($max_hours null):
-	 * its age is the data lost, and the owner sees it before typing the key.
+	 * A copy takes the newest chain at any age ($max_hours null): from the
+	 * running site its run backs the site up first, and from backups the age
+	 * is the data lost, which the owner sees before typing the key. The final
+	 * backup of a switch-over is checked at the default age.
 	 *
 	 * @return array{chain_id:string, time:string, bytes:int, files:int, db:int}
 	 */
@@ -650,16 +663,12 @@ class SiteCopyRunner {
 		if (!in_array($from, array(SiteCopy::FROM_SOURCE, SiteCopy::FROM_BACKUPS), true)) {
 			throw new SiteCopyException('Choose whether the copy comes from the running site or from its backups.');
 		}
+		self::confirm_source_release($source);
 		$why = self::source_refusals($source, true, $from);
 		if ($why) {
 			throw new SiteCopyException('This site cannot be copied: ' . implode(' ', $why));
 		}
-		self::newest_chain($source, self::chain_age_limit($from));
-	}
-
-	/** How old the newest backup may be: a day for a live source, any age from backups. */
-	public static function chain_age_limit(string $from): ?int {
-		return $from === SiteCopy::FROM_BACKUPS ? null : self::BACKUP_MAX_AGE_HOURS;
+		self::newest_chain($source, null);
 	}
 
 	private static function new_record(ManagedNode $source, $user_id, string $from = SiteCopy::FROM_SOURCE): SiteCopy {
@@ -1019,10 +1028,25 @@ class SiteCopyRunner {
 		self::begin_run($copy);
 	}
 
+	/**
+	 * The copy installs its source's exact release, so the release on record
+	 * is asked of the site itself first: one upgraded outside this node is on
+	 * record at its old release until a status check (B48). A site that does
+	 * not answer (a copy from backups of a site that is down) keeps the record.
+	 */
+	private static function confirm_source_release(ManagedNode $source): void {
+		$said = $source->probe_joinery_version();
+		if ($said !== null && preg_match('/^\d+\.\d+\.\d+$/', $said) && $said !== (string)$source->get('mgn_joinery_version')) {
+			$source->set('mgn_joinery_version', $said);
+			$source->save();
+		}
+	}
+
 	/** Lay out a run's steps, after checking both ends still hold. */
 	private static function begin_run(SiteCopy $copy): void {
 		try {
 			$source = self::source_row($copy);
+			self::confirm_source_release($source);
 			$why = self::source_refusals($source, false, (string)$copy->get('scp_from'));
 			if ($why) {
 				throw new SiteCopyException('The source cannot be copied now: ' . implode(' ', $why));
@@ -1036,14 +1060,15 @@ class SiteCopyRunner {
 			if (!$node || trim((string)$node->get('mgn_install_state')) !== 'copy') {
 				throw new SiteCopyException('The copy\'s node record is gone or is no longer a dormant copy.');
 			}
-			$chain = self::newest_chain($source, self::chain_age_limit((string)$copy->get('scp_from')));
+			$chain = self::newest_chain($source, null);
 		} catch (Exception $e) {
 			self::halt($copy, $e->getMessage());
 			return;
 		}
 		$steps = array();
 		foreach ($copy->from_backups() ? self::BACKUPS_RUN_STEPS : self::RUN_STEPS as $s) {
-			$steps[] = array('op' => $s['op'], 'on' => $s['on'], 'job_id' => null, 'verdict' => 'pending', 'reason' => '');
+			$steps[] = array('op' => $s['op'], 'on' => $s['on'], 'arg' => $s['arg'] ?? '', 'job_id' => null,
+				'verdict' => 'pending', 'reason' => '');
 		}
 		$copy->set_steps($steps);
 		$copy->set('scp_chain_id', $chain['chain_id']);
@@ -1171,6 +1196,11 @@ class SiteCopyRunner {
 			case 'site_quiet':
 				return JobCommandBuilder::build_site_quiet($step['on'] === 'source' ? $source : $node, (string)($step['arg'] ?? ''));
 			case 'backup_run':
+				// A run's first backup takes the source's own chain policy; the
+				// final one of a switch-over must extend the chain the copy holds.
+				if (($step['arg'] ?? '') === 'run') {
+					return JobCommandBuilder::build_backup_run($source, array('type' => 'project', 'mode' => 'chain'));
+				}
 				return JobCommandBuilder::build_backup_run($source, array('type' => 'project', 'mode' => 'chain',
 					'full_interval_days' => self::FINAL_RUN_FULL_INTERVAL_DAYS));
 			case 'copy_vouch':
@@ -1345,8 +1375,22 @@ class SiteCopyRunner {
 				return JobResultProcessor::census_of($job) === null ? 'the census could not be taken' : null;
 			case 'backup_run':
 				$r = json_decode((string)$job->get('mjb_result'), true);
+				$first = ($step['arg'] ?? '') === 'run';
 				if (!is_array($r) || !in_array($r['backup_status'] ?? '', array('success', 'warning'), true)) {
-					return 'the final backup did not succeed' . (is_array($r) && !empty($r['message']) ? ': ' . $r['message'] : '');
+					return ($first ? 'the backup of the site' : 'the final backup') . ' did not succeed'
+						. (is_array($r) && !empty($r['message']) ? ': ' . $r['message'] : '');
+				}
+				if ($first) {
+					// The copy is of the chain this backup is in: an increment of
+					// the newest chain, or a new chain where the policy began one.
+					try {
+						$chain = self::newest_chain($source, null);
+					} catch (Exception $e) {
+						return $e->getMessage();
+					}
+					$copy->set('scp_chain_id', $chain['chain_id']);
+					$copy->set('scp_chain_time', $chain['time']);
+					return null;
 				}
 				try {
 					$chain = self::newest_chain($source);
@@ -1416,7 +1460,7 @@ class SiteCopyRunner {
 				. BackupRunner::human($s_mem) . '; a copy needs at least the source\'s';
 		}
 		try {
-			$chain = self::newest_chain($source, self::chain_age_limit((string)$copy->get('scp_from')));
+			$chain = self::newest_chain($source, null);
 		} catch (Exception $e) {
 			return $e->getMessage();
 		}
@@ -1628,7 +1672,7 @@ class SiteCopyRunner {
 		}
 		if (!$why) {
 			try {
-				$chain = self::newest_chain($source, self::chain_age_limit($from));
+				$chain = self::newest_chain($source, null);
 				if ($chain['chain_id'] !== (string)$copy->get('scp_chain_id')) {
 					$why[] = 'The site\'s newest backup is in chain ' . $chain['chain_id'] . ', and the copy holds the key for '
 						. $copy->get('scp_chain_id') . '. Copy again first.';

@@ -60,6 +60,7 @@ function sc_site(string $root, array $own): void {
 		'static_files/offloaded.jpg'       => 'in the bucket',
 		'RELEASE_MANIFEST'                 => 'm',
 		'public_html/x/mylogs'             => 'k',        // a plain name matches a whole name only
+		'public_html/assets/vendor/lib.js' => 'signed',   // vendor/ is left out at the site root only
 		'public_html/x/joinery-core-2'     => null,       // tar keeps the directory of a file it leaves out
 		'empty_dir'                        => null,
 	) + $own);
@@ -101,7 +102,7 @@ check($fs['config']['files'] === 1, 'config/ counts the relay key only: Globalva
 check($fs['uploads']['files'] === 2 && $fs['uploads']['bytes'] === 150, 'uploads/upgrades is left out', json_encode($fs['uploads']));
 check(!isset($fs['upgrades']) && !isset($fs['upgrade_archives']), 'an upgrade\'s staging and archives beside the code are left out', implode(',', array_keys($fs)));
 check($fs['static_files']['files'] === 1, 'an offloaded file\'s local copy is left out', json_encode($fs['static_files']));
-check($fs['public_html']['files'] === 4, 'public_html: node_modules, .git and the backup_exclude pattern left out; a link counted',
+check($fs['public_html']['files'] === 5, 'public_html: node_modules, .git and the backup_exclude pattern left out; a link and assets/vendor counted',
 	json_encode($fs['public_html']));
 
 // The files engine is the authority: what tar leaves out, the census leaves out.
@@ -300,7 +301,8 @@ check($engine === SiteCensus::NAMED_EXCLUDES, 'the census leaves out exactly the
 foreach (array('public_html_*', 'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy') as $own) {
 	check(strpos($bf, '--exclude="${BASE}/' . $own . '"') !== false, "and the files engine leaves out $own, as the census does");
 }
-check(preg_match('/case "\$name" in public_html\|public_html_\*\|upgrades\|upgrade_archives\) skip=true/', $bf) === 1,
-	'and the data identity ignores the upgrade\'s staging and archives, which every upgrade makes anew');
+check(preg_match('/case "\$name" in public_html\|public_html_\*\|upgrades\|upgrade_archives\|vendor\) skip=true/', $bf) === 1,
+	'and the data identity ignores the upgrade\'s staging and archives, which every upgrade makes anew, and the root\'s vendor/');
+check(strpos($bf, '--exclude="${BASE}/vendor"') !== false, 'and the files engine leaves out the root\'s vendor/ only, as the census does');
 
 harness_finish();

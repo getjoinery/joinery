@@ -14,6 +14,8 @@
  * the census compared informationally; Copy again and Discard; the node-id
  * word's builder, and the row swap made only in the answer to its result.
  *
+ * @version 1.5 - a run backs the source up first and copies the chain that backup is in (B53)
+ * @version 1.4 - the release a copy installs is asked of the site itself (B48)
  * @version 1.3 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
  *               up only through a storage space, the suite had been skipping
  * @version 1.2 - the swapped rows are named for what they hold (B6)
@@ -57,12 +59,12 @@ section('The install a copy\'s server runs');
 $inst_node = $mk_node('inst', array('mgn_web_root' => '/var/www/html/scpsite/public_html'));
 $params = array('mode' => 'copy', 'sitename' => 'scpsite', 'domain' => 'scp.example.org', 'docker_mode' => 'bare-metal',
 	'admin_email' => 'owner@example.org', 'admin_password_stdin' => true,
-	'copy_of' => 4242, 'copy_of_key' => $source_key, 'release' => '0.8.453');
+	'copy_of' => 4242, 'copy_of_key' => $source_key, 'release' => '0.8.472');
 $steps = JobCommandBuilder::build_install_node($inst_node, $params);
 $session_cmd = (string)$steps[count($steps) - 1]['cmd'];
-check(strpos($session_cmd, '/utils/latest_release?version=0.8.453') !== false,
+check(strpos($session_cmd, '/utils/latest_release?version=0.8.472') !== false,
 	'the copy fetches its source\'s exact release, never the newest');
-check(strpos($steps[0]['cmd'], 'latest_release?version=0.8.453') !== false, 'and the preflight checks that release is served');
+check(strpos($steps[0]['cmd'], 'latest_release?version=0.8.472') !== false, 'and the preflight checks that release is served');
 check(strpos($session_cmd, " --dormant --copy-of=4242 --copy-of-key='" . $source_key . "'") !== false,
 	'the site install is dormant and records the source\'s node id and agent key', $session_cmd);
 check(strpos($session_cmd, '--admin-email') === false && empty($steps[count($steps) - 1]['stdin']),
@@ -94,7 +96,7 @@ $prov->set('cvp_slug', 'harnessscp-prov-' . $tag);
 $prov->set('cvp_docker_mode', 'bare-metal');
 $prov->set('cvp_install_mode', 'copy');
 $prov->set('cvp_source_node_id', 4242);
-$prov->set('cvp_release', '0.8.453');
+$prov->set('cvp_release', '0.8.472');
 $threw = '';
 try { $prov->prepare(); } catch (Exception $e) { $threw = $e->getMessage(); }
 check($threw === '', 'an admin copy of a node, on bare metal, at a release, is a valid provision', $threw);
@@ -107,7 +109,7 @@ foreach (array(
 	$p = new CustomerCloudProvision(NULL);   // a model's clone shares its fields
 	foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scp.example.org',
 		'cvp_slug' => 'harnessscp-prov-' . $tag, 'cvp_docker_mode' => 'bare-metal', 'cvp_install_mode' => 'copy',
-		'cvp_source_node_id' => 4242, 'cvp_release' => '0.8.453') as $k => $v) {
+		'cvp_source_node_id' => 4242, 'cvp_release' => '0.8.472') as $k => $v) {
 		$p->set($k, $v);
 	}
 	$p->set($over[0], $over[1]);
@@ -137,7 +139,7 @@ section('The node-id word and the row swap');
 
 $sw_src = $mk_node('swsrc', array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_host' => '192.0.2.61',
 	'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.49.1', 'mgn_agent_primitives' => 'check_status',
-	'mgn_install_state' => 'switching', 'mgn_joinery_version' => '0.8.453'));
+	'mgn_install_state' => 'switching', 'mgn_joinery_version' => '0.8.472'));
 $sw_copy = $mk_node('swcopy', array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_host' => '192.0.2.62',
 	'mgn_agent_public_key' => $copy_key, 'mgn_agent_version' => '1.50.0', 'mgn_agent_primitives' => 'take_node_id,site_census',
 	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$sw_src->key));
@@ -215,7 +217,7 @@ section('Preflight');
 $src_status = json_encode(array('backup_recovery_state' => 'proven'));
 $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn_site_url' => 'https://scp.example.org',
 	'mgn_host' => '192.0.2.63', 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.50.0',
-	'mgn_agent_primitives' => 'copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.453',
+	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,check_status', 'mgn_joinery_version' => '0.8.472',
 	'mgn_last_status_data' => $src_status, 'mgn_backup_recovery_fpr' => str_repeat('ab', 32),
 	'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_host_report' => json_encode(array('memory' => array('total_bytes' => 1000000000),
@@ -227,7 +229,7 @@ check(SiteCopyRunner::source_refusals($src) === array(), 'a bare-metal site on a
 	implode(' | ', SiteCopyRunner::source_refusals($src)));
 foreach (array(
 	'a container site'   => array('mgn_container_name', 'scpsite', 'container site'),
-	'an old release'     => array('mgn_joinery_version', '0.8.452', 'needs ' . JobCommandBuilder::COPY_SOURCE_MIN_VERSION),
+	'an old release'     => array('mgn_joinery_version', '0.8.471', 'needs ' . JobCommandBuilder::COPY_SOURCE_MIN_VERSION),
 	'an older agent'     => array('mgn_agent_primitives', 'check_status', 'update'),
 	'an unproven key'    => array('mgn_last_status_data', json_encode(array('backup_recovery_state' => 'unproven')), 'cannot run'),
 	'a management node'  => array('mgn_agent_server_manager', 'active', 'management node'),
@@ -289,10 +291,15 @@ $stale['chains'][0]['runs'][0]['time'] = gmdate('Y-m-d\TH:i:s\Z', time() - 30 * 
 SiteCopyRunner::$chain_lister = function ($node) use ($stale) { return $stale; };
 $threw = '';
 try { SiteCopyRunner::newest_chain($src); } catch (Exception $e) { $threw = $e->getMessage(); }
-check(strpos($threw, 'more than ' . SiteCopyRunner::BACKUP_MAX_AGE_HOURS . ' hours') !== false, 'a backup older than a day is refused, saying so', $threw);
+check(strpos($threw, 'more than ' . SiteCopyRunner::BACKUP_MAX_AGE_HOURS . ' hours') !== false,
+	'at the default age (a switch-over\'s final backup) a backup older than a day is refused, saying so', $threw);
+SiteCopyRunner::$chain_lister = function ($node) use ($stale) { return $stale; };
+check(SiteCopyRunner::newest_chain($src, null)['chain_id'] === $chain_id && SiteCopyRunner::source_refusals($src) === array(),
+	'but a copy starts from a day-old backup: its run backs the site up first (B53)', implode(' | ', SiteCopyRunner::source_refusals($src)));
 SiteCopyRunner::$chain_lister = function ($node) use (&$listing) { return $listing; };
-// Signing a chain's links reads backup storage, where this fixture chain is not;
-// the builder itself is job_command_builder's to test.
+// Signing a chain's links, and a backup run's grant, read backup storage, where
+// this fixture chain is not; the builders themselves are job_command_builder's to test.
+JobCommandBuilder::set_shelf_listing_for_tests(array());
 SiteCopyRunner::$stage_builder = function ($node, $chain) {
 	return array('primitive' => 'copy_stage', 'params' => array('chain_id' => $chain['chain_id'],
 		'manifest_url' => 'https://x.invalid/m', 'artifact_urls' => array()));
@@ -332,10 +339,10 @@ section('A copy onto a server the owner brings');
 
 $copy = SiteCopyRunner::start_own_server($src, null);
 harness_register_row('scp_site_copies', 'scp_site_copy_id', $copy->key);
-check($copy->status() === SiteCopy::STATUS_WAITING && $copy->get('scp_release') === '0.8.453',
+check($copy->status() === SiteCopy::STATUS_WAITING && $copy->get('scp_release') === '0.8.472',
 	'the copy waits for its server, pinned to the source\'s release');
 $cmd = SiteCopyRunner::owner_command($copy);
-check(strpos($cmd, "/utils/latest_release?version=0.8.453'") !== false
+check(strpos($cmd, "/utils/latest_release?version=0.8.472'") !== false
 	&& strpos($cmd, "site --bare-metal 'scpsite' --password-file=/root/.joinery_postgres_password 'scp.example.org'") !== false
 	&& strpos($cmd, '--dormant --copy-of=' . (int)$src->key . " --copy-of-key='" . $source_key . "'") !== false,
 	'the owner\'s command installs the source\'s release, site name and domain, dormant, recording the source', $cmd);
@@ -391,15 +398,23 @@ $census = function (int $rows) {
 };
 $results = array(
 	0 => array('completed', array('reported' => true)),
-	1 => array('completed', array('exported' => true, 'bundle' => '{"body":"x","signature":"y"}')),
-	2 => array('completed', array('imported' => true, 'chains' => array($chain_id), 'host_files' => 27,
+	1 => array('completed', array('backup_status' => 'success', 'message' => 'Incremental run 1')),
+	2 => array('completed', array('exported' => true, 'bundle' => '{"body":"x","signature":"y"}')),
+	3 => array('completed', array('imported' => true, 'chains' => array($chain_id), 'host_files' => 27,
 		'look_path' => '/.joinery-look/0123456789abcdef0123456789abcdef')),
-	3 => array('completed', array('staged' => true)),
-	4 => array('completed', array('restored' => true)),
-	5 => array('completed', $census(75)),
-	6 => array('completed', $census(50)),
+	4 => array('completed', array('staged' => true)),
+	5 => array('completed', array('restored' => true)),
+	6 => array('completed', $census(75)),
+	7 => array('completed', $census(50)),
 );
+// The backup the run takes lands in a chain of its own: the policy began a new
+// one. The copy follows it, not the chain it started on.
+$fresh_id = 'chain-' . gmdate('Ymd_His', time() - 60);
+$fresh = array('chains' => array(array('chain_id' => $fresh_id, 'profile' => BackupProfile::MANAGER, 'bytes' => 70000000,
+	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 30), 'artifacts' => array('files' => 69000000, 'db' => 140000))))),
+	'objects' => array(), 'error' => null);
 $ops = array();
+$was_listing = $listing;
 foreach ($results as $i => $r) {
 	SiteCopyRunner::advance($copy); $copy->load();
 	$step = $copy->steps()[$i];
@@ -410,8 +425,11 @@ foreach ($results as $i => $r) {
 	}
 	$job = $step_job($copy, $i);
 	$ops[] = $job->get('mjb_job_type') . '@' . ((int)$job->get('mjb_mgn_managed_node_id') === (int)$src->key ? 'source' : 'copy');
-	if ($i === 2) {
-		$params = json_decode((string)$job->get('mjb_parameters'), true);
+	if ($i === 1) {
+		$bparams = json_decode((string)$job->get('mjb_parameters'), true);
+		check((int)($bparams['full_interval_days'] ?? 0) !== SiteCopyRunner::FINAL_RUN_FULL_INTERVAL_DAYS && ($bparams['mode'] ?? '') === 'chain',
+			'the run\'s backup takes the source\'s own chain policy, not the final backup\'s', json_encode($bparams));
+		$listing = $fresh;
 	}
 	$finish($job, $r[0], $r[1]);
 	// The result arriving moves the run: the next step is queued at once,
@@ -424,8 +442,10 @@ foreach ($results as $i => $r) {
 			(string)$copy->get('scp_halt_reason'));
 	}
 }
-check($ops === array('host_report@copy', 'copy_export@source', 'copy_import@copy', 'copy_stage@copy', 'copy_restore@copy',
-	'site_census@source', 'site_census@copy'), 'one job at a time, each on its own machine, in order', implode(', ', $ops));
+check($ops === array('host_report@copy', 'backup_run@source', 'copy_export@source', 'copy_import@copy', 'copy_stage@copy',
+	'copy_restore@copy', 'site_census@source', 'site_census@copy'), 'one job at a time, each on its own machine, in order: the source backed up first', implode(', ', $ops));
+check($copy->get('scp_chain_id') === $fresh_id, 'and the copy is of the chain that backup is in (B53)', (string)$copy->get('scp_chain_id'));
+$listing = $was_listing;
 SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_DORMANT && $copy->get('scp_last_copied_time'),
 	'the run ends dormant: the source is live, so rows it wrote since its backup do not block',
@@ -441,10 +461,25 @@ SiteCopyRunner::advance($copy); $copy->load();
 $finish($step_job($copy, 0), 'completed', array('reported' => true));
 SiteCopyRunner::advance($copy); $copy->load();
 SiteCopyRunner::advance($copy); $copy->load();
-$finish($step_job($copy, 1), 'failed', array('exported' => false), 'the operator declined the export');
+$finish($step_job($copy, 1), 'completed', array('backup_status' => 'success'));
+SiteCopyRunner::advance($copy); $copy->load();
+SiteCopyRunner::advance($copy); $copy->load();
+$finish($step_job($copy, 2), 'failed', array('exported' => false), 'the operator declined the export');
 SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'declined') !== false
-	&& $copy->steps()[2]['verdict'] === 'skipped', 'a declined export stops the run and says so; nothing after it starts',
+	&& $copy->steps()[3]['verdict'] === 'skipped', 'a declined export stops the run and says so; nothing after it starts',
+	(string)$copy->get('scp_halt_reason'));
+
+// A backup of the source that fails stops the run before anything is exported.
+SiteCopyRunner::copy_again($copy, null); $copy->load();
+SiteCopyRunner::advance($copy); $copy->load();
+$finish($step_job($copy, 0), 'completed', array('reported' => true));
+SiteCopyRunner::advance($copy); $copy->load();
+SiteCopyRunner::advance($copy); $copy->load();
+$finish($step_job($copy, 1), 'completed', array('backup_status' => 'failed', 'message' => 'the target refused the upload'));
+SiteCopyRunner::advance($copy); $copy->load();
+check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'the backup of the site did not succeed: the target refused') !== false
+	&& empty($copy->steps()[2]['job_id']), 'a failed backup of the source stops the run before the export, saying why',
 	(string)$copy->get('scp_halt_reason'));
 
 // A copy too small for the run stops before anything leaves the source.
@@ -457,7 +492,7 @@ SiteCopyRunner::advance($copy); $copy->load();
 $finish($step_job($copy, 0), 'completed', array('reported' => true));
 SiteCopyRunner::advance($copy); $copy->load();
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'free') !== false
-	&& empty($copy->steps()[1]['job_id']), 'a copy without the disk for the run stops before the export',
+	&& empty($copy->steps()[1]['job_id']), 'a copy without the disk for the run stops before anything is asked of the source',
 	(string)$copy->get('scp_halt_reason'));
 
 // Memory: a copy holds at least its source's, except a container site's,
@@ -473,7 +508,7 @@ $big->set('mgn_container_name', 'scpsite');
 check(SiteCopyRunner::fit_refusal($copy, $big, $small) === null, 'a 1 GB copy of a container site on a 4 GB shared server is not');
 
 // The source moved to another release: the copy cannot follow.
-$src->set('mgn_joinery_version', '0.8.454');
+$src->set('mgn_joinery_version', '0.8.473');
 $src->save();
 SiteCopyRunner::copy_again($copy, null); $copy->load();
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'exact release') !== false,
@@ -482,7 +517,7 @@ check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('
 // Discard while the source waits for its owner to approve the export (B42):
 // the export job is cancelled, and the source, asking whether the job is still
 // wanted, hears that it was withdrawn and takes the request off its page.
-$src->set('mgn_joinery_version', '0.8.453');
+$src->set('mgn_joinery_version', '0.8.472');
 $src->save();
 $cnode->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 1000000000),
 	'disk' => array('avail_bytes' => 9000000000))));
@@ -491,7 +526,11 @@ SiteCopyRunner::copy_again($copy, null); $copy->load();
 SiteCopyRunner::advance($copy); $copy->load();
 $finish($step_job($copy, 0), 'completed', array('reported' => true));
 SiteCopyRunner::advance($copy); $copy->load();
-$export = $step_job($copy, 1);
+SiteCopyRunner::advance($copy); $copy->load();
+$finish($step_job($copy, 1), 'completed', array('backup_status' => 'success'));
+SiteCopyRunner::advance($copy); $copy->load();
+SiteCopyRunner::advance($copy); $copy->load();
+$export = $step_job($copy, 2);
 $export->set('mjb_status', 'running');
 $export->save();
 $asked = AgentChannelEndpoint::job_status_answer((int)$src->key, (int)$export->key);
@@ -543,6 +582,27 @@ $found = SiteCopyRunner::old_container($copy);
 check($found && (int)$found->key === (int)$old_ctr->key,
 	'and old_container() names its row, for Permanently Delete Site');
 
+// ---------------------------------------------------------------------------
+section('The release a copy installs is asked of the site itself (B48)');
+
+// A site upgraded outside this node is on record at its old release until a
+// status check; a copy started then installed the old release. This site's
+// own pages answer with its release, under a URL that is not this node's own.
+$confirm = new ReflectionMethod('SiteCopyRunner', 'confirm_source_release');
+$confirm->setAccessible(true);
+$here = trim((string)LibraryFunctions::get_joinery_version());
+$stale = $mk_node('stale', array('mgn_site_url' => rtrim((string)LibraryFunctions::get_absolute_url(), '/') . '/login',
+	'mgn_joinery_version' => '0.8.400'));
+$confirm->invoke(null, $stale);
+$stale->load();
+check($here !== '' && (string)$stale->get('mgn_joinery_version') === $here,
+	'a source on record at an old release takes the release its site says', (string)$stale->get('mgn_joinery_version') . ' vs ' . $here);
+$quiet = $mk_node('quiet', array('mgn_site_url' => 'http://127.0.0.1:9', 'mgn_joinery_version' => '0.8.400'));
+$confirm->invoke(null, $quiet);
+$quiet->load();
+check((string)$quiet->get('mgn_joinery_version') === '0.8.400', 'a site that does not answer keeps its record (a copy from the backups of a site that is down)');
+
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;
+JobCommandBuilder::set_shelf_listing_for_tests(null);
 harness_finish();

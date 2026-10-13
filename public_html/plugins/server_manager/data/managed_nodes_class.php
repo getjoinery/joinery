@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.54 - probe_joinery_version(): the release the node's site says it runs, read now
  * @version 1.53 - mgn_uptime_locked_since: an encrypted data root answering locked
  * @version 1.52 - soft_delete() retires an emptied Docker host record; undelete() places a container site back on one
  * @version 1.51 - adopt_reported_container(): a node whose agent says it runs in a container is named and placed as one
@@ -817,6 +818,42 @@ class ManagedNode extends SystemBase {
 			return $at_poll === 'active';
 		}
 		return self::is_management_node_from($this->get('mgn_last_status_data'));
+	}
+
+	/**
+	 * The release this node's site says it runs (its X-Joinery-Version
+	 * header), read now, or null when the site does not answer with one. A
+	 * site upgraded outside this management node runs a release its record
+	 * does not know until a status check; what must be exact (the release a
+	 * copy installs) asks here.
+	 */
+	public function probe_joinery_version(): ?string {
+		$site_url = rtrim((string)$this->get('mgn_site_url'), '/');
+		if ($site_url === '') {
+			return null;
+		}
+		$version = null;
+		$ch = curl_init($site_url . '/');
+		curl_setopt_array($ch, [
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_NOBODY         => true,
+			CURLOPT_CONNECTTIMEOUT => 5,
+			CURLOPT_TIMEOUT        => 8,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_MAXREDIRS      => 5,
+			CURLOPT_SSL_VERIFYPEER => $this->get('mgn_tls_insecure') ? false : true,
+			CURLOPT_SSL_VERIFYHOST => $this->get('mgn_tls_insecure') ? 0 : 2,
+			CURLOPT_HEADERFUNCTION => function ($curl, $header) use (&$version) {
+				if (stripos($header, 'X-Joinery-Version:') === 0) {
+					$v = trim(substr($header, strlen('X-Joinery-Version:')));
+					if ($v !== '') { $version = $v; }
+				}
+				return strlen($header);
+			},
+		]);
+		curl_exec($ch);
+		curl_close($ch);
+		return $version;
 	}
 
 	/** Whether this record is this management node's own — the rule self_node() finds it by. */

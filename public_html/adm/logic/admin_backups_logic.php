@@ -6,6 +6,7 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.22 - data_root_encrypt's answer says the services stop again for a few seconds when it finishes (B45)
  * @version 1.21 - data_root_encrypt and data_root_reseal: this server's data root encrypted, and its
  *                 break-glass copy sealed, to this site's recovery key, asked of root (WP4)
  * @version 1.20 - safety: what the site's own backups are missing (BackupSafety::site_warnings, no run off-site
@@ -264,7 +265,7 @@ function _admin_backups_handle($action, array $input, $session) {
 				}
 				RootRequest::submit($action, array(), (int)$session->get_user_id());
 				$say(array(
-					'data_root_encrypt' => 'Asked. Within a minute the server stops its services for a few seconds, then encrypts its data root in the background, which takes hours. Its break-glass copy is sealed to this site\'s recovery key.',
+					'data_root_encrypt' => 'Asked. Within a minute the server stops its services for a few seconds, then encrypts its data root in the background, which takes hours; when it finishes they stop again for a few seconds, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key.',
 					'data_root_reseal'  => 'Asked. Within two minutes the server seals its break-glass copy to this site\'s recovery key.',
 					'data_root_rekey'   => 'Asked. Within a minute the server starts re-encrypting its data root under a new volume key, in the background, for hours. From then on the old recovery key opens no copy of its disk.',
 				)[$action], true);

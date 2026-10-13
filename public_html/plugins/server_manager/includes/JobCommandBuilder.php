@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.122 - COPY_SOURCE_MIN_VERSION is BROKER_MIN_CORE_VERSION's 0.8.472: a copy run backs the source up
+ *                  through this management node's backup broker first (B53)
  * @version 1.121 - run_installer may name host_swap.sh (agent 1.75.2)
  * @version 1.120 - install_node fetches its release, and names its upgrade server, from ReleaseStream: this plane
  *                  when it serves releases, else this plane's own upgrade source (B38: a management node built
@@ -494,10 +496,12 @@ class JobCommandBuilder {
 	 * carries is what the copy runs: the dormant install that records the
 	 * source's key (install.sh 2.90), restore_chain's --adopt-secret-key, the
 	 * converger's quiet gate, and a quiet state that answers the owner's look
-	 * from off the machine (_site_state.sh 1.4). 0.8.453 is the first release
-	 * with all of them.
+	 * from off the machine (_site_state.sh 1.4), 0.8.453 and later. And each
+	 * copy run backs the source up first, through this management node's
+	 * backup broker (BROKER_MIN_CORE_VERSION), so the copy is of the site as it
+	 * is at its release: 0.8.472.
 	 */
-	const COPY_SOURCE_MIN_VERSION = '0.8.453';
+	const COPY_SOURCE_MIN_VERSION = '0.8.472';
 
 	/**
 	 * The oldest release a site can be copied from its backups (site_copy.md

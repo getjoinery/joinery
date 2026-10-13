@@ -21,6 +21,8 @@
  * (data_root_recipient), and its tick seals the copy again; the Backups page
  * counts them (sealing_counts()).
  *
+ * @version 1.4 - a dormant copy is sent no enrolment and no recipient: it refuses both until it takes over its
+ *                source's node, and each refusal was a failed job every hour
  * @version 1.3 - a rotated key is sent at once: the hour between sends holds back only the same key again (B35)
  * @version 1.2 - no enrolment job while this holder takes no new enrolments (DataRootEscrow::takes_new_enrolments)
  * @version 1.1 - hosted machines sealed to an older operator key are sent the current one (D8)
@@ -53,6 +55,12 @@ class DataRootEscrowSync {
 		$row->note_box(json_encode(array('fingerprint' => $enc['box_fingerprint'] ?? '', 'sealed' => $enc['box_sealed'] ?? '')));
 		$row->save();
 
+		// A dormant copy runs only read-only words and its copy's own until it
+		// takes over its source's node, and refuses both of these. They follow
+		// its first host report after the switch-over.
+		if (trim((string)$node->get('mgn_install_state')) === 'copy') {
+			return;
+		}
 		if (!empty($enc['open'])) {
 			self::push_operator_recipient($node, $enc);
 		}

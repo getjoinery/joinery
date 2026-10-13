@@ -1152,7 +1152,7 @@ The restore reconciles the result to the new box: the domain, the deployment sha
 
 Cross-shape rebuilds work in both directions with no extra step: a container backup landing on a plain server, or the reverse. Neither installs the virtualhost the backup carries — see the same section.
 
-**The dashboard** copies a working node onto a new server from its backups: the node's **Copy** tab (Server Manager, *Site copy*) installs a dormant copy at the node's own release and applies the node's newest backup chain there, its owner approving each export on the node itself. It cannot rebuild a node whose server is gone: its **restore_project** / **restore_chain** jobs restore a node's own backups onto that same node, which must already have a working site to approve them.
+**The dashboard** copies a working node onto a new server from its backups: the node's **Copy** tab (Server Manager, *Site copy*) installs a dormant copy at the node's own release, backs the node up and applies that backup chain there, its owner approving each export on the node itself. It cannot rebuild a node whose server is gone: its **restore_project** / **restore_chain** jobs restore a node's own backups onto that same node, which must already have a working site to approve them.
 
 **A PostgreSQL major-version jump needs nothing special, upwards.** The dump-and-restore path crosses it: a PG 16 dump restores onto PG 18 as an ordinary restore.
 
