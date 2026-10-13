@@ -22318,3 +22318,123 @@ fn a_fat_drives_notice_in_earlier_words_is_replaced() {
     assert_eq!(told.len(), 1, "{told:?}");
     assert!(told[0] != "the notice in its earlier words" && told[0].contains("folder"), "{told:?}");
 }
+
+/// A download planned for a folder whose user, before the download opened
+/// its file, renamed the folder away and made a new folder at its old name
+/// (an app writing through the path it knew). The file lands in the folder
+/// it belongs in, under the folder's new name, never in the new folder at
+/// the old one. RED before: the download took whatever directory stood at
+/// the name, the file went into the user's new folder, and the next pass
+/// read it as a new folder holding the file (soak run 2285).
+#[test]
+fn a_download_does_not_land_in_a_new_folder_at_its_folders_old_name() {
+    let world = World::new(9_878, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("Projects/a.txt", b"already in the folder");
+    assert!(world.settle().is_some());
+    pc.fs.user_write("Projects/new.txt", b"made on pc");
+    world.pass(pc);
+    let disk = mac.fs.clone();
+    let opened = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = opened.clone();
+    mac.fs.while_a_spool_opens(move |_| {
+        if !seen.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            disk.user_rename("Projects", "Projects renamed");
+            disk.user_mkdir("Projects");
+        }
+    });
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(opened.load(std::sync::atomic::Ordering::SeqCst), "the premise: the rename landed while the download opened");
+    let tree = world.server.tree();
+    assert_eq!(
+        tree.get("Projects renamed/new.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"made on pc")),
+        "the file did not land in the folder it belongs in: {tree:?}"
+    );
+    assert!(!tree.contains_key("Projects/new.txt"), "the file went into the new folder at the old name: {tree:?}");
+    assert_converged(&world);
+}
+
+/// A folder renamed on a FAT or exFAT drive is that folder, renamed. Its
+/// files are found where it went by their bytes, every one of them at the
+/// same place inside it, so the server renames the folder rather than
+/// trashing it and making another, and a peer renames its own directory
+/// rather than emptying it into a new one: on each platform's model of such
+/// a drive, with a subfolder of one file and an empty one carried along
+/// (owner decision Q1, 2026-10-13). RED before: on every model the server's
+/// folders were trashed and new ones made, every file moved into them, and
+/// the peer's own directory emptied into a new one (the FAT soak line's
+/// first run).
+#[test]
+fn a_folder_renamed_on_a_fat_drive_is_renamed_not_made_again() {
+    for (label, model) in [
+        ("windows", jd_sim::FileIds::DirectorySlot),
+        ("linux", jd_sim::FileIds::MountSession),
+        ("macos", jd_sim::FileIds::DataCluster),
+    ] {
+        let world = World::new(9_877, &["stick", "pc"]);
+        let stick = world.device("stick");
+        let pc = world.device("pc");
+        stick.fs.file_ids(model);
+        stick.fs.user_mkdir("Reports");
+        stick.fs.user_mkdir("Reports/Sub");
+        stick.fs.user_mkdir("Reports/Empty");
+        stick.fs.user_write("Reports/q1.txt", b"january through march");
+        stick.fs.user_write("Reports/q2.txt", b"april through june");
+        stick.fs.user_write("Reports/Sub/q3.txt", b"july through september");
+        assert!(world.settle().is_some(), "{label}: never settled");
+        pc.fs.user_write("Reports/from-pc.txt", b"written on the pc");
+        assert!(world.settle().is_some(), "{label}: never settled");
+        let before: Vec<Option<i64>> =
+            ["Reports", "Reports/Sub", "Reports/Empty"].iter().map(|p| world.server.folder_id_at(p)).collect();
+        assert!(before.iter().all(Option::is_some), "{label}: {before:?}");
+        let pc_directory = pc.fs.dir_birth_at("Reports");
+        assert!(pc_directory.is_some(), "{label}: the folder never reached the pc");
+
+        stick.fs.user_rename("Reports", "Quarterly Reports");
+        assert!(world.settle().is_some(), "{label}: never settled after the rename");
+        let after: Vec<Option<i64>> = ["Quarterly Reports", "Quarterly Reports/Sub", "Quarterly Reports/Empty"]
+            .iter()
+            .map(|p| world.server.folder_id_at(p))
+            .collect();
+        assert_eq!(after, before, "{label}: the folders were made again: {:?}", world.server.folders());
+        assert!(
+            world.server.folders().iter().all(|f| !f.trashed),
+            "{label}: a folder went to the trash: {:?}",
+            world.server.folders()
+        );
+        assert_eq!(
+            pc.fs.dir_birth_at("Quarterly Reports"),
+            pc_directory,
+            "{label}: the pc emptied its own directory into a new one"
+        );
+        assert_converged(&world);
+    }
+}
+
+/// A folder holding one file is not followed by that file on a FAT drive:
+/// the one file is all there is to read it by, and a swap of files between
+/// one-file folders reads the same (D4). Renamed there, it is read as
+/// deleted, its server copy restorable from the trash, and nothing is lost.
+/// The guard the rule above must keep: followed by one file, the ring walk
+/// handed a plain record a vault's directory (plat3 75414).
+#[test]
+fn a_one_file_folder_renamed_on_a_fat_drive_is_not_followed_by_its_file() {
+    let world = World::new(9_876, &["stick"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    stick.fs.user_mkdir("Solo");
+    stick.fs.user_write("Solo/only.txt", b"the only file");
+    assert!(world.settle().is_some());
+    let before = world.server.folder_id_at("Solo");
+    assert!(before.is_some());
+    stick.fs.user_rename("Solo", "Single");
+    assert!(world.settle().is_some());
+    assert_ne!(world.server.folder_id_at("Single"), before, "a one-file folder was followed by its file");
+    assert_eq!(
+        world.server.tree().get("Single/only.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"the only file"))
+    );
+    assert_converged(&world);
+}

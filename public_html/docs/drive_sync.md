@@ -96,8 +96,9 @@ the file to another record.
   to are weak. Every FAT or exFAT drive carries a standing notice saying that
   renames there cannot be tracked: files with identical contents that swap
   names may get their histories mixed up, each such pair named when it
-  happens, and a folder renamed while files inside it are being moved may be
-  read as deleted, its copy on the server going to the trash.
+  happens, and a renamed folder that holds fewer than two files, or whose
+  files were being moved or changed at the same time, may be read as deleted,
+  its copy on the server going to the trash.
 - **The scan pairs by identity first** on a strong volume: a record's own file
   is that record's wherever it stands, and the path decides only for a file no
   record owns. A weak volume pairs path-first. Where a record's file stands
@@ -167,6 +168,15 @@ follows takes that directory as the vault's own.
   files point to one new directory while its id stands at another is held,
   present and unmoved: the issues panel names both places, and the hold lifts
   when the directory is back at the folder's own path or gone.
+- **No ids at all** (FAT and exFAT, whose ids are positions). A folder gone
+  from its path is found by its files' bytes: the one new directory holding
+  every file the folder has, at least two, each at its place inside the folder
+  and with the bytes the engine last saw, is the folder renamed, so long as no
+  other gone folder fits that directory and it holds no sealed file. A folder
+  inside it goes with it under its own name, whatever it holds. Anything else
+  (a folder of one file or none, one whose files were moved or changed in the
+  same breath, two folders that fit one directory, a vault) is read as
+  deleted, its copy on the server going to the trash.
 
 ---
 
@@ -734,6 +744,18 @@ decompose are still real — HFS+ disks, Time Machine drives, network shares —
 `Personality::hfs_plus()` models them; the engine cannot tell which it has except
 by probing, and does not need to.
 
+**A FAT disk on a Mac keeps a spelling it never shows.** macOS's FAT driver
+lists every name decomposed, finds a file by either spelling, and renames a file
+(which a trash also is) only by the spelling its name was written with. The
+Mac's file manager, Finder's with it, always asks by the decomposed spelling. So
+where a disk lists names decomposed and finds them by either spelling, every
+name the engine writes there (a folder, a download, a rename's new name) is
+written decomposed, as Mac apps write one. A rename the disk answers "not found"
+is asked again under the name's other spelling, only on a disk that takes both
+spellings for one file: anywhere else the other spelling is another file. A file
+still written composed that the Trash refuses is respelled decomposed, which
+nothing on such a disk can see, and trashed again.
+
 ### macOS
 
 FSEvents reports *resolved* paths, with symlinks followed. A watcher started on
@@ -792,13 +814,17 @@ before that download has ever landed here is a new file of the user's, never
 the download's edit: a rename this device sends for a file not yet downloaded
 moves it on the server alone. A download's byte count comes from the bytes
 that reached the spool, never from a header. It lands in the directory that
-stood at its folder's path when the spool was opened: a folder the user moved
-or replaced while the bytes were in flight is never made again at its old name
-(`VfsError::FolderMoved`), and a spool whose folder is not on the disk when it
-opens is refused (`VfsError::NoFolder`). No engine write makes a directory it
-was not asked to make: a move refuses a destination folder that is not there,
-and a folder create makes one level, never a missing parent. The download or
-move stands down and the next pass places it where the folder now is.
+stood at its folder's path when the spool was opened, and only where that
+directory is its folder's own: on a volume whose identities hold, a directory
+at the folder's name with another id and birth (the folder renamed away and a
+new one made at its old name) is another folder, and the download is refused
+there. A folder the user moved or replaced while the bytes were in flight is
+never made again at its old name (`VfsError::FolderMoved`), and a spool whose
+folder is not on the disk when it opens is refused (`VfsError::NoFolder`). No
+engine write makes a directory it was not asked to make: a move refuses a
+destination folder that is not there, and a folder create makes one level,
+never a missing parent. The download or move stands down and the next pass
+places it where the folder now is.
 
 The spool lives with the state store, so a sync root on another volume (an
 external disk, a second partition, a mount point inside the root) cannot take
