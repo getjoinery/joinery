@@ -47,6 +47,7 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.4 - the working directory is removed after a rebuild too (Go's module cache is read-only)
  * @version 1.3 - plugin Go binaries are checked and rebuilt for every GoBinaryPublisher::PLUGIN_PUBLISHERS
  *                entry; a release that records none of a program's binaries shipped none of them
  * @version 1.2 - the core check runs both ways: every file the core commit ships must be listed, so an archive
@@ -101,7 +102,9 @@ class ReleaseVerifier {
 			$this->fail($e->getMessage());
 		} finally {
 			if (empty($this->opts['keep'])) {
-				exec('rm -rf ' . escapeshellarg($this->work));
+				// Go writes its module cache, the fetched toolchain among it,
+				// read-only; without u+w the rebuild's cache would stay behind.
+				exec('chmod -R u+w ' . escapeshellarg($this->work) . ' 2>/dev/null; rm -rf ' . escapeshellarg($this->work));
 			} else {
 				$this->say('Working files kept in ' . $this->work);
 			}

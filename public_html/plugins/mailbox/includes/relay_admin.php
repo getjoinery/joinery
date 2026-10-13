@@ -13,6 +13,8 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.11 - starting a cloud relay create or update with a token leaves no "started" notice:
+ *   the section's progress line reports the run, and the notice contradicted a create refused on landing
  * @version 2.10 - in a site container (no mail server of its own) disabling the relay says mail
  *   stops until it is enabled again, the Local mail listener box never shows, and the relay card
  *   says a container with no enabled relay receives nothing (it no longer mentions a tunnel)
@@ -404,11 +406,9 @@ function admin_mailbox_relay_take_grant(RelayCloudProvision $run, array $input, 
 	$run->set('rcl_status', 'ready');
 	$run->set('rcl_error', null);
 	$run->save();
-	admin_mailbox_relay_flash($session, ((string)$run->get('rcl_kind') === 'upgrade')
-		? 'Update started — the relay is drained first, then the same server is re-imaged from the current release '
-			. 'and reports in here. It stops accepting mail for several minutes; senders retry.'
-		: 'Provisioning started — the server is created in your account and builds itself from its first boot, '
-			. 'then reports in here. This page shows progress; the whole run takes several minutes.');
+	// No notice: the section's progress line says where the run stands, and a
+	// "started" notice would sit beside its error when the create is refused
+	// on the very page load this redirect lands on.
 	return LogicResult::redirect($back);
 }
 
