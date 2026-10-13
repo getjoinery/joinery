@@ -159,6 +159,88 @@ pub struct World {
     /// How many of each device's user moves `note_carries` has read.
     carry_moves_read: std::sync::Mutex<HashMap<String, usize>>,
     unseen: std::sync::Mutex<Vec<UnseenReading>>,
+    /// Per device, which server entity each of its files and directories
+    /// was bound to at each pass point (`note_bindings`): what a delete of
+    /// the user's there would reach.
+    bindings: std::sync::Mutex<HashMap<String, Bindings>>,
+}
+
+/// One device's bindings over the run: per file (by soul) and per directory
+/// (by birth), each change in the server ids its records bound it to, with
+/// the pass point it was seen at -- the device's look, by its number, and
+/// `vfs::user_acts_so_far` then. Pass points are ordered by their number:
+/// their stamps tie once no act comes between them, and the stamps are drawn
+/// from one counter for the whole process, so they tie or not as other worlds
+/// in it happen to act.
+#[derive(Default)]
+struct Bindings {
+    files: Timeline,
+    dirs: Timeline,
+    /// Every pass of the device, as (its start, its end): its scan read the
+    /// disk at the start, and the bindings are taken at the end, whether or
+    /// not one changed. An act of the user's between the two -- a chaos save
+    /// or swap while the pass ran -- is one that scan never saw.
+    looks: Vec<(u64, u64)>,
+    /// The look each of this device's trashes was made in, by the trash's
+    /// index on the server.
+    trashed_in: HashMap<usize, usize>,
+}
+
+/// Per soul or birth, each change in what it is bound to: (the look, its
+/// stamp, the server ids).
+type Timeline = HashMap<u64, Vec<(usize, u64, std::collections::BTreeSet<i64>)>>;
+
+impl Bindings {
+    /// What `soul` was bound to at the last pass point before the act
+    /// `order` -- what an act then reached.
+    fn before(timeline: &Timeline, soul: u64, order: u64) -> Option<&std::collections::BTreeSet<i64>> {
+        timeline.get(&soul)?.iter().rev().find(|(_, at, _)| *at <= order).map(|(_, _, ids)| ids)
+    }
+
+    /// What `soul` was bound to at the end of the device's look `look`.
+    fn at_look(timeline: &Timeline, soul: u64, look: usize) -> Option<&std::collections::BTreeSet<i64>> {
+        timeline.get(&soul)?.iter().rev().find(|(l, _, _)| *l <= look).map(|(_, _, ids)| ids)
+    }
+
+    fn note(timeline: &mut Timeline, now: HashMap<u64, std::collections::BTreeSet<i64>>, look: usize, at: u64) {
+        for (soul, line) in timeline.iter_mut() {
+            if !now.contains_key(soul) && line.last().is_some_and(|(_, _, ids)| !ids.is_empty()) {
+                line.push((look, at, Default::default()));
+            }
+        }
+        for (soul, ids) in now {
+            let line = timeline.entry(soul).or_default();
+            if line.last().map(|(_, _, last)| last) != Some(&ids) {
+                line.push((look, at, ids));
+            }
+        }
+    }
+}
+
+/// What the trash oracle found (`World::trashes_no_delete_reached`): every
+/// server file in the trash at the end, sorted by the trash that took it.
+#[derive(Debug, Default)]
+pub struct TrashVerdict {
+    pub judged: usize,
+    /// Taken by a trash the harness made by hand: a person on the web.
+    pub by_hand: usize,
+    /// The trash's device's user deleted or renamed over a file or
+    /// directory its records bound to what the trash named.
+    pub removed: usize,
+    /// The user carried the bound file or directory across a vault's edge
+    /// -- into one, out of one, or between two -- and the engine bound it to
+    /// an entity on the other side after: the conversion's trash of the
+    /// plain copy, an undo's of the sealed one, or a move between vaults'.
+    pub carried: usize,
+    /// On a disk whose ids are no file's identity, the user both moved and
+    /// rewrote the bound file before the trash: nothing the engine can go
+    /// by -- path, bytes or id -- follows it, so to it the file was deleted
+    /// and another made.
+    pub unfollowable: usize,
+    /// Of those, taken by a folder's trash no delete reached, but each one a
+    /// file the trash's device had its own reason to trash.
+    pub by_its_own: usize,
+    pub unreached: Vec<String>,
 }
 
 /// Two bodies a swap separated, and which swap did it.
@@ -408,6 +490,7 @@ impl World {
             carry_looks: Default::default(),
             carry_moves_read: Default::default(),
             unseen: Default::default(),
+            bindings: Default::default(),
         }
     }
 
@@ -777,6 +860,7 @@ impl World {
         device: &Device,
     ) -> Result<jd_core::pass::PassOutcome, jd_core::execute::ExecError> {
         let before = held_by(device);
+        let started = crate::vfs::user_acts_so_far();
         self.destroyed_by_the_user.lock().unwrap().clear();
         self.landing_saves.lock().unwrap().clear();
         let outcome = self.run_pass_on(device);
@@ -787,6 +871,7 @@ impl World {
         let after = held_by(device);
         self.note_unseen_readings(device);
         self.note_carries(device);
+        self.note_bindings(device, started);
         let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
         for hash in &before {
             if after.contains(hash) || by_the_user.contains(hash) {
@@ -999,6 +1084,307 @@ impl World {
     /// Every reading no scan could have told from a save (`UnseenReading`).
     pub fn unseen_readings(&self) -> Vec<UnseenReading> {
         self.unseen.lock().unwrap().clone()
+    }
+
+    /// At a pass point of this device: which server entity each file and
+    /// directory on its disk is bound to now -- a file by the disk's id for
+    /// a record's own file, where the engine is shown one, or else by the
+    /// path a record places it at; a directory by the path a folder record
+    /// places it at. Read by `trashes_no_delete_reached`: a delete of the user's
+    /// reaches what its file or directory was bound to when the engine last
+    /// looked.
+    fn note_bindings(&self, device: &Device, started: u64) {
+        let at = crate::vfs::user_acts_so_far();
+        let entries = device.store.every_entry().unwrap();
+        let souls = device.fs.souls();
+        let by_id: HashMap<u64, u64> = souls
+            .iter()
+            .filter_map(|(path, soul)| device.fs.file_id_of(path).map(|id| (id, *soul)))
+            .collect();
+        let stable = jd_vfs::Vfs::personality(&device.fs).stable_file_identity;
+        let sha_of: HashMap<u64, String> = souls
+            .iter()
+            .filter_map(|(path, soul)| device.fs.peek(path).map(|b| (*soul, crate::sha256_hex(&b))))
+            .collect();
+        let mut by_sha: HashMap<&str, Vec<u64>> = HashMap::new();
+        for (soul, sha) in &sha_of {
+            by_sha.entry(sha.as_str()).or_default().push(*soul);
+        }
+        let mut files: HashMap<u64, std::collections::BTreeSet<i64>> = HashMap::new();
+        let mut dirs: HashMap<u64, std::collections::BTreeSet<i64>> = HashMap::new();
+        for e in entries.iter().filter(|e| !e.id.is_provisional() && e.id.server_id > 0 && !e.remote_deleted) {
+            match e.id.entity_type {
+                // One file per record: its own file by the disk's id where
+                // that id is the file's identity to the engine and the file
+                // still stands; else the file at the path the record places
+                // it at, if it holds the bytes the record agreed on; else the
+                // one file anywhere that does; else the file at its path.
+                // Both at once, a swap across a vault's edge binds each of
+                // two files to both records, and a conversion reads as a
+                // sealed file all along; by path alone, a swap made while the
+                // record's first upload completed binds it to the other file
+                // (plain2 75291 on FAT). By id where the engine takes ids only
+                // as a tie-break (births hidden), a file moved and rewritten
+                // stays bound through a look that could not follow it (kill2
+                // 75101 hidden).
+                jd_core::EntityType::File => {
+                    let by_own_id = e
+                        .own_file
+                        .filter(|o| o.file_id != 0 && stable)
+                        .and_then(|o| by_id.get(&o.file_id))
+                        .copied();
+                    let soul = by_own_id.or_else(|| {
+                        let name = e.effective_local_name().to_string();
+                        let path = match e.local_placement().parent {
+                            None => Some(name),
+                            Some(id) => local_path_of_folder(device, id).map(|d| format!("{d}/{name}")),
+                        };
+                        let at_path = path.and_then(|p| device.fs.soul_of(&p));
+                        let Some(agreed) = e.synced_content.as_ref().map(|c| c.sha256.as_str()) else { return at_path };
+                        if at_path.is_some_and(|s| sha_of.get(&s).map(String::as_str) == Some(agreed)) {
+                            return at_path;
+                        }
+                        match by_sha.get(agreed).map(Vec::as_slice) {
+                            Some([only]) => Some(*only),
+                            _ => at_path,
+                        }
+                    });
+                    if let Some(soul) = soul {
+                        files.entry(soul).or_default().insert(e.id.server_id);
+                    }
+                }
+                jd_core::EntityType::Folder => {
+                    if let Some(birth) = local_path_of_folder(device, e.id.server_id).and_then(|p| device.fs.dir_birth_at(&p)) {
+                        dirs.entry(birth).or_default().insert(e.id.server_id);
+                    }
+                }
+            }
+        }
+        let mut all = self.bindings.lock().unwrap();
+        let mine = all.entry(device.name.clone()).or_default();
+        let look = mine.looks.len();
+        Bindings::note(&mut mine.files, files, look, at);
+        Bindings::note(&mut mine.dirs, dirs, look, at);
+        mine.looks.push((started, at));
+        // This device's trashes made since its last look were made in this
+        // one: a device calls the server only inside a pass.
+        for (i, c) in self.server.trash_calls().iter().enumerate() {
+            if c.caller.as_deref() == Some(device.name.as_str()) {
+                mine.trashed_in.entry(i).or_insert(look);
+            }
+        }
+    }
+
+    /// Every server file in the trash at the end of the run, judged by the
+    /// trash that took it: a trash goes only where a delete reached
+    /// (`TrashVerdict`). A trash a device sent is reached when, before it,
+    /// that device's user deleted -- or renamed something over -- a file or
+    /// directory its records bound to what the trash named at the last pass
+    /// point before the act. So a file deleted by hand, a folder deleted
+    /// with what is in it, and a sealed file held outside its vault and
+    /// deleted there (owner decision D1) all reach; a file the engine took
+    /// off the disk itself, and then read as deleted, does not. What a
+    /// folder's cascade took is judged by the folder's trash. Excused
+    /// besides: the harness's own hand (a person on the web), a file the
+    /// user carried across a vault's edge (`TrashVerdict::carried`) and a
+    /// file no engine on a disk of weak identity could follow
+    /// (`TrashVerdict::unfollowable`).
+    ///
+    /// Blind spots, recorded rather than closed. A delete reaches every later
+    /// trash of the same server id: a file restored after its trash and
+    /// trashed again with no new delete would pass, and nothing here restores
+    /// (the excuse must be spent at the next look that binds the id to a
+    /// file still standing, once something does). A record whose own file
+    /// left for an engine reason is bound to the one file anywhere holding
+    /// its agreed bytes, so a later delete of that file excuses the record's
+    /// trash -- after a loss the content oracles catch. A folder is bound by
+    /// its path alone, so a vault's directory standing at a plain folder's
+    /// path is bound to both, and is no carry: it crossed no vault's edge.
+    /// The unfollowable window opens when a pass starts, a little before
+    /// its scan reads the disk, so an act in that gap counts as unseen:
+    /// wider than the truth, in the direction of excusing.
+    pub fn trashes_no_delete_reached(&self) -> TrashVerdict {
+        let mut verdict = TrashVerdict::default();
+        let calls = self.server.trash_calls();
+        let files = self.server.files();
+        let folders = self.server.folders();
+        let sealed_file = |id: i64| files.iter().any(|f| f.id == id && f.encrypted);
+        let sealed_folder = |id: i64| folders.iter().any(|f| f.id == id && f.encrypted);
+        let bindings = self.bindings.lock().unwrap();
+        // Each trash judged once, however much it took.
+        let mut judged_calls: HashMap<usize, Result<&'static str, String>> = HashMap::new();
+        for f in files.iter().filter(|f| f.trashed) {
+            verdict.judged += 1;
+            let Some(i) = calls.iter().rposition(|c| c.took.contains(&("file", f.id))) else {
+                verdict.unreached.push(format!("file {} went to the trash by no trash this server answered", f.id));
+                continue;
+            };
+            let c = &calls[i];
+            let mut outcome = judged_calls
+                .entry(i)
+                .or_insert_with(|| self.trash_reached(&bindings, c, i, c.entity_type, c.id, &sealed_file, &sealed_folder))
+                .clone();
+            // A file a folder's unreached trash took, which the device that
+            // sent it had its own reason to trash: deleted, converted or
+            // unfollowable there before the call. The folder's misjudgment
+            // cost this file nothing (plat3 95595: a file carried into the
+            // vault and sent up sealed, its plain copy taken by a folder
+            // trash before its own came).
+            if outcome.is_err() && c.entity_type == "folder" {
+                if let Ok(own) = self.trash_reached(&bindings, c, i, "file", f.id, &sealed_file, &sealed_folder) {
+                    verdict.by_its_own += 1;
+                    outcome = Ok(own);
+                }
+            }
+            match outcome {
+                Ok("by_hand") => verdict.by_hand += 1,
+                Ok("removed") => verdict.removed += 1,
+                Ok("carried") => verdict.carried += 1,
+                Ok("unfollowable") => verdict.unfollowable += 1,
+                Ok(_) => unreachable!(),
+                Err(why) => {
+                    // Where its bytes still stand: the difference between a
+                    // file sent again under a new id and one now only in a
+                    // trash. A sealed file's are ciphertext, and not looked
+                    // for.
+                    let live = if f.encrypted {
+                        "sealed, not looked for".to_string()
+                    } else {
+                        let on_server: Vec<i64> = files.iter().filter(|g| !g.trashed && g.sha256 == f.sha256).map(|g| g.id).collect();
+                        let on_disks: Vec<String> = self
+                            .devices
+                            .iter()
+                            .flat_map(|d| {
+                                disk_tree(d).into_iter().filter(|(_, h)| h.as_deref() == Some(f.sha256.as_str())).map(move |(p, _)| format!("{}:{p}", d.name))
+                            })
+                            .collect();
+                        format!("server {on_server:?}, disks {on_disks:?}")
+                    };
+                    verdict.unreached.push(format!("file {}: {why}; its bytes live: {live}", f.id))
+                }
+            }
+        }
+        verdict
+    }
+
+    /// Whether a delete reached `entity` (of `entity_type`, `id`), judged for
+    /// the trash `c`: its caller and its moment. See
+    /// `trashes_no_delete_reached`.
+    fn trash_reached(
+        &self,
+        bindings: &HashMap<String, Bindings>,
+        c: &crate::server::TrashCall,
+        call: usize,
+        entity_type: &str,
+        id: i64,
+        sealed_file: &dyn Fn(i64) -> bool,
+        sealed_folder: &dyn Fn(i64) -> bool,
+    ) -> Result<&'static str, String> {
+        let Some(device_name) = c.caller.as_deref() else { return Ok("by_hand") };
+        let Some(device) = self.devices.iter().find(|d| d.name == device_name) else {
+            return Err(format!("{} {} trashed by {device_name}, a device this world does not hold", entity_type, id));
+        };
+        let empty = Bindings::default();
+        let mine = bindings.get(device_name).unwrap_or(&empty);
+        // The look the trash was made in; the looks before it are the ones
+        // the engine decided it from.
+        let made_in = mine.trashed_in.get(&call).copied().unwrap_or(mine.looks.len());
+        let (timeline, sealed): (_, &dyn Fn(i64) -> bool) =
+            if entity_type == "folder" { (&mine.dirs, sealed_folder) } else { (&mine.files, sealed_file) };
+        let (destroyed_files, destroyed_dirs) = device.fs.user_destroyed();
+        let destroyed = if entity_type == "folder" { destroyed_dirs } else { destroyed_files };
+        let reached = |soul: u64, order: u64| Bindings::before(timeline, soul, order).is_some_and(|ids| ids.contains(&id));
+        if destroyed.iter().any(|(soul, order)| *order < c.order && reached(*soul, *order)) {
+            return Ok("removed");
+        }
+        let moves = device.fs.user_carried();
+        let dir = entity_type == "folder";
+        // Carried across a vault's edge by the user's hand, and sent again
+        // on the other side: into a vault (a conversion -- the plain copy
+        // goes once the sealed one is up), out of one before it was settled
+        // there (an undo -- the plain file is the plain file again), or from
+        // one vault into another (sent again there, the first copy trashed).
+        // A file or directory bound to this entity at a look before the one
+        // the trash was made in, moved by the user across the edge from the
+        // side this entity stands on, is bound at a later look to another
+        // entity of the side it went to -- sealed in a vault, plain outside
+        // -- and no longer to this one. From the side this one stands on:
+        // a carry excuses the copy it left behind, never a copy made on the
+        // far side later (a sealed copy the engine sends again under a new
+        // id is no carry of the user's, however long ago the file came in). The move can come
+        // before the binding: a file carried in while its first upload
+        // completes is bound to its plain record only at the pass point
+        // after. Not a held file: carried out of its vault it stays bound to
+        // its own sealed record. Not anything the engine's own hand carried,
+        // nor a vault's own directory moved with its vault: no edge crossed.
+        // Later by the timeline's own order, not its stamps: once the user
+        // stops acting every pass point bears one stamp (plat3 75533).
+        let carried = timeline.iter().any(|(soul, line)| {
+            let Some(first) = line.iter().position(|(look, _, ids)| *look < made_in && ids.contains(&id)) else {
+                return false;
+            };
+            moves.iter().filter(|m| m.soul == *soul && m.dir == dir && m.crossed() && m.order < c.order && m.from_vault.is_some() == sealed(id)).any(|m| {
+                line[first + 1..].iter().any(|(_, at, ids)| {
+                    *at > m.order && !ids.contains(&id) && ids.iter().any(|other| *other != id && sealed(*other) == m.to_vault.is_some())
+                })
+            })
+        });
+        if carried {
+            return Ok("carried");
+        }
+        // Where the disk's ids are no file's identity -- positions on
+        // a FAT disk, or ids with no birth, which the engine takes
+        // only as a tie-break -- a file the user moved and rewrote
+        // between two looks leaves the engine nothing to follow.
+        if !dir && !jd_vfs::Vfs::personality(&device.fs).stable_file_identity {
+            let writes = device.fs.user_writes();
+            // Each file bound to this one after the engine's last
+            // look before the trash: moved, and rewritten, since that
+            // look's scan read the disk -- its start, since what the
+            // user did while it ran is past what it saw. A move one
+            // look saw and a rewrite the next saw, the engine saw
+            // apart, and could follow.
+            let unfollowable = timeline.keys().any(|soul| {
+                let Some(since) = mine
+                    .looks
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(look, _)| *look < made_in && Bindings::at_look(timeline, *soul, *look).is_some_and(|ids| ids.contains(&id)))
+                    .map(|(_, (start, _))| start)
+                else {
+                    return false;
+                };
+                let moved = moves.iter().any(|m| m.soul == *soul && !m.dir && m.order >= *since && m.order < c.order);
+                let rewrote = writes.iter().any(|w| w.soul == *soul && w.order >= *since && w.order < c.order);
+                moved && rewrote
+            });
+            if unfollowable {
+                return Ok("unfollowable");
+            }
+        }
+        // In soul order: a map's own order differs from one process to the
+        // next, and a seed's fire must read the same every run.
+        let mut bound: Vec<(u64, String)> = timeline
+            .iter()
+            .filter(|(_, line)| line.iter().any(|(_, _, ids)| ids.contains(&id)))
+            .map(|(soul, line)| {
+                let spans: Vec<String> = line.iter().map(|(_, at, ids)| format!("@{at}{ids:?}")).collect();
+                let gone = if dir { "" } else if device.fs.engine_trashed().iter().any(|(s, _)| s == soul) { " engine-trashed" } else { "" };
+                (*soul, format!("{soul}{gone}:{}", spans.join(",")))
+            })
+            .collect();
+        bound.sort();
+        let bound: Vec<String> = bound.into_iter().map(|(_, line)| line).collect();
+        Err(format!(
+            "{} {}{} trashed by {device_name} @{} (took {}), no delete of its user's reached it; bound=[{}]",
+            entity_type,
+            id,
+            if sealed(id) { " (sealed)" } else { "" },
+            c.order,
+            c.took.len(),
+            bound.join("; ")
+        ))
     }
 
     /// Every file the user carried into a vault folder (`note_carries`).

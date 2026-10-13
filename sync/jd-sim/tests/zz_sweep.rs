@@ -1404,6 +1404,36 @@ fn assert_no_plain_copy_of_a_file_carried_into_a_vault(world: &World, seed: u64)
     );
 }
 
+/// A server file goes to the trash only through a delete that reached it
+/// (`World::trashes_no_delete_reached`): every file in the trash at the end
+/// was taken by a trash the harness made by hand, or by one a device sent
+/// after its user deleted, or renamed something over, a file or directory
+/// its records bound to what the trash named -- or by a conversion, or on a
+/// positional disk where the user moved and rewrote the file before any
+/// pass saw it. A file its engine took off the disk itself and then read
+/// as deleted fires, edit or no edit (hostile2 74414 before fr: a sealed
+/// file held outside its vault, taken with a folder a peer deleted, its
+/// sealed copy trashed).
+fn assert_no_file_trashed_without_a_delete_that_reached_it(world: &World, seed: u64) {
+    let v = world.trashes_no_delete_reached();
+    eprintln!(
+        "TRASH-ORACLE seed={seed} judged={} by_hand={} removed={} carried={} unfollowable={} by_its_own={} unreached={}",
+        v.judged,
+        v.by_hand,
+        v.removed,
+        v.carried,
+        v.unfollowable,
+        v.by_its_own,
+        v.unreached.len()
+    );
+    assert!(
+        v.unreached.is_empty(),
+        "seed {seed}: {} server file(s) in the trash that no delete reached: {}",
+        v.unreached.len(),
+        v.unreached.join("; ")
+    );
+}
+
 fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &Custody, seed: u64) {
     use std::collections::{BTreeMap, BTreeSet};
     // Body hash -> every folder id it may stand in, over every intent that
@@ -2060,6 +2090,9 @@ fn workload_core_with(
         })),
         ("no_plain_copy_of_a_file_carried_into_a_vault", Box::new(|| {
             assert_no_plain_copy_of_a_file_carried_into_a_vault(&world, seed)
+        })),
+        ("no_file_trashed_without_a_delete_that_reached_it", Box::new(|| {
+            assert_no_file_trashed_without_a_delete_that_reached_it(&world, seed)
         })),
     ];
     if vault.any() {
@@ -7860,17 +7893,297 @@ fn frozen_a_carried_file_in_the_kill_arm_leaves_no_plain_copy_seed() {
 /// server trashed that folder; the folder's local trash carries it out beside
 /// the folder rather than taking it as the server's own, and its sealed copy,
 /// with the edit another device made to it, stays live. Witness of that
-/// world, every oracle on.
+/// world, every oracle on but one: the same world, later, has the mac read a
+/// plain ring file as a sealed one carried out of its parked vault, hold it
+/// and trash its plain copy with its folder, which the trash oracle names
+/// (B1's family A, open).
 #[test]
 fn frozen_a_file_held_in_a_trashed_folder_on_fat_is_carried_out_seed() {
     for kind in [jd_sim::FileIds::MountSession, jd_sim::FileIds::DataCluster] {
         FAT_DISK_HERE.with(|m| m.set(Some(kind)));
         let run = std::panic::catch_unwind(|| {
-            workload_core_with(75_102, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+            red_only_on(
+                &["no_file_trashed_without_a_delete_that_reached_it"],
+                "the trash oracle did not fire on frozen 75102 on FAT: B1's family A is fixed, \
+                 remove red_only_on from this pin",
+                || {
+                    workload_core_with(75_102, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+                },
+            );
         });
         FAT_DISK_HERE.with(|m| m.set(None));
         if let Err(e) = run {
             std::panic::resume_unwind(e);
         }
+    }
+}
+
+/// Kill2 75126 on a Linux stick: a swap made while a pass ran carried a file
+/// off its path after that pass's scan had read the disk, and the user saved
+/// over it before the next pass. No look saw it moved and unchanged, so the
+/// engine had nothing to follow it by, and its record's trash is the
+/// unfollowable one -- the look counts from its scan, not its end. Witness of
+/// that world, every oracle on.
+#[test]
+fn frozen_a_move_made_while_a_pass_ran_is_past_that_look_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_126, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Kill2 75101 with births hidden: a file a ring trade and a swap carried
+/// into the vault was saved over there before any pass saw it moved. Ids
+/// with no birth are a tie-break to the engine, never a file's identity, so
+/// the trash oracle binds a record by its path and bytes there, and the
+/// record's trash is the unfollowable one. Witness of that world, every
+/// oracle on.
+#[test]
+fn frozen_a_record_is_bound_by_its_path_where_ids_only_break_ties_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_101, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Kill2 75276: a plain file carried into a vault was sent up sealed there
+/// while its plain record still held it, and a swap then carried it on into
+/// another vault, where it was sent again and the first sealed copy trashed.
+/// That trash is the user's move across a vault's edge, not a delete nobody
+/// made. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_sealed_copy_carried_on_into_another_vault_is_the_users_move_seed() {
+    workload_core_with(75_276, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 75533: a file carried into a vault was bound to its plain record
+/// and then to a sealed one only after the user had stopped acting, at pass
+/// points that all bear one stamp. The sealed binding is still later, by the
+/// order the pass points came in, and the plain copy's trash is the user's
+/// carry. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_carry_bound_after_the_user_stopped_is_still_later_seed() {
+    workload_core_with(75_533, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Clean2 74014 on a Windows stick: the desktop rotated the ring folders'
+/// names through the parked vault, read the old plain folder as gone and its
+/// directory as a new one, and moved a file into the new one -- while the
+/// laptop's move of that file into the old folder reached the server first.
+/// The server's half no longer lands the file in the folder the desktop is
+/// deleting: it stays where the desktop has it, and the folder's trash waits
+/// for it to leave. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_file_moved_out_of_a_folder_deleted_here_is_not_handed_back_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(74_014, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// Plat3 75424 on a Linux stick, swaps off: the mac deletes a plain ring
+/// folder (a rotation through the parked vault, read as a delete), and a
+/// peer's move of a file the mac never moved lands that file in it on the
+/// server. The file stays where the mac has it instead of going to the
+/// trash with the folder. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_file_only_a_peer_moved_into_a_folder_deleted_here_stays_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::MountSession)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_424, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::Off);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75109 on a Windows FAT stick: a swap carried a plain file into the
+/// parked vault, and a rotation inside it moved the bytes its sealed stand-in
+/// holds to another name, putting another file at the stand-in's. Read by
+/// its path, the stand-in was forgotten as a file created and removed again,
+/// its source's hold lapsed, and the plain copy went to the server's trash
+/// while its bytes stood in the vault. The stand-in follows its bytes.
+/// Witness of that world, every oracle on.
+#[test]
+fn frozen_a_stand_in_rotated_within_a_parked_vault_keeps_its_hold_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_109, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75118 on a Windows FAT stick: the same with the stand-in's bytes
+/// carried back out to its source's own path, where a sealed file held
+/// outside its vault was read as holding them. The stand-in follows them
+/// out, which is its source's file back (an undo), and the plain copy stays.
+/// Witness of that world, every oracle on.
+#[test]
+fn frozen_a_stand_in_carried_back_out_of_a_parked_vault_is_its_source_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_118, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75122 on a Windows FAT stick: the same undo, onto the path where a
+/// sealed file is held outside its vault. With only the stand-in followed,
+/// the held file's path held another record's file, it read as deleted, and
+/// its sealed copy went to the trash. A held file away from its path follows
+/// its bytes too. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_held_file_whose_path_a_stand_in_takes_back_follows_its_bytes_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_122, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plain2 75288 with births hidden: a file its user moved onto a name the
+/// server gives another file was set aside beside it for that file's
+/// download. The downloaded file's bytes were shared with a copy elsewhere,
+/// so they named nobody, and the set-aside file read as its record's backup
+/// and the download as that record's save; the downloaded file's own record
+/// read as deleted and went to the trash. The record at home there by its
+/// agreed content owns the file. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_file_set_aside_for_a_download_is_not_its_records_backup_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_288, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::None, false, Names::Ordinary, Swaps::On);
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plat3 75414 with births hidden: two plain records claimed one file, and
+/// one went to the trash. It rides on the same ownership test: knocked out,
+/// the loss comes back. Witness of that world, every oracle on.
+#[test]
+fn frozen_two_records_wanting_one_path_leave_it_to_the_one_at_home_seed() {
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(true));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_414, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    });
+    BIRTHS_HIDDEN_HERE.with(|b| b.set(false));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// plain2 75299 on a Windows FAT stick, read by the bytes alone: two files
+/// went to the trash, and with the same ownership test knocked out they go
+/// again. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_file_set_aside_for_a_download_on_a_stick_is_not_its_records_backup_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_299, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::None, false, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// hostile2 74413 on a Windows FAT stick, swaps on: a file went to the
+/// trash with no delete behind it and its bytes were sent again under a new
+/// id. It rides on the same ownership test: knocked out, the loss comes
+/// back. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_swap_leaves_a_path_to_the_record_at_home_there_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(74_413, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// hostile2 74418 on a Windows FAT stick: the same. Witness of that world,
+/// every oracle on.
+#[test]
+fn frozen_a_swap_leaves_a_path_to_the_record_at_home_there_on_a_second_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(74_418, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// clean2 74000 on a Windows FAT stick: a plain folder renamed, its only
+/// file's bytes also standing as a copy in the parked vault. The file
+/// followed the copy by path order, the folder read as deleted, and both
+/// went to the trash. A file followed to another folder goes to the name it
+/// kept. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_renamed_folders_file_is_not_followed_to_a_copy_in_the_vault_seed() {
+    FAT_DISK_HERE.with(|m| m.set(Some(jd_sim::FileIds::DirectorySlot)));
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(74_000, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    });
+    FAT_DISK_HERE.with(|m| m.set(None));
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75165 on strong disks, swaps off: a rotation of ring folders through
+/// the vault. On pc a plain folder's directory is proven, id and birth, at a
+/// path the server was giving another folder in the same pass. The chain
+/// that reads it there refused the link, the folder was read as deleted, and
+/// it went to the trash with its file. Where its own directory is proven is
+/// where it is. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_folder_proven_at_a_path_the_server_is_naming_is_not_deleted_seed() {
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_165, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::Off);
+    });
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// kill2 75162 on strong disks, swaps off: another rotation, a plain folder
+/// trashed the same way, and the same proven-directory condition clears it.
+/// Witness of that world, every oracle on.
+#[test]
+fn frozen_a_folder_proven_at_a_path_the_server_is_naming_is_not_deleted_on_a_second_seed() {
+    let run = std::panic::catch_unwind(|| {
+        workload_core_with(75_162, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::Off);
+    });
+    if let Err(e) = run {
+        std::panic::resume_unwind(e);
     }
 }

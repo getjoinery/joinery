@@ -235,6 +235,26 @@ struct MemFsState {
     user_superseded: Vec<(String, u64)>,
     /// Every path the user deleted, file or folder, with its order.
     user_removes: Vec<(String, u64)>,
+    /// Path -> the file's soul: a number for the harness alone, handed out
+    /// once when a file comes to exist on this disk (the user's write, or a
+    /// download landing where nothing stood) and never again. Carried by
+    /// every rename, the user's or the engine's, kept by a save or a
+    /// download landing over the file, dropped when the file leaves the
+    /// disk. Unlike an id or a birth, no disk model reuses one, tunnels one
+    /// to the next file at a name, or renumbers one at a remount: it is
+    /// what "the same file" means to the person using the disk.
+    souls: BTreeMap<String, u64>,
+    next_soul: u64,
+    /// Every file the user's hand took off this disk -- deleted, or renamed
+    /// over -- by its soul, and every directory, by its birth, each with the
+    /// order of the act. What a delete of theirs reached.
+    user_destroyed: Vec<(u64, u64)>,
+    user_destroyed_dirs: Vec<(u64, u64)>,
+    /// Every file and directory a user's move carried, in order.
+    user_carried: Vec<UserMove>,
+    /// Every file the engine sent to the trash, by its soul, with the order
+    /// of the user's acts at the moment.
+    engine_trashed: Vec<(u64, u64)>,
     /// Directories the harness has declared sealed, by their current path.
     ///
     /// The one piece of directory identity this disk keeps, and it keeps it
@@ -294,14 +314,46 @@ pub struct UserWrite {
     /// When, among every act of a user's hand in this process: ordered
     /// against [`MemFs::user_superseded`] on any disk.
     pub order: u64,
+    /// The file written to, by its soul (`MemFsState::souls`).
+    pub soul: u64,
 }
 
 /// One order for every act of a user's hand on every disk, so a write on one
 /// device and a delete on another can be put in sequence. Shared across the
 /// process, so it says nothing about time, only which came first.
 fn user_act_order() -> u64 {
-    static ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    USER_ACT_ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+static USER_ACT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Where the order of the user's acts stands now: every act already made
+/// has an order below it, every act made later one at or above it. What an
+/// event the harness keeps elsewhere -- a trash on the server, a pass point
+/// -- is stamped with, to be put in sequence with the user's hand.
+pub fn user_acts_so_far() -> u64 {
+    USER_ACT_ORDER.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A file or a directory a user's move carried, by its soul (a file) or its
+/// birth (a directory), the vault it stood in before the move and the one it
+/// stands in after -- the directory marked sealed above it, by birth, `None`
+/// outside every vault -- and when (`MemFs::user_carried`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UserMove {
+    pub soul: u64,
+    pub dir: bool,
+    pub from_vault: Option<u64>,
+    pub to_vault: Option<u64>,
+    pub order: u64,
+}
+
+impl UserMove {
+    /// Did the move carry it across a vault's edge: into one, out of one, or
+    /// from one into another?
+    pub fn crossed(&self) -> bool {
+        self.from_vault != self.to_vault
+    }
 }
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
@@ -387,6 +439,12 @@ impl MemFs {
                 user_moved: Vec::new(),
                 user_superseded: Vec::new(),
                 user_removes: Vec::new(),
+                souls: BTreeMap::new(),
+                next_soul: 0,
+                user_destroyed: Vec::new(),
+                user_destroyed_dirs: Vec::new(),
+                user_carried: Vec::new(),
+                engine_trashed: Vec::new(),
                 sealed_dirs: BTreeSet::new(),
                 sealed_known: BTreeMap::new(),
                 sealed_names_known: BTreeSet::new(),
@@ -673,6 +731,7 @@ impl MemFs {
             let birth = Self::new_file_birth(&mut st);
             st.file_births.insert(key.clone(), birth);
             Self::tunnel(&mut st, &key, now);
+            Self::new_soul(&mut st, &key);
         } else if st.file_id_model == FileIds::DataCluster {
             // Rewritten in place: the content goes to new clusters.
             let id = Self::cluster_id(&mut st, bytes.len());
@@ -687,6 +746,7 @@ impl MemFs {
             let before = crate::sha256_hex(before);
             st.user_superseded.push((before, order));
         }
+        let soul = st.souls.get(&key).copied().unwrap_or(0);
         st.user_writes.push(UserWrite {
             path: key.clone(),
             sha256: crate::sha256_hex(bytes),
@@ -694,6 +754,7 @@ impl MemFs {
             named: created && names_it,
             parent_birth,
             order,
+            soul,
         });
         st.nodes.insert(
             key,
@@ -869,6 +930,7 @@ impl MemFs {
         if st.nodes.contains_key(&key) {
             let order = Self::supersede_under(&mut st, &key);
             st.user_removes.push((key.clone(), order));
+            Self::destroyed_by_the_user(&mut st, &key, order);
         }
         let now = self.clock.now_ns();
         for v in victims {
@@ -876,6 +938,7 @@ impl MemFs {
             st.touched.insert(v.clone());
             Self::vacate(&mut st, &v, now);
             st.nodes.remove(&v);
+            st.souls.remove(&v);
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
             st.file_births.remove(&v);
@@ -903,8 +966,10 @@ impl MemFs {
         Self::ensure_parents(&mut st, &t);
         let replaced = st.nodes.contains_key(&t);
         if replaced && t != f {
-            Self::supersede_under(&mut st, &t);
+            let order = Self::supersede_under(&mut st, &t);
+            Self::destroyed_by_the_user(&mut st, &t, order);
         }
+        Self::carried_by_the_user(&mut st, &f, &t);
         let under = format!("{f}/");
         let carried: Vec<(u64, u64)> = st
             .file_ids
@@ -953,6 +1018,110 @@ impl MemFs {
     pub fn user_moved_since(&self, from: usize) -> (Vec<(u64, u64)>, usize) {
         let st = self.state.lock().unwrap();
         (st.user_moved.get(from..).map(|m| m.to_vec()).unwrap_or_default(), st.user_moved.len())
+    }
+
+    /// The file at this path by its soul (`MemFsState::souls`), the path
+    /// read as the engine's own would be.
+    pub fn soul_of(&self, path: &str) -> Option<u64> {
+        let key = self.key_for(&Path::new("/sync").join(path)).ok()?;
+        self.state.lock().unwrap().souls.get(&key).copied()
+    }
+
+    /// The directory at this path by its birth, the path read as the
+    /// engine's own would be. `None` for a file or for nothing.
+    pub fn dir_birth_at(&self, path: &str) -> Option<u64> {
+        let key = self.key_for(&Path::new("/sync").join(path)).ok()?;
+        let st = self.state.lock().unwrap();
+        match st.nodes.get(&key) {
+            Some(Node::Dir) => st.births.get(&key).copied(),
+            _ => None,
+        }
+    }
+
+    /// Every file on this disk, by path, with its soul.
+    pub fn souls(&self) -> BTreeMap<String, u64> {
+        self.state.lock().unwrap().souls.clone()
+    }
+
+    /// Every file and directory the user's hand took off this disk: files
+    /// by soul, directories by birth, each with the order of the act.
+    pub fn user_destroyed(&self) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+        let st = self.state.lock().unwrap();
+        (st.user_destroyed.clone(), st.user_destroyed_dirs.clone())
+    }
+
+    /// Every file and directory a user's move carried, in order.
+    pub fn user_carried(&self) -> Vec<UserMove> {
+        self.state.lock().unwrap().user_carried.clone()
+    }
+
+    /// Every file the engine sent to the trash, by soul, with the order of
+    /// the user's acts at the moment.
+    pub fn engine_trashed(&self) -> Vec<(u64, u64)> {
+        self.state.lock().unwrap().engine_trashed.clone()
+    }
+
+    fn new_soul(st: &mut MemFsState, key: &str) {
+        st.next_soul += 1;
+        let soul = st.next_soul;
+        st.souls.insert(key.to_string(), soul);
+    }
+
+    /// Note every file and directory at or under `key` as taken off the
+    /// disk by the user's act `order`.
+    fn destroyed_by_the_user(st: &mut MemFsState, key: &str, order: u64) {
+        let under = format!("{key}/");
+        let at = |k: &str| k == key || k.starts_with(&under);
+        let souls: Vec<u64> = st.souls.iter().filter(|(k, _)| at(k)).map(|(_, s)| *s).collect();
+        let dirs: Vec<u64> = st
+            .births
+            .iter()
+            .filter(|(k, _)| at(k) && matches!(st.nodes.get(k.as_str()), Some(Node::Dir)))
+            .map(|(_, b)| *b)
+            .collect();
+        st.user_destroyed.extend(souls.into_iter().map(|s| (s, order)));
+        st.user_destroyed_dirs.extend(dirs.into_iter().map(|b| (b, order)));
+    }
+
+    /// Note every file and directory at or under `from` as carried by a
+    /// user's move to `to`, with which side of a sealed directory's edge
+    /// each stood on before and stands on after. Called before the move.
+    fn carried_by_the_user(st: &mut MemFsState, from: &str, to: &str) {
+        let order = user_act_order();
+        let under = format!("{from}/");
+        let moving: Vec<String> =
+            st.nodes.keys().filter(|k| k.as_str() == from || k.starts_with(&under)).cloned().collect();
+        // The vault above a path: the innermost directory marked sealed at
+        // or above it, by birth.
+        let vault_of = |st: &MemFsState, key: &str| -> Option<u64> {
+            st.sealed_dirs
+                .iter()
+                .filter(|d| key == d.as_str() || key.starts_with(&format!("{d}/")))
+                .max_by_key(|d| d.len())
+                .and_then(|d| st.births.get(d).copied())
+        };
+        // A directory marked sealed that is itself moved takes its vault, and
+        // what it carries, with it; otherwise the vault above the
+        // destination is the one it lands in.
+        let to_parent_vault = vault_of(st, Self::parent_key(to));
+        for k in moving {
+            let from_vault = vault_of(st, &k);
+            let carried_vault = st
+                .sealed_dirs
+                .iter()
+                .filter(|d| (d.as_str() == from || d.starts_with(&under)) && (k == **d || k.starts_with(&format!("{d}/"))))
+                .max_by_key(|d| d.len())
+                .and_then(|d| st.births.get(d).copied());
+            let to_vault = carried_vault.or(to_parent_vault);
+            let (soul, dir) = match st.nodes.get(&k) {
+                Some(Node::File { .. }) => (st.souls.get(&k).copied(), false),
+                Some(Node::Dir) => (st.births.get(&k).copied(), true),
+                None => (None, false),
+            };
+            if let Some(soul) = soul {
+                st.user_carried.push(UserMove { soul, dir, from_vault, to_vault, order });
+            }
+        }
     }
 
     /// Every file path the user has renamed something onto, in order, with
@@ -1438,6 +1607,9 @@ impl MemFs {
             if let Some(birth) = st.file_births.remove(&old) {
                 st.file_births.insert(new.clone(), birth);
             }
+            if let Some(soul) = st.souls.remove(&old) {
+                st.souls.insert(new.clone(), soul);
+            }
             if st.sealed_dirs.remove(&old) {
                 st.sealed_dirs.insert(new);
             }
@@ -1856,6 +2028,9 @@ impl Vfs for MemFs {
             if let Some(node) = st.nodes.remove(&v) {
                 st.trash.push((v.clone(), node));
             }
+            if let Some(soul) = st.souls.remove(&v) {
+                st.engine_trashed.push((soul, user_acts_so_far()));
+            }
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
             st.file_births.remove(&v);
@@ -2144,6 +2319,9 @@ impl SpoolFile for MemSpool {
         };
         let true_birth = st.file_births[&key];
         st.landed.push((id, true_birth));
+        if !st.souls.contains_key(&key) {
+            MemFs::new_soul(&mut st, &key);
+        }
         let id = if positional { 0 } else { id };
         let size = self.buf.len() as u64;
         st.nodes.insert(

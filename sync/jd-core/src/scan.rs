@@ -400,7 +400,20 @@ fn pair_with_given(
 
     let mut settled: Vec<bool> = given.to_vec();
     let mut gone_never_sent: Vec<(usize, usize)> = Vec::new();
-    for (n, k) in known.iter().enumerate() {
+    // At a path two records want, the one at home there (`at_home`: its
+    // own inode, or with none its agreed content) owns the file, before what
+    // its bytes name and before the order records are read in: those are
+    // read first. Read in index order, the other took the file as its edit
+    // and the one at home read as deleted (hidden plain2 75288). Two at home
+    // with the same file have equal evidence, and keep the order.
+    let home_first = |k: &KnownLocal| !k.server_deleted && at_home(k);
+    let rule_one_order: Vec<usize> = (0..known.len())
+        .filter(|n| home_first(&known[*n]))
+        .chain((0..known.len()).filter(|n| !home_first(&known[*n])))
+        .collect();
+    let rule_one_start = out.changes.len();
+    for n in rule_one_order {
+        let k = &known[n];
         if settled[n] {
             continue;
         }
@@ -457,6 +470,8 @@ fn pair_with_given(
         ));
     }
 
+    let position: HashMap<EntityId, usize> = known.iter().enumerate().map(|(n, k)| (k.id, n)).collect();
+    out.changes[rule_one_start..].sort_by_key(|(id, _)| position.get(id).copied().unwrap_or(usize::MAX));
     for (n, k) in known.iter().enumerate() {
         if settled[n] {
             continue;
@@ -591,6 +606,11 @@ fn folder_of(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
 
+/// The last component of a relative path: the file's own name.
+fn name_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or(path, |(_, name)| name)
+}
+
 /// Pair what is on disk against what the engine last recorded, by each file's
 /// own identity first (`specs/drive_file_identity.md`).
 ///
@@ -676,14 +696,28 @@ pub fn pair_files(
     // with the same bytes (a copy, a template, an empty file) name neither.
     // And only bytes that stand somewhere: a record whose bytes are gone was
     // edited, and is read by `pair_with` as before -- the safe-save stays an
-    // edit. Held records and claimants keep today's reading too; a vault on
-    // a weak volume is refused (D3).
+    // edit. A source whose bytes a claimant holds is never read by them:
+    // they are the claimant's. A claimant, or a sealed file held outside its
+    // vault, is read by its path while that path holds the bytes it was last
+    // seen with, and away from them follows them like any record. Read by
+    // its path there, a rotation through a parked vault that put another
+    // record's file at a claimant's name forgot the claimant as a file
+    // created and removed again, its source's hold lapsed, and the plain copy
+    // went to the trash while its bytes stood in the vault (kill2 75109,
+    // 75118); a held file whose name a claimant's bytes came back to read as
+    // deleted, and its sealed copy went to the trash (kill2 75122). Keyed at
+    // home too, a claimant and a copy of its bytes named neither, and the
+    // copy no longer followed (win hostile2 74407).
     // The bytes last seen, unless the agreed bytes stand at the record's own
     // path: then it is at home with them, whatever an older look saw (a
     // download that landed since, say), and an old copy elsewhere is not it.
     let at_path: HashMap<&str, &str> = observed.iter().map(|o| (o.path.as_str(), o.sha256.as_str())).collect();
     let key = |k: &KnownLocal| -> Option<String> {
-        if k.held || k.server_home.is_some() || k.claimant_for.is_some() {
+        if k.held {
+            return None;
+        }
+        let at_home = k.last_seen_sha.as_deref().is_some_and(|seen| at_path.get(k.path.as_str()) == Some(&seen));
+        if (k.claimant_for.is_some() || k.server_home.is_some()) && at_home {
             return None;
         }
         let agreed_here = k.sha256.as_deref().filter(|a| at_path.get(k.path.as_str()) == Some(a));
@@ -829,7 +863,13 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
     };
     let nearest = |k: &KnownLocal, candidates: &mut Vec<usize>| {
         candidates.sort_by(|a, b| {
-            let key = |i: &usize| (folder_of(&observed[*i].path) != folder_of(&k.path), &observed[*i].path);
+            let key = |i: &usize| {
+                (
+                    folder_of(&observed[*i].path) != folder_of(&k.path),
+                    name_of(&observed[*i].path) != name_of(&k.path),
+                    &observed[*i].path,
+                )
+            };
             key(a).cmp(&key(b))
         });
         candidates.first().copied()
@@ -974,7 +1014,20 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
             && !held_paths.contains(observed[c].path.as_str())
             && !awaiting_bytes.contains(k.path.as_str());
         if backup {
-            if let Some(&o) = at_path.get(k.path.as_str()).filter(|o| !claimed[**o] && !owned(**o)) {
+            // At a path two records want, the one at home there by its agreed
+            // content owns the file, before what its bytes name and before
+            // the order records are read in. Its bytes shared with a copy
+            // elsewhere named nobody, the file read as unowned, and the other
+            // record's own file set aside beside it read as that record's
+            // backup: the record took the file as its save, and the one at
+            // home read as deleted and went to the trash (hidden plain2
+            // 75288).
+            let at_home_there = |o: usize| {
+                known.iter().enumerate().any(|(r, rec)| {
+                    r != n && !rec.server_deleted && rec.path == observed[o].path && rec.sha256.as_deref() == Some(observed[o].sha256.as_str())
+                })
+            };
+            if let Some(&o) = at_path.get(k.path.as_str()).filter(|o| !claimed[**o] && !owned(**o) && !at_home_there(**o)) {
                 claimed[o] = true;
                 settled[n] = true;
                 out.bound.extend(bind(&observed[o]).map(|id| (k.id, id)));
@@ -1967,6 +2020,25 @@ mod tests {
     }
 
     #[test]
+    fn a_file_followed_to_another_folder_goes_to_the_name_it_kept() {
+        // clean2 74000: a folder renamed, its only file's bytes also standing
+        // as a copy in another folder. Of two names in other folders, the one
+        // that kept the record's name is the file, moved with its folder; by
+        // path order alone the record followed the copy, and the folder read
+        // as deleted. Both readings.
+        let strong = by_identity(
+            &[mine(1, "Sub/x.txt", 100, 1, "sha-x")],
+            &[seen("Private/Copy of x.txt", 100, 1, "sha-x"), seen("Sub renamed/x.txt", 100, 1, "sha-x")],
+        );
+        assert_eq!(moved_to(&strong, 1).as_deref(), Some("Sub renamed/x.txt"));
+        let weak = weak(
+            &[saw(1, "Sub/x.txt", "sha-x")],
+            &[observed("Private/Copy of x.txt", 0, "sha-x"), observed("Sub renamed/x.txt", 0, "sha-x")],
+        );
+        assert_eq!(moved_to(&weak, 1).as_deref(), Some("Sub renamed/x.txt"));
+    }
+
+    #[test]
     fn by_identity_a_hard_linked_file_is_followed_to_its_nearest_name() {
         let out = by_identity(
             &[mine(1, "a.txt", 100, 1, "sha-a")],
@@ -2035,6 +2107,53 @@ mod tests {
 
     fn weak(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
         pair_files(known, observed, &HashSet::new(), false)
+    }
+
+    #[test]
+    fn a_file_set_aside_beside_one_another_record_is_at_home_with_is_followed_there() {
+        // hidden plain2 75288: two records want doc-5.txt. One is at home
+        // there by its agreed content, bytes a copy elsewhere shares, so they
+        // name nobody; the other's own file stands set aside beside it. The
+        // file at the path is owned by the record at home with it, so the
+        // other's aside is not its backup: it follows its file there. Read
+        // as a backup, it took the file as its save and the one at home read
+        // as deleted. Both readings.
+        let weak_known = [saw(1, "doc-5.txt", "sha-a"), saw(2, "doc-5.txt", "sha-b"), saw(3, "Shared/copy.dat", "sha-b")];
+        let disk = [
+            observed("doc-5.txt", 0, "sha-b"),
+            observed("doc-5 (conflicted copy) 3.txt", 0, "sha-a"),
+            observed("Shared/copy.dat", 0, "sha-b"),
+        ];
+        let out = weak(&weak_known, &disk);
+        assert_eq!(moved_to(&out, 1).as_deref(), Some("doc-5 (conflicted copy) 3.txt"), "{:?}", out.changes);
+        assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged), "{:?}", out.changes);
+        let strong = by_identity(
+            &[mine(1, "doc-5.txt", 100, 1, "sha-a"), mine(2, "doc-5.txt", 200, 2, "sha-b"), mine(3, "Shared/copy.dat", 300, 3, "sha-b")],
+            &[seen("doc-5.txt", 200, 2, "sha-b"), seen("doc-5 (conflicted copy) 3.txt", 100, 1, "sha-a"), seen("Shared/copy.dat", 300, 3, "sha-b")],
+        );
+        assert_eq!(moved_to(&strong, 1).as_deref(), Some("doc-5 (conflicted copy) 3.txt"), "{:?}", strong.changes);
+        assert_eq!(strong.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged), "{:?}", strong.changes);
+    }
+
+    #[test]
+    fn at_a_path_two_records_want_the_one_at_home_there_owns_the_file() {
+        // The path-first reading: two records want doc-5.txt, the one at home
+        // there by its agreed content read second. It owns the file; the
+        // other is told nothing changed, never that the file is its edit.
+        // Read in index order, the other took the file as its edit and the
+        // one at home read as deleted. Both readings, the weak one with the
+        // bytes of each shared with a copy so they name nobody.
+        let known = [saw(1, "doc-5.txt", "sha-a"), saw(2, "doc-5.txt", "sha-b"), saw(3, "x/a.txt", "sha-a"), saw(4, "y/b.txt", "sha-b")];
+        let disk = [
+            observed("doc-5.txt", 0, "sha-b"),
+            observed("doc-5 (conflicted copy) 3.txt", 0, "sha-a"),
+            observed("x/a.txt", 0, "sha-a"),
+            observed("y/b.txt", 0, "sha-b"),
+        ];
+        for out in [pair_with(&known, &disk, &HashSet::new()), weak(&known, &disk)] {
+            assert_eq!(out.change_for(EntityId::file(2)), Some(&LocalChange::Unchanged), "{:?}", out.changes);
+            assert!(!edited(&out, 1), "the file another record is at home with read as this one's edit: {:?}", out.changes);
+        }
     }
 
     #[test]

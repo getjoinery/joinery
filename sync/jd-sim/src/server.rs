@@ -110,6 +110,25 @@ struct ChangeRow {
     actor: Option<String>,
 }
 
+/// One trash that took something live: what it named, whose call it was, and
+/// everything that went to the trash with it -- the entity named, if it was
+/// live, and each live descendant its folder's cascade took.
+#[derive(Debug, Clone)]
+pub struct TrashCall {
+    pub entity_type: &'static str,
+    pub id: i64,
+    /// The device whose call it was; `None` for the harness's own hand, a
+    /// person trashing it on the web.
+    pub caller: Option<String>,
+    /// Where the order of the user's acts stood when it ran
+    /// (`vfs::user_acts_so_far`): every act of a user's hand with an order
+    /// below it came first.
+    pub order: u64,
+    pub change_id: i64,
+    /// Every entity taken, as (entity type, id), the one named first.
+    pub took: Vec<(&'static str, i64)>,
+}
+
 /// One encrypted file as the server holds it, with everything a holder of the
 /// key needs to see it the way its owner does.
 ///
@@ -210,6 +229,13 @@ struct ServerState {
     next_token: u64,
     /// Who is calling. Set by the network layer per device.
     actor: Option<String>,
+    /// The device whose call is being answered right now, and `None`
+    /// between calls: unlike `actor`, which keeps the last device's name
+    /// after its call returns, this tells the harness's own hand apart.
+    caller: Option<String>,
+    /// Every trash that took something live, kept whole: the change feed is
+    /// pruned, this is not.
+    trash_calls: Vec<TrashCall>,
     /// Drive vault public keys by user id — what an encrypted upload seals its
     /// file key to. A user absent from here has no vault, which is a state the
     /// upload path has to handle rather than a state that cannot happen.
@@ -429,6 +455,8 @@ impl MockServer {
                 quota_bytes: None,
                 next_token: 0,
                 actor: None,
+                caller: None,
+                trash_calls: Vec::new(),
                 vault_public_keys: BTreeMap::new(),
             })),
             clock,
@@ -489,6 +517,17 @@ impl MockServer {
     /// Who subsequent calls are attributed to.
     pub fn acting_as(&self, device: Option<&str>) {
         self.state.lock().unwrap().actor = device.map(|d| d.to_string());
+    }
+
+    /// The device whose call is being answered, set for the length of the
+    /// call by the network layer and cleared after it.
+    pub fn calling_from(&self, device: Option<&str>) {
+        self.state.lock().unwrap().caller = device.map(|d| d.to_string());
+    }
+
+    /// Every trash that took something live, in order.
+    pub fn trash_calls(&self) -> Vec<TrashCall> {
+        self.state.lock().unwrap().trash_calls.clone()
     }
 
     pub fn set_quota_bytes(&self, quota: Option<u64>) {
@@ -1612,9 +1651,15 @@ impl MockServer {
                 });
             }
         }
+        let mut took: Vec<(&'static str, i64)> = Vec::new();
         if t == "folder" {
             match st.folders.get_mut(&id) {
-                Some(f) => f.trashed = true,
+                Some(f) => {
+                    if !f.trashed {
+                        took.push(("folder", id));
+                    }
+                    f.trashed = true;
+                }
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
             }
             // Trashing a folder takes its contents with it, and says so with
@@ -1637,21 +1682,43 @@ impl MockServer {
             let descendants = Self::subtree(&st, id);
             for fid in descendants.1 {
                 if let Some(f) = st.files.get_mut(&fid) {
+                    if !f.trashed {
+                        took.push(("file", fid));
+                    }
                     f.trashed = true;
                 }
             }
             for did in descendants.0 {
                 if let Some(f) = st.folders.get_mut(&did) {
+                    if !f.trashed {
+                        took.push(("folder", did));
+                    }
                     f.trashed = true;
                 }
             }
             Self::record(&mut st, "folder", id, "trashed");
         } else {
             match st.files.get_mut(&id) {
-                Some(f) => f.trashed = true,
+                Some(f) => {
+                    if !f.trashed {
+                        took.push(("file", id));
+                    }
+                    f.trashed = true;
+                }
                 None => return Err(refuse(404, "NotFound", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "trashed");
+        }
+        if !took.is_empty() {
+            let call = TrashCall {
+                entity_type: t,
+                id,
+                caller: st.caller.clone(),
+                order: crate::vfs::user_acts_so_far(),
+                change_id: st.next_change_id,
+                took,
+            };
+            st.trash_calls.push(call);
         }
         let mut answer = Self::echo(&mut st, t, id)?;
         if let Some(since) = since {
