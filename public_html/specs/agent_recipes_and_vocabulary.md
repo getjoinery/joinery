@@ -401,6 +401,16 @@ production host already showed "Reboot required" for 1 to 7 days.
 |---|---|---|
 | To reboot a host after a data root move, and to act on "Reboot required" at all | The owner rebooted from Linode's Cloud Manager; on a server outside our accounts (jeremytunnell-vps, the owner's own Linode) only its owner can | `reboot_machine` (operate, machine, no parameters): schedules the reboot a few seconds out so the job reports first, refuses inside a site container; a node page button behind a confirm beside "Reboot required"; the plane notes the boot id before and sees it change |
 
+**2026-10-12, mail apps on a relay-fronted test site (mailapps-walk.joinerytest.com).**
+Allow mail apps failed with "the gateway did not start listening on 993 and 465" while
+the gateway's own journal said it was listening on `[::]:993`. The cause (no IPv4
+listener) was found by reading the gateway source and reproducing it on dev; the node
+could not say which addresses its services were bound to.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Which addresses and ports the machine is listening on, and which program holds each | Read the source and reproduced it on dev | `listening_sockets` (observe, machine, no parameters): the `ss -ltnp` answer as rows of address, port, family and unit or program name, capped; no remote addresses, no connections |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.

@@ -4,7 +4,7 @@
 
 **Last Updated:** 2026-10-12
 
-**Status:** Released in 0.8.484 (J1–J4 in 0.8.485). Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). The gateway's life cycle (§ Running the gateway) is built on dev and uncommitted: A1 build at publish, A2 watching and self-repair, A3 removal; so are the J3 re-fix (APPENDUID always) and the relay pass-through (§ Where programs connect). Not built: A4 (container sites and managed nodes), and the shared certificate automation.
+**Status:** Released in 0.8.484 (J1–J4 in 0.8.485). Phase 0 measured Thunderbird 157.0.1 (§ Phase 0 findings), and the findings are folded into the rules below. Phases 1–4 are built (§ Build status). The gateway's life cycle (§ Running the gateway: A1 build at publish, A2 watching and self-repair, A3 removal), the J3 re-fix (APPENDUID always) and the relay pass-through (§ Where programs connect) are released in 0.8.486; their live checks are in the live verification queue. The pass-through's live test (mailapps-walk.joinerytest.com with its own 3.11 relay) found that gateway 1.0.0 listened on IPv6 only; 1.0.1 listens on IPv4 and IPv6, and the test resumes on the release carrying it. Not built: A4 (container sites and managed nodes), and the shared certificate automation.
 
 **Plugin name:** `mail_apps` — depends on `mailbox`.
 
@@ -58,9 +58,8 @@ The rig is in `plugins/mail_apps/tests/thunderbird_rig/`: real Thunderbird drive
 The tests listed in § Tests pass, including a live run: the real gateway on dev, IMAP and SMTP against a real mailbox.
 
 **Not built:**
-- The managed-node / container path (A4, § Running the gateway), which needs the relay pass-through first.
+- The managed-node / container path (A4, § Running the gateway).
 - The shared front-door certificate automation for `autoconfig.` names.
-- Measuring a 100,000-message folder.
 - Re-running the rig against the built gateway on the Mac mini and the Windows VM.
 
 **Implementation choices that differ from the first draft:**

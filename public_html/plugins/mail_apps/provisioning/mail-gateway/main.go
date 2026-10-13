@@ -20,7 +20,7 @@ import (
 )
 
 // Version is stamped at build time (-ldflags "-X main.Version=...").
-var Version = "1.0.0"
+var Version = "1.0.1"
 
 func main() {
 	configDir := flag.String("config-dir", "/etc/joinery/mail-gateway", "directory holding sites/<site>.json and sites/<site>.enabled")
@@ -127,9 +127,10 @@ func main() {
 	}
 }
 
-// listenDual listens on TCP for both IPv4 and IPv6 ("tcp" on a wildcard
-// address is dual-stack on Linux unless net.ipv6.bindv6only is set, in which
-// case a second IPv4 listener is opened beside it).
+// listenDual listens on TCP for both IPv4 and IPv6. A wildcard address gets
+// two listeners on the same port: Go opens a "tcp6" socket IPv6-only whatever
+// net.ipv6.bindv6only says, so IPv4 (the relay's dial, 127.0.0.1 checks, most
+// programs) needs its own.
 func listenDual(addr string) (net.Listener, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -138,25 +139,18 @@ func listenDual(addr string) (net.Listener, error) {
 	if host != "" {
 		return net.Listen("tcp", addr)
 	}
-	ln6, err6 := net.Listen("tcp6", net.JoinHostPort("::", port))
-	if err6 != nil {
+	ln4, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", port))
+	if err != nil {
+		return nil, err
+	}
+	// Port 0 (tests) picks a port; the IPv6 listener takes the same one.
+	_, port, _ = net.SplitHostPort(ln4.Addr().String())
+	ln6, err := net.Listen("tcp6", net.JoinHostPort("::", port))
+	if err != nil {
 		// No IPv6 on this host: IPv4 alone.
-		return net.Listen("tcp4", net.JoinHostPort("0.0.0.0", port))
+		return ln4, nil
 	}
-	if v6only() {
-		ln4, err := net.Listen("tcp4", net.JoinHostPort("0.0.0.0", port))
-		if err != nil {
-			ln6.Close()
-			return nil, err
-		}
-		return newMultiListener(ln6, ln4), nil
-	}
-	return ln6, nil
-}
-
-func v6only() bool {
-	b, err := os.ReadFile("/proc/sys/net/ipv6/bindv6only")
-	return err == nil && len(b) > 0 && b[0] == '1'
+	return newMultiListener(ln6, ln4), nil
 }
 
 func logf(format string, args ...any) {
