@@ -763,6 +763,32 @@ struct Custody {
     /// Per server folder the user deleted, who deleted it and every body that
     /// device's disk had been seen holding by then.
     removed_by: std::collections::BTreeMap<i64, Vec<(usize, std::collections::HashSet<String>)>>,
+    /// Every directory on every device, by (device index, birth), and the
+    /// first folder a learn point saw it as -- every directory, not only the
+    /// handles the workload wrote into.
+    dir_first: std::collections::BTreeMap<(usize, u64), (i64, u64)>,
+    /// Every folder id any learn point has seen, with the learn point that
+    /// first saw it.
+    folders_seen: std::collections::BTreeMap<i64, u64>,
+    /// Learn points so far, the clock the two maps above are read in.
+    learn_points: u64,
+    /// A folder the engine minted in a gone one's place: a directory first
+    /// seen as the gone folder now carries a folder no learn point had seen
+    /// before (`restore_remotely`'s new folder for a folder moved here and
+    /// deleted there, clean2 84369). The only way two folders join for the
+    /// verdict, and only while the server has let the first go
+    /// (`assert_every_file_is_in_a_folder_the_user_put_it_in`), and only to a
+    /// folder the device whose directory it is created -- `restore_remotely`
+    /// mints it there; a folder another device made at that path and this
+    /// one learned from the feed is not minted in anything's place. A
+    /// directory re-bound to a folder already known stays a misplacement.
+    /// Each edge also moves the directory's first sighting on to the folder
+    /// minted, so a directory remade twice chains (505 -> 509 -> 512) rather
+    /// than fanning out from its first folder. Read against the directory's
+    /// FIRST sighting: a directory first placed late (earlier learn points
+    /// saw several folders at its path, or none) can refuse a successor first
+    /// seen in between -- a false fire, never a false pass.
+    successors: std::collections::BTreeMap<i64, std::collections::BTreeSet<(i64, usize)>>,
     /// New files the user wrote with the bytes of a file standing on the same
     /// disk, not yet seen by a pass there ([`Custody::copy_reads_as_move`]).
     copies: Vec<UserCopy>,
@@ -1193,6 +1219,39 @@ impl Custody {
                 }
             }
         }
+        // Successors: a folder first seen after the directory was first seen
+        // as the gone one is new to it; one known by then is not.
+        self.learn_points += 1;
+        let at = self.learn_points;
+        for path in device.fs.all_paths() {
+            if device.fs.peek(&path).is_some() {
+                continue;
+            }
+            let Some(birth) = device.fs.birth_of(&path) else {
+                continue;
+            };
+            let jd_sim::scenario::FolderAt::One(now) = jd_sim::scenario::folder_record_at(device, &path) else {
+                continue;
+            };
+            let now_first_seen = *self.folders_seen.entry(now).or_insert(at);
+            match self.dir_first.get(&(di, birth)).copied() {
+                None => {
+                    self.dir_first.insert((di, birth), (now, at));
+                }
+                Some((first, dir_seen)) if first > 0 && first != now && now_first_seen > dir_seen => {
+                    let gone = device
+                        .store
+                        .get_entry(jd_core::EntityId::folder(first))
+                        .unwrap()
+                        .map_or(true, |e| e.remote_deleted);
+                    if gone {
+                        self.successors.entry(first).or_default().insert((now, di));
+                        self.dir_first.insert((di, birth), (now, at));
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 }
 
@@ -1310,9 +1369,23 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     // or a chaos swap as a misplacement. Such a body is not judged, and the
     // line counts it.
     let resolve = |h: &(usize, u64)| -> Option<Option<i64>> { custody.handles.get(h).copied().flatten() };
+    // A reading no scan could tell from a save (`UnseenReading`): a record
+    // whose own file the user destroyed between two pass points, bound to a
+    // file its scans never saw. The record took those bytes as its own save,
+    // and the engine was right to, so for custody they are written to every
+    // file that wrote the bytes it displaced: wherever that file goes after,
+    // they go with it (hostile plat3 85640: the user removed the file a swap
+    // had carried into a vault folder, and the record left at its name read
+    // the swapped-in file as its edit, then moved).
+    let mut intents = custody.intents.clone();
+    for reading in world.unseen_readings() {
+        let (body, displaced) = (jd_sim::sha256_hex(&reading.body), jd_sim::sha256_hex(&reading.displaced));
+        let keys: BTreeSet<usize> = custody.intents.iter().filter(|(h, _)| *h == displaced).map(|(_, k)| *k).collect();
+        intents.extend(keys.into_iter().map(|k| (body.clone(), k)));
+    }
     let mut candidates: BTreeMap<String, BTreeSet<Option<i64>>> = BTreeMap::new();
     let mut incomplete: BTreeSet<String> = BTreeSet::new();
-    for (hash, key) in &custody.intents {
+    for (hash, key) in &intents {
         let set = candidates.entry(hash.clone()).or_default();
         for h in &custody.placed[*key] {
             match resolve(h) {
@@ -1363,9 +1436,9 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
         // the swapped file into the root).
         for (body, dir) in [(&a, s.b), (&b, s.a)] {
             let keys: BTreeSet<usize> =
-                custody.intents.iter().filter(|(h, _)| h == body).map(|(_, k)| *k).collect();
+                intents.iter().filter(|(h, _)| h == body).map(|(_, k)| *k).collect();
             let landed = dir.and_then(|birth| resolve(&(s.device, birth)));
-            for (h, k) in &custody.intents {
+            for (h, k) in &intents {
                 if h == body || !keys.contains(k) {
                     continue;
                 }
@@ -1401,6 +1474,7 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
     let mut reminted = Vec::new();
     let mut held = Vec::new();
     let mut misplaced = Vec::new();
+    let mut succeeded: Vec<String> = Vec::new();
     // Files some device holds outside their vault (owner decision D1): the
     // server keeps each sealed where it was while the user's move stands on
     // that disk. Only while the hold is open; with none, a file here is judged.
@@ -1442,6 +1516,27 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
             multi += 1;
         }
         if set.contains(&f.folder) {
+            continue;
+        }
+        // The folder minted in a candidate's place, where the server has let
+        // the candidate go (`Custody::successors`).
+        let mut joined: BTreeSet<Option<i64>> = BTreeSet::new();
+        let mut frontier: Vec<i64> = set.iter().filter_map(|c| *c).collect();
+        while let Some(id) = frontier.pop() {
+            if folders.get(&id).is_some_and(|fo| !fo.trashed) {
+                continue;
+            }
+            for (next, di) in custody.successors.get(&id).into_iter().flatten() {
+                if world.server.created_by("folder", *next).as_deref() != Some(world.devices[*di].name.as_str()) {
+                    continue;
+                }
+                if joined.insert(Some(*next)) {
+                    frontier.push(*next);
+                }
+            }
+        }
+        if joined.contains(&f.folder) {
+            succeeded.push(format!("file {} stands in {:?}, minted in the place of {:?}", f.id, f.folder, set));
             continue;
         }
         let stands_in = f.folder;
@@ -1486,6 +1581,13 @@ fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &
             continue;
         }
         misplaced.push(line);
+    }
+    if !succeeded.is_empty() {
+        eprintln!(
+            "CUSTODY-SUCCESSORS seed={seed} edges={} used={} lines={succeeded:?}",
+            custody.successors.values().map(|s| s.len()).sum::<usize>(),
+            succeeded.len()
+        );
     }
     let net_fires_outside_a_user_delete = rescues_from_folders_the_user_never_deleted(world, custody);
     let learned = custody.handles.values().filter(|v| v.is_some()).count();
@@ -2145,6 +2247,29 @@ fn assert_sealed_content_never_reached_the_clear(world: &World, seed: u64) {
                     plain_names.insert(leaf(&path));
                 }
             }
+        }
+    }
+    // A body the workload's own swap carried out of the vault before the
+    // engine on that device could have known it was sealed: that file is
+    // plain there (Q4), and its bytes going up in the clear -- and coming back
+    // to other devices as that plain file -- are what the user's last act
+    // asked for, even once another file with the same bytes, saved in a vault
+    // and listed there, makes the body known (kill2 85127, 85317; plat3
+    // 85618: a copy saved beside the original, or the same body written on
+    // another device). Exempt as a plain copy is: the server cannot tell the
+    // two files' bytes apart. The device's own knowledge, because bytes are
+    // not identity and no engine knows what another device's files hold. In
+    // passes, not change ids: a swap and the pass after it can share a change
+    // id when nothing reached the server between them, and a swap made while
+    // a pass ran is never before that pass's listing.
+    for pair in world.swap_pairs() {
+        let (Some(body), Some(at), Some(di)) = (pair.crossed_out.as_deref(), pair.crossed_out_at, pair.device) else {
+            continue;
+        };
+        let hash = jd_sim::sha256_hex(body);
+        let known_there = world.devices[di].fs.sealed_known_passes().get(&hash).copied();
+        if known_there.map_or(true, |known| at < known) {
+            plain_bodies.entry(hash).or_insert(format!("carried out on device {di} after pass {at}, before it was known there"));
         }
     }
     // Named, not only counted: an exemption that survives unique bodies is
@@ -7350,5 +7475,246 @@ fn frozen_a_record_owning_no_file_takes_no_never_sent_file_seed() {
 fn frozen_a_waiting_sealed_upload_clears_a_name_held_since_seed() {
     for swaps in [Swaps::On, Swaps::Off] {
         workload_core_with(75_391, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}
+
+/// Kill2 85323: a folder swap's park on pc outlived a pass that died with its
+/// finish in flight. The walk does not go into a scratch directory, so the
+/// parked folder's sealed file read as deleted and its sealed copy was trashed
+/// on the server; a swap then carried the file out of the vault and it went up
+/// in the clear as a new file.
+#[test]
+fn frozen_a_park_outliving_its_pass_loses_nothing_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(85_323, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, swaps);
+    }
+}
+
+/// Fresh seeds whose sealed bodies were carried out of the vault by the
+/// workload before any engine could know them sealed, the same bytes later
+/// listed in a vault in another file (a copy beside the original, or the body
+/// written on another device). Witness of those worlds, every oracle on.
+#[test]
+fn frozen_a_body_carried_out_before_it_was_known_is_plain_seed() {
+    for (seed, steps, devices, kills) in [
+        (85_127, 30, vec![("mac", Platform::MacOs), ("pc", Platform::Windows)], true),
+        (85_317, 30, vec![("mac", Platform::MacOs), ("pc", Platform::Windows)], true),
+        (85_618, 40, vec![("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], false),
+    ] {
+        workload_core_with(seed, steps, &devices, true, Vault::FolderRings, kills, Names::Ordinary, Swaps::On);
+    }
+}
+
+/// clean2 84369: a folder renamed on one device and deleted on the other came
+/// back as a new folder at the user's name (`restore_remotely`), the file in
+/// it re-sent with it. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_folder_minted_in_a_deleted_ones_place_keeps_its_files_seed() {
+    for swaps in [Swaps::On, Swaps::Off] {
+        workload_core_with(84_369, 40, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], false, Vault::FolderRings, false, Names::Ordinary, swaps);
+    }
+}
+
+/// The sealed oracle's excuse for a body carried out before it was known, by
+/// hand, both ways. Carried out of the vault before any scan saw it, a file is
+/// plain (owner decision Q4), and its bytes going up in the clear do not fire
+/// -- though a copy with the same bytes is then saved in the vault and listed.
+/// Carried out AFTER a scan listed it in the vault, the same bytes standing
+/// plain on the server still fire.
+#[test]
+fn the_sealed_oracle_excuses_only_a_body_carried_out_before_it_was_known() {
+    let seed = 9_931;
+    let world = sweep_world(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], 0, false, Vault::FolderRings);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Plain/p.txt", b"a plain file the swap trades with");
+    assert!(world.settle().is_some());
+    let early = b"saved in the vault and carried out before any scan";
+    laptop.fs.user_write(&format!("{VAULT_ROOT}/a.txt"), early);
+    world.swap_names_by_chaos("laptop", &format!("{VAULT_ROOT}/a.txt"), "Plain/p.txt");
+    laptop.fs.user_write(&format!("{VAULT_ROOT}/Copy of a.txt"), early);
+    assert!(world.settle().is_some());
+    assert!(
+        world.server.files().iter().any(|f| !f.encrypted && f.sha256 == jd_sim::sha256_hex(early)),
+        "the premise: the carried-out bytes went up plain"
+    );
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+
+    let late = b"saved in the vault, listed there, then carried out";
+    laptop.fs.user_write(&format!("{VAULT_ROOT}/b.txt"), late);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Plain/q.txt", b"another plain file to trade with");
+    assert!(world.settle().is_some());
+    world.swap_names_by_chaos("laptop", &format!("{VAULT_ROOT}/b.txt"), "Plain/q.txt");
+    assert!(world.settle().is_some());
+    assert_sealed_content_never_reached_the_clear(&world, seed);
+    world.server.seed_file(None, "leaked.dat", late);
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_sealed_content_never_reached_the_clear(&world, seed)
+    }));
+    assert!(verdict.is_err(), "the oracle excused a body carried out after a scan had listed it in the vault");
+}
+
+/// The custody oracle joins two folders only where the engine minted the
+/// second in the first's place. By hand, both ways, in clean2 84369's shape:
+/// the user writes a file on the laptop into a folder the desktop only ever
+/// downloaded, so the desktop's directory is no handle of the workload's.
+/// Deleted on the laptop and renamed on the desktop, the folder comes back as
+/// a new folder at the desktop user's name with the file re-sent into it: the
+/// file stands where the user put it, and nothing fires. The desktop's
+/// directory re-bound instead to a folder that already existed -- by editing
+/// its records, as a confused engine would -- is a misplacement, and fires
+/// though the first folder is gone.
+#[test]
+fn the_custody_oracle_joins_only_a_folder_minted_in_a_gone_ones_place() {
+    for rebound in [false, true] {
+        let seed = 9_930 + rebound as u64;
+        let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+        let laptop = world.device("laptop");
+        let desktop = world.device("desktop");
+        laptop.fs.user_write("Other/other.txt", b"the other folder's own file");
+        assert!(world.settle().is_some());
+        let mut custody = Custody::default();
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.adopt_standing(di, d);
+            custody.learn(di, d, false);
+        }
+        let body = b"the body that belongs in Docs";
+        laptop.fs.user_write("Docs/keep.txt", body);
+        custody.wrote(0, laptop, "Docs/keep.txt", body);
+        assert!(world.settle().is_some());
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.learn(di, d, false);
+        }
+        let docs = world.server.folder_id_at("Docs").unwrap();
+        let other = world.server.folder_id_at("Other").unwrap();
+        if !rebound {
+            custody.removing(0, laptop, "Docs");
+            laptop.fs.user_remove("Docs");
+            world.pass(laptop);
+            desktop.fs.user_rename("Docs", "Docs renamed");
+            assert!(world.settle().is_some());
+            for (di, d) in world.devices.iter().enumerate() {
+                custody.learn(di, d, false);
+            }
+            let remade = world.server.folder_id_at("Docs renamed").expect("the premise: the folder came back at the user's name");
+            assert_ne!(remade, docs, "the premise: a new folder");
+            assert!(
+                world.server.files().iter().any(|f| !f.trashed && f.folder == Some(remade) && f.name == "keep.txt"),
+                "the premise: the file was re-sent into it"
+            );
+            assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+            continue;
+        }
+        let keep = world.server.files().into_iter().find(|f| f.name == "keep.txt").unwrap();
+        world.server.action("drive_move", &serde_json::json!({ "entity_type": "file", "entity_id": keep.id, "parent_id": other })).unwrap();
+        world.server.action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": docs })).unwrap();
+        let mut d = desktop.store.get_entry(jd_core::EntityId::folder(docs)).unwrap().unwrap();
+        d.remote_deleted = true;
+        desktop.store.put_entry(&d).unwrap();
+        let mut o = desktop.store.get_entry(jd_core::EntityId::folder(other)).unwrap().unwrap();
+        o.local_name = Some("Docs".into());
+        o.synced_placement = Some(jd_core::model::Placement { parent: None, name: "Docs".into() });
+        desktop.store.put_entry(&o).unwrap();
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.learn(di, d, false);
+        }
+        assert!(custody.successors.get(&docs).map_or(true, |s| !s.iter().any(|(n, _)| *n == other)), "a known folder was joined as a successor");
+        let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
+        }));
+        assert!(verdict.is_err(), "the oracle passed a file re-bound into a folder that already existed");
+    }
+}
+
+/// Fresh seeds where a record took a file no scan had seen as its own save
+/// after the user destroyed its own file between two pass points -- a save by
+/// rename (hostile2 84766), or the file a swap had carried away deleted
+/// (plat3 85640) -- and was then moved by a swap on another device. Witness of
+/// those worlds, every oracle on.
+#[test]
+fn frozen_a_body_a_record_took_unseen_moves_with_it_seed() {
+    workload_core_with(84_766, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+    workload_core_with(
+        85_640,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)],
+        true,
+        Vault::FolderRings,
+        false,
+        Names::Ordinary,
+        Swaps::On,
+    );
+}
+
+/// The custody oracle's reading of an unseen save, by hand, in 85640's shape.
+/// On the laptop a swap trades x.txt for a file never scanned and the user
+/// deletes the file the swap carried away: the record left at x.txt takes the
+/// stranger's bytes as its own save, as no scan could tell otherwise. The
+/// desktop, still holding x.txt's old bytes, swaps it into another folder,
+/// and the new bytes follow it there. The file stands where the user's swap
+/// put it; nothing fires. The same bytes standing in that folder WITHOUT a
+/// reading that took them -- carried there by the server's hand -- still fire.
+#[test]
+fn the_custody_oracle_follows_a_save_no_scan_could_see() {
+    for unseen in [true, false] {
+        let seed = 9_925 + unseen as u64;
+        let world = World::of(seed, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)]);
+        let laptop = world.device("laptop");
+        let mut custody = Custody::default();
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.adopt_standing(di, d);
+            custody.learn(di, d, false);
+        }
+        let mine = b"x.txt's own bytes";
+        let theirs = b"z.txt's own bytes";
+        let stranger = b"a file no scan here has seen";
+        laptop.fs.user_write("A/x.txt", mine);
+        custody.wrote(0, laptop, "A/x.txt", mine);
+        laptop.fs.user_write("D/z.txt", theirs);
+        custody.wrote(0, laptop, "D/z.txt", theirs);
+        assert!(world.settle().is_some());
+        for (di, d) in world.devices.iter().enumerate() {
+            custody.learn(di, d, false);
+        }
+        let x = world.server.files().into_iter().find(|f| f.name == "x.txt").unwrap().id;
+        let d = world.server.folder_id_at("D").unwrap();
+        laptop.fs.user_write("C/new.txt", stranger);
+        custody.wrote(0, laptop, "C/new.txt", stranger);
+        if unseen {
+            world.swap_names_by_chaos("laptop", "A/x.txt", "C/new.txt");
+            custody.note_swaps(&world);
+            custody.removing(0, laptop, "C/new.txt");
+            laptop.fs.user_remove("C/new.txt");
+            world.swap_names_by_chaos("desktop", "A/x.txt", "D/z.txt");
+            custody.note_swaps(&world);
+        }
+        world.pass(laptop);
+        for (di, dev) in world.devices.iter().enumerate() {
+            custody.learn(di, dev, false);
+        }
+        if !unseen {
+            // The stranger's bytes put into x.txt by hand on the server, and
+            // x.txt moved into D: no reading took them, no swap carried them.
+            let new = world.server.files().into_iter().find(|f| f.name == "new.txt").unwrap();
+            world.server.action("drive_move", &serde_json::json!({ "entity_type": "file", "entity_id": new.id, "parent_id": d })).unwrap();
+        }
+        assert!(world.settle().is_some(), "never settled");
+        for (di, dev) in world.devices.iter().enumerate() {
+            custody.learn(di, dev, true);
+        }
+        let stands: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(stranger)).collect();
+        if unseen {
+            assert!(
+                stands.iter().any(|f| f.id == x && f.folder == Some(d)),
+                "the premise: x.txt took the stranger's bytes and stands in D: {stands:?}"
+            );
+            assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed);
+        } else {
+            assert!(stands.iter().any(|f| f.folder == Some(d)), "the premise: the bytes stand in D: {stands:?}");
+            let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
+            }));
+            assert!(verdict.is_err(), "the oracle passed bytes moved into a folder by a hand no reading explains");
+        }
     }
 }

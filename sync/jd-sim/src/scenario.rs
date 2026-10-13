@@ -61,6 +61,8 @@ pub const MAX_PASSES_ENCRYPTED: usize = 2_000;
 
 /// A situation: a server, a clock, and the computers attached to it.
 pub struct World {
+    /// Passes started on any device, in order (`MemFs::passes_now`).
+    passes_started: std::sync::Arc<std::sync::atomic::AtomicI64>,
     /// Ask every pass for its trace (`jd_core::trace::PassTrace`), returned in
     /// its outcome. On when `JD_TRACE` is set, so a probe prints the same
     /// record a soak device writes; a test turns it on and off itself.
@@ -171,6 +173,13 @@ pub struct SwapPair {
     /// of the edge. Read by the sealed oracle to say which leaks the workload
     /// moved out and which the engine published on its own.
     pub crossed_out: Option<Vec<u8>>,
+    /// How many passes had started, on any device, when `crossed_out` was
+    /// carried out (`MemFs::passes_now`). Compared with the pass in which an
+    /// engine could first have known those bytes were sealed: a file carried
+    /// out before that pass began is a plain file to every engine (owner
+    /// decision Q4), whatever another file with the same bytes then showed a
+    /// scan in a vault.
+    pub crossed_out_at: Option<i64>,
     /// Where a chaos swap was made, which the ledger cannot say: it follows
     /// the workload's own hand by path, and this one is the harness's. Each
     /// body now stands in the directory the other stood in, whoever put the
@@ -277,7 +286,17 @@ fn swap_two_names(
             };
             let dir = |p: &str| disk.birth_of(p.rsplit_once('/').map(|(d, _)| d).unwrap_or(""));
             let stood_in = Some(StoodIn { device, a: dir(a), b: dir(b) });
-            pairs.lock().unwrap().push(SwapPair { a: ba, b: bb, source: "chaos", sealed: sa || sb, crossed_out, stood_in, device: Some(device) });
+            let crossed_out_at = crossed_out.as_ref().and_then(|_| disk.passes_now());
+            pairs.lock().unwrap().push(SwapPair {
+                a: ba,
+                b: bb,
+                source: "chaos",
+                sealed: sa || sb,
+                crossed_out,
+                crossed_out_at,
+                stood_in,
+                device: Some(device),
+            });
         }
     }
     disk.user_trade_names(a, b, parked);
@@ -313,6 +332,7 @@ impl World {
     pub fn of(seed: u64, devices: &[(&str, Platform)]) -> World {
         let clock = SimClock::new();
         let server = MockServer::new(clock.clone());
+        let passes_started = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
         let devices = devices
             .iter()
             .enumerate()
@@ -326,10 +346,15 @@ impl World {
                 };
                 let changes = server.clone();
                 fs.set_change_clock(crate::vfs::ChangeClock(std::sync::Arc::new(move || changes.latest_change_id())));
+                let passes = passes_started.clone();
+                fs.set_pass_clock(crate::vfs::ChangeClock(std::sync::Arc::new(move || {
+                    passes.load(std::sync::atomic::Ordering::SeqCst)
+                })));
                 Device::new(name, &server, clock.clone(), seed).with_fs(fs)
             })
             .collect();
         World {
+            passes_started,
             trace_passes: std::sync::atomic::AtomicBool::new(std::env::var("JD_TRACE").is_ok()),
             settle_passes: std::env::var("SETTLE_PASSES")
                 .ok()
@@ -801,6 +826,7 @@ impl World {
         // ruling): a plaintext version the pass itself sends after its walk
         // listed the bytes in a vault is later than the stamp, and fires.
         let as_of = self.server.latest_change_id();
+        self.passes_started.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         device.fs.take_listed_in_a_vault();
         device.fs.know_sealed(recorded_in_a_vault(device, as_of, as_of).into_iter().map(|(h, n, _)| (h, n)), as_of);
         // What the daemon does before a pass on a volume with no file ids:
@@ -925,6 +951,7 @@ impl World {
                 source,
                 sealed,
                 crossed_out: None,
+                crossed_out_at: None,
                 stood_in: None,
                 device,
             });

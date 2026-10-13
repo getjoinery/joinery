@@ -380,9 +380,26 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             )?;
             env.store.drop_op(op.op_id)?;
         }
-        OpOutcome::Overtaken(_) => {
+        OpOutcome::Overtaken(why) => {
             // No issue: there is nothing here for a person to decide. The next
             // scan plans from what is on the disk and the server now.
+            //
+            // Except for a stranded park's finish. Nothing plans that one
+            // afresh: it is queued again next pass, as it was, and overtaken
+            // every time it would leave the folder under the engine's scratch
+            // name for good with nothing said.
+            if crate::pass::is_a_stranded_finish(op) {
+                let name = env.store.get_entry(op.entity)?.map(|e| e.remote.name).unwrap_or_default();
+                env.store.raise_issue(
+                    Some(op.entity),
+                    crate::pass::PARK_UNFINISHED,
+                    &format!(
+                        "{name} is set aside under a temporary name on this computer and \
+                         could not be put back yet: {why}"
+                    ),
+                    (env.now_ms)() as i64,
+                )?;
+            }
             env.store.drop_op(op.op_id)?;
         }
         OpOutcome::Retry(why) => {
@@ -1603,9 +1620,21 @@ fn the_owner_follows_its_file(
     // aside before the rename, and the file is never nobody's
     // (`specs/drive_file_ownership.md`, design 2). Held outside its vault, it
     // stays held where it lands: the hold is read from where it stands.
+    //
+    // Into a folder the server has deleted whose directory still stands here
+    // too -- a rescue out of a deleted folder inside another -- it follows all
+    // the same: that folder's own trash rescues the file again, and it follows
+    // on. Left behind, the record was forgotten with the folder its file had
+    // left, and a file saved in a vault and carried out of it before it was
+    // sent was minted a new PLAIN file at the next scan and went up in the
+    // clear (plat3 85604).
     if owner.id.is_provisional() && owner.synced_placement.is_none() {
-        let Some(to) = aside_placement(env, aside)? else {
-            return Ok(());
+        let to = match aside_placement(env, aside)? {
+            Some(to) => to,
+            None => match placement_in_a_leaving_folder(env, aside)? {
+                Some(to) => to,
+                None => return Ok(()),
+            },
         };
         if beside == Beside::InPlace && to.parent != owner.remote.parent {
             return Ok(());
@@ -1739,6 +1768,41 @@ fn aside_placement(env: &ExecEnv, aside: &std::path::Path) -> Result<Option<Plac
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
     Ok(Some(Placement { parent, name }))
+}
+
+/// Where `aside` stands when its directory is a folder the server has
+/// deleted and this disk has not yet let go of: the one such record holding
+/// that directory, by its identity, or on a volume with none by where the
+/// records place it.
+fn placement_in_a_leaving_folder(env: &ExecEnv, aside: &std::path::Path) -> Result<Option<Placement>, ExecError> {
+    let (Some(root), Some(dir)) = (env.vfs.root(), aside.parent()) else {
+        return Ok(None);
+    };
+    if dir == root.as_path() {
+        return Ok(None);
+    }
+    let dir_id = env.vfs.directory_id(dir)?.filter(|id| *id != 0);
+    let mut holders = Vec::new();
+    for other in env.store.every_entry()? {
+        if other.id.entity_type != EntityType::Folder || !other.remote_deleted {
+            continue;
+        }
+        let here = match dir_id {
+            Some(id) => other.synced_fingerprint.is_some_and(|fp| fp.file_id == id),
+            None => matches!(local_path(env, &other)?, Placed::At(p) if p == dir),
+        };
+        if here {
+            holders.push(other.id.server_id);
+        }
+    }
+    let [folder] = holders.as_slice() else {
+        return Ok(None);
+    };
+    let name = aside
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok(Some(Placement { parent: Some(*folder), name }))
 }
 
 /// Is the file standing at `path` another record's own file, of a record
@@ -5211,6 +5275,13 @@ fn move_local(
             .local_name
             .as_deref()
             .is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX));
+    // A finisher whose own park has not landed -- refused, retrying -- waits
+    // for it. Run first, it moved the folder straight from its old name to the
+    // new one, where the other folder of the swap still stood waiting for the
+    // park, and made room by setting that one aside under a conflict name.
+    if op.kind == "move_local" && park_queued {
+        return Ok(OpOutcome::Retry("its park has not landed yet".into()));
+    }
     if let Some(p) = to.parent {
         if let Some(parent) = env.store.get_entry(EntityId::folder(p))? {
             if parent.synced_placement.is_none() && parent.stand_in.is_none() {
@@ -5339,6 +5410,25 @@ fn move_local(
                         "the file at that name is being moved to the trash first".into(),
                     ));
                 }
+            }
+        }
+        // And what stands there is one this device is parking out of the way,
+        // its park refused and retrying: a swap's first step, which waits on
+        // nothing. It goes first too. Made room for instead, a folder's own
+        // directory was set aside under a conflict name with its record
+        // following it, the swap's finisher no longer found it, and the next
+        // pass made the folder afresh and trashed the files left in the old
+        // directory -- one refused rename losing a file (a two-folder swap
+        // applied here).
+        for queued in env.store.queued_ops()? {
+            if queued.kind != "park_local" || queued.entity == entry.id {
+                continue;
+            }
+            let Some(going) = env.store.get_entry(queued.entity)? else { continue };
+            if matches!(local_path(env, &going)?, Placed::At(p) if p == dest) {
+                return Ok(OpOutcome::Retry(
+                    "what stands at that name is being moved out of the way first".into(),
+                ));
             }
         }
         // A rename lands on top of whatever is at the destination. If that is
@@ -7596,7 +7686,20 @@ fn keep_a_moved_file(
         _ => return Ok(MovedFile::NotMoved),
     };
     let unholdable = matches!(reason, R::NameTooLong { .. } | R::PathTooLong { .. } | R::Empty);
-    if !unholdable {
+    // Taken at the server's placement by something that is staying, where the
+    // server has moved the file too: a move race goes to the server, so the
+    // file is due there whatever the user's move here says, and no move made
+    // here ends the clash. Standing down, the park was judged again every pass
+    // for ever (hostile2 84411: the server's move onto the name a file held
+    // outside its vault stands at here). A holder on its way out leaves the
+    // name to the move a pass later, and a clash anywhere else -- the agreed
+    // name, with the server's placement free -- the move ends, as before.
+    let taken_where_the_server_sends_it = entry.remote != *entry.agreed_placement()
+        && match path_for(env, &entry.remote)? {
+            Placed::At(dest) if dest != stands => held_by_something_staying(env, &dest)?,
+            _ => false,
+        };
+    if !unholdable && !taken_where_the_server_sends_it {
         return Ok(MovedFile::StandDown(OpOutcome::Overtaken(format!(
             "its own file stands at {}; deciding again from what is there now",
             stands.display(),
@@ -7614,6 +7717,45 @@ fn keep_a_moved_file(
         Err(jd_vfs::VfsError::NotFound(_)) => Ok(MovedFile::NotMoved),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Does something stand at `path` that is staying there? A record held where
+/// it stands (outside its vault, or never sent from a vault), or one the
+/// server keeps at this very placement. Anything else gives the name up by
+/// itself: a record the server has moved elsewhere moves out, and a file
+/// never sent -- or not yet read -- goes up under a name of its own when the
+/// server's name is taken.
+fn held_by_something_staying(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError> {
+    let holders: Vec<Entry> = if let Some(fp) = env.vfs.fingerprint(path)? {
+        let mut owners = owners_here(env, path, fp, true)?;
+        if owners.is_empty() {
+            for e in env.store.every_entry()? {
+                if e.id.entity_type == EntityType::File && !e.remote_deleted && matches!(local_path(env, &e)?, Placed::At(p) if p == path) {
+                    owners.push(e);
+                }
+            }
+        }
+        owners
+    } else if env.vfs.read_dir(path).is_ok() {
+        let mut folders = Vec::new();
+        for e in env.store.every_entry()? {
+            if e.id.entity_type == EntityType::Folder && !e.remote_deleted && matches!(local_path(env, &e)?, Placed::At(p) if p == path) {
+                folders.push(e);
+            }
+        }
+        folders
+    } else {
+        return Ok(false);
+    };
+    for h in &holders {
+        if crate::pass::held_outside_its_vault(env, h)? || crate::pass::held_and_never_sent(env, h)? {
+            return Ok(true);
+        }
+        if !h.id.is_provisional() && matches!(path_for(env, &h.remote)?, Placed::At(p) if p == path) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Where on this disk the file with this identity stands, if anywhere. The

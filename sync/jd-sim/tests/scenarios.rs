@@ -20561,3 +20561,565 @@ fn a_waiting_sealed_upload_steps_aside_from_a_name_a_held_file_comes_to_hold() {
     );
     assert_converged(&world);
 }
+
+/// A two-folder swap applied here parks one folder under a scratch name,
+/// moves the other into its name, then finishes the first. The park's rename
+/// refused once, the move went ahead and made room: the parked folder's own
+/// directory was set aside under a conflict name, the finisher no longer
+/// found it, and the next pass made the folder afresh and trashed the file
+/// left in the old directory. The move waits for the park instead.
+#[test]
+fn a_folder_swap_whose_park_is_refused_once_loses_nothing() {
+    let world = World::new(9_940, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/a.txt", b"the file in A");
+    mac.fs.user_write("B/b.txt", b"the file in B");
+    assert!(world.settle().is_some());
+    pc.fs.user_rename("A", "T");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename("T", "B");
+    world.pass(pc);
+    mac.fs.fail_next(FsOp::Rename, Some("B"), FailureKind::Io, 1);
+    world.pass(mac);
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    for name in ["a.txt", "b.txt"] {
+        assert!(files.iter().any(|f| f.name == name && !f.trashed), "{name} was trashed: {files:?}");
+    }
+    assert_eq!(mac.fs.peek("B/a.txt").as_deref(), Some(&b"the file in A"[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("A/b.txt").as_deref(), Some(&b"the file in B"[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+
+/// A folder swap applied here parks one folder under a scratch name, moves
+/// the other into its name, then finishes the first. A finish refused once
+/// leaves the park standing into the next pass, and the walk does not go into
+/// a scratch directory: read by it, the parked folder's files were gone, and
+/// the next pass read them deleted and trashed them on the server (kill2
+/// 85323, where a swap then carried a sealed one out and it went up in the
+/// clear). What a standing park holds is held, as a leaving folder's park is,
+/// until the swap finishes.
+#[test]
+fn a_folder_swap_whose_finish_is_refused_once_trashes_nothing_in_the_park() {
+    let world = World::new(9_939, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/a.txt", b"the file in A");
+    mac.fs.user_write("B/b.txt", b"the file in B");
+    assert!(world.settle().is_some());
+    let id_of = |name: &str| world.server.files().into_iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let (a_id, b_id) = (id_of("a.txt"), id_of("b.txt"));
+    pc.fs.user_rename("A", "T");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename("T", "B");
+    world.pass(pc);
+    let fs = mac.fs.clone();
+    let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = refused.clone();
+    mac.fs.while_renaming(move |from, _| {
+        let from = from.to_string_lossy();
+        if let Some(rel) = from.strip_prefix("/sync/") {
+            if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                fs.fail_next(FsOp::Rename, Some(rel), FailureKind::Io, 1);
+            }
+        }
+    });
+    world.pass(mac);
+    assert!(refused.load(std::sync::atomic::Ordering::SeqCst), "the premise: the finish was refused");
+    assert!(
+        mac.fs.all_paths().iter().any(|p| p.starts_with(".jd-swap") && !p.contains('/')),
+        "the premise: the park stands into the next pass: {:?}",
+        mac.fs.all_paths()
+    );
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    for (name, id) in [("a.txt", a_id), ("b.txt", b_id)] {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "{name} was trashed: {files:?}");
+    }
+    assert_eq!(mac.fs.peek("B/a.txt").as_deref(), Some(&b"the file in A"[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("A/b.txt").as_deref(), Some(&b"the file in B"[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+/// A folder swap applied here parks one folder under a scratch name, moves
+/// the other into its name, then finishes the first. A kill with the finish
+/// in flight leaves the park standing with no operation open on it, and the
+/// walk does not go into a scratch directory: read by it, the parked folder's
+/// files were gone, and the next pass read them deleted and trashed them on
+/// the server (kill2 85323, where a swap then carried a sealed one out and it
+/// went up in the clear). What a standing park holds is held, as a leaving
+/// folder's park is.
+#[test]
+fn a_park_left_with_no_finisher_trashes_nothing_in_it() {
+    let world = World::new(9_939, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/a.txt", b"the file in A");
+    mac.fs.user_write("B/b.txt", b"the file in B");
+    assert!(world.settle().is_some());
+    let id_of = |name: &str| world.server.files().into_iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let (a_id, b_id) = (id_of("a.txt"), id_of("b.txt"));
+    pc.fs.user_rename("A", "T");
+    pc.fs.user_rename("B", "A");
+    pc.fs.user_rename("T", "B");
+    world.pass(pc);
+    let fs = mac.fs.clone();
+    let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = refused.clone();
+    mac.fs.while_renaming(move |from, _| {
+        let from = from.to_string_lossy();
+        if let Some(rel) = from.strip_prefix("/sync/") {
+            if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                fs.fail_next(FsOp::Rename, Some(rel), FailureKind::Io, 1);
+            }
+        }
+    });
+    world.pass(mac);
+    assert!(refused.load(std::sync::atomic::Ordering::SeqCst), "the premise: the finish was refused");
+    assert!(
+        mac.fs.all_paths().iter().any(|p| p.starts_with(".jd-swap") && !p.contains('/')),
+        "the premise: the park stands into the next pass: {:?}",
+        mac.fs.all_paths()
+    );
+    // A kill with the finish in flight loses the operation, and the park
+    // stands with nothing open on it (kill2 85323).
+    for op in mac.store.queued_ops().unwrap() {
+        if op.kind == "move_local" {
+            mac.store.drop_op(op.op_id).unwrap();
+        }
+    }
+    world.pass(mac);
+    let files = world.server.files();
+    for (name, id) in [("a.txt", a_id), ("b.txt", b_id)] {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "the pass after: {name} was trashed: {files:?}");
+    }
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    for (name, id) in [("a.txt", a_id), ("b.txt", b_id)] {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "{name} was trashed: {files:?}");
+    }
+    assert_eq!(mac.fs.peek("B/a.txt").as_deref(), Some(&b"the file in A"[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("A/b.txt").as_deref(), Some(&b"the file in B"[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+/// Strand a folder swap's park on `dev`: `peer` swaps A and B, `dev` applies
+/// it, its finish is refused once, and the finish is then lost as a kill loses
+/// it. Returns the parked record and the server ids of a.txt and b.txt.
+fn strand_a_swap_park(world: &World, dev: &jd_sim::engine::Device, peer: &jd_sim::engine::Device) -> (jd_core::model::Entry, [(&'static str, i64); 2]) {
+    dev.fs.user_write("A/a.txt", b"the file in A");
+    dev.fs.user_write("B/b.txt", b"the file in B");
+    assert!(world.settle().is_some());
+    let id_of = |name: &str| world.server.files().into_iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let ids = [("a.txt", id_of("a.txt")), ("b.txt", id_of("b.txt"))];
+    peer.fs.user_rename("A", "T");
+    peer.fs.user_rename("B", "A");
+    peer.fs.user_rename("T", "B");
+    world.pass(peer);
+    let fs = dev.fs.clone();
+    let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let once = refused.clone();
+    dev.fs.while_renaming(move |from, _| {
+        let from = from.to_string_lossy().replace('\\', "/");
+        let rel = from.rsplit_once("/sync/").map(|(_, r)| r.to_string()).unwrap_or_default();
+        if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            fs.fail_next(FsOp::Rename, Some(&rel), FailureKind::Io, 1);
+        }
+    });
+    world.pass(dev);
+    assert!(refused.load(std::sync::atomic::Ordering::SeqCst), "the premise: the finish was refused");
+    for op in dev.store.queued_ops().unwrap() {
+        if op.kind == "move_local" {
+            dev.store.drop_op(op.op_id).unwrap();
+        }
+    }
+    let parked = dev
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap")))
+        .expect("the premise: a park stands with nothing left to finish it");
+    (parked, ids)
+}
+
+fn no_park_left(dev: &jd_sim::engine::Device, parked: &jd_core::model::Entry) {
+    let me = dev.store.get_entry(parked.id).unwrap().unwrap();
+    assert!(
+        !me.local_name.as_deref().is_some_and(|n| n.starts_with(".jd-swap")),
+        "the folder still wears the scratch name: {me:?}"
+    );
+    assert!(
+        !dev.fs.all_paths().iter().any(|p| p.starts_with(".jd-swap")),
+        "the park still stands: {:?}",
+        dev.fs.all_paths()
+    );
+}
+
+fn server_kept(world: &World, ids: [(&'static str, i64); 2]) {
+    let files = world.server.files();
+    for (name, id) in ids {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "{name} was trashed on the server: {files:?}");
+    }
+}
+
+/// Q3. A stranded park whose server name a peer then changed to one this
+/// Windows disk cannot hold. Its finish carried the name to the disk, the disk
+/// refused it, and the finish was queued again next pass, for ever, with the
+/// folder under the engine's scratch name and nothing said. Judged as the
+/// arrival it is, it gives up its copy here as any folder renamed to such a
+/// name does, and the server keeps everything.
+#[test]
+fn a_stranded_park_renamed_to_a_name_this_disk_cannot_hold_gives_up_its_copy() {
+    let world = World::of(9_937, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    let (parked, ids) = strand_a_swap_park(&world, pc, lin);
+    let long = format!("{}{}", "n".repeat(150), "?".repeat(40));
+    lin.fs.user_rename(&parked.remote.name, &long);
+    world.pass(lin);
+    assert!(world.settle().is_some(), "never settled");
+    server_kept(&world, ids);
+    no_park_left(pc, &parked);
+    let me = pc.store.get_entry(parked.id).unwrap().unwrap();
+    assert!(
+        matches!(me.status, jd_core::model::LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::NameTooLong { .. })),
+        "{me:?}"
+    );
+}
+
+/// The same, where the disk refuses a name its kind would hold (an SMB share,
+/// an eCryptfs home). The refusal overtakes the finish once, and that is said;
+/// the next pass's judgement gives up the copy here, and the saying ends with
+/// the park.
+#[test]
+fn a_stranded_park_whose_name_the_disk_refuses_gives_up_its_copy_and_says_so() {
+    let world = World::new(9_936, &["mac", "pc"]);
+    let (mac, pc) = (world.device("mac"), world.device("pc"));
+    let (parked, ids) = strand_a_swap_park(&world, mac, pc);
+    pc.fs.user_rename(&parked.remote.name, "Renamed");
+    world.pass(pc);
+    let scratch = parked.local_name.clone().unwrap();
+    mac.fs.fail_next(FsOp::Rename, Some(&scratch), FailureKind::NameRefused, 1_000);
+    let mut said = false;
+    for _ in 0..4 {
+        world.pass(mac);
+        said |= mac.store.open_issues().unwrap().iter().any(|i| i.kind == "park_unfinished" && i.entity == Some(parked.id));
+    }
+    assert!(said, "the refused finish was never said");
+    assert!(world.settle().is_some(), "never settled");
+    server_kept(&world, ids);
+    no_park_left(mac, &parked);
+    assert!(
+        !mac.store.open_issues().unwrap().iter().any(|i| i.kind == "park_unfinished"),
+        "still said after the park ended"
+    );
+}
+
+/// A stranded park whose server name a peer then changed to a case twin of
+/// the other folder of the swap. On a Windows disk the two are one name. The
+/// finish went straight for it and made room by setting the other folder --
+/// the user's own, with its file -- aside under a conflict name. Judged, the
+/// arrival loses the clash and gives up its copy here; the folder already
+/// holding the name is not touched.
+#[test]
+fn a_stranded_park_renamed_to_a_case_twin_leaves_the_twin_alone() {
+    let world = World::of(9_935, &[("pc", jd_sim::Platform::Windows), ("lin", jd_sim::Platform::Linux)]);
+    let (pc, lin) = (world.device("pc"), world.device("lin"));
+    let (parked, ids) = strand_a_swap_park(&world, pc, lin);
+    let (twin, holder) = if parked.remote.name == "B" { ("a", "A") } else { ("b", "B") };
+    let inside = if holder == "A" { "A/b.txt" } else { "B/a.txt" };
+    let bytes = pc.fs.peek(inside);
+    assert!(bytes.is_some(), "the premise: the other folder stands at {holder}: {:?}", pc.fs.all_paths());
+    lin.fs.user_rename(&parked.remote.name, twin);
+    world.pass(lin);
+    assert!(world.settle().is_some(), "never settled");
+    server_kept(&world, ids);
+    no_park_left(pc, &parked);
+    assert_eq!(pc.fs.peek(inside), bytes, "the folder holding the name was disturbed: {:?}", pc.fs.all_paths());
+    assert!(
+        !pc.fs.all_paths().iter().any(|p| p.contains("conflicted copy")),
+        "a conflict copy was made: {:?}",
+        pc.fs.all_paths()
+    );
+}
+
+/// A file saved in a vault and carried out of it before it was sent, into a
+/// folder inside another, each then deleted on the server. The inner
+/// folder's trash rescues it into the outer, which the server has deleted
+/// too, and the record follows it there; the outer's trash rescues it again
+/// and it follows on, held. With no live folder to follow into, the record
+/// stayed behind and was forgotten with the inner folder, and the outer's
+/// rescue left the bytes nobody's: the next scan minted them a new PLAIN file
+/// and sent them in the clear (plat3 85604, kill2 85202).
+#[test]
+fn a_never_sent_vault_file_rescued_out_of_nested_deleted_folders_stays_held() {
+    let (world, _, _) = a_vault_of_two(9_934, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.user_mkdir("Outer");
+    holder.fs.user_mkdir("Outer/Inner");
+    holder.fs.user_write("Outer/Inner/kept.txt", b"synced before the trash");
+    assert!(world.settle().is_some());
+    let body = b"written in the vault, carried out, then its folders deleted";
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/draft.txt", body);
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    holder.fs.user_rename("Private/draft.txt", "Outer/Inner/draft.txt");
+    // Each deleted on its own, the inner first: two trashes here, the inner's
+    // rescue landing in the outer's directory.
+    for name in ["Outer/Inner", "Outer"] {
+        let id = world.server.folder_id_at(name).expect("the folder went up");
+        world
+            .server
+            .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": id }))
+            .expect("the trash should be accepted");
+    }
+    assert!(world.settle().is_some(), "never settled");
+    no_plaintext_of(&world, body);
+    let disk = disk_tree(holder);
+    let sha = jd_sim::sha256_hex(body);
+    assert!(disk.values().any(|h| h.as_deref() == Some(sha.as_str())), "the file is gone from the disk: {disk:?}");
+    let told = held_issues(holder);
+    assert!(
+        told.iter().any(|t| t.starts_with("draft.txt was saved in a vault and moved out before it was uploaded")),
+        "{told:?}"
+    );
+    assert_converged(&world);
+}
+
+/// Two devices each read the same empty vault subfolder renamed: on each the
+/// user deleted it and made one new empty folder beside it, under two
+/// different names. The empty-vault reading pairs the vault with the new
+/// directory on both; the laptop's rename reaches the server first, and the
+/// desktop moves its own new directory to the laptop's name. With the pairing
+/// never written down as the directory's identity, the move refused that
+/// directory as another folder's, overtaken every pass for ever
+/// (hostile2 84593).
+#[test]
+fn two_readings_of_one_empty_vault_renamed_settle_on_the_servers() {
+    let (world, _, _) = a_vault_of_two(9_933, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    laptop.fs.user_mkdir("Private/Sub 0");
+    assert!(world.settle().is_some());
+    assert!(desktop.fs.all_paths().iter().any(|p| p == "Private/Sub 0"), "the premise: both hold the vault's subfolder");
+    laptop.fs.user_remove("Private/Sub 0");
+    laptop.fs.user_mkdir("Private/Sub 29");
+    desktop.fs.user_remove("Private/Sub 0");
+    desktop.fs.user_mkdir("Private/Sub 16");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled: {:?}", desktop.fs.all_paths());
+    let folders: Vec<String> = world.server.folders().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    assert!(folders.iter().any(|n| n == "Sub 29"), "{folders:?}");
+    assert_converged(&world);
+}
+
+/// A file the user moved here while the server moved it onto the name a file
+/// held outside its vault stands at on this disk. A move race goes to the
+/// server, so the file is due at the held file's name, which it cannot have
+/// here while the hold stands: it gives up its copy and waits, and says so.
+/// The give-up stood down because the user had moved the copy -- a move that
+/// ends a clash only when it wins, and here the server's did -- and was
+/// judged again every pass, for ever (hostile2 84411, kill2 85148).
+#[test]
+fn a_file_moved_here_and_by_the_server_onto_a_held_name_waits() {
+    let (world, _private, out) = a_vault_of_two(9_932, &["holder", "peer"]);
+    let holder = world.device("holder");
+    let peer = world.device("peer");
+    holder.fs.user_mkdir("Plain");
+    holder.fs.user_mkdir("Third");
+    holder.fs.user_write("Other/f.txt", b"a plain file the peer moves");
+    assert!(world.settle().is_some());
+    let f = world.server.files().into_iter().find(|x| x.name == "f.txt").map(|x| x.id).expect("f.txt went up");
+    holder.fs.user_rename("Private/out.txt", "Plain/x.txt");
+    assert!(world.settle().is_some());
+    assert!(
+        holder.store.open_issues().unwrap().iter().any(|i| i.kind == "held_outside_the_vault" && i.entity == Some(jd_core::EntityId::file(out))),
+        "the premise: the vault file is held outside its vault"
+    );
+    peer.fs.user_rename("Other/f.txt", "Plain/x.txt");
+    world.pass(peer);
+    holder.fs.user_rename("Other/f.txt", "Third/f.txt");
+    assert!(world.settle().is_some(), "never settled: {:?}", holder.fs.all_paths());
+    assert_eq!(holder.fs.peek("Plain/x.txt").as_deref(), Some(HELD_BODY), "the held file was disturbed");
+    assert!(world.server.files().iter().any(|x| x.id == f && !x.trashed), "f.txt was trashed on the server");
+    assert!(
+        holder.store.open_issues().unwrap().iter().any(|i| i.kind == "waits_for_a_held_file" && i.entity == Some(jd_core::EntityId::file(f))),
+        "the wait is not said: {:?}",
+        holder.store.open_issues().unwrap().iter().map(|i| (i.kind.clone(), i.entity)).collect::<Vec<_>>()
+    );
+}
+
+/// A three-folder rotation applied here, stopped after its park and first
+/// move, with every queued move then lost. The next pass finishes the park
+/// before the round plans the move still owed, so the finish meets its name
+/// still held by the folder that has not moved yet, and sets that folder
+/// aside under a conflict name for a pass: the move-on-move wait that would
+/// spare it can deadlock two stale moves into each other's names, and the
+/// set-aside is what breaks that. A detour, never a loss: every file keeps
+/// its server id and every folder lands where the server has it.
+#[test]
+fn a_rotation_stopped_after_its_first_move_loses_nothing() {
+    let world = World::new(9_938, &["mac", "pc"]);
+    let mac = world.device("mac");
+    let pc = world.device("pc");
+    mac.fs.user_write("A/a.txt", b"the file in A");
+    mac.fs.user_write("B/b.txt", b"the file in B");
+    mac.fs.user_write("C/c.txt", b"the file in C");
+    assert!(world.settle().is_some());
+    let id_of = |name: &str| world.server.files().into_iter().find(|f| f.name == name).map(|f| f.id).unwrap();
+    let ids = [("a.txt", id_of("a.txt")), ("b.txt", id_of("b.txt")), ("c.txt", id_of("c.txt"))];
+    pc.fs.user_rename("A", "T");
+    pc.fs.user_rename("C", "A");
+    pc.fs.user_rename("B", "C");
+    pc.fs.user_rename("T", "B");
+    world.pass(pc);
+    let fs = mac.fs.clone();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let log = seen.clone();
+    let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let live = armed.clone();
+    mac.fs.while_renaming(move |from, to| {
+        let (from, to) = (from.to_string_lossy().to_string(), to.to_string_lossy().to_string());
+        let (Some(f), Some(t)) = (from.strip_prefix("/sync/"), to.strip_prefix("/sync/")) else { return };
+        if f.contains('/') || t.contains('/') {
+            return;
+        }
+        if !live.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let mut log = log.lock().unwrap();
+        // The pass stops after the park and the first move: every rename
+        // after that is refused, as a kill would leave it.
+        let parked = log.iter().any(|l| l.starts_with("park"));
+        let moved = log.iter().filter(|l| l.starts_with("move")).count();
+        if t.starts_with(".jd-swap") && !parked {
+            log.push(format!("park {f}->{t}"));
+        } else if parked && moved == 1 {
+            fs.fail_next(FsOp::Rename, Some(f), FailureKind::Io, 1);
+            log.push(format!("stop {f}->{t}"));
+        } else if parked {
+            log.push(format!("move {f}->{t}"));
+        } else {
+            log.push(format!("other {f}->{t}"));
+        }
+    });
+    world.pass(mac);
+    let log = seen.lock().unwrap().clone();
+    armed.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert!(log.iter().any(|l| l.starts_with("stop")), "the premise: a second move was stopped: {log:?}");
+    assert!(
+        mac.fs.all_paths().iter().any(|p| p.starts_with(".jd-swap") && !p.contains('/')),
+        "the premise: the park stands into the next pass: {:?}",
+        mac.fs.all_paths()
+    );
+    for op in mac.store.queued_ops().unwrap() {
+        if op.kind == "move_local" {
+            mac.store.drop_op(op.op_id).unwrap();
+        }
+    }
+    world.pass(mac);
+    let files = world.server.files();
+    for (name, id) in ids {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "the pass after: {name} was trashed: {files:?}");
+    }
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    for (name, id) in ids {
+        assert!(files.iter().any(|f| f.id == id && !f.trashed), "{name} was trashed: {files:?}");
+    }
+    assert_eq!(mac.fs.peek("B/a.txt").as_deref(), Some(&b"the file in A"[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("C/b.txt").as_deref(), Some(&b"the file in B"[..]), "{:?}", disk_tree(mac));
+    assert_eq!(mac.fs.peek("A/c.txt").as_deref(), Some(&b"the file in C"[..]), "{:?}", disk_tree(mac));
+    assert_converged(&world);
+}
+
+/// On a USB stick whose ids mean nothing, a file saved in a vault and never
+/// sent is carried out by the user and held, then moved again: each time, at
+/// the next pass's start, its bytes stand at a path no record names. What
+/// keeps it sealed is the mint: a file found where no record is, holding
+/// bytes a sealed record last saw whose own file no longer stands at its
+/// path, is minted SEALED, held, never sent (`pass::sealed_bytes_carried_out`).
+/// With bytes no other record claims, the scan's weak-volume reading also
+/// follows the record to its bytes wherever they stand (`scan::pair_files`,
+/// layer 1 / rule X), so the record keeps the file; either alone keeps the
+/// body sealed here, both missing it went up in the clear.
+fn a_never_sent_vault_file_moved_about_on_a_usb_stick(seed: u64, twins: bool) {
+    let (world, _, _) = a_vault_of_two(seed, &["holder"]);
+    let holder = world.device("holder");
+    holder.fs.file_ids(jd_sim::FileIds::MountSession);
+    holder.fs.user_mkdir("Plain");
+    assert!(world.settle().is_some());
+    let body: &[u8] = if twins { b"two vault files saved with these bytes" } else { b"one vault file saved with these bytes" };
+    holder.net.set_faults(NetFaults { refuse_before: Some("drive_upload_init".into()), ..NetFaults::none() });
+    holder.fs.user_write("Private/n.txt", body);
+    if twins {
+        holder.fs.user_write("Private/twin.txt", body);
+    }
+    world.pass(holder);
+    holder.fs.user_rename("Private/n.txt", "Plain/n.txt");
+    if twins {
+        holder.fs.user_rename("Private/twin.txt", "Plain/twin.txt");
+    }
+    world.pass(holder);
+    let held = held_issues(holder).iter().any(|t| t.starts_with("n.txt was saved in a vault and moved out before it was uploaded"));
+    holder.fs.user_rename("Plain/n.txt", "Plain/moved.txt");
+    world.pass(holder);
+    holder.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "never settled");
+    no_plaintext_of(&world, body);
+    assert_eq!(holder.fs.peek("Plain/moved.txt").as_deref(), Some(body), "the file is gone from the disk");
+    assert!(held, "the premise: held outside its vault, never sent, once carried out: {:?}", held_issues(holder));
+}
+
+/// Bytes no other record claims (see above).
+#[test]
+fn on_a_usb_stick_a_never_sent_vault_file_moved_again_stays_sealed() {
+    a_never_sent_vault_file_moved_about_on_a_usb_stick(9_929, false);
+}
+
+/// Bytes two never-sent vault files claim: nothing follows either, and the
+/// mint alone keeps them sealed (see above).
+#[test]
+fn on_a_usb_stick_two_never_sent_vault_twins_moved_out_stay_sealed() {
+    a_never_sent_vault_file_moved_about_on_a_usb_stick(9_928, true);
+}
+
+/// Defect AI's pin (2026-09-10): two synced files trade names through a
+/// scratch name between two passes -- in one folder, and across two folders.
+/// Each file keeps its own history: the server's version list of each holds
+/// only that file's own bytes, and the two are moved, not edited.
+#[test]
+fn two_files_trading_names_keep_their_own_histories() {
+    for disk in ["strong", "no births", "usb stick"] {
+    for (seed, a, b) in [(9_927, "a.txt", "b.txt"), (9_926, "One/a.txt", "Two/b.txt")] {
+        let world = World::new(seed, &["laptop"]);
+        let laptop = world.device("laptop");
+        match disk {
+            "no births" => laptop.fs.hide_births(true),
+            "usb stick" => laptop.fs.file_ids(jd_sim::FileIds::MountSession),
+            _ => {}
+        }
+        laptop.fs.user_write(a, b"the first file's own bytes");
+        laptop.fs.user_write(b, b"the second file's own bytes");
+        assert!(world.settle().is_some());
+        let id_of = |sha: &str| world.server.files().into_iter().find(|f| f.sha256 == sha).map(|f| f.id).unwrap();
+        let first = id_of(&jd_sim::sha256_hex(b"the first file's own bytes"));
+        let second = id_of(&jd_sim::sha256_hex(b"the second file's own bytes"));
+        laptop.fs.user_rename(a, "t.tmp");
+        laptop.fs.user_rename(b, a);
+        laptop.fs.user_rename("t.tmp", b);
+        assert!(world.settle().is_some());
+        for (id, own) in [(first, &b"the first file's own bytes"[..]), (second, &b"the second file's own bytes"[..])] {
+            let bodies: Vec<String> = world.server.all_versions().into_iter().filter(|v| v.file_id == id).map(|v| v.sha256).collect();
+            assert!(
+                bodies.iter().all(|s| *s == jd_sim::sha256_hex(own)),
+                "{disk}, seed {seed}: file {id}'s history holds another file's bytes: {bodies:?}"
+            );
+        }
+        assert_converged(&world);
+    }
+    }
+}

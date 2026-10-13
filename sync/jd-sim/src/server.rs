@@ -476,6 +476,16 @@ impl MockServer {
             .insert(user_id, public_key.to_string());
     }
 
+    /// The device whose call created this entity, as the change feed
+    /// attributes it (`acting_as`); `None` for one the harness made by hand.
+    pub fn created_by(&self, entity_type: &str, id: i64) -> Option<String> {
+        let st = self.state.lock().unwrap();
+        st.changes
+            .iter()
+            .find(|c| c.entity_type == entity_type && c.entity_id == id && c.kind == "created")
+            .and_then(|c| c.actor.clone())
+    }
+
     /// Who subsequent calls are attributed to.
     pub fn acting_as(&self, device: Option<&str>) {
         self.state.lock().unwrap().actor = device.map(|d| d.to_string());

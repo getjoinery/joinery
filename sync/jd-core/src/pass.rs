@@ -270,6 +270,7 @@ pub fn run_pass(
         .root()
         .map(|r| r.as_os_str().len())
         .unwrap_or_default();
+    finish_stranded_local_parks(env, key_for)?;
     out.naming = crate::naming::apply_naming(env, &env.vfs.personality(), root_prefix)?;
     // A file from the server refused a name here because a file held outside
     // its vault stands at that name on this disk. Said in its own words, and
@@ -430,7 +431,7 @@ pub fn run_pass(
         &followed,
         &traded_with_a_vault,
     )?;
-    hold_what_a_leaving_park_holds(env, &mut folders)?;
+    hold_what_a_standing_park_holds(env, &mut folders)?;
     lapse_parked_vaults_that_stand_nowhere(env, &folders, &followed, &mut folder_ids)?;
     point_paths_at_the_folders_whose_directories_they_are(env, &dir_identity, &mut folder_ids)?;
     note_the_tie_breaks_of_the_folders(env, &folder_ids, &dir_tie_breaks, &tie_breaks)?;
@@ -2961,6 +2962,99 @@ fn forget_directories_the_disk_has_reborn(
     Ok(())
 }
 
+/// A park this device made on its own disk that nothing is coming back to
+/// finish: the record wears this device's scratch name as its local spelling,
+/// its directory or file stands at it, and no operation is open on it -- the
+/// finisher lost with a pass that died in flight (kill2 85323). Left so, the
+/// scan's sweep of the engine's litter counted the park dead and trashed the
+/// directory with everything in it, and the files read as deleted and went to
+/// the trash on the server. It is finished instead: moved from where it stands
+/// to where the server has it, which is what the lost finisher was going to
+/// do. Not put back: the other half of the swap has already taken the name it
+/// left. Queued before naming and the scan, so the record is busy for both and
+/// the sweep counts the park live; the move waits like any other on whatever
+/// still holds its name. Only this device's own tag, as the server-side rescue
+/// of a park reads it.
+///
+/// The finish is an arrival, and naming judges its destination as it judges
+/// any arrival's (`is_a_stranded_finish`): a name this disk cannot hold, or
+/// one a sibling here already holds, gives up the copy here, and the finish is
+/// dropped with it. A finish overtaken for any other reason is queued again
+/// next pass, and is said while the park stands (`PARK_UNFINISHED`).
+fn finish_stranded_local_parks(env: &ExecEnv, key_for: &mut dyn FnMut() -> String) -> Result<(), ExecError> {
+    let Some(root) = env.vfs.root() else {
+        return Ok(());
+    };
+    for issue in env.store.open_issues()? {
+        if issue.kind != PARK_UNFINISHED {
+            continue;
+        }
+        let parked = match issue.entity {
+            Some(id) => env
+                .store
+                .get_entry(id)?
+                .is_some_and(|e| e.local_name.is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))),
+            None => false,
+        };
+        if !parked {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    let own = env.store.own_park_tag()?;
+    let busy: std::collections::HashSet<EntityId> = env.store.entities_with_open_ops()?.into_iter().collect();
+    for entry in all_entries(env)? {
+        let Some(scratch) = entry.local_name.clone().filter(|n| n.starts_with(crate::order::SWAP_PREFIX)) else {
+            continue;
+        };
+        let mine = match crate::order::park_tag_of(&scratch) {
+            Some(tag) => own.as_deref() == Some(tag),
+            None => true,
+        };
+        if !mine || busy.contains(&entry.id) || entry.remote_deleted || jd_vfs::is_internal(&entry.remote.name) {
+            continue;
+        }
+        let Some(rel) = relative_path(env, &entry)? else {
+            continue;
+        };
+        let here = root.join(&rel);
+        let stands = match entry.id.entity_type {
+            EntityType::Folder => env.vfs.read_dir(&here).is_ok(),
+            EntityType::File => env.vfs.fingerprint(&here)?.is_some(),
+        };
+        if !stands {
+            continue;
+        }
+        env.store.queue_op(
+            "move_local",
+            entry.id,
+            &serde_json::json!({
+                "parent": entry.remote.parent,
+                "name": entry.remote.name,
+                "from": { "parent": entry.local_placement().parent, "name": scratch },
+                "stranded": true,
+            })
+            .to_string(),
+            &key_for(),
+        )?;
+    }
+    Ok(())
+}
+
+/// The issue kind for a park this device made whose finish was overtaken: the
+/// folder or file stands under the engine's scratch name until the finish
+/// lands. Raised by the executor; lifted once the record no longer wears the
+/// scratch name.
+pub const PARK_UNFINISHED: &str = "park_unfinished";
+
+/// Is this the finish of a stranded park (`finish_stranded_local_parks`)?
+pub(crate) fn is_a_stranded_finish(op: &crate::store::Op) -> bool {
+    op.kind == "move_local"
+        && serde_json::from_str::<Value>(&op.params)
+            .ok()
+            .and_then(|p| p.get("stranded").and_then(Value::as_bool))
+            == Some(true)
+}
+
 /// A folder record learns which directory is its own.
 ///
 /// A folder record never knew: it found its directory by looking at what
@@ -3619,21 +3713,23 @@ fn folder_delta(entry: &Entry, folders: &FolderScan) -> Delta {
     Delta::None
 }
 
-/// Where a leaving folder's park stands: a folder the server deleted, its
-/// directory parked aside under a scratch name by the create that took its
-/// name (B-E1), its trash still to come. Relative paths, of parks whose
-/// directory stands at the scratch name -- or still at the folder's own, the
-/// park killed between its record and its rename: the record already says
-/// the scratch name, so its children's paths run through it and, unheld,
-/// read as deleted before the trash or the create could finish or undo it.
-fn leaving_parks(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
+/// Where a standing park stands: a folder whose directory this device has
+/// parked aside under a scratch name and not yet brought back -- a folder the
+/// server deleted, parked by the create that took its name (B-E1) with its
+/// trash still to come, or a live folder parked for a swap whose finish has
+/// not landed (refused, or a pass stopped between the two; kill2 85323).
+/// Relative paths, of parks whose directory stands at the scratch name -- or
+/// still at the folder's own, the park killed between its record and its
+/// rename: the record already says the scratch name, so its children's paths
+/// run through it and, unheld, read as deleted before anything could finish
+/// or undo it.
+fn standing_parks(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
     let Some(root) = env.vfs.root() else {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
     for entry in all_entries(env)? {
         if entry.id.entity_type != EntityType::Folder
-            || !entry.remote_deleted
             || !entry.local_name.as_deref().is_some_and(|n| n.starts_with(crate::order::SWAP_PREFIX))
         {
             continue;
@@ -3653,17 +3749,18 @@ fn under_one_of(parks: &[String], path: &str) -> bool {
     parks.iter().any(|p| path == p || path.starts_with(&format!("{p}/")))
 }
 
-/// What a leaving folder's park holds is held, not judged. The walk does not
-/// go into a scratch directory, so read by the walk, a child the server has
-/// moved elsewhere and whose directory is still in the park -- the very child
-/// the park's trash waits for -- was gone: re-made empty at its new place,
-/// and the files in it read as deleted here and trashed on the server. So
-/// every folder recorded under the park is present and unmoved, and its
+/// What a standing park holds is held, not judged. The walk does not go into
+/// a scratch directory, so read by the walk, what stands in a park was gone: a
+/// child the server has moved elsewhere whose directory is still in a leaving
+/// folder's park -- the very child that park's trash waits for -- was re-made
+/// empty at its new place, and the files of a folder parked for a swap read
+/// as deleted and went to the trash on the server, to come back as new files.
+/// So every folder recorded under the park is present and unmoved, and its
 /// remote move is planned from where it stands; the files under it are left
-/// out of the file scan (`known_local`). Once the child has moved out, the
-/// trash takes the park.
-fn hold_what_a_leaving_park_holds(env: &ExecEnv, folders: &mut FolderScan) -> Result<(), ExecError> {
-    let parks = leaving_parks(env)?;
+/// out of the file scan (`known_local`). The park's finish, or its trash,
+/// ends it.
+fn hold_what_a_standing_park_holds(env: &ExecEnv, folders: &mut FolderScan) -> Result<(), ExecError> {
+    let parks = standing_parks(env)?;
     if parks.is_empty() {
         return Ok(());
     }
@@ -5830,6 +5927,19 @@ fn detect_folder_moves(
         if folder_ids.get(&old_path) == Some(&id.server_id) {
             folder_ids.remove(&old_path);
         }
+        // This reading pairs the vault with a directory carrying another id,
+        // and from here that directory is its own: written down, so every
+        // reader by identity agrees with the reading. Left unwritten, a device
+        // whose reading of the rename lost to a peer's -- both read the same
+        // vault into a new directory, under two names -- carried the peer's
+        // name to its directory, and the move refused that directory as
+        // another folder's, every pass for ever (hostile2 84593).
+        if let Some(&dir) = dir_identity.get(*candidate).filter(|d| **d != 0) {
+            let mut adopted = entry.clone();
+            adopted.synced_fingerprint =
+                Some(jd_vfs::Fingerprint::of_directory(dir, dir_births.get(*candidate).copied().unwrap_or(0)));
+            env.store.put_entry(&adopted)?;
+        }
         if let Some(placement) = placement_of(candidate, folder_ids) {
             if entry.synced_placement.as_ref() != Some(&placement) {
                 scan.moves.insert(id, placement);
@@ -6171,7 +6281,7 @@ fn bind_never_sent_own_ids(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), Exec
 }
 
 fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec<KnownLocal>, ExecError> {
-    let parks = leaving_parks(env)?;
+    let parks = standing_parks(env)?;
     let positional = env.vfs.personality().positional_file_ids;
     let mut out = Vec::new();
     let mut deleted = Vec::new();
@@ -6210,8 +6320,8 @@ fn known_local(env: &ExecEnv, tie_breaks: &HashMap<EntityId, u64>) -> Result<Vec
         let Some(path) = relative_path(env, &entry)? else {
             continue;
         };
-        // Held in a leaving folder's park: not judged this pass
-        // (`hold_what_a_leaving_park_holds`).
+        // Held in a standing park: not judged this pass
+        // (`hold_what_a_standing_park_holds`).
         if under_one_of(&parks, &path) {
             continue;
         }
