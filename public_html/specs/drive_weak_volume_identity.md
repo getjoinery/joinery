@@ -109,8 +109,9 @@ the hold, and it needs its F fact verified on a disk image first.
 break the tie, two files with identical copies elsewhere that trade names are
 read as each other's edit, and their histories mix. The owner accepted that
 such drives may work badly, but not silently: the drive carries a standing
-notice (`renames_untracked_on_this_drive`), and each time the engine reads
-two records as crossed edits it names both files in an issue
+notice (`renames_untracked_on_this_drive`; every positional drive carries it,
+on every platform, with the folder limit D4 names), and each time the engine
+reads two records as crossed edits it names both files in an issue
 (`names_may_have_swapped`), recording the two contents it read as crossed.
 There is no version mark and no server change. The sweep excuses such a mix
 only on a Windows-kind device, only for the two contents the issue recorded,
@@ -643,6 +644,19 @@ FAT-formatted VHD on the Windows VM.
   on a strong disk with a nonzero count must trace to Q4's shape (saved in a
   vault and moved out before any scan); anything else means the stamp is
   hiding a leak.
+
+- **D4 (owner, 2026-10-13): a folder rename read from one file.** On a
+  positional disk, a folder holding one file renamed while files are swapped
+  cannot be told apart from a swap of files between one-file folders: the
+  folder's contents are its only evidence, and both readings fit them. The
+  engine keeps today's reading, in which the folder may be read as deleted
+  and its server copy goes to the trash, where it can be restored. Reading it
+  as a folder move instead was tried (a ring walk through a parked vault);
+  its wrong guess handed a plain record the vault's directory, and sealed
+  bytes went up in the clear (plat3 75414). Accepted as a limit (plat3 75401,
+  kill2 75102). Every positional drive carries a standing notice that says
+  so, beside its other limit (files with identical contents trading names).
+  Only a rename journal (layer 2) could close it.
 
 ## D3 as built behaviour (proposed 2026-09-28; revised with a5's B5, 2026-09-29; built in scratch wf5 2026-09-29)
 

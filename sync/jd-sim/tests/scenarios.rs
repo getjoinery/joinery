@@ -22260,3 +22260,61 @@ fn a_held_file_dragged_again_on_a_usb_stick_keeps_its_hold() {
         assert_converged(&world);
     }
 }
+
+/// The FAT drive's standing notice, as each disk carries it.
+fn fat_notices(device: &jd_sim::engine::Device) -> Vec<String> {
+    device
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "renames_untracked_on_this_drive")
+        .map(|i| i.detail)
+        .collect()
+}
+
+/// Every FAT or exFAT drive, on each platform's model of one, carries a
+/// standing notice that renames there cannot be tracked, naming what can go
+/// wrong; a drive with ids and births carries none (owner decision
+/// 2026-10-13). RED before: only a Windows stick was told, and not of the
+/// folder that may be read as deleted.
+#[test]
+fn every_fat_drive_is_told_renames_cannot_be_tracked() {
+    for (label, model) in [
+        ("windows", jd_sim::FileIds::DirectorySlot),
+        ("linux", jd_sim::FileIds::MountSession),
+        ("macos", jd_sim::FileIds::DataCluster),
+    ] {
+        let world = World::new(9_880, &["stick"]);
+        let stick = world.device("stick");
+        stick.fs.file_ids(model);
+        stick.fs.user_write("a.txt", b"a file on a stick");
+        assert!(world.settle().is_some(), "{label}: never settled");
+        let told = fat_notices(stick);
+        assert_eq!(told.len(), 1, "{label}: {told:?}");
+        assert!(
+            told[0].contains("FAT or exFAT") && told[0].contains("folder") && told[0].contains("trash"),
+            "{label}: {told:?}"
+        );
+    }
+    let world = World::new(9_880, &["disk"]);
+    let disk = world.device("disk");
+    disk.fs.user_write("a.txt", b"a file on a disk");
+    assert!(world.settle().is_some());
+    assert!(fat_notices(disk).is_empty(), "{:?}", fat_notices(disk));
+}
+
+/// A drive told in the notice's earlier words is told in its current ones:
+/// the old notice goes and the current one stands, once.
+#[test]
+fn a_fat_drives_notice_in_earlier_words_is_replaced() {
+    let world = World::new(9_879, &["stick"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
+    stick.store.raise_issue(None, "renames_untracked_on_this_drive", "the notice in its earlier words", 0).unwrap();
+    stick.fs.user_write("a.txt", b"a file on a stick");
+    assert!(world.settle().is_some());
+    let told = fat_notices(stick);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0] != "the notice in its earlier words" && told[0].contains("folder"), "{told:?}");
+}
