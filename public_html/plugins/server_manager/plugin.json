@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.30.63",
+  "version": "1.30.64",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -731,6 +731,7 @@
       "notify": {
         "ntf_type": "system",
         "supports_topic": true,
+        "audience": "superadmins",
         "default_email": false,
         "title_template": "{node_name}: {title}",
         "body_template": "{summary}",
@@ -753,6 +754,7 @@
       "notify": {
         "ntf_type": "system",
         "supports_topic": true,
+        "audience": "superadmins",
         "default_email": true,
         "title_template": "Critical, {node_name}: {title}",
         "body_template": "{summary}",

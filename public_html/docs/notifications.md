@@ -14,13 +14,12 @@ conventions, and declaring/subscribing — see [Signal Bus](signals.md).
 ## Concepts
 
 - **Notifiable signal** — any signal whose `signals.json` entry carries a
-  `notify` block. Notify ignores signals without one. All current notifiable
-  signals are topic-based admin alerts (e.g. `comment.posted`,
-  `purchase.completed`).
+  `notify` block. Notify ignores signals without one.
 - **Topic recipient** — any user who opts in to a signal via their preferences.
-- **Targeted recipient** — a user the dispatch names explicitly via a
-  `recipients` payload key. Used by the signals that notify particular people
-  (mailbox, site, server-manager and Boards signals).
+- **Targeted recipient** — a user the signal addresses without an opt-in:
+  either named by the dispatch in a `recipients` payload key (the people a
+  mailbox or Boards signal is about), or a member of the signal's declared
+  `audience` (the incident and system alerts go to every superadmin).
 - **Channels** — in-app is the baseline (always created); email is a secondary,
   opt-in channel layered on top.
 
@@ -61,7 +60,8 @@ schema are declared in the same entry — see [Signal Bus](signals.md):
 |--------------|---------|
 | `ntf_type` | Display type / icon for the in-app notification |
 | `supports_topic` | Whether users may opt in to it |
-| `default_email` | Default state of the "also email me" toggle when subscribing |
+| `audience` | A group that always gets it, resolved by Notify at send time. `superadmins`: every superadmin who is a person. The dispatch passes no `recipients` for it |
+| `default_email` | Whether a targeted recipient with no saved preference is emailed; also the default of the "also email me" toggle |
 | `title_template` | Notification title (also the email subject) |
 | `body_template` | Notification body (also the email body) |
 | `link_template` | URL opened when the notification is clicked |
@@ -98,7 +98,7 @@ names, they are versioned with the code, not exposed for live admin editing.
 ## Recipient & channel resolution
 
 For each notifiable signal, Notify builds the recipient set from any targeted
-`recipients` plus every topic subscriber (users with a `NotificationPreference`
+`recipients`, the members of its `audience`, and every topic subscriber (users with a `NotificationPreference`
 row where `ntp_subscribed = true`), de-duplicates, and drops `source_user_id` so
 nobody is notified of their own action. The system and deleted users
 (`User::is_placeholder()`) are never recipients on either channel: they are not
@@ -125,12 +125,27 @@ Per recipient:
 
 ## Preferences
 
-Admins manage their own subscriptions at
-`/admin/admin_notification_preferences`. Each notifiable signal can be subscribed
-to, and optionally flagged "also email me." Preferences are stored one row per
-(user, signal) in `ntp_notification_preferences` keyed by `ntp_signal_name`; the
-load/save logic (`adm/logic/admin_notification_preferences_logic.php`) is
-page-object-agnostic so a future user-facing preferences page can reuse it.
+Admins manage theirs at `/admin/admin_notification_preferences`, which lists
+every notifiable signal. Members manage theirs at
+`/profile/notification_preferences`, which lists the signals with
+`supports_topic` false. Preferences are stored one row per (user, signal) in
+`ntp_notification_preferences` keyed by `ntp_signal_name`.
+
+Both pages show what the person actually gets, through
+`Notify::preference_states()`: a saved row where there is one, otherwise
+`Notify::default_preference()`, the delivery rule with no row:
+
+| Signal | No saved row shows |
+|--------|--------------------|
+| `supports_topic` false (sent only to the people it is about) | on; email per `default_email` |
+| Declares an `audience` the viewer belongs to | on; email per `default_email` |
+| Anything else | off |
+
+Both save through `Notify::save_preferences()`. A signal with a saved row is
+updated. One without a row gets a row only when the choice differs from its
+default, so unticking an alert someone receives writes the muted row in one
+save, and a choice equal to the default leaves no row — an admin promoted into
+an audience later still gets its alerts.
 
 ## What does NOT go through Notify
 
