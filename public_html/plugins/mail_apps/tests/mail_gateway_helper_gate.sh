@@ -387,8 +387,8 @@ clear_beta; ask beta '{"on": true, "name": "m9.beta.example"}'; helper converge 
 chk "B9: a switch whose gateway does not come up fails" "$(said beta | cut -c1-6)/$(cat "$SB/sites/beta.mailhost")" "failed/m9.beta.example"
 rm -f "$T/nolisten"; clear_beta
 helper converge > /dev/null
-chk "  and the next pass, serving the new name, drops the old one" \
-    "$(said beta)/$( [ -e "$R/etc/apache2/sites-available/joinery-mail-mail.beta.example.conf" ]; echo $? )" "on m9.beta.example /1"
+chk "  and the next pass, serving the new name, drops the old one and the failure" \
+    "$(said beta)/$( [ -e "$R/etc/apache2/sites-available/joinery-mail-mail.beta.example.conf" ]; echo $? )/$( [ -e "$SB/sites/beta.failed" ]; echo $? )" "on m9.beta.example /1/1"
 site_fixture dweb m9.beta.example
 helper converge > /dev/null
 chk "O2: a site serving a name keeps it, answering on, when another site later claims it" "$(said beta)" "on m9.beta.example "
