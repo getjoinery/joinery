@@ -5882,7 +5882,7 @@ fn unmaterialize_and_park(
         // What the records say the server already holds, for the copies that
         // are actually in here. Gathered before anything moves, because the
         // rescue below asks it about files whose folder is on its way out.
-        let mut agreed_here = AgreedHere::default();
+        let mut agreed_here = AgreedHere { folder: Some(entry.id.server_id), ..AgreedHere::default() };
         for under in &inside {
             // Files only, said so: a folder record carries its directory's
             // id in the same slot, and this map is keyed by file inode.
@@ -6173,6 +6173,9 @@ fn summarise(names: &[String]) -> String {
 struct AgreedHere {
     by_id: std::collections::HashMap<u64, jd_vfs::Fingerprint>,
     contents: std::collections::HashSet<String>,
+    /// The folder being given up, so a record found by identity counts only
+    /// when the server holds it in there.
+    folder: Option<i64>,
 }
 
 fn is_on_the_server(
@@ -6234,6 +6237,18 @@ fn is_on_the_server(
     if entry.synced_content.is_none() {
         return Ok(false);
     }
+    // On the server IN THIS FOLDER, which is what goes with it. A file whose
+    // record the server holds somewhere else was moved in here by the user, a
+    // move the server never took -- the folder went to its trash first. Left
+    // to go with the directory, the file was gone from this disk, the next
+    // scan read its record as deleted by the user, and the delete went to the
+    // server and to every device (S3, hostile2 74496, kill2 75241). It is work
+    // the server never took, and is rescued out like any other.
+    if let Some(folder) = agreed_here.folder {
+        if !entry.remote_deleted && !sits_under(env, entry.id, folder)? {
+            return Ok(false);
+        }
+    }
     let Some(synced) = entry.synced_fingerprint else {
         return Ok(false);
     };
@@ -6249,9 +6264,9 @@ fn is_on_the_server(
 /// having deleted anything.
 ///
 /// So they are moved beside the folder first and picked up as new files on the
-/// next pass, which uploads them. Files the server already has are left to go
-/// with the folder — they are recoverable from the server, and rescuing them
-/// would litter the tree with copies of things nobody lost.
+/// next pass, which uploads them. Files the server already has in this
+/// folder are left to go with it — they are recoverable from the server, and
+/// rescuing them would litter the tree with copies of things nobody lost.
 fn rescue_unsynced(
     env: &ExecEnv,
     folder: &std::path::Path,
@@ -6840,7 +6855,7 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // No ids to go on (a FAT or exFAT volume): what the server held
             // here is known by the bytes its records agreed on. The server
             // took them with the folder, so deleted records count.
-            let mut agreed_here = AgreedHere::default();
+            let mut agreed_here = AgreedHere { folder: Some(entry.id.server_id), ..AgreedHere::default() };
             if env.vfs.personality().positional_file_ids {
                 for e in env.store.every_entry()? {
                     if e.id.entity_type == EntityType::File
