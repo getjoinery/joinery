@@ -7,7 +7,9 @@ package main
 // the ClientHello's server name without consuming it, dials the deployment's
 // server on the same port, writes a PROXY protocol v1 line naming the program's
 // address, replays the hello and copies bytes both ways. It never sees an app
-// password or a message.
+// password or a message. Submission is dialed on the server's 10465, not 465:
+// cloud providers (Linode among them) block outbound 25, 465 and 587, so the
+// relay could not reach the server's 465 at all.
 //
 // Only on a relay with ONE tenant (a self-hosted relay), and only for this
 // relay's own mail hostname: that is the name the tenant's mail programs use,
@@ -41,6 +43,13 @@ const (
 	mailAppsDialTimeout  = 10 * time.Second
 	// A fragment names at most this many server addresses.
 	mailAppsMaxOrigins = 4
+	// The server's port submission is dialed on: the gateway's second
+	// submission listener (-relay-smtp-listen), open to the relay only. A mirror
+	// of RelaySubmissionPort (mail-gateway main.go) and RELAY_SUBMISSION_PORT
+	// (install_mail_gateway.sh).
+	mailAppsSubmissionTarget = 10465
+	// How long the minute's check of the server's ports waits for each.
+	mailAppsCheckTimeout = 5 * time.Second
 )
 
 // mailAppsPass holds the pass-through's state: its caps, its counters for the
@@ -56,6 +65,12 @@ type mailAppsPass struct {
 	lastRefusal   string
 	lastRefusalAt time.Time
 	bound         map[string]bool
+	// targets: the server port each listening role dials. reaches: whether
+	// the server answered there at the last check (checkServer), and when.
+	targets   map[string]int
+	reaches   map[string]bool
+	checkedAt time.Time
+	checking  bool
 
 	// dial reaches the server; a field so the tests can point it at a fake.
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -66,7 +81,8 @@ type mailAppsPass struct {
 
 func newMailAppsPass(s *relayServer) *mailAppsPass {
 	d := &net.Dialer{Timeout: mailAppsDialTimeout, KeepAlive: 30 * time.Second}
-	return &mailAppsPass{s: s, perSource: map[string]int{}, bound: map[string]bool{}, dial: d.DialContext}
+	return &mailAppsPass{s: s, perSource: map[string]int{}, bound: map[string]bool{}, targets: map[string]int{},
+		reaches: map[string]bool{}, dial: d.DialContext}
 }
 
 // listen opens one pass-through port and serves it until the listener closes.
@@ -81,6 +97,7 @@ func (p *mailAppsPass) listen(addr, role string, targetPort int) {
 	}
 	p.mu.Lock()
 	p.bound[role] = true
+	p.targets[role] = targetPort
 	p.mu.Unlock()
 	fmt.Fprintf(os.Stderr, "relay-sealer: mail apps pass-through listening on %s for %s\n", addr, p.s.hostname)
 	p.serve(ln, targetPort)
@@ -342,6 +359,52 @@ func (p *mailAppsPass) sweep() {
 	p.mu.Unlock()
 }
 
+// checkServer dials the server on each port the pass-through dials onward,
+// so the ping says a path is blocked before a program finds it: a provider's
+// outbound block, or a firewall that has not opened a port to this relay,
+// shows here as reaches_server false. One connection, closed at once; the
+// gateway logs it and serves nothing. Run every minute while mail apps are
+// on; a check still running is not started again.
+func (p *mailAppsPass) checkServer() {
+	origins, _ := p.origins()
+	p.mu.Lock()
+	if p.checking {
+		p.mu.Unlock()
+		return
+	}
+	if len(origins) == 0 {
+		p.reaches, p.checkedAt = map[string]bool{}, time.Time{}
+		p.mu.Unlock()
+		return
+	}
+	p.checking = true
+	targets := map[string]int{}
+	for role, port := range p.targets {
+		targets[role] = port
+	}
+	p.mu.Unlock()
+
+	reaches := map[string]bool{}
+	for role, port := range targets {
+		for _, ip := range origins {
+			ctx, cancel := context.WithTimeout(context.Background(), mailAppsCheckTimeout)
+			c, err := p.dial(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+			cancel()
+			if err == nil {
+				_ = c.Close()
+				reaches[role] = true
+				break
+			}
+		}
+		if !reaches[role] {
+			reaches[role] = false
+		}
+	}
+	p.mu.Lock()
+	p.reaches, p.checkedAt, p.checking = reaches, time.Now(), false
+	p.mu.Unlock()
+}
+
 // status is the ping's mail_apps group (relay_status.go).
 func (p *mailAppsPass) status() map[string]interface{} {
 	origins, why := p.origins()
@@ -366,6 +429,14 @@ func (p *mailAppsPass) status() map[string]interface{} {
 	}
 	if len(origins) == 0 {
 		out["off_because"] = why
+	}
+	if !p.checkedAt.IsZero() {
+		reaches := map[string]interface{}{}
+		for role, ok := range p.reaches {
+			reaches[role] = map[string]interface{}{"port": p.targets[role], "answers": ok}
+		}
+		out["reaches_server"] = reaches
+		out["reaches_server_utc"] = p.checkedAt.UTC().Format(time.RFC3339)
 	}
 	if p.lastRefusal != "" {
 		out["last_refusal"] = p.lastRefusal

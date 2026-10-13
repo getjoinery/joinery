@@ -102,10 +102,12 @@ func runRelayServe() int {
 	httpsAddr := fs.String("listen", ":443", "HTTPS listen address")
 	imapAddr := fs.String("mail-apps-imap", ":993", "mail apps pass-through, IMAP (empty: off)")
 	submissionAddr := fs.String("mail-apps-submission", ":465", "mail apps pass-through, submission (empty: off)")
-	// The server's ports the pass-through dials: 993 and 465, a flag only so a
-	// test on one machine can stand a gateway on unprivileged ports.
+	// The server's ports the pass-through dials: 993, and 10465 for
+	// submission (outbound 465 is blocked by cloud providers; see
+	// mailAppsSubmissionTarget). Flags only so a test on one machine can stand
+	// a gateway on other ports.
 	imapTarget := fs.Int("mail-apps-imap-target", 993, "server port the IMAP pass-through dials")
-	submissionTarget := fs.Int("mail-apps-submission-target", 465, "server port the submission pass-through dials")
+	submissionTarget := fs.Int("mail-apps-submission-target", mailAppsSubmissionTarget, "server port the submission pass-through dials")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return 2
 	}
@@ -150,6 +152,7 @@ func runRelayServe() int {
 				s.auth.sweep()
 				s.sweepCounters()
 				s.mailApps.sweep()
+				go s.mailApps.checkServer()
 			case <-stop:
 				return
 			}

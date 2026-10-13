@@ -370,3 +370,42 @@ func TestChallengeCertificateAnswersOnlyAnACMEHello(t *testing.T) {
 		t.Fatal("an ordinary hello got the challenge certificate")
 	}
 }
+
+// The minute's check dials the server on each onward port, so a blocked path
+// (a provider's outbound block on 465, a firewall not opened to the relay)
+// shows in the ping before any program meets it.
+func TestCheckServerReportsEachOnwardPort(t *testing.T) {
+	open, _ := fakeGateway(t, "mx.relay.example")
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	dead := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	s, _ := passFixture(t, open)
+	s.mailApps.targets = map[string]int{"993": open, "465": dead}
+
+	s.mailApps.checkServer()
+	if _, ok := s.mailApps.status()["reaches_server"]; ok {
+		t.Fatal("reported a check with mail apps off")
+	}
+
+	writeRouting(t, s.routingPath, map[string][]string{"main": {"127.0.0.1"}})
+	s.mailApps.checkServer()
+	st := s.mailApps.status()
+	reaches, ok := st["reaches_server"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("no reaches_server in %v", st)
+	}
+	imap := reaches["993"].(map[string]interface{})
+	sub := reaches["465"].(map[string]interface{})
+	if imap["answers"] != true || imap["port"] != open {
+		t.Fatalf("993: %v", imap)
+	}
+	if sub["answers"] != false || sub["port"] != dead {
+		t.Fatalf("465: %v", sub)
+	}
+	if _, ok := st["reaches_server_utc"].(string); !ok {
+		t.Fatalf("no check time in %v", st)
+	}
+	if mailAppsSubmissionTarget == 465 || mailAppsSubmissionTarget == 587 || mailAppsSubmissionTarget == 25 {
+		t.Fatalf("submission must be dialed on a port cloud providers leave open, not %d", mailAppsSubmissionTarget)
+	}
+}

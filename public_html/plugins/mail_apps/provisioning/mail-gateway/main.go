@@ -20,12 +20,13 @@ import (
 )
 
 // Version is stamped at build time (-ldflags "-X main.Version=...").
-var Version = "1.0.1"
+var Version = "1.0.2"
 
 func main() {
 	configDir := flag.String("config-dir", "/etc/joinery/mail-gateway", "directory holding sites/<site>.json and sites/<site>.enabled")
 	imapListen := flag.String("imap-listen", ":993", "IMAP listen address (implicit TLS); empty disables IMAP")
 	smtpListen := flag.String("smtp-listen", ":465", "SMTP submission listen address (implicit TLS); empty disables submission")
+	relaySMTPListen := flag.String("relay-smtp-listen", ":"+RelaySubmissionPort, "second submission address, for a relay passing programs through (cloud providers block the relay's outbound 465); empty disables it")
 	smtpDomain := flag.String("smtp-domain", "", "name in the SMTP greeting (default: the only site's hostname, else this host's name)")
 	maxPerIP := flag.Int("max-conns-per-ip", 100, "concurrent connections allowed from one client address (IPv6: per /64)")
 	maxPerCred := flag.Int("max-conns-per-credential", 20, "concurrent signed-in connections allowed for one app password")
@@ -88,14 +89,17 @@ func main() {
 		go func() { errc <- fmt.Errorf("imap: %w", srv.Serve(tlsLn)) }()
 	}
 	if *smtpListen != "" {
-		ln, err := listenDual(*smtpListen)
+		ln, err := listenSubmission(*smtpListen, *relaySMTPListen)
 		if err != nil {
-			log.Fatalf("smtp listen %s: %v", *smtpListen, err)
+			log.Fatalf("smtp listen: %v", err)
 		}
 		srv := gw.NewSMTPServer(domain)
 		tlsLn := gw.TLSListener(ln, "smtp")
 		closers = append(closers, func() { srv.Close() })
 		logf("smtp submission listening on %s", ln.Addr())
+		if *relaySMTPListen != "" {
+			logf("smtp submission for relays listening on %s", *relaySMTPListen)
+		}
 		go func() { errc <- fmt.Errorf("smtp: %w", srv.Serve(tlsLn)) }()
 	}
 	if len(closers) == 0 {
@@ -151,6 +155,32 @@ func listenDual(addr string) (net.Listener, error) {
 		return ln4, nil
 	}
 	return newMultiListener(ln6, ln4), nil
+}
+
+// RelaySubmissionPort is where a relay passing mail programs through reaches
+// submission (specs/mail_apps_plugin.md § Where programs connect). Programs
+// still use 465 at the relay, but the relay cannot dial 465 onward: cloud
+// providers (Linode among them) block outbound 25, 465 and 587. A mirror of
+// mailAppsSubmissionTarget in the relay (relay-sealer/relay_serve.go) and of
+// RELAY_SUBMISSION_PORT in install_mail_gateway.sh.
+const RelaySubmissionPort = "10465"
+
+// listenSubmission is the submission listener: primary, plus relay when it is
+// not empty, served as one (same TLS, same sessions, same PROXY trust).
+func listenSubmission(primary, relay string) (net.Listener, error) {
+	ln, err := listenDual(primary)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", primary, err)
+	}
+	if relay == "" {
+		return ln, nil
+	}
+	rln, err := listenDual(relay)
+	if err != nil {
+		ln.Close()
+		return nil, fmt.Errorf("%s: %w", relay, err)
+	}
+	return newMultiListener(ln, rln), nil
 }
 
 func logf(format string, args ...any) {

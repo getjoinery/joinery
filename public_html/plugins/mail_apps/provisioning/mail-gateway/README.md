@@ -19,7 +19,7 @@ Thunderbird ──TLS 993/465──▶ mail-gateway ──loopback HTTP(S)──
 ## Running it
 
 ```
-mail-gateway [-config-dir /etc/joinery/mail-gateway] [-imap-listen :993] [-smtp-listen :465]
+mail-gateway [-config-dir /etc/joinery/mail-gateway] [-imap-listen :993] [-smtp-listen :465] [-relay-smtp-listen :10465]
              [-smtp-domain NAME] [-max-conns-per-ip 100] [-max-conns-per-credential 20]
              [-max-conns 2000] [-inflight-bytes N] [-body-cache-bytes N] [-folder-list-bytes N]
              [-memory-limit N] [-version]
@@ -30,6 +30,7 @@ mail-gateway [-config-dir /etc/joinery/mail-gateway] [-imap-listen :993] [-smtp-
 | `-config-dir` | `/etc/joinery/mail-gateway` | holds `sites/` (below) |
 | `-imap-listen` | `:993` | IMAP, implicit TLS. Empty turns IMAP off |
 | `-smtp-listen` | `:465` | SMTP submission, implicit TLS. Empty turns it off |
+| `-relay-smtp-listen` | `:10465` | The same submission server on a second port, for a relay passing programs through. Programs use 465 at the relay, but cloud providers block a relay's outbound 25, 465 and 587, so the relay dials this port instead; the helper opens it to the relay's address only. Empty turns it off |
 | `-smtp-domain` | the only site's hostname, else the host name | the name in the SMTP greeting |
 | `-max-conns-per-ip` | `100` | concurrent connections from one address (an IPv6 /64 counts as one) — high enough for an office or household behind one NAT |
 | `-max-conns-per-credential` | `20` | concurrent signed-in connections for one app password (counted at sign-in, keyed on a hash of username and password, never the password itself), so one credential cannot take an address's whole allowance. Thunderbird holds 5 per account |
@@ -361,7 +362,7 @@ cat > /tmp/mgw/sites/dev.json <<'EOF'
  "cert_file":"/tmp/mgw/cert.pem","key_file":"/tmp/mgw/key.pem"}
 EOF
 touch /tmp/mgw/sites/dev.enabled
-../bin/mail-gateway-$(uname -m) -config-dir /tmp/mgw -imap-listen 127.0.0.1:1993 -smtp-listen 127.0.0.1:1465
+../bin/mail-gateway-$(uname -m) -config-dir /tmp/mgw -imap-listen 127.0.0.1:1993 -smtp-listen 127.0.0.1:1465 -relay-smtp-listen ''
 ```
 
 and in another terminal:

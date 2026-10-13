@@ -9,6 +9,8 @@
  * request — a round trip with a throwaway app password (sign in, open INBOX,
  * sign out, revoke).
  *
+ * @version 1.5.0 - through a relay: the relay's own view (whether this server answers it on each port, what it last
+ *                  refused and why), from the report the site already keeps
  * @version 1.4.0 - a site in a container uses the same switch (a request to its Docker host) and shows the host's answer
  * @version 1.3.0 - the switch is MailAppGateway::allow()/disallow(), recording the route; a Switch offer when the rule
  *                picks another name or route, a warning while a relay hides an address programs still reach directly,
@@ -87,6 +89,46 @@ if ($cert !== null) {
 		: (($cert['covers'] ? 'Covers this name' : '<strong>Does not cover this name</strong>')
 			. ($cert['error'] !== null ? ' — <strong>' . $esc($cert['error']) . '</strong>' : '')
 			. ($cert['expires'] ? ', valid until ' . $esc(LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $cert['expires']), 'UTC', $tz, 'M j, Y')) : ''));
+}
+$relay_report = MailAppGateway::relayReport();
+if ($relay_report !== null) {
+	$at = function ($t) use ($esc, $tz) {
+		return $esc(LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s', $t), 'UTC', $tz, 'M j, g:i a'));
+	};
+	$labels = array('993' => 'IMAP (993)', '465' => 'Submission (465)');
+	if ($relay_report['reaches'] === null) {
+		$state['The relay reaches this server'] = 'Not checked yet: the relay checks each minute while mail apps are on'
+			. ' (relay 3.12 and later)';
+	} else {
+		$lines = array();
+		$blocked = false;
+		foreach ($labels as $role => $label) {
+			if (!isset($relay_report['reaches'][$role])) {
+				continue;
+			}
+			$r = $relay_report['reaches'][$role];
+			if ($r['answers']) {
+				$lines[] = $esc($label) . ': yes, on port ' . $r['port'];
+			} else {
+				$blocked = true;
+				$lines[] = '<strong>' . $esc($label) . ': no answer on port ' . $r['port'] . '</strong>';
+			}
+		}
+		$state['The relay reaches this server'] = implode('<br>', $lines)
+			. ($relay_report['checked'] !== null ? '<br><small>Checked by the relay ' . $at($relay_report['checked']) . '</small>' : '')
+			. ($blocked ? '<br>Programs cannot use that port through the relay. The mail gateway here is not listening on '
+				. 'the port the relay dials, or this server\'s firewall does not let the relay in. Stopping and allowing mail '
+				. 'apps again sets both.' : '');
+	}
+	$passed = $relay_report['passed_1h'] . ' passed through, ' . $relay_report['refused_1h'] . ' refused in the last hour';
+	if ($relay_report['last_refusal'] !== null) {
+		$passed .= '<br>Last refused: ' . $esc($relay_report['last_refusal'])
+			. ($relay_report['last_refusal_time'] !== null ? ' (' . $at($relay_report['last_refusal_time']) . ')' : '');
+	}
+	if ($relay_report['report_time'] !== null) {
+		$passed .= '<br><small>As the relay reported it ' . $at($relay_report['report_time']) . '</small>';
+	}
+	$state['Connections at the relay'] = $passed;
 }
 if (MailAppGateway::inContainer()) {
 	$state['Where it runs'] = 'On this site\'s server (its Docker host), which applies a change within a minute';
