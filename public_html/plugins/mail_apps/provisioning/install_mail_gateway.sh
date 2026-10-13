@@ -774,6 +774,7 @@ converge() {
             # whose gateway did not come up left its old names: dropped now.
             if [[ -e "${DIR}/sites/${site}.enabled" && "$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null)" == "${name}" ]]; then
                 drop_left_names "${site}" "${name}" "${web}"
+                rm -f "${DIR}/sites/${site}.failed"
                 answer "${root}" "${site}" on "${name}" ""
                 continue
             fi
