@@ -53,7 +53,7 @@ awk '/^cat > "\$\{CANDIDATE\}" <<.HELPERSCRIPT./{f=1;next} /^HELPERSCRIPT$/{f=0}
     | sed -e "s#/etc/joinery#$R/etc/joinery#g" -e "s#/etc/systemd#$R/etc/systemd#g" \
           -e "s#/usr/local/lib/joinery#$R/usr/local/lib/joinery#g" -e "s#/usr/local/sbin#$R/usr/local/sbin#g" \
           -e "s#/etc/letsencrypt#$R/etc/letsencrypt#g" -e "s#/etc/sudoers.d#$R/etc/sudoers.d#g" \
-          -e "s#/etc/apache2#$R/etc/apache2#g" > "$T/helper"
+          -e "s#/etc/apache2#$R/etc/apache2#g" -e "s#/var/lib/joinery#$R/var/lib/joinery#g" > "$T/helper"
 chk "the helper was extracted" "$(grep -c 'GATEWAY_REMOVED' "$T/helper" | awk '{print ($1 > 0)}')" "1"
 chk "no absolute path is left outside the sandbox" \
     "$(sed "s#$R#SANDBOX#g" "$T/helper" | grep -o -E '(SANDBOX)?/(etc/(joinery|systemd|letsencrypt|sudoers.d|apache2)|usr/local/(lib|sbin))' | grep -v -c '^SANDBOX' | tr -d ' ')" "0"
@@ -179,11 +179,12 @@ site_fixture() {   # site, web name
     mkdir -p "$R/etc/joinery/sites/$1" "$R/etc/apache2/sites-available" "$DR/volumes/$1_storage/_data/mail_apps" \
         "$R/etc/letsencrypt/live/$2"
     echo "# joinery-managed" > "$R/etc/joinery/sites/$1/run_spec"
-    printf '<VirtualHost *:443>\n    ServerName %s\n</VirtualHost>\n' "$2" > "$R/etc/apache2/sites-available/$1.conf"
+    printf '<VirtualHost *:443>\n    ServerName %s\n</VirtualHost>\n<VirtualHost *:80>\n    ServerName www.%s\n</VirtualHost>\n' "$2" "$2" \
+        > "$R/etc/apache2/sites-available/$1.conf"
     touch "$R/etc/letsencrypt/live/$2/fullchain.pem" "$R/etc/letsencrypt/live/$2/privkey.pem"
 }
 ask() { printf '%s' "$2" > "$DR/volumes/$1_storage/_data/mail_apps/request.json"; }
-said() { python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("state"), j.get("name"), (j.get("error") or "")[:40])' \
+said() { python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("state"), j.get("name"), (j.get("error") or "")[:120])' \
     "$DR/volumes/$1_storage/_data/mail_apps/answer.json" 2>/dev/null; }
 field() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]))' "$SB/sites/$1.json" "$2"; }
 site_fixture alpha alpha.example
@@ -250,6 +251,152 @@ rm -rf "$R/etc/joinery/sites/alpha"
 helper converge > /dev/null
 chk "a gone container's entry is forgotten" "$(ls "$SB/sites" | grep -c '^alpha\.')" "0"
 chk "an entry that is not a container's is left alone" "$( [ -e "$SB/sites/gamma.json" ] && [ -e "$SB/sites/gamma.enabled" ]; echo $? )" "0"
+
+echo "=== A Docker host: a container site's own mail name (behind Cloudflare) ==="
+setup
+SB="$R/etc/joinery/mail-gateway"
+sed -i -e "/^listening() {\$/i listening() { [ -e $T/nolisten ] && return 1; return 0; }" -e 's/^listening() {$/listening_real() {/' "$R/usr/local/sbin/joinery-mail-gateway"
+# certbot leaves a certificate for the name it was asked for; Apache accepts the
+# configuration; the name points at this machine (192.0.2.10).
+cat > "$T/bin/certbot" <<CERTBOT
+#!/bin/bash
+echo "certbot \$*" >> "$T/calls"
+if [ "\$1" = delete ]; then rm -rf "$R/etc/letsencrypt/live/\$3" "$R/etc/letsencrypt/renewal/\$3.conf"; exit 0; fi
+w=""; d=""
+while [ \$# -gt 0 ]; do case "\$1" in -w) w="\$2"; shift ;; -d) d="\$2"; shift ;; esac; shift; done
+case "\$d" in *nocert*) exit 1 ;; esac
+[ -e "$T/certfail_\$d" ] && exit 1
+mkdir -p "$R/etc/letsencrypt/live/\$d" "$R/etc/letsencrypt/renewal"
+touch "$R/etc/letsencrypt/live/\$d/fullchain.pem" "$R/etc/letsencrypt/live/\$d/privkey.pem"
+[ -n "\$w" ] && echo "webroot_path = \$w," > "$R/etc/letsencrypt/renewal/\$d.conf"
+exit 0
+CERTBOT
+for cmd in a2ensite apache2ctl; do printf '#!/bin/bash\necho "%s $*" >> "%s/calls"\nexit 0\n' "$cmd" "$T" > "$T/bin/$cmd"; done
+printf '#!/bin/bash\ncase "$2" in *elsewhere*) ip=198.51.100.99 ;; *) ip=192.0.2.10 ;; esac\n[ "$1" = ahosts ] && echo "$ip STREAM $2"\nexit 0\n' > "$T/bin/getent"
+printf '#!/bin/bash\necho "2: eth0    inet 192.0.2.10/24 brd 192.0.2.255 scope global eth0"\n' > "$T/bin/ip"
+chmod +x "$T/bin/"*
+site_fixture beta beta.example
+site_fixture parent parent.example
+site_fixture child shop.parent.example
+: > "$T/calls"
+ask beta '{"on": true, "name": "mail.beta.example"}'
+helper converge > /dev/null
+chk "a name under the web name is served" "$( [ -e "$SB/sites/beta.enabled" ]; echo $? )/$(cat "$SB/sites/beta.mailhost")/$(said beta)" \
+    "0/mail.beta.example/on mail.beta.example "
+VH="$R/etc/apache2/sites-available/joinery-mail-mail.beta.example.conf"
+chk "  through a port-80 site that answers only certificate checks" \
+    "$(grep -c 'ServerName mail.beta.example' "$VH")/$(grep -c 'acme-challenge' "$VH")/$(grep -c 'R=404' "$VH")" "1/1/1"
+chk "  its certificate ordered with the webroot (so renewal answers the same way)" \
+    "$(grep -c "certbot certonly --webroot -w $R/var/lib/joinery/mail-challenge -d mail.beta.example" "$T/calls")" "1"
+chk "  and the entry carries that certificate" "$(field beta mail_hostname) $(field beta cert_file)" \
+    "mail.beta.example $R/etc/letsencrypt/live/mail.beta.example/fullchain.pem"
+ask parent '{"on": true, "name": "mail.other.example"}'
+helper converge > /dev/null
+chk "a name outside the site's own is refused" "$( [ -e "$SB/sites/parent.enabled" ]; echo $? )/$(said parent | cut -c1-6)" "1/failed"
+rm -f "$SB/sites/parent.failed"
+ask parent '{"on": true, "name": "mail.shop.parent.example"}'
+helper converge > /dev/null
+chk "a name under a more specific site's web name is that site's" "$(said parent | grep -c 'belongs to another site')" "1"
+rm -f "$SB/sites/parent.failed"
+ask parent '{"on": true, "name": "shop.parent.example"}'
+helper converge > /dev/null
+chk "  and so is that site's web name" "$(said parent | grep -c 'belongs to another site')" "1"
+rm -f "$SB/sites/parent.failed"
+echo "mail.parent.example" > "$SB/sites/planted.mailhost"
+ask parent '{"on": true, "name": "mail.parent.example"}'
+helper converge > /dev/null
+chk "a name already serving another site is refused" "$(said parent | grep -c 'already serves another site')" "1"
+rm -f "$SB/sites/planted.mailhost" "$SB/sites/parent.failed"
+: > "$T/calls"
+ask beta '{"on": true, "name": "beta.example"}'
+helper converge > /dev/null
+chk "back to the web name drops the old name's check site and certificate" \
+    "$(cat "$SB/sites/beta.mailhost")/$( [ -e "$VH" ]; echo $? )/$(grep -c 'certbot delete --cert-name mail.beta.example' "$T/calls")" "beta.example/1/1"
+rm -f "$SB/sites/beta.certattempt"   # one certificate attempt an hour per site
+ask beta '{"on": true, "name": "mail.beta.example"}'
+helper converge > /dev/null
+chk "  and asking for it again orders it again" "$(cat "$SB/sites/beta.mailhost")" "mail.beta.example"
+rm -f "$DR/volumes/beta_storage/_data/mail_apps/request.json"
+: > "$T/calls"
+helper converge > /dev/null
+chk "a forgotten site's own mail name goes with it" \
+    "$(ls "$SB/sites" | grep -c '^beta\.')/$( [ -e "$VH" ]; echo $? )/$(grep -c 'certbot delete --cert-name mail.beta.example' "$T/calls")" "0/1/1"
+
+echo "=== A Docker host: review fixes (reviewer2, 2026-10-13) ==="
+VH2="$R/etc/apache2/sites-available/joinery-mail-mail.beta.example.conf"
+rm -f "$SB/sites/beta.certattempt"
+ask beta '{"on": true, "name": "mail.beta.example"}'
+helper converge > /dev/null
+site_fixture cweb mail.beta.example
+ask cweb '{"on": true, "name": "mail.beta.example"}'
+helper converge > /dev/null
+chk "B2: a web name that is another site's mail name is refused" \
+    "$( [ -e "$SB/sites/cweb.enabled" ]; echo $? )/$(said cweb | grep -c 'already serves another site')" "1/1"
+rm -rf "$R/etc/joinery/sites/cweb" "$R/etc/apache2/sites-available/cweb.conf"
+helper converge > /dev/null
+ask parent '{"on": true, "name": "www.parent.example"}'
+helper converge > /dev/null
+chk "B3: the site's own www. name is refused (its front door's redirect answers it)" "$(said parent | grep -c 'belongs to another site')" "1"
+rm -f "$SB/sites/parent.failed"
+rm -f "$SB/sites/beta.certattempt"
+: > "$T/calls"
+ask beta '{"on": true, "name": "elsewhere.beta.example"}'
+helper converge > /dev/null
+chk "B1: a switch that fails keeps the old name's check site, certificate and entry" \
+    "$(said beta | cut -c1-6)/$( [ -e "$VH2" ]; echo $? )/$( [ -d "$R/etc/letsencrypt/live/mail.beta.example" ]; echo $? )/$(cat "$SB/sites/beta.mailhost")/$(grep -c 'certbot delete' "$T/calls")" \
+    "failed/0/0/mail.beta.example/0"
+rm -f "$SB/sites/beta.failed" "$SB/sites/beta.certattempt"
+ask beta '{"on": true, "name": "nocert.beta.example"}'
+helper converge > /dev/null
+VH3="$R/etc/apache2/sites-available/joinery-mail-nocert.beta.example.conf"
+chk "  a name whose certificate is not issued fails, its check site waiting" "$(said beta | cut -c1-6)/$( [ -e "$VH3" ]; echo $? )" "failed/0"
+rm -f "$SB/sites/beta.failed" "$SB/sites/beta.certattempt"
+: > "$T/calls"
+ask beta '{"on": true, "name": "beta.example"}'
+helper converge > /dev/null
+chk "B5: moving on drops the never-issued name's check site, and the old name's" \
+    "$(cat "$SB/sites/beta.mailhost")/$( [ -e "$VH3" ]; echo $? )/$( [ -e "$VH2" ]; echo $? )/$(grep -c 'certbot delete --cert-name mail.beta.example' "$T/calls")" \
+    "beta.example/1/1/1"
+mkdir -p "$R/etc/letsencrypt/live/ops.beta.example"
+touch "$R/etc/letsencrypt/live/ops.beta.example/fullchain.pem" "$R/etc/letsencrypt/live/ops.beta.example/privkey.pem"
+rm -f "$SB/sites/beta.failed" "$SB/sites/beta.certattempt"
+ask beta '{"on": true, "name": "ops.beta.example"}'
+helper converge > /dev/null
+: > "$T/calls"
+ask beta '{"on": true, "name": "beta.example"}'
+helper converge > /dev/null
+chk "B4: a certificate this helper did not order is never deleted" \
+    "$(cat "$SB/sites/beta.mailhost")/$(grep -c 'certbot delete' "$T/calls")/$( [ -d "$R/etc/letsencrypt/live/ops.beta.example" ]; echo $? )" "beta.example/0/0"
+
+echo "=== A Docker host: recheck fixes (reviewer2, 2026-10-13) ==="
+clear_beta() { rm -f "$SB/sites/beta.failed" "$SB/sites/beta.certattempt"; }
+clear_beta; ask beta '{"on": true, "name": "mail.beta.example"}'; helper converge > /dev/null
+touch "$T/certfail_x1.beta.example" "$T/certfail_y1.beta.example"
+clear_beta; ask beta '{"on": true, "name": "x1.beta.example"}'; helper converge > /dev/null
+clear_beta; ask beta '{"on": true, "name": "y1.beta.example"}'; helper converge > /dev/null
+chk "B8: a second failed name drops the first one's check site (one pending name per site)" \
+    "$( [ -e "$R/etc/apache2/sites-available/joinery-mail-x1.beta.example.conf" ]; echo $? )/$( [ -e "$R/etc/apache2/sites-available/joinery-mail-y1.beta.example.conf" ]; echo $? )" "1/0"
+rm -f "$T/certfail_x1.beta.example"
+clear_beta; ask beta '{"on": true, "name": "x1.beta.example"}'; helper converge > /dev/null
+chk "  and the first name, asked again, is the site's (served, not 'belongs to another site')" "$(said beta)" "on x1.beta.example "
+clear_beta; ask beta '{"on": true, "name": "beta.example"}'; helper converge > /dev/null
+chk "  after moving on, none of its check sites is left" "$(ls "$R/etc/apache2/sites-available" | grep -c '^joinery-mail-.*beta\.example\.conf$')" "0"
+clear_beta; ask beta '{"on": true, "name": "mail.beta.example"}'; helper converge > /dev/null
+touch "$T/nolisten"
+clear_beta; ask beta '{"on": true, "name": "m9.beta.example"}'; helper converge > /dev/null
+chk "B9: a switch whose gateway does not come up fails" "$(said beta | cut -c1-6)/$(cat "$SB/sites/beta.mailhost")" "failed/m9.beta.example"
+rm -f "$T/nolisten"; clear_beta
+helper converge > /dev/null
+chk "  and the next pass, serving the new name, drops the old one" \
+    "$(said beta)/$( [ -e "$R/etc/apache2/sites-available/joinery-mail-mail.beta.example.conf" ]; echo $? )" "on m9.beta.example /1"
+site_fixture dweb m9.beta.example
+helper converge > /dev/null
+chk "O2: a site serving a name keeps it, answering on, when another site later claims it" "$(said beta)" "on m9.beta.example "
+rm -rf "$R/etc/joinery/sites/dweb" "$R/etc/apache2/sites-available/dweb.conf"
+printf '<VirtualHost *:80>\n    ServerName bare.example\n    ServerAlias *.wild.beta.example\n</VirtualHost>\n' > "$R/etc/apache2/sites-available/barehand.conf"
+clear_beta; ask beta '{"on": true, "name": "mx.wild.beta.example"}'; helper converge > /dev/null
+chk "a name a wildcard ServerAlias answers belongs to that site" "$(said beta | grep -c 'belongs to another site')" "1"
+rm -f "$R/etc/apache2/sites-available/barehand.conf"
 
 echo
 echo "=== The installer on a Docker host with no sites yet ==="

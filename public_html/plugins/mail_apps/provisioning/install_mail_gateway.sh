@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.2 - recheck fixes (reviewer2): one pending name per site (a second failed name drops the first); a
+#                switch whose gateway did not come up drops its old name on the next pass (<site>.previous); a
+#                site already serving a name keeps it and answers on, even if another site claims it later; a
+#                wildcard ServerAlias counts.
+# Version: 2.1 - review fixes (reviewer2, 2026-10-13): an old mail name is dropped only after the new one serves; a
+#                name any other Apache site on the machine answers to is refused (another site's web or www. name,
+#                a bare-metal site, a web name equal to another site's mail name, the site's own www. name); only
+#                certificates this helper ordered are deleted; a name whose certificate never issued is dropped too.
+# Version: 2.0 - a container site's own mail name (A4 step 6): a name under its web name that no other site on the
+#                host owns; its certificate comes through a permanent port-80 site that answers only ACME checks
+#                (certbot --webroot, so renewal works the same way), dropped with the name.
 # Version: 1.9 - --machine installs on any Docker host, with or without sites yet: on a host built before its
 #                sites (install.sh docker, then install.sh site) the gateway arrived only with the next daily run.
 #                converge forgets a container site with no request at all (its plugin uninstalled), as it
@@ -350,10 +361,24 @@ issue_certificate() {
     now="$(date +%s)"
     last="$(cat "${marker}" 2>/dev/null || echo 0)"
     if [[ "${last}" =~ ^[0-9]+$ ]] && (( now - last < 3600 )); then
-        echo "joinery-mail-gateway: a certificate for ${host} was tried less than an hour ago; try again later." >&2
+        echo "joinery-mail-gateway: a certificate was tried for this site less than an hour ago (one attempt an hour, to stay within the certificate authority's limits); try again later." >&2
         exit 5
     fi
     echo "${now}" > "${marker}"
+    if [[ "$(json_field "${DIR}/sites/${SITE}.json" container 2>/dev/null)" == "true" ]]; then
+        # One pending name per site: an earlier name that never issued goes
+        # (drop_mail_name keeps anything a site still serves).
+        local pending
+        pending="$(cat "${DIR}/sites/${SITE}.challenge" 2>/dev/null || true)"
+        echo "${host}" > "${DIR}/sites/${SITE}.challenge"
+        if [[ -n "${pending}" && "${pending}" != "${host}" ]]; then
+            drop_mail_name "${pending}"
+        fi
+        challenge_site "${host}" || exit 5
+        certbot certonly --webroot -w "${CHALLENGE_ROOT}" -d "${host}" --non-interactive --agree-tos \
+            --register-unsafely-without-email --keep-until-expiring >&2 || true
+        return 0
+    fi
     if certbot certonly --apache -d "${host}" --non-interactive --agree-tos --register-unsafely-without-email \
             --keep-until-expiring >&2; then
         return 0
@@ -587,6 +612,128 @@ front_door_name() {
     awk 'tolower($1) == "servername" { print tolower($2); exit }' "/etc/apache2/sites-available/$1.conf" 2>/dev/null
 }
 
+# A container site's mail name: its web name, or a name under it (www.
+# dropped) that no other site on this host owns. Another site owns a name that
+# is its web name, or that lies under its web name when that is more specific
+# than this site's; a name already serving another site is refused too. So no
+# site can take mail programs (and their app passwords) meant for another.
+# Prints why not, or nothing when the name is the site's to use.
+mail_name_problem() {
+    local site="$1" name="$2" web="$3" base other ow ob entry conf c
+    # A name already serving another site, its web name included.
+    for entry in "${DIR}"/sites/*.mailhost; do
+        [[ -f "${entry}" ]] || continue
+        [[ "$(basename "${entry}" .mailhost)" == "${site}" ]] && continue
+        if [[ "$(cat "${entry}")" == "${name}" ]]; then
+            echo "${name} already serves another site on this server."
+            return 0
+        fi
+    done
+    # A name another Apache site on this machine answers to: another site's
+    # front door (its web name, its www. name), a bare-metal site, another
+    # site's check site. This site's own front door counts only for its web
+    # name: its www. name is the front door's redirect, which would swallow the
+    # certificate check. Its own check site for this name is its own.
+    for conf in /etc/apache2/sites-available/*.conf; do
+        [[ -f "${conf}" ]] || continue
+        c="$(basename "${conf}" .conf)"
+        [[ "${c}" == "${site}" && "${name}" == "${web}" ]] && continue
+        if [[ "${c}" == "joinery-mail-${name}" ]] && { [[ "$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null)" == "${name}" ]] \
+                || [[ "$(cat "${DIR}/sites/${site}.challenge" 2>/dev/null)" == "${name}" ]]; }; then
+            continue
+        fi
+        if awk -v n="${name}" 'tolower($1) == "servername" || tolower($1) == "serveralias" {
+                for (i = 2; i <= NF; i++) { v = tolower($i)
+                    if (v == n || (substr(v, 1, 2) == "*." && length(n) > length(v) - 1 && substr(n, length(n) - length(v) + 2) == substr(v, 2))) found = 1 } }
+                END { exit !found }' "${conf}"; then
+            echo "${name} belongs to another site on this server."
+            return 0
+        fi
+    done
+    [[ "${name}" == "${web}" ]] && return 0
+    base="${web#www.}"
+    if [[ "${name}" != *".${base}" ]]; then
+        echo "The mail name must be a name under the site's web name (such as mail.${base}), not ${name}."
+        return 0
+    fi
+    for other in /etc/joinery/sites/*/run_spec; do
+        [[ -f "${other}" ]] || continue
+        other="$(basename "$(dirname "${other}")")"
+        [[ "${other}" == "${site}" ]] && continue
+        ow="$(front_door_name "${other}")"
+        [[ -n "${ow}" ]] || continue
+        ob="${ow#www.}"
+        if [[ "${name}" == "${ow}" || "${name}" == "${ob}" ]] \
+                || { [[ "${name}" == *".${ob}" ]] && (( ${#ob} > ${#base} )); }; then
+            echo "${name} belongs to another site on this server."
+            return 0
+        fi
+    done
+}
+
+# A container site's own mail name needs a certificate the front door does not
+# hold. Port 80 on a Docker host answers names no site claims with a refusal
+# (000-joinery-no-site.conf), so the name gets a permanent port-80 site of its
+# own that serves only ACME challenges, from one webroot; certbot --webroot
+# records it, so renewal answers the same way.
+CHALLENGE_ROOT=/var/lib/joinery/mail-challenge
+challenge_site() {
+    local host="$1" conf="/etc/apache2/sites-available/joinery-mail-${1}.conf" candidate
+    install -d -m 755 "${CHALLENGE_ROOT}"
+    candidate="$(mktemp)"
+    cat > "${candidate}" <<VHOST
+# Written by joinery-mail-gateway: ${host} is a container site's mail name.
+# Only the certificate checks are answered here; mail programs use 993 and 465.
+<VirtualHost *:80>
+    ServerName ${host}
+    DocumentRoot ${CHALLENGE_ROOT}
+    <Directory ${CHALLENGE_ROOT}>
+        Options None
+        AllowOverride None
+        Require all granted
+    </Directory>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+    RewriteRule ^ - [R=404,L]
+</VirtualHost>
+VHOST
+    if ! cmp -s "${candidate}" "${conf}"; then
+        install -m 644 "${candidate}" "${conf}"
+    fi
+    rm -f "${candidate}"
+    a2ensite -q "joinery-mail-${host}" >/dev/null 2>&1 || ln -sf "${conf}" "/etc/apache2/sites-enabled/joinery-mail-${host}.conf"
+    if ! apache2ctl configtest >/dev/null 2>&1; then
+        rm -f "/etc/apache2/sites-enabled/joinery-mail-${host}.conf" "${conf}"
+        echo "joinery-mail-gateway: Apache refused the certificate-check site for ${host}; nothing was changed." >&2
+        return 1
+    fi
+    systemctl reload apache2 >/dev/null 2>&1 || true
+}
+
+# A mail name no site uses any more: its challenge site and its certificate.
+drop_mail_name() {
+    local host="$1" entry
+    valid_host "${host}" || return 0
+    # Never one a site still uses: the gateway loads its files at every start,
+    # and a unit whose credential file is gone does not start at all.
+    for entry in "${DIR}"/sites/*.json; do
+        [[ -f "${entry}" ]] || continue
+        [[ "$(json_field "${entry}" cert_file)" == */live/"${host}"/* ]] && return 0
+    done
+    for entry in "${DIR}"/sites/*.mailhost; do
+        [[ -f "${entry}" && "$(cat "${entry}")" == "${host}" ]] && return 0
+    done
+    if [[ -e "/etc/apache2/sites-available/joinery-mail-${host}.conf" ]]; then
+        rm -f "/etc/apache2/sites-enabled/joinery-mail-${host}.conf" "/etc/apache2/sites-available/joinery-mail-${host}.conf"
+        systemctl reload apache2 >/dev/null 2>&1 || true
+    fi
+    # Only a certificate this helper ordered (certbot recorded our webroot):
+    # a lineage the operator holds for the name for anything else is theirs.
+    if grep -qF "${CHALLENGE_ROOT}" "/etc/letsencrypt/renewal/${host}.conf" 2>/dev/null && command -v certbot >/dev/null 2>&1; then
+        certbot delete --cert-name "${host}" --non-interactive >/dev/null 2>&1 || true
+    fi
+}
+
 # A container site's entry: the gateway reaches it through the host's front
 # door, under its web name, as on a site machine. Its mail name and
 # certificate are the on verb's (set_mail_host).
@@ -622,12 +769,17 @@ converge() {
                 answer "${root}" "${site}" failed "${name}" "This host has no front door (vhost) for the site."
                 continue
             fi
-            if [[ "${name}" != "${web}" ]]; then
-                answer "${root}" "${site}" failed "${name}" "Mail programs can only use the site's web name, ${web}, for now."
+            # Served under this name already: it stays (the first site to hold a
+            # name keeps it, even if another site claims it later). A switch
+            # whose gateway did not come up left its old names: dropped now.
+            if [[ -e "${DIR}/sites/${site}.enabled" && "$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null)" == "${name}" ]]; then
+                drop_left_names "${site}" "${name}" "${web}"
+                answer "${root}" "${site}" on "${name}" ""
                 continue
             fi
-            if [[ -e "${DIR}/sites/${site}.enabled" && "$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null)" == "${name}" ]]; then
-                answer "${root}" "${site}" on "${name}" ""
+            out="$(mail_name_problem "${site}" "${name}" "${web}")"
+            if [[ -n "${out}" ]]; then
+                answer "${root}" "${site}" failed "${name}" "${out}"
                 continue
             fi
             # A request that failed is tried again after an hour, not every minute.
@@ -638,9 +790,16 @@ converge() {
                 continue
             fi
             container_entry "${site}" "${web}"
+            # The name served until now is kept aside, to be dropped once the
+            # new one serves (a failed switch keeps it serving).
+            last="$(cat "${DIR}/sites/${site}.mailhost" 2>/dev/null || true)"
+            if [[ -n "${last}" && "${last}" != "${name}" && "${last}" != "${web}" ]]; then
+                echo "${last}" > "${DIR}/sites/${site}.previous"
+            fi
             rc=0
             out="$("$0" on "${site}" "${name}" 2>&1)" || rc=$?
             if [[ "${rc}" == 0 ]]; then
+                drop_left_names "${site}" "${name}" "${web}"
                 rm -f "${DIR}/sites/${site}.failed"
                 answer "${root}" "${site}" on "${name}" ""
             else
@@ -673,13 +832,34 @@ converge() {
 }
 
 # A container site's entry and certificate, gone: off first if it was served.
+# Served under NAME now: the name served before (<site>.previous) and a name
+# whose certificate never issued (<site>.challenge) lose their check site and
+# certificate (the web name's are the front door's).
+drop_left_names() {
+    local site="$1" name="$2" web="$3" left f
+    for f in previous challenge; do
+        left="$(cat "${DIR}/sites/${site}.${f}" 2>/dev/null || true)"
+        if [[ -n "${left}" && "${left}" != "${name}" && "${left}" != "${web}" ]]; then
+            drop_mail_name "${left}"
+        fi
+        [[ "${left}" == "${name}" && "${f}" == challenge ]] || rm -f "${DIR}/sites/${site}.${f}"
+    done
+}
+
 forget_container_entry() {
-    local s="$1"
+    local s="$1" own tried web
+    own="$(cat "${DIR}/sites/${s}.mailhost" 2>/dev/null || true)"
+    tried="$(cat "${DIR}/sites/${s}.challenge" 2>/dev/null || true) $(cat "${DIR}/sites/${s}.previous" 2>/dev/null || true)"
+    web="$(json_field "${DIR}/sites/${s}.json" hostname 2>/dev/null || true)"
     if [[ -e "${DIR}/sites/${s}.enabled" ]]; then
         "$0" off "${s}" >/dev/null 2>&1 || true
     fi
-    rm -f "${DIR}/sites/${s}".{json,mailhost,relay,certattempt,failed,answer}
+    rm -f "${DIR}/sites/${s}".{json,mailhost,relay,certattempt,failed,answer,challenge,previous}
     rm -rf "${CERTS:?}/${s}"
+    for own in ${own} ${tried}; do
+        [[ -n "${own}" && "${own}" != "${web}" ]] && drop_mail_name "${own}"
+    done
+    return 0
 }
 
 case "${VERB}" in
