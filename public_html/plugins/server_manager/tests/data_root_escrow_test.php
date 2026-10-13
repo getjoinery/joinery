@@ -357,6 +357,24 @@ $recent = new ReflectionMethod('DataRootEscrowSync', 'recipient_sent_recently');
 $recent->setAccessible(true);
 check($recent->invoke(null, $node, $key_a) && !$recent->invoke(null, $node, $key_b),
 	'A recipient sent within the hour holds back only that key again; a rotated key goes at once (B35)');
+// B55: decrypted to the end, it holds no slot of this holder's.
+$gone = new DataRootEscrow(NULL);
+$gone->set('dre_identity_key', base64_encode(random_bytes(32)));
+$gone->set('dre_status', 'retired');
+$gone->set('dre_hostname', 'escrow-test');
+$gone->set('dre_mgn_managed_node_id', $dnode->key);
+$gone->save();
+$made_escrows[] = $gone->key;
+$drow->set('dre_status', 'enrolled');
+$drow->set('dre_slot', 0);
+$drow->save();
+$still = function ($row) { return $row && DataRootEscrow::find_by_identity((string)$row->get('dre_identity_key')) !== null; };
+DataRootEscrowSync::from_plain_report($dnode, 'not_mounted');
+DataRootEscrowSync::from_plain_report($dnode, 'none');
+check($still($drow), 'A report with no data root mounted says nothing of one: what it enrolled stays');
+DataRootEscrowSync::from_plain_report($dnode, array('path' => '/srv/joinery', 'fstype' => 'xfs'));
+check(!$still($drow) && $still($gone) && $still($crow) && DataRootEscrow::for_node((int)$dnode->key) === null,
+	'Its data root mounted and plain: its enrolment here goes, a key given up stays on record, another node\'s row is untouched (B55)');
 check(JobResultProcessor::host_report_data_root_encryption('none') === 'none'
 	&& JobResultProcessor::host_report_data_root_encryption(array('identity' => 'not base64!', 'holder' => 'http://x', 'slot' => 99))['identity'] === '',
 	'The report section is held to its shape');

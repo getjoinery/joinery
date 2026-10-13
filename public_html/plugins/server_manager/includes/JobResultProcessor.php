@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.80 - a host report of a plain data root hands it to DataRootEscrowSync::from_plain_report (B55)
  * @version 1.79 - script_text(): a script primitive's own text out of the agent's envelope; a host report's disk_pool keeps the device a data root on a device sits on (host_report 1.22)
  * @version 1.78 - a host report's host_restrictions and each container's code_check (host_report 1.21,
  *                 specs/host_restrictions.md D8) are kept
@@ -3342,6 +3343,8 @@ HTML;
 				// and its enrolment here when this plane holds its key.
 				if (is_array($report['data_root_encryption'] ?? null)) {
 					DataRootEscrowSync::from_host_report($node, $report['data_root_encryption']);
+				} elseif (($report['data_root_encryption'] ?? null) === 'none') {
+					DataRootEscrowSync::from_plain_report($node, $report['disk_pool'] ?? null);
 				}
 				// Each site row's held state follows what its host says.
 				if (is_array($report['containers'] ?? null)) {

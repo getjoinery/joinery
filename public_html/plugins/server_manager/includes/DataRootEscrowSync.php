@@ -21,6 +21,14 @@
  * (data_root_recipient), and its tick seals the copy again; the Backups page
  * counts them (sealing_counts()).
  *
+ * A PLAIN DATA ROOT (B55): a node whose report says its data root is mounted
+ * and not encrypted holds none of this holder's key slots, whatever was enrolled
+ * before its decryption. What this holder kept for it goes, as before it was
+ * ever encrypted, and an encryption made again enrols afresh. A retired row
+ * stays: it records a key this holder gave up.
+ *
+ * @version 1.5 - from_plain_report(): a node reporting a plain data root drops what this holder kept for it; its
+ *                enrolled row stayed, hid its node page's Encrypt and stopped a new encryption from enrolling (B55)
  * @version 1.4 - a dormant copy is sent no enrolment and no recipient: it refuses both until it takes over its
  *                source's node, and each refusal was a failed job every hour
  * @version 1.3 - a rotated key is sent at once: the hour between sends holds back only the same key again (B35)
@@ -71,6 +79,17 @@ class DataRootEscrowSync {
 			} catch (Exception $e) {
 				// An agent too old for the word: the node page says so.
 			}
+		}
+	}
+
+	/** A node reporting its data root plain: the rows this holder kept for it go (B55). */
+	public static function from_plain_report(ManagedNode $node, $disk_pool): void {
+		// Only with a data root mounted: a report silent on one says nothing.
+		if (!is_array($disk_pool)) {
+			return;
+		}
+		foreach (new MultiDataRootEscrow(array('node' => (int)$node->key, 'live' => true)) as $row) {
+			$row->permanent_delete();
 		}
 	}
 

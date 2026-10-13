@@ -962,6 +962,7 @@ chk "a TERM while cryptsetup's start opens the volume: the mapping closed before
 cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"
 truncate -s $(( 8 * G )) "$R/srv/joinery.img"
 held_binds; touch "$T/mounted"
+printf 'url=https://holder.example\nslot=0\n' > "$R/etc/joinery/data-root/holder"
 : > "$LOG"
 out="$(run encrypt 2>&1)"; rc=$?
 chk "a service that keeps a file on a bind: stopped for the start, the bind unmounted, started again after" \
@@ -969,6 +970,8 @@ chk "a service that keeps a file on a bind: stopped for the start, the bind unmo
 chk "but never the service this run is part of (B42)" "$(grep -c 'joinery-host-converger' "$LOG")|$(grep -c 'joinery-host-converger' <<< "$out")" "0|0"
 cp "$T/systemctl.d5" "$T/bin/systemctl"; rm -f "$T/bin/fuser"; rm -rf "$R/proc"
 chk "encrypt: exit 0, and says it encrypts in the background" "$rc|$(grep -c 'encrypting in the background' <<< "$out")" "0|1"
+chk "the escrow holder and slot an earlier encryption recorded: gone with the old header (B55)" \
+    "$( [ -e "$R/etc/joinery/data-root/holder" ] && echo kept || echo gone)" "gone"
 chk "the image grows by the 32 MiB the header takes, which XFS never sees" "$(grep -c "^fallocate -l $(( 8 * G + 32 * 1024 * 1024 )) $R/srv/joinery.img$" "$LOG")" "1"
 chk "both keys sealed before the volume is written: the volume key, then the driving slot's" \
     "$(grep -n -e '^agent data-root seal' -e '^cryptsetup reencrypt' "$LOG" | cut -d: -f2 | cut -d' ' -f1-4 | paste -sd,)" \

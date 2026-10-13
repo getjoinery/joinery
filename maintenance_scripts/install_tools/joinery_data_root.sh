@@ -4,6 +4,8 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.20 - An encrypt's start forgets the escrow holder and slot an earlier encryption recorded: its new
+#                 header holds no escrow slot, and an enrolment removed "the earlier slot" by that number (B55).
 # Version: 1.19 - An encrypt's start cut off while cryptsetup made the header is put back as it was: cryptsetup
 #                 opens the volume as it ends, and a signal waits for that, so the mapping held the loop device
 #                 and the data root would not mount again (B49). A tick closes such a mapping over a plain data
@@ -2444,6 +2446,10 @@ do_encrypt() {
         && chmod 600 "${ROOT}${DRIVING_SIDECAR_REAL}.tmp.$$" && mv -f "${ROOT}${DRIVING_SIDECAR_REAL}.tmp.$$" "${ROOT}${DRIVING_SIDECAR_REAL}" \
         || die "could not seal the driving slot's secret to the recovery key. Nothing was changed."
     "$AGENT_BIN" data-root identity >/dev/null || die "could not make this machine's unlock identity. Nothing was changed."
+    # A new header holds no escrow slot. The holder and slot an earlier
+    # encryption of this machine recorded go: its enrolment is made afresh, and
+    # never removes a slot of this header by that old number.
+    rm -f "${DATA_ROOT_DIR}/holder"
     durable "${ROOT}${sidecar_real}" "${ROOT}${DRIVING_SIDECAR_REAL}" "${DATA_ROOT_DIR}/unlock_identity"
     sync
     trap - EXIT
