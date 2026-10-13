@@ -320,8 +320,20 @@ the user is asked to act on, and the clash clearing releases the whole subtree
 at once. A parked folder that has a directory of its own is not held this way:
 what is inside it is genuinely there.
 
+A folder given up here while its directory stands takes that directory to the
+OS trash, once nothing inside is owed elsewhere. Work the server does not have
+is carried out beside it first, and the give-up waits while something inside
+still has somewhere to go: a child the server has moved out, a file of another
+record's the user moved in, a file saved there and not yet sent. A sealed one
+waiting for a key holds it until there is one, and says so. A file carried out
+of its vault and held there -- sent before or not -- has nowhere on the server
+to go, so it does not hold the give-up: it is carried out beside the folder with
+the rest, its record following it, still held.
+
 Which sibling wins: anything already on this disk claims first, then the lowest
-server id. The consequence, stated honestly — two devices that downloaded a
+server id. A file held outside its vault claims before any of them: it stands
+where it is held, and a record that agrees on the same name cannot also have its
+file there. The consequence, stated honestly — two devices that downloaded a
 clashing pair in different orders keep different members of it. Both remain on
 the server and both devices report the clash. An entry recovers by itself, with
 no user action, as soon as the clash clears.
@@ -395,7 +407,9 @@ spelling on disk, never as the agreement, and naming leaves a parked entry
 alone. The walk does not read inside a scratch directory, so while a park
 stands -- its finish refused, or a pass stopped between the two -- nothing
 under it is judged: it is all held, present and unmoved, until the finish
-lands. A park this device made that nothing is left to finish is finished:
+lands. What stands in it is known by identity alone: a file the user carries
+out of the park is followed to where it went, and a file carried in from
+outside is held with the park until it ends. A park this device made that nothing is left to finish is finished:
 moved from where it stands to where the server has it, since the name it left
 belongs by then to the other half of the swap. That finish is judged as any
 arrival is: a name this disk cannot hold, or one a sibling here already holds,
@@ -589,15 +603,23 @@ made outside the vault is a new file and goes up with the protection of the
 folder it stands in; so does an editor's backup or save written outside the
 vault.
 
-**Into a vault, a file or folder is converted.** The source is trashed, its
-record forgotten, and the next scan finds the bytes at their new path as an
-ordinary local creation and uploads them with the destination folder's
-protection. A plaintext folder is converted contents and all — until it is, the
-user is looking at a folder they believe is private while the server holds every
-file in it in the clear at the old path. A plaintext file found standing in a
-vault folder where a download is arriving, and set aside there under a conflict
-name, is converted the same way: its record stays where it was agreed, and the
-next scan reads the file moved into the vault.
+**Into a vault, a file or folder is converted.** It goes up again inside the
+vault as a new sealed file or folder, and the plaintext source is trashed once
+that upload lands, wherever another device has moved it meanwhile. From the move
+on, the new record owns the bytes where they stand and holds the source's server
+copy until then — with no key on this device it waits for one, and the copy the
+rest of the fleet can reach stays where it was — so a file saved at the old path
+meanwhile is a new file, never the source's next version. A plaintext folder is
+converted contents and all, each file inside crossing as its own conversion —
+until it is, the user is looking at a folder they believe is private while the
+server holds every file in it in the clear at the old path. An edit made
+elsewhere to the source before its trash lands wins over that delete, as any
+edit does: the source comes back here as the plain file it is, beside its sealed
+copy, and where a file held outside its vault now stands at its name, it waits
+for that name like any file from the server. A plaintext file found standing in
+a vault folder where a download is arriving, and set aside there under a
+conflict name, is converted the same way: its record stays where it was agreed,
+and the next scan reads the file moved into the vault.
 
 A file edited in the vault before its conversion has gone up belongs to the
 vault from that edit on. Carried out again, it is held like any file saved in a
@@ -744,7 +766,10 @@ The client may stop at any instruction.
 onto the target. A partial download is never something a user can open. The
 rename is guarded by the fingerprint the engine decided against, so a file
 edited while the download was in flight is not overwritten — the download is
-withdrawn and the local edit wins. A download's byte count comes from the bytes
+withdrawn and the local edit wins. A file the user saves at a download's name
+before that download has ever landed here is a new file of the user's, never
+the download's edit: a rename this device sends for a file not yet downloaded
+moves it on the server alone. A download's byte count comes from the bytes
 that reached the spool, never from a header. It lands in the directory that
 stood at its folder's path when the spool was opened: a folder the user moved
 or replaced while the bytes were in flight is never made again at its old name

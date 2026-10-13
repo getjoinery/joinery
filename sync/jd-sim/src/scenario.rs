@@ -152,6 +152,12 @@ pub struct World {
     /// workload's slot swaps, rotations and folder trades -- records here.
     swap_pairs: std::sync::Arc<std::sync::Mutex<Vec<SwapPair>>>,
     sightings: std::sync::Mutex<HashMap<String, Sightings>>,
+    /// Files the user carried from a plain folder into a vault folder, seen
+    /// between two pass points (`note_carries`), and each device's last look.
+    carries: std::sync::Mutex<Vec<Carry>>,
+    carry_looks: std::sync::Mutex<HashMap<String, HashMap<(u64, u64), CarryLook>>>,
+    /// How many of each device's user moves `note_carries` has read.
+    carry_moves_read: std::sync::Mutex<HashMap<String, usize>>,
     unseen: std::sync::Mutex<Vec<UnseenReading>>,
 }
 
@@ -240,11 +246,34 @@ struct Sightings {
     landings_read: usize,
     /// Every file the engine laid on this disk.
     laid: std::collections::HashSet<(u64, u64)>,
+    /// Where the journal and the swap record stood when the last pass ended:
+    /// the start of the pass that runs next.
+    noted: (usize, usize),
 }
 
 /// A file record's own file (by the disk's identity, and as the engine holds
 /// it), path and bytes when last seen live, and where in the journal and the
 /// swap record that was.
+/// A file the user carried from a plain folder into a vault folder on one
+/// device (`World::note_carries`): the server file its record was, and that
+/// file's bytes then.
+#[derive(Clone, Debug)]
+pub struct Carry {
+    pub device: String,
+    pub device_index: usize,
+    pub record: i64,
+    pub sha: String,
+    pub identity: (u64, u64),
+}
+
+/// One file at a pass point: in a vault folder or not, the live file record
+/// that owns it, and that record's plain bytes on the server.
+struct CarryLook {
+    sealed: bool,
+    record: Option<i64>,
+    plain_sha: Option<String>,
+}
+
 struct LastSeen {
     own: (u64, u64),
     seen: jd_vfs::FileIdentity,
@@ -375,6 +404,9 @@ impl World {
             journal: Default::default(),
             swap_pairs: Default::default(),
             sightings: Default::default(),
+            carries: Default::default(),
+            carry_looks: Default::default(),
+            carry_moves_read: Default::default(),
             unseen: Default::default(),
         }
     }
@@ -754,6 +786,7 @@ impl World {
         });
         let after = held_by(device);
         self.note_unseen_readings(device);
+        self.note_carries(device);
         let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
         for hash in &before {
             if after.contains(hash) || by_the_user.contains(hash) {
@@ -968,6 +1001,72 @@ impl World {
         self.unseen.lock().unwrap().clone()
     }
 
+    /// Every file the user carried into a vault folder (`note_carries`).
+    pub fn carries(&self) -> Vec<Carry> {
+        self.carries.lock().unwrap().clone()
+    }
+
+    /// At a pass point of this device: every file standing in a vault folder
+    /// now that stood in a plain one at the last pass point, by the disk's own
+    /// identity -- the user carried it in; nothing the engine does takes a
+    /// plain file into a vault. Kept with the server file its record was
+    /// then, and that file's bytes: the conversion trashes that copy once the
+    /// sealed one lands. A file the user carried back out of every vault by a
+    /// later pass point had its carry undone, and the carry is dropped. Only
+    /// where the engine is shown the disk's own id; on a disk whose ids are
+    /// positions it knows a file by its bytes, and this is blind there.
+    fn note_carries(&self, device: &Device) {
+        let Some(index) = self.devices.iter().position(|d| d.name == device.name) else { return };
+        let entries = device.store.every_entry().unwrap();
+        let files = self.server.files();
+        let mut now: HashMap<(u64, u64), CarryLook> = HashMap::new();
+        for path in device.fs.all_paths() {
+            let Some(identity) = device.fs.true_identity_of(&path) else { continue };
+            let record = entries
+                .iter()
+                .filter(|e| e.id.entity_type == jd_core::EntityType::File && !e.id.is_provisional() && !e.remote_deleted)
+                .find(|e| e.own_file.is_some_and(|o| o.file_id != 0 && o.file_id == identity.0))
+                .map(|e| e.id.server_id);
+            let plain_sha = record.and_then(|id| files.iter().find(|f| f.id == id && !f.trashed && !f.encrypted)).map(|f| f.sha256.clone());
+            now.insert(identity, CarryLook { sealed: device.fs.under_sealed_dir(&path), record, plain_sha });
+        }
+        let moved_by_the_user: std::collections::HashSet<(u64, u64)> = {
+            let mut read = self.carry_moves_read.lock().unwrap();
+            let from = read.get(&device.name).copied().unwrap_or(0);
+            let (moved, all) = device.fs.user_moved_since(from);
+            read.insert(device.name.clone(), all);
+            moved.into_iter().collect()
+        };
+        let mut looks = self.carry_looks.lock().unwrap();
+        if let Some(before) = looks.get(&device.name) {
+            for (identity, look) in &now {
+                let Some(was) = before.get(identity) else { continue };
+                // Carried back out of every vault by the user: the carry is
+                // undone, and the plain copy is theirs again -- whatever the
+                // file is called or becomes after. Not by the engine: a file
+                // it set aside or rescued out of a vault is still the
+                // conversion's, and its plain copy is still judged.
+                if was.sealed && !look.sealed && moved_by_the_user.contains(identity) {
+                    self.carries.lock().unwrap().retain(|c| !(c.device_index == index && c.identity == *identity));
+                    continue;
+                }
+                if !look.sealed || was.sealed {
+                    continue;
+                }
+                if let (Some(record), Some(sha)) = (was.record, was.plain_sha.clone()) {
+                    self.carries.lock().unwrap().push(Carry {
+                        device: device.name.clone(),
+                        device_index: index,
+                        record,
+                        sha,
+                        identity: *identity,
+                    });
+                }
+            }
+        }
+        looks.insert(device.name.clone(), now);
+    }
+
     /// At a pass point of this device: which records were bound, since each
     /// was last seen holding its own file, to a file its scans had not seen
     /// except beside them, with their own file destroyed; then what its scans
@@ -1055,7 +1154,16 @@ impl World {
             if !beside_only {
                 continue;
             }
-            if let Some(body) = device.fs.peek(path) {
+            // The bytes of the file it was bound to, found by that file's own
+            // identity: its path can hold another file by now, a swap made
+            // while the pass ran having carried the bound file away (hostile2
+            // 94649, read against the wrong bytes and so never excused).
+            let bound = device
+                .fs
+                .all_paths()
+                .into_iter()
+                .find(|p| device.fs.true_identity_of(p).is_some_and(|(id, birth)| key(id, birth) == *to));
+            if let Some(body) = bound.as_deref().or(Some(path.as_str())).and_then(|p| device.fs.peek(p)) {
                 self.unseen.lock().unwrap().push(UnseenReading {
                     device: device.name.clone(),
                     device_index: index,
@@ -1087,6 +1195,25 @@ impl World {
             .map(|e| e.id.server_id)
             .collect();
         let at_home = |own: &(u64, u64), path: &str| device.fs.true_identity_of(path).is_some_and(|(id, b)| key(id, b) == *own);
+        // A record first bound in this pass whose own file a swap made while
+        // the pass ran carried off its path has no sighting at home: its
+        // binding is the start of its window all the same, from the start of
+        // this pass, with the bytes of the file it is bound to. Waiting for a
+        // sighting at home, a reading of a file no scan saw, its own file
+        // destroyed in between, was never noted, and a swap made in the pass
+        // that first bound it went unexcused (plat3 95631).
+        let (at_start, pairs_start) = mine.noted;
+        let mut first_bound: HashMap<i64, LastSeen> = HashMap::new();
+        for (r, (own, seen, path)) in &now {
+            if mine.last.contains_key(r) || at_home(own, path) {
+                continue;
+            }
+            let Some(bound) = device.fs.all_paths().into_iter().find(|p| device.fs.true_identity_of(p).is_some_and(|(id, b)| key(id, b) == *own)) else {
+                continue;
+            };
+            let bytes = device.fs.peek(&bound).unwrap_or_default();
+            first_bound.insert(*r, LastSeen { own: *own, seen: *seen, path: path.clone(), bytes, at: at_start, pairs: pairs_start });
+        }
         let mut next: HashMap<i64, LastSeen> = now
             .into_iter()
             .filter(|(_, (own, _, path))| at_home(own, path))
@@ -1100,7 +1227,11 @@ impl World {
                 next.insert(r, l);
             }
         }
+        for (r, l) in first_bound {
+            next.entry(r).or_insert(l);
+        }
         mine.last = next;
+        mine.noted = (at, pairs_now);
     }
 
     /// Every pass this world has run, in order, as the plan it made and the

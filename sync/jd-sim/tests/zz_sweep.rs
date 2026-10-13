@@ -1359,6 +1359,51 @@ fn the_rescue_nets_bar_knows_whose_delete_it_was() {
 /// folders (moved between them by the user) cannot discriminate; a directory
 /// learned after an engine mis-pairing inherits that belief; a sealed file no
 /// key opens is skipped.
+/// A file the user carried from a plain folder into a vault folder goes up
+/// sealed, and the plain copy its record was on the server goes to the trash:
+/// left live, the user's file is in the clear on the server at a place they
+/// took it from. Not where that copy changed since (an edit made elsewhere
+/// beats the delete the carry is), not where the user carried the file back
+/// out of every vault (`World::note_carries` drops that carry), and not on a
+/// device with no vault key or whose disk parks its vaults (it cannot send
+/// the sealed copy, and so never trashes the plain one). Blind where the
+/// engine knows files by their bytes (`World::note_carries`).
+fn assert_no_plain_copy_of_a_file_carried_into_a_vault(world: &World, seed: u64) {
+    let files = world.server.files();
+    let mut left = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for c in world.carries() {
+        let Some(f) = files.iter().find(|f| f.id == c.record && !f.trashed && !f.encrypted && f.sha256 == c.sha) else {
+            continue;
+        };
+        let device = &world.devices[c.device_index];
+        if device.vault().is_none() {
+            continue;
+        }
+        // Nor on a disk that parks its vaults (owner decision D3): nothing in
+        // them goes up sealed there, so nothing replaces the plain copy. Read
+        // device-wide and at the end of the run, which names the same set as
+        // "the carried file's vault was parked at the carry" only because in
+        // the simulator a disk's weakness is fixed for the whole run and a
+        // weak disk parks every vault it holds. A disk that turns weak
+        // mid-run -- the case the park's lift exists for -- needs this read at
+        // each pass point instead. The issue, not the disk's personality: it
+        // is what the engine told the user, which is what D3 promises.
+        if device.store.open_issues().unwrap().iter().any(|i| i.kind == "vault_on_a_weak_drive") {
+            continue;
+        }
+        if seen.insert(f.id) {
+            left.push(format!("file {} ({:?} in {:?}) carried into a vault on {}", f.id, f.name, f.folder, c.device));
+        }
+    }
+    assert!(
+        left.is_empty(),
+        "seed {seed}: {} plain cop(ies) of a file carried into a vault left on the server: {}",
+        left.len(),
+        left.join("; ")
+    );
+}
+
 fn assert_every_file_is_in_a_folder_the_user_put_it_in(world: &World, custody: &Custody, seed: u64) {
     use std::collections::{BTreeMap, BTreeSet};
     // Body hash -> every folder id it may stand in, over every intent that
@@ -2012,6 +2057,9 @@ fn workload_core_with(
         })),
         ("no_edit_lost_to_an_act_that_never_saw_it", Box::new(|| {
             assert_no_edit_was_lost_to_an_act_that_never_saw_it(&world, &custody, seed)
+        })),
+        ("no_plain_copy_of_a_file_carried_into_a_vault", Box::new(|| {
+            assert_no_plain_copy_of_a_file_carried_into_a_vault(&world, seed)
         })),
     ];
     if vault.any() {
@@ -7715,6 +7763,114 @@ fn the_custody_oracle_follows_a_save_no_scan_could_see() {
                 assert_every_file_is_in_a_folder_the_user_put_it_in(&world, &custody, seed)
             }));
             assert!(verdict.is_err(), "the oracle passed bytes moved into a folder by a hand no reading explains");
+        }
+    }
+}
+
+/// Kill2 95329: while mac held a vault folder in a park, the workload's swap
+/// traded the vault's file inside the park with a ring file outside it. With
+/// the park's records held blind, the ring record read the vault file at its
+/// name as its own edit and sent its plaintext. Witness of that world, every
+/// oracle on.
+#[test]
+fn frozen_a_file_traded_out_of_a_standing_park_is_followed_seed() {
+    workload_core_with(95_329, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+}
+
+/// Hostile2 94649: on the laptop the user's swap carried a record's file
+/// away and the user then removed the folder holding it, so the record read
+/// a file no scan had seen as its own save -- and a swap made while that pass
+/// ran moved the bound file on. The unseen reading is read against the bound
+/// file's bytes, found by its identity, and the mix it made is excused.
+/// Witness of that world, every oracle on.
+#[test]
+fn frozen_an_unseen_save_whose_file_moved_on_mid_pass_seed() {
+    workload_core_with(94_649, 30, &[("laptop", Platform::Linux), ("desktop", Platform::Linux)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 95424: on the pc a plain file and a vault file traded places, the
+/// plain file going up sealed as a new file that replaces it and the vault
+/// file held outside its vault at the plain file's name; a peer's edit then
+/// beat the plain file's trash. The plain file comes back and waits for the
+/// held file's name instead of standing down on it every pass. Witness of
+/// that world, every oracle on.
+#[test]
+fn frozen_a_conversion_lost_to_an_edit_waits_for_a_held_name_seed() {
+    workload_core_with(95_424, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 95595: on the pc a sealed file saved in a vault and carried into a
+/// plain folder before it was sent stood in that folder when the server moved
+/// the folder to a name this disk could not give it. The give-up carries the
+/// held file out beside the folder instead of waiting for an upload that
+/// never comes. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_folder_given_up_does_not_wait_on_a_held_never_sent_file_seed() {
+    workload_core_with(95_595, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 95631: on the disk a file went up and, in the same pass, a swap
+/// carried it off its path; its own file was then destroyed and a file no
+/// scan had seen stood at its path, read as its save. The reading is noted
+/// from the pass that first bound the record, and the mix it made is excused.
+/// Witness of that world, every oracle on.
+#[test]
+fn frozen_a_record_bound_in_the_pass_a_swap_moved_its_file_seed() {
+    workload_core_with(95_631, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Kill2 95117: on the pc a file the server had trashed went up again as a
+/// new file beside another at its name, the answer was lost, and the retry
+/// took the new file as its own after the feed had named it. The record is
+/// the live file's, and the copy here stays. Witness of that world, every
+/// oracle on.
+#[test]
+fn frozen_a_trashed_file_sent_again_and_adopted_stays_here_seed() {
+    workload_core_with(95_117, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 95640: on the pc a vault file never downloaded there was renamed to
+/// a numbered name, and the user saved a file at that name while its download
+/// was landing, then swapped that file into another folder. The file saved
+/// there is the user's own, never the record's, and the record stays in the
+/// folder the user put it in. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_rename_of_a_file_never_placed_here_agrees_on_nothing_seed() {
+    workload_core_with(95_640, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Plat3 75402: on the mac a plain file carried into a vault was set aside
+/// within the vault for a peer's sealed file of the same name while its
+/// sealed upload was still on its way. The conversion stands, and no plain
+/// copy is left on the server. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_carried_file_set_aside_within_its_vault_leaves_no_plain_copy_seed() {
+    workload_core_with(75_402, 40, &[("mac", Platform::MacOs), ("pc", Platform::Windows), ("disk", Platform::Decomposing)], true, Vault::FolderRings, false, Names::Ordinary, Swaps::On);
+}
+
+/// Kill2 75125: the same on the mac of the kill arm, with deaths between
+/// passes. Witness of that world, every oracle on.
+#[test]
+fn frozen_a_carried_file_in_the_kill_arm_leaves_no_plain_copy_seed() {
+    workload_core_with(75_125, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+}
+
+/// FAT kill2 75102 (Linux and macOS FAT kinds): on the pc a sealed file a
+/// swap carried out of its vault into a plain folder was held there when the
+/// server trashed that folder; the folder's local trash carries it out beside
+/// the folder rather than taking it as the server's own, and its sealed copy,
+/// with the edit another device made to it, stays live. Witness of that
+/// world, every oracle on.
+#[test]
+fn frozen_a_file_held_in_a_trashed_folder_on_fat_is_carried_out_seed() {
+    for kind in [jd_sim::FileIds::MountSession, jd_sim::FileIds::DataCluster] {
+        FAT_DISK_HERE.with(|m| m.set(Some(kind)));
+        let run = std::panic::catch_unwind(|| {
+            workload_core_with(75_102, 30, &[("mac", Platform::MacOs), ("pc", Platform::Windows)], true, Vault::FolderRings, true, Names::Ordinary, Swaps::On);
+        });
+        FAT_DISK_HERE.with(|m| m.set(None));
+        if let Err(e) = run {
+            std::panic::resume_unwind(e);
         }
     }
 }

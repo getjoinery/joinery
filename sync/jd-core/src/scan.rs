@@ -46,6 +46,8 @@ pub struct ObservedFile {
     /// (`jd_vfs::Personality::id_tie_break`), and 0 everywhere else. Never
     /// identity: read only by the tie-break in [`pair_files`].
     pub tie_break_id: u64,
+    /// Listed inside a vault folder.
+    pub in_a_vault: bool,
 }
 
 /// What the engine last recorded about a file it is tracking.
@@ -893,7 +895,12 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
             };
             let obs = &observed[c];
             claimed[c] = true;
-            if known[s].sha256.as_deref() == Some(obs.sha256.as_str()) {
+            // Out of every vault: a file moved within one -- set aside under a
+            // conflict name for a download landing at its name, renamed by
+            // the user -- is still on its way up sealed. Taken back there, the
+            // source's hold lapsed, the conversion was dropped, and the plain
+            // copy stayed on the server (plat3 75402).
+            if known[s].sha256.as_deref() == Some(obs.sha256.as_str()) && !obs.in_a_vault {
                 settled[s] = true;
                 out.bound.extend(bind(obs).map(|id| (known[s].id, id)));
                 out.changes.push((known[s].id, moved(&known[s], obs)));
@@ -1158,6 +1165,7 @@ mod tests {
             fingerprint: fp(file_id, 10, 100),
             sha256: sha.into(),
             tie_break_id: 0,
+            in_a_vault: false,
         }
     }
 
@@ -1193,7 +1201,7 @@ mod tests {
             seen_at: Some("Private/Report 8.docx".into()),
             ..known(-5, "Private/Report 8 (2).docx", 1010, "")
         };
-        let here = ObservedFile { path: "Private/Report 8.docx".into(), fingerprint: strong(1010), sha256: "sha-other".into(), tie_break_id: 0 };
+        let here = ObservedFile { path: "Private/Report 8.docx".into(), fingerprint: strong(1010), sha256: "sha-other".into(), tie_break_id: 0, in_a_vault: false };
         let out = pair_files(&[sealed, never_sent], &[here], &HashSet::new(), true);
         assert_eq!(out.change_for(EntityId::file(904)), Some(&LocalChange::Deleted), "the sealed file took the other file as its save: {:?}", out.changes);
         assert!(!out.superseded.contains(&EntityId::file(-5)), "{:?}", out.superseded);
@@ -1205,7 +1213,7 @@ mod tests {
     fn a_never_sent_file_seen_beside_a_gone_file_and_renamed_onto_it_is_its_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
         assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1218,7 +1226,7 @@ mod tests {
     fn a_save_whose_temporary_file_naming_renamed_on_paper_is_still_a_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd (2).tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
         assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1230,7 +1238,7 @@ mod tests {
     fn a_never_sent_file_whose_place_is_not_known_is_not_read_as_a_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: None, ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0 };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert_eq!(out.change_for(EntityId::file(1)), Some(&LocalChange::Deleted), "{:?}", out.changes);
         assert!(!out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1738,7 +1746,7 @@ mod tests {
     }
 
     fn seen(path: &str, file_id: u64, birth: u64, sha: &str) -> ObservedFile {
-        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into(), tie_break_id: 0 }
+        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into(), tie_break_id: 0, in_a_vault: false }
     }
 
     fn by_identity(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
@@ -2246,7 +2254,7 @@ mod tie_break_tests {
     }
 
     fn file(path: &str, sha: &str, tie_break_id: u64) -> ObservedFile {
-        ObservedFile { path: path.into(), fingerprint: fp0(), sha256: sha.into(), tie_break_id }
+        ObservedFile { path: path.into(), fingerprint: fp0(), sha256: sha.into(), tie_break_id, in_a_vault: false }
     }
 
     /// Two files whose bytes each also stand as another record's copy, and

@@ -2947,6 +2947,9 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 adopted.synced_fingerprint = Some(fingerprint);
                 adopted.own_file = Some(fingerprint.identity());
                 adopted.status = LocalStatus::Synced;
+                // The holder of a name is a live file, whatever the record it
+                // is taken as believed of the file it was (above).
+                adopted.remote_deleted = false;
                 // The disk has to follow here as well, and the crash window is
                 // why. An upload that lands beside under a conflict name and
                 // dies before its rename comes back through recovery: the
@@ -5026,7 +5029,16 @@ fn move_remote(
         .and_then(|p| p.get("disk_follows").and_then(Value::as_bool))
         .unwrap_or(false);
     if op.kind != "park_remote" && !disk_follows {
-        entry.synced_placement = Some(entry.remote.clone());
+        // Not for a record whose download has not landed: it agrees on
+        // nothing here, and its rename moves the server alone. Agreed here,
+        // it read as having held its new name already: a file the user saved
+        // there while the download was landing was taken as its edit rather
+        // than met as a stranger, and that file's next move carried the
+        // record -- every device's copy -- into a folder no one put it in
+        // (plat3 95640).
+        if !(entry.synced_placement.is_none() && entry.status == LocalStatus::PendingDownload) {
+            entry.synced_placement = Some(entry.remote.clone());
+        }
         // A rename this device derived from its own disk says the file wears
         // the new name byte for byte, and the server now calls it that too.
         // Any spelling written down earlier is not a fact about the disk any
@@ -5796,6 +5808,20 @@ fn unmaterialize_and_park(
             "the server no longer has it, so the deletion path owns this".into(),
         ));
     }
+    // A source a claimant replaces is going: its file went into a vault and
+    // is going up sealed, and its trash follows that upload wherever the
+    // server has moved it. Naming can decide this park before the scan of
+    // the same pass reads the carry; given up, the record lost its agreement,
+    // its trash never ran, and the plain copy stayed on the server in the
+    // clear -- a move race read against what was a conversion (kill2 75281).
+    if crate::pass::all_entries(env)?
+        .iter()
+        .any(|e| e.replaces == Some(entry.id) && !e.remote_deleted && e.status != LocalStatus::OutOfScope)
+    {
+        return Ok(OpOutcome::Overtaken(
+            "its file went into a vault, and the conversion decides what becomes of it".into(),
+        ));
+    }
     // At the AGREED path, never where a folder the user moved stands: what
     // is found there is told apart from the folder's own directory below by
     // identity, and the folder's own directory, moved away, is parked under
@@ -5957,6 +5983,13 @@ fn unmaterialize_and_park(
             if sits_under(env, e.id, entry.id.server_id)? {
                 continue;
             }
+            // Held outside its vault: its server copy lives sealed in the
+            // vault for good, and nothing will ever move it here. The rescue
+            // below carries it out instead, as the trash's does. Waited for,
+            // the park was retried every pass, for ever.
+            if crate::pass::held_outside_its_vault(env, e)? {
+                continue;
+            }
             if local_chain_parked(env, e, entry.id.server_id)? {
                 env.store.raise_issue(
                     Some(entry.id),
@@ -6097,6 +6130,22 @@ fn unmaterialize_and_park(
                 && child.synced_fingerprint.is_none()
                 && child.local_name.is_none()
             {
+                continue;
+            }
+            // Held outside its vault: its copy here was never the folder's.
+            // The rescue has carried it out, and its record holds it where
+            // it lands -- following it there now, or finding it there at the
+            // next scan where its bytes name more than one record. Always
+            // carried out: a held file's folder is plain, and so is every
+            // folder above it (a vault's whole tree is sealed, and the server
+            // refuses a move across that boundary), so the rescue never
+            // refuses it as a disclosure; and a rename that fails fails the
+            // park before the directory goes. Reset, the record let go of it,
+            // and the next scan minted it a new PLAIN file and sent it up in
+            // the clear. `trash_local` has no twin of this: it forgets only
+            // what the server confirms went with the folder, and a held
+            // record's server copy never did.
+            if crate::pass::held_outside_its_vault(env, &child)? {
                 continue;
             }
             child.synced_placement = None;
@@ -6336,22 +6385,26 @@ fn is_on_the_server(
     let Some(fp) = child.fingerprint else {
         return Ok(false);
     };
+    // A file held outside its vault is on the server only sealed, in the
+    // vault -- never at this path. Trashed with this folder, the user's copy
+    // would go and the scan would then read its absence as a delete of the
+    // sealed copy too. It is carried out like anything unsent, and stays held
+    // where it lands. Asked before the bytes alone answer, of the owners this
+    // disk can name -- by its own identity where it has ids, by its bytes
+    // where it has none (`owners_here` answers both): asked after, a held
+    // file on a FAT volume whose bytes the folder's records agreed on went to
+    // the trash with the folder (kill2 75102).
+    for holder in owners_here(env, path, fp, true)? {
+        if crate::pass::held_outside_its_vault(env, &holder)? {
+            return Ok(false);
+        }
+    }
     // No id to know the file by, so it is known by its bytes: on the server
     // when they are what a record in this folder agreed on. A folder's worth
     // of hashing, once, on a FAT or exFAT volume only.
     if fp.file_id == 0 {
         let here = env.vfs.hash(path)?;
         return Ok(agreed_here.contents.contains(&here));
-    }
-    // A file held outside its vault is on the server only sealed, in the
-    // vault -- never at this path. Trashed with this folder, the user's copy
-    // would go and the scan would then read its absence as a delete of the
-    // sealed copy too. It is carried out like anything unsent, and stays held
-    // where it lands.
-    for holder in env.store.owners_of_file(fp.identity(), true)? {
-        if crate::pass::held_outside_its_vault(env, &holder)? {
-            return Ok(false);
-        }
     }
     // What the caller knows from the RECORDS, asked first.
     //
@@ -6994,13 +7047,21 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             let mut refused: Vec<String> = Vec::new();
             // No ids to go on (a FAT or exFAT volume): what the server held
             // here is known by the bytes its records agreed on. The server
-            // took them with the folder, so deleted records count.
+            // took them with the folder, so deleted records count -- and only
+            // what the SERVER had under it. A file the user moved in here,
+            // followed by its bytes while its move had not reached the
+            // server, is not taken by the server's cascade: it is carried out
+            // beside the folder like any work the server does not have here.
+            // Counted by where it stood here, it went to the trash with the
+            // folder, its record read it as deleted, and that delete took an
+            // edit made on another device to the server's trash (FAT kill2
+            // 75102).
             let mut agreed_here = AgreedHere { folder: Some(entry.id.server_id), ..AgreedHere::default() };
             if env.vfs.personality().positional_file_ids {
                 for e in env.store.every_entry()? {
                     if e.id.entity_type == EntityType::File
                         && !e.id.is_provisional()
-                        && local_chain_passes(env, &e, entry.id.server_id)?
+                        && sits_under(env, e.id, entry.id.server_id)?
                     {
                         if let Some(c) = e.synced_content.as_ref() {
                             agreed_here.contents.insert(c.sha256.clone());
@@ -7761,7 +7822,7 @@ fn held_by_something_staying(env: &ExecEnv, path: &std::path::Path) -> Result<bo
 /// Where on this disk the file with this identity stands, if anywhere. The
 /// engine's scratch names count -- a file standing under one stands -- but
 /// a scratch directory is not walked into, as `observed_dirs` does not.
-fn where_file_stands(
+pub(crate) fn where_file_stands(
     env: &ExecEnv,
     own: jd_vfs::FileIdentity,
 ) -> Result<Option<std::path::PathBuf>, ExecError> {
@@ -7819,6 +7880,16 @@ fn a_strangers_file_inside(
                     let Some(fp) = child.fingerprint.filter(|fp| fp.identity().is_strong()) else { continue };
                     for owner in env.store.owners_of_file(fp.identity(), true)? {
                         if owner.id != folder && !inside.iter().any(|e| e.id == owner.id) {
+                            // A sealed file saved in a vault and carried in
+                            // here before it was sent is held, never uploaded
+                            // (D1): a wait for its upload never ends. The
+                            // rescue carries it out beside the folder, its
+                            // record following, still held where it lands.
+                            // Waited for, the park was retried every pass,
+                            // for ever (plat3 95595).
+                            if crate::pass::held_and_never_sent(env, &owner)? {
+                                continue;
+                            }
                             return Ok(Some(owner.id));
                         }
                     }
