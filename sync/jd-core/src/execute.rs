@@ -2090,6 +2090,36 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
         Err(e) => return Err(e.into()),
     };
+    // Into the folder it is for, not another folder at that folder's name:
+    // the user renamed the folder away and made a new one at its old name
+    // before the bytes arrived. Where the volume's identities hold and the
+    // folder's record knows its directory by id and birth, a directory at
+    // that name with another id and birth is another folder. Landed in it,
+    // the file went into a folder its user never put it in, and the next
+    // pass read that directory as a new folder holding it (soak run 2285).
+    // The spool's own check only asks that the directory stay the same while
+    // the bytes are in flight. Stricter than `not_its_folders_directory` on
+    // purpose: a mismatch here costs one pass, and the scan records a
+    // replaced directory again before it plans.
+    if env.vfs.personality().stable_file_identity {
+        if let (Some(folder), Some(dir)) = (entry.local_placement().parent, path.parent()) {
+            let known = env
+                .store
+                .get_entry(EntityId::folder(folder))?
+                .and_then(|f| f.synced_fingerprint)
+                .filter(|fp| fp.file_id != 0 && fp.birth_ns != 0)
+                .map(|fp| jd_vfs::FileIdentity { file_id: fp.file_id, birth_ns: fp.birth_ns });
+            let here = env.vfs.directory_identity(dir)?.filter(|id| id.file_id != 0 && id.birth_ns != 0);
+            if let (Some(known), Some(here)) = (known, here) {
+                if here != known {
+                    spool.discard();
+                    return Ok(OpOutcome::Overtaken(
+                        "another folder stands at the name of the folder it belongs in; deciding again from where it stands".into(),
+                    ));
+                }
+            }
+        }
+    }
     let mut landing = match (&file_key, &content_id) {
         (Some(key), Some(cid)) => Arrival::encrypted(&mut *spool, key, cid),
         _ => Arrival::plain(&mut *spool),

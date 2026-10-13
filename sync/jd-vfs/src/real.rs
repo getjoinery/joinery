@@ -710,7 +710,7 @@ impl Vfs for OsVfs {
 
     fn create_dir(&self, path: &Path) -> VfsResult<()> {
         folder_on_disk(path)?;
-        match fs::create_dir(path) {
+        match fs::create_dir(as_written(path, &self.personality)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => Ok(()),
             Err(e) => Err(io_err(path, e)),
@@ -719,7 +719,8 @@ impl Vfs for OsVfs {
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         folder_on_disk(to)?;
-        fs::rename(from, to).map_err(|e| io_err(from, e))
+        let to = as_written(to, &self.personality);
+        rename_as_stored(from, &to, &self.personality, |from, to| fs::rename(from, to)).map_err(|e| io_err(from, e))
     }
 
     fn trash(&self, path: &Path) -> VfsResult<()> {
@@ -732,7 +733,25 @@ impl Vfs for OsVfs {
         // extended-length paths — handed one it reports a path that does not
         // exist. Everywhere else this is a no-op.
         let shell_path = crate::paths::strip_verbatim(path);
-        trash_context().delete(&shell_path).map_err(|e| VfsError::Io {
+        let trashed = trash_context().delete(&shell_path);
+        // macOS's file manager asks the disk for the item by its decomposed
+        // spelling, and a FAT disk there moves an item, which is what a trash
+        // is, only by the spelling its name was made with. A file made with
+        // a composed name, as every file this engine downloads there is, was
+        // never trashed, and the folder it stood in never left (the FAT soak
+        // line's first run). Where the disk lists every name decomposed
+        // anyway, the spelling it keeps is seen by nothing but a rename, so
+        // the name is respelled decomposed and the trash asked once more.
+        #[cfg(target_os = "macos")]
+        let trashed = match (trashed, decomposed(path)) {
+            (Err(_), Some(respelled)) if self.personality.decomposes_unicode && path.exists() => {
+                rename_as_stored(path, &respelled, &self.personality, |from, to| fs::rename(from, to))
+                    .map_err(|e| io_err(path, e))?;
+                trash_context().delete(crate::paths::strip_verbatim(&respelled))
+            }
+            (trashed, _) => trashed,
+        };
+        trashed.map_err(|e| VfsError::Io {
             path: path.to_path_buf(),
             source: std::io::Error::other(e.to_string()),
         })
@@ -905,6 +924,78 @@ struct OsSpoolFile {
     after_copy: fn(&Path),
 }
 
+/// Renamed by the spelling the disk keeps the name under, where the disk takes
+/// the other spelling of a name for the same file. macOS's FAT driver finds a
+/// file by either spelling of an accented name, lists it decomposed whatever
+/// it was made with, and renames it only by the spelling it was made with: a
+/// file made decomposed, as most Mac apps make one, could not be renamed by
+/// the composed name the engine knows it by. The move was refused as "no
+/// longer there" every pass, and the folder it was leaving never went to the
+/// trash (the FAT soak line's first run). Tried in the other spellings only
+/// on a disk that ignores the difference: elsewhere the other spelling is
+/// another file.
+fn rename_as_stored(
+    from: &Path,
+    to: &Path,
+    personality: &Personality,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let asked = rename(from, to);
+    match &asked {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && personality.normalization_insensitive => {}
+        _ => return asked,
+    }
+    for spelled in other_spellings(from) {
+        match rename(&spelled, to) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            other => return other,
+        }
+    }
+    asked
+}
+
+/// The spelling a name is written under. Where the disk lists every name
+/// decomposed and finds a name by either spelling (HFS+, and macOS's FAT
+/// driver), it is written decomposed, as every Mac app writes one. A disk that
+/// lists names decomposed but finds them only as written keeps the composed
+/// spelling the engine opens them by. A FAT disk on a Mac keeps the spelling a
+/// name was written with and renames a file, which a trash also is, only by
+/// that one, and the Mac's file manager, Finder's with it, always asks by the
+/// decomposed spelling: a file written composed could be neither renamed nor
+/// put in the Trash there, except by this engine. HFS+ decomposes every name
+/// anyway.
+fn as_written(path: &Path, personality: &Personality) -> PathBuf {
+    match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) if personality.decomposes_unicode && personality.normalization_insensitive && !name.is_ascii() => {
+            path.with_file_name(crate::names::nfd(name))
+        }
+        _ => path.to_path_buf(),
+    }
+}
+
+/// The path with its last name composed and decomposed, each where it differs
+/// from the name as given. Only an accented name has more than one spelling.
+fn other_spellings(path: &Path) -> Vec<PathBuf> {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()).filter(|n| !n.is_ascii()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = Vec::new();
+    for spelled in [crate::names::nfc(name), crate::names::nfd(name)] {
+        let p = path.with_file_name(&spelled);
+        if spelled != name && !out.contains(&p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// The path with its last name decomposed, for an accented name.
+#[cfg(target_os = "macos")]
+fn decomposed(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name().and_then(|n| n.to_str()).filter(|n| !n.is_ascii())?;
+    Some(path.with_file_name(crate::names::nfd(name)))
+}
+
 /// How this platform moves a file to its trash.
 ///
 /// On macOS the `trash` crate's default asks Finder to do it through an
@@ -984,7 +1075,7 @@ impl OsSpoolFile {
                 return Err(VfsError::FolderMoved(parent.to_path_buf()));
             }
         }
-        match (self.rename)(&self.path, target) {
+        match (self.rename)(&self.path, &as_written(target, &self.personality)) {
             Ok(()) => {}
             // The spool is on the state store's volume and the sync root is
             // not: an external disk, a second partition, a mount point inside
@@ -1042,7 +1133,7 @@ impl OsSpoolFile {
             if directory_identity_at(dir, &self.personality)? != folder {
                 return Err(VfsError::FolderMoved(dir.to_path_buf()));
             }
-            fs::rename(&land, target).map_err(|e| io_err(&land, e))?;
+            fs::rename(&land, as_written(target, &self.personality)).map_err(|e| io_err(&land, e))?;
             // The rename is durable when the directory entry is. Unix only:
             // Windows has no directory handle to flush, and its rename is
             // journaled by the volume.
@@ -1987,6 +2078,149 @@ mod tests {
             "a trash took {:?}: something is waiting on a permission",
             started.elapsed()
         );
+    }
+
+    /// A disk that finds a name by either spelling but renames it only by the
+    /// one it was made with, as macOS's FAT driver does: `kept` is that
+    /// spelling, and every rename by another is "not found".
+    fn renames_only_as_stored<'a>(
+        kept: &'a std::cell::RefCell<String>,
+        calls: &'a std::cell::Cell<usize>,
+    ) -> impl Fn(&Path, &Path) -> std::io::Result<()> + 'a {
+        move |from: &Path, to: &Path| {
+            calls.set(calls.get() + 1);
+            if from.file_name().unwrap().to_str().unwrap() != kept.borrow().as_str() {
+                return Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+            }
+            *kept.borrow_mut() = to.file_name().unwrap().to_str().unwrap().to_string();
+            Ok(())
+        }
+    }
+
+    /// On a disk that takes either spelling for one file, a rename by the
+    /// spelling the engine knows reaches a file made with the other.
+    #[test]
+    fn a_file_made_decomposed_is_renamed_by_its_composed_name() {
+        let composed = "5-caf\u{e9} notes.txt";
+        let made = "5-cafe\u{301} notes.txt";
+        for (label, from, kept) in [("made decomposed", composed, made), ("made composed", made, composed)] {
+            let kept = std::cell::RefCell::new(kept.to_string());
+            let calls = std::cell::Cell::new(0);
+            // As the probe reads macOS's FAT driver: names come back
+            // decomposed, and either spelling finds the file.
+            let p = Personality::hfs_plus();
+            rename_as_stored(
+                &Path::new("/stick/Projects").join(from),
+                Path::new("/stick/Other/moved.txt"),
+                &p,
+                renames_only_as_stored(&kept, &calls),
+            )
+            .unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert_eq!(kept.borrow().as_str(), "moved.txt", "{label}");
+        }
+    }
+
+    /// A name is written decomposed where the disk lists names decomposed and
+    /// finds them by either spelling, and as given everywhere else.
+    #[test]
+    fn a_name_is_written_decomposed_only_where_the_disk_lists_it_so() {
+        let composed = Path::new("/d/Caf\u{e9}/5-caf\u{e9} notes.txt");
+        let decomposed = Path::new("/d/Caf\u{e9}/5-cafe\u{301} notes.txt");
+        assert_eq!(as_written(composed, &Personality::hfs_plus()), decomposed);
+        let mut spelling_sensitive = Personality::hfs_plus();
+        spelling_sensitive.normalization_insensitive = false;
+        assert_eq!(as_written(composed, &spelling_sensitive), composed);
+        for p in [Personality::macos(), Personality::linux(), Personality::windows(), Personality::fat32()] {
+            assert_eq!(as_written(composed, &p), composed);
+            assert_eq!(as_written(decomposed, &p), decomposed);
+        }
+        assert_eq!(as_written(Path::new("/d/plain.txt"), &Personality::hfs_plus()), Path::new("/d/plain.txt"));
+    }
+
+    /// Where the two spellings are two files, the other spelling is never
+    /// tried: renaming it would move a different file.
+    #[test]
+    fn where_spellings_are_two_files_the_other_is_never_renamed() {
+        let kept = std::cell::RefCell::new("5-cafe\u{301} notes.txt".to_string());
+        let calls = std::cell::Cell::new(0);
+        let refused = rename_as_stored(
+            Path::new("/disk/5-caf\u{e9} notes.txt"),
+            Path::new("/disk/moved.txt"),
+            &Personality::linux(),
+            renames_only_as_stored(&kept, &calls),
+        );
+        assert_eq!(refused.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+        assert_eq!(calls.get(), 1, "the other spelling was tried");
+        assert_eq!(kept.borrow().as_str(), "5-cafe\u{301} notes.txt");
+    }
+
+    /// The same, on macOS's own FAT driver: a disk image formatted FAT32,
+    /// files made under each spelling of an accented name, each renamed and
+    /// trashed by the name the engine knows it by.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn on_a_mac_fat_disk_a_file_is_renamed_and_trashed_whichever_spelling_made_it() {
+        struct Mounted(PathBuf);
+        impl Drop for Mounted {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("hdiutil").args(["detach", "-force"]).arg(&self.0).output();
+            }
+        }
+        let d = TempDir::new("mac-fat");
+        let image = d.path().join("stick.dmg");
+        let made = std::process::Command::new("hdiutil")
+            .args(["create", "-size", "40m", "-fs", "MS-DOS FAT32", "-volname", "JDTEST"])
+            .arg(&image)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+        let mount = d.path().join("mnt");
+        fs::create_dir_all(&mount).unwrap();
+        let attached = std::process::Command::new("hdiutil")
+            .args(["attach", "-nobrowse", "-mountpoint"])
+            .arg(&mount)
+            .arg(&image)
+            .output()
+            .unwrap();
+        assert!(attached.status.success(), "{}", String::from_utf8_lossy(&attached.stderr));
+        let _mounted = Mounted(mount.clone());
+        let root = mount.join("root");
+        fs::create_dir_all(&root).unwrap();
+        let v = OsVfs::new(root.clone(), d.path().join("spool")).unwrap();
+        assert!(v.personality().decomposes_unicode && v.personality().normalization_insensitive);
+        // The engine's name on a disk that decomposes: composed.
+        let known = "5-caf\u{e9} notes.txt";
+        for (label, made_as) in [("made decomposed", "5-cafe\u{301} notes.txt"), ("made composed", known)] {
+            let folder = root.join(label);
+            fs::create_dir_all(folder.join("away")).unwrap();
+            fs::write(folder.join(made_as), b"a").unwrap();
+            fs::write(folder.join(format!("x-{made_as}")), b"b").unwrap();
+            v.rename(&folder.join(known), &folder.join("away").join("moved.txt"))
+                .unwrap_or_else(|e| panic!("{label}: the rename failed: {e}"));
+            assert!(folder.join("away/moved.txt").exists(), "{label}");
+            let doomed = folder.join(format!("x-{known}"));
+            v.trash(&doomed).unwrap_or_else(|e| panic!("{label}: the trash failed: {e}"));
+            assert!(!doomed.exists(), "{label}: the file is still there");
+        }
+        // What the engine writes there -- a folder, a download, a rename --
+        // is stored decomposed, the spelling the Mac's file manager renames
+        // and trashes by: a plain rename by that spelling finds each one.
+        let decomposed = |p: &Path| p.with_file_name(crate::names::nfd(p.file_name().unwrap().to_str().unwrap()));
+        let made = root.join("Caf\u{e9}");
+        v.create_dir(&made).unwrap();
+        let landed = made.join(known);
+        let mut spool = v.spool(&landed, 1).unwrap();
+        spool.write_all(b"downloaded").unwrap();
+        spool.commit(&landed, None).unwrap();
+        let renamed = made.join("r\u{e9}sum\u{e9}.txt");
+        fs::write(made.join("plain.txt"), b"c").unwrap();
+        v.rename(&made.join("plain.txt"), &renamed).unwrap();
+        for (what, written) in [("the download", &landed), ("the rename", &renamed), ("the folder", &made)] {
+            let away = root.join(format!("away-{}", what.len()));
+            fs::rename(decomposed(written), &away)
+                .unwrap_or_else(|e| panic!("{what} was not stored decomposed: {e}"));
+            fs::rename(&away, decomposed(written)).unwrap();
+        }
     }
 
     #[test]

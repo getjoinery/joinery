@@ -202,8 +202,9 @@ and the strong-only ones are unaffected. These need changing:
 9. **The held-record skip** (`scan.rs`) is `0 != 0`. Not reachable under D3,
    but guarded anyway.
 
-Folder following by ids is safe but blind at 0, so folder renames rest on
-contents and paths, as the existing "vanished id" scenario already covers.
+Folder following by ids is safe but blind at 0. On a positional disk a folder
+is followed by its files' bytes instead (D5); on a stable-id weak disk its
+files' ids still propose, as the existing "vanished id" scenario covers.
 
 **The hash cache is keyed by the id (B7, found 2026-09-28).** `cached_hash`
 looks a file's hash up by (file id, size, mtime). On a positional disk the
@@ -657,6 +658,25 @@ FAT-formatted VHD on the Windows VM.
   kill2 75102). Every positional drive carries a standing notice that says
   so, beside its other limit (files with identical contents trading names).
   Only a rename journal (layer 2) could close it.
+
+- **D5 (owner, 2026-10-13, Q1): a plain folder renamed on a positional disk
+  is followed by its files' bytes.** Before, `detect_folder_moves` credited
+  a folder only with its files' ids, all 0 on a positional disk, so every
+  folder renamed there, however quietly, was read as deleted: its server
+  copy trashed with whatever was tied to it (sharing set on it), a new folder
+  made, every file moved into it one at a time, and a peer's directory
+  emptied into a new one (the FAT soak line's first run, seed 19001, both
+  cycles). Now a gone folder takes the one new directory where every file
+  it has, by the bytes each record last saw, stands at its place inside it.
+  The rule is narrow on purpose (reviewer1): the whole set, never one file
+  (a file found elsewhere is as likely moved out or traded); at least two
+  files (a one-file folder is D4's ambiguity, and the ring misread that
+  followed one file is plat3 75414); one directory and one folder (two that
+  fit are a copy, and nothing is guessed); never a vault (D3 parks it), and
+  never a directory holding sealed bytes. A folder inside one so found goes
+  with it under its own name, whatever it holds: its parent's whole set
+  already took its files in. Everything else keeps the reading above, and
+  the standing notice names what that leaves.
 
 ## D3 as built behaviour (proposed 2026-09-28; revised with a5's B5, 2026-09-29; built in scratch wf5 2026-09-29)
 

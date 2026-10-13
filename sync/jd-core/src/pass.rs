@@ -3344,10 +3344,12 @@ pub(crate) fn held_by_a_weak_volume_park(env: &ExecEnv) -> Result<std::collectio
 /// renames there are read from contents and paths alone, and what cannot be
 /// read is reported, not hidden -- files with identical contents trading
 /// names, named pair by pair (`say_where_two_files_may_have_swapped`), and a
-/// folder renamed while files inside it are moved, which may be read as
-/// deleted, its copy on the server going to the trash (owner decisions
-/// 2026-09-29: such drives may work badly, but they fail loudly; 2026-10-13:
-/// the folder reading is an accepted limit, and every FAT drive is told).
+/// renamed folder its files cannot vouch for -- fewer than two of them, or
+/// moved or changed in the same breath -- which may be read as deleted, its
+/// copy on the server going to the trash (owner decisions 2026-09-29: such
+/// drives may work badly, but they fail loudly; 2026-10-13: the folder
+/// reading is an accepted limit, and every FAT drive is told; Q1, the same
+/// day: any other renamed folder is followed by its files' bytes).
 pub(crate) const RENAMES_UNTRACKED: &str = "renames_untracked_on_this_drive";
 
 /// What the standing notice says. A notice already open in other words is
@@ -3355,9 +3357,9 @@ pub(crate) const RENAMES_UNTRACKED: &str = "renames_untracked_on_this_drive";
 const RENAMES_UNTRACKED_TEXT: &str = "This drive is formatted FAT or exFAT, which cannot keep track of files \
      and folders when they are renamed. Syncing still works, but two things can go wrong: files with \
      identical contents that swap names may get their version histories mixed up (you will be told \
-     which files each time), and a folder renamed while files inside it are being moved may be read \
-     as deleted, sending its copy on the server to the trash, where it can be restored. For important \
-     work, use the computer's own drive.";
+     which files each time), and a renamed folder that holds fewer than two files, or whose files were \
+     being moved or changed at the same time, may be read as deleted, sending its copy on the server \
+     to the trash, where it can be restored. For important work, use the computer's own drive.";
 
 /// Raised per pair when it happens (`say_where_two_files_may_have_swapped`).
 pub(crate) const NAMES_MAY_HAVE_SWAPPED: &str = "names_may_have_swapped";
@@ -4945,8 +4947,52 @@ fn detect_folder_moves(
         }
     }
 
+    // On a volume whose ids are positions every file's id reads 0 and
+    // credits no folder, so `children` holds nothing there and a folder the
+    // user renamed was never found: it read as deleted, its server copy went
+    // to the trash, a new folder was made with every file moved into it, and
+    // a peer's directory was emptied into a new one (the FAT soak line's
+    // first run). There a folder's files are known by the bytes each record
+    // last saw, credited to every folder above them as `children` credits
+    // ids. Sealed bytes are gathered apart, to keep a plain folder off any
+    // directory that holds them, and credit no folder.
+    let positional = env.vfs.personality().positional_file_ids;
+    let mut by_bytes: HashMap<EntityId, Vec<(String, String)>> = HashMap::new();
+    let mut sealed_bytes: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if positional {
+        for entry in all_entries(env)? {
+            if entry.id.entity_type != EntityType::File || entry.remote_deleted || entry.synced_fingerprint.is_none() {
+                continue;
+            }
+            let agreed = entry.synced_content.as_ref().map(|c| c.sha256.clone());
+            if entry.is_encrypted {
+                sealed_bytes.extend(entry.last_seen_sha.clone());
+                sealed_bytes.extend(agreed);
+                continue;
+            }
+            let (Some(sha), Some(path)) = (entry.last_seen_sha.clone().or(agreed), relative_path(env, &entry)?) else {
+                continue;
+            };
+            let parts: Vec<&str> = path.split('/').collect();
+            let mut folder = entry.local_placement().parent;
+            let mut depth = 1;
+            while let Some(id) = folder {
+                if depth >= parts.len() {
+                    break;
+                }
+                by_bytes
+                    .entry(EntityId::folder(id))
+                    .or_default()
+                    .push((parts[parts.len() - depth..].join("/"), sha.clone()));
+                folder = folder_parent.get(&id).copied().flatten();
+                depth += 1;
+            }
+        }
+    }
+
     let by_path: HashMap<&str, &ObservedFile> =
         observed.iter().map(|o| (o.path.as_str(), o)).collect();
+    let bytes_at: HashMap<&str, &str> = observed.iter().map(|o| (o.path.as_str(), o.sha256.as_str())).collect();
 
     // A known child FOLDER is contents too, by identity: for each tracked
     // folder, the ids of the folders it holds, where they know them. The only
@@ -5683,6 +5729,67 @@ fn detect_folder_moves(
         }
     }
 
+    // Where ids are positions: the one directory a gone folder's whole set
+    // of files stands in, by bytes, each at its place inside the folder
+    // (`by_bytes`). Every file, not one: there, one file found elsewhere is
+    // as likely a file moved out, or files traded between folders, as a
+    // folder renamed. Two at least: a one-file folder's file is all there is
+    // to read it by, and a swap of files between one-file folders reads the
+    // same (D4). One directory and one folder: two that fit are a copy, and
+    // nothing is guessed. Never a vault, which such a volume parks (D3), and
+    // never a directory holding sealed bytes: a plain record handed a
+    // vault's directory sent sealed files up in the clear (plat3 75414).
+    // Nothing a standing park holds, by its record or by its directory: what
+    // stands in a park is held, not judged (`hold_what_a_standing_park_holds`),
+    // and a folder followed out from under one had its path moved and its
+    // move dropped by the hold, and its files came back at the drive root.
+    // Anything else keeps today's reading.
+    let parked: Vec<String> = if positional {
+        let mut parked = standing_parks(env)?;
+        parked.extend(park_directories(env)?.into_iter().map(|(dir, _)| dir));
+        parked
+    } else {
+        Vec::new()
+    };
+    let mut followed_by_bytes: HashMap<EntityId, String> = HashMap::new();
+    // The folders the match below finds this way, for the folders inside
+    // them to go along with.
+    let mut found_by_bytes: std::collections::HashSet<EntityId> = std::collections::HashSet::new();
+    if positional {
+        let whole_set_at = |id: &EntityId, at: &str| -> bool {
+            by_bytes.get(id).is_some_and(|kids| {
+                kids.len() >= 2
+                    && kids
+                        .iter()
+                        .all(|(rel, sha)| bytes_at.get(format!("{at}/{rel}").as_str()) == Some(&sha.as_str()))
+            })
+        };
+        let holds_sealed = |at: &str| -> bool {
+            let inside = format!("{at}/");
+            observed.iter().any(|o| o.path.starts_with(&inside) && sealed_bytes.contains(&o.sha256))
+        };
+        let mut fits: Vec<(EntityId, &String)> = Vec::new();
+        for (old_path, id) in &missing {
+            if encrypted.contains(id) || claimed.contains(id) || under_one_of(&parked, old_path) {
+                continue;
+            }
+            for candidate in candidates.iter() {
+                if !taken.contains(candidate)
+                    && !under_one_of(&parked, candidate)
+                    && whole_set_at(id, candidate)
+                    && !holds_sealed(candidate)
+                {
+                    fits.push((*id, *candidate));
+                }
+            }
+        }
+        for (id, candidate) in &fits {
+            if fits.iter().filter(|(i, _)| i == id).count() == 1 && fits.iter().filter(|(_, c)| c == candidate).count() == 1 {
+                followed_by_bytes.insert(*id, (*candidate).clone());
+            }
+        }
+    }
+
     // A record that lost its path to a claim is searched for as a contested
     // one, and where neither its contents place it nor anything else does, it
     // takes today's reading. Stated residual (plat3 75412, rooted in T1): it
@@ -5771,7 +5878,40 @@ fn detect_folder_moves(
                         .count()
                         + usize::from(child_folder_under(id, at))
                 };
-                let matched = matched_at(candidate);
+                // Where ids are positions, a gone folder is found by bytes
+                // (`followed_by_bytes`), or carried along inside a folder so
+                // found this pass: the directory of its own name under where
+                // its parent went, its own files, any it has, there as they
+                // were, and no sealed bytes in it. Its parent's whole set took
+                // them in; a subfolder of one file or none has nothing else to
+                // be read by, and read alone it was made again inside the
+                // renamed folder. Never about a park (`parked`).
+                let by_bytes_here = positional
+                    && !whole_only
+                    && !encrypted.contains(id)
+                    && !under_one_of(&parked, old_path)
+                    && !under_one_of(&parked, candidate)
+                    && (followed_by_bytes.get(id).is_some_and(|at| at == *candidate)
+                        || match (
+                            folder_parent.get(&id.server_id).copied().flatten(),
+                            candidate.rsplit_once('/'),
+                        ) {
+                            (Some(parent), Some((dir, name))) => {
+                                old_path.rsplit('/').next() == Some(name)
+                                    && found_by_bytes.contains(&EntityId::folder(parent))
+                                    && folder_ids.get(dir) == Some(&parent)
+                                    && !observed.iter().any(|o| {
+                                        o.path.starts_with(&format!("{candidate}/")) && sealed_bytes.contains(&o.sha256)
+                                    })
+                                    && by_bytes.get(id).is_none_or(|kids| {
+                                        kids.iter().all(|(rel, sha)| {
+                                            bytes_at.get(format!("{candidate}/{rel}").as_str()) == Some(&sha.as_str())
+                                        })
+                                    })
+                            }
+                            _ => false,
+                        });
+                let matched = if by_bytes_here { matched_at(candidate).max(1) } else { matched_at(candidate) };
                 // The folder's own directory, proven, stands here: the
                 // folder renamed or moved, whatever its files did. Nothing
                 // inside need propose it -- its only file may have been
@@ -5877,6 +6017,11 @@ fn detect_folder_moves(
                 continue;
             };
             claimed.push(id);
+            // Where ids are positions, a gone folder is placed only by its
+            // bytes (`by_bytes_here`): nothing else proposes one there.
+            if positional && !whole_only {
+                found_by_bytes.insert(id);
+            }
             taken.insert(candidate);
             scan.present.insert(id);
             folder_ids.insert((*candidate).clone(), id.server_id);
