@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 3.12 - docker installs the release's own support bundle through the agent (joinery-agent bundle install),
+#               so a host that never joins a management node has its host converger and data-root tick.
 #VERSION 3.11 - --encrypted-data-root places the release's agent binary first (no unit, no identity), checked
 #              against the manifest's hash of the unpacked binary; it was unpacked into /run, which is noexec
 #VERSION 3.10 - install.sh server|docker --encrypted-data-root --recovery-public-key=KEY: the data root is born on a
@@ -2311,6 +2313,27 @@ install_docker_host_agent() {
         return 0
     fi
     print_success "Host agent installed and enabled"
+
+    # The release's own support bundle, and with it the host converger: the
+    # converge a bundle's arrival runs installs the converger's timer, which
+    # runs the data root's tick. A host that never joins a management node
+    # has no other way to get one; a host that joins gets newer bundles from
+    # its management node. The agent holds these bytes to the checks a bundle
+    # from a management node meets (signature, every file, the public log).
+    if [ -f "$dist_dir/support_bundle.tar.gz" ]; then
+        print_step "Installing the release's support bundle and the host converger..."
+        local -a bundle_args=("$dist_dir/support_bundle.tar.gz")
+        [ -f "$dist_dir/RELEASE_STATEMENT" ] && bundle_args+=(--statement="$dist_dir/RELEASE_STATEMENT")
+        if joinery-agent bundle install "${bundle_args[@]}" \
+            && systemctl is-active --quiet joinery-host-converger.timer; then
+            print_success "Support bundle installed; the host converger runs every minute"
+        else
+            print_warning "This host has no running host converger: the support bundle or the converge that installs the converger did not complete (above)."
+            print_warning "Retry with: joinery-agent bundle install ${bundle_args[*]}"
+        fi
+    else
+        print_warning "No support bundle at $dist_dir: this host has no host converger until a management node sends one."
+    fi
 
     if [ -n "$mgmt_url" ]; then
         print_step "Requesting to join $mgmt_url ..."

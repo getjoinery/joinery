@@ -3419,6 +3419,13 @@ check(substr_count($install_src, 'install_docker_host_agent "$MGMT_NODE_URL" "$N
     'which both branches of install.sh docker run (fresh Docker, Docker already present)');
 check(strpos($docker_fn, 'joinery-agent join "${join_args[@]}"') !== false,
     'and joins the management node in the same run when one is named');
+$bundle_at = strpos($docker_fn, 'joinery-agent bundle install "${bundle_args[@]}"');
+check($bundle_at !== false && $bundle_at > strpos($docker_fn, '--siteless --dist-dir') && $bundle_at < strpos($docker_fn, 'joinery-agent join'),
+    'and installs the release\'s own support bundle (with its release statement) between placing the agent and joining, so a host that never joins has its host converger');
+check(strpos($docker_fn, 'bundle_args+=(--statement="$dist_dir/RELEASE_STATEMENT")') !== false,
+    'the bundle goes with the release statement beside it, so a machine held to the public log can install it');
+check(strpos($docker_fn, '&& systemctl is-active --quiet joinery-host-converger.timer; then') !== false,
+    'the install says the host converger runs only when its timer is active');
 $php_callers = [];
 foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PathHelper::getRootDir() . '/plugins/server_manager/includes')) as $f) {
     if (substr((string)$f, -4) === '.php' && strpos((string)file_get_contents((string)$f), '--siteless') !== false) {

@@ -667,8 +667,8 @@ mkdir -p "$R/dev"; : > "$R/dev/tpmrm0"
 out="$(run create --encrypted 16G 2>&1)"; rc=$?
 chk "create --encrypted: exit 0, and says it is encrypted and to whom it is sealed" \
     "$rc|$(grep -c "on an encrypted volume; its key is sealed to the recovery key ${FPR:0:16}" <<< "$out")" "0|1"
-chk "LUKS2 in the standard configuration: aes-xts-plain64, a 512-bit key, 4096-byte sectors, PBKDF2-SHA256 at 2000000" \
-    "$(grep -c '^cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --sector-size 4096 --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000 --key-slot 0 --volume-key-file .*/volume.key /dev/loop7 .*/slot.key$' "$LOG")" "1"
+chk "LUKS2 in the standard configuration: aes-xts-plain64, a 512-bit key, 4096-byte sectors, PBKDF2-SHA256 at 1000000" \
+    "$(grep -c '^cryptsetup luksFormat --batch-mode --type luks2 --cipher aes-xts-plain64 --key-size 512 --sector-size 4096 --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 1000000 --key-slot 0 --volume-key-file .*/volume.key /dev/loop7 .*/slot.key$' "$LOG")" "1"
 chk "on the image's loop device, with direct I/O" "$(grep -c "^losetup --direct-io=on --find --show $R/srv/joinery.img$" "$LOG")" "1"
 chk "the key is sealed to the recovery key before the volume is written: 64 bytes, a 512-bit key" \
     "$(grep -n -e '^agent data-root seal' -e '^cryptsetup luksFormat' "$LOG" | cut -d: -f2 | cut -d' ' -f1-2 | paste -sd,)|$(cat "$R/srv/joinery.img.recovery")|$(stat -c %a "$R/srv/joinery.img.recovery")" \
@@ -687,6 +687,8 @@ if [ -f "$AGENT_ESCROW" ]; then
     chk "the agent's key slots are the script's: PBKDF2-SHA256 at the same count" \
         "$(grep -c -e 'luksSlotPBKDF      = "pbkdf2"' -e 'luksSlotHash       = "sha256"' -e "luksSlotIterations = \"$(sed -n 's/^LUKS_ITERATIONS=//p' "$SCRIPT")\"" "$AGENT_ESCROW")" "3"
 fi
+chk "today's count is among the counts check accepts" \
+    "$(eval "$(grep -E '^LUKS_ITERATIONS(_MADE)?=' "$SCRIPT")"; [[ " ${LUKS_ITERATIONS_MADE[*]} " == *" $LUKS_ITERATIONS "* ]] && echo yes)" "yes"
 C="$R/etc/joinery/data_root"
 chk "recorded: luks-file, the image, the break-glass copy" \
     "$(grep -c '^backing=luks-file$' "$C")|$(grep -c '^source=/srv/joinery.img$' "$C")|$(grep -c '^sidecar=/srv/joinery.img.recovery$' "$C")" "1|1|1"
@@ -705,14 +707,22 @@ chk "no direct I/O unit (the unlock sets the loop up), and the target wants none
 chk "check: 0, mounted and open" "$(run check >/dev/null 2>&1; echo $?)" "0"
 
 echo "--- slots ---"
-printf 'slot=1 kdf=pbkdf2 hash=sha256 iterations=1000 token=systemd-tpm2\nslot=2 kdf=pbkdf2 hash=sha256 iterations=2000000 token=-\n' > "$T/slots"
-chk "the TPM2 slot and a slot of ours: check 0" "$(run check >/dev/null 2>&1; echo $?)" "0"
+printf 'slot=1 kdf=pbkdf2 hash=sha256 iterations=1000 token=systemd-tpm2\nslot=2 kdf=pbkdf2 hash=sha256 iterations=1000000 token=-\nslot=5 kdf=pbkdf2 hash=sha256 iterations=2000000 token=-\n' > "$T/slots"
+chk "the TPM2 slot, a slot at today's count and one an earlier release made: check 0" "$(run check >/dev/null 2>&1; echo $?)" "0"
+cp "$T/slots" "$T/slots.ok"
+for n in 500000 1500000 4000000; do
+    cp "$T/slots.ok" "$T/slots"; printf 'slot=4 kdf=pbkdf2 hash=sha256 iterations=%s token=-\n' "$n" >> "$T/slots"
+    out="$(run check 2>&1)"; rc=$?
+    chk "a PBKDF2-SHA256 slot at ${n}, a count this platform never made: check fails and names it" \
+        "$rc|$(grep -c "key slot 4 of the encrypted volume was not made by this platform (pbkdf2 sha256, ${n} iterations" <<< "$out")" "1|1"
+done
+cp "$T/slots.ok" "$T/slots"
 printf 'slot=3 kdf=argon2id hash=- iterations=4 token=-\n' >> "$T/slots"
 out="$(run check 2>&1)"; rc=$?
 chk "a slot this platform did not make: check fails and names it" "$rc|$(grep -c 'key slot 3 of the encrypted volume was not made by this platform (argon2id' <<< "$out")" "1|1"
 chk "and tick goes on: a strange slot is not 'not ready'" "$(run tick >/dev/null 2>&1; echo $?)" "0"
 chk "status names the slots, the TPM2 chip and the break-glass copy" \
-    "$(run status 2>&1 | grep -c -e '^state: mounted' -e '^key slots: 3, one of them the TPM2 chip$' -e "^break-glass copy: /srv/joinery.img.recovery, sealed to the recovery key ${FPR}$" -e '^encryption: LUKS2' -e '^WARNING: key slot 3')" "5"
+    "$(run status 2>&1 | grep -c -e '^state: mounted' -e '^key slots: 4, one of them the TPM2 chip$' -e "^break-glass copy: /srv/joinery.img.recovery, sealed to the recovery key ${FPR}$" -e '^encryption: LUKS2' -e '^WARNING: key slot 3')" "5"
 : > "$T/slots"
 
 echo "--- binds ---"
@@ -818,7 +828,7 @@ chk "the new volume key and the driving key sealed before anything is written" \
     "agent data-root seal --recipient,agent data-root seal --recipient,cryptsetup reencrypt --init-only --batch-mode"
 chk "the new key's pending copy: 64 bytes, a 512-bit key" "$(grep -c '"sealed_bytes": 64' "$R/srv/joinery.img.recovery.pending")" "1"
 chk "LUKS2 re-encryption under that key, through the driving slot, the standard slot settings, no keyring" \
-    "$(grep -c -- '^cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 --hotzone-size 8M --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000 --volume-key-file .*/new.vk --key-slot 4 --key-file .*/slot.key /dev/loop7$' "$LOG")" "1"
+    "$(grep -c -- '^cryptsetup reencrypt --init-only --batch-mode --disable-keyring --key-size 512 --hotzone-size 8M --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 1000000 --volume-key-file .*/new.vk --key-slot 4 --key-file .*/slot.key /dev/loop7$' "$LOG")" "1"
 chk "recorded: re-encrypting, its driving slot, the pending copy; the new key itself not kept" \
     "$(grep -c -e '^reencrypt=reencrypt$' -e '^driving_slot=4$' -e '^rekey_sidecar=/srv/joinery.img.recovery.pending$' "$C")|$( [ -e "$R/run/joinery/data-root-encrypt/new.vk" ] && echo kept || echo gone)" "3|gone"
 out="$(run decrypt 2>&1)"; rc=$?
@@ -883,7 +893,7 @@ chk "both keys sealed before the volume is written: the volume key, then the dri
     "$(grep -n -e '^agent data-root seal' -e '^cryptsetup reencrypt' "$LOG" | cut -d: -f2 | cut -d' ' -f1-4 | paste -sd,)" \
     "agent data-root seal --recipient,agent data-root seal --recipient,cryptsetup reencrypt --encrypt --init-only"
 chk "LUKS2 started in place: the filesystem's own 512-byte sectors, the standard slot, 32 MiB reduced, no keyring" \
-    "$(grep -c -- '^cryptsetup reencrypt --encrypt --init-only --batch-mode --disable-keyring --type luks2 --cipher aes-xts-plain64 --key-size 512 --sector-size 512 --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000 --reduce-device-size 33554432 --volume-key-file .*/volume.key --key-slot 0 --key-file .*/slot.key /dev/loop7 joinery-data$' "$LOG")" "1"
+    "$(grep -c -- '^cryptsetup reencrypt --encrypt --init-only --batch-mode --disable-keyring --type luks2 --cipher aes-xts-plain64 --key-size 512 --sector-size 512 --pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 1000000 --reduce-device-size 33554432 --volume-key-file .*/volume.key --key-slot 0 --key-file .*/slot.key /dev/loop7 joinery-data$' "$LOG")" "1"
 chk "recorded: luks-file, encrypting, its driving slot and that slot's sealed copy" \
     "$(grep -c -e '^backing=luks-file$' -e '^reencrypt=encrypt$' -e '^driving_slot=0$' -e '^driving_sidecar=/etc/joinery/data-root/driving-slot.recovery$' "$C")" "4"
 chk "the fstab line is gone: the mount is a unit of its own now" "$(grep -c joinery.img "$R/etc/fstab")" "0"
