@@ -9,6 +9,8 @@
  * request — a round trip with a throwaway app password (sign in, open INBOX,
  * sign out, revoke).
  *
+ * @version 1.6.0 - in a container: the Mail name form (a name of its own under the web name, for a web name behind
+ *                  Cloudflare); it takes effect at Allow, or Switch while mail apps are on
  * @version 1.5.0 - through a relay: the relay's own view (whether this server answers it on each port, what it last
  *                  refused and why), from the report the site already keeps
  * @version 1.4.0 - a site in a container uses the same switch (a request to its Docker host) and shows the host's answer
@@ -40,6 +42,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 		$run = $action === 'disallow' ? MailAppGateway::disallow() : MailAppGateway::allow();
 		$flash($run['message'], !$run['ok'] ? 'Nothing changed'
 			: ($action === 'disallow' ? 'Mail apps off' : ($action === 'switch' ? 'Switched' : 'Mail apps on')));
+		header('Location: ' . $self);
+		exit;
+	}
+	if ($action === 'set_container_name' && MailAppGateway::inContainer()) {
+		$set = MailAppGateway::setContainerMailName((string)($_POST['container_mail_name'] ?? ''));
+		$flash($set['message'], $set['ok'] ? 'Mail name saved' : 'Nothing changed');
 		header('Location: ' . $self);
 		exit;
 	}
@@ -194,6 +202,25 @@ if ($enabled || $why_not === null) {
 		echo ' ' . AdminPage::action_button('Run a round trip', $self, array('hidden' => array('action' => 'round_trip')));
 	}
 	echo '</p>';
+}
+
+if (MailAppGateway::inContainer()) {
+	$base = MailAppGateway::containerNameBase();
+	echo '<h3>Mail name</h3><p>Mail programs connect to this site\'s web name, <code>' . $esc(MailAppGateway::hostname())
+		. '</code>, unless you give them a name of their own here. Do that when the web name goes through Cloudflare, which '
+		. 'carries web pages only: use a name under it, such as <code>mail.' . $esc($base) . '</code>, pointing straight at '
+		. 'this site\'s server (DNS only). The server gets its certificate when mail apps are allowed. A change takes '
+		. 'effect at Allow, or with Switch while mail apps are on.</p>';
+	$formwriter = $page->getFormWriter('mail_name_form', array('action' => $self));
+	echo $formwriter->begin_form();
+	$formwriter->hiddeninput('action', '', array('value' => 'set_container_name'));
+	$formwriter->textinput('container_mail_name', 'Mail name', array(
+		'value'       => (string)MailAppGateway::containerMailName(),
+		'placeholder' => 'mail.' . $base,
+		'helptext'    => 'Empty: the web name.',
+	));
+	$formwriter->submitbutton('save_mail_name', 'Save mail name');
+	echo $formwriter->end_form();
 }
 
 if ($round_trip !== null) {

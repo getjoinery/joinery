@@ -17,6 +17,9 @@
  * asks its Docker host in its own storage, and the host's converge timer
  * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.8.1 - containerNameProblem() no longer repeats the typed text (a message is shown unescaped)
+ * @version 1.8.0 - a container site's own mail name (mail_apps_container_name, containerNameProblem()): for a web
+ *                  name behind Cloudflare, a DNS-only name under it that the host gets a certificate for
  * @version 1.7.0 - withdrawFromHost(): an uninstalled container site takes its request away, so its host forgets it
  * @version 1.6.0 - relayReport(): the relay's own view of the pass-through, from the report the site already keeps
  *                  (whether the server answers on each onward port, the last connection it refused and why)
@@ -346,9 +349,13 @@ class MailAppGateway {
 	 */
 	public static function mailHostname(): ?string {
 		if (self::inContainer()) {
-			// A container's programs connect straight to its Docker host under
-			// the site's web name, never through a relay (§ Which route a
-			// deployment uses, A4).
+			// A container's programs connect straight to its Docker host, never
+			// through a relay (§ Which route a deployment uses, A4): under the
+			// site's own mail name when it has one, else its web name.
+			$own = self::containerMailName();
+			if ($own !== null) {
+				return $own;
+			}
 			$host = strtolower(trim(self::hostname()));
 			return $host !== '' ? $host : null;
 		}
@@ -357,6 +364,63 @@ class MailAppGateway {
 			: (string)Globalvars::get_instance()->get_setting('mailbox_mail_hostname');
 		$host = strtolower(trim($host));
 		return $host !== '' ? $host : null;
+	}
+
+	/** In a container: the mail name the admin set (mail_apps_container_name), or null for the web name. */
+	public static function containerMailName(): ?string {
+		$name = strtolower(trim((string)Globalvars::get_instance()->get_setting('mail_apps_container_name')));
+		return $name !== '' ? $name : null;
+	}
+
+	/**
+	 * The web name with a leading www. dropped: the names under it are the ones
+	 * a container site may use for mail. Its host checks the same rule, and also
+	 * that no other site on it owns the name (install_mail_gateway.sh converge).
+	 */
+	public static function containerNameBase(): string {
+		$web = strtolower(trim(self::hostname()));
+		return strpos($web, 'www.') === 0 ? substr($web, 4) : $web;
+	}
+
+	/**
+	 * Why $name cannot be this container site's mail name, or null when it can:
+	 * a host name under the site's web name (mail.example.com for example.com or
+	 * www.example.com), so no site can claim a name that belongs to another.
+	 */
+	public static function containerNameProblem(string $name): ?string {
+		$name = strtolower(trim($name));
+		$base = self::containerNameBase();
+		if (!preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/', $name)) {
+			return 'That is not a host name: letters, digits and hyphens, in parts joined by dots, such as mail.' . $base . '.';
+		}
+		if ($base === '' || substr($name, -strlen('.' . $base)) !== '.' . $base) {
+			return 'The mail name must be a name under this site\'s web name, such as mail.' . $base
+				. ', so that it can only be this site\'s.';
+		}
+		return null;
+	}
+
+	/**
+	 * In a container: set the mail name (an empty one goes back to the web
+	 * name). It takes effect at Allow, or Switch while mail apps are on.
+	 *
+	 * @return array{ok:bool, message:string}
+	 */
+	public static function setContainerMailName(string $name): array {
+		$name = strtolower(trim($name));
+		if ($name !== '' && $name !== strtolower(self::hostname())) {
+			$why = self::containerNameProblem($name);
+			if ($why !== null) {
+				return array('ok' => false, 'message' => $why);
+			}
+		} else {
+			$name = '';
+		}
+		Setting::put('mail_apps_container_name', $name);
+		return array('ok' => true, 'message' => $name === ''
+			? 'Mail programs will connect to the web name, ' . self::hostname() . '.'
+			: 'Mail programs will connect to ' . $name . '. Point it straight at this site\'s server (DNS only, '
+				. 'not through Cloudflare); the server gets its certificate when mail apps are allowed.');
 	}
 
 	/** The relay this deployment's mail arrives through, or null. */
@@ -430,8 +494,11 @@ class MailAppGateway {
 			}
 			if (self::behindCloudflare($name)) {
 				return 'Mail programs connect to ' . $name . ', which goes through Cloudflare. Cloudflare carries web '
-					. 'pages only, not mail (ports 993 and 465). Turn Cloudflare\'s proxy off for this name (DNS only) '
-					. 'so it points straight at this site\'s server.';
+					. 'pages only, not mail (ports 993 and 465). '
+					. (self::containerMailName() === null
+						? 'Give mail programs a name of their own below, such as mail.' . self::containerNameBase()
+							. ', set to DNS only and pointing straight at this site\'s server.'
+						: 'Turn Cloudflare\'s proxy off for this name (DNS only) so it points straight at this site\'s server.');
 			}
 			if (!is_dir(self::storageDir()) && !@mkdir(self::storageDir(), 0755, true)) {
 				return 'This site cannot write its request for the host (' . self::storageDir() . ').';

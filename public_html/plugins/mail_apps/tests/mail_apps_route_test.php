@@ -208,8 +208,29 @@ check(MailAppGateway::mailHostname() === $web, 'programs connect to the web name
 check(MailAppGateway::behindCloudflare('dev.getjoinery.com') && !MailAppGateway::behindCloudflare('mailapps-walk.joinerytest.com'),
 	'a name proxied by Cloudflare is told from one that points straight at a server');
 if (MailAppGateway::behindCloudflare($web)) {
-	check(strpos((string)MailAppGateway::cannotTurnOn(), 'Cloudflare') !== false, 'a web name behind Cloudflare is refused, saying why');
+	check(strpos((string)MailAppGateway::cannotTurnOn(), 'name of their own') !== false,
+		'a web name behind Cloudflare is refused, pointing at a mail name of the site\'s own',
+		(string)MailAppGateway::cannotTurnOn());
 }
+
+section('A container site\'s own mail name (for a web name behind Cloudflare)');
+$base = MailAppGateway::containerNameBase();
+check($base !== '' && strpos($base, 'www.') !== 0, 'the names under the web name, www. dropped: ' . $base);
+check(MailAppGateway::containerNameProblem('mail.' . $base) === null, 'a name under the web name is the site\'s');
+check(MailAppGateway::containerNameProblem('mail.example.org') !== null, 'a name outside it is refused');
+check(MailAppGateway::containerNameProblem('evil' . $base) !== null, '  even one that only ends with the same letters');
+check(MailAppGateway::containerNameProblem('not a name') !== null, '  and anything that is not a host name');
+check(strpos((string)MailAppGateway::containerNameProblem('<img src=x onerror=alert(1)>'), '<img') === false,
+	'  without repeating what was typed (messages are shown unescaped)');
+$set = MailAppGateway::setContainerMailName('Mail.' . strtoupper($base));
+check($set['ok'] && MailAppGateway::containerMailName() === 'mail.' . $base && MailAppGateway::mailHostname() === 'mail.' . $base,
+	'saved, programs then connect to it', $set['message']);
+check(!MailAppGateway::setContainerMailName('mail.example.org')['ok'] && MailAppGateway::containerMailName() === 'mail.' . $base,
+	'a refused name changes nothing');
+check(MailAppGateway::setContainerMailName('')['ok'] && MailAppGateway::containerMailName() === null
+	&& MailAppGateway::mailHostname() === $web, 'empty goes back to the web name');
+check(MailAppGateway::setContainerMailName($web)['ok'] && MailAppGateway::containerMailName() === null,
+	'  and so does the web name itself');
 $calls = array();
 $asked = MailAppGateway::turnOn();
 $request = json_decode((string)@file_get_contents($box . '/request.json'), true);
