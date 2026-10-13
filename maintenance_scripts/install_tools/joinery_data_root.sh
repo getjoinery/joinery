@@ -4,6 +4,9 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.16 - Key slots are PBKDF2-SHA256 at 1,000,000 iterations, about a second on a 1 GB Linode: a
+#                 512-bit key takes two PBKDF2 blocks, so 2,000,000 took 1.5-2.5 s (T-V11). check accepts a slot at
+#                 either count this platform has made (LUKS_ITERATIONS_MADE), and no other.
 # Version: 1.15 - A change of volume key keeps its rewrite area to 8 MiB, so the open after a crash part-way is
 #                 minutes, not most of an hour, on network block storage (T-F2).
 # Version: 1.14 - The filesystem is made with 4096-byte sectors: an in-place encryption keeps the filesystem's sector
@@ -262,7 +265,11 @@ TMP_MOUNT_UNIT="tmp.mount"
 # the mapping would reach a file-backed volume's image and hand its space back
 # to the root disk (see loop_no_discard).
 LUKS_FORMAT=(--type luks2 --cipher aes-xts-plain64 --key-size 512 --sector-size 4096)
-LUKS_ITERATIONS=2000000
+LUKS_ITERATIONS=1000000
+# Every count a release of this platform has made its slots at, the current one
+# among them. A slot an earlier release made is ours for as long as its volume
+# lives; a slot at any other count is not one we made.
+LUKS_ITERATIONS_MADE=(1000000 2000000)
 LUKS_SLOT=(--pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations "$LUKS_ITERATIONS")
 MAPPING="joinery-data"
 MAPPER_REAL="/dev/mapper/${MAPPING}"
@@ -389,7 +396,8 @@ mapping_open() { [[ -e "${ROOT}${MAPPER_REAL}" ]]; }
 recipient_get() { awk -F= -v k="$1" '$1 == k { sub(/^[^=]*=/, ""); print; exit }' "$RECIPIENT" 2>/dev/null || true; }
 
 # A key slot this platform did not make, or nothing (D1): every slot is ours
-# (PBKDF2-SHA256 at LUKS_ITERATIONS) or systemd's TPM2 token slot. The agent
+# (PBKDF2-SHA256 at a count in LUKS_ITERATIONS_MADE) or systemd's TPM2 token
+# slot. The agent
 # reads the header's own metadata, a line a slot: "slot=N kdf=K hash=H
 # iterations=I token=T".
 luks_slot_problem() {
@@ -406,7 +414,7 @@ luks_slot_problem() {
             esac
         done
         [[ "$token" == "systemd-tpm2" ]] && continue
-        [[ "$kdf" == "pbkdf2" && "$hash" == "sha256" && "$iter" == "$LUKS_ITERATIONS" ]] && continue
+        [[ "$kdf" == "pbkdf2" && "$hash" == "sha256" && " ${LUKS_ITERATIONS_MADE[*]} " == *" $iter "* ]] && continue
         printf 'key slot %s of the encrypted volume was not made by this platform (%s %s, %s iterations); see: cryptsetup luksDump %s' \
             "$slot" "$kdf" "$hash" "$iter" "$(conf_get source)"
         return

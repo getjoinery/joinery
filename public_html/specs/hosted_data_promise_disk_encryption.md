@@ -59,7 +59,9 @@ day's fixes copied over it; test account, us-east). Passed, by test:
   T-E6: an IP swap leaves no provider event; Tier 2's instance check refuses a
   copy at a moved address.
 - **Shapes:** T-V9 (the tick grew an encrypted file volume, the key never on
-  disk), T-V11 (see O-PBKDF2), T-V12 and T-M2 (a multi-tenant host, born
+  disk), T-V11 (2,000,000 iterations took 1.5-2.5 s idle and 3.8 s under
+  pgbench; at 1,000,000 an open takes 0.7-0.9 s idle and 1.6 s under
+  pgbench), T-V12 and T-M2 (a multi-tenant host, born
   encrypted, then undone and encrypted again in place with both sites up).
 - **T-F2, the reliability campaign:**
   - Cuts on 1 GB and 4 GB file-backed data roots and a 1 GB Block Storage
@@ -99,6 +101,16 @@ Found and fixed in that run (uncommitted), each with a gate case:
   open. Its rewrite area is capped at 8 MiB.
 - **Speed:** data roots are formatted with 4096-byte sectors.
 - **Agent 1.73.1** fixes its help text and what `enable` says on a site.
+- **Key slots** are PBKDF2 at 1,000,000 iterations, about a second to open
+  (T-V11; owner, 2026-10-12). `check` accepts a slot at exactly 1,000,000 or
+  2,000,000, the counts a release has made (R27), and no other.
+- **A Docker host that never joined** a management node had no host
+  converger, so its data root never ticked: no growth, no re-seal, no reboot
+  policy. `install.sh docker` now installs the release's own support bundle
+  through the agent (`joinery-agent bundle install`, agent 1.75.0), whose
+  converge installs the converger. Proven on mt-enc: a changed bundle and a
+  missing statement are refused, the real one installs, and the timer runs
+  the tick every minute.
 
 Not run on Linode, and why:
 - **T-V5 and Lish:** no Lish access from here. The console prompt is proven on
@@ -266,7 +278,11 @@ directories, the mail stack and the quota work see the same paths.
 **Standard configuration — one for every node, whatever its size.**
 `cryptsetup luksFormat --type luks2 --cipher aes-xts-plain64 --key-size 512`
 (a 512-bit volume key: two 256-bit AES keys for XTS), and every keyslot we
-make `--pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 2000000`.
+make `--pbkdf pbkdf2 --hash sha256 --pbkdf-force-iterations 1000000` (T-V11:
+the 512-bit key takes two PBKDF2 blocks, so 2,000,000 took 1.5-2.5 s idle on
+a 1 GB Linode; owner 2026-10-12: lower it to about one second). A slot an
+earlier release made at 2,000,000 stays one of ours: D1's check accepts the
+counts a release has made, `LUKS_ITERATIONS_MADE` = 1,000,000 and 2,000,000.
 Nothing else is
 tuned: no `--perf-no_read_workqueue` / `--perf-no_write_workqueue` (measured
 2026-10-07: no gain on 1 GB or 4 GB nodes, and worse on some random-write
@@ -1991,8 +2007,8 @@ the appendix's ranges; anything worse is reported before WP3 ships.
 - **D-E. One standard LUKS configuration for every node** (owner, 2026-10-07):
   LUKS2, aes-xts-plain64 with a 512-bit key, no workqueue flags (D1). Not
   chosen per plan size. **Amended by the owner 2026-10-11:** every slot we
-  make is PBKDF2-SHA256 at a fixed count of about one second (2,000,000 on
-  dev's CPU, settled in WP1), not argon2id at 256 MiB, because D-H left no
+  make is PBKDF2-SHA256 at a fixed count of about one second (1,000,000,
+  settled on a 1 GB Linode by T-V11, 2026-10-12), not argon2id at 256 MiB, because D-H left no
   slot holding a passphrase and argon2id's memory runs while the stack is up
   (D1). Not the minimum, so a slot weaker than intended still costs a guesser
   time. Slots a re-encryption mints inherit the driving slot's settings; D8
