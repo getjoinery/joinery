@@ -221,18 +221,28 @@ struct Sightings {
     /// never sent, and its path (`None` where the path could not be resolved,
     /// which is never beside anything).
     of: HashMap<(u64, u64), Vec<(bool, Option<String>)>>,
-    /// Each file record's own file (by the disk's identity, and as the engine
-    /// holds it), path and bytes at the device's last pass point, and where
-    /// in the journal that was.
-    last: HashMap<i64, ((u64, u64), jd_vfs::FileIdentity, String, Vec<u8>)>,
-    last_at: usize,
-    last_pairs: usize,
+    /// Each file record's last live sighting: at the last pass point its own
+    /// file stood on this disk, or earlier where it has held none since and
+    /// nothing has bound it (`note_unseen_readings`).
+    last: HashMap<i64, LastSeen>,
     /// Every path each record has been seen at.
     held: HashMap<i64, std::collections::HashSet<String>>,
     /// How many of the disk's landings have been read.
     landings_read: usize,
     /// Every file the engine laid on this disk.
     laid: std::collections::HashSet<(u64, u64)>,
+}
+
+/// A file record's own file (by the disk's identity, and as the engine holds
+/// it), path and bytes when last seen live, and where in the journal and the
+/// swap record that was.
+struct LastSeen {
+    own: (u64, u64),
+    seen: jd_vfs::FileIdentity,
+    path: String,
+    bytes: Vec<u8>,
+    at: usize,
+    pairs: usize,
 }
 
 /// The device a chaos swap was made on (its index in the world) and the
@@ -931,18 +941,41 @@ impl World {
         self.unseen.lock().unwrap().clone()
     }
 
-    /// At a pass point of this device: which records were bound, between this
-    /// one and its last, to a file its scans had not seen except beside them,
-    /// with their own file destroyed; then what its scans have now seen.
+    /// At a pass point of this device: which records were bound, since each
+    /// was last seen holding its own file, to a file its scans had not seen
+    /// except beside them, with their own file destroyed; then what its scans
+    /// have now seen.
+    ///
+    /// A record's last live sighting -- its own file standing at the record's
+    /// own path -- stands until the record is seen so again. A pass point at
+    /// which its own file is gone, or stands where the record has not followed
+    /// it, ends nothing, so the reading that follows is judged against the
+    /// file it held when last seen, over the window since (kill2 75157: the
+    /// record held no file for two pass points before a scan bound it to
+    /// another; kill2 75302: a pass that died before its scan left the record
+    /// behind its swapped file). Only while the record lives: one deleted or
+    /// gone is dropped.
+    ///
+    /// Files are keyed by the disk's id and birth -- an id alone is reused once
+    /// its file is gone -- except on a disk whose births are names (local
+    /// NTFS): there a name taken again hands its birth to the next file, so a
+    /// swap gives both files new births, while a freed id comes back with its
+    /// sequence raised and never repeats (`MemFs::ids_alone_name_files`). The
+    /// id alone is the key there, at every use below (kill2 75302: the swap
+    /// re-birthed the record's own file and its reading was never seen as
+    /// one).
     fn note_unseen_readings(&self, device: &Device) {
         let at = self.journal.lock().unwrap().len();
         let pairs_now = self.swap_pairs.lock().unwrap().len();
         let Some(index) = self.devices.iter().position(|d| d.name == device.name) else { return };
-        // Where an id and its birth can name two files, nothing can be said of
-        // what this device's scans saw, and nothing is excused.
-        if !device.fs.identity_is_unique() {
+        let id_only = device.fs.ids_alone_name_files();
+        // Where an id and its birth can name two files, and the id alone does
+        // not either, nothing can be said of what this device's scans saw,
+        // and nothing is excused.
+        if !id_only && !device.fs.identity_is_unique() {
             return;
         }
+        let key = |id: u64, birth: u64| -> (u64, u64) { if id_only { (id, 0) } else { (id, birth) } };
         let entries = device.store.every_entry().unwrap();
         let path_of = |e: &jd_core::model::Entry| -> Option<String> {
             let name = e.effective_local_name().to_string();
@@ -960,7 +993,7 @@ impl World {
             .filter_map(|e| {
                 let own = e.own_file.filter(|o| o.file_id != 0)?;
                 let birth = *live.get(&own.file_id)?;
-                Some((e.id.server_id, (own.file_id, birth), own, path_of(e), e.id.is_provisional(), e.remote_deleted))
+                Some((e.id.server_id, key(own.file_id, birth), own, path_of(e), e.id.is_provisional(), e.remote_deleted))
             })
             .collect();
         let now: HashMap<i64, ((u64, u64), jd_vfs::FileIdentity, String)> = owned
@@ -968,16 +1001,17 @@ impl World {
             .filter(|(_, _, _, path, _, deleted)| path.is_some() && !deleted)
             .map(|(r, own, seen, path, _, _)| (*r, (*own, *seen, path.clone().unwrap())))
             .collect();
-        let on_disk: std::collections::HashSet<(u64, u64)> = live.iter().map(|(id, b)| (*id, *b)).collect();
+        let on_disk: std::collections::HashSet<(u64, u64)> = live.iter().map(|(id, b)| key(*id, *b)).collect();
         let folder = |p: &str| p.rsplit_once('/').map(|(d, _)| d.to_string()).unwrap_or_default();
         let mut all = self.sightings.lock().unwrap();
         let mine = all.entry(device.name.clone()).or_default();
         // What the engine itself laid is never a scan's reading.
         let laid = device.fs.landed_since(mine.landings_read);
         mine.landings_read += laid.len();
-        mine.laid.extend(laid);
+        mine.laid.extend(laid.into_iter().map(|(id, b)| key(id, b)));
         for (record, (to, seen_to, path)) in &now {
-            let Some((from, seen_from, was_at, displaced)) = mine.last.get(record) else { continue };
+            let Some(last) = mine.last.get(record) else { continue };
+            let (from, seen_from, was_at, displaced) = (&last.own, &last.seen, &last.path, &last.bytes);
             // A reading is the engine binding the record to another file: the
             // identity it holds changed, not only the disk's under an id it
             // reused while the engine was shown nothing to tell them apart.
@@ -1003,8 +1037,8 @@ impl World {
                     to: *to,
                     body,
                     displaced: displaced.clone(),
-                    window: (mine.last_at, at),
-                    pairs: mine.last_pairs..pairs_now,
+                    window: (last.at, at),
+                    pairs: last.pairs..pairs_now,
                 });
             }
         }
@@ -1014,15 +1048,32 @@ impl World {
         for (record, (_, _, path)) in &now {
             mine.held.entry(*record).or_default().insert(path.clone());
         }
-        mine.last = now
+        // A record seen live AT ITS OWN PATH starts again from here: its own
+        // file stands where the record says, the state a scan that took in
+        // the disk leaves. Any other record still living keeps its last such
+        // sighting -- its own file gone, or standing somewhere the record has
+        // not followed it to, which is a disk no scan has read yet (a pass
+        // that died before its scan, kill2 75302).
+        let living: std::collections::HashSet<i64> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::File && !e.remote_deleted)
+            .map(|e| e.id.server_id)
+            .collect();
+        let at_home = |own: &(u64, u64), path: &str| device.fs.true_identity_of(path).is_some_and(|(id, b)| key(id, b) == *own);
+        let mut next: HashMap<i64, LastSeen> = now
             .into_iter()
+            .filter(|(_, (own, _, path))| at_home(own, path))
             .map(|(r, (own, seen, path))| {
                 let bytes = device.fs.peek(&path).unwrap_or_default();
-                (r, (own, seen, path, bytes))
+                (r, LastSeen { own, seen, path, bytes, at, pairs: pairs_now })
             })
             .collect();
-        mine.last_at = at;
-        mine.last_pairs = pairs_now;
+        for (r, l) in mine.last.drain() {
+            if !next.contains_key(&r) && living.contains(&r) {
+                next.insert(r, l);
+            }
+        }
+        mine.last = next;
     }
 
     /// Every pass this world has run, in order, as the plan it made and the

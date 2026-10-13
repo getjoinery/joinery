@@ -1650,6 +1650,18 @@ fn the_owner_follows_its_file(
     let Some(to) = aside_placement(env, aside)? else {
         return Ok(());
     };
+    // A PLAIN file whose file now stands inside a vault does not follow it
+    // there: the server refuses a plain file in a vault folder, and only the
+    // scan's crossing converts one -- a sealed copy at the new place, the
+    // plain one trashed. Agreed here, the record named the vault folder as
+    // where it already was, so the next scan saw no move to convert, the owed
+    // move was refused, and once the server deleted the file its rescue went
+    // up in the clear into the vault, refused every pass (plat3 75603). Left
+    // at its agreement, the next scan reads the file moved into the vault and
+    // converts it. The mirror of the hold below.
+    if !owner.is_encrypted && crate::pass::parent_is_encrypted(env, to.parent)? {
+        return Ok(());
+    }
     owner.synced_placement = Some(to.clone());
     owner.local_name = None;
     // A sealed file whose file now stands outside its vault is HELD there, not
@@ -3582,6 +3594,14 @@ fn waits_after_a_refusal(env: &ExecEnv, op: &Op, why: &str) -> Result<OpOutcome,
     Ok(OpOutcome::Retry(why.into()))
 }
 
+/// Does the server keep a live folder other than `asker` at `name` under
+/// `parent`, as this device last heard it?
+fn a_folder_the_server_keeps_holds(env: &ExecEnv, asker: EntityId, name: &str, parent: Option<i64>) -> Result<bool, ExecError> {
+    Ok(env.store.children_of(parent)?.into_iter().any(|e| {
+        e.id != asker && e.id.entity_type == EntityType::Folder && !e.remote_deleted && e.remote.name == name
+    }))
+}
+
 /// Is that name held by something this batch is already about to move off it?
 ///
 /// The refusal itself cannot say. `name_taken` means the server has something
@@ -4768,6 +4788,36 @@ fn move_remote(
                 // As the upload does: a conflict name this device already
                 // knows the server holds earns the same refusal, and two such
                 // tries were the whole budget (kill2 75104 on a stick).
+                let taken = names_the_server_has(env, to.parent)?;
+                attempt += 1;
+                let mut n = attempt;
+                wanted = loop {
+                    let candidate = (env.conflict_name)(&to.name, n);
+                    if !taken.iter().any(|t| *t == candidate) || n > attempt + 1000 {
+                        break candidate;
+                    }
+                    n += 1;
+                };
+            }
+            // A FOLDER refused in prose is withdrawn, as the arm above says,
+            // and re-derived until its name frees up -- except where this
+            // device knows what holds it: a live folder the server keeps at
+            // that name, which this device is not renaming away. Then the wait
+            // can last for ever: the occupant's own arrival here waits for
+            // this folder's directory to leave the name, and this folder waits
+            // for the occupant to leave the server's -- two devices that
+            // rotated the same folders at once, refused and re-derived every
+            // pass (kill2 75140, plat3 75636, and five more of the ring). It
+            // steps aside under a conflict name, as a marked refusal does, at
+            // the same cost: a holder a peer was about to rename away leaves a
+            // conflict name behind that waiting would not have.
+            Err(ExecError::Proto(p))
+                if p.refused_without_saying_why()
+                    && op.entity.entity_type == EntityType::Folder
+                    && attempt < 2
+                    && a_folder_the_server_keeps_holds(env, op.entity, &wanted, to.parent)?
+                    && !held_by_a_rename_this_device_owes(env, op.entity, &wanted, to.parent)? =>
+            {
                 let taken = names_the_server_has(env, to.parent)?;
                 attempt += 1;
                 let mut n = attempt;
