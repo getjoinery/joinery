@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.20 - a scan that finishes while a dialog is open offers a reload instead of reloading under it, which
+ *                 threw away a restore the operator was in the middle of confirming
  * @version 1.19 - each run shows its manifest and the sha256 recorded when it was written, and a backup set whose
  *                 newest manifest differs from the recorded one says so (specs/storage_targets.md WP5)
  * @version 1.18 - the node's storage spaces: where new backups go, older backups kept on a target it was moved
@@ -878,6 +880,14 @@ function pollBackupList(jobId, retries) {
 			}
 			btn.disabled = false;
 			btn.textContent = 'Scan for Backups';
+			// The scan often starts on its own at page load, so the operator may
+			// already be in a restore or verify dialog: reloading under it would
+			// throw that away. Offer the reload instead.
+			if (document.querySelector('dialog[open]')) {
+				status.innerHTML = '<span class="text-success">Scan complete.</span> '
+					+ '<a href="" onclick="location.reload();return false;">Reload</a> to see the new list.';
+				return;
+			}
 			status.innerHTML = '<span class="text-success">Scan complete</span>';
 			setTimeout(function() { status.style.display = 'none'; }, 2000);
 			// Reload page to show updated file list

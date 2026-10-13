@@ -5,6 +5,8 @@
 # (specs/host_restrictions.md D5). Sourced by restore_project.sh and
 # restore_chain.sh, which is what a site copy runs.
 #
+# Version: 1.1 - the refusal names the site the backup was taken of, which is this
+#                site itself for a restore of its own backup, not only a copy's source
 # Version: 1.0
 #
 # MACHINE_CONFIG_FILES are the config/ files that belong to the MACHINE, not to
@@ -127,7 +129,7 @@ restore_guard_check() {  # STAGED_SITE_ROOT LIVE_PUBLIC_HTML
     fi
 
     if [[ "$refused" == true ]]; then
-        echo "restore: nothing was restored. Remove what is named above from the site being copied (or upgrade it to a current release), take a new backup, and restore that." >&2
+        echo "restore: nothing was restored. Remove what is named above from the site the backup was taken of (or upgrade it to a current release), take a new backup, and restore that." >&2
         return 1
     fi
     return 0
