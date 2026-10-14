@@ -16,6 +16,7 @@
  * asked for it starts one rollout over every eligible node, management nodes
  * last, and writes what became of it onto the publish job.
  *
+ * @version 1.5 - the page_probe gate: the pages parsed, the verdict's rules, and a rollout that checks pages before and after
  * @version 1.4 - a node past the rollout's release passes the gate; one short of it, or reporting none, halts
  * @version 1.3 - the readiness check (upgrade_preflight) before a node's apply: passes, fails by name, is skipped for an agent without it
  * @version 1.2 - a node refusing a modified upgrade script halts with its own reason
@@ -319,5 +320,101 @@ StagedRolloutRunner::advance($r2); $r2->load(); $steps = $r2->steps();
 check((string)$r2->get('srl_status') === StagedRollout::STATUS_HALTED && empty($steps[0]['job_id'])
 	&& strpos((string)$r2->get('srl_halt_reason'), 'public_html/utils/upgrade.php') !== false,
 	'a failing check halts the rollout at that node with no apply ever queued', (string)$r2->get('srl_halt_reason'));
+
+// ---------------------------------------------------------------------------
+section('The page check before and after each node\'s apply (page_probe)');
+
+$pp = StagedRolloutRunner::parse_probe_pages("/\n admin /admin/admin_users \n\n/ \nMEMBER /profile");
+check($pp === array(array('page' => '/', 'viewer' => 'anonymous'), array('page' => '/admin/admin_users', 'viewer' => 'admin'),
+	array('page' => '/profile', 'viewer' => 'member')), 'one page a line, its viewer before it or anonymous, a repeat counted once', var_export($pp, true));
+foreach (array("/x?y=1", "root /", "/../etc", str_repeat("/p\n", 1) . "/a\n/b\n/c\n/d\n/e") as $bad) {
+	$threw = '';
+	try { StagedRolloutRunner::parse_probe_pages($bad); } catch (StagedRolloutException $e) { $threw = $e->getMessage(); }
+	check($threw !== '' && strpos($threw, 'Pages to check') === 0, 'refused, naming the field: ' . json_encode($bad), $threw);
+}
+check(StagedRolloutRunner::parse_probe_pages("  \n ") === array(), 'nothing typed checks no pages');
+
+$probe = function ($page, $viewer, $status, $errors = 0, array $assets = array(), $job_status = 'completed') {
+	$w = array();
+	for ($i = 0; $i < $errors; $i++) { $w[] = array('type' => 'error', 'at' => 'x.php:' . $i); }
+	$w[] = array('type' => 'deprecated', 'at' => 'y.php:1');
+	$fa = array();
+	foreach ($assets as $p) { $fa[] = array('path' => $p, 'status' => 404); }
+	return new SrlJob(array('mjb_status' => $job_status, 'mjb_result' => json_encode(array('read' => true,
+		'page' => $page, 'viewer' => $viewer, 'status' => $status, 'warnings' => $w, 'failed_assets' => $fa, 'failed_assets_unnamed' => 0))));
+};
+$pages = array(array('page' => '/', 'viewer' => 'anonymous'), array('page' => '/admin/admin_users', 'viewer' => 'admin'));
+$before = array($probe('/', 'anonymous', 200), $probe('/admin/admin_users', 'admin', 200, 1, array('/theme/x/old.css')));
+check(StagedRolloutRunner::probe_verdict($before, array($probe('/admin/admin_users', 'admin', 200, 1, array('/theme/x/old.css')), $probe('/', 'anonymous', 200)), $pages) === null,
+	'no page worse than before: passes, whatever it already had (an error, a missing asset)');
+$cases = array(
+	array('an error status it did not answer before', array($probe('/', 'anonymous', 500), $probe('/admin/admin_users', 'admin', 200, 1, array('/theme/x/old.css'))), 'answers 500 after the apply; it answered 200 before'),
+	array('more PHP errors', array($probe('/', 'anonymous', 200), $probe('/admin/admin_users', 'admin', 200, 3, array('/theme/x/old.css'))), 'raises 3 PHP errors after the apply (1 before)'),
+	array('an asset it loaded before', array($probe('/', 'anonymous', 200, 0, array('/plugins/p/new.js')), $probe('/admin/admin_users', 'admin', 200, 1, array('/theme/x/old.css'))), 'fails to load /plugins/p/new.js'),
+	array('a check that did not run after', array($probe('/', 'anonymous', 200), $probe('/admin/admin_users', 'admin', 200, 1, array(), 'failed')), 'did not run'),
+);
+foreach ($cases as $c) {
+	$why = StagedRolloutRunner::probe_verdict($before, $c[1], $pages);
+	check($why !== null && strpos($why, $c[2]) !== false, 'the page gate halts on ' . $c[0], (string)$why);
+}
+check(StagedRolloutRunner::probe_verdict(array($probe('/', 'anonymous', 500)), array($probe('/', 'anonymous', 500), $probe('/admin/admin_users', 'admin', 200)), $pages) === null,
+	'a page already answering an error before is not one the apply made worse; a page with no check before must be clean after');
+check(StagedRolloutRunner::probe_verdict(array(), array($probe('/', 'anonymous', 404), $probe('/admin/admin_users', 'admin', 200)), $pages) !== null,
+	'with nothing before to hold it against, an error status after halts');
+
+// The flow: pages before the apply, the apply, pages after, a page worse halts.
+$pg1 = $mk('pages', 'apply_update,check_status,page_probe');
+$pg_old = $mk('pagesold', 'apply_update,check_status');
+$prior = StagedRollout::running();
+if ($prior) { StagedRolloutRunner::stop($prior, null); }
+$threw = '';
+try { StagedRolloutRunner::start(array($pg_old->key), null, $pages); } catch (StagedRolloutException $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'cannot render a page') !== false, 'a node that cannot render a page is refused when pages are named', $threw);
+
+$pr = StagedRolloutRunner::start(array($pg1->key), null, $pages);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $pr->key);
+$st = $pr->steps()[0];
+check($pr->probe_pages() === $pages && count($st['probes_before'] ?? array()) === 2 && empty($st['job_id']),
+	'the pages are kept on the rollout, and the node renders them before its apply is queued', var_export($st, true));
+$finish_probe = function ($id, $status, $errors = 0) use ($pages) {
+	$job = new ManagementJob((int)$id, TRUE);
+	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
+	$params = $job->get('mjb_commands');
+	$params = is_string($params) ? json_decode($params, true) : $params;
+	$page = $params['params']['page'] ?? ($params[0]['params']['page'] ?? '/');
+	$viewer = $params['params']['viewer'] ?? ($params[0]['params']['viewer'] ?? 'anonymous');
+	$w = array();
+	for ($i = 0; $i < $errors; $i++) { $w[] = array('type' => 'error', 'at' => 'x.php:' . $i); }
+	$job->set('mjb_status', 'completed');
+	$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+	$job->set('mjb_result', json_encode(array('read' => true, 'page' => $page, 'viewer' => $viewer, 'status' => $status,
+		'warnings' => $w, 'failed_assets' => array(), 'failed_assets_unnamed' => 0)));
+	$job->save();
+	return array($viewer, $page);
+};
+$seen = array();
+foreach ($st['probes_before'] as $id) { $seen[] = implode(' ', $finish_probe($id, 200)); }
+sort($seen);
+check($seen === array('admin /admin/admin_users', 'anonymous /'), 'one page_probe per page, with its viewer', var_export($seen, true));
+StagedRolloutRunner::advance($pr); $pr->load();
+$st = $pr->steps()[0];
+check(!empty($st['probes_before_done']) && !empty($st['job_id']), 'with the pages read, the apply is queued');
+$pjob = new ManagementJob($st['job_id'], TRUE);
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $pjob->key);
+$finish($pjob, 'completed', srl_apply(array('version_after' => $release)));
+StagedRolloutRunner::advance($pr); $pr->load();
+$st = $pr->steps()[0];
+check(count($st['probes_after'] ?? array()) === 2 && $st['verdict'] === 'running' && $pr->is_running(),
+	'a good apply is not yet a pass: the pages are rendered again', var_export($st, true));
+foreach ($st['probes_after'] as $id) {
+	$job = new ManagementJob((int)$id, TRUE);
+	$cmd = $job->get('mjb_commands');
+	$cmd = is_string($cmd) ? json_decode($cmd, true) : $cmd;
+	$finish_probe($id, (($cmd['params']['page'] ?? ($cmd[0]['params']['page'] ?? '')) === '/admin/admin_users') ? 500 : 200);
+}
+StagedRolloutRunner::advance($pr); $pr->load();
+check((string)$pr->get('srl_status') === StagedRollout::STATUS_HALTED
+	&& strpos((string)$pr->get('srl_halt_reason'), '/admin/admin_users (as admin) answers 500') !== false,
+	'a page that answers an error it did not before halts the rollout at that node', (string)$pr->get('srl_halt_reason'));
 
 harness_finish();

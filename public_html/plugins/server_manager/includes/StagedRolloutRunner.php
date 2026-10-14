@@ -20,6 +20,9 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.7 - the page_probe gate: a rollout may name up to MAX_PROBE_PAGES pages; each node renders them before
+ *                its apply and again after it passes the apply gate, and halts when a page got worse (it answers an
+ *                error status it did not before, raises more PHP errors, or fails to load an asset it loaded)
  * @version 1.6 - gate(): a node that reports a release past the rollout's (it follows a newer upgrade source) passes
  * @version 1.5 - a node whose agent offers upgrade_preflight is asked whether an upgrade would stop before it
  *                started, before its apply is queued; a failing check halts the rollout at that node with the
@@ -46,6 +49,12 @@ class StagedRolloutRunner {
 
 	/** How long a node may take to answer its readiness check before the rollout halts at it. */
 	const PREFLIGHT_WAIT_MINUTES = 15;
+
+	/** How many pages a rollout may check on each node. */
+	const MAX_PROBE_PAGES = 5;
+
+	/** How long one round of a node's page checks may take before the rollout halts at it. */
+	const PROBE_WAIT_MINUTES = 15;
 
 	/** The advisory lock every mover takes: the task tick and the page load never race. */
 	const LOCK_KEY = 7720230923;
@@ -75,7 +84,7 @@ class StagedRolloutRunner {
 	/**
 	 * Why a node cannot be in a rollout, or null when it can.
 	 */
-	public static function node_refusal($node) {
+	public static function node_refusal($node, bool $checks_pages = false) {
 		if ($node->get('mgn_delete_time')) {
 			return 'it has been removed';
 		}
@@ -89,7 +98,40 @@ class StagedRolloutRunner {
 		if ($missing || !JobCommandBuilder::has_primitive($node, 'apply_update')) {
 			return AgentVocabulary::needs_newer_agent_text($node, $missing ?: self::DECLARED_WORDS);
 		}
+		if ($checks_pages && !JobCommandBuilder::has_primitive($node, 'page_probe')) {
+			return 'it cannot render a page to check: ' . AgentVocabulary::needs_newer_agent_text($node, ['page_probe']);
+		}
 		return null;
+	}
+
+	/**
+	 * The pages a rollout checks, from what the operator typed: one per line,
+	 * a path, optionally after its viewer ("admin /admin/admin_users"; the
+	 * viewer is anonymous otherwise). Each is held to page_probe's own shape.
+	 *
+	 * @return array<int, array{page: string, viewer: string}>
+	 * @throws StagedRolloutException naming the line that is not a page
+	 */
+	public static function parse_probe_pages(string $text): array {
+		$pages = array();
+		foreach (preg_split('/\r?\n/', $text) as $line) {
+			$line = trim($line);
+			if ($line === '') { continue; }
+			$parts = preg_split('/\s+/', $line);
+			$viewer = (count($parts) > 1) ? strtolower($parts[0]) : 'anonymous';
+			$page = (count($parts) > 1) ? $parts[1] : $parts[0];
+			try {
+				$built = JobCommandBuilder::build_page_probe_primitive(null, $page, $viewer);
+			} catch (Exception $e) {
+				throw new StagedRolloutException('Pages to check: ' . $e->getMessage());
+			}
+			$key = $built['params']['viewer'] . ' ' . $built['params']['page'];
+			$pages[$key] = array('page' => $built['params']['page'], 'viewer' => $built['params']['viewer']);
+		}
+		if (count($pages) > self::MAX_PROBE_PAGES) {
+			throw new StagedRolloutException('Pages to check: at most ' . self::MAX_PROBE_PAGES . ' pages, so each node\'s check stays short.');
+		}
+		return array_values($pages);
 	}
 
 	/**
@@ -99,18 +141,18 @@ class StagedRolloutRunner {
 	 * @param int[] $node_ids ordered, first applied first
 	 * @throws StagedRolloutException naming what refused
 	 */
-	public static function start(array $node_ids, $user_id) {
+	public static function start(array $node_ids, $user_id, array $probe_pages = array()) {
 		if (!self::lock()) {
 			throw new StagedRolloutException('A rollout is being started or moved right now; try again in a moment.');
 		}
 		try {
-			return self::start_locked($node_ids, $user_id);
+			return self::start_locked($node_ids, $user_id, $probe_pages);
 		} finally {
 			self::unlock();
 		}
 	}
 
-	private static function start_locked(array $node_ids, $user_id) {
+	private static function start_locked(array $node_ids, $user_id, array $probe_pages = array()) {
 		if (StagedRollout::running()) {
 			throw new StagedRolloutException('A rollout is already running; stop it or let it finish first.');
 		}
@@ -129,7 +171,7 @@ class StagedRolloutRunner {
 			} catch (Exception $e) {
 				throw new StagedRolloutException("Node #{$id} does not exist.");
 			}
-			$why = self::node_refusal($node);
+			$why = self::node_refusal($node, (bool)$probe_pages);
 			if ($why !== null) {
 				throw new StagedRolloutException("'{$node->get('mgn_name')}' cannot be in a rollout: {$why}");
 			}
@@ -145,6 +187,7 @@ class StagedRolloutRunner {
 		$rollout->set('srl_position', 0);
 		$rollout->set('srl_status', StagedRollout::STATUS_RUNNING);
 		$rollout->set('srl_created_by', $user_id ?: null);
+		$rollout->set('srl_probe_pages', $probe_pages ? array_values($probe_pages) : null);
 		$rollout->save();
 		$rollout->load();
 		self::advance_locked($rollout);
@@ -366,7 +409,7 @@ class StagedRolloutRunner {
 		}
 
 		if (empty($step['job_id'])) {
-			$why = self::node_refusal($node);
+			$why = self::node_refusal($node, (bool)$rollout->probe_pages());
 			if ($why !== null) {
 				self::fail_step($rollout, $steps, $pos, $why);
 				return;
@@ -377,6 +420,16 @@ class StagedRolloutRunner {
 			}
 			if ($pre !== null) {
 				self::fail_step($rollout, $steps, $pos, $pre);
+				return;
+			}
+			// The pages as they render before the apply: what the check after
+			// it is measured against.
+			$probe = self::probe_round($rollout, $node, $steps, $pos, 'probes_before');
+			if ($probe === 'wait') {
+				return;
+			}
+			if ($probe !== null) {
+				self::fail_step($rollout, $steps, $pos, $probe);
 				return;
 			}
 			try {
@@ -417,6 +470,23 @@ class StagedRolloutRunner {
 		if ($why !== null) {
 			self::fail_step($rollout, $steps, $pos, $why);
 			return;
+		}
+		// The same pages after the apply, held against how they rendered before.
+		$probe = self::probe_round($rollout, $node, $steps, $pos, 'probes_after');
+		if ($probe === 'wait') {
+			return;
+		}
+		if ($probe !== null) {
+			self::fail_step($rollout, $steps, $pos, $probe);
+			return;
+		}
+		if ($rollout->probe_pages()) {
+			$why = self::probe_verdict(self::probe_jobs($steps[$pos]['probes_before'] ?? array()),
+				self::probe_jobs($steps[$pos]['probes_after'] ?? array()), $rollout->probe_pages());
+			if ($why !== null) {
+				self::fail_step($rollout, $steps, $pos, $why);
+				return;
+			}
 		}
 		$steps[$pos]['verdict'] = 'passed';
 		$steps[$pos]['reason'] = '';
@@ -480,6 +550,147 @@ class StagedRolloutRunner {
 		$steps[$pos]['reason'] = '';
 		$rollout->set_steps($steps);
 		$rollout->save();
+		return null;
+	}
+
+	/**
+	 * One round of a node's page checks ($round: probes_before or
+	 * probes_after): queue a page_probe for each of the rollout's pages, then
+	 * wait for all of them. Null: the round is done, or the rollout checks no
+	 * pages. 'wait': look again on the next tick. A string: halt here. A
+	 * probe that failed is not a halt by itself; probe_verdict() reads it.
+	 */
+	private static function probe_round(StagedRollout $rollout, ManagedNode $node, array &$steps, $pos, string $round) {
+		$pages = $rollout->probe_pages();
+		if (!$pages || !empty($steps[$pos][$round . '_done'])) {
+			return null;
+		}
+		$when = ($round === 'probes_before') ? 'before' : 'after';
+		if (empty($steps[$pos][$round])) {
+			$ids = array();
+			try {
+				foreach ($pages as $p) {
+					$built = JobCommandBuilder::build_page_probe($node, $p['page'], $p['viewer']);
+					$job = ManagementJob::createFromBuild($node->key, 'page_probe', $built,
+						array('staged_rollout_id' => (int)$rollout->key), $rollout->get('srl_created_by'));
+					$ids[] = (int)$job->key;
+				}
+			} catch (Exception $e) {
+				return 'its page checks could not be queued: ' . $e->getMessage();
+			}
+			$steps[$pos][$round] = $ids;
+			$steps[$pos]['verdict'] = 'running';
+			$steps[$pos]['reason'] = 'checking its pages ' . $when . ' the apply';
+			$rollout->set_steps($steps);
+			$rollout->save();
+			return 'wait';
+		}
+		$oldest = null;
+		foreach ($steps[$pos][$round] as $id) {
+			try {
+				$job = new ManagementJob((int)$id, TRUE);
+			} catch (Exception $e) {
+				return 'one of its page checks is gone';
+			}
+			if (!in_array((string)$job->get('mjb_status'), JobResultProcessor::TERMINAL_STATUSES, true)) {
+				$queued = strtotime((string)$job->get('mjb_create_time') . ' UTC');
+				$oldest = ($oldest === null) ? $queued : min($oldest, $queued);
+				continue;
+			}
+			JobResultProcessor::process_if_due($job);
+		}
+		if ($oldest !== null) {
+			if (time() - $oldest > self::PROBE_WAIT_MINUTES * 60) {
+				return 'its page checks ' . $when . ' the apply have not finished in ' . self::PROBE_WAIT_MINUTES
+					. ' minutes (is its agent claiming jobs?)';
+			}
+			return 'wait';
+		}
+		$steps[$pos][$round . '_done'] = true;
+		$steps[$pos]['reason'] = '';
+		$rollout->set_steps($steps);
+		$rollout->save();
+		return null;
+	}
+
+	/** Job ids to the jobs they name, loaded; a gone job is left out. */
+	private static function probe_jobs(array $ids): array {
+		$jobs = array();
+		foreach ($ids as $id) {
+			try {
+				$jobs[] = new ManagementJob((int)$id, TRUE);
+			} catch (Exception $e) {
+				// Gone: probe_verdict reads it as no check.
+			}
+		}
+		return $jobs;
+	}
+
+	/**
+	 * The page gate: null when no page got worse with the apply, else why.
+	 * A page worse after is one that answers an error status (400 or more, or
+	 * none) it did not answer before, raises more PHP errors than it did, or
+	 * fails to load an asset it loaded. A page the node could not render after
+	 * the apply halts too; one it could not render before has nothing to be
+	 * held against, so after must be clean on its own. Public so the test can
+	 * hold it to those rules.
+	 *
+	 * @param ManagementJob[] $before page_probe jobs, in any order
+	 * @param ManagementJob[] $after  page_probe jobs, in any order
+	 * @param array<int, array{page: string, viewer: string}> $pages
+	 */
+	public static function probe_verdict(array $before, array $after, array $pages) {
+		$read = function (array $jobs) {
+			$by = array();
+			foreach ($jobs as $job) {
+				$r = json_decode((string)$job->get('mjb_result'), true);
+				if ((string)$job->get('mjb_status') === 'completed' && is_array($r) && !empty($r['read'])) {
+					$by[($r['viewer'] ?? '') . ' ' . ($r['page'] ?? '')] = $r;
+				}
+			}
+			return $by;
+		};
+		$b = $read($before);
+		$a = $read($after);
+		$errors = function ($r) {
+			$n = 0;
+			foreach ((array)($r['warnings'] ?? array()) as $w) {
+				if (is_array($w) && ($w['type'] ?? '') === 'error') { $n++; }
+			}
+			return $n;
+		};
+		$bad = function ($status) { return !is_int($status) || $status <= 0 || $status >= 400; };
+		foreach ($pages as $p) {
+			$key = $p['viewer'] . ' ' . $p['page'];
+			$label = $p['page'] . ' (as ' . $p['viewer'] . ')';
+			if (!isset($a[$key])) {
+				return 'its page check of ' . $label . ' after the apply did not run, so the apply cannot be judged by it';
+			}
+			$after_r = $a[$key];
+			$before_r = $b[$key] ?? null;
+			if ($bad($after_r['status'] ?? null) && ($before_r === null || !$bad($before_r['status'] ?? null))) {
+				return $label . ' answers ' . (int)($after_r['status'] ?? 0)
+					. ($before_r !== null ? ' after the apply; it answered ' . (int)$before_r['status'] . ' before' : ' after the apply');
+			}
+			$errs_after = $errors($after_r);
+			$errs_before = ($before_r !== null) ? $errors($before_r) : 0;
+			if ($errs_after > $errs_before) {
+				return $label . ' raises ' . $errs_after . ' PHP error' . ($errs_after === 1 ? '' : 's')
+					. ' after the apply (' . $errs_before . ' before)';
+			}
+			$assets_before = array();
+			foreach ((array)($before_r['failed_assets'] ?? array()) as $fa) {
+				if (is_array($fa)) { $assets_before[(string)($fa['path'] ?? '')] = true; }
+			}
+			$new_assets = array();
+			foreach ((array)($after_r['failed_assets'] ?? array()) as $fa) {
+				if (is_array($fa) && !isset($assets_before[(string)($fa['path'] ?? '')])) { $new_assets[] = (string)$fa['path']; }
+			}
+			if ($new_assets || (int)($after_r['failed_assets_unnamed'] ?? 0) > (int)($before_r['failed_assets_unnamed'] ?? 0)) {
+				return $label . ' fails to load ' . ($new_assets ? implode(', ', array_slice($new_assets, 0, 5)) : 'assets')
+					. ' after the apply';
+			}
+		}
 		return null;
 	}
 

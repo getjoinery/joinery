@@ -11,8 +11,11 @@
  *
  * srl_steps is the ordered list, one entry per node:
  *   {node_id, name, job_id, verdict, reason}
- * verdict is one of pending | running | passed | failed | skipped.
+ * verdict is one of pending | running | passed | failed | skipped. A rollout
+ * with pages to check (srl_probe_pages) adds probes_before and probes_after,
+ * each the page_probe job ids of one round.
  *
+ * @version 1.1 - srl_probe_pages: the pages each node renders before and after its apply, [{page, viewer}]
  * @version 1.0
  */
 
@@ -23,7 +26,7 @@ class StagedRollout extends SystemBase {
 	public static $tablename = 'srl_staged_rollouts';
 	public static $pkey_column = 'srl_staged_rollout_id';
 
-	public static $json_vars = array('srl_steps');
+	public static $json_vars = array('srl_steps', 'srl_probe_pages');
 
 	const STATUS_RUNNING   = 'running';
 	const STATUS_COMPLETED = 'completed';
@@ -37,6 +40,9 @@ class StagedRollout extends SystemBase {
 		'srl_position'          => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0'),
 		'srl_status'            => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'running'),
 		'srl_halt_reason'       => array('type'=>'text'),
+		// The pages each node renders as a throwaway viewer before and after
+		// its apply (page_probe), [{page, viewer}]; null or empty checks none.
+		'srl_probe_pages'       => array('type'=>'jsonb', 'is_nullable'=>true),
 		'srl_created_by'        => array('type'=>'int8'),
 		'srl_stopped_by'        => array('type'=>'int8'),
 		'srl_finish_time'       => array('type'=>'timestamp(6)'),
@@ -61,6 +67,15 @@ class StagedRollout extends SystemBase {
 
 	public function set_steps(array $steps): void {
 		$this->set('srl_steps', array_values($steps));
+	}
+
+	/** The pages each node renders before and after its apply: [{page, viewer}]. */
+	public function probe_pages(): array {
+		$pages = $this->get('srl_probe_pages');
+		if (is_string($pages)) {
+			$pages = json_decode($pages, true);
+		}
+		return is_array($pages) ? array_values($pages) : array();
 	}
 
 	public function is_running(): bool {

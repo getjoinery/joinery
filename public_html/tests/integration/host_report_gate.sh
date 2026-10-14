@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,memory,swap,cpus,reboot_required,reboot_required_since,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -338,6 +338,15 @@ chk "served certificates: whole days left per name, a failed handshake left out"
 chk "containers: only the two whose name is their SITENAME" "$(jv "$T/root.json" containers count)/$(jv "$T/root.json" containers.0.name)/$(jv "$T/root.json" containers.1.name)" "2/siteone/sitetwo"
 chk "containers: one answering through PHP, one not" "$(jv "$T/root.json" containers.0.answers)/$(jv "$T/root.json" containers.1.answers)" "yes/no"
 chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv "$T/root.json" containers.0.health)" "running/none"
+# On the site container engine: the same list through podman, whose names carry
+# no slash and whose start time is asked for in RFC 3339 (specs/site_container_engine.md WP3).
+sed -e 's#echo "/\(siteone\|sitetwo\|impostor\|\$c\)|#echo "\1|#' -e 's#echo "docker \$1"#echo "podman \$1 \$3"#' "$T/bin/docker" > "$T/bin/podman"; chmod 755 "$T/bin/podman"
+mv "$T/bin/docker" "$T/docker.real"
+GATE_DOCKER_LOG="$T/podman.log" JOINERY_SITE_ENGINE_KIND=podman PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/pod.json" 2>/dev/null
+mv "$T/docker.real" "$T/bin/docker"; rm -f "$T/bin/podman"
+chk "on the site container engine: the same two sites, through podman" "$(jv "$T/pod.json" containers count)/$(jv "$T/pod.json" containers.0.name)/$(jv "$T/pod.json" containers.0.answers)" "2/siteone/yes"
+chk "  its start time asked for in RFC 3339, so started_at holds" \
+    "$(grep -c 'StartedAt.Format "2006-01-02T15:04:05.999999999Z07:00"' "$T/podman.log")|$(jv "$T/pod.json" containers.0.started_at)" "1|$(jv "$T/root.json" containers.0.started_at)"
 # A site's figures (multi_tenant_docker_hosts WP1), read from the cgroup and
 # network namespace of the process docker names - here the gate's own.
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
@@ -514,7 +523,10 @@ chk "120 sites: exit 0, a JSON object" "$rc/$(jv "$T/many.json" "" type)" "0/obj
 chk "120 sites: the first 100 are listed" "$(jv "$T/many.json" containers count)/$(jv "$T/many.json" containers.0.name | cut -c1-7)/$(jv "$T/many.json" containers.99.name | cut -c1-7)" "100/site001/site100"
 chk "120 sites: each one answers" "$(php -r '$o=json_decode(file_get_contents($argv[1]),true); echo count(array_filter($o["containers"], fn($c) => $c["answers"] === "yes"));' "$T/many.json")" "100"
 chk "120 sites: docker inspect runs once, for all of them" "$(grep -c '^docker inspect' "$GATE_DOCKER_LOG")" "1"
-chk "120 sites answering in 2 s each: the report took the slowest, not the sum (${elapsed}s)" "$( [ "$elapsed" -lt 20 ]; echo $? )" "0"
+# Asked one after another, 100 would take 200 s; at once, the slowest. The bound
+# is the agent's minute with room: a box busy with other runs adds seconds,
+# never the 198 s a serial walk would.
+chk "120 sites answering in 2 s each: the report took the slowest, not the sum, inside the agent's minute (${elapsed}s)" "$( [ "$elapsed" -lt 45 ]; echo $? )" "0"
 # The largest a host's sites can make the report: 100 such entries, plus 100
 # sites' outbound figures (122 bytes each at the longest name), must stay
 # under the agent's 64 KiB with room for the rest of the report.
@@ -555,6 +567,29 @@ STUB
 chmod 755 "$T/poolbin/docker"
 PATH="$T/poolbin:$T/bin:$PATH" bash "$SCRIPT" > "$T/noinspect.json" 2>/dev/null
 chk "an inspect that answers nothing: containers unknown, not an empty list (N5)" "$(jv "$T/noinspect.json" containers)" "unknown"
+
+echo "=== The data root's own script, and the boot id (host_report 1.23) ==="
+eval "$(sed -n -e '/^script_version() {/,/^}/p' -e '/^emit_data_root_script() {/,/^}/p' -e '/^emit_boot_id() {/,/^}/p' "$SCRIPT")"
+MAX_LIST=20
+mkdir -p "$T/drs/tree/maintenance_scripts/install_tools" "$T/drs/etc/systemd/system/postgresql.service.d" "$T/drs/bin"
+printf '#!/bin/bash\n#\n# Version: 1.22 - x\n# Version: 1.21 - y\nCONSUMERS="postgresql.service docker.service apache2.service bad;unit.service"\n' \
+    > "$T/drs/tree/maintenance_scripts/install_tools/joinery_data_root.sh"
+printf '#!/bin/bash\n# Version: 1.21 - y\nCONSUMERS="postgresql.service"\n' > "$T/drs/sbin"
+: > "$T/drs/etc/systemd/system/postgresql.service.d/joinery-data-root.conf"
+cat > "$T/drs/bin/systemctl" <<'STUB'
+#!/bin/bash
+[ "$1" = "list-unit-files" ] && printf 'postgresql.service enabled enabled\napache2.service enabled enabled\n'
+exit 0
+STUB
+chmod 755 "$T/drs/bin/systemctl"
+printf 'backing=file\n' > "$T/drs/conf"
+drs() { PATH="$T/drs/bin:$PATH" SITE_ROOT="$T/drs/tree" HOST_REPORT_ETC="$T/drs/etc" HOST_REPORT_DATA_ROOT_CONF="$1" HOST_REPORT_DATA_ROOT_SBIN="$2" emit_data_root_script; }
+drs_v() { drs "$1" "$2" | php -r '$o=json_decode(stream_get_contents(STDIN),true); $u=[]; foreach ($o["consumers"] as $c) { $u[]=$c["unit"].":".($c["drop_in"]?"d":"-").($c["installed"]?"i":"-"); } echo $o["installed_version"], "/", $o["release_version"], "/", implode(",", $u);'; }
+chk "the installed copy's version beside the release's, and each consumer's drop-in and unit; a hostile name reduced" \
+    "$(drs_v "$T/drs/conf" "$T/drs/sbin")" "1.21/1.22/postgresql.service:di,docker.service:--,apache2.service:-i,badunit.service:--"
+chk "no installed copy: none, not unknown" "$(drs_v "$T/drs/conf" "$T/drs/absent" | cut -d/ -f1)" "none"
+chk "a host that declares no data root: none" "$(drs "$T/drs/no_conf" "$T/drs/sbin")" '"none"'
+chk "the boot id is the kernel's" "$(jv "$T/root.json" boot_id)" "$(tr -cd '0-9a-f-' < /proc/sys/kernel/random/boot_id)"
 
 echo "=== A command that hangs costs its key, not the report ==="
 cat > "$T/bin/fail2ban-client" <<'STUB'
@@ -614,9 +649,10 @@ chk "the environment is filtered to SITENAME inside docker" "$(grep -cF '0) "SIT
 chk "the name cap is 64" "$(grep -c '^MAX_NAME=64' "$SCRIPT")" "1"
 chk "sshd is invoked once, read-only (-T)" "$(grep -o 'run sshd[^)]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run sshd -T "
 chk "openssl only reads: s_client and x509 -noout" "$(grep -o 'run openssl [a-z_0-9]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run openssl s_client run openssl x509 "
-chk "no docker verb but ps and inspect" "$(grep -o 'run docker [a-z]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "run docker inspect run docker ps "
+chk "no engine verb but ps and inspect" "$(grep -o -E 'run (docker|"\$engine") [a-z]*' "$SCRIPT" | sed 's/^run [^ ]* //' | sort -u | tr '\n' ' ')" "inspect ps "
+chk "and no docker by name: the engine is the one this host's sites run on" "$(grep -c -E 'run docker [a-z]' "$SCRIPT")" "0"
 chk "du runs once, summarising (-s), under the command timeout" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c '\bdu ')/$(grep -c 'run du -s -B1 -- ' "$SCRIPT")" "1/1"
-chk "a container's figures come from its cgroup, never from docker stats or exec" "$(grep -c -E 'docker (stats|exec)' "$SCRIPT")" "0"
+chk "a container's figures come from its cgroup, never from docker stats or exec" "$(grep -c -E '(docker|"\$engine") (stats|exec)' "$SCRIPT")" "0"
 chk "curl is only ever asked for headers, body discarded" "$(grep -c 'run curl' "$SCRIPT")/$(grep 'run curl' "$SCRIPT" | grep -c -- '-o /dev/null -D -')" "3/3"
 chk "no systemctl verb but show and list" "$(grep -o 'systemctl [a-z-]*' "$SCRIPT" | sort -u | tr '\n' ' ')" "systemctl list-unit-files systemctl list-units systemctl show "
 chk "no fail2ban-client verb but status" "$(grep -o 'fail2ban-client [a-z]\+' "$SCRIPT" | sort -u | tr '\n' ' ')" "fail2ban-client status "

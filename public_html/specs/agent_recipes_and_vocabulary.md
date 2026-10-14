@@ -6,11 +6,11 @@ and the older spec carries a dated note saying so.** It reverses one owner
 decision (A10, 2026-08-26: "the agent never initiates work of its own") and
 records the reversal below.
 
-**BUILT 2026-09-23 (agent 1.43.0), reviewed, all findings fixed; not yet
-released or proven live on a node.** Every word, recipe and work package
-below is built except the items marked **Open** or **Not built**: the plugin
-set in `host_report` (running list, Open) and the optional `page_probe` gate
-in `staged_rollout`. The tier 1 contract it builds on is
+**BUILT 2026-09-23 (agent 1.43.0), reviewed, all findings fixed, released.
+The running list's words, the plugin set and the `page_probe` gate in
+`staged_rollout` BUILT 2026-10-14 (agent 1.76.0, host_report 1.23); their
+live checks are in the verification queue.** Every word, recipe and work
+package below is built. The tier 1 contract it builds on is
 `implemented/agent_tier1_recipes.md`; the first installer shipped with
 `post_release_fleet_defects.md` B2. The spec stays here, not in
 `implemented/`, because it governs the agent family and its running list of
@@ -356,7 +356,7 @@ no shell was opened; what follows is what the operator could not see.
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
 | Confirm the node's schema after a migration: the old table gone, the new column NOT NULL, a row count | Trusted the transcript's own lines | `schema_probe {table}` (observe): exists, row count, columns with type and nullability, indexes — the node's `information_schema` answer for one named table, no SQL taken from the plane. `table` matches a compiled identifier pattern and must exist in the node's own `information_schema` or the word refuses; the row count is accepted as an aggregate, as `page_probe`'s size is — **BUILT** (agent 1.43.0) |
-| Which plugins are active on the node, and their versions | Inferred from the absence of a plugin-migration line | `host_report` (or `check_status`) carries the plugin set: name, version, active — the platform's own registry, read not guessed. **Open:** `check_status` carries the hourly plugin fleet report (each plugin's own checks), not this set |
+| Which plugins are active on the node, and their versions | Inferred from the absence of a plugin-migration line | `check_status` carries the plugin set as `plugins`: name, version (from the recorded `plugin.json`), active, and `plg_status` — the platform's own registry, read not guessed; the management API's stats endpoint carries the same list — **BUILT** (agent 1.76.0) |
 | The site's error log for the minutes after the swap | Nothing | `site_log {file, previous, lines}` (observe): the last N lines of one of the site's own log files from a compiled list, capped, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
 | A deploy result to read rather than a transcript to grep | Grepped 70 KB of routing debug for six lines | `apply_update` posts a structured result beside the transcript: version before and after, each migration run with its row counts, schema changes, deploy-tier verdict, rollback yes/no. The transcript stays for forensics. Field list in *Settled 2026-09-23* below; `staged_rollout` depends on it — **BUILT** |
 | The site's own log tables after the swap: the last logins, request log rows, event log rows and webhook rows | Nothing | `log_table_tail {table, rows}` (observe): the newest N rows of one log table from a compiled list (`log_logins`, `rql_request_logs`, `evl_event_logs`, `wbh_webhook_logs`, `lfe_log_form_errors`), compiled column list per table, rows capped; the node's own query, no SQL taken from the plane. With `site_log`, gated by one owner-set switch on the node, on by default, redacted on the node — **BUILT** (agent 1.35.0), `agent_log_access.md` |
@@ -387,9 +387,9 @@ the host keeps run specs, so the operator opened a read-only SSH session to dock
 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
-| Each container's image, its mounts (type, volume name), and whether its run spec exists | Read-only SSH: `docker inspect` per container, `ls /etc/joinery/sites` | `host_report` carries, per container, `image`, `mounts` (type and volume name, never a bind source path) and `run_spec` (present or not), so the plane can show a container that install.sh did not make before anyone removes it (platform, no agent release: `host_report.sh` is a script word) |
+| Each container's image, its mounts (type, volume name), and whether its run spec exists | Read-only SSH: `docker inspect` per container, `ls /etc/joinery/sites` | `container_inventory` (observe, machine, no parameters): every container on the machine with `install_sh` (its name is its `SITENAME`), `image`, `state`, `mounts` (type and volume name, never a bind source path) and `run_spec` (present or not), so the plane can show a container that install.sh did not make before anyone removes it. Its own word, not keys in `host_report`: a host's hundred sites already fill most of the agent's 64 KiB there — **BUILT** (agent 1.76.0) |
 | To be told the disk was filling before it filled | Nothing. Four days of warning sat unread in stored host reports | The plane-side notice over stored samples (floor **and** slope, § 2 of the spec) was **dropped by the owner 2026-09-22**: disk space is the operator's responsibility and a daily notice is noise. What was built is the node's own floor: recipe `disk_headroom` (check-only, `Recipe.NoRepair`: 10% or 5 GiB available, a case on the first failing check) — **BUILT** (agent 1.41.0) |
-| Whether a user's Mark as spam reached the spam filter on jeremytunnell (10-03) — the correction rows and the size of the learned corpus | Read-only SSH and a PHP query against `iem_inbound_email_messages` and `ibt_inbound_bayes_tokens`; the cron log only said Taught 0, which cannot tell a correction already taught apart from one never recorded | `spam_learning_status` (observe, no parameters): counts only, never a subject or address — corrections recorded, taught, pending clear, pending sealed, skipped as IMAP-polled in the last 7 days, corpus token count and newest token time, and the two policy switches |
+| Whether a user's Mark as spam reached the spam filter on jeremytunnell (10-03) — the correction rows and the size of the learned corpus | Read-only SSH and a PHP query against `iem_inbound_email_messages` and `ibt_inbound_bayes_tokens`; the cron log only said Taught 0, which cannot tell a correction already taught apart from one never recorded | `spam_learning_status` (observe, no parameters): counts only, never a subject or address — corrections recorded, taught, pending clear, pending sealed, skipped as IMAP-polled in the last 7 days, corpus token count and newest token time, and the two policy switches — **BUILT** (agent 1.76.0; `SpamLearning::status()`) |
 
 **2026-10-10, the data root moves (one_data_root.md WP4), joinerydemo first.** The move
 ran through `data_root_migrate`, and its last step is a reboot: the old copies stay
@@ -399,7 +399,7 @@ production host already showed "Reboot required" for 1 to 7 days.
 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
-| To reboot a host after a data root move, and to act on "Reboot required" at all | The owner rebooted from Linode's Cloud Manager; on a server outside our accounts (jeremytunnell-vps, the owner's own Linode) only its owner can | `reboot_machine` (operate, machine, no parameters): schedules the reboot a few seconds out so the job reports first, refuses inside a site container; a node page button behind a confirm beside "Reboot required"; the plane notes the boot id before and sees it change |
+| To reboot a host after a data root move, and to act on "Reboot required" at all | The owner rebooted from Linode's Cloud Manager; on a server outside our accounts (jeremytunnell-vps, the owner's own Linode) only its owner can | `reboot_machine` (operate, machine, no parameters): schedules the reboot a few seconds out so the job reports first, refuses inside a site container; a node page button behind a confirm beside "Reboot required"; the plane notes the boot id before and sees it change — **BUILT** (agent 1.76.0): twenty seconds out on a transient timer; also refuses where the boot would wait for a recovery key (an encrypted data root with no escrow holder, or mid-run), while dpkg or apt runs, and while the host's installers hold their lock; `host_report` carries `boot_id` |
 
 **2026-10-12, mail apps on a relay-fronted test site (mailapps-walk.joinerytest.com).**
 Allow mail apps failed with "the gateway did not start listening on 993 and 465" while
@@ -409,7 +409,7 @@ could not say which addresses its services were bound to.
 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
-| Which addresses and ports the machine is listening on, and which program holds each | Read the source and reproduced it on dev | `listening_sockets` (observe, machine, no parameters): the `ss -ltnp` answer as rows of address, port, family and unit or program name, capped; no remote addresses, no connections |
+| Which addresses and ports the machine is listening on, and which program holds each | Read the source and reproduced it on dev | `listening_sockets` (observe, machine, no parameters): the `ss -ltnp` answer as rows of address, port, family and unit or program name, capped; no remote addresses, no connections — **BUILT** (agent 1.76.0; bound UDP sockets too) |
 
 **2026-10-14, the 0.8.494 check on an encrypted data root (node-n, TEST plane).** 0.8.494
 changed `joinery_data_root.sh` to 1.22 (`podman-restart.service` joined its consumers). The
@@ -418,8 +418,21 @@ were read over SSH, read-only.
 
 | Wanted | Done instead | Word or recipe |
 |---|---|---|
-| Which version of the data root script the machine runs (`/usr/local/sbin/joinery-data-root`, the copy a run's unit starts, which the tick brings up to the release's) | Read its `# Version:` line over SSH | A field in `host_report`'s `data_root_encryption`: the installed copy's version line, beside the release's own, so a node page can say when they differ |
-| Which consumer drop-ins the data root wrote, and whether each names a unit installed here | Listed `/etc/systemd/system/*.service.d` over SSH | A field in `host_report`'s `data_root_encryption`: for each unit in the script's `CONSUMERS` (a closed list), drop-in present and unit installed |
+| Which version of the data root script the machine runs (`/usr/local/sbin/joinery-data-root`, the copy a run's unit starts, which the tick brings up to the release's) | Read its `# Version:` line over SSH | `host_report`'s `data_root_script` (not `data_root_encryption`: a plain data root has the script too): the installed copy's version beside the release's own, so a node page can say when they differ — **BUILT** (host_report 1.23) |
+| Which consumer drop-ins the data root wrote, and whether each names a unit installed here | Listed `/etc/systemd/system/*.service.d` over SSH | `host_report`'s `data_root_script.consumers`: for each unit in the script's `CONSUMERS` (a closed list), drop-in present and unit installed — **BUILT** (host_report 1.23) |
+
+**2026-10-14, the 0.8.494 sandboxed plugin check (plugin_tiers.md) on two TEST boxes, sbxbm
+(bare metal) and sbxct (a site container).** A sandboxed plugin was uploaded, approved and
+removed on each. The host's own state could not be read: the container's keepalive held the
+converger's lock (fixed in install_sandbox_host.sh 1.2), found only from the converger's log,
+and the restore check needed a shell on the box, which a TEST box no longer gives.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Whether the sandboxed plugin host's unit is active, stopped or gone, and its last journal lines | Inferred from the plugin's own answers and from its files disappearing | `unit_journal` gains the per-site unit family `joinery-sandbox-host-*` (closed: the units install_sandbox_host.sh names) |
+| The host's keepalive log in a site container (`/var/log/joinery-sandbox-host-{site}.log`) and whether its cron file exists | Nothing | `site_log` gains the host log, and `host_report` carries the sandbox host's mode (systemd, cron, none), its version and whether it answers `/health` |
+| The converger's own journal on a bare-metal host (which run holds the lock, since when) | Read the container's converger log only; on bare metal nothing | `unit_journal` gains the converger's unit |
+| Restore one site's dump onto another site with a different `secret_box_key`, to see `RESTORE_SECRET_KEY_MISMATCH` | Proved on dev instead (tests/backups/restore_secret_key_gate.sh: the script's own check, read-only, plus a canary that does not open) | None needed for the platform; the end-to-end proof waits for a box the operator can reach |
 
 ## Settled 2026-09-23
 
@@ -517,7 +530,10 @@ render, never the render.
 newest *published* version, the one a node's apply pulls; one mover at a time
 under an advisory lock; a node whose apply has not finished in 90 minutes
 halts the rollout by name, and the nodes after a halt or stop read skipped
-(review B16, B17, B20). The optional `page_probe` gate is not built.
+(review B16, B17, B20). The optional `page_probe` gate is **BUILT**
+(2026-10-14): up to five pages, rendered on each node before its apply and
+again after it passes, halting where a page got worse (an error status it did
+not answer, more PHP errors, an asset it no longer loads).
 
 Not a node word: each step is the node's existing `apply_update`. The plane
 takes a release and an ordered node list, applies to one node at a time, and
@@ -638,9 +654,9 @@ with the agent's `vocabulary_test.go`.
 | WP7 | **BUILT** 2026-09-23. `reclaim_managed_file`: the files `install.sh` and `_site_init.sh` write once move into re-runnable installers (see *Host files*), the runner gains `--only-plugin=` for `run_installer plugin:NAME`, then the word. Needs the host timer stopped on dev while installers are edited. `apache2.conf` stays readable only (owner, option A) | this spec |
 | WP6 | **BUILT** 2026-09-23. Version spread: the plane's declared-words helper and its standard "needs a newer agent" state; the version floor (`AgentVocabulary::FLOOR` = 1.43.0, a constant; node-list flag; `apply_update`-only below it), with `PRIMITIVE_MIN_AGENT_VERSION` and the no-vocabulary fallback deleted; the two-direction channel test; version spread on the node list | this spec, last |
 
-All work packages are built. What remains is the release (agent 1.43.0 with
-the platform) and a live proof on one node: a `page_probe`, a recipe repair,
-a reset, and a staged rollout.
+All work packages are built and released. A `page_probe` is proven live
+(jeremytunnell, job 96242); a recipe repair, a reset and a staged rollout
+(with and without pages) wait in the verification queue.
 
 ## Open questions
 

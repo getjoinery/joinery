@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.82 - listening_sockets, container_inventory, spam_learning_status and reboot_machine results (agent
+ *                 1.76.0); a host report keeps data_root_script and boot_id (host_report 1.23), and a boot id that
+ *                 is not the one a reboot_machine job recorded says the machine came back (reboot_seen)
  * @version 1.81 - a data root job that ends (encrypt, decrypt, rekey, migrate, recipient, an enrolment confirmed)
  *                 queues a host report: the node page, the escrow sync and the address swap's check read the
  *                 last one, and the next hourly one left them saying what the machine was before (B62)
@@ -3209,6 +3212,251 @@ HTML;
 		}
 	}
 
+	/** The JSON object a script word printed, or null. */
+	private static function script_json($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
+		$decoded = ($text !== '') ? json_decode(trim($text), true) : null;
+		return is_array($decoded) ? $decoded : null;
+	}
+
+	/** The listeners listening_sockets.sh lists at most (its MAX_SOCKETS). */
+	const LISTENING_SOCKETS_MAX = 100;
+
+	/**
+	 * A listening_sockets job's result (agent 1.76.0): the machine's listeners,
+	 * each held to its shape. Pure; the processor test drives it.
+	 */
+	public static function sanitise_listening_sockets($d) {
+		if (!is_array($d) || !array_key_exists('sockets', $d)) {
+			return ['read' => false];
+		}
+		if (!is_array($d['sockets'])) {
+			return ['read' => true, 'sockets' => 'unknown', 'truncated' => false];
+		}
+		$out = [];
+		foreach (array_slice(array_values($d['sockets']), 0, self::LISTENING_SOCKETS_MAX) as $r) {
+			if (!is_array($r)) { continue; }
+			$address = (string)($r['address'] ?? '');
+			$port = $r['port'] ?? null;
+			if (!in_array($r['proto'] ?? '', ['tcp', 'udp'], true) || !is_int($port) || $port < 0 || $port > 65535
+					|| ($address !== '*' && filter_var($address, FILTER_VALIDATE_IP) === false)) {
+				continue;
+			}
+			$out[] = [
+				'proto'   => $r['proto'],
+				'family'  => in_array($r['family'] ?? '', ['ipv4', 'ipv6', 'any'], true) ? $r['family'] : 'unknown',
+				'address' => $address,
+				'port'    => $port,
+				'program' => self::host_report_name($r['program'] ?? ''),
+				'unit'    => self::host_report_name($r['unit'] ?? ''),
+			];
+		}
+		return ['read' => true, 'sockets' => $out, 'truncated' => ($d['truncated'] ?? false) === true];
+	}
+
+	private static function process_listening_sockets($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_listening_sockets(self::script_json($job))));
+		$job->save();
+	}
+
+	/** The mount types a container_inventory result names; any other is other. */
+	const CONTAINER_MOUNT_TYPES = ['volume', 'bind', 'tmpfs', 'npipe', 'cluster', 'image'];
+	/** Entries container_inventory.sh lists at most (its MAX_CONTAINERS), and mounts each. */
+	const CONTAINER_INVENTORY_MAX = 150;
+	const CONTAINER_INVENTORY_MAX_MOUNTS = 10;
+
+	/**
+	 * A container_inventory job's result (agent 1.76.0): every container on
+	 * the host, held to its shape. install_sh is the node's answer to whether
+	 * install.sh made it. Pure; the processor test drives it.
+	 */
+	public static function sanitise_container_inventory($d) {
+		if (!is_array($d) || !array_key_exists('containers', $d)) {
+			return ['read' => false];
+		}
+		$list = $d['containers'];
+		// The engine this host's sites run on (Docker, or the site container engine).
+		$engine = in_array($d['engine'] ?? '', ['docker', 'podman'], true) ? $d['engine'] : 'unknown';
+		if ($list === 'none' || !is_array($list)) {
+			return ['read' => true, 'engine' => $engine, 'containers' => ($list === 'none') ? 'none' : 'unknown', 'truncated' => false];
+		}
+		$out = [];
+		foreach (array_slice(array_values($list), 0, self::CONTAINER_INVENTORY_MAX) as $c) {
+			if (!is_array($c)) { continue; }
+			$name = self::host_report_name($c['name'] ?? '');
+			if ($name === '') { continue; }
+			$image = (string)($c['image'] ?? '');
+			$mounts = 'unknown';
+			if (is_array($c['mounts'] ?? null)) {
+				$mounts = [];
+				foreach (array_slice(array_values($c['mounts']), 0, self::CONTAINER_INVENTORY_MAX_MOUNTS) as $m) {
+					if (!is_array($m)) { continue; }
+					$mounts[] = [
+						'type' => in_array($m['type'] ?? '', self::CONTAINER_MOUNT_TYPES, true) ? $m['type'] : 'other',
+						'name' => self::host_report_name($m['name'] ?? ''),
+					];
+				}
+			}
+			$out[] = [
+				'name'       => $name,
+				'install_sh' => ($c['install_sh'] ?? null) === true,
+				'image'      => preg_match('#^[A-Za-z0-9._@:/-]{1,128}$#', $image) ? $image : 'unknown',
+				'state'      => self::unit_journal_word($c['state'] ?? ''),
+				'mounts'     => $mounts,
+				'run_spec'   => ($c['run_spec'] ?? null) === true,
+			];
+		}
+		return ['read' => true, 'engine' => $engine, 'containers' => $out, 'truncated' => ($d['truncated'] ?? false) === true];
+	}
+
+	private static function process_container_inventory($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_container_inventory(self::script_json($job))));
+		$job->save();
+	}
+
+	/**
+	 * A spam_learning_status job's result (agent 1.76.0): counts, a time and
+	 * booleans, each held to its shape, or mailbox inactive. Pure; the
+	 * processor test drives it.
+	 */
+	public static function sanitise_spam_learning_status($d) {
+		if (!is_array($d) || !in_array($d['mailbox'] ?? null, ['active', 'inactive'], true)) {
+			return ['read' => false];
+		}
+		if ($d['mailbox'] === 'inactive') {
+			return ['read' => true, 'mailbox' => 'inactive'];
+		}
+		$counts = function ($v, array $keys) {
+			$out = [];
+			foreach ($keys as $k) {
+				$out[$k] = self::host_report_count(is_array($v) ? ($v[$k] ?? null) : null);
+			}
+			return $out;
+		};
+		$corpus = is_array($d['corpus'] ?? null) ? $d['corpus'] : [];
+		$policy = is_array($d['policy'] ?? null) ? $d['policy'] : [];
+		$newest = (string)($corpus['newest_token'] ?? '');
+		return [
+			'read'        => true,
+			'mailbox'     => 'active',
+			'window_days' => self::host_report_count($d['window_days'] ?? null),
+			'corrections' => $counts($d['corrections'] ?? null, ['recorded', 'taught', 'pending_clear', 'pending_sealed', 'skipped_imap']),
+			'corpus'      => $counts($corpus, ['tokens', 'spam_messages', 'ham_messages']) + [
+				'newest_token' => preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $newest) ? $newest : null,
+				'trained'      => ($corpus['trained'] ?? null) === true,
+			],
+			'policy'      => [
+				'filtering_enabled' => ($policy['filtering_enabled'] ?? null) === true,
+				'learning_enabled'  => ($policy['learning_enabled'] ?? null) === true,
+			],
+		];
+	}
+
+	private static function process_spam_learning_status($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_spam_learning_status(self::script_json($job))));
+		$job->save();
+	}
+
+	/** The refusal codes reboot_machine.sh gives. */
+	const REBOOT_REFUSALS = ['container', 'no_systemd', 'data_root_run', 'no_escrow', 'packages', 'installers'];
+
+	/**
+	 * A reboot_machine job's result (agent 1.76.0): whether the reboot was
+	 * scheduled, and the boot id it was asked from, which reboot_seen() checks
+	 * each later host report against. came_back_at is filled in then. Pure;
+	 * the processor test drives it.
+	 */
+	public static function sanitise_reboot_machine($d) {
+		if (!is_array($d) || !array_key_exists('scheduled', $d)) {
+			return ['read' => false];
+		}
+		$refused = in_array($d['refused'] ?? '', self::REBOOT_REFUSALS, true) ? $d['refused'] : '';
+		return [
+			'read'              => true,
+			'scheduled'         => ($d['scheduled'] ?? null) === true && $refused === '',
+			'already_scheduled' => ($d['already_scheduled'] ?? null) === true,
+			'in_seconds'        => self::host_report_count($d['in_seconds'] ?? null),
+			'boot_id_before'    => self::boot_id($d['boot_id_before'] ?? null),
+			'refused'           => $refused,
+			'reason'            => substr(preg_replace('#[^A-Za-z0-9 ,.:;()/_\'-]#', '', (string)($d['reason'] ?? '')), 0, 300),
+			'came_back_at'      => null,
+		];
+	}
+
+	/**
+	 * A reboot_machine job's result. A scheduled reboot leaves the node to come
+	 * back; the uptime pass asks it for a host report every
+	 * RunNodeUptimeChecks::REBOOT_REFRESH_SECONDS until one carries a new boot
+	 * id (reboot_awaited, reboot_seen).
+	 */
+	private static function process_reboot_machine($job) {
+		$job->set('mjb_result', json_encode(self::sanitise_reboot_machine(self::script_json($job))));
+		$job->save();
+	}
+
+	/** How long after a reboot was asked for the plane still watches for the machine to come back. */
+	const REBOOT_WATCH_HOURS = 24;
+
+	/**
+	 * The node's latest reboot_machine job inside REBOOT_WATCH_HOURS, as the
+	 * node page and the uptime pass read it: {job, asked_at, scheduled,
+	 * boot_id_before, came_back_at}, or null.
+	 */
+	public static function last_reboot($node) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT mjb_management_job_id FROM mjb_management_jobs
+			WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'reboot_machine' AND mjb_delete_time IS NULL
+			  AND mjb_create_time > now() AT TIME ZONE 'UTC' - make_interval(hours => ?)
+			ORDER BY mjb_management_job_id DESC LIMIT 1");
+		$q->execute([(int)$node->key, self::REBOOT_WATCH_HOURS]);
+		$id = $q->fetchColumn();
+		if (!$id) {
+			return null;
+		}
+		$job = new ManagementJob((int)$id, TRUE);
+		$r = json_decode((string)$job->get('mjb_result'), true);
+		$r = is_array($r) ? $r : [];
+		return [
+			'job'            => $job,
+			'asked_at'       => (string)$job->get('mjb_create_time'),
+			'status'         => (string)$job->get('mjb_status'),
+			'scheduled'      => (string)$job->get('mjb_status') === 'completed' && !empty($r['scheduled']),
+			'boot_id_before' => (string)($r['boot_id_before'] ?? ''),
+			'came_back_at'   => $r['came_back_at'] ?? null,
+		];
+	}
+
+	/** A scheduled reboot not yet seen to have happened: the uptime pass keeps asking for host reports. */
+	public static function reboot_awaited($node): bool {
+		$last = self::last_reboot($node);
+		return $last !== null && $last['scheduled'] && empty($last['came_back_at']);
+	}
+
+	/**
+	 * A host report from a machine this plane asked to reboot: when its boot id
+	 * is not the one the reboot_machine job recorded, the reboot happened, and
+	 * the job says when it was seen (came_back_at).
+	 */
+	private static function reboot_seen($node, array $report, $read_at) {
+		$boot = (string)($report['boot_id'] ?? '');
+		if ($boot === '' || $boot === 'unknown') {
+			return;
+		}
+		$last = self::last_reboot($node);
+		if ($last === null || !$last['scheduled'] || !empty($last['came_back_at'])
+				|| $last['boot_id_before'] === '' || $last['boot_id_before'] === 'unknown'
+				|| hash_equals($last['boot_id_before'], $boot)) {
+			return;
+		}
+		$job = $last['job'];
+		$r = json_decode((string)$job->get('mjb_result'), true);
+		$r = is_array($r) ? $r : [];
+		$r['came_back_at'] = $read_at;
+		$job->set('mjb_result', json_encode($r));
+		$job->save();
+	}
+
 	private static function process_page_probe($job) {
 		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
 		$text = (is_array($data) && isset($data['output'])) ? (string)$data['output'] : '';
@@ -3389,6 +3637,9 @@ HTML;
 				} elseif (($report['data_root_encryption'] ?? null) === 'none') {
 					DataRootEscrowSync::from_plain_report($node, $report['disk_pool'] ?? null);
 				}
+				// A reboot this plane asked for, seen to have happened: the boot
+				// id is not the one the reboot_machine job recorded.
+				self::reboot_seen($node, $report, $read_at);
 				// Each site row's held state follows what its host says.
 				if (is_array($report['containers'] ?? null)) {
 					$held = [];
@@ -3515,6 +3766,9 @@ HTML;
 			// never shows it filling.
 			'disk_pool'                    => array_key_exists('disk_pool', $in) ? self::host_report_disk_pool($in['disk_pool']) : null,
 			'data_root_encryption'         => array_key_exists('data_root_encryption', $in) ? self::host_report_data_root_encryption($in['data_root_encryption']) : null,
+			// The data root script's version beside the release's, and each service it orders
+			// after the data root (host_report 1.23); null from an older node.
+			'data_root_script'             => array_key_exists('data_root_script', $in) ? self::host_report_data_root_script($in['data_root_script']) : null,
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			// Processors, for reading the load average against (host_report 1.6).
@@ -3522,6 +3776,8 @@ HTML;
 			'reboot_required'              => $reboot,
 			// When it was first asked for; a time only while one is pending.
 			'reboot_required_since'        => ($reboot === true) ? self::host_report_count($in['reboot_required_since'] ?? null) : null,
+			// The kernel's boot id (host_report 1.23): a new one is a reboot that happened.
+			'boot_id'                      => array_key_exists('boot_id', $in) ? self::boot_id($in['boot_id']) : null,
 			'unattended_upgrades_last_run' => self::host_report_count($in['unattended_upgrades_last_run'] ?? null),
 			'os'                           => self::host_report_os($in['os'] ?? null),
 			'answers'                      => array_key_exists('answers', $in) ? self::host_report_answers($in['answers']) : null,
@@ -4020,6 +4276,38 @@ HTML;
 			// "<epoch> <why>": a reboot an update asked for, held back (D4).
 			'reboot_held'           => substr(preg_replace('#[^A-Za-z0-9 ,.:/()_-]#', '', (string)($v['reboot_held'] ?? '')), 0, 400),
 		];
+	}
+
+	/**
+	 * The data root's own script (host_report 1.23): "none" where the host
+	 * declares no data root, or {installed_version, release_version,
+	 * consumers: [{unit, drop_in, installed}]}. installed_version is none
+	 * where no copy is installed (a data root never encrypted).
+	 */
+	public static function host_report_data_root_script($v) {
+		if ($v === 'none') { return 'none'; }
+		if (!is_array($v)) { return 'unknown'; }
+		$version = function ($x, $missing) {
+			if ($x === $missing) { return $missing; }
+			return (is_string($x) && preg_match('/^[0-9]{1,4}(\.[0-9]{1,4}){0,3}$/', $x)) ? $x : 'unknown';
+		};
+		$consumers = [];
+		foreach (array_slice(array_values(is_array($v['consumers'] ?? null) ? $v['consumers'] : []), 0, self::HOST_REPORT_MAX_LIST) as $c) {
+			if (!is_array($c)) { continue; }
+			$unit = self::host_report_name($c['unit'] ?? '');
+			if (!preg_match('/^[a-z0-9@._-]{1,60}\.service$/', $unit)) { continue; }
+			$consumers[] = ['unit' => $unit, 'drop_in' => ($c['drop_in'] ?? null) === true, 'installed' => ($c['installed'] ?? null) === true];
+		}
+		return [
+			'installed_version' => $version($v['installed_version'] ?? null, 'none'),
+			'release_version'   => $version($v['release_version'] ?? null, 'unknown'),
+			'consumers'         => $consumers,
+		];
+	}
+
+	/** A kernel boot id (a UUID), or unknown. */
+	public static function boot_id($v) {
+		return (is_string($v) && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $v)) ? $v : 'unknown';
 	}
 
 	private static function host_report_disk_pool($v) {

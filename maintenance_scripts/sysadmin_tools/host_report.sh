@@ -8,6 +8,16 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.24 - containers are read through the engine this host's sites run on (install_tools/
+#                _site_engine.sh): Docker, or the site container engine (specs/site_container_engine.md
+#                WP3), whose start time is asked in Docker's RFC 3339 form so started_at holds.
+# Version: 1.23 - data_root_script: on a host that declares a data root, the version of the data root
+#                 script a run's unit starts beside the release's, and each service it names as living
+#                 on the data root with whether its drop-in is written and its unit installed. boot_id:
+#                 the kernel's, so the management node sees a reboot happen (reboot_machine).
+#                 (specs/agent_recipes_and_vocabulary.md, the running list.) A site container
+#                 engine (Podman) container is a container too (/run/.containerenv), so its
+#                 memory is its own group's, not the shared server's.
 # Version: 1.22 - disk_pool.device: the device a data root on a device sits on (a Block Storage volume's
 #                 by-id path), so the provider's layer under it is the volume's, not the server's disk's.
 # Version: 1.21 - host_restrictions: what the machine refuses its sites (its restrictions file), and each
@@ -469,6 +479,55 @@ emit_data_root_encryption() {
         "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$fpr" "$sealed" "$held" "$mode" "$pct"
 }
 
+# The data root's own script, on a host that declares a data root
+# (/etc/joinery/data_root): the version of the copy a run's unit starts
+# (/usr/local/sbin/joinery-data-root, which the tick brings up to the
+# release's) beside the release's own, and for each service the script names
+# as living on the data root (its CONSUMERS, a closed list in the script)
+# whether the drop-in that orders it after the data root is written and
+# whether the unit is installed here at all. "none" where the host declares no
+# data root.
+script_version() {  # FILE: its first "# Version: X.Y" line's number, or empty
+    grep -m 1 -o '^# Version: [0-9][0-9.]*' "$1" 2>/dev/null | sed 's/^# Version: //' | head -c 16
+}
+emit_data_root_script() {
+    local conf="${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}"
+    local installed="${HOST_REPORT_DATA_ROOT_SBIN:-/usr/local/sbin/joinery-data-root}"
+    local release="$SITE_ROOT/maintenance_scripts/install_tools/joinery_data_root.sh"
+    local sysdir="${HOST_REPORT_ETC:-/etc}/systemd/system" units="" unit listed sep="" k=0 v_inst v_rel
+    [[ -f "$conf" ]] || { printf '"none"'; return; }
+    v_inst="$(script_version "$installed")"; v_rel="$(script_version "$release")"
+    # The release's list is what should be there now; an installed copy alone
+    # (a host whose tree has no copy) speaks for itself.
+    for f in "$release" "$installed"; do
+        units="$(sed -n 's/^CONSUMERS="\([^"]*\)"$/\1/p' "$f" 2>/dev/null | head -n 1 | tr -cd 'a-z0-9@._ -')"
+        [[ -n "$units" ]] && break
+    done
+    # One list of unit files for every unit: the ones it lists are installed.
+    # shellcheck disable=SC2086  # the units are checked above: one word each
+    listed=" $(run systemctl list-unit-files --no-legend --no-pager $units | awk '{print $1}' | tr '\n' ' ') "
+    printf '{"installed_version":%s,"release_version":%s,"consumers":[' \
+        "$([[ -n "$v_inst" ]] && json_str "$v_inst" || printf '"none"')" \
+        "$([[ -n "$v_rel" ]] && json_str "$v_rel" || printf '"unknown"')"
+    for unit in $units; do
+        [[ "$unit" =~ ^[a-z0-9@._-]{1,60}\.service$ ]] || continue
+        (( k < MAX_LIST )) || break
+        printf '%s{"unit":%s,"drop_in":%s,"installed":%s}' "$sep" "$(json_str "$unit")" \
+            "$([[ -f "${sysdir}/${unit}.d/joinery-data-root.conf" ]] && echo true || echo false)" \
+            "$([[ "$listed" == *" $unit "* ]] && echo true || echo false)"
+        sep=","; k=$((k+1))
+    done
+    printf ']}'
+}
+
+# The kernel's boot id: a new one each boot. The management node keeps the one
+# a reboot_machine job saw and reads this to know the machine came back.
+emit_boot_id() {
+    local b
+    b="$(tr -cd '0-9a-f-' < /proc/sys/kernel/random/boot_id 2>/dev/null | head -c 36)"
+    if [[ -n "$b" ]]; then printf '"%s"' "$b"; else printf '"unknown"'; fi
+}
+
 meminfo_kb() { awk -v k="$1" '$1==k":" {print $2; exit}' /proc/meminfo 2>/dev/null; }
 kb_to_bytes_or_unknown() {
     if [[ "${1:-}" =~ ^[0-9]+$ ]]; then printf '%s' $(( $1 * 1024 )); else printf '"unknown"'; fi
@@ -527,7 +586,7 @@ json_limit() {
 # Inside a container /sys/fs/cgroup is the container's own group, and
 # /proc/meminfo is the shared server's. Both are functions so the gate can
 # point them at a fixture.
-in_container() { [[ -f /.dockerenv ]]; }
+in_container() { [[ -f /.dockerenv || -f /run/.containerenv ]]; }
 own_cgroup_dir() { printf '/sys/fs/cgroup'; }
 
 # The machine's memory. In a container it is the site's own: what its group
@@ -1053,19 +1112,40 @@ emit_host_restrictions() {
     printf '}'
 }
 
+# The engine this host's sites run on: install_tools/_site_engine.sh beside
+# this script's tree names it. Without the helper Docker is the engine, as the
+# helper itself answers, except on a machine with the site container engine.
+host_engine() {
+    local helper
+    helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_site_engine.sh"
+    if [[ -f "$helper" ]]; then
+        bash -c '. "$1" && site_engine_kind' _ "$helper"
+        return
+    fi
+    [[ -e /usr/local/lib/joinery-site-engine/current ]] && return 1
+    echo docker
+}
+
 emit_containers() {
-    local names c site state health pid started port vols answers n=0 i src sum bytes path
+    local names c site state health pid started port vols answers n=0 i src sum bytes path engine fmt="$INSPECT_FORMAT"
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
     local -A src_site=() disk=() missing=() reply=() ports=() cfg=()
-    command -v docker >/dev/null 2>&1 || { printf '"none"'; return; }
-    names="$(run docker ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
+    engine="$(host_engine)" || { printf '"unknown"'; return; }
+    command -v "$engine" >/dev/null 2>&1 || { printf '"none"'; return; }
+    # Podman's start time is a time, printed in Go's own layout: asked for in
+    # RFC 3339, as Docker prints it.
+    if [[ "$engine" == podman ]]; then
+        local docker_started='{{.State.StartedAt}}' podman_started='{{.State.StartedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}'
+        fmt="${fmt//"$docker_started"/"$podman_started"}"
+    fi
+    names="$(run "$engine" ps -a --format '{{.Names}}')" || { printf '"unknown"'; return; }
     names="$(grep -E '^[a-z0-9_-]{1,50}$' <<< "$names")"
     [[ -n "$names" ]] || { printf '[]'; return; }
     # One read for every container. Nothing back (it timed out, or docker
     # stopped answering) is unknown, never a host with no sites.
     local inspected
     # shellcheck disable=SC2086  # the names are checked above: one word each
-    inspected="$(run docker inspect -f "$INSPECT_FORMAT" $names)"
+    inspected="$(run "$engine" inspect -f "$fmt" $names)"
     [[ -n "$inspected" ]] || { printf '"unknown"'; return; }
     while IFS='|' read -r c site state health pid started port vols; do
         (( n < MAX_SITES )) || break
@@ -1210,11 +1290,13 @@ printf '"root_ssh":%s,' "$(emit_root_ssh)"
 printf '"disk":%s,' "$(emit_disk)"
 printf '"disk_pool":%s,' "$(emit_disk_pool)"
 printf '"data_root_encryption":%s,' "$(emit_data_root_encryption)"
+printf '"data_root_script":%s,' "$(emit_data_root_script)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"
 printf '"reboot_required":%s,' "$(emit_reboot_required)"
 printf '"reboot_required_since":%s,' "$(emit_reboot_required_since)"
+printf '"boot_id":%s,' "$(emit_boot_id)"
 printf '"unattended_upgrades_last_run":%s,' "$(emit_unattended_upgrades_last_run)"
 printf '"os":%s,' "$(emit_os)"
 printf '"answers":%s,' "$(emit_answers)"

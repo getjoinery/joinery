@@ -31,6 +31,7 @@
  *
  * Run: php tests/run.php test-db --filter=spam_learning
  *
+ * @version 2.1 - status(): the counts spam_learning_status carries, by what became of each correction
  * @version 2.0 - the in-core corpus; replaces the rspamd stub test
  */
 
@@ -417,6 +418,26 @@ try {
 	check(($task['status'] ?? '') === 'success', 'the cron pass runs', json_encode($task));
 	check(sl_col($legacy, 'iem_learned_verdict') === $SPAM && sl_token('w:legacyredisword')[0] === $legacy_tok[0] + 1,
 		'and teaches it into the corpus');
+
+	section('status: what the spam_learning_status agent word carries');
+	// Counts as deltas: the test database keeps what earlier sections wrote.
+	$st0 = SpamLearning::status();
+	$now = gmdate('Y-m-d H:i:s');
+	$old = gmdate('Y-m-d H:i:s', time() - (SpamLearning::STATUS_DAYS + 2) * 86400);
+	sl_message($std, $box, array('iem_spam_corrected_time' => $now, 'iem_train_verdict' => $SPAM, 'iem_learned_verdict' => $SPAM));
+	sl_message($std, $box, array('iem_spam_corrected_time' => $now, 'iem_train_verdict' => $SPAM, 'iem_pending_parse' => false));
+	sl_message($std, $box, array('iem_spam_corrected_time' => $now, 'iem_train_verdict' => $HAM, 'iem_iia_inbound_imap_account_id' => 999999));
+	sl_message($std, $box, array('iem_spam_corrected_time' => $old, 'iem_train_verdict' => $SPAM));
+	$st1 = SpamLearning::status();
+	$d = function ($k) use ($st0, $st1) { return $st1['corrections'][$k] - $st0['corrections'][$k]; };
+	check($d('recorded') === 3, 'three corrections inside the window; the one older than it is not counted', json_encode($st1['corrections']));
+	check($d('taught') === 1 && $d('pending_clear') === 1 && $d('skipped_imap') === 1 && $d('pending_sealed') === 0,
+		'one taught, one waiting for the keyless pass, one never taught because it was polled over IMAP');
+	check($st1['window_days'] === SpamLearning::STATUS_DAYS && is_int($st1['corpus']['tokens']) && is_bool($st1['corpus']['trained'])
+		&& is_bool($st1['policy']['filtering_enabled']) && is_bool($st1['policy']['learning_enabled']),
+		'the corpus and the two switches, as numbers and booleans');
+	check(strpos(json_encode($st1), 'Cheap watches') === false && strpos(json_encode($st1), 'sender.example') === false,
+		'no subject and no address in it: counts only');
 
 	section('keys are minted once, never replaced');
 	$fp_key = MailboxSpamKeys::get(MailboxSpamKeys::FINGERPRINT);

@@ -450,9 +450,10 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 24 && array_key_exists('data_root_encryption', $capped)
-	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions among them)', var_export(array_keys($capped), true));
+check(!isset($capped['surprise']) && count($capped) === 26 && array_key_exists('data_root_encryption', $capped)
+	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
+	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, boot_id among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -1964,5 +1965,120 @@ check(count($queued) === 1, 'a report finished before the enrolment ended is no 
 foreach (array('data_root_encrypt', 'data_root_decrypt', 'data_root_rekey', 'data_root_migrate', 'data_root_recipient', 'data_root_enrol') as $t) {
 	check(in_array($t, JobResultProcessor::processable_types(), true), "$t is a type this processor knows");
 }
+
+section('The running list\'s words (agent 1.76.0) and host_report 1.23');
+
+$rl_env = function ($type, $obj) {
+	return "=== [Step 1/1] $type ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+		'output' => (is_string($obj) ? $obj : json_encode($obj)) . "\n", 'output_bytes' => 400))) . "\n[Step 1/1 OK]";
+};
+
+// listening_sockets: each listener held to its shape.
+$ls = JobResultProcessor::sanitise_listening_sockets(array('sockets' => array(
+	array('proto' => 'tcp', 'family' => 'ipv4', 'address' => '0.0.0.0', 'port' => 80, 'program' => 'apache2', 'unit' => 'apache2.service'),
+	array('proto' => 'tcp', 'family' => 'ipv6', 'address' => '::', 'port' => 993, 'program' => 'joinery-mail-ga', 'unit' => 'joinery-mail-gateway.service'),
+	array('proto' => 'udp', 'family' => 'any', 'address' => '*', 'port' => 53, 'program' => 'x<script>', 'unit' => ''),
+	array('proto' => 'raw', 'family' => 'ipv4', 'address' => '0.0.0.0', 'port' => 1),
+	array('proto' => 'tcp', 'family' => 'ipv4', 'address' => 'evil.example', 'port' => 22),
+	array('proto' => 'tcp', 'family' => 'ipv4', 'address' => '127.0.0.1', 'port' => 70000),
+	'not a row',
+), 'truncated' => true));
+check($ls['read'] === true && count($ls['sockets']) === 3 && $ls['truncated'] === true,
+	'listening_sockets: three listeners kept; a raw socket, a name for an address and a port past 65535 dropped', var_export($ls, true));
+check($ls['sockets'][1]['address'] === '::' && $ls['sockets'][1]['family'] === 'ipv6' && $ls['sockets'][2]['program'] === 'xscript',
+	'an IPv6 address kept as an address; a program name reduced');
+check(JobResultProcessor::sanitise_listening_sockets(array('sockets' => 'unknown'))['sockets'] === 'unknown'
+	&& JobResultProcessor::sanitise_listening_sockets(null) === array('read' => false),
+	'ss not answering is unknown; output that is not the object is not read');
+$ls_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x51", 32))));
+$ls_job = jrp_job($ls_node, 'listening_sockets', $rl_env('listening_sockets', array('sockets' => array(
+	array('proto' => 'tcp', 'family' => 'ipv4', 'address' => '0.0.0.0', 'port' => 443, 'program' => 'apache2', 'unit' => 'apache2.service')), 'truncated' => false)));
+JobResultProcessor::process($ls_job);
+$ls_job->load();
+$ls_r = json_decode((string)$ls_job->get('mjb_result'), true);
+check(($ls_r['sockets'][0]['port'] ?? null) === 443, 'a listening_sockets job keeps its listeners as its result', var_export($ls_r, true));
+
+// container_inventory: install.sh's and not, mounts by type and volume name.
+$ci = JobResultProcessor::sanitise_container_inventory(array('engine' => 'podman', 'containers' => array(
+	array('name' => 'siteone', 'install_sh' => true, 'image' => 'joinery/site:0.8.494', 'state' => 'running',
+		'mounts' => array(array('type' => 'volume', 'name' => 'siteone_data'), array('type' => 'bind', 'name' => ''), array('type' => 'weird', 'name' => 'x;y')), 'run_spec' => true),
+	array('name' => 'postgres', 'install_sh' => 'yes', 'image' => 'postgres:16 ; rm', 'state' => 'exited', 'mounts' => 'unknown', 'run_spec' => 1),
+	array('name' => '', 'install_sh' => true),
+), 'truncated' => false));
+check(count($ci['containers']) === 2 && $ci['engine'] === 'podman', 'container_inventory: the engine kept, a nameless entry dropped', var_export($ci, true));
+check($ci['containers'][0]['install_sh'] === true && $ci['containers'][0]['run_spec'] === true && $ci['containers'][0]['mounts'][2]['type'] === 'other'
+	&& $ci['containers'][0]['mounts'][2]['name'] === 'xy', 'a site container kept as the node said; a mount type it does not know is other');
+check($ci['containers'][1]['install_sh'] === false && $ci['containers'][1]['run_spec'] === false && $ci['containers'][1]['image'] === 'unknown'
+	&& $ci['containers'][1]['mounts'] === 'unknown', 'only a literal true says install.sh made it; an image that is not a reference is unknown');
+check(JobResultProcessor::sanitise_container_inventory(array('engine' => 'lxc', 'containers' => 'none'))['engine'] === 'unknown'
+	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'none'))['containers'] === 'none'
+	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'nonsense'))['containers'] === 'unknown',
+	'no docker is none; anything else that is not a list is unknown');
+
+// spam_learning_status: counts, a time, booleans.
+$sl = JobResultProcessor::sanitise_spam_learning_status(array('mailbox' => 'active', 'window_days' => 7,
+	'corrections' => array('recorded' => 5, 'taught' => 3, 'pending_clear' => 1, 'pending_sealed' => 1, 'skipped_imap' => '2', 'subject' => 'Buy now'),
+	'corpus' => array('tokens' => 153, 'newest_token' => '2026-10-14T05:41:03Z', 'spam_messages' => 5, 'ham_messages' => 2, 'trained' => false),
+	'policy' => array('filtering_enabled' => true, 'learning_enabled' => 'yes')));
+check($sl['corrections'] === array('recorded' => 5, 'taught' => 3, 'pending_clear' => 1, 'pending_sealed' => 1, 'skipped_imap' => 2),
+	'spam_learning_status: the five counts and nothing else the node sent', var_export($sl, true));
+check($sl['corpus']['newest_token'] === '2026-10-14T05:41:03Z' && $sl['policy'] === array('filtering_enabled' => true, 'learning_enabled' => false),
+	'the newest token time kept; only a literal true switches a policy on');
+check(JobResultProcessor::sanitise_spam_learning_status(array('mailbox' => 'inactive')) === array('read' => true, 'mailbox' => 'inactive')
+	&& JobResultProcessor::sanitise_spam_learning_status(array('corrections' => array())) === array('read' => false),
+	'mailbox inactive is said; an answer with no mailbox state is not read');
+
+// host_report 1.23: the data root script and the boot id.
+$drs = JobResultProcessor::host_report_data_root_script(array('installed_version' => '1.21', 'release_version' => '1.22', 'consumers' => array(
+	array('unit' => 'postgresql.service', 'drop_in' => true, 'installed' => true),
+	array('unit' => 'podman-restart.service', 'drop_in' => true, 'installed' => false),
+	array('unit' => 'evil', 'drop_in' => true, 'installed' => true))));
+check($drs['installed_version'] === '1.21' && $drs['release_version'] === '1.22' && count($drs['consumers']) === 2,
+	'data_root_script: both versions, and only units that are services', var_export($drs, true));
+check(JobResultProcessor::host_report_data_root_script(array('installed_version' => 'none', 'release_version' => '1.x; rm'))['release_version'] === 'unknown'
+	&& JobResultProcessor::host_report_data_root_script('none') === 'none',
+	'a version that is not a version is unknown; no data root is none');
+check(JobResultProcessor::boot_id('c42ff0bb-667f-4a49-ac78-e96690792931') === 'c42ff0bb-667f-4a49-ac78-e96690792931'
+	&& JobResultProcessor::boot_id('nope') === 'unknown', 'a boot id is a UUID or unknown');
+$s23 = JobResultProcessor::sanitise_host_report(array('boot_id' => 'c42ff0bb-667f-4a49-ac78-e96690792931', 'data_root_script' => 'none'));
+check($s23['boot_id'] === 'c42ff0bb-667f-4a49-ac78-e96690792931' && $s23['data_root_script'] === 'none'
+	&& JobResultProcessor::sanitise_host_report(array())['boot_id'] === null,
+	'the host report keeps both keys; an older node\'s report has neither (null, not reported)');
+
+// reboot_machine: the boot id before, and the next host report's new one says it came back.
+$rb_node = jrp_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x52", 32))));
+$boot_a = '11111111-2222-4333-8444-555555555555';
+$boot_b = '66666666-7777-4888-9999-aaaaaaaaaaaa';
+$rb_job = jrp_job($rb_node, 'reboot_machine', $rl_env('reboot_machine', array('scheduled' => true, 'already_scheduled' => false,
+	'in_seconds' => 20, 'boot_id_before' => $boot_a, 'refused' => '', 'reason' => '')));
+JobResultProcessor::process($rb_job);
+$rb_job->load();
+$rb_r = json_decode((string)$rb_job->get('mjb_result'), true);
+check(!empty($rb_r['scheduled']) && $rb_r['boot_id_before'] === $boot_a && $rb_r['came_back_at'] === null,
+	'a scheduled reboot keeps the boot id it was asked from, not yet back', var_export($rb_r, true));
+check(JobResultProcessor::reboot_awaited($rb_node), 'the plane awaits it: the uptime pass asks for host reports more often');
+$rb_report = function ($boot) use ($rb_node, $rl_env) {
+	$job = jrp_job($rb_node, 'host_report', $rl_env('host_report', array('boot_id' => $boot, 'generated_at' => time())));
+	JobResultProcessor::process($job);
+};
+$rb_report($boot_a);
+check(JobResultProcessor::reboot_awaited($rb_node), 'a report with the same boot id (taken before the reboot) is not the machine coming back');
+$rb_report('unknown');
+check(JobResultProcessor::reboot_awaited($rb_node), 'nor is a report that cannot say its boot id');
+$rb_report($boot_b);
+check(!JobResultProcessor::reboot_awaited($rb_node), 'a new boot id is the reboot seen to have happened');
+$rb_last = JobResultProcessor::last_reboot($rb_node);
+check(!empty($rb_last['came_back_at']) && (int)$rb_last['job']->key === (int)$rb_job->key,
+	'the reboot job says when it came back', var_export($rb_last['came_back_at'] ?? null, true));
+
+$rb_refused = jrp_job($rb_node, 'reboot_machine', $rl_env('reboot_machine', array('scheduled' => false, 'already_scheduled' => false,
+	'in_seconds' => 20, 'boot_id_before' => $boot_b, 'refused' => 'no_escrow', 'reason' => 'the data root is encrypted and names no escrow holder')));
+JobResultProcessor::process($rb_refused);
+$rb_refused->load();
+$rr = json_decode((string)$rb_refused->get('mjb_result'), true);
+check(empty($rr['scheduled']) && $rr['refused'] === 'no_escrow' && !JobResultProcessor::reboot_awaited($rb_node),
+	'a refused reboot is not scheduled and nothing is awaited', var_export($rr, true));
+check(JobResultProcessor::sanitise_reboot_machine(array('scheduled' => true, 'refused' => 'container'))['scheduled'] === false,
+	'a result that both schedules and refuses reads as refused');
 
 harness_finish();

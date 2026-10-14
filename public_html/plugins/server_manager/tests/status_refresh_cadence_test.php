@@ -20,6 +20,7 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.4 - a machine asked to reboot is asked for its host report every REBOOT_REFRESH_SECONDS until it is seen back
  * @version 1.3 - a host report saying a data root run is under way is asked again after
  *                DATA_ROOT_RUN_REFRESH_SECONDS, not the hour (B62)
  * @version 1.2 - a refused or failed answer inside the window is cover; a cancelled job is not
@@ -166,5 +167,29 @@ check($queued === 1 && srt_jobs($running, 'host_report') === 2 && srt_jobs($sett
 	'six minutes after its last report, the encrypting machine is asked again; a settled one waits out the hour', "queued=$queued");
 $queued = $task->refresh_status_facts(array($running), gmdate('Y-m-d H:i:s'));
 check($queued === 0, 'and asked once: the open job is cover', "queued=$queued");
+
+section('A machine asked to reboot is asked every two minutes until it is seen back (agent 1.76.0)');
+// The reboot_machine job keeps the boot id it was asked from; a host report
+// with a new one is the machine back (JobResultProcessor::reboot_seen).
+$three_min = gmdate('Y-m-d H:i:s', time() - RunNodeUptimeChecks::REBOOT_REFRESH_SECONDS - 60);
+$rebooting = srt_node($tag, 'reboot', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report,reboot_machine',
+	'mgn_last_host_report_time' => $three_min, 'mgn_last_host_report' => json_encode(array('boot_id' => '11111111-2222-4333-8444-555555555555'))));
+$rj = ManagementJob::createFromBuild($rebooting->key, 'reboot_machine', JobCommandBuilder::build_reboot_machine_primitive($rebooting), null, null);
+$rj->set('mjb_status', 'completed');
+$rj->set('mjb_result', json_encode(array('read' => true, 'scheduled' => true, 'boot_id_before' => '11111111-2222-4333-8444-555555555555', 'came_back_at' => null)));
+$rj->save();
+$hj = ManagementJob::createFromBuild($rebooting->key, 'host_report', JobCommandBuilder::build_host_report_primitive($rebooting), null, null);
+$hj->set('mjb_status', 'completed');
+$hj->set('mjb_completed_time', $three_min);
+$hj->save();
+check(JobResultProcessor::reboot_awaited($rebooting), 'a scheduled reboot not yet seen is awaited');
+$queued = $task->refresh_status_facts(array($rebooting), gmdate('Y-m-d H:i:s'));
+check($queued === 1 && srt_jobs($rebooting, 'host_report') === 2,
+	'three minutes after its last report, a rebooting machine is asked again, not after the hour', "queued=$queued");
+$rr = json_decode((string)$rj->get('mjb_result'), true);
+$rr['came_back_at'] = gmdate('Y-m-d H:i:s');
+$rj->set('mjb_result', json_encode($rr));
+$rj->save();
+check(!JobResultProcessor::reboot_awaited($rebooting), 'once it is seen back, nothing is awaited and the hour applies again');
 
 harness_finish();

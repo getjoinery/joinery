@@ -2794,4 +2794,55 @@ $cp_none->load();
 check(JobResultProcessor::bundle_of($cp_none) === null, 'a declined export keeps no bundle');
 
 
+section('The running list\'s words: listening_sockets, container_inventory, spam_learning_status, reboot_machine (agent 1.76.0)');
+
+{
+	$rl_node = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x31", 32))));
+	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'reboot_machine') as $w) {
+		$m = 'build_' . $w;
+		$built = JobCommandBuilder::$m($rl_node);
+		check($built === array('primitive' => $w, 'params' => array()),
+			$w . ' travels as the name and nothing else', var_export($built, true));
+		check(JobCommandBuilder::transports_for($w) === array('primitive'), $w . ' has one transport, the primitive');
+	}
+
+	$rl_old = jcb_node(array(
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x32", 32)),
+		'mgn_agent_version'    => AgentVocabulary::FLOOR,
+		'mgn_agent_primitives' => 'check_status,host_report,disk_usage',
+	));
+	foreach (array('listening_sockets', 'container_inventory', 'spam_learning_status', 'reboot_machine') as $w) {
+		$m = 'build_' . $w;
+		$said = '';
+		try { JobCommandBuilder::$m($rl_old); } catch (Exception $e) { $said = $e->getMessage(); }
+		check($said !== '' && strpos($said, $w) !== false, 'a node without ' . $w . ' is told it needs a newer agent, naming the word', $said);
+	}
+
+	// The reboot is refused on the plane where the node would refuse it.
+	$rl_container = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x33", 32)), 'mgn_container_name' => 'sitex'));
+	$said = '';
+	try { JobCommandBuilder::build_reboot_machine($rl_container); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'container') !== false, 'a container site is not a machine: no reboot from its row', $said);
+
+	$enc = function ($holder, $reencrypt = '') {
+		return json_encode(array('data_root_encryption' => array('backing' => 'luks-file', 'open' => true,
+			'identity' => base64_encode(str_repeat("\x44", 32)), 'holder' => $holder, 'slot' => 0, 'reencrypt' => $reencrypt)));
+	};
+	$rl_noholder = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x34", 32)), 'mgn_last_host_report' => $enc('')));
+	$said = '';
+	try { JobCommandBuilder::build_reboot_machine($rl_noholder); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'recovery key') !== false, 'an encrypted data root with no escrow holder would wait for its recovery key: refused', $said);
+
+	$rl_holder = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x35", 32)), 'mgn_last_host_report' => $enc('https://mgr.example.com')));
+	check(JobCommandBuilder::build_reboot_machine($rl_holder)['primitive'] === 'reboot_machine',
+		'an encrypted data root that names its escrow holder opens by itself: the reboot is built');
+	check(JobCommandBuilder::reboot_refusal($rl_holder) === null && JobCommandBuilder::reboot_refusal($rl_node) === null,
+		'no refusal for a plain machine or one that opens by itself');
+
+	$rl_run = jcb_node(array('mgn_agent_public_key' => base64_encode(str_repeat("\x36", 32)), 'mgn_last_host_report' => $enc('https://mgr.example.com', 'encrypt')));
+	$said = '';
+	try { JobCommandBuilder::build_reboot_machine($rl_run); } catch (Exception $e) { $said = $e->getMessage(); }
+	check(strpos($said, 'encrypted, decrypted or re-keyed') !== false, 'a data root mid-run is not rebooted, even with a holder', $said);
+}
+
 harness_finish();

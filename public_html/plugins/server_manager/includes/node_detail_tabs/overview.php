@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.66 - the Machine box asks what the machine listens on, lists every container on a Docker host, and
+ *                 reboots it behind a confirm (agent 1.76.0), saying when the last reboot was asked and whether the
+ *                 machine came back; the Data root gauge names its script's version and any service kept there
+ *                 with no drop-in; a Plugins card lists the site's plugins (check_status) with Spam learning
  * @version 1.65 - the provision's data root line reads what the machine reports now, as the encryption section does (B44)
  * @version 1.64 - Services: a Mail apps gateway row (host_report 1.20 mail_gateway) with Restart and Why?
  * @version 1.63 - Hosted at no longer says '(not hosted by us)' twice for a machine hosted elsewhere
@@ -176,6 +180,13 @@
 	<input type="hidden" name="action" value="disk_usage">
 	<?php echo SmAdminCsrf::field(); ?>
 </form>
+<?php foreach (['nodeActionListeningSockets' => 'listening_sockets', 'nodeActionContainerInventory' => 'container_inventory',
+	'nodeActionSpamLearning' => 'spam_learning_status', 'nodeActionRebootMachine' => 'reboot_machine'] as $form_id => $form_action) { ?>
+<form id="<?php echo $form_id; ?>" method="post" action="<?php echo $base_url; ?>" hidden>
+	<input type="hidden" name="action" value="<?php echo $form_action; ?>">
+	<?php echo SmAdminCsrf::field(); ?>
+</form>
+<?php } ?>
 <form id="host_converge_form" method="post" action="<?php echo $base_url; ?>" hidden>
 	<input type="hidden" name="action" value="host_converge">
 	<?php echo SmAdminCsrf::field(); ?>
@@ -610,12 +621,13 @@
 	// lacks, where the buttons and forms for them would be - never a blank.
 	if ($node->get('mgn_agent_public_key')) {
 		$tab_words = ['host_report', 'site_log', 'log_table_tail', 'file_head', 'unit_journal', 'reset_failed_unit',
-			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file'];
+			'disk_usage', 'restart_unit', 'schema_probe', 'run_installer', 'page_probe', 'reclaim_managed_file',
+			'listening_sockets', 'container_inventory', 'reboot_machine', 'spam_learning_status'];
 		// (restore_release_file and upgrade_preflight are not listed: a node
 		// without them simply does not offer Restore signed copy, and a rollout
 		// applies it as before.)
 		if (!$node->hosts_site()) {
-			$tab_words = array_values(array_diff($tab_words, ['site_log', 'log_table_tail', 'schema_probe', 'page_probe']));
+			$tab_words = array_values(array_diff($tab_words, ['site_log', 'log_table_tail', 'schema_probe', 'page_probe', 'spam_learning_status']));
 		}
 		$tab_missing = AgentVocabulary::missing_words($node, $tab_words);
 		if ($tab_missing) {
@@ -945,16 +957,45 @@
 		// /srv/joinery on a filesystem of its own, which the root disk above
 		// never shows filling.
 		$dp = $hr['disk_pool'] ?? null;
+		// The data root's own script (host_report 1.23): the copy a run starts
+		// beside this release's, and a service that keeps data there with no
+		// drop-in ordering it after the data root (it could start before the
+		// data root is mounted and write to the root disk beneath it).
+		$drs = $hr['data_root_script'] ?? null;
+		$drs_extra = '';
+		if (is_array($drs)) {
+			$drs_extra .= '<div class="small text-muted mt-2">Data root script ' . $hr_str($drs['release_version'])
+				. ($drs['installed_version'] !== 'none' ? ' · the copy a run starts: ' . $hr_str($drs['installed_version']) : '') . '</div>';
+			if ($drs['installed_version'] !== 'none' && $drs['release_version'] !== 'unknown' && $drs['installed_version'] !== $drs['release_version']) {
+				$drs_extra .= '<div class="small text-warning">The copy a run starts is not this release\'s; the host timer brings it up to date once no run is recorded.</div>';
+			}
+			$unordered = [];
+			foreach ($drs['consumers'] as $cu) {
+				if ($cu['installed'] && !$cu['drop_in']) { $unordered[] = $cu['unit']; }
+			}
+			if ($unordered) {
+				$drs_extra .= '<div class="small text-danger">Not ordered after the data root: ' . $hr_str(implode(', ', $unordered))
+					. '. It could start before the data root is mounted; the host timer writes its drop-in.</div>';
+			}
+			if ($drs['consumers']) {
+				$drs_extra .= '<details class="small mt-1"><summary class="text-muted" style="cursor:pointer;">Services kept on the data root</summary><ul class="mb-0">';
+				foreach ($drs['consumers'] as $cu) {
+					$drs_extra .= '<li>' . $hr_str($cu['unit']) . ': ' . ($cu['installed'] ? 'installed' : 'not installed here')
+						. ', ' . ($cu['drop_in'] ? 'ordered after the data root' : 'no drop-in') . '</li>';
+				}
+				$drs_extra .= '</ul></details>';
+			}
+		}
 		if (is_array($dp) && is_int($dp['total_bytes']) && $dp['total_bytes'] > 0 && is_int($dp['used_bytes'])) {
 			$pct = (int)round($dp['used_bytes'] * 100 / $dp['total_bytes']);
 			$free = is_int($dp['avail_bytes']) ? $dp['avail_bytes'] : $dp['total_bytes'] - $dp['used_bytes'];
 			$class = ($free < $dp['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
 			$gauge('Data root', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
-				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), '');
+				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), $drs_extra);
 		} elseif ($dp === 'not_mounted') {
 			// Declared and down: nothing that keeps data starts until it is back.
 			$gauge('Data root', null, '', '<span class="text-danger fs-6">not mounted</span>',
-				'This host has a data root, and it is not mounted: the services that keep data wait for it. <code>joinery_data_root.sh status</code> on the host says why.');
+				'This host has a data root, and it is not mounted: the services that keep data wait for it. <code>joinery_data_root.sh status</code> on the host says why.', $drs_extra);
 		} elseif ($dp === 'none' && (string)$node->get('mgn_container_name') === ''
 			&& JobCommandBuilder::has_primitive($node, 'data_root_migrate')) {
 			// A host installed before the data root (one_data_root WP4): its data
@@ -1393,6 +1434,58 @@
 			} elseif ($hr['reboot_required'] === false) {
 				echo '<div><span class="badge bg-success">No reboot pending</span></div>';
 			}
+			// The last reboot this plane asked for (reboot_machine): asked,
+			// refused, waiting to come back, or back (a host report with a
+			// new boot id).
+			$last_reboot = JobResultProcessor::last_reboot($node);
+			if ($last_reboot) {
+				$lr_job = $last_reboot['job'];
+				$lr_link = '<a href="/admin/server_manager/job_detail?job_id=' . (int)$lr_job->key . '">';
+				$lr_asked = $lr_job->get_local('mjb_create_time', 'M j, g:i A');
+				$lr_result = json_decode((string)$lr_job->get('mjb_result'), true);
+				if (!empty($last_reboot['came_back_at'])) {
+					echo '<div class="small mt-2">' . $lr_link . 'Rebooted</a>: asked ' . $hr_str($lr_asked) . ', back by '
+						. $hr_str(LibraryFunctions::convert_time((string)$last_reboot['came_back_at'], 'UTC', $session->get_timezone(), 'g:i A')) . '</div>';
+				} elseif ($last_reboot['scheduled']) {
+					$lr_age = time() - (int)strtotime($last_reboot['asked_at'] . ' UTC');
+					echo '<div class="small mt-2 ' . ($lr_age > 1800 ? 'text-danger' : 'text-muted') . '">' . $lr_link . 'Reboot</a> asked ' . $hr_str($lr_asked)
+						. ($lr_age > 1800 ? ': not seen back since (no host report with a new boot id)' : ': waiting for the machine to come back') . '</div>';
+				} elseif (in_array($last_reboot['status'], ['failed', 'refused', 'lost', 'cancelled'], true)) {
+					$lr_why = is_array($lr_result) && !empty($lr_result['reason']) ? (string)$lr_result['reason'] : trim((string)$lr_job->get('mjb_error_message'));
+					echo '<div class="small mt-2 text-muted">' . $lr_link . 'Reboot</a> asked ' . $hr_str($lr_asked) . ' was not done'
+						. ($lr_why !== '' ? ': ' . htmlspecialchars($lr_why) : '') . '</div>';
+				} elseif ((string)$lr_job->get('mjb_status') !== 'completed') {
+					echo '<div class="small mt-2 text-muted">' . $lr_link . 'Reboot</a> asked ' . $hr_str($lr_asked) . ': waiting for the node to take it</div>';
+				}
+			}
+			// What the machine can be asked here: what it listens on, every
+			// container on it, and a reboot (agent 1.76.0).
+			$mb_buttons = [];
+			if (JobCommandBuilder::has_primitive($node, 'listening_sockets')) {
+				$mb_buttons[] = '<button type="submit" form="nodeActionListeningSockets" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="The addresses and ports the machine listens on, with the program and unit holding each">Listening ports</button>';
+			}
+			if (JobCommandBuilder::has_primitive($node, 'container_inventory') && is_array($hr['containers'] ?? null)) {
+				$mb_buttons[] = '<button type="submit" form="nodeActionContainerInventory" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Every container on this machine: whether install.sh made it, its image, mounts and run spec">All containers</button>';
+			}
+			if (JobCommandBuilder::has_primitive($node, 'reboot_machine') && trim((string)$node->get('mgn_container_name')) === '') {
+				$reboot_why = JobCommandBuilder::reboot_refusal($node);
+				if ($reboot_why === null) {
+					$enc = $hr['data_root_encryption'] ?? null;
+					$reboot_ask = 'Reboot ' . (string)$node->get('mgn_name') . '? Its sites go down while it restarts, usually for a minute or two, and come back by themselves.'
+						. (is_array($enc) ? ' Its encrypted data root opens through its escrow holder.' : '')
+						. ' The reboot starts twenty seconds after the node takes the job.';
+					$mb_buttons[] = '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
+						. ' onclick="JoineryModal.confirm(' . htmlspecialchars(json_encode($reboot_ask), ENT_QUOTES, 'UTF-8')
+						. ', function(){ document.getElementById(\'nodeActionRebootMachine\').submit(); })">Reboot</button>';
+				} else {
+					$mb_buttons[] = '<span class="small text-muted">Not rebooted from here: ' . htmlspecialchars($reboot_why) . '</span>';
+				}
+			}
+			if ($mb_buttons) {
+				echo '<div class="mt-2 d-flex flex-wrap gap-1 align-items-center">' . implode(' ', $mb_buttons) . '</div>';
+			}
 			if ($hr['failed_units'] === 'unknown') {
 				echo '<div class="mt-2 text-muted small">Failed units: unknown</div>';
 			} elseif (count($hr['failed_units']) === 0) {
@@ -1660,6 +1753,48 @@
 			if ($pc_checked !== '' && strtotime($pc_checked . ' UTC')) {
 				echo '<div class="text-muted small mt-2">Checked on the node ' . htmlspecialchars(LibraryFunctions::time_ago(
 					substr($pc_checked, 0, 19), $session->get_timezone())) . '</div>';
+			}
+			echo '</div></div>';
+		}
+
+		// The site's plugins as its own registry records them (check_status,
+		// agent 1.76.0): each switched on with its version, and how many are
+		// installed and off. Rendered from the node's words, so each is held to
+		// a plain name and version here.
+		if (isset($status_data['plugins']) && is_array($status_data['plugins'])) {
+			$pl_on = [];
+			$pl_off = 0;
+			foreach (array_slice($status_data['plugins'], 0, 100) as $pl) {
+				if (!is_array($pl)) { continue; }
+				$pl_name = preg_replace('/[^A-Za-z0-9._+-]/', '', (string)($pl['name'] ?? ''));
+				if ($pl_name === '') { continue; }
+				if (($pl['active'] ?? null) === true) {
+					$pl_on[$pl_name] = [preg_replace('/[^A-Za-z0-9._+-]/', '', (string)($pl['version'] ?? '')),
+						preg_replace('/[^a-z]/', '', (string)($pl['status'] ?? ''))];
+				} else {
+					$pl_off++;
+				}
+			}
+			echo '<div><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Plugins</div>';
+			if (!$pl_on) {
+				echo '<div class="mt-1 text-muted small">None switched on.</div>';
+			} else {
+				echo '<div class="small mt-1">';
+				$pl_parts = [];
+				foreach ($pl_on as $pl_name => $pl_v) {
+					$pl_parts[] = htmlspecialchars($pl_name) . ($pl_v[0] !== '' ? ' <span class="text-muted">' . htmlspecialchars($pl_v[0]) . '</span>' : '')
+						. (in_array($pl_v[1], ['error', 'stale'], true) ? ' <span class="badge bg-warning">' . htmlspecialchars($pl_v[1]) . '</span>' : '');
+				}
+				echo implode(' · ', $pl_parts) . '</div>';
+			}
+			if ($pl_off) {
+				echo '<div class="small text-muted mt-1">' . (int)$pl_off . ' installed and switched off</div>';
+			}
+			// Whether members' spam corrections reach the filter: counts only.
+			if (isset($pl_on['mailbox']) && JobCommandBuilder::has_primitive($node, 'spam_learning_status')) {
+				echo '<div class="mt-2"><button type="submit" form="nodeActionSpamLearning" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075"'
+					. ' title="Whether what members mark as spam or not spam reaches the spam filter: counts only">Spam learning</button></div>';
 			}
 			echo '</div></div>';
 		}
