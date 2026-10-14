@@ -69,15 +69,15 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			@touch($part);
 		} else {
 			$up->discard();
-			return LogicResult::error('Uploaded bytes are missing; please retry.');
+			return LogicResult::error('Uploaded bytes are missing; please retry.', array('reason' => 'upload_incomplete'));
 		}
 	}
 	if ((int)filesize($part) !== (int)$up->get('fup_expected_bytes')) {
-		return LogicResult::error('Uploaded size does not match; please retry.');
+		return LogicResult::error('Uploaded size does not match; please retry.', array('reason' => 'upload_incomplete'));
 	}
 	$expected_sha = (string)$up->get('fup_expected_sha256');
 	if ($expected_sha !== '' && hash_file('sha256', $part) !== $expected_sha) {
-		return LogicResult::error('Uploaded content failed its checksum; please retry.');
+		return LogicResult::error('Uploaded content failed its checksum; please retry.', array('reason' => 'upload_incomplete'));
 	}
 
 	// Everything above is universal — the bytes are all here, the right size, and
@@ -114,7 +114,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		// is a save that reports success and shows nothing.
 		if ($target_file->get('fil_delete_time') !== null && $target_file->get('fil_delete_time') !== '') {
 			$up->discard();
-			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id));
+			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id, 'standing' => true));
 		}
 		$owner_id = (int)$target_file->get('fil_usr_user_id');
 		$level = $target_file->protection_level();
@@ -235,7 +235,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$quota = (int)SubscriptionTier::getUserFeature($owner_id, 'drive_storage_bytes', 0);
 		$current = DriveUsage::recompute($owner_id);
 		if ($quota > 0 && $current + $expected > $quota) {
-			return LogicResult::error('That upload would exceed the storage quota.');
+			return LogicResult::error('That upload would exceed the storage quota.', array('reason' => 'quota', 'standing' => true));
 		}
 
 		if ($target_file) {

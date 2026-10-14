@@ -218,7 +218,13 @@ struct ServerState {
     /// the response whatever its status and replays it for the same key
     /// (`ApiLogicEndpoint::idempotencyResolveExisting`). Kept successes only,
     /// the mock let a client re-ask a refused request under its old key and
-    /// get a fresh answer the real server never gives.
+    /// get a fresh answer the real server never gives. Never a 5xx: the
+    /// platform stores what the action answered, a success or a refusal, and a
+    /// server failure never reaches that store. The 5xx modelled here is one
+    /// that never reached the claim (a gateway, an overload). A PHP error
+    /// after the claim leaves the row with no status, and the platform
+    /// answers the same key with a 409 'still in progress' for five minutes
+    /// before a retry takes it over; that case is not modelled.
     idempotency: BTreeMap<String, (String, Value, ServerResult)>,
     /// How many times a key was offered for a second, different request. A
     /// client that cannot reproduce its own request byte for byte is refused
@@ -232,6 +238,15 @@ struct ServerState {
     /// one belongs to its owner too). The account syncs its own Drive only, so
     /// a client asking for `scope: mine` is never told of these.
     shared_in: std::collections::BTreeSet<(&'static str, i64)>,
+    /// What is shared in is shared as a viewer's: nothing may be written into
+    /// it, nor any of it changed (`MockServer::shared_in_read_only`).
+    shared_in_read_only: bool,
+    /// Every upload a client began, refused or not: what a refusal costs.
+    upload_inits: usize,
+    /// Every trash a client asked for, refused or not.
+    trash_requests: usize,
+    /// The next call to each named action is answered with this status, once.
+    answer_next: Vec<(String, u16, Option<&'static str>)>,
     /// Who is calling. Set by the network layer per device.
     actor: Option<String>,
     /// The device whose call is being answered right now, and `None`
@@ -307,6 +322,28 @@ fn refuse(status: u16, errortype: &'static str, message: impl Into<String>) -> A
         errortype,
         message: message.into(),
         data: Value::Null,
+    }
+}
+
+/// The bytes did not all arrive as declared, as the platform's completion
+/// says it: 422 with `reason: upload_incomplete`, which a retry cures.
+fn upload_incomplete(message: &'static str) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: message.into(),
+        data: json!({ "reason": "upload_incomplete" }),
+    }
+}
+
+/// A refusal the same request would get again (`standing: true`), as the
+/// platform renders every one: 422, with its data beside the message.
+fn standing(message: &'static str) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: message.into(),
+        data: json!({ "standing": true }),
     }
 }
 
@@ -464,6 +501,10 @@ impl MockServer {
                 quota_bytes: None,
                 next_token: 0,
                 shared_in: std::collections::BTreeSet::new(),
+                shared_in_read_only: false,
+                upload_inits: 0,
+                trash_requests: 0,
+                answer_next: Vec::new(),
                 actor: None,
                 caller: None,
                 trash_calls: Vec::new(),
@@ -497,6 +538,34 @@ impl MockServer {
     /// would: what a full walk did not return is never, by that alone, gone.
     pub fn index_shows_nothing(&self, on: bool) {
         *self.index_shows_nothing.lock().unwrap() = on;
+    }
+
+    /// What is shared in to the account is shared as a viewer's: an upload,
+    /// a new version or a folder made inside it is refused, as the platform
+    /// refuses a write a grant does not cover.
+    pub fn shared_in_read_only(&self, on: bool) {
+        self.state.lock().unwrap().shared_in_read_only = on;
+    }
+
+    /// How many trashes clients have asked for.
+    pub fn trash_requests(&self) -> usize {
+        self.state.lock().unwrap().trash_requests
+    }
+
+    /// The next call to `action` fails with `status`, once: a server error
+    /// (5xx) on one chosen call, which the rate knobs cannot aim.
+    pub fn answer_next(&self, action: &str, status: u16) {
+        self.state.lock().unwrap().answer_next.push((action.to_string(), status, None));
+    }
+
+    /// As `answer_next`, the refusal carrying this `reason`.
+    pub fn answer_next_because(&self, action: &str, status: u16, reason: &'static str) {
+        self.state.lock().unwrap().answer_next.push((action.to_string(), status, Some(reason)));
+    }
+
+    /// How many uploads clients have begun.
+    pub fn upload_inits(&self) -> usize {
+        self.state.lock().unwrap().upload_inits
     }
 
     /// Answer as a server from before the own-Drive scope: `scope` is not
@@ -1173,10 +1242,25 @@ impl MockServer {
     }
 
     fn dispatch(&self, name: &str, body: &Value) -> ServerResult {
+        {
+            let mut st = self.state.lock().unwrap();
+            if name == "drive_trash" {
+                st.trash_requests += 1;
+            }
+            if let Some(i) = st.answer_next.iter().position(|(a, _, _)| a == name) {
+                let (_, status, reason) = st.answer_next.remove(i);
+                let mut refusal = refuse(status, "ServerError", "The server could not answer just now.");
+                if let Some(reason) = reason {
+                    refusal.data = json!({ "reason": reason });
+                }
+                return Err(refusal);
+            }
+        }
         match name {
             "drive_changes" => self.drive_changes(body),
             "drive_stat" => self.drive_stat(body),
             "drive_index" => self.drive_index(body),
+            "drive_list" => self.drive_list(body),
             "drive_folder_create" => self.drive_folder_create(body),
             "drive_rename" => self.drive_rename(body),
             "drive_move" => self.drive_move(body),
@@ -1229,10 +1313,12 @@ impl MockServer {
             return prior_response;
         }
         let out = self.action(name, body);
-        self.state.lock().unwrap().idempotency.insert(
-            key.to_string(),
-            (name.to_string(), body.clone(), out.clone()),
-        );
+        if !matches!(&out, Err(refusal) if refusal.status >= 500) {
+            self.state.lock().unwrap().idempotency.insert(
+                key.to_string(),
+                (name.to_string(), body.clone(), out.clone()),
+            );
+        }
         out
     }
 
@@ -1439,6 +1525,25 @@ impl MockServer {
         }))
     }
 
+    /// A folder's live children, the account's own, as `drive_list` returns
+    /// them: one page, never truncated here.
+    fn drive_list(&self, body: &Value) -> ServerResult {
+        let folder = body.get("folder_id").and_then(Value::as_i64).filter(|f| *f > 0);
+        let st = self.state.lock().unwrap();
+        let mut items = Vec::new();
+        for f in st.folders.values() {
+            if !f.trashed && f.parent == folder && !Self::is_shared_in(&st, "folder", f.id) {
+                items.push(json!({ "entity_type": "folder", "id": f.id, "name": f.name }));
+            }
+        }
+        for f in st.files.values() {
+            if !f.trashed && f.folder == folder && !Self::is_shared_in(&st, "file", f.id) {
+                items.push(json!({ "entity_type": "file", "id": f.id, "name": f.name }));
+            }
+        }
+        Ok(json!({ "ok": true, "items": items, "truncated": false }))
+    }
+
     fn drive_folder_create(&self, body: &Value) -> ServerResult {
         let name = body
             .get("name")
@@ -1455,6 +1560,9 @@ impl MockServer {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
                 Some(f) if f.trashed => return Err(parent_trashed(p)),
                 Some(_) => {}
+            }
+            if st.shared_in_read_only && Self::is_shared_in(&st, "folder", p) {
+                return Err(standing("You do not have access to that folder."));
             }
         }
         // A live folder of that name in that parent already exists. The real
@@ -1605,7 +1713,7 @@ impl MockServer {
         let mut st = self.state.lock().unwrap();
         // The top level is the owner's.
         if dest.is_none() && Self::is_shared_in(&st, t, id) {
-            return Err(refuse(422, "ActionError", "Only the owner can move this to the top of their Drive."));
+            return Err(standing("Only the owner can move this to the top of their Drive."));
         }
         if let Some(d) = dest {
             match st.folders.get(&d) {
@@ -1702,7 +1810,7 @@ impl MockServer {
         let mut st = self.state.lock().unwrap();
         // Trash is owner-only; an editor's grant never confers it.
         if Self::is_shared_in(&st, t, id) {
-            return Err(refuse(422, "ActionError", "You do not have permission to delete this item."));
+            return Err(standing("You do not have permission to delete this item."));
         }
         // The platform refuses a trash when something it would take changed
         // after the cursor the client sent (`specs/drive_trash_unchanged_since.md`):
@@ -1931,6 +2039,7 @@ impl MockServer {
         let file_id = body.get("file_id").and_then(Value::as_i64);
 
         let mut st = self.state.lock().unwrap();
+        st.upload_inits += 1;
         if let Some(f) = folder {
             match st.folders.get(&f) {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
@@ -1941,6 +2050,21 @@ impl MockServer {
         if let Some(id) = file_id {
             if st.files.get(&id).is_some_and(|f| f.trashed) {
                 return Err(file_trashed(id));
+            }
+        }
+        let into_shared = match file_id {
+            Some(id) => Self::is_shared_in(&st, "file", id),
+            None => folder.is_some_and(|f| Self::is_shared_in(&st, "folder", f)),
+        };
+        if st.shared_in_read_only && into_shared {
+            return Err(standing("You do not have access to that folder."));
+        }
+        // The platform refuses at init, before a byte moves, and asks again at
+        // completion only for uploads that raced each other past it.
+        if let Some(quota) = st.quota_bytes {
+            let used: u64 = st.blobs.values().map(|b| b.len() as u64).sum();
+            if size != u64::MAX && used + size > quota {
+                return Err(standing("That upload would exceed the storage quota."));
             }
         }
         // Whether this upload is encrypted is the DESTINATION's property, never
@@ -2122,9 +2246,7 @@ impl MockServer {
         // and a corrupted chunk then became a file no device could ever open.
         if !session.sha256.is_empty() && actual != session.sha256 {
             st.uploads.remove(&token);
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(upload_incomplete(
                 "The uploaded bytes do not match the declared hash.",
             ));
         }
@@ -2134,11 +2256,7 @@ impl MockServer {
             let used: u64 = st.blobs.values().map(|b| b.len() as u64).sum();
             if used + session.expected > quota {
                 st.uploads.remove(&token);
-                return Err(refuse(
-                    413,
-                    "ValidationError",
-                    "That would exceed the storage quota.",
-                ));
+                return Err(standing("That upload would exceed the storage quota."));
             }
         }
 
@@ -2767,7 +2885,9 @@ mod tests {
         let err = s
             .action("drive_upload_complete", &json!({ "upload_token": token }))
             .unwrap_err();
-        assert_eq!(err.status, 400);
+        // As the platform answers it: refused, and saying the bytes did not
+        // arrive whole, so a client sends them again.
+        assert_eq!((err.status, err.data["reason"].as_str()), (422, Some("upload_incomplete")));
     }
 
     #[test]
@@ -2787,27 +2907,29 @@ mod tests {
     }
 
     #[test]
-    fn quota_is_enforced_at_completion_not_at_the_start() {
-        // At init nobody knows whether the bytes will dedup away to nothing, so
-        // refusing early would reject uploads that were never going to cost
-        // anything.
+    fn quota_is_refused_at_the_start_and_again_at_completion() {
+        // As the platform: an upload over quota is refused at init, before a
+        // byte moves, and the refusal stands. Uploads that each fit when they
+        // began are asked again at completion, where the second to land is
+        // refused the same way.
         let s = server();
-        s.set_quota_bytes(Some(4));
-        let init = s
-            .action(
-                "drive_upload_init",
-                &json!({ "name": "big.bin", "size_bytes": 9, "sha256": sha256_hex(b"123456789") }),
-            )
-            .unwrap();
-        assert!(init["upload_token"].is_string(), "init is allowed through");
-        let token = init["upload_token"].as_str().unwrap().to_string();
-        s.upload_chunk(&token, 0, b"123").unwrap();
-        s.upload_chunk(&token, 3, b"456").unwrap();
-        s.upload_chunk(&token, 6, b"789").unwrap();
+        s.set_quota_bytes(Some(8));
         let err = s
-            .action("drive_upload_complete", &json!({ "upload_token": token }))
+            .action("drive_upload_init", &json!({ "name": "big.bin", "size_bytes": 9, "sha256": sha256_hex(b"123456789") }))
             .unwrap_err();
-        assert_eq!(err.status, 413);
+        assert_eq!((err.status, err.data["standing"].as_bool()), (422, Some(true)));
+        let a = s
+            .action("drive_upload_init", &json!({ "name": "a.bin", "size_bytes": 5, "sha256": sha256_hex(b"12345") }))
+            .unwrap();
+        let b = s
+            .action("drive_upload_init", &json!({ "name": "b.bin", "size_bytes": 5, "sha256": sha256_hex(b"abcde") }))
+            .unwrap();
+        let (ta, tb) = (a["upload_token"].as_str().unwrap().to_string(), b["upload_token"].as_str().unwrap().to_string());
+        s.upload_chunk(&ta, 0, b"12345").unwrap();
+        s.upload_chunk(&tb, 0, b"abcde").unwrap();
+        s.action("drive_upload_complete", &json!({ "upload_token": ta })).unwrap();
+        let err = s.action("drive_upload_complete", &json!({ "upload_token": tb })).unwrap_err();
+        assert_eq!((err.status, err.data["standing"].as_bool()), (422, Some(true)));
     }
 
     #[test]
@@ -2824,6 +2946,19 @@ mod tests {
             .action_idempotent("drive_folder_create", &json!({ "name": "Docs" }), key)
             .unwrap();
         assert_eq!(a, b);
+        assert_eq!(s.live_counts(), (1, 0));
+    }
+
+    #[test]
+    fn a_server_failure_is_not_replayed_under_its_key() {
+        // The platform stores what the action answered; a 5xx never reached
+        // that store, so the same key asked again is answered afresh. Replayed,
+        // one passing failure failed every retry under that key for good.
+        let s = server();
+        s.answer_next("drive_folder_create", 503);
+        let first = s.action_idempotent("drive_folder_create", &json!({ "name": "Docs" }), "k-1");
+        assert_eq!(first.map_err(|e| e.status), Err(503));
+        s.action_idempotent("drive_folder_create", &json!({ "name": "Docs" }), "k-1").unwrap();
         assert_eq!(s.live_counts(), (1, 0));
     }
 

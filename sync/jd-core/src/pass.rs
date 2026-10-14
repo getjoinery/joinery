@@ -2053,11 +2053,12 @@ pub fn run_pass(
     // name naming refused, and make room by moving aside whatever holds it,
     // the user's own folder included (B5, B6).
     let parking: std::collections::HashSet<EntityId> =
-        out.naming.give_up_local_copy.iter().map(|(id, _)| *id).collect();
-    let refused: HashMap<EntityId, Vec<jd_vfs::UnsyncableReason>> = {
-        let mut m: HashMap<EntityId, Vec<jd_vfs::UnsyncableReason>> = HashMap::new();
-        for (id, reason) in out.naming.give_up_local_copy.iter().chain(out.naming.held_destinations.iter()) {
-            m.entry(*id).or_default().push(reason.clone());
+        out.naming.give_up_local_copy.iter().map(|(id, _, _)| *id).collect();
+    // Each verdict with the folder it was judged in.
+    let refused: HashMap<EntityId, Vec<(jd_vfs::UnsyncableReason, Option<i64>)>> = {
+        let mut m: HashMap<EntityId, Vec<(jd_vfs::UnsyncableReason, Option<i64>)>> = HashMap::new();
+        for (id, reason, parent) in out.naming.give_up_local_copy.iter().chain(out.naming.held_destinations.iter()) {
+            m.entry(*id).or_default().push((reason.clone(), *parent));
         }
         m
     };
@@ -2069,7 +2070,7 @@ pub fn run_pass(
             .naming
             .held_destinations
             .iter()
-            .filter_map(|(id, _)| env.store.get_entry(*id).ok().flatten().map(|e| (*id, e.remote.name)))
+            .filter_map(|(id, _, _)| env.store.get_entry(*id).ok().flatten().map(|e| (*id, e.remote.name)))
             .collect();
         for issue in env.store.open_issues()? {
             if issue.kind != crate::naming::RENAME_HELD {
@@ -2128,7 +2129,7 @@ pub fn run_pass(
         // batch for the same reason: it is decided before the scan, so it
         // cannot be part of the round, and whoever is waiting on the name
         // should not have to wait a further pass for it.
-        ops.extend(out.naming.give_up_local_copy.iter().map(|(id, reason)| {
+        ops.extend(out.naming.give_up_local_copy.iter().map(|(id, reason, _)| {
             crate::order::PlannedOp {
                 entity: *id,
                 action: crate::reconcile::Action::UnmaterializeAndPark {
@@ -2148,16 +2149,21 @@ pub fn run_pass(
     // The round of this same pass planned from the server's change before
     // naming's verdict, so it can hold a local placement for an entity being
     // parked; the cancellation above reaches only ops already queued. Only a
-    // placement at the name naming refused goes: a move the round planned to
-    // somewhere else is what ends the clash when the verdict was read against
-    // an agreement the disk has left behind (rig run 1873), and dropping it
-    // re-parks the entry every pass.
+    // placement at the name naming refused, in the folder it refused it in,
+    // goes: a move the round planned to somewhere else is what ends the clash
+    // when the verdict was read against an agreement the disk has left behind
+    // (rig run 1873), and dropping it re-parks the entry every pass. That
+    // holds for a move into another folder under the same name too: held for
+    // its name, the record went on claiming the slot it left, a new file
+    // saved there waited on it, and neither ever moved (P3).
     if !refused.is_empty() {
         let personality = env.vfs.personality();
         let mut kept = Vec::with_capacity(out.round.plan.ops.len());
         for op in std::mem::take(&mut out.round.plan.ops) {
-            let drop = match (refused.get(&op.entity), placed_name(env, &op)?) {
-                (Some(reasons), Some(name)) => reasons.iter().any(|r| a_park_refuses(r, &name, &personality)),
+            let drop = match (refused.get(&op.entity), placed_at(env, &op)?) {
+                (Some(verdicts), Some(at)) => verdicts
+                    .iter()
+                    .any(|(r, judged_in)| *judged_in == at.parent && a_park_refuses(r, &at.name, &personality)),
                 _ => false,
             };
             if !drop {
@@ -2166,6 +2172,7 @@ pub fn run_pass(
         }
         out.round.plan.ops = kept;
     }
+    lift_or_keep_refusals(env, &mut out.round.plan, next_cursor)?;
     let queued = journal(env.store, &out.round.plan, key_for)?;
     // A trash carries the change it was decided at: whatever the server had
     // changed under it by then, this round has judged, and only what changes
@@ -2184,6 +2191,7 @@ pub fn run_pass(
         })?,
         None => run_queued(env)?,
     };
+    env.store.stamp_refusals(next_cursor)?;
 
     // The cursor moves only now, once everything the batch implied is durably
     // in the journal. A cursor advanced any earlier is a change the server will
@@ -2284,6 +2292,48 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
         return Ok((walk_index_and_the_rest(env)?, next, true));
     }
     Ok((stat_all(env, &wanted)?, next, false))
+}
+
+/// How long a refusal is held with nothing it was asked about moving: the
+/// one change the feed does not carry, a limit raised by an administrator,
+/// is picked up within it.
+const REFUSAL_HOLD_MS: i64 = 60 * 60 * 1000;
+
+/// What the server refused is held (`Store::refusals`): the same action with
+/// the same target, asked with nothing it was asked about changed -- the
+/// entity on both sides, the feed -- is refused again, so it is not asked.
+/// An upload over quota went up whole every pass, for ever, and an editor's
+/// trash of a shared file was refused 140 times in three minutes (B-SH3).
+/// A hold lifts the moment any of that moves: an edit, a rename or a move
+/// here (a new target), a change on the server, any change to the account
+/// (room freed elsewhere), or an hour. The op it lifts for is planned as any
+/// other, and a refusal again is held again in the same issue.
+fn lift_or_keep_refusals(env: &ExecEnv, plan: &mut crate::order::Plan, at: i64) -> Result<(), ExecError> {
+    let held = env.store.refusals()?;
+    if held.is_empty() {
+        return Ok(());
+    }
+    let now = (env.now_ms)() as i64;
+    let mut standing: HashMap<EntityId, String> = HashMap::new();
+    for r in held {
+        let still = r.cursor == at
+            && now - r.refused_at < REFUSAL_HOLD_MS
+            && env
+                .store
+                .get_entry(r.entity)?
+                .is_some_and(|e| crate::execute::refusal_inputs(&e) == r.inputs);
+        if still {
+            standing.insert(r.entity, r.action);
+        } else {
+            env.store.clear_refusal(r.entity)?;
+        }
+    }
+    plan.ops.retain(|op| {
+        standing
+            .get(&op.entity)
+            .is_none_or(|action| crate::execute::planned_action_key(&op.action) != *action)
+    });
+    Ok(())
 }
 
 /// The store's mark that it has been walked in full under the own-Drive scope
@@ -7642,13 +7692,13 @@ pub(crate) fn holds_here(env: &ExecEnv, entry: &Entry) -> Result<bool, ExecError
 
 /// The name an op would place its entry under on this disk, for an op that
 /// places it at all; `None` for remote-side work and removals.
-fn placed_name(env: &ExecEnv, op: &crate::order::PlannedOp) -> Result<Option<String>, ExecError> {
+fn placed_at(env: &ExecEnv, op: &crate::order::PlannedOp) -> Result<Option<Placement>, ExecError> {
     use crate::reconcile::Action;
     Ok(match &op.action {
-        Action::ApplyRemoteMove { to, .. } | Action::AdoptPlacement { to } => Some(to.name.clone()),
-        Action::CreateLocalFolder { placement } => Some(placement.name.clone()),
-        Action::PreserveLocalAs { name, .. } => Some(name.clone()),
-        Action::Download => env.store.get_entry(op.entity)?.map(|e| e.remote.name),
+        Action::ApplyRemoteMove { to, .. } | Action::AdoptPlacement { to } => Some(to.clone()),
+        Action::CreateLocalFolder { placement } => Some(placement.clone()),
+        Action::PreserveLocalAs { name, parent } => Some(Placement { parent: *parent, name: name.clone() }),
+        Action::Download => env.store.get_entry(op.entity)?.map(|e| e.remote),
         Action::Adopt
         | Action::UploadVersion
         | Action::UploadAsNew { .. }
@@ -7664,10 +7714,9 @@ fn placed_name(env: &ExecEnv, op: &crate::order::PlannedOp) -> Result<Option<Str
 
 /// Whether a park for this reason refuses placing its entry under `name`
 /// here: a clash refuses the name it clashes with, any other reason refuses
-/// a name this disk cannot hold at all. By name alone, without the parent: a
-/// verdict at a destination is judged in the destination's own folder, so it
-/// and the round's move there share a parent; a verdict on the agreed name
-/// against a same-named move into another folder only holds that move a pass.
+/// a name this disk cannot hold at all. By name alone: the executor's guard
+/// has no folder to ask about, and the pass's filter of the round asks the
+/// folder the verdict was judged in beside it.
 pub(crate) fn a_park_refuses(reason: &jd_vfs::UnsyncableReason, name: &str, p: &jd_vfs::Personality) -> bool {
     use jd_vfs::UnsyncableReason as R;
     match reason {

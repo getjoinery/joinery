@@ -57,13 +57,13 @@ function drive_folder_create_logic(array $input): LogicResult {
 		}
 		$owner_id = (int)$parent->get('fol_usr_user_id');
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $parent, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to that folder.');
+			return LogicResult::error('You do not have access to that folder.', array('standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($parent)) {
 			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 		}
 		if (DriveHelper::depth($parent_id) + 1 > DriveHelper::max_depth()) {
-			return LogicResult::error('Maximum folder depth reached.');
+			return LogicResult::error('Maximum folder depth reached.', array('standing' => true));
 		}
 		$parent_level = DriveHelper::folder_level($parent);
 		if ($parent_level !== ProtectionLevel::STANDARD) {

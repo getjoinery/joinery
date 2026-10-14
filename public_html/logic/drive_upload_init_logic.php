@@ -84,7 +84,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 			return LogicResult::error('The file to update was not found.');
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FILE, $target_file, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have permission to update that file.');
+			return LogicResult::error('You do not have permission to update that file.', array('standing' => true));
 		}
 		// A new version of a file in the trash has nowhere to be seen. The row is
 		// hidden from every listing, so the bytes would be admitted, charged to
@@ -92,7 +92,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 		// worked. Restoring is drive_restore's job; a sync client whose edit beat
 		// somebody's delete sends the rescued bytes up as a NEW file instead.
 		if ($target_file->get('fil_delete_time') !== null && $target_file->get('fil_delete_time') !== '') {
-			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id));
+			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id, 'standing' => true));
 		}
 		$folder_id = (int)$target_file->get('fil_fol_folder_id');
 		$owner_id  = (int)$target_file->get('fil_usr_user_id');
@@ -104,7 +104,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 			return LogicResult::error('Destination folder not found.');
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to that folder.');
+			return LogicResult::error('You do not have access to that folder.', array('standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($folder)) {
 			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
@@ -135,11 +135,11 @@ function drive_upload_init_logic(array $input): LogicResult {
 	if ($max_file > 0) {
 		$size_cap = $encrypted ? DriveHelper::encrypted_size_ceiling($max_file) : $max_file;
 		if ($size_bytes > $size_cap) {
-			return LogicResult::error('That file is larger than the per-file limit.');
+			return LogicResult::error('That file is larger than the per-file limit.', array('reason' => 'file_too_large', 'standing' => true));
 		}
 	}
 	if ($quota > 0 && DriveUsage::current_bytes($owner_id) + $size_bytes > $quota) {
-		return LogicResult::error('That upload would exceed the storage quota.');
+		return LogicResult::error('That upload would exceed the storage quota.', array('reason' => 'quota', 'standing' => true));
 	}
 
 	// A quota is what the owner is allowed; this is what the machine can actually

@@ -29,7 +29,7 @@ function drive_trash_logic(array $input): LogicResult {
 	}
 	// Trash (a soft delete) is owner-only — an editor grant never grants delete.
 	if (!DriveHelper::owns($entity_type, $entity, $user_id)) {
-		return LogicResult::error('You do not have permission to delete this item.');
+		return LogicResult::error('You do not have permission to delete this item.', array('standing' => true));
 	}
 
 	// A sync client sends the change it decided this trash at. Anything the

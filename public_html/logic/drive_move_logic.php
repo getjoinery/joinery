@@ -28,7 +28,7 @@ function drive_move_logic(array $input): LogicResult {
 	// the item to the root instead would look like success.
 	$parent_id   = isset($input['parent_id']) ? (int)$input['parent_id'] : 0;
 	if ($parent_id < 0) {
-		return LogicResult::error('Destination folder not found.', array('reason' => 'invalid_parent', 'folder_id' => $parent_id));
+		return LogicResult::error('Destination folder not found.', array('reason' => 'invalid_parent', 'folder_id' => $parent_id, 'standing' => true));
 	}
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
@@ -40,7 +40,7 @@ function drive_move_logic(array $input): LogicResult {
 		return LogicResult::error('Item not found.');
 	}
 	if (!DriveHelper::can_write($entity_type, $entity, $user_id, $session->get_permission())) {
-		return LogicResult::error('You do not have permission to move this item.');
+		return LogicResult::error('You do not have permission to move this item.', array('standing' => true));
 	}
 
 	// Already there: nothing to move. Answered as success so a retried move
@@ -63,7 +63,7 @@ function drive_move_logic(array $input): LogicResult {
 			return LogicResult::error('Destination folder not found.');
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $target, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to the destination folder.');
+			return LogicResult::error('You do not have access to the destination folder.', array('standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($target)) {
 			// Moving something into the trash is what drive_trash is for, and it
@@ -76,14 +76,14 @@ function drive_move_logic(array $input): LogicResult {
 		// delete-forever cascades (which select by folder) would operate on
 		// another user's rows.
 		if (DriveHelper::owner_id_of($entity_type, $entity) !== (int)$target->get('fol_usr_user_id')) {
-			return LogicResult::error('Items can only be moved within their owner\'s Drive.');
+			return LogicResult::error('Items can only be moved within their owner\'s Drive.', array('standing' => true));
 		}
 	} elseif (!DriveHelper::owns($entity_type, $entity, $user_id)) {
 		// The top level is the item's OWNER's: moved there, it lands at the top of
 		// the owner's Drive, outside every folder shared with the mover. An editor
 		// reaches the item through a share, and taking it out of the share is not
 		// something that grant covers.
-		return LogicResult::error('Only the owner can move this to the top of their Drive.');
+		return LogicResult::error('Only the owner can move this to the top of their Drive.', array('standing' => true));
 	}
 
 	// Protection-boundary guard. A folder's level is the floor for everything
@@ -130,11 +130,11 @@ function drive_move_logic(array $input): LogicResult {
 			// is a download and an upload, so that is what the refusal names.
 			if ($item_level === ProtectionLevel::FORTRESS) {
 				return LogicResult::error('A Fortress file cannot be moved out of its vault. Download it and upload it where you want it.',
-					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id, 'standing' => true));
 			}
 			if ($dest_level === ProtectionLevel::FORTRESS) {
 				return LogicResult::error('A file cannot be moved into a Fortress vault. Download it and upload it into the vault.',
-					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id, 'standing' => true));
 			}
 			$plain_bytes = $entity->plain_size_bytes();
 			if ($plain_bytes > ProtectionLevelChange::BYTE_BUDGET) {
@@ -164,7 +164,7 @@ function drive_move_logic(array $input): LogicResult {
 		if ($item_level !== $dest_level) {
 			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
 				return LogicResult::error('A Fortress folder can only sit at the Drive root or inside another Fortress folder.',
-					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id, 'standing' => true));
 			}
 			// Standard <-> Private for a whole subtree is the level change, not a
 			// move: it is byte work with a receipt, and silently starting it from

@@ -63,7 +63,7 @@ pub struct NamingOutcome {
     /// still names the file, so every later scan reports it as a local move
     /// that nothing acts on, for ever, while the user sees a file that is never
     /// scanned, sent, renamed or removed again.
-    pub give_up_local_copy: Vec<(EntityId, UnsyncableReason)>,
+    pub give_up_local_copy: Vec<(EntityId, UnsyncableReason, Option<i64>)>,
     /// Arrivals whose destination is not decidable this pass: the name they
     /// want is held by an entry with an open op of this device's own, so
     /// where that holder stands next is the queue's business. No verdict was
@@ -76,7 +76,7 @@ pub struct NamingOutcome {
     /// inside a locked vault), but not moved there either. The pass keeps their
     /// move off the disk and says why (`RENAME_HELD`); a key arriving hands
     /// them to the ordinary verdict.
-    pub held_destinations: Vec<(EntityId, UnsyncableReason)>,
+    pub held_destinations: Vec<(EntityId, UnsyncableReason, Option<i64>)>,
 }
 
 impl NamingOutcome {
@@ -772,7 +772,7 @@ pub fn apply_naming(
                     // really gone, so the record and the disk change together.
                     if holds(&gone, &entry) && entry.synced_placement.is_some() {
                         releasing = true;
-                        out.give_up_local_copy.push((entry.id, reason));
+                        out.give_up_local_copy.push((entry.id, reason, parent));
                     } else {
                         // Re-raising the same verdict every pass would fill the
                         // issues panel with one problem repeated a thousand
@@ -921,7 +921,7 @@ fn judge_destinations(
     // for ever: never destructive, because the agreement it would need is gone,
     // but a device that is never quiet again.
     let already: std::collections::HashSet<EntityId> =
-        out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
+        out.give_up_local_copy.iter().map(|(id, _, _)| *id).collect();
     let (trading, pending) = trading_names(env, personality, settled, leaving_this_pass, busy)?;
     let parked = crate::pass::held_by_a_weak_volume_park(env)?;
     let all = crate::pass::all_entries(env)?;
@@ -1062,9 +1062,9 @@ fn judge_destinations(
         };
         if let Some(reason) = taken {
             if keyless {
-                out.held_destinations.push((entry.id, reason));
+                out.held_destinations.push((entry.id, reason, entry.remote.parent));
             } else {
-                out.give_up_local_copy.push((entry.id, reason));
+                out.give_up_local_copy.push((entry.id, reason, entry.remote.parent));
             }
         }
     }
@@ -1910,7 +1910,7 @@ mod tests {
 
         let out = apply_naming(&env(&f.store), &tight, 20).unwrap();
         assert!(
-            out.give_up_local_copy.iter().any(|(id, r)| *id == EntityId::file(1) && matches!(r, UnsyncableReason::PathTooLong { .. })),
+            out.give_up_local_copy.iter().any(|(id, r, _)| *id == EntityId::file(1) && matches!(r, UnsyncableReason::PathTooLong { .. })),
             "{:?}",
             out.give_up_local_copy
         );
