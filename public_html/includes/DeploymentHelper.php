@@ -5,6 +5,7 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.9 - testPluginLoading() is gone: it looked for a _class.php in each plugin folder, which no plugin has
  * @version 1.8 - preserveReason() asks SandboxPlugins only where the running core has it; on a core
  *                from before it, the self-updated copy of this file fataled mid-upgrade
  * @version 1.7 - servesReleases(): a site other sites upgrade from, which takes every package its source
@@ -248,96 +249,6 @@ class DeploymentHelper {
                     'line' => $line,
                     'message' => $message,
                     'type' => 'syntax'
-                ];
-                $result['success'] = false;
-            }
-        }
-
-        return $result;
-    }
-
-    /**
-     * Test that plugin class files can be loaded
-     * @param string $stage_dir Staging directory
-     * @return array ['success' => bool, 'errors' => array, 'files_checked' => int]
-     *               Each error: ['file' => string, 'message' => string, 'type' => string]
-     *               Types: 'syntax', 'missing_dependency', 'fatal_error', 'include_error'
-     */
-    public static function testPluginLoading($stage_dir) {
-        $result = [
-            'success' => true,
-            'errors' => [],
-            'files_checked' => 0
-        ];
-
-        $plugins_dir = $stage_dir . '/plugins';
-        if (!is_dir($plugins_dir)) {
-            return $result;
-        }
-
-        // Find all plugin class files
-        $plugin_classes = glob($plugins_dir . '/*/_class.php');
-
-        if (empty($plugin_classes)) {
-            return $result;
-        }
-
-        foreach ($plugin_classes as $class_file) {
-            $result['files_checked']++;
-            $plugin_name = basename(dirname($class_file));
-
-            // First check syntax
-            $output = [];
-            $return_var = 0;
-            exec("php -l " . escapeshellarg($class_file) . " 2>&1", $output, $return_var);
-
-            if ($return_var !== 0) {
-                $result['errors'][] = [
-                    'file' => $class_file,
-                    'message' => implode(' ', $output),
-                    'type' => 'syntax'
-                ];
-                $result['success'] = false;
-
-                continue;
-            }
-
-            // Try to load the plugin class in isolated context
-            $test_script = tempnam(sys_get_temp_dir(), 'plugin_test_');
-            file_put_contents($test_script, "<?php
-                // Simulate PathHelper context
-                define('TESTING_PLUGIN_LOAD', true);
-                error_reporting(E_ALL);
-
-                // Try to include the plugin class
-                try {
-                    include_once('$class_file');
-                    echo 'SUCCESS';
-                } catch (Error \$e) {
-                    echo 'ERROR: ' . \$e->getMessage();
-                } catch (Exception \$e) {
-                    echo 'EXCEPTION: ' . \$e->getMessage();
-                }
-            ");
-
-            $output = [];
-            exec("php " . escapeshellarg($test_script) . " 2>&1", $output, $return_var);
-            unlink($test_script);
-
-            $output_text = implode("\n", $output);
-
-            if (strpos($output_text, 'SUCCESS') === false) {
-                $error_type = 'fatal_error';
-                if (strpos($output_text, 'Class') !== false && strpos($output_text, 'not found') !== false) {
-                    $error_type = 'missing_dependency';
-                } elseif (strpos($output_text, 'Failed opening') !== false || strpos($output_text, 'include') !== false) {
-                    $error_type = 'include_error';
-                }
-
-                $result['errors'][] = [
-                    'file' => $class_file,
-                    'message' => $output_text,
-                    'type' => $error_type
                 ];
                 $result['success'] = false;
             }
