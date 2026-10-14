@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.7 - servesReleases(): a site other sites upgrade from, which takes every package its source
+ *                publishes (utils/upgrade.php 1.19)
  * @version 1.6 - preserveReason(): a sandboxed plugin folder is always kept (SandboxPlugins); no release ships one
  * @version 1.5 - keepSelfUpdateOriginals() / restoreSelfUpdateFiles(): the deployment files a self-update replaced
  *                are put back when the run ends without deploying (utils/upgrade.php 1.15)
@@ -72,6 +74,28 @@ class DeploymentHelper {
             $root = self::normalizeDeploymentHost((string)$settings->get_setting('root_node'));
             if ($root === '') return false;   // no origin named — nobody is it
             return self::normalizeDeploymentHost((string)$settings->get_setting('webDir')) === $root;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * True on a site other sites upgrade from: it is an upgrade server and has
+     * published a release, which is when its ?serve-upgrade answers.
+     *
+     * Such a site republishes what is on its own disk (publish_upgrade.php
+     * walks plugins/ and theme/), so its upgrade takes every package its
+     * source publishes, installed here or not. A package missing from its disk
+     * is missing from every release it serves, and each site downstream that
+     * runs one keeps its old copy against the new core.
+     *
+     * Lives here for the reason isOriginNode() does: upgrade.php asks it.
+     */
+    public static function servesReleases() {
+        if (!self::isUpgradeServer()) return false;
+        try {
+            $q = DbConnector::get_instance()->get_db_link()->query('SELECT 1 FROM upg_upgrades LIMIT 1');
+            return $q !== false && $q->fetchColumn() !== false;
         } catch (Throwable $e) {
             return false;
         }

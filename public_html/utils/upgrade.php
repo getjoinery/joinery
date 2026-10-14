@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.19 - a site other sites upgrade from (DeploymentHelper::servesReleases()) takes every theme and
+	 *                plugin its source publishes, installed here or not, so the releases it republishes carry them
 	 * @version 1.18 - the extension table says "Edited here, will be replaced" for a package the deploy
 	 *                replaces whose files changed since install, naming the first one (specs/local_edits_detected.md)
 	 * @version 1.17 - only the run a self-update re-execs (JOINERY_UPGRADE_RERUN=1) resumes from staging; any
@@ -1053,6 +1055,17 @@
 			get_installed_extension_names($live_directory . '/plugins', 'plugin'),
 			$source_published_plugin_names
 		));
+		// A site other sites upgrade from republishes only what is on its own
+		// disk, so it takes every package its source publishes, installed here
+		// or not. One it lacked would be missing from every release it serves,
+		// and each site running it would keep its old copy against the new core.
+		$taken_to_serve = array('theme' => array(), 'plugin' => array());
+		if (method_exists('DeploymentHelper', 'servesReleases') && DeploymentHelper::servesReleases()) {
+			$taken_to_serve['theme']  = array_values(array_diff($source_published_theme_names, $themes_to_download));
+			$taken_to_serve['plugin'] = array_values(array_diff($source_published_plugin_names, $plugins_to_download));
+			$themes_to_download  = array_merge($themes_to_download, $taken_to_serve['theme']);
+			$plugins_to_download = array_merge($plugins_to_download, $taken_to_serve['plugin']);
+		}
 		// Map name → archive URL for the download loop.
 		$theme_url_by_name  = array_column($source_published_themes,  'url', 'name');
 		$plugin_url_by_name = array_column($source_published_plugins, 'url', 'name');
@@ -1084,9 +1097,9 @@
 
 		// Summary
 		$total_themes = count($all_themes_info);
-		$themes_to_upgrade_count = count($themes_to_download);
+		$themes_to_upgrade_count = count($themes_to_download) - count($taken_to_serve['theme']);
 		$total_plugins = count($all_plugins_info);
-		$plugins_to_upgrade_count = count($plugins_to_download);
+		$plugins_to_upgrade_count = count($plugins_to_download) - count($taken_to_serve['plugin']);
 
 		if ($is_cli) {
 			echo "Summary: {$themes_to_upgrade_count}/{$total_themes} themes and {$plugins_to_upgrade_count}/{$total_plugins} plugins will be upgraded\n\n";
@@ -1387,6 +1400,13 @@
 		// =====================================================
 		if (!empty($themes_to_download) || !empty($plugins_to_download)) {
 			out_step('Downloading Individual Themes and Plugins');
+
+			foreach ($taken_to_serve as $kind => $names) {
+				if ($names) {
+					upgrade_echo('This site serves releases, so it also takes the ' . count($names) . ' published ' . $kind
+						. '(s) it does not have: ' . htmlspecialchars(implode(', ', $names)) . '<br>');
+				}
+			}
 
 			$skipped_items = [];
 			$downloaded_count  = download_extension_set($themes_to_download,  $theme_url_by_name,  'theme',  'theme',   $stage_directory, $skipped_items);

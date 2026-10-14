@@ -113,6 +113,14 @@ loads after every ordered consumer, sorted by plugin name. A bootstrap is never
 `VaultUnlock::loadConsumerBootstraps()` and lets the loader run it, which is
 what keeps each registration attributed to its plugin.
 
+A bootstrap that throws — say it names a core constant this release no longer
+has — does not take the request down with it. The loader logs the error with
+the plugin's name, skips the rest of that bootstrap, and lists the plugin in
+`PluginBootstraps::notLoaded()`. Unlock windows then fall back to the hardened
+caps, and a key rotation is refused while a plugin that declares `reseals` is
+on that list, since it may have registered its re-seal callback and nothing
+after it.
+
 **Contributing setup wizard steps.** A plugin registers steps into the
 `SetupSteps` registry from its bootstrap (`SetupSteps::register('key', [...])`
 — see `docs/admin_pages.md` § Setup steps for the field contract). The registry
