@@ -182,19 +182,23 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_private_ai_consent' => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'local'),
 	);
 
-private static function UcName($string) {
-		$test_string = preg_replace('/[^A-Za-z]/', '', $string);
-		$string = preg_replace('/[^A-Za-z\'-]/', '', $string);
-		if(ctype_lower($test_string) || ctype_upper($test_string) ){
-		    $string =ucwords(strtolower($string));
-
-		    foreach (array('-', '\'') as $delimiter) {
-		      if (strpos($string, $delimiter)!==false) {
-		        $string =implode($delimiter, array_map('ucfirst', explode($delimiter, $string)));
-		      }
-		    }
+/**
+	 * A name as a person writes it: every character kept (accents, spaces,
+	 * any script), spacing tidied, and re-cased only when it was typed all
+	 * lower or all upper case ("josé" and "JOSÉ" become "José"; "McDonald"
+	 * and "van der Berg" are left as they are).
+	 */
+	private static function UcName($string) {
+		$string = trim(preg_replace('/\s+/u', ' ', (string)$string));
+		$letters = preg_replace('/[^\p{L}]/u', '', $string);
+		if ($letters === '' || (mb_strtolower($letters, 'UTF-8') !== $letters && mb_strtoupper($letters, 'UTF-8') !== $letters)) {
+			return $string;
 		}
-	    return $string;
+		$string = mb_convert_case(mb_strtolower($string, 'UTF-8'), MB_CASE_TITLE, 'UTF-8');
+		// A part after a hyphen or an apostrophe is a name of its own (Smith-Jones, O'Brien).
+		return preg_replace_callback("~(?<=[-'])\\p{Ll}~u", function ($m) {
+			return mb_strtoupper($m[0], 'UTF-8');
+		}, $string);
 	}
 
 	public function add_user_to_mailing_lists($mailing_list_ids){
@@ -1110,13 +1114,33 @@ private static function UcName($string) {
 		$result = parent::load();
 		$this->loaded_password_hash = ($this->data !== NULL && isset($this->data->usr_password))
 			? $this->data->usr_password : NULL;
+		$this->remember_profile();
 		return $result;
 	}
 
 	function load_from_data($data, $fields) {
 		parent::load_from_data($data, $fields);
 		$this->loaded_password_hash = $this->get('usr_password');
+		$this->remember_profile();
 	}
+
+	/** The profile fields whose change is the account.updated signal. */
+	const PROFILE_FIELDS = array('first_name', 'last_name', 'nickname', 'organization_name', 'email', 'timezone');
+
+	/** The profile as loaded, to tell what a save changed; null for a user not loaded. */
+	private $loaded_profile = NULL;
+
+	private function remember_profile(): void {
+		$this->loaded_profile = array();
+		foreach (self::PROFILE_FIELDS as $field) {
+			$this->loaded_profile[$field] = (string)$this->get('usr_' . $field);
+		}
+		$this->loaded_could_approve = (int)$this->get('usr_permission') >= SandboxConsent::APPROVER_PERMISSION
+			&& !$this->get('usr_is_disabled');
+	}
+
+	/** Whether, as loaded, this user's approval of a sandboxed plugin stood. */
+	private $loaded_could_approve = FALSE;
 
 	function save($debug=false) {
 		// A changed hash on an existing, previously loaded user is a credential
@@ -1129,6 +1153,35 @@ private static function UcName($string) {
 		parent::save($debug);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
+
+		// A superadmin demoted or disabled by this save: the sandboxed plugins
+		// they approved stop acting as them (SandboxCredentials).
+		if ($this->loaded_profile !== NULL && $this->loaded_could_approve
+				&& ((int)$this->get('usr_permission') < SandboxConsent::APPROVER_PERMISSION || $this->get('usr_is_disabled'))) {
+			$this->loaded_could_approve = FALSE;
+			SandboxCredentials::lapseApprovalsOf((int)$this->key);
+		}
+
+		// A loaded user whose profile this save changed: the account.updated
+		// signal, naming what changed.
+		if ($this->loaded_profile !== NULL) {
+			$changed = array();
+			foreach (self::PROFILE_FIELDS as $field) {
+				if ((string)$this->get('usr_' . $field) !== $this->loaded_profile[$field]) {
+					$changed[] = $field;
+				}
+			}
+			if ($changed) {
+				$this->remember_profile();
+				SignalBus::dispatch('account.updated', array(
+					'user_id'        => (int)$this->key,
+					'display_name'   => $this->display_name(),
+					'email'          => (string)$this->get('usr_email'),
+					'changed'        => implode(',', $changed),
+					'source_user_id' => isset($_SESSION['usr_user_id']) ? (int)$_SESSION['usr_user_id'] : null,
+				));
+			}
+		}
 
 		// Revoke all active API session keys when the password changes —
 		// the lost-phone / compromised-credential path. Machine keys survive
@@ -1205,10 +1258,10 @@ private static function UcName($string) {
 	/**
 	 * Refuse to delete an account that owns a live scoped machine key. Such a
 	 * key is another machine's credential for one job (a DNS server reading
-	 * its snapshot, say), minted by the feature that owns that job under an
-	 * account made for it. Deleting the account would silently cut that
-	 * machine off, and permanent deletion would take the key with it; the
-	 * key is revoked first, by the feature that issued it.
+	 * its snapshot, an integration reading one model), and it acts as this
+	 * account. Deleting the account would silently cut that machine off, and
+	 * permanent deletion would take the key with it; the key is deleted
+	 * first, on its own page.
 	 */
 	private function refuse_while_scoped_key_is_live(){
 		require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -1217,12 +1270,23 @@ private static function UcName($string) {
 			'type' => ApiKey::TYPE_MACHINE,
 			'deleted' => false,
 		));
+		$now_utc = gmdate('Y-m-d H:i:s');
 		foreach($keys as $key){
-			if($key->is_scoped()){
+			// A key that is switched off or past its expiry is in use by nothing.
+			$expired = $key->get('apk_expires_time') && $key->get('apk_expires_time') < $now_utc;
+			if($key->is_scoped() && $key->get('apk_is_active') && !$expired){
+				$plugin = $key->sandbox_plugin();
+				if($plugin !== null){
+					throw new SystemDisplayableError(
+						'This account approved the sandboxed plugin ' . $plugin . ', which acts on the site as it. '
+						. 'Have another admin approve it again first, at /admin/admin_sandbox_approve?plugin=' . rawurlencode($plugin)
+						. ', or deactivate it; deleting the account would cut the plugin off.');
+				}
 				throw new SystemDisplayableError(
 					'This account owns the key "' . $key->get('apk_name') . '", which is limited to '
-					. implode(', ', $key->scope()) . ' and is in use by another machine. Revoke that key '
-					. 'where it was issued first; deleting the account would cut that machine off.');
+					. $key->scope_label() . ' and is in use by another machine. Delete that key first, at '
+					. '/admin/admin_api_key?apk_api_key_id=' . (int)$key->key
+					. '; deleting the account would cut that machine off.');
 			}
 		}
 	}
@@ -1445,6 +1509,10 @@ private static function UcName($string) {
 			return '/assets/images/blank-avatar.png';
 		}
 		$file = new File($file_id, TRUE);
+		// A photo whose record or bytes are gone is the blank avatar, not a broken image.
+		if (!$file->key || $file->get('fil_delete_time') || !$file->bytes_present()) {
+			return '/assets/images/blank-avatar.png';
+		}
 		return $file->get_url($size_key);
 	}
 

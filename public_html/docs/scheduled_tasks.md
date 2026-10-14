@@ -65,6 +65,7 @@ Place in `/tasks/` (core) or `/plugins/{plugin}/tasks/` (plugin).
 - `default_time` — Default time of day (HH:MM:SS, only used for `daily` and `weekly`). Omit the key entirely for other frequencies — the value is written verbatim to a `time` column, so an empty string fails activation
 - `config_fields` — Task-specific parameters rendered in admin form
 - `activate_on_install` — Create the task's row automatically (see [Activate on install](#activate-on-install))
+- `activated_by_hand` — `false` for a task whose rows the feature that owns it makes (one per thing it runs for, each with its own config), which the Scheduled Tasks page then never offers for activation. `SandboxScheduledRun` is one: a row per approved schedule of a sandboxed plugin
 - `replaces` — Class names this task absorbed, for retirement messages (see [Supersession](#supersession--say-what-replaced-it))
 
 **Config field types:**

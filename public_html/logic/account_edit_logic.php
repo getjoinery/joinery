@@ -52,8 +52,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
 		if($session->get_user_id()){
 			$user = new User($session->get_user_id(), TRUE);
-			$user->set('usr_first_name', preg_replace("/[^a-zA-Z'-]/", "", $input['usr_first_name']));
-			$user->set('usr_last_name', preg_replace("/[^a-zA-Z'-]/", "", $input['usr_last_name']));
+			// A name keeps every character a person typed (accents, spaces,
+			// any script); only control characters and tags are taken out.
+			$user->set('usr_first_name', trim(strip_tags(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$input['usr_first_name']))));
+			$user->set('usr_last_name', trim(strip_tags(preg_replace('/[\x00-\x1F\x7F]/u', '', (string)$input['usr_last_name']))));
 			$user->set('usr_timezone', preg_replace("/[^a-zA-Z\/_-]/", "", $input['usr_timezone']));
 			$user->save();
 		}

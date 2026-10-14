@@ -39,4 +39,3 @@ function page_logic(array $input): LogicResult {
 	return LogicResult::render($page_vars);
 }
 ?>
-

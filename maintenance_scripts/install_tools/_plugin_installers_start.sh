@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
+#                 host, a site without one has it stopped (specs/plugin_tiers.md WP7). A sandboxed plugin's
+#                 manifest.json is part of what "changed" means, so one arriving starts the host at the next tick.
 # Version: 2.35 - A site whose config/ is on the data root, found with the data root not mounted, runs the
 #                 data root's tick before it waits: a plain data root that is only unmounted (an encrypt's
 #                 start cut off) is mounted again by it, and the run goes on. The wait skipped the tick, so
@@ -262,7 +265,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # about them is a plugin's business. Each is idempotent and decides for itself
 # whether it applies here, the same contract plugin installers work under.
 # This list is also the whole of what --only may name.
-CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
+CORE_INSTALLERS="install_agent.sh install_parser_jail.sh install_sandbox_host.sh install_host_converger.sh render_vhost.sh host_housekeeping.sh host_swap.sh site_housekeeping.sh"
 
 # The host's own installers: what a machine with no site converges to. A
 # subset of CORE_INSTALLERS by construction (each is also a site's), and the
@@ -1180,6 +1183,9 @@ converge_hash() {
         # reason to converge, not something to wait a day for.
         cat "${TOOLS_DIR}"/*.sh "${TOOLS_DIR}"/default_*.conf "${TOOLS_DIR}"/vhost_history/*.conf 2>/dev/null
         for m in "${PUBLIC_HTML}"/plugins/*/plugin.json; do [[ -f "${m}" ]] && cat "${m}"; done
+        # A sandboxed plugin's manifest: one arriving or leaving decides
+        # whether the site runs a plugin host (install_sandbox_host.sh).
+        for m in "${PUBLIC_HTML}"/plugins/*/manifest.json; do [[ -f "${m}" ]] && cat "${m}"; done
         echo "${ACTIVE_PLUGINS_FOR_HASH:-}"
         echo "${HOST_SWITCHES_FOR_HASH:-}"
     } | sha256sum | cut -d' ' -f1

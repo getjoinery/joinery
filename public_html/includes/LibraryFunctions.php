@@ -1437,7 +1437,7 @@ class LibraryFunctions {
 			if ($options['plugin_status'] === 'active') {
 				require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 				$plugins = array_values(array_filter($plugins, function ($plugin) {
-					return PluginHelper::isPluginActive($plugin);
+					return PluginHelper::isActiveOfEitherKind($plugin);
 				}));
 			}
 
@@ -1448,6 +1448,24 @@ class LibraryFunctions {
 				}
 				if (is_dir($plugin_data_dir)) {
 					LibraryFunctions::load_models_from_directory($plugin_data_dir, $classes, $options);
+				}
+			}
+
+			// A sandboxed plugin's models come from its manifest, not from
+			// files (SandboxModels declares them); they meet every option above.
+			// One plugin asked for by name is answered whatever its row says
+			// (its own install makes its tables before the row is saved); a
+			// sweep over many takes only the installed ones.
+			if ($options['plugin_filter']) {
+				// $plugins is the filter, or nothing when it is not active and only active ones were asked for.
+				$sandbox_classes = in_array((string)$options['plugin_filter'], $plugins, true)
+					? SandboxModels::classesFor((string)$options['plugin_filter']) : array();
+			} else {
+				$sandbox_classes = SandboxModels::classesForPlugins($plugins);
+			}
+			foreach ($sandbox_classes as $sandbox_class) {
+				if (!in_array($sandbox_class, $classes, true)) {
+					$classes[] = $sandbox_class;
 				}
 			}
 		}

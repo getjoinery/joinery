@@ -119,15 +119,18 @@ Two models:
 
 - `SignalReceiver` (`sgr_signal_receivers`): where signals go. `sgr_signals`
   is a JSON array of signal names, or `["*"]` for all. `sgr_kind` says what
-  kind of receiver it is; `webhook` is the only kind.
+  kind of receiver it is: `webhook`, or `sandbox`, a sandboxed plugin named by
+  `sgr_plugin` (made and removed with the plugin; see
+  [Sandboxed Plugins](sandboxed_plugins.md)). The webhook pages show only the
+  `webhook` kind.
 - `SignalDelivery` (`sgd_signal_deliveries`): one signal owed to one
   receiver, with its status (`pending`, `delivered`, `failed`, `withheld`),
   attempts, last result and next attempt time.
 
 `SignalDeliveryQueue::handle_signal()` queues for every active receiver
-whatever its kind; `drain()` sends only the `webhook` kind. A new kind of
-receiver adds its value to `sgr_kind`'s allowed values and a drain of its
-own, and shares the queue, the retry rule and the retention.
+whatever its kind; `drain()` sends each due delivery by its receiver's kind: a
+signed POST for a `webhook`, a call to the plugin host for a `sandbox`
+receiver. Both share the queue, the retry rule and the retention.
 
 `drain()` and `send_test()` take an optional client (anything with
 `post($url, $body, $headers)` returning a `SafeHttpResponse`), which is how

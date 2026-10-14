@@ -1,0 +1,16 @@
+{
+  "name": "greeter",
+  "title": "Greeter (JavaScript)",
+  "version": "1.0.0",
+  "description": "A small sandboxed plugin written in JavaScript: greets whoever is named on its page, with the site's member count.",
+  "author": "Joinery",
+  "platform": 1,
+  "permissions": {"records": {"User": ["read"]}},
+  "settings": [{"name": "greeting", "label": "Greeting", "type": "text", "default": "Hello"}],
+  "admin_pages": [{"slug": "main", "title": "Greet someone", "sections": [
+    {"type": "form", "handler": "greet", "submit_label": "Greet", "fields": [{"name": "name", "label": "Name", "type": "text", "required": true}]},
+    {"type": "settings"}
+  ]}],
+  "menu": {"title": "Greeter"},
+  "limits": {"memory_mb": 32, "timeout_ms": 5000}
+}

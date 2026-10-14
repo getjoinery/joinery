@@ -227,6 +227,9 @@ $unmarked = array();
 foreach (SettingsDeclarations::all() as $name => $declaration) {
 	// A machine-written value never reaches a form, so it cannot leak through one.
 	if (!empty($declaration['managed'])) continue;
+	// A sandboxed plugin's names are its author's, and its setting is secret
+	// only by saying so in its manifest: the rule is about names we choose.
+	if (SandboxPlugins::isSandboxed((string)$declaration['_source'])) continue;
 	if (!empty($declaration['secret'])) continue;
 	if (isset($public_by_design[$name])) continue;
 	if (preg_match($credential_shaped, $name)) $unmarked[] = $name;
@@ -242,6 +245,7 @@ $missed = array();
 foreach (SettingsDeclarations::all() as $name => $declaration) {
 	if (empty($declaration['secret'])) continue;
 	if (!empty($declaration['managed'])) continue;
+	if (SandboxPlugins::isSandboxed((string)$declaration['_source'])) continue;
 	if (!preg_match($credential_shaped, $name)) $missed[] = $name;
 }
 check(empty($missed),
@@ -360,7 +364,9 @@ if (!$admin_uid) {
 
 		admin_settings_logic(array($probe => 'a-rotated-secret'));
 		$forget($probe);
-		check($raw($probe) === 'a-rotated-secret', 'text replaces it');
+		check(SecretBox::looksEncrypted((string)$raw($probe)) && Setting::openStored($probe, (string)$raw($probe)) === 'a-rotated-secret',
+			'text replaces it, stored sealed');
+		check(Globalvars::get_instance()->get_setting($probe) === 'a-rotated-secret', 'and reads back as what was typed');
 
 		admin_settings_logic(array($probe => ''));
 		$forget($probe);

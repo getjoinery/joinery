@@ -19,6 +19,7 @@
  *
  * Run: php tests/run.php --only=tests/core/package_replace_page_test.php
  *
+ * @version 1.1 - a sandboxed plugin's replace panel, and a kind change refused
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -164,6 +165,46 @@ check(!is_dir($old), 'the day-old staging directory is gone');
 check(is_dir($fresh), 'a fresh one is left alone');
 $rmtree($fresh);
 PackageInstallPage::discard('theme', (string)$outcome['staged_dir']);
+
+section('A sandboxed plugin: its manifest, never a fork, and it keeps its kind');
+
+// Installed: a sandboxed plugin folder (manifest.json and one module).
+$sbx = 'zzsbxreplace';
+$sbx_dir = PathHelper::getAbsolutePath('plugins') . '/' . $sbx;
+$native_dir = PathHelper::getAbsolutePath('plugins') . '/zznativereplace';
+harness_defer(function () use ($sbx_dir, $native_dir, $rmtree) {
+	$rmtree($sbx_dir);
+	$rmtree($native_dir);
+});
+@mkdir($sbx_dir, 0755, true);
+file_put_contents($sbx_dir . '/manifest.json', json_encode(array('name' => $sbx, 'title' => 'Fixture', 'version' => '1.0.0', 'platform' => 1)));
+file_put_contents($sbx_dir . '/' . $sbx . '.wasm', "\0asm\x01\0\0\0");
+SandboxPlugins::reset();
+$sbx_zip = function (string $name, string $version, bool $with_php = false) use ($scratch): string {
+	$path = $scratch . '/' . $name . '-' . bin2hex(random_bytes(3)) . '.zip';
+	$zip = new ZipArchive();
+	$zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+	$zip->addFromString($name . '/manifest.json', json_encode(array('name' => $name, 'title' => 'Fixture', 'version' => $version, 'platform' => 1, 'author' => 'Fixture Two')));
+	$zip->addFromString($name . '/' . $name . '.wasm', "\0asm\x01\0\0\0");
+	$zip->close();
+	return $path;
+};
+$outcome = PackageInstallPage::upload('plugin', $sbx_zip($sbx, '1.1.0'), 1);
+check(($outcome['outcome'] ?? '') === 'pending_replace' && ($outcome['name'] ?? '') === $sbx, 'an upload of an installed sandboxed name is held', json_encode($outcome));
+$pending = PackageInstallPage::pending('plugin', (string)($outcome['staged_dir'] ?? ''), $why);
+check(is_array($pending) && $pending['installed']['version'] === '1.0.0' && $pending['uploaded']['version'] === '1.1.0',
+	'the panel reads both manifest.json files', $why);
+check(is_array($pending) && $pending['becomes_fork'] === false, 'and never calls it a fork');
+PackageInstallPage::discard('plugin', (string)$outcome['staged_dir']);
+
+// Installed: a native plugin of the name a sandboxed upload carries.
+@mkdir($native_dir, 0755, true);
+file_put_contents($native_dir . '/plugin.json', json_encode(array('name' => 'zznativereplace', 'version' => '1.0.0')));
+$outcome = PackageInstallPage::upload('plugin', $sbx_zip('zznativereplace', '2.0.0'), 1);
+$pending = PackageInstallPage::pending('plugin', (string)($outcome['staged_dir'] ?? ''), $why);
+check($pending === null && strpos($why, 'cannot change kind') !== false, 'a sandboxed upload over a native plugin is refused, saying why', $why);
+PackageInstallPage::discard('plugin', (string)$outcome['staged_dir']);
+check(count(RootRequest::pending()) === $queued_before, 'nothing was queued');
 
 section('A staged directory name from a request is checked, never trusted');
 

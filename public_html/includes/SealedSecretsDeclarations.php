@@ -8,12 +8,13 @@
  * what makes SecretBox::seal() refuse an unregistered value, and what the
  * reconciler walks.
  *
- * This is deliberately NOT the same thing as a setting's `secret:true` flag.
- * `secret:true` means "mask this field in the settings form" — it says nothing
- * about whether the stored value is encrypted at rest (hcaptcha_private is
- * masked yet stored plaintext). Masked-in-form and sealed-on-disk are two
- * different properties, so sealing gets its own declaration rather than being
- * inferred from `secret:true`.
+ * Every setting declared `secret: true` (in settings.json, a plugin.json or a
+ * sandboxed plugin's manifest) is a sealed secret too: it is stored sealed
+ * under its own name (Setting::sealForStorage(), opened again by
+ * Globalvars::get_setting()), so it is declared here without being written
+ * twice. Unless a manifest declares it explicitly, its entry is implicit:
+ * kind `operator` (an admin typed it, and types it again if it is lost), its
+ * label and feature from the setting's declaration, marked `_implicit`.
  *
  * An entry is a CATEGORY, not one secret: "IMAP account passwords" is one entry
  * even though there is one per account. Each entry answers the two questions the
@@ -43,6 +44,7 @@
  *                owning plugin is loaded. The locator is the floor that always
  *                works; the enumerator is the ceiling that works when code is up.
  *
+ * @version 1.2 - every secret:true setting is an implicit operator entry (specs/plugin_tiers.md, Secret settings)
  * @version 1.1 - the reconciler is what walks the declarations
  * @version 1.0
  */
@@ -83,6 +85,23 @@ class SealedSecretsDeclarations {
 					$declarations[$resolved['locator']] = $resolved;
 				}
 			}
+		}
+
+		// Every declared secret setting not declared above, as an operator
+		// secret stored under its own name.
+		foreach (SettingsDeclarations::all() as $name => $setting) {
+			if (empty($setting['secret']) || isset($declarations[$name])) {
+				continue;
+			}
+			$source = (string)($setting['_source'] ?? 'core');
+			$declarations[$name] = array(
+				'locator'   => $name,
+				'label'     => (string)($setting['label'] ?? $name),
+				'feature'   => SettingsDeclarations::groupLabel($source, (string)($setting['group'] ?? '')),
+				'kind'      => 'operator',
+				'_source'   => $source,
+				'_implicit' => true,
+			);
 		}
 
 		self::$cache = $declarations;

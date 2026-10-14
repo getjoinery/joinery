@@ -912,6 +912,12 @@ function harness_cleanup_stale_fixtures() {
 			if ($state === 'unknown' && !$row['past_floor']) continue;
 			try {
 				harness_reclaim_sole_held_mailboxes((int)$row['usr_user_id']);
+				// A fixture user who owns a scoped key cannot be deleted while
+				// it is live (User::refuse_while_scoped_key_is_live), so its
+				// keys go first; they are fixtures too.
+				foreach (new MultiApiKey(array('user_id' => (int)$row['usr_user_id'])) as $fixture_key) {
+					$fixture_key->permanent_delete();
+				}
 				$u = new User((int)$row['usr_user_id'], TRUE);
 				if ($u->key) { $u->permanent_delete(); }
 				harness_boot_note("  reclaimed stale fixture user " . $row['usr_email'] . " (a killed run's leftover)\n");
@@ -921,6 +927,40 @@ function harness_cleanup_stale_fixtures() {
 		}
 	} catch (\Throwable $e) {
 		harness_boot_note("  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n");
+	}
+
+	// Sandboxed plugin fixtures (tests/lib/sandbox.php, the sandbox suites)
+	// are folders plugins/hts… with tables and sequences sbx_hts… and a
+	// registry row. A run holds its folder for its whole life, so anything
+	// named for a folder that is gone is a killed run's leftover.
+	try {
+		$live = array();
+		foreach ((array)glob(PathHelper::getIncludePath('plugins') . '/hts*', GLOB_ONLYDIR) as $fixture_dir) {
+			$live[] = basename($fixture_dir);
+		}
+		$is_live = function ($name) use ($live) {
+			foreach ($live as $plugin) {
+				if (strpos($name, 'sbx_' . $plugin . '_') === 0 || $name === $plugin) {
+					return true;
+				}
+			}
+			return false;
+		};
+		$rels = $db->query("SELECT relname, relkind FROM pg_class WHERE relname LIKE 'sbx\\_hts%' AND relkind IN ('r', 'S')")->fetchAll(PDO::FETCH_ASSOC);
+		foreach ($rels as $rel) {
+			if ($is_live($rel['relname']) || !preg_match('~^sbx_hts[a-z0-9_]+$~D', $rel['relname'])) continue;
+			$db->exec(($rel['relkind'] === 'S' ? 'DROP SEQUENCE IF EXISTS ' : 'DROP TABLE IF EXISTS ') . $rel['relname'] . ' CASCADE');
+			harness_boot_note("  reclaimed stale sandbox fixture " . $rel['relname'] . " (a killed run's leftover)\n");
+		}
+		$rows = $db->query("SELECT plg_name FROM plg_plugins WHERE plg_name LIKE 'hts%'")->fetchAll(PDO::FETCH_COLUMN);
+		foreach ($rows as $plugin) {
+			if ($is_live($plugin)) continue;
+			$db->prepare('DELETE FROM amu_admin_menus WHERE amu_slug LIKE ?')->execute(array('sbx-' . $plugin . '%'));
+			$db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($plugin));
+			harness_boot_note("  reclaimed stale sandbox fixture plugin row " . $plugin . "\n");
+		}
+	} catch (\Throwable $e) {
+		harness_boot_note("  WARNING: stale sandbox fixture sweep failed: " . $e->getMessage() . "\n");
 	}
 
 	// Lock files of runs dead a day or more. Removed only while this process

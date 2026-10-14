@@ -5,6 +5,7 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.6 - preserveReason(): a sandboxed plugin folder is always kept (SandboxPlugins); no release ships one
  * @version 1.5 - keepSelfUpdateOriginals() / restoreSelfUpdateFiles(): the deployment files a self-update replaced
  *                are put back when the run ends without deploying (utils/upgrade.php 1.15)
  * @version 1.4 - deployRoot() names upgrades/ and upgrade_archives/, which utils/upgrade.php keeps there
@@ -1328,6 +1329,11 @@ class DeploymentHelper {
     public static function preserveReason($live_path, $stage_path, $manifest_filename) {
         if (!is_dir($stage_path)) {
             return 'not in staging';
+        }
+        // A sandboxed plugin is never shipped in a release; one of the same
+        // name in a release is someone else's, and does not replace it.
+        if (SandboxPlugins::isSandboxedDir($live_path)) {
+            return 'sandboxed plugin (never shipped by a release)';
         }
         $flag = function ($dir) use ($manifest_filename) {
             $path = $dir . '/' . $manifest_filename;

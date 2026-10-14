@@ -37,6 +37,8 @@
  * the URL, which carries only a request id or a staged directory name that
  * is checked against staging.
  *
+ * @version 1.5 - the replace panel reads a sandboxed plugin's manifest.json, never calls one a fork, and
+ *                refuses a replacement that would change a plugin's kind
  * @version 1.4 - on a host that refuses unsigned packages the warning says so and offers no button,
  *                and acknowledge() refuses (specs/host_restrictions.md D3)
  * @version 1.3 - the warning is the verdict's: an unlogged package gets the unlogged words
@@ -110,7 +112,14 @@ class PackageInstallPage {
 			$why = 'The staged package is no longer there; upload it again.';
 			return null;
 		}
-		$manifest_name = $type === 'theme' ? 'theme.json' : 'plugin.json';
+		// A sandboxed plugin's manifest is manifest.json (SandboxPlugins).
+		$manifest_for = function (string $from) use ($type): string {
+			if ($type === 'theme') {
+				return 'theme.json';
+			}
+			return SandboxPlugins::isSandboxedDir($from) ? SandboxManifest::FILE : 'plugin.json';
+		};
+		$manifest_name = $manifest_for($dir);
 		$uploaded_manifest = self::manifest($dir . '/' . $manifest_name);
 		if ($uploaded_manifest === null) {
 			$why = 'The staged directory holds no ' . $manifest_name . '; upload the package again.';
@@ -122,7 +131,13 @@ class PackageInstallPage {
 			$why = "Nothing is installed under the name '$name' now; upload the package again to install it.";
 			return null;
 		}
-		$installed_manifest = self::manifest($live . '/' . $manifest_name) ?? array();
+		if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($live) !== SandboxPlugins::isSandboxedDir($dir)) {
+			$why = "'$name' is installed as a " . (SandboxPlugins::isSandboxedDir($live) ? 'sandboxed' : 'native')
+				. ' plugin and the upload is a ' . (SandboxPlugins::isSandboxedDir($dir) ? 'sandboxed' : 'native')
+				. ' one. A plugin cannot change kind in place: uninstall it first, then upload this.';
+			return null;
+		}
+		$installed_manifest = self::manifest($live . '/' . $manifest_for($live)) ?? array();
 
 		$facts = function (string $from, array $manifest) use ($type): array {
 			$f = array(
@@ -167,7 +182,8 @@ class PackageInstallPage {
 			'older'        => $older,
 			'in_use'       => $in_use,
 			// An uploaded package is a local fork; this says whether that is new.
-			'becomes_fork' => !$manager->isLocalFork($name),
+			// A sandboxed plugin is never shipped, so never a fork.
+			'becomes_fork' => !SandboxPlugins::isSandboxedDir($dir) && !$manager->isLocalFork($name),
 		);
 	}
 

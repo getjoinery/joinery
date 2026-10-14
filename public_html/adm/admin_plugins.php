@@ -1,4 +1,6 @@
 <?php
+// @version 1.6 - a sandboxed plugin: the Sandboxed badge, Waiting for approval, Review and activate / What it may do
+//               (admin_sandbox_approve) in place of Activate while it waits on an approval; never a fork
 // @version 1.5 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited plugin (specs/local_edits_detected.md)
 // @version 1.4 - Deactivate / Activate and the active count read plg_active (is_active()), never
 //                plg_status: a running plugin whose status says 'stale' was offered Activate and Uninstall
@@ -117,7 +119,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     <div class="col-md-8">
                         <input type="file" name="plugin_zip" class="form-control" accept=".zip" required>
                         <div class="form-text">
-                            Upload a ZIP file containing plugin files with plugin.json manifest.
+                            Upload a ZIP of a plugin: a native one (with plugin.json), or a sandboxed one (manifest.json and one .wasm module).
                         </div>
                     </div>
                     <div class="col-md-4">
@@ -201,10 +203,32 @@ $page->begin_box(array('altlinks' => $altlinks));
                         . htmlspecialchars(implode(', ', $plugin['audience'])) . '">Unlisted</span>';
                 }
 
+                // A sandboxed plugin: never shipped by a release, so never a
+                // fork, and never warned about (it can do only what an admin
+                // approved). It says whether it waits on that approval.
+                // With its files gone, the row's stored metadata still says.
+                $is_sandboxed = $plugin['directory_exists']
+                    ? SandboxPlugins::isSandboxed($plugin['name'])
+                    : ($plugin['plugin'] && !empty(json_decode((string)$plugin['plugin']->get('plg_metadata'), true)['sandboxed']));
+                $waits_on_approval = false;
+                if ($is_sandboxed) {
+                    $status_cell .= ' <span class="badge bg-info" title="A WebAssembly module that reaches the site only in the ways an admin approved.">Sandboxed</span>';
+                    if ($plugin['directory_exists'] && $plugin['plugin'] && !$plugin['plugin']->is_uninstalled()) {
+                        try {
+                            $waits_on_approval = SandboxConsent::needsApproval($plugin['name']);
+                        } catch (SandboxManifestException $e) {
+                            $waits_on_approval = false;
+                        }
+                        if ($waits_on_approval && $plugin['plugin']->is_active()) {
+                            $status_cell .= ' <span class="badge bg-warning" title="A newer version asks for more than was approved; until it is approved it keeps only what was.">Waiting for approval</span>';
+                        }
+                    }
+                }
+
                 // A local fork: the live manifest says receives_upgrades=false,
                 // so deploys leave it alone. The badge says the cost, and how
                 // far behind the shipped version it is when that is known.
-                if ($plugin['plugin']) {
+                if ($plugin['plugin'] && !$is_sandboxed) {
                     if (!$plugin['plugin']->receives_upgrades()) {
                         $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars($fork_help) . '">Local fork</span>';
                         $shipped = is_array($fork_versions) ? (string)($fork_versions[$plugin['name']] ?? '') : '';
@@ -339,8 +363,17 @@ $page->begin_box(array('altlinks' => $altlinks));
                         }
                         if ($plugin['plugin']->is_active()) {
                             $actions['Deactivate'] = "javascript:submitPluginAction('deactivate', '$plugin_name')";
+                            if ($is_sandboxed) {
+                                $actions[$waits_on_approval ? 'Review new permissions' : 'What it may do']
+                                    = htmlspecialchars(SandboxPluginManager::approvalUrl($plugin['name']));
+                                $actions['Call log'] = htmlspecialchars('/admin/admin_sandbox_log?plugin=' . rawurlencode($plugin['name']));
+                            }
                         } else {
-                            if ($plugin_status !== 'error') {
+                            if ($is_sandboxed && $waits_on_approval) {
+                                // Activation is refused until approved: the
+                                // review page approves and activates in one.
+                                $actions['Review and activate'] = htmlspecialchars(SandboxPluginManager::approvalUrl($plugin['name']));
+                            } elseif ($plugin_status !== 'error') {
                                 $actions['Activate'] = "javascript:submitPluginAction('activate', '$plugin_name')";
                             }
                             if (!$is_active_theme_provider) {
@@ -352,7 +385,7 @@ $page->begin_box(array('altlinks' => $altlinks));
                     // The fork mark, for any plugin with a row. Allow upgrade
                     // ends a fork, and the next deploy replaces the files, so
                     // it asks first; Disable upgrade starts one and asks nothing.
-                    if ($plugin['plugin'] && $plugin_status !== Plugin::STATUS_UNINSTALLED) {
+                    if ($plugin['plugin'] && $plugin_status !== Plugin::STATUS_UNINSTALLED && !$is_sandboxed) {
                         if (isset($edited[$plugin['name']])) {
                             // The same mark as Disable upgrade, offered as what
                             // it means for an edited plugin, with its cost.

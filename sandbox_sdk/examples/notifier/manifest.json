@@ -1,0 +1,36 @@
+{
+  "name": "notifier",
+  "title": "Notifier",
+  "version": "1.0.0",
+  "description": "Posts chosen site events to a chat webhook (Slack, Discord, Mattermost), keeps a log of what it sent, and sends a daily digest.",
+  "author": "Joinery",
+  "platform": 1,
+  "signals": ["account.signup", "post.published", "comment.posted"],
+  "schedules": [{"name": "digest", "frequency": "daily", "time": "08:00"}],
+  "outbound_hosts": ["hooks.slack.com", "discord.com"],
+  "settings": [
+    {"name": "webhook_url", "label": "Webhook URL", "type": "url", "secret": true, "help": "The incoming-webhook address your chat service gave you (https://hooks.slack.com/... or https://discord.com/api/webhooks/...)."},
+    {"name": "site_label", "label": "Name to post as", "type": "text", "default": "Joinery", "help": "Shown at the start of each message."},
+    {"name": "send_digest", "label": "Send a daily digest", "type": "boolean", "default": true}
+  ],
+  "models": [
+    {"name": "SentLog", "label": "Sent messages", "fields": [
+      {"name": "signal", "label": "Event", "type": "string", "max_length": 100, "index": true},
+      {"name": "message", "label": "Message", "type": "text", "required": true},
+      {"name": "http_status", "label": "Answer", "type": "integer"},
+      {"name": "delivered", "label": "Delivered", "type": "boolean"}
+    ]}
+  ],
+  "admin_pages": [
+    {"slug": "log", "title": "Sent messages", "sections": [
+      {"type": "text", "text": "Messages this plugin posted to your chat webhook, newest first. Each site event it was approved for is posted as it happens; a digest goes out each morning."},
+      {"type": "table", "model": "SentLog", "columns": ["create_time", "signal", "message", "http_status", "delivered"], "order": "-create_time", "limit": 100},
+      {"type": "form", "title": "Send a test message", "handler": "send_test", "submit_label": "Send", "fields": [
+        {"name": "text", "label": "Text", "type": "text", "required": true, "help": "Posted to the webhook as it is."}
+      ]},
+      {"type": "settings", "title": "Settings"}
+    ]}
+  ],
+  "menu": {"title": "Notifier"},
+  "limits": {"memory_mb": 16, "timeout_ms": 8000}
+}

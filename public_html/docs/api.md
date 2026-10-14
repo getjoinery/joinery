@@ -70,7 +70,8 @@ The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`,
 
 Collection reads accept `page` (0-based), `numperpage`, `sort` (column name), `sdirection` (`ASC`/`DESC`) as query parameters and respond with integer `num_results` (total rows matching the query, after owner-scoping), `page`, and `numperpage` alongside the `data` array. There is no cursor form; `num_results` with `page * numperpage` is the whole model.
 
-**`numperpage` defaults to 3.** A page that lists a whole small collection must pass it explicitly — relying on the default silently truncates the list at three rows, and the caller cannot tell a short page from a complete one without reading `num_results`.
+**`numperpage` defaults to 3, and is at most 200** (a larger value reads as 200; the answer's
+`numperpage` says which was used). A page that lists a whole small collection must pass it explicitly — relying on the default silently truncates the list at three rows, and the caller cannot tell a short page from a complete one without reading `num_results`.
 
 `sort` must name a declared column of the model being read; anything else is a `400`. A sort column is an identifier, which SQL cannot bind as a parameter, so it is validated against `$field_specifications` rather than escaped. The bare column name works too — the table prefix is inferred (`sort=user_id` and `sort=usr_user_id` are equivalent on `Users`). Sorting by an expression is not supported.
 
@@ -233,18 +234,31 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 | `purpose` | An app credential's purpose (see [App credentials](#app-credentials)); null for machine and session keys |
 | `ip_restriction` | Comma-separated list of allowed IPs (optional, machine keys) |
 | `permission` | Access level (see Permission Levels below) |
-| `scope` | Comma-separated action names (machine keys only; empty = unscoped). A scoped key can call only those actions — see [Scoped machine keys](#scoped-machine-keys) |
+| `scope` | Comma-separated entries (machine keys only; empty = unscoped): action names, and `Model:verb` record entries. A scoped key can do only what they name — see [Scoped machine keys](#scoped-machine-keys) |
 
 ### Scoped machine keys
 
-A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` names the actions a key may call, e.g. `dns_filtering/resolver_snapshot`. A scoped key:
+A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` lists what a key may do, one entry per item, comma separated. Two kinds of entry:
 
-- calls the actions its scope names, subject to the rest of each action's contract (capability, user floor);
-- is refused 403 everywhere else: every other action, CRUD, forms, management, `auth/*`, `app/*`, `drive_upload` and the `GET /api/v1/actions` listing. The message names the scope.
+| Entry | Example | Reaches |
+|---|---|---|
+| An action name | `dns_filtering/resolver_snapshot` | `POST /api/v1/action/{name}` for that action |
+| A model and one verb | `EventRegistrant:read` | that model's record endpoints for that verb: `read` is `GET /{Class}/{id}` and `GET /{Class}s`, `create` is `POST`, `update` is `PUT`, `delete` is `DELETE` |
 
-The check lives in `ApiAuth::authorize()`, which action dispatch calls with the action's name; CRUD, forms and management pass no name, and no scope can name them. The route families that never reach `authorize()` after authentication refuse a scoped key in `apiv1.php` (`ApiAuth::refuseScopedKeyOutsideActions()`). Sessionless actions (`requires_session: false`) run before authentication and never see a key; anyone may call them.
+A scoped key:
 
-Only a machine key may be scoped (`ApiKey::save()` refuses otherwise). Scoped keys are minted by the feature that owns the action, never typed: the admin API key page shows a key's scope and does not offer to edit a scoped key, since saving that form would hand the key to the admin who submitted it.
+- does what its entries name, subject to the rest of each endpoint's contract (capability, user floor) and, on records, to per-record authorization as its owner. A key made on the API Keys page belongs to the admin who makes it, so it reaches every row of the models it names, as staff do;
+- is refused 403 everywhere else: every other action, model and verb, forms, management, `auth/*`, `app/*`, `drive_upload` and the `GET /api/v1/actions` listing. The message names the scope.
+
+`ApiAuth::authorize()` makes the decision: action dispatch passes the action's name, and each record endpoint passes its model and verb as an argument of their own (never a contract key, so no descriptor can name a record). Forms and management pass neither, so no scope reaches them. Before any route family but action dispatch runs, `apiv1.php` calls `ApiAuth::refuseScopedKeyOutsideItsScope()`, which lets a key through only to a URL that is exactly a model its scope names (`Event`, or `Events` for the list), and only when that name is a model class on this site; that covers the families that never call `authorize()`. No model shares a name with a route family (`tests/unit/api_scoped_key_test.php` holds this). Sessionless actions (`requires_session: false`) run before authentication and never see a key; anyone may call them.
+
+Only a machine key may be scoped. When a scope is set or changed, `ApiKey::save()` refuses one that names nothing and any entry that does not parse or whose model is not a model class here, naming it. A scope is not re-checked on later saves, so a key whose model has since gone (an uninstalled plugin's) can still be revoked.
+
+**Making one.** An admin makes a scoped key on **Admin > API Keys > Add API key** by choosing "Only the actions and records chosen below": actions a machine key can call, and the exposed models for each verb. The key belongs to the admin who makes it and acts as them. Its permission is set to the lowest that lets every entry through the capability gate (`ApiKey::permission_for_scope()`), so it never contradicts the scope. A feature can also mint one for its own client (the dns_filtering plugin's DNS server access panel does).
+
+**A scope is fixed for the key's life.** The edit page does not open a scoped key: what was handed out is what it can do, permission included. To change it, make a new key and delete the old one. An action whose descriptor later asks for more (a read action becoming a write) is then refused to a key made for the old one, until it is replaced.
+
+Every key's `apk_permission` is one of 1 to 4 (`ApiKey::save()` refuses any other number) or empty, which the capability gate reads as read-only. Authentication stamps a key's last use with a targeted update, never a full save, so a stored row the model's validation would refuse still authenticates.
 
 ### App credentials
 
@@ -509,6 +523,12 @@ to allow. (An explicit `false` return is also treated as denial.) It composes wi
 shapes: a **single** `GET /{Class}/{id}` of an unauthorized row returns an error, while a
 **collection** `GET /{Class}s` simply **skips** rows the caller isn't authorized to see.
 
+A member's request for a **list** of a model they can never read a row of
+(not public, no owner column, keeping SystemBase's own read rule, so staff
+only) is refused with a 403 before anything is counted: the list would show
+them nothing, but its `num_results` would still answer for the rows matching
+their filter.
+
 You override `authenticate_read` in two directions. To make a resource **public** there is a
 declarative flag for the common case:
 
@@ -669,10 +689,12 @@ Any additional query parameters are passed as filter options to the Multi class.
 
 ```
 POST /api/v1/{ClassName}
-Content-Type: application/x-www-form-urlencoded
+Content-Type: application/json
 
-field1=value1&field2=value2
+{"field1": "value1", "field2": "value2"}
 ```
+
+The fields may also come as form fields (`application/x-www-form-urlencoded`).
 
 Input is sanitized at the API boundary before anything is created — unwritable fields (the write
 floor) and the owner column are dropped, and the owner is stamped from the session. If the model
@@ -691,10 +713,14 @@ object is created and the sanitized fields are set from the POST body.
 ### Update Object
 
 ```
-PUT /api/v1/{ClassName}/{id}?field1=value1&field2=value2
+PUT /api/v1/{ClassName}/{id}
+Content-Type: application/json
+
+{"field1": "value1"}
 ```
 
-Fields to update are passed as query string parameters. The row is authorized **as stored**
+Fields to update are a JSON object body, or query string parameters
+(`PUT /api/v1/{ClassName}/{id}?field1=value1`) when the request sends no JSON. The row is authorized **as stored**
 before any input is applied (you may only update a row you already own), and unwritable fields
 plus the owner column are dropped from the update.
 

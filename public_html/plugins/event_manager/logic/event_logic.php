@@ -244,4 +244,3 @@ function event_logic(array $input): LogicResult {
 	return LogicResult::render($page_vars);
 }
 ?>
-

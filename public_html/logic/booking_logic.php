@@ -51,4 +51,3 @@ function booking_logic_descriptor() {
     ];
 }
 ?>
-

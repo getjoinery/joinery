@@ -15,7 +15,7 @@
 	$page = new AdminPage();
 	$page->admin_header(
 	array(
-		'menu-id'=> 'urls',
+		'menu-id'=> 'api_keys',
 		'page_title' => 'ApiKeys',
 		'readable_title' => 'ApiKeys',
 		'breadcrumbs' => array(
@@ -28,11 +28,19 @@
 
 	$options['title'] = 'ApiKey';
 	$options['altlinks'] = array();
-	// A scoped key is managed by the feature that issued it (see the Scope line).
-	if(!$api_key->is_scoped()){
+	// A sandboxed plugin's credential is made and removed with the plugin:
+	// nothing here changes it.
+	if($sandbox_plugin !== null){
+		// (no actions)
+	}
+	// A scoped key's scope is fixed when it is made (see the Scope line).
+	elseif(!$api_key->is_scoped()){
 		$options['altlinks']['Edit'] = '/admin/admin_api_key_edit?apk_api_key_id='.$api_key->key;
 	}
-	if(!$api_key->get('apk_delete_time')){
+	if($sandbox_plugin !== null){
+		// (no actions)
+	}
+	elseif(!$api_key->get('apk_delete_time')){
 		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'soft_delete', 'apk_api_key_id' => $api_key->key));
 	}
 	else{
@@ -40,11 +48,11 @@
 	}
 
 	// Add regenerate secret option (not shown when secret is currently displayed)
-	if(!$api_key->get('apk_delete_time') && !(isset($_SESSION['new_api_secret']) && isset($_SESSION['new_api_key_id']) && $_SESSION['new_api_key_id'] == $api_key->key)){
+	if($sandbox_plugin === null && !$api_key->get('apk_delete_time') && !(isset($_SESSION['new_api_secret']) && isset($_SESSION['new_api_key_id']) && $_SESSION['new_api_key_id'] == $api_key->key)){
 		$options['altlinks']['Regenerate Secret'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'regenerate_secret', 'apk_api_key_id' => $api_key->key));
 	}
 
-	if($_SESSION['permission'] >= 8) {
+	if($sandbox_plugin === null && $_SESSION['permission'] >= 8) {
 		$options['altlinks'] += array('Permanent Delete' => array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'permanent_delete', 'apk_api_key_id' => $api_key->key)));
 	}
 
@@ -96,9 +104,17 @@
 
 	echo '<strong>Owner:</strong> '. $owner->display_name().'<br>';
 
+	if($sandbox_plugin !== null){
+		echo '<strong>Belongs to:</strong> the sandboxed plugin '.htmlspecialchars($sandbox_plugin)
+			.' <em style="color: #6c757d;">(made and removed with the plugin; it acts as the admin who approved it)</em>'
+			.' <a href="'.htmlspecialchars(SandboxPluginManager::approvalUrl($sandbox_plugin)).'">What it may do</a><br>';
+	}
+
 	if($api_key->is_scoped()){
-		echo '<strong>Scope:</strong> '. htmlspecialchars(implode(', ', $api_key->scope()))
-			.' <em style="color: #6c757d;">(this key can call only these actions; it is managed by the feature that issued it)</em><br>';
+		echo '<strong>Scope:</strong> '. htmlspecialchars($api_key->scope_label())
+			.' <em style="color: #6c757d;">'.($sandbox_plugin !== null
+				? '(it can do only this: what the plugin was approved for, and its own records)'
+				: '(it can do only this; to change it, make a new key and delete this one)').'</em><br>';
 	}
 	else{
 		echo '<strong>Scope:</strong> <em style="color: #6c757d;">Unscoped</em><br>';

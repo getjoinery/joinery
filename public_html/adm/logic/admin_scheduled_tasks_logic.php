@@ -118,6 +118,11 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	// Build available (not yet activated) tasks
 	$available_tasks = array();
 	foreach ($discovered_tasks as $class_name => $task_info) {
+		// A task whose rows its owner makes ("activated_by_hand": false) is
+		// never offered for activation here.
+		if (($task_info['json']['activated_by_hand'] ?? true) === false) {
+			continue;
+		}
 		if (!isset($active_task_classes[$class_name])) {
 			$available_tasks[$class_name] = $task_info;
 		}
@@ -243,6 +248,9 @@ function _handle_activate($input) {
 	}
 
 	$json_data = $discovered[$class_name]['json'];
+	if (($json_data['activated_by_hand'] ?? true) === false) {
+		return array('error' => 'This task is not activated by hand: its rows are made by the feature that owns it.');
+	}
 
 	// Check if already activated
 	$existing = new MultiScheduledTask(array('task_class' => $class_name, 'deleted' => false));

@@ -89,6 +89,18 @@ if (is_dir($pluginDir)) {
             continue; // Skip hidden directories
         }
         
+        // A sandboxed plugin's manifest is its manifest.json (SandboxPlugins),
+        // held to SandboxManifest's rules rather than plugin.json's.
+        if (SandboxPlugins::isSandboxedDir($dir)) {
+            try {
+                SandboxManifest::fromFile($dir . '/' . SandboxManifest::FILE, $pluginName);
+                echo "   ✓ Plugin '{$pluginName}' (sandboxed) has a valid manifest.json\n";
+            } catch (SandboxManifestException $e) {
+                $errors[] = "Plugin '{$pluginName}' (sandboxed) has an invalid manifest.json: " . $e->getMessage();
+            }
+            continue;
+        }
+
         $manifestPath = $dir . '/plugin.json';
         if (!file_exists($manifestPath)) {
             $errors[] = "Plugin '{$pluginName}' missing required plugin.json manifest";

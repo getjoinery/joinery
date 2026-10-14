@@ -248,6 +248,12 @@ foreach ($held as $path => $expected) {
 }
 check(strpos(implode(' ', ReleaseCommit::JOINERY_HELD_DIRS), ParserJailPublisher::SOURCE_SUBDIR . '/') !== false,
 	'the parser jail source held is the one its publisher compiles');
+check(in_array(SandboxHostPublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true)
+	&& ReleaseCommit::publishWrite(dirname(PathHelper::getIncludePath('includes')), SandboxHostPublisher::BIN_SUBDIR . '/sandbox-host-x86_64'),
+	'the sandboxed plugin host source is held, and its binaries are publish\'s to commit');
+$publish_source = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php'));
+check(strpos($publish_source, 'SandboxHostPublisher::publish($full_site_dir') !== false
+	&& strpos($publish_source, 'SandboxHostPublisher::STATUS_FAILED') !== false, 'and publish builds it, refusing a release whose host is stale');
 check(in_array(SiteEnginePublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
 	'the site container engine source held is the one its publisher builds');
 $plugin_publishers = GoBinaryPublisher::pluginPublishers();

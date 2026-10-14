@@ -1,0 +1,7 @@
+{
+  "name": "Sandboxed plugin scheduled run",
+  "description": "Runs one schedule a sandboxed plugin declares, through the plugin host. One row per approved schedule, made and removed with the plugin.",
+  "activated_by_hand": false,
+  "default_frequency": "daily",
+  "default_time": "08:00:00"
+}

@@ -38,6 +38,8 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
+ * @version 1.4 - a secret is compared by what it holds (stored sealed; Setting::openStored()); an active
+ *   sandboxed plugin's settings are writable like an active native plugin's
  * @version 1.3 - a setting's declared clearsPages leave the static page cache when it changes
  * @changelog 1.2 - secrets go through FormWriterV2Base::process_secretinput(): absent keeps, blank
  *   removes, text replaces; the Clear checkbox and kept_secrets are gone
@@ -124,7 +126,7 @@ class SettingsWriter {
 				continue;
 			}
 			// A deactivated plugin's rows persist but are not writable.
-			if ($declaration['_source'] !== 'core' && !PluginHelper::isPluginActive($declaration['_source'])) {
+			if ($declaration['_source'] !== 'core' && !PluginHelper::isActiveOfEitherKind($declaration['_source'])) {
 				$result['refused'][] = $name;
 				continue;
 			}
@@ -195,6 +197,12 @@ class SettingsWriter {
 		$changes = array();
 		foreach ($candidates as $name => $value) {
 			$current = isset($stored[$name]) ? (string)$stored[$name]->get('stg_value') : null;
+			// A secret is stored sealed: what counts is what it holds, the
+			// value the page was drawn from (Globalvars::get_setting()). One
+			// that can no longer be opened holds nothing.
+			if ($current !== null && SettingsDeclarations::isSecret($name)) {
+				$current = Setting::openStored($name, $current) ?? '';
+			}
 
 			// A credential with something stored is drawn locked, and a locked
 			// field is not submitted, so one that arrives was unlocked on purpose

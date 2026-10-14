@@ -96,4 +96,3 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	return LogicResult::render($page_vars);
 }
 ?>
-

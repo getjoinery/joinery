@@ -37,6 +37,7 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.6 - verifyTree() passes over a sandboxed plugin as it does an unsigned style theme ($sandboxed)
  * @version 1.5 - editedSinceInstall(): whether a live package's files still match its signed listing, the
  *                first differing file named, once per request (specs/local_edits_detected.md)
  * @version 1.4 - verifyTree(): every package in a site root, core included, each against its own
@@ -575,15 +576,20 @@ class PackageSignature {
 	 * An unsigned STYLE theme is not a failure: it holds nothing that runs
 	 * (ThemeHelper::styleThemeRefusal()), which is why it installs without
 	 * the warning. It is returned in $style_themes so a caller can say so.
+	 * Nor is a SANDBOXED plugin (exactly a manifest and one WebAssembly
+	 * module, SandboxPlugins): nothing in it runs in the site's PHP. It is
+	 * returned in $sandboxed.
 	 *
 	 * @param string      $site_root    The site root (the directory holding public_html)
 	 * @param string|null $keys_file    The key file; the node's own when null
 	 * @param array       $style_themes Out: names of unsigned style themes passed over
+	 * @param array       $sandboxed    Out: names of sandboxed plugins passed over
 	 * @return array<int, array{what:string, kind:string, name:string, verdict:PackageVerdict}>
 	 */
-	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null): array {
+	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null, ?array &$sandboxed = null): array {
 		$site_root = rtrim($site_root, '/');
 		$style_themes = array();
+		$sandboxed = array();
 		$failures = array();
 
 		// The keys and the log rules are this machine's (null: the running
@@ -622,6 +628,10 @@ class PackageSignature {
 				}
 				if ($type === 'theme' && ThemeHelper::styleThemeRefusal($path) === null) {
 					$style_themes[] = $entry;
+					continue;
+				}
+				if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($path)) {
+					$sandboxed[] = $entry;
 					continue;
 				}
 				$failures[] = array('what' => $type . ' ' . $entry, 'kind' => $type, 'name' => $entry, 'verdict' => $verdict);

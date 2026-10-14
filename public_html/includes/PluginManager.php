@@ -13,6 +13,9 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.12 - RESERVED_NAMES (adds 'core'), shared with the sandboxed manifest; liveManifest() reads a sandboxed plugin's manifest.json; install() over an active sandboxed plugin reconciles what it owns with its new manifest
+ * @version 1.11 - a sandboxed plugin (SandboxPlugins) is validated, described, activated, deactivated,
+ *               uninstalled and synced through SandboxPluginManager where a native one reads plugin.json or PHP
  * @version 1.10 - fileSources are checked when a plugin is validated (a clash with core or an active plugin refuses it) and reported on every sync
  * @version 1.9 - sync() retries a plugin left in 'error' by a failed install once its files change (retryErroredPlugins),
  *               so a fix that ships does not leave the plugin waiting for someone to press Repair
@@ -54,6 +57,15 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
 class PluginComposerNeedsRootException extends Exception {}
 
 class PluginManager extends AbstractExtensionManager {
+
+    /**
+     * Names no plugin of either kind may take: URL segments the system owns
+     * (plugin names appear in /{name}/* and /profile/{name}/*), and 'core',
+     * the source name of the core's own settings and declarations.
+     */
+    const RESERVED_NAMES = ['profile', 'admin', 'login', 'ajax', 'api', 'assets', 'theme',
+                            'plugins', 'views', 'uploads', 'utils', 'tests', 'docs', 'specs',
+                            'migrations', 'data', 'includes', 'logic', 'adm', 'core'];
     
     private static $instance = null;
     
@@ -105,6 +117,22 @@ class PluginManager extends AbstractExtensionManager {
         $manifest_path = null;
         $plugin_name = null;
         $plugin_root = null;
+
+        // A sandboxed package, judged by its contents alone (exactly
+        // manifest.json and one .wasm), at the top or in one folder: named by
+        // its validated manifest, never by anything else in it.
+        $candidates = array($temp_dir);
+        foreach (scandir($temp_dir) as $entry) {
+            if ($entry !== '.' && $entry !== '..' && is_dir("$temp_dir/$entry") && !is_link("$temp_dir/$entry")) {
+                $candidates[] = "$temp_dir/$entry";
+            }
+        }
+        foreach ($candidates as $candidate) {
+            if (SandboxPlugins::isSandboxedDir($candidate)) {
+                $sandbox = SandboxManifest::fromFile($candidate . '/' . SandboxManifest::FILE);
+                return array('root' => $candidate, 'manifest' => $sandbox->toArray(), 'name' => $sandbox->name());
+            }
+        }
         
         // Check root directory first
         if (file_exists("$temp_dir/plugin.json")) {
@@ -152,6 +180,21 @@ class PluginManager extends AbstractExtensionManager {
         );
     }
     
+    /**
+     * The installed copy's manifest: plugin.json, or a sandboxed plugin's
+     * validated manifest.json (which carries no fork or system mark).
+     */
+    public function liveManifest($name) {
+        if (SandboxPlugins::isSandboxedDir($this->getExtensionPath($name))) {
+            try {
+                return SandboxPlugins::manifest((string)$name)->toArray();
+            } catch (SandboxManifestException $e) {
+                return null;
+            }
+        }
+        return parent::liveManifest($name);
+    }
+
     /**
      * Handle existing plugin when installing
      * @param string $path Path to existing plugin
@@ -205,8 +248,17 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $name Plugin name
      */
     protected function loadMetadataIntoModel($model, $name) {
-        $metadata = parent::loadMetadataIntoModel($model, $name);
-        if ($metadata === false) return; // Error already set by parent
+        if (SandboxPlugins::isSandboxed((string)$name)) {
+            $metadata = SandboxPluginManager::metadata((string)$name);
+            if ($metadata === null) {
+                $model->set('plg_install_error', 'Invalid ' . SandboxManifest::FILE);
+                return;
+            }
+            $model->set('plg_install_error', null);
+        } else {
+            $metadata = parent::loadMetadataIntoModel($model, $name);
+            if ($metadata === false) return; // Error already set by parent
+        }
 
         $model->set('plg_metadata', json_encode($metadata));
         $model->set('plg_receives_upgrades', $metadata['receives_upgrades'] ?? true);
@@ -537,6 +589,9 @@ class PluginManager extends AbstractExtensionManager {
      * @return array Validation results with 'valid', 'errors', and 'warnings'
      */
     protected function validatePlugin($plugin_name) {
+        if (SandboxPlugins::isSandboxed((string)$plugin_name)) {
+            return SandboxPluginManager::validate((string)$plugin_name);
+        }
         $results = array(
             'valid' => true,
             'errors' => array(),
@@ -808,11 +863,13 @@ class PluginManager extends AbstractExtensionManager {
         // Reject plugin names that conflict with system URL segments.
         // Plugin names appear directly in URLs (/{name}/*, /profile/{name}/*),
         // so they must not collide with existing system paths.
-        $reserved_names = ['profile', 'admin', 'login', 'ajax', 'api', 'assets', 'theme',
-                           'plugins', 'views', 'uploads', 'utils', 'tests', 'docs', 'specs',
-                           'migrations', 'data', 'includes', 'logic', 'adm'];
-        if (in_array($name, $reserved_names)) {
+        if (in_array($name, self::RESERVED_NAMES, true)) {
             throw new Exception("Plugin name '$name' is reserved and conflicts with system URLs. Choose a distinctive plugin name.");
+        }
+        // 'sbx' begins every name the sandboxed tier derives (its settings,
+        // tables and classes), so no native plugin may start with it.
+        if (!SandboxPlugins::isSandboxed($name) && preg_match('~^sbx(_|$)~', $name)) {
+            throw new Exception("Plugin name '$name' is reserved: names starting 'sbx' belong to sandboxed plugins' data.");
         }
         // Also reject names that clash with existing base view filenames
         // (e.g. if views/profile/billing.php exists, plugin 'billing' is blocked).
@@ -822,6 +879,22 @@ class PluginManager extends AbstractExtensionManager {
             if (file_exists($dir . '/' . $name . '.php')) {
                 throw new Exception("Plugin name '$name' conflicts with a system view. Choose a distinctive plugin name.");
             }
+        }
+
+        // A sandboxed plugin has no PHP, composer packages or plugin.json:
+        // its own steps are SandboxPluginManager's, and it shares only the
+        // row's flags, its suspended runs and its menu with a native one.
+        if (SandboxPlugins::isSandboxed($name)) {
+            SandboxPluginManager::activate($name);
+            $now = gmdate('Y-m-d H:i:s');
+            $model->set('plg_active', 1);
+            $model->set('plg_activated_time', $now);
+            $model->set('plg_last_activated_time', $now);
+            $model->set('plg_install_error', null);
+            $this->resumePluginTasks($name);
+            $this->syncMenus($name, SandboxPluginManager::menus($name));
+            $this->keepStoredMetadata($model);
+            return;
         }
 
         // Re-validate dependencies
@@ -965,23 +1038,30 @@ class PluginManager extends AbstractExtensionManager {
             }
         }
 
-        // Resume scheduled tasks that belong to this plugin
+        $this->resumePluginTasks($name);
+
+        // Sync declarative menus (admin sidebar + user dropdown) from plugin.json
+        $this->syncMenus($name);
+        $this->keepStoredMetadata($model);
+    }
+
+    /**
+     * Resume the scheduled tasks that belong to a plugin, when it is
+     * activated again. A retired task is left alone: it is off because its
+     * code file is gone, not because the plugin was, and resuming it would
+     * put back a row that cannot run.
+     */
+    protected function resumePluginTasks($name) {
         require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
         $suspended = new MultiScheduledTask(array('plugin_name' => $name, 'active' => false, 'deleted' => false));
         $suspended->load();
         foreach ($suspended as $task) {
-            // A retired task is deactivated because its code file is gone, not
-            // because the plugin was off. Resuming it would put back a row that
-            // cannot run and would retire itself again on the next reconcile.
             if ($task->get('sct_last_run_status') === 'retired') {
                 continue;
             }
             $task->set('sct_is_active', true);
             $task->save();
         }
-
-        // Sync declarative menus (admin sidebar + user dropdown) from plugin.json
-        $this->syncMenus($name);
     }
 
     /**
@@ -995,6 +1075,18 @@ class PluginManager extends AbstractExtensionManager {
      * @throws Exception to roll back the transaction
      */
     protected function onDeactivate($name, $model, $dblink) {
+        // A sandboxed plugin is no theme provider and nothing depends on it.
+        if (SandboxPlugins::isSandboxed($name)) {
+            SandboxPluginManager::deactivate($name);
+            $this->syncMenus($name, ['admin' => [], 'profile' => []]);
+            $this->keepStoredMetadata($model);
+            $model->set('plg_active', 0);
+            $model->set('plg_activated_time', null);
+            $model->set('plg_last_deactivated_time', gmdate('Y-m-d H:i:s'));
+            $this->suspendPluginTasks($name);
+            return;
+        }
+
         // Block if this plugin is the active theme provider
         require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
         try {
@@ -1054,13 +1146,37 @@ class PluginManager extends AbstractExtensionManager {
 
         // Remove declarative menus (both admin sidebar + user dropdown)
         $this->syncMenus($name, ['admin' => [], 'profile' => []]);
+        $this->keepStoredMetadata($model);
 
         // Set inactive flag and timestamps
         $model->set('plg_active', 0);
         $model->set('plg_activated_time', null);
         $model->set('plg_last_deactivated_time', gmdate('Y-m-d H:i:s'));
 
-        // Suspend scheduled tasks that belong to this plugin
+        $this->suspendPluginTasks($name);
+    }
+
+    /**
+     * syncMenus() records a plugin's menu slugs in its stored plg_metadata.
+     * The row activate() and deactivate() hold in memory predates that write
+     * and is saved after it, which would put the old metadata back and lose
+     * the slugs a later deactivation prunes by (its menu entries would stay
+     * until the next full sync). Take the stored value first.
+     */
+    private function keepStoredMetadata($model) {
+        if (!$model || !$model->key) {
+            return;
+        }
+        $q = DbConnector::get_instance()->get_db_link()->prepare('SELECT plg_metadata FROM plg_plugins WHERE plg_plugin_id = ?');
+        $q->execute(array((int)$model->key));
+        $stored = $q->fetchColumn();
+        if ($stored !== false) {
+            $model->set('plg_metadata', $stored);
+        }
+    }
+
+    /** Suspend the scheduled tasks that belong to a plugin, when it is deactivated. */
+    protected function suspendPluginTasks($name) {
         require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
         $active_tasks = new MultiScheduledTask(array('plugin_name' => $name, 'active' => true, 'deleted' => false));
         $active_tasks->load();
@@ -1094,7 +1210,9 @@ class PluginManager extends AbstractExtensionManager {
         // Plugins with included_in_publish=true on the upgrade server get fresh
         // code on every install; plugins not in the catalog 404 silently and
         // install proceeds with on-disk files.
-        if ($refresh_files) {
+        // Our publisher builds native plugins only; a sandboxed one is
+        // never fetched from upstream.
+        if ($refresh_files && !SandboxPlugins::isSandboxed($name)) {
             $this->refreshFromUpstream($name);
         }
 
@@ -1170,6 +1288,15 @@ class PluginManager extends AbstractExtensionManager {
             $this->setRemoveRequestId($plugin, '');
             $plugin->save();
 
+            // An active sandboxed plugin whose files were replaced: what it
+            // owns follows its new manifest at once, within what was approved
+            // (anything more waits on an admin's approval).
+            if (SandboxPlugins::isSandboxed($name) && $plugin->is_active()) {
+                SandboxPluginManager::reconcile($name);
+                $this->syncMenus($name, SandboxPluginManager::menus($name));
+                $this->keepStoredMetadata($plugin);
+            }
+
             if ($this_transaction) {
                 $dblink->commit();
             }
@@ -1232,26 +1359,34 @@ class PluginManager extends AbstractExtensionManager {
             throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
         }
 
-        require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-        $plugin_helper = PluginHelper::getInstance($name);
+        // A sandboxed plugin has no plugin.json or PHP: its settings, menu,
+        // tables and the rest of what it owns are SandboxPluginManager's to
+        // remove (steps 1-3 and 6-7 below are a native plugin's).
+        $sandboxed = SandboxPlugins::isSandboxed($name);
+        if ($sandboxed) {
+            $this->syncMenus($name, ['admin' => [], 'profile' => []]);
+        } else {
+            require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+            $plugin_helper = PluginHelper::getInstance($name);
 
-        // Step 1: Delete declared settings. Settings previously declared and
-        // since removed from the manifest are left as orphans by design.
-        try {
-            $declared_settings = $plugin_helper->getDeclaredSettings();
-            Setting::unseed_declared($declared_settings);
-        } catch (Exception $e) {
-            error_log("Failed to remove declared settings for plugin '$name' during uninstall: " . $e->getMessage());
-        }
+            // Step 1: Delete declared settings. Settings previously declared and
+            // since removed from the manifest are left as orphans by design.
+            try {
+                $declared_settings = $plugin_helper->getDeclaredSettings();
+                Setting::unseed_declared($declared_settings);
+            } catch (Exception $e) {
+                error_log("Failed to remove declared settings for plugin '$name' during uninstall: " . $e->getMessage());
+            }
 
-        // Step 2: Delete menus (admin sidebar + user dropdown)
-        $this->syncMenus($name, ['admin' => [], 'profile' => []]);
+            // Step 2: Delete menus (admin sidebar + user dropdown)
+            $this->syncMenus($name, ['admin' => [], 'profile' => []]);
 
-        // Step 3: Remove deletion rules
-        try {
-            $plugin_helper->removePluginDeletionRules();
-        } catch (Exception $e) {
-            error_log("Failed to remove deletion rules for plugin '$name' during uninstall: " . $e->getMessage());
+            // Step 3: Remove deletion rules
+            try {
+                $plugin_helper->removePluginDeletionRules();
+            } catch (Exception $e) {
+                error_log("Failed to remove deletion rules for plugin '$name' during uninstall: " . $e->getMessage());
+            }
         }
 
         // Step 4: Delete scheduled task records
@@ -1284,54 +1419,58 @@ class PluginManager extends AbstractExtensionManager {
             $migration->permanent_delete();
         }
 
-        // Step 6: Run uninstall hook. Runs after scaffolding cleanup but before
-        // tables are dropped, so the hook can still query the plugin's own
-        // tables for external teardown (e.g. revoking cached API keys).
-        $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
-        if (file_exists($uninstall_file)) {
-            require_once($uninstall_file);
-            $uninstall_fn = $name . '_uninstall';
-            if (function_exists($uninstall_fn)) {
-                $result = call_user_func($uninstall_fn);
-                if ($result === false) {
-                    throw new Exception("Plugin '$name' uninstall script returned failure.");
+        if ($sandboxed) {
+            SandboxPluginManager::teardown($name);
+        } else {
+            // Step 6: Run uninstall hook. Runs after scaffolding cleanup but before
+            // tables are dropped, so the hook can still query the plugin's own
+            // tables for external teardown (e.g. revoking cached API keys).
+            $uninstall_file = PathHelper::getAbsolutePath("plugins/{$name}/uninstall.php");
+            if (file_exists($uninstall_file)) {
+                require_once($uninstall_file);
+                $uninstall_fn = $name . '_uninstall';
+                if (function_exists($uninstall_fn)) {
+                    $result = call_user_func($uninstall_fn);
+                    if ($result === false) {
+                        throw new Exception("Plugin '$name' uninstall script returned failure.");
+                    }
                 }
             }
-        }
 
-        // Step 7: Drop plugin tables. Regex-extracts table names from *_class.php
-        // files rather than loading the classes (avoids missing-dep issues when
-        // the plugin's code path is partially torn down). Also drops orphan
-        // sequences — Joinery's sequences aren't column-owned in pg_depend, so
-        // DROP TABLE CASCADE doesn't sweep them automatically.
-        $dblink = DbConnector::get_instance()->get_db_link();
-        $data_dir = PathHelper::getAbsolutePath("plugins/{$name}/data");
-        if (is_dir($data_dir)) {
-            foreach (glob($data_dir . '/*_class.php') as $class_file) {
-                $content = file_get_contents($class_file);
-                if (preg_match('/\$tablename\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $matches)) {
-                    $tablename = $matches[1];
-                    if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tablename)) {
-                        $dblink->exec("DROP TABLE IF EXISTS " . $tablename . " CASCADE");
+            // Step 7: Drop plugin tables. Regex-extracts table names from *_class.php
+            // files rather than loading the classes (avoids missing-dep issues when
+            // the plugin's code path is partially torn down). Also drops orphan
+            // sequences — Joinery's sequences aren't column-owned in pg_depend, so
+            // DROP TABLE CASCADE doesn't sweep them automatically.
+            $dblink = DbConnector::get_instance()->get_db_link();
+            $data_dir = PathHelper::getAbsolutePath("plugins/{$name}/data");
+            if (is_dir($data_dir)) {
+                foreach (glob($data_dir . '/*_class.php') as $class_file) {
+                    $content = file_get_contents($class_file);
+                    if (preg_match('/\$tablename\s*=\s*[\'"]([^\'"]+)[\'"]/', $content, $matches)) {
+                        $tablename = $matches[1];
+                        if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $tablename)) {
+                            $dblink->exec("DROP TABLE IF EXISTS " . $tablename . " CASCADE");
 
-                        $seq_stmt = $dblink->prepare(
-                            "SELECT relname FROM pg_class WHERE relkind = 'S' AND relname LIKE ?"
-                        );
-                        $seq_stmt->execute([$tablename . '\_%']);
-                        foreach ($seq_stmt->fetchAll(PDO::FETCH_COLUMN) as $seqname) {
-                            if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $seqname)) {
-                                $dblink->exec("DROP SEQUENCE IF EXISTS " . $seqname . " CASCADE");
+                            $seq_stmt = $dblink->prepare(
+                                "SELECT relname FROM pg_class WHERE relkind = 'S' AND relname LIKE ?"
+                            );
+                            $seq_stmt->execute([$tablename . '\_%']);
+                            foreach ($seq_stmt->fetchAll(PDO::FETCH_COLUMN) as $seqname) {
+                                if (preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $seqname)) {
+                                    $dblink->exec("DROP SEQUENCE IF EXISTS " . $seqname . " CASCADE");
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // The rules that named those tables go with them. permanent_delete()
-        // counts rows in every rule's table first, so a rule left behind would
-        // refuse every delete of its source until the next update_database.
-        DeletionRule::pruneOrphanedRules();
+            // The rules that named those tables go with them. permanent_delete()
+            // counts rows in every rule's table first, so a rule left behind would
+            // refuse every delete of its source until the next update_database.
+            DeletionRule::pruneOrphanedRules();
+        }
 
         // Step 8: The row stays, as the record. Data is gone; the files are
         // root's to remove. sync() leaves an uninstalled row alone, so the
@@ -1754,6 +1893,10 @@ class PluginManager extends AbstractExtensionManager {
      * @throws Exception if validation fails
      */
     public function syncSettings($plugin_name) {
+        if (SandboxPlugins::isSandboxed((string)$plugin_name)) {
+            SandboxPluginManager::syncSettings((string)$plugin_name);
+            return;
+        }
         try {
             $helper = PluginHelper::getInstance($plugin_name);
         } catch (Exception $e) {
@@ -1870,16 +2013,21 @@ class PluginManager extends AbstractExtensionManager {
                     "syncMenus('core'): \$declared is required for source_name='core' (no plugin.json to read from)."
                 );
             }
-            try {
-                $helper = PluginHelper::getInstance($source_name);
-                $declared = [
-                    'admin'    => $helper->getAdminMenuItems(),
-                    'profile'  => $helper->getProfileMenuItems(),
-                    'settings' => $helper->getSettingsMenuItems(),
-                ];
-            } catch (Exception $e) {
-                error_log("syncMenus: could not read plugin.json for '$source_name': " . $e->getMessage());
-                $declared = ['admin' => [], 'profile' => [], 'settings' => []];
+            if (SandboxPlugins::isSandboxed($source_name)) {
+                // A sandboxed plugin's menus come from its manifest.json.
+                $declared = SandboxPluginManager::menus($source_name);
+            } else {
+                try {
+                    $helper = PluginHelper::getInstance($source_name);
+                    $declared = [
+                        'admin'    => $helper->getAdminMenuItems(),
+                        'profile'  => $helper->getProfileMenuItems(),
+                        'settings' => $helper->getSettingsMenuItems(),
+                    ];
+                } catch (Exception $e) {
+                    error_log("syncMenus: could not read plugin.json for '$source_name': " . $e->getMessage());
+                    $declared = ['admin' => [], 'profile' => [], 'settings' => []];
+                }
             }
         }
 

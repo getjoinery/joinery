@@ -19,8 +19,9 @@
  *                         against a small contract (key scope + capability +
  *                         machine-key + user floor). Called by the CRUD verbs,
  *                         the logic endpoint, and the management router.
- *   refuseScopedKeyOutsideActions() — confine a scoped key to action dispatch;
- *                         apiv1.php calls it for every other route family.
+ *   refuseScopedKeyOutsideItsScope() — keep a scoped key off every route
+ *                         family its scope cannot name; apiv1.php calls it
+ *                         before any family but action dispatch runs.
  *   attemptLogin()      — verify an email/password and mint a session key.
  *   revokeSessionKey()  — revoke a presented session key (logout).
  *
@@ -40,11 +41,14 @@
  * The user role axis (usr_permission) is a simple floor (e.g. management = 10).
  * See specs/implemented/api_auth_gate_unification.md for the equivalence table.
  *
- * SCOPE — a machine key may carry apk_scope, a list of action names. A scoped
- * key reaches those actions and nothing else: authorize() refuses it on every
- * endpoint its scope does not name (CRUD, forms and management pass no name,
- * so they always refuse it), and apiv1.php keeps it out of the route families
- * that never reach authorize(). An action whose auth block declares
+ * SCOPE — a machine key may carry apk_scope, a list of entries: action names
+ * ('dns_filtering/resolver_snapshot') and record entries ('Event:read', one
+ * of read|create|update|delete per entry). A scoped key reaches those and
+ * nothing else: authorize() refuses it on every endpoint its scope does not
+ * name (an action by name, a record endpoint by model and verb; forms and
+ * management can never be named), and apiv1.php keeps it out of the route
+ * families its scope cannot name before they run. Per-record authorization
+ * applies underneath, as the key's owner. An action whose auth block declares
  * requires_scoped_key admits only a key scoped to it.
  *
  * APP CREDENTIALS — a credential limited to one app purpose (AppAccess; an app
@@ -58,7 +62,11 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.5.0
+ * @version 1.6.0
+ * @changelog 1.6.0 - Record entries in a scope ('Model:verb'): the record
+ *   endpoints pass the model and verb to authorize() as its own argument, and
+ *   refuseScopedKeyOutsideItsScope() (was refuseScopedKeyOutsideActions())
+ *   lets a key through to the models its scope names.
  * @changelog 1.5.0 - App credentials: authenticate() resolves the app-access
  *   headers, refuses an undeclared purpose, opens the credential's borrowed
  *   unlock window (VaultUnlock::useCredentialWindow()) and limits failed
@@ -543,12 +551,17 @@ class ApiAuth {
 	 * @param string $message_prefix  Surface label for the 403 body.
 	 * @param string|null $endpoint   The action's name ('{plugin}/{action}' or
 	 *                                '{action}'), matched against a scoped key's
-	 *                                apk_scope. Null for surfaces that are not
-	 *                                actions (CRUD, forms, management), which no
-	 *                                scope can name.
+	 *                                action entries. Null for every other
+	 *                                surface.
+	 * @param array|null $record      ['model' => class, 'verb' => read|create|
+	 *                                update|delete], passed by the record (CRUD)
+	 *                                endpoints alone and matched against a scoped
+	 *                                key's record entries. A separate argument,
+	 *                                not a contract key, so no descriptor's auth
+	 *                                block can name a record.
 	 * @return void Returns when authorized; otherwise exits.
 	 */
-	public static function authorize(array $auth, $api_entry, $user_permission, $message_prefix = 'Endpoint', $endpoint = null) {
+	public static function authorize(array $auth, $api_entry, $user_permission, $message_prefix = 'Endpoint', $endpoint = null, $record = null) {
 		// Anonymous gate first — fails closed before every other check. The
 		// 401 body matches the missing-credential shape: no oracle separating
 		// "this action exists but needs login" from "no credential presented".
@@ -572,11 +585,12 @@ class ApiAuth {
 				'AuthenticationError', 403);
 		}
 
-		// Scope gate. A scoped key reaches only the endpoints its scope names;
-		// a surface with no name is never among them.
+		// Scope gate. A scoped key reaches only what its scope names: an action
+		// by its name, a record endpoint by model and verb. Forms, management
+		// and every other surface pass neither, so no scope reaches them.
 		if ($api_entry && $api_entry->is_scoped()
-			&& ($endpoint === null || !in_array($endpoint, $api_entry->scope(), true))) {
-			api_error($message_prefix . ': this key is limited to ' . implode(', ', $api_entry->scope()),
+			&& !self::scopeAdmits($api_entry, $endpoint, $record)) {
+			api_error($message_prefix . ': this key is limited to ' . $api_entry->scope_label(),
 				'AuthenticationError', 403);
 		}
 		// The inverse: an endpoint that admits only a key scoped to it. The
@@ -635,21 +649,59 @@ class ApiAuth {
 	}
 
 	/**
-	 * Refuse a scoped key on a route family other than action dispatch. The
-	 * families that never reach authorize() after authentication — auth/*,
-	 * app/*, drive_upload, the GET actions listing — have no endpoint name to
-	 * match, and a scope names only actions, so apiv1.php calls this once for
-	 * all of them rather than each endpoint class refusing on its own. The
-	 * families that do reach authorize() are refused there too.
+	 * Whether a scoped key's entries name this endpoint: an action by name,
+	 * or a record endpoint by model and verb.
+	 *
+	 * @param ApiKey      $api_entry A scoped key.
+	 * @param string|null $endpoint  The action's name, or null.
+	 * @param array|null  $record    ['model' => class, 'verb' => verb], or null.
+	 */
+	protected static function scopeAdmits($api_entry, $endpoint, $record): bool {
+		if ($endpoint !== null) {
+			return $api_entry->scope_allows_action((string)$endpoint);
+		}
+		if (is_array($record) && isset($record['model'], $record['verb'])) {
+			return $api_entry->scope_allows_record((string)$record['model'], (string)$record['verb']);
+		}
+		return false;
+	}
+
+	/**
+	 * Refuse a scoped key on every route family outside its scope, before the
+	 * family runs. Action dispatch is left to authorize(), which matches the
+	 * action's name. A record (CRUD) request is let through only when its URL
+	 * names a model the scope has an entry for, exactly: 'Event' (one record)
+	 * or 'Events' (the list), after apiv1.php's ucwords(); the record
+	 * endpoint then checks the verb in authorize(). Everything else is
+	 * refused here, including the families that never call authorize()
+	 * (auth/*, app/*, drive_upload, the GET actions listing). No model may
+	 * share a name with a route family; tests/unit/api_scoped_key_test.php
+	 * holds that.
 	 *
 	 * @param ApiKey|null $api_entry The authenticated key (null for a browser session).
-	 * @param string      $family    The route family, for the 403 body.
+	 * @param string      $segment   The route segment after /api/v1/, as sent.
 	 */
-	public static function refuseScopedKeyOutsideActions($api_entry, $family) {
-		if ($api_entry && $api_entry->is_scoped()) {
-			api_error(($family !== '' ? $family : 'This endpoint') . ': this key is limited to '
-				. implode(', ', $api_entry->scope()), 'AuthenticationError', 403);
+	public static function refuseScopedKeyOutsideItsScope($api_entry, $segment) {
+		if (!$api_entry || !$api_entry->is_scoped()) {
+			return;
 		}
+		$segment = (string)$segment;
+		if (strtolower($segment) === 'action') {
+			return;
+		}
+		// Exactly 'Model' or 'Models'. The router takes any last character off
+		// for a list, so this is stricter than routing on purpose: dropping
+		// an arbitrary letter would let 'auth' through for a model named 'Aut'.
+		// The name must also be a model this site has: a stored entry naming
+		// a route family ('Auth:read') opens nothing, whatever wrote it.
+		$operation = ucwords($segment);
+		foreach (array_keys($api_entry->scope_records()) as $model) {
+			if (($operation === $model || $operation === $model . 's') && ApiKey::is_model_class($model)) {
+				return;
+			}
+		}
+		api_error(($segment !== '' ? strtolower($segment) : 'This endpoint') . ': this key is limited to '
+			. $api_entry->scope_label(), 'AuthenticationError', 403);
 	}
 
 	/**

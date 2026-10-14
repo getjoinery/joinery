@@ -2,6 +2,7 @@
 /**
  * Admin: add or edit a webhook. See adm/logic/admin_webhook_edit_logic.php.
  *
+ * @version 1.1 - each signal says what personal data it carries
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('adm/logic/admin_webhook_edit_logic.php'));
@@ -32,6 +33,10 @@ $page->admin_header(array(
 $options = array();
 foreach ($catalog as $name => $meta) {
 	$options[$name] = ($meta['category'] ?? 'Other') . ' — ' . ($meta['label'] ?? $name);
+	// What personal data choosing it sends to this URL.
+	if (trim((string)($meta['personal_data'] ?? '')) !== '') {
+		$options[$name] .= ' (carries: ' . trim((string)$meta['personal_data']) . ')';
+	}
 }
 asort($options);
 $chosen = $receiver->wants_all_signals() ? array() : $receiver->signals();

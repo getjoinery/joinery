@@ -11,6 +11,7 @@ class PluginNotSentException extends PluginException {};
 /**
  * Plugin — a plugin's database row.
  *
+ * @version 1.7 - get_plugin_metadata() reads a sandboxed plugin's manifest.json (SandboxPluginManager)
  * @version 1.6 - get_status_badge() no longer asks plg_status whether a plugin is active: a row left at
  *               'active' that is switched off reaches the default branch, which says Inactive from is_active()
  * @version 1.5 - get_status_badge() says Active or Inactive from plg_active (is_active()), as the row's actions
@@ -197,6 +198,11 @@ function authenticate_write($data) {
 		$plugin_name = $this->get('plg_name');
 		if (!$plugin_name) {
 			return null;
+		}
+
+		// A sandboxed plugin's metadata comes from its manifest.json.
+		if (SandboxPlugins::isSandboxed((string)$plugin_name)) {
+			return SandboxPluginManager::metadata((string)$plugin_name);
 		}
 		
 		$metadata_file = PathHelper::getIncludePath('plugins/' . $plugin_name . '/plugin.json');

@@ -26,9 +26,9 @@ array(
 )
 );
 
-$headers = array("Name", "Public Key", 'Owner', "Start Time", "Expires Time", "Last Used", 'Status');
+$headers = array("Name", "Public Key", 'Owner', 'Reach', "Start Time", "Expires Time", "Last Used", 'Status');
 $altlinks = array();
-$altlinks += array('Add ApiKey'=> '/admin/admin_api_key_edit');
+$altlinks += array('Add API key'=> '/admin/admin_api_key_edit');
 $pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 $table_options = array(
 	'altlinks' => $altlinks,
@@ -49,6 +49,7 @@ foreach ($api_keys as $api_key){
 
 	array_push($rowvalues, $api_key->get('apk_public_key'));
 	array_push($rowvalues, $owner->display_name());
+	array_push($rowvalues, $api_key->is_scoped() ? 'Limited' : 'Everything');
 
 	array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_start_time'), "UTC", $session->get_timezone(), 'M j, Y'));
 	array_push($rowvalues, LibraryFunctions::convert_time($api_key->get('apk_expires_time'), "UTC", $session->get_timezone(), 'M j, Y'));

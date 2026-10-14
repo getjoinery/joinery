@@ -170,7 +170,10 @@ function admin_file_upload_process_logic(array $input): LogicResult {
 			$thisfile->name,
 			$thisfile->type,
 			$session->get_user_id(),
-			array('fil_source' => File::SOURCE_USER_UPLOAD)
+			array('fil_source' => File::SOURCE_USER_UPLOAD),
+			// Its restrictions are set on its edit page after it lands, so it
+			// is announced from there, if it is public then (admin_file_edit).
+			false
 		);
 		if (!$file->resize() && $file->variant_refusal() !== null) {
 			// Saved, but too large to make sizes from: the row says so.

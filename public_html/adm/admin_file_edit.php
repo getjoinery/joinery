@@ -60,6 +60,9 @@
 		$file->prepare();
 		$file->save();
 		$file->load();
+		// Uploaded here with its restrictions to come: announced once it is
+		// saved public (File::announce_upload() sends it once).
+		$file->announce_upload();
 
 		LibraryFunctions::redirect('/admin/admin_file?fil_file_id='.$file->key);
 		return;

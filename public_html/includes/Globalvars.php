@@ -4,6 +4,8 @@ require_once('PathHelper.php');
 class Globalvars {
 	private static $instance_map = array();
 	private $settings;
+	/** True while a sealed secret setting is being opened (no re-entry). */
+	private static $opening = false;
 
 	private function __construct() {
 		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
@@ -70,6 +72,27 @@ class Globalvars {
 		if(isset($result->stg_value)){
 			$found = 1;
 			$setting_value = $result->stg_value;
+			// A declared secret is stored sealed (Setting::sealForStorage()):
+			// it is read as what it holds, and one that can no longer be
+			// opened reads as no value. Only a value shaped like a SecretBox
+			// blob is looked at, and never while one is being opened.
+			if (is_string($setting_value) && strncmp($setting_value, 'v1.', 3) === 0
+					&& SecretBox::looksEncrypted($setting_value)) {
+				// Read while another is being opened: answered as stored, never
+				// kept, so it is opened properly on its next read.
+				if (self::$opening) {
+					return $setting_value;
+				}
+				self::$opening = true;
+				try {
+					$setting_value = Setting::openStored((string)$setting, $setting_value);
+				} finally {
+					self::$opening = false;
+				}
+				if ($setting_value === null) {
+					return NULL;
+				}
+			}
 			if($setting_value || $setting_value === 0 || $setting_value === '0'){
 				//FOUND A SETTING THAT IS NOT BLANK
 				$this->settings[$setting] = $setting_value;

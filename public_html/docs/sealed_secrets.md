@@ -25,10 +25,16 @@ accounts. Fields:
 | `reprovision` | For `regenerable`: `Class::method` that mints a fresh one. Optional on `regenerable-breaks-things` (used only by the operator-acknowledged re-mint). |
 | `enumerator` | Optional, for a row-scoped kind whose column wraps the blob (a jsonb `{"enc":...}` envelope): `Class::method` returning each `['ref'=>…, 'blob'=>…]`. Used only when the owning code is loaded; the locator is the floor that always works. |
 
-`sealed_secrets` is **not** a setting's `secret:true` flag. `secret:true` only
-masks a form field; it says nothing about encryption at rest (`hcaptcha_private`
-is masked yet stored plaintext). The two answer different questions, so sealing
-gets its own declaration.
+**Secret settings are sealed secrets without an entry.** Every setting
+declared `secret: true` (in `settings.json`, a `plugin.json` or a sandboxed
+plugin's manifest) is stored sealed under its own name
+([Settings § Credentials](settings.md#credentials)), and is declared here
+implicitly: an `operator` secret labelled from its setting
+(`SealedSecretsDeclarations::all()` marks it `_implicit`). An explicit entry
+for the same name (an OAuth client secret, `services_api_secret_key`) wins
+and keeps its own kind. A sealed value that its consumer opens itself, and
+that is no form field, is declared explicitly and is not `secret: true`
+(`joinery_direct_decoy_secret`).
 
 ### The four kinds
 

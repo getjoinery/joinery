@@ -611,6 +611,15 @@ the archive does not list is removed, at any depth, including a directory the
 files engine never archives (`vendor/`, say) when the source had none of that
 name. A directory the source had but the archive left out (`logs/`) is kept.
 
+**A database dump does not open without its site's key.** Every secret setting
+(mail, payment and API credentials) and every other sealed value is sealed with
+the `secret_box_key` of the site that wrote it, which lives in
+`config/Globalvars_site.php`, not in the database. A dump loaded on a site with
+another key restores those values unreadable: the site reads them as unset.
+`restore_database.sh` checks the key canary after the load and says so
+(`RESTORE_SECRET_KEY_MISMATCH`, beside `RESTORE_OK`); the remedy is the key
+the dump was sealed with, which `--adopt-secret-key` below brings across.
+
 **`--adopt-secret-key`** is for a chain from another machine. This machine keeps
 its own `config/Globalvars_site.php` and takes the chain's `secret_box_key` into
 it: read from the chain's copy of the file by pattern (never run), required to be

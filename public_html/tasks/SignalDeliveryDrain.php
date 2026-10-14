@@ -3,9 +3,11 @@
  * SignalDeliveryDrain — sends what SignalDeliveryQueue queued.
  *
  * The scheduler entry point for SignalDeliveryQueue::drain(): every minute,
- * send each due webhook delivery, and schedule the next attempt for any that
- * failed. See docs/webhooks.md.
+ * send each due delivery (to webhooks, and to sandboxed plugins through the
+ * plugin host), and schedule the next attempt for any that failed. See
+ * docs/webhooks.md and docs/sandboxed_plugins.md.
  *
+ * @version 1.1 - also delivers to sandboxed plugins
  * @version 1.0
  */
 

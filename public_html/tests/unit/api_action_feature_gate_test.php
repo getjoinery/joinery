@@ -128,12 +128,17 @@ check(strpos($endpoint_src, 'protected static function assertSettingEnabled') !=
 
 section('Discovery hides an action whose feature is off');
 
+// The listing reads ApiLogicEndpoint::actionCatalog(), which the admin page
+// that scopes keys reads too; the filter lives there.
 $apiv1_src = file_get_contents(PathHelper::getIncludePath('api/apiv1.php'));
-$disc_at = strpos($apiv1_src, '$discover_actions = function');
-$disc_body = $disc_at === false ? '' : substr($apiv1_src, $disc_at, 2000);
+check(strpos($apiv1_src, 'ApiLogicEndpoint::actionCatalog()') !== false,
+	'GET /api/v1/actions lists ApiLogicEndpoint::actionCatalog()');
+$endpoint_src = file_get_contents(PathHelper::getIncludePath('includes/ApiLogicEndpoint.php'));
+$disc_at = strpos($endpoint_src, 'function actionCatalog');
+$disc_body = $disc_at === false ? '' : substr($endpoint_src, $disc_at, 2500);
 
 check($disc_at !== false && strpos($disc_body, 'requires_setting') !== false,
-	'GET /api/v1/actions filters on requires_setting');
+	'The action catalog filters on requires_setting');
 check(strpos($disc_body, 'use ($settings)') !== false,
 	'The discovery closure captures $settings, so the filter can actually read one');
 
