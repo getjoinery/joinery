@@ -6,7 +6,7 @@
 # needs: []
 # timeout: 600
 #
-# The sandboxed plugin author kit (sandbox_sdk/, specs/plugin_tiers.md WP8):
+# The sandboxed plugin author kit (sandbox_sdk/, plugin_tiers.md WP8):
 # the Rust example builds against the Rust crate, and the JavaScript example
 # against the JS kit, and each module exports what its manifest needs and
 # imports only what the plugin host gives (SandboxModule, the check install

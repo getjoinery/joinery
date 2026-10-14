@@ -1,7 +1,7 @@
 <?php
 /**
  * Logic for the page where an admin reviews what a sandboxed plugin asks for
- * and approves it (specs/plugin_tiers.md Q2, Q11). This is consent, not a
+ * and approves it (plugin_tiers.md Q2, Q11). This is consent, not a
  * warning: the plugin can do only what is listed, and only once approved.
  *
  * GET shows the plugin, what it asks for in plain words (grouped by feature),

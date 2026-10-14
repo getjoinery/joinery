@@ -19,7 +19,9 @@
  * a full when the tree changed. A chain archives code and data apart
  * (--part), so the swap re-bases the code while the data keeps incrementing.
  * Proved here with real tar against a scratch tree shaped like a site: the
- * swap is done the way utils/upgrade.php does it.
+ * swap is done the way utils/upgrade.php does it. The upgrade's own trees
+ * (public_html_last and the rest) are the machine's and no archive carries
+ * them, so a restored tree is the site less those.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -88,9 +90,14 @@ function code_extract(array $archives, $site_dir) {
 	return 0;
 }
 
-function trees_equal($a, $b) {
+/** diff -r, leaving out the top-level names in $left_out (absent from both is fine). */
+function trees_equal($a, $b, array $left_out = array()) {
 	$rc = 0; $o = array();
-	exec('diff -r ' . escapeshellarg($a) . ' ' . escapeshellarg($b) . ' 2>&1', $o, $rc);
+	$x = '';
+	foreach ($left_out as $name) {
+		$x .= ' -x ' . escapeshellarg($name);
+	}
+	exec('diff -r' . $x . ' ' . escapeshellarg($a) . ' ' . escapeshellarg($b) . ' 2>&1', $o, $rc);
 	return $rc === 0;
 }
 
@@ -108,7 +115,8 @@ file_put_contents($site . '/public_html/includes/b.php', "v1 edited\n");
 list($l1, $a1) = engine_run($engine, $site, $snar, $w, 'files-0001');
 check($l1 === 1, 'an ordinary edit extends the chain', var_export($l1, true));
 check(chain_extract(array($a0, $a1), $w . '/out1') === 0, 'the chain extracts');
-check(trees_equal($site, $w . '/out1/site'), 'the extracted chain is the tree as it stands');
+check(!file_exists($w . '/out1/site/public_html_last'), "the upgrade's previous tree is not archived: it is the machine's, and no restore takes it");
+check(trees_equal($site, $w . '/out1/site', array('public_html_last')), 'the extracted chain is the tree as it stands, less that');
 
 // ── A swap starts the archive over ──────────────────────────────────────────
 section('A swapped tree starts the whole-site archive over');
@@ -130,7 +138,8 @@ exec('rm -rf ' . escapeshellarg($site . '/upgrades'));
 list($l2, $a2) = engine_run($engine, $site, $snar, $w, 'files-0002');
 check($l2 === 0, 'the run after a swap is a full, not an incremental across the swap', var_export($l2, true));
 check(chain_extract(array($a2), $w . '/out2') === 0, 'the new chain extracts');
-check(trees_equal($site, $w . '/out2/site'), 'the new chain is the swapped tree exactly');
+check(!file_exists($w . '/out2/site/public_html_last'), "the tree the swap moved aside is not archived either");
+check(trees_equal($site, $w . '/out2/site', array('public_html_last')), 'the new chain is the swapped tree exactly, less that');
 
 list($l3, $a3) = engine_run($engine, $site, $snar, $w, 'files-0003');
 check($l3 === 1, 'the new chain is extended by the next run', var_export($l3, true));

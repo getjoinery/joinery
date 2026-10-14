@@ -7,7 +7,7 @@
  * timeout: 120
  */
 /**
- * Every setting declared `secret: true` is stored sealed (specs/plugin_tiers.md,
+ * Every setting declared `secret: true` is stored sealed (plugin_tiers.md,
  * What already exists: Secret settings).
  *
  * What is pinned here, against a sandboxed fixture plugin's settings (so no

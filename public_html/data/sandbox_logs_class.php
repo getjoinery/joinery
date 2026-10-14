@@ -7,7 +7,7 @@
  * it ended, how long it took, and the host's record of every door the module
  * used during the call — each API request and outbound request it made, and
  * each one refused with the reason. It is the per-plugin log an author reads
- * (specs/plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
+ * (plugin_tiers.md WP8) and an admin checks when a plugin misbehaves.
  *
  * @version 1.0
  */

@@ -1,7 +1,7 @@
 <?php
 /**
  * Logic for a sandboxed plugin's admin page, rendered from its manifest
- * (door 4, specs/plugin_tiers.md WP4). The page is the manifest's
+ * (door 4, plugin_tiers.md WP4). The page is the manifest's
  * declaration; nothing the plugin ships is run here. Its sections:
  *
  *   text      words from the manifest

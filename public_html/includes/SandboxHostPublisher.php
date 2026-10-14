@@ -1,7 +1,7 @@
 <?php
 /**
  * SandboxHostPublisher - cross-compiles the sandboxed plugin host
- * (maintenance_scripts/install_tools/sandbox_host, specs/plugin_tiers.md WP7)
+ * (maintenance_scripts/install_tools/sandbox_host, plugin_tiers.md WP7)
  * into prebuilt binaries at publish time.
  *
  * A site with a sandboxed plugin runs a prebuilt host: install_sandbox_host.sh,

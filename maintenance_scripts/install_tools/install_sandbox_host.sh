@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # install_sandbox_host.sh - install or converge the sandboxed plugin host for
-# one site (specs/plugin_tiers.md WP7, docs/sandboxed_plugins.md).
+# one site (plugin_tiers.md WP7, docs/sandboxed_plugins.md).
 #
 # Version: 1.1 - the unit masks the web root, filters system calls, refuses internal addresses, yields CPU
 # Version: 1.0

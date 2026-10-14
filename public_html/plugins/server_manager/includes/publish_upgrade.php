@@ -694,7 +694,7 @@
 				exit(1);
 			}
 
-			// The sandboxed plugin host (specs/plugin_tiers.md WP7): the same
+			// The sandboxed plugin host (plugin_tiers.md WP7): the same
 			// shape, run by install_sandbox_host.sh on a site with a
 			// sandboxed plugin. A stale host must not ship either.
 			publish_output("Building sandboxed plugin host binaries...");

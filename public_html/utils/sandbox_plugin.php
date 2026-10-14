@@ -1,6 +1,6 @@
 <?php
 /**
- * sandbox_plugin.php — the sandboxed plugin author's command (specs/plugin_tiers.md WP8).
+ * sandbox_plugin.php — the sandboxed plugin author's command (plugin_tiers.md WP8).
  *
  *   php utils/sandbox_plugin.php validate PATH
  *       PATH is a plugin folder, its manifest.json, or a zip of it. Checks the

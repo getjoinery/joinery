@@ -4,8 +4,8 @@ A sandboxed plugin is a WebAssembly module that reaches the platform only
 through the doors its manifest declares. It ships no PHP, runs outside the
 PHP pool, and can do nothing its manifest does not say. Native plugins (PHP,
 `plugin.json`) are described in the [Plugin Developer Guide](plugin_developer_guide.md);
-this page is the other kind. The design and its decisions are in
-`specs/plugin_tiers.md`.
+this page is the other kind. The design and its decisions are in the spec
+`plugin_tiers.md`.
 
 ## What one is
 
@@ -218,9 +218,9 @@ was approved and nothing more (a member page it adds is not shown); the
 Plugins page marks it **Waiting for approval**, and the review page lists what
 is new. An approval stands while the admin who gave it is a superadmin, not
 disabled and not deleted: demoting or disabling them switches the plugin's key
-off at once (`SandboxCredentials::lapseApprovalsOf()`, from `User::save()`),
-and it waits on another admin's approval, which mints a key as them. Their
-account cannot be deleted while the key is live.
+off at once (`SandboxCredentials::lapseApprovalsOf()`, from `User::save()` and
+`User::soft_delete()`; a permanent delete takes the key with the account), and
+it waits on another admin's approval, which mints a key as them.
 Another superadmin may approve an approved plugin as themselves (**Approve as
 me**), which moves its credential to them.
 
@@ -256,8 +256,7 @@ machine only (`127.0.0.1`, `::1`). Its secret is sealed on the
 sealed secret whose recipe mints a new key) and handed to the host with every
 call. Each approval mints a new key and deletes the old. Deactivation
 switches it off; uninstall deletes it. The key pages show it as the plugin's
-and refuse to delete it or reset its secret, and the approving admin's
-account cannot be deleted while it is live.
+and refuse to delete it or reset its secret.
 
 **Its signals (door 2).** One `SignalReceiver` of kind `sandbox` naming the
 plugin (`sgr_plugin`) carries the approved signals. Signals queue and retry on

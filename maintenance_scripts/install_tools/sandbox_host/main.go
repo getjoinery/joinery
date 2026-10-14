@@ -1,4 +1,4 @@
-// sandbox-host runs a site's sandboxed plugins (specs/plugin_tiers.md WP7).
+// sandbox-host runs a site's sandboxed plugins (plugin_tiers.md WP7).
 //
 // A sandboxed plugin is a WebAssembly module and a manifest. Core never runs a
 // module itself: for each call (a form on the plugin's page, a signal, a
