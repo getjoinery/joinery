@@ -11,6 +11,7 @@
  * fleet_status can reconcile lazily (server_manager never learns what a
  * tenant is).
  *
+ * @version 1.2 - mft_mx_hostname_applied: the mail name last delivered to the slot's shard
  * @version 1.1 - the four shared status values come from the core ServiceTenantLadder
  * @version 1.0
  */
@@ -53,6 +54,10 @@ class MailboxFleetSlot extends SystemBase {
 		// The operator-controlled per-tenant MX hostname (an A record to the
 		// shard's IP — re-sharding is an A-record change, tenants never touch DNS).
 		'mft_mx_hostname'           => array('type'=>'varchar(255)'),
+		// The shard and mail name last delivered in a tenant-add to a shard that
+		// keeps it (relay 3.13), as <shard id>:<name>: the reconcile re-adds an
+		// active slot whose shard or name differs.
+		'mft_mx_hostname_applied'   => array('type'=>'varchar(255)'),
 		// The tenant's credentials the shard peers/authorizes: main-box
 		// WireGuard public key and the pull SSH public key (locked to the
 		// tenant shell by add-tenant).

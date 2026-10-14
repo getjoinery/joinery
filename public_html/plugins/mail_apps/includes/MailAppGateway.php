@@ -17,6 +17,7 @@
  * asks its Docker host in its own storage, and the host's converge timer
  * serves it (specs/mail_apps_plugin.md § A4).
  *
+ * @version 1.9.0 - a site on a shared relay (relay 3.13) passes mail programs through it under its slot's mail name
  * @version 1.8.1 - containerNameProblem() no longer repeats the typed text (a message is shown unescaped)
  * @version 1.8.0 - a container site's own mail name (mail_apps_container_name, containerNameProblem()): for a web
  *                  name behind Cloudflare, a DNS-only name under it that the host gets a certificate for
@@ -507,12 +508,17 @@ class MailAppGateway {
 		}
 		$relay = self::relay();
 		if ($relay !== null) {
-			if ($relay->get('mrl_is_hosted')) {
-				return 'Mail arrives here through a shared relay. Mail apps pass through a relay this deployment has '
-					. 'to itself; a shared one carries other deployments\' mail and passes none.';
-			}
 			$running = trim($relay->provisionedVersion());
-			if (!RelayVersion::passesMailApps($running)) {
+			if ($relay->get('mrl_is_hosted')) {
+				// A shared shard passes each tenant's programs under its slot's
+				// own mail name (mrl_mx_hostname), from relay 3.13.
+				if (!RelayVersion::passesMailAppsShared($running)) {
+					return 'Mail arrives here through a shared relay, which keeps this server\'s address hidden. It runs '
+						. 'version ' . ($running !== '' ? $running : 'unknown') . '; passing mail programs through a shared '
+						. 'relay needs ' . RelayVersion::PASSES_MAIL_APPS_SHARED . ', which arrives when the relay\'s operator '
+						. 'renews it.';
+				}
+			} elseif (!RelayVersion::passesMailApps($running)) {
 				return 'Mail arrives here through a relay, which keeps this server\'s address hidden, and mail programs '
 					. 'reach this server through it. The relay runs version ' . ($running !== '' ? $running : 'unknown')
 					. '; passing mail programs through needs ' . RelayVersion::PASSES_MAIL_APPS

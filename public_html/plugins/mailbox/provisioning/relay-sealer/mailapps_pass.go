@@ -11,11 +11,15 @@ package main
 // cloud providers (Linode among them) block outbound 25, 465 and 587, so the
 // relay could not reach the server's 465 at all.
 //
-// Only on a relay with ONE tenant (a self-hosted relay), and only for this
-// relay's own mail hostname: that is the name the tenant's mail programs use,
-// and the name the relay already answers on 443. A shared shard passes nothing.
+// Which deployment a program reaches is decided by the name it asked for:
+//   - a self-hosted relay (no operator key, one tenant): its own mail hostname,
+//     the name its tenant's programs use and the relay answers on 443;
+//   - a shared shard (it has an operator key): each tenant's slot name, which
+//     only the operator assigns (the signed tenant-add's mx_hostname, kept in
+//     the tenant's root-owned registry entry). The shard's own name passes
+//     nothing, so no tenant can be reached, or certified, under another's name.
 // The server's addresses arrive in the tenant's signed fragment
-// (mail_apps_origins); none means the pass-through is off.
+// (mail_apps_origins); none means the pass-through is off for that tenant.
 
 import (
 	"bytes"
@@ -39,7 +43,7 @@ const (
 	// Connections the pass-through holds at once, in all.
 	mailAppsTotal = 1000
 	// How long a program has to send its hello, and the relay to reach the server.
-	mailAppsHelloTimeout = 10 * time.Second
+	mailAppsHelloTimeout = 5 * time.Second
 	mailAppsDialTimeout  = 10 * time.Second
 	// A fragment names at most this many server addresses.
 	mailAppsMaxOrigins = 4
@@ -52,25 +56,34 @@ const (
 	mailAppsCheckTimeout = 5 * time.Second
 )
 
+// mailAppsPerTenant: connections one deployment's programs may hold at once
+// on a shard (a var so a test can lower it).
+var mailAppsPerTenant = 300
+
 // mailAppsPass holds the pass-through's state: its caps, its counters for the
 // ping, and the seams the tests use.
 type mailAppsPass struct {
 	s *relayServer
 
-	mu            sync.Mutex
-	active        int
-	perSource     map[string]int
-	spliced       []time.Time
+	mu        sync.Mutex
+	active    int
+	perSource map[string]int
+	perTenant map[string]int
+	// refusals before a tenant is known (no hello, a name no tenant has, the
+	// total and per-source caps): reported to a self-hosted relay's one
+	// tenant, never to a shard's tenants, whose own refusals are in stats.
 	refused       []time.Time
 	lastRefusal   string
 	lastRefusalAt time.Time
+	stats         map[string]*mailAppsTenantStats
 	bound         map[string]bool
-	// targets: the server port each listening role dials. reaches: whether
-	// the server answered there at the last check (checkServer), and when.
-	targets   map[string]int
-	reaches   map[string]bool
-	checkedAt time.Time
-	checking  bool
+	// targets: the server port each listening role dials.
+	targets  map[string]int
+	checking bool
+	// totalCap: mailAppsTotal, or on a shard enough for every tenant's own cap,
+	// so one tenant's programs cannot fill the pool the others share (set at
+	// each check, as tenants come and go).
+	totalCap int
 
 	// dial reaches the server; a field so the tests can point it at a fake.
 	dial func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -79,10 +92,31 @@ type mailAppsPass struct {
 	routingMap   *routingMap
 }
 
+// mailAppsTenantStats: one tenant's counters for its ping, and whether its
+// server answered on each onward port at the last check.
+type mailAppsTenantStats struct {
+	spliced       []time.Time
+	refused       []time.Time
+	lastRefusal   string
+	lastRefusalAt time.Time
+	reaches       map[string]bool
+	checkedAt     time.Time
+}
+
 func newMailAppsPass(s *relayServer) *mailAppsPass {
 	d := &net.Dialer{Timeout: mailAppsDialTimeout, KeepAlive: 30 * time.Second}
-	return &mailAppsPass{s: s, perSource: map[string]int{}, bound: map[string]bool{}, targets: map[string]int{},
-		reaches: map[string]bool{}, dial: d.DialContext}
+	return &mailAppsPass{s: s, perSource: map[string]int{}, perTenant: map[string]int{}, bound: map[string]bool{},
+		targets: map[string]int{}, stats: map[string]*mailAppsTenantStats{}, totalCap: mailAppsTotal, dial: d.DialContext}
+}
+
+// tenantStats is the tenant's record, made on first use. Call with p.mu held.
+func (p *mailAppsPass) tenantStats(slug string) *mailAppsTenantStats {
+	st := p.stats[slug]
+	if st == nil {
+		st = &mailAppsTenantStats{reaches: map[string]bool{}}
+		p.stats[slug] = st
+	}
+	return st
 }
 
 // listen opens one pass-through port and serves it until the listener closes.
@@ -137,7 +171,7 @@ func sourceKey(addr net.Addr) string {
 func (p *mailAppsPass) admit(key string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.active >= mailAppsTotal || p.perSource[key] >= mailAppsPerSource {
+	if p.active >= p.totalCap || p.perSource[key] >= mailAppsPerSource {
 		return false
 	}
 	p.active++
@@ -162,6 +196,34 @@ func (p *mailAppsPass) refuse(c net.Conn, why string) {
 	_ = c.Close()
 }
 
+// refuseFor is a refusal once the tenant is known: counted as the tenant's.
+func (p *mailAppsPass) refuseFor(c net.Conn, slug, why string) {
+	p.mu.Lock()
+	st := p.tenantStats(slug)
+	st.refused = append(st.refused, time.Now())
+	st.lastRefusal, st.lastRefusalAt = why, time.Now()
+	p.mu.Unlock()
+	_ = c.Close()
+}
+
+func (p *mailAppsPass) admitTenant(slug string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.perTenant[slug] >= mailAppsPerTenant {
+		return false
+	}
+	p.perTenant[slug]++
+	return true
+}
+
+func (p *mailAppsPass) releaseTenant(slug string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.perTenant[slug]--; p.perTenant[slug] <= 0 {
+		delete(p.perTenant, slug)
+	}
+}
+
 func (p *mailAppsPass) handle(c net.Conn, targetPort int) {
 	key := sourceKey(c.RemoteAddr())
 	if !p.admit(key) {
@@ -178,13 +240,23 @@ func (p *mailAppsPass) handle(c net.Conn, targetPort int) {
 	}
 	_ = c.SetReadDeadline(time.Time{})
 	name = strings.ToLower(strings.TrimSuffix(name, "."))
-	if name != p.s.hostname {
-		p.refuse(c, "a name this relay does not pass")
+	slug, why := p.route(name)
+	if slug == "" {
+		p.refuse(c, why)
 		return
 	}
-	origins, why := p.origins()
+	// The per-tenant cap shares a shard among its tenants; a self-hosted
+	// relay's one tenant has the whole pass-through.
+	if p.shard() {
+		if !p.admitTenant(slug) {
+			p.refuseFor(c, slug, "this deployment's connection cap reached")
+			return
+		}
+		defer p.releaseTenant(slug)
+	}
+	origins, why := p.originsOf(slug)
 	if len(origins) == 0 {
-		p.refuse(c, why)
+		p.refuseFor(c, slug, why)
 		return
 	}
 
@@ -198,21 +270,22 @@ func (p *mailAppsPass) handle(c net.Conn, targetPort int) {
 		}
 	}
 	if server == nil {
-		p.refuse(c, "the server did not answer on "+strconv.Itoa(targetPort))
+		p.refuseFor(c, slug, "the server did not answer on "+strconv.Itoa(targetPort))
 		return
 	}
 	defer server.Close()
 
 	if _, err := io.WriteString(server, proxyLine(c.RemoteAddr(), c.LocalAddr())); err != nil {
-		p.refuse(c, "the server closed the connection")
+		p.refuseFor(c, slug, "the server closed the connection")
 		return
 	}
 	if _, err := server.Write(hello); err != nil {
-		p.refuse(c, "the server closed the connection")
+		p.refuseFor(c, slug, "the server closed the connection")
 		return
 	}
 	p.mu.Lock()
-	p.spliced = append(p.spliced, time.Now())
+	st := p.tenantStats(slug)
+	st.spliced = append(st.spliced, time.Now())
 	p.mu.Unlock()
 	splice(c, server)
 }
@@ -232,13 +305,63 @@ func (p *mailAppsPass) soleTenant() (string, string) {
 	return slugs[0], ""
 }
 
-// origins are the server addresses the one tenant's fragment names, or why
-// there are none.
-func (p *mailAppsPass) origins() ([]string, string) {
-	slug, why := p.soleTenant()
-	if slug == "" {
-		return nil, why
+// shard: a relay with an operator key is a shared shard; a self-hosted relay
+// has its tenant's key only.
+func (p *mailAppsPass) shard() bool {
+	return p.s.auth != nil && p.s.auth.publicKeyFor(relayOperatorTenant) != ""
+}
+
+// route is the tenant a program asking for name reaches, or why none.
+func (p *mailAppsPass) route(name string) (string, string) {
+	if p.shard() {
+		if name == "" {
+			return "", "a program must name the slot it connects to"
+		}
+		if name == p.s.hostname {
+			return "", "the shard's own name passes nothing (each deployment has its slot's name)"
+		}
+		slugs, _ := listTenantSlugs(p.s.paths.tenantsDir())
+		for _, slug := range slugs {
+			// A tenant the operator has assigned no name is reached by none.
+			if n := tenantMailName(p.s.paths, slug); n != "" && n == name {
+				return slug, ""
+			}
+		}
+		return "", "a name this relay does not pass"
 	}
+	if name != p.s.hostname {
+		return "", "a name this relay does not pass"
+	}
+	return p.soleTenant()
+}
+
+// mailName is the name the tenant's programs use here, and the only one it is
+// certified under, or why it has none: on a shard the slot name the operator
+// assigned; on a self-hosted relay the relay's own name, for its one tenant.
+func (p *mailAppsPass) mailName(slug string) (string, string) {
+	if p.shard() {
+		name := tenantMailName(p.s.paths, slug)
+		if name == "" {
+			return "", "the operator has assigned this deployment no mail name on this shard"
+		}
+		if name == p.s.hostname {
+			return "", "the shard's own name is no deployment's"
+		}
+		return name, ""
+	}
+	sole, why := p.soleTenant()
+	if sole == "" {
+		return "", why
+	}
+	if sole != slug {
+		return "", "only a relay's one tenant is passed mail programs under its name"
+	}
+	return p.s.hostname, ""
+}
+
+// originsOf are the server addresses the tenant's fragment names, or why
+// there are none.
+func (p *mailAppsPass) originsOf(slug string) ([]string, string) {
 	m, err := p.routing()
 	if err != nil {
 		return nil, "no routing map yet"
@@ -246,7 +369,7 @@ func (p *mailAppsPass) origins() ([]string, string) {
 	if tc, ok := m.Tenants[slug]; ok && len(tc.MailAppsOrigins) > 0 {
 		return tc.MailAppsOrigins, ""
 	}
-	return nil, "mail apps are off for this relay's deployment"
+	return nil, "mail apps are off for this deployment"
 }
 
 func (p *mailAppsPass) routing() (*routingMap, error) {
@@ -354,8 +477,11 @@ func (p *mailAppsPass) sweep() {
 		return out
 	}
 	p.mu.Lock()
-	p.spliced = trim(p.spliced)
 	p.refused = trim(p.refused)
+	for _, st := range p.stats {
+		st.spliced = trim(st.spliced)
+		st.refused = trim(st.refused)
+	}
 	p.mu.Unlock()
 }
 
@@ -366,14 +492,8 @@ func (p *mailAppsPass) sweep() {
 // gateway logs it and serves nothing. Run every minute while mail apps are
 // on; a check still running is not started again.
 func (p *mailAppsPass) checkServer() {
-	origins, _ := p.origins()
 	p.mu.Lock()
 	if p.checking {
-		p.mu.Unlock()
-		return
-	}
-	if len(origins) == 0 {
-		p.reaches, p.checkedAt = map[string]bool{}, time.Time{}
 		p.mu.Unlock()
 		return
 	}
@@ -384,30 +504,63 @@ func (p *mailAppsPass) checkServer() {
 	}
 	p.mu.Unlock()
 
-	reaches := map[string]bool{}
-	for role, port := range targets {
-		for _, ip := range origins {
-			ctx, cancel := context.WithTimeout(context.Background(), mailAppsCheckTimeout)
-			c, err := p.dial(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
-			cancel()
-			if err == nil {
-				_ = c.Close()
-				reaches[role] = true
-				break
+	results := map[string]map[string]bool{}
+	slugs, _ := listTenantSlugs(p.s.paths.tenantsDir())
+	total := mailAppsTotal
+	if p.shard() && len(slugs)*mailAppsPerTenant > total {
+		total = len(slugs) * mailAppsPerTenant
+	}
+	for _, slug := range slugs {
+		if name, _ := p.mailName(slug); name == "" {
+			continue
+		}
+		origins, _ := p.originsOf(slug)
+		if len(origins) == 0 {
+			continue
+		}
+		reaches := map[string]bool{}
+		for role, port := range targets {
+			reaches[role] = false
+			for _, ip := range origins {
+				ctx, cancel := context.WithTimeout(context.Background(), mailAppsCheckTimeout)
+				c, err := p.dial(ctx, "tcp", net.JoinHostPort(ip, strconv.Itoa(port)))
+				cancel()
+				if err == nil {
+					_ = c.Close()
+					reaches[role] = true
+					break
+				}
 			}
 		}
-		if !reaches[role] {
-			reaches[role] = false
+		results[slug] = reaches
+	}
+	now := time.Now()
+	p.mu.Lock()
+	for slug, st := range p.stats {
+		if _, ok := results[slug]; !ok {
+			st.reaches, st.checkedAt = map[string]bool{}, time.Time{}
 		}
 	}
-	p.mu.Lock()
-	p.reaches, p.checkedAt, p.checking = reaches, time.Now(), false
+	for slug, reaches := range results {
+		st := p.tenantStats(slug)
+		st.reaches, st.checkedAt = reaches, now
+	}
+	p.totalCap = total
+	p.checking = false
 	p.mu.Unlock()
 }
 
-// status is the ping's mail_apps group (relay_status.go).
-func (p *mailAppsPass) status() map[string]interface{} {
-	origins, why := p.origins()
+// status is the ping's mail_apps group for one tenant (relay_status.go): its
+// own name, origins, connections and checks. A self-hosted relay's one tenant
+// also sees the refusals made before a tenant was known; a shard's tenants
+// never see another's.
+func (p *mailAppsPass) status(slug string) map[string]interface{} {
+	name, why := p.mailName(slug)
+	var origins []string
+	if name != "" {
+		origins, why = p.originsOf(slug)
+	}
+	shard := p.shard()
 	cutoff := time.Now().Add(-time.Hour)
 	count := func(in []time.Time) int {
 		n := 0
@@ -420,29 +573,47 @@ func (p *mailAppsPass) status() map[string]interface{} {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	st := p.tenantStats(slug)
+	// A shard counts each tenant's own; a self-hosted relay's one tenant has
+	// every connection.
+	active := p.active
+	if shard {
+		active = p.perTenant[slug]
+	}
+	refused := count(st.refused)
+	last, lastAt := st.lastRefusal, st.lastRefusalAt
+	if !shard {
+		refused += count(p.refused)
+		if p.lastRefusalAt.After(lastAt) {
+			last, lastAt = p.lastRefusal, p.lastRefusalAt
+		}
+	}
 	out := map[string]interface{}{
 		"listening":  map[string]bool{"993": p.bound["993"], "465": p.bound["465"]},
 		"origins":    len(origins),
-		"active":     p.active,
-		"spliced_1h": count(p.spliced),
-		"refused_1h": count(p.refused),
+		"active":     active,
+		"spliced_1h": count(st.spliced),
+		"refused_1h": refused,
+	}
+	if name != "" {
+		out["mail_name"] = name
 	}
 	if len(origins) == 0 {
 		out["off_because"] = why
 	}
-	if !p.checkedAt.IsZero() {
+	if !st.checkedAt.IsZero() {
 		reaches := map[string]interface{}{}
-		for role, ok := range p.reaches {
+		for role, ok := range st.reaches {
 			reaches[role] = map[string]interface{}{"port": p.targets[role], "answers": ok}
 		}
 		out["reaches_server"] = reaches
-		out["reaches_server_utc"] = p.checkedAt.UTC().Format(time.RFC3339)
+		out["reaches_server_utc"] = st.checkedAt.UTC().Format(time.RFC3339)
 	}
-	if p.lastRefusal != "" {
-		out["last_refusal"] = p.lastRefusal
-		out["last_refusal_utc"] = p.lastRefusalAt.UTC().Format(time.RFC3339)
+	if last != "" {
+		out["last_refusal"] = last
+		out["last_refusal_utc"] = lastAt.UTC().Format(time.RFC3339)
 	}
-	for k, v := range p.s.mailAppsCertStatus() {
+	for k, v := range p.s.mailAppsCertStatus(slug) {
 		out[k] = v
 	}
 	return out

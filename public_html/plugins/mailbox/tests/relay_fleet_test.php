@@ -26,6 +26,7 @@
  *
  * Run: php tests/run.php db --filter=relay_fleet
  *
+ * @version 1.5 - FleetService::mailNameOwed(): a slot's mail name owed to a 3.13 shard, settled once delivered
  * @version 1.4 - the fleet on the core skeleton: client, state vocabulary, the ladder on a slot row
  * @version 1.3 - fleet_status exercised through the action
  */
@@ -167,6 +168,31 @@ class RelayFleetTest {
 		check(!isset($coords['ssh_user']) && !isset($coords['tunnel_ip']) && !isset($coords['wg_public_key']),
 			'no tunnel or ssh coordinate survives');
 		check($shard->slotCount() === 1, 'slot count sees the live slot');
+
+		// The slot's mail name reaches its shard (relay 3.13): owed while a shard
+		// that keeps it has not been given it; never to an older shard, which
+		// would ignore it; settled once delivered.
+		$shard->set('mfs_provisioned_version', '3.12');
+		$shard->save();
+		check(!FleetService::mailNameOwed($slot_a), 'an older shard is owed no mail name (it would ignore it)');
+		$shard->set('mfs_provisioned_version', '3.13');
+		$shard->save();
+		check(FleetService::mailNameOwed($slot_a), 'a 3.13 shard is owed the active slot\'s mail name');
+		$slot_a->set('mft_mx_hostname_applied', strtolower((string)$slot_a->get('mft_mx_hostname')));
+		$slot_a->save();
+		check(FleetService::mailNameOwed($slot_a), '  a delivery recorded without its shard does not settle it');
+		$slot_a->set('mft_mx_hostname_applied', '999999:' . strtolower((string)$slot_a->get('mft_mx_hostname')));
+		$slot_a->save();
+		check(FleetService::mailNameOwed($slot_a), '  nor one recorded for another shard (a moved slot is owed it there)');
+		$slot_a->set('mft_mx_hostname_applied', FleetService::mailNameKey($slot_a));
+		$slot_a->save();
+		check(!FleetService::mailNameOwed($slot_a), '  and not once this shard has it');
+		$slot_a->set('mft_mx_hostname_applied', null);
+		$slot_a->set('mft_status', MailboxFleetSlot::STATUS_SUSPENDED);
+		$slot_a->save();
+		check(!FleetService::mailNameOwed($slot_a), '  nor while the slot is suspended (a re-add would restore its domains)');
+		$slot_a->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);
+		$slot_a->save();
 
 		$slot_b = new MailboxFleetSlot(NULL);
 		$slot_b->set('mft_mfs_mailbox_fleet_shard_id', intval($shard->key));

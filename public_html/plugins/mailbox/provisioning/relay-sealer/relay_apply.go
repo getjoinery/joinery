@@ -77,7 +77,11 @@ type relayRequest struct {
 	PublicKey string          `json:"public_key,omitempty"`
 	Domains   []string        `json:"domains,omitempty"`
 	Limits    *tenantLimits   `json:"limits,omitempty"`
-	FiledUTC  string          `json:"filed_utc"`
+	// MxHostname: the slot's mail name the operator assigned (tenant-add on a
+	// shard): the only name the mail apps pass-through routes to the tenant,
+	// and the only one it issues the tenant a certificate for.
+	MxHostname string `json:"mx_hostname,omitempty"`
+	FiledUTC   string `json:"filed_utc"`
 }
 
 // relayVerdict is root's answer, returned to the caller in the response body.
@@ -267,7 +271,14 @@ func applyRequest(p relayPaths, req relayRequest) relayVerdict {
 		if req.By != relayOperatorTenant {
 			return reject("tenant changes are the operator's act")
 		}
+		// The name is checked first, so a refused add changes nothing.
+		if why := checkTenantMailName(p, req.Tenant, req.MxHostname); why != "" {
+			return reject(why)
+		}
 		if why := registerTenant(p, req.Tenant, req.PublicKey, req.Domains, req.Limits); why != "" {
+			return reject(why)
+		}
+		if why := writeTenantMailName(p, req.Tenant, req.MxHostname); why != "" {
 			return reject(why)
 		}
 		return mergeAndVerdict(p, v, req.Tenant)
@@ -400,6 +411,58 @@ func registerTenant(p relayPaths, slug, publicKey string, domains []string, limi
 	chownToRelayUser(spool)
 	chownToRelayUser(filepath.Join(spool, "tmp"))
 	return ""
+}
+
+// writeTenantMailName records the slot's mail name the operator assigned, in
+// the tenant's root-owned registry entry (tenants/<slug>/mx_hostname). Empty
+// leaves an earlier assignment as it is: a plane that does not send the name
+// takes nothing away. A tenant never writes here (fragments go to their own
+// drop), so the name a tenant is served and certified under is the operator's.
+func writeTenantMailName(p relayPaths, slug, name string) string {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if name == "" {
+		return ""
+	}
+	if why := checkTenantMailName(p, slug, name); why != "" {
+		return why
+	}
+	if err := writeFileAtomic(filepath.Join(p.tenantDir(slug), "mx_hostname"), []byte(name+"\n"), 0o644); err != nil {
+		return "cannot write the tenant mail name"
+	}
+	return ""
+}
+
+// checkTenantMailName says why name cannot be the tenant's, or "": a host
+// name, and not one another tenant on this relay holds (one name, one tenant).
+// Empty is fine (it changes nothing).
+func checkTenantMailName(p relayPaths, slug, name string) string {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if name == "" {
+		return ""
+	}
+	if !domainRe.MatchString(name) {
+		return fmt.Sprintf("%q is not a host name", name)
+	}
+	if others, err := listTenantSlugs(p.tenantsDir()); err == nil {
+		for _, other := range others {
+			if other != slug && tenantMailName(p, other) == name {
+				return fmt.Sprintf("%q is another tenant's mail name", name)
+			}
+		}
+	}
+	return ""
+}
+
+// tenantMailName is the slot's mail name the operator assigned, or "".
+func tenantMailName(p relayPaths, slug string) string {
+	if !slugRe.MatchString(slug) {
+		return ""
+	}
+	name := strings.ToLower(readTrimmed(filepath.Join(p.tenantDir(slug), "mx_hostname")))
+	if !domainRe.MatchString(name) {
+		return ""
+	}
+	return name
 }
 
 // validateAllowlist: "*" alone, or any number of well-formed domains. Empty is
