@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.13 - uninstall() deletes the app credentials of the purposes the plugin declares (appAccess)
  * @version 1.12 - RESERVED_NAMES (adds 'core'), shared with the sandboxed manifest; liveManifest() reads a sandboxed plugin's manifest.json; install() over an active sandboxed plugin reconciles what it owns with its new manifest
  * @version 1.11 - a sandboxed plugin (SandboxPlugins) is validated, described, activated, deactivated,
  *               uninstalled and synced through SandboxPluginManager where a native one reads plugin.json or PHP
@@ -413,6 +414,31 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $file Path to migrations.php
      * @return array Results of migration runs
      */
+    /**
+     * Delete every app credential (an app password, say) of the purposes a
+     * plugin declares under `appAccess`. Deactivating the plugin only makes
+     * them refused (AppAccess); installing and activating it again would make
+     * each one work again, so uninstall removes them. A purpose an active
+     * plugin still declares is not this plugin's to sweep.
+     *
+     * @return int how many were deleted
+     */
+    private function deleteAppCredentials($manifest) {
+        $declared = (is_array($manifest) && is_array($manifest['appAccess'] ?? null)) ? $manifest['appAccess'] : array();
+        $deleted = 0;
+        foreach (array_keys($declared) as $purpose) {
+            $purpose = (string)$purpose;
+            if (!preg_match(AppAccess::NAME_PATTERN, $purpose) || AppAccess::isDeclared($purpose)) {
+                continue;
+            }
+            foreach (new MultiApiKey(array('purpose' => $purpose)) as $key) {
+                $key->permanent_delete();
+                $deleted++;
+            }
+        }
+        return $deleted;
+    }
+
     private function runPhpMigrations($plugin_name, $file) {
         $results = array();
 
@@ -1317,7 +1343,8 @@ class PluginManager extends AbstractExtensionManager {
     }
 
     /**
-     * Uninstall a plugin — destructive. Removes scaffolding (settings, menus,
+     * Uninstall a plugin — destructive. Deletes the app credentials of the
+     * purposes it declares (appAccess), removes scaffolding (settings, menus,
      * deletion rules, scheduled tasks, version/dependency/migration records),
      * runs the plugin's optional uninstall.php hook, drops plugin tables, marks
      * the plg_plugins row `uninstalled` (the row stays as the record), and asks
@@ -1331,7 +1358,7 @@ class PluginManager extends AbstractExtensionManager {
      * node cannot be without it, and the upgrade fetches it for that reason.
      *
      * Hook failure is fatal: if the hook throws or returns false, the table
-     * drop and the status change are skipped. Scaffolding cleanup (steps 1-5)
+     * drop and the status change are skipped. Scaffolding cleanup (steps 0-5)
      * is idempotent, so the operator can fix the hook and re-run uninstall.
      *
      * @param string   $name         Plugin name
@@ -1358,6 +1385,10 @@ class PluginManager extends AbstractExtensionManager {
         if (!empty($dependents)) {
             throw new Exception("Cannot uninstall plugin '$name': other plugins depend on it: " . implode(', ', $dependents));
         }
+
+        // Step 0: Delete the app credentials of the purposes it declares. First,
+        // so a refusal leaves everything else in place for a retry.
+        $this->deleteAppCredentials($manifest);
 
         // A sandboxed plugin has no plugin.json or PHP: its settings, menu,
         // tables and the rest of what it owns are SandboxPluginManager's to
