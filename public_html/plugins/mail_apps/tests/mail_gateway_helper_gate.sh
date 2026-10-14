@@ -336,7 +336,7 @@ rm -rf "$R/etc/joinery/sites/cweb" "$R/etc/apache2/sites-available/cweb.conf"
 helper converge > /dev/null
 ask parent '{"on": true, "name": "www.parent.example"}'
 helper converge > /dev/null
-chk "B3: the site's own www. name is refused (its front door's redirect answers it)" "$(said parent | grep -c 'belongs to another site')" "1"
+chk "B3: the site's own www. name is refused (its front door's redirect answers it), saying so" "$(said parent | grep -c "the site's own front door")" "1"
 rm -f "$SB/sites/parent.failed"
 rm -f "$SB/sites/beta.certattempt"
 : > "$T/calls"
