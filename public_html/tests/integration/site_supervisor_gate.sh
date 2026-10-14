@@ -230,9 +230,11 @@ rm -f "$T/refuse_stale"
 
 echo "== where it is wired in =="
 TPL="$ROOT/maintenance_scripts/install_tools/Dockerfile.template"
-chk "the start command ends by exec'ing it" "$(tail -1 "$TPL" | grep -c 'exec bash "${SUPERVISOR}" "${SITENAME}"; else exec apache2ctl -D FOREGROUND; fi')" "1"
+START="$ROOT/maintenance_scripts/install_tools/_site_start.sh"
+chk "the image runs its start command" "$(grep -c '^CMD \["/bin/bash", "/usr/local/sbin/joinery-site-start"\]$' "$TPL")" "1"
+chk "the start command ends by exec'ing it" "$(tail -1 "$START" | grep -c 'exec bash "${SUPERVISOR}" "${SITENAME}"; else exec apache2ctl -D FOREGROUND; fi')" "1"
 chk "the health check runs --check, and passes without the file" "$(grep -c '\[ ! -f "$f" \] || bash "$f" --check' "$TPL")" "1"
-chk "PHP's pool is sized before PHP-FPM starts" "$(grep -A1 'tune_php_fpm.sh" --no-restart --container' "$TPL" | grep -c 'service "${FPM_SERVICE}" start')" "1"
+chk "PHP's pool is sized before PHP-FPM starts" "$(grep -A1 'tune_php_fpm.sh" --no-restart --container' "$START" | grep -c 'service "${FPM_SERVICE}" start')" "1"
 REB="$ROOT/maintenance_scripts/sysadmin_tools/rebase_site_container.sh"
 chk "rebase holds the supervisor before stopping PHP-FPM" \
     "$(awk '/^stop_site_writes\(\)/,/^}/' "$REB" | grep -n 'supervisor.hold\|service "\$(basename "\$s")" stop' | cut -d: -f1 | tr '\n' ' ' | awk '{print ($1 < $2) ? "first" : "after"}')" "first"

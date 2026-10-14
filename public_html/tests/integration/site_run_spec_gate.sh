@@ -354,7 +354,7 @@ chk "a bad value from the spec is named as the spec's, not as an option" \
 run_spec_set mysite memory 512m
 unset STUB_CALLS
 check_at="$(grep -n 'not a memory size Docker takes' "$INSTALL" | head -1 | cut -d: -f1)"
-stop_at="$(grep -n 'docker stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)"
+stop_at="$(grep -n 'site_engine stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)"
 chk "install.sh checks --memory before its first stop" "$([ "$check_at" -lt "$stop_at" ] && echo yes)" "yes"
 check_at="$(grep -n 'end of the limits check' "$INSTALL" | head -1 | cut -d: -f1)"
 chk "and every other limit too" "$([ "$check_at" -lt "$stop_at" ] && echo yes)" "yes"
@@ -404,7 +404,7 @@ chk "install.sh names each spec line a rebuild does not keep" "$(grep -c 'Not ke
 
 echo "=== Every rebuild runs the container from the spec, and checks before it changes anything ==="
 code() { grep -v '^[[:space:]]*#' "$1"; }
-chk "install.sh runs from the spec in both forms" "$(code "$INSTALL" | grep -c 'docker run -d "${RUN_ARGS\[@\]}" --env-file "$ENV_FILE" "joinery-$SITENAME"')" "2"
+chk "install.sh runs from the spec in both forms" "$(code "$INSTALL" | grep -c 'site_engine run -d "${RUN_ARGS\[@\]}" --env-file "$ENV_FILE" "joinery-$SITENAME"')" "2"
 chk "install.sh keeps the site's own lines" "$(code "$INSTALL" | grep -c 'run_spec_foreign_lines "$SITENAME"')" "1"
 chk "rebase: no arguments rebuilt from docker inspect" "$(code "$REBASE" | grep -c 'save_run_args\|mapfile -d .. ARGS < "${WORK}/run_args"')" "0"
 chk "rebase: rollback runs from the kept spec with the kept environment" "$(code "$REBASE" | grep -c 'docker run -d "${ARGS\[@\]}" --env-file "${WORK}/env" "$KEEP_IMAGE"')" "1"
@@ -624,7 +624,7 @@ DF="$ROOT/maintenance_scripts/install_tools/Dockerfile.template"
 chk "the image itself trusts the host's slot ranges and the default bridge (review R1: a rebuild keeps older code)" \
     "$(grep -c "'RemoteIPInternalProxy ${RUN_SPEC_NET4_PREFIX}.0.0/16'" "$DF")|$(grep -c "'RemoteIPInternalProxy ${RUN_SPEC_NET6_PREFIX}::/32'" "$DF")|$(grep -c "'RemoteIPInternalProxy 172.17.0.0/16'" "$DF")|$(grep -c "'RemoteIPHeader X-Forwarded-For'" "$DF")" "1|1|1|1"
 chk "install.sh gives the site its network before it stops anything" \
-    "$([ "$(grep -n 'NET_LINES="$(run_spec_network_lines "$SITENAME")"' "$INSTALL" | cut -d: -f1)" -lt "$(grep -n 'docker stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)" ] && echo yes)" "yes"
+    "$([ "$(grep -n 'NET_LINES="$(run_spec_network_lines "$SITENAME")"' "$INSTALL" | cut -d: -f1)" -lt "$(grep -n 'site_engine stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)" ] && echo yes)" "yes"
 chk "install.sh writes the network lines into the spec it renders" "$(grep -cF '"$CONTAINER_PIDS")"$'"'"'\n'"'"'"$NET_LINES"' "$INSTALL")" "1"
 chk "remove_account removes the network the spec names, and checks it is gone" \
     "$(grep -c 's/^network=//p' "$REMOVE")|$(grep -c 'docker network rm "$SITE_NETWORK"' "$REMOVE")|$(grep -c 'Docker network still present' "$REMOVE")" "1|1|1"

@@ -1072,6 +1072,12 @@ section('Site code survives the container it runs in');
 $dockerfile     = $site_root . '/maintenance_scripts/install_tools/Dockerfile.template';
 $dockerfile_src = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
 check($dockerfile_src !== '', 'Dockerfile.template is readable', $dockerfile);
+// The image's start command lives in _site_start.sh, which the template copies
+// into the image (specs/site_container_engine.md D6): the image is both.
+$dockerfile_src .= (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
+check(strpos($dockerfile_src, 'CMD ["/bin/bash", "/usr/local/sbin/joinery-site-start"]') !== false
+	&& strpos($dockerfile_src, 'COPY maintenance_scripts/install_tools/_site_start.sh /usr/local/sbin/joinery-site-start') !== false,
+	'the image copies its start command in and runs it in exec form');
 
 // Everything utils/upgrade.php writes has to be on a volume, or a rebuild
 // discards it. These three cover public_html, vendor and maintenance_scripts.
@@ -2048,7 +2054,7 @@ $install_nocomment = implode("\n", array_filter(
 ));
 
 $dockerfile = $site_root . '/maintenance_scripts/install_tools/Dockerfile.template';
-$df_src     = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
+$df_src     = (is_file($dockerfile) ? file_get_contents($dockerfile) : '') . (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
 check($df_src !== '', 'the Dockerfile template exists', $dockerfile);
 
 // Strip comments; the rationale above each fix names the thing it removed.
@@ -2837,7 +2843,7 @@ $readme        = $site_root . '/maintenance_scripts/install_tools/INSTALL_README
 $dbconnector   = PathHelper::getIncludePath('includes/DbConnector.php');
 $site_init_now = is_file($site_init) ? file_get_contents($site_init) : '';
 $install_now   = is_file($install_sh) ? file_get_contents($install_sh) : '';
-$df_now        = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
+$df_now        = (is_file($dockerfile) ? file_get_contents($dockerfile) : '') . (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
 $readme_md     = is_file($readme) ? file_get_contents($readme) : '';
 $dbconn_src    = is_file($dbconnector) ? file_get_contents($dbconnector) : '';
 
@@ -3526,7 +3532,7 @@ check(strpos($converger_src, '"${TREE_OWNER}" == "www-data"') !== false,
 section('A rebuilt container keeps its agent and never starts PostgreSQL on the wrong data (specs/fleet_ubuntu_2604_postgres_upgrade.md WP1, WP2)');
 
 $install_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/install.sh');
-$template_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+$template_b56 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template') . (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
 check(strpos((string)shell_exec('bash -c ' . escapeshellarg('. "$1" && run_spec_render mysite "" 8087 9087 "" "" ""') . ' _ '
         . escapeshellarg($site_root . '/maintenance_scripts/install_tools/_site_run_spec.sh')), "volume=mysite_agent:/etc/joinery-agent\n") !== false,
     'the run spec mounts the agent\'s identity on the _agent volume',
@@ -3537,7 +3543,7 @@ $existing_at = strpos($install_b56, "print_step \"Checking for existing containe
 $refuse_at = strpos($install_b56, 'refuse_database_major_mismatch "$SITENAME" "joinery-base:${BASE_IMAGE_VERSION}"');
 check($refuse_at !== false && $existing_at !== false && $refuse_at < $existing_at,
     'a kept database volume is checked against the image\'s PostgreSQL before the old container is touched');
-check(substr_count($install_b56, "seed_agent_volume \"\$SITENAME\"\n                docker stop \"\$SITENAME\"") === 2,
+check(substr_count($install_b56, "seed_agent_volume \"\$SITENAME\"\n                site_engine stop \"\$SITENAME\"") === 2,
     'both kept-volume rebuild branches carry the agent\'s identity across before stopping the old container');
 check(strpos($install_b56, 'MOUNTPOINT}"/*/main/PG_VERSION') !== false,
     'the database volume\'s version is read off the volume itself, per cluster');
@@ -3695,7 +3701,7 @@ check((bool)preg_match('/for attempt in 1 2 3 4; do \\\\\n\s+apt-get update -qq 
 
 section('PostgreSQL starts on volumes another image\'s postgres user owns (specs/fleet_ubuntu_2604_postgres_upgrade.md B15)');
 
-$tpl_b15 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template');
+$tpl_b15 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template') . (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
 $owner_at_b15 = strpos($tpl_b15, 'PG_OWNER="$(id -u postgres):$(id -g postgres)"');
 $start_at_b15 = strpos($tpl_b15, "    service postgresql start && \\\n");
 $guard_at_b15 = strpos($tpl_b15, 'FATAL: the database on this volume is PostgreSQL');
@@ -3883,7 +3889,7 @@ preg_match('/^ARG BASE_IMAGE_VERSION=([0-9.]+)$/m', $tpl_wp6, $vt_wp6);
 check(version_compare($vi_wp6[1] ?? '0', '2.0', '>='), 'install.sh builds sites on joinery-base 2.0 or later (26.04)', $vi_wp6[1] ?? '');
 check(($vi_wp6[1] ?? 'a') === ($vt_wp6[1] ?? 'b'), 'Dockerfile.template\'s default base version is install.sh\'s',
 	'the default exists for BuildKit\'s static check; a stale one names an image the host may not have');
-check((bool)preg_match('/^FROM ubuntu:26\.04$/m', $base_wp6), 'the base image is built FROM ubuntu:26.04');
+check((bool)preg_match('/^FROM docker\.io\/library\/ubuntu:26\.04$/m', $base_wp6), 'the base image is built FROM ubuntu:26.04, named in full so the site container engine pulls it with no short-name lookup');
 
 section('Declared packages wait for apt\'s lock (0.8.460: an upgrade lost the race to the converger\'s apt-get)');
 

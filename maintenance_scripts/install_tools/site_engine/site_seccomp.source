@@ -1,0 +1,13 @@
+# site_engine/site_seccomp.json - the system call filter every site container runs under on the
+# site container engine (specs/site_container_engine.md D5): Docker's own default profile, so a
+# site there is filtered exactly as on a Docker host. Podman's built-in default lets a process
+# with no CAP_SYS_ADMIN make user namespaces (unshare -U as www-data succeeded on 6.1.4,
+# 2026-10-14); this one refuses them, as Docker does.
+#
+# Copied unchanged from upstream; replace it only with another release's file, and this record
+# with it. Licence: Apache-2.0 (https://github.com/moby/profiles/blob/main/LICENSE).
+SOURCE="https://github.com/moby/profiles"
+TAG="seccomp/v0.2.4"
+COMMIT="245180c51918481c0525424b3ee025d2b435d46c"
+FILE="seccomp/default.json"
+SHA256="785b2429264afba4d594320337cb17f144f3c7d51585f9805eef72e28f4f9334"

@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 3.19 - A host's sites run on the engine _site_engine.sh names (specs/site_container_engine.md
+#               WP2): every container command in the site path, the base build and the listings
+#               goes through site_engine; on the site container engine an image is built in Docker's
+#               format with no cache, a new site takes its own id block into its run spec, the
+#               helper that carries the agent's identity runs under the site's ids, and --disk is
+#               refused until the engine's disk pool (WP3). install.sh docker --site-engine makes
+#               a new host on the engine instead of Docker: the data root, the engine (install_site_engine.sh
+#               converge), the host's restrictions, --multi-tenant's walls, housekeeping and the agent.
+#               Opt-in until WP3 and WP4; Docker hosts are as they were.
 #VERSION 3.18 - docker remaps user ids on every new host, not only with --multi-tenant, so root in any
 #               container is an unprivileged host uid (multi_tenant_host_hardening D11); it writes the
 #               host's restrictions directory refusing nothing (host_restrictions.sh init), which a
@@ -575,6 +584,9 @@
 #                       --multi-tenant: the walls between sites, a reboot after kernel updates and the
 #                                       restrictions for strangers' sites; a fresh host, or one with no sites yet
 #                       --data-root=SIZE|DEVICE: the data root's first size (16G), or a spare device for it
+#                       --site-engine: the site container engine (our own Podman build) in Docker's place,
+#                                      each site with its own block of ids; a new host only, opt-in
+#                                      until its admin scripts and agent words land
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
@@ -647,6 +659,21 @@ export DEBIAN_FRONTEND=noninteractive
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Which engine runs this host's sites (_site_engine.sh, specs/site_container_engine.md
+# D7): the site and host paths call it through site_engine. The base image's build
+# copies install.sh without it, so a missing helper means Docker.
+if [ -f "$SCRIPT_DIR/_site_engine.sh" ]; then
+    . "$SCRIPT_DIR/_site_engine.sh"
+else
+    site_engine() { docker "$@"; }
+    site_engine_kind() { echo docker; }
+    site_engine_is_podman() { return 1; }
+fi
+# A build on the site engine never trusts the layer cache (a second site's build
+# reused the first site's layers, build arguments and all) and keeps the health
+# check, which only the Docker image format carries (D6).
+site_engine_build_flags() { if site_engine_is_podman; then printf '%s\n' --format docker --no-cache; fi; }
 
 #==============================================================================
 # GLOBAL CONSTANTS
@@ -1526,7 +1553,7 @@ name_reaches_here() {
     effective="${wout#* }"
 
     if [ "$kind" = "proxy" ]; then
-        docker exec "$sitename" rm -f "$file" 2>/dev/null || true
+        site_engine exec "$sitename" rm -f "$file" 2>/dev/null || true
     else
         rm -f "$file" 2>/dev/null || true
     fi
@@ -1738,8 +1765,8 @@ is_port_in_use() {
     fi
 
     # Check Docker container port mappings
-    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
-        if docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; then
+    if command -v "$(site_engine_kind)" &> /dev/null && site_engine info &> /dev/null 2>&1; then
+        if site_engine ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; then
             return 0
         fi
     fi
@@ -1789,7 +1816,7 @@ list_docker_containers() {
                 found=1
             fi
         fi
-    done < <(docker ps -a --filter "ancestor=joinery-*" --format "{{.Names}} {{.Ports}} {{.Status}}" 2>/dev/null)
+    done < <(site_engine ps -a --filter "ancestor=joinery-*" --format "{{.Names}} {{.Ports}} {{.Status}}" 2>/dev/null)
 
     # Also check by naming convention if ancestor filter didn't work
     if [ $found -eq 0 ]; then
@@ -1809,7 +1836,7 @@ list_docker_containers() {
                     found=1
                 fi
             fi
-        done < <(docker ps -a --format "{{.Names}} {{.Image}} {{.Ports}} {{.Status}}" 2>/dev/null)
+        done < <(site_engine ps -a --format "{{.Names}} {{.Image}} {{.Ports}} {{.Status}}" 2>/dev/null)
     fi
 
     if [ $found -eq 0 ]; then
@@ -2235,7 +2262,7 @@ is_docker() {
 
 # Check if Docker is installed and running
 is_docker_available() {
-    command -v docker &> /dev/null && docker info &> /dev/null 2>&1
+    command -v "$(site_engine_kind)" &> /dev/null && site_engine info &> /dev/null 2>&1
 }
 
 # Check if bare-metal prerequisites are met
@@ -2486,6 +2513,66 @@ multi_tenant_host_install() {
     print_success "Sites here install only signed plugins and themes"
 }
 
+# A new host whose sites run on the site container engine, our own build of
+# Podman (specs/site_container_engine.md WP2), in Docker's place: install.sh
+# docker --site-engine. Opt-in until the admin scripts and the agent speak to it
+# (WP3, WP4); then it is how every new host is made. The data root holds the
+# engine's storage, as it holds Docker's; each site gets its own block of ids
+# where Docker would remap them all to one, so the host's restrictions are
+# written as on a remapping Docker host.
+do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUTBOUND_LIMITS
+    local mgmt="$1" node="$2" multi="$3" data_root="$4" no_outbound="$5" rc=0
+    print_header "Site Container Engine Host"
+    if [ "$EUID" -ne 0 ]; then
+        print_error "This command must be run as root (use sudo)"
+        exit 1
+    fi
+    if command -v dockerd > /dev/null 2>&1 || command -v docker > /dev/null 2>&1; then
+        print_error "Docker is installed on this host. The site container engine is for a new host: build one with install.sh docker --site-engine and move the sites onto it."
+        exit 1
+    fi
+
+    print_step "Making the data root (/srv/joinery) for the engine's storage..."
+    bash "$SCRIPT_DIR/joinery_data_root.sh" check > /dev/null 2>&1 || rc=$?
+    case "$rc" in
+        0) print_success "The data root is mounted" ;;
+        2) if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
+               encrypted_data_root_prepare || exit 1
+               bash "$SCRIPT_DIR/joinery_data_root.sh" create --encrypted ${data_root:+"$data_root"} || exit 1
+           else
+               bash "$SCRIPT_DIR/joinery_data_root.sh" create ${data_root:+"$data_root"} || exit 1
+           fi
+           print_success "The data root is made: XFS with project quotas, grown as it fills" ;;
+        *) print_error "This host has a data root that is not mounted: $(bash "$SCRIPT_DIR/joinery_data_root.sh" check 2>&1 || true). Nothing was changed."
+           exit 1 ;;
+    esac
+
+    print_step "Installing the site container engine..."
+    bash "$SCRIPT_DIR/install_site_engine.sh" converge "$UPGRADE_SERVER" || exit 1
+    if ! site_engine_is_podman; then
+        print_error "No site container engine was installed: this release tree names none (site_engine/ENGINE). Use a release that ships one."
+        exit 1
+    fi
+    if ! site_engine info > /dev/null 2>&1; then
+        print_error "The site container engine is installed but does not answer: $(site_engine info 2>&1 | tail -n 1)"
+        exit 1
+    fi
+    print_success "Site container engine: $(bash "$SCRIPT_DIR/install_site_engine.sh" status | sed -n 's/^engine=//p')"
+
+    # Every site's ids are its own here, so a site runs only where the host's
+    # restrictions are (run_spec_restrictions_present), as on a remapping Docker host.
+    bash "$SCRIPT_DIR/host_restrictions.sh" init || exit 1
+    if [ "$multi" -eq 1 ]; then
+        multi_tenant_host_install || exit 1
+    fi
+    if [ "$no_outbound" -ne 1 ]; then
+        print_info "The outbound limits read each site through Docker; on the site container engine they come with its admin scripts (specs/site_container_engine.md WP3)"
+    fi
+    host_housekeeping
+    install_docker_host_agent "$mgmt" "$node"
+    print_success "Site container engine host ready"
+}
+
 do_docker_install() {
     local MGMT_NODE_URL=""
     local NODE_NAME=""
@@ -2502,10 +2589,16 @@ do_docker_install() {
             --encrypted-data-root) ENCRYPTED_DATA_ROOT=1 ;;
             --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
+            --site-engine) SITE_ENGINE_HOST=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
+
+    if [ "${SITE_ENGINE_HOST:-0}" -eq 1 ]; then
+        do_site_engine_host "$MGMT_NODE_URL" "$NODE_NAME" "$MULTI_TENANT" "$DATA_ROOT" "$NO_OUTBOUND_LIMITS"
+        return
+    fi
 
     print_header "Docker Installation"
 
@@ -2885,8 +2978,8 @@ do_build_base() {
 
     print_header "Building Joinery Base Image"
 
-    if ! command -v docker >/dev/null 2>&1; then
-        print_error "Docker is not installed. Run './install.sh docker' first."
+    if ! command -v "$(site_engine_kind)" >/dev/null 2>&1; then
+        print_error "No container engine is installed ($(site_engine_kind)). Run './install.sh docker' first."
         exit 1
     fi
 
@@ -2901,6 +2994,7 @@ do_build_base() {
     mkdir -p "$BUILD_DIR/install_tools"
     cp "$SCRIPT_DIR/install.sh" "$BUILD_DIR/install_tools/install.sh"
     cp "$SCRIPT_DIR/_host_files.sh" "$BUILD_DIR/install_tools/_host_files.sh"
+    cp "$SCRIPT_DIR/_site_engine.sh" "$BUILD_DIR/install_tools/_site_engine.sh"
     cp "$SCRIPT_DIR/Dockerfile.base" "$BUILD_DIR/install_tools/Dockerfile.base"
 
     INSTALL_SH_HASH=$(compute_install_sh_hash)
@@ -2910,14 +3004,14 @@ do_build_base() {
 
     local BUILD_STATUS=0
     if [ "$QUIET_MODE" -eq 1 ]; then
-        docker build -q \
+        site_engine build -q $(site_engine_build_flags) \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
             -t "joinery-base:latest" \
             "$BUILD_DIR/install_tools" > /dev/null || BUILD_STATUS=$?
     else
-        docker build \
+        site_engine build $(site_engine_build_flags) \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
@@ -4386,7 +4480,7 @@ do_site_create() {
                 exit 1
             fi
         done
-        if is_docker_available && [ -n "$(docker ps -aq 2>/dev/null)" ]; then
+        if is_docker_available && [ -n "$(site_engine ps -aq 2>/dev/null)" ]; then
             print_error "This machine runs Docker containers. A dormant copy is quiet machine-wide, so it goes on a machine of its own."
             exit 1
         fi
@@ -4495,7 +4589,7 @@ remove_site_volumes() {
     local SITENAME="$1"
     local vol
     for vol in "${ALL_SITE_VOLUMES[@]}"; do
-        docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
+        site_engine volume rm "${SITENAME}_${vol}" 2>/dev/null || true
     done
 }
 
@@ -4506,7 +4600,7 @@ remove_site_volumes() {
 site_database_majors() {
     local SITENAME="$1"
     local MOUNTPOINT f
-    MOUNTPOINT=$(docker volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_postgres" 2>/dev/null) || return 0
+    MOUNTPOINT=$(site_engine volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_postgres" 2>/dev/null) || return 0
     [ -n "$MOUNTPOINT" ] || return 0
     for f in "${MOUNTPOINT}"/*/main/PG_VERSION; do
         [ -f "$f" ] && tr -cd '0-9' < "$f" && echo
@@ -4515,7 +4609,7 @@ site_database_majors() {
 
 # The PostgreSQL major an image carries: the one server installed in it.
 image_postgres_major() {
-    docker run --rm --entrypoint ls "$1" /usr/lib/postgresql 2>/dev/null | sort -n | tail -1
+    site_engine run --rm --entrypoint ls "$1" /usr/lib/postgresql 2>/dev/null | sort -n | tail -1
 }
 
 # Refuse a rebuild that would mount the site's database under a server that
@@ -4552,15 +4646,19 @@ refuse_database_major_mismatch() {
 seed_agent_volume() {
     local SITENAME="$1"
     local VOL="${SITENAME}_agent" IMAGE
-    docker volume inspect "$VOL" > /dev/null 2>&1 && return 0
-    docker cp "${SITENAME}:/etc/joinery-agent" - > /dev/null 2>&1 || return 0
-    IMAGE="$(docker inspect -f '{{.Config.Image}}' "$SITENAME" 2>/dev/null)"
-    docker volume create "$VOL" > /dev/null
-    if docker cp "${SITENAME}:/etc/joinery-agent" - \
-        | docker run --rm -i -v "${VOL}:/dst" --entrypoint tar "$IMAGE" -x -p -C /dst --strip-components=1; then
+    site_engine volume inspect "$VOL" > /dev/null 2>&1 && return 0
+    # On the site engine what the helper writes must belong to the site's own
+    # ids (run_spec_idmap_args); on Docker the daemon remaps it.
+    local IDMAP_ARGS=()
+    mapfile -d '' IDMAP_ARGS < <(run_spec_idmap_args "$SITENAME")
+    site_engine cp "${SITENAME}:/etc/joinery-agent" - > /dev/null 2>&1 || return 0
+    IMAGE="$(site_engine inspect -f '{{.Config.Image}}' "$SITENAME" 2>/dev/null)"
+    site_engine volume create "$VOL" > /dev/null
+    if site_engine cp "${SITENAME}:/etc/joinery-agent" - \
+        | site_engine run --rm -i "${IDMAP_ARGS[@]}" -v "${VOL}:/dst" --entrypoint tar "$IMAGE" -x -p -C /dst --strip-components=1; then
         print_info "Carried the agent's identity into ${VOL}"
     else
-        docker volume rm "$VOL" > /dev/null 2>&1 || true
+        site_engine volume rm "$VOL" > /dev/null 2>&1 || true
         print_warning "Could not carry the agent's identity across; the rebuilt site's agent will ask to be paired again."
     fi
 }
@@ -4576,7 +4674,7 @@ seed_agent_volume() {
 code_volume_is_populated() {
     local SITENAME="$1"
     local MOUNTPOINT
-    MOUNTPOINT=$(docker volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_code" 2>/dev/null) || return 1
+    MOUNTPOINT=$(site_engine volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_code" 2>/dev/null) || return 1
     [ -n "$MOUNTPOINT" ] && [ -f "${MOUNTPOINT}/VERSION" ]
 }
 
@@ -4604,7 +4702,7 @@ assert_rebuild_moves_code_forward() {
 
     if [ "$DEPLOY_MODE" = "docker" ]; then
         # Nothing installed under this name yet — there is no code to move backward.
-        if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
+        if ! site_engine ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
             return 0
         fi
 
@@ -4629,7 +4727,7 @@ assert_rebuild_moves_code_forward() {
         # docker exec cannot — and a previous failed run may have left it stopped.
         local TMP_VERSION
         TMP_VERSION=$(mktemp)
-        if docker cp "${SITENAME}:${LIVE_VERSION_PATH}" "$TMP_VERSION" > /dev/null 2>&1; then
+        if site_engine cp "${SITENAME}:${LIVE_VERSION_PATH}" "$TMP_VERSION" > /dev/null 2>&1; then
             RUNNING_VERSION=$(tr -d '[:space:]' < "$TMP_VERSION")
         fi
         rm -f "$TMP_VERSION"
@@ -4766,7 +4864,7 @@ do_site_docker() {
     # before the record existed has it read from Docker now, while it still
     # exists; nothing reads Docker's record of it again.
     . "$SCRIPT_DIR/_site_run_spec.sh"
-    if ! run_spec_exists "$SITENAME" && docker inspect "$SITENAME" > /dev/null 2>&1; then
+    if ! run_spec_exists "$SITENAME" && site_engine inspect "$SITENAME" > /dev/null 2>&1; then
         run_spec_adopt "$SITENAME" || { print_error "Could not record how ${SITENAME}'s container is run; nothing was changed"; exit 1; }
         print_info "Recorded ${SITENAME}'s run spec from its container: $(run_spec_path "$SITENAME")"
     fi
@@ -4774,7 +4872,7 @@ do_site_docker() {
     # a new site (no spec) gets the default process ceiling.
     local SPEC_FOREIGN="" SPEC_OUTBOUND=""
     if run_spec_exists "$SITENAME"; then
-        docker inspect "$SITENAME" > /dev/null 2>&1 \
+        site_engine inspect "$SITENAME" > /dev/null 2>&1 \
             || print_info "${SITENAME} has a run spec but no container; its limits apply: $(run_spec_path "$SITENAME")"
         [ "$CONTAINER_MEMORY_GIVEN" -eq 1 ] || CONTAINER_MEMORY="$(run_spec_get "$SITENAME" memory)"
         [ "$CONTAINER_CPUS_GIVEN" -eq 1 ] || CONTAINER_CPUS="$(run_spec_get "$SITENAME" cpus)"
@@ -4827,6 +4925,9 @@ do_site_docker() {
     # A disk allowance is an XFS project on the data root, and holds only
     # where root in the container is not root on the host. Where it would not
     # hold, it is refused rather than ignored.
+    if [ -n "$CONTAINER_DISK" ] && site_engine_is_podman; then
+        refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "a disk allowance on the site container engine comes with its disk pool (specs/site_container_engine.md WP3); install the site without --disk for now"
+    fi
     if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap >/dev/null 2>&1; then
         refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: $(bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap 2>&1 | sed 's/^docker_disk_pool: //') (install.sh docker --multi-tenant makes a host that can, on a new host)"
     fi
@@ -4859,6 +4960,13 @@ do_site_docker() {
     local NET_LINES
     NET_LINES="$(run_spec_network_lines "$SITENAME")" \
         || { print_error "Could not give ${SITENAME} a network of its own; nothing was changed"; exit 1; }
+    # On the site engine, the site's own block of ids (specs/site_container_engine.md
+    # D4): the one its spec records, or the lowest free one, claimed now.
+    local IDBLOCK_LINE=""
+    if site_engine_is_podman; then
+        IDBLOCK_LINE="$(run_spec_idblock_line "$SITENAME")" \
+            || { print_error "Could not give ${SITENAME} a block of ids of its own; nothing was changed"; exit 1; }
+    fi
 
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
@@ -4866,9 +4974,9 @@ do_site_docker() {
     # causing install.sh to auto-pick a stray alternate port (breaks the
     # domain→port mapping on rebuild). The container-exists block below still
     # runs and does the actual `docker rm` (and --wipe-data if requested).
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
+    if site_engine ps --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
         print_info "Existing container '${SITENAME}' is running — stopping it before port check"
-        docker stop "$SITENAME" > /dev/null 2>&1 || true
+        site_engine stop "$SITENAME" > /dev/null 2>&1 || true
     fi
 
     # Port conflict detection
@@ -4927,7 +5035,7 @@ do_site_docker() {
     # gets it built here automatically; Dockerfile.base ships alongside this
     # script in every release archive.
     print_step "Checking for joinery-base:${BASE_IMAGE_VERSION}..."
-    if ! docker image inspect "joinery-base:${BASE_IMAGE_VERSION}" > /dev/null 2>&1; then
+    if ! site_engine image inspect "joinery-base:${BASE_IMAGE_VERSION}" > /dev/null 2>&1; then
         print_warning "joinery-base:${BASE_IMAGE_VERSION} not found — building it now (one-time per host, 5-10 minutes)."
         do_build_base
     fi
@@ -4938,7 +5046,7 @@ do_site_docker() {
     # mismatch means someone edited install.sh without bumping
     # BASE_IMAGE_VERSION and rebuilding the base.
     CURRENT_HASH=$(compute_install_sh_hash)
-    BASE_HASH=$(docker image inspect "joinery-base:${BASE_IMAGE_VERSION}" \
+    BASE_HASH=$(site_engine image inspect "joinery-base:${BASE_IMAGE_VERSION}" \
         --format '{{ index .Config.Labels "joinery.install_sh_hash" }}' 2>/dev/null)
     if [ -n "$BASE_HASH" ] && [ "$BASE_HASH" != "unknown" ] && [ "$CURRENT_HASH" != "$BASE_HASH" ]; then
         print_warning "install.sh do_server_setup has changed since joinery-base was built"
@@ -4977,15 +5085,15 @@ do_site_docker() {
     # Check for existing container
     print_step "Checking for existing container named '$SITENAME'..."
 
-    if docker ps -a --format '{{.Names}}' | grep -q "^${SITENAME}$"; then
+    if site_engine ps -a --format '{{.Names}}' | grep -q "^${SITENAME}$"; then
         print_warning "A container named '$SITENAME' already exists"
 
         if [ "$ASSUME_YES" -eq 1 ]; then
             if [ "$WIPE_DATA" -eq 1 ]; then
                 # Full wipe: remove container AND all data volumes (fresh install)
                 print_warning "Auto-removing existing container AND data volumes (-y --wipe-data)"
-                docker stop "$SITENAME" 2>/dev/null || true
-                docker rm "$SITENAME" 2>/dev/null || true
+                site_engine stop "$SITENAME" 2>/dev/null || true
+                site_engine rm "$SITENAME" 2>/dev/null || true
                 remove_site_volumes "$SITENAME"
                 print_success "Existing container and volumes removed"
             else
@@ -4993,8 +5101,8 @@ do_site_docker() {
                 print_info "Auto-removing existing container (-y flag); data volumes preserved"
                 print_info "Add --wipe-data to also delete volumes (irreversible)"
                 seed_agent_volume "$SITENAME"
-                docker stop "$SITENAME" 2>/dev/null || true
-                docker rm "$SITENAME" 2>/dev/null || true
+                site_engine stop "$SITENAME" 2>/dev/null || true
+                site_engine rm "$SITENAME" 2>/dev/null || true
                 print_success "Existing container removed (volumes intact)"
             fi
         else
@@ -5013,8 +5121,8 @@ do_site_docker() {
                     exit 1
                 fi
                 print_info "Stopping and removing existing container and volumes..."
-                docker stop "$SITENAME" 2>/dev/null || true
-                docker rm "$SITENAME" 2>/dev/null || true
+                site_engine stop "$SITENAME" 2>/dev/null || true
+                site_engine rm "$SITENAME" 2>/dev/null || true
                 remove_site_volumes "$SITENAME"
                 print_success "Existing container and volumes removed"
             else
@@ -5028,8 +5136,8 @@ do_site_docker() {
                 fi
                 print_info "Stopping and removing existing container..."
                 seed_agent_volume "$SITENAME"
-                docker stop "$SITENAME" 2>/dev/null || true
-                docker rm "$SITENAME" 2>/dev/null || true
+                site_engine stop "$SITENAME" 2>/dev/null || true
+                site_engine rm "$SITENAME" 2>/dev/null || true
                 print_success "Existing container removed (volumes intact)"
             fi
         fi
@@ -5143,13 +5251,13 @@ EOF
     # Build with -q flag in quiet mode to suppress build output
     # BASE_IMAGE_VERSION is consumed by Dockerfile.template's `ARG` before FROM.
     if [ "$QUIET_MODE" -eq 1 ]; then
-        docker build -q \
+        site_engine build -q $(site_engine_build_flags) \
             --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
             -t "joinery-$SITENAME" . > /dev/null
     else
-        docker build \
+        site_engine build $(site_engine_build_flags) \
             --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
@@ -5224,7 +5332,7 @@ EOF
     # What install.sh does not own (another published port, a volume at a
     # destination of its own) is the site's, and the rebuild keeps it.
     local RENDERED OLD_LINE
-    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$CONTAINER_CPUS" "$CONTAINER_PIDS")"$'\n'"$NET_LINES"
+    RENDERED="$(run_spec_render "$SITENAME" "${WEB_PUBLISH%:}" "$PORT" "$DB_PORT" "$CONTAINER_MEMORY" "$CONTAINER_CPUS" "$CONTAINER_PIDS")"$'\n'"$NET_LINES"${IDBLOCK_LINE:+$'\n'"$IDBLOCK_LINE"}
     print_info "Network: $(sed -n 's/^network=//p' <<< "$NET_LINES") ($(sed -n 's/^subnet6\?=\(..*\)$/\1/p' <<< "$NET_LINES" | paste -sd ' '))"
     if [ -n "$SPEC_FOREIGN" ]; then
         printf '%s\n' "$SPEC_FOREIGN" | while IFS= read -r l; do print_info "Kept from the run spec: ${l}"; done
@@ -5242,14 +5350,15 @@ EOF
     { printf '%s\n' "$RENDERED"; [ -z "$CONTAINER_DISK" ] || printf 'disk=%s\n' "$CONTAINER_DISK"; [ -z "$SPEC_FOREIGN" ] || printf '%s\n' "$SPEC_FOREIGN"; [ -z "$SPEC_OUTBOUND" ] || printf '%s\n' "$SPEC_OUTBOUND"; } \
         | run_spec_write "$SITENAME" \
         || { print_error "Could not write ${SITENAME}'s run spec"; exit 1; }
+    run_spec_idblock_claim_clear "$SITENAME"
     local RUN_ARGS=()
     mapfile -d '' RUN_ARGS < <(run_spec_args "$SITENAME")
     [ "${#RUN_ARGS[@]}" -gt 0 ] || { print_error "${SITENAME}'s run spec gave no arguments"; exit 1; }
 
     if [ "$QUIET_MODE" -eq 1 ]; then
-        docker run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
+        site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
     else
-        docker run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
+        site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
     fi
 
     if [ $? -eq 0 ]; then
@@ -5326,10 +5435,10 @@ EOF
     # was silently dropped on the Docker path and the site came up unmanageable.
     if [ "$ENABLE_AGENT" = true ]; then
         print_step "Enabling the Joinery agent inside the container..."
-        if docker exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
+        if site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" "${AGENT_CONTROL_ARGS[@]}"; then
             print_success "Agent enabled inside $SITENAME${MANAGEMENT_NODE_URL:+ and asked to join $MANAGEMENT_NODE_URL}"
             if [ -n "$MANAGEMENT_NODE_URL" ]; then
-                emit_site_agent_key docker exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
+                emit_site_agent_key site_engine exec "$SITENAME" php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --status
             fi
         else
             print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
@@ -5387,18 +5496,22 @@ EOF
         fi
         echo -e "Access your site: ${GREEN}$SITE_URL${NC}"
         echo ""
+        # Commands the operator types name the engine itself: site_engine is
+        # this script's own function, which no shell outside it knows.
+        local ENGINE_CMD
+        ENGINE_CMD="$(site_engine_kind)"
         print_admin_login "/var/www/html/$SITENAME/config/admin_credentials.txt" \
-            "docker exec $SITENAME cat" \
-            "docker exec $SITENAME cat /var/www/html/$SITENAME/config/admin_credentials.txt"
+            "$ENGINE_CMD exec $SITENAME cat" \
+            "$ENGINE_CMD exec $SITENAME cat /var/www/html/$SITENAME/config/admin_credentials.txt"
         print_ssl_deferred_notice
         echo "Useful commands:"
-        echo -e "  View logs:      ${BLUE}docker logs $SITENAME${NC}"
-        echo -e "  Shell access:   ${BLUE}docker exec -it $SITENAME bash${NC}"
-        echo -e "  Stop container: ${BLUE}docker stop $SITENAME${NC}"
-        echo -e "  Start container:${BLUE}docker start $SITENAME${NC}"
+        echo -e "  View logs:      ${BLUE}$ENGINE_CMD logs $SITENAME${NC}"
+        echo -e "  Shell access:   ${BLUE}$ENGINE_CMD exec -it $SITENAME bash${NC}"
+        echo -e "  Stop container: ${BLUE}$ENGINE_CMD stop $SITENAME${NC}"
+        echo -e "  Start container:${BLUE}$ENGINE_CMD start $SITENAME${NC}"
         echo ""
 
-        CONTAINER_STATUS=$(docker ps --filter "name=$SITENAME" --format "{{.Status}}" 2>/dev/null)
+        CONTAINER_STATUS=$(site_engine ps --filter "name=$SITENAME" --format "{{.Status}}" 2>/dev/null)
         if [ -n "$CONTAINER_STATUS" ]; then
             echo -e "Container status: ${GREEN}$CONTAINER_STATUS${NC}"
         else
@@ -5685,29 +5798,29 @@ do_list() {
     print_header "Existing Joinery Sites"
 
     # Check for Docker sites
-    if command -v docker &> /dev/null; then
-        echo -e "${BLUE}Docker containers:${NC}"
+    if command -v "$(site_engine_kind)" &> /dev/null; then
+        echo -e "${BLUE}Site containers ($(site_engine_kind)):${NC}"
 
         local found=false
         while IFS= read -r line; do
             if [ -n "$line" ]; then
                 local name=$(echo "$line" | awk '{print $1}')
                 local status=$(echo "$line" | awk '{$1=""; print $0}' | xargs)
-                local ports=$(docker port "$name" 2>/dev/null | head -1 | sed 's/.*://')
+                local ports=$(site_engine port "$name" 2>/dev/null | head -1 | sed 's/.*://')
 
                 # Only show joinery containers
-                if [[ "$name" == joinery-* ]] || docker inspect "$name" --format '{{.Config.Image}}' 2>/dev/null | grep -q "^joinery-"; then
+                if [[ "$name" == joinery-* ]] || site_engine inspect "$name" --format '{{.Config.Image}}' 2>/dev/null | grep -q "^joinery-"; then
                     echo "  $name	$status	Port: ${ports:-N/A}"
                     found=true
                 fi
             fi
-        done < <(docker ps -a --format "{{.Names}} {{.Status}}" 2>/dev/null)
+        done < <(site_engine ps -a --format "{{.Names}} {{.Status}}" 2>/dev/null)
 
         # Also show stopped containers
-        local stopped=$(docker ps -a --filter "status=exited" --format "{{.Names}}" 2>/dev/null | grep "^joinery-")
+        local stopped=$(site_engine ps -a --filter "status=exited" --format "{{.Names}}" 2>/dev/null | grep "^joinery-")
         if [ -n "$stopped" ]; then
             echo "$stopped" | while read name; do
-                if ! docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
+                if ! site_engine ps --format "{{.Names}}" 2>/dev/null | grep -q "^${name}$"; then
                     echo "  ${name}	(stopped)"
                     found=true
                 fi
