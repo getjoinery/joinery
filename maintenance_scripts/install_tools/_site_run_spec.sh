@@ -3,6 +3,9 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.13 - the missing-helper fallback names images as the helper does (site_engine_image). On the
+#                 site container engine a spec that publishes the site's database (5432) on any address
+#                 but loopback runs no site: no DOCKER-USER chain there drops it (WP3).
 # Version: 1.12 - Without _site_engine.sh beside it (outbound_limits.sh installs a copy alone) it
 #                 answers Docker only where the site container engine is not installed; on a
 #                 machine where it is, every engine call is refused and says why, never sent to
@@ -111,7 +114,7 @@
 if [[ -f "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh" ]]; then
     . "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh"
 else
-    site_engine_is_podman() { [[ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; }
+    site_engine_is_podman() { [[ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; }
     site_engine_kind() {
         if site_engine_is_podman; then
             echo "run spec: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $(dirname "${BASH_SOURCE[0]}")/_site_run_spec.sh; nothing was done" >&2
@@ -120,6 +123,7 @@ else
         echo docker
     }
     site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
+    site_engine_image() { printf '%s\n' "${1#localhost/}"; }
 fi
 
 RUN_SPEC_VERSION=2
@@ -731,6 +735,13 @@ run_spec_args() {  # SITE
         idbase="$(site_engine_idblock_base "$v")" || return 1
         [[ -s "$(run_spec_root)${RUN_SPEC_SITE_SECCOMP}" ]] \
             || { echo "run spec: no site system call filter at ${RUN_SPEC_SITE_SECCOMP}, so ${site} would run under the engine's own, which lets it make user namespaces; run install_tools/install_site_engine.sh converge as root" >&2; return 1; }
+        # A site's database is published on loopback alone: there is no
+        # DOCKER-USER chain here to drop the rest (install.sh docker's rule).
+        while IFS= read -r v; do
+            [[ "$v" =~ :5432(/tcp)?$ ]] || continue
+            [[ "$v" == 127.0.0.1:* || "$v" == "[::1]:"* ]] \
+                || { echo "run spec: ${site} publishes its database beyond this host (publish=${v}); on the site container engine a site's database is published on 127.0.0.1 alone" >&2; return 1; }
+        done < <(run_spec_list "$site" publish)
     fi
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
     v="$(run_spec_get "$site" network)"

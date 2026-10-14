@@ -24,6 +24,10 @@
 #     D7's step when it is filling, grows only as far as the root disk can
 #     give above its reserve, and says once when it cannot grow at all.
 #   - grow SIZE: never shrinks, never takes the root disk under its reserve.
+#   - the data root's own mount point (1.24): locked underneath, as a bind's
+#     is, by create before the first mount, and by the first tick of a boot
+#     on a host made earlier; only while it is empty: one holding files is
+#     named and left.
 #   - bind / unbind (WP2, D1): a path is a bind mount of its place under the
 #     data root, recorded, its unit written and required by the target; a new
 #     place takes the path's mode; a path holding data is refused with exit 3
@@ -105,6 +109,13 @@ stub du 'p="${@: -1}"; case "$p" in *joinery.img) if [ -f "$GATE_T/holes" ]; the
 figs() { echo "$(( $2 )) $(( $3 )) $(( $4 ))" > "$T/fig_$1"; }
 run() { PATH="$T/bin:$PATH" JOINERY_HOST_ROOT="$T/root" bash "$SCRIPT" "$@"; }
 unmount() { rm -f "$T/mounted"; }
+# chattr and lsattr as on a filesystem that has the immutable flag: +i is
+# recorded, and lsattr reads it back. Unprivileged, the real chattr cannot set it.
+imm_stubs() {
+    stub chattr 'echo "chattr $*" >> "$GATE_LOG"; [ "$1" = "+i" ] && echo "$2" >> "$GATE_T/immutable"; exit 0'
+    stub lsattr 'p="${@: -1}"; if grep -qxF "$p" "$GATE_T/immutable" 2>/dev/null; then echo "----i---------e------- $p"; else echo "--------------e------- $p"; fi'
+}
+no_imm_stubs() { rm -f "$T/bin/chattr" "$T/bin/lsattr" "$T/immutable"; }
 
 # A 100 GiB root disk with 80 free: its reserve is 15 GiB, so it can give 65.
 figs root 100*G 20*G 80*G
@@ -158,8 +169,14 @@ figs root 100*G 20*G 80*G
 
 echo "=== create: a file of the first size D7 gives ==="
 : > "$T/root/lib/systemd/system/php8.5-fpm.service"
-out="$(run create 2>&1)"; rc=$?
+# The root view's stand-in: the folder the mount will hide at /srv/joinery.
+mkdir -p "$T/hidden_create/srv/joinery"
+imm_stubs
+out="$(JOINERY_TEST_ROOT_VIEW="$T/hidden_create" run create 2>&1)"; rc=$?
+no_imm_stubs
 chk "exit 0" "$rc" "0"
+chk "the mount point underneath: root's, mode 000 and immutable, before the first mount (1.24)" \
+    "$(stat -c %a "$T/hidden_create/srv/joinery")|$(grep -n -e "^chattr +i $T/hidden_create/srv/joinery$" -e '^mount ' "$LOG" | cut -d: -f2 | cut -d' ' -f1 | paste -sd,)" "0|chattr,mount"
 chk "first size: a quarter of the root disk, 25 GiB (above 16)" \
     "$(grep -c "^fallocate -l $((25 * G)) $T/root/srv/joinery.img$" "$LOG")" "1"
 chk "formatted XFS with ftype=1 and 4096-byte sectors" "$(grep -c "^mkfs.xfs -q -n ftype=1 -s size=4096 $T/root/srv/joinery.img$" "$LOG")" "1"
@@ -253,6 +270,46 @@ rm -f "$SD/docker.service.d/joinery-data-root.conf"
 out="$(run tick 2>&1)"
 chk "a drop-in removed, and a PHP-FPM installed later: both written, one reload" \
     "$( [ -f "$SD/docker.service.d/joinery-data-root.conf" ] && echo y)|$( [ -f "$SD/php8.6-fpm.service.d/joinery-data-root.conf" ] && echo y)|$(grep -c daemon-reload "$LOG")" "y|y|1"
+
+echo "=== tick: the data root's own mount point, underneath it (1.24) ==="
+# A data root made before 1.24: the folder its mount hides is a plain one.
+imm_stubs
+HV="$T/hidden_tick"; mkdir -p "$HV/srv/joinery"
+unlock_hv() { chmod 755 "$HV/srv/joinery"; rm -f "$T/immutable"; }
+seen="$T/root/run/joinery/data-root.mountpoint-seen"; rm -f "$seen"
+out="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"; rc=$?
+chk "an empty one: locked at the boot's first tick, quietly, and recorded so; the data root itself is not touched" \
+    "$rc|${#out}|$(stat -c %a "$HV/srv/joinery")|$(grep -cxF "$HV/srv/joinery" "$T/immutable")|$(stat -c %a "$T/root/srv/joinery")|$(cat "$seen")|$(stat -c %a "$seen")" "0|0|0|1|755|locked|644"
+unlock_hv; : > "$HV/srv/joinery/storage.db"
+out="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"
+chk "looked at once a boot: the next tick does not look again" "$(stat -c %a "$HV/srv/joinery")|${#out}" "755|0"
+rm -f "$seen"
+out="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"; rc=$?
+out2="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"
+chk "one holding files: named once, left as it is, and the tick goes on" \
+    "$rc|$(grep -c "/srv/joinery underneath the data root holds files" <<< "$out")|$(grep -c 'holds files' <<< "$out2")|$(stat -c %a "$HV/srv/joinery")|$(ls "$HV/srv/joinery")" \
+    "0|1|0|755|storage.db"
+chk "and recorded so" "$(cat "$seen")" "holds-files"
+rm -f "$HV/srv/joinery/storage.db"; : > "$seen"
+JOINERY_TEST_ROOT_VIEW="$HV" run tick >/dev/null 2>&1
+chk "a flag that records nothing: looked at again" "$(stat -c %a "$HV/srv/joinery")|$(cat "$seen")" "0|locked"
+rm -f "$seen"; : > "$LOG"
+JOINERY_TEST_ROOT_VIEW="$HV" run tick >/dev/null 2>&1
+chk "already immutable at the next boot: recorded locked, and not locked again" "$(cat "$seen")|$(grep -c '^chattr' "$LOG")" "locked|0"
+unlock_hv
+# A root disk whose filesystem will not take the immutable flag: mode 000
+# alone, which root (and so podman) passes straight through.
+stub chattr 'echo "chattr $*" >> "$GATE_LOG"; exit 0'
+rm -f "$seen"
+out="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"; rc=$?
+out2="$(JOINERY_TEST_ROOT_VIEW="$HV" run tick 2>&1)"
+chk "a filesystem without the immutable flag: mode 000, recorded mode-only, not locked, said once (reviewer2)" \
+    "$rc|$(stat -c %a "$HV/srv/joinery")|$(cat "$seen")|$(grep -c 'would not take the immutable flag' <<< "$out")|$(grep -c 'immutable' <<< "$out2")" "0|0|mode-only|1|0"
+unlock_hv; no_imm_stubs
+rm -f "$seen"
+out="$(run tick 2>&1)"
+chk "a test root that gives no view: the data root's own folder is never locked, and nothing is said to be" \
+    "$(stat -c %a "$T/root/srv/joinery")|${#out}|$(cat "$seen")" "755|0|unreachable"
 
 echo "=== tick: growth (D7) ==="
 : > "$LOG"
@@ -542,6 +599,13 @@ chk "no boot id to tell a later boot by: refused, nothing made (reviewer2 F2)" \
     "$rc|$(grep -c "boot's id .* cannot be read" <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)" "1|1|none"
 out="$(run migrate 2M 2>&1)"; rc=$?
 chk "a size that cannot hold the data with room: refused" "$rc|$(grep -c 'cannot hold this host' <<< "$out")" "1|1"
+mkdir -p "$R/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa" "$R/etc/containers"
+ln -s 6.1.4-aaaaaaaaaaaa "$R/usr/local/lib/joinery-site-engine/current"
+printf '[storage]\ndriver = "overlay"\ngraphroot = "/var/lib/containers/storage"\n' > "$R/etc/containers/storage.conf"
+out="$(run migrate 2>&1)"; rc=$?
+chk "a site container engine whose storage is off the data root: refused, nothing made" \
+    "$rc|$(grep -c 'site container engine keeps its storage at /var/lib/containers/storage, off the data root' <<< "$out")|$( [ -e "$R/srv/joinery.img" ] && echo made || echo none)|$(grep -c '^systemctl stop' "$LOG")" "1|1|none|0"
+rm -rf "${R:?}/usr/local/lib/joinery-site-engine" "${R:?}/etc/containers"
 
 echo "--- the move ---"
 : > "$LOG"

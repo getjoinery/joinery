@@ -4,6 +4,13 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.24 - The data root's own mount point is locked underneath it, as a bind's is: at create before the
+#                 first mount, and on an existing host at the first tick of each boot while it is empty. A
+#                 Podman call while /srv/joinery is not mounted fails, where it made a new, empty store on the
+#                 root disk (reviewer2, site_container_engine WP3 R2). Locked means immutable: where the
+#                 filesystem will not take the flag, the tick records mode-only.
+# Version: 1.23 - migrate refuses a site container engine host whose storage is off the data root, and
+#                 moves nothing of one whose storage is on it; a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 1.22 - podman-restart.service joins the consumers: on a host whose sites run on the site
 #                container engine (specs/site_container_engine.md WP2) the containers come back
 #                at boot only once the data root holding their storage is mounted.
@@ -127,7 +134,8 @@
 #   joinery_data_root.sh tick
 #                     Root. The host converger's call, every minute: check,
 #                     keep the units, mount a recorded bind that is not in
-#                     place, and grow when D7 says so. Exits as check.
+#                     place, lock the mount point underneath once a boot,
+#                     and grow when D7 says so. Exits as check.
 #   joinery_data_root.sh bind REL TARGET
 #                     Root. TARGET (an absolute path, /var/lib/postgresql) is
 #                     from then on a bind mount of /srv/joinery/REL (postgresql),
@@ -182,7 +190,11 @@
 # mounted. Every service whose data lives there requires it, so none starts
 # on an empty directory on the root disk. The drop-ins exist only where a
 # data root does: a Requires= naming a target that does not exist would stop
-# the unit starting.
+# the unit starting. A caller that is not a unit waits for nothing: the site
+# container engine has no daemon, so every podman call is one. For those the
+# directory under /srv/joinery is locked, as a bind's is (below): while the
+# data root is not mounted, such a call fails instead of making a new, empty
+# store of its own on the root disk.
 #
 # THE BINDS (D1). The paths the platform and its packages use stay as they
 # are; each is a bind mount of its place here. Not a symlink: tar, find and
@@ -231,6 +243,9 @@ LOCK_FILE="${ROOT}/run/joinery/data-root.lock"
 CANNOT_GROW_FLAG="${ROOT}/run/joinery/data-root.cannot-grow"
 # The tick said once that the data root would not mount again.
 NOT_MOUNTED_FLAG="${ROOT}/run/joinery/data-root.not-mounted"
+# The tick looked once this boot at the data root's own mount point underneath it; it holds
+# how that stands (lock_data_root_mountpoint).
+MOUNTPOINT_FLAG="${ROOT}/run/joinery/data-root.mountpoint-seen"
 BINDS="${ROOT}/etc/joinery/data_binds"
 TARGET_UNIT="joinery-data.target"
 MOUNT_UNIT="srv-joinery.mount"
@@ -1191,6 +1206,8 @@ do_create() {
     chmod 644 "$CONF"
 
     mkdir -p "$MNT"
+    # Locked before the first mount hides it; the tick tries again if not.
+    lock_data_root_mountpoint || true
     if (( encrypted )); then
         # The mount is a unit of its own (D1b); starting the target mounts it,
         # and the unlock finds the volume already open.
@@ -1296,6 +1313,45 @@ root_view_close() {
         umount "$ROOT_VIEW" && rmdir "$ROOT_VIEW"
     fi
     ROOT_VIEW=""
+}
+
+# The data root's own mount point, underneath it, locked as a bind's is (THE
+# UNITS, above). Reached through the root view, so mounted or not. Only an
+# empty one: what is there was written while the data root was down, and is
+# for a person to look at, so it is named and left. Locked means immutable:
+# podman runs as root, which mode 000 alone does not stop. 0 when it is
+# locked; MOUNTPOINT_STATE says how it stands: locked, mode-only (its
+# filesystem would not take the immutable flag), holds-files, failed or
+# unreachable.
+MOUNTPOINT_STATE=""
+is_immutable() { [[ "$(lsattr -d "$1" 2>/dev/null | awk '{ print $1 }')" == *i* ]]; }
+lock_data_root_mountpoint() {
+    local under
+    MOUNTPOINT_STATE="unreachable"
+    if ! root_view_open; then
+        say "data root: ${MNT_REAL} underneath the data root could not be reached to lock it"
+        return 1
+    fi
+    under="${ROOT_VIEW}${MNT_REAL}"
+    # A test root that gave no view sees the data root itself: nothing is underneath.
+    if [[ "$under" == "$MNT" ]]; then
+        :
+    elif is_immutable "$under"; then
+        MOUNTPOINT_STATE="locked"
+    elif [[ -n "$(ls -A "$under" 2>/dev/null)" ]]; then
+        MOUNTPOINT_STATE="holds-files"
+        say "data root: ${MNT_REAL} underneath the data root holds files, written while it was not mounted, so it is not locked. See them with: mount --bind / /mnt && ls -A /mnt${MNT_REAL}. Once they are moved away, the next boot locks it."
+    elif ! lock_mountpoint "$under"; then
+        MOUNTPOINT_STATE="failed"
+        say "data root: ${MNT_REAL} underneath the data root could not be locked (above)"
+    elif is_immutable "$under"; then
+        MOUNTPOINT_STATE="locked"
+    else
+        MOUNTPOINT_STATE="mode-only"
+        say "data root: ${MNT_REAL} underneath the data root is mode 000, but its filesystem would not take the immutable flag: a command run as root (podman) can still write there while the data root is not mounted"
+    fi
+    root_view_close
+    [[ "$MOUNTPOINT_STATE" == "locked" ]]
 }
 
 # Move a folder that holds data onto the data root where it stands (D9: a
@@ -1849,7 +1905,7 @@ do_migrate() {
     need_root
     cd /
     # A container's data is its volumes, on its host: the host is what moves.
-    if [[ -z "$ROOT" ]] && { [[ -e /.dockerenv ]] || systemd-detect-virt --container --quiet 2>/dev/null; }; then
+    if [[ -z "$ROOT" ]] && { [[ -e /.dockerenv || -e /run/.containerenv ]] || systemd-detect-virt --container --quiet 2>/dev/null; }; then
         die "this is a container; its data is its volumes, which move with its host (run this on the host). ${MIGRATE_NOTHING}"
     fi
     # A unit of its own: the move outlives whoever started it (an ssh session
@@ -1894,6 +1950,16 @@ do_migrate() {
         # shellcheck source=_docker_daemon_json.sh
         . "$(dirname "$SELF")/_docker_daemon_json.sh" || die "_docker_daemon_json.sh is missing beside this script"
         MIGRATE_DOCKER_FROM="$(migrate_docker_root)"
+    fi
+    # The site container engine keeps its storage on the data root from its
+    # first start (install.sh docker --site-engine makes the data root first,
+    # and install_site_engine.sh writes storage.conf onto it only): nothing of
+    # its moves, and one whose storage is anywhere else is not a host this moves.
+    if [[ -L "${ROOT}/usr/local/lib/joinery-site-engine/current" ]]; then
+        local graphroot
+        graphroot="$(sed -n 's/^graphroot = "\(.*\)"$/\1/p' "${ROOT}/etc/containers/storage.conf" 2>/dev/null | tail -n 1)"
+        [[ "$graphroot" == "${MNT_REAL}/"* ]] \
+            || die "this host's site container engine keeps its storage at ${graphroot:-/var/lib/containers/storage}, off the data root, and this does not move it: build a host with install.sh docker --site-engine and move its sites there. ${MIGRATE_NOTHING}"
     fi
     if (( ${#moves[@]} == 0 )) && [[ -z "$MIGRATE_DOCKER_FROM" ]]; then
         say "This host keeps no data off the data root; nothing to move"
@@ -3199,6 +3265,14 @@ plain_leftovers() {
 
 tick_upkeep() {
     ensure_units || return 1
+    # Once a boot: a data root made before 1.24 is locked underneath too, and
+    # one unlocked by hand is locked again. The flag holds how it stands, for
+    # anyone to read.
+    if [[ ! -s "$MOUNTPOINT_FLAG" ]]; then
+        lock_data_root_mountpoint || true
+        printf '%s\n' "$MOUNTPOINT_STATE" > "$MOUNTPOINT_FLAG"
+        chmod 644 "$MOUNTPOINT_FLAG"
+    fi
     migrate_forget_old || true
     is_luks || plain_leftovers
     if is_luks; then

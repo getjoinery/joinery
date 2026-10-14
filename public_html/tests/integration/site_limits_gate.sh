@@ -105,6 +105,24 @@ reset; rm -f "$T/pool"
 o="$(run sitea keep keep 2G 2>&1)"; r=$?
 chk "refused: an allowance on a host with no disk pool" "$r|$(grep -c 'no disk pool' <<< "$o")|$(key disk)" "2|1|1G"
 
+echo "=== on the site container engine: podman updates and restarts it, never docker ==="
+cp "$ROOT_DIR/maintenance_scripts/install_tools/_site_engine.sh" "$T/tools/"
+cat > "$T/bin/podman" <<'STUB'
+#!/bin/bash
+case "$1" in
+    inspect) case "${@: -1}" in sitea|nospec) echo "SITENAME=${@: -1}" ;; other) echo "SITENAME=sitea" ;; *) exit 1 ;; esac ;;
+    info) echo 2 ;;
+    update|restart) echo "podman $*" >> "$GATE_LOG" ;;
+esac
+STUB
+printf '#!/bin/bash\necho "docker $*" >> "%s/direct"\nexit 1\n' "$T" > "$T/bin/docker"
+chmod 755 "$T/bin/podman" "$T/bin/docker"
+reset
+out="$(JOINERY_SITE_ENGINE_KIND=podman run sitea 768m keep keep)"; rc=$?
+chk "done, the new memory in force, restarted" "$rc|$(grep -c '"done":true' <<< "$out")|$(grep -c '"memory":"768m"' <<< "$out")|$(grep -c '"restarted":true' <<< "$out")|$(key memory)" "0|1|1|1|768m"
+chk "podman was asked update with swap held to it, then restart" "$(grep '^podman' "$T/log" | tr '\n' '|')" "podman update --memory=768m --memory-swap=768m sitea|podman restart sitea|"
+chk "nothing reached docker" "$([ -s "$T/direct" ] && cat "$T/direct" || echo none)" "none"
+
 echo "=== install.sh site-limits ==="
 chk "the command runs site_limits.sh with keep for each flag left out" \
     "$(grep -c 'local site="" memory=keep cpus=keep disk=keep' "$INSTALL")|$(grep -c 'sysadmin_tools/site_limits.sh" "$site" "$memory" "$cpus" "$disk"' "$INSTALL")" "1|1"

@@ -80,6 +80,14 @@ mkdir -p "$FX/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa" "$FX/usr/loc
 ln -s 6.1.4-aaaaaaaaaaaa "$FX/usr/local/lib/joinery-site-engine/current"
 printf '#!/bin/sh\n' > "$FX/usr/local/bin/podman"; chmod 755 "$FX/usr/local/bin/podman"
 chk "a host where install_site_engine.sh put ours runs them on podman" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind")" "podman"
+chmod 644 "$FX/usr/local/bin/podman"
+chk "installed but its podman not executable: refused, never docker (reviewer2 R1)" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind" 2>"$T/err"; echo "rc=$?")" "rc=1"
+chk "  saying what to run" "$(grep -c 'install_site_engine.sh converge' "$T/err")" "1"
+chk "  and the host still counts as the site engine's, so no Docker branch is taken" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_is_podman && echo yes")" "yes"
+chmod 755 "$FX/usr/local/bin/podman"
+mv "$FX/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa" "$FX/aside"
+chk "a dangling current link is still the site engine's (reviewer2 R7)" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind")" "podman"
+mv "$FX/aside" "$FX/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa"
 chk "a test can name the engine" "$(JOINERY_SITE_ENGINE_KIND=podman bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind")" "podman"
 chk "  and naming another is refused" "$(JOINERY_SITE_ENGINE_KIND=lxc bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind" 2>/dev/null; echo $?)" "1"
 
@@ -131,6 +139,13 @@ mv "$T/root/etc/containers/joinery-site-seccomp.json" "$T/seccomp.aside"
 chk "a host with no site filter runs no site" "$(args e | grep -c .)" "0"
 chk "  and says what to run" "$(grep -c 'install_site_engine.sh converge' "$T/err")" "1"
 mv "$T/seccomp.aside" "$T/root/etc/containers/joinery-site-seccomp.json"
+spec h 8
+printf 'publish=127.0.0.1:9081:5432\n' >> "$T/root/etc/joinery/sites/h/run_spec"
+chk "a database published on loopback runs" "$(args h | grep -c -x -- '127.0.0.1:9081:5432')" "1"
+for pub in 9081:5432 0.0.0.0:9081:5432 '[::]:9081:5432/tcp' 10.0.0.5:9081:5432; do
+    sed -i '/:5432/d' "$T/root/etc/joinery/sites/h/run_spec"; printf 'publish=%s\n' "$pub" >> "$T/root/etc/joinery/sites/h/run_spec"
+    chk "a database published beyond the host (${pub}) runs no site" "$(args h | grep -c .)|$(grep -c 'publishes its database beyond this host' "$T/err")" "0|1"
+done
 A="$(JOINERY_SITE_ENGINE_KIND=docker args e)"
 chk "a Docker host's arguments carry no id map, no sysctl and no filter of ours" "$(grep -c -E -- '^--(uidmap|gidmap|sysctl|security-opt)$' <<< "$A")" "0"
 
@@ -151,16 +166,78 @@ chk "and every site's ids are its own" "$(in_lib "run_spec_docker_remaps_ids; ec
 echo "install.sh speaks to the site's engine"
 # Every docker command outside Docker's own host install, by function (B10: the
 # reach probe's docker exec failed on every site engine host).
-bare_docker() {  # FILE
-    awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{/ { fn = $1; sub(/\(\).*/, "", fn) } /^}/ { fn = "" } /^[[:space:]]*#/ { next }
-         /(^|[^_a-z-])docker (exec|ps|run|inspect|cp|volume|network|image|images|build|stop|rm|start|logs|port|info|version|pull|tag|rmi|kill|restart|wait|update|system)( |$)/ \
-         && fn != "do_docker_install" && fn != "docker_multi_tenant_existing" { print NR ":" (fn == "" ? "(top)" : fn) }' "$1"
+# A docker command outside a comment or a here-document, as FILE:LINE:FUNCTION:TEXT
+# lines (a trailing comment does not count).
+bare_docker() {  # FILE...
+    awk 'BEGIN { hd = "" }
+         hd != "" { if ($0 ~ "^[[:space:]]*" hd "$") hd = ""; next }
+         /^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{/ { fn = $1; sub(/\(\).*/, "", fn) }
+         /^}/ { fn = "" }
+         /^[[:space:]]*#/ { next }
+         { line = $0; sub(/[[:space:]]#[[:space:]].*$/, "", line)
+           if (match(line, /<<-?[[:space:]]*[\047"]?[A-Za-z_]+[\047"]?/)) {
+               tag = substr(line, RSTART, RLENGTH); sub(/^<<-?[[:space:]]*[\047"]?/, "", tag); sub(/[\047"]$/, "", tag); hd = tag }
+           if (line ~ /(^|[^_a-z$"-])docker (exec|ps|run|inspect|cp|volume|network|image|images|build|stop|rm|rmi|start|logs|port|info|version|pull|tag|kill|restart|wait|update|system|diff|stats|events)( |$)/)
+               print FILENAME ":" FNR ":" (fn == "" ? "(top)" : fn) ":" line }' "$@"
 }
 INSTALL="$TOOLS/install.sh"
-chk "no docker command outside Docker's own host install" "$(bare_docker "$INSTALL" | tr '\n' ' ')" ""
+# Docker's own branches, each read and named: a host install, Docker's data-root
+# move, the run spec helper's Docker halves, the two migrations the site engine
+# never needs (each stops before any docker call there), and remove_account's
+# test for an answering Docker. Anything else that names docker is a script
+# speaking past the engine helper (reviewer2 R6). An entry names a whole
+# function, and four of them have both halves (run_spec_ensure_network,
+# run_spec_host_cpus, run_spec_network_read, do_migrate): a docker call added
+# to their engine half would pass here, and is for the reader to catch.
+DOCKER_BRANCHES="install.sh:do_docker_install install.sh:docker_multi_tenant_existing
+docker_disk_pool.sh:docker_ids_apart joinery_data_root.sh:do_migrate joinery_data_root.sh:migrate_abort
+_site_run_spec.sh:run_spec_adopt _site_run_spec.sh:run_spec_docker_remaps_ids _site_run_spec.sh:run_spec_ensure_network
+_site_run_spec.sh:run_spec_host_cpus _site_run_spec.sh:run_spec_net_free_slot _site_run_spec.sh:run_spec_net_no_ipv6_reason
+_site_run_spec.sh:run_spec_network_read migrate_site_to_code_volumes.sh:* move_site_to_own_network.sh:*"
+outside_docker_branches() {  # FILE...
+    local f n fn text
+    bare_docker "$@" | while IFS=: read -r f n fn text; do
+        f="$(basename "$f")"
+        [[ " $(tr '\n' ' ' <<< "$DOCKER_BRANCHES") " == *" ${f}:${fn} "* || " $(tr '\n' ' ' <<< "$DOCKER_BRANCHES") " == *" ${f}:* "* ]] && continue
+        [[ "$f" == remove_account.sh && "$text" == "elif command -v docker &> /dev/null && timeout 30 docker info > /dev/null 2>&1; then" ]] && continue
+        echo "${f}:${n}:${fn}"
+    done
+}
+SCANNED=("$ROOT"/maintenance_scripts/sysadmin_tools/*.sh "$TOOLS"/{_site_run_spec,docker_disk_pool,outbound_limits,install,joinery_data_root,multi_tenant_host,install_site_engine}.sh "$ROOT/public_html/plugins/mail_apps/provisioning/install_mail_gateway.sh")
+chk "no docker command outside Docker's own branches, in every script that speaks to an engine" "$(outside_docker_branches "${SCANNED[@]}" | tr '\n' ' ')" ""
 sed 's/site_engine exec "$sitename" sh -c "mkdir -p/docker exec "$sitename" sh -c "mkdir -p/' "$INSTALL" > "$T/install_mut.sh"
-chk "  which a docker exec put back in the reach probe fails" "$(bare_docker "$T/install_mut.sh" | grep -c ':name_reaches_here$')" "1"
+chk "  which a docker exec put back in the reach probe fails" "$(outside_docker_branches "$T/install_mut.sh" | grep -c ':name_reaches_here$')" "1"
+sed 's/run "\$ENGINE" update --restart=no/run docker update --restart=no/' "$ROOT/maintenance_scripts/sysadmin_tools/hold_container.sh" > "$T/hold_container.sh"
+chk "  and so does one put back in hold_container" "$(outside_docker_branches "$T/hold_container.sh" | grep -c '^hold_container.sh:')" "1"
 chk "what the operator is told to type names the engine, not this script's function" "$(grep -v '^[[:space:]]*#' "$INSTALL" | grep -E 'echo|print_' | grep -c 'site_engine \(exec\|logs\|stop\|start\)')" "0"
+
+echo "Am I in a container"
+# Docker marks its containers with /.dockerenv, the site container engine with
+# /run/.containerenv: a file whose code asks the one must ask the other, or a
+# Podman site is taken for a machine (WP3: its cron, its held manifest, its
+# gateway trust and its memory figures all went wrong that way).
+asks_only_docker() {
+    local f
+    for f in $(grep -rl --include='*.sh' --include='*.php' '\.dockerenv' "$ROOT/maintenance_scripts" "$ROOT/public_html" 2>/dev/null \
+               | grep -v -E '/tests/|/archive/|/specs/|/vendor/'); do
+        code="$(grep -v -E '^[[:space:]]*(#|//|\*|/\*)' "$f")"
+        grep -q '\.dockerenv' <<< "$code" || continue
+        grep -q '\.containerenv' <<< "$code" || echo "${f#"$ROOT"/}"
+    done
+}
+chk "every container check accepts the site container engine's mark too" "$(asks_only_docker | tr '\n' ' ')" ""
+
+echo "The agent's identity, carried on the host"
+# On the site engine the archive is the tenant's and is unpacked by host root:
+# GNU tar's defaults keep it inside the volume, and the folder's owner is copied
+# only from a real folder (reviewer2 V1, S2).
+for f in "$TOOLS/install.sh" "$ROOT/maintenance_scripts/sysadmin_tools/rebase_site_container.sh"; do
+    carry="$(awk '/^carry_agent_identity\(\) \{/,/^}/' "$f")"
+    chk "$(basename "$f"): the carry unpacks with the archive's own ids, never absolute names" \
+        "$(grep -c 'tar -x -p --numeric-owner -C "$mp"' <<< "$carry")|$(grep -c -E 'tar [^|]*(-P|--absolute-names)' <<< "$carry")" "1|0"
+    chk "$(basename "$f"): the volume's root copies its owner only from a real folder" \
+        "$(grep -c '\[ -d "$mp/joinery-agent" \] && \[ ! -L "$mp/joinery-agent" \] || return 1' <<< "$carry")" "1"
+done
 
 echo "A copy without the helper beside it"
 # outbound_limits.sh installs _site_run_spec.sh alone; a tree missing the helper

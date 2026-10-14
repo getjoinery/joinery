@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+#VERSION 3.21 - The agent's identity is carried across a rebuild on the site container engine by unpacking
+#               the engine's archive on the host: it carries the site's own host ids, which the
+#               id-mapped helper could not set (reviewer2 V1, tar: Cannot change ownership); the
+#               volume's root takes the folder's owner and mode (S2), and a copy that dies part way
+#               fails the carry (S3).
+#               install.sh docker refuses a host with the site container engine on it (reviewer2 R5).
+#               install.sh docker --site-engine sets the outbound limits and makes the disk pool, so
+#               --disk holds on the site container engine (docker_disk_pool.sh 2.5); a site rebuilt
+#               there removes the untagged images earlier builds left.
+#               is_docker counts /run/.containerenv (the site container engine's mark) beside /.dockerenv.
+#               install.sh list reads an image's name as install.sh gave it (site_engine_image), so
+#               the site container engine's sites are listed (B12: Podman reads them back as
+#               localhost/joinery-...).
 #VERSION 3.20 - The reach probe is placed in a site's container through site_engine, so a name on a
 #               site container engine host can be found to reach it (it always failed there: B10,
 #               site_container_engine release proof on 0.8.494); the hints after a site install
@@ -675,7 +688,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/_site_engine.sh" ]; then
     . "$SCRIPT_DIR/_site_engine.sh"
 else
-    site_engine_is_podman() { [ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; }
+    site_engine_is_podman() { [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; }
     site_engine_kind() {
         if site_engine_is_podman; then
             echo "install.sh: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $SCRIPT_DIR/install.sh; nothing was done" >&2
@@ -684,6 +697,7 @@ else
         echo docker
     }
     site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
+    site_engine_image() { printf '%s\n' "${1#localhost/}"; }
 fi
 # A build on the site engine never trusts the layer cache (a second site's build
 # reused the first site's layers, build arguments and all) and keeps the health
@@ -1842,8 +1856,9 @@ list_docker_containers() {
                 local ports=$(echo "$line" | awk '{print $3}')
                 local status=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | xargs)
 
-                # Check if image starts with joinery-
-                if [[ "$image" == joinery-* ]]; then
+                # Check if image starts with joinery- (as install.sh named it:
+                # Podman reads it back as localhost/joinery-...)
+                if [[ "$(site_engine_image "$image")" == joinery-* ]]; then
                     local web_port=$(echo "$ports" | grep -oP '(?:\d{1,3}\.){3}\d{1,3}:\K[0-9]+(?=->80/)' | head -1)
                     local db_port=$(echo "$ports" | grep -oP '(?:\d{1,3}\.){3}\d{1,3}:\K[0-9]+(?=->5432/)' | head -1)
 
@@ -2265,6 +2280,7 @@ create_test_site() {
 is_docker() {
     # Check for running container
     [ -f /.dockerenv ] && return 0
+    [ -f /run/.containerenv ] && return 0
 
     # Check cgroup for running container
     grep -q docker /proc/1/cgroup 2>/dev/null && return 0
@@ -2573,6 +2589,9 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
         exit 1
     fi
     print_success "Site container engine: $(bash "$SCRIPT_DIR/install_site_engine.sh" status | sed -n 's/^engine=//p')"
+    # The disk pool, before the first layer: the engine's layer folder carries
+    # the project its layer caps are numbered above (docker_disk_pool.sh).
+    bash "$SCRIPT_DIR/docker_disk_pool.sh" create || exit 1
 
     # Every site's ids are its own here, so a site runs only where the host's
     # restrictions are (run_spec_restrictions_present), as on a remapping Docker host.
@@ -2580,9 +2599,7 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
     if [ "$multi" -eq 1 ]; then
         multi_tenant_host_install || exit 1
     fi
-    if [ "$no_outbound" -ne 1 ]; then
-        print_info "The outbound limits read each site through Docker; on the site container engine they come with its admin scripts (specs/site_container_engine.md WP3)"
-    fi
+    outbound_limits_install 0 "$no_outbound"
     host_housekeeping
     install_docker_host_agent "$mgmt" "$node"
     print_success "Site container engine host ready"
@@ -2620,6 +2637,12 @@ do_docker_install() {
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
         print_error "This command must be run as root (use sudo)"
+        exit 1
+    fi
+    # One engine per host: Docker beside the site container engine would be
+    # what every engine-less fallback reaches instead of a refusal.
+    if site_engine_is_podman; then
+        print_error "This host's sites run on the site container engine; Docker is not installed beside it. Nothing was changed. Run install.sh docker --site-engine to converge it."
         exit 1
     fi
 
@@ -4658,19 +4681,38 @@ refuse_database_major_mismatch() {
 # destroys. Copied into the volume while the old container still exists, the
 # rebuilt one comes back paired. A site whose volume already exists carries it
 # already; one whose container has no such directory has nothing to carry.
+# The agent's identity, from the container into VOL (made, empty). On the site
+# engine the archive carries the site's own host ids (its block), so it is
+# unpacked on the host as it is: a container under the site's id map cannot set
+# them (tar's chown of an id outside its map). On Docker the archive carries
+# the container's ids, which a container of the site's image writes back.
+carry_agent_identity() {  # SITENAME VOL IMAGE
+    local mp
+    if site_engine_is_podman; then
+        mp="$(site_engine volume inspect -f '{{.Mountpoint}}' "$2" 2>/dev/null)"
+        [ -n "$mp" ] && [ -d "$mp" ] || return 1
+        # pipefail: a copy that dies part way is a failure, not a part carried.
+        ( set -o pipefail; site_engine cp "${1}:/etc/joinery-agent" - | tar -x -p --numeric-owner -C "$mp" ) || return 1
+        # The volume's root takes the folder's own owner and mode (the engine
+        # leaves a volume it did not fill as host root's), and its contents.
+        # A folder, never a link a tenant planted in its place (--reference follows one).
+        [ -d "$mp/joinery-agent" ] && [ ! -L "$mp/joinery-agent" ] || return 1
+        chown --reference="$mp/joinery-agent" "$mp" && chmod --reference="$mp/joinery-agent" "$mp" \
+            && find "$mp/joinery-agent" -mindepth 1 -maxdepth 1 -exec mv -t "$mp" {} + && rmdir "$mp/joinery-agent"
+    else
+        ( set -o pipefail; site_engine cp "${1}:/etc/joinery-agent" - \
+            | site_engine run --rm -i -v "${2}:/dst" --entrypoint tar "$3" -x -p -C /dst --strip-components=1 )
+    fi
+}
+
 seed_agent_volume() {
     local SITENAME="$1"
     local VOL="${SITENAME}_agent" IMAGE
     site_engine volume inspect "$VOL" > /dev/null 2>&1 && return 0
-    # On the site engine what the helper writes must belong to the site's own
-    # ids (run_spec_idmap_args); on Docker the daemon remaps it.
-    local IDMAP_ARGS=()
-    mapfile -d '' IDMAP_ARGS < <(run_spec_idmap_args "$SITENAME")
     site_engine cp "${SITENAME}:/etc/joinery-agent" - > /dev/null 2>&1 || return 0
     IMAGE="$(site_engine inspect -f '{{.Config.Image}}' "$SITENAME" 2>/dev/null)"
     site_engine volume create "$VOL" > /dev/null
-    if site_engine cp "${SITENAME}:/etc/joinery-agent" - \
-        | site_engine run --rm -i "${IDMAP_ARGS[@]}" -v "${VOL}:/dst" --entrypoint tar "$IMAGE" -x -p -C /dst --strip-components=1; then
+    if carry_agent_identity "$SITENAME" "$VOL" "$IMAGE"; then
         print_info "Carried the agent's identity into ${VOL}"
     else
         site_engine volume rm "$VOL" > /dev/null 2>&1 || true
@@ -4940,9 +4982,6 @@ do_site_docker() {
     # A disk allowance is an XFS project on the data root, and holds only
     # where root in the container is not root on the host. Where it would not
     # hold, it is refused rather than ignored.
-    if [ -n "$CONTAINER_DISK" ] && site_engine_is_podman; then
-        refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "a disk allowance on the site container engine comes with its disk pool (specs/site_container_engine.md WP3); install the site without --disk for now"
-    fi
     if [ -n "$CONTAINER_DISK" ] && ! bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap >/dev/null 2>&1; then
         refuse_limit "$CONTAINER_DISK_GIVEN" disk disk "$CONTAINER_DISK" "an allowance this host cannot hold: $(bash "$SCRIPT_DIR/docker_disk_pool.sh" can-cap 2>&1 | sed 's/^docker_disk_pool: //') (install.sh docker --multi-tenant makes a host that can, on a new host)"
     fi
@@ -5392,6 +5431,13 @@ EOF
     elif bash "$SCRIPT_DIR/docker_disk_pool.sh" check; then
         bash "$SCRIPT_DIR/docker_disk_pool.sh" release "$SITENAME" || true
     fi
+    # The site container engine builds with no cache, so a rebuild leaves the
+    # whole old image behind, untagged. Untagged images older than ten minutes
+    # go: a build running beside this one makes its intermediate images now.
+    if site_engine_is_podman; then
+        site_engine image prune -f --filter until=10m > /dev/null 2>&1 \
+            || print_warning "Could not remove the untagged images earlier builds left (podman image prune)"
+    fi
 
     # Create host-side logs directory for reverse proxy (used by manage_domain.sh)
     # Container has its own /var/www/html/{site}/ but host needs logs dir for proxy
@@ -5824,7 +5870,7 @@ do_list() {
                 local ports=$(site_engine port "$name" 2>/dev/null | head -1 | sed 's/.*://')
 
                 # Only show joinery containers
-                if [[ "$name" == joinery-* ]] || site_engine inspect "$name" --format '{{.Config.Image}}' 2>/dev/null | grep -q "^joinery-"; then
+                if [[ "$name" == joinery-* ]] || site_engine_image "$(site_engine inspect "$name" --format '{{.Config.Image}}' 2>/dev/null)" | grep -q "^joinery-"; then
                     echo "  $name	$status	Port: ${ports:-N/A}"
                     found=true
                 fi

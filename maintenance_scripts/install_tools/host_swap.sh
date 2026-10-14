@@ -2,6 +2,7 @@
 #
 # host_swap.sh - this host's swap: compressed memory (zram), never a disk.
 #
+# Version: 1.1 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 1.0 - Swap moves from an encrypted file to zram. Swap through dm-crypt over a loop
 #                device over a file on ext4 (the /swapfile every install made) locks a 1 GB machine
 #                up under memory pressure: writing a page out needs page cache for the loop's file,
@@ -45,7 +46,7 @@ else
     exit 0
 fi
 
-if [[ -f "${FS_ROOT}/.dockerenv" ]] || { [[ -z "${FS_ROOT}" ]] && systemd-detect-virt --container --quiet 2>/dev/null; }; then
+if [[ -f "${FS_ROOT}/.dockerenv" || -f "${FS_ROOT}/run/.containerenv" ]] || { [[ -z "${FS_ROOT}" ]] && systemd-detect-virt --container --quiet 2>/dev/null; }; then
     exit 0
 fi
 

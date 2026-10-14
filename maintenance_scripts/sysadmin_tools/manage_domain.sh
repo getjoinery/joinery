@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # manage_domain.sh - Manage domain assignments for Joinery sites
+# VERSION: 1.3 - a container site is read through the engine this host's sites run on
+#                (_site_engine.sh): Docker, or the site container engine (specs/site_container_engine.md WP3)
 # VERSION: 1.2 - says when a container's web port answers around the proxy (published on every
 #                interface) or cannot be reached once the domain is cleared (published on
 #                127.0.0.1, as install.sh publishes a site with a domain)
@@ -26,6 +28,12 @@ set -e
 #==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The engine this host's sites run on, and the one way to call it.
+if [ ! -f "$SCRIPT_DIR/../install_tools/_site_engine.sh" ]; then
+    echo "manage_domain: there is no install_tools/_site_engine.sh beside this script's tree" >&2
+    exit 1
+fi
+. "$SCRIPT_DIR/../install_tools/_site_engine.sh"
 
 #==============================================================================
 # COLORS AND OUTPUT
@@ -59,23 +67,23 @@ is_ip_address() {
     [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
-# Check if site is running in Docker
+# Check if site is running in a container
 is_docker_site() {
     local sitename="$1"
-    docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$sitename"
+    site_engine ps --format '{{.Names}}' 2>/dev/null | grep -qx "$sitename"
 }
 
-# Get Docker container port
+# Get the container's web port
 get_container_port() {
     local sitename="$1"
-    docker port "$sitename" 80 2>/dev/null | head -1 | sed 's/.*://'
+    site_engine port "$sitename" 80 2>/dev/null | head -1 | sed 's/.*://'
 }
 
 # The host address the container's web port is published on: 127.0.0.1 when
 # only this machine (its proxy) reaches it, 0.0.0.0 when every interface does.
 get_container_bind() {
     local sitename="$1"
-    docker port "$sitename" 80 2>/dev/null | head -1 | sed 's/:[0-9]*$//'
+    site_engine port "$sitename" 80 2>/dev/null | head -1 | sed 's/:[0-9]*$//'
 }
 
 # Check if an IP belongs to Cloudflare
@@ -226,7 +234,7 @@ cmd_status() {
     # Detect site type
     if is_docker_site "$sitename"; then
         local port=$(get_container_port "$sitename")
-        echo -e "Type:   ${GREEN}Docker${NC} (port $port)"
+        echo -e "Type:   ${GREEN}Container${NC} ($(site_engine_kind), port $port)"
 
         # Check for proxy config
         if [ -f "/etc/apache2/sites-available/${sitename}-proxy.conf" ]; then

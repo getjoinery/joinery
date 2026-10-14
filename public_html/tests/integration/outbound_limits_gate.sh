@@ -334,7 +334,7 @@ U="$R/etc/systemd/system/joinery-limits.service"
 chk "install: exit 0" "$rc" "0"
 chk "the script is copied to /usr/local/sbin/joinery-limits, executable" "$(cmp -s "$SCRIPT" "$R/usr/local/sbin/joinery-limits" && [ -x "$R/usr/local/sbin/joinery-limits" ] && echo same)" "same"
 chk "the unit runs the copy, with --web-user, after Docker and the resolver" \
-    "$(grep -c -E '^ExecStart=/usr/local/sbin/joinery-limits apply --web-user$|^After=docker.service systemd-resolved.service' "$U")" "2"
+    "$(grep -c -E '^ExecStart=/usr/local/sbin/joinery-limits apply --web-user$|^After=docker.service podman-restart.service systemd-resolved.service' "$U")" "2"
 chk "the timer runs it every five minutes" "$(grep -c '^OnUnitActiveSec=5min$' "$R/etc/systemd/system/joinery-limits.timer")" "1"
 chk "the ruleset is checked before anything is written" "$(calls '^nft -c -f -$')" "1"
 chk "unit and timer enabled, the timer started, the unit run" \
@@ -378,13 +378,40 @@ cat "$T/bare_own/\$site" 2>/dev/null; exit 0
 STUB
 chmod +x "$T/bin/docker" "$T/bin/runuser"
 cls() { grep "tc class replace dev $1 " "$T/tc_calls" | tail -1 | grep -o 'rate [0-9]*mbit' | head -1; }
-chain_of() { sed -n "/chain $1 {/,/}/p" "$T/nft_loaded"; }
+chain_of() { sed -n "/chain $1 {/,/^[[:space:]]*}$/p" "$T/nft_loaded"; }
 : > "$T/tc_calls"
 lim apply > /dev/null 2>&1
 chk "no host file and no site figures: the built-in ones (200 Mbit/s; 20 a second, bursts to 100; 256 open)" \
     "$(cls jifb1)|$(status_key conn_rate)/$(status_key conn_burst)/$(status_key open_conns)|$(status_key set_by)" "rate 200mbit|20/100/256|"
 chk "each site is told root's figure and the one in force" "$(tr '\n' ' ' < "$T/told/s1")" "state=on host_ceiling_mbit=200 ceiling_mbit=200 set_by= "
 chk "a site not on a network of its own is told the limits do not cover it" "$(head -1 "$T/told/old")" "state=uncovered"
+# On the site container engine the same, through podman (_site_engine.sh), never docker.
+sed 's/echo "docker /echo "podman /' "$T/bin/docker" > "$T/bin/podman"; chmod +x "$T/bin/podman"
+cp "$T/told/s1" "$T/told_s1.keep"; cp "$T/docker_calls" "$T/docker_calls.keep"
+rm -f "$T/told/s1"; : > "$T/docker_calls"
+JOINERY_SITE_ENGINE_KIND=podman lim apply > /dev/null 2>&1
+chk "on the site container engine: each site is read and told through podman, never docker" \
+    "$(tr '\n' ' ' < "$T/told/s1" 2>/dev/null)|$(grep -c '^podman exec -u www-data s1 ' "$T/docker_calls")|$(grep -c '^docker ' "$T/docker_calls")" \
+    "state=on host_ceiling_mbit=200 ceiling_mbit=200 set_by= |1|0"
+# Its sites ask the host resolver's own upstream servers directly (their networks
+# run no DNS service): UDP to port 53 of exactly those, held to the rate (B14).
+mkdir -p "$R/run/systemd/resolve"
+printf 'nameserver 50.116.62.5\nnameserver 2600:3c03::5\nnameserver bogus;x\nsearch example\n' > "$R/run/systemd/resolve/resolv.conf"
+JOINERY_SITE_ENGINE_KIND=podman lim apply > /dev/null 2>&1
+chk "on the site container engine a site's name lookups reach the upstream resolvers, v4 and v6, and nothing else" \
+    "$(chain_of site_s1 | grep -c -E '^\s+ip daddr \{ 50\.116\.62\.5 \} udp dport 53 accept$')|$(chain_of site_s1 | grep -c -E '^\s+ip6 daddr \{ 2600:3c03::5 \} udp dport 53 accept$')|$(chain_of site_s1 | grep -c bogus)" "1|1|0"
+chk "  and the status says the engine is asked" "$(status_key site_engine)" "podman"
+chk "  held to the site's rate on new connections, before every other UDP is dropped" \
+    "$(chain_of site_s1 | grep -n -E 'udp dport 53 ct state new limit rate over [0-9]+/second|meta l4proto udp counter' | cut -d: -f1 | tr '\n' ' ')" "2 4 6 "
+mv "$T/bin/podman" "$T/podman.aside"
+out="$(JOINERY_SITE_ENGINE_KIND=podman lim apply 2>&1)"
+mv "$T/podman.aside" "$T/bin/podman"
+chk "an engine that cannot be asked: said, and unusable in the status, not left silent (reviewer2 R11)" \
+    "$(grep -c 'site container engine, which cannot be asked here' <<< "$out")|$(status_key site_engine)" "1|unusable"
+lim apply > /dev/null 2>&1
+chk "a Docker host's sites ask Docker's resolver: their chain lets no UDP out" "$(chain_of site_s1 | grep -c 'udp dport 53')|$(status_key site_engine)" "0|"
+rm -rf "$R/run/systemd"
+rm -f "$T/bin/podman"; mv "$T/told_s1.keep" "$T/told/s1"; mv "$T/docker_calls.keep" "$T/docker_calls"
 
 echo '{"ceiling_mbit": 300, "conn_rate": 40, "conn_burst": 120, "open_conns": 512, "set_by": "plane"}' > "$R/etc/joinery/outbound_limits.json"
 : > "$T/tc_calls"
@@ -515,10 +542,11 @@ out="$(lim refresh 2>&1)"
 chk "an older installed copy: brought up to this one, and the unit run" \
     "$(cmp -s "$SCRIPT" "$R/usr/local/sbin/joinery-limits" && echo same)|$(grep -c 'brought up to this release' <<< "$out")|$(grep -c -E '^systemctl (daemon-reload|start joinery-limits.service)$' "$T/systemctl_calls")" "same|1|2"
 chk "the run spec helper is installed beside it" "$(cmp -s "$HELPER" "$R/usr/local/lib/joinery-limits/_site_run_spec.sh" && echo same)" "same"
+chk "and the engine helper beside that, so the copy names the engine on a site container engine host" "$(cmp -s "$(dirname "$HELPER")/_site_engine.sh" "$R/usr/local/lib/joinery-limits/_site_engine.sh" && echo same)" "same"
 sed -i 's/^# Version: .*/# Version: 9.9/' "$R/usr/local/sbin/joinery-limits"; : > "$T/systemctl_calls"
 out="$(lim refresh 2>&1)"; lim ceiling 300 > /dev/null 2>&1
 chk "a newer installed copy (another site's tree, a newer bundle) is never taken back, by refresh or by a figure set" \
-    "$(script_v="$(sed -n 's/^# Version: //p' "$R/usr/local/sbin/joinery-limits")"; echo "$script_v")|$out|$(grep -c daemon-reload "$T/systemctl_calls")" "9.9|outbound limits: installed copy current|0"
+    "$(script_v="$(sed -n 's/^# Version: //p' "$R/usr/local/sbin/joinery-limits" | head -1)"; echo "$script_v")|$out|$(grep -c daemon-reload "$T/systemctl_calls")" "9.9|outbound limits: installed copy current|0"
 cp "$SCRIPT" "$R/usr/local/sbin/joinery-limits"
 echo "# a hand edit at the same version" >> "$R/usr/local/sbin/joinery-limits"
 chk "a copy at the same version is current, so two trees at one release never flap" "$(lim refresh 2>&1)" "outbound limits: installed copy current"

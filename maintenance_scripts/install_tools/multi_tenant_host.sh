@@ -6,6 +6,15 @@
 # reboot that follows a kernel update
 # (multi_tenant_docker_hosts WP5 items 1, 4, 5, 6 and 7).
 #
+# Version: 1.4 - On the site container engine every container start checks the walls (an OCI hook,
+#                /etc/containers/oci/hooks.d/joinery-site-walls.json, at createRuntime), as dockerd's own
+#                start did on Docker: a restart, a hold's start, a rebuild or the restart policy no longer
+#                start a site with the walls unloaded (reviewer2 R3).
+# Version: 1.3 - On a host whose sites run on the site container engine (specs/site_container_engine.md
+#                WP3) the walls hold the same way: podman0 (Podman's default bridge, which no site is
+#                on but a helper container may be) beside docker0, and podman-restart.service, which
+#                starts the sites at boot, waits for them and does not start without them, as
+#                docker.service does. A drop-in for a unit that is not installed does nothing.
 # Version: 1.2 - On a host whose data root is encrypted, apt's own reboot is off
 #                (joinery_data_root.sh writes 53joinery-encrypted-reboot over this
 #                file's policy) and the data root's tick reboots it instead, after its
@@ -32,7 +41,8 @@
 #                                  the reboot policy is in force; exit 1 if not.
 #
 # THE WALLS. A site's container is on a bridge on the host: docker0 for a site
-# on Docker's default network, jsnet<N> for a site on a network of its own
+# on Docker's default network (podman0 is the site container engine's), jsnet<N>
+# for a site on a network of its own
 # (node_outbound_and_transfer WP2). Each rule below names those bridges, so it
 # holds for every site there is or will be, with nothing to rewrite when one is
 # added. The tables are in the inet family (IPv4 and IPv6 alike) and the bridge
@@ -64,7 +74,10 @@
 # NEVER UNWALLED. The unit loads the walls before Docker at boot, and Docker's
 # own start checks they are loaded (a drop-in ExecStartPre running `assert`),
 # so if the walls fail to load, Docker and every site stay down rather than run
-# without them; docker.service shows as failed in the host report. Not
+# without them; docker.service shows as failed in the host report. The site
+# container engine has no daemon to hold, so every container start runs
+# `assert` (an OCI hook) and fails while the walls are not loaded; and
+# podman-restart.service, which starts the sites at boot, is held as Docker is. Not
 # Requires=: a required unit's restart restarts its dependents, and install
 # restarts the walls. nftables.service starts with `flush ruleset`, which takes
 # the walls too, so a drop-in loads them again straight after it.
@@ -90,6 +103,8 @@ UNIT_PATH="${ROOT}/etc/systemd/system/${UNIT_NAME}"
 REBOOT_CONF="${ROOT}/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"
 TIMER_DROPIN="${ROOT}/etc/systemd/system/apt-daily-upgrade.timer.d/joinery-multi-tenant.conf"
 DOCKER_DROPIN="${ROOT}/etc/systemd/system/docker.service.d/joinery-site-walls.conf"
+PODMAN_DROPIN="${ROOT}/etc/systemd/system/podman-restart.service.d/joinery-site-walls.conf"
+OCI_HOOK="${ROOT}/etc/containers/oci/hooks.d/joinery-site-walls.json"
 NFTABLES_DROPIN="${ROOT}/etc/systemd/system/nftables.service.d/joinery-site-walls.conf"
 INSTALLED="${ROOT}${SELF_INSTALLED}"
 
@@ -104,6 +119,7 @@ table inet joinery_site_walls {
 	chain input {
 		type filter hook input priority filter; policy accept;
 		iifname "docker0" jump site_to_host
+		iifname "podman0" jump site_to_host
 		iifname "jsnet*" jump site_to_host
 	}
 	chain site_to_host {
@@ -115,10 +131,12 @@ table inet joinery_site_walls {
 	chain forward {
 		type filter hook forward priority filter; policy accept;
 		iifname "docker0" jump site_through_host
+		iifname "podman0" jump site_through_host
 		iifname "jsnet*" jump site_through_host
 	}
 	chain site_through_host {
 		oifname "docker0" counter drop
+		oifname "podman0" counter drop
 		oifname "jsnet*" counter drop
 		tcp dport 25 counter drop
 		ip daddr 169.254.169.254 counter drop
@@ -136,6 +154,7 @@ table bridge joinery_site_walls {
 	chain forward {
 		type filter hook forward priority filter; policy accept;
 		meta ibrname "docker0" counter drop
+		meta ibrname "podman0" counter drop
 		meta ibrname "jsnet*" counter drop
 	}
 }
@@ -148,7 +167,7 @@ unit_text() {
 Description=Joinery: walls between this host's sites, the host and the outside (multi_tenant_host.sh)
 DefaultDependencies=no
 After=local-fs.target
-Before=network-pre.target docker.service
+Before=network-pre.target docker.service podman-restart.service
 Wants=network-pre.target
 
 [Service]
@@ -163,10 +182,28 @@ EOF
 
 docker_dropin_text() {
     cat <<EOF
-# Written by multi_tenant_host.sh: Docker does not start unless the site walls
-# are loaded, so no site ever runs without them.
+# Written by multi_tenant_host.sh: the engine does not start the sites unless
+# the site walls are loaded, so no site ever runs without them.
 [Service]
 ExecStartPre=${SELF_INSTALLED} assert
+EOF
+}
+
+# Every container the site container engine starts checks the walls first
+# (install_site_engine.sh reads this folder); a hook runs with no environment of
+# its own, so it is given the PATH nft is on.
+oci_hook_text() {
+    cat <<EOF
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "${SELF_INSTALLED}",
+    "args": ["joinery-site-walls", "assert"],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
+  },
+  "when": { "always": true },
+  "stages": ["createRuntime"]
+}
 EOF
 }
 
@@ -236,7 +273,7 @@ do_walls() {
 }
 
 do_assert() {
-    walls_loaded || die "the site walls are not loaded, so Docker does not start: see systemctl status ${UNIT_NAME}"
+    walls_loaded || die "the site walls are not loaded, so the engine does not start the sites: see systemctl status ${UNIT_NAME}"
 }
 
 # The data root is encrypted: its tick owns the reboot (D4).
@@ -273,6 +310,8 @@ do_install() {
     walls_changed+="$(write_if_differs "$INSTALLED" 0755 < "${BASH_SOURCE[0]}")"
     walls_changed+="$(unit_text | write_if_differs "$UNIT_PATH" 0644)"
     other_changed+="$(docker_dropin_text | write_if_differs "$DOCKER_DROPIN" 0644)"
+    other_changed+="$(docker_dropin_text | write_if_differs "$PODMAN_DROPIN" 0644)"
+    oci_hook_text | write_if_differs "$OCI_HOOK" 0644 >/dev/null
     other_changed+="$(nftables_dropin_text | write_if_differs "$NFTABLES_DROPIN" 0644)"
     timer_changed="$(timer_dropin_text | write_if_differs "$TIMER_DROPIN" 0644)"
     reboot_conf_text | write_if_differs "$REBOOT_CONF" 0644 >/dev/null
@@ -307,10 +346,10 @@ do_check() {
     else
         say "walls: NOT loaded"; bad=1
     fi
-    if systemctl is-enabled "$UNIT_NAME" >/dev/null 2>&1 && [[ -f "$DOCKER_DROPIN" ]]; then
-        say "walls at boot: ${UNIT_NAME} enabled, Docker waits for them"
+    if systemctl is-enabled "$UNIT_NAME" >/dev/null 2>&1 && [[ -f "$DOCKER_DROPIN" && -f "$PODMAN_DROPIN" && -f "$OCI_HOOK" ]]; then
+        say "walls at boot: ${UNIT_NAME} enabled, the engine waits for them"
     else
-        say "walls at boot: NOT kept (${UNIT_NAME} not enabled, or Docker would start without them)"; bad=1
+        say "walls at boot: NOT kept (${UNIT_NAME} not enabled, or the engine would start the sites without them)"; bad=1
     fi
     if [[ -f "$TIMER_DROPIN" ]] && updates_reboot; then
         if encrypted_reboot; then

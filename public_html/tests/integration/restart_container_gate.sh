@@ -89,11 +89,22 @@ STUB_RESTART_RC=1 PATH="$T/bin:$PATH" bash "$SCRIPT" siteone > "$T/refused.json"
 chk "still exit 0 with an object" "$rc/$(jv "$T/refused.json" container)" "0/siteone"
 chk "restarted false" "$(jv "$T/refused.json" restarted)" "false"
 
+echo "=== On the site container engine: restarted by podman, never docker ==="
+cp "$T/bin/docker" "$T/bin/podman"
+printf '#!/bin/bash\necho "docker $*" >> "%s/direct"\nexit 1\n' "$T" > "$T/bin/docker"
+chmod +x "$T/bin/podman" "$T/bin/docker"
+rm -f "$T/calls" "$T/was_restarted"
+JOINERY_SITE_ENGINE_KIND=podman PATH="$T/bin:$PATH" bash "$SCRIPT" siteone > "$T/out.json" 2>/dev/null; rc=$?
+chk "exit 0, restarted, exited then running" "$rc:$(jv "$T/out.json" restarted):$(jv "$T/out.json" before.state)/$(jv "$T/out.json" after.state)" "0:true:exited/running"
+chk "podman restarted it once" "$(grep -c '^restart siteone$' "$T/calls")" "1"
+chk "nothing reached docker" "$([ -s "$T/direct" ] && cat "$T/direct" || echo none)" "none"
+
 echo "=== Static pins ==="
 CODE="$(grep -v -E '^\s*#' "$SCRIPT")"
 chk "the name pattern is the agent's site pattern" "$(grep -c '\^\[a-z0-9\]\[a-z0-9_-\]{0,49}\$' "$SCRIPT")" "1"
-chk "no docker verb but ps, inspect and restart" "$(printf '%s\n' "$CODE" | grep -o 'docker [a-z]\+' | sort -u | tr '\n' ' ')" "docker inspect docker ps docker restart "
-chk "no rm, stop, kill, exec, pull or run" "$(printf '%s\n' "$CODE" | grep -c -E 'docker (rm|stop|kill|exec|pull|run|volume|system)')" "0"
+chk "no engine verb but ps, inspect and restart" "$(printf '%s\n' "$CODE" | grep -o -E '(docker|"\$ENGINE"|site_engine) [a-z]+' | sed 's/^[^ ]* //' | sort -u | tr '\n' ' ')" "inspect ps restart "
+chk "no rm, stop, kill, exec, pull or run" "$(printf '%s\n' "$CODE" | grep -c -E '(docker|"\$ENGINE"|site_engine) (rm|stop|kill|exec|pull|run|volume|system)')" "0"
+chk "every engine call goes to the engine this host's sites run on" "$(printf '%s\n' "$CODE" | grep -c -E '(^|[^_a-z-])docker (ps|inspect|restart)')" "0"
 chk "exit 0 is the last thing it does" "$(tail -n 1 "$SCRIPT")" "exit 0"
 
 echo

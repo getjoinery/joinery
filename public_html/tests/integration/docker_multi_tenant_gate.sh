@@ -181,7 +181,7 @@ echo "=== Nothing writes container ids into a volume from the host ==="
 code() { grep -v '^[[:space:]]*#' "$1"; }
 chk "rebase: no host-side chown of a volume" "$(code "$REBASE" | grep -c 'chown "[^"]*" "$(vol_mp')" "0"
 chk "rebase: rollback hands the log directory back inside the old image, by name" \
-    "$(code "$REBASE" | grep -c 'docker run --rm -v "${LOG_VOL}:/pglog" --entrypoint bash "$KEEP_IMAGE"')" "1"
+    "$(code "$REBASE" | grep -c 'site_engine run --rm ${IDMAP\[@\]+"${IDMAP\[@\]}"} -v "${LOG_VOL}:/pglog" --entrypoint bash "$KEEP_IMAGE"')" "1"
 # Run the real script against the stub: on a host that does not remap (the
 # only hosts it is for) it must get past the check under its own set -e; the
 # stub then reports no container status, so prepare stops at that.

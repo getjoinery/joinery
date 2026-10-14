@@ -376,13 +376,13 @@ chk "rebase prepare and swap refuse it (save_run_spec) and keep no copy" \
     "$(STUB_NPROC=1 bash -c '. "$1"; SITE=bigcpu; WORK="$2"; '"$SAVE"'; save_run_spec' _ "$HELPER" "$T/rework" > /dev/null 2>&1; echo $?)|$(ls -A "$T/rework" | wc -l)" "1|0"
 
 echo "=== Rebase prepare keeps a hand-made binding only when the spec carries it ==="
-LOOP="$(awk '/^    EXTRA_PORTS=""$/,/^    done < <\(docker inspect/' "$REBASE")"
+LOOP="$(awk '/^    EXTRA_PORTS=""$/,/^    done < <\(site_engine inspect/' "$REBASE")"
 CARRY="$(awk '/^    FOREIGN="\$\(run_spec_foreign_lines/,/^    \[ -z "\$NOT_CARRIED" \] \|\| die/' "$REBASE")"
 chk "the binding loop and the carried check are findable" "$([ -n "$LOOP" ] && [ -n "$CARRY" ] && echo yes)" "yes"
 prepare_bindings() {  # SITE BINDINGS
     bash -c '. "$1"; SITE="$2"; PORT=8091; BINDINGS="$3"
         die() { echo "DIE $*"; exit 1; }
-        docker() { printf "$BINDINGS"; }
+        site_engine() { printf "$BINDINGS"; }
         '"$LOOP"'
         '"$CARRY"'
         echo carried' _ "$HELPER" "$1" "$2" 2>&1
@@ -407,19 +407,19 @@ code() { grep -v '^[[:space:]]*#' "$1"; }
 chk "install.sh runs from the spec in both forms" "$(code "$INSTALL" | grep -c 'site_engine run -d "${RUN_ARGS\[@\]}" --env-file "$ENV_FILE" "joinery-$SITENAME"')" "2"
 chk "install.sh keeps the site's own lines" "$(code "$INSTALL" | grep -c 'run_spec_foreign_lines "$SITENAME"')" "1"
 chk "rebase: no arguments rebuilt from docker inspect" "$(code "$REBASE" | grep -c 'save_run_args\|mapfile -d .. ARGS < "${WORK}/run_args"')" "0"
-chk "rebase: rollback runs from the kept spec with the kept environment" "$(code "$REBASE" | grep -c 'docker run -d "${ARGS\[@\]}" --env-file "${WORK}/env" "$KEEP_IMAGE"')" "1"
+chk "rebase: rollback runs from the kept spec with the kept environment" "$(code "$REBASE" | grep -c 'site_engine run -d "${ARGS\[@\]}" --env-file "${WORK}/env" "$KEEP_IMAGE"')" "1"
 SWAP="$(awk '/^if \[ "\$STAGE" = "swap" \]/,/^fi$/' "$REBASE")"
 ROLL="$(awk '/^if \[ "\$STAGE" = "rollback" \]/,/^fi$/' "$REBASE")"
 line_of() { printf '%s\n' "$1" | grep -n -- "$2" | head -1 | cut -d: -f1; }
 chk "rebase swap keeps the spec before it stops anything" \
     "$([ "$(line_of "$SWAP" 'save_run_spec ||')" -lt "$(line_of "$SWAP" 'stop_site_writes ||')" ] && echo yes)" "yes"
 chk "rebase rollback checks its spec and environment before it removes anything" \
-    "$([ "$(line_of "$ROLL" 'run_spec_check_file "${WORK}/run_spec"')" -lt "$(line_of "$ROLL" 'docker stop "$SITE"')" ] && echo yes)" "yes"
+    "$([ "$(line_of "$ROLL" 'run_spec_check_file "${WORK}/run_spec"')" -lt "$(line_of "$ROLL" 'site_engine stop "$SITE"')" ] && echo yes)" "yes"
 chk "rebase rollback checks the kept spec fits this host before it removes anything" \
-    "$([ "$(line_of "$ROLL" 'run_spec_fits_host "${WORK}/run_spec"')" -lt "$(line_of "$ROLL" 'docker stop "$SITE"')" ] && echo yes)" "yes"
+    "$([ "$(line_of "$ROLL" 'run_spec_fits_host "${WORK}/run_spec"')" -lt "$(line_of "$ROLL" 'site_engine stop "$SITE"')" ] && echo yes)" "yes"
 chk "rebase's plan says none for no process limit" "$(grep -c "pids_limit | sed 's/^\$/none/'" "$REBASE")" "1"
 chk "rebase rollback reads a 1.7 run_args before it removes anything" \
-    "$([ "$(line_of "$ROLL" 'run_spec_from_run_args')" -lt "$(line_of "$ROLL" 'docker stop "$SITE"')" ] && echo yes)" "yes"
+    "$([ "$(line_of "$ROLL" 'run_spec_from_run_args')" -lt "$(line_of "$ROLL" 'site_engine stop "$SITE"')" ] && echo yes)" "yes"
 chk "rebase: no cp chained with && (set -e ignores the failure)" "$(code "$REBASE" | grep -c 'cp [^|]*&& chmod')" "0"
 chk "migrate: no arguments rebuilt from docker inspect" "$(code "$MIGRATE" | grep -c 'PortBindings\|RUN_ARGS+=')" "0"
 chk "migrate: runs from the spec" "$(code "$MIGRATE" | grep -c 'docker run -d "${RUN_ARGS\[@\]}" --env-file "$ENV_FILE" "$IMAGE"')" "1"
@@ -627,7 +627,7 @@ chk "install.sh gives the site its network before it stops anything" \
     "$([ "$(grep -n 'NET_LINES="$(run_spec_network_lines "$SITENAME")"' "$INSTALL" | cut -d: -f1)" -lt "$(grep -n 'site_engine stop "$SITENAME"' "$INSTALL" | head -1 | cut -d: -f1)" ] && echo yes)" "yes"
 chk "install.sh writes the network lines into the spec it renders" "$(grep -cF '"$CONTAINER_PIDS")"$'"'"'\n'"'"'"$NET_LINES"' "$INSTALL")" "1"
 chk "remove_account removes the network the spec names, and checks it is gone" \
-    "$(grep -c 's/^network=//p' "$REMOVE")|$(grep -c 'docker network rm "$SITE_NETWORK"' "$REMOVE")|$(grep -c 'Docker network still present' "$REMOVE")" "1|1|1"
+    "$(grep -c 's/^network=//p' "$REMOVE")|$(grep -c '"$ENGINE" network rm "$SITE_NETWORK"' "$REMOVE")|$(grep -c 'Docker network still present' "$REMOVE")" "1|1|1"
 export PATH="$OLDPATH"; unset STUB_CALLS
 unset JOINERY_SITE_STATE_ROOT
 # remove_account.sh clears <SITES_STATE>/<site>/run_spec among its marks.

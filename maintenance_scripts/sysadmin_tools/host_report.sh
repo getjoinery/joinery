@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.25 - the site container engine is installed where its current link is (-L), as _site_engine.sh
+#                reads it (reviewer2 R7).
 # Version: 1.24 - containers are read through the engine this host's sites run on (install_tools/
 #                _site_engine.sh): Docker, or the site container engine (specs/site_container_engine.md
 #                WP3), whose start time is asked in Docker's RFC 3339 form so started_at holds.
@@ -1122,7 +1124,7 @@ host_engine() {
         bash -c '. "$1" && site_engine_kind' _ "$helper"
         return
     fi
-    [[ -e /usr/local/lib/joinery-site-engine/current ]] && return 1
+    [[ -L /usr/local/lib/joinery-site-engine/current ]] && return 1
     echo docker
 }
 

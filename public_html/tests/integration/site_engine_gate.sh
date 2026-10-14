@@ -110,9 +110,11 @@ chk "status prints the engine" "$(JOINERY_SITE_ENGINE_ROOT="$FR" bash "$INST" st
 echo "Converge keeps the host's configuration"
 mkdir -p "$FR/srv/joinery"
 rm -f "$FR/etc/containers/joinery-site-seccomp.json"
+echo "# an edit" > "$CONF"
 STAMPF0="$T/ENGINE0"; printf 'archive=%s\nsha256=%s\n' "$(basename "$A")" "$(sha "$A")" > "$STAMPF0"
 JOINERY_SITE_ENGINE_ROOT="$FR" JOINERY_SITE_ENGINE_STAMP="$STAMPF0" bash "$INST" converge "file:///nowhere" > "$T/out" 2>&1
 chk "an engine already current: converge writes back a missing site filter" "$(grep -c 'is current' "$T/out") $([ -f "$FR/etc/containers/joinery-site-seccomp.json" ] && echo back)" "1 back"
+chk "  and writes its containers.conf drop-in back, the host's hook folder in it" "$(grep -c '^hooks_dir = \["/usr/share/containers/oci/hooks.d", "/etc/containers/oci/hooks.d"\]$' "$CONF")|$(grep -c 'an edit' "$CONF")" "1|0"
 chk "  and puts container storage on the data root once there is one" "$(grep -c '^graphroot = "/srv/joinery/containers/storage"$' "$FR/etc/containers/storage.conf")" "1"
 
 echo "Run again, newer, rollback"

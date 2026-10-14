@@ -4,6 +4,9 @@
 # rebuilding it: its memory, its CPU ceiling and its disk allowance, and say
 # what is now in force, as ONE JSON object on stdout.
 #
+# Version: 1.2 - the engine is the one this host's sites run on (_site_engine.sh, through the run
+#                spec helper): Docker, or the site container engine (specs/site_container_engine.md
+#                WP3), whose update takes the same memory and CPU figures.
 # Version: 1.1 - a disk allowance asks docker_disk_pool.sh can-cap (the pool in place and user ids
 #                remapped), and is refused with its reason: every new Docker host has a data root,
 #                which alone no longer says a site's disk can be capped (one_data_root WP2).
@@ -20,7 +23,7 @@
 #     refused (exit 2), and so is a value install.sh site would refuse: a
 #     memory size or CPU ceiling Docker would not take, a CPU ceiling above
 #     the host's, a disk allowance on a host that cannot cap a site's disk.
-#   - Memory and CPU change on the running container (docker update), and the
+#   - Memory and CPU change on the running container (the engine's update), and the
 #     run spec records them, so a rebuild keeps them. Neither can be lifted on
 #     a running container: Docker keeps a CPU ceiling in the container's
 #     configuration and puts it back at the next start, and refuses to lift a
@@ -34,7 +37,7 @@
 #   - Every key is ALWAYS present; the exit code is 0 whenever the object was
 #     printed. Only compiled facts are printed, reduced to a safe character set.
 #
-# Runs on: a Docker host.
+# Runs on: a container host (Docker, or the site container engine).
 
 set -u
 export LC_ALL=C
@@ -55,12 +58,13 @@ refuse() {
 
 NAME="${1:-}"; MEM_IN="${2:-keep}"; CPUS_IN="${3:-keep}"; DISK_IN="${4:-keep}"
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9_-]{1,49}$ ]] || refuse "${NAME:0:64} is not a site this host serves"
-command -v docker >/dev/null 2>&1 || refuse "this machine has no docker"
 [[ -f "$TOOLS/_site_run_spec.sh" ]] || refuse "this host's support bundle does not carry _site_run_spec.sh"
 . "$TOOLS/_site_run_spec.sh"
+ENGINE="$(site_engine_kind)" || refuse "this machine's container engine could not be named; nothing was changed"
+command -v "$ENGINE" >/dev/null 2>&1 || refuse "this machine has no ${ENGINE}"
 
 # Ours: a container whose SITENAME is its name, with a run spec.
-site_env="$(run docker inspect -f '{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}' "$NAME" 2>/dev/null)" \
+site_env="$(run "$ENGINE" inspect -f '{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}' "$NAME" 2>/dev/null)" \
     || refuse "${NAME} is not a container on this host"
 [[ "$site_env" == "SITENAME=${NAME}" ]] || refuse "${NAME} is not a site container install.sh made"
 run_spec_exists "$NAME" || refuse "${NAME} has no run spec on this host (install.sh site writes one)"
@@ -93,8 +97,8 @@ DONE=true; REASON=""; RESTARTED=false
 args=()
 if [[ "$MEM" != "$OLD_MEM" ]]; then args+=("--memory=${MEM}" "--memory-swap=${MEM}"); fi
 if [[ "$CPUS" != "$OLD_CPUS" ]]; then args+=("--cpus=${CPUS}"); fi
-if (( ${#args[@]} > 0 )) && ! run docker update "${args[@]}" "$NAME" >/dev/null 2>&1; then
-    DONE=false; REASON="docker_update_refused"
+if (( ${#args[@]} > 0 )) && ! run "$ENGINE" update "${args[@]}" "$NAME" >/dev/null 2>&1; then
+    DONE=false; REASON="update_refused"
 fi
 if [[ "$DONE" == true ]]; then
     run_spec_set "$NAME" memory "$MEM" && run_spec_set "$NAME" cpus "$CPUS" || { DONE=false; REASON="spec_not_written"; }
@@ -112,7 +116,7 @@ fi
 
 # PostgreSQL and PHP-FPM size themselves from the memory limit as they start.
 if [[ "$DONE" == true && "$MEM" != "$OLD_MEM" ]]; then
-    if run docker restart "$NAME" >/dev/null 2>&1; then RESTARTED=true; else DONE=false; REASON="restart_failed"; fi
+    if run "$ENGINE" restart "$NAME" >/dev/null 2>&1; then RESTARTED=true; else DONE=false; REASON="restart_failed"; fi
 fi
 
 in_force() { run_spec_get "$NAME" "$1"; }

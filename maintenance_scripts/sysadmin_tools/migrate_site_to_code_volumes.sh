@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # migrate_site_to_code_volumes.sh — move a site's code onto named volumes.
 #
+# Version: 1.4 - On the site container engine (specs/site_container_engine.md WP3) there is nothing to
+#                move: every site there is born with its code on volumes. It says so and stops.
 # Version: 1.3 - Refuses on a host whose Docker remaps user ids: docker cp into a volume's host
 #                directory writes the container's ids, not their remapped owners (WP5 item 3).
 # Version: 1.2 - The run spec is checked against the CPUs Docker counts before anything stops
@@ -45,6 +47,10 @@ WORK_DIR=/root/code-migration
 TOOLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../install_tools/_site_run_spec.sh
 . "${TOOLS_DIR}/../install_tools/_site_run_spec.sh"
+if site_engine_is_podman; then
+    echo "${SITE}: this host's sites run on the site container engine, where every site is born with its code on volumes; nothing to move."
+    exit 0
+fi
 STATE_FILE="${WORK_DIR}/${SITE}.state"
 SITE_ROOT="/var/www/html/${SITE}"
 

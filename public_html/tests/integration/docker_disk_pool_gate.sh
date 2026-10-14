@@ -235,6 +235,57 @@ chk "the site's projects leave both files; the other sites' stay, sitea_deploy's
 chk "and its allowance goes, from the host and from the site's config volume (reviewer2 B1)" \
     "$( [ -e "$T/root/etc/joinery/sites/sitea/disk_allowance" ] && echo kept || echo gone)|$( [ -e "$V/sitea_config/_data/disk_allowance" ] && echo kept || echo gone)" "gone|gone"
 
+echo "=== the site container engine (specs/site_container_engine.md WP3) ==="
+# Its storage is on the data root; its layer caps are numbered from the project
+# of the folder that holds the layers, as Docker's are; every site's ids are
+# its own block. No docker command is on this PATH.
+mkdir -p "$T/podbin"
+PV="$T/root/srv/joinery/containers/storage/volumes"
+cat > "$T/podbin/podman" <<STUB
+#!/bin/bash
+echo "podman \$*" >> "$T/podman_calls"
+[ "\$1 \$2" = "volume inspect" ] || exit 0
+echo "$PV/\${@: -1}/_data"
+STUB
+chmod 755 "$T/podbin/podman"
+run_podman() { PATH="$T/podbin:$T/bin:$PATH" JOINERY_SITE_ENGINE_KIND=podman JOINERY_POOL_ROOT="$T/root" JOINERY_SITE_STATE_ROOT="$T/root" bash "$SCRIPT" "$@"; }
+SC="$T/root/etc/containers/storage.conf"
+mkdir -p "$(dirname "$SC")"
+out="$(run_podman can-cap 2>&1)"; rc=$?
+chk "no engine storage on the data root: no disk pool" "$rc|$(grep -c 'no disk pool' <<< "$out")" "1|1"
+out="$(run_podman create 2>&1)"; rc=$?
+chk "  and create says why, making nothing" "$rc|$(grep -c 'keeps no storage on a mounted data root' <<< "$out")|$( [ -d "$T/root/srv/joinery/containers/storage/overlay" ] && echo made || echo none)" "1|1|none"
+printf '[storage]\ndriver = "overlay"\ngraphroot = "/srv/joinery/containers/storage"\n' > "$SC"
+out="$(run_podman can-cap 2>&1)"; rc=$?
+chk "storage on the data root but its layer folder without the base: refused, saying to run create" \
+    "$rc|$(grep -c 'does not carry project 2000000000' <<< "$out")" "1|1"
+: > "$LOG"
+out="$(run_podman create 2>&1)"; rc=$?
+chk "create: the layer folder is made, 700, and carries project 2000000000, passed to what is made in it" \
+    "$rc|$(stat -c %a "$T/root/srv/joinery/containers/storage/overlay")|$(grep -c "^xfs_io -r -c chproj 2000000000 -c chattr +P $T/root/srv/joinery/containers/storage/overlay$" "$LOG")|$(grep -c 'site container engine keeps its data' <<< "$out")" "0|700|1|1"
+chk "  and nothing of Docker's is written" "$( [ -e "$T/root/srv/joinery/docker/.gate_projid" ] && echo kept || echo none)|$(grep -c 'docker' "$LOG")" "kept|0"
+chk "can-cap: 0, with no daemon.json to say whether ids are remapped" "$(run_podman can-cap >/dev/null 2>&1; echo $?)" "0"
+mkdir -p "$PV"; echo 1000000004 > "$PV/.gate_projid"
+out="$(run_podman can-cap 2>&1)"; rc=$?
+chk "a volumes folder carrying a site-range project: refused, since each new volume would join it (reviewer2 V3)" \
+    "$rc|$(grep -c 'carries project 1000000004, at or above the sites' <<< "$out")" "1|1"
+echo 2000000000 > "$PV/.gate_projid"
+chk "  and one at the layers' base" "$(run_podman can-cap >/dev/null 2>&1; echo $?)" "1"
+rm -f "$PV/.gate_projid"
+mkdir -p "$T/root/etc/joinery/sites/podsite" "$PV/podsite_config/_data"
+for v in code uploads postgres config backups deploy; do printf 'volume=podsite_%s:/var/www/html/podsite/%s\n' "$v" "$v"; done > "$T/root/etc/joinery/sites/podsite/run_spec"
+: > "$LOG"; : > "$T/podman_calls"
+out="$(run_podman allow podsite 2G 2>&1)"; rc=$?
+P_ID="$(awk -F: '$1 == "joinery_podsite" { print $2 }' "$T/root/etc/projid")"
+chk "allow: the site's volumes, asked of podman, join its project" \
+    "$rc|$(grep "^${P_ID}:" "$T/root/etc/projects" | sed 's#.*/volumes/##; s#/_data##' | sort | paste -sd,)|$(grep -c '^podman volume inspect' "$T/podman_calls")" \
+    "0|podsite_code,podsite_config,podsite_postgres,podsite_uploads|6"
+chk "  and the allowance is written where the site reads it" "$(cat "$PV/podsite_config/_data/disk_allowance")" "2147483648"
+run_podman release podsite
+sed -i 's#^graphroot = .*#graphroot = "/var/lib/containers/storage"#' "$SC"
+chk "storage anywhere else is no pool" "$(run_podman check; echo $?)" "1"
+rm -f "$SC"
+
 echo "=== install.sh ==="
 chk "every new Docker host makes the data root, with no flag needed" \
     "$(grep -c '^    bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1$' "$INSTALL")|$(grep -c -- '^[^#]*--disk-pool' "$INSTALL")" "1|0"

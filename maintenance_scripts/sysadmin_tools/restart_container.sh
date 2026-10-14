@@ -3,6 +3,8 @@
 # restart_container.sh - restart one of this host's Joinery containers, and say
 # what its state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.2 - the engine is the one this host's sites run on (_site_engine.sh): Docker, or the
+#                site container engine (specs/site_container_engine.md WP3).
 # Version: 1.1 - a container held stopped by hold_container (/etc/joinery/sites/{site}/held) is
 #                refused: the old container of a switch-over stays stopped.
 # Version: 1.0 - the restart_container operate word of
@@ -27,13 +29,13 @@
 #     unknown; the exit code is 0 whenever the object was printed.
 #   - Only compiled facts are printed, reduced to a safe character set.
 #
-# Runs on: a Docker host.
+# Runs on: a container host (Docker, or the site container engine).
 
 set -u
 export LC_ALL=C
 
 CMD_TIMEOUT=20          # seconds per inspect
-RESTART_TIMEOUT=120     # docker restart waits up to its own stop timeout first
+RESTART_TIMEOUT=120     # a restart waits up to the container's own stop timeout first
 
 run() { timeout "$CMD_TIMEOUT" "$@" 2>/dev/null; }
 json_safe() {
@@ -46,19 +48,24 @@ if [[ ! "$NAME" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]]; then
     printf 'restart_container: %s is not a container this node will restart\n' "${NAME:0:64}" >&2
     exit 2
 fi
-command -v docker >/dev/null 2>&1 || {
-    printf 'restart_container: this machine has no docker\n' >&2
+refuse() {
+    printf 'restart_container: %s\n' "$1" >&2
     exit 2
 }
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[[ -f "$HERE/../install_tools/_site_engine.sh" ]] || refuse "there is no install_tools/_site_engine.sh beside this script's tree; nothing was restarted"
+. "$HERE/../install_tools/_site_engine.sh"
+ENGINE="$(site_engine_kind)" || refuse "this machine's container engine could not be named; nothing was restarted"
+command -v "$ENGINE" >/dev/null 2>&1 || refuse "this machine has no ${ENGINE}"
 
 # The host's own list: every container, running or not, whose name is its
 # SITENAME. The name alone proves nothing; the environment install.sh gave it
 # is what makes it ours.
 own_container() {
     local c site
-    for c in $(run docker ps -a --format '{{.Names}}'); do
+    for c in $(run "$ENGINE" ps -a --format '{{.Names}}'); do
         [[ "$c" == "$1" ]] || continue
-        site="$(run docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | awk -F= '$1=="SITENAME" {print $2; exit}')"
+        site="$(run "$ENGINE" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" | awk -F= '$1=="SITENAME" {print $2; exit}')"
         [[ "$site" == "$c" ]] && return 0
     done
     return 1
@@ -78,14 +85,14 @@ fi
 
 state_object() {
     local state health
-    state="$(run docker inspect -f '{{.State.Status}}' "$NAME")"
-    health="$(run docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$NAME")"
+    state="$(run "$ENGINE" inspect -f '{{.State.Status}}' "$NAME")"
+    health="$(run "$ENGINE" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$NAME")"
     printf '{"state":%s,"health":%s}' "$(json_safe "${state:-unknown}")" "$(json_safe "${health:-unknown}")"
 }
 
 BEFORE="$(state_object)"
 RESTARTED=false
-if timeout "$RESTART_TIMEOUT" docker restart "$NAME" >/dev/null 2>&1; then
+if timeout "$RESTART_TIMEOUT" "$ENGINE" restart "$NAME" >/dev/null 2>&1; then
     RESTARTED=true
 fi
 AFTER="$(state_object)"

@@ -3,6 +3,15 @@
 # docker_disk_pool.sh - a Docker host's disk pool, and each site's allowance in
 # it (specs/multi_tenant_docker_hosts.md WP4).
 #
+# Version: 2.6 - can-cap on the site container engine refuses a volumes folder whose project is in the sites'
+#                range or above: each new volume's folder would inherit it (reviewer2 V3).
+# Version: 2.5 - A host whose sites run on the site container engine (specs/site_container_engine.md WP3)
+#                has the pool too: the data root, with the engine's storage on it
+#                (/srv/joinery/containers/storage, install_site_engine.sh). Its layer caps are
+#                numbered like Docker's, from the project of the folder that holds them
+#                (containers/storage drivers/quota), so create gives storage/overlay the base;
+#                every site's ids are its own block, so a site cannot move its files out of
+#                its project. Volume paths are asked of the engine (site_engine).
 # Version: 2.4 - Docker's project ids and the sites' never meet (gvisor_site_sandbox_trial B1).
 #                create gives Docker's data-root DOCKER_PROJID_BASE, which every folder Docker
 #                makes inherits, so Docker numbers its layer caps above it however often it
@@ -122,6 +131,11 @@ fi
 DATA_ROOT_TOOL="${SCRIPT_DIR}/joinery_data_root.sh"
 MNT="${ROOT}/srv/joinery"
 DOCKER_DATA_ROOT="/srv/joinery/docker"
+# The site container engine's storage, and the folder its layers (and their
+# caps) live in (install_site_engine.sh's storage.conf).
+ENGINE_STORAGE="/srv/joinery/containers/storage"
+ENGINE_LAYERS="${ENGINE_STORAGE}/overlay"
+STORAGE_CONF="${ROOT}/etc/containers/storage.conf"
 PROJECTS="${ROOT}/etc/projects"
 PROJID="${ROOT}/etc/projid"
 SITES_DIR="${ROOT}/etc/joinery/sites"
@@ -139,6 +153,10 @@ ALLOWANCE_FILE="disk_allowance"
 export DOCKER_DAEMON_JSON="${ROOT}/etc/docker/daemon.json"
 # shellcheck source=_docker_daemon_json.sh
 . "${SCRIPT_DIR}/_docker_daemon_json.sh"
+# The engine this host's sites run on (site_engine_is_podman, site_engine).
+[[ -f "${SCRIPT_DIR}/_site_engine.sh" ]] || { printf 'docker_disk_pool: _site_engine.sh is missing beside this script\n' >&2; exit 1; }
+# shellcheck source=_site_engine.sh
+. "${SCRIPT_DIR}/_site_engine.sh"
 
 data_root() { JOINERY_HOST_ROOT="$ROOT" bash "$DATA_ROOT_TOOL" "$@"; }
 
@@ -161,9 +179,13 @@ size_bytes() {
 }
 
 # The pool is in place: the data root mounted, XFS with project quotas on, and
-# Docker's data-root in it.
+# Docker's data-root in it, or the site container engine's storage.
 pool_mounted() {
     data_root check >/dev/null 2>&1 || return 1
+    if site_engine_is_podman; then
+        [[ "$(sed -n 's/^graphroot = "\(.*\)"$/\1/p' "$STORAGE_CONF" 2>/dev/null | tail -n 1)" == "$ENGINE_STORAGE" ]]
+        return
+    fi
     local dr
     dr="$(docker_daemon_json_get data-root)"
     dr="${dr#\"}"; dr="${dr%\"}"; dr="${dr%/}"
@@ -178,16 +200,25 @@ dir_projid() { xfs_io -r -c lsproj "$1" 2>/dev/null | awk '$1 == "projid" { prin
 # its id.
 docker_base_ensure() {
     local d="${ROOT}${DOCKER_DATA_ROOT}" id
+    if site_engine_is_podman; then
+        d="${ROOT}${ENGINE_LAYERS}"
+        [[ -d "$d" ]] || { mkdir -p "$d" && chmod 700 "$d"; } || die "could not make ${ENGINE_LAYERS}"
+    fi
     id="$(dir_projid "$d")"
     [[ "$id" =~ ^[0-9]+$ ]] && (( id >= DOCKER_PROJID_BASE )) && return 0
     xfs_io -r -c "chproj ${DOCKER_PROJID_BASE}" -c 'chattr +P' "$d" >/dev/null \
-        || die "could not give ${DOCKER_DATA_ROOT} project ${DOCKER_PROJID_BASE}, which keeps Docker's project ids apart from the sites'"
+        || die "could not give ${d#"$ROOT"} project ${DOCKER_PROJID_BASE}, which keeps the engine's project ids apart from the sites'"
 }
 
 # Docker numbers its layer caps above the sites': the folders it keeps the
 # layers and the volumes in, whose ids it starts from, carry the base.
 docker_ids_apart() {
     local root home id
+    if site_engine_is_podman; then
+        id="$(dir_projid "${ROOT}${ENGINE_LAYERS}")"
+        [[ "$id" =~ ^[0-9]+$ ]] && (( id >= DOCKER_PROJID_BASE ))
+        return
+    fi
     root="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null)" || return 1
     [[ "$root" == /* ]] || return 1
     for home in overlay2 volumes; do
@@ -202,6 +233,20 @@ docker_ids_apart() {
 # move them out of its project (chattr -p).
 can_cap() {
     pool_mounted || { printf 'docker_disk_pool: this host has no disk pool\n' >&2; return 1; }
+    if site_engine_is_podman; then
+        # The folder the engine makes volumes in passes its project to each new
+        # volume's own folder: one in the sites' range would put a new volume in
+        # a site's allowance, one at the base among the layer caps. It carries
+        # none (0) as the engine makes it, and must stay below the sites'.
+        local vols_id
+        vols_id="$(dir_projid "${ROOT}${ENGINE_STORAGE}/volumes")"
+        [[ -z "$vols_id" || ( "$vols_id" =~ ^[0-9]+$ && "$vols_id" -lt "$SITE_PROJID_BASE" ) ]] \
+            || { printf "docker_disk_pool: the site container engine's volumes folder (%s) carries project %s, at or above the sites' range (%s): each new volume would join it\n" "${ENGINE_STORAGE}/volumes" "$vols_id" "$SITE_PROJID_BASE" >&2; return 1; }
+        # Every site's ids are a block of its own (idblock), never root's.
+        docker_ids_apart \
+            || { printf "docker_disk_pool: the site container engine's layer folder (%s) does not carry project %s, so it would number its layer caps among the sites' allowances; run docker_disk_pool.sh create\n" "$ENGINE_LAYERS" "$DOCKER_PROJID_BASE" >&2; return 1; }
+        return 0
+    fi
     [[ -n "$(docker_daemon_json_get userns-remap)" ]] \
         || { printf 'docker_disk_pool: Docker does not remap user ids here, so a site could move its own files out of its allowance\n' >&2; return 1; }
     docker_ids_apart \
@@ -220,6 +265,17 @@ do_create() {
         [[ "$want" =~ ^[0-9]+[KMGT]?$ ]] || die "the size is a number with G, M or T (68G), or a device under /dev, not '${want}'"
     fi
     [[ "$EUID" -eq 0 || -n "$ROOT" ]] || die "this must be run as root"
+
+    # The site container engine keeps its storage on the data root from its
+    # first start (install.sh docker --site-engine): the pool is the data root
+    # and its layer folder's project, set before the first layer if it can be.
+    # Layers made before keep their ids, which lie far below the sites'.
+    if site_engine_is_podman; then
+        pool_mounted || die "this host's site container engine keeps no storage on a mounted data root (${ENGINE_STORAGE}); see: joinery_data_root.sh status, install_site_engine.sh converge"
+        docker_base_ensure
+        say "The disk pool is in place: the site container engine keeps its data at ${ENGINE_STORAGE}, on the data root"
+        return 0
+    fi
 
     if pool_mounted; then
         # A pool made before its data-root carried the base takes it here; it
@@ -295,7 +351,7 @@ site_volumes() {
     while IFS= read -r line; do
         name="${line%%:*}"
         [[ "$name" == "${site}_"* ]] || continue
-        mp="$(docker volume inspect -f '{{.Mountpoint}}' "$name" 2>/dev/null)" || continue
+        mp="$(site_engine volume inspect -f '{{.Mountpoint}}' "$name" 2>/dev/null)" || continue
         [[ "$mp" == /* && "$mp" != *..* ]] || continue
         printf '%s\t%s\n' "${name#"${site}_"}" "$mp"
     done < <(run_spec_list "$site" volume)

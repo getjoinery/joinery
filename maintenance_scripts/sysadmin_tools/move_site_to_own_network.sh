@@ -3,6 +3,8 @@
 # default network onto a network of their own, without stopping them
 # (specs/node_outbound_and_transfer.md WP2).
 #
+# Version: 1.2 - On the site container engine (specs/site_container_engine.md WP3) there is nothing to
+#                move: every site there is born on a network of its own. It says so and stops.
 # Version: 1.1 - The host's outbound limits follow the moved sites (joinery-limits unit, WP3).
 # Version: 1.0
 #
@@ -37,6 +39,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HELPER="${SCRIPT_DIR}/../install_tools/_site_run_spec.sh"
 [[ -f "$HELPER" ]] || { echo "move: ${HELPER} is not beside this script" >&2; exit 1; }
 . "$HELPER"
+if site_engine_is_podman; then
+    echo "move: this host's sites run on the site container engine, where every site is born on a network of its own; nothing to move."
+    exit 0
+fi
 
 say()  { echo "move: $*"; }
 fail() { echo "move: ${SITE}: $*" >&2; return 1; }

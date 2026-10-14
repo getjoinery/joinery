@@ -405,7 +405,11 @@ rm -f "$R/etc/apache2/sites-available/barehand.conf"
 echo
 echo "=== The installer on a Docker host with no sites yet ==="
 chk "--machine installs on any Docker host, sites or not (a host is built before its sites)" \
-    "$(grep -c 'command -v docker >/dev/null 2>&1 || \[\[ ! -d /etc/joinery/sites' "$INSTALLER")/$(grep -c 'not a Docker host (no docker) - nothing to install' "$INSTALLER")" "0/1"
+    "$(grep -c 'command -v docker >/dev/null 2>&1 || \[\[ ! -d /etc/joinery/sites' "$INSTALLER")/$(grep -c 'not a container host (no docker, no site container engine) - nothing to install' "$INSTALLER")" "0/1"
+chk "--machine installs on a site container engine host, which has no docker (specs/site_container_engine.md WP3)" \
+    "$(grep -c '! command -v docker >/dev/null 2>&1 && \[\[ ! -L /usr/local/lib/joinery-site-engine/current \]\]' "$INSTALLER")" "1"
+chk "converge reads the site container engine's storage there, laid out as Docker's root" \
+    "$(grep -c "r=\"\$(podman info -f '{{.Store.GraphRoot}}'" "$INSTALLER")" "1"
 
 echo "mail_gateway_helper gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
