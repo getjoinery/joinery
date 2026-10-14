@@ -227,6 +227,11 @@ struct ServerState {
     key_conflicts: usize,
     quota_bytes: Option<u64>,
     next_token: u64,
+    /// Folders and files another member owns and has shared with this account,
+    /// each with everything inside it (single-owner trees: what is made inside
+    /// one belongs to its owner too). The account syncs its own Drive only, so
+    /// a client asking for `scope: mine` is never told of these.
+    shared_in: std::collections::BTreeSet<(&'static str, i64)>,
     /// Who is calling. Set by the network layer per device.
     actor: Option<String>,
     /// The device whose call is being answered right now, and `None`
@@ -272,6 +277,10 @@ pub struct MockServer {
     /// before its server has the check, and the only way to see what the
     /// client does on its own (`specs/drive_trash_unchanged_since.md`).
     ignores_unchanged_since: Arc<Mutex<bool>>,
+    /// See [`MockServer::ignores_scope`].
+    ignores_scope: Arc<Mutex<bool>>,
+    /// See [`MockServer::index_shows_nothing`].
+    index_shows_nothing: Arc<Mutex<bool>>,
 }
 
 impl std::fmt::Debug for MockServer {
@@ -454,6 +463,7 @@ impl MockServer {
                 key_conflicts: 0,
                 quota_bytes: None,
                 next_token: 0,
+                shared_in: std::collections::BTreeSet::new(),
                 actor: None,
                 caller: None,
                 trash_calls: Vec::new(),
@@ -463,7 +473,70 @@ impl MockServer {
             during_upload: Arc::new(Mutex::new(None)),
             plain_refusals: Arc::new(Mutex::new(false)),
             ignores_unchanged_since: Arc::new(Mutex::new(false)),
+            ignores_scope: Arc::new(Mutex::new(false)),
+            index_shows_nothing: Arc::new(Mutex::new(false)),
         }
+    }
+
+    /// A folder another member owns and has shared with this account, as its
+    /// editor: everything later made inside it is that member's too.
+    pub fn seed_shared_in_folder(&self, parent: Option<i64>, name: &str) -> i64 {
+        let id = self.seed_folder(parent, name);
+        self.state.lock().unwrap().shared_in.insert(("folder", id));
+        id
+    }
+
+    /// The entity, and everything inside it, now belongs to another member
+    /// who shares it with this account: ownership moved (a site copy, an
+    /// account merge), so it leaves the account's own Drive.
+    pub fn hand_to_another_member(&self, entity_type: &'static str, id: i64) {
+        self.state.lock().unwrap().shared_in.insert((entity_type, id));
+    }
+
+    /// The index answers that there is nothing, as a walk that showed nothing
+    /// would: what a full walk did not return is never, by that alone, gone.
+    pub fn index_shows_nothing(&self, on: bool) {
+        *self.index_shows_nothing.lock().unwrap() = on;
+    }
+
+    /// Answer as a server from before the own-Drive scope: `scope` is not
+    /// read, so the feed and `drive_stat` hand a sync client what is shared
+    /// in to the account, as they did.
+    pub fn ignores_scope(&self, on: bool) {
+        *self.ignores_scope.lock().unwrap() = on;
+    }
+
+    /// Is this entity, or a folder above it, shared in to the account?
+    fn is_shared_in(st: &ServerState, t: &str, id: i64) -> bool {
+        let mut folder = if t == "folder" {
+            if st.shared_in.contains(&("folder", id)) {
+                return true;
+            }
+            st.folders.get(&id).and_then(|f| f.parent)
+        } else {
+            if st.shared_in.contains(&("file", id)) {
+                return true;
+            }
+            st.files.get(&id).and_then(|f| f.folder)
+        };
+        let mut guard = 0;
+        while let Some(fid) = folder {
+            if st.shared_in.contains(&("folder", fid)) {
+                return true;
+            }
+            guard += 1;
+            if guard > 10_000 {
+                return false;
+            }
+            folder = st.folders.get(&fid).and_then(|f| f.parent);
+        }
+        false
+    }
+
+    /// Does this request ask for the account's own Drive only, and does this
+    /// server read the question?
+    fn own_drive_only(&self, body: &Value) -> bool {
+        body.get("scope").and_then(Value::as_str) == Some("mine") && !*self.ignores_scope.lock().unwrap()
     }
 
     /// Do something to the world each time an upload reaches completion, just
@@ -746,7 +819,9 @@ impl MockServer {
         let st = self.state.lock().unwrap();
         let mut out = BTreeMap::new();
         for f in st.folders.values() {
-            if f.trashed {
+            // The account's own Drive: what is shared in to it is another
+            // member's, and not synced.
+            if f.trashed || Self::is_shared_in(&st, "folder", f.id) {
                 continue;
             }
             if let Some(path) = Self::folder_path(&st, f.id) {
@@ -754,7 +829,7 @@ impl MockServer {
             }
         }
         for f in st.files.values() {
-            if f.trashed {
+            if f.trashed || Self::is_shared_in(&st, "file", f.id) {
                 continue;
             }
             let parent = match f.folder {
@@ -1183,11 +1258,16 @@ impl MockServer {
             }));
         }
 
+        let mine = self.own_drive_only(body);
         let mut out = Vec::new();
         let mut next = cursor;
         for c in st.changes.iter().filter(|c| c.change_id > cursor) {
             if out.len() as i64 >= limit {
                 break;
+            }
+            if mine && Self::is_shared_in(&st, c.entity_type, c.entity_id) {
+                next = c.change_id;
+                continue;
             }
             out.push(json!({
                 "change_id": c.change_id,
@@ -1249,11 +1329,18 @@ impl MockServer {
             ));
         }
 
+        let mine = self.own_drive_only(body);
         let now = self.clock.now_ms();
         let mut st = self.state.lock().unwrap();
         let mut items = Vec::new();
         let mut missing = Vec::new();
+        let mut not_yours = Vec::new();
         for (t, id) in wanted {
+            if mine && Self::is_shared_in(&st, &t, id) {
+                missing.push(json!({ "entity_type": t, "entity_id": id }));
+                not_yours.push(json!({ "entity_type": t, "entity_id": id }));
+                continue;
+            }
             let found = if t == "folder" {
                 st.folders.get(&id).map(Self::folder_export)
             } else {
@@ -1268,7 +1355,7 @@ impl MockServer {
                 None => missing.push(json!({ "entity_type": t, "entity_id": id })),
             }
         }
-        Ok(json!({ "ok": true, "items": items, "missing": missing }))
+        Ok(json!({ "ok": true, "items": items, "missing": missing, "not_yours": not_yours }))
     }
 
     fn drive_index(&self, body: &Value) -> ServerResult {
@@ -1279,6 +1366,9 @@ impl MockServer {
             .to_string();
         let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(500) as usize;
         let (phase, after) = parse_index_token(&token);
+        if *self.index_shows_nothing.lock().unwrap() {
+            return Ok(json!({ "ok": true, "scope": "mine", "items": [], "next_after_id": token, "done": true }));
+        }
 
         let mut st = self.state.lock().unwrap();
         let mut items = Vec::new();
@@ -1299,8 +1389,11 @@ impl MockServer {
                 .collect();
             for id in &ids {
                 if let Some(f) = st.folders.get(id) {
-                    items.push(Self::folder_export(f));
                     last = format!("folder:{id}");
+                    if Self::is_shared_in(&st, "folder", *id) {
+                        continue;
+                    }
+                    items.push(Self::folder_export(f));
                 }
             }
             if ids.len() < limit {
@@ -1328,8 +1421,11 @@ impl MockServer {
             for id in &ids {
                 let row = st.files.get(id).cloned();
                 if let Some(f) = row {
-                    items.push(Self::file_export(&mut st, &f, false, 0));
                     last = format!("file:{id}");
+                    if Self::is_shared_in(&st, "file", *id) {
+                        continue;
+                    }
+                    items.push(Self::file_export(&mut st, &f, false, 0));
                 }
             }
         }
@@ -1507,6 +1603,10 @@ impl MockServer {
         }
         let dest = body.get("parent_id").and_then(Value::as_i64);
         let mut st = self.state.lock().unwrap();
+        // The top level is the owner's.
+        if dest.is_none() && Self::is_shared_in(&st, t, id) {
+            return Err(refuse(422, "ActionError", "Only the owner can move this to the top of their Drive."));
+        }
         if let Some(d) = dest {
             match st.folders.get(&d) {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
@@ -1600,6 +1700,10 @@ impl MockServer {
     fn drive_trash(&self, body: &Value) -> ServerResult {
         let (t, id) = Self::target(body)?;
         let mut st = self.state.lock().unwrap();
+        // Trash is owner-only; an editor's grant never confers it.
+        if Self::is_shared_in(&st, t, id) {
+            return Err(refuse(422, "ActionError", "You do not have permission to delete this item."));
+        }
         // The platform refuses a trash when something it would take changed
         // after the cursor the client sent (`specs/drive_trash_unchanged_since.md`):
         // a file created, edited, moved or restored there, or a subfolder moved

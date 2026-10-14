@@ -47,6 +47,13 @@ function drive_stat_logic(array $input): LogicResult {
 		return LogicResult::error('At most ' . DRIVE_STAT_MAX . ' entities may be requested at once.');
 	}
 	$with_urls = !empty($input['urls']);
+	// `mine`, a sync client's scope: an entity the caller does not own is not
+	// theirs to sync, however it is shared to them, and is answered as
+	// `not_yours`, as an unshared one is.
+	$scope = (string)($input['scope'] ?? 'all');
+	if ($scope !== 'mine' && $scope !== 'all') {
+		return LogicResult::error('Unknown scope.');
+	}
 
 	// Normalize and dedupe the request. A client replaying a feed run will ask
 	// for the same file several times (created, then renamed, then content);
@@ -86,7 +93,8 @@ function drive_stat_logic(array $input): LogicResult {
 			$missing[] = $req;
 			continue;
 		}
-		if (!DriveHelper::can_read($req['entity_type'], $entity, $user_id, $permission)) {
+		if (!DriveHelper::can_read($req['entity_type'], $entity, $user_id, $permission)
+			|| ($scope === 'mine' && !DriveHelper::owns($req['entity_type'], $entity, $user_id))) {
 			$missing[] = $req;
 			$not_yours[] = $req;
 			continue;
@@ -150,6 +158,7 @@ function drive_stat_logic_descriptor(): array {
 				),
 			),
 			'urls' => array('type' => 'bool', 'required' => false, 'label' => 'Mint signed download/thumbnail URLs (off by default)'),
+			'scope' => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'all'), 'label' => "'mine' (an entity the caller does not own is not_yours) or 'all' (the default)"),
 		),
 	);
 }

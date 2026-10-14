@@ -250,6 +250,39 @@ $stat_gone = drive_stat_logic(array('entities' => array(array('entity_type' => '
 check(count($stat_gone->data['missing'] ?? array()) === 1, 'a file that does not exist is missing');
 check(empty($stat_gone->data['not_yours']), 'a file that does not exist is not reported as somebody else\'s');
 
+// ---------------------------------------------------------------------------
+section('a sync client\'s scope is its own Drive');
+
+// A sync client asks for `mine`: the changes to what it owns, an editor's
+// writes to its files included, and nothing shared in to it.
+$session->set_api_user($owner->key);
+FileAccessGrant::sync_for_entity('folder', $Fsh, array((int)$grantee->key => 'editor'), $owner->key);
+$cur_m = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+drive_rename_logic(array('entity_type' => 'file', 'entity_id' => $Z->key, 'name' => 'inside-by-owner.txt'));
+
+$session->set_api_user($grantee->key);
+$names_z = function ($feed) use ($Z) {
+	foreach (($feed->data['changes'] ?? array()) as $c) {
+		if (($c['entity_type'] ?? '') === 'file' && (int)($c['entity_id'] ?? 0) === (int)$Z->key) { return true; }
+	}
+	return false;
+};
+check(!$names_z(drive_changes_logic(array('cursor' => $cur_m, 'scope' => 'mine'))), 'the grantee\'s own-Drive feed leaves out the file shared in to them');
+check($names_z(drive_changes_logic(array('cursor' => $cur_m))), 'the default feed still names it');
+$stat_m = drive_stat_logic(array('entities' => array(array('entity_type' => 'file', 'entity_id' => (int)$Z->key)), 'scope' => 'mine'));
+$not_yours_ids = array_map(function ($e) { return (int)$e['entity_id']; }, $stat_m->data['not_yours'] ?? array());
+check(empty($stat_m->data['items']) && in_array((int)$Z->key, $not_yours_ids, true), 'drive_stat in the own-Drive scope answers a shared-in file as not_yours');
+$stat_all = drive_stat_logic(array('entities' => array(array('entity_type' => 'file', 'entity_id' => (int)$Z->key))));
+check(count($stat_all->data['items'] ?? array()) === 1, 'the default drive_stat still returns it');
+
+// The grantee, an editor now, renames the owner's file: the owner's own feed
+// is told, since the row is the owner's.
+$cur_e = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+drive_rename_logic(array('entity_type' => 'file', 'entity_id' => $Z->key, 'name' => 'inside-by-editor.txt'));
+$session->set_api_user($owner->key);
+check($names_z(drive_changes_logic(array('cursor' => $cur_e, 'scope' => 'mine'))), 'the owner\'s own-Drive feed names an editor\'s change to the owner\'s file');
+check(drive_changes_logic(array('cursor' => $cur_e, 'scope' => 'theirs'))->error !== null, 'an unknown scope is refused');
+
 $session->set_api_user($owner->key);
 
 harness_finish();

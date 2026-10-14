@@ -43,11 +43,19 @@ function drive_folder_create_logic(array $input): LogicResult {
 		return LogicResult::error('That is not a protection level Drive offers.');
 	}
 
+	// The OWNER of the new folder is the parent folder's owner, else the actor
+	// (single-owner-tree rule, as drive_upload_init applies it to files):
+	// everything under a folder belongs to the folder's owner, whoever creates
+	// it. Owned by an editor instead, the folder was missing from the owner's
+	// own Drive walk, and it and everything uploaded into it belonged to the
+	// editor beneath the owner's folder.
+	$owner_id = $user_id;
 	if ($parent_id > 0) {
 		$parent = DriveHelper::load_folder($parent_id);
 		if (!$parent) {
 			return LogicResult::error('Parent folder not found.');
 		}
+		$owner_id = (int)$parent->get('fol_usr_user_id');
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $parent, $user_id, $session->get_permission())) {
 			return LogicResult::error('You do not have access to that folder.');
 		}
@@ -72,12 +80,12 @@ function drive_folder_create_logic(array $input): LogicResult {
 	// creation rather than letting the first upload fail with a file in flight.
 	if ($level === ProtectionLevel::PRIVATE_) {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-		if (UserEncryptionVault::loadForUser($user_id, UserEncryptionVault::SCOPE_USER) === null) {
+		if (UserEncryptionVault::loadForUser($owner_id, UserEncryptionVault::SCOPE_USER) === null) {
 			return LogicResult::error('Set up your vault before creating a Private folder.');
 		}
 	}
 
-	if (DriveHelper::folder_name_taken($user_id, $parent_id, $name)) {
+	if (DriveHelper::folder_name_taken($owner_id, $parent_id, $name)) {
 		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
 
@@ -86,9 +94,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 	// folder cannot land under a parent that went to the trash meanwhile — which
 	// would hide it from every listing with nothing to bring it back.
 	try {
-		$folder = DriveHelper::place_into($parent_id, function () use ($user_id, $parent_id, $name, $level) {
+		$folder = DriveHelper::place_into($parent_id, function () use ($owner_id, $parent_id, $name, $level) {
 			$folder = new Folder(NULL);
-			$folder->set('fol_usr_user_id', $user_id);
+			$folder->set('fol_usr_user_id', $owner_id);
 			if ($parent_id > 0) {
 				$folder->set('fol_parent_folder_id', $parent_id);
 			}
@@ -107,7 +115,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
 
-	FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FOLDER, $folder->key, $user_id, $user_id);
+	FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FOLDER, $folder->key, $owner_id, $user_id);
 
 	return LogicResult::render(array(
 		'ok'     => true,
@@ -117,7 +125,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 
 function drive_folder_create_logic_descriptor(): array {
 	return array(
-		'description'      => 'Create a folder in the current user\'s Drive. `protection_level` is one of standard / private / fortress and is accepted only at the root: a folder under a protected parent inherits that parent\'s level, and raising the level part-way down a tree is refused (a protected tree is a top-level tree). `encrypted` is the older spelling for fortress and still works. A private folder requires the owner to have a vault.',
+		'description'      => 'Create a folder in the parent folder\'s owner\'s Drive (the caller\'s, at the top level). `protection_level` is one of standard / private / fortress and is accepted only at the root: a folder under a protected parent inherits that parent\'s level, and raising the level part-way down a tree is refused (a protected tree is a top-level tree). `encrypted` is the older spelling for fortress and still works. A private folder requires the owner to have a vault.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => true,

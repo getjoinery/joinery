@@ -186,6 +186,17 @@ The client is this loop, run over and over:
 
 1. **Read the change feed** from the stored cursor (`drive_changes`), or walk
    the whole index (`drive_index`) when the server answers `{reset: true}`.
+   Every request asks for `scope: mine`: the client syncs the account's own
+   Drive, never what another member shares with it. After any full walk the
+   client asks `drive_stat`, by id, about every live record the walk did not
+   return; one the server answers as `missing` (gone, or not the account's)
+   reads as deleted. Nothing is decided by its absence from the walk alone. A
+   store not yet marked as walked under this scope (`OWN_DRIVE_ONLY`) is walked
+   this way once, which takes down anything of another member's it holds, each
+   copy going to this computer's trash as a deletion would, an edit that never
+   reached the server rescued into the folder it was made in. A store the
+   client starts, at no feed position and holding nothing, is marked without a
+   walk.
 2. **Absorb** what the server reports into the remote side of `entries`. An
    observation, never an agreement.
 3. **Resolve names** for this filesystem ([below](#filesystem-personalities)).

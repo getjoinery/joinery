@@ -132,6 +132,14 @@ stays lean (id-only rows); this is the batch re-fetch that pairs with it.
 - File exports here do **not** mint `download_url` / `thumb_url` (minting a
   signed URL per file is wasted work at sync scale) — a `urls: true` input
   flag opts in for small batches.
+- `scope` (`mine` | `all`, default `all`; added 2026-10-14 with the live
+  finding B-SH1): with `mine`, an entity the caller does not own lands in
+  `missing` and `not_yours`, however it is shared to them. `drive_changes`
+  takes the same `scope`, and with `mine` returns only rows recorded against
+  the caller (their own entities, an editor's changes to them included). The
+  v1 sync client sends `mine` on `drive_changes`, `drive_stat` and
+  `drive_index` (D12): before it did, a folder shared to the account came down
+  through the feed and `drive_stat` into the top of the sync root.
 
 ## I.3 `drive_index` — full-tree walk for cold start / reset
 
