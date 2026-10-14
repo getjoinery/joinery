@@ -24,6 +24,10 @@
  *   sealer and the mail gateway are compiled from their source on this
  *   disk; the release key lists are read from this disk into the agent bundle; a plugin or theme manifest
  *   is where publish writes its version bump and commits the whole file;
+ *   publish's own code (publish_upgrade.php, this class, every *Publisher
+ *   class) runs from this disk and decides what the release holds - which
+ *   scripts the support bundle carries, what each manifest lists - so a
+ *   half-finished edit there would build this release to another commit's plan;
  * - everything else, which is LEFT OUT: named in the publish output, absent
  *   from the release, and no reason to refuse it.
  *
@@ -57,6 +61,9 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.9 - publish's own code is held: publish_upgrade.php, ReleaseCommit and every *Publisher class run
+ *               from this disk, and an uncommitted support bundle list named scripts the commit did not have,
+ *               so 0.8.496 shipped with no bundle at all (B70)
  * @version 1.8 - the sandboxed plugin host's source is held and its bin/ is publish's to commit, like the parser jail's
  * @version 1.7 - the site container engine's source is held and its ENGINE record is publish's to commit
  *                (specs/site_container_engine.md D1, D2)
@@ -244,6 +251,8 @@ class ReleaseCommit {
 		'public_html/admin_menus.json',          // likewise
 		'public_html/install_bundles.json',      // read from this disk by publish's own bundle guard
 		'public_html/utils/create_install_sql.php', // what dumps the install SQL
+		'public_html/plugins/server_manager/includes/publish_upgrade.php', // publish itself, run from this disk
+		'public_html/includes/ReleaseCommit.php',  // what decides what a release holds, likewise
 	);
 
 	/** Repository-relative directories held the same way. */
@@ -263,7 +272,8 @@ class ReleaseCommit {
 	 * left out of it. Pure, so the rule can be asserted directly. A plugin's or
 	 * theme's manifest is held because publish writes its version bump into
 	 * that file and commits the whole file; a plugin's data classes and
-	 * migrations for the same reason as core's.
+	 * migrations for the same reason as core's. A *Publisher class, core's or
+	 * a plugin's, builds part of the release from this disk (B70).
 	 */
 	public static function heldPath($rel) {
 		$rel = ltrim(str_replace('\\', '/', $rel), '/');
@@ -275,7 +285,8 @@ class ReleaseCommit {
 				return true;
 			}
 		}
-		return (bool)preg_match('~^public_html/(plugins/[^/]+/(data|migrations)/|plugins/[^/]+/plugin\.json$|theme/[^/]+/theme\.json$)~', $rel);
+		return (bool)preg_match('~^public_html/(plugins/[^/]+/(data|migrations)/|plugins/[^/]+/plugin\.json$|theme/[^/]+/theme\.json$'
+			. '|(plugins/[^/]+/)?includes/[A-Za-z0-9]+Publisher\.php$)~', $rel);
 	}
 
 	/**

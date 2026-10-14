@@ -324,6 +324,31 @@ if ($go_version === '') {
 	check($res['status'] === AgentDistPublisher::STATUS_FAILED && strpos($res['message'], 'Raise the version') !== false,
 		'source that builds different bytes at the same version refuses the publish', $res['message']);
 	check(file_get_contents($dist_d . '/manifest.json') === $before_d, 'and leaves the bundle as it was');
+
+	// A new version rebuilds the agent's own files only. What other publishers
+	// keep in agent_dist goes on into the new directory: 0.8.496 rebuilt the
+	// agent, the support bundle was carried forward from a directory the
+	// rebuild had just replaced, and the release shipped with none (B70).
+	file_put_contents($git_src . '/main.go', "package main\n\nvar version = \"3.0.1\"\n\nfunc main() { println(\"three\") }\n");
+	exec($git . 'commit -qam three');
+	$others = array('support_bundle.tar.gz' => 'bundle bytes', 'support_bundle.json' => '{"version":"b1"}', 'RELEASE_STATEMENT' => 'statement');
+	foreach ($others as $f => $bytes) {
+		file_put_contents($dist_d . '/' . $f, $bytes);
+	}
+	file_put_contents($dist_d . '/joinery-agent.service', 'an old unit the source no longer has');
+	$res = AgentDistPublisher::publish($site_d, null);
+	$carried = array();
+	foreach ($others as $f => $bytes) {
+		$carried[$f] = @file_get_contents($dist_d . '/' . $f) === $bytes;
+	}
+	$after = json_decode(file_get_contents($dist_d . '/manifest.json'), true);
+	check($res['status'] === AgentDistPublisher::STATUS_BUILT && ($after['version'] ?? '') === '3.0.1'
+		&& !in_array(false, $carried, true),
+		'a rebuild to a new version keeps the support bundle and the release statement beside the agent (B70)',
+		$res['message'] . ' ' . json_encode($carried));
+	check(!is_file($dist_d . '/joinery-agent.service') && AgentDistPublisher::ownFile('joinery-agent-linux-arm64.gz')
+		&& AgentDistPublisher::ownFile('manifest.json') && !AgentDistPublisher::ownFile('support_bundle.json'),
+		'but none of the agent\'s own old files: a unit the source no longer has is not carried');
 }
 
 
