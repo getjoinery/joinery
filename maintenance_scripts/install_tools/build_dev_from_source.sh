@@ -30,7 +30,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.15"
+DEPLOY_VERSION="3.16"  # 3.16: no plugin loading step; it matched no plugin file, so it checked nothing
 
 # Capture script directory at startup (before any cd commands change working directory)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -933,68 +933,6 @@ else
     files_checked=$(echo "$php_validation_output" | grep "^SUCCESS:" | cut -d: -f2)
     verbose_echo "✓ PHP syntax validation passed ($files_checked files checked)"
 fi
-
-# PLUGIN LOADING TEST ON STAGING (using DeploymentHelper)
-if [ "$FAST_MODE" = true ]; then
-    echo "⚡ Fast mode: Skipping plugin loading test"
-else
-verbose_echo "Testing plugin class file loading on staging..."
-plugin_test_output=$(php -r "
-    require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
-    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
-
-    \$result = DeploymentHelper::testPluginLoading('/var/www/html/$TARGET_SITE/public_html_stage');
-
-    if (!\$result['success']) {
-        echo 'ERRORS_FOUND:' . count(\$result['errors']) . ':' . \$result['files_checked'] . PHP_EOL;
-        foreach (\$result['errors'] as \$error) {
-            echo 'ERROR:' . \$error['file'] . ':' . \$error['type'] . ':' . \$error['message'] . PHP_EOL;
-        }
-        exit(1);
-    } else {
-        echo 'SUCCESS:' . \$result['files_checked'];
-        exit(0);
-    }
-" 2>&1)
-plugin_test_exit=$?
-
-if [ $plugin_test_exit -ne 0 ]; then
-    # Parse error output
-    error_count=$(echo "$plugin_test_output" | grep "^ERRORS_FOUND:" | cut -d: -f2)
-    files_checked=$(echo "$plugin_test_output" | grep "^ERRORS_FOUND:" | cut -d: -f3)
-
-    echo ""
-    echo "========================================="
-    echo "PLUGIN LOADING FAILURES DETECTED"
-    echo "========================================="
-    echo "ERROR: $error_count plugin loading errors found in staging."
-    echo ""
-
-    echo "$plugin_test_output" | grep "^ERROR:" | while IFS=: read -r prefix file type message; do
-        echo "  [$type] $file"
-        echo "    $message"
-    done
-
-    echo ""
-    echo "DEBUGGING: Staging directory preserved at: /var/www/html/$TARGET_SITE/public_html_stage"
-    echo "You can manually test plugin files with:"
-    echo "  cd /var/www/html/$TARGET_SITE/public_html_stage"
-    echo "  php -l plugins/path/to/problematic_file.php"
-    echo "========================================="
-
-    if [ "$DISABLE_ROLLBACK" = true ]; then
-        echo ""
-        echo "--norollback flag detected: Proceeding with deployment despite plugin loading failures."
-        echo "WARNING: Plugin tests failed but deployment will continue. Manual intervention may be required."
-        echo ""
-    else
-        exit 1
-    fi
-else
-    files_checked=$(echo "$plugin_test_output" | grep "^SUCCESS:" | cut -d: -f2)
-    verbose_echo "✓ Plugin loading test passed ($files_checked files checked)"
-fi
-fi  # End of FAST_MODE check for plugin loading test
 
 # APPLICATION BOOTSTRAP TEST ON STAGING (using DeploymentHelper)
 if [ "$FAST_MODE" = true ]; then

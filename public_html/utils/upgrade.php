@@ -34,6 +34,10 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.21 - a site container engine site (/run/.containerenv) keeps its held release manifest as a Docker
+	 *                one does (specs/site_container_engine.md WP3): a rebuild puts the image's older one back
+	 * @version 1.20 - no 'Plugin loading' step before the swap (it matched no plugin file); the deploy tier
+	 *                loads every active plugin's bootstrap after the swap and rolls back if one throws
 	 * @version 1.19 - a site other sites upgrade from (DeploymentHelper::servesReleases()) takes every theme and
 	 *                plugin its source publishes, installed here or not, so the releases it republishes carry them
 	 * @version 1.18 - the extension table says "Edited here, will be replaced" for a package the deploy
@@ -1492,20 +1496,6 @@
 			upgrade_echo("✓ {$result['files_checked']} files<br>");
 		}
 
-		// Test plugin loading
-		upgrade_echo('Plugin loading... ');
-		$result = DeploymentHelper::testPluginLoading($stage_directory);
-		if (!$result['success']) {
-			$lines = [];
-			foreach ($result['errors'] as $error) {
-				$type_label = ($error['type'] === 'syntax') ? 'SYNTAX' : strtoupper($error['type']);
-				$lines[] = "• [$type_label] " . htmlspecialchars($error['file']) . ': ' . htmlspecialchars($error['message']);
-			}
-			upgrade_abort('Plugin Loading Tests FAILED', implode('<br>', $lines));
-		} else {
-			upgrade_echo("✓ {$result['files_checked']} plugins<br>");
-		}
-
 		// Test bootstrap
 		upgrade_echo('Application bootstrap... ');
 		$result = DeploymentHelper::testBootstrap($stage_directory);
@@ -2244,7 +2234,7 @@
 		// passed its deploy tier; site_housekeeping.sh puts it back at the site
 		// root whenever it is the one the code matches.
 		$held_manifest_dir = $full_site_dir . '/config/release_manifest';
-		if (file_exists('/.dockerenv') && is_dir($full_site_dir . '/config')
+		if ((file_exists('/.dockerenv') || file_exists('/run/.containerenv')) && is_dir($full_site_dir . '/config')
 				&& is_file($full_site_dir . '/RELEASE_MANIFEST') && is_file($full_site_dir . '/RELEASE_MANIFEST.sig')) {
 			$hm_out = []; $hm_exit = 0;
 			exec($root_prefix . 'mkdir -p ' . escapeshellarg($held_manifest_dir) . ' && '
