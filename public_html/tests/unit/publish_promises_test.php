@@ -22,6 +22,7 @@
  *
  * Run:  php tests/unit/publish_promises_test.php
  *
+ * @version 1.5 - and every method or constant they name on such a class is in the previous release, or guarded
  * @version 1.4 - the pre-swap deployment files name only classes every site has, or guard them
  * @version 1.3 - a site others upgrade from carries every package it serves
  */
@@ -303,6 +304,81 @@ foreach ($named as $class => $files) {
 check($unguarded === array(),
     'the pre-swap deployment files name only classes every site has, or ask class_exists() first',
     $unguarded ? 'unguarded: ' . implode('; ', $unguarded) : '');
+
+// The same for a method or constant on one of those classes: a site has the
+// class but not what a release added to it (MarketplaceClient::is_root, 0.8.318).
+// Each one named here must exist in the previous release, or be asked for
+// with method_exists() / defined() first. Needs the repository; a tree
+// without one (a node, a release staging copy) skips this half.
+$repo_top = trim((string)@shell_exec('git -C ' . escapeshellarg(PathHelper::getIncludePath('')) . ' rev-parse --show-toplevel 2>/dev/null'));
+$head = trim((string)@shell_exec('git -C ' . escapeshellarg($repo_top) . ' rev-parse HEAD 2>/dev/null'));
+$floor = '';
+foreach (explode("\n", (string)@shell_exec('git -C ' . escapeshellarg($repo_top) . " log --format=%H --grep='^Release ' -n 2 2>/dev/null")) as $release_commit) {
+    $release_commit = trim($release_commit);
+    if ($release_commit !== '' && $release_commit !== $head) { $floor = $release_commit; break; }
+}
+if ($repo_top === '' || $floor === '') {
+    check(true, 'methods and constants the pre-swap files name: skipped, no repository to compare a release against');
+} else {
+    $members = array();   // "Class::member" => array(kind, files)
+    foreach ($pre_swap as $rel) {
+        $tokens = token_get_all((string)@file_get_contents(PathHelper::getIncludePath($rel)));
+        $count = count($tokens);
+        for ($i = 0; $i < $count; $i++) {
+            if (!is_array($tokens[$i]) || !in_array($tokens[$i][0], array(T_STRING, T_NAME_FULLY_QUALIFIED), true)) continue;
+            $class = ltrim($tokens[$i][1], '\\');
+            if (in_array(strtolower($class), array('self', 'static', 'parent'), true) || isset($set_classes[$class])) continue;
+            $j = $i + 1;
+            while ($j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) $j++;
+            if (!($j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_DOUBLE_COLON)) continue;
+            $j++;
+            while ($j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) $j++;
+            if (!($j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) || strtolower($tokens[$j][1]) === 'class') continue;
+            $member = $tokens[$j][1];
+            $k = $j + 1;
+            while ($k < $count && is_array($tokens[$k]) && $tokens[$k][0] === T_WHITESPACE) $k++;
+            $kind = ($k < $count && $tokens[$k] === '(') ? 'method' : 'constant';
+            $members[$class . '::' . $member] = array('class' => $class, 'member' => $member, 'kind' => $kind,
+                'files' => array_merge($members[$class . '::' . $member]['files'] ?? array(), array($rel => true)));
+        }
+    }
+    $missing = array();
+    $old_sources = array();
+    foreach ($members as $name => $m) {
+        if (!class_exists($m['class'])) continue;   // the class-level check above owns this
+        $reflect = new ReflectionClass($m['class']);
+        if ($reflect->isInternal()) continue;
+        $guarded = true;
+        foreach (array_keys($m['files']) as $rel) {
+            $src = (string)file_get_contents(PathHelper::getIncludePath($rel));
+            $guard = $m['kind'] === 'method'
+                ? "method_exists('" . $m['class'] . "', '" . $m['member'] . "')"
+                : "defined('" . $m['class'] . '::' . $m['member'] . "')";
+            if (strpos($src, "class_exists('" . $m['class'] . "'") === false && strpos($src, $guard) === false) {
+                $guarded = false;
+            }
+        }
+        if ($guarded) continue;
+        $file = (string)$reflect->getFileName();
+        if (strpos($file, $repo_top . '/') !== 0) continue;
+        $repo_rel = substr($file, strlen($repo_top) + 1);
+        if (!isset($old_sources[$repo_rel])) {
+            $old_sources[$repo_rel] = (string)@shell_exec('git -C ' . escapeshellarg($repo_top) . ' show '
+                . escapeshellarg($floor . ':' . $repo_rel) . ' 2>/dev/null');
+        }
+        $pattern = $m['kind'] === 'method'
+            ? '/function\s+&?\s*' . preg_quote($m['member'], '/') . '\s*\(/i'
+            : '/const\s+(?:[A-Za-z_?][A-Za-z0-9_|?]*\s+)?' . preg_quote($m['member'], '/') . '\s*=/';
+        if (!preg_match($pattern, $old_sources[$repo_rel])) {
+            $missing[] = $name . ' (' . $m['kind'] . ', ' . implode(', ', array_keys($m['files'])) . ')';
+        }
+    }
+    check($members !== array(), 'the scan finds the methods and constants the pre-swap files name');
+    check($missing === array(),
+        'every method and constant they name on a class outside the set is in the previous release ('
+        . substr($floor, 0, 8) . '), or guarded first',
+        $missing ? 'not in that release: ' . implode('; ', $missing) : '');
+}
 
 
 section('One publish goes from a committed tree to a release');
