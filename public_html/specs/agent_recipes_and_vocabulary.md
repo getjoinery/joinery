@@ -411,6 +411,16 @@ could not say which addresses its services were bound to.
 |---|---|---|
 | Which addresses and ports the machine is listening on, and which program holds each | Read the source and reproduced it on dev | `listening_sockets` (observe, machine, no parameters): the `ss -ltnp` answer as rows of address, port, family and unit or program name, capped; no remote addresses, no connections |
 
+**2026-10-14, the 0.8.494 check on an encrypted data root (node-n, TEST plane).** 0.8.494
+changed `joinery_data_root.sh` to 1.22 (`podman-restart.service` joined its consumers). The
+check proved the upgrade and an escrow-opened reboot through the plane, but two of its facts
+were read over SSH, read-only.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Which version of the data root script the machine runs (`/usr/local/sbin/joinery-data-root`, the copy a run's unit starts, which the tick brings up to the release's) | Read its `# Version:` line over SSH | A field in `host_report`'s `data_root_encryption`: the installed copy's version line, beside the release's own, so a node page can say when they differ |
+| Which consumer drop-ins the data root wrote, and whether each names a unit installed here | Listed `/etc/systemd/system/*.service.d` over SSH | A field in `host_report`'s `data_root_encryption`: for each unit in the script's `CONSUMERS` (a closed list), drop-in present and unit installed |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.
