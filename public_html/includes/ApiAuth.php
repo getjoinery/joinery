@@ -62,7 +62,10 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.6.0
+ * @version 1.7.0
+ * @changelog 1.7.0 - A disabled account (User::actions_allowed()) is refused on every key it owns
+ *   (machine, session, app password), on a browser session, and at auth/login (reason 'disabled').
+ *   Only a deleted account was refused before.
  * @changelog 1.6.0 - Record entries in a scope ('Model:verb'): the record
  *   endpoints pass the model and verb to authorize() as its own argument, and
  *   refuseScopedKeyOutsideItsScope() (was refuseScopedKeyOutsideActions())
@@ -230,6 +233,14 @@ class ApiAuth {
 			self::auth_failure(401, 'Incorrect secret key', 'Incorrect secret key');
 		}
 
+		// A disabled account signs in nowhere, the website included: every key
+		// it owns is refused while it stays disabled, and works again if it is
+		// re-enabled (disabling is undone, so its keys are not revoked). Asked
+		// after the secret verifies, so a public key alone learns nothing.
+		if (!$api_user->actions_allowed()) {
+			self::auth_failure(401, 'API user is disabled', 'This account is disabled');
+		}
+
 		// An app credential is good only while its purpose is declared: the
 		// declaring plugin's deactivation is what turns its credentials off.
 		// And one presented through the ordinary key headers is refused — the
@@ -353,6 +364,10 @@ class ApiAuth {
 
 		if (!$api_user->key || $api_user->get('usr_delete_time')) {
 			self::auth_failure(400, 'Session user has been deleted', 'API user has been deleted');
+		}
+
+		if (!$api_user->actions_allowed()) {
+			self::auth_failure(401, 'Session user is disabled', 'This account is disabled');
 		}
 
 		RequestLogger::set_api_key_type('browser');
@@ -738,8 +753,9 @@ class ApiAuth {
 	 *
 	 * @return array On success: ['ok'=>true, 'user'=>User, 'api_key'=>ApiKey, 'secret_key'=>string].
 	 *               On failure: ['ok'=>false, 'user'=>User|null] (user set when found-but-invalid,
-	 *               for failure logging), plus 'reason'=>'activation_required' when
-	 *               the credentials were valid but the account is unactivated.
+	 *               for failure logging), plus a 'reason' when the credentials were
+	 *               valid: 'disabled' (the account is disabled) or 'activation_required'
+	 *               (it is unactivated).
 	 */
 	public static function attemptLogin($email, $password, $device_label = NULL) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -747,6 +763,11 @@ class ApiAuth {
 
 		if (!$user || $user->get('usr_delete_time') || !$user->check_password($password)) {
 			return array('ok' => false, 'user' => $user ?: null);
+		}
+
+		// Said only after the password verifies, like activation below.
+		if (!$user->actions_allowed()) {
+			return array('ok' => false, 'user' => $user, 'reason' => 'disabled');
 		}
 
 		$settings = Globalvars::get_instance();

@@ -17,6 +17,9 @@
  *     the auth rate limit and locks out at the threshold.
  *   - Session-key requests reach CRUD and action endpoints as the right user;
  *     object write ownership enforced across users.
+ *   - A disabled account: its session and machine keys get 401 while it stays
+ *     disabled (refused, not revoked; re-enabling restores them) and auth/login
+ *     with the right password gets 403.
  *   - Expired and revoked keys get 401; logout revokes only the presented key
  *     and refuses machine keys; password change revokes all session keys and
  *     no machine keys (and a silent hash upgrade revokes nothing).
@@ -242,6 +245,49 @@ try {
 	$r = api_request('GET', '/api/v1/auth/session',
 		key_headers($expiring['api_key']->get('apk_public_key'), $expiring['secret_key']));
 	check($r['status'] === 401, 'expired session key gets 401', $r['raw']);
+
+	// ------------------------------------------------------------------
+	section('A disabled account is refused on every key, and at login');
+	$user_d = make_user($suffix . 'D');
+	$password_d = 'TestPassword_' . $suffix . 'D';
+	$d_session = ApiKey::CreateSessionKey($user_d->key, 'D Phone ' . $suffix);
+	harness_register_key_id($d_session['api_key']->key);
+	$d_machine = make_machine_key($user_d->key, 'mkeyD-' . $suffix);
+	$d_session_h = key_headers($d_session['api_key']->get('apk_public_key'), $d_session['secret_key']);
+	$d_machine_h = key_headers($d_machine['api_key']->get('apk_public_key'), $d_machine['secret_key']);
+	$r = api_request('GET', '/api/v1/auth/session', $d_session_h);
+	check($r['status'] === 200, 'before: the session key works', $r['raw']);
+
+	$set_disabled = function (bool $disabled) use ($user_d) {
+		$u = new User($user_d->key, TRUE);
+		$u->set('usr_is_disabled', $disabled);
+		$u->save();
+	};
+	$set_disabled(true);
+	$r = api_request('GET', '/api/v1/auth/session', $d_session_h);
+	check($r['status'] === 401, 'a disabled account\'s session key gets 401', $r['raw']);
+	$r = api_request('GET', '/api/v1/auth/session', $d_machine_h);
+	check($r['status'] === 401, 'and its machine key gets 401', $r['raw']);
+	$r = api_request('POST', '/api/v1/auth/login', array(), array(
+		'email' => $user_d->get('usr_email'),
+		'password' => $password_d,
+	));
+	check($r['status'] === 403 && stripos($r['raw'], 'de-activated') !== false,
+		'auth/login with the right password refuses it, saying so', $r['raw']);
+	$d_key_after = new ApiKey($d_session['api_key']->key, TRUE);
+	check($d_key_after->get('apk_delete_time') === NULL && (bool)$d_key_after->get('apk_is_active'),
+		'the keys are refused, not revoked');
+	$r = api_request('POST', '/api/v1/auth/login', array(), array(
+		'email' => $user_d->get('usr_email'),
+		'password' => 'definitely-wrong',
+	));
+	check($r['status'] === 401, 'a wrong password on it is the ordinary 401, which says nothing about the account', $r['raw']);
+
+	$set_disabled(false);
+	$r = api_request('GET', '/api/v1/auth/session', $d_session_h);
+	check($r['status'] === 200, 're-enabled: the same session key works again', $r['raw']);
+	$r = api_request('GET', '/api/v1/auth/session', $d_machine_h);
+	check($r['status'] === 200, 'and the machine key', $r['raw']);
 
 	// ------------------------------------------------------------------
 	section('Management boundary (LOAD-BEARING — acceptance #6)');
