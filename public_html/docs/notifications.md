@@ -21,7 +21,8 @@ conventions, and declaring/subscribing — see [Signal Bus](signals.md).
   mailbox or Boards signal is about), or a member of the signal's declared
   `audience` (the incident and system alerts go to every superadmin; a content report goes to every admin).
 - **Channels** — in-app is the baseline (always created); email is a secondary,
-  opt-in channel layered on top.
+  opt-in channel layered on top; push reaches the browsers a person turned push
+  on in ([Push Notifications](push_notifications.md)).
 
 ## Adding a notifiable signal
 
@@ -65,6 +66,7 @@ schema are declared in the same entry — see [Signal Bus](signals.md):
 | `title_template` | Notification title (also the email subject) |
 | `body_template` | Notification body (also the email body) |
 | `link_template` | URL opened when the notification is clicked |
+| `push_text` | `generic` pushes only the generic text ("You have a new notification."), for a signal whose text is sealed content. A dispatch can ask the same for one send with `push_protected` true in its payload |
 
 The `label`, `description`, and `category` (used by the preferences UI) live at
 the top level of the entry, alongside the `payload` schema.
@@ -107,12 +109,14 @@ controls.
 
 Per recipient:
 
-| Recipient | In-app | Email |
-|-----------|--------|-------|
-| Targeted, no preference row | yes | signal's `default_email` |
-| Targeted, muted (`ntp_subscribed = false`) | skipped | — |
-| Targeted, subscribed | yes | their `ntp_email_enabled` |
-| Topic subscriber | yes | their `ntp_email_enabled` |
+| Recipient | In-app | Email | Push |
+|-----------|--------|-------|------|
+| Targeted, no preference row | yes | signal's `default_email` | yes |
+| Targeted, muted (`ntp_subscribed = false`) | skipped | — | — |
+| Targeted, subscribed | yes | their `ntp_email_enabled` | their `ntp_push_enabled` |
+| Topic subscriber | yes | their `ntp_email_enabled` | their `ntp_push_enabled` |
+
+Push reaches only the browsers (and apps) the person registered; with none, it costs nothing.
 
 ## Delivery
 
@@ -122,14 +126,18 @@ Per recipient:
   `READY_TO_SEND` status; the `SendQueuedEmails` scheduled task delivers it on its
   next run. This keeps email out of latency-sensitive paths like checkout. No
   notification email is time-critical.
+- **Push** is queued with `PushSender::queue()` and sent once the response has
+  gone back to the browser (see [Push Notifications](push_notifications.md)).
 
 ## Preferences
 
 Admins manage theirs at `/admin/admin_notification_preferences`, which lists
 every notifiable signal. Members manage theirs at
 `/profile/notification_preferences`, which lists the signals with
-`supports_topic` false. Preferences are stored one row per (user, signal) in
-`ntp_notification_preferences` keyed by `ntp_signal_name`.
+`supports_topic` false. Both pages also carry the box that turns push on in the
+browser in use. Preferences are stored one row per (user, signal) in
+`ntp_notification_preferences` keyed by `ntp_signal_name`: subscribed, email,
+and push.
 
 Both pages show what the person actually gets, through
 `Notify::preference_states()`: a saved row where there is one, otherwise
@@ -137,8 +145,8 @@ Both pages show what the person actually gets, through
 
 | Signal | No saved row shows |
 |--------|--------------------|
-| `supports_topic` false (sent only to the people it is about) | on; email per `default_email` |
-| Declares an `audience` the viewer belongs to | on; email per `default_email` |
+| `supports_topic` false (sent only to the people it is about) | on; email per `default_email`; push on |
+| Declares an `audience` the viewer belongs to | on; email per `default_email`; push on |
 | Anything else | off |
 
 Both save through `Notify::save_preferences()`. A signal with a saved row is

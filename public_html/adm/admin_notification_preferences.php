@@ -5,7 +5,7 @@
  * Admin page where an admin opts in to notification signal alerts and chooses
  * which should also be emailed.
  *
- * @version 1.3
+ * @version 1.4 - push in this browser, and a push choice per signal
  */
 
 require_once(PathHelper::getIncludePath('adm/logic/admin_notification_preferences_logic.php'));
@@ -34,6 +34,7 @@ $page->admin_header(array(
 $options            = array();
 $subscribed_checked = array();
 $email_checked      = array();
+$push_checked       = array();
 
 foreach ($notifiable_signals as $name => $meta) {
 	$category = isset($meta['category']) ? $meta['category'] : 'Other';
@@ -46,6 +47,9 @@ foreach ($notifiable_signals as $name => $meta) {
 	}
 	if ($prefs[$name]['email']) {
 		$email_checked[] = $name;
+	}
+	if ($prefs[$name]['push']) {
+		$push_checked[] = $name;
 	}
 }
 asort($options);
@@ -64,11 +68,16 @@ if (!$cron_is_active || !$send_queued_active) {
 	echo '</div>';
 }
 
+$page->begin_box(array('title' => 'Push Notifications'));
+echo PushPanel::html();
+$page->end_box();
+
 $page->begin_box(array('title' => 'Admin Alerts'));
 
 echo '<p>Choose which site events you want to be alerted about. Alerts appear in '
 	. 'your notifications; tick the same event under "Also email me" to additionally '
-	. 'receive an email when it happens.</p>';
+	. 'receive an email when it happens, and under "Push to my browsers" to see it '
+	. 'on the browsers where push is on.</p>';
 
 if (empty($options)) {
 	echo '<p>No notifiable signals are declared.</p>';
@@ -83,6 +92,10 @@ if (empty($options)) {
 	$formwriter->checkboxList('notify_email', 'Also email me about', array(
 		'options' => $options,
 		'checked' => $email_checked,
+	));
+	$formwriter->checkboxList('notify_push', 'Push to my browsers', array(
+		'options' => $options,
+		'checked' => $push_checked,
 	));
 	$formwriter->submitbutton('submit', 'Save Preferences');
 	$formwriter->end_form();

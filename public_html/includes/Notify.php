@@ -20,7 +20,14 @@
  *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 2.5
+ * Push is the third channel: anyone who gets the in-app notification also
+ * gets it on every browser or phone they turned push on for
+ * (PushSender), unless they switched push off for that signal. A signal
+ * whose notify block says `"push_text": "generic"`, or a dispatch whose
+ * payload carries `push_protected` true, is pushed as the generic text only.
+ *
+ * @version 2.6
+ * @changelog 2.6 - Push channel through PushSender; a preference carries ntp_push_enabled.
  * @changelog 2.5 - The `admins` and `superadmins` audiences leave out disabled accounts.
  * @changelog 2.4 - An `admins` audience: every admin (permission 5+) who is a person.
  * @changelog 2.3 - A declared `audience` names the targeted recipients; the
@@ -81,11 +88,12 @@ class Notify {
 	 * same rule delivery applies. A signal is on for the people it addresses:
 	 * everyone, for one sent only to the people it is about (no topic
 	 * subscription), and the members of its declared audience. Email follows
-	 * the signal's `default_email`. Anything else waits for an opt-in.
+	 * the signal's `default_email`, and push follows the alert itself. Anything
+	 * else waits for an opt-in.
 	 *
 	 * @param array $meta     the signal's declaration (with its notify block)
 	 * @param array $audiences audience => ids, for reuse across signals
-	 * @return array  array('subscribed' => bool, 'email' => bool)
+	 * @return array  array('subscribed' => bool, 'email' => bool, 'push' => bool)
 	 */
 	public static function default_preference(array $meta, $user_id, array &$audiences = array()) {
 		$notify = isset($meta['notify']) && is_array($meta['notify']) ? $meta['notify'] : array();
@@ -97,7 +105,7 @@ class Notify {
 			}
 			$on = in_array((int)$user_id, $audiences[$audience], true);
 		}
-		return array('subscribed' => $on, 'email' => $on && !empty($notify['default_email']));
+		return array('subscribed' => $on, 'email' => $on && !empty($notify['default_email']), 'push' => $on);
 	}
 
 	/**
@@ -105,7 +113,7 @@ class Notify {
 	 * otherwise default_preference().
 	 *
 	 * @param array $signals  signal_name => declaration
-	 * @return array  signal_name => array('subscribed' => bool, 'email' => bool)
+	 * @return array  signal_name => array('subscribed' => bool, 'email' => bool, 'push' => bool)
 	 */
 	public static function preference_states($user_id, array $signals) {
 		require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
@@ -115,6 +123,7 @@ class Notify {
 			$saved[$pref->get('ntp_signal_name')] = array(
 				'subscribed' => (bool)$pref->get('ntp_subscribed'),
 				'email'      => (bool)$pref->get('ntp_email_enabled'),
+				'push'       => (bool)$pref->get('ntp_push_enabled'),
 			);
 		}
 
@@ -129,8 +138,9 @@ class Notify {
 	}
 
 	/**
-	 * Save what a preferences form submitted. $subscribed_signals and
-	 * $email_signals are the ticked signal names; email needs subscribed. A
+	 * Save what a preferences form submitted. $subscribed_signals,
+	 * $email_signals and $push_signals are the ticked signal names; email and
+	 * push need subscribed. A
 	 * signal with a saved row is updated. One without a row gets one only when
 	 * the choice differs from the default, so a default that changes later —
 	 * the signal's own, or an admin promoted into its audience — still reaches
@@ -138,18 +148,19 @@ class Notify {
 	 *
 	 * @param array $signals  signal_name => declaration: the signals the form showed
 	 */
-	public static function save_preferences($user_id, array $signals, array $subscribed_signals, array $email_signals) {
+	public static function save_preferences($user_id, array $signals, array $subscribed_signals, array $email_signals, array $push_signals = array()) {
 		require_once(PathHelper::getIncludePath('data/notification_preferences_class.php'));
 
 		$audiences = array();
 		foreach ($signals as $signal_name => $meta) {
 			$subscribed = in_array($signal_name, $subscribed_signals, true);
 			$email      = $subscribed && in_array($signal_name, $email_signals, true);
+			$push       = $subscribed && in_array($signal_name, $push_signals, true);
 
 			$pref = NotificationPreference::get_for($user_id, $signal_name);
 			if (!$pref) {
 				$default = self::default_preference($meta, $user_id, $audiences);
-				if ($default['subscribed'] === $subscribed && $default['email'] === $email) {
+				if ($default['subscribed'] === $subscribed && $default['email'] === $email && $default['push'] === $push) {
 					continue;
 				}
 				$pref = new NotificationPreference(NULL);
@@ -158,6 +169,7 @@ class Notify {
 			}
 			$pref->set('ntp_subscribed', $subscribed);
 			$pref->set('ntp_email_enabled', $email);
+			$pref->set('ntp_push_enabled', $push);
 			$pref->save();
 		}
 	}
@@ -195,6 +207,7 @@ class Notify {
 		$ntf_type       = isset($notify['ntf_type']) ? $notify['ntf_type'] : 'system';
 		$supports_topic = !empty($notify['supports_topic']);
 		$default_email  = !empty($notify['default_email']);
+		$push_protected = (($notify['push_text'] ?? '') === 'generic') || !empty($payload['push_protected']);
 
 		$title = trim(self::_render(isset($notify['title_template']) ? $notify['title_template'] : '', $payload, $signal));
 		$body  = self::_render(isset($notify['body_template']) ? $notify['body_template'] : '', $payload, $signal);
@@ -303,6 +316,23 @@ class Notify {
 					self::_enqueue_email($uid, $title, $body, $link);
 				} catch (Exception $e) {
 					error_log('[Notify] email enqueue failed for user ' . $uid . ': ' . $e->getMessage());
+				}
+			}
+
+			// Push follows the alert, unless switched off for this signal. It is
+			// held to the end of the request; a member with no browser or phone
+			// registered costs nothing more.
+			if ($pref === null || (bool)$pref->get('ntp_push_enabled')) {
+				try {
+					PushSender::queue($uid, array(
+						'title'     => $title,
+						'body'      => $body,
+						'link'      => $link,
+						'tag'       => $signal,
+						'protected' => $push_protected,
+					));
+				} catch (Throwable $e) {
+					error_log('[Notify] push queue failed for user ' . $uid . ': ' . $e->getMessage());
 				}
 			}
 		}

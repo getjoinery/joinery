@@ -2,9 +2,9 @@
 
 **Purpose:** The core pieces that more than one community feature needs, built once. The Chat plugin (`chat_plugin.md`) and the Forum plugin (`forum_plugin.md`) are the first two consumers; Messenger, Boards and later plugins adopt them as they are touched. Nothing here is chat- or forum-specific.
 
-**Last Updated:** 2026-10-13
+**Last Updated:** 2026-10-14
 
-**Status:** Active. C1, C2, C3, C4, C6 and C6a built 2026-10-13/14 (the forum is their first consumer); C5 (push) is not built — chat builds it. Developer docs: docs/social_features.md (Spaces, Mentions, Full-text search, Attachments on posts, Content Reports), docs/formwriter.md (the restricted editor), docs/plugin_developer_guide.md (fileSources).
+**Status:** Implemented. C1, C2, C3, C4, C6 and C6a built 2026-10-13/14, C5 (push) built 2026-10-14; the forum is the first consumer of all of them, push included (its alerts go out through Notify's push channel). Verified on dev: the suites (push_notifications 63/63 among them) and a real Google Chrome on the Mac mini, which received the test push and a forum reply alert sent through Notify about a second after dev sent it. iPhone/iPad Safari (Home Screen web app) push is not yet tried; it is in the live verification queue. Developer docs: docs/social_features.md (Spaces, Mentions, Full-text search, Attachments on posts, Content Reports), docs/formwriter.md (the restricted editor), docs/plugin_developer_guide.md (fileSources), docs/push_notifications.md (push).
 
 **Built differently from the text below, and why:**
 - C4: the language is the constant `FullTextSearch::CONFIG`, not a setting — changing it changes every index expression, so a setting would silently stop the indexes being used. A data class writes its index entry literally (a property default cannot call `indexSpec()`), and its tests assert the two are equal.
@@ -16,6 +16,11 @@
 - C6a: a clash with core or an active plugin refuses a plugin at validation (activate/install); every sync reports clashes; a usable tag with a stray key stays in the catalog as declared.
 - C4: snippets mark matches found in the plain text, never inside an escaped entity.
 - C6: `AccessGateRegistry` asks a provider about a signed-out visitor as user 0 instead of refusing outright, so a public post's attachment opens for visitors; the member-only gates refuse 0.
+- C5: built ahead of chat, with the forum as first consumer, since the forum's alerts already ran through Notify.
+- C5: the VAPID pair is a sealed `regenerable` setting (`push_vapid_keys`, minted by update_database, re-minted by the sealed-secret reconciler), not `Globalvars_site.php`: config/ is written only by root installers now (read_only_tree), and the setting follows the file-URL signing key's pattern. A re-mint retires every browser destination — on a copied database those were another site's browsers. No config endpoint of its own: the `push_config` action answers the public key.
+- C5: no delivery queue. Pushes are held to the end of the request and sent after the response is finished (`fastcgi_finish_request`); a failed push is not retried (in-app and email are the record; push services hold a message a day for an offline browser).
+- C5: endpoints are limited to the browser makers' push services over https (the server POSTs to them); sign-out finds the browser by a device cookie set when push is turned on; a member keeps at most 20 destinations; retire after 5 failures in a row, at once on 404/410.
+- C5: the per-user opt-in is a third column on the existing preferences (`ntp_push_enabled`, on by default), plus the "turn on in this browser" box on both preferences pages; a `notify` block's `"push_text": "generic"` or a payload's `push_protected` marks a message protected.
 
 **Built by:** whichever consumer ships first builds each component, to this spec, in core (`/includes/`, `/data/`, `/assets/`). The second consumer finds it there.
 
@@ -134,7 +139,7 @@ Mailbox search (sealed, its own index) and Drive content search stay as they are
 
 ## C5. Push notifications
 
-Moved here from `chat_plugin.md` because the forum, the native apps' mail push (`push_notification_relay.md`) and later features all send through it. Chat builds it first.
+Moved here from `chat_plugin.md` because the forum, the native apps' mail push (`push_notification_relay.md`) and later features all send through it. Built with the forum as its first consumer.
 
 - **`psh_push_destinations`** — one table for every place a user can be alerted. Columns: user, `kind` (`web` / `ios` / `android`), the endpoint or token, optional API key id, failure count, last-seen time, and a JSON `details` column for what differs by kind (a browser's p256dh key and auth secret and user agent; a phone's app id and followed mailboxes). Lives in `/data/`.
 - **A push driver interface** — register, send, retire — with one driver per transport. The first build ships the `web` driver: it sends straight to the browser vendor's push service with the site's own VAPID key, no Joinery relay. The `native` driver (APNs / FCM through the Joinery relay) is `push_notification_relay.md`'s work.
@@ -202,4 +207,4 @@ The shared pieces are small and independent; each is built when its first consum
 1. **C1** (markdown profile, mentions) and **C2** (space access) — before either plugin's phase 1. **C6a** (plugin-declared file categories) stands alone and goes in with them.
 2. **C4** (search) and **C6** (attachments) — when the first consumer needs them.
 3. **C3** (reports) — before either plugin opens to members.
-4. **C5** (push) — chat's last phase.
+4. **C5** (push) — built 2026-10-14, ahead of chat.

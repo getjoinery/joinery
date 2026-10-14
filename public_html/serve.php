@@ -105,6 +105,9 @@ $routes = [
         '/theme/{theme}/assets/*' => ['cache' => 43200],
         '/static_files/*' => ['cache' => 43200, 'exclude_from_cache' => ['.upg.zip']],
         '/favicon.ico' => ['cache' => 43200],
+        // The push service worker: at the root so its scope is the whole site;
+        // never cached, so a new version reaches browsers on their next check.
+        '/service-worker.js' => ['cache' => 0],
         // TEMPORARY: content staging area for copy editing — remove when done
         '/content_staging/*' => ['cache' => 0],
         // REMOVED: '/plugins/ * /includes/*' - All plugins now use /assets/

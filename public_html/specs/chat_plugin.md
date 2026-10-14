@@ -8,7 +8,7 @@
 
 **Plugin name:** `chat`
 
-**Prerequisite:** `community_shared_components.md` — member-post markdown and mentions (C1), space access (C2), content reports (C3), full-text search (C4), push (C5), attachments (C6). Chat is the first consumer of C5 and builds it. The Forum plugin (`forum_plugin.md`) shares the same components.
+**Prerequisite:** `community_shared_components.md` — member-post markdown and mentions (C1), space access (C2), content reports (C3), full-text search (C4), push (C5), attachments (C6). C5 is built (2026-10-14, the forum was its first consumer); chat sends its mentions through it. The Forum plugin (`forum_plugin.md`) shares the same components.
 
 ---
 
@@ -95,7 +95,7 @@ The chat service runs **on the same node as the Joinery instance it serves** and
 
 ### Push notifications
 
-Browser push is the shared push layer in `community_shared_components.md` (C5): the destinations table, the driver interface, the web driver, VAPID keys, the service worker and the Notify push channel. Chat is its first consumer and builds it (phase 10); chat mentions are the first thing sent through it.
+Browser push is the shared push layer in `community_shared_components.md` (C5): the destinations table, the driver interface, the web driver, VAPID keys, the service worker and the Notify push channel. It is built (docs/push_notifications.md); chat's mention alerts go through Notify like the forum's, so they reach the push channel with no chat-side push code (phase 10). A message from a Private conversation set to Nothing leaves unsealed is dispatched with `push_protected`.
 
 ### Apache configuration
 
@@ -221,7 +221,7 @@ Reuses the in-app notification system (`Notification::create_notification`) and 
 - `chat.channel_message_posted` — targeted to channel members, topic for site-wide watchers
 - `chat.channel_mention` — targeted to mentioned user
 
-Browser push is the shared push layer (C5), which chat builds first.
+Browser push is the shared push layer (C5).
 
 ### Unread indicators
 
@@ -280,10 +280,10 @@ To avoid surprises mid-build, the systems this plugin touches:
 | C1 / C2 / C3 / C4 | Member-post markdown and mentions; read and post rules; reports; full-text search | Built in core per `community_shared_components.md` |
 | `ChangeTracking` | Old body of an edited message | No |
 | Vhost templates + `render_vhost.sh` | WebSocket proxy `/ws/` | Yes — add the proxy lines to both templates; host installer enables `mod_proxy_wstunnel` |
-| `Globalvars_site.php` | Existing `secret_box_key` (chat signing key derived via HMAC, never used raw) | No — no new entry needed. Push adds `vapid_public_key` / `vapid_private_key` |
+| `Globalvars_site.php` | Existing `secret_box_key` (chat signing key derived via HMAC, never used raw) | No — no new entry needed. Push's key pair is the sealed setting `push_vapid_keys`, not a config entry |
 | `stg_settings` / `plugin.json` settings | WebSocket port, max attachment size, idle-presence threshold, message rate limit, etc. | Declared in `plugin.json` |
 | Admin menu | Plugin admin UI entries | Declared in `plugin.json` (per platform convention) |
-| Push layer (C5) | Browser push delivery for mentions | Built by chat as the first consumer — see [Push notifications](#push-notifications) |
+| Push layer (C5) | Browser push delivery for mentions | Built (docs/push_notifications.md) — see [Push notifications](#push-notifications) |
 | `host_installer` + `provisioners` | Installs and health-checks the Go service | Plugin ships both |
 | `update_database` | Plugin tables created on plugin sync | No special handling needed |
 
@@ -302,9 +302,9 @@ Suggested incremental build order, each phase deliverable on its own:
 7. **Attachments** — C6 uploads, image embeds, thumbnails.
 8. **Messenger link** — sidebar entry and unread count; Go pushes `message_events` to an open chat page.
 9. **Search and reports** — C4 search on `chm_body` and the plugin search UI; C3 report handler.
-10. **Push layer (C5) + chat consumer** — builds the shared push layer and wires chat mentions to it as the first consumer.
+10. **Push for chat** — chat mentions reach the existing push channel through Notify; protected conversations dispatch with `push_protected`.
 
-Phases 1–3 are the load-bearing risk. After phase 3, the rest is mostly conventional feature work. Phase 10 is platform-level work bundled into the project; other features adopt the push channel after it ships.
+Phases 1–3 are the load-bearing risk. After phase 3, the rest is mostly conventional feature work. Phase 10 is small: the platform push layer already exists.
 
 ---
 

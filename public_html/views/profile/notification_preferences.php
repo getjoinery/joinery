@@ -38,19 +38,24 @@
                 $options = array();
                 $sub_checked = array();
                 $email_checked = array();
+                $push_checked = array();
                 foreach ($page_vars['signals'] as $name => $meta) {
                     $options[$name] = ($meta['category'] ?? 'Other') . ' — ' . ($meta['label'] ?? $name);
                     // Their saved choice, or what delivery does with none.
                     $state = $page_vars['prefs'][$name];
                     if ($state['subscribed']) { $sub_checked[] = $name; }
                     if ($state['email']) { $email_checked[] = $name; }
+                    if ($state['push']) { $push_checked[] = $name; }
                 }
                 asort($options);
 
                 if (empty($options)) {
                     echo '<p>There are no adjustable notification types on this site yet.</p>';
                 } else {
-                    echo '<p>Choose which events notify you. Tick the same event under the email list to also get an email when it happens.</p>';
+                    echo '<h2>Push notifications</h2>';
+                    echo PushPanel::html();
+                    echo '<h2>What you are notified about</h2>';
+                    echo '<p>Choose which events notify you. Tick the same event under the email list to also get an email when it happens, and under the push list to see it on the browsers where push is on.</p>';
                     $formwriter = $page->getFormWriter('form1', [
                         'action' => '/profile/notification_preferences'
                     ]);
@@ -63,6 +68,10 @@
                     $formwriter->checkboxList('notify_email', 'Also email me about', [
                         'options' => $options,
                         'checked' => $email_checked,
+                    ]);
+                    $formwriter->checkboxList('notify_push', 'Push to my browsers', [
+                        'options' => $options,
+                        'checked' => $push_checked,
                     ]);
                     $formwriter->submitbutton('submit', 'Save Preferences');
                     $formwriter->end_form();

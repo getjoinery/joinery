@@ -66,7 +66,7 @@ Attachments are gated by `ForumAttachmentGate` (key `forum_post`, reference = th
 
 ## Notifications
 
-Declared under `signals` in `plugin.json`; delivered through Notify with each member's preferences.
+Declared under `signals` in `plugin.json`; delivered through Notify (in-app, email, and push to the browsers a member turned it on in) with each member's preferences.
 
 | Signal | Who |
 |---|---|

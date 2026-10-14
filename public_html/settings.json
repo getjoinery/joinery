@@ -2839,6 +2839,13 @@
       "helptext": "HMAC key for signed file URLs, minted on first use by data/files_class.php with a race-safe INSERT. Never entered by hand."
     },
     {
+      "name": "push_vapid_keys",
+      "default": "",
+      "managed": true,
+      "secret": true,
+      "helptext": "This site's browser-push key pair (VAPID), minted by update_database through WebPushDriver::provisionKeys(). Never entered by hand; a new pair retires every browser that turned push on."
+    },
+    {
       "name": "_store_event_autoactivate_v1",
       "default": "",
       "managed": true,
@@ -3010,6 +3017,13 @@
       "kind": "regenerable",
       "locator": "file_signed_url_key",
       "reprovision": "File::provisionSigningKey"
+    },
+    {
+      "label": "Browser push key pair",
+      "feature": "Push notifications",
+      "kind": "regenerable",
+      "locator": "push_vapid_keys",
+      "reprovision": "WebPushDriver::provisionKeys"
     },
     {
       "label": "Services API secret key",
