@@ -74,19 +74,21 @@ See `specs/implemented/fast_serve_uploads.md` for the full specification.
 
 Every `File` row carries an optional `fil_source` tag — a short string naming **where the file came from**, stamped by whatever code created it. It is a categorization label only: it has no bearing on access, which flows entirely through `is_viewable()` / `fil_private`.
 
-The value is opaque to `File` — it stores and filters on the string but attaches no behavior to any value. Each source key has a `File::SOURCE_*` constant; a new file-creation site adds its own.
+The value is opaque to `File` — it stores and filters on the string but attaches no behavior to any value. Core's tags are `File::SOURCE_*` constants declared in `File::core_source_catalog()`; a plugin declares its own under `fileSources` in `plugin.json` and keeps the constant on one of its classes (see [Drive § Origin tags](drive.md#origin-tags--where-a-file-came-from) and the [Plugin Developer Guide](plugin_developer_guide.md#file-origin-tags-declarative)).
 
 | Source key | Constant | Set at |
 |-----------|----------|--------|
 | `user_upload` | `File::SOURCE_USER_UPLOAD` | general admin/user upload (`admin_file_upload_process_logic.php`) |
 | `entity_photo` | `File::SOURCE_ENTITY_PHOTO` | avatar / event / location / gallery photo (`entity_photos_ajax.php`) |
-| `email_attachment` | `File::SOURCE_EMAIL_ATTACHMENT` | inbound-email attachment (`InboundEmailRouter.php`) |
-| `ai_chat_upload` | `File::SOURCE_AI_CHAT_UPLOAD` | file uploaded into a joinery_ai chat |
 | `drive` | `File::SOURCE_DRIVE` | member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag |
-| `mailbox_search_index` | `File::SOURCE_MAILBOX_SEARCH_INDEX` | sealed FTS5 blob (`MailboxIndex`), read server-side only |
-| `mail_import_archive` | `File::SOURCE_MAIL_IMPORT_ARCHIVE` | mbox/zip/tar uploaded to be imported into a mailbox (`MailImportService`) |
 | `problem_report` | `File::SOURCE_PROBLEM_REPORT` | image a member attached to a problem report this site sends (`report_problem_submit_logic.php`) |
-| `bug_report_image` | `File::SOURCE_BUG_REPORT_IMAGE` | image that arrived with a problem report from another site (`bug_reports` plugin intake) |
+| `email_attachment` | `AttachmentByteCustody::FILE_SOURCE` (mailbox) | inbound-email attachment (`InboundEmailRouter.php`) |
+| `mailbox_search_index` | `MailboxIndex::FILE_SOURCE` (mailbox) | sealed FTS5 blob (`MailboxIndex`), read server-side only |
+| `mail_import_archive` | `MailImportService::FILE_SOURCE` (mailbox) | mbox/zip/tar uploaded to be imported into a mailbox (`MailImportService`) |
+| `messenger_attachment` | `MessengerUploads::FILE_SOURCE` (messenger) | photo or file sent in a conversation |
+| `ai_chat_upload` | `AiAttachment::FILE_SOURCE` (joinery_ai) | file uploaded into a joinery_ai chat |
+| `bug_report_image` | `BugReportIntake::FILE_SOURCE` (bug_reports) | image that arrived with a problem report from another site |
+| `boards_attachment` | `BoardsUploads::FILE_SOURCE` (boards) | file attached to a card, or a board's background image |
 
 The tag is what keeps surfaces from bleeding into each other. Drive lists only `drive`, so a mail attachment or an import archive never appears there or counts against a member's quota, even though all three belong to the same user.
 

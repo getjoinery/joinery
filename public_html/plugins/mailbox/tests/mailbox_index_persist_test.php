@@ -118,7 +118,7 @@ $owner_files = function () use ($blob) {
 $index_file_rows = function ($user_id) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$q = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE fil_usr_user_id = ? AND fil_source = ?');
-	$q->execute(array($user_id, File::SOURCE_MAILBOX_SEARCH_INDEX));
+	$q->execute(array($user_id, MailboxIndex::FILE_SOURCE));
 	return (int)$q->fetchColumn();
 };
 
@@ -160,7 +160,7 @@ section('a bookkeeping row that still names a File is transitioned');
 $legacy = File::createFromBytes('superseded index bytes', 'mailfts_' . $uid . '.bin',
 	'application/octet-stream', $uid, array(
 		'fil_private' => true,
-		'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
+		'fil_source'  => MailboxIndex::FILE_SOURCE,
 	));
 $legacy_id = (int)$legacy->key;
 $bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
@@ -197,7 +197,7 @@ if ((int)$q->fetchColumn() === 0) {
 	$held = File::createFromBytes('an index File something holds', 'mailfts_' . $uid . '.bin',
 		'application/octet-stream', $uid, array(
 			'fil_private' => true,
-			'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
+			'fil_source'  => MailboxIndex::FILE_SOURCE,
 		));
 	$held_id = (int)$held->key;
 	$db->prepare('INSERT INTO esf_event_session_files (esf_fil_file_id) VALUES (?)')->execute(array($held_id));

@@ -5,6 +5,7 @@ require_once(__DIR__ . '/ComponentBase.php');
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
  *
+ * @version 1.3.0 - validate() reports malformed or colliding "fileSources" declarations
  * @version 1.2.0 - activePluginNames(): the active plugins, or an exception when they cannot be read. The
  *   class autoloader caches a map per active set, and "the database did not answer" read as "nothing is
  *   active" let it cache a map with no plugins in it: getjoinery's server_manager classes stopped
@@ -301,6 +302,11 @@ class PluginHelper extends ComponentBase {
                 $errors[] = "{$prefix}: 'parent' must be a non-empty slug string";
             }
         }
+        }
+
+        // File origin tags: well-formed, not core's, not another plugin's
+        foreach (FileSourceDeclarations::errorsFor($this->name) as $error) {
+            $errors[] = $error;
         }
 
         // Validate API endpoints if present

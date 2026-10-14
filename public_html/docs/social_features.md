@@ -1,6 +1,6 @@
 # Social Features
 
-Core platform features for user-to-user interaction: reactions (likes, favorites, bookmarks) and messaging. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
+Core platform features for user-to-user interaction: reactions (likes, favorites, bookmarks), messaging, content reports, and the pieces every community feature shares — spaces (who may read and post), mentions, full-text search and attachments on posts. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
 
 ---
 
@@ -110,6 +110,7 @@ Any entity with a primary key can be reacted to. Common types:
 | `post` | Blog posts | like |
 | `product` | Products | favorite, bookmark |
 | `location` | Locations | favorite |
+| `forum_post` | Forum posts | like |
 
 Plugins can introduce new entity types and reaction types without schema changes.
 
@@ -398,7 +399,7 @@ A photo or file is uploaded first (so the composer can show it) and claimed onto
 a message when the member presses send:
 
 1. `messenger/messenger_upload` — multipart, one `file` field. Stores a private
-   `File` tagged `File::SOURCE_MESSENGER_ATTACHMENT`, owned by the uploader alone.
+   `File` tagged `MessengerUploads::FILE_SOURCE`, owned by the uploader alone.
 2. `messenger/messenger_send` with `attachment_ids` — `MessengerUploads::claim()`
    re-points each file at the conversation and hangs an `msa` row off the message.
 
@@ -580,3 +581,193 @@ utilities: there is deliberately no shared thread *component*, because the AI
 chat is turn-based (streaming partials, tool activity) and the messenger is
 multi-party (receipts, typing, reactions, replies), and one component serving
 both would grow an option flag per difference.
+
+---
+
+## Content Reports
+
+Members report other people's content — a forum post, a chat message — for an
+admin to look at, and admins settle the reports in one queue at
+`/admin/admin_content_reports` (menu: Users → Content Reports, permission 5; the
+entry shows how many reports are open). The queue knows nothing about any one
+feature: each feature that lets members report something registers a
+**handler** for its content, and the queue asks the handler everything about
+that content.
+
+### Data model
+
+`ContentReport` / `MultiContentReport` (`data/content_reports_class.php`),
+table `rpt_content_reports`:
+
+| Column | Meaning |
+|--------|---------|
+| `rpt_usr_user_id` | The reporter |
+| `rpt_entity_type`, `rpt_entity_id` | The content: a handler's type and the content's own id (no foreign key, so one table serves every feature) |
+| `rpt_reason` | `spam` / `abuse` / `off_topic` / `other` (`ContentReport::reasons()` gives the words) |
+| `rpt_note` | Optional, at most `ContentReport::NOTE_MAX` characters |
+| `rpt_status` | `open` / `actioned` / `dismissed` |
+| `rpt_usr_user_id_handled_by`, `rpt_handled_time`, `rpt_outcome` | Who settled it, when, and what they did ("Hid the post") |
+
+A person has at most one open report on a piece of content (a partial unique
+index), so reporting twice is one row and one alert. An admin's decision settles
+**every** open report on that content at once: acting on it marks them all
+`actioned`, dismissing marks them all `dismissed`. A reporter may read their own
+reports; only admins change them. Deleting a user sets either user column to the
+deleted-user value, so the queue keeps its history.
+
+### Writing a handler
+
+Implement `ContentReportHandler` (`includes/ContentReportHandler.php`) for each
+kind of content, and register it from the plugin's bootstrap:
+
+```php
+// plugins/forum/includes/bootstrap.php
+ContentReportRegistry::register(new ForumReportHandler());
+```
+
+```php
+class ForumReportHandler implements ContentReportHandler {
+    public function entityType(): string { return 'forum_post'; }
+    public function label(): string { return 'Forum post'; }
+
+    // The reporter can see it and it is live.
+    public function mayReport(int $entity_id, int $user_id): bool { ... }
+
+    // What the queue shows; null when the content is gone.
+    public function preview(int $entity_id): ?array {
+        return array('title' => $topic_title, 'excerpt' => $plain_text,
+                     'author_user_id' => $author_id, 'url' => '/forum/t/12/slug?post=345');
+    }
+
+    // Buttons the queue offers; Dismiss is the queue's own and never listed.
+    public function actions(int $entity_id): array {
+        return array('delete' => 'Remove post', 'lock' => 'Lock topic');
+    }
+
+    // Do it; return a short past-tense message. Throw with a readable message to
+    // refuse — any exception: the queue shows its message and leaves the report open.
+    public function act(int $entity_id, string $action, int $admin_user_id): string { ... }
+}
+```
+
+`ContentReportRegistry::get($type)` and `all()` pull plugin bootstraps in
+first, so callers never load them. `preview()`'s `url` must be a same-site path;
+the queue links nothing else. A type whose plugin is inactive has no handler: its
+reports stay listed and can only be dismissed.
+
+### Filing a report
+
+Page JavaScript calls the `content_report` API action with the browser session:
+
+```js
+joineryApi.post('content_report', {
+    entity_type: 'forum_post', entity_id: 345,
+    reason: 'spam', note: 'Same link posted in five topics'
+});
+```
+
+The action refuses an unknown type, content the handler's `mayReport()` turns
+down, or an unknown reason, each with a message to show. It is rate-limited per
+member in the `content_report` bucket (`content_report_rate_limit_requests` /
+`_window`, default 10 an hour). A new report dispatches `content.reported`,
+whose notify block has the `admins` audience: every admin is told in-app and by
+email unless they mute it on their notification preferences. A repeat report by
+the same person answers success with the existing report and dispatches nothing.
+
+Server code files a report with `ContentReport::file($type, $id, $user_id,
+$reason, $note)`, which returns `[report, created]` and throws
+`ContentReportException` on a refusal; `$report->act($action, $admin_id)` and
+`$report->dismiss($admin_id)` settle one.
+
+---
+
+## Spaces: who may read and who may post
+
+A **space** is any row that holds posts other people read: a forum category, a chat channel. `SpaceAccess` (`includes/SpaceAccess.php`) is the one decision every surface asks — a page view, a list, a search, a sitemap, the mention picker, an alert, a file gate — so none of them can disagree.
+
+A space's model declares four columns under its own prefix:
+
+| Column | Meaning |
+|---|---|
+| `{p}_read_rule` | `public` (signed-out visitors too) / `members` / `tier` / `group` / `invite` / `staff` |
+| `{p}_post_rule` | the same, without `public` |
+| `{p}_tier_min_level` | the tier level the `tier` rule asks for |
+| `{p}_grp_group_id` | the user group the `group` rule asks for |
+
+and two static properties: `$post_model`, the class of the posts it holds, and optionally `$space_members`, a `SpaceMembers` class that answers the `invite` rule from the consumer's own member table.
+
+```php
+SpaceAccess::mayRead($category, $user_id);      // 0 = signed out
+SpaceAccess::mayPost($category, $user_id);      // needs read too; never signed out
+SpaceAccess::mayModerate($category, $user_id);
+// The same read decision as SQL, for lists and search:
+$where = SpaceAccess::readableSql('ForumCategory', 'fcg', $user_id);
+```
+
+An unknown rule is closed, and so is a `tier` rule with no tier level set. A user id that is not a live, enabled account (deleted, disabled, no such row) reads nothing — public spaces included — so a watch or a mention never reaches, or names, an account that is gone. For a list of people (the recipients of an alert), `SpaceAccess::readableUserIds($space, $ids)` answers the same rule in one query, using each person's stored permission. A **moderator** is a user whose permission reaches the post model's `$write_permission`; moderators read, post and moderate every space, and `staff` means moderators only. The level is declared once, on the post model, and read from there. The signed-in user's permission is the session's own; anyone else's is read from their row. A user's tier level and groups are read once per request — call `SpaceAccess::forget()` after changing a membership mid-request.
+
+A consumer names its space types from its plugin bootstrap, so a shared surface can take a reference like `forum_category:12`:
+
+```php
+SpaceAccess::registerType('forum_category', 'ForumCategory');
+SpaceAccess::resolve('forum_category:12');      // the live row, or null
+```
+
+A space's models override `authenticate_read()` with `mayRead()`, and its post models write the rule "author, or a moderator, and on create `mayPost()`" in `authenticate_write()`, so the REST and AI surfaces meet the same rule as the pages.
+
+## Mentions
+
+Users have no unique username, so a typed `@sam` names nobody. A mention is a token the editor's picker writes into the markdown source:
+
+```
+@[Sam Lee](user:42)
+```
+
+`MarkdownRenderer` renders it as a chip (`<span class="jy-mention" data-user-id="42">@Sam Lee</span>`); inside code it stays text. `MentionParser` (`includes/MentionParser.php`) is the server side:
+
+```php
+// Before saving: keep a mention of someone who can be mentioned in the space,
+// with their real name; write anyone else's as plain text. At most
+// MentionParser::MAX_PER_POST (20) mentions are kept.
+$body  = MentionParser::normalizeFor($body, $space);
+$alert = MentionParser::userIds($body);         // who to tell, outside code only
+```
+
+Who can be mentioned is one rule, `MentionParser::mentionableName($user_id, $space)`: a live, enabled, activated account that may read the space. The picker offers exactly these and a save keeps exactly these, so typing ids by hand reveals no names the picker would not. What counts as code is `MarkdownRenderer`'s own patterns (`FENCE_PATTERN`, `DOUBLE_TICK_PATTERN`, `SINGLE_TICK_PATTERN`), so the parser and the renderer never disagree about whether a token is a mention.
+
+The picker's data comes from the core `mention_search` action (`space`, `q`): people whose first name, last name, "first last" or nickname starts with at least two typed characters — never a match on email — limited to eight, to people who may read that space, and only for a caller who may post in it. It is rate-limited per member.
+
+## Full-text search
+
+`FullTextSearch` (`includes/FullTextSearch.php`) keeps the index and the query on one expression, which is what makes Postgres use the index. A data class declares the index literally (a property default cannot call a method) and its tests assert it equals `FullTextSearch::indexSpec()`:
+
+```php
+public static $index_specifications = array(
+    array('columns' => array("to_tsvector('english', fpo_body)"), 'method' => 'gin'),
+);
+```
+
+```php
+list($match, $params) = FullTextSearch::match('fpo.fpo_body', $q);   // websearch syntax: "phrases", -exclude
+list($rank, $rank_params) = FullTextSearch::rank('fpo.fpo_body', $q);
+FullTextSearch::snippet($plain_text, $q);       // escaped excerpt with <mark> around matches
+```
+
+The language is the constant `FullTextSearch::CONFIG` (`english`), not a setting: changing it changes every index expression. A search over posts other people wrote always ANDs `match()` with `SpaceAccess::readableSql()` in the same query.
+
+## Attachments on posts
+
+`EntityAttachment` (`eat_entity_attachments`) lists the files on any row a member writes, by entity type and id, with name, type, size and order. The bytes are an ordinary `File`, which the consumer gates on the entity: `fil_access_provider` names its `AccessGateProvider`, `fil_access_ref` the entity, so the file is exactly as visible as the post through core's file serving. Each consumer stamps its own origin tag (`fil_source`), declared under `fileSources` in its `plugin.json`.
+
+```php
+EntityAttachment::forEntities('forum_post', $post_ids);   // one query for a page
+EntityAttachment::removeAllFor('forum_post', $post_id);   // rows and Files, for good
+```
+
+`AccessGateRegistry::userMayAccess()` asks a provider about a signed-out visitor as user 0, so a gate whose content can be public (a post in a public forum category) can allow it; a member-only gate refuses 0.
+
+## Markdown written by members
+
+Text members write for each other renders through `MarkdownRenderer::render($text, true, true)` — the restricted profile: links only to http, https, mailto or relative targets, marked `nofollow ugc` and opening in a new tab; no images; headings pushed down two levels and given no id; mention chips; block quotes. A feature that stores the rendered HTML stores `MarkdownRenderer::VERSION` beside it and renders again when the version changes.
+
+The editor for that text is FormWriter's markdown editor with `markdown_restricted` (no heading, image or table buttons, preview through the restricted profile) and, for mentions, `mention_space` (see [FormWriter](formwriter.md)).

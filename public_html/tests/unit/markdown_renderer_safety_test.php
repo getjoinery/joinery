@@ -81,7 +81,7 @@ check(strpos($restricted_image, 'tracker') !== false, 'but keeps the alt text');
 section('Restricted profile: links leave the opener behind, headings carry no id');
 
 $link = MarkdownRenderer::render('[go](https://example.test)', false, true);
-check(strpos($link, 'rel="noopener noreferrer nofollow"') !== false, 'external links drop the opener', $link);
+check(strpos($link, 'rel="noopener noreferrer nofollow ugc"') !== false, 'external links drop the opener', $link);
 check(strpos($link, 'target="_blank"') !== false, 'and open in a new tab');
 
 $heading = MarkdownRenderer::render('# boards-app', false, true);

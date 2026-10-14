@@ -115,7 +115,7 @@ $blob_bytes = function () use ($blob) {
 $index_file_rows = function () use ($uid) {
 	$db = DbConnector::get_instance()->get_db_link();
 	$q = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE fil_usr_user_id = ? AND fil_source = ?');
-	$q->execute(array($uid, File::SOURCE_MAILBOX_SEARCH_INDEX));
+	$q->execute(array($uid, MailboxIndex::FILE_SOURCE));
 	return (int)$q->fetchColumn();
 };
 

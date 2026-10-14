@@ -36,6 +36,14 @@
             "parent": "users"
         },
         {
+            "slug": "content-reports",
+            "title": "Content Reports",
+            "url": "admin_content_reports",
+            "order": 3,
+            "permission": 5,
+            "parent": "users"
+        },
+        {
             "slug": "emails",
             "title": "Emails",
             "url": "",

@@ -1,0 +1,227 @@
+{
+    "name": "Forum",
+    "version": "0.1.1",
+    "description": "A discussion forum: categories, topics and replies that members find and read months later, with public categories search engines can index.",
+    "author": "Joinery",
+    "license": "Joinery-Commercial",
+    "status": "beta",
+    "requires_entitlement": true,
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "tags": [
+        "forum",
+        "community",
+        "discussion"
+    ],
+    "styles": [
+        "assets/css/forum.css"
+    ],
+    "bootstrap": "includes/bootstrap.php",
+    "publicPaths": [
+        "/forum"
+    ],
+    "profileMenu": [
+        {
+            "slug": "forum",
+            "title": "Forum",
+            "url": "/forum",
+            "icon": "comments",
+            "visibility": "in",
+            "permission": 0,
+            "order": 58,
+            "settingActivate": "forum_active"
+        }
+    ],
+    "adminMenu": [
+        {
+            "slug": "forum-admin",
+            "title": "Forum",
+            "icon": "comments",
+            "permission": 5,
+            "order": 18,
+            "settingActivate": "forum_active",
+            "items": [
+                {
+                    "slug": "forum-admin-categories",
+                    "title": "Categories",
+                    "url": "/plugins/forum/admin/admin_forum_categories",
+                    "permission": 5,
+                    "order": 1
+                },
+                {
+                    "slug": "forum-admin-held",
+                    "title": "Posts awaiting approval",
+                    "url": "/plugins/forum/admin/admin_forum_held",
+                    "permission": 5,
+                    "order": 2
+                },
+                {
+                    "slug": "forum-admin-topics",
+                    "title": "Topics",
+                    "url": "/plugins/forum/admin/admin_forum_topics",
+                    "permission": 5,
+                    "order": 3
+                }
+            ]
+        }
+    ],
+    "settingsGroups": {
+        "forum": "Forum",
+        "forum_limits": "Limits"
+    },
+    "settings": [
+        {
+            "name": "forum_active",
+            "default": "1",
+            "clearsPages": ["/forum", "/sitemap"],
+            "group": "forum",
+            "label": "Forum enabled",
+            "type": "checkbox",
+            "helptext": "Turns the forum on. With it off its pages and API actions refuse; existing topics are untouched."
+        },
+        {
+            "name": "forum_hold_first_posts",
+            "default": "2",
+            "group": "forum",
+            "label": "Hold a new member's first posts",
+            "type": "text",
+            "helptext": "How many of a member's first posts wait for an admin's approval before anyone else sees them. 0 holds nothing."
+        },
+        {
+            "name": "forum_page_size",
+            "default": "20",
+            "group": "forum",
+            "label": "Posts per page",
+            "type": "text",
+            "helptext": "How many posts a topic page shows."
+        },
+        {
+            "name": "forum_topics_page_size",
+            "default": "30",
+            "group": "forum",
+            "label": "Topics per page",
+            "type": "text",
+            "helptext": "How many topics a category page lists."
+        },
+        {
+            "name": "forum_post_rate_limit",
+            "default": "3",
+            "group": "forum_limits",
+            "label": "Posts allowed per member",
+            "type": "text",
+            "helptext": "How many posts (new topics and replies together) one member may make inside the window below."
+        },
+        {
+            "name": "forum_post_rate_window",
+            "default": "60",
+            "group": "forum_limits",
+            "label": "Rate window (seconds)",
+            "type": "text",
+            "helptext": "The window the post limit counts over."
+        },
+        {
+            "name": "forum_max_attachment_mb",
+            "default": "10",
+            "group": "forum_limits",
+            "label": "Largest attachment (MB)",
+            "type": "text",
+            "helptext": "Per file. The server's own upload limit still applies on top of this."
+        }
+    ],
+    "fileSources": {
+        "forum_attachment": {
+            "label": "Forum attachments",
+            "internal": false,
+            "default_view": false
+        }
+    },
+    "signals": {
+        "forum.topic_created": {
+            "label": "New topic in a category you watch",
+            "description": "Someone starts a topic in a forum category you chose to watch.",
+            "category": "Forum",
+            "payload": {
+                "category_name": "Category name",
+                "topic_title": "Topic title",
+                "topic_url": "Link to the topic",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{category_name}] {topic_title}",
+                "body_template": "{summary}",
+                "link_template": "{topic_url}"
+            }
+        },
+        "forum.reply_posted": {
+            "label": "Reply in a topic you watch",
+            "description": "Someone replies in a forum topic you started, replied to or chose to watch, or replies to your post.",
+            "category": "Forum",
+            "payload": {
+                "category_name": "Category name",
+                "topic_title": "Topic title",
+                "topic_url": "Link to the reply",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{category_name}] {topic_title}",
+                "body_template": "{summary}",
+                "link_template": "{topic_url}"
+            }
+        },
+        "forum.post_held": {
+            "label": "A forum post is waiting for approval",
+            "description": "A new member's post is held until a moderator approves it.",
+            "category": "Forum",
+            "payload": {
+                "category_name": "Category name",
+                "topic_title": "Topic title",
+                "author_name": "Who wrote it",
+                "summary": "The start of the post",
+                "source_user_id": "Acting user id (the author)"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "audience": "admins",
+                "default_email": true,
+                "title_template": "Waiting for approval: {topic_title}",
+                "body_template": "{author_name} wrote in {category_name}: {summary}",
+                "link_template": "/plugins/forum/admin/admin_forum_held"
+            }
+        },
+        "forum.mention": {
+            "label": "Mentioned in the forum",
+            "description": "Someone @mentions you in a forum post.",
+            "category": "Forum",
+            "payload": {
+                "category_name": "Category name",
+                "topic_title": "Topic title",
+                "topic_url": "Link to the post",
+                "summary": "What happened, in a sentence",
+                "recipients": "User ids to tell",
+                "source_user_id": "Acting user id"
+            },
+            "notify": {
+                "ntf_type": "system",
+                "supports_topic": false,
+                "default_email": true,
+                "title_template": "[{category_name}] {topic_title}",
+                "body_template": "{summary}",
+                "link_template": "{topic_url}"
+            }
+        }
+    }
+}

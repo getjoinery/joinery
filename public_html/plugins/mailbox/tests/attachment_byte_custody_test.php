@@ -208,7 +208,7 @@ $make_remote_message = function (string $mid, array $rows) use (
 /** Import one raw message as an archive of its own, to completion. */
 $import_raw = function (string $raw, string $name) use (&$file_ids, $alias_id, $uid) {
 	$file = File::createFromBytes($raw, $name, 'message/rfc822', $uid,
-		array('fil_private' => true, 'fil_source' => File::SOURCE_MAIL_IMPORT_ARCHIVE));
+		array('fil_private' => true, 'fil_source' => MailImportService::FILE_SOURCE));
 	$file_ids[] = (int)$file->key;
 
 	$run = new MailImportRun(NULL);
@@ -293,7 +293,7 @@ $file_ids[] = $adopted_file_id;
 $adopted = new File($adopted_file_id, TRUE);
 check($adopted->key && $adopted->read_bytes('original') === $png,
 	'IMAP first: the stored bytes are the real attachment, decoded');
-check((string)$adopted->get('fil_source') === File::SOURCE_EMAIL_ATTACHMENT,
+check((string)$adopted->get('fil_source') === AttachmentByteCustody::FILE_SOURCE,
 	'IMAP first: the File is tagged email_attachment, so it stays out of Drive and its quota',
 	(string)$adopted->get('fil_source'));
 check((bool)$adopted->get('fil_private'), 'IMAP first: the File is private');
@@ -369,7 +369,7 @@ check(!$ms[0]->get('ima_is_sealed'),
 check((int)$sealed_file->get('fil_sealed_owner_user_id') === $uid,
 	'sealed: wrapped to the owner the MESSAGE records, not to whoever ran the import',
 	(string)$sealed_file->get('fil_sealed_owner_user_id'));
-check((string)$sealed_file->get('fil_source') === File::SOURCE_EMAIL_ATTACHMENT,
+check((string)$sealed_file->get('fil_source') === AttachmentByteCustody::FILE_SOURCE,
 	'sealed: still tagged email_attachment, so Drive never lists it');
 check($sealed_file->read_bytes('original') !== $pdf,
 	'sealed: what is on disk is NOT the plaintext');
@@ -600,9 +600,9 @@ check($read_part->invokeArgs($sender, array($ms[0], $msg_s, &$ingestor)) === $pd
 // own, so it is checked through the registration rather than by hand.
 $whole_prop = new ReflectionProperty('File', 'decrypt_hooks');
 $whole = $whole_prop->getValue();
-check(isset($whole[File::SOURCE_EMAIL_ATTACHMENT]),
+check(isset($whole[AttachmentByteCustody::FILE_SOURCE]),
 	'the mailbox bootstrap registered a whole-bytes decrypt hook');
-check(call_user_func($whole[File::SOURCE_EMAIL_ATTACHMENT],
+check(call_user_func($whole[AttachmentByteCustody::FILE_SOURCE],
 		$sealed_file->read_bytes('original'), $sealed_file) === $pdf,
 	'decrypt hook: returns the original bytes, never the container');
 
@@ -610,9 +610,9 @@ check(call_user_func($whole[File::SOURCE_EMAIL_ATTACHMENT],
 // than a 200 full of container bytes. Reach the registration itself.
 $hooks_prop = new ReflectionProperty('File', 'streaming_decrypt_hooks');
 $hooks = $hooks_prop->getValue();
-check(isset($hooks[File::SOURCE_EMAIL_ATTACHMENT]),
+check(isset($hooks[AttachmentByteCustody::FILE_SOURCE]),
 	'a streaming decryptor is registered for mail attachments');
-$opener = $hooks[File::SOURCE_EMAIL_ATTACHMENT];
+$opener = $hooks[AttachmentByteCustody::FILE_SOURCE];
 check(call_user_func($opener, $sealed_file, 'original') instanceof DriveSealedStream,
 	'streaming: a self-sealed attachment streams through the container decryptor');
 check(call_user_func($opener, $adopted, 'original') === null,
@@ -632,7 +632,7 @@ $legacy_plain = "legacy attachment bytes";
 $legacy_cipher = $crypto->sealField($legacy_plain, $dek,
 	InboundEmailMessage::attachmentAd((int)$msg_l->key, '2'));
 $legacy_file = File::createFromBytes($legacy_cipher, 'legacy.txt', 'text/plain', $uid,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+	array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 $file_ids[] = (int)$legacy_file->key;
 $legacy_att = InboundMessageAttachment::CreateEntry(array(
 	'ima_iem_inbound_email_message_id' => (int)$msg_l->key,

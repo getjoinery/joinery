@@ -44,7 +44,7 @@ class PublicPageFalcon extends PublicPageBase {
 			if($title){
 				$output .= '
 				<div class="card-header bg-body-tertiary">
-					<h5 class="mb-0">'.$title.'</h5>
+					<h5 class="mb-0">'.htmlspecialchars($title, ENT_QUOTES, 'UTF-8').'</h5>
 				</div>';
 			}
 			$output .= '

@@ -2,9 +2,20 @@
 
 **Purpose:** The core pieces that more than one community feature needs, built once. The Chat plugin (`chat_plugin.md`) and the Forum plugin (`forum_plugin.md`) are the first two consumers; Messenger, Boards and later plugins adopt them as they are touched. Nothing here is chat- or forum-specific.
 
-**Last Updated:** 2026-10-11
+**Last Updated:** 2026-10-13
 
-**Status:** Active — not yet implemented.
+**Status:** Active. C1, C2, C3, C4, C6 and C6a built 2026-10-13/14 (the forum is their first consumer); C5 (push) is not built — chat builds it. Developer docs: docs/social_features.md (Spaces, Mentions, Full-text search, Attachments on posts, Content Reports), docs/formwriter.md (the restricted editor), docs/plugin_developer_guide.md (fileSources).
+
+**Built differently from the text below, and why:**
+- C4: the language is the constant `FullTextSearch::CONFIG`, not a setting — changing it changes every index expression, so a setting would silently stop the indexes being used. A data class writes its index entry literally (a property default cannot call `indexSpec()`), and its tests assert the two are equal.
+- C1: `MarkdownRenderer` also gained block quotes (the editor's Quote button produced literal "> " text before) and `MarkdownRenderer::VERSION`, which a consumer storing rendered HTML keeps beside it.
+- C2: `SpaceAccess::registerType()` / `resolve()` let the shared mention picker take a 'type:id' space reference.
+- C1: one rule decides who can be mentioned (`MentionParser::mentionableName`: live, enabled, activated, may read the space), used by the picker and the save alike; a post keeps at most 20 mentions; the parser uses the renderer's own code patterns. The renderer strips its placeholder sentinel from input, refuses a target containing it, never makes a mention chip a link, and groups quotes in one linear pass.
+- C2: an account that is not live and enabled reads nothing, public included; a tier rule with no level is closed; `readableUserIds()` answers a recipient list in one query.
+- C3: the queue uses a new Notify audience `admins` (permission 5+, enabled, real people); a report row keeps `rpt_outcome` (what the action did); the queue filters open / actioned / dismissed; the handler decides its own actions (the forum offers remove and lock, no "hide"). A handler's own exception reaches the queue as its message.
+- C6a: a clash with core or an active plugin refuses a plugin at validation (activate/install); every sync reports clashes; a usable tag with a stray key stays in the catalog as declared.
+- C4: snippets mark matches found in the plain text, never inside an escaped entity.
+- C6: `AccessGateRegistry` asks a provider about a signed-out visitor as user 0 instead of refusing outright, so a public post's attachment opens for visitors; the member-only gates refuse 0.
 
 **Built by:** whichever consumer ships first builds each component, to this spec, in core (`/includes/`, `/data/`, `/assets/`). The second consumer finds it there.
 
@@ -33,17 +44,21 @@ These need no work; the consumer specs just name them.
 
 ## C1. Member-post markdown and mentions
 
-**The problem.** `MarkdownRenderer` passes any link scheme (`javascript:`) and any image URL through. That is acceptable for admin-written docs and unsafe for text members write for each other. Open bug, tracked in the to-do `project_todo_markdown_renderer_unsafe_links`.
+**One renderer, one profile for other people's text.** `MarkdownRenderer` already has it: `render($text, $soft_breaks, $restricted = true)`, used by Boards for comments and card descriptions. Link targets must be `http`, `https`, `mailto` or relative; no images; no heading ids, and headings pushed down two levels; links open in a new tab without the opener. Tests: `tests/unit/markdown_renderer_safety_test.php`. Every consumer (Boards, Forum, Chat) renders through that same profile. There is no second renderer and no per-consumer variant.
 
-**Build.** A `member_post` profile on `MarkdownRenderer::render()`:
+**Build** (changes to the existing profile, which Boards then gets too):
 
-- Allowed: bold, italic, strikethrough, inline and fenced code, blockquotes, lists, soft line breaks, links.
-- Links: `http`, `https`, `mailto` only. Every external link carries `rel="nofollow ugc noopener"` and `target="_blank"` — the forum's public pages are an SEO-spam target.
-- Not allowed: headings, tables, horizontal rules, images (an uploaded attachment is the way to show an image).
+- Restricted links carry `rel="nofollow ugc noopener noreferrer"` (adds `ugc`, which tells search engines the link is user content — the forum's public pages are an SEO-spam target).
+- Mention tokens render as chips (below).
 - All input is HTML-escaped before parsing, as today.
-- Tests in `tests/unit`: scheme allow-list, `javascript:`/`data:` rejected, the paren and quote payloads, nested code, mentions.
+- Tests added to the safety test: `ugc` on restricted links, mention tokens, a mention token cannot carry a link target.
 
-**Mentions.** Users have an optional, non-unique `usr_nickname` and no username, so a typed `@name` cannot name one person. Mentions are inserted by a picker: typing `@` opens a list, choosing a person writes `@[Sam Lee](user:42)` into the markdown source. A bare typed `@sam` mentions nobody.
+**The editor is the existing one.** FormWriter's `textbox` with `markdownmode` (`assets/js/joinery-editor.js`): toolbar, Write / Split / Preview, preview rendered by the server through the `markdown_preview` action. Two changes:
+
+- A `markdown_restricted` option on the field. The toolbar leaves out the buttons the restricted profile drops or the post should not use (H1–H3, image, table), and the preview call sends `restricted: true`.
+- `markdown_preview` accepts `restricted` and renders through the restricted profile, so the preview is exactly what readers will see. It already requires a signed-in user, which every poster is.
+
+**Mentions.** Users have an optional, non-unique `usr_nickname` and no username, so a typed `@name` cannot name one person. Mentions are inserted by a picker built into the same editor (an optional `mention_space` on the field turns it on and names the space whose readers it searches): typing `@` opens a list, choosing a person writes `@[Sam Lee](user:42)` into the markdown source. A bare typed `@sam` mentions nobody.
 
 - `MentionParser::userIds($markdown)` returns the mentioned user ids, for notifications.
 - The renderer turns each token into a mention chip showing the name as written.
@@ -65,14 +80,23 @@ These need no work; the consumer specs just name them.
 | `<p>_tier_min_level` | int4, used by whichever rule is `tier` (same column `TierGatedContentRegistry` counts) |
 | `<p>_grp_group_id` | int4, used by whichever rule is `group` |
 
-Admins (`usr_permission >= 5`) always read, post and moderate. `staff` means admins only (announcement spaces).
+Moderators always read, post and moderate. `staff` means moderators only (announcement spaces). Who is a moderator is decided in one place, `SpaceAccess::mayModerate()` (below), never by a level written into consumer code.
 
 **Build.** `SpaceAccess`:
 
 - `SpaceAccess::mayRead($space, $user_id)` and `mayPost(...)` — one decision, fail-closed on an unknown rule.
 - `SpaceAccess::readableSql($table_columns, $user_id)` — the same decision as a SQL condition, so search, "all channels" lists and the sitemap filter in the database instead of loading rows and checking each.
 - `invite` delegates to the consumer's own member table through a small `SpaceMembers` interface (`isMember($space, $user_id)`); chat has one, the forum has none in v1.
+- `SpaceAccess::mayModerate($space, $user_id)` — true when the user's session permission reaches the consumer's post model's `$write_permission`. Moderators are admins in v1; a per-space moderator role later changes only this method.
 - Each consumer registers its table with `TierGatedContentRegistry`.
+
+**How this fits `declared_permissions`.** That spec declares, on the admin scale, who may open a page, who may change or delete a row, and who may run an action, and it leaves reads to each model. Space access is a different question: the member-facing rule (public, members, tier, group, staff) for reading and posting. The two meet at three points, and each is built so that spec lands without changing a consumer:
+
+- **Reads.** A space's models override `authenticate_read()` with `mayRead()`. That spec leaves `authenticate_read()` in place.
+- **Writes.** "Author, or a moderator, and on create `mayPost()`" depends on the row's contents, which is the case where that spec keeps a model's own `authenticate_write()`. The post models declare `$write_permission` and `$delete_permission`, the properties that spec introduces, and `mayModerate()` reads them. One declaration serves both.
+- **Actions.** Every consumer descriptor names `min_user_permission` explicitly, because that spec removes the default.
+
+A write the server makes on a member's behalf (a reply updating its topic's counters) happens in the post's own save, never through a member-facing save of the parent row, so it is the one place that spec's server-write marker has to cover.
 
 ---
 
@@ -128,7 +152,46 @@ Moved here from `chat_plugin.md` because the forum, the native apps' mail push (
 
 **The problem.** Chat messages and forum posts both carry uploaded files. Messenger's attachment table (`msa_`) is bound to a message and carries sealing columns that neither consumer has; the photo table (`eph_`) is images only and has an `int4` entity id.
 
-**Build.** One polymorphic `eat_entity_attachments` table: `eat_entity_type`, `eat_entity_id` (int8), `eat_fil_file_id`, filename, mime type, byte size, sort order, create and delete times. Upload goes through `UploadHandler` and cloud storage; each consumer registers an `AccessGateProvider` so a file is exactly as visible as the space it was posted in (the `MessengerAttachmentGate` pattern). Image thumbnails come from the existing `File` resize path. Messenger keeps `msa_`.
+**Build.** One polymorphic `eat_entity_attachments` table: `eat_entity_type`, `eat_entity_id` (int8), `eat_fil_file_id`, filename, mime type, byte size, sort order, create and delete times. Upload goes through `UploadHandler` and cloud storage. Each consumer stamps its own origin tag on the file row (`fil_source`, e.g. `forum_attachment` / "Forum attachments"), so the admin Files page lists each kind separately, as it does board and message attachments. A plugin declares that tag in its own `plugin.json` (C6a, below). Each consumer also registers an `AccessGateProvider` so a file is exactly as visible as the space it was posted in (the `MessengerAttachmentGate` pattern). Image thumbnails come from the existing `File` resize path. Messenger keeps `msa_`.
+
+### C6a. Plugins declare their own file categories
+
+**The problem.** Every file carries an origin tag (`fil_source`) that says what made it, and `File::source_catalog()` says what each tag is called and whether listings show it. That catalog is a hard-coded list in core (`data/files_class.php`). Every plugin that wanted its own category has edited it, so core carries Boards', Mailbox's, Messenger's, Bug reports' and Joinery AI's categories even on a site that has none of those plugins.
+
+**Build.** A plugin declares its tags in `plugin.json`:
+
+```json
+"fileSources": {
+  "forum_attachment": { "label": "Forum attachments", "internal": false, "default_view": false }
+}
+```
+
+- `File::source_catalog()` returns core's own tags merged with every plugin's declarations. It reads every plugin on disk, active or not, following the `SettingsDeclarations` pattern (a `glob` of `plugins/*/plugin.json`, cached for the request). An inactive plugin's files keep their name, and an internal tag (Mailbox's search index) stays unlisted when its plugin is off.
+- A plugin may not declare a tag core already owns, and two plugins may not declare the same tag. Either is a validation error from the plugin manifest check, and at runtime core's entry wins.
+- The plugin keeps its tag string as a constant on one of its own classes (e.g. `ForumUploads::SOURCE`), never on `File`.
+- An undeclared tag (files left by a removed plugin) behaves as it does today: shown as its raw name, and listable, so it is noticed and not lost.
+- Every reader of the catalog (`admin_files.php`, `DriveHelper`'s other-sources view, `internal_sources()`, `default_view_sources()`, `source_label()`, `source_is_listable()`) goes through `source_catalog()` already, so none of them changes.
+
+**What moves out of core** (the tag strings stay the same, so no stored row changes):
+
+| Tag | Moves to |
+|---|---|
+| `email_attachment`, `mail_import_archive`, `mailbox_search_index` | `mailbox` |
+| `messenger_attachment` | `messenger` |
+| `ai_chat_upload` | `joinery_ai` |
+| `bug_report_image` | `bug_reports` |
+| `boards_attachment` | `boards` |
+
+**What stays in core:** `user_upload`, `entity_photo`, `drive`, `problem_report`, and the unclassified bucket.
+
+**Core code that names a moving tag** switches to the tag string:
+- `migrations/backfill_file_source_from_references.php`: four tags.
+- `includes/UploadPurposeRegistry.php`: a doc example.
+- `tests/functional/drive/other_sources_test.php` and `tests/functional/files/upload_purposes_test.php`: core tests that use plugin tags as fixtures. They create their own throwaway tags instead, so a core test never needs a plugin installed.
+
+**Docs.** `docs/plugin_developer_guide.md` gains a `fileSources` section beside the settings one.
+
+**Tests** (`tests/unit`): a declared plugin tag appears in the catalog with its label; an inactive plugin's internal tag stays internal; a collision with a core tag is refused by the manifest check; an undeclared tag reads as its raw name and is listable.
 
 ---
 
@@ -136,7 +199,7 @@ Moved here from `chat_plugin.md` because the forum, the native apps' mail push (
 
 The shared pieces are small and independent; each is built when its first consumer reaches it.
 
-1. **C1** (markdown profile, mentions) and **C2** (space access) — before either plugin's phase 1.
+1. **C1** (markdown profile, mentions) and **C2** (space access) — before either plugin's phase 1. **C6a** (plugin-declared file categories) stands alone and goes in with them.
 2. **C4** (search) and **C6** (attachments) — when the first consumer needs them.
 3. **C3** (reports) — before either plugin opens to members.
 4. **C5** (push) — chat's last phase.

@@ -44,25 +44,25 @@ function backfill_file_source_from_references() {
 	// Ordered: machine-owned and unambiguous first, generic human upload last.
 	$rules = array(
 		array(
-			'source' => File::SOURCE_MAILBOX_SEARCH_INDEX,
+			'source' => 'mailbox_search_index',
 			'table'  => 'imi_inbound_mailbox_search_index',
 			'column' => 'imi_fil_file_id',
 			'why'    => 'sealed mailbox search index',
 		),
 		array(
-			'source' => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			'source' => 'mail_import_archive',
 			'table'  => 'mir_mail_import_runs',
 			'column' => 'mir_fil_file_id',
 			'why'    => 'archive uploaded for a mail import run',
 		),
 		array(
-			'source' => File::SOURCE_EMAIL_ATTACHMENT,
+			'source' => 'email_attachment',
 			'table'  => 'ima_inbound_message_attachments',
 			'column' => 'ima_fil_file_id',
 			'why'    => 'attachment on an inbound email',
 		),
 		array(
-			'source' => File::SOURCE_AI_CHAT_UPLOAD,
+			'source' => 'ai_chat_upload',
 			'table'  => 'aia_message_attachments',
 			'column' => 'aia_fil_file_id',
 			'why'    => 'file attached to an AI chat message',

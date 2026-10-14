@@ -357,7 +357,7 @@ $mk_att = function ($did, $inline, $cid) use ($std_uid) {
 	$bytes = 'PNGDATA-' . bin2hex(random_bytes(4));
 	$file = File::createFromBytes($bytes, ($inline ? 'pic.png' : 'doc.pdf'),
 		($inline ? 'image/png' : 'application/pdf'), $std_uid,
-		array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+		array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 	harness_register_model('File', (int)$file->key);
 	$att = InboundMessageAttachment::CreateEntry(array(
 		'ima_iem_inbound_email_message_id' => $did,

@@ -2,9 +2,24 @@
 
 **Purpose:** A discussion forum for Joinery sites: categories, topics with titles, flat replies, likes, attachments, watching, search. Topics are meant to be found and read months later, by members and — in categories the admin makes public — by search engines. Chat (`chat_plugin.md`) is the live-conversation product; this is the durable one.
 
-**Last Updated:** 2026-10-11
+**Last Updated:** 2026-10-13
 
-**Status:** Active — not yet implemented.
+**Status:** Implemented 2026-10-14 (phases 1–6; phase 7, push, has nothing to build until C5 exists). Developer doc: `plugins/forum/docs/overview.md`. Verified: suites forum_unit, forum_access, forum_posting, forum_notify (plus community_components, content_reports, file_source_declarations); two review rounds by reviewer2 (R1–R33, RR1–RR9) fixed; browser walk on dev (categories admin, new topic, reply, quote, edit, pin, search, phone width, signed-out cache and sitemap). Not yet run (in the live verification queue): file upload in the browser, a second account's held post and report, email delivery of alerts, the phone apps, a release and a live node.
+
+**Built differently from the text below, and why:**
+- Admin pages: categories list and edit, posts awaiting approval, and a topics list (restore / remove for good). Day-to-day moderation (pin, lock, move, remove, approve) is on the topic page under Moderate.
+- Holding counts *approved* posts: a member is held until `forum_hold_first_posts` of their posts have been approved, so a turned-down post does not use up the hold.
+- Posts store `fpo_render_version` (`MarkdownRenderer::VERSION`); the daily `ForumMaintenance` task renders again posts an older renderer made, and removes unposted uploads after a day.
+- The reading position moves through the `forum_mark_read` action after a topic page loads, so a page view writes nothing.
+- There is no blocking system on the platform (docs/social_features.md § Blocking), so "blocked members' posts are collapsed" has nothing to build on and is not built.
+- Uploads are single-request (up to `forum_max_attachment_mb`); the chunked upload purpose is not used.
+- `/forum` is declared in the plugin's `publicPaths` for the sitemap; public categories and topics are enumerated by their models' `seo_public_records()`.
+- "admins who opted in" to `forum.topic_created`: an admin opts in by watching the category, like anyone; there is no separate admin switch. A `forum.post_held` signal tells the admins when a post is held.
+- A public site-menu link: plugins cannot declare public-menu entries (the site's Public Menus editor owns them); the forum declares a member-menu entry (`profileMenu`), which the apps show.
+- Cache clearing uses `StaticPageCache::invalidatePaths()` (every cached copy of a page, query strings included, in one pass), not `invalidateUrl()`. `/forum/search` is never cached (route option `static_cache => false`), and `forum_active` declares `clearsPages` so turning the forum off clears it.
+- Links to one post are `?post={id}`, resolved per visitor by the topic page.
+- Model rules live in `save()` (the platform's `save()` does not call `prepare()`); `prepare()` reports the same list early.
+- Review 2026-10-14 (reviewer2, R1-R33) fixes are in; see the session notes for the list.
 
 **Plugin name:** `forum`
 
@@ -47,10 +62,19 @@ Blog comments (`cmt_`) hang off one post, have no titles, categories, pinning, l
 
 A plain PHP plugin on the platform's request path. There is no service to run, no WebSocket and no polling: a page shows what is in the database when it loads. Realtime would add nothing to a forum.
 
-- **Views** under `plugins/forum/views/` (`/forum`, category and topic pages). Topic and category URLs carry placeholders, so `serve.php` routes bind the category and topic by slug.
+- **Views** under `plugins/forum/views/` (`/forum`, category and topic pages). Topic and category URLs carry placeholders, so `serve.php` routes bind them:
+  - a category is `/forum/{category-slug}`;
+  - a topic is `/forum/t/{topic-id}/{title-slug}`. The id finds the topic; the slug is only for readers and search engines. A link with a stale slug (the title was edited) redirects to the current one. The category is not in the topic URL, so a moved topic keeps its link and no redirect table is needed.
 - **Logic** under `plugins/forum/logic/`, exposed as `/api/v1` actions through `_logic_descriptor()`: `topic_create`, `post_create`, `post_edit`, `post_delete`, `topic_set` (pin / lock / move), `watch_set`, `search`. Page JavaScript calls them with the browser-session credential.
 - **Admin** under `plugins/forum/admin/`, menu declared in `plugin.json`.
-- **Settings** declared in `plugin.json` (`forum_post_rate_limit`, `forum_post_rate_window`, `forum_hold_first_posts`, `forum_page_size`).
+- **Settings** declared in `plugin.json` (`forum_post_rate_limit`, `forum_post_rate_window`, `forum_hold_first_posts` default `2`, `forum_page_size`).
+- **Menus.** A public menu link to `/forum`, and a `profileMenu` entry so the forum appears in the iOS and Android apps.
+
+### Screens
+
+- **Writing a post** uses the platform's existing markdown editor (FormWriter `textbox` with `markdownmode`: toolbar, Write / Split / Preview, preview rendered by the server). It is used in its `restricted` form (C1): the toolbar leaves out headings, image and table, and the preview renders through the same restricted profile the saved post uses. The `@` mention picker attaches to the same editor. Files go through the attachment control (C6), not the image button.
+- **Opening a topic** lands on the member's first unread post (from `ftr_topic_reads`), on whatever page it falls; a topic they have read through opens at its last post, and a first visit opens at the top. Signed-out visitors always start at the top.
+- **Reply box** sits under the last post of the last page. Quoting a post fills it with the quoted text and sets `fpo_reply_to_id`.
 
 ### Public pages, SEO and the static cache
 
@@ -131,7 +155,7 @@ Per-user read position, one row per topic a member has opened: `ftr_usr_user_id`
 | Need | Uses |
 |---|---|
 | Likes | `Reaction`, entity type `forum_post`, reaction `like` |
-| Attachments | C6 `eat_entity_attachments`, entity type `forum_post`, with a forum `AccessGateProvider` |
+| Attachments | C6 `eat_entity_attachments`, entity type `forum_post`, with a forum `AccessGateProvider`. The file rows carry their own origin tag, `forum_attachment` (label "Forum attachments"), declared under `fileSources` in the forum's `plugin.json` (C6a), so the admin Files page can filter them apart from every other kind, the way board and message attachments are |
 | Reports | C3 `rpt_content_reports`, entity type `forum_post`, with a forum report handler |
 | Edit history | `ChangeTracking` (old and new `fpo_body`, the editor, the time); admin-visible, the post shows only "edited" |
 
@@ -141,7 +165,7 @@ Per-user read position, one row per topic a member has opened: `ftr_usr_user_id`
 
 - **Order.** Category pages list pinned topics, then by last activity. A topic page lists posts oldest first, paged at `forum_page_size`.
 - **Edit and delete.** An author edits their own post at any time (the post shows "edited"); an admin edits or deletes any. Deleting the opening post deletes the topic. Delete is soft. Locked topics refuse new replies from everyone but admins.
-- **Move** changes a topic's category; the old URL redirects to the new one.
+- **Move** changes a topic's category. The topic's URL does not name its category, so it does not change.
 - **Holding.** `forum_hold_first_posts` holds a member's first N posts for admin approval (the blog-comment `cmt_is_approved` idea). While held, the post is invisible to everyone else, takes no part in `ftp_last_post_time`, and sends no alerts. Approval releases it and sends them.
 - **Mentions** are inserted by the picker (C1); a mention of someone who cannot read the category is dropped at write time.
 - **Rate limit.** Per-user bucket `forum_post` through `RequestLogger::rate_limit_state()`: 3 posts per minute per user (topics and replies together). Over the limit the save is refused with `retry_after` and the text stays in the editor. Both numbers are settings; the defaults are starting values, not measured.
@@ -181,7 +205,7 @@ A member's alerts arrive in-app and, by their Notify preferences, by email; push
 
 Each is deliverable on its own.
 
-1. **Categories, topics, posts, public reading.** Shared C1 (markdown profile, bug fix) and C2 (space access) first. Data model, category/topic/post views, the create and reply actions, soft delete, pin, lock, move. Static cache invalidation and SEO registration.
+1. **Categories, topics, posts, public reading.** Shared C1 (the restricted profile's `ugc` links, the editor's restricted toolbar and preview) and C2 (space access) first; C1's mention chips and picker come with phase 3. Data model, category/topic/post views, the create and reply actions, soft delete, pin, lock, move. Static cache invalidation and SEO registration.
 2. **Admin UI.** Category CRUD with the access rules, topic management.
 3. **Mentions, watching, notifications.** The mention picker, watch rows, the three signals, unread markers.
 4. **Likes and attachments.** `Reaction` likes; C6 attachments.
@@ -201,9 +225,21 @@ Phase 1 is the load-bearing one: the access rules and the cache invalidation are
 
 ---
 
-## Open Decisions
+## Permissions
 
-- **Default for `forum_hold_first_posts`.** `0` (nobody held) is friendliest for a private members' forum; `2` or `3` is the common defence for a public one. The setting exists either way; the question is what a fresh install ships with.
+Built to sit unchanged under `declared_permissions` (see C2's section on it in the shared spec):
+
+- **Reading** a category, topic or post is the space rule, through `SpaceAccess`. The models override `authenticate_read()` with it, so the REST and AI surfaces cannot bypass it.
+- **Changing** a post: its author, or a moderator. Creating one also needs `SpaceAccess::mayPost()` on the category and an unlocked topic (moderators excepted). This rule depends on the row's contents, which is the case where `declared_permissions` keeps a model's own `authenticate_write()`. The models also declare `$write_permission` and `$delete_permission` (both 5), the properties that spec introduces, and `SpaceAccess::mayModerate()` reads them, so the moderator level is written in one place and not as a literal `5` in the forum code.
+- **Actions**: every forum `_logic_descriptor()` names its `min_user_permission` explicitly; none relies on the default that spec removes.
+- **Counters**: a member's reply updating the topic's reply count and last-post fields is a server write (that spec's own example is a registration updating an event's count). It is done in the post's save, never through a member-facing topic save.
+- **Admin pages** gate the way every admin page does today. They are all under `plugins/forum/admin/`, so `declared_permissions` moves them as one `adminAccess` entry in `plugin.json`.
+
+---
+
+## Decisions
+
+- **D1 (owner, 2026-10-13).** `forum_hold_first_posts` defaults to `2`: a fresh install holds a new member's first two posts for approval.
 
 ---
 

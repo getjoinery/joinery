@@ -28,6 +28,7 @@
  * for the browser to open. saveDraft refuses such a mailbox, so a plaintext draft
  * cannot land there.
  *
+ * @version 1.6 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.5 - saveDraft() takes parts given as bytes ({name, type, bytes, content_id}) as well
  *   as HTTP uploads: a mail program's draft, parsed from its MIME
  * @version 1.4 - a Fortress draft's parts carry signed URLs to their ciphertext (specs/fortress_mobile_apps.md § R12)
@@ -886,7 +887,7 @@ class MailboxDrafts {
 				}
 				$file = File::createFromBytes($stored, $name, $mime, $this->viewer->getUserId(), array(
 					'fil_private' => true,
-					'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+					'fil_source'  => AttachmentByteCustody::FILE_SOURCE,
 				));
 				if ($crypto !== null) {
 					$file->set('fil_type', substr($mime, 0, 128));

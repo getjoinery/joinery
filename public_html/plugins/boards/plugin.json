@@ -1,6 +1,6 @@
 {
     "name": "Joinery Boards",
-    "version": "0.2.4",
+    "version": "0.2.5",
     "description": "Kanban boards, lists and cards for clubs, nonprofits and small teams, wired into the site's members, notifications, calendar and files. One price, no seat or board limits.",
     "author": "Joinery",
     "license": "Joinery-Commercial",
@@ -21,6 +21,9 @@
         "assets/css/boards.css"
     ],
     "bootstrap": "includes/bootstrap.php",
+    "fileSources": {
+        "boards_attachment": { "label": "Board attachments", "internal": false, "default_view": false }
+    },
     "profileMenu": [
         {
             "slug": "boards",

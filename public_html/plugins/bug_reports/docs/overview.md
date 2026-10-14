@@ -53,7 +53,7 @@ In order, `BugReportIntake::receive()`:
    report is not stored again: its `occurrences` (1 to 1,000,000; 1 when missing) are
    added to that report in one UPDATE, last-seen moves, a closed report reopens as `new`,
    and the answer is that report's id. No email. A member's report is always stored.
-5. **Image.** Kept privately (`File::SOURCE_BUG_REPORT_IMAGE`) when it passes the size
+5. **Image.** Kept privately (`BugReportIntake::FILE_SOURCE`, declared under `fileSources` in `plugin.json`) when it passes the size
    and type checks. A refused image never refuses the report; the row says why it was
    not kept.
 6. **Save and notify.** The row is saved as `new`. When `bug_reports_notify_email` is

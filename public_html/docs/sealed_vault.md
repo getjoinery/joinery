@@ -620,7 +620,7 @@ exists) does the rest.
 a decryptor for its `fil_source` tag once, at bootstrap:
 
 ```php
-File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphertext, File $file): string {
+File::registerDecryptHook(AttachmentByteCustody::FILE_SOURCE, function (string $ciphertext, File $file): string {
     $key = VaultUnlock::secretKey($file->get('fil_usr_user_id'));
     if ($key === null) throw new VaultLockedException();
     // ... $crypto->openItemDek($sealed_key, $key), then the AEAD blob, return plaintext bytes

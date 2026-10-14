@@ -76,6 +76,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
 | Signals your plugin emits, or reactions to existing signals | `signals` / `signalSubscribers` keys in `plugin.json` | [Plugin Signals & Subscribers](#plugin-signals--subscribers-declarative) |
 | A cloud-offload store profile (move rows' bytes to a bucket) | `storage_profiles` array in `plugin.json` — a `StorageProfile` class name | [Storage Profiles](#storage-profiles-declarative) |
+| Public pages that belong in the sitemap and the SEO inventory | `publicPaths` key in `plugin.json` — a list of same-site paths, e.g. `["/forum"]` | [SEO Metadata](seo_metadata.md#what-is-enumerated) |
 | Receiving email addressed to a feature of your plugin | `inboundHandlers` key in `plugin.json` — handler key → `InboundAddressHandler` class | [Mailbox: email handlers](../plugins/mailbox/docs/overview.md#email-handlers-and-personal-addresses) |
 | A button on a message in the mailbox reader | `mailboxMessageActions` key in `plugin.json` — action key → label, icon, same-site url | [Mailbox: buttons on a message](../plugins/mailbox/docs/overview.md#buttons-on-a-message-in-the-reader) |
 | A cross-instance payload kind on the Joinery Direct channel | `directKinds` key in `plugin.json` — kind name → handler class (`gate`/`ingest`) | [Joinery Direct](joinery_direct.md#serving-a-kind-the-plugin-surface) |
@@ -1017,6 +1018,7 @@ never overwritten.
 | `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
 | `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |
 | `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |
+| `clearsPages` | No | — | Same-site paths whose static-cached pages (and everything under them) are cleared when an operator changes this setting — e.g. `["/forum", "/sitemap"]` on a setting that turns public pages on or off. The cache answers signed-out visitors before any code runs, so without it a page the setting turns off goes on being served. |
 
 The full field-spec reference, including how a plugin admin page requests a group
 and wraps it with context, is in [Settings](settings.md).
@@ -1044,6 +1046,29 @@ Validation failures throw. On `activate()` the plugin does not activate; on `syn
 **Blank defaults:** `default: ""` creates a row with an empty value. Use this for things that have no meaningful factory default but should still be present (API keys, SMTP hosts, a webhook URL). `get_setting()` returns `''` for anything unset (and logs a notice — pass the `$fail_silently` flag to suppress it), so supply a floor in code: `intval(...) ?: 100`.
 
 **Uninstall:** On uninstall, PluginManager deletes rows matching the names in the current manifest. Settings declared in an earlier version but dropped from the current manifest are left in place.
+
+### File Origin Tags (Declarative)
+
+Every file row carries an origin tag (`fil_source`) naming what created it, and listings (the admin Files page, Drive's "Also in your account" views, the Drive usage meter) read what each tag is called and whether to show it from `File::source_catalog()`. A plugin that stores files declares its tags in `plugin.json` under `fileSources`:
+
+```json
+"fileSources": {
+  "forum_attachment": { "label": "Forum attachments", "internal": false, "default_view": false }
+}
+```
+
+| Key | Meaning |
+|---|---|
+| tag (the object key) | Lowercase letters, digits and underscores, starting with a letter, at most 64 characters. Stamped on the file as `fil_source`. |
+| `label` | Required. The human name listing filters and pickers show. |
+| `internal` | Optional, default `false`. A file the system made for its own use; no browse surface lists it. Not a permission — `File::is_viewable()` alone decides who may read a file. |
+| `default_view` | Optional, default `false`. Included when a listing opens with no filter chosen. |
+
+- **Keep the tag string as a constant on one of the plugin's own classes**, e.g. `BoardsUploads::FILE_SOURCE = 'boards_attachment'`, and stamp it when the file is created: `File::createFromUpload($tmp, $name, $mime, $user_id, array('fil_source' => BoardsUploads::FILE_SOURCE, ...))`. Core's `File::SOURCE_*` constants are core's own tags only.
+- **Declarations are read off disk, active or not** (`FileSourceDeclarations`, cached per request), so a deactivated plugin's files keep their name and an internal tag stays unlisted while its plugin is off.
+- **A tag core owns, or one another plugin declares, is refused** by the manifest check (`PluginHelper::validate()`), along with a malformed entry. At runtime core's entry wins, and between two plugins the first in directory order wins.
+- **An undeclared tag** (files left by an uninstalled plugin) reads as its raw name and stays listable, so it is noticed rather than lost.
+- A test that needs a throwaway tag declares it for its own process with `FileSourceDeclarations::declareForTest($tag, $spec)` (CLI only).
 
 ### Storage Profiles (Declarative)
 
@@ -2352,7 +2377,7 @@ file people browse or one the system keeps for itself:
 ```php
 $file = File::createFromBytes($bytes, $name, $mime, $owner_id, array(
     'fil_private' => true,
-    'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
+    'fil_source'  => MailboxIndex::FILE_SOURCE,
 ));
 ```
 

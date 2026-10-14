@@ -83,6 +83,7 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.56 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.55 - a part inside an attached message (message/*, forward as attachment) is never this message's body: extractBodies() and enumerateNonTextParts() skip it as a body and still list it as a part
  * @version 1.54 - handler aliases: `base+tag` resolves to a handler alias and each newly stored message is handed to the plugin handler (handOver)
  * @version 1.53 - comments: a never_spam rule does not lift a message the From domain disowned
@@ -1586,7 +1587,7 @@ class InboundEmailRouter {
 						: ($name !== null ? $name : 'attachment'),
 					$stored_type,
 					$owner_id,
-					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
+					array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE)
 				);
 				if ($sealing) {
 					// The on-disk bytes are ciphertext, so type detection saw noise —
@@ -1963,7 +1964,7 @@ class InboundEmailRouter {
 						: ($name !== null ? $name : 'attachment'),
 					$stored_type,
 					$owner_id,
-					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
+					array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE)
 				);
 				if ($sealing) {
 					// createFromBytes()/save() detects fil_type from the on-disk bytes,

@@ -121,6 +121,7 @@ URL placeholders (`{slug}`, `{id}`, etc.) are extracted into a `$params` array t
 | `handler` | Yes* | Alternative to `view`: a handler file (no `.php`) that fully serves the response itself (e.g. ICS downloads) — no view/theme resolution runs |
 | `plugin` | No | Plugin name that owns this route. View/handler and auto-loaded logic resolve from the plugin's directory; the route hard-404s while the plugin is inactive. See below |
 | `check_setting` | No | Setting name — route only serves if setting is truthy |
+| `static_cache` | No | `false` — the response is never written to the static page cache and leaves no index entry (a search page, where every query string is its own page). A view can do the same with `StaticPageCache::skipThisRequest()` |
 | `min_permission` | No | Minimum permission level required (uses `SessionControl::check_permission()`). **See the ladder below — note `0` requires login; *omit* the key for a truly public page.** |
 | `valid_page` | No | Set `false` to exclude from page statistics (default: `true`) |
 
@@ -285,6 +286,13 @@ invalidation covers the common cases (see below), so manual clearing should rare
 **Automatic invalidation:**
 - `alternate_homepage` or `alternate_loggedin_homepage` settings saved → `/` invalidated
 - `active_theme` setting saved → entire cache flushed
+- A forum change → that topic's pages, its category, `/forum` and `/sitemap` (see the forum plugin's docs)
+
+**Invalidating from code:** `StaticPageCache::invalidateUrl($url, $params)` removes one exact URL.
+`StaticPageCache::invalidatePath($path, $with_children = false)` removes every cached copy of a
+path whatever its query string (`?page=2` goes with the first page), and with `$with_children`
+everything under it too. Content whose change reaches every page of it — a thread, a list —
+uses `invalidatePath()`.
 
 ## Debugging
 

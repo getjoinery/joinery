@@ -463,6 +463,11 @@ class RouteHelper {
             $forced_plugin = $route['plugin'];
         }
 
+        // A route that must never be cached (every query is its own page).
+        if (isset($route['static_cache']) && $route['static_cache'] === false) {
+            StaticPageCache::skipThisRequest();
+        }
+
         // Check setting requirement if specified. For plugin-delegated routes this
         // now runs only after the plugin is confirmed active (so its settings exist).
         if (!empty($route['check_setting'])) {

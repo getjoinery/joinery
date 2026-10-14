@@ -1,0 +1,7 @@
+{
+  "name": "Forum upkeep",
+  "description": "Removes files members uploaded while writing a post but never posted (after a day), renders again any post made by an older version of the markdown renderer, and re-checks every topic's reply count and latest post against its posts, correcting any that drifted.",
+  "activate_on_install": true,
+  "default_frequency": "daily",
+  "config_fields": {}
+}

@@ -106,6 +106,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.47 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.46 - senderDomainDisowns(): a DMARC fail under an enforcing policy, which no allow rule lifts
  * @version 1.45 - iem_dmarc_policy: the DMARC policy the verifier read; authRuleSaysSpam() exempts a fail under p=none
  * @version 1.44 - an offloaded raw records its file store and full key (iem_raw_bkt_backup_target_id,
@@ -1250,7 +1251,7 @@ class InboundEmailMessage extends SystemBase {
 		$file = File::createFromBytes($u['bytes'], self::fortressAttachmentName($message_id, $u['mime_part']),
 			self::FORTRESS_FILE_TYPE, $owner_id, array(
 				'fil_private' => true,
-				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+				'fil_source'  => AttachmentByteCustody::FILE_SOURCE,
 			));
 		// Magic-byte detection on save() saw ciphertext: keep the stored type.
 		$file->set('fil_type', self::FORTRESS_FILE_TYPE);

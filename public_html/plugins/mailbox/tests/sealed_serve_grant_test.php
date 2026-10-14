@@ -174,7 +174,7 @@ list($msg_a, $dek_a) = $make_sealed_message('selfsealed');
 $tmp = tempnam(sys_get_temp_dir(), 'sg-test-');
 file_put_contents($tmp, $png);
 $sealed_file = DriveSealed::createSealedFile($tmp, 'selfsealed.png', 'image/png', $uid,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+	array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 @unlink($tmp);
 harness_register_model('File', (int)$sealed_file->key);
 $att_a = $make_att_row($msg_a, 'selfsealed', '2', (int)$sealed_file->key, false);
@@ -214,7 +214,7 @@ list($msg_b, $dek_b) = $make_sealed_message('msgdek');
 $tmp = tempnam(sys_get_temp_dir(), 'sg-test-');
 file_put_contents($tmp, 'placeholder');
 $dek_file = File::createFromUpload($tmp, 'msgdek.png', 'image/png', $uid,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+	array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 if (is_file($tmp)) { @unlink($tmp); }
 harness_register_model('File', (int)$dek_file->key);
 $att_b = $make_att_row($msg_b, 'msgdek', '2', (int)$dek_file->key, true);

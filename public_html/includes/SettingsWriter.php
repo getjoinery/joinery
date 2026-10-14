@@ -38,7 +38,8 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
- * @version 1.2 - secrets go through FormWriterV2Base::process_secretinput(): absent keeps, blank
+ * @version 1.3 - a setting's declared clearsPages leave the static page cache when it changes
+ * @changelog 1.2 - secrets go through FormWriterV2Base::process_secretinput(): absent keeps, blank
  *   removes, text replaces; the Clear checkbox and kept_secrets are gone
  * @changelog 1.1
  */
@@ -270,6 +271,7 @@ class SettingsWriter {
 			}
 		}
 
+		SettingsDeclarations::clearPagesFor($result['written']);
 		return $result;
 	}
 

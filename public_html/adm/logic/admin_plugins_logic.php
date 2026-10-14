@@ -198,6 +198,10 @@ function admin_plugins_logic(array $input): LogicResult {
 				if (!empty($result['migration_messages'])) {
 					$message .= '<br><small>Migrations: ' . htmlspecialchars(implode('; ', $result['migration_messages'])) . '</small>';
 				}
+				if (!empty($result['warnings'])) {
+					$message .= '<br><strong>Needs attention:</strong> ' . htmlspecialchars(implode('; ', $result['warnings']));
+					$message_type = 'warning';
+				}
 				if (!empty($result['deletion_rule_messages'])) {
 					$message .= '<br><small>Deletion rules: ' . htmlspecialchars(implode('; ', $result['deletion_rule_messages'])) . '</small>';
 				}

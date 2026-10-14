@@ -5,7 +5,7 @@
  * One wrapper, .jy-ed[data-jy-editor="html|markdown"]; the view lives in
  * data-mode (html: visual|source; markdown: write|split|preview).
  *
- * @version 1.0.0
+ * @version 1.1.0 - the @ mention picker list
  */
 
 .jy-ed {
@@ -64,6 +64,22 @@
 }
 
 .jy-ed-views { margin-left: auto; display: flex; gap: 2px; }
+
+/* ------------------------------------------------------- mention picker */
+
+.jy-ed-mentions {
+	list-style: none;
+	margin: 4px 0 0;
+	padding: 4px 0;
+	max-width: 320px;
+	border: 1px solid #c8ccd4;
+	border-radius: 6px;
+	background: #fff;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, .12);
+	font-size: 13px;
+}
+.jy-ed-mentions li { padding: 6px 10px; cursor: pointer; color: #1f2329; }
+.jy-ed-mentions li[aria-selected="true"] { background: #e8f0fe; }
 
 /* ------------------------------------------------------------- popover */
 

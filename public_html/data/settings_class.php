@@ -184,12 +184,18 @@ private function _check_for_duplicate_setting() {
 		$value = ($value === null) ? '' : (string)$value;
 
 		$dblink = DbConnector::get_instance()->get_db_link();
+		$before = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+		$before->execute(array($name));
+		$previous = $before->fetchColumn();
 		$stmt = $dblink->prepare(
 			"INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
 			 VALUES (?, ?, 1, NOW(), NOW(), 'general')
 			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
 		$stmt->execute(array($name, $value));
 		Globalvars::get_instance()->forget_setting($name);
+		if ($previous === false || (string)$previous !== $value) {
+			SettingsDeclarations::clearPagesFor(array($name));
+		}
 	}
 
 	/**

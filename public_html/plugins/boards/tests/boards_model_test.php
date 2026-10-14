@@ -263,7 +263,7 @@ BoardsCards::addItem($checklist, $mover, $board, $owner, 'Step one');
 BoardsCards::addComment($mover, $board, $owner, 'A comment that travels', array());
 $file = File::createFromBytes('hello', 'note.txt', 'text/plain', $owner, array(
 	'fil_private' => false, 'fil_access_provider' => BoardsAttachmentGate::KEY,
-	'fil_access_ref' => (int)$board->key, 'fil_source' => File::SOURCE_BOARDS_ATTACHMENT));
+	'fil_access_ref' => (int)$board->key, 'fil_source' => BoardsUploads::FILE_SOURCE));
 $attachment = BoardsCards::attachFile($mover, $board, $owner, $file);
 
 $mover = new BoardCard((int)$mover->key, TRUE);

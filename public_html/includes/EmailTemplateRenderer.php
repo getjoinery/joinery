@@ -390,7 +390,7 @@ class EmailTemplateRenderer {
      */
     protected function _substitute_variables($string, $values) {
         $split_template = preg_split(
-            '/\*([^\*\| ]+(?:\|[^\*]+)?)\*/', $string, null,
+            '/\*([^\*\| ]+(?:\|[^\*]+)?)\*/', $string, -1,
             PREG_SPLIT_DELIM_CAPTURE
         );
 
@@ -457,7 +457,7 @@ class EmailTemplateRenderer {
         }
 
         $parts = preg_split(
-            '/(?<!\\\\){([^\}]+)}/', $template_string, NULL,
+            '/(?<!\\\\){([^\}]+)}/', $template_string, -1,
             PREG_SPLIT_DELIM_CAPTURE);
         $n = count($parts);
 
@@ -540,7 +540,7 @@ class EmailTemplateRenderer {
         $template_string = preg_replace('/\/\*\*.*?\*\*\//ms', '', $template_string);
 
         $split_template = preg_split(
-            '/(?<!\\\){([^\}]+)}/', $template_string, NULL,
+            '/(?<!\\\){([^\}]+)}/', $template_string, -1,
             PREG_SPLIT_DELIM_CAPTURE);
 
         $template_pairs = array();
@@ -684,7 +684,7 @@ class EmailTemplateRenderer {
                 // Its the in between of conditionals, so lets pull out all the [] counter
                 // operations and process them
                 $operations = preg_split(
-                    '/\[([^\]]+)\]/', $split_template[$i], NULL,
+                    '/\[([^\]]+)\]/', $split_template[$i], -1,
                     PREG_SPLIT_DELIM_CAPTURE);
 
                 $operations_size = count($operations);

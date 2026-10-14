@@ -9,10 +9,16 @@
  * way the finished attachment is a File gated on the board, so the people with a
  * role on the board can open it and nobody else can (BoardsAttachmentGate).
  *
+ * @version 1.1.0 - FILE_SOURCE: the boards_attachment origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.0.0
  */
 
 class BoardsUploads {
+
+	/** Origin tag (fil_source) on a file attached to a card (or a board's
+	 *  background image), declared under "fileSources" in plugin.json. */
+	const FILE_SOURCE = 'boards_attachment';
 
 	/**
 	 * File types a card refuses outright.
@@ -88,7 +94,7 @@ class BoardsUploads {
 			'fil_private'         => false,
 			'fil_access_provider' => BoardsAttachmentGate::KEY,
 			'fil_access_ref'      => (int)$board->key,
-			'fil_source'          => File::SOURCE_BOARDS_ATTACHMENT,
+			'fil_source'          => BoardsUploads::FILE_SOURCE,
 		));
 	}
 
@@ -108,7 +114,7 @@ class BoardsUploads {
 		}
 		$file = new File($file_id, TRUE);
 		if ((int)$file->get('fil_usr_user_id') !== $user_id
-			|| $file->get('fil_source') !== File::SOURCE_BOARDS_ATTACHMENT
+			|| $file->get('fil_source') !== BoardsUploads::FILE_SOURCE
 			|| $file->get('fil_delete_time')
 			|| $file->get('fil_access_provider')) {
 			throw new BoardsRefusal('That upload is no longer available.');
@@ -177,7 +183,7 @@ class BoardsUploads {
 					'fil_private'         => false,
 					'fil_access_provider' => BoardsAttachmentGate::KEY,
 					'fil_access_ref'      => (int)$board->key,
-					'fil_source'          => File::SOURCE_BOARDS_ATTACHMENT,
+					'fil_source'          => BoardsUploads::FILE_SOURCE,
 				));
 			if (!$file) {
 				$skipped++;

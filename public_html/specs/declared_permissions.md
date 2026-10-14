@@ -215,7 +215,7 @@ public static $delete_permission = 10;  // default: the write level
 - **Overrides.** The ~100 boilerplate overrides of `authenticate_write()` are
   replaced by the declaration. Models with real rules keep their override:
   - owner-only rows such as passkeys;
-  - rows whose rule depends on their contents.
+  - rows whose rule depends on their contents. Forum and chat posts are one: author, or a moderator, and on create the space's post rule. Their `SpaceAccess::mayModerate()` reads the post model's `$write_permission`, so the declaration here sets the moderator level too (see the community shared components spec, C2).
 - **Enforcement is on the write itself.** `save()`, `soft_delete()`,
   `undelete()`, `permanent_delete()` and `updateColumns()` run the check
   against the session on every web request. CLI, cron and scheduled tasks have
