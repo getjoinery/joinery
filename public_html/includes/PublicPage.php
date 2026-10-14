@@ -92,13 +92,9 @@ class PublicPage extends PublicPageBase {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <?php if (!empty($options['meta_description'])): ?>
-    <meta name="description" content="<?php echo htmlspecialchars($options['meta_description'], ENT_QUOTES, 'UTF-8'); ?>">
-    <?php endif; ?>
     <?php if (!empty($options['noindex'])): ?>
     <meta name="robots" content="noindex<?php echo !empty($options['nofollow']) ? ',nofollow' : ''; ?>">
     <?php endif; ?>
-    <title><?php echo htmlspecialchars($options['title'], ENT_QUOTES, 'UTF-8'); ?></title>
 
     <?php $this->global_includes_top($options); ?>
 

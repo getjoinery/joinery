@@ -460,10 +460,8 @@ class PublicPageFalcon extends PublicPageBase {
   		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<meta http-equiv="X-UA-Compatible" content="IE=edge">
-		<meta name="description" content="<?php echo htmlspecialchars((string)($options['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
         <meta name="keywords" content="">
 
-		<title><?php echo htmlspecialchars((string)($options['title'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></title>
 			<?php $this->global_includes_top($options); ?>
 
   

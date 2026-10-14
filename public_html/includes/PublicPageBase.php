@@ -788,6 +788,10 @@ abstract class PublicPageBase {
 			echo '<meta name="twitter:image" content="' . htmlspecialchars($emitted_og_image, ENT_QUOTES, 'UTF-8') . '" />' . "\n";
 		}
 
+		// The web app manifest: an iPhone or iPad opens the site from the Home
+		// Screen as its own app (and lets it receive push) only with one.
+		echo '<link rel="manifest" href="/manifest.webmanifest">' . "\n";
+
 		// Lazy auto-create row for any new public path (admin previews included)
 		if (!$override) {
 			SeoPageMetadata::lazy_auto_create($canonical_path, $options);

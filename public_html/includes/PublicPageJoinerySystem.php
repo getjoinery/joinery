@@ -578,8 +578,6 @@ class PublicPageJoinerySystem extends PublicPageBase {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <meta name="description" content="<?php echo htmlspecialchars($options['description'] ?? ''); ?>">
-  <title><?php echo htmlspecialchars($options['title'] ?? ''); ?></title>
   <?php $this->global_includes_top($options); ?>
   <meta name="theme-color" content="#ffffff">
   <link rel="preconnect" href="https://fonts.gstatic.com">
