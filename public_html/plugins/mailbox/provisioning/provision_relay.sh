@@ -14,6 +14,9 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.14 - the operator's ping on a shard reports the whole mail apps pass-through (every tenant by
+#                slug, and the refusals that reach no tenant) instead of a tenant-shaped group about
+#                a tenant called operator that said it had no mail name.
 # Version: 3.13 - a shared shard passes mail programs through too (RelayVersion::PASSES_MAIL_APPS_SHARED): each
 #                tenant under its slot's mail name, which the operator's signed tenant-add assigns
 #                (tenants/<slug>/mx_hostname); the shard certifies a tenant only under that name; caps,
@@ -112,7 +115,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.13"
+RELAY_VERSION="3.14"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"

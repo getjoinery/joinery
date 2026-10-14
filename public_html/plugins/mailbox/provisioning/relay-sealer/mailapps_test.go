@@ -491,6 +491,44 @@ func TestShardRoutesBySlotName(t *testing.T) {
 	}
 }
 
+// The operator's ping on a shard sees the whole pass-through: every tenant by
+// slug, and the refusals that reach no tenant (a hello with no name, a name no
+// tenant has), not a tenant-shaped group about a tenant called "operator".
+func TestShardOperatorSeesTheWholePassThrough(t *testing.T) {
+	gw, _ := fakeGateway(t, "t1.fleet.example")
+	s, addr := shardFixture(t, gw, map[string]string{"t1": "t1.fleet.example", "t2": "t2.fleet.example"},
+		map[string][]string{"t1": {"127.0.0.1"}, "t2": nil})
+	if _, err := dialThrough(addr, "t1.fleet.example"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"", "t3.fleet.example", "t2.fleet.example"} {
+		if g, err := dialThrough(addr, name); err == nil {
+			t.Fatalf("%q got through (%q)", name, g)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	st := s.mailApps.status(relayOperatorTenant)
+	if _, ok := st["off_because"]; ok {
+		t.Fatalf("the operator was told it is a tenant with no name: %v", st)
+	}
+	if st["tenants_named"] != 2 || st["tenants_on"] != 1 || st["spliced_1h"] != 1 || st["refused_1h"] != 3 || st["refused_unknown_1h"] != 2 {
+		t.Fatalf("operator: %v", st)
+	}
+	tenants, _ := st["tenants"].(map[string]interface{})
+	t1, _ := tenants["t1"].(map[string]interface{})
+	t2, _ := tenants["t2"].(map[string]interface{})
+	if t1["mail_name"] != "t1.fleet.example" || t1["spliced_1h"] != 1 || t2["refused_1h"] != 1 || t2["origins"] != 0 {
+		t.Fatalf("by tenant: %v", tenants)
+	}
+	if st["last_refusal"] != "a name this relay does not pass" {
+		t.Fatalf("last refusal %v", st["last_refusal"])
+	}
+	// A tenant still sees only its own.
+	if st1 := s.mailApps.status("t1"); st1["refused_1h"] != 0 || st1["spliced_1h"] != 1 {
+		t.Fatalf("t1: %v", st1)
+	}
+}
+
 func TestShardCapsOneTenant(t *testing.T) {
 	gw, _ := fakeGateway(t, "t1.fleet.example")
 	s, addr := shardFixture(t, gw, map[string]string{"t1": "t1.fleet.example"}, map[string][]string{"t1": {"127.0.0.1"}})

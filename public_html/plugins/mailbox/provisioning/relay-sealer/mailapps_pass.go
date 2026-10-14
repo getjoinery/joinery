@@ -553,8 +553,12 @@ func (p *mailAppsPass) checkServer() {
 // status is the ping's mail_apps group for one tenant (relay_status.go): its
 // own name, origins, connections and checks. A self-hosted relay's one tenant
 // also sees the refusals made before a tenant was known; a shard's tenants
-// never see another's.
+// never see another's. The operator's ping on a shard gets the whole
+// pass-through instead (shardStatus).
 func (p *mailAppsPass) status(slug string) map[string]interface{} {
+	if slug == relayOperatorTenant && p.shard() {
+		return p.shardStatus()
+	}
 	name, why := p.mailName(slug)
 	var origins []string
 	if name != "" {
@@ -615,6 +619,75 @@ func (p *mailAppsPass) status(slug string) map[string]interface{} {
 	}
 	for k, v := range p.s.mailAppsCertStatus(slug) {
 		out[k] = v
+	}
+	return out
+}
+
+// shardStatus is the operator's mail_apps group on a shard: the pass-through
+// as a whole, which no tenant sees. Each tenant's name, origins count and
+// last hour by slug; the refusals made before a tenant was known (no hello, a
+// name no tenant has, the total and per-source caps), which reach no tenant's
+// ping; and the connections open against the total cap.
+func (p *mailAppsPass) shardStatus() map[string]interface{} {
+	type slot struct {
+		name    string
+		origins int
+	}
+	slots := map[string]slot{}
+	slugs, _ := listTenantSlugs(p.s.paths.tenantsDir())
+	for _, slug := range slugs {
+		name, _ := p.mailName(slug)
+		n := 0
+		if name != "" {
+			origins, _ := p.originsOf(slug)
+			n = len(origins)
+		}
+		slots[slug] = slot{name: name, origins: n}
+	}
+	cutoff := time.Now().Add(-time.Hour)
+	count := func(in []time.Time) int {
+		n := 0
+		for _, t := range in {
+			if t.After(cutoff) {
+				n++
+			}
+		}
+		return n
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	tenants := map[string]interface{}{}
+	named, on, spliced, refused := 0, 0, 0, 0
+	for slug, sl := range slots {
+		row := map[string]interface{}{"origins": sl.origins, "active": p.perTenant[slug], "spliced_1h": 0, "refused_1h": 0}
+		if sl.name != "" {
+			row["mail_name"] = sl.name
+			named++
+		}
+		if sl.origins > 0 {
+			on++
+		}
+		if st := p.stats[slug]; st != nil {
+			row["spliced_1h"], row["refused_1h"] = count(st.spliced), count(st.refused)
+			spliced += count(st.spliced)
+			refused += count(st.refused)
+		}
+		tenants[slug] = row
+	}
+	out := map[string]interface{}{
+		"listening":          map[string]bool{"993": p.bound["993"], "465": p.bound["465"]},
+		"active":             p.active,
+		"total_cap":          p.totalCap,
+		"tenants_named":      named,
+		"tenants_on":         on,
+		"spliced_1h":         spliced,
+		"refused_1h":         refused + count(p.refused),
+		"refused_unknown_1h": count(p.refused),
+		"tenants":            tenants,
+	}
+	if p.lastRefusal != "" {
+		out["last_refusal"] = p.lastRefusal
+		out["last_refusal_utc"] = p.lastRefusalAt.UTC().Format(time.RFC3339)
 	}
 	return out
 }
