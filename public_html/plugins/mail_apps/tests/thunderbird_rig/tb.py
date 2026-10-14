@@ -97,16 +97,36 @@ def stop():
     except Exception:
         pass
     for _ in range(20):
-        try:
-            os.kill(pid, 0)
-            time.sleep(0.5)
-        except OSError:
+        if not _alive(pid):
             break
+        time.sleep(0.5)
+    _kill_tree(pid)
+    os.remove(pidfile())
+
+
+def _alive(pid):
+    """Whether the process still runs. On Windows os.kill(pid, 0) would end it
+    (any signal but the console ones is TerminateProcess), so ask tasklist."""
+    if os.name == "nt":
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid, "/NH"], capture_output=True, text=True).stdout
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _kill_tree(pid):
+    """Thunderbird and its child processes: its process group on POSIX
+    (launched in a new session), taskkill /T on Windows (no process groups)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+        return
     try:
         os.killpg(pid, signal.SIGKILL)
     except OSError:
         pass
-    os.remove(pidfile())
 
 
 class session:

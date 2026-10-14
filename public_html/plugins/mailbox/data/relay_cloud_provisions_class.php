@@ -21,6 +21,9 @@
  *                    token the customer mints for this one act)
  *   ready          - credential received (token sealed on the row); instance
  *                    not yet created
+ *   creating       - one worker has claimed the run (claimForCreate) and is
+ *                    creating the instance; no other may, so a page load and the
+ *                    scheduled task never create two servers
  *   draining       - UPGRADE ONLY: pulling the relay's spool empty before the
  *                    wipe, because the wipe destroys whatever is left on it
  *   rebuilding     - UPGRADE ONLY: the provider is replacing every disk; the
@@ -37,6 +40,8 @@
  * the provider access token and the per-run root SSH private key, both
  * SecretBox-sealed and erased at terminal state.
  *
+ * @version 1.7 - claimForCreate(): ready -> creating in one conditional update, so only one worker creates the
+ *                instance (two did: one server orphaned, the run failed by the other's stale copy)
  * @version 1.6 - rcl_instance_ipv6: the provider-reported IPv6 a birth report may arrive from
  * @version 1.5 - prefix rcl, table rcl_relay_cloud_provisions, locators rcl_relay_cloud_provisions.rcl_sealed_*:
  *                rcp is Recipe's alone (specs/implemented/shared_prefix_relay_cloud_provision.md)
@@ -225,6 +230,27 @@ class RelayCloudProvision extends SystemBase {
 		$this->set('rcl_status', 'failed');
 		$this->set('rcl_error', mb_substr($message, 0, 4000));
 		$this->eraseCredentials();
+	}
+
+	/**
+	 * Claim the run for creating its instance: ready -> creating in one
+	 * conditional update, so of two workers (the Setup page's cheap advance and
+	 * the scheduled task) exactly one wins. True for the winner, whose copy now
+	 * reads creating; false for the other, which must leave the run alone.
+	 */
+	public function claimForCreate(): bool {
+		if (!$this->key) {
+			return false;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"UPDATE rcl_relay_cloud_provisions SET rcl_status = 'creating', rcl_update_time = now() AT TIME ZONE 'UTC'
+			 WHERE rcl_relay_cloud_provision_id = ? AND rcl_status = 'ready' AND rcl_delete_time IS NULL");
+		$q->execute(array(intval($this->key)));
+		if ($q->rowCount() !== 1) {
+			return false;
+		}
+		$this->set('rcl_status', 'creating');
+		return true;
 	}
 
 	/** True while the run is neither done nor failed. */

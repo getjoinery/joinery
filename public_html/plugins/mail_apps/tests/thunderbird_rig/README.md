@@ -87,7 +87,7 @@ The certificate must be one Thunderbird trusts. Without the rig server there is 
 
 ## Notes
 
-- Kill only by PID (`rig.py stop`, `kill <rigserver pid>`); `pkill -f` matches your own shell.
+- Kill only by PID (`rig.py stop`, `kill <rigserver pid>`); `pkill -f` matches your own shell. On Windows `rig.py stop` checks the process with `tasklist` and ends its tree with `taskkill /T`, since `os.kill(pid, 0)` there would end it.
 - `rig.py` scenarios that end in a modal error dialog leave it open; Marionette refuses commands until `rig.py alert` closes it.
 - Headless Thunderbird reports the user as idle, so auto-sync of non-Inbox folders starts about 10 s after startup; on a desktop it starts when the person goes idle. To trigger it on demand: `rig.py js 'const a = Cc["@mozilla.org/imap/autosyncmgr;1"].getService(Ci.nsIObserver); a.observe(null, "back", ""); a.observe(null, "idle", "10");'`.
 - The server's MOVE replaces go-imap's in-memory MOVE, which sends each EXPUNGE twice (see `server/session.go`).

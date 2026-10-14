@@ -13,6 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.12 - a run being created (creating) is never dismissed
  * @version 2.11 - starting a cloud relay create or update with a token leaves no "started" notice:
  *   the section's progress line reports the run, and the notice contradicted a create refused on landing
  * @version 2.10 - in a site container (no mail server of its own) disabling the relay says mail
@@ -306,8 +307,7 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	if ($action === 'relay_cloud_dismiss') {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
 		$run = RelayCloudProvision::latest();
-		if ($run !== null && (string)$run->get('rcl_status') !== 'booting'
-				&& (string)$run->get('rcl_status') !== 'provisioning') {
+		if ($run !== null && !in_array((string)$run->get('rcl_status'), array('creating', 'booting', 'provisioning'), true)) {
 			$run->eraseCredentials();
 			$run->soft_delete();
 		}

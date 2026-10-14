@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.4 - a release that changes only the helper re-applies the firewall and proxy_from (its new access
+#                verb), so a new rule (such as 10465 for relays) reaches a site already on without a restart.
 # Version: 2.3 - the site's own www. name is refused saying it is its own front door's, not another site's.
 # Version: 2.2 - recheck fixes (reviewer2): one pending name per site (a second failed name drops the first); a
 #                switch whose gateway did not come up drops its old name on the next pass (<site>.previous); a
@@ -269,7 +271,7 @@ RELAY_SUBMISSION_PORT=10465
 
 # remove may find its site already forgotten (a second run): that is done, not an error.
 # converge takes no site; refresh without one re-hands every served site's.
-if [[ "${VERB}" == "converge" || ( "${VERB}" == "refresh" && -z "${SITE}" ) ]]; then
+if [[ "${VERB}" == "converge" || "${VERB}" == "access" || ( "${VERB}" == "refresh" && -z "${SITE}" ) ]]; then
     :
 elif [[ ! "${SITE}" =~ ^[a-z0-9_-]+$ ]] || { [[ "${VERB}" != "remove" ]] && [[ ! -f "${DIR}/sites/${SITE}.json" ]]; }; then
     echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE (an installed site)" >&2
@@ -918,6 +920,12 @@ case "${VERB}" in
     converge)
         converge
         ;;
+    access)
+        # The firewall and proxy_from, from the served sites: run after the
+        # installer replaces this helper, whose rules may have changed.
+        converge_access
+        echo "GATEWAY_ACCESS"
+        ;;
     refresh)
         # The firewall and proxy_from are derived from the served sites, so an
         # update that changes which ports a route needs (10465 for relays, 1.7)
@@ -1023,13 +1031,15 @@ case "${VERB}" in
         echo "GATEWAY_STATUS"
         ;;
     *)
-        echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE, or converge" >&2
+        echo "usage: joinery-mail-gateway on|off|status|refresh|remove|csr|install-cert SITE, or converge | access" >&2
         exit 2
         ;;
 esac
 HELPERSCRIPT
+HELPER_CHANGED=0
 if ! cmp -s "${CANDIDATE}" "${HELPER}"; then
     install -m 755 "${CANDIDATE}" "${HELPER}"
+    HELPER_CHANGED=1
 fi
 rm -f "${CANDIDATE}"
 
@@ -1126,6 +1136,9 @@ fi
 # --- 8. a served site picks up a new binary or entry --------------------------------
 if [[ "${CHANGED}" == "1" ]]; then
     "${HELPER}" refresh ${SITE_NAME:+"${SITE_NAME}"} >/dev/null || true
+elif [[ "${HELPER_CHANGED}" == "1" ]]; then
+    # A new helper alone: its firewall rules apply now, with no restart.
+    "${HELPER}" access >/dev/null || true
 fi
 
 if [[ "${MACHINE}" == "1" ]]; then

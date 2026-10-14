@@ -155,6 +155,10 @@ chk "  and not to everyone" "$(grep -c 'ufw allow 993/tcp\|ufw allow 465/tcp' "$
 chk "  10465 open to each relay address (the relay cannot dial 465 onward)" "$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465\|ufw allow proto tcp from 2001:db8::7 to any port 10465' "$T/calls")" "2"
 chk "  and never to everyone" "$(grep -c 'ufw allow 10465' "$T/calls")" "0"
 : > "$T/calls"
+out="$(helper access)"; rc=$?
+chk "access re-applies the relay's rules alone, with no restart (a release that changes only the helper)" \
+    "$rc/$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465' "$T/calls")/$(grep -c 'systemctl restart' "$T/calls")" "0/1/0"
+: > "$T/calls"
 out="$(helper refresh one)"; rc=$?
 chk "refresh re-applies the relay's rules, 10465 included (an update opens a new port with no Stop and Allow)" \
     "$rc/$(grep -c 'ufw allow proto tcp from 198.51.100.7 to any port 10465\|ufw allow proto tcp from 2001:db8::7 to any port 10465' "$T/calls")" "0/2"
