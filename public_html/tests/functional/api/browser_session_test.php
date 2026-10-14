@@ -14,10 +14,15 @@
  *      even for a permission-10 user.
  *   5. auth/logout is a website concern for browser sessions (403).
  *   6. Anonymous keyless requests (no cookie) fail exactly as before (400).
+ *   7. A website session ends when its account is disabled or deleted, and
+ *      lifting that does not sign the old session back in.
+ *   8. A password change made on the website ends the account's other
+ *      sessions and remembered devices, and keeps the browser that made it.
  *
  * Usage: php browser_session_test.php [base_url] [origin_ip]
  *
- * @version 1.0.0
+ * @version 1.2.0 - section 8, a password change ends the other sessions
+ * @version 1.1.0 - section 7, a barred account's website session ends
  */
 
 /** @joinery-test
@@ -152,6 +157,64 @@ try {
 	check($r['status'] === 400, 'no cookie, no keys → 400 (pre-existing shape)', 'status ' . $r['status'] . ' ' . $r['raw']);
 	check(strpos($r['raw'], 'keys not present') !== false,
 		'error body unchanged for anonymous callers', $r['raw']);
+
+	section('7. A website session ends when its account is disabled or deleted');
+	// Each case: signed in, the account barred, the next page sends it to sign
+	// in, and lifting the bar does not sign the old session back in, because it
+	// was ended rather than refused.
+	$cases = array(
+		'disabled' => array(
+			function ($u) { $u->set('usr_is_disabled', true); $u->save(); },
+			function ($u) { $u->set('usr_is_disabled', false); $u->save(); },
+		),
+		'deleted' => array(
+			function ($u) { $u->soft_delete(); },
+			function ($u) { $u->undelete(); },
+		),
+	);
+	foreach ($cases as $case => $steps) {
+		$barred = make_user('BrwE' . $case . $run_id);
+		list($barred_jar, $barred_token) = web_login_and_scrape_token($barred, 'BrwE' . $case . $run_id);
+		$r = harness_request('GET', '/profile/profile', array('jar' => $barred_jar, 'accept' => null));
+		check($r['status'] === 200, "$case: signed in to begin with", 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+		$steps[0](new User($barred->key, TRUE));
+		$r = harness_request('GET', '/profile/profile', array('jar' => $barred_jar, 'accept' => null));
+		check(in_array($r['status'], array(301, 302, 303), true) && strpos($r['redirect_url'], '/login') !== false,
+			"$case: the next page sends it to sign in", 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+		$steps[1](new User($barred->key, TRUE));
+		$r = harness_request('GET', '/profile/profile', array('jar' => $barred_jar, 'accept' => null));
+		check($r['status'] !== 200 && strpos($r['redirect_url'], '/login') !== false,
+			"$case: lifting it does not bring the old session back", 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	}
+
+	section('8. A password change ends the account\'s other sessions, not the one that made it');
+	$changer = make_user('BrwF' . $run_id);
+	$old_password = 'TestPassword_BrwF' . $run_id;
+	list($jar_here, $token_here) = web_login_and_scrape_token($changer, 'BrwF' . $run_id);
+	$jar_there = harness_jar_new('jybrw');
+	check(harness_web_login($jar_there, $changer->get('usr_email'), $old_password) !== null, 'a second browser signs in too');
+	// A device remembered elsewhere, which the change must forget.
+	$seeded = new User($changer->key, TRUE);
+	$seeded->set('usr_remember_tokens', json_encode(array(array('hash' => hash('sha256', 'elsewhere-' . $run_id),
+		'expires' => gmdate('Y-m-d H:i:s', time() + 86400)))));
+	$seeded->save();
+	foreach (array('here' => $jar_here, 'there' => $jar_there) as $which => $jar) {
+		$r = harness_request('GET', '/profile/profile', array('jar' => $jar, 'accept' => null));
+		check($r['status'] === 200, "the browser $which is signed in", 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	}
+	$new_password = 'Changed-' . $run_id . '-Password-9';
+	$r = harness_request('POST', '/profile/password_edit', array('jar' => $jar_here, 'accept' => null, 'encode' => 'form',
+		'body' => array('usr_old_password' => $old_password, 'usr_password' => $new_password, 'usr_password_again' => $new_password)));
+	$fresh = new User($changer->key, TRUE);
+	check($fresh->check_password($new_password), 'the password changed through the website form', 'status ' . $r['status']);
+	check((int)$fresh->get('usr_session_generation') >= 1, 'and the account\'s session generation moved on');
+	check(empty(json_decode((string)$fresh->get('usr_remember_tokens'), true)), 'and the device remembered elsewhere is forgotten',
+		(string)$fresh->get('usr_remember_tokens'));
+	$r = harness_request('GET', '/profile/profile', array('jar' => $jar_here, 'accept' => null));
+	check($r['status'] === 200, 'the browser that changed it stays signed in', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
+	$r = harness_request('GET', '/profile/profile', array('jar' => $jar_there, 'accept' => null));
+	check(in_array($r['status'], array(301, 302, 303), true) && strpos($r['redirect_url'], '/login') !== false,
+		'the other browser is signed out at its next page', 'status ' . $r['status'] . ' ' . $r['redirect_url']);
 
 } finally {
 	harness_teardown_data();
