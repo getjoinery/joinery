@@ -22,6 +22,7 @@
  *
  * Run:  php tests/unit/publish_promises_test.php
  *
+ * @version 1.4 - the pre-swap deployment files name only classes every site has, or guard them
  * @version 1.3 - a site others upgrade from carries every package it serves
  */
 
@@ -247,6 +248,61 @@ foreach ($deployment_set as $rel) {
 
 check(strpos($helper_src, 'function isOriginNode') !== false,
     'DeploymentHelper owns the origin predicate, so upgrade.php can ask it');
+
+// The same rule for every class, not just the one it went wrong with first.
+// These three run before the swap, against the site's OLD core: a class they
+// name must be one every running site has, or be asked for with class_exists()
+// first. SandboxPlugins, new in 0.8.493 and named unguarded from
+// DeploymentHelper::preserveReason(), stopped getjoinery's upgrade from 0.8.492
+// on the re-run after the self-update. update_database.php and
+// DatabaseUpdater.php run after the swap, against the new core.
+// Adding a name here asserts every site still running has the class.
+$every_site_has = array(
+    'PathHelper', 'Globalvars', 'DbConnector', 'LibraryFunctions', 'SessionControl', 'MultiUpgrade',
+    'ClassAutoloader', 'PluginHelper', 'ThemeHelper', 'TransparencyProof', 'HostRestrictions',
+);
+$pre_swap = array('utils/upgrade.php', 'includes/DeploymentHelper.php', 'includes/PackageSignature.php');
+$set_classes = array();
+$named = array();
+foreach ($deployment_set + array(99 => 'includes/PackageSignature.php') as $rel) {
+    $tokens = token_get_all((string)@file_get_contents(PathHelper::getIncludePath($rel)));
+    $count = count($tokens);
+    for ($i = 0; $i < $count; $i++) {
+        if (!is_array($tokens[$i])) continue;
+        $prev = $i - 1;
+        while ($prev >= 0 && is_array($tokens[$prev]) && $tokens[$prev][0] === T_WHITESPACE) $prev--;
+        $next = $i + 1;
+        while ($next < $count && is_array($tokens[$next]) && $tokens[$next][0] === T_WHITESPACE) $next++;
+        if (in_array($tokens[$i][0], array(T_CLASS, T_INTERFACE), true)
+            && $next < $count && is_array($tokens[$next]) && $tokens[$next][0] === T_STRING) {
+            $set_classes[$tokens[$next][1]] = true;
+        }
+        if (!in_array($rel, $pre_swap, true)) continue;
+        if (!in_array($tokens[$i][0], array(T_STRING, T_NAME_FULLY_QUALIFIED), true)) continue;
+        $is_static = $next < $count && is_array($tokens[$next]) && $tokens[$next][0] === T_DOUBLE_COLON;
+        $is_new = $prev >= 0 && is_array($tokens[$prev]) && in_array($tokens[$prev][0], array(T_NEW, T_INSTANCEOF), true);
+        if ($is_static || $is_new) {
+            $named[ltrim($tokens[$i][1], '\\')][$rel] = true;
+        }
+    }
+}
+$unguarded = array();
+foreach ($named as $class => $files) {
+    if (in_array(strtolower($class), array('self', 'static', 'parent'), true)) continue;
+    if (isset($set_classes[$class]) || in_array($class, $every_site_has, true)) continue;
+    if (class_exists($class, false) || interface_exists($class, false)) {
+        $reflect = new ReflectionClass($class);
+        if ($reflect->isInternal()) continue;
+    }
+    foreach (array_keys($files) as $rel) {
+        if (strpos((string)file_get_contents(PathHelper::getIncludePath($rel)), "class_exists('" . $class . "'") === false) {
+            $unguarded[] = $class . ' in ' . $rel;
+        }
+    }
+}
+check($unguarded === array(),
+    'the pre-swap deployment files name only classes every site has, or ask class_exists() first',
+    $unguarded ? 'unguarded: ' . implode('; ', $unguarded) : '');
 
 
 section('One publish goes from a committed tree to a release');

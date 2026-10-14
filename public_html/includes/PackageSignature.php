@@ -37,6 +37,7 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.7 - verifyTree() asks SandboxPlugins only where the running core has it (self-update safety)
  * @version 1.6 - verifyTree() passes over a sandboxed plugin as it does an unsigned style theme ($sandboxed)
  * @version 1.5 - editedSinceInstall(): whether a live package's files still match its signed listing, the
  *                first differing file named, once per request (specs/local_edits_detected.md)
@@ -630,7 +631,9 @@ class PackageSignature {
 					$style_themes[] = $entry;
 					continue;
 				}
-				if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($path)) {
+				// Guarded: this file self-updates ahead of core, and a core
+				// from before SandboxPlugins has no sandboxed plugin.
+				if ($type === 'plugin' && class_exists('SandboxPlugins') && SandboxPlugins::isSandboxedDir($path)) {
 					$sandboxed[] = $entry;
 					continue;
 				}
