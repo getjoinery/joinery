@@ -23,6 +23,7 @@
  *
  * Self-cleaning: every fixture File is permanently deleted in finally.
  *
+ * @version 1.5.0 - a record whose bytes are gone: bytes_present(), icon thumbnail, blank avatar
  * @version 1.4.1 - a signal-killed decoder child records nothing
  * @version 1.4.0 - one decode, upright variants, untouched original, refusal record
  * @version 1.3.0
@@ -444,6 +445,22 @@ try {
 	ImageDecoder::set_djpeg_for_tests('');
 	check($ft->resize() === true, 'killed: the next attempt (here, without djpeg) succeeds');
 	ImageDecoder::set_djpeg_for_tests(null);
+
+	section('a record whose bytes are gone says so');
+	$fm = $track(File::createFromBytes(make_png(9101), 'gone_' . bin2hex(random_bytes(4)) . '.png', 'image/png', 1, array()));
+	$owner = new User(NULL);
+	$owner->set('usr_pic_picture_id', $fm->key);
+	check($fm->bytes_present(), 'a stored file has its bytes');
+	check(strpos($fm->thumbnail_html('avatar'), '/uploads/avatar/') !== false, 'and its thumbnail is the image');
+	check($owner->get_picture_link() === $fm->get_url('avatar'), 'and a profile photo shows it');
+	@unlink($fm->get_filesystem_path('original'));
+	$fm = new File((int)$fm->key, true);
+	check(!$fm->bytes_present(), 'with the original removed from disk, the file has no bytes');
+	check(strpos($fm->thumbnail_html('avatar'), '/uploads/') === false && strpos($fm->thumbnail_html('avatar'), 'jy-thumb-icon') !== false,
+		'its thumbnail is the type icon, not a link that 404s');
+	check($owner->get_picture_link() === '/assets/images/blank-avatar.png', 'a profile photo without bytes is the blank avatar');
+	check(LibraryFunctions::format_bytes(193) === '193 bytes' && LibraryFunctions::format_bytes(24576) === '24 KB'
+		&& LibraryFunctions::format_bytes(2516582) === '2.4 MB', 'sizes read as people read them');
 
 } finally {
 	ImageDecoder::set_ceiling_for_tests(null);

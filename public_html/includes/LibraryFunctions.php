@@ -21,6 +21,21 @@ class LibraryFunctions {
 		return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
 	}
 
+	/** A byte count people read: '193 bytes', '24 KB', '2.4 MB', '1.2 GB'. */
+	public static function format_bytes($bytes): string {
+		$bytes = max(0, (int)$bytes);
+		if ($bytes >= 1073741824) {
+			return round($bytes / 1073741824, 1) . ' GB';
+		}
+		if ($bytes >= 1048576) {
+			return round($bytes / 1048576, 1) . ' MB';
+		}
+		if ($bytes >= 1024) {
+			return round($bytes / 1024) . ' KB';
+		}
+		return $bytes . ' bytes';
+	}
+
 
 	/**
 	 * Normalize a timestamp for an API payload: UTC, 'Y-m-d H:i:s', seconds

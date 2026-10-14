@@ -13,8 +13,15 @@ function admin_file_logic(array $input): LogicResult {
 
 	$settings = Globalvars::get_instance();
 
-	$file = new File($input['fil_file_id'], TRUE);
-	$user = new User($file->get('fil_usr_user_id'), TRUE);
+	$file = new File((int)($input['fil_file_id'] ?? 0), TRUE);
+	if (!$file->key) {
+		return LogicResult::error('That file does not exist.');
+	}
+	// Not every file has an owner (legacy rows predate the column being filled).
+	$user = $file->get('fil_usr_user_id') ? new User((int)$file->get('fil_usr_user_id'), TRUE) : null;
+	if ($user && !$user->key) {
+		$user = null;
+	}
 
 	// Handle actions
 	$post_action = $input['action'] ?? null;
