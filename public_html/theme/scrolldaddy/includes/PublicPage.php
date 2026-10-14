@@ -5,7 +5,8 @@
  * themes style the markup but do not own the list
  * (docs/plugin_developer_guide.md § Plugin Menus).
  *
- * @version 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
+ * @version 1.2.2 - BeginPage escapes the title, as every theme does
+ * @changelog 1.2.1 - the theme tail (the applied look's stylesheets) after the theme stylesheet (specs/style_themes.md WP3)
  * @version 1.2.0
  */
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
@@ -91,7 +92,7 @@ class PublicPage extends PublicPageBase {
     <div class="breadcumb-wrapper " data-bg-src="/theme/scrolldaddy/assets/img/bg/breadcumb-bg.jpg">
         <div class="container">
            <div class="breadcumb-content">
-                <h1 class="breadcumb-title">'.$title.'</h1>
+                <h1 class="breadcumb-title">'.htmlspecialchars($title, ENT_QUOTES, 'UTF-8').'</h1>
                <!--  <ul class="breadcumb-menu">
                     <li><a href="home-hr-management.html">Home</a></li>
                     <li>Contact Us</li>

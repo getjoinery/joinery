@@ -16,6 +16,7 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
+ * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3
  * @changelog 1.3 - registers the ai_provider setup wizard step
  *   (specs/setup_wizard.md § Step 7) into the SetupSteps registry.
@@ -70,7 +71,7 @@ VaultDeferredWork::register(
 // bytes are sealed under the OWNING message's DEK. Resolve the attachment link
 // (and its message) from the file id, then open in-window. A plaintext file (a
 // Standard-chat upload, aia_sealed = false) streams as-is.
-File::registerDecryptHook(File::SOURCE_AI_CHAT_UPLOAD, function (string $ciphertext, File $file): string {
+File::registerDecryptHook(AiAttachment::FILE_SOURCE, function (string $ciphertext, File $file): string {
     $links = new MultiAiMessageAttachment(array('file_id' => intval($file->key), 'deleted' => false), array());
     $links->load();
     if ($links->count() === 0) {

@@ -1086,7 +1086,7 @@ return [
 				   LEFT JOIN fbb_file_blobs b ON b.fbb_file_blob_id = f.fil_fbb_file_blob_id
 				  WHERE f.fil_source = ?
 				  ORDER BY f.fil_file_id');
-			$q->execute(array(File::SOURCE_MAILBOX_SEARCH_INDEX));
+			$q->execute(array('mailbox_search_index'));
 			$rows = $q->fetchAll(PDO::FETCH_ASSOC);
 			if (!count($rows)) {
 				error_log('mailbox imi_002_reclaim_search_index_files: 0 search-index File records found, nothing to reclaim');

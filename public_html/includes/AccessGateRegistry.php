@@ -12,6 +12,11 @@
  * Fail-closed by design: a record gated to a provider that isn't registered
  * denies access. An ungated record (null/empty provider) allows access.
  *
+ * A signed-out visitor is asked about as user 0. Most gates are satisfied only
+ * by a member and refuse 0; a gate whose content can be public (a post in a
+ * public forum category) answers for 0 like anyone else.
+ *
+ * @version 1.1.0 - a signed-out visitor reaches the provider as user 0 instead of being refused here
  * @version 1.0.0
  */
 
@@ -50,17 +55,15 @@ class AccessGateRegistry {
      * Central access decision for a gated record.
      *
      * - null/empty provider  → true  (ungated — matches the historical "All")
-     * - anonymous (null user) → false (a gate can't be satisfied logged-out)
      * - unknown provider      → false (fail-closed)
-     * - otherwise delegate to the provider
+     * - otherwise delegate to the provider; a signed-out visitor (null user)
+     *   is asked about as user 0
      */
     public static function userMayAccess(?string $provider, $ref, ?int $user_id): bool {
         if ($provider === null || $provider === '') {
             return true;
         }
-        if ($user_id === null) {
-            return false;
-        }
+        $user_id = $user_id === null ? 0 : $user_id;
         $p = self::$providers[$provider] ?? null;
         if ($p === null) {
             return false;

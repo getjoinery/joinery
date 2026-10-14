@@ -5,7 +5,8 @@
  * Pure HTML5 form generation with semantic markup and no CSS framework dependencies.
  * Provides accessible, standards-compliant forms that any theme can style.
  *
- * @version 2.7.0 - A checkbox with `switch` draws as an on/off switch (role="switch", .jy-switch)
+ * @version 2.8.0 - textbox markdownmode options markdown_restricted (the toolbar and preview of the restricted profile, for text members write for each other) and mention_space (the @ mention picker)
+ * @changelog 2.7.0 - A checkbox with `switch` draws as an on/off switch (role="switch", .jy-switch)
  * @changelog 2.6.0 - A stored credential (passwordinput 'stored') draws locked with a Reset button (assets/js/stored-secret.js); 'rows' draws a multi-line credential as a textarea
  * @changelog 2.5.0 - One editor for htmlmode and markdownmode (assets/js/joinery-editor.js): editor_view and editor_cleanup options, no jQuery
  * @changelog 2.4.1 - jQuery for the Trumbowyg editor is served from assets/vendor, not a CDN (CSP has no script CDN)
@@ -859,7 +860,15 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      * @param string $label Field label
      * @param array $options Field options: 'htmlmode' or 'markdownmode' picks the
      *                       editor dialect; 'editor_view' the opening view;
-     *                       'editor_cleanup' (html only) button|always|none.
+     *                       'editor_cleanup' (html only) button|always|none;
+     *                       'markdown_restricted' (markdown only) offers only
+     *                       what MarkdownRenderer's restricted profile keeps —
+     *                       no headings, images or tables — and previews
+     *                       through that profile; 'mention_space' (markdown
+     *                       only) turns on the @ mention picker, naming the
+     *                       space whose readers it searches ('type:id', e.g.
+     *                       'forum_category:12', as the mention_search action
+     *                       takes it).
      */
     public function textbox($name, $label = '', $options = []) {
         // THIS OVERRIDE USED TO SKIP REGISTRATION ENTIRELY, and it was the only
@@ -899,6 +908,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         $dialect = $htmlmode === 'yes' ? 'html' : ($markdownmode === 'yes' ? 'markdown' : null);
         $editor = self::editorOptions($name, $dialect,
             $options['editor_view'] ?? null, $options['editor_cleanup'] ?? null);
+        $restricted = !empty($options['markdown_restricted']);
+        $mention_space = isset($options['mention_space']) ? (string)$options['mention_space'] : '';
+        if (($restricted || $mention_space !== '') && $dialect !== 'markdown') {
+            throw new Exception("FormWriter: field '{$name}' passes markdown_restricted or mention_space without markdownmode; they belong to the markdown editor.");
+        }
 
         $has_errors = isset($this->errors[$name]);
         if ($has_errors) {
@@ -926,6 +940,8 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
                 'view' => $editor['view'],
                 'cleanup' => $editor['cleanup'],
                 'label' => $label,
+                'restricted' => $restricted,
+                'mention_space' => $mention_space,
             ]);
             $html .= $chrome['open'];
         }
@@ -1081,12 +1097,15 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      * script. A cloned repeater row carries this markup already.
      *
      * @param string $dialect 'html' or 'markdown'
-     * @param array  $options view, cleanup (html only), label
+     * @param array  $options view, cleanup (html only), label, restricted and
+     *                        mention_space (markdown only)
      * @return array{open: string, close: string}
      */
     private static function editorChrome($dialect, $options) {
         $view = $options['view'];
         $cleanup = $options['cleanup'] ?? null;
+        $restricted = !empty($options['restricted']);
+        $mention_space = (string)($options['mention_space'] ?? '');
         $sep = [null, null, null, null, null];
 
         if ($dialect === 'html') {
@@ -1142,6 +1161,11 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
                 ['codeblock', 'Code block', 'Code block', '', 'Code block'],
                 ['table', 'Table', 'Table', '', 'Table'],
             ];
+            if ($restricted) {
+                // The restricted profile shrinks headings, drops images and is
+                // for conversation, not documents: offer none of the three.
+                $buttons = self::withoutButtons($buttons, ['h1', 'h2', 'h3', 'image', 'table']);
+            }
             $views = ['write' => 'Write', 'split' => 'Split', 'preview' => 'Preview'];
             $toolbar_label = 'Markdown formatting';
         }
@@ -1151,6 +1175,12 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
             . ' data-mode="' . htmlspecialchars($view) . '"';
         if ($dialect === 'html') {
             $open .= ' data-jy-ed-cleanup="' . htmlspecialchars($cleanup) . '"';
+        }
+        if ($restricted) {
+            $open .= ' data-jy-ed-restricted="1"';
+        }
+        if ($mention_space !== '') {
+            $open .= ' data-jy-ed-mention-space="' . htmlspecialchars($mention_space) . '"';
         }
         $open .= '>';
         $open .= '<div class="jy-ed-toolbar" role="toolbar" aria-label="' . htmlspecialchars($toolbar_label) . '">';
@@ -1189,6 +1219,31 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
         }
 
         return ['open' => $open, 'close' => $close];
+    }
+
+    /**
+     * A toolbar button table without the named actions, and without a separator
+     * left leading, trailing or doubled by their removal.
+     *
+     * @param array    $buttons [action, face, aria, class, title] rows; separators have action null
+     * @param string[] $drop    actions to remove
+     * @return array
+     */
+    private static function withoutButtons(array $buttons, array $drop) {
+        $kept = [];
+        foreach ($buttons as $button) {
+            if ($button[0] !== null && in_array($button[0], $drop, true)) {
+                continue;
+            }
+            if ($button[0] === null && (empty($kept) || end($kept)[0] === null)) {
+                continue;
+            }
+            $kept[] = $button;
+        }
+        while (!empty($kept) && end($kept)[0] === null) {
+            array_pop($kept);
+        }
+        return $kept;
     }
 
     /**

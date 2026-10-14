@@ -174,7 +174,7 @@ class ChatAttachmentIngest {
             try {
                 $file = File::createFromBytes($p['bytes'], $p['name'], $p['mime'], $uid, [
                     'fil_private' => true,
-                    'fil_source'  => File::SOURCE_AI_CHAT_UPLOAD,
+                    'fil_source'  => AiAttachment::FILE_SOURCE,
                 ]);
             } catch (Throwable $e) {
                 error_log('[joinery_ai chat] attachment store failed: ' . $e->getMessage());

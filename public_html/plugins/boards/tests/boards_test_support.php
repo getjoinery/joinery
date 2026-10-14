@@ -125,7 +125,7 @@ BoardsCards::addComment($doomed, $full, $owner, 'A comment', array());
 BoardsCards::attachLink($doomed, $full, $owner, 'https://example.test/a', 'A link');
 $doomed_file = File::createFromBytes('bytes', 'doomed.txt', 'text/plain', $owner, array(
 	'fil_private' => false, 'fil_access_provider' => BoardsAttachmentGate::KEY,
-	'fil_access_ref' => $full_id, 'fil_source' => File::SOURCE_BOARDS_ATTACHMENT));
+	'fil_access_ref' => $full_id, 'fil_source' => BoardsUploads::FILE_SOURCE));
 $doomed_file_id = (int)$doomed_file->key;
 BoardsCards::attachFile($doomed, $full, $owner, $doomed_file);
 $doomed_id = (int)$doomed->key;

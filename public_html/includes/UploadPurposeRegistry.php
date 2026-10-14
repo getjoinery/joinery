@@ -20,7 +20,7 @@
  * Registering a purpose:
  *
  *   UploadPurposeRegistry::register('mail_import_archive', array(
- *       'source'       => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+ *       'source'       => MailImportService::FILE_SOURCE,
  *       'label'        => 'mail archive',
  *       'max_bytes'    => 0,
  *       'authorize'    => function (int $user_id, array $input): ?string {
@@ -37,6 +37,7 @@
  *
  * See specs/chunked_upload_purposes.md.
  *
+ * @version 1.1 - the doc example names the plugin's own origin-tag constant (plugin.json "fileSources")
  * @version 1.0
  */
 

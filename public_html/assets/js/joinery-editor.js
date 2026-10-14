@@ -16,10 +16,19 @@
  * html-cleanup.js) runs only when the author presses the button or the field
  * was declared prose-only with `editor_cleanup: always`.
  *
+ * A markdown wrapper may also carry:
+ *   data-jy-ed-restricted="1"     the preview renders through MarkdownRenderer's
+ *                                 restricted profile (text members write for
+ *                                 each other); FormWriter leaves out the buttons
+ *                                 that profile drops.
+ *   data-jy-ed-mention-space="t:id"  typing @ and two letters offers people who
+ *                                 can read that space (the mention_search
+ *                                 action); choosing one writes @[Name](user:id).
+ *
  * Self-initialises on DOMContentLoaded and on `jy-repeater-row-added`; no
  * inline script, so it lives under the Content-Security-Policy as is.
  *
- * @version 1.0.0
+ * @version 1.1.0 - restricted preview and the @ mention picker
  */
 (function () {
 	'use strict';
@@ -645,7 +654,7 @@
 		if (!window.joineryApi) return;
 
 		var seq = ++state.seq;
-		window.joineryApi.post('markdown_preview', { markdown: markdown })
+		window.joineryApi.post('markdown_preview', { markdown: markdown, restricted: state.restricted })
 			.then(function (data) {
 				if (seq !== state.seq) return;   // a later keystroke already won
 				state.rendered = markdown;
@@ -689,6 +698,107 @@
 		replaceRange(ta, caret, caret, '\n' + match[1] + marker);
 	}
 
+	/* ------------------------------------------------------- mention picker */
+
+	var MENTION_DEBOUNCE_MS = 250;
+	// "@" then two or more name characters, right before the caret, at the
+	// start of the text or after a space or an opening bracket.
+	var MENTION_TRIGGER = /(^|[\s(])@([^\s@\[\]()]{2,40})$/;
+
+	function mentionQuery(ta) {
+		if (ta.selectionStart !== ta.selectionEnd) return null;
+		var caret = ta.selectionStart;
+		var from = Math.max(0, caret - 60);
+		var m = ta.value.slice(from, caret).match(MENTION_TRIGGER);
+		if (!m) return null;
+		return { q: m[2], start: caret - m[2].length - 1, end: caret };
+	}
+
+	function closeMentions(state) {
+		window.clearTimeout(state.mentionTimer);
+		state.mentionSeq++;
+		if (state.mentionList) {
+			state.mentionList.remove();
+			state.mentionList = null;
+		}
+		state.mentionItems = [];
+		state.mentionAt = null;
+	}
+
+	function chooseMention(state, person) {
+		var at = state.mentionAt;
+		closeMentions(state);
+		if (!at || !person) return;
+		replaceRange(state.textarea, at.start, at.end, person.token + ' ');
+		schedulePreview(state);
+	}
+
+	function highlightMention(state, index) {
+		var items = state.mentionItems;
+		if (!items.length) return;
+		state.mentionIndex = (index + items.length) % items.length;
+		items.forEach(function (el, i) {
+			el.setAttribute('aria-selected', i === state.mentionIndex ? 'true' : 'false');
+		});
+	}
+
+	function showMentions(state, people) {
+		if (state.mentionList) state.mentionList.remove();
+		state.mentionItems = [];
+		if (!people.length) { state.mentionList = null; return; }
+
+		var list = document.createElement('ul');
+		list.className = 'jy-ed-mentions';
+		list.setAttribute('role', 'listbox');
+		list.setAttribute('aria-label', 'People to mention');
+		people.forEach(function (person, i) {
+			var li = document.createElement('li');
+			li.setAttribute('role', 'option');
+			li.textContent = person.name;
+			li.addEventListener('mousedown', function (event) { event.preventDefault(); });
+			li.addEventListener('click', function () { chooseMention(state, person); });
+			li.jyPerson = person;
+			list.appendChild(li);
+			state.mentionItems.push(li);
+		});
+		state.textarea.parentNode.insertBefore(list, state.textarea.nextSibling);
+		state.mentionList = list;
+		highlightMention(state, 0);
+	}
+
+	function lookUpMentions(state) {
+		var at = mentionQuery(state.textarea);
+		if (!at) { closeMentions(state); return; }
+		window.clearTimeout(state.mentionTimer);
+		state.mentionTimer = window.setTimeout(function () {
+			var seq = ++state.mentionSeq;
+			window.joineryApi.post('mention_search', { space: state.mentionSpace, q: at.q })
+				.then(function (data) {
+					if (seq !== state.mentionSeq) return;
+					state.mentionAt = at;
+					showMentions(state, (data && data.people) || []);
+				})
+				.catch(function () {
+					if (seq === state.mentionSeq) closeMentions(state);
+				});
+		}, MENTION_DEBOUNCE_MS);
+	}
+
+	/** Keys the open list takes; true when the key was handled. */
+	function mentionKey(state, event) {
+		if (!state.mentionList || !state.mentionItems.length) return false;
+		if (event.key === 'ArrowDown') { highlightMention(state, state.mentionIndex + 1); }
+		else if (event.key === 'ArrowUp') { highlightMention(state, state.mentionIndex - 1); }
+		else if (event.key === 'Enter' || event.key === 'Tab') {
+			chooseMention(state, state.mentionItems[state.mentionIndex].jyPerson);
+		}
+		else if (event.key === 'Escape') { closeMentions(state); }
+		else { return false; }
+		event.preventDefault();
+		event.stopPropagation();
+		return true;
+	}
+
 	var MARKDOWN_DIALECT = {
 		name: 'markdown',
 		defaultView: 'write',
@@ -699,6 +809,14 @@
 			state.rendered = null;
 			state.seq = 0;
 			state.timer = null;
+			state.restricted = state.root.getAttribute('data-jy-ed-restricted') === '1';
+			state.mentionSpace = state.root.getAttribute('data-jy-ed-mention-space') || '';
+			state.mentionList = null;
+			state.mentionItems = [];
+			state.mentionIndex = 0;
+			state.mentionAt = null;
+			state.mentionSeq = 0;
+			state.mentionTimer = null;
 
 			// Without the shared API transport there is no server to render the
 			// preview, so drop the view controls rather than offer a button that fails.
@@ -709,6 +827,7 @@
 
 			var ta = state.textarea;
 			ta.addEventListener('keydown', function (event) {
+				if (mentionKey(state, event)) return;
 				var accel = event.metaKey || event.ctrlKey;
 				if (accel && !event.altKey) {
 					var key = event.key.toLowerCase();
@@ -723,7 +842,11 @@
 				}
 				continueList(state, event);
 			});
-			ta.addEventListener('input', function () { schedulePreview(state); });
+			ta.addEventListener('input', function () {
+				schedulePreview(state);
+				if (state.mentionSpace && window.joineryApi) lookUpMentions(state);
+			});
+			ta.addEventListener('blur', function () { closeMentions(state); });
 
 			if (ta.disabled || ta.readOnly) setToolbarEnabled(state, false);
 			return true;

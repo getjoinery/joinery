@@ -13,6 +13,8 @@
  * and nobody else can (MessengerAttachmentGate). An upload that is never
  * claimed simply stays the uploader's own private file.
  *
+ * @version 1.1.0 - FILE_SOURCE: the messenger_attachment origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.0.0
  */
 
@@ -21,6 +23,10 @@ require_once(PathHelper::getIncludePath('data/message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/messenger/includes/MessengerAttachmentGate.php'));
 
 class MessengerUploads {
+
+	/** Origin tag (fil_source) on a photo or file sent in a conversation,
+	 *  declared under "fileSources" in plugin.json. */
+	const FILE_SOURCE = 'messenger_attachment';
 
 	/**
 	 * File types a conversation refuses outright.
@@ -90,7 +96,7 @@ class MessengerUploads {
 		return File::createFromUpload($upload['tmp_name'], $name, $mime, $user_id, array(
 			// Nobody's but the uploader's until a message claims it.
 			'fil_private' => true,
-			'fil_source'  => File::SOURCE_MESSENGER_ATTACHMENT,
+			'fil_source'  => MessengerUploads::FILE_SOURCE,
 		));
 	}
 
@@ -115,7 +121,7 @@ class MessengerUploads {
 			$file = new File($file_id, TRUE);
 
 			if ((int)$file->get('fil_usr_user_id') !== $user_id
-				|| $file->get('fil_source') !== File::SOURCE_MESSENGER_ATTACHMENT
+				|| $file->get('fil_source') !== MessengerUploads::FILE_SOURCE
 				|| $file->get('fil_delete_time')) {
 				throw new MessengerRefusal('One of those attachments is no longer available.');
 			}

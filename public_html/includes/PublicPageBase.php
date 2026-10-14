@@ -580,7 +580,7 @@ abstract class PublicPageBase {
 	public static function BeginPage($title='', $options=array()) {
 		$output = '<div style="max-width: 1140px; margin: 0 auto; padding: 2rem 1rem;">';
 		if($title){
-			$output .= '<h2>'.$title.'</h2>';
+			$output .= '<h2>'.htmlspecialchars($title, ENT_QUOTES, 'UTF-8').'</h2>';
 			if(isset($options['subtitle']) && $options['subtitle']){
 				$output .= '<p>'.$options['subtitle'].'</p>';
 			}

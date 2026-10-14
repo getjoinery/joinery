@@ -14,6 +14,9 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
+ * @version 1.5
+ * @changelog 1.5 - FILE_SOURCE: the mail_import_archive origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.4
  * @changelog 1.4 - nextBatch(): when the next batch lands and how big it is,
  *   from the runner's own observed cadence — what the page's countdown shows —
@@ -35,6 +38,13 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 class MailImportService {
+
+	/** Origin tag (fil_source) on an uploaded mbox/zip/tar held for the life of
+	 *  its import run, not a Drive item. Declared under "fileSources" in
+	 *  plugin.json, and NOT internal on purpose: someone uploaded it deliberately,
+	 *  and either the run cleans it up or it sits there taking space, which
+	 *  whoever pays for the space has to be able to see. */
+	const FILE_SOURCE = 'mail_import_archive';
 
 	/** Operators can import into any mailbox; members only into their own. */
 	const OPERATOR_PERMISSION = 5;
@@ -124,7 +134,7 @@ class MailImportService {
 		$files = new MultiFile(array(
 			'user_id' => $userId,
 			'deleted' => false,
-			'sources' => array(File::SOURCE_DRIVE, File::SOURCE_MAIL_IMPORT_ARCHIVE),
+			'sources' => array(File::SOURCE_DRIVE, MailImportService::FILE_SOURCE),
 		), array('fil_create_time' => 'DESC'), 500);
 		$files->load();
 
@@ -191,7 +201,7 @@ class MailImportService {
 				// deliberately NOT as a Drive item: it is working material for one run,
 				// so it should not turn up in the member's Drive listing or count
 				// against their quota.
-				'fil_source'  => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+				'fil_source'  => MailImportService::FILE_SOURCE,
 			)
 		);
 		if (!$file || !$file->key) {

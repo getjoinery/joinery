@@ -29,6 +29,7 @@
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.11 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.10 - labels are the run's mailbox's (mailbox_per_mailbox_labels.md)
  * @version 1.9
  * @changelog 1.9 - readerAndPath() retired with the To/Cc backfill
@@ -748,7 +749,7 @@ class MailArchiveImporter {
 			$file = new File($file_id, TRUE);
 			if ($file->key) {
 				$source = (string)$file->get('fil_source');
-				if ($source !== File::SOURCE_MAIL_IMPORT_ARCHIVE) {
+				if ($source !== MailImportService::FILE_SOURCE) {
 					// Somebody's own file, picked from their Drive. Let go of it
 					// without touching it.
 					$this->run->writeColumns(array('mir_fil_file_id' => null));

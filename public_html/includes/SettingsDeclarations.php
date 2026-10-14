@@ -28,7 +28,8 @@
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
- * @version 1.1 - show_when takes a list of values
+ * @version 1.2 - clearPagesFor(): a setting's declared clearsPages leave the static cache when any writer changes it
+ * @changelog 1.1 - show_when takes a list of values
  * @version 1.0
  */
 class SettingsDeclarations {
@@ -97,6 +98,34 @@ class SettingsDeclarations {
 
 		self::$active_cache = $active;
 		return self::$active_cache;
+	}
+
+	/**
+	 * A setting may declare the public pages its value changes ("clearsPages":
+	 * same-site paths). When one of these settings changes, those pages and
+	 * everything under them leave the static page cache — the cache answers
+	 * signed-out visitors before any code runs, so a page a setting turns off
+	 * would otherwise go on being served. Every writer calls this: the settings
+	 * form (SettingsWriter) and code (Setting::put).
+	 *
+	 * @param string[] $changed names whose stored value changed
+	 */
+	public static function clearPagesFor(array $changed): void {
+		$paths = array();
+		foreach ($changed as $name) {
+			$declaration = self::get((string)$name);
+			foreach ((array)($declaration['clearsPages'] ?? array()) as $path) {
+				// A plain same-site path: no "..", no "//".
+				if (is_string($path) && preg_match('#^/[A-Za-z0-9_\-.]+(/[A-Za-z0-9_\-.]+)*$#', $path)
+						&& strpos($path, '..') === false) {
+					$paths[$path] = true;
+				}
+			}
+		}
+		if ($paths) {
+			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+			StaticPageCache::invalidatePaths(array(), array_keys($paths));
+		}
 	}
 
 	public static function get(string $name): ?array {

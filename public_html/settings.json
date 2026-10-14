@@ -854,6 +854,28 @@
       "helptext": "3600 is one hour."
     },
     {
+      "name": "content_report_rate_limit_requests",
+      "default": "10",
+      "group": "api_rate_limits",
+      "label": "Max content reports per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "Counted per member. Reporting the same thing again makes no second report but still counts here."
+    },
+    {
+      "name": "content_report_rate_limit_window",
+      "default": "3600",
+      "group": "api_rate_limits",
+      "label": "Content report window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      },
+      "helptext": "3600 is one hour."
+    },
+    {
       "name": "api_rate_limit_requests",
       "default": "1000",
       "group": "api_rate_limits",

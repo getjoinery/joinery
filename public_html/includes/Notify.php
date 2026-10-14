@@ -20,7 +20,9 @@
  *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 2.3
+ * @version 2.5
+ * @changelog 2.5 - The `admins` and `superadmins` audiences leave out disabled accounts.
+ * @changelog 2.4 - An `admins` audience: every admin (permission 5+) who is a person.
  * @changelog 2.3 - A declared `audience` names the targeted recipients; the
  *   preference state and save rules for both preferences pages live here.
  * @changelog 2.2 - A recipient deleted since the recipients were read gets
@@ -59,16 +61,19 @@ class Notify {
 	 *
 	 * - `superadmins` — every superadmin who is a person (not the system or
 	 *   deleted placeholder).
+	 * - `admins` — every admin (permission 5 and up) who is a person: the
+	 *   people who settle content reports.
 	 */
 	public static function audience_ids($audience) {
-		if ($audience === 'superadmins') {
-			$ids = array();
-			foreach (new MultiUser(array('permission_range' => array(10, 10), 'deleted' => false, 'not_system_users' => true)) as $u) {
-				$ids[] = (int)$u->key;
-			}
-			return $ids;
+		$ranges = array('superadmins' => array(10, 10), 'admins' => array(5, 10));
+		if (!isset($ranges[$audience])) {
+			return null;
 		}
-		return null;
+		$ids = array();
+		foreach (new MultiUser(array('permission_range' => $ranges[$audience], 'deleted' => false, 'disabled' => false, 'not_system_users' => true)) as $u) {
+			$ids[] = (int)$u->key;
+		}
+		return $ids;
 	}
 
 	/**

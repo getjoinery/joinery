@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.10 - fileSources are checked when a plugin is validated (a clash with core or an active plugin refuses it) and reported on every sync
  * @version 1.9 - sync() retries a plugin left in 'error' by a failed install once its files change (retryErroredPlugins),
  *               so a fix that ships does not leave the plugin waiting for someone to press Repair
  * @version 1.8 - a plugin's PHP migrations run with its own classes resolvable (ClassAutoloader::allowPlugin),
@@ -555,6 +556,17 @@ class PluginManager extends AbstractExtensionManager {
             $results['valid'] = false;
             $results['errors'][] = "Invalid plugin manifest";
             return $results;
+        }
+
+        // File origin tags: well formed, not core's, and not a tag an active
+        // plugin already owns — two owners would silently hide one plugin's
+        // files from every file listing.
+        require_once(PathHelper::getIncludePath('includes/FileSourceDeclarations.php'));
+        FileSourceDeclarations::reset();
+        $active_others = array_values(array_diff(array_keys(PluginHelper::getActivePlugins()), array($plugin_name)));
+        foreach (FileSourceDeclarations::errorsFor($plugin_name, $active_others) as $error) {
+            $results['valid'] = false;
+            $results['errors'][] = $error;
         }
 
         // Maturity status is honest labeling only and gates nothing, but an
@@ -1469,6 +1481,18 @@ class PluginManager extends AbstractExtensionManager {
         // collision aborts the whole sync with no partial state.
         $this->validateFlatNamespaceCollisions();
 
+        // File origin tags across the active plugins: reported, not fatal — the
+        // catalog keeps the first owner, and the operator must see the clash.
+        require_once(PathHelper::getIncludePath('includes/FileSourceDeclarations.php'));
+        FileSourceDeclarations::reset();
+        $active_names = array_keys(PluginHelper::getActivePlugins());
+        foreach ($active_names as $active_name) {
+            foreach (FileSourceDeclarations::errorsFor($active_name, $active_names) as $error) {
+                error_log("PluginManager sync: plugin '{$active_name}': {$error}");
+                $result['warnings'][] = "Plugin '{$active_name}': {$error}";
+            }
+        }
+
         // Update database tables and run migrations for all active plugins.
         //
         // DatabaseUpdater is instantiated with upgrade=true so unique
@@ -1801,6 +1825,7 @@ class PluginManager extends AbstractExtensionManager {
         // syncs, rather than when a page tries to render it.
         require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
         SettingsDeclarations::reset();
+        FileSourceDeclarations::reset();
         $schema_errors = array();
         foreach (SettingsDeclarations::schemaErrors() as $error) {
             if (strpos($error, $plugin_name . ':') === 0) $schema_errors[] = $error;

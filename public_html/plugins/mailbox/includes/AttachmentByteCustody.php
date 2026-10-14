@@ -18,6 +18,9 @@
  * a bonus on top of dedup, never a condition of it, and a total failure leaves
  * the dedup outcome exactly as it was.
  *
+ * @version 1.4
+ * @changelog 1.4 - FILE_SOURCE: the email_attachment origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.3
  * @changelog 1.3 - adoptBytes(), the string-shaped third entry point
  *   (specs/bugfix_sealed_inline_images.md): the IMAP ingest and the
@@ -32,6 +35,10 @@
  */
 
 class AttachmentByteCustody {
+
+	/** Origin tag (fil_source) on every mail attachment's File, declared under
+	 *  "fileSources" in plugin.json. */
+	const FILE_SOURCE = 'email_attachment';
 
 	/**
 	 * Take the real attachment bytes for a message the platform already holds
@@ -263,7 +270,7 @@ class AttachmentByteCustody {
 		// are what the reader already shows, so they win over the in-hand copy's.
 		$name = (string)($att->get('ima_filename') ?: $fallback_name ?: 'attachment');
 		$type = (string)($att->get('ima_content_type') ?: $fallback_type ?: 'application/octet-stream');
-		$restrictions = array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT);
+		$restrictions = array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE);
 
 		// Sealing runs with nobody signed in, and that is fine: it needs only
 		// the vault's PUBLIC key (docs/sealed_vault.md — a consumer seals a

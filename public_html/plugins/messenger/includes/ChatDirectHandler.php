@@ -19,6 +19,7 @@
  * parts, never in new envelope fields — that is what keeps the envelope
  * kind-independent.
  *
+ * @version 1.2 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.1
  * @changelog 1.1 - a message for a locally raised sealed conversation defers
  *   (DirectDeferIngest) while nobody can open its key, instead of being lost;
@@ -310,7 +311,7 @@ class ChatDirectHandler implements DirectKindHandler {
 				$file = File::createFromBytes($bytes,
 					(string)($part->filename() ?: 'attachment'),
 					$part->contentType(), $owner_user_id, array(
-						'fil_source'           => File::SOURCE_MESSENGER_ATTACHMENT,
+						'fil_source'           => MessengerUploads::FILE_SOURCE,
 						'fil_access_provider'  => MessengerAttachmentGate::KEY,
 						'fil_access_ref'       => (int)$conversation->key,
 					));

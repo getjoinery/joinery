@@ -37,6 +37,30 @@
             "link_template": "/admin/admin_mailing_lists"
         }
     },
+    "content.reported": {
+        "label": "Content reported",
+        "description": "A member reported someone else's content (a forum post, a chat message) for an admin to look at.",
+        "category": "Content",
+        "payload": {
+            "report_id": "Content report id",
+            "entity_type": "Reported content type (the handler's type, e.g. forum_post)",
+            "entity_id": "Reported content id",
+            "content_label": "What the content is, e.g. Forum post",
+            "content_title": "The content's title in the queue",
+            "reason_label": "The reason, in words",
+            "reporter_name": "Reporter display name",
+            "source_user_id": "Acting user id (the reporter)"
+        },
+        "notify": {
+            "ntf_type": "system",
+            "supports_topic": true,
+            "audience": "admins",
+            "default_email": true,
+            "title_template": "{content_label} reported: {reason_label}",
+            "body_template": "{reporter_name} reported \"{content_title}\".",
+            "link_template": "/admin/admin_content_reports"
+        }
+    },
     "comment.posted": {
         "label": "New comment posted",
         "description": "A new comment was posted on a blog post.",

@@ -23,6 +23,10 @@ class AiAttachmentException extends Exception {}
 
 class AiAttachment {
 
+    /** Origin tag (fil_source) on a file uploaded into a chat, declared under
+     *  "fileSources" in plugin.json. */
+    const FILE_SOURCE = 'ai_chat_upload';
+
     /** Per-chat attachment modes (mirrors aic_attachment_mode). `on_demand`
      *  routes exactly like `extract` for the initial send (cheap text-first) but
      *  offers the `view_attachment` tool so the model can pull a specific file's
@@ -372,7 +376,7 @@ class AiAttachment {
     public static function readOriginalBytes(File $file): ?string {
         $bytes = $file->read_bytes('original');
         if ($bytes === null) return null;
-        if ((string)$file->get('fil_source') !== File::SOURCE_AI_CHAT_UPLOAD) return $bytes;
+        if ((string)$file->get('fil_source') !== AiAttachment::FILE_SOURCE) return $bytes;
 
         require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachments_class.php'));

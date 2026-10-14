@@ -97,6 +97,8 @@
  * a working copy or restored blob of another format fails to open and is
  * rebuilt — the disposable-cache contract, so a shape change never needs a
  * migration, just one rebuild per owner on their next unlocked visit.
+ * @version 1.14 - FILE_SOURCE: the mailbox_search_index origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.13 - FORMAT 3: the persisted index is a SealedFileContainer (the
  *   platform's one chunked format); every older blob is rebuilt once, in its
  *   owner's unlock window
@@ -130,6 +132,11 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mail
 class MailboxIndexException extends Exception {}
 
 class MailboxIndex {
+
+	/** Origin tag (fil_source) on the sealed FTS5 blob — read server-side only,
+	 *  never streamed via serve_from_path. Declared "internal" under
+	 *  "fileSources" in plugin.json, so no browse surface lists it. */
+	const FILE_SOURCE = 'mailbox_search_index';
 
 	const SHM_DIR = '/dev/shm';
 

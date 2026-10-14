@@ -59,8 +59,15 @@ class SeoPageMetadata extends SystemBase {
 		);
 	}
 
-	/** All registered entity types, keyed by type. */
+	/**
+	 * All registered entity types, keyed by type. Plugin bootstraps are loaded
+	 * first, so a type a plugin registers there is known everywhere — on the
+	 * command line (update_database) as well as in a web request.
+	 */
 	public static function entity_classes(): array {
+		if (class_exists('PluginBootstraps')) {
+			PluginBootstraps::load();
+		}
 		return self::$entity_classes;
 	}
 
@@ -399,45 +406,52 @@ class SeoPageMetadata extends SystemBase {
 			}
 		}
 
-		$plugins_dir = PathHelper::getIncludePath('plugins');
-		if (is_dir($plugins_dir)) {
-			foreach (scandir($plugins_dir) as $plugin) {
-				if ($plugin === '.' || $plugin === '..') continue;
-				$views_dir = $plugins_dir . '/' . $plugin . '/views';
-				if (!is_dir($views_dir)) continue;
-				foreach (self::scan_plugin_views($views_dir, '') as $sub_path) {
-					$canonical = self::canonicalize_path('/' . $plugin . $sub_path);
-					if (isset($seen[$canonical])) continue;
-					$seen[$canonical] = true;
-					$records[] = array(
-						'path'        => $canonical,
-						'entity_type' => null,
-						'entity_id'   => null,
-						'modify_time' => null,
-					);
-				}
-			}
+		// A plugin's public pages are the ones it declares (plugin.json
+		// "publicPaths"), for active plugins only. A plugin's view files are not
+		// a list of public pages: most are member, admin, endpoint or
+		// placeholder views that are wrong, private or broken as a bare URL.
+		foreach (self::plugin_public_paths() as $path) {
+			$canonical = self::canonicalize_path($path);
+			if (isset($seen[$canonical])) continue;
+			$seen[$canonical] = true;
+			$records[] = array(
+				'path'        => $canonical,
+				'entity_type' => null,
+				'entity_id'   => null,
+				'modify_time' => null,
+			);
 		}
 
 		return $records;
 	}
 
-	private static function scan_plugin_views($dir, $prefix) {
+	/**
+	 * The public, indexable paths active plugins declare in plugin.json:
+	 *
+	 *     "publicPaths": ["/forum"]
+	 *
+	 * Each must be a same-site path; anything else is ignored with a log line.
+	 *
+	 * @return string[]
+	 */
+	public static function plugin_public_paths(): array {
 		$paths = array();
-		foreach (scandir($dir) as $entry) {
-			if ($entry === '.' || $entry === '..') continue;
-			$full = $dir . '/' . $entry;
-			if (is_dir($full)) {
-				foreach (self::scan_plugin_views($full, $prefix . '/' . $entry) as $sub) {
-					$paths[] = $sub;
+		if (!class_exists('PluginHelper')) {
+			return $paths;
+		}
+		try {
+			$plugins = PluginHelper::getActivePlugins();
+		} catch (\Throwable $e) {
+			error_log('SeoPageMetadata: active plugins unavailable: ' . $e->getMessage());
+			return $paths;
+		}
+		foreach ($plugins as $name => $plugin) {
+			foreach ((array)$plugin->get('publicPaths', array()) as $path) {
+				if (!is_string($path) || !preg_match('#^/[A-Za-z0-9/_\-.]*$#', $path) || strpos($path, '//') !== false) {
+					error_log("SeoPageMetadata: plugin '{$name}' declares publicPaths entry that is not a same-site path; ignored.");
+					continue;
 				}
-			} elseif (substr($entry, -4) === '.php') {
-				$base = substr($entry, 0, -4);
-				if ($base === 'index') {
-					$paths[] = $prefix === '' ? '' : $prefix;
-				} else {
-					$paths[] = $prefix . '/' . $base;
-				}
+				$paths[] = $path;
 			}
 		}
 		return $paths;
@@ -452,6 +466,28 @@ class SeoPageMetadata extends SystemBase {
 		$class = $info['class'];
 		$multi_class = $info['multi'];
 		if (!class_exists($class) || !class_exists($multi_class)) {
+			return $records;
+		}
+
+		// An entity whose public set is narrower than "every live row" — a forum
+		// topic is public only in a public category, and only once approved —
+		// supplies its own records: [['id'=>, 'link'=>, 'modify_time'=>], …],
+		// each link the path under the type's namespace.
+		if (method_exists($class, 'seo_public_records')) {
+			try {
+				foreach ($class::seo_public_records() as $row) {
+					$link = trim((string)($row['link'] ?? ''), '/');
+					if ($link === '') continue;
+					$records[] = array(
+						'path'        => self::canonicalize_path('/' . $info['namespace'] . '/' . $link),
+						'entity_type' => $type_key,
+						'entity_id'   => (int)$row['id'],
+						'modify_time' => $row['modify_time'] ?? null,
+					);
+				}
+			} catch (\Throwable $e) {
+				error_log('SeoPageMetadata seo_public_records failed for ' . $type_key . ': ' . $e->getMessage());
+			}
 			return $records;
 		}
 
@@ -541,6 +577,17 @@ class SeoPageMetadata extends SystemBase {
 						$ins->execute(array($rec['path'], $rec['entity_type'], $rec['entity_id']));
 						if ($ins->rowCount() > 0) {
 							$result['inserted_entity']++;
+						} else {
+							// The path already has a row with no entity: one made lazily by a
+							// pageview before this entity type was registered. Adopt it, so
+							// its SEO copy follows the entity and retirement can reach it.
+							$adopt = $dblink->prepare("UPDATE spm_seo_page_metadata
+								SET spm_entity_type = ?, spm_entity_id = ?, spm_update_time = now()
+								WHERE spm_path = ? AND spm_delete_time IS NULL AND spm_entity_type IS NULL");
+							$adopt->execute(array($rec['entity_type'], $rec['entity_id'], $rec['path']));
+							if ($adopt->rowCount() > 0) {
+								$result['adopted_entity'] = ($result['adopted_entity'] ?? 0) + 1;
+							}
 						}
 					}
 				} else {

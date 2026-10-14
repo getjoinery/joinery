@@ -19,7 +19,7 @@ conventions, and declaring/subscribing — see [Signal Bus](signals.md).
 - **Targeted recipient** — a user the signal addresses without an opt-in:
   either named by the dispatch in a `recipients` payload key (the people a
   mailbox or Boards signal is about), or a member of the signal's declared
-  `audience` (the incident and system alerts go to every superadmin).
+  `audience` (the incident and system alerts go to every superadmin; a content report goes to every admin).
 - **Channels** — in-app is the baseline (always created); email is a secondary,
   opt-in channel layered on top.
 
@@ -60,7 +60,7 @@ schema are declared in the same entry — see [Signal Bus](signals.md):
 |--------------|---------|
 | `ntf_type` | Display type / icon for the in-app notification |
 | `supports_topic` | Whether users may opt in to it |
-| `audience` | A group that always gets it, resolved by Notify at send time. `superadmins`: every superadmin who is a person. The dispatch passes no `recipients` for it |
+| `audience` | A group that always gets it, resolved by Notify at send time. `superadmins`: every superadmin who is a person. `admins`: every admin (permission 5 and up) who is a person. The dispatch passes no `recipients` for it |
 | `default_email` | Whether a targeted recipient with no saved preference is emailed; also the default of the "also email me" toggle |
 | `title_template` | Notification title (also the email subject) |
 | `body_template` | Notification body (also the email body) |

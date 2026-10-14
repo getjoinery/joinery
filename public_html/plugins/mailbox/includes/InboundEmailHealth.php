@@ -20,6 +20,7 @@
  * checkRelayReachable is a pinned ping; the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.26 - a site container has no mail server: checkInboundMailServer asks for an enabled
  *   relay when its mail arrives by SMTP and a domain receives here; checkOriginHidden does not apply
  * @version 1.25 - checkContentSpamScanner checks the milter (wired, answering on 11332) on a
@@ -490,7 +491,7 @@ class InboundEmailHealth {
 
         $db = DbConnector::get_instance()->get_db_link();
         $stmt = $db->prepare('SELECT COUNT(*) FROM fil_files WHERE fil_source = ?');
-        $stmt->execute(array(File::SOURCE_MAILBOX_SEARCH_INDEX));
+        $stmt->execute(array(MailboxIndex::FILE_SOURCE));
         $file_rows = (int)$stmt->fetchColumn();
 
         $sweep = InboundMailboxSearchIndex::sweepPersistedIndexes(true);

@@ -31,6 +31,7 @@
  * vault client drives on every page while the window is open; the receipt and
  * the mailbox banner only count (mailbox/fortress_backlog).
  *
+ * @version 1.4 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.3 - a raw reset to inline forgets its file store and key; the stored raw is deleted by its descriptor
  * @version 1.2 - both drains are ProtectionLevelChange::convergeBatch() passes; the byte budget is the platform's
  * @version 1.1 - the lowering count leaves out relay-sealed rows still waiting to be parsed (B45)
@@ -243,7 +244,7 @@ class MailboxFortressLevel {
 						InboundEmailMessage::sealAttachmentBytes($p['bytes'], $dek, $message_id, $mime_part, true),
 						InboundEmailMessage::fortressAttachmentName($message_id, $mime_part),
 						InboundEmailMessage::FORTRESS_FILE_TYPE, $owner_id,
-						array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+						array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 					$file->set('fil_type', InboundEmailMessage::FORTRESS_FILE_TYPE);
 					$file->save();
 					$new_files[] = $file;
@@ -262,7 +263,7 @@ class MailboxFortressLevel {
 					InboundEmailMessage::sealAttachmentBytes($p['bytes'], $dek, $message_id, $p['mime_part'], true),
 					InboundEmailMessage::fortressAttachmentName($message_id, $p['mime_part']),
 					InboundEmailMessage::FORTRESS_FILE_TYPE, $owner_id,
-					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+					array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 				$file->set('fil_type', InboundEmailMessage::FORTRESS_FILE_TYPE);
 				$file->save();
 				$new_files[] = $file;

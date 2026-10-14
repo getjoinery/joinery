@@ -872,6 +872,11 @@
 					echo "  Migration: " . htmlspecialchars($mm) . "<br>\n";
 				}
 			}
+			if (!empty($plugin_sync_result['warnings'])) {
+				foreach ($plugin_sync_result['warnings'] as $pw) {
+					echo "  ⚠ Plugin: " . htmlspecialchars($pw) . "<br>\n";
+				}
+			}
 			// settings_messages is populated only when a plugin's settings sync
 			// threw — an invalid manifest declaration, an unreadable plugin.json.
 			// sync() catches those per plugin so one bad manifest cannot abort the

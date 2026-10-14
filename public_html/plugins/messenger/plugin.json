@@ -1,6 +1,6 @@
 {
     "name": "Joinery Messenger",
-    "version": "1.0.19",
+    "version": "1.0.20",
     "description": "WhatsApp-style messaging in the member area: conversations and groups with near-realtime delivery, read receipts, typing indicators, replies, reactions and attachments.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -20,6 +20,9 @@
         "assets/css/messenger.css"
     ],
     "bootstrap": "includes/bootstrap.php",
+    "fileSources": {
+        "messenger_attachment": { "label": "Message attachments", "internal": false, "default_view": false }
+    },
     "directKinds": {
         "chat": {
             "handler": "includes/ChatDirectHandler.php",

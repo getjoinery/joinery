@@ -45,6 +45,10 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
+ * @version 1.17.0 - plugins declare their own origin tags (plugin.json "fileSources", FileSourceDeclarations);
+ *                   source_catalog() merges them over core_source_catalog(). The mailbox, messenger,
+ *                   joinery_ai, bug_reports and boards tags moved to their plugins
+ *                   (specs/community_shared_components.md C6a)
  * @version 1.16.0 - remote_key_for() and cloud_driver() are the blob's: an offloaded file is read from the store
  *                   and key its blob records (specs/storage_targets.md WP6)
  * @version 1.15.0 - variant_refusal(): why the blob's last resize was refused (specs/image_decode_memory.md)
@@ -99,26 +103,23 @@ class File extends SystemBase {	public static $prefix = 'fil';
 
 	// Origin tags for fil_source: a short, self-describing key saying where a file
 	// came from, stamped by whatever code created it. NULL means "unspecified /
-	// legacy." Subsystems that create files stamp one of these; a new creation site
-	// adds its own constant here AND a row in source_catalog() below.
+	// legacy." These are core's own tags; a core creation site adds its constant
+	// here AND a row in core_source_catalog() below. A plugin declares its tags in
+	// its plugin.json under "fileSources" and keeps the constant on one of its own
+	// classes (FileSourceDeclarations, docs/plugin_developer_guide.md).
 	const SOURCE_USER_UPLOAD      = 'user_upload';       // deliberate admin/user file upload
 	const SOURCE_ENTITY_PHOTO     = 'entity_photo';      // avatar / event / location / gallery photo
-	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
-	const SOURCE_AI_CHAT_UPLOAD   = 'ai_chat_upload';    // file uploaded into a joinery_ai chat
 	const SOURCE_DRIVE            = 'drive';             // member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag
-	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
-	const SOURCE_MAIL_IMPORT_ARCHIVE  = 'mail_import_archive';  // mbox/zip/tar uploaded to be imported into a mailbox — held for the life of the run, not a Drive item
-	const SOURCE_MESSENGER_ATTACHMENT = 'messenger_attachment'; // photo or file sent in a messenger conversation
-	const SOURCE_PROBLEM_REPORT       = 'problem_report';       // image a member attached to a problem report this site sent (prr_problem_reports)
-	const SOURCE_BUG_REPORT_IMAGE     = 'bug_report_image';     // image that arrived with a problem report from another site (bug_reports plugin)
-	const SOURCE_BOARDS_ATTACHMENT    = 'boards_attachment';    // file attached to a card (or a board's background image) in the boards plugin
+	const SOURCE_PROBLEM_REPORT   = 'problem_report';    // image a member attached to a problem report this site sent (prr_problem_reports)
 
 	/** The catalog key standing in for "no origin tag" (legacy rows). */
 	const SOURCE_UNCLASSIFIED = '_none';
 
 	/**
 	 * What each origin tag IS — one declaration, read by every surface that lists
-	 * files. Keyed by the tag; SOURCE_UNCLASSIFIED covers NULL/legacy rows.
+	 * files. Keyed by the tag; SOURCE_UNCLASSIFIED covers NULL/legacy rows. Core's
+	 * own tags (core_source_catalog()) merged with every plugin's "fileSources"
+	 * declaration (FileSourceDeclarations).
 	 *
 	 *   label        Human name. Listing filters and pickers show this.
 	 *   internal     A file the system made for its own use. Browse surfaces must
@@ -139,6 +140,16 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	 * @return array<string,array{label:string,internal:bool,default_view:bool}>
 	 */
 	public static function source_catalog() {
+		return FileSourceDeclarations::catalog();
+	}
+
+	/**
+	 * Core's own origin tags. A plugin's tags are declared in its plugin.json and
+	 * merged in by source_catalog(); a plugin may not declare one of these.
+	 *
+	 * @return array<string,array{label:string,internal:bool,default_view:bool}>
+	 */
+	public static function core_source_catalog() {
 		return array(
 			// Legacy rows predate the origin tags. They are the site's actual
 			// history, so they stay visible and stay in the default view —
@@ -147,22 +158,10 @@ class File extends SystemBase {	public static $prefix = 'fil';
 			self::SOURCE_UNCLASSIFIED       => array('label' => 'Unclassified',         'internal' => false, 'default_view' => true),
 			self::SOURCE_USER_UPLOAD        => array('label' => 'Uploads',              'internal' => false, 'default_view' => true),
 			self::SOURCE_ENTITY_PHOTO       => array('label' => 'Photos',               'internal' => false, 'default_view' => true),
-			self::SOURCE_EMAIL_ATTACHMENT   => array('label' => 'Mail attachments',     'internal' => false, 'default_view' => false),
-			self::SOURCE_AI_CHAT_UPLOAD     => array('label' => 'AI chat uploads',      'internal' => false, 'default_view' => false),
-			self::SOURCE_MESSENGER_ATTACHMENT => array('label' => 'Message attachments', 'internal' => false, 'default_view' => false),
-			self::SOURCE_BOARDS_ATTACHMENT  => array('label' => 'Board attachments',   'internal' => false, 'default_view' => false),
 			// Someone attached these deliberately, and they take space until the
 			// report's retention window removes them, so they stay listable.
 			self::SOURCE_PROBLEM_REPORT     => array('label' => 'Problem report images', 'internal' => false, 'default_view' => false),
-			self::SOURCE_BUG_REPORT_IMAGE   => array('label' => 'Received bug report images', 'internal' => false, 'default_view' => false),
 			self::SOURCE_DRIVE              => array('label' => 'Drive',                'internal' => false, 'default_view' => false),
-			// Not internal on purpose: someone uploaded this mbox deliberately.
-			// Either the import run cleans it up or it is sitting there consuming
-			// space, and whoever pays for the space has to be able to see it.
-			// Hiding it would turn a storage leak into an invisible one.
-			self::SOURCE_MAIL_IMPORT_ARCHIVE => array('label' => 'Mail import archives', 'internal' => false, 'default_view' => false),
-			// Machine-owned: a sealed FTS5 blob read server-side and never streamed.
-			self::SOURCE_MAILBOX_SEARCH_INDEX => array('label' => 'Search index',        'internal' => true,  'default_view' => false),
 		);
 	}
 

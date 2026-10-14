@@ -25,6 +25,8 @@
  * claimed host is used for exactly one thing, the callback, and that goes
  * through SafeHttpClient, which refuses private and internal addresses.
  *
+ * @version 1.2.0 - FILE_SOURCE: the bug_report_image origin tag lives here, declared
+ *   in the plugin's manifest (plugin.json "fileSources", specs/community_shared_components.md C6a).
  * @version 1.1.0 - fingerprints; automatic reports merge into the stored one and add their count
  * @version 1.0.0
  */
@@ -38,6 +40,10 @@ class BugReportRefusal extends Exception {
 }
 
 class BugReportIntake {
+
+	/** Origin tag (fil_source) on an image that arrived with a problem report
+	 *  from another site, declared under "fileSources" in plugin.json. */
+	const FILE_SOURCE = 'bug_report_image';
 
 	const BUNDLE_MAX = 262144;
 	const COMMENT_MAX = 5000;
@@ -238,7 +244,7 @@ class BugReportIntake {
 		$extension = array('image/png' => 'png', 'image/jpeg' => 'jpg', 'image/webp' => 'webp', 'image/gif' => 'gif')[$mime];
 		return File::createFromBytes($bytes, 'bug-report.' . $extension, $mime, null, array(
 			'fil_private' => true,
-			'fil_source'  => File::SOURCE_BUG_REPORT_IMAGE,
+			'fil_source'  => BugReportIntake::FILE_SOURCE,
 		));
 	}
 

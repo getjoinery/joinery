@@ -53,6 +53,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
+ * @version 1.26 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.25 - sendRaw(): send what a mail program composed (whole MIME + envelope) through
  *   the same pipeline, carried over part for part; storeRawOutbound(): store one as Sent
  * @version 1.24 - a send records its recipients in the sender records and a reply teaches its source ham
@@ -1689,7 +1690,7 @@ class MailboxSender {
 			$for_browser ? InboundEmailMessage::fortressAttachmentName($message_id, $part_id) : $name,
 			$stored_type, $this->viewer->getUserId(), array(
 				'fil_private' => true,
-				'fil_source'  => File::SOURCE_EMAIL_ATTACHMENT,
+				'fil_source'  => AttachmentByteCustody::FILE_SOURCE,
 			));
 		if ($sealing) {
 			// Magic-byte detection on save() saw ciphertext — restore the type.

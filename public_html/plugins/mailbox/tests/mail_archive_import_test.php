@@ -123,7 +123,7 @@ class MailArchiveImportTest {
 		// reclaim it — a difference that only shows up if the fixture is honest.
 		$file = File::createFromBytes($bytes, $this->suffix . '-' . $displayName,
 			'application/octet-stream', User::USER_SYSTEM,
-			array('fil_private' => true, 'fil_source' => File::SOURCE_MAIL_IMPORT_ARCHIVE));
+			array('fil_private' => true, 'fil_source' => MailImportService::FILE_SOURCE));
 		$this->file_ids[] = intval($file->key);
 
 		$run = new MailImportRun(NULL);
@@ -411,7 +411,7 @@ class MailArchiveImportTest {
 			check($file->key && $file->size_bytes() > 0,
 				'attachments: the File has real bytes, so the import stored them rather than a reference',
 				'size_bytes: ' . ($file->key ? $file->size_bytes() : 'no file'));
-			check((string)$file->get('fil_source') === File::SOURCE_EMAIL_ATTACHMENT,
+			check((string)$file->get('fil_source') === AttachmentByteCustody::FILE_SOURCE,
 				'attachments: the File is tagged email_attachment, so it stays out of Drive',
 				(string)$file->get('fil_source'));
 			check((bool)$file->get('fil_private'),

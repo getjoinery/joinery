@@ -201,7 +201,7 @@ require_once(PathHelper::getIncludePath('data/message_attachments_class.php'));
 
 $plain_bytes = 'PLAINTEXT-' . $suffix . str_repeat('.', 2048);
 $attachment = File::createFromBytes($plain_bytes, 'note-' . $suffix . '.txt', 'text/plain',
-	$alice['id'], array('fil_private' => true, 'fil_source' => File::SOURCE_MESSENGER_ATTACHMENT));
+	$alice['id'], array('fil_private' => true, 'fil_source' => MessengerUploads::FILE_SOURCE));
 harness_register_model('File', (int)$attachment->key);
 $attachment->set('fil_access_provider', 'messenger_conversation');
 $attachment->set('fil_access_ref', (int)$room->key);

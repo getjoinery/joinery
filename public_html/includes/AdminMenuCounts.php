@@ -12,11 +12,23 @@
  * probe. A counter that throws is logged and shows nothing: a menu never
  * fails to draw because a count could not be had.
  *
+ * Core's own counters are fixed (coreCounters()); a plugin's come from its
+ * bootstrap.
+ *
+ * @version 1.1 - core counters: open content reports
  * @version 1.0
  */
 class AdminMenuCounts {
 	/** @var array<string, callable> counters, by menu slug */
 	private static $counters = array();
+
+	/** Core counters, by menu slug. Each is a callable returning an int. */
+	private static function coreCounters(): array {
+		return array(
+			// Content members reported, waiting for an admin to look.
+			'content-reports' => array('ContentReport', 'open_count'),
+		);
+	}
 
 	/** Register the counter for a menu slug. Registering again replaces it. */
 	public static function register(string $slug, callable $counter): void {
@@ -36,7 +48,7 @@ class AdminMenuCounts {
 			}
 		}
 		$out = array();
-		foreach (self::$counters as $slug => $counter) {
+		foreach (self::coreCounters() + self::$counters as $slug => $counter) {
 			try {
 				$n = (int)call_user_func($counter);
 			} catch (\Throwable $e) {

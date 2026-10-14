@@ -34,6 +34,7 @@
  *    Drive off: their descriptors name no feature gate, Drive's still does, and a
  *    Drive upload is refused by them
  *
+ * @version 1.2 - the purpose's files carry this suite's own origin tag, not a plugin's
  * @version 1.1
  */
 
@@ -51,6 +52,9 @@ class UploadPurposesTest {
 
 	const PURPOSE = 'test_purpose';
 	const REFUSING = 'test_purpose_refused';
+	// The origin tag this suite's files carry. Its own, so the suite never
+	// depends on a plugin that owns a real tag being installed.
+	const SOURCE = 'upload_purposes_test';
 
 	private $db;
 	private $user_id;
@@ -91,7 +95,7 @@ class UploadPurposesTest {
 		$_SESSION['loggedin'] = true;
 
 		UploadPurposeRegistry::register(self::PURPOSE, array(
-			'source'       => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			'source'       => self::SOURCE,
 			'label'        => 'test archive',
 			'restrictions' => array('fil_private' => true),
 			'authorize'    => function (int $uid, array $input): ?string {
@@ -104,7 +108,7 @@ class UploadPurposesTest {
 		));
 
 		UploadPurposeRegistry::register(self::REFUSING, array(
-			'source'    => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			'source'    => self::SOURCE,
 			'authorize' => function (int $uid, array $input): ?string {
 				return 'This purpose says no, for its own reasons.';
 			},
@@ -223,7 +227,7 @@ class UploadPurposesTest {
 		check($file_id > 0, 'round trip: a File came back');
 		if ($file_id > 0) {
 			$file = new File($file_id, TRUE);
-			check((string)$file->get('fil_source') === File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			check((string)$file->get('fil_source') === self::SOURCE,
 				'round trip: the File carries the purpose\'s origin tag',
 				(string)$file->get('fil_source'));
 			check((bool)$file->get('fil_private'),
@@ -281,7 +285,7 @@ class UploadPurposesTest {
 		check($file_id > 0, 'purpose swap: the upload still completed');
 		if ($file_id > 0) {
 			$file = new File($file_id, TRUE);
-			check((string)$file->get('fil_source') === File::SOURCE_MAIL_IMPORT_ARCHIVE,
+			check((string)$file->get('fil_source') === self::SOURCE,
 				'purpose swap: it kept the purpose it was OPENED under, not the one requested',
 				(string)$file->get('fil_source'));
 		}

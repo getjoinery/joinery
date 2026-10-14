@@ -5,7 +5,25 @@
  * Extracted from adm/admin_spec_view.php for reuse across
  * the spec viewer and help documentation viewer.
  *
- * Version: 1.8
+ * Version: 1.12
+ * @changelog 1.12 - Placeholders are expanded only where present (a heading's
+ *   slug, a mention's name): the full-map expansion per heading was quadratic.
+ *   A link or image whose target holds a placeholder (code, a mention) stays
+ *   as its bracket text instead of losing the target. A mention's name shows
+ *   any code inside it rendered, never a raw placeholder.
+ * @changelog 1.11 - Linear quote grouping (a quote-heavy text could exhaust the
+ *   regex engine and come back empty) and one unwrap pass for quote blocks (the
+ *   per-quote pass was quadratic). The placeholder sentinel byte is stripped from
+ *   input and refused in link targets, so typed text cannot forge a placeholder.
+ *   A link whose text holds a mention chip is shown as its text, not a link. A
+ *   pattern that fails leaves its pass undone (logged) instead of emptying the page.
+ * @changelog 1.10 - Block quotes: a run of lines starting with ">" renders as a
+ *   <blockquote> whose contents are markdown of their own (lists, emphasis, code),
+ *   nested up to MAX_QUOTE_DEPTH. Before this, "> " stayed literal text, so the
+ *   editor's Quote button produced nothing a reader saw as a quote.
+ * @changelog 1.9 - Mention tokens (@[Name](user:42), written by the editor's
+ *   picker) render as a mention chip in every profile. Restricted links also
+ *   carry rel="ugc", which tells search engines a member wrote the link.
  * @changelog 1.8 - Link and image targets are checked: only http, https, mailto and
  *   relative targets become links, and an image is only ever http, https or relative.
  *   Anything else (javascript:, data:, vbscript:, a scheme hidden behind tabs or
@@ -17,6 +35,26 @@
 class MarkdownRenderer {
 
     /**
+     * Changes whenever the same markdown would render differently. A caller that
+     * stores rendered HTML stores this beside it, and renders again when it differs.
+     */
+    const VERSION = '1.12';
+
+    /**
+     * The renderer's definition of code, shared with MentionParser so both agree
+     * on what is code and what is prose. Applied in this order.
+     */
+    const FENCE_PATTERN = '/^( {0,3})```(\w*)[ \t]*\n(.*?)\n {0,3}```[ \t]*$/ms';
+    const DOUBLE_TICK_PATTERN = '/``([^`]+)``/';
+    const SINGLE_TICK_PATTERN = '/`([^`\n]+)`/';
+
+    /** The byte that brackets every placeholder; never allowed in from input. */
+    const SENTINEL = "\x02";
+
+    /** Quotes inside quotes are parsed this deep; deeper markers stay text. */
+    const MAX_QUOTE_DEPTH = 4;
+
+    /**
      * Render markdown text to HTML.
      * Input is HTML-escaped first for XSS protection.
      *
@@ -25,12 +63,24 @@ class MarkdownRenderer {
      * (LLM replies) wants this; authored docs are hard-wrapped and don't.
      *
      * $restricted — the profile for text other people wrote (comments, card
-     * descriptions, anything that can arrive by email): no images, no heading
-     * ids, links open in a new tab without the opener. Authored docs use the
+     * descriptions, forum posts, anything that can arrive by email): no images,
+     * no heading ids, headings pushed down two levels, links open in a new tab
+     * without the opener and are marked nofollow and ugc. Authored docs use the
      * default profile.
+     *
+     * A mention token — @[Name](user:42), see MentionParser — becomes a chip
+     * showing the name, in either profile. Inside code it stays literal text.
      */
     public static function render($text, $soft_breaks = false, $restricted = false) {
-        $text = htmlspecialchars($text);
+        $text = str_replace(self::SENTINEL, '', (string)$text);
+        return self::render_escaped(htmlspecialchars($text), $soft_breaks, $restricted, 0);
+    }
+
+    /**
+     * The rendering itself, over text that is already HTML-escaped. A block
+     * quote's contents come back through here one level deeper.
+     */
+    private static function render_escaped($text, $soft_breaks, $restricted, $depth) {
 
         // Extract fenced and inline code to placeholders BEFORE any other pass so
         // their contents are invisible to header/italic/etc. regexes. Without this,
@@ -43,15 +93,25 @@ class MarkdownRenderer {
         // Fenced code blocks (``` ... ```) — fences may be indented 0–3 spaces (e.g. inside list items).
         // Leading whitespace is preserved in the replacement so the placeholder stays on an indented
         // continuation line, which lets the list regex below absorb it into the parent list item.
-        $text = preg_replace_callback('/^( {0,3})```(\w*)[ \t]*\n(.*?)\n {0,3}```[ \t]*$/ms', function($matches) use (&$placeholders, &$counter) {
+        $text = self::sub(self::FENCE_PATTERN, function($matches) use (&$placeholders, &$counter) {
             $lang = $matches[2] ? ' class="language-' . $matches[2] . '"' : '';
             $key = "\x02MDPH" . $counter++ . "\x02";
             $placeholders[$key] = '<pre><code' . $lang . '>' . $matches[3] . '</code></pre>';
             return $matches[1] . $key;
         }, $text);
 
+        // Block quotes: a run of lines starting with ">" (escaped to &gt; by
+        // now). Fenced code is already a placeholder, so a "> " line inside a
+        // code block is never taken for a quote; a fence inside the quote is
+        // found by the inner pass. The quote stands as its own block.
+        $block_keys = false;
+        if ($depth < self::MAX_QUOTE_DEPTH && strpos($text, '&gt;') !== false) {
+            $text = self::extract_quotes($text, $placeholders, $counter, $soft_breaks, $restricted, $depth);
+            $block_keys = true;
+        }
+
         // Double-backtick inline code (``...``) — used when content contains a backtick
-        $text = preg_replace_callback('/``([^`]+)``/', function($matches) use (&$placeholders, &$counter) {
+        $text = self::sub(self::DOUBLE_TICK_PATTERN, function($matches) use (&$placeholders, &$counter) {
             $key = "\x02MDPH" . $counter++ . "\x02";
             $placeholders[$key] = '<code>' . trim($matches[1]) . '</code>';
             return $key;
@@ -59,9 +119,18 @@ class MarkdownRenderer {
 
         // Single-backtick inline code (`code`) — restricted to a single line so an
         // unclosed backtick can't swallow the rest of the document
-        $text = preg_replace_callback('/`([^`\n]+)`/', function($matches) use (&$placeholders, &$counter) {
+        $text = self::sub(self::SINGLE_TICK_PATTERN, function($matches) use (&$placeholders, &$counter) {
             $key = "\x02MDPH" . $counter++ . "\x02";
             $placeholders[$key] = '<code>' . $matches[1] . '</code>';
+            return $key;
+        }, $text);
+
+        // Mention tokens, before any rule that reads brackets or emphasis: the
+        // name is the author's text (already escaped), so it is held as a
+        // placeholder and nothing inside it is parsed.
+        $text = self::sub(MentionParser::TOKEN_PATTERN, function($matches) use (&$placeholders, &$counter) {
+            $key = "\x02MDMN" . $counter++ . "\x02";
+            $placeholders[$key] = '<span class="jy-mention" data-user-id="' . (int)$matches[2] . '">@' . self::expand_present($matches[1], $placeholders) . '</span>';
             return $key;
         }, $text);
 
@@ -69,7 +138,7 @@ class MarkdownRenderer {
         // table of contents links to. Repeated titles get -1, -2 suffixes, the
         // same way the anchors are written elsewhere.
         $slug_counts = array();
-        $text = preg_replace_callback('/^(#{1,6}) (.+)$/m', function($matches) use (&$slug_counts, $placeholders, $restricted) {
+        $text = self::sub('/^(#{1,6}) (.+)$/m', function($matches) use (&$slug_counts, $placeholders, $restricted) {
             $level = strlen($matches[1]);
             $title = trim($matches[2]);
             if ($restricted) {
@@ -88,15 +157,15 @@ class MarkdownRenderer {
         }, $text);
 
         // Bold (**text** or __text__)
-        $text = preg_replace('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
-        $text = preg_replace('/__(.+?)__/', '<strong>$1</strong>', $text);
+        $text = self::sub('/\*\*(.+?)\*\*/', '<strong>$1</strong>', $text);
+        $text = self::sub('/__(.+?)__/', '<strong>$1</strong>', $text);
 
         // Italic (*text* or _text_)
-        $text = preg_replace('/\*([^*]+)\*/', '<em>$1</em>', $text);
-        $text = preg_replace('/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/', '<em>$1</em>', $text);
+        $text = self::sub('/\*([^*]+)\*/', '<em>$1</em>', $text);
+        $text = self::sub('/(?<![a-zA-Z])_([^_]+)_(?![a-zA-Z])/', '<em>$1</em>', $text);
 
         // Horizontal rules
-        $text = preg_replace('/^---+$/m', '<hr>', $text);
+        $text = self::sub('/^---+$/m', '<hr>', $text);
 
         // Images ![alt](url) — must run before the link rule, which would
         // otherwise consume the bracket pair and leave a bare '!' beside a link.
@@ -104,7 +173,12 @@ class MarkdownRenderer {
         // Wrapped in a link to itself: shown small in the column, full size on click.
         // The target is checked first: a scheme that can run script or fetch
         // something nobody asked for is shown as the alt text instead.
-        $text = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)\)/', function($matches) use ($restricted) {
+        $text = self::sub('/!\[([^\]]*)\]\(([^)\s]+)\)/', function($matches) use ($restricted) {
+            // A placeholder (code, a mention) in the target: not an image —
+            // keep the bracket text as written, which the restore fills in.
+            if (strpos($matches[2], self::SENTINEL) !== false) {
+                return $matches[0];
+            }
             if ($restricted || !self::is_safe_url($matches[2], false)) {
                 return $matches[1];
             }
@@ -113,16 +187,21 @@ class MarkdownRenderer {
 
         // Links [text](url). Only http, https, mailto and relative targets
         // become links; any other scheme leaves the text without the link.
-        $text = preg_replace_callback('/\[([^\]]+)\]\(([^)]+)\)/', function($matches) use ($restricted) {
-            if (!self::is_safe_url($matches[2], true)) {
+        $text = self::sub('/\[([^\]]+)\]\(([^)]+)\)/', function($matches) use ($restricted) {
+            // A placeholder in the target: not a link; keep the bracket text.
+            if (strpos($matches[2], self::SENTINEL) !== false) {
+                return $matches[0];
+            }
+            // A mention chip is a person, never the face of a link.
+            if (!self::is_safe_url($matches[2], true) || strpos($matches[1], "\x02MDMN") !== false) {
                 return $matches[1];
             }
-            $extra = $restricted ? ' target="_blank" rel="noopener noreferrer nofollow"' : '';
+            $extra = $restricted ? ' target="_blank" rel="noopener noreferrer nofollow ugc"' : '';
             return '<a href="' . $matches[2] . '"' . $extra . '>' . $matches[1] . '</a>';
         }, $text);
 
         // Unordered lists (- item) — each item may span indented continuation lines
-        $text = preg_replace_callback('/(?:^- .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
+        $text = self::sub('/(?:^- .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
             $raw = trim($matches[0]);
             $items = preg_split('/^(?=- )/m', $raw, -1, PREG_SPLIT_NO_EMPTY);
             $html = '';
@@ -134,7 +213,7 @@ class MarkdownRenderer {
         }, $text);
 
         // Ordered lists (1. item) — each item may span indented continuation lines
-        $text = preg_replace_callback('/(?:^\d+\. .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
+        $text = self::sub('/(?:^\d+\. .+$(?:\n[ \t]+[^\n]*)*\n?)+/m', function($matches) {
             $raw = trim($matches[0]);
             $items = preg_split('/^(?=\d+\. )/m', $raw, -1, PREG_SPLIT_NO_EMPTY);
             $html = '';
@@ -146,7 +225,7 @@ class MarkdownRenderer {
         }, $text);
 
         // Tables — separator row accepts alignment colons (:---, :---:, ---:)
-        $text = preg_replace_callback('/^\|(.+)\|\n\|[-:| ]+\|\n((?:\|.+\|\n?)+)/m', function($matches) {
+        $text = self::sub('/^\|(.+)\|\n\|[-:| ]+\|\n((?:\|.+\|\n?)+)/m', function($matches) {
             // Header row
             $headers = array_map('trim', explode('|', trim($matches[1], '|')));
             $header_html = '<tr>' . implode('', array_map(function($h) { return '<th>' . $h . '</th>'; }, $headers)) . '</tr>';
@@ -165,7 +244,7 @@ class MarkdownRenderer {
         }, $text);
 
         // Paragraphs (double newlines)
-        $text = preg_replace('/\n\n+/', '</p><p>', $text);
+        $text = self::sub('/\n\n+/', '</p><p>', $text);
         $text = '<p>' . $text . '</p>';
 
         // Soft breaks: remaining newlines are single (the paragraph pass ate
@@ -174,7 +253,7 @@ class MarkdownRenderer {
         // Code blocks are placeholders at this point, so their contents are
         // safe; a <br> landing against a restored <pre> is stripped below.
         if ($soft_breaks) {
-            $text = preg_replace(
+            $text = self::sub(
                 '~(?<!</h1>|</h2>|</h3>|</h4>|</h5>|</h6>|</ul>|</ol>|</table>|<hr>)\n(?!<(?:h[1-6]|ul|ol|table|hr))~',
                 '<br>',
                 $text
@@ -182,11 +261,18 @@ class MarkdownRenderer {
         }
 
         // Clean up empty paragraphs and fix nesting
-        $text = preg_replace('/<p>\s*<(h[1-6]|ul|ol|pre|hr|table)/s', '<$1', $text);
-        $text = preg_replace('/<\/(h[1-6]|ul|ol|pre|table)>\s*<\/p>/s', '</$1>', $text);
-        $text = preg_replace('/<p>\s*<\/p>/', '', $text);
-        $text = preg_replace('/<p><hr><\/p>/', '<hr>', $text);
-        $text = preg_replace('/<p><hr>/', '<hr><p>', $text);
+        $text = self::sub('/<p>\s*<(h[1-6]|ul|ol|pre|hr|table)/s', '<$1', $text);
+        $text = self::sub('/<\/(h[1-6]|ul|ol|pre|table)>\s*<\/p>/s', '</$1>', $text);
+        $text = self::sub('/<p>\s*<\/p>/', '', $text);
+        $text = self::sub('/<p><hr><\/p>/', '<hr>', $text);
+        $text = self::sub('/<p><hr>/', '<hr><p>', $text);
+
+        // A quote is a block, not a paragraph's content: one pass for all of them.
+        if ($block_keys) {
+            $text = self::sub('#<p>(\x02MDBQ\d+\x02)</p>|<br>(\x02MDBQ\d+\x02)|(\x02MDBQ\d+\x02)<br>#', function($m) {
+                return $m[1] . ($m[2] ?? '') . ($m[3] ?? '');
+            }, $text);
+        }
 
         if (!empty($placeholders)) {
             $text = strtr($text, $placeholders);
@@ -199,6 +285,77 @@ class MarkdownRenderer {
         }
 
         return $text;
+    }
+
+    /**
+     * Group runs of quoted lines ("&gt;" after escaping) into block quotes, in
+     * one walk over the lines. Each quote's text, its markers removed, is
+     * rendered as markdown of its own one level deeper and held as a block
+     * placeholder that stands as its own paragraph.
+     */
+    private static function extract_quotes($text, &$placeholders, &$counter, $soft_breaks, $restricted, $depth) {
+        $out = array();
+        $run = array();
+        $flush = function () use (&$run, &$out, &$placeholders, &$counter, $soft_breaks, $restricted, $depth) {
+            if (!$run) {
+                return;
+            }
+            $key = "\x02MDBQ" . $counter++ . "\x02";
+            $placeholders[$key] = '<blockquote>' . self::render_escaped(implode("\n", $run), $soft_breaks, $restricted, $depth + 1) . '</blockquote>';
+            // A blank line on each side: the quote is always a paragraph of its own.
+            array_push($out, '', '', $key, '', '');
+            $run = array();
+        };
+        foreach (explode("\n", $text) as $line) {
+            $trimmed = ltrim($line, ' ');
+            if (strlen($line) - strlen($trimmed) <= 3 && strncmp($trimmed, '&gt;', 4) === 0) {
+                $rest = substr($trimmed, 4);
+                $run[] = ($rest !== '' && $rest[0] === ' ') ? substr($rest, 1) : $rest;
+                continue;
+            }
+            $flush();
+            $out[] = $line;
+        }
+        $flush();
+        return implode("\n", $out);
+    }
+
+    /**
+     * $text with the placeholders it contains expanded — only those, so the
+     * cost follows the text, not the size of the whole placeholder map.
+     */
+    private static function expand_present($text, array $placeholders) {
+        if (!$placeholders || strpos($text, self::SENTINEL) === false) {
+            return $text;
+        }
+        if (!preg_match_all('/\x02MD[A-Z]{2}\d+\x02/', $text, $m)) {
+            return $text;
+        }
+        $present = array();
+        foreach ($m[0] as $key) {
+            if (isset($placeholders[$key])) {
+                $present[$key] = $placeholders[$key];
+            }
+        }
+        return strtr($text, $present);
+    }
+
+    /**
+     * preg_replace / preg_replace_callback that never empties the text: when a
+     * pattern fails (the backtrack limit on hostile input), the pass is left
+     * undone and logged, and rendering carries on with the text as it was.
+     *
+     * @param string|callable $replacement
+     */
+    private static function sub($pattern, $replacement, $text) {
+        $result = is_callable($replacement) && !is_string($replacement)
+            ? preg_replace_callback($pattern, $replacement, $text)
+            : preg_replace($pattern, $replacement, $text);
+        if ($result === null) {
+            error_log('MarkdownRenderer: pattern failed (' . preg_last_error_msg() . '): ' . $pattern);
+            return $text;
+        }
+        return $result;
     }
 
     /**
@@ -215,6 +372,10 @@ class MarkdownRenderer {
      * @param bool $allow_mailto true for a link, false for an image
      */
     public static function is_safe_url($url, $allow_mailto = true) {
+        // A placeholder in a target would be filled with markup on the way out.
+        if (strpos((string)$url, self::SENTINEL) !== false) {
+            return false;
+        }
         $decoded = html_entity_decode((string)$url, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $decoded = preg_replace('/[\x00-\x20\x7f]+/u', '', $decoded);
         if ($decoded === null || $decoded === '') {
@@ -241,7 +402,7 @@ class MarkdownRenderer {
      * restored before slugging.
      */
     private static function heading_slug($title, $placeholders = array()) {
-        $slug = $placeholders ? strtr($title, $placeholders) : $title;
+        $slug = self::expand_present($title, $placeholders);
         $slug = html_entity_decode(strip_tags($slug), ENT_QUOTES, 'UTF-8');
         $slug = strtolower($slug);
         $slug = preg_replace('/[^a-z0-9 -]+/', '', $slug);
@@ -302,6 +463,8 @@ class MarkdownRenderer {
                and open at full size when clicked. */
             .markdown-content img { display: block; max-width: min(100%, 380px); height: auto; margin: 1em 0; border: 1px solid #ddd; border-radius: 4px; }
             .markdown-content a > img { cursor: zoom-in; }
+            .markdown-content .jy-mention { font-weight: 600; white-space: nowrap; }
+            .markdown-content blockquote { margin: 0.75em 0; padding: 0.25em 1em; border-left: 3px solid #c8ccd4; color: #5a6170; }
         ';
     }
 }

@@ -22,6 +22,7 @@
  * (specs/in_window_deferred_work.md), so a relay-sealed backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
+ * @version 1.27 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.26 - registers the mailbox_spam_backfill deferred-work consumer (SpamSenderBackfill)
  * @version 1.25 - registers the mailbox_contact_level deferred-work consumer (MailboxContactConvergence)
  * @version 1.24 - registers the mailbox_spam_learn deferred-work consumer (SpamLearning)
@@ -128,7 +129,7 @@ VaultUnlock::onWindowCaps(
 // Resolve the owning message (and its owner) from the attachment manifest,
 // require an open window for that owner, then open the per-message DEK and
 // the attachment's own AEAD blob.
-File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphertext, File $file): string {
+File::registerDecryptHook(AttachmentByteCustody::FILE_SOURCE, function (string $ciphertext, File $file): string {
 	$manifest = new MultiInboundMessageAttachment(array('file_id' => intval($file->key)));
 	$manifest->load();
 	if ($manifest->count() === 0) {
@@ -161,7 +162,7 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 // exactly as they did. Keying on fil_content_sealed, not File::is_sealed(): the
 // column that literally means "these bytes are a container" is the one that
 // decides whether to open one.
-File::registerStreamingDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (File $file, $size_key = null) {
+File::registerStreamingDecryptHook(AttachmentByteCustody::FILE_SOURCE, function (File $file, $size_key = null) {
 	return $file->get('fil_content_sealed') ? new DriveSealedStream($file, $size_key) : null;
 });
 
@@ -563,7 +564,7 @@ EmailSender::registerDirectAttempt(function (EmailMessage $message): array {
 // shared and needs to know nothing about mail.
 require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
 UploadPurposeRegistry::register('mail_import_archive', array(
-	'source' => File::SOURCE_MAIL_IMPORT_ARCHIVE,
+	'source' => MailImportService::FILE_SOURCE,
 	'label'  => 'mail archive',
 
 	// Private, and NOT a Drive item: the archive is working material for one

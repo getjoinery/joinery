@@ -50,7 +50,7 @@ section('fixtures: a leaked blob, a bare file, a held copy, a young file');
 // A leaked blob: its File row is gone, its reference count is still one.
 $leaked_file = File::createFromBytes(random_bytes(2048), 'mailfts_' . $tag . '.bin',
 	'application/octet-stream', (int)$owner->key,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_MAILBOX_SEARCH_INDEX));
+	array('fil_private' => true, 'fil_source' => MailboxIndex::FILE_SOURCE));
 $leaked_blob_id = (int)$leaked_file->get('fil_fbb_file_blob_id');
 $leaked_blob = new FileBlob($leaked_blob_id, TRUE);
 $leaked_name = (string)$leaked_blob->get('fbb_stored_name');
@@ -66,7 +66,7 @@ check(is_file($leaked_path) && preg_match(InboundMailboxSearchIndex::LEGACY_BLOB
 // A held copy: the same shape, but a live File row still references it.
 $held_file = File::createFromBytes(random_bytes(1024), 'mailfts_' . ($tag + 1) . '.bin',
 	'application/octet-stream', (int)$owner->key,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_MAILBOX_SEARCH_INDEX));
+	array('fil_private' => true, 'fil_source' => MailboxIndex::FILE_SOURCE));
 harness_register_row('fil_files', 'fil_file_id', $held_file->key);
 $held_blob_id = (int)$held_file->get('fil_fbb_file_blob_id');
 $held_blob = new FileBlob($held_blob_id, TRUE);

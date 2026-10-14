@@ -555,9 +555,28 @@ Cleanup runs in the browser only. It is an editing convenience for admin
 authors, not a security control; a member-facing rich-text field needs a
 server-side sanitizer.
 
+**Text members write for each other** uses two more markdown options:
+
+| Option | Does |
+|---|---|
+| `markdown_restricted` | The toolbar leaves out headings, image and table, and the preview renders through `MarkdownRenderer`'s restricted profile — exactly what readers will see. |
+| `mention_space` | Typing `@` and two letters opens a list of people who may read that space (`'forum_category:12'`, a [space](social_features.md#spaces-who-may-read-and-who-may-post) reference), from the `mention_search` action. Arrow keys and Enter or Tab choose; choosing writes the mention token `@[Name](user:42)`. |
+
+```php
+$formwriter->textbox('body', 'Your reply', [
+    'markdownmode'        => 'yes',
+    'markdown_restricted' => true,
+    'mention_space'       => 'forum_category:' . $category->key,
+]);
+```
+
+The server still decides: a post's save normalizes its mentions and renders
+through the restricted profile whatever the browser sent.
+
 Definition-time checks: `htmlmode` and `markdownmode` together, a view from
-the other dialect, `editor_cleanup` with `markdownmode`, or either option on
-a plain textarea all throw.
+the other dialect, `editor_cleanup` with `markdownmode`, either option on
+a plain textarea, or `markdown_restricted` / `mention_space` without
+`markdownmode` all throw.
 
 Assets (`assets/css/joinery-editor.css`, `assets/js/html-cleanup.js`,
 `assets/js/joinery-editor.js`) are emitted once per request however many

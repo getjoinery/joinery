@@ -16,6 +16,7 @@
  * itself needs no registration: Message declares $sealed_fields and its own
  * decrypt path on the class, which loads wherever a message is read.
  *
+ * @version 1.1 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.0
  */
 
@@ -30,7 +31,7 @@ require_once(PathHelper::getIncludePath('data/conversation_key_grants_class.php'
 // then for the span the client wanted; a closed unlock window becomes a 423,
 // never ciphertext with a 200 on it. A Standard conversation's attachment is
 // plaintext and streams unchanged.
-File::registerStreamingDecryptHook(File::SOURCE_MESSENGER_ATTACHMENT, function (File $file, $size_key = null) {
+File::registerStreamingDecryptHook(MessengerUploads::FILE_SOURCE, function (File $file, $size_key = null) {
 	return $file->is_sealed() ? new ConversationAttachmentStream($file) : null;
 });
 

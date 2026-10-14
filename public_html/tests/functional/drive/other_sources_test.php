@@ -10,6 +10,7 @@
  * feature stored (a mail attachment, a chat upload) are reachable from the
  * Drive rail, read-only, without ever leaking into My Drive.
  *
+ * @version 1.1 - its own origin tags (FileSourceDeclarations::declareForTest), not a plugin's
  * @version 1.0
  */
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -23,6 +24,18 @@ require_once(PathHelper::getIncludePath('logic/drive_list_logic.php'));
 $made_files = array();
 
 harness_set_setting_mem('drive_active', '1');
+
+// This suite's own origin tags, so it never depends on a plugin that owns real
+// ones (mail attachments, chat uploads, a search index) being installed. The
+// attachment tag opens through a hook, as a mail attachment does, so an export
+// of it says "opened in-window".
+const OSRC_ATTACHMENT = 'osrc_test_attachment';
+const OSRC_CHAT       = 'osrc_test_chat_upload';
+const OSRC_INDEX      = 'osrc_test_search_index';
+FileSourceDeclarations::declareForTest(OSRC_ATTACHMENT, array('label' => 'Test attachments'));
+FileSourceDeclarations::declareForTest(OSRC_CHAT, array('label' => 'Test chat uploads'));
+FileSourceDeclarations::declareForTest(OSRC_INDEX, array('label' => 'Test search index', 'internal' => true));
+File::registerDecryptHook(OSRC_ATTACHMENT, function (string $ciphertext, File $file): string { return $ciphertext; });
 
 function osrc_file($content, $name, $user_id, $source) {
 	global $made_files;
@@ -56,12 +69,12 @@ harness_defer(function () use ($session) { $session->clear_api_user(); });
 
 $salt = bin2hex(random_bytes(6));
 $drive_file = osrc_file("drive-$salt", "mine-$salt.bin", $owner->key, File::SOURCE_DRIVE);
-$att_a      = osrc_file("att-a-$salt", "invoice-$salt.pdf", $owner->key, File::SOURCE_EMAIL_ATTACHMENT);
-$att_b      = osrc_file("att-b-$salt", "photo-$salt.jpg", $owner->key, File::SOURCE_EMAIL_ATTACHMENT);
-$chat       = osrc_file("chat-$salt", "notes-$salt.txt", $owner->key, File::SOURCE_AI_CHAT_UPLOAD);
+$att_a      = osrc_file("att-a-$salt", "invoice-$salt.pdf", $owner->key, OSRC_ATTACHMENT);
+$att_b      = osrc_file("att-b-$salt", "photo-$salt.jpg", $owner->key, OSRC_ATTACHMENT);
+$chat       = osrc_file("chat-$salt", "notes-$salt.txt", $owner->key, OSRC_CHAT);
 $untagged   = osrc_file("legacy-$salt", "legacy-$salt.bin", $owner->key, null);
-$index      = osrc_file("idx-$salt", "index-$salt.db", $owner->key, File::SOURCE_MAILBOX_SEARCH_INDEX);
-$foreign    = osrc_file("foreign-$salt", "theirs-$salt.pdf", $other->key, File::SOURCE_EMAIL_ATTACHMENT);
+$index      = osrc_file("idx-$salt", "index-$salt.db", $owner->key, OSRC_INDEX);
+$foreign    = osrc_file("foreign-$salt", "theirs-$salt.pdf", $other->key, OSRC_ATTACHMENT);
 
 // ---------------------------------------------------------------------------
 section('the rail lists every other listable source the member owns files under, with counts');
@@ -73,20 +86,20 @@ check(in_array((int)$drive_file->key, $mine_ids, true), 'the Drive file is in My
 check(!in_array((int)$att_a->key, $mine_ids, true) && !in_array((int)$chat->key, $mine_ids, true) && !in_array((int)$untagged->key, $mine_ids, true),
 	'attachments, chat uploads and untagged files stay out of My Drive');
 
-$att_entry = osrc_source_entry($mine, File::SOURCE_EMAIL_ATTACHMENT);
-check($att_entry !== null && $att_entry['count'] >= 2 && $att_entry['label'] === 'Mail attachments',
-	'Mail attachments listed with a count of at least the two made here', json_encode($att_entry));
-$chat_entry = osrc_source_entry($mine, File::SOURCE_AI_CHAT_UPLOAD);
-check($chat_entry !== null && $chat_entry['count'] >= 1, 'AI chat uploads listed');
+$att_entry = osrc_source_entry($mine, OSRC_ATTACHMENT);
+check($att_entry !== null && $att_entry['count'] >= 2 && $att_entry['label'] === 'Test attachments',
+	'a declared source is listed under its label with a count of at least the two made here', json_encode($att_entry));
+$chat_entry = osrc_source_entry($mine, OSRC_CHAT);
+check($chat_entry !== null && $chat_entry['count'] >= 1, 'a second declared source is listed');
 check(osrc_source_entry($mine, File::SOURCE_UNCLASSIFIED) !== null, 'untagged files are offered as Unclassified, not hidden');
 check(osrc_source_entry($mine, File::SOURCE_DRIVE) === null, 'Drive itself is not an "other" source');
-check(osrc_source_entry($mine, File::SOURCE_MAILBOX_SEARCH_INDEX) === null, 'an internal source (the search index) is never offered');
+check(osrc_source_entry($mine, OSRC_INDEX) === null, 'an internal source (the search index) is never offered');
 
 // ---------------------------------------------------------------------------
 section('a source view lists only the caller\'s own files of that source, newest first');
 
-$att = drive_list_logic(array('view' => 'source', 'source' => File::SOURCE_EMAIL_ATTACHMENT));
-check($att->error === null && $att->data['view'] === 'source' && $att->data['source'] === File::SOURCE_EMAIL_ATTACHMENT, 'source view answers');
+$att = drive_list_logic(array('view' => 'source', 'source' => OSRC_ATTACHMENT));
+check($att->error === null && $att->data['view'] === 'source' && $att->data['source'] === OSRC_ATTACHMENT, 'source view answers');
 $att_ids = osrc_ids($att);
 check(in_array((int)$att_a->key, $att_ids, true) && in_array((int)$att_b->key, $att_ids, true), 'both attachments listed');
 check(!in_array((int)$drive_file->key, $att_ids, true) && !in_array((int)$chat->key, $att_ids, true), 'no file of another source');
@@ -96,7 +109,7 @@ $pos_b = array_search((int)$att_b->key, $att_ids, true);
 check($pos_b < $pos_a, 'newest first (the later-made attachment comes before the earlier)');
 foreach ($att->data['items'] as $it) {
 	if ((int)$it['id'] === (int)$att_a->key) {
-		check(!empty($it['requires_window']) && empty($it['is_image']) && empty($it['syncable']) && $it['source'] === File::SOURCE_EMAIL_ATTACHMENT,
+		check(!empty($it['requires_window']) && empty($it['is_image']) && empty($it['syncable']) && $it['source'] === OSRC_ATTACHMENT,
 			'an attachment export says: opened in-window, no thumbnail, not syncable', json_encode($it));
 	}
 }
@@ -108,14 +121,14 @@ check(!in_array((int)$att_a->key, osrc_ids($un), true), '…and only untagged fi
 // ---------------------------------------------------------------------------
 section('search stays inside the source; refused sources are refused');
 
-$srch = drive_list_logic(array('view' => 'source', 'source' => File::SOURCE_EMAIL_ATTACHMENT, 'search' => "invoice-$salt"));
+$srch = drive_list_logic(array('view' => 'source', 'source' => OSRC_ATTACHMENT, 'search' => "invoice-$salt"));
 $srch_ids = osrc_ids($srch);
 check($srch->error === null && $srch_ids === array((int)$att_a->key), 'a search in the attachments view finds only the matching attachment', json_encode($srch_ids));
 
 $plain = drive_list_logic(array('search' => "invoice-$salt"));
 check($plain->error === null && !in_array((int)$att_a->key, osrc_ids($plain), true), 'the Drive-wide search does not surface attachments');
 
-$bad = drive_list_logic(array('view' => 'source', 'source' => File::SOURCE_MAILBOX_SEARCH_INDEX));
+$bad = drive_list_logic(array('view' => 'source', 'source' => OSRC_INDEX));
 check($bad->error !== null, 'an internal source is refused as a view');
 $bad2 = drive_list_logic(array('view' => 'source', 'source' => File::SOURCE_DRIVE));
 check($bad2->error !== null, 'Drive\'s own tag is refused as an "other" source view');

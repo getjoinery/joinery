@@ -244,7 +244,7 @@ section('Attachments: a failed read never costs the key; a turn\'s attachments f
 /** An attachment on $m owned by $owner_id, its text and bytes plain. */
 function clc_attach(AiConversationMessage $m, int $owner_id, string $bytes): array {
 	$file = File::createFromBytes($bytes, 'note_' . bin2hex(random_bytes(3)) . '.txt', 'text/plain', $owner_id,
-		array('fil_private' => true, 'fil_source' => File::SOURCE_AI_CHAT_UPLOAD));
+		array('fil_private' => true, 'fil_source' => AiAttachment::FILE_SOURCE));
 	harness_defer(function () use ($file) { try { $f = new File((int)$file->key, true); if ($f->key) $f->permanent_delete(); } catch (Throwable $e) {} });
 	$link = new AiMessageAttachment(NULL);
 	$link->set('aia_aim_conversation_message_id', (int)$m->key);

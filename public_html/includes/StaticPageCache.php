@@ -6,6 +6,12 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 1.4 - skipThisRequest(): a page that must never be cached (a route's
+ *                'static_cache' => false, or the view itself) leaves no file and
+ *                no index entry — a search page would otherwise add one per query
+ * @version 1.3 - invalidatePath(): every cached copy of a path, whatever its query
+ *                string, and optionally everything under it (a forum thread's
+ *                later pages go stale with its first)
  * @version 1.2 - the index and every page are written through a temporary name of the writer's own
  *                (tempName()), not a shared "{file}.tmp": two requests saving at once renamed each
  *                other's temporary away, and the loser failed on a file that was no longer there
@@ -408,6 +414,9 @@ class StaticPageCache {
      * Create a cache file for a URL
      */
     public static function createCache($url, $params, $content) {
+        if (self::$skip_request) {
+            return false;
+        }
         self::init();
 
         // If cache directory couldn't be initialized, skip caching
@@ -505,7 +514,22 @@ class StaticPageCache {
      * Check if URL should be completely ignored (spam/malicious)
      * Returns true for URLs that should not be cached OR tracked
      */
+    /** Set by skipThisRequest(): this response is neither cached nor recorded. */
+    private static $skip_request = false;
+
+    /**
+     * This response must not be cached, and must not leave an index entry
+     * either — for pages whose every query string is a different page (search).
+     * Routes ask for it with 'static_cache' => false; a view may call it itself.
+     */
+    public static function skipThisRequest(): void {
+        self::$skip_request = true;
+    }
+
     public static function shouldIgnore($request_path = '', $params = []) {
+        if (self::$skip_request) {
+            return true;
+        }
         // Permanently uncacheable by its nature: an excluded path, or a link
         // signed for one recipient. Ignoring means not even writing down the
         // decision, and that distinction is the whole point here.
@@ -593,6 +617,9 @@ class StaticPageCache {
     public static function shouldCache($request_path = '', $params = [], $content = '', $detailed = false) {
         $reasons = [];
         $passed = true;
+        if (self::$skip_request && !$detailed) {
+            return false;
+        }
         // 1. Check HTTP status - only cache successful responses
         $response_code = http_response_code();
         // If no response code has been set, assume 200 (PHP's default)
@@ -939,6 +966,9 @@ class StaticPageCache {
      * Mark a URL as non-cacheable
      */
     public static function markAsNostatic($url, $params = []) {
+        if (self::$skip_request) {
+            return false;   // a never-cached page leaves no index entry, whoever asks
+        }
         self::init();
 
         // If cache directory couldn't be initialized, skip operation
@@ -1003,6 +1033,76 @@ class StaticPageCache {
         self::saveIndex();
 
         return true;
+    }
+
+    /**
+     * Invalidate every cached copy of a path, whatever its query string — a
+     * page's ?page=2 goes stale with its first page. With $with_children, also
+     * every path under it ($path . '/...'). Returns how many entries went.
+     *
+     * invalidateUrl() removes one exact URL; this is for content whose change
+     * reaches every variant of its pages.
+     */
+    public static function invalidatePath($path, $with_children = false) {
+        return $with_children ? self::invalidatePaths(array(), array($path)) : self::invalidatePaths(array($path), array());
+    }
+
+    /**
+     * invalidatePath() for several at once, in one pass over the index: every
+     * cached copy of each path in $paths, and of each path in $trees together
+     * with everything under it.
+     *
+     * @param string[] $paths
+     * @param string[] $trees
+     * @return int how many entries went
+     */
+    public static function invalidatePaths(array $paths, array $trees) {
+        self::init();
+        if (self::$cache_dir === null || self::indexUnavailable()) {
+            return 0;
+        }
+        $norm = function ($p) { return '/' . trim((string)$p, '/'); };
+        $exact = array();
+        foreach ($paths as $p) {
+            $exact[$norm($p)] = true;
+        }
+        $roots = array();
+        foreach ($trees as $p) {
+            $p = $norm($p);
+            $exact[$p] = true;
+            $roots[] = rtrim($p, '/') . '/';
+        }
+        $index = self::loadIndex();
+        $removed = 0;
+        foreach ($index as $hash => $entry) {
+            if ($hash === self::CONFIG_KEY || !is_array($entry) || !isset($entry['url'])) {
+                continue;
+            }
+            $entry_path = $norm(parse_url((string)$entry['url'], PHP_URL_PATH));
+            $hit = isset($exact[$entry_path]);
+            if (!$hit) {
+                foreach ($roots as $root) {
+                    if (strpos($entry_path, $root) === 0) {
+                        $hit = true;
+                        break;
+                    }
+                }
+            }
+            if (!$hit) {
+                continue;
+            }
+            $file = self::$cache_dir . $hash . ($entry['extension'] ?? '.html');
+            if (file_exists($file)) {
+                @unlink($file);
+            }
+            unset($index[$hash]);
+            $removed++;
+        }
+        if ($removed > 0) {
+            self::$index = $index;
+            self::saveIndex();
+        }
+        return $removed;
     }
 
     /**

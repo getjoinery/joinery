@@ -9,13 +9,14 @@
  * private File; the boards_upload action then claims it onto a card, which
  * re-points it at the board so everyone on the board can open it.
  *
+ * @version 1.0.1 - the plugin's file origin tag is its own constant, declared in plugin.json "fileSources"
  * @version 1.0.0
  */
 
 require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
 
 UploadPurposeRegistry::register('boards_attachment', array(
-	'source' => File::SOURCE_BOARDS_ATTACHMENT,
+	'source' => BoardsUploads::FILE_SOURCE,
 	'label'  => 'board attachment',
 
 	// The attachment limit the operator set, in bytes.

@@ -273,7 +273,7 @@ section('delete forever reclaims');
 
 $m_att = $make_msg($mine_alias, '<att@x>', 'With a file', 'attbody');
 $file = File::createFromBytes('trash test bytes', 'trash.txt', 'text/plain', $owner_id,
-	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
+	array('fil_private' => true, 'fil_source' => AttachmentByteCustody::FILE_SOURCE));
 $file_id = (int)$file->key;
 $db->prepare("INSERT INTO ima_inbound_message_attachments
 	(ima_iem_inbound_email_message_id, ima_filename, ima_content_type, ima_size_bytes,
