@@ -1456,9 +1456,16 @@ pub(crate) fn free_conflict_path(
 /// occupant's name — refused, dropped, re-derived, for ever. The gap IS the
 /// defect; closing it is not a tidy-up.
 ///
-/// Returns where the file now is. Never silent: if the destination is occupied
-/// or unplaceable the rename cannot happen, and that leaves exactly the gap
-/// above, so it is said out loud rather than skipped.
+/// Only from the name refused. A file the user moved or renamed after the
+/// upload was planned is sent from where it stands (`where_file_stands`), and
+/// renaming it to the server's name carried it out of the folder the user had
+/// put it in (rig runs 2341, 2342). Left where it is, the gap between it and
+/// the record is the user's own move, and the next scan sends it as one.
+///
+/// Returns where the file now is. Never silent where the file stands at the
+/// name refused: if the destination is occupied or unplaceable the rename
+/// cannot happen, and that leaves exactly the gap above, so it is said out
+/// loud rather than skipped.
 fn follow_the_server_name(
     env: &ExecEnv,
     id: EntityId,
@@ -1467,6 +1474,10 @@ fn follow_the_server_name(
     asked_for: &str,
     server_holds: &str,
 ) -> Result<PathBuf, ExecError> {
+    let refused = Placement { parent: wanted.parent, name: asked_for.to_string() };
+    if !matches!(path_for(env, &refused)?, Placed::At(ref at) if at == from) {
+        return Ok(from.to_path_buf());
+    }
     let Placed::At(to) = path_for(env, wanted)? else {
         env.store.raise_issue(
             Some(id),

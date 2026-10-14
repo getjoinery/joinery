@@ -467,7 +467,10 @@ A new file whose upload is refused because its name is taken goes up beside
 the holder under a conflict name. Refused without a reason, it does so only
 where the server lists something under that name in that folder; otherwise the
 upload is withdrawn and planned again from the disk, never sent as a conflicted
-copy of itself beside nothing. An upload whose bytes did not all arrive
+copy of itself beside nothing. The file on this disk takes the conflict name
+where it still stands at the name refused; one the user moved or renamed after
+the upload was planned is sent from where it stands and left there, and its
+move goes up on the next pass. An upload whose bytes did not all arrive
 (`upload_incomplete`) is sent again whole.
 
 A create claims a directory already standing at its path — a stand-in it was
