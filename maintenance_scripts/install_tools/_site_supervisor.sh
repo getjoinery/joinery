@@ -2,6 +2,10 @@
 #
 # _site_supervisor.sh - keep a site container's four main processes running.
 #
+# Version: 1.2 - At every start, setuid and setgid bits and file capabilities are removed from the
+#                container's own filesystem but for the programs the platform needs them on: the
+#                parser jail's launcher and Postfix's postdrop and postqueue
+#                (multi_tenant_host_hardening D3).
 # Version: 1.1 - A service is started over a stale pid file: one a power cut left half written stopped
 #                Apache for good (the container restarted forever).
 # Version: 1.0 (specs/multi_tenant_docker_hosts.md WP2 item 2)
@@ -150,6 +154,36 @@ if [ "${1:-}" = "--check" ]; then
     exit 0
 fi
 
+# Setuid and setgid bits and file capabilities, at every start
+# (multi_tenant_host_hardening D3). Each such program in Ubuntu's image (su,
+# passwd, mount, chage and the like) is a known route from www-data to root in
+# the container, and nothing the site runs needs one: Apache, PHP-FPM, cron and
+# PostgreSQL start as root and drop privileges themselves. Three are kept, by
+# path: the parser jail's launcher, which needs root for a moment to switch to
+# the jail user (parser_jail spec; without its bit the platform parses strangers'
+# files as www-data again), and Postfix's postdrop and postqueue, through which
+# www-data's sendmail hands mail to the local queue. Only this container's own
+# filesystem is walked (-xdev): the site's volumes are not touched. A package an
+# upgrade installs is stripped at the next start.
+SETUID_KEEP="/usr/local/sbin/joinery-jail /usr/sbin/postdrop /usr/sbin/postqueue"
+strip_setuid() {
+    local f n=0
+    while IFS= read -r -d '' f; do
+        case " ${SETUID_KEEP} " in *" ${f#"$RUN_ROOT"} "*) continue ;; esac
+        chmod u-s,g-s "$f" 2>/dev/null && n=$((n + 1))
+    done < <(find "${RUN_ROOT:-/}" -xdev -type f -perm /6000 -print0 2>/dev/null)
+    # setcap -r needs CAP_SETFCAP, which a site container does not hold. A copy
+    # carries no capability (cp -p keeps mode, owner and times, not extended
+    # attributes), so the copy replaces the file.
+    if command -v getcap > /dev/null 2>&1; then
+        while read -r f _; do
+            [ -n "$f" ] && [ -f "$f" ] || continue
+            cp -p "$f" "${f}.joinery-nocap" 2>/dev/null && mv -f "${f}.joinery-nocap" "$f" && n=$((n + 1))
+        done < <(getcap -r "${RUN_ROOT}/usr" "${RUN_ROOT}/opt" 2>/dev/null)
+    fi
+    [ "$n" -eq 0 ] || say "removed setuid, setgid or file capabilities from ${n} program(s)"
+}
+
 # The watch is one function, called from the last line: bash has then read the
 # whole file before it runs any of it, so an upgrade that replaces this file
 # under the running process can never be read half old, half new.
@@ -164,6 +198,7 @@ supervise() {
     fi
 
     rm -f "$HOLD"
+    strip_setuid
 
     stopping=0
     shutdown() {

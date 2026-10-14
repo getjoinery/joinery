@@ -115,6 +115,19 @@ check($rc === 0 && HostRestrictions::has('unsigned_packages') && HostRestriction
 $before = file_get_contents($file);
 exec($env . ' bash ' . escapeshellarg($tools . '/host_restrictions.sh') . ' multi-tenant 2>&1', $out, $rc);
 check(file_get_contents($file) === $before, 'run again, it writes the same file');
+exec($env . ' bash ' . escapeshellarg($tools . '/host_restrictions.sh') . ' init 2>&1', $out, $rc);
+check($rc === 0 && file_get_contents($file) === $before, 'init over a file already there keeps it as it is');
+
+// A single-site Docker host remaps user ids too (multi_tenant_host_hardening D11):
+// init gives it the directory, with a file that refuses nothing.
+@unlink($file);
+exec($env . ' bash ' . escapeshellarg($tools . '/host_restrictions.sh') . ' init 2>&1', $out, $rc);
+HostRestrictions::useFile($file);
+check($rc === 0 && is_file($file) && HostRestrictions::all() === array() && HostRestrictions::refusal() === ''
+	&& substr(sprintf('%o', fileperms($file)), -3) === '644', 'init writes a file that refuses nothing, 644, read cleanly', implode(' ', $out));
+exec($env . ' bash ' . escapeshellarg($tools . '/host_restrictions.sh') . ' multi-tenant 2>&1', $out, $rc);
+HostRestrictions::useFile($file);
+check($rc === 0 && HostRestrictions::has('unsigned_packages'), 'multi-tenant after init adds the set');
 
 $ask = function (string $file) use ($tools, $root) {
 	exec('JOINERY_HOST_RESTRICTIONS_FILE=' . escapeshellarg($file) . ' bash -c '

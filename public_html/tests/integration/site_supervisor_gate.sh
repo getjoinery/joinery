@@ -131,12 +131,37 @@ PATH="$T/bin:$PATH" service php8.5-fpm start
 PATH="$T/bin:$PATH" apache2ctl stop
 : > "$T/calls"
 
+# Programs carrying setuid or setgid bits, as Ubuntu's image has them, and the
+# three the platform keeps (multi_tenant_host_hardening D3).
+mkdir -p "$RUN/usr/bin" "$RUN/usr/sbin" "$RUN/usr/local/sbin" "$RUN/usr/lib/openssh"
+for f in usr/bin/su usr/bin/passwd usr/bin/mount usr/lib/openssh/ssh-keysign usr/local/sbin/joinery-jail; do
+    printf '#!/bin/sh\n' > "$RUN/$f"; chmod 4755 "$RUN/$f"
+done
+for f in usr/bin/chage usr/bin/crontab usr/sbin/postdrop usr/sbin/postqueue; do
+    printf '#!/bin/sh\n' > "$RUN/$f"; chmod 2755 "$RUN/$f"
+done
+printf '#!/bin/sh\n' > "$RUN/usr/bin/plain"; chmod 755 "$RUN/usr/bin/plain"
+# A program carrying file capabilities, as getcap lists it (a stand-in: setting
+# one needs privilege this gate does not have).
+mkdir -p "$RUN/usr/lib/helper"; printf '#!/bin/sh\necho helper\n' > "$RUN/usr/lib/helper/capped"; chmod 750 "$RUN/usr/lib/helper/capped"
+printf '#!/bin/bash\nfor d in "$@"; do [ "$d" = -r ] && continue; [ -f "$d/lib/helper/capped" ] && echo "$d/lib/helper/capped cap_setuid=ep"; done\nexit 0\n' > "$T/bin/getcap"; chmod +x "$T/bin/getcap"
+capped_inode="$(stat -c '%i' "$RUN/usr/lib/helper/capped")"
+modes() { for f in "$@"; do stat -c '%a' "$RUN/$f"; done | tr '\n' ' '; }
+
 echo "== the supervisor starts =="
 SUPERVISOR_TEST_INTERVAL=0.5 PATH="$T/bin:$PATH" bash "$SUP" testsite > "$T/out" 2>&1 &
 SUP_PID=$!
 wait_for 5 logged "running; watching"
 chk "it started Apache" "$(calls | grep -c '^start apache2$')" "1"
 chk "the hold left from before is gone" "$([ -e "$RUN/run/joinery/supervisor.hold" ] && echo there || echo gone)" "gone"
+chk "setuid and setgid bits removed from Ubuntu's programs (D3)" \
+    "$(modes usr/bin/su usr/bin/passwd usr/bin/mount usr/lib/openssh/ssh-keysign usr/bin/chage usr/bin/crontab)" "755 755 755 755 755 755 "
+chk "the parser jail's launcher keeps its setuid bit, Postfix's postdrop and postqueue their setgid bit" \
+    "$(modes usr/local/sbin/joinery-jail usr/sbin/postdrop usr/sbin/postqueue)" "4755 2755 2755 "
+chk "a program without either is left as it is" "$(modes usr/bin/plain)" "755 "
+chk "a program getcap lists is replaced by a copy, which carries no capability; mode and content kept" \
+    "$([ "$(stat -c '%i' "$RUN/usr/lib/helper/capped")" != "$capped_inode" ] && echo replaced)|$(stat -c '%a' "$RUN/usr/lib/helper/capped")|$(sh "$RUN/usr/lib/helper/capped")|$(ls "$RUN/usr/lib/helper")" "replaced|750|helper|capped"
+chk "and the start says how many it changed" "$(grep -c 'removed setuid, setgid or file capabilities from 7 program(s)' "$T/out")" "1"
 chk "--check passes" "$(sup --check >/dev/null; echo $?)" "0"
 
 echo "== a dead PHP-FPM master =="

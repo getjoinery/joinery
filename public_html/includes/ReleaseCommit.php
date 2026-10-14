@@ -57,6 +57,8 @@
  * and commits and pushes exactly those itself (commitRelease()), as
  * 'Release <version>', so one run goes from a committed tree to a release.
  *
+ * @version 1.7 - the site container engine's source is held and its ENGINE record is publish's to commit
+ *                (specs/site_container_engine.md D1, D2)
  * @version 1.6 - blockerNotes(): what each refusing file is, when it was written, and which session prepared it
  * @version 1.5.2 - the mail gateway's bin/ is generated and its source held, beside the relay sealer's
  * @version 1.5.1 - the build is written 644/755 (tar.umask 0022), not git's group-writable default
@@ -249,6 +251,7 @@ class ReleaseCommit {
 		'public_html/migrations/',                                 // likewise
 		'maintenance_scripts/install_tools/release_keys/',         // copied into the agent bundle from this disk
 		'maintenance_scripts/install_tools/joinery_jail/',         // ParserJailPublisher::SOURCE_SUBDIR, compiled here
+		'maintenance_scripts/install_tools/site_engine/',          // SiteEnginePublisher::SOURCE_SUBDIR, built here
 		'public_html/plugins/mailbox/provisioning/relay-sealer/',  // RelaySealerPublisher::SOURCE_SUBDIR, compiled here
 		'public_html/plugins/mail_apps/provisioning/mail-gateway/', // MailGatewayPublisher::SOURCE_SUBDIR, compiled here
 	);
@@ -629,13 +632,15 @@ class ReleaseCommit {
 	/**
 	 * Whether an uncommitted path is one a publish writes, and so one a
 	 * publish may commit: VERSION, the install SQL, a file in the parser
-	 * jail's prebuilt binary directory, or a plugin or theme manifest whose
+	 * jail's prebuilt binary directory, the site container engine's ENGINE
+	 * record, or a plugin or theme manifest whose
 	 * only change from HEAD is its version line. Anything else is the owner's
 	 * work.
 	 */
 	public static function publishWrite($repo_root, $rel) {
 		$rel = ltrim(str_replace('\\', '/', $rel), '/');
-		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0) {
+		if (in_array($rel, self::JOINERY_RELEASE_FILES, true) || strpos($rel, ParserJailPublisher::BIN_SUBDIR . '/') === 0
+			|| $rel === SiteEnginePublisher::SOURCE_SUBDIR . '/' . SiteEnginePublisher::STAMP_FILE) {
 			return true;
 		}
 		if (!preg_match('~^public_html/(plugins/[^/]+/plugin|theme/[^/]+/theme)\.json$~', $rel)) {

@@ -4,6 +4,16 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.18 - Every machine pins the kernel settings that keep its surface small for an unprivileged
+#                process (kernel pointers, BPF JIT hardening, perf, ptrace, kexec, unprivileged user
+#                namespaces, links and files in shared directories, ASLR) and raises inotify instances,
+#                which every site's www-data shares on a host that remaps user ids; and writes the
+#                network settings install.sh wrote on a server only (99-security.conf), so a Docker host
+#                has them too (multi_tenant_host_hardening D1, D4).
+# Version: 1.17 - The module list is joinery-rare-modules.conf, a file of its own. 1.16 wrote it over
+#                blacklist-rare-network.conf, which is kmod's (install.sh appended to it before), and
+#                apt holds back a kmod update that would change a config file changed here; every run
+#                puts kmod's file back as the package shipped it where what changed it was ours (B6).
 # Version: 1.16 - Every machine, a Docker host as much as a server, keeps the kernel from loading
 #                rare protocol modules any process could make it load (a site's web user loaded
 #                sctp, can and can_raw on a shared host) and unloads one loaded and unused; and
@@ -921,11 +931,25 @@ fi
 # modprobe NAME; "blacklist NAME" keeps their aliases from naming them), and
 # one already loaded and unused is unloaded. Line disciplines are refused as a
 # class: the kernel loads one for a process without CAP_SYS_MODULE only while
-# dev.tty.ldisc_autoload is 1. The other settings keep BPF, the kernel log and
-# userfaultfd out of an unprivileged process's reach. Off the list on purpose:
+# dev.tty.ldisc_autoload is 1. The other kernel settings keep BPF, the kernel log
+# and pointers, perf, userfaultfd, kexec and user namespaces out of an
+# unprivileged process's reach, refuse it a link or file another user placed in
+# a shared directory, and give every site's www-data (one host uid where user
+# ids are remapped) inotify instances enough for twelve sites. The network
+# settings are the ones install.sh once wrote on a server only. Each is pinned
+# even where Ubuntu ships the same value, so a distro change or a hand edit
+# cannot loosen a shared kernel quietly. kernel.modules_disabled is not used:
+# Docker loads bridge and netfilter modules when a site's network is made.
+# Off the list on purpose:
 # what a server's owner may run (WireGuard, IPsec's xfrm_user, ip_vs, nbd,
-# Open vSwitch) and af_alg, which cryptsetup uses. Both files are written whole
-# on every run.
+# Open vSwitch) and af_alg, which cryptsetup uses. Every file here is written
+# whole on every run.
+#
+# blacklist-rare-network.conf beside the list is kmod's own config file. Where
+# what changed it was ours - install.sh's appended lines, or the whole file an
+# earlier run wrote - it is put back byte for byte as kmod shipped it: apt holds
+# back an update to a package whose config file was changed here. An operator's
+# own edits to it are theirs and stay.
 RARE_MODULES=(
     # Socket families.
     appletalk atm ax25 netrom rose x25 af_key llc2 rds tipc
@@ -944,10 +968,92 @@ KERNEL_SETTINGS=(
     "kernel.unprivileged_bpf_disabled = 1"
     "kernel.dmesg_restrict = 1"
     "vm.unprivileged_userfaultfd = 0"
+    "kernel.kptr_restrict = 2"
+    "net.core.bpf_jit_harden = 2"
+    "kernel.perf_event_paranoid = 4"
+    "kernel.yama.ptrace_scope = 1"
+    "kernel.kexec_load_disabled = 1"
+    "kernel.apparmor_restrict_unprivileged_userns = 1"
+    "kernel.randomize_va_space = 2"
+    "fs.protected_symlinks = 1"
+    "fs.protected_hardlinks = 1"
+    "fs.protected_regular = 2"
+    "fs.protected_fifos = 2"
+    "fs.inotify.max_user_instances = 2048"
 )
-MODPROBE_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
+NETWORK_SETTINGS=(
+    "net.ipv4.conf.default.rp_filter = 1"
+    "net.ipv4.conf.all.rp_filter = 1"
+    "net.ipv4.conf.all.accept_redirects = 0"
+    "net.ipv6.conf.all.accept_redirects = 0"
+    "net.ipv4.conf.default.accept_redirects = 0"
+    "net.ipv6.conf.default.accept_redirects = 0"
+    "net.ipv4.conf.all.send_redirects = 0"
+    "net.ipv4.conf.default.send_redirects = 0"
+    "net.ipv4.conf.all.accept_source_route = 0"
+    "net.ipv6.conf.all.accept_source_route = 0"
+    "net.ipv4.conf.default.accept_source_route = 0"
+    "net.ipv6.conf.default.accept_source_route = 0"
+    "net.ipv4.conf.all.log_martians = 1"
+    "net.ipv4.conf.default.log_martians = 1"
+    "net.ipv4.icmp_echo_ignore_all = 0"
+    "net.ipv4.icmp_echo_ignore_broadcasts = 1"
+    "net.ipv6.conf.all.disable_ipv6 = 0"
+    "net.ipv6.conf.default.disable_ipv6 = 0"
+    "net.ipv4.tcp_syncookies = 1"
+    "net.ipv4.tcp_max_syn_backlog = 2048"
+    "net.ipv4.tcp_synack_retries = 2"
+    "net.ipv4.tcp_syn_retries = 5"
+)
+MODPROBE_CONF="${FS_ROOT}/etc/modprobe.d/joinery-rare-modules.conf"
+KMOD_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
 KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
+NETWORK_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/99-security.conf"
+# blacklist-rare-network.conf as kmod ships it on Ubuntu 24.04 and 26.04. It is
+# written back only when its checksum is the one dpkg recorded for this kmod.
+kmod_shipped_rare_network() { cat <<'EOF'
+# Many less commonly used network protocols have recently had various
+# security flaws discovered. In an effort to reduce the scope of future
+# vulnerability exploitations, they are being blacklisted here so that
+# unprivileged users cannot use them by default. System owners can still
+# either modify this file, or specifically modprobe any needed protocols.
+
+# ax25
+alias net-pf-3 off
+# netrom
+alias net-pf-6 off
+# x25
+alias net-pf-9 off
+# rose
+alias net-pf-11 off
+# decnet
+alias net-pf-12 off
+# econet
+alias net-pf-19 off
+# rds
+alias net-pf-21 off
+# af_802154
+alias net-pf-36 off
+EOF
+}
 if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/modprobe.d" ]]; then
+    shipped="$(dpkg-query --admindir="${FS_ROOT}/var/lib/dpkg" -W -f='${Conffiles}\n' kmod 2>/dev/null \
+        | awk '$1 == "/etc/modprobe.d/blacklist-rare-network.conf" { print $2; exit }')"
+    if [[ -n "${shipped}" && -f "${KMOD_CONF}" && "$(md5sum < "${KMOD_CONF}" | cut -c1-32)" != "${shipped}" ]]; then
+        CANDIDATE="$(mktemp)"
+        if grep -q '^# Written by host_housekeeping.sh' "${KMOD_CONF}"; then
+            kmod_shipped_rare_network > "${CANDIDATE}"
+        else
+            # install.sh appended these four, once per server install.
+            grep -v -x -E 'install (dccp|sctp|rds|tipc) /bin/true' "${KMOD_CONF}" > "${CANDIDATE}"
+        fi
+        if [[ "$(md5sum < "${CANDIDATE}" | cut -c1-32)" == "${shipped}" ]]; then
+            install_file "${KMOD_CONF}" "${CANDIDATE}" && say "put ${KMOD_CONF} back as kmod shipped it"
+        elif grep -q '^# Written by host_housekeeping.sh' "${KMOD_CONF}"; then
+            warn "${KMOD_CONF} holds the module list an earlier run wrote, and this kmod shipped another text; put kmod's back: rm ${KMOD_CONF} && apt-get install --reinstall -o Dpkg::Options::=--force-confmiss kmod"
+        fi
+        rm -f "${CANDIDATE}"
+    fi
     CANDIDATE="$(mktemp)"
     {
         echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."
@@ -972,29 +1078,36 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/modprobe.d" ]]; then
         done
     fi
 fi
-if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
-    CANDIDATE="$(mktemp)"
+# One sysctl file: written whole, applied, and each value read back from the
+# running kernel. $1 the file, $2 one comment line saying what it holds, the rest
+# its settings.
+write_sysctl_file() {
+    local file="$1" what="$2" setting key want proc got candidate
+    shift 2
+    candidate="$(mktemp)"
     {
         echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."
-        echo "# What an unprivileged process may ask of the kernel: no line discipline loaded on"
-        echo "# its behalf, no BPF, no kernel log, no userfaultfd."
-        printf '%s\n' "${KERNEL_SETTINGS[@]}"
-    } > "${CANDIDATE}"
-    if install_file "${KERNEL_SYSCTL_CONF}" "${CANDIDATE}"; then
-        say "wrote ${KERNEL_SYSCTL_CONF}"
+        echo "# ${what}"
+        printf '%s\n' "$@"
+    } > "${candidate}"
+    if install_file "${file}" "${candidate}"; then
+        say "wrote ${file}"
     fi
-    rm -f "${CANDIDATE}"
-    if [[ "${RUN_SYSTEM}" == 1 ]]; then
-        # -e: a setting this kernel does not have is passed over, not an error.
-        sysctl -e -q -p "${KERNEL_SYSCTL_CONF}" >/dev/null 2>&1 || true
-        for setting in "${KERNEL_SETTINGS[@]}"; do
-            key="${setting%% =*}"; want="${setting##*= }"
-            proc="/proc/sys/${key//.//}"
-            [[ -r "${proc}" ]] || continue
-            got="$(cat "${proc}")"
-            [[ "${got}" == "${want}" ]] || warn "${key} is ${got}, not ${want}: a later file in /etc/sysctl.d or /etc/sysctl.conf sets it, or the kernel refused it"
-        done
-    fi
+    rm -f "${candidate}"
+    [[ "${RUN_SYSTEM}" == 1 ]] || return 0
+    # -e: a setting this kernel does not have is passed over, not an error.
+    sysctl -e -q -p "${file}" >/dev/null 2>&1 || true
+    for setting in "$@"; do
+        key="${setting%% =*}"; want="${setting##*= }"
+        proc="/proc/sys/${key//.//}"
+        [[ -r "${proc}" ]] || continue
+        got="$(cat "${proc}")"
+        [[ "${got}" == "${want}" ]] || warn "${key} is ${got}, not ${want}: a later file in /etc/sysctl.d or /etc/sysctl.conf sets it, or the kernel refused it"
+    done
+}
+if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
+    write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
+    write_sysctl_file "${NETWORK_SYSCTL_CONF}" "No spoofed source, redirect or source route accepted; SYN floods met with cookies." "${NETWORK_SETTINGS[@]}"
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

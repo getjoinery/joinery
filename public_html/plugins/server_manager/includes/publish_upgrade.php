@@ -695,6 +695,25 @@
 			}
 		}
 
+		// The site container engine, our own build of Podman (specs/
+		// site_container_engine.md D1, D2): built in the owner-made 26.04 build
+		// root when site_engine/versions.env or build.sh changed, published under
+		// static_files/site_engine/, and recorded in site_engine/ENGINE, which
+		// this publish commits and the signed manifest covers. A republishing
+		// site serves the archive its received ENGINE names, fetched from
+		// upstream and checked against that hash. Either way, a tree naming an
+		// engine that is not served would leave every host unable to install it.
+		publish_output($republish ? "Serving the site container engine the received release names..." : "Building the site container engine if its pins changed...");
+		$site_engine = SiteEnginePublisher::publish($full_site_dir, 'publish_output', array('republish' => $republish));
+		if ($site_engine['status'] === SiteEnginePublisher::STATUS_FAILED) {
+			publish_output("\nRefusing to publish {$version} — the site container engine "
+				. ($republish ? 'its received release names could not be served.' : 'is owed a build that did not complete.'));
+			publish_output($republish
+				? "Check that upstream serves it under static_files/site_engine/, then publish again. No release was published."
+				: "Make the build root once (sudo bash maintenance_scripts/install_tools/site_engine/build_root.sh create) or fix the build, then publish again. No release was published.");
+			exit(1);
+		}
+
 		// The support bundle rides beside the agent artifact: the signed script
 		// tree a machine with NO SITE resolves its primitives against. Built
 		// here, while the tree is the tree that is about to ship and before the

@@ -158,11 +158,13 @@ goes from a commit to a release:
      plugin (the install SQL is dumped from this box's database, which
      `update_database` may already have changed); `settings.json`,
      `admin_menus.json`, `install_bundles.json` and `create_install_sql.php`;
-     the parser jail, relay sealer and mail gateway sources (compiled here); `release_keys/`
+     the parser jail, relay sealer and mail gateway sources (compiled here); the site
+     container engine's `install_tools/site_engine/` (built here); `release_keys/`
      (copied into the agent bundle); and every `plugin.json` and `theme.json`
      (publish writes its version bump into the file and commits the whole file).
    - **Publish's own** (`ReleaseCommit::publishWrite()`: `VERSION`, the install
-     SQL, the parser jail binaries, a plugin or theme manifest whose only change
+     SQL, the parser jail binaries, the site container engine's
+     `site_engine/ENGINE` record, a plugin or theme manifest whose only change
      is its version), left by an earlier run that stopped — written again, and a
      `VERSION` that names a version with no release row is published as-is
      rather than bumped.
@@ -172,7 +174,8 @@ goes from a commit to a release:
    support bundle's scripts and the version decisions below all read it.
 3. Writes the files a release generates — `public_html/VERSION`, the install
    SQL at `maintenance_scripts/install_tools/joinery-install.sql.gz`, any
-   rebuilt launcher binaries, and the patch bumps of every theme or plugin
+   rebuilt launcher binaries, the site container engine's `ENGINE` record when
+   its pins changed (see *The site container engine* below), and the patch bumps of every theme or plugin
    whose content changed since the last release (`plugin.json` / `theme.json`).
 4. Commits exactly those files as `Release <version>` and pushes
    (`ReleaseCommit::commitRelease()`). The paths are named on the commit, so
@@ -367,6 +370,18 @@ logged statements, spent versions, the unfinished-row guard) and
 `plugins/server_manager/tests/release_log_tail_test.php` (reading a log built
 in the test: where it starts, the settled checkpoint, our entry matched, a
 stranger and a changed entry unaccounted for, the budget, blind).
+
+### The site container engine
+
+Container hosts run our own build of Podman with netavark and aardvark-dns (`specs/site_container_engine.md`), not Ubuntu's package. `maintenance_scripts/install_tools/site_engine/versions.env` pins each part by upstream tag and commit, and the official Go toolchain Podman is compiled with. When `versions.env` or `build.sh` changed since the engine last published, publish builds it (`SiteEnginePublisher`, about twelve minutes) in an Ubuntu 26.04 build root at `/var/lib/joinery-site-engine-build/resolute`. The owner makes that root once, as root, on the publishing box:
+
+    sudo bash maintenance_scripts/install_tools/site_engine/build_root.sh create
+
+`build.sh` refuses its own output unless the binary carries the pinned commit, the pinned Go and the `seccomp` and `apparmor` build tags. The archive, `joinery-site-engine-<version>-<arch>.tar.xz`, is published under `static_files/site_engine/`; publish writes its name and SHA-256 into `site_engine/ENGINE` and commits that file with the release, so the signed manifest covers it. A build owed and not done (no build root, a failed build) refuses the release.
+
+A site that republishes what it received does not build: it fetches the archive its received `ENGINE` names from its `upgrade_source`, keeps it only when the hash matches, and serves it from its own `static_files/site_engine/`; one it cannot serve refuses the republish. A host installs the engine with `install_site_engine.sh converge`, which reads `ENGINE` from its own signed tree and fetches and installs the archive only when its current engine is not that one.
+
+Tests: `tests/integration/site_engine_gate.sh` (the host installer and `converge`, run against a fixture root) and `tests/unit/site_engine_publisher_test.php` (build when owed, publish, the republishing site's fetch).
 
 ### Distribution Architecture
 

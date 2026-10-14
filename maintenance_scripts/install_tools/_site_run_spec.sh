@@ -3,6 +3,9 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.10 - A remapping host need not serve strangers (every new Docker host remaps,
+#                 multi_tenant_host_hardening D11): the refusal for a missing restrictions
+#                 directory names host_restrictions.sh init, which every new host runs.
 # Version: 1.9 - Every site mounts the host's restrictions directory read-only
 #                (RUN_SPEC_RESTRICTIONS_DIR, specs/host_restrictions.md D7), the platform's like
 #                the capabilities; on a host whose Docker remaps user ids no site is run without
@@ -612,7 +615,7 @@ run_spec_args() {  # SITE
 }
 
 # A site is never run unrestricted on a host that restricts: where Docker remaps
-# user ids (a multi-tenant host, install.sh docker --multi-tenant), the host's
+# user ids (every Docker host install.sh docker builds), the host's
 # restrictions directory must exist before any container is made. Fails closed
 # when Docker does not say whether it remaps.
 run_spec_restrictions_present() {
@@ -622,7 +625,7 @@ run_spec_restrictions_present() {
     rc=$?
     [[ "$rc" -eq 1 ]] && return 0
     if [[ "$rc" -eq 0 ]]; then
-        echo "run spec: this host runs sites for others (Docker remaps user ids) but has no ${RUN_SPEC_RESTRICTIONS_DIR}; no site runs here without the host's restrictions. Run install.sh docker --multi-tenant to write them." >&2
+        echo "run spec: Docker remaps user ids on this host, and it has no ${RUN_SPEC_RESTRICTIONS_DIR}; no site runs here without the host's restrictions. Run install_tools/host_restrictions.sh init as root (multi-tenant on a host that serves others) to write them." >&2
     else
         echo "run spec: Docker did not say whether it remaps user ids, and this host has no ${RUN_SPEC_RESTRICTIONS_DIR}; refusing rather than run a site that may be unrestricted" >&2
     fi

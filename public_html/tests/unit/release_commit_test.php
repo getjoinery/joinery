@@ -233,6 +233,7 @@ $held = array(
 	'public_html/utils/create_install_sql.php'                          => true,
 	'maintenance_scripts/install_tools/release_keys/release/k.pub'      => true,  // copied into the agent bundle
 	'maintenance_scripts/install_tools/joinery_jail/src/main.rs'        => true,  // compiled on this box
+	'maintenance_scripts/install_tools/site_engine/versions.env'        => true,  // the engine is built from it here
 	'public_html/plugins/mailbox/provisioning/relay-sealer/src/main.rs' => true,
 	'public_html/includes/DriveHelper.php'                              => false,
 	'public_html/logic/drive_trash_logic.php'                           => false,
@@ -247,6 +248,8 @@ foreach ($held as $path => $expected) {
 }
 check(strpos(implode(' ', ReleaseCommit::JOINERY_HELD_DIRS), ParserJailPublisher::SOURCE_SUBDIR . '/') !== false,
 	'the parser jail source held is the one its publisher compiles');
+check(in_array(SiteEnginePublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true),
+	'the site container engine source held is the one its publisher builds');
 $plugin_publishers = GoBinaryPublisher::pluginPublishers();
 check(in_array('RelaySealerPublisher', $plugin_publishers, true) && in_array('MailGatewayPublisher', $plugin_publishers, true),
 	'the relay sealer and the mail gateway are both plugin Go programs publish builds', json_encode($plugin_publishers));
@@ -378,6 +381,8 @@ file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": 
 check(ReleaseCommit::publishWrite($repo, 'public_html/VERSION'), 'VERSION is publish\'s to commit');
 check(ReleaseCommit::publishWrite($repo, 'public_html/plugins/p/plugin.json'), 'a manifest whose only change is its version is publish\'s');
 check(ReleaseCommit::publishWrite($repo, 'maintenance_scripts/install_tools/joinery_jail/bin/joinery-jail-x86_64'), 'a rebuilt parser jail binary is publish\'s');
+check(ReleaseCommit::publishWrite($repo, 'maintenance_scripts/install_tools/site_engine/ENGINE'), 'the site container engine\'s ENGINE record is publish\'s');
+check(!ReleaseCommit::publishWrite($repo, 'maintenance_scripts/install_tools/site_engine/versions.env'), '  its pins are the owner\'s');
 file_put_contents($repo . '/public_html/includes/Mine.php', "<?php // the owner's\n");
 check(!ReleaseCommit::publishWrite($repo, 'public_html/includes/Mine.php'), 'any other file is the owner\'s');
 file_put_contents($repo . '/public_html/plugins/p/plugin.json', "{\n  \"name\": \"q\",\n  \"version\": \"1.0.1\"\n}\n");
