@@ -1,0 +1,5 @@
+# Written by the publish (SiteEnginePublisher): the engine this tree's hosts install,
+# published beside the release under static_files/site_engine/. Do not edit.
+source_sha256=27fac1b88cfb7c686d0db57b2ccaff6e80c9cb3579a5049c2d3cef80019e7304
+archive=joinery-site-engine-6.1.4-amd64.tar.xz
+sha256=85d9c315d86b3d0b47d6bdbc31ff58c08c40070340dcda3c91371382e558e760
