@@ -30,8 +30,13 @@
  * A DORMANT COPY (B58) is enrolled and sent its recipient as any machine is,
  * once its agent takes both on a quiet site (DORMANT_COPY_MIN_AGENT_VERSION):
  * an address swap restarts it, and it must open by escrow then. Its row follows
- * it to its source's node at the switch-over (SiteCopySwap).
+ * it to its source's node at the switch-over (SiteCopySwap). A machine the
+ * copy lets go (a discarded copy, the old server of a kept switch-over) has
+ * its key given up (let_go()): its owner deletes it at the provider, and a
+ * holder still answering it would open its data for whoever has it next.
  *
+ * @version 1.7 - let_go(): a machine a site copy lets go (discarded, or the old server of a kept switch-over) has
+ *                the keys held for it retired; its row stayed enrolled on a deleted node, still answered (B64)
  * @version 1.6 - a dormant copy is enrolled and sent its recipient once its agent takes both on a quiet site (B58);
  *                only an enrolment job that has not succeeded holds the next back an hour, so the machine that
  *                takes over a node is enrolled at once (B60)
@@ -100,6 +105,17 @@ class DataRootEscrowSync {
 		}
 		foreach (new MultiDataRootEscrow(array('node' => (int)$node->key, 'live' => true)) as $row) {
 			$row->permanent_delete();
+		}
+	}
+
+	/**
+	 * A machine a site copy lets go: what this holder keeps for it is retired,
+	 * as Stop holding its key does, so it is answered no more (B64). Retired,
+	 * not removed: it records a key this holder gave up.
+	 */
+	public static function let_go(ManagedNode $node): void {
+		foreach (new MultiDataRootEscrow(array('node' => (int)$node->key, 'live' => true)) as $row) {
+			$row->retire();
 		}
 	}
 

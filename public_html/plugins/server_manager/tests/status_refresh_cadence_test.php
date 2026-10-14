@@ -20,6 +20,8 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.3 - a host report saying a data root run is under way is asked again after
+ *                DATA_ROOT_RUN_REFRESH_SECONDS, not the hour (B62)
  * @version 1.2 - a refused or failed answer inside the window is cover; a cancelled job is not
  * @version 1.1 - the probe-stamped node still gets its check_status; a node with a recently
  *                completed check_status job gets none
@@ -138,5 +140,31 @@ $cancelled_job->set('mjb_status', 'cancelled');
 $cancelled_job->save();
 $queued = $task->refresh_status_facts(array($cancelled), gmdate('Y-m-d H:i:s'));
 check($queued === 1, 'a cancelled host_report is no cover: the node is asked', "queued=$queued");
+
+section('While its data root is being encrypted, a machine is asked every few minutes (B62)');
+// The run ends on its own, hours after the job that started it; its end is
+// what calls for the enrolment and changes what the node page offers.
+$six_min = gmdate('Y-m-d H:i:s', time() - RunNodeUptimeChecks::DATA_ROOT_RUN_REFRESH_SECONDS - 60);
+$run_report = function (string $reencrypt) {
+	return json_encode(array('data_root_encryption' => array('backing' => 'luks-file', 'open' => true, 'holder' => '',
+		'reencrypt' => $reencrypt, 'reencrypt_percent' => $reencrypt === '' ? '' : '42.0')));
+};
+$running = srt_node($tag, 'drrun', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $six_min, 'mgn_last_host_report' => $run_report('encrypt')));
+$settled = srt_node($tag, 'drdone', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $six_min, 'mgn_last_host_report' => $run_report('')));
+foreach (array($running, $settled) as $n) {
+	$j = ManagementJob::createFromBuild($n->key, 'host_report', JobCommandBuilder::build_host_report_primitive($n), null, null);
+	$j->set('mjb_status', 'completed');
+	$j->set('mjb_completed_time', $six_min);
+	$j->save();
+}
+check(RunNodeUptimeChecks::data_root_run_under_way($running) && !RunNodeUptimeChecks::data_root_run_under_way($settled),
+	'a report with an encryption under way says so; one without does not');
+$queued = $task->refresh_status_facts(array($running, $settled), gmdate('Y-m-d H:i:s'));
+check($queued === 1 && srt_jobs($running, 'host_report') === 2 && srt_jobs($settled, 'host_report') === 1,
+	'six minutes after its last report, the encrypting machine is asked again; a settled one waits out the hour', "queued=$queued");
+$queued = $task->refresh_status_facts(array($running), gmdate('Y-m-d H:i:s'));
+check($queued === 0, 'and asked once: the open job is cover', "queued=$queued");
 
 harness_finish();

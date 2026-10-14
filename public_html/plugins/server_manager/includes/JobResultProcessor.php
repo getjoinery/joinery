@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.81 - a data root job that ends (encrypt, decrypt, rekey, migrate, recipient, an enrolment confirmed)
+ *                 queues a host report: the node page, the escrow sync and the address swap's check read the
+ *                 last one, and the next hourly one left them saying what the machine was before (B62)
  * @version 1.80 - a host report of a plain data root hands it to DataRootEscrowSync::from_plain_report (B55)
  * @version 1.79 - script_text(): a script primitive's own text out of the agent's envelope; a host report's disk_pool keeps the device a data root on a device sits on (host_report 1.22)
  * @version 1.78 - a host report's host_restrictions and each container's code_check (host_report 1.21,
@@ -3164,6 +3167,46 @@ HTML;
 			'unlock_fingerprint' => preg_match('/^[0-9a-f]{16}$/', (string)($data['unlock_fingerprint'] ?? '')) ? $data['unlock_fingerprint'] : '',
 		]));
 		$job->save();
+		self::report_after_data_root_job($job);
+	}
+
+	/**
+	 * The data root words whose job's own output is the whole record: what
+	 * they changed shows in the machine's next host report, asked for as they
+	 * end (B62). An encryption, its undo and a re-key end their job once they
+	 * are under way; the report then says how far, and the uptime pass keeps
+	 * asking while it does (RunNodeUptimeChecks::data_root_run_under_way).
+	 */
+	private static function process_data_root_encrypt($job) { self::report_after_data_root_job($job); }
+	private static function process_data_root_decrypt($job) { self::report_after_data_root_job($job); }
+	private static function process_data_root_rekey($job) { self::report_after_data_root_job($job); }
+	private static function process_data_root_migrate($job) { self::report_after_data_root_job($job); }
+	private static function process_data_root_recipient($job) { self::report_after_data_root_job($job); }
+
+	/**
+	 * A data root job ended, so the machine's data root, its escrow holder or
+	 * its sealed copy may have changed, and the node page, the enrolment
+	 * (DataRootEscrowSync) and the address swap's check (IpSwapMove) all read
+	 * the last host report. One is queued now, unless one is already on its
+	 * way; a report finished before this job ended describes the machine
+	 * before it (B62).
+	 */
+	private static function report_after_data_root_job($job) {
+		$node_id = (int)$job->get('mjb_mgn_managed_node_id');
+		if (!$node_id) {
+			return;
+		}
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+			if (JobCommandBuilder::has_primitive($node, 'host_report')
+					&& !ManagementJob::activeOrRecentForNode($node_id, 'host_report', 0)) {
+				ManagementJob::createFromBuild($node_id, 'host_report',
+					JobCommandBuilder::build_host_report($node), null, $job->get('mjb_created_by'));
+			}
+		} catch (Exception $e) {
+			// The job's own outcome stands; the uptime pass reads the machine
+			// again in its turn.
+		}
 	}
 
 	private static function process_page_probe($job) {

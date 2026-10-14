@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.22 - a machine the copy lets go (discarded, gone back from, or the old server of a kept switch-over)
+ *                 has the escrow keys held for it retired (DataRootEscrowSync::let_go, B64)
  * @version 1.21 - an address swapped back passes on what the swap noted (an AAAA record still at the copy, B61); a
  *                new move clears what the last undo said
  * @version 1.20 - a copy run from the running site backs it up first (backup_run, arg run) and copies the chain
@@ -860,6 +862,7 @@ class SiteCopyRunner {
 			self::cancel_open_steps($copy->steps());
 			$node = self::copy_row($copy, false);
 			if ($node && !$node->get('mgn_delete_time')) {
+				DataRootEscrowSync::let_go($node);
 				$node->soft_delete();
 			}
 			$copy->set('scp_status', SiteCopy::STATUS_DISCARDED);
@@ -2040,6 +2043,7 @@ class SiteCopyRunner {
 			// key again, so it can no longer reach this management node.
 			$node = self::copy_row($copy, true);
 			if ($node) {
+				DataRootEscrowSync::let_go($node);
 				$node->soft_delete();
 			}
 			$copy->set('scp_status', SiteCopy::STATUS_DISCARDED);
@@ -2071,6 +2075,7 @@ class SiteCopyRunner {
 			$server = self::server_to_delete($copy);
 			$node = self::copy_row($copy, true);
 			if ($node && trim((string)$node->get('mgn_install_state')) === 'retired') {
+				DataRootEscrowSync::let_go($node);
 				$node->soft_delete();
 			}
 			$copy->set('scp_status', SiteCopy::STATUS_FINISHED);

@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.16 - the ended copy's banner keeps what going back noted (an AAAA record still at the copy): the copy is
+ *                discarded minutes after, and the note went with it (B63)
  * @version 1.15 - a copy from the running site backs it up first: the note says so, and the step has its label (B53)
  * @version 1.14 - "Data root encrypted" on the new-server form where data_root_encryption_offered is on, ticked when
  *                 the first account offered is one of ours (specs/hosted_data_promise_disk_encryption.md C-2)
@@ -135,6 +137,11 @@ if (!$site_copy) {
 		echo '<div class="alert alert-light border">The last copy of this site ended ('
 			. $copy_h(strtolower($ended_copy->status_label())) . ', ' . $copy_h($ended_copy->get_local('scp_update_time', 'M j, g:i A'))
 			. '). If you have not yet, delete its server at the provider: <strong>' . $copy_h($ended_server) . '</strong>.</div>';
+	}
+	// What going back noted outlasts the copy: an AAAA record the owner
+	// pointed at the copy still sends IPv6 visitors to that server (B63).
+	foreach ($ended_copy ? (array)($ended_copy->switch_record()['moved_back_notes'] ?? array()) : array() as $note) {
+		echo '<div class="alert alert-warning small">When it went back: ' . $copy_h($note) . '</div>';
 	}
 	$page->begin_box(['title' => 'Copy this site to a new server']);
 	// Two places a copy can come from: the running site, or its backups
