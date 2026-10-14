@@ -26,6 +26,8 @@
  * happens entirely here, out of this plane's own directory layout, for the same
  * reason serve_agent_binary() takes an architecture rather than a filename.
  *
+ * @version 1.3 - core_archive(): the published core archive of a version, whole, for a host installing a
+ *                site from it (site_install, specs/site_container_engine.md D9)
  * @version 1.2 - read_file(): one of the five self-update files out of a published core archive, for a node
  *                that must put it back (specs/release_file_repair.md)
  * @version 1.1 - member names are matched by stripping a './' PREFIX, not a character set
@@ -137,6 +139,17 @@ class ReleaseManifestSource {
 	/** Is this a version string this plane will look for? */
 	public static function valid_version(string $version): bool {
 		return (bool)preg_match(self::VERSION_PATTERN, $version);
+	}
+
+	/**
+	 * The published core archive of a version, or NULL where this plane has
+	 * none (never published here, or pruned). A node names the version; the
+	 * path is this plane's own.
+	 */
+	public static function core_archive(string $version): ?string {
+		if (!self::valid_version($version)) { return null; }
+		$path = self::archive_path('', $version);
+		return ($path !== null && is_file($path)) ? $path : null;
 	}
 
 	/**

@@ -2,6 +2,10 @@
 #
 # _site_start.sh - a site container's start command (specs/site_container_engine.md D6).
 #
+# Version: 1.1 - a quiet site (its state file, _site_state.sh) starts quiet: before cron and Apache
+#                start, the quiet measures are asserted, which holds the scheduled-task cron file
+#                just written and puts the web drop-in in place; a cron file still there stops the
+#                start (specs/site_container_engine.md D9).
 # Version: 1.0 - the start command Dockerfile.template carried inline as a shell-form CMD,
 #                moved here unchanged so the image runs it in exec form: Podman's builder
 #                stores a shell-form CMD for /bin/sh whatever SHELL says, and this command
@@ -85,6 +89,14 @@ set +H && \
     echo "" >> /etc/cron.d/logrotate-joinery && \
     sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
     chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
+    if [ -e "/etc/joinery/sites/${SITENAME}/state" ]; then \
+        bash -c '. "$1" && site_state_init "$2" && site_state_assert "$(site_state_read)"' _ \
+            "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_site_state.sh" "${SITENAME}" \
+            || echo "${SITENAME} is quiet and a quiet measure did not hold; the converger asserts them again"; \
+        if [ -e "/etc/cron.d/joinery-${SITENAME}" ]; then \
+            echo "FATAL: ${SITENAME} is quiet and its scheduled-task cron file could not be held"; exit 1; \
+        fi; \
+    fi && \
     service cron start && \
     FPM_SERVICE="$(basename "$(ls -1 /etc/init.d/php*-fpm 2>/dev/null | sort -V | tail -1)")" && \
     if [ -z "${FPM_SERVICE}" ] || [ "${FPM_SERVICE}" = "." ]; then echo "FATAL: no php-fpm init script under /etc/init.d"; exit 1; fi && \

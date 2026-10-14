@@ -18,6 +18,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.18 - Copy onto a host: the hosts that can take a copy as a container, and why the others cannot; a copy
+ *                 being installed on its host; its key page reached at the site's name through one hosts-file line;
+ *                 the labels of the host's quiet steps (specs/site_container_engine.md D9)
+ * @version 1.17 - an AAAA record left at the copy is named while DNS still names it, and not after the owner points
+ *                it back (SiteCopyRunner::went_back_notes, B66)
  * @version 1.16 - the ended copy's banner keeps what going back noted (an AAAA record still at the copy): the copy is
  *                discarded minutes after, and the note went with it (B63)
  * @version 1.15 - a copy from the running site backs it up first: the note says so, and the step has its label (B53)
@@ -74,6 +79,9 @@ $copy_step_labels = array(
 	'probe/copy'               => 'Ask for the copy\'s look link at the site\'s name',
 	'provision_certificate/source' => 'Issue the site\'s certificate on the new server',
 	'hold_container:stop/host'     => 'Stop the old container on its host, and keep it stopped',
+	'site_quiet_host:on/source_host'   => 'Freeze the site from outside: its host keeps it off the network',
+	'site_quiet_host:off/source_host'  => 'Let the site back on the network: its host lifts the freeze',
+	'site_quiet_host:off/copy_host'    => 'Let the copy on the network: its host lifts its quiet',
 );
 $copy_verdict_badge = array(
 	'pending' => 'secondary', 'running' => 'primary', 'passed' => 'success', 'failed' => 'danger', 'skipped' => 'secondary',
@@ -140,7 +148,7 @@ if (!$site_copy) {
 	}
 	// What going back noted outlasts the copy: an AAAA record the owner
 	// pointed at the copy still sends IPv6 visitors to that server (B63).
-	foreach ($ended_copy ? (array)($ended_copy->switch_record()['moved_back_notes'] ?? array()) : array() as $note) {
+	foreach ($ended_copy ? SiteCopyRunner::went_back_notes($ended_copy->switch_record()) : array() as $note) {
 		echo '<div class="alert alert-warning small">When it went back: ' . $copy_h($note) . '</div>';
 	}
 	$page->begin_box(['title' => 'Copy this site to a new server']);
@@ -315,6 +323,46 @@ if (!$site_copy) {
 	$fw->submitbutton('btn_copy_own', 'Copy to a server I bring', ['class' => 'btn btn-outline-primary']);
 	$fw->end_form();
 	$page->end_box();
+
+	// Onto a host, as a container there (specs/site_container_engine.md D9):
+	// from the site's backups, then a final copy of the frozen site at the
+	// switch-over, so nothing written meanwhile is lost.
+	if (isset($copy_from_options[SiteCopy::FROM_BACKUPS])) {
+		$page->begin_box(['title' => 'Copy onto a host']);
+		$host_options = array();
+		$host_refused = array();
+		foreach (new MultiManagedHost(array('deleted' => false), array('mgh_name' => 'ASC')) as $copy_host) {
+			$why = SiteCopyRunner::host_refusals($node, $copy_host);
+			if ($why) {
+				$host_refused[(string)$copy_host->get('mgh_name')] = $why;
+			} else {
+				$host_options[(int)$copy_host->key] = $copy_host->get('mgh_name') . ' (' . $copy_host->get('mgh_host') . ')';
+			}
+		}
+		echo '<p>Puts this site in a container on one of your hosts whose sites run on the site container engine. It is copied '
+			. 'from its backups (you type the recovery key on the copy\'s own page); at the switch-over this site is frozen, '
+			. 'backed up once more and copied again, and both must match before the address moves. The host issues the copy\'s '
+			. 'certificate, and this site\'s old container is held stopped after.</p>';
+		if ($host_options) {
+			$fw = $page->getFormWriter('copy_on_host_form', ['action' => $base_url . '&tab=copy']);
+			$fw->begin_form();
+			$fw->hiddeninput('action', ['value' => 'copy_on_host']);
+			echo SmAdminCsrf::field();
+			$fw->dropinput('copy_host', 'Host', ['options' => $host_options, 'required' => true]);
+			$fw->submitbutton('btn_copy_on_host', 'Copy onto this host', ['class' => 'btn btn-outline-primary']);
+			$fw->end_form();
+		} else {
+			echo '<p class="text-muted">No host can take it now.</p>';
+		}
+		if ($host_refused) {
+			echo '<ul class="small text-muted">';
+			foreach ($host_refused as $host_name => $why) {
+				echo '<li><strong>' . $copy_h($host_name) . ':</strong> ' . $copy_h(implode(' ', $why)) . '</li>';
+			}
+			echo '</ul>';
+		}
+		$page->end_box();
+	}
 	return;
 }
 
@@ -345,7 +393,13 @@ if ($copy_status === SiteCopy::STATUS_HALTED && $site_copy->get('scp_halt_reason
 }
 
 if ($copy_status === SiteCopy::STATUS_WAITING) {
-	if ($copy_provision) {
+	if ($site_copy->on_host()) {
+		$install_job_id = (int)$site_copy->get('scp_install_job_id');
+		echo '<p>The host is installing the copy as a container' . ($install_job_id
+			? ' (<a href="/admin/server_manager/job_detail?job_id=' . $install_job_id . '">job #' . $install_job_id . '</a>)' : '')
+			. ': it builds the copy\'s image, then starts it quiet. Its agent then asks to join, and is let in when it carries '
+			. 'the key its install showed.</p>';
+	} elseif ($copy_provision) {
 		echo '<p>This management node is creating the server (' . $copy_h($copy_provision->get('cvp_instance_type')) . '): <strong>'
 			. $copy_h($copy_provision->get('cvp_status')) . '</strong>';
 		if ($copy_provision->get('cvp_instance_ip')) {
@@ -393,7 +447,17 @@ if ($copy_steps) {
 		}
 		echo '</td><td><span class="badge bg-' . ($copy_verdict_badge[$s['verdict']] ?? 'secondary') . '">' . $copy_h($s['verdict']) . '</span></td>';
 		echo '<td>' . $copy_h($s['reason'] ?? '') . '</td></tr>';
-		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node) {
+		if ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node && $site_copy->on_host()) {
+			// A shared host answers by name only: the key page is reached at the
+			// site's name, pointed at the host by one hosts-file line.
+			$key_domain = SiteCopyRunner::site_domain($node);
+			echo '<tr><td colspan="4" class="table-info"><strong>Waiting for the backup\'s recovery key.</strong> Point your computer at '
+				. 'the copy\'s host with one hosts-file line, <code>' . $copy_h($copy_node->get('mgn_host') . ' ' . $key_domain) . '</code>, then '
+				. '<a href="' . $copy_h('https://' . $key_domain . $site_copy->get('scp_look_path') . '/key') . '" target="_blank" rel="noopener">open '
+				. 'the copy\'s key page</a>, accept the certificate warning (the copy has a placeholder until the switch-over), then check the '
+				. 'backup, the date its storage provider says it was stored, and the key\'s fingerprint it names, and paste the recovery key. '
+				. 'It stays in your browser; this management node never sees it. Take the hosts-file line out once you are done.</td></tr>';
+		} elseif ($s['op'] === 'copy_take_key' && $s['verdict'] === 'running' && $copy_node) {
 			// The key page needs no hosts-file line: it answers at the copy's
 			// own address, the look link's cookie included (the certificate
 			// warning is the copy's placeholder, accepted once).
@@ -666,7 +730,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		echo '<div class="alert alert-warning small">The last move did not finish (' . $copy_h($copy_switch['move_failure']) . ')'
 			. ($copy_method === SiteCopyRunner::METHOD_IP_SWAP ? '; the addresses were put back.' : '.') . '</div>';
 	}
-	foreach ((array)($copy_switch['moved_back_notes'] ?? array()) as $note) {
+	foreach (SiteCopyRunner::went_back_notes($copy_switch) as $note) {
 		echo '<div class="alert alert-warning small">' . $copy_h($note) . '</div>';
 	}
 

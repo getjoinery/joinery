@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.39 - claim budgets for site_install and discard_copy, a copy onto a host's install and removal
  * @version 1.38 - claim budgets for data_root_encrypt, data_root_decrypt and data_root_rekey (their starts)
  * @version 1.37 - a claim that never reports is LOST, never requeued: failStaleClaims() (was requeueStaleClaims)
  *                 fails a job past its budget, markLost() fails a node's running jobs when its agent says it is
@@ -353,6 +354,11 @@ class ManagementJob extends SystemBase {
 		// host's proof that the domain left instead of an approval wait.
 		// Sized above the agent's declared 20m.
 		'decommission_moved_site' => 1500, // 20m + slack
+		// A copy onto a host (specs/site_container_engine.md D9): its install
+		// builds the copy's image there (the agent's 75m), and a dormant copy's
+		// removal is a teardown (its 20m).
+		'site_install'          => 4800,  // 75m + slack
+		'discard_copy'          => 1500,  // 20m + slack
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */

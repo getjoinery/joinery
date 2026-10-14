@@ -6,6 +6,7 @@
  * env: any
  * needs: []
  * timeout: 60
+ * covers: [public_html/plugins/mailbox/provisioning/provision_relay.sh]
  *
  * A relay has no compiler. provision_relay.sh 2.9 installs a PREBUILT sealer
  * from provisioning/bin/relay-sealer-<uname -m> and refuses to proceed without

@@ -29,6 +29,8 @@
  * A swap made anywhere else would leave the copy signing as itself against a
  * row that no longer holds its key.
  *
+ * @version 1.6 - the container's published port moves with the machine: a copy onto a host is a container
+ *                too, on a port of its own there (specs/site_container_engine.md D9)
  * @version 1.5 - an escrow row follows its machine: it stayed on the node, whose page then showed, and whose Stop
  *                holding its key gave up, the other machine's key (B56)
  * @version 1.4 - the agent's support-bundle verdict moves with the machine
@@ -46,9 +48,10 @@ class SiteCopySwap {
 	 */
 	const MACHINE_COLUMNS = array(
 		'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path', 'mgn_ssh_port',
-		// A container source's machine is its container on a Docker host;
-		// the copy is bare metal, so the site's row leaves both behind.
-		'mgn_container_name', 'mgn_mgh_managed_host_id',
+		// A container's machine is its container on its host, reached on its
+		// own published port: each side's moves with it, whether the copy is
+		// bare metal or a container on another host.
+		'mgn_container_name', 'mgn_mgh_managed_host_id', 'mgn_port',
 		'mgn_last_host_report', 'mgn_last_host_report_time',
 		'mgn_agent_public_key', 'mgn_agent_paired_time', 'mgn_agent_quiet_time', 'mgn_agent_last_poll',
 		'mgn_agent_version', 'mgn_agent_primitives', 'mgn_agent_recipes', 'mgn_agent_bundle_version',

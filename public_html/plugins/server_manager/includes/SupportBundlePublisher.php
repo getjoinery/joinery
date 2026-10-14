@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.23 - carries site_quiet_host.sh, the host's half of a site container's quiet state (the
+ *                site_quiet_host word, host housekeeping, the engine's hook), and discard_copy.sh, a dormant
+ *                copy removed from its host (specs/site_container_engine.md D9)
  * @version 1.22 - carries listening_sockets.sh, container_inventory.sh and reboot_machine.sh: the three machine words of
  *                 agent 1.76.0 work on a siteless host
  * @version 1.21 - carries _site_engine.sh, which install.sh and _site_run_spec.sh source to name the engine a
@@ -179,6 +182,14 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
 		'maintenance_scripts/sysadmin_tools/hold_container.sh',
+		// site_quiet_host: the host's half of a site container's quiet state
+		// (specs/site_container_engine.md D9), run by the word of that name,
+		// by host_housekeeping.sh (install and assert) and, as its installed
+		// copy, by the site container engine's hook. Sources _site_engine.sh.
+		'maintenance_scripts/sysadmin_tools/site_quiet_host.sh',
+		// discard_copy: a dormant copy removed from its host, only while the
+		// host records it as a copy. Runs remove_account.sh beside it.
+		'maintenance_scripts/sysadmin_tools/discard_copy.sh',
 		// suspended_page: a site's suspended page on the host's proxy. Sources
 		// nothing.
 		'maintenance_scripts/sysadmin_tools/suspended_page.sh',

@@ -6,6 +6,7 @@
  * env: any
  * needs: []
  * timeout: 60
+ * covers: [public_html/plugins/mail_apps/provisioning/install_mail_gateway.sh]
  *
  * A server has no compiler. install_mail_gateway.sh installs a PREBUILT gateway
  * from provisioning/bin/mail-gateway-<uname -m>, and MailGatewayPublisher is

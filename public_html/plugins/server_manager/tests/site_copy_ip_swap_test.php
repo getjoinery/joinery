@@ -470,9 +470,15 @@ check($src->get('mgn_agent_public_key') === $source_key && $src->get('mgn_host')
 	'the node is the old machine at its own address, and the provisions say so');
 check(trim((string)$src->get('mgn_install_state')) === '', 'the site is no longer switching');
 $ended = SiteCopy::recently_ended_for_source((int)$src->key);
-$notes = $ended ? implode(' ', (array)($ended->switch_record()['moved_back_notes'] ?? array())) : '';
+$notes = $ended ? implode(' ', SiteCopyRunner::went_back_notes($ended->switch_record())) : '';
 check($ended && (int)$ended->key === (int)$copy->key && strpos($notes, 'AAAA record for the copy\'s IPv6 address 2600:3c03::2') !== false,
 	'discarded, the copy still carries what going back noted, for the ended-copy banner (B63)', $notes);
+// The owner points the record at the site's own server: the banner stops naming it (B66).
+$aaaa = array('2600:3c03::1');
+$notes = implode(' ', SiteCopyRunner::went_back_notes($ended->switch_record()));
+check(strpos($notes, 'AAAA') === false && !empty($ended->switch_record()['aaaa_left']),
+	'once the AAAA record no longer names the copy, the banner no longer says it does (B66)', $notes);
+$aaaa = array('2600:3c03::2');
 $back_row = new DataRootEscrow($back_row->key, TRUE);
 $old_row = new DataRootEscrow($old_row->key, TRUE);
 check((string)$back_row->get('dre_status') === 'retired' && (int)$back_row->get('dre_mgn_managed_node_id') === (int)$cnode->key,
@@ -528,7 +534,7 @@ check($fake->owner[$S4] === '11' && $fake->status['11'] === 'running' && $fake->
 	'each address is back, the old server runs (still frozen), and the copy runs on its own address');
 check(trim((string)$src->get('mgn_install_state')) === 'switching' && ($copy2->switch_record()['address_at'] ?? '') === 'source',
 	'the site is still frozen, its address at its own server');
-$notes = implode(' ', (array)($copy2->switch_record()['moved_back_notes'] ?? array()));
+$notes = implode(' ', SiteCopyRunner::went_back_notes($copy2->switch_record()));
 check(strpos($notes, 'AAAA record for the copy\'s IPv6 address 2600:3c03::2') !== false && strpos($notes, '2600:3c03::1') !== false,
 	'the undo says the AAAA record still names the copy\'s IPv6, and where to point it back (B61)', $notes);
 $aaaa = array();

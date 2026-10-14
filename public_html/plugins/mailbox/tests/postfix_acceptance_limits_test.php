@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/install_email.sh, public_html/plugins/mailbox/provisioning/provision_relay.sh, public_html/plugins/mailbox/provisioning/relay-sealer/*.go]
  */
 /**
  * Two things Postfix must be told on every machine that receives mail, because

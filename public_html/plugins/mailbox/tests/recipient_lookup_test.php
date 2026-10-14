@@ -4,6 +4,7 @@
  * tier: test-db
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/install_email.sh]
  */
 /**
  * A colocated box refuses an address it does not have while the sender is

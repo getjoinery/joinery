@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -345,6 +345,7 @@ mv "$T/bin/docker" "$T/docker.real"
 GATE_DOCKER_LOG="$T/podman.log" JOINERY_SITE_ENGINE_KIND=podman PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/pod.json" 2>/dev/null
 mv "$T/docker.real" "$T/bin/docker"; rm -f "$T/bin/podman"
 chk "on the site container engine: the same two sites, through podman" "$(jv "$T/pod.json" containers count)/$(jv "$T/pod.json" containers.0.name)/$(jv "$T/pod.json" containers.0.answers)" "2/siteone/yes"
+chk "  and it says which engine its sites run on, for a copy to choose a host by" "$(jv "$T/pod.json" site_engine)/$(jv "$T/root.json" site_engine)" "podman/docker"
 chk "  its start time asked for in RFC 3339, so started_at holds" \
     "$(grep -c 'StartedAt.Format "2006-01-02T15:04:05.999999999Z07:00"' "$T/podman.log")|$(jv "$T/pod.json" containers.0.started_at)" "1|$(jv "$T/root.json" containers.0.started_at)"
 # A code_check the site made a link is not followed (host_report runs as root; reviewer2 T1).

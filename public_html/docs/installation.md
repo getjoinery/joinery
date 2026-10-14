@@ -319,6 +319,8 @@ unsigned_packages=refuse
 - A rebuilt site's untagged images older than ten minutes are removed: the engine builds with no cache.
 - It is for a new host; a host with Docker on it refuses `--site-engine`.
 - The host agent names the engine by the same rule (`engine.go`), reads a site's volumes under the engine's storage, and copies into a site through it; a site's own agent knows it is in a container by either engine's marker.
+- A site moves onto such a host by site copy into a container there. `install.sh site --docker SITENAME - DOMAIN PORT --dormant --copy-of=ID --copy-of-key=KEY --release-tree-only` installs the empty copy quiet from its first process: its own state goes into its container before it starts, and its host holds it off the network from outside (the host's installed `joinery-site-quiet` and the engine's hook, which host housekeeping keeps current; the quiet state in [Deploy and Upgrade](deploy_and_upgrade.md)). It refuses a name the host already has, and a host whose housekeeping has not installed the quiet tool.
+- `--release-tree-only` builds a site from the tree install.sh came from and nothing else: no core archive laid over it, no theme, plugin or bundle fetched by the installer. It needs the tree's signed manifest and takes no `--activate`. At first boot the site installs its active theme, which routing needs, through `utils/install_extension.php`, which writes only a package that verifies against the release keys the tree carries. The management node drives it through the host's agent (`site_install`, from the site's verified release); see *Site copy* in the Server Manager docs.
 - It is opt-in, for a new host: Docker is the default.
 
 ### Create a site

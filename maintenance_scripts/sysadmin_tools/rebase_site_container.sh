@@ -2,6 +2,9 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.16 - a site its host holds quiet (a dormant copy, a frozen source) is refused before
+#                anything changes: its own state is in its container (run_spec_quiet_refusal,
+#                specs/site_container_engine.md D9).
 # Version: 1.15 - reviewer2 V1, R9, R10, S2: on the site container engine the agent's identity is unpacked on
 #                the host (the engine's archive carries the site's host ids, which an id-mapped helper
 #                cannot set) and the volume's root takes the folder's owner and mode, a volume the carry did not fill is removed, and an id map with other than
@@ -164,6 +167,7 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root on the container host"
 ENGINE="$(site_engine_bin)" || die "this machine's container engine could not be named"
 command -v "$ENGINE" > /dev/null || die "${ENGINE} is not installed here"
+run_spec_quiet_refusal "$SITE" && die "${SITE} is quiet on this host and is not rebuilt"
 
 # An image id, short: Docker's carry a sha256: prefix, Podman's do not.
 short_id() { local i="${1#sha256:}"; echo "${i:0:12}"; }

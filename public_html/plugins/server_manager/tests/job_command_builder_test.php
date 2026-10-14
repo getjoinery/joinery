@@ -4,6 +4,7 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [maintenance_scripts/sysadmin_tools/restore_database.sh]
  */
 /**
  * JobCommandBuilder — the commands the management node sends to production nodes.
@@ -1633,6 +1634,45 @@ foreach (array(array('', '1g', '', ''), array('Starter7', '1g', '', ''), array('
 	$sl_msg = '';
 	try { JobCommandBuilder::build_site_limits_primitive($bad[0], $bad[1], $bad[2], $bad[3]); } catch (Exception $e) { $sl_msg = $e->getMessage(); }
 	check($sl_msg !== '', "the envelope refuses " . json_encode($bad));
+}
+
+// site_install and site_quiet_host (specs/site_container_engine.md D9): a
+// dormant copy installed as a container on a host, and the host's half of its
+// quiet state, each addressed to the host's own agent.
+list($host_si, $host_si_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,site_install,site_quiet_host'));
+$si_ok = array('name' => 'getjoinery_orgs', 'domain' => 'Orgs.GetJoinery.com', 'port' => 9083, 'release' => '0.8.496',
+	'copy_of' => 417, 'copy_of_key' => base64_encode(str_repeat("\x0c", 32)), 'memory' => '384m');
+$sienv = JobCommandBuilder::build_site_install($host_si_node, $si_ok);
+check(($sienv['primitive'] ?? '') === 'site_install' && ($sienv['params'] ?? null) === array('name' => 'getjoinery_orgs',
+		'domain' => 'orgs.getjoinery.com', 'port' => 9083, 'release' => '0.8.496', 'copy_of' => 417,
+		'copy_of_key' => base64_encode(str_repeat("\x0c", 32)), 'memory' => '384m'),
+	'site_install routes the copy\'s name, domain (lower-cased), port, release, source and key; no address of any plane', json_encode($sienv));
+check(!isset(JobCommandBuilder::build_site_install_primitive(array_merge($si_ok, array('memory' => '')))['params']['memory']),
+	'no memory limit sends none');
+foreach (array('name' => 'Getjoinery', 'domain' => 'x', 'port' => 80, 'release' => 'latest', 'copy_of' => 0,
+		'copy_of_key' => 'short', 'memory' => '1t') as $field => $bad) {
+	$si_msg = '';
+	try { JobCommandBuilder::build_site_install_primitive(array_merge($si_ok, array($field => $bad))); } catch (Exception $e) { $si_msg = $e->getMessage(); }
+	check($si_msg !== '', "site_install refuses a bad {$field}", json_encode($bad));
+}
+list($host_nosi, $host_nosi_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
+foreach (array('site_install' => function () use ($host_nosi_node, $si_ok) { JobCommandBuilder::build_site_install($host_nosi_node, $si_ok); },
+		'site_quiet_host' => function () use ($host_nosi_node) { JobCommandBuilder::build_site_quiet_host($host_nosi_node, 'sa', 'on', 'switchover'); },
+		'discard_copy' => function () use ($host_nosi_node) { JobCommandBuilder::build_discard_copy($host_nosi_node, 'sa'); }) as $word => $call) {
+	$si_msg = '';
+	try { $call(); } catch (Exception $e) { $si_msg = $e->getMessage(); }
+	check(strpos($si_msg, $word) !== false, "a host agent without {$word} refuses, naming it", $si_msg);
+}
+check(JobCommandBuilder::build_site_quiet_host($host_si_node, 'getjoinery_orgs', 'on', 'switchover')
+		=== array('primitive' => 'site_quiet_host', 'params' => array('action' => 'on', 'name' => 'getjoinery_orgs', 'reason' => 'switchover')),
+	'site_quiet_host on carries its reason, a switch-over');
+check(JobCommandBuilder::build_site_quiet_host_primitive('getjoinery_orgs', 'off')
+		=== array('primitive' => 'site_quiet_host', 'params' => array('action' => 'off', 'name' => 'getjoinery_orgs')),
+	'and off carries none');
+foreach (array(array('sa', 'on', ''), array('sa', 'on', 'live'), array('sa', 'on', 'copy'), array('sa', 'off', 'copy'), array('sa', 'clear', ''), array('Sa', 'on', 'copy'), array('a;b', 'off', '')) as $bad) {
+	$si_msg = '';
+	try { JobCommandBuilder::build_site_quiet_host_primitive($bad[0], $bad[1], $bad[2]); } catch (Exception $e) { $si_msg = $e->getMessage(); }
+	check($si_msg !== '', 'site_quiet_host refuses ' . json_encode($bad));
 }
 
 // suspended_page: a site's suspended page on its host's proxy, addressed to

@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/**, maintenance_scripts/sysadmin_tools/**, public_html/composer.json, public_html/includes/cloudflare_ip_ranges.txt, public_html/plugins/mail_apps/provisioning/**, public_html/plugins/mailbox/provisioning/**, public_html/utils/*.php, public_html/plugins/server_manager/includes/SupportBundlePublisher.php, public_html/tests/email/auth_analysis.php]
  */
 /**
  * The promises the published install path makes, held to the code that makes them.
@@ -2501,9 +2502,11 @@ section('The health probe reports reachability, not liveness');
 // The reach probe (name_reaches_here) is not a probe line: it fetches a nonce
 // THROUGH the name on purpose, and asking by Host header would prove nothing
 // about the path the CA takes.
-// Both closing checks go through probe_site_front, which asks by Host header.
+// Both closing checks go through probe_site_front, which asks by Host header,
+// and so does a dormant container copy's second ask, as a visitor with no look
+// cookie, which must get the quiet 503 (specs/site_container_engine.md D9).
 $probe_calls = preg_match_all('/^\s+probe_site_front "http/m', $install_exec);
-check($probe_calls === 2, 'both install paths probe the site', 'probe calls found: ' . $probe_calls);
+check($probe_calls === 3, 'both install paths probe the site, and a dormant container copy asks again as a visitor', 'probe calls found: ' . $probe_calls);
 $probe_lines = array_values(array_filter(
     preg_split('/\R/', $install_exec),
     function ($l) { return strpos($l, 'curl') !== false && strpos($l, '-D -') !== false

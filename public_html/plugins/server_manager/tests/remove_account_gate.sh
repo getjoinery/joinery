@@ -151,7 +151,7 @@ container_site() {
     echo "joinery-${s}:latest" >> "$D/images"
     mkdir -p "$T/fs/etc/joinery/sites/$s" "$T/fs/var/www/html/$s/logs"
     echo "network=${s}_net" > "$T/fs/etc/joinery/sites/$s/run_spec"
-    printf 'SSLCertificateFile /etc/letsencrypt/live/%s.example/fullchain.pem\nErrorLog /var/www/html/%s/logs/proxy_error.log\n' "$s" "$s" \
+    printf 'ServerName %s.example\nServerAlias www.%s.example\nSSLCertificateFile /etc/letsencrypt/live/%s.example/fullchain.pem\nErrorLog /var/www/html/%s/logs/proxy_error.log\n' "$s" "$s" "$s" "$s" \
         > "$T/fs/etc/apache2/sites-available/$s.conf"
 }
 in_use() { local v; for v in $mine; do echo "${1}_${v}" >> "$D/in_use"; done; }
@@ -167,7 +167,10 @@ for s in getjoinery_developers getjoinery_orgs getjoinery_test; do container_sit
 echo "getjoinery_postgres_pg16" >> "$D/volumes"
 echo "joinery-getjoinery:pre-rebase-pg16" >> "$D/images"
 mkdir -p "$T/fs/root/rebase/getjoinery" "$T/fs/root/rebase/getjoinery_orgs"
-touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended"
+touch "$T/fs/etc/joinery/sites/getjoinery/held" "$T/fs/etc/joinery/sites/getjoinery/suspended" "$T/fs/etc/joinery/sites/getjoinery/quiet"
+# A certificate retry armed for its name, and one for a sibling's.
+mkdir -p "$T/fs/etc/joinery/ssl-retry"
+touch "$T/fs/etc/joinery/ssl-retry/getjoinery.example.conf" "$T/fs/etc/joinery/ssl-retry/getjoinery_orgs.example.conf"
 # Its disk allowance on a disk pool (docker_disk_pool.sh), beside two
 # neighbours' whose names begin with getjoinery's, one of them a site named
 # getjoinery_deploy, whose project's name is what getjoinery's deploy
@@ -195,7 +198,10 @@ chk "A: getjoinery's vhost and its backup gone" "$(ls "$T/fs/etc/apache2/sites-a
 chk "A: no database dropped on a Docker host" "$(logged '^dropdb')" "0"
 chk "A: rebase work dir gone" "$(there /root/rebase/getjoinery)" "no"
 chk "A: a sibling's rebase work dir kept" "$(there /root/rebase/getjoinery_orgs)" "yes"
-chk "A: held and suspended marks gone" "$(ls "$T/fs/etc/joinery/sites/getjoinery" | wc -l | tr -d ' ')" "0"
+chk "A: held, quiet and suspended marks gone" "$(ls "$T/fs/etc/joinery/sites/getjoinery" | wc -l | tr -d ' ')" "0"
+chk "A: its certificate retry stopped, the sibling's kept (B15)" \
+    "$(there /etc/joinery/ssl-retry/getjoinery.example.conf):$(logged 'disable --now joinery-ssl-retry@getjoinery.example.timer'):$(there /etc/joinery/ssl-retry/getjoinery_orgs.example.conf):$(logged 'joinery-ssl-retry@getjoinery_orgs')" \
+    "no:1:yes:0"
 chk "A: sibling state kept" "$(there /etc/joinery/sites/getjoinery_orgs/run_spec)" "yes"
 chk "A: its certificate handed to remove_site_certificate.sh" "$(echo "$out" | grep -c 'getjoinery.example.*removed')" "1"
 

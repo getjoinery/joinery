@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.26 - site_engine: which engine this host's sites run on (podman, docker, none or unknown), for
+#                the management node to choose a host for a copy by (specs/site_container_engine.md D9).
 # Version: 1.25 - the site container engine is installed where anything is at its current path, as
 #                _site_engine.sh reads it (reviewer2 R7, T4), and its podman is run by path (T3); a site's
 #                code_check that is a link is not followed (T1).
@@ -1133,6 +1135,19 @@ host_engine() {
     echo "docker docker"
 }
 
+# Which engine this host's sites run on, for the management node to choose a
+# host by: "podman" (the site container engine), "docker", "none" (no engine
+# here to run a site), or "unknown" (named, but the helper refused).
+emit_site_engine() {
+    local pair kind bin
+    pair="$(host_engine 2>/dev/null)" || { printf '"unknown"'; return; }
+    read -r kind bin <<< "$pair"
+    case "$kind" in
+        podman|docker) command -v "$bin" >/dev/null 2>&1 && printf '"%s"' "$kind" || printf '"none"' ;;
+        *) printf '"unknown"' ;;
+    esac
+}
+
 emit_containers() {
     local names c site state health pid started port vols answers n=0 i src sum bytes path engine fmt="$INSPECT_FORMAT"
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
@@ -1311,6 +1326,7 @@ printf '"os":%s,' "$(emit_os)"
 printf '"answers":%s,' "$(emit_answers)"
 printf '"served_certificates":%s,' "$(emit_served_certificates)"
 printf '"host_restrictions":%s,' "$(emit_host_restrictions)"
+printf '"site_engine":%s,' "$(emit_site_engine)"
 printf '"containers":%s,' "$(emit_containers)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"

@@ -155,8 +155,20 @@ for pub in 9081:5432 0.0.0.0:9081:5432 '[::]:9081:5432/tcp' 10.0.0.5:9081:5432; 
     sed -i '/:5432/d' "$T/root/etc/joinery/sites/h/run_spec"; printf 'publish=%s\n' "$pub" >> "$T/root/etc/joinery/sites/h/run_spec"
     chk "a database published beyond the host (${pub}) runs no site" "$(args h | grep -c .)|$(grep -c 'publishes its database beyond this host' "$T/err")" "0|1"
 done
+A="$(args e)"
+chk "the site is named to the engine's quiet hook (D9)" "$(grep -A1 -x -- '--annotation' <<< "$A" | tail -n1)" "io.joinery.site=e"
+mkdir -p "$T/root/etc/joinery/sites/e"; echo copy > "$T/root/etc/joinery/sites/e/quiet"
+chk "a site its host holds quiet gives no arguments: it is never rebuilt" "$(args e | grep -c .)" "0"
+chk "  and says why" "$(grep -c 'is quiet on this host' "$T/err")" "1"
+rm -f "$T/root/etc/joinery/sites/e/quiet"
+for f in "$ROOT/maintenance_scripts/sysadmin_tools/rebase_site_container.sh" "$ROOT/maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh"; do
+    chk "$(basename "$f") refuses a quiet site before anything changes" \
+        "$(( $(grep -n 'run_spec_quiet_refusal "\$SITE" && die' "$f" | head -1 | cut -d: -f1) < $(grep -n -E 'site_engine (stop|rm)|docker (stop|rm)|stop_site_writes ' "$f" | grep -v '^[0-9]*:[[:space:]]*#' | head -1 | cut -d: -f1) ))" "1"
+done
+chk "install.sh refuses a quiet site before anything changes" \
+    "$(( $(grep -n 'if run_spec_quiet_refusal "\$SITENAME"; then' "$TOOLS/install.sh" | cut -d: -f1) < $(grep -n 'site_engine stop "\$SITENAME"' "$TOOLS/install.sh" | head -1 | cut -d: -f1) ))" "1"
 A="$(JOINERY_SITE_ENGINE_KIND=docker args e)"
-chk "a Docker host's arguments carry no id map, no sysctl and no filter of ours" "$(grep -c -E -- '^--(uidmap|gidmap|sysctl|security-opt)$' <<< "$A")" "0"
+chk "a Docker host's arguments carry no id map, no sysctl and no filter of ours" "$(grep -c -E -- '^--(uidmap|gidmap|sysctl|security-opt|annotation)$' <<< "$A")" "0"
 
 echo "A site network on the site engine"
 : > "$STUB_CALLS"
@@ -171,6 +183,24 @@ chk "adopt is refused on the site engine" "$(in_lib "run_spec_adopt nospec"; ech
 chk "  saying the site is rebuilt instead" "$(grep -c 'rebuild the site with install.sh site' "$T/err")" "1"
 chk "the CPU count is Podman's" "$(STUB_CPUS=8 in_lib "run_spec_host_cpus")" "8"
 chk "and every site's ids are its own" "$(in_lib "run_spec_docker_remaps_ids; echo \$?")" "0"
+
+echo "A site built from its release tree alone (reviewer2 WP5 R1, R5)"
+I="$TOOLS/install.sh"
+chk "the core archive is laid over the tree only when it is not the site's release by signature" \
+    "$(grep -B1 'download_core_archive "\$BUILD_DIR/\$SITENAME/public_html"' "$I" | grep -c 'RELEASE_TREE_ONLY:-false}" != true')" "1"
+chk "  and themes and plugins are fetched for a container only then" \
+    "$(grep -A1 'if \[ "\${RELEASE_TREE_ONLY:-false}" != true \] && { \[ -n "\$THEMES" \] || \[ -n "\$UPGRADE_SERVER" \]; }; then' "$I" | grep -c 'download_themes_and_plugins "\$ARCHIVE_ROOT/public_html"')" "1"
+chk "  and for bare metal" \
+    "$(grep -A1 'if \[ "\${RELEASE_TREE_ONLY:-false}" != true \]; then' "$I" | grep -c 'download_themes_and_plugins "\$ARCHIVE_ROOT/public_html"')" "1"
+chk "no other call of either download" "$(grep -v '^[[:space:]]*#' "$I" | grep -c -E '^[[:space:]]*download_(core_archive|themes_and_plugins) ')" "3"
+chk "it needs the tree's signed manifest, and takes no theme, and installs no bundle" \
+    "$(grep -c -e 'carries its signed manifest, and \$tree_root has none' -e 'adds no theme, so there is none to --activate' -e 'export JOINERY_INSTALL_BUNDLE=none' "$I")" "3"
+chk "a dormant container copy uses the host's installed quiet tool, never the tree's" \
+    "$(grep -c 'local quiet_host="/usr/local/sbin/joinery-site-quiet"' "$I"):$(grep -c 'sysadmin_tools/site_quiet_host.sh" install' "$I")" "1:0"
+chk "and a copy that could not start quiet is removed whole" \
+    "$(grep -A6 'if ! start_dormant_container' "$I" | grep -c 'remove_account.sh" "\$SITENAME" -y')" "1"
+chk "  and so is one whose container could not be made (R2c)" \
+    "$(grep -A6 'if ! site_engine create "\${RUN_ARGS\[@\]}"' "$I" | grep -c 'remove_account.sh" "\$SITENAME" -y')" "1"
 
 echo "install.sh speaks to the site's engine"
 # Every docker command outside Docker's own host install, by function (B10: the

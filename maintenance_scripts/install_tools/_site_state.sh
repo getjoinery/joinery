@@ -3,6 +3,11 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.6 - in a site container (either engine's marker) the machine's measures are the host's: its
+#               table inside the site's own network namespace is site_quiet_host.sh's, and the
+#               container keeps the rest here - the web drop-in (reloaded with apache2ctl graceful
+#               when Apache runs; no systemd), the held cron files and Postfix's deferral; no boot
+#               unit, no nftables of its own and no certbot timer (specs/site_container_engine.md D9).
 # Version: 1.5 - /.joinery-look/{secret}/key sets the look cookie and lands on /copy-key: a copy
 #               waiting for its recovery key is opened at its key page, not at a home page that
 #               has no accounts yet. Both look paths are matched exactly.
@@ -45,6 +50,13 @@
 # gone; and site_quiet.sh, which sets and clears `quiet switchover` for the
 # agent. The dormant install writes `quiet copy` and leaves the rest to the gate.
 #
+# In a site container the machine is the host (specs/site_container_engine.md
+# D9). The table that refuses the web user's traffic lives in the site's own
+# network namespace, loaded from outside by site_quiet_host.sh, which the site
+# holds no capability to change; the container has no systemd and no
+# certificate of its own. So here the state file, the web drop-in, the held
+# cron files and Postfix's deferral are kept, and the rest is the host's.
+#
 # A test points /etc at a fixture with JOINERY_SITE_STATE_ROOT, and only an
 # unprivileged run may. Without it, an unprivileged run has nothing it can
 # assert, and site_state_init says so by returning 1.
@@ -86,6 +98,8 @@ site_state_init() {
     SS_APACHE_ENABLED="${SS_ROOT}/etc/apache2/conf-enabled/joinery-quiet-${SS_SITE}.conf"
     SS_CRON_DIR="${SS_ROOT}/etc/cron.d"
     SS_UNIT_FILE="${SS_ROOT}/etc/systemd/system/${SS_UNIT_NAME}"
+    SS_CONTAINER=0
+    [[ -e "${SS_ROOT}/.dockerenv" || -e "${SS_ROOT}/run/.containerenv" ]] && SS_CONTAINER=1
     return 0
 }
 
@@ -257,6 +271,13 @@ ss_apache_reload() {
         ss_warn "apache2ctl configtest fails - Apache not reloaded: $(apache2ctl configtest 2>&1 | tail -1)"
         return 1
     fi
+    if [[ "${SS_CONTAINER}" == "1" ]]; then
+        # No systemd: the container's supervisor starts Apache, and one not yet
+        # running starts with the drop-in in place.
+        pgrep -x apache2 >/dev/null 2>&1 || return 0
+        apache2ctl -k graceful 2>/dev/null || ss_warn "Apache did not reload"
+        return 0
+    fi
     systemctl reload apache2 2>/dev/null || ss_warn "Apache did not reload"
 }
 
@@ -273,31 +294,34 @@ site_state_assert() {
     local reason="$1" rc=0 changed secret svc now name f
     mkdir -p "${SS_HELD}/cron.d" 2>/dev/null && chmod 700 "${SS_DIR}" "${SS_HELD}" 2>/dev/null
 
-    # Outgoing traffic. First: it is the measure that makes the rest safe.
-    if ! command -v nft >/dev/null 2>&1 && [[ -z "${SS_ROOT}" ]]; then
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -q nftables >/dev/null 2>&1 \
-            || ss_warn "nftables is not installed and could not be"
-    fi
-    if [[ -z "$(ss_uids)" ]]; then
-        ss_warn "no web user on this machine - no firewall rule to write"
-        rc=1
-    fi
-    ss_render_nft | ss_write_if_changed "${SS_NFT_FILE}" 600
-    case $? in
-        0) ss_say "firewall rule written" ;;
-        2) ss_warn "cannot write ${SS_NFT_FILE}"; rc=1 ;;
-    esac
-    # Loaded every time: a table deleted by hand is back within the minute.
-    if ! nft -f "${SS_NFT_FILE}" 2>/dev/null; then
-        ss_warn "nft could not load ${SS_NFT_FILE} - the web user can still reach the network"
-        rc=1
-    fi
-    ss_render_unit | ss_write_if_changed "${SS_UNIT_FILE}" 644
-    changed=$?
-    [[ "${changed}" == "2" ]] && { ss_warn "cannot write ${SS_UNIT_FILE}"; rc=1; }
-    if [[ "${changed}" == "0" ]] || ! systemctl is-enabled --quiet "${SS_UNIT_NAME}" 2>/dev/null; then
-        systemctl daemon-reload 2>/dev/null
-        systemctl enable "${SS_UNIT_NAME}" >/dev/null 2>&1 || { ss_warn "cannot enable ${SS_UNIT_NAME}"; rc=1; }
+    # Outgoing traffic. First: it is the measure that makes the rest safe. In a
+    # container it is the host's (site_quiet_host.sh), so none of it is here.
+    if [[ "${SS_CONTAINER}" != "1" ]]; then
+        if ! command -v nft >/dev/null 2>&1 && [[ -z "${SS_ROOT}" ]]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q nftables >/dev/null 2>&1 \
+                || ss_warn "nftables is not installed and could not be"
+        fi
+        if [[ -z "$(ss_uids)" ]]; then
+            ss_warn "no web user on this machine - no firewall rule to write"
+            rc=1
+        fi
+        ss_render_nft | ss_write_if_changed "${SS_NFT_FILE}" 600
+        case $? in
+            0) ss_say "firewall rule written" ;;
+            2) ss_warn "cannot write ${SS_NFT_FILE}"; rc=1 ;;
+        esac
+        # Loaded every time: a table deleted by hand is back within the minute.
+        if ! nft -f "${SS_NFT_FILE}" 2>/dev/null; then
+            ss_warn "nft could not load ${SS_NFT_FILE} - the web user can still reach the network"
+            rc=1
+        fi
+        ss_render_unit | ss_write_if_changed "${SS_UNIT_FILE}" 644
+        changed=$?
+        [[ "${changed}" == "2" ]] && { ss_warn "cannot write ${SS_UNIT_FILE}"; rc=1; }
+        if [[ "${changed}" == "0" ]] || ! systemctl is-enabled --quiet "${SS_UNIT_NAME}" 2>/dev/null; then
+            systemctl daemon-reload 2>/dev/null
+            systemctl enable "${SS_UNIT_NAME}" >/dev/null 2>&1 || { ss_warn "cannot enable ${SS_UNIT_NAME}"; rc=1; }
+        fi
     fi
 
     # Web.
@@ -334,8 +358,9 @@ site_state_assert() {
     done
 
     # certbot's timer. Recorded only when it was on, so clearing never turns
-    # on a timer somebody had turned off.
-    if systemctl is-enabled --quiet certbot.timer 2>/dev/null || systemctl is-active --quiet certbot.timer 2>/dev/null; then
+    # on a timer somebody had turned off. A container has none: its
+    # certificate is its host's.
+    if [[ "${SS_CONTAINER}" != "1" ]] && { systemctl is-enabled --quiet certbot.timer 2>/dev/null || systemctl is-active --quiet certbot.timer 2>/dev/null; }; then
         if systemctl is-enabled --quiet certbot.timer 2>/dev/null; then
             : > "${SS_HELD}/certbot.timer"
         fi

@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.15 - A new site whose active theme is not on disk installs it at first boot through
+#                 utils/install_extension.php, which installs only a package that verifies against
+#                 the release keys this tree carries: a site built from its release tree alone
+#                 (install.sh --release-tree-only, a copy onto a host) fetched no theme, and routing
+#                 serves nothing without one (specs/site_container_engine.md D9, reviewer2 WP5 R1).
 # VERSION: 3.14 - On an encrypted data root the site's config/ is on it too, moved in before
 #                 anything here writes into it (specs/hosted_data_promise_disk_encryption.md D9).
 # VERSION: 3.13 - On a host with a data root, a bare-metal site's uploads, static_files, storage,
@@ -845,6 +850,35 @@ if [ -n "$ACTIVATE_THEME" ]; then
              WHERE NOT EXISTS (SELECT 1 FROM stg_settings WHERE stg_name = 'theme_template');" 2>/dev/null || true
     else
         log_error "Theme not found: $ACTIVATE_THEME"
+    fi
+fi
+
+# =============================================================================
+# THE ACTIVE THEME IS ON DISK
+# =============================================================================
+#
+# Routing refuses to serve a site whose active theme has no folder
+# (RouteHelper). A site built from its release tree alone (install.sh
+# --release-tree-only) has none: nothing the upgrade server serves unsigned
+# was laid into it. Its active theme comes here, from the upgrade source,
+# through install_extension.php, which writes only a package that verifies
+# against the release keys this tree carries. As root, at first boot.
+
+if [ "$DB_EXISTS" = false ]; then
+    ACTIVE_THEME="$(psql -U postgres -d "$SITENAME" -tAc \
+        "SELECT stg_value FROM stg_settings WHERE stg_name = 'theme_template'" 2>/dev/null | head -1 | tr -d '[:space:]')"
+    if [[ "$ACTIVE_THEME" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] && [ "$ACTIVE_THEME" != "plugin" ] \
+            && [ ! -d "$SITE_ROOT/public_html/theme/$ACTIVE_THEME" ]; then
+        log "The active theme ($ACTIVE_THEME) is not on disk; installing it from the upgrade source, signed..."
+        if [ -f "$SCRIPT_DIR/_host_files.sh" ]; then
+            . "$SCRIPT_DIR/_host_files.sh"
+            host_files_write_release_verify_keys "$SITE_ROOT"
+        fi
+        if php "$SITE_ROOT/public_html/utils/install_extension.php" theme "$ACTIVE_THEME"; then
+            log "Theme $ACTIVE_THEME installed"
+        else
+            log_error "Warning: the active theme $ACTIVE_THEME could not be installed signed; the site serves no page until it is. A dormant copy's install then finds no page behind its look cookie and is removed whole; install it again once the upgrade source answers."
+        fi
     fi
 fi
 

@@ -12,7 +12,10 @@
  * class only holds it.
  *
  * scp_steps is the current or last run, in order, one entry per job:
- *   {op, on: source|copy, job_id, verdict, reason}
+ *   {op, on: source|copy|host|source_host|copy_host, job_id, verdict, reason}
+ * (host is a container source's old host, holding its old container;
+ * source_host and copy_host are the hosts of a copy onto a host, as the
+ * switch-over recorded them before the rows swapped.)
  * verdict is one of pending | running | passed | failed | skipped.
  *
  * scp_status:
@@ -48,6 +51,15 @@
  * backups gets its chain's key from the owner's recovery key, typed on the
  * copy's own page, and its census is judged alone.
  *
+ * scp_mgh_managed_host_id is the host a copy is installed on as a container
+ * (specs/site_container_engine.md D9), empty for a copy on a server of its
+ * own; scp_install_job_id is the host's site_install job that made it, and
+ * scp_expected_site_key the key its install printed for its agent. Such a
+ * copy comes from backups, and its switch-over freezes the source and runs a
+ * final copy before the address moves.
+ *
+ * @version 1.3 - scp_mgh_managed_host_id and scp_install_job_id: a copy onto a host, as a container
+ *                (specs/site_container_engine.md D9)
  * @version 1.2 - scp_from (a copy from backups, site_copy.md WP10) and the undoing status (an IP swap undone, WP12)
  * @version 1.1 - the switch-over's statuses and scp_switch (site_copy.md WP7a)
  * @version 1.0
@@ -105,6 +117,13 @@ class SiteCopy extends SystemBase {
 		// The provision when the management node creates the copy's server;
 		// empty when the owner brings their own.
 		'scp_cvp_customer_cloud_provision_id' => array('type'=>'int8'),
+		// The host a copy is installed on as a container (see the header), and
+		// that host's site_install job.
+		'scp_mgh_managed_host_id' => array('type'=>'int8'),
+		'scp_install_job_id'     => array('type'=>'int8'),
+		// The fingerprint of the key the copy's site agent was made with, as its
+		// install printed it: its join is approved when it carries that key.
+		'scp_expected_site_key'  => array('type'=>'varchar(16)'),
 		'scp_release'            => array('type'=>'varchar(20)', 'required'=>true, 'is_nullable'=>false),
 		'scp_status'             => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'waiting'),
 		// Where the copy comes from: the live source, or its backups (see the header).
@@ -134,6 +153,7 @@ class SiteCopy extends SystemBase {
 		'scp_source_node_id' => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
 		'scp_copy_node_id'   => ['action' => 'null', 'source_table' => 'mgn_managed_nodes'],
 		'scp_cvp_customer_cloud_provision_id' => ['action' => 'null', 'source_table' => 'cvp_customer_cloud_provisions'],
+		'scp_mgh_managed_host_id' => ['action' => 'null', 'source_table' => 'mgh_managed_hosts'],
 	];
 
 	/** The run's steps as an array. */
@@ -169,6 +189,11 @@ class SiteCopy extends SystemBase {
 
 	public function set_switch_record(array $record): void {
 		$this->set('scp_switch', $record);
+	}
+
+	/** Is this a copy installed on a host as a container (D9)? */
+	public function on_host(): bool {
+		return (int)$this->get('scp_mgh_managed_host_id') > 0;
 	}
 
 	/** Is this a copy from the site's backups alone (its server is dead)? */
