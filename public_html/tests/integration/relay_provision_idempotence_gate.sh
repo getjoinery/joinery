@@ -17,7 +17,8 @@
 #      fail any test that only checks the end state, because the end state is
 #      identical. It has to be caught here.
 #
-#   2. THE FIREWALL IS CONVERGED, NOT RESET, and it is 25 and 443 ONLY. Port 22
+#   2. THE FIREWALL IS CONVERGED, NOT RESET, and it is 25, 443, 993 and 465
+#      ONLY (993 and 465 carry mail programs through to the deployment). Port 22
 #      is admitted by --keep-sshd alone, and an existing 22 rule is removed on
 #      a real build; there is no WireGuard port and no tunnel egress rule.
 #
@@ -172,7 +173,7 @@ chk "a no-change converge restarts NOTHING" \
     "$(grep -cE 'systemctl (restart|reload|start)' "$T/log")" "0"
 
 # ---------------------------------------------------------------------------
-echo "== the firewall is converged, never reset, and is 25 + 443 only =="
+echo "== the firewall is converged, never reset, and is 25, 443, 993 + 465 only =="
 {
     echo '#!/bin/bash'
     echo 'set -u'
@@ -200,11 +201,13 @@ run_fw "$T/v_fresh" "$T/r_fresh"
 chk "fresh box: never resets"          "$(grep -c 'ufw --force reset' "$T/log")" "0"
 chk "fresh box: opens 25/tcp"          "$(grep -c 'ufw allow 25/tcp' "$T/log")" "1"
 chk "fresh box: opens 443/tcp"         "$(grep -c 'ufw allow 443/tcp' "$T/log")" "1"
+chk "fresh box: opens 993/tcp"         "$(grep -c 'ufw allow 993/tcp' "$T/log")" "1"
+chk "fresh box: opens 465/tcp"         "$(grep -c 'ufw allow 465/tcp' "$T/log")" "1"
 chk "fresh box: does NOT open 22/tcp"  "$(grep -c 'ufw allow 22/tcp' "$T/log")" "0"
 chk "fresh box: no WireGuard port"     "$(grep -c '51820' "$T/log")" "0"
 chk "fresh box: no tunnel egress rule" "$(grep -c '8442' "$T/log")" "0"
 chk "fresh box: enables the firewall"  "$(grep -c 'ufw --force enable' "$T/log")" "1"
-chk "fresh box: exactly two allow rules" "$(grep -c 'ufw allow' "$T/log")" "2"
+chk "fresh box: exactly four allow rules" "$(grep -c 'ufw allow' "$T/log")" "4"
 
 # The hand run keeps 22 so the box is not locked.
 run_fw "$T/v_fresh" "$T/r_fresh" 1
@@ -223,6 +226,8 @@ To                         Action      From
 --                         ------      ----
 25/tcp                     ALLOW       Anywhere
 443/tcp                    ALLOW       Anywhere
+993/tcp                    ALLOW       Anywhere
+465/tcp                    ALLOW       Anywhere
 EOF
 run_fw "$T/v_ok" "$T/r_ok"
 chk "converged box: no rule is re-added" \
@@ -241,6 +246,8 @@ To                         Action      From
 22/tcp                     ALLOW       Anywhere
 25/tcp                     ALLOW       Anywhere
 443/tcp                    ALLOW       Anywhere
+993/tcp                    ALLOW       Anywhere
+465/tcp                    ALLOW       Anywhere
 EOF
 run_fw "$T/v_ok" "$T/r_ssh"
 chk "ssh-open box: 22/tcp rule is removed"  "$(grep -c 'ufw delete allow 22/tcp' "$T/log")" "1"
