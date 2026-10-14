@@ -339,7 +339,8 @@ echo "=== The kernel loads nothing a site can ask for (gvisor_site_sandbox_trial
 RK="$T/kernel"
 mkdir -p "$RK/etc/modprobe.d" "$RK/etc/sysctl.d"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"; rc=$?
-MP="$RK/etc/modprobe.d/blacklist-rare-network.conf"; SC="$RK/etc/sysctl.d/90-joinery-kernel.conf"
+MP="$RK/etc/modprobe.d/joinery-rare-modules.conf"; SC="$RK/etc/sysctl.d/90-joinery-kernel.conf"
+KM="$RK/etc/modprobe.d/blacklist-rare-network.conf"
 chk "exit 0" "$rc" "0"
 chk "what a site's web user made a shared host load is never loaded: sctp, can, can_raw" \
     "$(grep -cxE 'install (sctp|can|can_raw) /bin/false' "$MP")|$(grep -cxE 'blacklist (sctp|can|can_raw)' "$MP")" "3|3"
@@ -349,19 +350,93 @@ chk "nothing a machine here uses: no netfilter, bridge, overlay, IPsec, WireGuar
 chk "line disciplines are refused as a class" "$(grep -cx 'dev.tty.ldisc_autoload = 0' "$SC")" "1"
 chk "unprivileged BPF off; the kernel log and userfaultfd kept from unprivileged processes" \
     "$(grep -cxE 'kernel.unprivileged_bpf_disabled = 1|kernel.dmesg_restrict = 1|vm.unprivileged_userfaultfd = 0' "$SC")" "3"
-# A server's list as install.sh appended it, on two installs.
-printf 'install dccp /bin/true\ninstall sctp /bin/true\ninstall rds /bin/true\ninstall tipc /bin/true\n%.0s' 1 2 > "$MP"
+chk "kernel pointers, BPF JIT, perf, ptrace, kexec, user namespaces and ASLR pinned (D1)" \
+    "$(grep -cxE 'kernel.kptr_restrict = 2|net.core.bpf_jit_harden = 2|kernel.perf_event_paranoid = 4|kernel.yama.ptrace_scope = 1|kernel.kexec_load_disabled = 1|kernel.apparmor_restrict_unprivileged_userns = 1|kernel.randomize_va_space = 2' "$SC")" "7"
+chk "links and files in shared directories refused to another user" \
+    "$(grep -cxE 'fs.protected_symlinks = 1|fs.protected_hardlinks = 1|fs.protected_regular = 2|fs.protected_fifos = 2' "$SC")" "4"
+chk "inotify instances for every site's www-data together (D4)" "$(grep -cx 'fs.inotify.max_user_instances = 2048' "$SC")" "1"
+chk "kernel.modules_disabled is never set: Docker loads modules when a site's network is made" "$(grep -c 'modules_disabled' "$SC")" "0"
+SN="$RK/etc/sysctl.d/99-security.conf"
+chk "the network settings are written on every machine: spoofing, redirects, source routes, SYN cookies" \
+    "$(grep -cxE 'net.ipv4.conf.all.rp_filter = 1|net.ipv4.conf.all.accept_redirects = 0|net.ipv6.conf.all.accept_redirects = 0|net.ipv4.conf.all.send_redirects = 0|net.ipv4.conf.all.accept_source_route = 0|net.ipv4.tcp_syncookies = 1' "$SN")" "6"
+chk "each setting once, in one file or the other" \
+    "$(cat "$SC" "$SN" | grep -v '^#' | awk -F' = ' '{print $1}' | sort | uniq -d | wc -l)" "0"
+chk "kmod's own file is not made where there is none" "$([ -e "$KM" ] && echo made || echo none)" "none"
+# A server's 99-security.conf as install.sh wrote it: the run writes it whole.
+printf '# IP Spoofing protection\nnet.ipv4.conf.all.rp_filter = 1\n\n# Control Buffer Overflow attacks\nkernel.randomize_va_space = 2\n' > "$SN"
 JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1
-chk "a server's list, appended twice by install.sh, is written whole" "$(grep -c '^install sctp ' "$MP")|$(grep -c '/bin/true' "$MP")" "1|0"
+chk "a server's 99-security.conf from install.sh is written whole, ASLR now in the kernel file" \
+    "$(head -1 "$SN" | grep -c '^# Written by host_housekeeping.sh')|$(grep -c 'randomize_va_space' "$SN")|$(grep -c '^net.ipv4.conf.all.rp_filter' "$SN")" "1|0|1"
+
+# kmod's blacklist-rare-network.conf as Ubuntu 24.04 and 26.04 ship it, and
+# dpkg's record of it (the checksum is what dpkg holds on both).
+kmod_text() { cat <<'EOF'
+# Many less commonly used network protocols have recently had various
+# security flaws discovered. In an effort to reduce the scope of future
+# vulnerability exploitations, they are being blacklisted here so that
+# unprivileged users cannot use them by default. System owners can still
+# either modify this file, or specifically modprobe any needed protocols.
+
+# ax25
+alias net-pf-3 off
+# netrom
+alias net-pf-6 off
+# x25
+alias net-pf-9 off
+# rose
+alias net-pf-11 off
+# decnet
+alias net-pf-12 off
+# econet
+alias net-pf-19 off
+# rds
+alias net-pf-21 off
+# af_802154
+alias net-pf-36 off
+EOF
+}
+KMOD_MD5=8fb4b96124e461f53adceba9ca91f09a
+kmod_record() {  # $1 root, $2 the checksum dpkg recorded
+    mkdir -p "$1/var/lib/dpkg"
+    printf 'Package: kmod\nStatus: install ok installed\nMaintainer: x\nArchitecture: amd64\nVersion: 34.2-2ubuntu2\nConffiles:\n /etc/modprobe.d/blacklist-rare-network.conf %s\nDescription: x\n' "$2" > "$1/var/lib/dpkg/status"
+}
+chk "the fixture is kmod's file byte for byte" "$(kmod_text | md5sum | cut -c1-32)" "$KMOD_MD5"
+kmod_record "$RK" "$KMOD_MD5"
+# A server's: install.sh appended its four lines, on two installs.
+{ kmod_text; printf 'install dccp /bin/true\ninstall sctp /bin/true\ninstall rds /bin/true\ninstall tipc /bin/true\n%.0s' 1 2; } > "$KM"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
+chk "a server's kmod file, appended to twice by install.sh, is back as kmod shipped it, and the run says so" \
+    "$(md5sum < "$KM" | cut -c1-32)|$(grep -c 'blacklist-rare-network.conf back as kmod shipped it' <<< "$out")" "$KMOD_MD5|1"
+# A machine an earlier run wrote kmod's file over (host_housekeeping 1.16).
+{ echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."; grep -v '^#' "$MP"; } > "$KM"
+JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1
+chk "kmod's file written over by an earlier run is back as kmod shipped it" "$(md5sum < "$KM" | cut -c1-32)" "$KMOD_MD5"
 before="$(tree_sum "$RK")"
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
-chk "a second run changes neither file and says nothing of them" \
-    "$(tree_sum "$RK")|$(grep -c 'blacklist-rare-network\|90-joinery-kernel' <<< "$out")" "$before|0"
+chk "a second run changes no file and says nothing of them" \
+    "$(tree_sum "$RK")|$(grep -c 'rare-modules\|blacklist-rare-network\|90-joinery-kernel\|99-security' <<< "$out")" "$before|0"
+# An operator's own line in kmod's file, beside install.sh's: the file is theirs.
+{ kmod_text; echo "install dccp /bin/true"; echo "alias net-pf-4 off"; } > "$KM"; cp "$KM" "$T/km.operator"
+JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1
+chk "an operator's own edit to kmod's file: left as it is" "$(cmp -s "$T/km.operator" "$KM" && echo same)" "same"
+# A kmod that shipped another text: an earlier run's list cannot be put back, and the run says how.
+kmod_record "$RK" 0123456789abcdef0123456789abcdef
+{ echo "# Written by host_housekeeping.sh (Joinery) on every run - edits here do not survive."; grep -v '^#' "$MP"; } > "$KM"; cp "$KM" "$T/km.ours"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
+chk "a kmod that shipped another text: the file is left, and the run names the command" \
+    "$(cmp -s "$T/km.ours" "$KM" && echo same)|$(grep -c 'force-confmiss kmod' <<< "$out")" "same|1"
+rm -rf "$RK/var/lib/dpkg"
+JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1
+chk "no dpkg record of kmod: its file is not touched" "$(cmp -s "$T/km.ours" "$KM" && echo same)" "same"
 RKC="$T/kernel-container"
 mkdir -p "$RKC/etc/modprobe.d" "$RKC/etc/sysctl.d"; touch "$RKC/.dockerenv"
 JOINERY_HOUSEKEEPING_ROOT="$RKC" bash "$SCRIPT" >/dev/null 2>&1
 chk "in a container neither is written: the kernel is the host's" "$(ls "$RKC/etc/modprobe.d" "$RKC/etc/sysctl.d" | grep -c '\.conf$')" "0"
+kmod_record "$RKC" "$KMOD_MD5"; cp "$T/km.ours" "$RKC/etc/modprobe.d/blacklist-rare-network.conf"
+JOINERY_HOUSEKEEPING_ROOT="$RKC" bash "$SCRIPT" >/dev/null 2>&1
+chk "nor is kmod's file touched there" "$(cmp -s "$T/km.ours" "$RKC/etc/modprobe.d/blacklist-rare-network.conf" && echo same)" "same"
 chk "install.sh writes no module list of its own" "$(grep -v '^#' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh" | grep -c 'modprobe\.d')" "0"
+chk "nor a sysctl file of its own" "$(grep -v '^[[:space:]]*#' "$SITE_ROOT/maintenance_scripts/install_tools/install.sh" | grep -c 'sysctl\.d/')" "0"
 if command -v modprobe >/dev/null 2>&1; then
     # modprobe itself, dry-run against the written list: the module is refused, not inserted.
     chk "modprobe reads it: sctp would run /bin/false, not be inserted" \

@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 3.18 - docker remaps user ids on every new host, not only with --multi-tenant, so root in any
+#               container is an unprivileged host uid (multi_tenant_host_hardening D11); it writes the
+#               host's restrictions directory refusing nothing (host_restrictions.sh init), which a
+#               site on a remapping host needs; --multi-tenant adds the walls, the reboot policy and
+#               its restrictions. A host Docker is already on is not changed.
+#VERSION 3.17 - server writes no network sysctl file of its own: host_housekeeping.sh writes
+#               /etc/sysctl.d/99-security.conf on every machine, Docker hosts included
+#               (multi_tenant_host_hardening D1).
 #VERSION 3.16 - Swap is compressed memory (host_swap.sh), not an encrypted /swapfile: dm-crypt over a
 #               loop device over a file locked a 1 GB machine up under memory pressure (B32).
 #VERSION 3.15 - server no longer appends its four rare network modules to
@@ -562,8 +570,10 @@
 #   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       Docker keeps its data on the host's data root, /srv/joinery/docker: XFS with project
 #                       quotas, made before Docker's first start and grown as it fills
-#                       --multi-tenant: root in a container is not root on the host (userns-remap), so each
-#                                       site's disk can be capped (site --disk); a fresh host only
+#                       Root in a container is not root on the host (userns-remap) on every new Docker host,
+#                       so each site's disk can be capped (site --disk)
+#                       --multi-tenant: the walls between sites, a reboot after kernel updates and the
+#                                       restrictions for strangers' sites; a fresh host, or one with no sites yet
 #                       --data-root=SIZE|DEVICE: the data root's first size (16G), or a spare device for it
 #                       --no-outbound-limits: no connection limits and no UDP drop for this host's sites
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
@@ -2574,11 +2584,12 @@ do_docker_install() {
         fi
     fi
 
+    # Every new Docker host remaps user ids, whatever it serves: root in a
+    # container is then an unprivileged host uid, so a breakout from a
+    # single-site host lands without root too (multi_tenant_host_hardening D11).
     # Set before the package installs: it starts the daemon, and remapping
     # must be on from that first start.
-    if [ "$MULTI_TENANT" -eq 1 ]; then
-        docker_daemon_json_set_userns_remap || exit 1
-    fi
+    docker_daemon_json_set_userns_remap || exit 1
 
     # The data root too (specs/one_data_root.md D4), on every new Docker host:
     # the package starts the daemon, which would make its data on the root
@@ -2627,13 +2638,17 @@ do_docker_install() {
         else
             print_warning "Docker installed but daemon is not running"
         fi
+        docker_assert_remaps_ids || exit 1
+        # A site on a remapping host runs only where the host's restrictions
+        # directory is (run_spec_restrictions_present); a single-site host's
+        # says nothing is refused, and --multi-tenant adds its set.
+        bash "$SCRIPT_DIR/host_restrictions.sh" init || exit 1
         if [ "$MULTI_TENANT" -eq 1 ]; then
-            docker_assert_remaps_ids || exit 1
             multi_tenant_host_install || exit 1
         fi
     else
         print_error "Docker installation failed"
-        [ "$MULTI_TENANT" -eq 1 ] && print_info "/etc/docker/daemon.json keeps userns-remap, so a later Docker install on this host comes up remapped"
+        print_info "/etc/docker/daemon.json keeps userns-remap, so a later Docker install on this host comes up remapped"
         exit 1
     fi
 
@@ -3813,59 +3828,9 @@ EOF
 
         print_success "Automatic security updates configured"
 
-        # Security hardening
-        print_step "Applying security hardening..."
-
-        # The modules the kernel never loads, and the kernel's own settings, are
-        # host_housekeeping.sh's (above), on every machine and every converge.
-        tee /etc/sysctl.d/99-security.conf > /dev/null << 'EOF'
-# IP Spoofing protection
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.all.rp_filter = 1
-
-# Ignore ICMP redirects
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv6.conf.all.accept_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv6.conf.default.accept_redirects = 0
-
-# Ignore send redirects
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
-
-# Disable source packet routing
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv6.conf.all.accept_source_route = 0
-net.ipv4.conf.default.accept_source_route = 0
-net.ipv6.conf.default.accept_source_route = 0
-
-# Log Martians
-net.ipv4.conf.all.log_martians = 1
-net.ipv4.conf.default.log_martians = 1
-
-# Ignore ICMP ping requests
-net.ipv4.icmp_echo_ignore_all = 0
-
-# Ignore Directed pings
-net.ipv4.icmp_echo_ignore_broadcasts = 1
-
-# Disable IPv6 if not needed
-net.ipv6.conf.all.disable_ipv6 = 0
-net.ipv6.conf.default.disable_ipv6 = 0
-
-# TCP SYN flood protection
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_max_syn_backlog = 2048
-net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_syn_retries = 5
-
-# Control Buffer Overflow attacks
-kernel.randomize_va_space = 2
-EOF
-
-        sysctl -p /etc/sysctl.d/99-security.conf || true
-
-        print_success "Security hardening applied"
+        # The modules the kernel never loads, the kernel's own settings and the
+        # network settings (99-security.conf) are host_housekeeping.sh's (above),
+        # on every machine and every converge.
     fi
 
     # Set proper permissions for web directory.

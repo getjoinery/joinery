@@ -231,7 +231,7 @@ chk "no restrictions directory and Docker not remapping ids: no mount, the site 
     "$(args_of mysite | grep -c host_restrictions)" "0"
 STUB_SECOPTS='name=apparmor name=seccomp,profile=builtin name=userns ' run_spec_args mysite > /dev/null 2> "$T/err"; rc=$?
 chk "a host that remaps ids with no restrictions directory: refused, and the fix named" \
-    "$rc|$(grep -c 'install.sh docker --multi-tenant' "$T/err")" "1|1"
+    "$rc|$(grep -c 'host_restrictions.sh init' "$T/err")" "1|1"
 STUB_SECOPTS='' run_spec_args mysite > /dev/null 2> "$T/err"; rc=$?
 chk "Docker silent on remapping, no restrictions directory: refused (fails closed)" \
     "$rc|$(grep -c 'did not say' "$T/err")" "1|1"

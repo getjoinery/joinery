@@ -3,8 +3,17 @@
 # host_restrictions.sh - write what this machine refuses to let its sites do
 # (specs/host_restrictions.md D7).
 #
+# Version: 1.1 - init: the directory and a file refusing nothing, where there is no file yet. Every
+#                new Docker host remaps user ids (multi_tenant_host_hardening D11), and a site on a
+#                remapping host runs only where the restrictions directory is
+#                (run_spec_restrictions_present), so a single-site host carries one that says
+#                nothing is refused; --multi-tenant then adds its set.
 # Version: 1.0
 #
+#   host_restrictions.sh init           Root. Makes the directory and a file that
+#                                       refuses nothing, where there is no file;
+#                                       a file already there is kept as it is.
+#                                       install.sh docker runs it on every new host.
 #   host_restrictions.sh multi-tenant   Root. Adds the multi-tenant set
 #                                       (unsigned_packages=refuse) to the file,
 #                                       keeping any other known restriction already
@@ -57,7 +66,7 @@ write_pairs() {  # NAME=VALUE...
     {
         echo "# joinery-managed: written by host_restrictions.sh, read by every site on this host"
         echo "# (specs/host_restrictions.md). Sites mount this directory read-only."
-        printf '%s\n' "$@" | sort -u
+        if (( $# )); then printf '%s\n' "$@" | sort -u; fi
     } > "${tmp}" || { rm -f "${tmp}"; return 1; }
     chmod 644 "${tmp}" || { rm -f "${tmp}"; return 1; }
     mv -f "${tmp}" "${FILE}" || { rm -f "${tmp}"; return 1; }
@@ -75,6 +84,16 @@ current_pairs() {
 }
 
 case "${1:-}" in
+    init)
+        if [[ -f "${FILE}" ]]; then
+            echo "host restrictions: ${FILE} kept as it is ($(current_pairs | sort -u | paste -sd' ' | sed 's/^$/nothing refused/'))"
+        elif write_pairs; then
+            echo "host restrictions: ${FILE} refuses nothing"
+        else
+            echo "host_restrictions.sh: could not write ${FILE}" >&2
+            exit 1
+        fi
+        ;;
     multi-tenant)
         mapfile -t pairs < <(current_pairs)
         pairs+=("${HOST_RESTRICTIONS_MULTI_TENANT[@]}")
@@ -92,7 +111,7 @@ case "${1:-}" in
         printf '%s\n' "${HOST_RESTRICTIONS_KNOWN[@]}"
         ;;
     *)
-        echo "Usage: host_restrictions.sh multi-tenant | show | known" >&2
+        echo "Usage: host_restrictions.sh init | multi-tenant | show | known" >&2
         exit 2
         ;;
 esac

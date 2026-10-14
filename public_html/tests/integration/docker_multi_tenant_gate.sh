@@ -147,9 +147,19 @@ existing_at="$(line_of 'docker_multi_tenant_existing || exit 1')"
 hk_at="$(line_of '^        host_housekeeping$')"
 chk "an existing host is checked before its housekeeping and agent" \
     "$([ -n "$existing_at" ] && [ -n "$hk_at" ] && [ "$existing_at" -lt "$hk_at" ] && echo yes)" "yes"
+# Every new Docker host remaps, whatever it serves (multi_tenant_host_hardening D11).
+chk "a fresh host remaps without --multi-tenant: the setting is not inside a multi-tenant test" \
+    "$(printf '%s\n' "$DOCKER_FN" | grep -B2 -- 'docker_daemon_json_set_userns_remap || exit 1' | grep -c 'MULTI_TENANT')" "0"
+assert_at="$(line_of 'docker_assert_remaps_ids || exit 1')"
+init_at="$(line_of 'host_restrictions.sh" init || exit 1')"
+chk "and checks it remaps, then writes the restrictions directory a remapping host's sites need" \
+    "$([ -n "$assert_at" ] && [ -n "$init_at" ] && [ "$assert_at" -lt "$init_at" ] && echo yes)" "yes"
+chk "the remap check is not inside a multi-tenant test either" \
+    "$(printf '%s\n' "$DOCKER_FN" | grep -B1 -- 'docker_assert_remaps_ids || exit 1' | grep -c 'MULTI_TENANT')" "0"
 walls_calls="$(printf '%s\n' "$DOCKER_FN" | grep -n 'multi_tenant_host_install || exit 1' | cut -d: -f1 | tr '\n' ' ')"
-chk "both paths install the site walls, each right after its remap check" \
-    "$walls_calls" "$((existing_at + 1)) $(( $(line_of 'docker_assert_remaps_ids || exit 1') + 1 )) "
+fresh_walls="$(echo $walls_calls | cut -d' ' -f2)"
+chk "both paths install the site walls: an existing host right after its remap check, a fresh one after its restrictions directory" \
+    "$(echo $walls_calls | cut -d' ' -f1)|$([ "$fresh_walls" -gt "$init_at" ] && [ "$fresh_walls" -le $((init_at + 3)) ] && echo after)" "$((existing_at + 1))|after"
 chk "an existing host is walled before its housekeeping and agent" \
     "$([ "${walls_calls%% *}" -lt "$hk_at" ] && echo yes)" "yes"
 agent_at="$(printf '%s\n' "$DOCKER_FN" | grep -n 'install_docker_host_agent' | tail -1 | cut -d: -f1)"
