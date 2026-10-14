@@ -10,6 +10,7 @@
  * is, and can be stopped between nodes. The AdvanceStagedRollouts task moves
  * it; loading this page moves it too.
  *
+ * @version 1.2 - Pages to check on each node: the page_probe gate, before and after each node's apply
  * @version 1.1 - the release shown and rolled out is the newest published one (review B20)
  * @version 1.0
  */
@@ -42,8 +43,10 @@ if ($_POST) {
 		}
 		usort($order, function ($a, $b) { return $a[0] <=> $b[0]; });
 		try {
-			$r = StagedRolloutRunner::start(array_column($order, 1), $session->get_user_id());
-			$flash('Rollout of ' . $r->get('srl_release') . ' started across ' . count($r->steps()) . ' node(s).', 'ok');
+			$pages = StagedRolloutRunner::parse_probe_pages((string)($_POST['probe_pages'] ?? ''));
+			$r = StagedRolloutRunner::start(array_column($order, 1), $session->get_user_id(), $pages);
+			$flash('Rollout of ' . $r->get('srl_release') . ' started across ' . count($r->steps()) . ' node(s)'
+				. ($pages ? ', checking ' . count($pages) . ' page(s) on each' : '') . '.', 'ok');
 		} catch (StagedRolloutException $e) {
 			$flash($e->getMessage(), 'error');
 		}
@@ -95,6 +98,12 @@ $render_rollout = function (StagedRollout $r) use ($verdict_class) {
 	$status = (string)$r->get('srl_status');
 	echo '<p class="mb-1"><strong>' . htmlspecialchars($r->get('srl_release')) . '</strong> — ' . htmlspecialchars($status)
 		. ' <small class="text-muted">started ' . htmlspecialchars($r->get_local('srl_create_time', 'M j, g:i A')) . '</small></p>';
+	$probe_pages = $r->probe_pages();
+	if ($probe_pages) {
+		$labels = array();
+		foreach ($probe_pages as $p) { $labels[] = $p['page'] . ' (as ' . $p['viewer'] . ')'; }
+		echo '<p class="small text-muted mb-1">Pages checked on each node before and after its apply: ' . htmlspecialchars(implode(', ', $labels)) . '</p>';
+	}
 	if ($r->get('srl_halt_reason')) {
 		echo '<div class="alert alert-danger small">Halted at ' . htmlspecialchars($r->get('srl_halt_reason')) . '</div>';
 	}
@@ -119,7 +128,8 @@ if ($running) {
 		. '<button type="button" class="btn btn-sm btn-outline-danger" onclick="var f=this.parentElement; JoineryModal.confirm(\'Stop this rollout? An apply already running on a node finishes; no further node is started.\', function(){ f.submit(); })">Stop</button></form>';
 } else {
 	echo '<p class="text-muted mb-0">None. A rollout applies this management node\'s release (' . htmlspecialchars($release)
-		. ') to one node at a time and moves on only when that node\'s apply completed, passed its deploy tier, reports the new version, and did not roll back.</p>';
+		. ') to one node at a time and moves on only when that node\'s apply completed, passed its deploy tier, reports the new version, and did not roll back,'
+		. ' and, where pages are named, no page renders worse than it did before the apply.</p>';
 }
 $page->end_box();
 
@@ -144,6 +154,14 @@ if (!$running) {
 		$fw->numberinput('order_' . $node->key, $label, ['min' => 1, 'max' => 999]);
 	}
 	if ($any) {
+		// Pages each node renders as a throwaway viewer before and after its
+		// apply (page_probe); the rollout halts at a node where one got worse.
+		$fw->textbox('probe_pages', 'Pages to check on each node (optional)', [
+			'rows' => 3,
+			'placeholder' => "/\nadmin /admin/admin_users",
+			'helptext' => 'One per line, at most ' . StagedRolloutRunner::MAX_PROBE_PAGES . '. A page path, after admin or member to view it signed in (anonymous otherwise). '
+				. 'Each node renders them before its apply and again after; the rollout halts at a node where a page answers an error it did not, raises more PHP errors, or fails to load an asset it loaded.',
+		]);
 		$fw->submitbutton('btn_start', 'Start rollout');
 	} else {
 		echo '<p class="text-muted">No node can take a rollout right now.</p>';

@@ -7,6 +7,10 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.7 - memory in a container counts the site container engine's too (/run/.containerenv beside
+ *                Docker's /.dockerenv, specs/site_container_engine.md WP3)
+ * @version 1.6 - plugins: each plugin's name, version, whether it is switched on and its status, as the agent's
+ *                check_status carries them
  * @version 1.5 - disk figures on a site with a disk allowance are its use out of the allowance
  *                (DiskAllowance), not the disk it sees (the allowance plus 10%)
  * @version 1.4 - memory inside a container is the site's own cgroup's (in use out of its limit),
@@ -188,6 +192,31 @@ function stats_handler($request) {
 		// A node too old to record one answers the rest normally.
 	}
 
+	// The site's plugins as its registry records them: name, version from the
+	// recorded plugin.json, switched on, and plg_status. The same rows, read
+	// the same way, as the agent's check_status carries.
+	try {
+		$rows = DbConnector::get_instance()->get_db_link()->query(
+			"SELECT plg_name, plg_active, plg_status, plg_metadata FROM plg_plugins
+			  WHERE plg_status IS DISTINCT FROM 'uninstalled' ORDER BY plg_name LIMIT 100")->fetchAll(PDO::FETCH_ASSOC);
+		$plugins = array();
+		foreach ($rows as $row) {
+			$name = substr(preg_replace('/[^A-Za-z0-9._+-]/', '', (string)$row['plg_name']), 0, 64);
+			if ($name === '') { continue; }
+			$meta = (strlen((string)$row['plg_metadata']) <= 262144) ? json_decode((string)$row['plg_metadata'], true) : null;
+			$version = (is_array($meta) && is_string($meta['version'] ?? null)) ? $meta['version'] : '';
+			$plugins[] = array(
+				'name'    => $name,
+				'version' => substr(preg_replace('/[^A-Za-z0-9._+-]/', '', $version), 0, 32),
+				'active'  => (int)$row['plg_active'] === 1 && $row['plg_active'] !== null,
+				'status'  => substr(preg_replace('/[^A-Za-z0-9._+-]/', '', (string)$row['plg_status']), 0, 20),
+			);
+		}
+		$result['plugins'] = $plugins;
+	} catch (Throwable $e) {
+		// No registry readable: the key is left out, which reads as not measured.
+	}
+
 	// Cron health — last time process_scheduled_tasks.php fired
 	$settings = Globalvars::get_instance();
 	$cron_last_run = $settings->get_setting('scheduled_tasks_last_cron_run');
@@ -322,7 +351,8 @@ function _mgmt_stats_format_uptime($secs) {
  * cannot be read.
  */
 function _mgmt_stats_container_memory() {
-	if (!@file_exists('/.dockerenv')) { return null; }
+	// Docker marks its containers with /.dockerenv, the site container engine with /run/.containerenv.
+	if (!@file_exists('/.dockerenv') && !@file_exists('/run/.containerenv')) { return null; }
 	$current = @file_get_contents('/sys/fs/cgroup/memory.current');
 	if ($current === false || !ctype_digit(trim($current))) { return null; }
 	$inactive = 0;

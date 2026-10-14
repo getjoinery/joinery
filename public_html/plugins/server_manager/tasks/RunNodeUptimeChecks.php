@@ -21,6 +21,9 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.13 - data_root_run_under_way() reads DataRootEscrowSync::run_under_way(); a node this plane asked to
+ *                 reboot is asked for its host report every REBOOT_REFRESH_SECONDS until
+ *                 one shows a new boot id, so the node page says it came back within minutes
  * @version 2.12 - a node whose last host report says its data root is being encrypted, decrypted or
  *                 re-keyed is asked again every DATA_ROOT_RUN_REFRESH_SECONDS, so the run's end (and the
  *                 enrolment it calls for) is seen within minutes, not the hour (B62)
@@ -80,6 +83,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const STATUS_REFRESH_SECONDS  = 3600;
 	/** How old a host report may be while it says a data root run is under way (B62). */
 	const DATA_ROOT_RUN_REFRESH_SECONDS = 300;
+	/** How old a host report may be while a reboot this plane asked for is not yet seen to have happened. */
+	const REBOOT_REFRESH_SECONDS = 120;
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
@@ -219,7 +224,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * decrypted or re-keyed is asked for its report every
 	 * DATA_ROOT_RUN_REFRESH_SECONDS instead: the run ends on its own, hours
 	 * later, and its end is what calls for the enrolment (DataRootEscrowSync)
-	 * and changes what the node page offers (B62).
+	 * and changes what the node page offers (B62). A machine this plane asked
+	 * to reboot is asked every REBOOT_REFRESH_SECONDS until a report carries a
+	 * new boot id (JobResultProcessor::reboot_awaited).
 	 *
 	 * @param iterable $nodes   live ManagedNode rows
 	 * @param string   $now_utc 'Y-m-d H:i:s'
@@ -244,8 +251,14 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				if (!JobCommandBuilder::has_primitive($node, $word)) {
 					continue;
 				}
-				$window = ($word === 'host_report' && self::data_root_run_under_way($node))
-					? self::DATA_ROOT_RUN_REFRESH_SECONDS : self::STATUS_REFRESH_SECONDS;
+				$window = self::STATUS_REFRESH_SECONDS;
+				if ($word === 'host_report') {
+					if (JobResultProcessor::reboot_awaited($node)) {
+						$window = self::REBOOT_REFRESH_SECONDS;
+					} elseif (self::data_root_run_under_way($node)) {
+						$window = self::DATA_ROOT_RUN_REFRESH_SECONDS;
+					}
+				}
 				$last = $stamp_column === null ? '' : trim((string)$node->get($stamp_column));
 				if ($last !== '' && strtotime($last . ' UTC') >= $now - $window) {
 					continue;
@@ -263,9 +276,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 
 	/** Its last host report says an encryption, its undo or a re-key is running on its data root. */
 	public static function data_root_run_under_way($node): bool {
-		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
-		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
-		return is_array($enc) && (string)($enc['reencrypt'] ?? '') !== '';
+		return DataRootEscrowSync::run_under_way($node);
 	}
 
 	/**

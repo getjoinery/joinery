@@ -31,6 +31,7 @@
  * (drainForUser). The LearnSpamFeedback cron pass is the backstop for clear rows
  * a request did not finish.
  *
+ * @version 2.1 - status(): the counts the spam_learning_status agent word carries
  * @version 2.0 - the corpus is a Postgres table taught in the request; no
  *   rebuilt email, no HTTP call to a scanner
  * @version 1.0
@@ -249,6 +250,65 @@ class SpamLearning {
 			throw $e;
 		}
 		return self::TAUGHT;
+	}
+
+	/** The days spam_learning_status looks back over. */
+	const STATUS_DAYS = 7;
+
+	/**
+	 * Whether what members mark reaches the corpus, as counts: the answer the
+	 * spam_learning_status agent word carries (maintenance_scripts/sysadmin_tools/
+	 * spam_learning_status.php). Rows a member marked spam or not spam in the
+	 * last STATUS_DAYS days (iem_spam_corrected_time), split by what became of
+	 * the evidence: taught (or handled where nothing could be taught, a
+	 * browser-sealed row), waiting for the keyless pass (pending_clear) or for
+	 * its owner's window (pending_sealed), or never taught because it was
+	 * polled over IMAP. Then the corpus itself and the two policy switches.
+	 * COUNTS ONLY: no subject, no sender, no address, no row id.
+	 */
+	public static function status(): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$since = gmdate('Y-m-d H:i:s', time() - self::STATUS_DAYS * 86400);
+		$taught = "iem_train_verdict IS NOT NULL AND iem_learned_verdict IS NOT DISTINCT FROM iem_train_verdict";
+		$stmt = $db->prepare("SELECT
+				count(*) AS recorded,
+				count(*) FILTER (WHERE " . self::eligibleSql() . " AND $taught) AS taught,
+				count(*) FILTER (WHERE " . self::eligibleSql() . " AND " . self::pendingSql() . "
+					AND NOT (" . self::windowSealedSql() . ")) AS pending_clear,
+				count(*) FILTER (WHERE " . self::eligibleSql() . " AND " . self::pendingSql() . "
+					AND " . self::windowSealedSql() . ") AS pending_sealed,
+				count(*) FILTER (WHERE iem_iia_inbound_imap_account_id IS NOT NULL) AS skipped_imap
+			FROM iem_inbound_email_messages
+			WHERE iem_spam_corrected_time >= ?");
+		$stmt->execute(array($since));
+		$counts = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+
+		$corpus = $db->query("SELECT count(*) AS tokens, max(ibt_last_seen_time) AS newest
+			FROM ibt_inbound_bayes_tokens WHERE ibt_token <> " . SpamBayes::TOTALS)->fetch(PDO::FETCH_ASSOC) ?: array();
+		$totals = SpamBayes::totals();
+		$newest = $corpus['newest'] ?? null;
+
+		return array(
+			'window_days'    => self::STATUS_DAYS,
+			'corrections'    => array(
+				'recorded'       => intval($counts['recorded'] ?? 0),
+				'taught'         => intval($counts['taught'] ?? 0),
+				'pending_clear'  => intval($counts['pending_clear'] ?? 0),
+				'pending_sealed' => intval($counts['pending_sealed'] ?? 0),
+				'skipped_imap'   => intval($counts['skipped_imap'] ?? 0),
+			),
+			'corpus'         => array(
+				'tokens'        => intval($corpus['tokens'] ?? 0),
+				'newest_token'  => $newest ? gmdate('Y-m-d\TH:i:s\Z', strtotime($newest . ' UTC')) : null,
+				'spam_messages' => intval($totals['spam'] ?? 0),
+				'ham_messages'  => intval($totals['ham'] ?? 0),
+				'trained'       => SpamBayes::trained($totals),
+			),
+			'policy'         => array(
+				'filtering_enabled' => MailboxSpamPolicy::filingEnabled(),
+				'learning_enabled'  => MailboxSpamPolicy::learningEnabled(),
+			),
+		);
 	}
 
 	/**

@@ -5,6 +5,7 @@
  *
  * Shows job output with live polling for running jobs.
  *
+ * @version 1.17 - listening_sockets, container_inventory, spam_learning_status and reboot_machine results (agent 1.76.0)
  * @version 1.16 - Mark as failed on a running agent job: fails it as lost (ManagementJob::markLost) and frees the
  *                 node's queue; a result that arrives later still replaces it. No running job was ever stuck
  *                 past what a page could clear again (getjoinery job 536, 10-10). The hour-long-run warning
@@ -490,6 +491,105 @@ if ($result) {
 			. '<div>After: ' . $state($result_data['after'] ?? null) . '</div>'
 			. '<small class="text-muted">Clearing changes nothing that runs: a unit that is still broken fails again the next time it starts, and the next host report names it again.</small>'
 			. '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'listening_sockets' && !empty($result_data['read'])) {
+		// What the machine listens on (agent 1.76.0): a row per listener.
+		$socks = $result_data['sockets'] ?? 'unknown';
+		echo '<div class="card mb-3"><div class="card-header"><strong>Listening</strong> <small class="text-muted">— TCP sockets that listen and UDP sockets that are bound; no connections</small></div>';
+		if (!is_array($socks)) {
+			echo '<div class="card-body text-muted">The node could not read its sockets (ss is missing or did not answer).</div>';
+		} elseif (!$socks) {
+			echo '<div class="card-body text-muted">Nothing listens.</div>';
+		} else {
+			echo '<div class="card-body p-0"><table class="table table-sm mb-0"><thead><tr><th>Protocol</th><th>Address</th><th>Port</th><th>Program</th><th>Unit</th></tr></thead><tbody>';
+			foreach ($socks as $r) {
+				$fam = array('ipv4' => 'IPv4', 'ipv6' => 'IPv6', 'any' => 'IPv4 and IPv6')[$r['family'] ?? ''] ?? 'unknown';
+				echo '<tr><td>' . htmlspecialchars(strtoupper((string)$r['proto'])) . '</td><td><code>' . htmlspecialchars((string)$r['address'])
+					. '</code> <small class="text-muted">' . $fam . '</small></td><td>' . (int)$r['port'] . '</td><td>'
+					. htmlspecialchars((string)$r['program'] ?: '—') . '</td><td>' . htmlspecialchars((string)$r['unit'] ?: '—') . '</td></tr>';
+			}
+			echo '</tbody></table></div>';
+			if (!empty($result_data['truncated'])) {
+				echo '<div class="card-body small text-muted">The first ' . count($socks) . ' are shown; the machine listens on more.</div>';
+			}
+		}
+		echo '</div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'container_inventory' && !empty($result_data['read'])) {
+		// Every container on the host (agent 1.76.0), install.sh's and not.
+		$list = $result_data['containers'] ?? 'unknown';
+		$engine = array('docker' => 'Docker', 'podman' => 'the site container engine (Podman)')[$result_data['engine'] ?? ''] ?? 'its container engine';
+		echo '<div class="card mb-3"><div class="card-header"><strong>Containers on this machine</strong> <small class="text-muted">— as ' . htmlspecialchars($engine) . ' lists them</small></div>';
+		if ($list === 'none') {
+			echo '<div class="card-body text-muted">This machine has no ' . htmlspecialchars($engine) . '.</div>';
+		} elseif (!is_array($list)) {
+			echo '<div class="card-body text-muted">' . htmlspecialchars(ucfirst($engine)) . ' did not answer, so the containers are not known.</div>';
+		} elseif (!$list) {
+			echo '<div class="card-body text-muted">No containers.</div>';
+		} else {
+			echo '<div class="card-body small text-muted">A site container is one install.sh made: its name is a site name and its SITENAME is its name. Removing a site, holding it stopped and restarting it act only on those; anything else here is someone else\'s and nothing on this plane touches it.</div>';
+			echo '<div class="card-body p-0"><table class="table table-sm mb-0"><thead><tr><th>Container</th><th>Made by install.sh</th><th>Image</th><th>State</th><th>Mounts</th><th>Run spec</th></tr></thead><tbody>';
+			foreach ($list as $c) {
+				$mounts = $c['mounts'] ?? 'unknown';
+				if (is_array($mounts)) {
+					$parts = array();
+					foreach ($mounts as $m) {
+						$parts[] = htmlspecialchars((string)$m['type']) . ($m['name'] !== '' ? ' <code>' . htmlspecialchars((string)$m['name']) . '</code>' : '');
+					}
+					$mounts = $parts ? implode(', ', $parts) : 'none';
+				} else {
+					$mounts = 'unknown';
+				}
+				echo '<tr' . (empty($c['install_sh']) ? ' class="table-warning"' : '') . '><td><code>' . htmlspecialchars((string)$c['name']) . '</code></td><td>'
+					. (!empty($c['install_sh']) ? 'yes' : '<strong>no</strong>') . '</td><td><code>' . htmlspecialchars((string)$c['image']) . '</code></td><td>'
+					. htmlspecialchars((string)$c['state']) . '</td><td class="small">' . $mounts . '</td><td>' . (!empty($c['run_spec']) ? 'yes' : 'no') . '</td></tr>';
+			}
+			echo '</tbody></table></div>';
+			if (!empty($result_data['truncated'])) {
+				echo '<div class="card-body small text-muted">The first ' . count($list) . ' are shown; the machine has more.</div>';
+			}
+		}
+		echo '</div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'spam_learning_status' && !empty($result_data['read'])) {
+		// Whether members' spam corrections reach the filter (agent 1.76.0): counts only.
+		echo '<div class="card mb-3"><div class="card-header"><strong>Spam learning</strong></div><div class="card-body">';
+		if (($result_data['mailbox'] ?? '') !== 'active') {
+			echo '<div class="text-muted">The Mailbox plugin is not active on this site.</div>';
+		} else {
+			$n = function ($v) { return is_int($v) ? number_format($v) : 'unknown'; };
+			$c = $result_data['corrections'] ?? array();
+			$k = $result_data['corpus'] ?? array();
+			$p = $result_data['policy'] ?? array();
+			echo '<div>Filing suspected spam: <strong>' . (!empty($p['filtering_enabled']) ? 'on' : 'off') . '</strong>; learning from what members mark: <strong>'
+				. (!empty($p['learning_enabled']) ? 'on' : 'off') . '</strong></div>';
+			echo '<div class="mt-2">Marked spam or not spam in the last ' . $n($result_data['window_days'] ?? null) . ' days: <strong>' . $n($c['recorded'] ?? null) . '</strong></div>'
+				. '<ul class="mb-2"><li>taught: ' . $n($c['taught'] ?? null) . '</li>'
+				. '<li>waiting for the next pass: ' . $n($c['pending_clear'] ?? null) . '</li>'
+				. '<li>waiting for their owner to unlock their mail: ' . $n($c['pending_sealed'] ?? null) . '</li>'
+				. '<li>never taught, because they were fetched from another mail server over IMAP: ' . $n($c['skipped_imap'] ?? null) . '</li></ul>';
+			echo '<div>The spam filter has learned from ' . $n($k['spam_messages'] ?? null) . ' spam and ' . $n($k['ham_messages'] ?? null) . ' good messages ('
+				. $n($k['tokens'] ?? null) . ' words), ' . (!empty($k['trained']) ? 'enough for its answer to count' : 'not yet enough for its answer to count')
+				. (!empty($k['newest_token']) ? '; it last learned something on ' . htmlspecialchars(LibraryFunctions::convert_time(str_replace(array('T', 'Z'), array(' ', ''), $k['newest_token']), 'UTC', $session->get_timezone(), 'M j, Y g:i A')) : '')
+				. '.</div>';
+		}
+		echo '</div></div>';
+		$result_data = null;
+	} elseif (is_array($result_data) && $job_type === 'reboot_machine' && !empty($result_data['read'])) {
+		// The reboot (agent 1.76.0): scheduled, and whether it was seen to happen.
+		echo '<div class="card mb-3"><div class="card-header"><strong>Reboot</strong></div><div class="card-body">';
+		if (empty($result_data['scheduled'])) {
+			echo '<div>Not rebooted: ' . htmlspecialchars((string)($result_data['reason'] ?? '')) . '</div>';
+		} else {
+			echo '<div>' . (!empty($result_data['already_scheduled']) ? 'A reboot was already scheduled; no second one was added.' : 'Scheduled ' . (int)($result_data['in_seconds'] ?? 0) . ' seconds after this job reported.') . '</div>';
+			if (!empty($result_data['came_back_at'])) {
+				echo '<div class="text-success mt-1">It came back: a host report at ' . htmlspecialchars(LibraryFunctions::convert_time((string)$result_data['came_back_at'], 'UTC', $session->get_timezone(), 'M j, g:i A'))
+					. ' carried a new boot id.</div>';
+			} else {
+				echo '<div class="text-muted mt-1">Not yet seen to come back. This management node asks the machine for a host report every two minutes until one carries a new boot id.</div>';
+			}
+		}
+		echo '</div></div>';
 		$result_data = null;
 	} elseif (is_array($result_data) && $job_type === 'move_to_plane' && !empty($result_data['fingerprint'])) {
 		$fp = (string)$result_data['fingerprint'];

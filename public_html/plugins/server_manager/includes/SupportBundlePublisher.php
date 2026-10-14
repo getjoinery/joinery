@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.22 - carries listening_sockets.sh, container_inventory.sh and reboot_machine.sh: the three machine words of
+ *                 agent 1.76.0 work on a siteless host
  * @version 1.21 - carries _site_engine.sh, which install.sh and _site_run_spec.sh source to name the engine a
  *                 host's sites run on: without it a site container engine host's reach probe (setup_ssl.sh)
  *                 called Docker, which is not there, and no certificate was ever issued (B11)
@@ -165,6 +167,12 @@ class SupportBundlePublisher {
 		// reset_failed_unit: unit_journal's counterpart, same list, sources
 		// nothing. A unit a host can be asked about is one it can clear.
 		'maintenance_scripts/sysadmin_tools/reset_failed_unit.sh',
+		// listening_sockets, container_inventory and reboot_machine (agent
+		// 1.76.0): what a Docker host listens on, every container on it, and
+		// its reboot, each a machine's question. All three source nothing.
+		'maintenance_scripts/sysadmin_tools/listening_sockets.sh',
+		'maintenance_scripts/sysadmin_tools/container_inventory.sh',
+		'maintenance_scripts/sysadmin_tools/reboot_machine.sh',
 		// restart_unit and restart_container: the repairs of service_health
 		// and container_health. A Docker host runs its site containers and its
 		// own fail2ban and cron; both scripts source nothing.

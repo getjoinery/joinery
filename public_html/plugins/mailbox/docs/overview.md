@@ -4498,6 +4498,15 @@ model and writing only counts. Fortress rows are never openable here and are mar
 handled. The `LearnSpamFeedback` cron pass is the backstop for clear rows a request did
 not finish.
 
+Whether corrections reach the corpus is answered in counts by `SpamLearning::status()`:
+rows marked spam or not spam in the last `STATUS_DAYS` (7) days, split into taught (or
+handled), waiting for the keyless pass, waiting for their owner's window, and never
+taught because they were polled over IMAP; the corpus's token count, newest token and
+spam and good message totals; and the two policy switches. A management node asks for
+it with the agent's `spam_learning_status` word, which runs
+`maintenance_scripts/sysadmin_tools/spam_learning_status.php`; nothing in it names a
+message, a sender or an address.
+
 ### What the spam filter keeps readable
 
 The relationship signals and the corpus work on sealed mailboxes at ingest, with no

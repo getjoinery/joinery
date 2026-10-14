@@ -35,6 +35,8 @@
  * its key given up (let_go()): its owner deletes it at the provider, and a
  * holder still answering it would open its data for whoever has it next.
  *
+ * @version 1.8 - run_under_way(): the one reading of "a data root run is under way", for the uptime pass and the
+ *                reboot's refusal
  * @version 1.7 - let_go(): a machine a site copy lets go (discarded, or the old server of a kept switch-over) has
  *                the keys held for it retired; its row stayed enrolled on a deleted node, still answered (B64)
  * @version 1.6 - a dormant copy is enrolled and sent its recipient once its agent takes both on a quiet site (B58);
@@ -106,6 +108,19 @@ class DataRootEscrowSync {
 		foreach (new MultiDataRootEscrow(array('node' => (int)$node->key, 'live' => true)) as $row) {
 			$row->permanent_delete();
 		}
+	}
+
+	/**
+	 * Whether the machine's last host report says an encryption, its undo or
+	 * a re-key is running on its data root. A boot mid-run opens only with the
+	 * recovery key; the uptime pass asks such a machine for its report more
+	 * often (RunNodeUptimeChecks), and nothing reboots it from here
+	 * (JobCommandBuilder::reboot_refusal).
+	 */
+	public static function run_under_way($node): bool {
+		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
+		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
+		return is_array($enc) && (string)($enc['reencrypt'] ?? '') !== '';
 	}
 
 	/**

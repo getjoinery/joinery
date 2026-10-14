@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.123 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0,
+ *                  the running list of specs/agent_recipes_and_vocabulary.md); reboot_refusal() names what the node
+ *                  would refuse before a reboot is queued
  * @version 1.122 - COPY_SOURCE_MIN_VERSION is BROKER_MIN_CORE_VERSION's 0.8.472: a copy run backs the source up
  *                  through this management node's backup broker first (B53)
  * @version 1.121 - run_installer may name host_swap.sh (agent 1.75.2)
@@ -2759,6 +2762,105 @@ class JobCommandBuilder {
 
 	public static function build_disk_usage_primitive($node) {
 		return ['primitive' => 'disk_usage', 'params' => []];
+	}
+
+	/**
+	 * The addresses and ports the machine listens on, with the program and
+	 * unit holding each (agent 1.76.0, specs/agent_recipes_and_vocabulary.md,
+	 * the running list). PRIMITIVE ONLY, and it takes nothing. No log-access
+	 * check: listeners are configuration, not content.
+	 */
+	public static function build_listening_sockets($node) {
+		if (!self::has_primitive($node, 'listening_sockets')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot list what it listens on. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['listening_sockets']));
+		}
+		return self::build_listening_sockets_primitive($node);
+	}
+
+	public static function build_listening_sockets_primitive($node) {
+		return ['primitive' => 'listening_sockets', 'params' => []];
+	}
+
+	/**
+	 * Every container on a host: whether install.sh made it, its image, state,
+	 * mounts and run spec (agent 1.76.0). PRIMITIVE ONLY, and it takes nothing.
+	 */
+	public static function build_container_inventory($node) {
+		if (!self::has_primitive($node, 'container_inventory')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot list its containers. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['container_inventory']));
+		}
+		return self::build_container_inventory_primitive($node);
+	}
+
+	public static function build_container_inventory_primitive($node) {
+		return ['primitive' => 'container_inventory', 'params' => []];
+	}
+
+	/**
+	 * Whether members' spam corrections reach the site's spam filter: counts
+	 * only (agent 1.76.0). PRIMITIVE ONLY, and it takes nothing; a site word,
+	 * so a machine with no site does not offer it.
+	 */
+	public static function build_spam_learning_status($node) {
+		if (!self::has_primitive($node, 'spam_learning_status')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its spam learning. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['spam_learning_status']));
+		}
+		return self::build_spam_learning_status_primitive($node);
+	}
+
+	public static function build_spam_learning_status_primitive($node) {
+		return ['primitive' => 'spam_learning_status', 'params' => []];
+	}
+
+	/**
+	 * Why this plane will not ask the machine to reboot, or null. The node
+	 * refuses each of these itself (reboot_machine.sh); asking here names the
+	 * reason before a job is queued, from what the plane already knows: a
+	 * container site is not a machine, and a machine whose encrypted data root
+	 * would wait at boot for its recovery key is not rebooted from here.
+	 */
+	public static function reboot_refusal($node): ?string {
+		if (trim((string)$node->get('mgn_container_name')) !== '') {
+			return 'This site runs in a container; reboot its server from the server\'s own node.';
+		}
+		if (DataRootEscrowSync::run_under_way($node)) {
+			return 'Its data root is being encrypted, decrypted or re-keyed, and a boot mid-run opens only with the recovery key. Reboot when the run has finished.';
+		}
+		if (!IpSwapMove::opens_by_itself($node)) {
+			return 'Its data root is encrypted and has no escrow holder, so it would wait at boot for someone to type its recovery key.';
+		}
+		return null;
+	}
+
+	/**
+	 * Reboot the machine twenty seconds after the job reports (agent 1.76.0).
+	 * PRIMITIVE ONLY, and it takes nothing. The node refuses where the reboot
+	 * cannot be proved safe, and so does this plane where it already knows
+	 * (reboot_refusal). The job's result keeps the boot id before; the next
+	 * host report's boot id says the machine came back
+	 * (JobResultProcessor::reboot_seen).
+	 */
+	public static function build_reboot_machine($node) {
+		if (!self::has_primitive($node, 'reboot_machine')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be rebooted from here. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['reboot_machine']));
+		}
+		$why = self::reboot_refusal($node);
+		if ($why !== null) {
+			throw new Exception($why);
+		}
+		return self::build_reboot_machine_primitive($node);
+	}
+
+	public static function build_reboot_machine_primitive($node) {
+		return ['primitive' => 'reboot_machine', 'params' => []];
 	}
 
 	/**

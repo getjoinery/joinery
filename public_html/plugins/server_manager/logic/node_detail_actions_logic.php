@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.60 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0)
  * @version 1.59 - retry_install is refused only when this plane no longer holds the install password, for any
  *                shape: a failed install keeps it (B37: a bare-metal install that never reached its server was
  *                refused on the old belief that its setup turned password login off); data_root_enrol is refused
@@ -168,6 +169,10 @@ class NodeDetailActions {
 		'log_table_tail'           => 'overview',
 		'unit_journal'             => 'overview',
 		'disk_usage'               => 'overview',
+		'listening_sockets'        => 'overview',
+		'container_inventory'      => 'overview',
+		'spam_learning_status'     => 'overview',
+		'reboot_machine'           => 'overview',
 		'reset_failed_unit'        => 'overview',
 		'restart_unit'             => 'overview',
 		'move_to_plane'            => 'api_keys',
@@ -420,6 +425,20 @@ class NodeDetailActions {
 			case 'disk_usage': {
 				$built = JobCommandBuilder::build_disk_usage($node);
 				$job = ManagementJob::createFromBuild($node->key, 'disk_usage', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			// The words of the running list (agent 1.76.0): three reads that take
+			// nothing, and the reboot, which the builder refuses where the node
+			// would (a container site, an encrypted data root that would wait
+			// for its recovery key).
+			case 'listening_sockets':
+			case 'container_inventory':
+			case 'spam_learning_status':
+			case 'reboot_machine': {
+				$builder = 'build_' . $action;
+				$built = JobCommandBuilder::$builder($node);
+				$job = ManagementJob::createFromBuild($node->key, $action, $built, null, $uid);
 				return self::jobUrl($job);
 			}
 
