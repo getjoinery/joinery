@@ -90,6 +90,8 @@ php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by r
 php tests/run.php db --timeout=30   # override every test's declared wall-clock cap (seconds)
 php tests/run.php --list       # list discovered tests, run nothing
 php tests/run.php --json       # emit the aggregate JSON contract (for CI)
+php tests/run.php db --fresh   # run every selected suite; borrow no earlier result
+php tests/run.php db --no-wait # exit 3 at once if another run holds the gate
 ```
 
 `safe`, `db` and `test-db` are cumulative, so `php tests/run.php db` is the
@@ -145,10 +147,10 @@ holds, and the summary names which:
   `theme/`, `serve.php`) or its own plugin changed — Apache-side reach is not
   in the process's include list.
 
-A change to `tests/run.php`, `tests/lib/harness.php`, `tests/lib/coverage.php`
-or `tests/lib/discovery.php` runs the whole batch: the harness changing
-invalidates every recorded reach, and no suite loads the runner, the
-selection or the discovery, so reach cannot see them. Every other file under
+A change to `tests/run.php`, `tests/lib/harness.php`, `tests/lib/coverage.php`,
+`tests/lib/discovery.php` or `tests/lib/gate.php` runs the whole batch: the
+harness changing invalidates every recorded reach, and no suite loads the
+runner, the selection, the discovery or the gate, so reach cannot see them. Every other file under
 `tests/lib/` — a fixture library, the HTTP or logic helpers — is loaded by the
 suites that use it and recorded in their reach, so it selects only those. A
 stale or missing map can therefore only widen a run, never wrongly narrow it.
@@ -163,6 +165,111 @@ selects nothing exits 0: a docs-only change is legitimately green.
 `--changed` refuses the `live` and `deploy` tiers (real effects and deployed
 nodes are never silently narrowed), refuses `--only` (which already names its
 test), and refuses to run without git and a repository.
+
+### One run at a time: the gate
+
+Several agents share one box, and each runs the gate before checking in. A
+gate is a three-wide pool plus the test-database lane plus whatever a suite
+compiles, so two of them at once is more than four cores carry: the box
+stops answering, and the overlap is also where most flaky reds come from
+(two runs sharing one database and one tree). So the box runs one at a time.
+
+A run selecting more than ten suites takes an exclusive lock on
+`{site root}/cache/tests/gate.lock` before its first suite and holds it until
+its last result is in. A second such run prints who holds the gate and how
+far along it is, then a progress line every thirty seconds, and starts the
+moment the lock frees:
+
+```
+Gate held by public-html-41 (pid 3408152): db --changed, 212/711 suites done, 0 failed, held 4m10s. Waiting (340 suites to run, more than the cutoff of 10)...
+  still waiting (0m30s): db --changed, 260/711 suites done, 0 failed, held 4m40s
+Gate acquired after 6m02s.
+```
+
+The kernel owns the lock, so a killed runner frees it at once and nothing
+needs cleaning up. `gate.holder.json` beside the lock names the holder — pid,
+tier, arguments, and the Claude session it runs under, resolved to the name
+the `work` launcher gave it — and is believed only while the lock is held.
+`--no-wait` exits with code 3 instead of waiting, for a caller that would
+rather come back later.
+
+What does not queue:
+
+- **A run of ten suites or fewer** — a `--only`, a narrow `--filter`, a
+  `--changed` that reaches little. It runs at once, beside whatever holds the
+  gate, so the working loop never waits behind a twelve-minute run. The cutoff
+  is `GATE_QUEUE_CUTOFF` in `tests/lib/gate.php`.
+- **The `deploy` tier**, which runs once on a node after an upgrade swap with
+  a rollback hanging on the result.
+- **Dashboard runs**, which are one suite per request and so always below
+  the cutoff. The dashboard shows the holder line while a gate runs.
+
+Every run that executes suites raises its own nice value to 10, and every
+suite subprocess, the lane worker and any compiler they start inherit it, so
+the sessions on the box win the CPU and the gate takes what is left. Postgres
+is untouched.
+
+A test of the runner spawns runners while the real gate is held:
+`JOINERY_GATE_DIR` relocates the lock and the run records, and
+`JOINERY_GATE_CUTOFF` lowers the cutoff so a one-suite run exercises the
+wait. Both are read only when the `debug` setting is on.
+
+### Run records and reuse
+
+Every run leaves a record under `{site root}/cache/tests/runs/`: `{run_id}.json`
+written at the start (tier, arguments, holder, the **tree id**) and
+`{run_id}.jsonl`, one result per line as it lands (which is what a waiting
+runner reads for the holder's progress). The tree id is the git tree of the
+working tree as it stood when the run started — every tracked and untracked,
+non-ignored file under the repository root — made with `git add -A` into a
+temporary copy of the index and `git write-tree`, so the shared index and
+every prepared-commit index stay untouched. Records are kept for 48 hours.
+
+Each result also says whether its **reach is complete**: the files the
+suite's process loaded (the same list the coverage map records) plus its
+`covers` globs are a complete statement of what the result depends on. That
+is true of a PHP suite that reported its files and of a shell gate, whose
+`covers` is its whole declaration. It is false for a crash or timeout, for a
+suite with `needs: [dev-web]` (Apache-side reach is not in its include list),
+and for `live`, `prod-verify` and `deploy` suites, which are never reused.
+
+A run then **borrows** a suite's result from a record instead of running it
+when all of these hold:
+
+1. the recorded reach is complete and the result is a pass or a fail (a skip,
+   crash or timeout is never borrowed);
+2. none of the files in that reach differ between the record's tree and this
+   run's — one `git diff-tree` per record answers it for every suite at once,
+   and the decision is the `--changed` selection applied to that diff, so the
+   two can never disagree about what a change reaches;
+3. the record's debug environment matches.
+
+The newest valid record wins. A borrowed result counts in the totals exactly
+as a fresh one, is marked on its line and in the JSON contract
+(`reused_from`: run id, start time, holder), and the summary says how many
+came from where:
+
+```
+  PASS booking_flow                 61/61       8104ms  plugins/bookings/tests/booking_flow_test.php  [reused: 2026-10-14T18:40Z by public-html-41 (pid 3408152)]
+...
+Reused: 302 of 711 results from 2 earlier runs (20261014T184012Z-3391020, 20261014T185421Z-3408152); 409 run now
+Run record: 20261014T190301Z-3410077 (held the gate, waited 6m02s)
+```
+
+A run that waited for the gate decides reuse again once it holds it, so
+everything the previous holder completed is on offer. A borrowed result does
+not touch the coverage map — the map already holds that reach from the run
+that produced it — and a record holds only what its own run ran, so a borrow
+always points at the run that produced the result.
+
+What reuse does not know: it knows what a suite loaded, not what the
+database held, what a setting was, or what another process wrote while the
+suite ran. That is the assumption `--changed` already makes when it skips a
+suite, and a result that was wrong for one of those reasons stays wrong when
+borrowed. `--fresh` looks at no record, and **the pre-publish gate is
+`php tests/run.php db --fresh`**: a release proves the tree it ships, on the
+box, now. Reuse is for the working loop and the pre-checkin gate, where the
+question is "did my change break something".
 
 ### `deploy` is not a development tier
 
@@ -226,6 +333,11 @@ end rather than a unit of one:
 Adding a small test costs the gate almost nothing. Adding a suite that boots a
 subsystem costs it seconds, so give one of those a `tier:` it has earned.
 
+Those are the costs of running a suite. A pre-checkin gate pays them only for
+the suites whose reach differs from a recorded run (see [Run records and
+reuse](#run-records-and-reuse)); two sessions whose trees differ in files most
+suites never load share most of one run between them.
+
 Within each lane the runner executes tests one at a time. Most of the `db`
 gate's wall clock is spent waiting on the database rather than on CPU, so its
 duration is closer to the sum of its parts than to the work it does.
@@ -285,7 +397,8 @@ php tests/unit/dns_resolver_test.php --json
 ### The dashboard
 
 `/tests/` (superadmin, permission 10) lists every discovered test grouped by
-tier with its env and `needs`, plus per-tier "Run all" controls. Runs execute
+tier with its env and `needs`, plus per-tier "Run all" controls, and names the
+run holding the gate while one is running. Runs execute
 through the `tests_run` API action, which spawns the runner with `--json`;
 page JS calls `/api/v1` with the browser-session credential. On production
 (`debug` off) `dev-only` tests render locked; `live` and `prod-verify` tests
