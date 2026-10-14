@@ -3,6 +3,10 @@
 # install_site_engine.sh - install or converge the site container engine on a
 # container host (specs/site_container_engine.md D2, D3).
 #
+# Version: 1.3 - the engine's containers.conf drop-in and apt pin are written by every converge, with
+#               the rest of its configuration: a changed one reached a host only with a new engine.
+#               The engine reads OCI hooks from /etc/containers/oci/hooks.d too, where the host's own
+#               go (multi_tenant_host.sh: every container start checks the walls, reviewer2 R3).
 # Version: 1.2 - apt's package lists are fetched before runc and conmon are installed (a new
 #               machine has none), and a failed apt step stops the run; converge runs the install
 #               as a plain statement, since bash ignores errexit inside a condition and an install
@@ -102,6 +106,9 @@ conf_text() {
 runtime = "runc"
 cgroup_manager = "systemd"
 helper_binaries_dir = ["/usr/local/lib/joinery-site-engine/current/helpers"]
+# Hooks this host adds (multi_tenant_host.sh's walls check) are read beside the
+# engine's own; every container start runs them.
+hooks_dir = ["/usr/share/containers/oci/hooks.d", "/etc/containers/oci/hooks.d"]
 
 [network]
 network_backend = "netavark"
@@ -145,6 +152,8 @@ EOF
 # What the engine needs beside its binaries, written whole every run.
 host_config() {
     local seccomp_src_sha
+    conf_text | write_if_changed "$CONF" 644 && say "wrote ${CONF#"$ROOT"}"
+    pref_text | write_if_changed "$PREF" 644 && say "wrote ${PREF#"$ROOT"}"
     printf '{\n  "default": [{"type": "insecureAcceptAnything"}],\n  "transports": {"docker-daemon": {"": [{"type": "insecureAcceptAnything"}]}}\n}\n' \
         | write_if_changed "$POLICY" 644 && say "wrote ${POLICY#"$ROOT"}"
     printf '# Written by install_site_engine.sh: a short image name is looked for on docker.io alone.\nunqualified-search-registries = ["docker.io"]\nshort-name-mode = "enforcing"\n' \
@@ -262,8 +271,6 @@ install_engine() {  # ARCHIVE SHA256
     fi
     put_podman
 
-    conf_text | write_if_changed "$CONF" 644 && say "wrote ${CONF#"$ROOT"}"
-    pref_text | write_if_changed "$PREF" 644 && say "wrote ${PREF#"$ROOT"}"
     host_config
     if write_if_changed "$UNIT" 644 < "$LIB/current/systemd/podman-restart.service"; then
         say "wrote ${UNIT#"$ROOT"}"

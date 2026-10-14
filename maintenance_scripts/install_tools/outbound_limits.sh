@@ -7,6 +7,19 @@
 # them; they stop a hacked plugin turning the server into a scanner or a
 # flood, and bound what a runaway site costs.
 #
+# Version: 1.4 - on the site container engine a site's name lookups go to the host resolver's own
+#                upstream servers (its networks run no DNS service, specs/site_container_engine.md
+#                D5), so its chain lets UDP to port 53 of exactly those through, under the site's
+#                rate on new connections; every other UDP is dropped as before (B14: with the limits
+#                on, a site there resolved nothing). The lookups' limit is a token bucket of its own, so
+#                a site's budget of new flows is about twice the figure, and they are outside the cap
+#                on open connections. The status says site_engine=podman, or unusable where the engine
+#                cannot be asked (its helper missing): its sites' lookups are then dropped, said so.
+#                A container site is read and told through the engine this machine's sites run on
+#                (_site_engine.sh): Docker, or the site container engine (specs/site_container_engine.md
+#                WP3). install puts the engine helper beside the run spec helper's installed copy,
+#                which refuses every engine call on such a machine without it; the unit starts after
+#                podman-restart.service as after docker.service.
 # Version: 1.3
 #
 #   outbound_limits.sh install [--web-user] [--off] [FIGURES] [--by=plane]
@@ -173,10 +186,14 @@ UNIT_PATH="${ROOT}/etc/systemd/system/${UNIT_NAME}"
 TIMER_PATH="${ROOT}/etc/systemd/system/${TIMER_NAME}"
 INSTALLED="${ROOT}${SELF_INSTALLED}"
 LIB_INSTALLED="${ROOT}/usr/local/lib/joinery-limits/_site_run_spec.sh"
+ENGINE_LIB_INSTALLED="${ROOT}/usr/local/lib/joinery-limits/_site_engine.sh"
 HOST_FILE="${ROOT}/etc/joinery/outbound_limits.json"
 SITES_DIR="${ROOT}/etc/joinery/sites"
 WEB_ROOTS="${ROOT}/var/www/html"
 RESOLV_CONF="${ROOT}/etc/resolv.conf"
+# systemd-resolved's own upstream servers: the ones the site container engine
+# writes into each site's /etc/resolv.conf for the 127.0.0.53 stub.
+UPSTREAM_RESOLV="${ROOT}/run/systemd/resolve/resolv.conf"
 RUN_DIR="${ROOT}/run/joinery"
 STATUS_FILE="${RUN_DIR}/outbound_limits.status"
 APPLIED_FILE="${RUN_DIR}/outbound_limits.applied"
@@ -195,6 +212,26 @@ spec_lib() {
     if [[ -f "${SELF_DIR}/_site_run_spec.sh" ]]; then echo "${SELF_DIR}/_site_run_spec.sh"
     elif [[ -f "$LIB_INSTALLED" ]]; then echo "$LIB_INSTALLED"
     else return 1; fi
+}
+# The engine helper, found the same way.
+engine_lib() {
+    if [[ -f "${SELF_DIR}/_site_engine.sh" ]]; then echo "${SELF_DIR}/_site_engine.sh"
+    elif [[ -f "$ENGINE_LIB_INSTALLED" ]]; then echo "$ENGINE_LIB_INSTALLED"
+    else return 1; fi
+}
+# The command of the engine this machine's sites run on, or nothing where it is
+# not installed. Without the helper Docker is the engine, as the helper itself
+# answers, except on a machine with the site container engine installed.
+container_engine() {
+    local lib kind
+    if lib="$(engine_lib)"; then
+        kind="$(bash -c '. "$1" && site_engine_kind' _ "$lib")" || return 1
+    elif [[ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; then
+        return 1
+    else
+        kind=docker
+    fi
+    command -v "$kind" > /dev/null 2>&1 && echo "$kind"
 }
 
 # --- the figures -----------------------------------------------------------------
@@ -332,8 +369,9 @@ own_ceiling_answer() {
 
 # A container site's own ceiling, read inside it as the web server's user.
 container_own_ceiling() {  # SITE
-    command -v docker > /dev/null 2>&1 || return 0
-    timeout 30 docker exec -u "$WEB_USER" "$1" timeout 20 php "/var/www/html/$1/${SITE_CEILING_SCRIPT}" 2> /dev/null \
+    local engine
+    engine="$(container_engine)" || return 0
+    timeout 30 "$engine" exec -u "$WEB_USER" "$1" timeout 20 php "/var/www/html/$1/${SITE_CEILING_SCRIPT}" 2> /dev/null \
         | own_ceiling_answer
 }
 
@@ -369,8 +407,9 @@ told_text() {  # STATE HOST_CEILING(- none) IN_FORCE(- none) [SET_BY, default th
 }
 
 tell_container() {  # SITE STATE HOST_CEILING IN_FORCE
-    command -v docker > /dev/null 2>&1 || return 0
-    told_text "$2" "$3" "$4" "$(site_set_by "$1")" | timeout 30 docker exec -i -u root "$1" sh -c \
+    local engine
+    engine="$(container_engine)" || return 0
+    told_text "$2" "$3" "$4" "$(site_set_by "$1")" | timeout 30 "$engine" exec -i -u root "$1" sh -c \
         "mkdir -p /run/joinery && chmod 755 /run/joinery && cat > ${SITE_TOLD}.tmp && chmod 644 ${SITE_TOLD}.tmp && mv -f ${SITE_TOLD}.tmp ${SITE_TOLD}" \
         > /dev/null 2>&1
 }
@@ -450,6 +489,15 @@ resolvers() {
     awk '$1 == "nameserver" { print $2 }' "$RESOLV_CONF" 2>/dev/null
 }
 
+# The resolvers a site on the site container engine asks, one per line: the
+# upstream servers systemd-resolved names, IPv4 and IPv6, nothing else. None
+# on a Docker host, whose sites ask Docker's own resolver.
+site_resolvers() {
+    [[ "$(container_engine 2> /dev/null)" == podman ]] || return 0
+    awk '$1 == "nameserver" { print $2 }' "$UPSTREAM_RESOLV" 2>/dev/null \
+        | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9A-Fa-f:]*:[0-9A-Fa-f:]+$' | head -n 8
+}
+
 # 0 when every resolver is a loopback address (and there is at least one).
 resolver_is_loopback() {
     local r n=0
@@ -484,10 +532,22 @@ container_sites() {
 
 # --- the table -------------------------------------------------------------------
 
-# One limited sender's chain: UDP, then the open cap, then the rate.
-sender_chain() {  # CHAIN COUNTER RATE BURST OPEN
+# One limited sender's chain: name lookups to the site's resolvers (RESOLVERS,
+# space-separated, on the site container engine), held to the rate; then UDP,
+# the open cap and the rate.
+sender_chain() {  # CHAIN COUNTER RATE BURST OPEN [RESOLVERS]
+    local r v4="" v6="" fam set
+    for r in ${6:-}; do
+        if [[ "$r" == *:* ]]; then v6+="${v6:+, }$r"; else v4+="${v4:+, }$r"; fi
+    done
+    printf '\tchain %s {\n' "$1"
+    for fam in ip ip6; do
+        if [[ "$fam" == ip ]]; then set="$v4"; else set="$v6"; fi
+        [[ -n "$set" ]] || continue
+        printf '\t\t%s daddr { %s } udp dport 53 ct state new limit rate over %s/second burst %s packets counter name "%s" drop\n' "$fam" "$set" "$3" "$4" "$2"
+        printf '\t\t%s daddr { %s } udp dport 53 accept\n' "$fam" "$set"
+    done
     cat <<EOF
-	chain $1 {
 		meta l4proto udp counter name "$2" drop
 		ct state new ct count over $5 counter name "$2" drop
 		ct state new limit rate over $3/second burst $4 packets counter name "$2" drop
@@ -513,7 +573,8 @@ table_body() {  # WEB_USER(0|1) [COUNTS]
         printf '\tcounter %s {\n\t\tpackets %s bytes %s\n\t}\n' "$1" "$p" "$b"
     }
 
-    local i
+    local i resolvers
+    resolvers="$(site_resolvers | paste -sd ' ')"
     for i in "${!sites[@]}"; do counter_decl "drops_site_${sites[$i]}"; done
     [[ "$web" == 1 ]] && counter_decl "drops_web_user"
     if (( ${#sites[@]} > 0 )); then
@@ -524,7 +585,7 @@ table_body() {  # WEB_USER(0|1) [COUNTS]
         printf '\t}\n'
         for i in "${!sites[@]}"; do
             read -r c r b o <<< "$(site_figures "${sites[$i]}" 2> /dev/null)"
-            sender_chain "site_${sites[$i]}" "drops_site_${sites[$i]}" "$r" "$b" "$o"
+            sender_chain "site_${sites[$i]}" "drops_site_${sites[$i]}" "$r" "$b" "$o" "$resolvers"
         done
     fi
     if [[ "$web" == 1 ]]; then
@@ -709,6 +770,7 @@ write_status() {
         echo "set_by=${SET_BY:-}"
         echo "web_ceiling_mbit=${web_ceiling}"
         echo "site_figures=${7:-}"
+        echo "site_engine=${SITE_ENGINE_STATE:-}"
         echo "site_set_by=$(for e in ${7:-}; do
             grep -qx 'outbound_set_by=plane' "${SITES_DIR}/${e%%:*}/run_spec" 2> /dev/null && printf '%s ' "${e%%:*}"
         done | sed 's/ $//')"
@@ -754,6 +816,17 @@ do_apply() {  # WEB_USER(0|1)
         write_status refused resolver_not_loopback
         tell_everyone refused "$web"
         die "the host's resolver is not a loopback address ($(resolvers | paste -sd ' ')): dropping a site's UDP would break its name lookups, so no limits are in force. Point /etc/resolv.conf at the local resolver (systemd-resolved, 127.0.0.53) and run this again"
+    fi
+    # On the site container engine a site's name lookups and what it is told
+    # need the engine named; one that cannot be is said and in the status.
+    SITE_ENGINE_STATE=""
+    if [[ "${JOINERY_SITE_ENGINE_KIND:-}" == podman || -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; then
+        if [[ "$(container_engine 2> /dev/null)" == podman ]]; then
+            SITE_ENGINE_STATE=podman
+        else
+            SITE_ENGINE_STATE=unusable
+            say "outbound limits: WARNING: this machine's sites run on the site container engine, which cannot be asked here (no _site_engine.sh beside this script, or no usable podman): their name lookups are dropped and they are not told their figures"
+        fi
     fi
 
     sites=""; uncovered=""; pairs=""
@@ -980,7 +1053,7 @@ unit_text() {  # WEB_USER(0|1)
     cat <<EOF
 [Unit]
 Description=Joinery: outbound limits and speed ceiling for this machine's sites (outbound_limits.sh)
-After=docker.service systemd-resolved.service network-online.target
+After=docker.service podman-restart.service systemd-resolved.service network-online.target
 
 [Service]
 Type=oneshot
@@ -1028,6 +1101,9 @@ write_installed() {  # WEB_USER(0|1)
         || changed+="$(write_if_differs "$INSTALLED" 0755 < "${BASH_SOURCE[0]}")"
     if lib="$(spec_lib)" && [[ "$(readlink -f "$lib")" != "$(readlink -f "$LIB_INSTALLED" 2> /dev/null)" ]]; then
         changed+="$(write_if_differs "$LIB_INSTALLED" 0644 < "$lib")"
+    fi
+    if lib="$(engine_lib)" && [[ "$(readlink -f "$lib")" != "$(readlink -f "$ENGINE_LIB_INSTALLED" 2> /dev/null)" ]]; then
+        changed+="$(write_if_differs "$ENGINE_LIB_INSTALLED" 0644 < "$lib")"
     fi
     changed+="$(unit_text "$1" | write_if_differs "$UNIT_PATH" 0644)"
     changed+="$(timer_text | write_if_differs "$TIMER_PATH" 0644)"
@@ -1080,8 +1156,12 @@ version_newer() {  # MINE THEIRS
 newer_than_installed() {
     local lib
     version_newer "${BASH_SOURCE[0]}" "$INSTALLED" && return 0
-    lib="$(spec_lib)" && [[ "$(readlink -f "$lib")" != "$(readlink -f "$LIB_INSTALLED" 2> /dev/null)" ]] \
-        && version_newer "$lib" "$LIB_INSTALLED"
+    if lib="$(spec_lib)" && [[ "$(readlink -f "$lib")" != "$(readlink -f "$LIB_INSTALLED" 2> /dev/null)" ]] \
+        && version_newer "$lib" "$LIB_INSTALLED"; then
+        return 0
+    fi
+    lib="$(engine_lib)" && [[ "$(readlink -f "$lib")" != "$(readlink -f "$ENGINE_LIB_INSTALLED" 2> /dev/null)" ]] \
+        && version_newer "$lib" "$ENGINE_LIB_INSTALLED"
 }
 
 # Brings an installed machine's copies up to this script, as an upgrade

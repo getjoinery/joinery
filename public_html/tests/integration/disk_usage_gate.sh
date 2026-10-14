@@ -87,7 +87,7 @@ chk "biggest first" "$( php -r '
 chk "the machine list is the compiled one" "$( php -r '
     $m = json_decode(file_get_contents($argv[1]), true)["machine"];
     echo implode(",", array_column($m, "path"));
-' "$T/real.json" )" "/var/log,/var/lib/postgresql,/var/cache,/var/backups,/var/lib/docker"
+' "$T/real.json" )" "/var/log,/var/lib/postgresql,/var/cache,/var/backups,/var/lib/docker,/var/lib/containers"
 
 echo "=== An argument and stdin change nothing ==="
 echo "some stdin the script must ignore" | bash "$SCRIPT" / --max-depth=9 /etc > "$T/arg.json" 2>/dev/null

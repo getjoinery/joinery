@@ -4,6 +4,8 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.5 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3); a Podman site took its own cron entry and dropped
+#                the held manifest an image rebuild puts back.
 # Version: 1.4 - On a host that refuses unsigned code, every run checks the whole code tree against what
 #                was shipped and writes config/code_check for the host report (specs/host_restrictions.md D8).
 # Version: 1.3 - A cron entry that is the platform's own earlier rendering, every 15 or every 5
@@ -89,6 +91,9 @@ else
     say "not root - skipping"
     exit 0
 fi
+# Docker marks its containers with /.dockerenv, the site container engine with /run/.containerenv.
+IN_CONTAINER=0
+[[ -f "${FS_ROOT}/.dockerenv" || -f "${FS_ROOT}/run/.containerenv" ]] && IN_CONTAINER=1
 
 FAILED=0
 
@@ -134,7 +139,7 @@ CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_schedul
 # and blank lines aside. Nobody chose those intervals, so they are not an
 # owner's edit, and a slow task held every other task up until the next tick.
 CRON_EVERY="${CRON_LINE#\* }"
-if [[ "${NO_CRON}" == 1 || -f "${FS_ROOT}/.dockerenv" ]]; then
+if [[ "${NO_CRON}" == 1 || "${IN_CONTAINER}" == 1 ]]; then
     : # the container's start command owns the cron entry
 elif [[ -f "${CRON}" ]] && { [[ "$(directives "${CRON}")" == "*/15 ${CRON_EVERY}" ]] \
         || [[ "$(directives "${CRON}")" == "*/5 ${CRON_EVERY}" ]]; }; then
@@ -164,7 +169,7 @@ HELD="${SITE_ROOT}/config/release_manifest"
 manifest_matches() {   # $1 = a RELEASE_MANIFEST beside its .sig: does the code match it?
     [[ -f "$1" && -f "$1.sig" ]] && (cd "${SITE_ROOT}" && sha256sum -c --status "$1") 2>/dev/null
 }
-if [[ ! -f "${FS_ROOT}/.dockerenv" || ! -f "${MANIFEST}" || ! -d "${SITE_ROOT}/config" ]]; then
+if [[ "${IN_CONTAINER}" == 0 || ! -f "${MANIFEST}" || ! -d "${SITE_ROOT}/config" ]]; then
     :   # on disk nothing puts an older manifest back; a site with no manifest has none to keep
 elif cmp -s "${MANIFEST}" "${HELD}/RELEASE_MANIFEST" && cmp -s "${MANIFEST}.sig" "${HELD}/RELEASE_MANIFEST.sig"; then
     :   # the two agree

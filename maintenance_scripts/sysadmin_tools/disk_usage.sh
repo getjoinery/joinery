@@ -5,6 +5,8 @@
 # and the machine directories that are usually the answer when a site tree is
 # not.
 #
+# Version: 1.2 - /var/lib/containers joins the machine directories: the site container engine's own default
+#                storage (specs/site_container_engine.md WP3), where it keeps its data off a data root.
 # Version: 1.1 - data_root: on a host with a data root (/srv/joinery, specs/one_data_root.md),
 #                its own figures and its biggest directories to depth three. A site's folders
 #                and Postgres are bind mounts of it, so the -x walk of the site tree stops at
@@ -64,6 +66,7 @@ MACHINE_DIRS=(
     /var/cache
     /var/backups
     /var/lib/docker
+    /var/lib/containers
 )
 
 safe_path() {

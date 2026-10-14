@@ -3,6 +3,7 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.37 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
 #                 host, a site without one has it stopped (plugin_tiers.md WP7). A sandboxed plugin's
 #                 manifest.json is part of what "changed" means, so one arriving starts the host at the next tick.
@@ -1400,7 +1401,7 @@ write_certificate_summary() {
     local site_name=""
     local -a own_a=() apex_a=() www_a=()
 
-    if [[ -f /.dockerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+    if [[ -f /.dockerenv || -f /run/.containerenv ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
         in_container=true
     fi
     [[ -d "${le}" ]] && letsencrypt=true

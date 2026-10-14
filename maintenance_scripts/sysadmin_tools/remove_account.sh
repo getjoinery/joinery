@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+#VERSION 2.16 - reviewer2 R4, R8, S1: on the site container engine the site's id block is claimed
+#               (sites/<site>/idblock) before anything of it is removed, and the claim stays until a
+#               removal verifies it gone,
+#               so no new site is given ids that own them; REMOVE_ACCOUNT_DATA_ROOT is a test's seam,
+#               read only under REMOVE_ACCOUNT_ROOT.
+#VERSION 2.15 - A site on the site container engine (specs/site_container_engine.md WP3) is removed
+#               through the engine this host's sites run on (install_tools/_site_engine.sh), its
+#               image read as install.sh named it (Podman reads it back as localhost/joinery-...).
+#               With no daemon to answer, the engine sees only what its storage on the data root
+#               holds, so a host whose data root is not mounted is refused, nothing removed.
 #VERSION 2.14 - A site on a host with restrictions (install.sh docker --multi-tenant) mounts them
 #               read-only (_site_run_spec.sh 1.9), and that bind made every such site 'not one
 #               install.sh made': none could be removed. That one mount, exactly, is accepted.
@@ -117,9 +127,34 @@ fi
 # DETECT DEPLOYMENT TYPE
 # =============================================================================
 
+# The engine this host's sites run on, from install_tools/_site_engine.sh beside
+# this script's tree. Without the helper, Docker is the engine, as the helper
+# itself answers, except on a machine with the site container engine installed,
+# where nothing is removed.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$HERE/../install_tools/_site_engine.sh" ]; then
+    . "$HERE/../install_tools/_site_engine.sh"
+elif [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; then
+    echo "ERROR: this machine's sites run on the site container engine, and there is no install_tools/_site_engine.sh beside this script. Nothing was removed."
+    exit 1
+else
+    site_engine_kind() { echo docker; }
+    site_engine_is_podman() { return 1; }
+    site_engine_image() { printf '%s\n' "${1#localhost/}"; }
+fi
+ENGINE="$(site_engine_kind)" || { echo "ERROR: this machine's container engine could not be named. Nothing was removed."; exit 1; }
+
 WEB_DIR="$FS/var/www/html"
 APACHE_SITES="$FS/etc/apache2/sites-available"
 SITES_STATE="$FS/etc/joinery/sites"
+# On the site container engine the site's files are owned by its own id block
+# (its run spec's idblock=, or an install's claim). Read before anything goes:
+# the block stays taken while any of them is left (VERIFY GONE).
+SITE_IDBLOCK=""
+if site_engine_is_podman; then
+    SITE_IDBLOCK="$(sed -n 's/^idblock=\([0-9]\{1,5\}\)$/\1/p' "$SITES_STATE/$SITE_NAME/run_spec" 2>/dev/null | tail -n 1)"
+    [ -n "$SITE_IDBLOCK" ] || SITE_IDBLOCK="$(grep -x -E '[0-9]{1,5}' "$SITES_STATE/$SITE_NAME/idblock" 2>/dev/null | head -n 1)"
+fi
 
 SITE_ROOT="$WEB_DIR/$SITE_NAME"
 TEST_SITE_ROOT="$WEB_DIR/${SITE_NAME}_test"
@@ -130,11 +165,29 @@ LE_SSL_FILE="$APACHE_SITES/$SITE_NAME-le-ssl.conf"
 IS_DOCKER=false
 IS_BAREMETAL=false
 
-# Docker is used only when its daemon answers. A daemon that is installed and
+# The engine is used only when it answers. A Docker daemon that is installed and
 # meant to run but does not answer hides every container and volume, and the
-# run would remove the proxy and verify a site gone that is still there.
+# run would remove the proxy and verify a site gone that is still there. The
+# site container engine has no daemon: it reads its storage straight off the
+# data root, so one not mounted hides them the same way.
 DOCKER=false
-if command -v docker &> /dev/null && timeout 30 docker info > /dev/null 2>&1; then
+if site_engine_is_podman; then
+    # The seam is a test's, honoured only under its scratch root (REMOVE_ACCOUNT_ROOT).
+    DATA_ROOT_MNT="$FS/srv/joinery"
+    [ -n "$FS" ] && DATA_ROOT_MNT="${REMOVE_ACCOUNT_DATA_ROOT:-$DATA_ROOT_MNT}"
+    if ! mountpoint -q "$DATA_ROOT_MNT" 2>/dev/null; then
+        echo "ERROR: this machine's sites run on the site container engine, whose storage is on the data root"
+        echo "(/srv/joinery), and the data root is not mounted, so this site's container and volumes cannot be"
+        echo "seen. Nothing was removed; mount it (joinery_data_root.sh check says why) and run this again."
+        exit 1
+    fi
+    if ! timeout 30 "$ENGINE" info > /dev/null 2>&1; then
+        echo "ERROR: the site container engine is installed here but does not answer, so this site's container"
+        echo "and volumes cannot be seen. Nothing was removed; run install_tools/install_site_engine.sh converge."
+        exit 1
+    fi
+    DOCKER=true
+elif command -v docker &> /dev/null && timeout 30 docker info > /dev/null 2>&1; then
     DOCKER=true
 elif [ -S "$FS/var/run/docker.sock" ] || systemctl is-enabled --quiet docker 2>/dev/null; then
     echo "ERROR: Docker is installed here but not answering (or not on this PATH), so this site's"
@@ -143,8 +196,9 @@ elif [ -S "$FS/var/run/docker.sock" ] || systemctl is-enabled --quiet docker 2>/
 fi
 
 # The suffix of every volume a site owns: install.sh's ALL_SITE_VOLUMES and
-# _site_run_spec.sh's RUN_SPEC_VOLUMES, spelled here because this script ships
-# alone and sources nothing (remove_account_gate checks the three agree).
+# _site_run_spec.sh's RUN_SPEC_VOLUMES, spelled here because this script runs
+# with or without install_tools beside it and sources only the engine helper
+# (remove_account_gate checks the three agree).
 SITE_VOLUME_SUFFIXES="code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs agent deploy"
 
 # _site_run_spec.sh's RUN_SPEC_RESTRICTIONS_DIR: the host's restrictions, which
@@ -159,7 +213,7 @@ HOST_RESTRICTIONS_DIR="/etc/joinery/host_restrictions"
 site_volumes() {
     local name="${1:-$SITE_NAME}" present suffix
     [ "$DOCKER" = true ] || return 0
-    present=$(docker volume ls --format '{{.Name}}' 2>/dev/null || true)
+    present=$("$ENGINE" volume ls --format '{{.Name}}' 2>/dev/null || true)
     for suffix in $SITE_VOLUME_SUFFIXES; do
         printf '%s\n' "$present" | grep -qxF "${name}_${suffix}" && echo "${name}_${suffix}"
     done
@@ -171,7 +225,7 @@ site_volumes() {
 # container has it: a site named 'cafe' must never reach container cafe12...
 container_exists() {
     [ "$DOCKER" = true ] || return 1
-    docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qxF "$1"
+    "$ENGINE" ps -a --format '{{.Names}}' 2>/dev/null | grep -qxF "$1"
 }
 
 # Whether NAME is a site in its own right on this machine: its own container,
@@ -189,12 +243,13 @@ another_site() {
 # by hand may hold a database, a bind mount or another site's volume.
 container_not_ours() {
     local image mounts m name suffix own
-    image=$(docker inspect -f '{{.Config.Image}}' "$SITE_NAME" 2>/dev/null) || { echo "it could not be inspected"; return 0; }
+    image=$("$ENGINE" inspect -f '{{.Config.Image}}' "$SITE_NAME" 2>/dev/null) || { echo "it could not be inspected"; return 0; }
+    image=$(site_engine_image "$image")
     case "$image" in
         "joinery-${SITE_NAME}"|"joinery-${SITE_NAME}:"*) ;;
         *) echo "it runs the image '${image}', not joinery-${SITE_NAME}"; return 0 ;;
     esac
-    mounts=$(docker inspect -f '{{range .Mounts}}{{.Type}}:{{.Name}}:{{.Source}}:{{.Destination}}:{{.RW}} {{end}}' "$SITE_NAME" 2>/dev/null) \
+    mounts=$("$ENGINE" inspect -f '{{range .Mounts}}{{.Type}}:{{.Name}}:{{.Source}}:{{.Destination}}:{{.RW}} {{end}}' "$SITE_NAME" 2>/dev/null) \
         || { echo "its mounts could not be read"; return 0; }
     local type src dest rw
     for m in $mounts; do
@@ -227,7 +282,7 @@ if [ "$DOCKER" = true ]; then
         IS_DOCKER=true
     elif [ -n "$(site_volumes)" ]; then
         IS_DOCKER=true
-    elif docker network inspect "${SITE_NAME}_net" > /dev/null 2>&1; then
+    elif "$ENGINE" network inspect "${SITE_NAME}_net" > /dev/null 2>&1; then
         IS_DOCKER=true
     fi
 fi
@@ -321,6 +376,8 @@ if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
     # job re-run (or a teardown that already happened) must not fail here. The
     # marker lets the caller distinguish "already gone" from "removed just now".
     clear_site_marks
+    # Nothing of the site is left under its id block: a claim on it goes too.
+    rm -f "$SITES_STATE/$SITE_NAME/idblock"
     echo "No site found with name '$SITE_NAME':"
     echo "  - No Docker container or volumes named '$SITE_NAME'"
     echo "  - No directory at $SITE_ROOT"
@@ -383,6 +440,13 @@ if [ "$ASSUME_YES" = false ]; then
     fi
 fi
 
+# The site's id block is claimed before anything of it goes, so no run that
+# stops part way (or an install beside this one) frees it while its files are
+# still owned by it; only a removal verified gone drops the claim (VERIFY GONE).
+if [ -n "$SITE_IDBLOCK" ]; then
+    mkdir -p "$SITES_STATE/$SITE_NAME" && printf '%s\n' "$SITE_IDBLOCK" > "$SITES_STATE/$SITE_NAME/idblock"
+fi
+
 # =============================================================================
 # DOCKER REMOVAL
 # =============================================================================
@@ -393,14 +457,14 @@ if [ "$IS_DOCKER" = true ]; then
 
     if container_exists "$SITE_NAME"; then
         echo "Stopping container..."
-        if docker stop "$SITE_NAME" 2>/dev/null; then
+        if "$ENGINE" stop "$SITE_NAME" 2>/dev/null; then
             echo "Container stopped: $SITE_NAME"
         else
             echo "Container was not running or already stopped"
         fi
 
         echo "Removing container..."
-        if docker rm "$SITE_NAME" 2>/dev/null; then
+        if "$ENGINE" rm "$SITE_NAME" 2>/dev/null; then
             echo "Container removed: $SITE_NAME"
         else
             echo "WARNING: Failed to remove container"
@@ -413,8 +477,8 @@ if [ "$IS_DOCKER" = true ]; then
     # its run spec names, or the one named for it when the spec is already gone.
     SITE_NETWORK=$(sed -n 's/^network=//p' "$SITES_STATE/${SITE_NAME}/run_spec" 2>/dev/null | tail -1)
     SITE_NETWORK="${SITE_NETWORK:-${SITE_NAME}_net}"
-    if docker network inspect "$SITE_NETWORK" > /dev/null 2>&1; then
-        if docker network rm "$SITE_NETWORK" > /dev/null 2>&1; then
+    if "$ENGINE" network inspect "$SITE_NETWORK" > /dev/null 2>&1; then
+        if "$ENGINE" network rm "$SITE_NETWORK" > /dev/null 2>&1; then
             echo "Network removed: $SITE_NETWORK"
         else
             echo "WARNING: Failed to remove network: $SITE_NETWORK"
@@ -426,7 +490,7 @@ if [ "$IS_DOCKER" = true ]; then
     VOLUMES=$(site_volumes)
     if [ -n "$VOLUMES" ]; then
         for vol in $VOLUMES; do
-            if docker volume rm "$vol" 2>/dev/null; then
+            if "$ENGINE" volume rm "$vol" 2>/dev/null; then
                 echo "  Removed volume: $vol"
             else
                 echo "  WARNING: Failed to remove volume: $vol"
@@ -439,11 +503,11 @@ if [ "$IS_DOCKER" = true ]; then
     # Its images: the one it runs, and any rebase_site_container.sh kept to go
     # back to (joinery-<site>:pre-rebase-pg<major>).
     echo "Removing Docker images..."
-    IMAGES=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
-        | grep -xE "joinery-${SITE_NAME}:(latest|pre-rebase-pg[0-9]+)" || true)
+    IMAGES=$("$ENGINE" images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+        | while read -r i; do site_engine_image "$i"; done | grep -xE "joinery-${SITE_NAME}:(latest|pre-rebase-pg[0-9]+)" || true)
     if [ -n "$IMAGES" ]; then
         for image in $IMAGES; do
-            if docker rmi "$image" > /dev/null 2>&1; then
+            if "$ENGINE" rmi "$image" > /dev/null 2>&1; then
                 echo "Image removed: $image"
             else
                 echo "WARNING: Failed to remove image: $image"
@@ -454,7 +518,7 @@ if [ "$IS_DOCKER" = true ]; then
     fi
 
     # The host's outbound limits stop naming the site (outbound_limits.sh;
-    # the unit is spelled here because this script sources nothing).
+    # the unit is spelled here because this script sources only the engine helper).
     clear_site_marks
     if [ -f "$FS/etc/systemd/system/joinery-limits.service" ]; then
         systemctl start joinery-limits.service > /dev/null 2>&1 \
@@ -609,21 +673,36 @@ fi
 # above, several of which warn-and-continue.
 
 LEFTOVERS=""
+ENGINE_LEFT=false
 
 if [ "$DOCKER" = true ]; then
-    if ! timeout 30 docker info > /dev/null 2>&1; then
-        LEFTOVERS="${LEFTOVERS}  - Docker stopped answering, so its container and volumes could not be checked"$'\n'
+    if ! timeout 30 "$ENGINE" info > /dev/null 2>&1; then
+        LEFTOVERS="${LEFTOVERS}  - ${ENGINE} stopped answering, so its container and volumes could not be checked"$'\n'
+        ENGINE_LEFT=true
     else
         if container_exists "$SITE_NAME"; then
             LEFTOVERS="${LEFTOVERS}  - Docker container still present: $SITE_NAME"$'\n'
+            ENGINE_LEFT=true
         fi
         LEFT_VOLUMES=$(site_volumes)
         if [ -n "$LEFT_VOLUMES" ]; then
             LEFTOVERS="${LEFTOVERS}  - Docker volumes still present: $(echo "$LEFT_VOLUMES" | tr '\n' ' ')"$'\n'
+            ENGINE_LEFT=true
         fi
-        if docker network inspect "${SITE_NETWORK:-${SITE_NAME}_net}" > /dev/null 2>&1; then
+        if "$ENGINE" network inspect "${SITE_NETWORK:-${SITE_NAME}_net}" > /dev/null 2>&1; then
             LEFTOVERS="${LEFTOVERS}  - Docker network still present: ${SITE_NETWORK:-${SITE_NAME}_net}"$'\n'
         fi
+    fi
+fi
+
+# The site's id block stays taken while anything of it is left under its ids:
+# a new site given the block would own what is left (site_container_engine D4).
+# Its claim, made before the removal began, stays until a removal verifies it gone.
+if [ -n "$SITE_IDBLOCK" ]; then
+    if [ "$ENGINE_LEFT" = true ]; then
+        LEFTOVERS="${LEFTOVERS}  - id block ${SITE_IDBLOCK} is kept for what is left of the site (${SITES_STATE#"$FS"}/${SITE_NAME}/idblock)"$'\n'
+    else
+        rm -f "$SITES_STATE/$SITE_NAME/idblock"
     fi
 fi
 

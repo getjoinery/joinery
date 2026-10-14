@@ -140,6 +140,20 @@ STUB_STOP_RC=1 PATH="$T/bin:$PATH" HOLD_CONTAINER_ETC="$ETC" bash "$SCRIPT" stop
 chk "exit 0, not done, still running" "$rc:$(jv "$T/out.json" done):$(jv "$T/out.json" state)" "0:false:running"
 chk "held, so the health check leaves it for the next try" "$(jv "$T/out.json" held)" "true"
 
+echo "=== On the site container engine: the same, asked of podman, never docker ==="
+cp "$T/bin/docker" "$T/bin/podman"
+printf '#!/bin/bash\necho "docker $*" >> "%s/direct"\nexit 1\n' "$T" > "$T/bin/docker"
+chmod +x "$T/bin/podman" "$T/bin/docker"
+reset unless-stopped
+JOINERY_SITE_ENGINE_KIND=podman PATH="$T/bin:$PATH" HOLD_CONTAINER_ETC="$ETC" bash "$SCRIPT" stop siteone > "$T/out.json" 2>/dev/null; rc=$?
+chk "stop: done, held, exited, restart no" "$rc:$(jv "$T/out.json" done):$(jv "$T/out.json" held):$(jv "$T/out.json" state):$(jv "$T/out.json" restart)" "0:true:true:exited:no"
+JOINERY_SITE_ENGINE_KIND=podman PATH="$T/bin:$PATH" HOLD_CONTAINER_ETC="$ETC" bash "$SCRIPT" start siteone > "$T/out.json" 2>/dev/null
+chk "start: done, running, the policy back" "$(jv "$T/out.json" done):$(jv "$T/out.json" state):$(cat "$T/policy")" "true:running:unless-stopped"
+chk "podman was asked update, stop, update, start" "$(grep -vE '^(ps|inspect)' "$T/calls" | cut -d' ' -f1 | tr '\n' ' ')" "update stop update start "
+chk "nothing reached docker" "$([ -s "$T/direct" ] && cat "$T/direct" || echo none)" "none"
+echo stopped > "$T/state"
+chk "a container podman calls stopped counts as stopped" "$(grep -c 'exited|created|stopped) DONE=true' "$SCRIPT")" "1"
+
 echo
 echo "RESULT: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

@@ -340,6 +340,53 @@ for bad in '../foo' 'get.oinery' '' 'UPPER' '_lead'; do
 done
 chk "H: nothing was called" "$(wc -l < "$D/log" | tr -d ' ')" "0"
 
+# --- P: a site on the site container engine (specs/site_container_engine.md
+# --- WP3). Its image reads back as localhost/joinery-<site>; the engine has no
+# --- daemon, so its view is trusted only with the data root mounted; and no
+# --- call reaches docker.
+mkdir -p "$T/install_tools"; cp "$ROOT/maintenance_scripts/install_tools/_site_engine.sh" "$T/install_tools/"
+# The same stub, answering as podman, whose rmi finds a localhost/ image by its bare name.
+awk '/"rmi "\*\)/ { print "    \"rmi \"*)        n=\"$2\"; has images \"$n\" || n=\"localhost/$n\"; has images \"$n\" && drop images \"$n\" ;;"; next } { print }' "$BIN/docker" > "$BIN/podman"
+printf '#!/bin/bash\necho "docker $*" >> "%s/direct"\nexit 1\n' "$T" > "$BIN/docker"
+chmod +x "$BIN/podman" "$BIN/docker"
+prun() { PATH="$BIN:$PATH" JOINERY_SITE_ENGINE_KIND=podman REMOVE_ACCOUNT_ROOT="$T/fs" REMOVE_ACCOUNT_DATA_ROOT="$1" bash "$RUN/remove_account.sh" "$2" -y 2>&1; }
+podman_site() {
+    container_site "$1"
+    echo "localhost/joinery-$1:latest" > "$D/image_$1"
+    grep -vxF "joinery-$1:latest" "$D/images" > "$D/images.new"; mv "$D/images.new" "$D/images"
+    echo "localhost/joinery-$1:latest" >> "$D/images"
+    echo "idblock=3" >> "$T/fs/etc/joinery/sites/$1/run_spec"
+}
+reset; podman_site getjoinery
+out="$(prun "$T/fs/srv/joinery" getjoinery)"; rc=$?
+chk "P: the data root not mounted: refused (exit 1)" "$rc" "1"
+chk "P:   saying the data root is not mounted" "$(echo "$out" | grep -c 'the data root is not mounted')" "1"
+chk "P:   before the engine was asked anything" "$(wc -l < "$D/log" | tr -d ' ')" "0"
+chk "P:   container, volumes and vhost untouched" \
+    "$(grep -cxF getjoinery "$D/containers")|$(grep -c '^getjoinery_' "$D/volumes" | tr -d ' ')|$(there /etc/apache2/sites-available/getjoinery.conf)" "1|16|yes"
+reset; podman_site getjoinery
+out="$(prun / getjoinery)"; rc=$?
+chk "P: mounted: a site whose image reads back as localhost/joinery-getjoinery is ours, and verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')" "1"
+chk "P:   its container, volumes and network gone" "$(grep -cxF getjoinery "$D/containers")|$(grep -c '^getjoinery_' "$D/volumes" | tr -d ' ')|$(grep -cxF getjoinery_net "$D/networks")" "0|0|0"
+chk "P:   its image gone" "$(grep -c 'joinery-getjoinery:' "$D/images")" "0"
+chk "P:   nothing reached docker" "$([ -s "$T/direct" ] && cat "$T/direct" || echo none)" "none"
+chk "P:   verified gone: no claim keeps its id block" "$(there /etc/joinery/sites/getjoinery/idblock)" "no"
+# A volume that will not go: the site's id block stays claimed, so no new site
+# is given the ids that own it (reviewer2 R4).
+reset; podman_site getjoinery; in_use getjoinery
+out="$(prun / getjoinery)"; rc=$?
+chk "P: volumes left: the removal is not verified" "$rc|$(echo "$out" | grep -c '^DECOMMISSION_FAILED_VERIFY getjoinery$')" "1|1"
+chk "P:   and its id block is kept, claimed, and said" \
+    "$(cat "$T/fs/etc/joinery/sites/getjoinery/idblock" 2>/dev/null)|$(echo "$out" | grep -c 'id block 3 is kept')|$(there /etc/joinery/sites/getjoinery/run_spec)" "3|1|no"
+: > "$D/in_use"
+out="$(prun / getjoinery)"; rc=$?
+claim_at="$(grep -n 'printf .%s\\n. "\$SITE_IDBLOCK" > "\$SITES_STATE/\$SITE_NAME/idblock"' "$SCRIPT" | head -1 | cut -d: -f1)"
+removal_at="$(grep -n '^    clear_site_marks$' "$SCRIPT" | sed -n 2p | cut -d: -f1)"
+chk "P:   the claim is written before the first removal step clears the run spec (reviewer2 S1)" \
+    "$([ -n "$claim_at" ] && [ -n "$removal_at" ] && [ "$claim_at" -lt "$removal_at" ] && echo yes)" "yes"
+chk "P:   a later run that takes them verifies, and the claim goes (the block read back from it)" \
+    "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED getjoinery$')|$(there /etc/joinery/sites/getjoinery/idblock)" "1|no"
+
 rm -rf "${T:?}"
 
 echo "== Behavioral (root + Docker required) =="

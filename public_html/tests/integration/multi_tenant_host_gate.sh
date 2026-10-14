@@ -80,6 +80,10 @@ echo "=== across one bridge ==="
 BR="$(printf '%s\n' "$RS" | awk '/^table bridge joinery_site_walls \{/,0')"
 has "bridge forward hook" "$BR" 'type filter hook forward priority filter; policy accept;'
 has "port to port on docker0: dropped" "$BR" 'meta ibrname "docker0" counter drop'
+has "podman0 goes to site_to_host" "$IN" '^iifname "podman0" jump site_to_host$'
+has "podman0 goes to site_through_host" "$FW" '^iifname "podman0" jump site_through_host$'
+has "to a container on podman0: dropped" "$S3" '^oifname "podman0" counter drop$'
+has "port to port on podman0: dropped" "$BR" 'meta ibrname "podman0" counter drop'
 has "port to port on jsnet*: dropped" "$BR" 'meta ibrname "jsnet\*" counter drop'
 
 echo "=== the host's own port 25 ==="
@@ -132,12 +136,22 @@ chk "the unit runs a root-owned copy, not the tree's" "$(cmp -s "$MTH" "$T/root/
 UNIT="$(cat "$T/root/etc/systemd/system/joinery-site-walls.service" 2>/dev/null)"
 has "unit: loads the walls" "$UNIT" '^ExecStart=/usr/local/sbin/joinery-site-walls walls$'
 has "unit: before Docker starts" "$UNIT" '^Before=.*docker\.service'
+has "unit: before the site container engine starts the sites" "$UNIT" '^Before=.*podman-restart\.service'
 has "unit: stays active" "$UNIT" '^RemainAfterExit=yes$'
 has "unit: at every boot" "$UNIT" '^WantedBy=multi-user\.target$'
 hasnt "unit: no Requires or BindsTo (a walls restart must not restart Docker)" "$UNIT" '^(Requires|BindsTo|PartOf)='
 DD="$(cat "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf" 2>/dev/null)"
 chk "Docker's start asserts the walls first" "$(printf '%s\n' "$DD" | grep -v '^#' | tr '\n' '|')" \
     "[Service]|ExecStartPre=/usr/local/sbin/joinery-site-walls assert|"
+PD="$(cat "$T/root/etc/systemd/system/podman-restart.service.d/joinery-site-walls.conf" 2>/dev/null)"
+chk "and so does the start of the site container engine's sites" "$(printf '%s\n' "$PD" | grep -v '^#' | tr '\n' '|')" \
+    "[Service]|ExecStartPre=/usr/local/sbin/joinery-site-walls assert|"
+HOOK="$T/root/etc/containers/oci/hooks.d/joinery-site-walls.json"
+chk "every container the site container engine starts checks the walls first (an OCI hook at createRuntime, reviewer2 R3)" \
+    "$(python3 -I -c 'import json,sys; h=json.load(open(sys.argv[1])); print(h["hook"]["path"], " ".join(h["hook"]["args"]), h["stages"], h["when"])' "$HOOK" 2>&1)" \
+    "/usr/local/sbin/joinery-site-walls joinery-site-walls assert ['createRuntime'] {'always': True}"
+chk "  with a PATH nft is on, since a hook runs with none" "$(grep -c '"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' "$HOOK")" "1"
+chk "  in a folder the engine reads (install_site_engine.sh)" "$(grep -c 'hooks_dir = \["/usr/share/containers/oci/hooks.d", "/etc/containers/oci/hooks.d"\]' "$ROOT/maintenance_scripts/install_tools/install_site_engine.sh")" "1"
 ND="$(cat "$T/root/etc/systemd/system/nftables.service.d/joinery-site-walls.conf" 2>/dev/null)"
 chk "nftables.service's flush is followed by the walls, at start, reload and stop" "$(printf '%s\n' "$ND" | grep -v '^#' | tr '\n' '|')" \
     "[Service]|ExecStartPost=/usr/local/sbin/joinery-site-walls walls|ExecReload=/usr/local/sbin/joinery-site-walls walls|ExecStopPost=/usr/local/sbin/joinery-site-walls walls|"
@@ -198,7 +212,7 @@ bash "$MTH" assert > /dev/null 2>&1; rc=$?
 chk "walls loaded: exit 0" "$rc" "0"
 out="$(STUB_NFT_LIST_RC=1 bash "$MTH" assert 2>&1)"; rc=$?
 chk "walls missing: exit 1, so Docker does not start" "$rc" "1"
-has "and says why" "$out" 'Docker does not start'
+has "and says why" "$out" 'the engine does not start the sites'
 : > "$T/calls"; STUB_NFT_LIST_RC=1 bash "$MTH" assert > /dev/null 2>&1
 chk "assert only reads" "$(calls | tr '|' '\n' | grep -vc '^nft list table')" "0"
 
@@ -224,6 +238,14 @@ out="$(bash "$MTH" check)"; rc=$?
 chk "Docker would start without the walls: exit 1" "$rc" "1"
 has "names it" "$out" '^walls at boot: NOT kept'
 mv "$T/dd" "$T/root/etc/systemd/system/docker.service.d/joinery-site-walls.conf"
+mv "$T/root/etc/systemd/system/podman-restart.service.d/joinery-site-walls.conf" "$T/pd"
+out="$(bash "$MTH" check)"; rc=$?
+chk "the site container engine would start its sites without the walls: exit 1" "$rc:$(printf '%s\n' "$out" | grep -c '^walls at boot: NOT kept')" "1:1"
+mv "$T/pd" "$T/root/etc/systemd/system/podman-restart.service.d/joinery-site-walls.conf"
+mv "$HOOK" "$T/hook"
+out="$(bash "$MTH" check)"; rc=$?
+chk "no walls hook: a site could be started without them, exit 1" "$rc:$(printf '%s\n' "$out" | grep -c '^walls at boot: NOT kept')" "1:1"
+mv "$T/hook" "$HOOK"
 out="$(STUB_APT_OFF=1 bash "$MTH" check)"; rc=$?
 chk "apt will not run or reboot: exit 1" "$rc:$(printf '%s\n' "$out" | grep -c '^reboot after updates: NOT set$')" "1:1"
 rm -f "$T/root/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"

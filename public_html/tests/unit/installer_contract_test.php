@@ -391,7 +391,9 @@ $site_fn = '';
 if (preg_match('/^REACH_STATE=""\nname_reaches_here\(\) \{.*?^\}$/ms', $install_src, $m)) { $reach_fn = $m[0]; }
 if (preg_match('/^site_serving_name\(\) \{.*?^\}$/ms', $install_src, $m)) { $site_fn = $m[0]; }
 check($reach_fn !== '' && $site_fn !== '', 'the reach probe and the vhost lookup are findable');
-$rr = harness_scratch_dir('reach_probe');
+// A folder of this run's own: a run as another user (the /tests/ dashboard
+// runs as the web server's) leaves a shared one this run cannot write.
+$rr = harness_scratch_dir('reach_probe_' . getmypid() . '_' . bin2hex(random_bytes(3)));
 @mkdir($rr . '/served/static_files', 0755, true);
 @mkdir($rr . '/elsewhere', 0755, true);
 $port = 18000 + (getmypid() % 1000);
@@ -2580,7 +2582,8 @@ check(strpos($df_code, '/etc/cron.d/scheduled-tasks') === false,
     'the generic file is not written at all');
 $site_hk_src = (string)file_get_contents($tools_dir . '/site_housekeeping.sh');
 check(strpos($site_init_src, '[ "$DOCKER_MODE" = true ] && SITE_HK_ARGS+=(--no-cron)') !== false
-        && strpos($site_hk_src, 'if [[ "${NO_CRON}" == 1 || -f "${FS_ROOT}/.dockerenv" ]]; then') !== false
+        && strpos($site_hk_src, 'if [[ "${NO_CRON}" == 1 || "${IN_CONTAINER}" == 1 ]]; then') !== false
+        && strpos($site_hk_src, '[[ -f "${FS_ROOT}/.dockerenv" || -f "${FS_ROOT}/run/.containerenv" ]] && IN_CONTAINER=1') !== false
         && strpos($site_hk_src, 'CRON="${FS_ROOT}/etc/cron.d/joinery-${SITENAME}"') !== false,
     'the site\'s cron file is written only on bare metal: _site_init.sh passes --no-cron in a container, and site_housekeeping.sh never writes it inside one');
 
@@ -3618,12 +3621,12 @@ check(strpos($rebase_code_b10, 'postgres_access') === false && strpos($rebase_co
 $bind_dir = sys_get_temp_dir() . '/joinery_bind_' . getmypid();
 @mkdir($bind_dir, 0700, true);
 $bind_loop = '';
-if (preg_match('/^    EXTRA_PORTS=""\n    EXTRA_SPEC=""\n    DROPPED_DB=""\n.*?^    done < <\(docker inspect[^\n]*\n/ms', $rebase_b10, $m)) { $bind_loop = $m[0]; }
+if (preg_match('/^    EXTRA_PORTS=""\n    EXTRA_SPEC=""\n    DROPPED_DB=""\n.*?^    done < <\(site_engine inspect[^\n]*\n/ms', $rebase_b10, $m)) { $bind_loop = $m[0]; }
 check($bind_loop !== '', 'the rebase\'s binding loop is findable');
 $bindings = function (string $lines) use ($bind_dir, $bind_loop): string {
 	file_put_contents($bind_dir . '/bindings', $lines);
 	file_put_contents($bind_dir . '/run.sh', "PORT=8087\n"
-		. 'docker() { cat ' . escapeshellarg($bind_dir . '/bindings') . "; }\n"
+		. 'site_engine() { cat ' . escapeshellarg($bind_dir . '/bindings') . "; }\n"
 		. $bind_loop
 		. "echo \"dropped=[\$DROPPED_DB] extra=[\$EXTRA_PORTS]\"\n");
 	return trim((string)shell_exec('bash ' . escapeshellarg($bind_dir . '/run.sh') . ' 2>&1'));
@@ -3647,7 +3650,7 @@ file_put_contents($hba_dir . '/pg_hba.conf', "local all postgres md5\nhost all a
 file_put_contents($hba_dir . '/run.sh', <<<'SH'
 #!/usr/bin/env bash
 SRC="$1"; D="$2"; SITE=site
-docker() { case "$1" in inspect) echo 172.17.0.1 ;; exec) cat "$D/pg_hba.conf" ;; esac; }
+site_engine() { case "$1" in inspect) echo 172.17.0.1 ;; exec) cat "$D/pg_hba.conf" ;; esac; }
 eval "$(awk '/^hba_network\(\) \{/,/^}$/' "$SRC")"
 hba_network 16
 SH
@@ -3717,8 +3720,8 @@ check(strpos($tpl_b15, 'chown -R postgres:postgres /var/lib/postgresql') !== fal
 section('The move script keeps its way back (specs/fleet_ubuntu_2604_postgres_upgrade.md B16)');
 
 $rebase_b16 = (string)file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/rebase_site_container.sh');
-check(strpos($rebase_b16, "OLD_IMAGE=\"\$(docker inspect -f '{{.Image}}' \"\$SITE\")\"") !== false
-	&& strpos($rebase_b16, "OLD_IMAGE=\"\$(docker inspect -f '{{.Config.Image}}'") === false,
+check(strpos($rebase_b16, "OLD_IMAGE=\"\$(site_engine inspect -f '{{.Image}}' \"\$SITE\")\"") !== false
+	&& strpos($rebase_b16, "OLD_IMAGE=\"\$(site_engine inspect -f '{{.Config.Image}}'") === false,
 	'the old image is recorded by id, not by the name install.sh rebuilds under',
 	'by name, a second swap tagged the new image as the rollback image');
 check(strpos($rebase_b16, 'state_set stage rolled_back') !== false
@@ -3780,7 +3783,7 @@ check(strpos($rebase_b21, '[ "${#HOST_NAMES[@]}" -eq 0 ] || DOMAIN="${HOST_NAMES
 	'prepare takes the host\'s name over DOMAIN_NAME and refuses several');
 check(substr_count($rebase_b21, 'manifest_failures)"') >= 3,
 	'prepare, swap and the swap\'s last check all count files against the manifest');
-check(preg_match('/docker cp "\$\{SITE\}:\/var\/www\/html\/\$\{SITE\}\/\$\{f\}" "\$\{WORK\}\/\$\{f\}"/', $rebase_b21) === 1
+check(preg_match('/site_engine cp "\$\{SITE\}:\/var\/www\/html\/\$\{SITE\}\/\$\{f\}" "\$\{WORK\}\/\$\{f\}"/', $rebase_b21) === 1
 	&& strpos($rebase_b21, 'put_manifest || die') !== false,
 	'swap keeps the old container\'s manifest and puts it in the new one, or stops',
 	'the manifest is in the container\'s own layer; the rebuild lays in whatever release install.sh downloaded');
@@ -3851,7 +3854,7 @@ foreach ($stubs as $name => $body) {
 file_put_contents($b25_dir . '/run.sh', "set -euo pipefail\n"
 	. 'D=' . escapeshellarg($b25_dir) . "\nWORK=\"\$D/work\"; SITE=site\n"
 	. "say() { echo \"SAY \$*\"; }\nsleep() { :; }\n"
-	. "docker() {\n"
+	. "site_engine() {\n"
 	. "    if [ \"\$1\" = exec ] && [ \"\$2\" = -i ]; then shift 3; PATH=\"\$D/bin:\$PATH\" \"\$@\"; return; fi\n"
 	. "    case \"\$3\" in\n"
 	. "        bash) echo 'core installers: install_agent.sh: ok'; echo 'core installers: host_housekeeping.sh: ok' ;;\n"

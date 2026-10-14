@@ -396,7 +396,7 @@
 		// The figure sits beside what this server has sent so far, and the
 		// ceiling beside what the server holds the site to.
 		$outbound_month = OutboundTransferMeter::month();
-		$outbound_site = file_exists('/.dockerenv') ? basename(dirname(rtrim(PathHelper::getIncludePath(''), '/'))) : '';
+		$outbound_site = (file_exists('/.dockerenv') || file_exists('/run/.containerenv')) ? basename(dirname(rtrim(PathHelper::getIncludePath(''), '/'))) : '';
 		SettingsFieldRenderer::renderGroups($formwriter, array('outbound'), array(
 			'heading_level' => 'h5',
 			'field_options' => array(

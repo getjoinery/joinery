@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.6 - the site container engine is installed where its current link is (-L), and one whose
+#                podman is unusable is said and skipped, never read as Docker (reviewer2 R7).
+# Version: 2.5 - a host whose sites run on the site container engine (specs/site_container_engine.md WP3)
+#                is a container host too: the gateway installs there, and converge reads each site's
+#                storage volume under the engine's storage (Podman's graphroot), laid out as Docker's.
 # Version: 2.4 - a release that changes only the helper re-applies the firewall and proxy_from (its new access
 #                verb), so a new rule (such as 10465 for relays) reaches a site already on without a restart.
 # Version: 2.3 - the site's own www. name is refused saying it is its own front door's, not another site's.
@@ -89,8 +94,8 @@ if [[ "${MACHINE}" == "1" ]]; then
     # installers run again only when a bundle arrives or once a day. Installed
     # here, switched off, the converge timer serves a site within a minute of
     # it asking, however soon after the host was built.
-    if ! command -v docker >/dev/null 2>&1; then
-        echo "mail gateway: not a Docker host (no docker) - nothing to install."
+    if ! command -v docker >/dev/null 2>&1 && [[ ! -L /usr/local/lib/joinery-site-engine/current ]]; then
+        echo "mail gateway: not a container host (no docker, no site container engine) - nothing to install."
         exit 0
     fi
     if ! command -v python3 >/dev/null 2>&1; then
@@ -538,7 +543,15 @@ set_relay_host() {
 # written outside its own folder. Answers: none | off | on NAME | bad REASON.
 docker_root() {
     local r
-    r="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
+    # The site container engine's storage (its graphroot) holds volumes/<name>/_data
+    # as Docker's root does; a host has it where its current link is (_site_engine.sh).
+    if [[ -L /usr/local/lib/joinery-site-engine/current ]]; then
+        # Installed but unusable is a refusal, never Docker.
+        [[ -x /usr/local/bin/podman ]] || { echo "mail gateway: the site container engine is installed and /usr/local/bin/podman is not usable" >&2; return 1; }
+        r="$(podman info -f '{{.Store.GraphRoot}}' 2>/dev/null || true)"
+    else
+        r="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
+    fi
     [[ "${r}" == /* && "${r}" != *..* && -d "${r}" ]] || return 1
     echo "${r%/}"
 }

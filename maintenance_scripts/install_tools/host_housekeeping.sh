@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.19 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3); a Podman site's Apache trusted no gateway and
+#                 logged every visitor as its host's proxy.
 # Version: 1.18 - Every machine pins the kernel settings that keep its surface small for an unprivileged
 #                process (kernel pointers, BPF JIT hardening, perf, ptrace, kexec, unprivileged user
 #                namespaces, links and files in shared directories, ASLR) and raises inotify instances,
@@ -149,7 +151,8 @@
 #                                        <dir>/etc/apache2 are read and written, no
 #                                        system command runs (apt, systemctl,
 #                                        a2enmod, fail2ban-client). <dir>/.dockerenv
-#                                        makes the run believe it is in a container.
+#                                        or <dir>/run/.containerenv makes the run
+#                                        believe it is in a container.
 #   JOINERY_HOUSEKEEPING_NO_SYSTEMCTL=1  the real /etc, but no system command.
 
 set -u
@@ -204,7 +207,7 @@ F2B_DIR="${FS_ROOT}/etc/fail2ban"
 APACHE_DIR="${FS_ROOT}/etc/apache2"
 
 IN_CONTAINER=0
-[[ -f "${FS_ROOT}/.dockerenv" ]] && IN_CONTAINER=1
+[[ -f "${FS_ROOT}/.dockerenv" || -f "${FS_ROOT}/run/.containerenv" ]] && IN_CONTAINER=1
 
 HAVE_SYSTEMD=0
 if [[ "${RUN_SYSTEM}" == 1 ]] && [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then

@@ -2,6 +2,15 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.15 - reviewer2 V1, R9, R10, S2: on the site container engine the agent's identity is unpacked on
+#                the host (the engine's archive carries the site's host ids, which an id-mapped helper
+#                cannot set) and the volume's root takes the folder's owner and mode, a volume the carry did not fill is removed, and an id map with other than
+#                its four arguments stops the helper rather than run it as the host's root.
+# Version: 1.14 - Runs on the engine this host's sites run on (site_engine, through the run spec helper):
+#                Docker, or the site container engine (specs/site_container_engine.md WP3). There each
+#                site has ids of its own, so the helpers that write into its volumes (the agent's
+#                identity, the log directory's owners) run under its id map (run_spec_idmap_args);
+#                an image's id is shown without Docker's sha256: prefix, which Podman's lacks.
 # Version: 1.13 - rollback puts the recreated database volume back in the site's disk allowance
 #                (docker_disk_pool.sh allow, multi_tenant_docker_hosts WP4; reviewer2 N4)
 # Version: 1.12 - the image's locales are read whole before a database's is looked for in them, so
@@ -152,8 +161,48 @@ INSTALL_SH="$(cd "${TOOLS_DIR}/../install_tools" 2>/dev/null && pwd)/install.sh"
 say() { echo "[$(date -u +%H:%M:%S)] $*"; }
 die() { echo "FATAL: $*" >&2; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || die "run as root on the Docker host"
-command -v docker > /dev/null || die "docker is not installed here"
+[ "$(id -u)" -eq 0 ] || die "run as root on the container host"
+ENGINE="$(site_engine_kind)" || die "this machine's container engine could not be named"
+command -v "$ENGINE" > /dev/null || die "${ENGINE} is not installed here"
+
+# An image id, short: Docker's carry a sha256: prefix, Podman's do not.
+short_id() { local i="${1#sha256:}"; echo "${i:0:12}"; }
+
+# The id map a helper container needs to write into the site's volumes as the
+# site: on the site container engine its own block (run_spec_idmap_args), so a
+# volume it is the first to mount is given to the site's ids; nothing on Docker,
+# whose daemon maps every container alike. Sets IDMAP.
+helper_idmap() {
+    IDMAP=()
+    if site_engine_is_podman; then
+        [ -n "$(run_spec_get "$SITE" idblock)" ] || die "${SITE}'s run spec has no id block (idblock=)"
+        mapfile -d '' IDMAP < <(run_spec_idmap_args "$SITE")
+        # A failure inside the substitution is not seen here; without the four
+        # arguments the helper would run as the host's root.
+        [ "${#IDMAP[@]}" -eq 4 ] || die "${SITE}'s id block ($(run_spec_get "$SITE" idblock)) gave no id map; nothing was changed by the helper"
+    fi
+}
+
+# The agent's identity, from the old container into ${SITE}_agent (made, empty):
+# on the site engine the archive carries the site's own host ids, unpacked on
+# the host as they are, which a container under the site's map cannot set; on
+# Docker it carries the container's ids, written back by the old image.
+carry_agent_identity() {
+    local mp
+    if site_engine_is_podman; then
+        mp="$(vol_mp "${SITE}_agent")" && [ -d "$mp" ] || return 1
+        site_engine cp "${SITE}:/etc/joinery-agent" - | tar -x -p --numeric-owner -C "$mp" || return 1
+        # The volume's root takes the folder's own owner and mode (the engine
+        # leaves a volume it did not fill as host root's), and its contents.
+        # A folder, never a link a tenant planted in its place (--reference follows one).
+        [ -d "$mp/joinery-agent" ] && [ ! -L "$mp/joinery-agent" ] || return 1
+        chown --reference="$mp/joinery-agent" "$mp" && chmod --reference="$mp/joinery-agent" "$mp" \
+            && find "$mp/joinery-agent" -mindepth 1 -maxdepth 1 -exec mv -t "$mp" {} + && rmdir "$mp/joinery-agent"
+    else
+        site_engine cp "${SITE}:/etc/joinery-agent" - \
+            | site_engine run --rm -i -v "${SITE}_agent:/dst" --entrypoint tar "$OLD_IMAGE" -x -p -C /dst --strip-components=1
+    fi
+}
 
 state_get() { grep "^$1=" "$STATE" 2>/dev/null | tail -1 | cut -d= -f2-; }
 state_set() {
@@ -161,13 +210,13 @@ state_set() {
     { grep -v "^$1=" "$STATE" 2>/dev/null || true; printf '%s=%s\n' "$1" "$2"; } > "$tmp"
     mv "$tmp" "$STATE"
 }
-vol_mp() { docker volume inspect -f '{{ .Mountpoint }}' "$1"; }
+vol_mp() { site_engine volume inspect -f '{{ .Mountpoint }}' "$1"; }
 
 # SQL against the site's server as postgres, authenticated with the password the
 # container was started with — read inside the container, never on this host's
 # command line. The SQL arrives on stdin.
 psql_in() {  # $1 database
-    docker exec -i "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -XtA -F "$(printf "\t")" -v ON_ERROR_STOP=1 -d "$1"' _ "$1"
+    site_engine exec -i "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -XtA -F "$(printf "\t")" -v ON_ERROR_STOP=1 -d "$1"' _ "$1"
 }
 
 # Every table's exact row count, one "schema.table<TAB>count" line each.
@@ -178,8 +227,8 @@ WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_s
 ORDER BY 1 \\gexec" | psql_in "$1" | sort
 }
 
-db_major() { docker exec "$SITE" bash -c 'cat /var/lib/postgresql/*/main/PG_VERSION 2>/dev/null' | tr -cd '0-9\n' | sort -n | tail -1; }
-image_major() { docker run --rm --entrypoint ls "$1" /usr/lib/postgresql 2>/dev/null | sort -n | tail -1; }
+db_major() { site_engine exec "$SITE" bash -c 'cat /var/lib/postgresql/*/main/PG_VERSION 2>/dev/null' | tr -cd '0-9\n' | sort -n | tail -1; }
+image_major() { site_engine run --rm --entrypoint ls "$1" /usr/lib/postgresql 2>/dev/null | sort -n | tail -1; }
 target_base() {
     local v
     v="$(sed -n 's/^BASE_IMAGE_VERSION="\([^"]*\)".*/\1/p' "$INSTALL_SH" | head -1)"
@@ -212,8 +261,8 @@ save_run_spec() {
 # and the rebuild would silently drop it.
 hba_network() {  # $1 major
     local f="/etc/postgresql/$1/main/pg_hba.conf" gw
-    gw="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' "$SITE")"
-    docker exec "$SITE" cat "$f" \
+    gw="$(site_engine inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' "$SITE")"
+    site_engine exec "$SITE" cat "$f" \
         | awk -v gw="${gw}/32" '$1 ~ /^host/ && $4 !~ /^(127\.0\.0\.1|::1)(\/|$)/ && $4 != "localhost" && $4 != "samehost" && $4 != gw' \
         | sed -E 's/[[:space:]]+/ /g; s/ $//' | sort -u
 }
@@ -240,7 +289,7 @@ host_domains() {  # vhost files...
 # "missing" when it has none. The agent verifies every script it runs as root
 # against this file, so a tree that does not match has its backups refused.
 manifest_failures() {
-    docker exec "$SITE" bash -c 'cd "/var/www/html/$1" 2>/dev/null && [ -f RELEASE_MANIFEST ] || { echo missing; exit 0; }
+    site_engine exec "$SITE" bash -c 'cd "/var/www/html/$1" 2>/dev/null && [ -f RELEASE_MANIFEST ] || { echo missing; exit 0; }
         sha256sum -c --quiet RELEASE_MANIFEST 2>/dev/null | grep -c FAILED || true' _ "$SITE"
 }
 
@@ -251,9 +300,9 @@ manifest_failures() {
 put_manifest() {
     local f
     for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
-        docker cp "${WORK}/${f}" "${SITE}:/var/www/html/${SITE}/${f}" || return 1
+        site_engine cp "${WORK}/${f}" "${SITE}:/var/www/html/${SITE}/${f}" || return 1
     done
-    docker exec "$SITE" bash -c 'cd "/var/www/html/$1" && chown root:root RELEASE_MANIFEST RELEASE_MANIFEST.sig && chmod 644 RELEASE_MANIFEST RELEASE_MANIFEST.sig' _ "$SITE" || return 1
+    site_engine exec "$SITE" bash -c 'cd "/var/www/html/$1" && chown root:root RELEASE_MANIFEST RELEASE_MANIFEST.sig && chmod 644 RELEASE_MANIFEST RELEASE_MANIFEST.sig' _ "$SITE" || return 1
     [ "$(manifest_failures)" = "0" ]
 }
 
@@ -292,7 +341,7 @@ restore_runtime() {
         extra="$(paste -sd' ' "${WORK}/php_packages.txt")"
     fi
     say "Reinstalling the PHP extensions the site declares and the old container had"
-    docker exec -i "$SITE" bash -s -- "$SITE" $extra > "${WORK}/rollback_runtime.log" 2>&1 <<'EOS' || return 1
+    site_engine exec -i "$SITE" bash -s -- "$SITE" $extra > "${WORK}/rollback_runtime.log" 2>&1 <<'EOS' || return 1
 site="$1"; shift
 installed=0
 apt_ready=0
@@ -316,12 +365,12 @@ true
 EOS
     sed 's/^/  /' "${WORK}/rollback_runtime.log"
     say "Running the core installers (the agent, the host converger, housekeeping)"
-    docker exec "$SITE" bash "/var/www/html/${SITE}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "$SITE" \
+    site_engine exec "$SITE" bash "/var/www/html/${SITE}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "$SITE" \
         > "${WORK}/rollback_installers.log" 2>&1 || true
     grep -E '^core installers: .*: (ok|FAILED|failed)' "${WORK}/rollback_installers.log" | sed 's/^/  /' || true
     # The agent is started by its cron supervisor, once a minute.
     for i in $(seq 1 45); do
-        docker exec "$SITE" pgrep -x joinery-agent > /dev/null 2>&1 && return 0
+        site_engine exec "$SITE" pgrep -x joinery-agent > /dev/null 2>&1 && return 0
         sleep 2
     done
     return 1
@@ -361,15 +410,15 @@ restore_host_vhosts() {
 # the docker restart that ends a move, or a rollback, clears the hold.
 stop_site_writes() {
     local started
-    started="$(docker inspect -f '{{.State.StartedAt}}' "$SITE")"
-    docker exec "$SITE" bash -c '
+    started="$(site_engine inspect -f '{{.State.StartedAt}}' "$SITE")"
+    site_engine exec "$SITE" bash -c '
         mkdir -p /run/joinery && echo "rebase_site_container.sh: the site'"'"'s writes are stopped for a move" > /run/joinery/supervisor.hold
         for s in /etc/init.d/php*-fpm; do [ -e "$s" ] && service "$(basename "$s")" stop; done
         service cron stop; service postfix stop; pkill -x joinery-agent; true' > /dev/null 2>&1 || true
-    if [ "$(docker inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$SITE")" != "true ${started}" ]; then
+    if [ "$(site_engine inspect -f '{{.State.Running}} {{.State.StartedAt}}' "$SITE")" != "true ${started}" ]; then
         echo "${SITE} stopped or restarted while its writes were being stopped" >&2; return 1
     fi
-    if docker exec "$SITE" pgrep -f '^php-fpm' > /dev/null 2>&1; then
+    if site_engine exec "$SITE" pgrep -f '^php-fpm' > /dev/null 2>&1; then
         echo "PHP-FPM is still running in ${SITE}" >&2; return 1
     fi
 }
@@ -380,7 +429,7 @@ stop_site_writes() {
 # Dockerfile.template: the local postgres line goes to trust for one command
 # and back, and the password travels on stdin.
 set_postgres_password() {
-    docker exec -i "$SITE" bash -s <<'EOS'
+    site_engine exec -i "$SITE" bash -s <<'EOS'
 set -e
 PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf | sort -V | tail -1)"
 METHOD="$(awk '$1=="local" && $2=="all" && $3=="postgres" {print $4; exit}' "$PG_CONF")"
@@ -416,7 +465,7 @@ wait_for_site() {
 wait_for_postgres() {
     local i
     for i in $(seq 1 60); do
-        docker exec "$SITE" pg_isready -q 2>/dev/null && return 0
+        site_engine exec "$SITE" pg_isready -q 2>/dev/null && return 0
         sleep 2
     done
     return 1
@@ -427,13 +476,13 @@ mkdir -p "$WORK"; chmod 700 /root/rebase "$WORK"
 # ─────────────────────────────────────────────────────────────────── prepare
 if [ "$STAGE" = "prepare" ]; then
     [ -f "$INSTALL_SH" ] || die "no install.sh at ${INSTALL_SH} — run this from the extracted release that carries the new base image"
-    [ "$(docker inspect -f '{{.State.Status}}' "$SITE" 2>/dev/null)" = "running" ] || die "container ${SITE} is not running"
+    [ "$(site_engine inspect -f '{{.State.Status}}' "$SITE" 2>/dev/null)" = "running" ] || die "container ${SITE} is not running"
     case "$(state_get stage)" in
         swapping|swapped) die "${SITE} is at stage '$(state_get stage)': a move is in flight. Roll it back, or finish it, first" ;;
     esac
 
     BASE="$(target_base)"
-    if ! docker image inspect "$BASE" > /dev/null 2>&1; then
+    if ! site_engine image inspect "$BASE" > /dev/null 2>&1; then
         say "Building ${BASE} (one-time per host, 5-10 minutes)"
         bash "$INSTALL_SH" build-base
     fi
@@ -443,11 +492,11 @@ if [ "$STAGE" = "prepare" ]; then
     [ "$HAVE" != "$WANT" ] || die "${SITE} already runs PostgreSQL ${HAVE}, the version ${BASE} carries — nothing to move"
     [ "$HAVE" -lt "$WANT" ] || die "${SITE} runs PostgreSQL ${HAVE}, newer than the ${WANT} in ${BASE}"
 
-    DB="$(docker exec "$SITE" bash -c "sed -n \"s/^\\\$this->settings\['dbname'\] = '\([^']*\)'.*/\1/p\" /var/www/html/${SITE}/config/Globalvars_site.php" | head -1)"
+    DB="$(site_engine exec "$SITE" bash -c "sed -n \"s/^\\\$this->settings\['dbname'\] = '\([^']*\)'.*/\1/p\" /var/www/html/${SITE}/config/Globalvars_site.php" | head -1)"
     [ -n "$DB" ] || die "could not read the database name from ${SITE}'s config"
     IFS=$'\t' read -r ENC COLL CTYPE < <(printf '%s\n' "SELECT pg_encoding_to_char(encoding), datcollate, datctype FROM pg_database WHERE datname = '${DB}'" | psql_in postgres)
     [ -n "${ENC:-}" ] || die "database ${DB} not found in ${SITE}"
-    LOCALES="$(docker run --rm --entrypoint locale "$BASE" -a 2>/dev/null)"
+    LOCALES="$(site_engine run --rm --entrypoint locale "$BASE" -a 2>/dev/null)"
     # Normalised whole before matching: a loop piped into grep -qx, which stops
     # at its first match, dies of SIGPIPE on its next line, and pipefail calls
     # a locale the image has missing.
@@ -458,8 +507,8 @@ if [ "$STAGE" = "prepare" ]; then
             || die "database ${DB} uses locale ${loc}, which ${BASE} does not have"
     done
 
-    DOMAIN="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | sed -n 's/^DOMAIN_NAME=//p' | head -1)"
-    PORT="$(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{if eq $p "80/tcp"}}{{range $conf}}{{.HostPort}}{{end}}{{end}}{{end}}' "$SITE")"
+    DOMAIN="$(site_engine inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | sed -n 's/^DOMAIN_NAME=//p' | head -1)"
+    PORT="$(site_engine inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{if eq $p "80/tcp"}}{{range $conf}}{{.HostPort}}{{end}}{{end}}{{end}}' "$SITE")"
     [ -n "$PORT" ] || die "could not read ${SITE}'s web port"
 
     # The name install.sh renders the host vhost for is the one the host serves
@@ -499,14 +548,14 @@ if [ "$STAGE" = "prepare" ]; then
                if [ "$eproto" = "$cport" ] || [ "$eproto" = tcp ]; then eproto=""; else eproto="/${eproto}"; fi
                EXTRA_SPEC="${EXTRA_SPEC}publish=${ehip:+${ehip}:}${hport}:${cport%%/*}${eproto}"$'\n' ;;
         esac
-    done < <(docker inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
+    done < <(site_engine inspect -f '{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{.HostIp}}|{{.HostPort}}|{{$p}}{{println}}{{end}}{{end}}' "$SITE")
     NETWORK_HBA="$(hba_network "$HAVE")"
     [ -z "$NETWORK_HBA" ] || die "${SITE}'s pg_hba admits from the network: $(printf '%s\n' "$NETWORK_HBA" | paste -sd ';' - | sed 's/;/; /g'). A Joinery database answers only its own machine and the rebuild drops these; find what uses them and remove them first. Nothing was changed."
-    EXTRA_ENV="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
+    EXTRA_ENV="$(site_engine inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SITE" | cut -d= -f1 \
         | grep -vxE 'PATH|DEBIAN_FRONTEND|SITENAME|DOMAIN_NAME|POSTGRES_PASSWORD|UPGRADE_SERVER|CLONE_FROM|CLONE_KEY|JOINERY_[A-Z_]+|BASE_IMAGE_VERSION|LANG|LC_ALL|TZ' || true)"
     # By id: install.sh rebuilds under the same name, so the name stops meaning
     # this image the moment the swap rebuilds.
-    OLD_IMAGE="$(docker inspect -f '{{.Image}}' "$SITE")"
+    OLD_IMAGE="$(site_engine inspect -f '{{.Image}}' "$SITE")"
 
     # The rebuild runs from the run spec, so a binding install.sh does not make
     # survives exactly when the spec carries it as the site's own. One the
@@ -532,15 +581,15 @@ if [ "$STAGE" = "prepare" ]; then
     state_set domain "$DOMAIN"; state_set port "$PORT"; state_set old_image "$OLD_IMAGE"
     state_set other_vhosts "$OTHER_VHOSTS"
 
-    docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
+    site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"; chmod 600 "${WORK}/roles.sql"
-    docker diff "$SITE" 2>/dev/null | grep -E ' /etc/(postgresql|cron\.d)|/var/spool/cron' > "${WORK}/layer_changes.txt" || true
-    docker exec "$SITE" bash -c "dpkg -l 'php[0-9]*-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | sort" > "${WORK}/php_packages.txt" || true
+    site_engine diff "$SITE" 2>/dev/null | grep -E ' /etc/(postgresql|cron\.d)|/var/spool/cron' > "${WORK}/layer_changes.txt" || true
+    site_engine exec "$SITE" bash -c "dpkg -l 'php[0-9]*-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | sort" > "${WORK}/php_packages.txt" || true
     count_rows "$DB" > "${WORK}/counts.prepare.tsv"
 
     say "Trial dump of ${DB}..."
     T0=$(date +%s)
-    DUMP_BYTES=$(docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -Fc "$1"' _ "$DB" | wc -c)
+    DUMP_BYTES=$(site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -Fc "$1"' _ "$DB" | wc -c)
     T1=$(date +%s)
     PG_BYTES=$(du -sb "$(vol_mp "${SITE}_postgres")" | cut -f1)
     FREE=$(df -B1 --output=avail /root | tail -1 | tr -d ' ')
@@ -549,7 +598,7 @@ if [ "$STAGE" = "prepare" ]; then
 
     say "Plan for ${SITE}:"
     echo "  PostgreSQL ${HAVE} -> ${WANT} (${BASE}), database ${DB} (${ENC}, ${COLL})"
-    echo "  domain ${DOMAIN:-?}, web port ${PORT}, image $(docker inspect -f '{{.Config.Image}}' "$SITE") (${OLD_IMAGE:7:12}) kept for rollback"
+    echo "  domain ${DOMAIN:-?}, web port ${PORT}, image $(site_engine inspect -f '{{.Config.Image}}' "$SITE") ($(short_id "$OLD_IMAGE")) kept for rollback"
     if [ -n "$ENV_DOMAIN" ] && [ "$ENV_DOMAIN" != "$DOMAIN" ]; then
         echo "  the host serves ${DOMAIN}; the container's DOMAIN_NAME says ${ENV_DOMAIN}. The rebuild uses ${DOMAIN}"
     fi
@@ -599,10 +648,10 @@ if [ "$STAGE" = "swap" ]; then
     [ "$(state_get stage)" = "prepared" ] || die "${SITE} is at stage '$(state_get stage)', not prepared"
     [ -f "$INSTALL_SH" ] || die "no install.sh at ${INSTALL_SH}"
     [ "$(db_major)" = "$FROM" ] || die "${SITE}'s database is no longer PostgreSQL ${FROM}; prepare again"
-    [ "$(docker inspect -f '{{.Image}}' "$SITE")" = "$OLD_IMAGE" ] || die "${SITE} runs another image than it did at prepare; prepare again"
-    KEPT="$(docker image inspect -f '{{.Id}}' "$KEEP_IMAGE" 2>/dev/null || true)"
-    [ -z "$KEPT" ] || [ "$KEPT" = "$OLD_IMAGE" ] || die "${KEEP_IMAGE} already names another image (${KEPT:7:12}); it may be the only copy of an earlier rollback image. Nothing was changed"
-    ! docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "${BACKUP_VOL} already exists — a previous swap was not finished or rolled back"
+    [ "$(site_engine inspect -f '{{.Image}}' "$SITE")" = "$OLD_IMAGE" ] || die "${SITE} runs another image than it did at prepare; prepare again"
+    KEPT="$(site_engine image inspect -f '{{.Id}}' "$KEEP_IMAGE" 2>/dev/null || true)"
+    [ -z "$KEPT" ] || [ "$KEPT" = "$OLD_IMAGE" ] || die "${KEEP_IMAGE} already names another image ($(short_id "$KEPT")); it may be the only copy of an earlier rollback image. Nothing was changed"
+    ! site_engine volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "${BACKUP_VOL} already exists — a previous swap was not finished or rolled back"
     MF_FAILED="$(manifest_failures)"
     [ "$MF_FAILED" = "0" ] || die "${SITE}'s files do not match its signed release manifest (${MF_FAILED}); apply its update, then prepare again. Nothing was changed"
     # A move prepared before run specs has none yet; the container is still
@@ -614,40 +663,44 @@ if [ "$STAGE" = "swap" ]; then
     save_run_spec || die "could not keep ${SITE}'s run spec and environment in ${WORK}; nothing was changed"
 
     say "Stopping the site's writes (PHP-FPM, cron, the agent, Postfix)"
-    stop_site_writes || die "the site's writes could not be stopped; nothing was moved. Restart it with: docker restart ${SITE}"
+    stop_site_writes || die "the site's writes could not be stopped; nothing was moved. Restart it with: ${ENGINE} restart ${SITE}"
     count_rows "$DB" > "${WORK}/counts.before.tsv"
     say "Dumping ${DB}"
-    docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -Fc --create "$1"' _ "$DB" > "${WORK}/${DB}.dump"
+    site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U postgres -Fc --create "$1"' _ "$DB" > "${WORK}/${DB}.dump"
     chmod 600 "${WORK}/${DB}.dump"
-    [ -s "${WORK}/${DB}.dump" ] || die "the dump is empty; the site's writes are stopped — restart it with: docker restart ${SITE}"
-    docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
+    [ -s "${WORK}/${DB}.dump" ] || die "the dump is empty; the site's writes are stopped — restart it with: ${ENGINE} restart ${SITE}"
+    site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"
     for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
-        docker cp "${SITE}:/var/www/html/${SITE}/${f}" "${WORK}/${f}" \
-            || die "could not keep ${SITE}'s ${f}; nothing was moved. Restart it with: docker restart ${SITE}"
+        site_engine cp "${SITE}:/var/www/html/${SITE}/${f}" "${WORK}/${f}" \
+            || die "could not keep ${SITE}'s ${f}; nothing was moved. Restart it with: ${ENGINE} restart ${SITE}"
     done
     save_host_vhosts
 
     # The agent's identity must outlive the old container. install.sh carries
     # it across its own rebuild, but this removes the container first, so the
     # volume is seeded here the same way.
-    if ! docker volume inspect "${SITE}_agent" > /dev/null 2>&1 \
-        && docker cp "${SITE}:/etc/joinery-agent" - > /dev/null 2>&1; then
-        docker volume create "${SITE}_agent" > /dev/null
-        docker cp "${SITE}:/etc/joinery-agent" - | docker run --rm -i -v "${SITE}_agent:/dst" --entrypoint tar "$OLD_IMAGE" -x -p -C /dst --strip-components=1
+    if ! site_engine volume inspect "${SITE}_agent" > /dev/null 2>&1 \
+        && site_engine cp "${SITE}:/etc/joinery-agent" - > /dev/null 2>&1; then
+        site_engine volume create "${SITE}_agent" > /dev/null
+        if ! carry_agent_identity; then
+            # An empty volume left behind would read as carried on the next run.
+            site_engine volume rm "${SITE}_agent" > /dev/null 2>&1 || true
+            die "could not carry ${SITE}'s agent identity into ${SITE}_agent; nothing was moved. Restart it with: ${ENGINE} restart ${SITE}"
+        fi
         say "Carried the agent's identity into ${SITE}_agent"
     fi
 
     say "Keeping the old image as ${KEEP_IMAGE} and the old database volume as ${BACKUP_VOL}"
-    docker tag "$OLD_IMAGE" "$KEEP_IMAGE"
-    docker stop "$SITE" > /dev/null
-    docker volume create "$BACKUP_VOL" > /dev/null
+    site_engine tag "$OLD_IMAGE" "$KEEP_IMAGE"
+    site_engine stop "$SITE" > /dev/null
+    site_engine volume create "$BACKUP_VOL" > /dev/null
     cp -a "$(vol_mp "${SITE}_postgres")/." "$(vol_mp "$BACKUP_VOL")/"
     [ "$(find "$(vol_mp "${SITE}_postgres")" -type f | wc -l)" = "$(find "$(vol_mp "$BACKUP_VOL")" -type f | wc -l)" ] \
         || die "the copy of ${SITE}_postgres is incomplete; nothing removed. Roll back with: $0 ${SITE} rollback"
     state_set stage swapping
-    docker rm "$SITE" > /dev/null
-    docker volume rm "${SITE}_postgres" > /dev/null
+    site_engine rm "$SITE" > /dev/null
+    site_engine volume rm "${SITE}_postgres" > /dev/null
 
     say "Rebuilding ${SITE} with install.sh on $(state_get base)"
     PWFILE="$(mktemp "${WORK}/.pw.XXXXXX")"; chmod 600 "$PWFILE"
@@ -680,9 +733,9 @@ if [ "$STAGE" = "swap" ]; then
         # The rebuilt container's own first start may have made an empty one.
         printf '%s\n' "DROP DATABASE \"${DB}\";" | psql_in postgres > /dev/null
     fi
-    docker exec -i "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U postgres --create --exit-on-error -d postgres' \
+    site_engine exec -i "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore -U postgres --create --exit-on-error -d postgres' \
         < "${WORK}/${DB}.dump" || die "the restore failed. Roll back with: $0 ${SITE} rollback"
-    docker exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" vacuumdb -U postgres --analyze-only -q "$1"' _ "$DB" || true
+    site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" vacuumdb -U postgres --analyze-only -q "$1"' _ "$DB" || true
 
     count_rows "$DB" > "${WORK}/counts.after.tsv"
     if ! diff -q "${WORK}/counts.before.tsv" "${WORK}/counts.after.tsv" > /dev/null; then
@@ -692,7 +745,7 @@ if [ "$STAGE" = "swap" ]; then
     say "Row counts match: $(wc -l < "${WORK}/counts.after.tsv") tables"
 
     say "Restarting ${SITE} with its data in place"
-    docker restart "$SITE" > /dev/null
+    site_engine restart "$SITE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not come back after the restart. Roll back with: $0 ${SITE} rollback"
     CODE="$(wait_for_site)"
     say "Front page through the container's port: HTTP ${CODE}"
@@ -708,8 +761,8 @@ fi
 # ─────────────────────────────────────────────────────────────────── rollback
 if [ "$STAGE" = "rollback" ]; then
     case "$(state_get stage)" in swapping|swapped) ;; *) die "${SITE} is at stage '$(state_get stage)'; nothing to roll back" ;; esac
-    docker volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "no ${BACKUP_VOL} to roll back to"
-    docker image inspect "$KEEP_IMAGE" > /dev/null 2>&1 || die "no ${KEEP_IMAGE} to roll back to"
+    site_engine volume inspect "$BACKUP_VOL" > /dev/null 2>&1 || die "no ${BACKUP_VOL} to roll back to"
+    site_engine image inspect "$KEEP_IMAGE" > /dev/null 2>&1 || die "no ${KEEP_IMAGE} to roll back to"
     # What the old container is recreated from, checked before anything is
     # removed. A move begun before run specs kept a run_args list instead.
     if [ -f "${WORK}/run_args" ] && { [ ! -f "${WORK}/run_spec" ] || [ ! -f "${WORK}/env" ]; }; then
@@ -721,16 +774,16 @@ if [ "$STAGE" = "rollback" ]; then
     run_spec_check_file "${WORK}/run_spec" || die "no usable kept run spec for ${SITE} in ${WORK}; nothing was changed"
     run_spec_fits_host "${WORK}/run_spec" "Lower or remove the cpus= line in that kept copy" || die "this host cannot run ${SITE}'s kept run spec as it is; nothing was changed"
     say "Removing the rebuilt container and its database volume"
-    docker stop "$SITE" > /dev/null 2>&1 || true
-    docker rm "$SITE" > /dev/null 2>&1 || true
-    docker volume rm "${SITE}_postgres" > /dev/null 2>&1 || true
-    docker volume create "${SITE}_postgres" > /dev/null
+    site_engine stop "$SITE" > /dev/null 2>&1 || true
+    site_engine rm "$SITE" > /dev/null 2>&1 || true
+    site_engine volume rm "${SITE}_postgres" > /dev/null 2>&1 || true
+    site_engine volume create "${SITE}_postgres" > /dev/null
     cp -a "$(vol_mp "$BACKUP_VOL")/." "$(vol_mp "${SITE}_postgres")/"
     # The old container comes back from the spec it ran under, kept at prepare:
     # install.sh rewrote the live one for the rebuilt container.
     run_spec_write "$SITE" < <(grep -v '^#' "${WORK}/run_spec") \
         || die "could not put the old container's run spec back; the copy is still in ${BACKUP_VOL}, the spec in ${WORK}/run_spec"
-    if docker volume inspect "${SITE}_agent" > /dev/null 2>&1; then
+    if site_engine volume inspect "${SITE}_agent" > /dev/null 2>&1; then
         run_spec_add_volume "$SITE" "${SITE}_agent" /etc/joinery-agent || die "could not add ${SITE}_agent to ${SITE}'s run spec"
     fi
     mapfile -d '' ARGS < <(run_spec_args "$SITE")
@@ -748,14 +801,16 @@ if [ "$STAGE" = "rollback" ]; then
     # its server could not write its log and would not start. Hand it back, by
     # name, inside a container of the old image: a chown from the host would
     # write the container's ids, which are not its owners on a host that remaps
-    # user ids (userns-remap, specs/multi_tenant_docker_hosts.md WP5).
+    # user ids (userns-remap, specs/multi_tenant_docker_hosts.md WP5), and on
+    # the site container engine it runs under the site's own id map.
     LOG_VOL="$(run_spec_list "$SITE" volume | sed -n 's#^\([^:]*\):/var/log/postgresql$#\1#p' | head -1)"
     if [ -n "$LOG_VOL" ]; then
-        docker run --rm -v "${LOG_VOL}:/pglog" --entrypoint bash "$KEEP_IMAGE" -c \
+        helper_idmap
+        site_engine run --rm ${IDMAP[@]+"${IDMAP[@]}"} -v "${LOG_VOL}:/pglog" --entrypoint bash "$KEEP_IMAGE" -c \
             'chown root:postgres /pglog && chmod 1775 /pglog && find /pglog -maxdepth 1 -type f -name "*.log" -exec chown postgres:adm {} +'
     fi
     say "Recreating ${SITE} on ${KEEP_IMAGE} with its old arguments"
-    docker run -d "${ARGS[@]}" --env-file "${WORK}/env" "$KEEP_IMAGE" > /dev/null
+    site_engine run -d "${ARGS[@]}" --env-file "${WORK}/env" "$KEEP_IMAGE" > /dev/null
     wait_for_postgres || die "PostgreSQL did not start on the old image; the copy is still in ${BACKUP_VOL}"
     [ "$(db_major)" = "$FROM" ] || die "the rolled-back container does not see PostgreSQL ${FROM}; the copy is still in ${BACKUP_VOL}"
     # The old image's own layer carries the manifest it was built with, not the
@@ -766,7 +821,7 @@ if [ "$STAGE" = "rollback" ]; then
     restore_host_vhosts || say "WARNING: Apache refused the restored vhosts; the copies are in ${WORK}/host_vhosts"
     # The data is back in ${SITE}_postgres and running; the copy has done its job,
     # and leaving it would block the next swap.
-    docker volume rm "$BACKUP_VOL" > /dev/null
+    site_engine volume rm "$BACKUP_VOL" > /dev/null
     state_set stage rolled_back
     # The old start command runs to its end (Apache) before anything is added.
     say "Front page through the container's port: HTTP $(wait_for_site)"
@@ -781,8 +836,8 @@ fi
 # ───────────────────────────────────────────────────────────────────── finish
 if [ "$STAGE" = "finish" ]; then
     [ "$(state_get stage)" = "swapped" ] || die "${SITE} is at stage '$(state_get stage)', not swapped"
-    docker volume rm "$BACKUP_VOL" > /dev/null
-    docker rmi "$KEEP_IMAGE" > /dev/null 2>&1 || true
+    site_engine volume rm "$BACKUP_VOL" > /dev/null
+    site_engine rmi "$KEEP_IMAGE" > /dev/null 2>&1 || true
     rm -f "${WORK}/${DB}.dump" "${WORK}/run_spec" "${WORK}/env" "${WORK}/run_args" "${WORK}/roles.sql" "${WORK}/RELEASE_MANIFEST" "${WORK}/RELEASE_MANIFEST.sig"
     rm -rf "${WORK:?}/host_vhosts"
     state_set stage finished
