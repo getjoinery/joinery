@@ -236,8 +236,10 @@ and for `live`, `prod-verify` and `deploy` suites, which are never reused.
 A run then **borrows** a suite's result from a record instead of running it
 when all of these hold:
 
-1. the recorded reach is complete and the result is a pass or a fail (a skip,
-   crash or timeout is never borrowed);
+1. the recorded reach is complete and the result is a pass. A fail is never
+   borrowed: a red suite is re-proven on the current tree, which is also what
+   lets a rerun alone tell a flaky suite from a broken one. A skip, crash or
+   timeout is never borrowed either;
 2. none of the files in that reach differ between the record's tree and this
    run's — one `git diff-tree` per record answers it for every suite at once,
    and the decision is the `--changed` selection applied to that diff, so the
@@ -252,9 +254,16 @@ came from where:
 ```
   PASS booking_flow                 61/61       8104ms  plugins/bookings/tests/booking_flow_test.php  [reused: 2026-10-14T18:40Z by public-html-41 (pid 3408152)]
 ...
-Reused: 302 of 711 results from 2 earlier runs (20261014T184012Z-3391020, 20261014T185421Z-3408152); 409 run now
-Run record: 20261014T190301Z-3410077 (held the gate, waited 6m02s)
+Reused: 379 of 711 results from 6 earlier runs (20261014T185421Z-3408152, 20261014T192432Z-3718766, ...); 332 run now
+Not borrowed: 332: loads public_html/plugins/server_manager/data/managed_nodes_class.php
+Run record: 20261014T192632Z-3720986 (held the gate, waited 1m26s)
 ```
+
+The `Not borrowed` line says what blocked reuse, most suites first, in the
+words the `--changed` selection uses. The example is a real run: one data
+class edited by another session between the two runs, and every suite that
+boots the model layer loads every data class, so a data class change
+invalidates most of the estate — for reuse exactly as for `--changed`.
 
 A run that waited for the gate decides reuse again once it holds it, so
 everything the previous holder completed is on offer. A borrowed result does

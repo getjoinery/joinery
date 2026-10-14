@@ -92,8 +92,8 @@ $why = gate_reuse_refusal($res, $meta, $rel, array('public_html/tests/unit/fixtu
 check($why !== '', 'a fixture in the suite\'s area changing refuses', $why);
 check(gate_reuse_refusal($res, $meta, $rel, array(), false) !== '', 'a different debug environment refuses');
 check(gate_reuse_refusal(array('status' => 'pass', 'reach_complete' => false, 'files' => array()), $meta, $rel, array(), true) !== '', 'an incomplete reach refuses');
-check(gate_reuse_refusal(array_merge($res, array('status' => 'fail')), $meta, $rel, array(), true) === '',
-	'a recorded fail is reusable too (a known red need not be re-run)');
+check(gate_reuse_refusal(array_merge($res, array('status' => 'fail')), $meta, $rel, array(), true) !== '',
+	'a recorded fail is never borrowed: a red suite is re-proven on this tree (and a rerun alone diagnoses flakiness)');
 
 // ---------------------------------------------------------------------------
 section('The tree id');

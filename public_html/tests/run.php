@@ -445,9 +445,10 @@ $SITE_ROOT = dirname($ROOT);
 $my_tree = $tier_arg === 'deploy' ? null : gate_tree_id($SITE_ROOT);
 $reused = array();      // rel path => a result borrowed from an earlier run
 $reuse_runs = array();  // run_id => how many results came from it
-$take_reuse = function () use (&$to_run, &$reused, &$reuse_runs, $gate_dir, $my_tree, $SITE_ROOT, $ROOT, $debug_on, $want_fresh) {
+$reuse_why = array();   // rel path => why the newest record that had it was refused
+$take_reuse = function () use (&$to_run, &$reused, &$reuse_runs, &$reuse_why, $gate_dir, $my_tree, $SITE_ROOT, $ROOT, $debug_on, $want_fresh) {
 	if ($want_fresh || $my_tree === null || !$to_run) return;
-	$plan = gate_reuse_plan($to_run, gate_records_load($gate_dir), $my_tree, $SITE_ROOT, $ROOT, $debug_on);
+	$plan = gate_reuse_plan($to_run, gate_records_load($gate_dir), $my_tree, $SITE_ROOT, $ROOT, $debug_on, $reuse_why);
 	if (!$plan) return;
 	$kept = array();
 	foreach ($to_run as $d) {
@@ -929,8 +930,11 @@ $totals = array(
 	'tests' => $tests_total, 'tests_passed' => $tests_passed, 'tests_failed' => $tests_failed,
 	'checks_passed' => $checks_passed, 'checks_failed' => $checks_failed, 'checks_skipped' => $checks_skipped,
 );
+$not_borrowed = array(); // refusal reason => suites it blocked, most first
+foreach ($reuse_why as $rel => $w) $not_borrowed[$w] = ($not_borrowed[$w] ?? 0) + 1;
+arsort($not_borrowed);
 $reuse_summary = array('reused' => count($reused), 'ran' => $tests_total - count($reused),
-	'from_runs' => $reuse_runs, 'fresh' => $want_fresh);
+	'from_runs' => $reuse_runs, 'not_borrowed' => $not_borrowed, 'fresh' => $want_fresh);
 $gate_summary = array('locked' => $gate_held, 'waited_s' => $gate_waited_s, 'cutoff' => $gate_cutoff);
 gate_record_finish($gate_dir, $run_id, array('totals' => $totals, 'reuse' => $reuse_summary, 'waited_s' => $gate_waited_s));
 if ($gate_held) { gate_holder_clear($gate_dir); gate_unlock($gate_fh); }
@@ -968,6 +972,14 @@ if (count($reused) > 0) {
 		. ' (' . implode(', ', array_keys($reuse_runs)) . '); ' . ($tests_total - count($reused)) . " run now\n";
 } elseif (!$want_fresh && $tier_arg !== 'deploy' && $my_tree === null) {
 	echo "Reuse: unavailable here (no repository tree id).\n";
+}
+// What blocked borrowing, most suites first. A gate that ran 332 suites
+// fresh because one data class differed should say so in one line.
+if ($not_borrowed) {
+	$parts = array();
+	foreach (array_slice($not_borrowed, 0, 3, true) as $w => $n) $parts[] = $n . ': ' . $w;
+	$rest = count($not_borrowed) > 3 ? '; and ' . (count($not_borrowed) - 3) . ' other reason' . (count($not_borrowed) === 4 ? '' : 's') : '';
+	echo 'Not borrowed: ' . implode('; ', $parts) . $rest . "\n";
 }
 echo 'Run record: ' . $run_id . ($gate_held ? ' (held the gate' . ($gate_waited_s ? ', waited ' . gate_fmt_duration($gate_waited_s) : '') . ')' : ' (below the cutoff, no lock)') . "\n";
 
