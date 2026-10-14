@@ -162,7 +162,7 @@ say() { echo "[$(date -u +%H:%M:%S)] $*"; }
 die() { echo "FATAL: $*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root on the container host"
-ENGINE="$(site_engine_kind)" || die "this machine's container engine could not be named"
+ENGINE="$(site_engine_bin)" || die "this machine's container engine could not be named"
 command -v "$ENGINE" > /dev/null || die "${ENGINE} is not installed here"
 
 # An image id, short: Docker's carry a sha256: prefix, Podman's do not.

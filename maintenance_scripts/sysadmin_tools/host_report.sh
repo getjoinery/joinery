@@ -8,8 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
-# Version: 1.25 - the site container engine is installed where its current link is (-L), as _site_engine.sh
-#                reads it (reviewer2 R7).
+# Version: 1.25 - the site container engine is installed where anything is at its current path, as
+#                _site_engine.sh reads it (reviewer2 R7, T4), and its podman is run by path (T3); a site's
+#                code_check that is a link is not followed (T1).
 # Version: 1.24 - containers are read through the engine this host's sites run on (install_tools/
 #                _site_engine.sh): Docker, or the site container engine (specs/site_container_engine.md
 #                WP3), whose start time is asked in Docker's RFC 3339 form so started_at holds.
@@ -1071,7 +1072,9 @@ probe_sites() {
 code_check_json() {  # CONFIG_DIR (on the host), or empty
     local f="$1/code_check" first state at line kind name verdict file n=0 sep=""
     [[ -n "$1" ]] || { printf '"unknown"'; return; }
-    [[ -f "$f" ]] || { printf '"none"'; return; }
+    [[ -e "$f" || -L "$f" ]] || { printf '"none"'; return; }
+    # The file is the site's own: a link it planted is not followed (this runs as root).
+    [[ -f "$f" && ! -L "$f" ]] || { printf '"unknown"'; return; }
     first="$(head -n 1 "$f" 2>/dev/null)"
     [[ "$first" =~ ^(ok|failed)\ ([0-9TZ:.-]{1,40})$ ]] || { printf '"unknown"'; return; }
     state="${BASH_REMATCH[1]}"; at="${BASH_REMATCH[2]}"
@@ -1117,26 +1120,30 @@ emit_host_restrictions() {
 # The engine this host's sites run on: install_tools/_site_engine.sh beside
 # this script's tree names it. Without the helper Docker is the engine, as the
 # helper itself answers, except on a machine with the site container engine.
+# Prints its name and the command to run it by (site_engine_bin: the site
+# container engine's podman by path, whatever PATH holds).
 host_engine() {
     local helper
     helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_site_engine.sh"
     if [[ -f "$helper" ]]; then
-        bash -c '. "$1" && site_engine_kind' _ "$helper"
+        bash -c '. "$1" && k="$(site_engine_kind)" && b="$(site_engine_bin)" && echo "$k $b"' _ "$helper"
         return
     fi
-    [[ -L /usr/local/lib/joinery-site-engine/current ]] && return 1
-    echo docker
+    [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]] && return 1
+    echo "docker docker"
 }
 
 emit_containers() {
     local names c site state health pid started port vols answers n=0 i src sum bytes path engine fmt="$INSPECT_FORMAT"
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
     local -A src_site=() disk=() missing=() reply=() ports=() cfg=()
-    engine="$(host_engine)" || { printf '"unknown"'; return; }
+    local engine_pair engine_kind
+    engine_pair="$(host_engine)" || { printf '"unknown"'; return; }
+    read -r engine_kind engine <<< "$engine_pair"
     command -v "$engine" >/dev/null 2>&1 || { printf '"none"'; return; }
     # Podman's start time is a time, printed in Go's own layout: asked for in
     # RFC 3339, as Docker prints it.
-    if [[ "$engine" == podman ]]; then
+    if [[ "$engine_kind" == podman ]]; then
         local docker_started='{{.State.StartedAt}}' podman_started='{{.State.StartedAt.Format "2006-01-02T15:04:05.999999999Z07:00"}}'
         fmt="${fmt//"$docker_started"/"$podman_started"}"
     fi

@@ -85,11 +85,20 @@ chk "installed but its podman not executable: refused, never docker (reviewer2 R
 chk "  saying what to run" "$(grep -c 'install_site_engine.sh converge' "$T/err")" "1"
 chk "  and the host still counts as the site engine's, so no Docker branch is taken" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_is_podman && echo yes")" "yes"
 chmod 755 "$FX/usr/local/bin/podman"
+chk "the engine is run by its path, whatever PATH holds (reviewer2 T3)" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_bin")" "$FX/usr/local/bin/podman"
+chk "  and docker as it always was" "$(SITE_ENGINE_ROOT="$T/none" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_bin")" "docker"
+FD="$T/engine-dir"; mkdir -p "$FD/usr/local/lib/joinery-site-engine/current" "$FD/usr/local/bin"; cp "$FX/usr/local/bin/podman" "$FD/usr/local/bin/"
+chk "a current that is not a link: refused, never docker (reviewer2 T4)" "$(SITE_ENGINE_ROOT="$FD" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind" 2>"$T/err"; echo "rc=$?")|$(grep -c 'is not a link' "$T/err")" "rc=1|1"
+chk "  and the host still counts as the site engine's" "$(SITE_ENGINE_ROOT="$FD" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_is_podman && echo yes")" "yes"
 mv "$FX/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa" "$FX/aside"
 chk "a dangling current link is still the site engine's (reviewer2 R7)" "$(SITE_ENGINE_ROOT="$FX" bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind")" "podman"
 mv "$FX/aside" "$FX/usr/local/lib/joinery-site-engine/6.1.4-aaaaaaaaaaaa"
 chk "a test can name the engine" "$(JOINERY_SITE_ENGINE_KIND=podman bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind")" "podman"
 chk "  and naming another is refused" "$(JOINERY_SITE_ENGINE_KIND=lxc bash -c ". '$TOOLS/_site_engine.sh'; site_engine_kind" 2>/dev/null; echo $?)" "1"
+
+listed="$(sed -n 's/^#   \(site_engine[a-z_]*\) .*/\1/p' "$TOOLS/_site_engine.sh" | sort -u)"
+chk "the helper defines every function its header lists ($(echo $listed | wc -w))" \
+    "$(bash -c ". '$TOOLS/_site_engine.sh'; for f in $(echo $listed); do declare -F \$f > /dev/null || echo \$f; done")" ""
 
 echo "An id block is a fixed range"
 idb() { bash -c ". '$TOOLS/_site_engine.sh'; site_engine_idblock_base $1" 2>/dev/null; }

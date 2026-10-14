@@ -219,19 +219,20 @@ engine_lib() {
     elif [[ -f "$ENGINE_LIB_INSTALLED" ]]; then echo "$ENGINE_LIB_INSTALLED"
     else return 1; fi
 }
-# The command of the engine this machine's sites run on, or nothing where it is
+# The command to run the engine this machine's sites run on by (the site
+# container engine's podman by path, site_engine_bin), or nothing where it is
 # not installed. Without the helper Docker is the engine, as the helper itself
 # answers, except on a machine with the site container engine installed.
 container_engine() {
-    local lib kind
+    local lib bin current="${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current"
     if lib="$(engine_lib)"; then
-        kind="$(bash -c '. "$1" && site_engine_kind' _ "$lib")" || return 1
-    elif [[ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; then
+        bin="$(bash -c '. "$1" && site_engine_bin' _ "$lib")" || return 1
+    elif [[ -L "$current" || -e "$current" ]]; then
         return 1
     else
-        kind=docker
+        bin=docker
     fi
-    command -v "$kind" > /dev/null 2>&1 && echo "$kind"
+    command -v "$bin" > /dev/null 2>&1 && echo "$bin"
 }
 
 # --- the figures -----------------------------------------------------------------
@@ -493,7 +494,7 @@ resolvers() {
 # upstream servers systemd-resolved names, IPv4 and IPv6, nothing else. None
 # on a Docker host, whose sites ask Docker's own resolver.
 site_resolvers() {
-    [[ "$(container_engine 2> /dev/null)" == podman ]] || return 0
+    [[ "$(basename "$(container_engine 2> /dev/null)")" == podman ]] || return 0
     awk '$1 == "nameserver" { print $2 }' "$UPSTREAM_RESOLV" 2>/dev/null \
         | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^[0-9A-Fa-f:]*:[0-9A-Fa-f:]+$' | head -n 8
 }
@@ -820,8 +821,9 @@ do_apply() {  # WEB_USER(0|1)
     # On the site container engine a site's name lookups and what it is told
     # need the engine named; one that cannot be is said and in the status.
     SITE_ENGINE_STATE=""
-    if [[ "${JOINERY_SITE_ENGINE_KIND:-}" == podman || -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; then
-        if [[ "$(container_engine 2> /dev/null)" == podman ]]; then
+    if [[ "${JOINERY_SITE_ENGINE_KIND:-}" == podman || -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" \
+          || -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; then
+        if [[ "$(basename "$(container_engine 2> /dev/null)")" == podman ]]; then
             SITE_ENGINE_STATE=podman
         else
             SITE_ENGINE_STATE=unusable

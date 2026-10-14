@@ -1955,7 +1955,7 @@ do_migrate() {
     # first start (install.sh docker --site-engine makes the data root first,
     # and install_site_engine.sh writes storage.conf onto it only): nothing of
     # its moves, and one whose storage is anywhere else is not a host this moves.
-    if [[ -L "${ROOT}/usr/local/lib/joinery-site-engine/current" ]]; then
+    if [[ -L "${ROOT}/usr/local/lib/joinery-site-engine/current" || -e "${ROOT}/usr/local/lib/joinery-site-engine/current" ]]; then
         local graphroot
         graphroot="$(sed -n 's/^graphroot = "\(.*\)"$/\1/p' "${ROOT}/etc/containers/storage.conf" 2>/dev/null | tail -n 1)"
         [[ "$graphroot" == "${MNT_REAL}/"* ]] \

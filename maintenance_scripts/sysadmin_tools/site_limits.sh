@@ -60,7 +60,7 @@ NAME="${1:-}"; MEM_IN="${2:-keep}"; CPUS_IN="${3:-keep}"; DISK_IN="${4:-keep}"
 [[ "$NAME" =~ ^[a-z0-9][a-z0-9_-]{1,49}$ ]] || refuse "${NAME:0:64} is not a site this host serves"
 [[ -f "$TOOLS/_site_run_spec.sh" ]] || refuse "this host's support bundle does not carry _site_run_spec.sh"
 . "$TOOLS/_site_run_spec.sh"
-ENGINE="$(site_engine_kind)" || refuse "this machine's container engine could not be named; nothing was changed"
+ENGINE="$(site_engine_bin)" || refuse "this machine's container engine could not be named; nothing was changed"
 command -v "$ENGINE" >/dev/null 2>&1 || refuse "this machine has no ${ENGINE}"
 
 # Ours: a container whose SITENAME is its name, with a run spec.

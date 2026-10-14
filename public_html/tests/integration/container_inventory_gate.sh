@@ -92,7 +92,7 @@ case "$1 $2" in
     "inspect -f")
         shift 3
         for c in "$@"; do
-            m=""; for v in a b c d e f g h i j k l; do m+="volume:${c}_${v} "; done
+            m=""; for v in $(seq 1 40); do m+="volume:${c}_v${v} "; done
             echo "/$c|SITENAME=$c|running|registry.example.com/joinery/site-with-a-long-image-name:0.8.494-$(printf 'y%.0s' $(seq 1 40))|$m"
         done ;;
 esac
@@ -100,7 +100,32 @@ STUB
 PATH="$T/bin:$PATH" CONTAINER_INVENTORY_ETC="$T/etc" bash "$SCRIPT" > "$T/many.json" 2>/dev/null
 chk "400 large containers: truncated, and the whole object under the agent's 64 KiB" \
     "$(jv "$T/many.json" truncated)/$( [ "$(wc -c < "$T/many.json")" -lt 60000 ]; echo $? )" "true/0"
-chk "ten mounts at most per container" "$(jv "$T/many.json" containers.0.mounts count)" "10"
+chk "32 mounts at most per container" "$(jv "$T/many.json" containers.0.mounts count)" "32"
+# A site's sixteen volumes (B65: ten were kept, and truncated said false).
+cat > "$T/bin/docker" <<'STUB'
+#!/bin/bash
+case "$1 $2" in
+    "ps -a") printf 'siteone\n' ;;
+    "inspect -f")
+        m=""; for v in config uploads static storage code scripts vendor logs cache backups pg data mail spool run tmp; do m+="volume:siteone_${v} "; done
+        echo "/siteone|SITENAME=siteone|running|joinery/site:0.8.495|$m" ;;
+esac
+STUB
+PATH="$T/bin:$PATH" CONTAINER_INVENTORY_ETC="$T/etc" bash "$SCRIPT" > "$T/site16.json" 2>/dev/null
+chk "a site's sixteen volumes: every one listed, the last among them, and nothing said cut" \
+    "$(jv "$T/site16.json" containers.0.mounts count)|$(jv "$T/site16.json" containers.0.mounts.15.name)|$(jv "$T/site16.json" truncated)" "16|siteone_tmp|false"
+cat > "$T/bin/docker" <<'STUB'
+#!/bin/bash
+case "$1 $2" in
+    "ps -a") printf 'siteone\n' ;;
+    "inspect -f")
+        m=""; for v in $(seq 1 33); do m+="volume:siteone_v${v} "; done
+        echo "/siteone|SITENAME=siteone|running|joinery/site:0.8.495|$m" ;;
+esac
+STUB
+PATH="$T/bin:$PATH" CONTAINER_INVENTORY_ETC="$T/etc" bash "$SCRIPT" > "$T/site33.json" 2>/dev/null
+chk "one container with a mount more than are listed: the list says it was cut" \
+    "$(jv "$T/site33.json" containers.0.mounts count)|$(jv "$T/site33.json" truncated)" "32|true"
 
 echo "=== No docker, and a docker that does not answer ==="
 mkdir -p "$T/nodocker"
@@ -145,7 +170,7 @@ chk "another container on it: not install.sh's, stopped" "$(jv "$T/pod.json" con
 echo "=== Static pins ==="
 chk "no engine verb but ps and inspect, and no engine named but through the helper" \
     "$(grep -o 'run "$ENGINE" [a-z]*' "$SCRIPT" | sort -u | tr '\n' ' ')|$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c -E '\b(docker|podman) ')" 'run "$ENGINE" inspect run "$ENGINE" ps |0'
-chk "the engine comes from install_tools/_site_engine.sh" "$(grep -c '_site_engine.sh"$' "$SCRIPT")/$(grep -c 'ENGINE="$(site_engine_kind)"' "$SCRIPT")" "1/1"
+chk "the engine comes from install_tools/_site_engine.sh, named by its kind and run by its command" "$(grep -c '_site_engine.sh"$' "$SCRIPT")/$(grep -c 'ENGINE_KIND="$(site_engine_kind)"' "$SCRIPT")/$(grep -c 'ENGINE="$(site_engine_bin)"' "$SCRIPT")" "1/1/1"
 chk "the environment is filtered to SITENAME inside docker" "$(grep -cF '0) "SITENAME"}}{{.}}{{end}}' "$SCRIPT")" "1"
 chk "a mount's source is never read" "$(grep '^INSPECT_FORMAT=' "$SCRIPT" | grep -c '\.Source')" "0"
 chk "nothing writes" "$(grep -v '^[[:space:]]*#' "$SCRIPT" | grep -c -E '\btee\b|>\s*/(etc|var|srv|usr|run)|\brm |\bmv ')" "0"

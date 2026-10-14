@@ -347,6 +347,11 @@ mv "$T/docker.real" "$T/bin/docker"; rm -f "$T/bin/podman"
 chk "on the site container engine: the same two sites, through podman" "$(jv "$T/pod.json" containers count)/$(jv "$T/pod.json" containers.0.name)/$(jv "$T/pod.json" containers.0.answers)" "2/siteone/yes"
 chk "  its start time asked for in RFC 3339, so started_at holds" \
     "$(grep -c 'StartedAt.Format "2006-01-02T15:04:05.999999999Z07:00"' "$T/podman.log")|$(jv "$T/pod.json" containers.0.started_at)" "1|$(jv "$T/root.json" containers.0.started_at)"
+# A code_check the site made a link is not followed (host_report runs as root; reviewer2 T1).
+CC="$T/vol/siteone_config/_data/code_check"; mv "$CC" "$T/cc.real"; ln -s "$T/cc.real" "$CC"
+PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/link.json" 2>/dev/null
+rm -f "$CC"; mv "$T/cc.real" "$CC"
+chk "a code_check that is a link is not followed: unknown" "$(jv "$T/link.json" containers.0.code_check)" "unknown"
 # A site's figures (multi_tenant_docker_hosts WP1), read from the cgroup and
 # network namespace of the process docker names - here the gate's own.
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }

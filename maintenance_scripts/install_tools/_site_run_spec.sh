@@ -114,7 +114,7 @@
 if [[ -f "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh" ]]; then
     . "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh"
 else
-    site_engine_is_podman() { [[ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; }
+    site_engine_is_podman() { [[ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" || -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; }
     site_engine_kind() {
         if site_engine_is_podman; then
             echo "run spec: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $(dirname "${BASH_SOURCE[0]}")/_site_run_spec.sh; nothing was done" >&2
@@ -124,6 +124,7 @@ else
     }
     site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
     site_engine_image() { printf '%s\n' "${1#localhost/}"; }
+    site_engine_bin() { site_engine_kind; }
 fi
 
 RUN_SPEC_VERSION=2
