@@ -20,14 +20,14 @@ import (
 )
 
 // Version is stamped at build time (-ldflags "-X main.Version=...").
-var Version = "1.0.3"
+var Version = "1.0.4"
 
 func main() {
 	configDir := flag.String("config-dir", "/etc/joinery/mail-gateway", "directory holding sites/<site>.json and sites/<site>.enabled")
 	imapListen := flag.String("imap-listen", ":993", "IMAP listen address (implicit TLS); empty disables IMAP")
 	smtpListen := flag.String("smtp-listen", ":465", "SMTP submission listen address (implicit TLS); empty disables submission")
 	relaySMTPListen := flag.String("relay-smtp-listen", ":"+RelaySubmissionPort, "second submission address, for a relay passing programs through (cloud providers block the relay's outbound 465); empty disables it")
-	smtpDomain := flag.String("smtp-domain", "", "name in the SMTP greeting (default: the only site's hostname, else this host's name)")
+	smtpDomain := flag.String("smtp-domain", "", "one name in the SMTP greeting for every connection (default: the name each program connected to)")
 	maxPerIP := flag.Int("max-conns-per-ip", 100, "concurrent connections allowed from one client address (IPv6: per /64)")
 	maxPerCred := flag.Int("max-conns-per-credential", 20, "concurrent signed-in connections allowed for one app password")
 	maxConns := flag.Int("max-conns", 2000, "concurrent connections allowed in total (each costs ~40 KiB besides the budgets)")
@@ -70,11 +70,6 @@ func main() {
 	logf("limits: %d connections (%d per address, %d per credential); in-flight %d MiB, message cache %d MiB, folder lists %d MiB, memory limit %d MiB",
 		*maxConns, *maxPerIP, *maxPerCred, *inflightBytes>>20, *cacheBytes>>20, *folderBytes>>20, *memLimit>>20)
 
-	domain := *smtpDomain
-	if domain == "" {
-		domain = reg.DefaultDomain()
-	}
-
 	errc := make(chan error, 4)
 	var closers []func()
 	if *imapListen != "" {
@@ -93,14 +88,14 @@ func main() {
 		if err != nil {
 			log.Fatalf("smtp listen: %v", err)
 		}
-		srv := gw.NewSMTPServer(domain)
+		front := gw.NewSMTPFront(*smtpDomain)
 		tlsLn := gw.TLSListener(ln, "smtp")
-		closers = append(closers, func() { srv.Close() })
+		closers = append(closers, front.Close)
 		logf("smtp submission listening on %s", ln.Addr())
 		if *relaySMTPListen != "" {
 			logf("smtp submission for relays listening on %s", *relaySMTPListen)
 		}
-		go func() { errc <- fmt.Errorf("smtp: %w", srv.Serve(tlsLn)) }()
+		go func() { errc <- fmt.Errorf("smtp: %w", front.Serve(tlsLn)) }()
 	}
 	if len(closers) == 0 {
 		log.Fatalf("nothing to listen on: both -imap-listen and -smtp-listen are empty")

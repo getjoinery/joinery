@@ -107,9 +107,9 @@ func startHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	smtpSrv := gw.NewSMTPServer(testHost)
+	smtpSrv := gw.NewSMTPFront("")
 	go smtpSrv.Serve(gw.TLSListener(smtpLn, "smtp"))
-	t.Cleanup(func() { smtpSrv.Close() })
+	t.Cleanup(smtpSrv.Close)
 
 	return &harness{site: site, imapAddr: imapLn.Addr().String(), smtpAddr: smtpLn.Addr().String(),
 		gw: gw, dir: dir, upURL: up.URL, certPath: certPath, keyPath: keyPath}

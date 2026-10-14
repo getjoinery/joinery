@@ -31,7 +31,7 @@ mail-gateway [-config-dir /etc/joinery/mail-gateway] [-imap-listen :993] [-smtp-
 | `-imap-listen` | `:993` | IMAP, implicit TLS. Empty turns IMAP off |
 | `-smtp-listen` | `:465` | SMTP submission, implicit TLS. Empty turns it off |
 | `-relay-smtp-listen` | `:10465` | The same submission server on a second port, for a relay passing programs through. Programs use 465 at the relay, but cloud providers block a relay's outbound 25, 465 and 587, so the relay dials this port instead; the helper opens it to the relay's address only. Empty turns it off |
-| `-smtp-domain` | the only site's hostname, else the host name | the name in the SMTP greeting |
+| `-smtp-domain` | the name each program connected to | one name for every SMTP greeting |
 | `-max-conns-per-ip` | `100` | concurrent connections from one address (an IPv6 /64 counts as one) — high enough for an office or household behind one NAT |
 | `-max-conns-per-credential` | `20` | concurrent signed-in connections for one app password (counted at sign-in, keyed on a hash of username and password, never the password itself), so one credential cannot take an address's whole allowance. Thunderbird holds 5 per account |
 | `-max-conns` | `2000` | concurrent connections in total (each costs ~40 KiB besides the budgets) |
@@ -287,7 +287,10 @@ number from `mail_sync`, ready to answer them.
 
 ## SMTP submission
 
-Port 465, implicit TLS, `AUTH PLAIN` only, checked by calling `mail_login` — a
+Port 465, implicit TLS. The greeting names the site the program connected to
+(`220 mail.example.com ESMTP Service Ready`): the TLS handshake finishes first,
+and the connection goes to a submission server for that name (`smtp_front.go`),
+so each site on a shared machine greets with its own name. `AUTH PLAIN` only, checked by calling `mail_login` — a
 wrong password fails at `AUTH` with `535 5.7.8`. Nothing is accepted before
 sign-in (`530 5.7.0`). `SIZE 23000000` is advertised; a `MAIL FROM … SIZE=`
 over it is refused by go-smtp (`552 5.3.4 Max message size exceeded`), and
