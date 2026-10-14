@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.5 - the node's alerts are on: a hand-made node on dev is a test cloud box, which is quiet by default
  * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
  *                for a running site not checked on a host that refuses unsigned code (host_restrictions D8)
  * @version 1.3 - plane:release_log_entry and plane:release_log_tail_blind (release_transparency O5)
@@ -45,6 +46,7 @@ $node->set('mgn_slug', 'harnesstest-src-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.44');
 $node->set('mgn_ssh_user', 'root');
 $node->set('mgn_site_url', 'https://sources.example');
+$node->set('mgn_alerts', 'on');
 $node->set('mgn_enabled', true);
 $node->set('mgn_uptime_enabled', true);
 $node->set('mgn_uptime_last_status', 'up');

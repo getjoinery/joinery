@@ -21,6 +21,8 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.14 - leaves a test's fixture nodes alone (ManagedNode::is_fixture_name()), as the incident pass does: it
+ *                 queued jobs for a running suite's nodes, which outlived them when the suite deleted its nodes
  * @version 2.13 - data_root_run_under_way() reads DataRootEscrowSync::run_under_way(); a node this plane asked to
  *                 reboot is asked for its host report every REBOOT_REFRESH_SECONDS until
  *                 one shows a new boot id, so the node page says it came back within minutes
@@ -94,10 +96,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
-		$nodes = new MultiManagedNode([
-			'deleted' => false,
-		]);
-		$nodes->load();
+		$nodes = self::watched_nodes();
 
 		$checked     = 0;
 		$skipped     = 0;
@@ -195,6 +194,23 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			$message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 5));
 		}
 		return ['status' => 'success', 'message' => $message];
+	}
+
+	/**
+	 * The nodes a scheduled pass looks at: every live node but a test's
+	 * fixtures. A suite drives its own nodes; a pass over them queues jobs
+	 * that outlive them when the suite deletes them.
+	 *
+	 * @return ManagedNode[]
+	 */
+	public static function watched_nodes(): array {
+		$nodes = array();
+		foreach (new MultiManagedNode(['deleted' => false]) as $node) {
+			if (!ManagedNode::is_fixture_name((string)$node->get('mgn_name'))) {
+				$nodes[] = $node;
+			}
+		}
+		return $nodes;
 	}
 
 	/**

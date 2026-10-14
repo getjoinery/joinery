@@ -13,6 +13,10 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.25 - a refusal and the poll's file report are two findings, and each clears only itself: a completed
+ *                job no longer clears deployment files the poll still names, and the poll's "none differ" no
+ *                longer clears a refusal of a file it never checks. The poll's files get the same
+ *                changed_here_after_publish() reading a refusal does, so this site's own commits are not an alarm
  * @version 1.24 - verify_state(): never verified and stale are problems a day past the node's verify interval
  *                 (FleetBackupPolicy::verify_alarm_days(), 8 days at the weekly default), not 45 and 60 days
  * @version 1.24 - note_reported_script_trust(): a node that looked at its deployment files (agent 1.71.0) names the
@@ -446,9 +450,13 @@ class NodeMonitorHealth {
 	 * $site_dir is for the tests; the default is this site's own root.
 	 */
 	public static function changed_here_after_publish($node, string $reason, ?string $site_dir = null): bool {
+		return self::file_changed_here_after_publish($node, self::refused_path($reason), $site_dir);
+	}
+
+	/** changed_here_after_publish() for a tree-relative path rather than a refusal's wording. */
+	public static function file_changed_here_after_publish($node, string $rel, ?string $site_dir = null): bool {
 		if (!$node || !$node->is_self()) { return false; }
-		$rel = self::refused_path($reason);
-		if ($rel === '') { return false; }
+		if (!self::is_tree_path($rel)) { return false; }
 		if ($site_dir === null) {
 			$settings = Globalvars::get_instance();
 			$site_dir = (string)$settings->get_setting('baseDir') . (string)$settings->get_setting('site_template');
@@ -468,12 +476,13 @@ class NodeMonitorHealth {
 		if (!preg_match('/(?:has been modified since release|is not in the signed release manifest):\s*(\S+)/', $reason, $m)) {
 			return '';
 		}
-		$rel = $m[1];
-		if (!preg_match('#^[A-Za-z0-9._/-]+$#', $rel) || $rel[0] === '/'
-			|| in_array('..', explode('/', $rel), true)) {
-			return '';
-		}
-		return $rel;
+		return self::is_tree_path($m[1]) ? $m[1] : '';
+	}
+
+	/** Is $rel a relative path of ordinary characters with no '..' segment, safe to hand to git? */
+	private static function is_tree_path(string $rel): bool {
+		return $rel !== '' && preg_match('#^[A-Za-z0-9._/-]+$#', $rel) && $rel[0] !== '/'
+			&& !in_array('..', explode('/', $rel), true);
 	}
 
 	/** Is $rel tracked in the git checkout at $dir, and identical to its last commit? */
@@ -519,27 +528,16 @@ class NodeMonitorHealth {
 	 * here on trust grounds, completing now, is the node's own evidence that it
 	 * can verify scripts again, and that evidence needs no list to read.
 	 */
-	public static function note_script_trust($node, $job): void {
+	public static function note_script_trust($node, $job, ?string $site_dir = null): void {
 		if (!$node || !$node->key) { return; }
 		$outcome = (string)$job->get('mjb_agent_outcome');
 		$type    = (string)$job->get('mjb_job_type');
 
 		if ($outcome === 'refused') {
-			$state = self::classify_script_trust((string)$job->get('mjb_error_message'));
-			if ($state === null) { return; }
-			if ($state === 'untrusted_file'
-				&& self::changed_here_after_publish($node, (string)$job->get('mjb_error_message'))) {
-				$state = 'unpublished_file';
-			}
-			// Keep the first sighting: how long a node has been unmanageable is
-			// the number that makes it urgent, and re-stamping it on every
-			// nightly refusal would report every such node as new today.
-			if ((string)$node->get('mgn_script_trust') !== $state) {
-				$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
-			}
-			$node->set('mgn_script_trust', $state);
+			if (self::classify_script_trust((string)$job->get('mjb_error_message')) === null) { return; }
 			$node->set('mgn_script_trust_reason', (string)$job->get('mjb_error_message'));
 			$node->set('mgn_script_trust_job_type', $type);
+			self::settle_script_trust($node, self::script_trust_files($node), $site_dir);
 			$node->save();
 			return;
 		}
@@ -553,11 +551,84 @@ class NodeMonitorHealth {
 		// nothing about script verification.
 		if (!self::type_ever_trust_refused((int)$node->key, $type)) { return; }
 
-		$node->set('mgn_script_trust', 'ok');
-		$node->set('mgn_script_trust_since', null);
+		// It clears the refusal, and only the refusal: deployment files the
+		// poll still names as differing were never this job's to vouch for.
+		// A script job that ran proves the manifest usable.
+		if ($current === 'untrusted_manifest') {
+			$node->set('mgn_script_trust', 'ok');
+		}
 		$node->set('mgn_script_trust_reason', '');
 		$node->set('mgn_script_trust_job_type', '');
+		self::settle_script_trust($node, self::script_trust_files($node), $site_dir);
 		$node->save();
+	}
+
+	/** How bad each state is; the worse finding is the node's state. */
+	const SCRIPT_TRUST_RANK = ['ok' => 0, 'unpublished_file' => 1, 'untrusted_file' => 2, 'untrusted_manifest' => 3];
+
+	/**
+	 * Set the state from the two findings the columns hold, the worse one
+	 * winning. A refusal on record (a job type beside it) names the script the
+	 * agent would not run; the poll's file list names the deployment files it
+	 * found differing. Each is read as this site's own unpublished change when
+	 * the evidence says so (file_changed_here_after_publish()), which is only
+	 * ever on this management node's own record. Nothing on record is ok, which
+	 * releases every column.
+	 *
+	 * An untrusted_manifest the poll reported has no finding behind it in the
+	 * columns, so it stands until the poll says the manifest is usable again.
+	 */
+	private static function settle_script_trust($node, array $files, ?string $site_dir = null): void {
+		$state = (string)$node->get('mgn_script_trust') === 'untrusted_manifest'
+			&& trim((string)$node->get('mgn_script_trust_job_type')) === '' ? 'untrusted_manifest' : 'ok';
+
+		if (trim((string)$node->get('mgn_script_trust_job_type')) !== '') {
+			$reason  = (string)$node->get('mgn_script_trust_reason');
+			$refused = self::classify_script_trust($reason) ?? 'ok';
+			if ($refused === 'untrusted_file' && self::changed_here_after_publish($node, $reason, $site_dir)) {
+				$refused = 'unpublished_file';
+			}
+			$state = self::worse_script_trust($state, $refused);
+		}
+
+		if ($files) {
+			$found = 'unpublished_file';
+			foreach ($files as $rel) {
+				if (!self::file_changed_here_after_publish($node, (string)$rel, $site_dir)) {
+					$found = 'untrusted_file';
+					break;
+				}
+			}
+			$state = self::worse_script_trust($state, $found);
+		}
+
+		if ($state === 'ok') {
+			$node->set('mgn_script_trust', 'ok');
+			$node->set('mgn_script_trust_since', null);
+			$node->set('mgn_script_trust_reason', '');
+			$node->set('mgn_script_trust_job_type', '');
+			$node->set('mgn_script_trust_files', '');
+			return;
+		}
+		// Keep the first sighting: how long a node has been unmanageable is
+		// the number that makes it urgent, and re-stamping it on every
+		// nightly refusal would report every such node as new today.
+		if ((string)$node->get('mgn_script_trust') !== $state) {
+			$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+		}
+		$node->set('mgn_script_trust', $state);
+		$node->set('mgn_script_trust_files', $files ? json_encode(array_values($files)) : '');
+		// A state with no refusal behind it says plainly where it came from
+		// rather than leaving the reason blank.
+		if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
+			$node->set('mgn_script_trust_reason', $files
+				? 'The node reported that these deployment files differ from its signed release: ' . implode(', ', $files) . '.'
+				: 'The node reported on its poll that it cannot verify its own scripts.');
+		}
+	}
+
+	private static function worse_script_trust(string $a, string $b): string {
+		return (self::SCRIPT_TRUST_RANK[$a] ?? 0) >= (self::SCRIPT_TRUST_RANK[$b] ?? 0) ? $a : $b;
 	}
 
 	/**
@@ -573,60 +644,77 @@ class NodeMonitorHealth {
 	 * sent a job of the right type first. Only the caller decides whether it was
 	 * said at all; an absent answer never reaches here.
 	 *
-	 * The answer is about the MANIFEST only: the agent never hashes files for
-	 * its poll. So "ok" cannot clear a file that does not match its release —
-	 * that clears only when the job type that refused completes. Reading it as
-	 * clearing both flips the node between the two every poll, opening and
-	 * closing the same critical incident while the file stays modified.
+	 * The poll looks at the manifest and at the five deployment files
+	 * (ReleaseManifestSource::SELF_UPDATE_FILES), and at nothing else. An agent
+	 * that checks the files names the differing ones, or sends an empty list
+	 * when none differ; an older one sends no list, and its "ok" is about the
+	 * manifest alone. So the poll's word clears what it looked at and nothing
+	 * more: a refusal of any other script clears only when the job type that
+	 * refused completes, as the poll's files clear only on its own empty list.
+	 * Letting either clear the other flips the node every few minutes, opening
+	 * and closing the same critical incident while the file stays modified.
 	 *
 	 * Does not save. The claim handler saves the node once, after folding
 	 * everything the poll reported.
 	 */
-	public static function note_reported_script_trust($node, string $reported, ?array $files = null): void {
+	public static function note_reported_script_trust($node, string $reported, ?array $files = null, ?string $site_dir = null): void {
 		if (!$node || !$node->key) { return; }
 		if (!in_array($reported, ['ok', 'untrusted_manifest', 'untrusted_file'], true)) { return; }
 
 		$current = (string)$node->get('mgn_script_trust');
-		$clear = function () use ($node) {
-			$node->set('mgn_script_trust', 'ok');
-			$node->set('mgn_script_trust_since', null);
-			$node->set('mgn_script_trust_reason', '');
-			$node->set('mgn_script_trust_job_type', '');
-			$node->set('mgn_script_trust_files', '');
-		};
 
-		if ($reported === 'ok') {
-			if ($current === 'untrusted_manifest') {
-				$clear();
-			} elseif ($current === 'untrusted_file' && $files !== null && $files === []) {
-				// The node looked at its deployment files itself and every one
-				// matches its release: the file that refused has been put back.
-				// Only an agent that checks files says an empty list; an older
-				// agent says nothing and cannot clear this.
-				$clear();
+		if ($reported === 'untrusted_manifest') {
+			if ($current !== $reported) {
+				$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+				$node->set('mgn_script_trust', $reported);
+			}
+			// Its own report carries no wording. A reason already recorded from
+			// a refusal is the more useful of the two and is kept.
+			if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
+				$node->set('mgn_script_trust_reason', 'The node reported on its poll that it cannot verify its own scripts.');
 			}
 			return;
 		}
 
-		// The names, when the node gave them: they are what the incident lists
-		// and what the repair is offered for.
-		if ($reported === 'untrusted_file' && $files !== null) {
-			$node->set('mgn_script_trust_files', json_encode(array_values($files)));
+		if ($reported === 'ok') {
+			if ($current === 'untrusted_manifest') {
+				// The manifest is usable: whatever said otherwise, refusal or
+				// poll, no longer holds, and the files are looked at afresh.
+				$node->set('mgn_script_trust', 'ok');
+				$node->set('mgn_script_trust_reason', '');
+				$node->set('mgn_script_trust_job_type', '');
+				$node->set('mgn_script_trust_files', '');
+				self::settle_script_trust($node, $files ?? array(), $site_dir);
+				return;
+			}
+			// Only an agent that checks its deployment files says a list; an
+			// older agent says nothing and its "ok" is about the manifest alone.
+			if ($files !== array() || ($current !== 'untrusted_file' && $current !== 'unpublished_file')) { return; }
+			// Every deployment file matches. That answers for a refusal of one
+			// of them too; a refusal of any other script stands until its own
+			// job type completes, because the poll never looked at it.
+			if (in_array(self::refused_path((string)$node->get('mgn_script_trust_reason')), ReleaseManifestSource::SELF_UPDATE_FILES, true)) {
+				$node->set('mgn_script_trust_reason', '');
+				$node->set('mgn_script_trust_job_type', '');
+			}
+			self::settle_script_trust($node, array(), $site_dir);
+			return;
 		}
 
-		if ($current !== $reported) {
-			$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
-			$node->set('mgn_script_trust', $reported);
-			// Its own report carries no wording. A reason already recorded from
-			// a refusal is the more useful of the two and is kept; otherwise say
-			// plainly where this came from rather than leaving it blank.
-			if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
-				$node->set('mgn_script_trust_reason',
-					$reported === 'untrusted_file' && $files
-						? 'The node reported that these deployment files differ from its signed release: ' . implode(', ', $files) . '.'
-						: 'The node reported on its poll that it cannot verify its own scripts.');
+		// untrusted_file. The names, when the node gave them, are what the
+		// incident lists and what the repair is offered for; an untrusted_file
+		// with no names cannot be read for this site's own change.
+		if ($files === null || $files === array()) {
+			if ($current !== 'untrusted_manifest' && $current !== $reported) {
+				$node->set('mgn_script_trust_since', gmdate('Y-m-d H:i:s'));
+				$node->set('mgn_script_trust', $reported);
 			}
+			if (trim((string)$node->get('mgn_script_trust_reason')) === '') {
+				$node->set('mgn_script_trust_reason', 'The node reported that a deployment file differs from its signed release.');
+			}
+			return;
 		}
+		self::settle_script_trust($node, $files, $site_dir);
 	}
 
 	/** The deployment files a node reported as differing from its release, or []. */
@@ -671,10 +759,11 @@ class NodeMonitorHealth {
 
 		if ($state === 'unpublished_file') {
 			return self::result('unpublished', 'A script was changed here after the last publish' . $for,
-				'This site signs its own tree when it publishes, and the refused file was changed in its '
+				'This site signs its own tree when it publishes, and the differing file was changed in its '
 				. 'own checkout: it is exactly its last commit, or the web server cannot write it or any '
 				. 'folder above it, so an account on this machine changed it, not the site. The agent will '
 				. 'not run it as root until the next publish re-signs the tree.'
+				. (self::script_trust_files($node) ? ' Differing deployment files: ' . implode(', ', self::script_trust_files($node)) . '.' : '')
 				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
 				. ($reason !== '' ? ' The node said: ' . $reason : ''), false);
 		}

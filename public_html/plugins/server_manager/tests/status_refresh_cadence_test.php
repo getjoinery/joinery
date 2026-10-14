@@ -20,6 +20,7 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.5 - the scheduled pass leaves a test's fixture nodes alone (RunNodeUptimeChecks::watched_nodes())
  * @version 1.4 - a machine asked to reboot is asked for its host report every REBOOT_REFRESH_SECONDS until it is seen back
  * @version 1.3 - a host report saying a data root run is under way is asked again after
  *                DATA_ROOT_RUN_REFRESH_SECONDS, not the hour (B62)
@@ -191,5 +192,12 @@ $rr['came_back_at'] = gmdate('Y-m-d H:i:s');
 $rj->set('mjb_result', json_encode($rr));
 $rj->save();
 check(!JobResultProcessor::reboot_awaited($rebooting), 'once it is seen back, nothing is awaited and the hour applies again');
+
+// The scheduled pass never sees a suite's own nodes: it queued check_status
+// and host_report for them mid-run, and those jobs outlived the nodes.
+$watched = array_map(function ($n) { return (int)$n->key; }, RunNodeUptimeChecks::watched_nodes());
+check(!in_array((int)$rebooting->key, $watched, true)
+	&& count(array_filter(RunNodeUptimeChecks::watched_nodes(), function ($n) { return ManagedNode::is_fixture_name((string)$n->get('mgn_name')); })) === 0,
+	'the scheduled pass leaves every test fixture node alone');
 
 harness_finish();

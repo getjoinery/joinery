@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.61 - the settings form saves mgn_alerts (whether this node's incidents notify anyone)
  * @version 1.60 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0)
  * @version 1.59 - retry_install is refused only when this plane no longer holds the install password, for any
  *                shape: a failed install keeps it (B37: a bare-metal install that never reached its server was
@@ -1324,7 +1325,7 @@ class NodeDetailActions {
 			'mgn_site_url', 'mgn_notes', 'mgn_enabled',
 			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
-			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds', 'mgn_cloud_account',
+			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds', 'mgn_cloud_account', 'mgn_alerts',
 		];
 		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled'];
@@ -1343,6 +1344,9 @@ class NodeDetailActions {
 				}
 				if ($field === 'mgn_cloud_account') {
 					$value = CloudAccounts::normalize_hosted_at($value);
+				}
+				if ($field === 'mgn_alerts' && !isset(ManagedNode::ALERTS[$value])) {
+					$value = '';
 				}
 				$node->set($field, $value);
 			}

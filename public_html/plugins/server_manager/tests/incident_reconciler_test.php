@@ -37,9 +37,13 @@
  *   - a full pass leaves a test's fixture nodes alone, and a harness process
  *     rings no bell unless its suite stands in; every node a test names
  *     carries the fixture prefix.
+ *   - a node whose alerts are off opens its incidents and tells nobody: a box
+ *     in our test cloud account by default, any node turned off; a test box
+ *     turned on is told about.
  *
  * Run: php plugins/server_manager/tests/incident_reconciler_test.php
  *
+ * @version 1.7 - a node whose alerts are off tells nobody (ManagedNode::sends_alerts()); this suite's node has them on
  * @version 1.6 - the incident signal is addressed by its declared audience, not a recipient list
  * @version 1.5 - a full pass leaves fixture nodes alone, removed nodes kept in it; fixture node names carry the
  *                prefix, and outside a test process no node takes it
@@ -61,6 +65,7 @@ $node->set('mgn_slug', 'harnesstest-rec-' . bin2hex(random_bytes(3)));
 $node->set('mgn_host', '192.0.2.43');
 $node->set('mgn_ssh_user', 'root');
 $node->set('mgn_site_url', 'https://reconciler.example');
+$node->set('mgn_alerts', 'on');
 $node->set('mgn_enabled', true);
 $node->set('mgn_uptime_enabled', true);
 $node->set('mgn_uptime_last_status', 'up');
@@ -321,6 +326,33 @@ check($c['cleared'] === 0 && count($w) === 1 && $w[0]->is_open(), 'A source that
 ReconcilerTestWarning::$throws = false;
 ReconcilerTestWarning::$holds = false;
 $pass(array($warn->name() => $warn));
+
+// ---------------------------------------------------------------------------
+section('A node whose alerts are off opens its incidents and tells nobody');
+
+// A box in our test cloud account is made and thrown away by the dozen; left
+// automatic it is quiet. Any node can be turned off, and a test box on.
+$alerts = function (string $hosted, string $choice) use ($set, $warn, $incidents, &$signals, $pass): array {
+	$set(array('mgn_cloud_account' => $hosted, 'mgn_alerts' => $choice));
+	ReconcilerTestWarning::$holds = true;
+	$signals = array();
+	$pass(array($warn->name() => $warn));
+	$open = count(array_filter($incidents('plane:harness_warning'), function ($r) { return $r->is_open(); }));
+	$told = count($signals);
+	ReconcilerTestWarning::$holds = false;
+	$pass(array($warn->name() => $warn));
+	// Past the reopen window, so the next case opens afresh rather than reopening.
+	foreach ($incidents('plane:harness_warning') as $r) {
+		$r->set('inc_closed_time', gmdate('Y-m-d H:i:s', time() - IncidentReconciler::REOPEN_WINDOW - 60));
+		$r->save();
+	}
+	return array($open, $told);
+};
+check($alerts(CloudAccounts::TEST, '') === array(1, 0), 'A test cloud box left automatic: the incident opens, nobody is told');
+check($alerts(CloudAccounts::TEST, 'on') === array(1, 1), 'A test cloud box with its alerts on is told about');
+check($alerts(CloudAccounts::MAIN, '') === array(1, 1), 'Any other node left automatic is told about');
+check($alerts(CloudAccounts::MAIN, 'off') === array(1, 0), 'And any node with its alerts off is not');
+$set(array('mgn_cloud_account' => CloudAccounts::MAIN, 'mgn_alerts' => 'on'));
 
 // ---------------------------------------------------------------------------
 section('One pass at a time');

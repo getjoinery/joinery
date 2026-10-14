@@ -386,6 +386,13 @@ who is the sole member of a protected mailbox cannot be deleted while that
 mailbox stands — the alias goes first and cascades its grants and feeds. A
 fixture reachable from a registered parent needs no name.
 
+A `HarnessTest` node is also invisible to the scheduled passes that run on the
+same database while a suite does: the incident pass
+(`IncidentReconciler::full_pass_nodes()`) and the uptime and status-refresh
+pass (`RunNodeUptimeChecks::watched_nodes()`) leave it alone, so no superadmin
+is told about a suite's node and no job is queued for one that the suite then
+deletes. A suite that wants either pass over its nodes calls it with them.
+
 ### Mail a run sends is cleaned up too
 
 `harness_boot()` points sending at the local relay and redirects every recipient

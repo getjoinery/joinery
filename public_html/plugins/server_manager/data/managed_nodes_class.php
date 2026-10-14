@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.55 - mgn_alerts / sends_alerts(): whether this node's incidents notify anyone; a box in our test
+ *                cloud account does not unless someone turns its alerts on
  * @version 1.54 - probe_joinery_version(): the release the node's site says it runs, read now
  * @version 1.53 - mgn_uptime_locked_since: an encrypted data root answering locked
  * @version 1.52 - soft_delete() retires an emptied Docker host record; undelete() places a container site back on one
@@ -274,6 +276,9 @@ class ManagedNode extends SystemBase {
 		// Where the machine is hosted (CloudAccounts::HOSTED_AT): main or test (ours), customer or external.
 		// A node on a host takes the host's.
 		'mgn_cloud_account'       => array('type'=>'varchar(16)'),
+		// Whether this node's incidents notify anyone (sends_alerts()): 'on', 'off', or empty for
+		// by where it is hosted, which is off for a box in our test cloud account.
+		'mgn_alerts'              => array('type'=>'varchar(8)'),
 		// When the host verified this site's container gone (Permanently Delete Site).
 		'mgn_site_removed_time'   => array('type'=>'timestamp(6)'),
 		// Whether the node detail Console tab may run an ad-hoc command here.
@@ -508,6 +513,28 @@ class ManagedNode extends SystemBase {
 	 */
 	public function is_operational(): bool {
 		return self::is_operational_from($this);
+	}
+
+	/** The Alerts choices: empty follows where the node is hosted. */
+	const ALERTS = array(
+		''    => 'Automatic: off for a box in our test cloud account, on for everything else',
+		'on'  => 'On: tell the superadmins when an incident opens here',
+		'off' => 'Off: incidents still open, and nobody is told',
+	);
+
+	/**
+	 * Does an incident on this node notify anyone? The incident opens either
+	 * way and waits in the inbox; this decides only whether the superadmins
+	 * are told. A box in our test cloud account is made and thrown away by the
+	 * dozen, and nearly all of them start with a condition nobody will fix
+	 * (no recovery key), so it is quiet unless someone turns its alerts on.
+	 */
+	public function sends_alerts(): bool {
+		$choice = (string)$this->get('mgn_alerts');
+		if ($choice === 'on' || $choice === 'off') {
+			return $choice === 'on';
+		}
+		return CloudAccounts::hosted_at($this) !== CloudAccounts::TEST;
 	}
 
 	/** What every node a test makes is named with; the harness reclaims a killed run's by it too. */

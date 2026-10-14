@@ -42,8 +42,12 @@
  * Notification: one signal per open, per reopen and per unproven fix sent back, never per tick:
  * incident.opened for a warning, incident.opened_critical for a critical one,
  * each addressed to every superadmin. Notify gives each the bell, and email
- * by the signal's default (critical: on) or their own preference.
+ * by the signal's default (critical: on) or their own preference. A node
+ * whose alerts are off (ManagedNode::sends_alerts()) sends neither: its
+ * incidents open and wait in the inbox.
  *
+ * @version 1.9 - a node whose alerts are off (ManagedNode::sends_alerts(): a test cloud box unless turned on)
+ *                opens its incidents and tells nobody
  * @version 1.8 - the signals declare their audience (superadmins); the payload names no recipients
  * @version 1.7 - a full pass leaves test fixture nodes alone (ManagedNode::is_fixture_name()): their
  *                incidents rang every superadmin's bell, and a suite's own incidents were cleared under it.
@@ -419,9 +423,12 @@ class IncidentReconciler {
 	/**
 	 * Tell every superadmin: the bell, and email by the signal's default or their
 	 * choice. Both signals declare `audience: superadmins`, so Notify reads who
-	 * that is. $summary says what happened.
+	 * that is. $summary says what happened. Nobody, on a node whose alerts are off.
 	 */
 	private static function notify(IncidentRecord $inc, ManagedNode $node, string $summary): void {
+		if (!$node->sends_alerts()) {
+			return;
+		}
 		$payload = array(
 			'incident_id' => (int)$inc->key,
 			'node_id'     => (int)$node->key,
