@@ -24,11 +24,12 @@
  *  - one save with the box unticked writes a muted row, and Notify honours it;
  *    a choice equal to the default writes no row, so an admin promoted into an
  *    audience later still gets its alerts;
- *  - a superadmin with no row is reached through the declared audience.
+ *  - a superadmin with no row is reached through the declared audience;
+ *  - push follows the alert: on wherever the alert is on, until unticked.
  *
  * Run: php tests/run.php test-db --filter=notification_preferences
  *
- * @version 1.0
+ * @version 1.1 - each state carries push
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -101,24 +102,24 @@ try {
 	$s = Notify::preference_states((int)$super->key, $signals);
 	$a = Notify::preference_states((int)$admin->key, $signals);
 
-	check($s[$emailing] === array('subscribed' => true, 'email' => true),
+	check($s[$emailing] === array('subscribed' => true, 'email' => true, 'push' => true),
 		'a superadmin is shown on, with email, for ' . $emailing, json_encode($s[$emailing]));
 	if ($quiet !== null) {
-		check($s[$quiet] === array('subscribed' => true, 'email' => false),
+		check($s[$quiet] === array('subscribed' => true, 'email' => false, 'push' => true),
 			'and on, without email, for ' . $quiet . ' (no default_email)', json_encode($s[$quiet]));
 	} else {
 		harness_skip('an audience signal without default_email', 'none declared here');
 	}
-	check($a[$emailing] === array('subscribed' => false, 'email' => false),
+	check($a[$emailing] === array('subscribed' => false, 'email' => false, 'push' => false),
 		'a permission-5 admin is outside the audience and shown off', json_encode($a[$emailing]));
 	if ($opt_in !== null) {
-		check($s[$opt_in] === array('subscribed' => false, 'email' => false),
+		check($s[$opt_in] === array('subscribed' => false, 'email' => false, 'push' => false),
 			'a pure opt-in signal (' . $opt_in . ') is off', json_encode($s[$opt_in]));
 	} else {
 		harness_skip('a pure opt-in signal', 'none declared here');
 	}
 	if ($about !== null) {
-		$expect = array('subscribed' => true, 'email' => !empty($signals[$about]['notify']['default_email']));
+		$expect = array('subscribed' => true, 'email' => !empty($signals[$about]['notify']['default_email']), 'push' => true);
 		check($a[$about] === $expect,
 			'a signal sent only to the people it is about (' . $about . ') is on, email per default_email', json_encode($a[$about]));
 	} else {
@@ -149,7 +150,8 @@ try {
 	$s2 = Notify::preference_states((int)$super2->key, $signals);
 	$ticked = array_keys(array_filter($s2, function ($st) { return $st['subscribed']; }));
 	$emails = array_keys(array_filter($s2, function ($st) { return $st['email']; }));
-	Notify::save_preferences((int)$super2->key, $signals, $ticked, $emails);
+	$pushes = array_keys(array_filter($s2, function ($st) { return $st['push']; }));
+	Notify::save_preferences((int)$super2->key, $signals, $ticked, $emails, $pushes);
 	$rows = (int)$db->query('SELECT count(*) FROM ntp_notification_preferences WHERE ntp_usr_user_id = ' . (int)$super2->key)->fetchColumn();
 	check($rows === 0, 'saving the page unchanged writes no rows', $rows . ' rows');
 

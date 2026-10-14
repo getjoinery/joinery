@@ -6,7 +6,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  *
  * Lists the targeted signals — the ones delivered to a member because an
  * action of theirs produced them (supports_topic false) — and lets the member
- * mute each or opt into an email copy. Topic-subscription signals (operator
+ * mute each, opt into an email copy, or keep it off push. Topic-subscription signals (operator
  * alerts like new sales and signups) stay on the admin page
  * (/admin/admin_notification_preferences).
  *
@@ -14,7 +14,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * default_email); Notify::preference_states() and Notify::save_preferences()
  * hold that rule for this page and the admin page alike.
  *
- * @version 1.1
+ * @version 1.2 - a push choice per signal
  */
 function notification_preferences_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -30,7 +30,8 @@ function notification_preferences_logic(array $input): LogicResult {
 	if (($input['action'] ?? '') === 'save') {
 		$subscribed = (isset($input['subscribe']) && is_array($input['subscribe'])) ? $input['subscribe'] : array();
 		$emails     = (isset($input['notify_email']) && is_array($input['notify_email'])) ? $input['notify_email'] : array();
-		Notify::save_preferences($user_id, $signals, $subscribed, $emails);
+		$pushes     = (isset($input['notify_push']) && is_array($input['notify_push'])) ? $input['notify_push'] : array();
+		Notify::save_preferences($user_id, $signals, $subscribed, $emails, $pushes);
 		$session->save_message(new DisplayMessage(
 			'Your notification preferences have been saved.',
 			'Preferences saved',

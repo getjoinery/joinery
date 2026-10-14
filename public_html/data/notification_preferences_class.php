@@ -4,9 +4,12 @@
  *
  * Per-user, per-signal preferences for notification delivery. One row per
  * (user, signal) the user has explicitly configured — absence of a row means
- * defaults apply. Two meaningful booleans: subscribe/mute and also-email-me.
+ * defaults apply. Three meaningful booleans: subscribe/mute, also-email-me, and
+ * push (on by default: a member with no browser or phone registered gets no
+ * push either way).
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - ntp_push_enabled
  * @changelog 1.2 - ntp_create_time is stamped when the row is made; it was left empty
  */
 
@@ -49,6 +52,7 @@ class NotificationPreference extends SystemBase {
 		'ntp_signal_name'   => array('type' => 'varchar(100)', 'required' => true),
 		'ntp_subscribed'    => array('type' => 'bool', 'default' => true),
 		'ntp_email_enabled' => array('type' => 'bool', 'default' => false),
+		'ntp_push_enabled'  => array('type' => 'bool', 'default' => true),
 		'ntp_create_time'   => array('type' => 'timestamp(6)', 'default' => 'now()'),
 		'ntp_delete_time'   => array('type' => 'timestamp(6)'),
 	);

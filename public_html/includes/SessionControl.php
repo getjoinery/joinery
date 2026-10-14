@@ -110,6 +110,12 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.11 - a real password change signs out the account's other sessions and forgets its other
+ *                 remembered devices (end_other_sessions(), usr_session_generation)
+ * @version 1.10 - a signed-in session whose account is deleted or disabled is signed out at its next
+ *                 identity question (validate_account_standing()); save_visitor_event() no longer warns
+ *                 when the session was signed out earlier in the request
+ * @version 1.9 - signing out retires this browser's push notifications (PushSender::retire_device)
  * @version 1.8 - an owed password change or terms acceptance holds the person on its own page:
  *                no later gate runs there. Every signed-in page runs the gates, and the
  *                terms gate sent a fresh install's admin off /change-password-required while
@@ -501,9 +507,8 @@ class SessionControl{
 	
 	//TYPES:  1= WEB HIT, 3..8 = conversion/diagnostic events — see VisitorEvent::TYPE_* constants
 	public function save_visitor_event($type=1, $is_404=FALSE, $ref_type=NULL, $ref_id=NULL, $meta=NULL){
-		if(!$_SESSION['uniqid']){
-			$_SESSION['uniqid'] = uniqid();
-		}
+		// A session signed out earlier in this request has no uniqid left.
+		$this->get_uniqid();
 		
 		//IF A CRAWLER EXIT
 		if($this->crawlerDetect($_SERVER['HTTP_USER_AGENT'] ?? '')){
@@ -840,6 +845,16 @@ class SessionControl{
 				VaultUnlock::close($this->get_user_id(), 'user', VaultAudit::REASON_LOGOUT);
 			} catch (\Throwable $e) {
 				error_log('logout: vault window close failed: ' . $e->getMessage());
+			}
+		}
+
+		// Signing out on a browser stops its push notifications: the next person
+		// at it must not get this member's alerts.
+		if ($this->get_user_id() && PushSender::device_token() !== null) {
+			try {
+				PushSender::retire_device((int)$this->get_user_id(), PushSender::device_token());
+			} catch (\Throwable $e) {
+				error_log('logout: push destination retire failed: ' . $e->getMessage());
 			}
 		}
 
@@ -1185,8 +1200,94 @@ class SessionControl{
 		}
 	}
 
-	function get_user_id($initial_user=FALSE) {
+	/**
+	 * A signed-in browser session lives only while its account may act: one
+	 * deleted, gone, or disabled (User::actions_allowed()), or one signed in
+	 * before the account's last password change (end_other_sessions()), is
+	 * signed out at its next identity question, as a bridged session is when
+	 * its key dies. Once
+	 * per request; logout()'s own identity calls pass through on the flag. An
+	 * API request is ApiAuth's to check, the CLI has no web session, and a
+	 * database error is no answer, so it signs nobody out.
+	 */
+	private function validate_account_standing() {
+		$this->_account_checked = true;
+		if (php_sapi_name() === 'cli' || $this->is_api_context() || session_status() !== PHP_SESSION_ACTIVE
+				|| empty($_SESSION['loggedin']) || empty($_SESSION['usr_user_id'])) {
+			return;
+		}
+		try {
+			$user = new User((int)$_SESSION['usr_user_id'], TRUE);
+		} catch (\Throwable $e) {
+			error_log('SessionControl: account standing not checked: ' . $e->getMessage());
+			return;
+		}
+		if (!$user->key || $user->get('usr_delete_time') || !$user->actions_allowed()
+				|| (int)($_SESSION['session_generation'] ?? 0) !== (int)$user->get('usr_session_generation')) {
+			$this->logout();
+		}
+	}
+
+	/**
+	 * A real password change ends every other way back into the account: each
+	 * other browser session at its next request (the account's session
+	 * generation moves on past theirs, validate_account_standing()), and every
+	 * remembered device but this one. A website session making the change for
+	 * its own account keeps going; through the API, the change ends every
+	 * session, the caller's included, as it ends every API session key. Called
+	 * by User::save(); a silent rehash at sign-in is not a change.
+	 */
+	public function end_other_sessions(User $user): void {
+		if (!$user->key) {
+			return;
+		}
+		$here = !$this->is_api_context() && session_status() === PHP_SESSION_ACTIVE
+			&& !empty($_SESSION['loggedin']) && (int)($_SESSION['usr_user_id'] ?? 0) === (int)$user->key;
+		$keep_hash = ($here && preg_match('/^[0-9a-f]{64}$/', (string)($_COOKIE['tt'] ?? '')))
+			? hash('sha256', (string)$_COOKIE['tt']) : null;
+		$tokens = $user->get('usr_remember_tokens');
+		if (is_string($tokens)) {
+			$tokens = json_decode($tokens, true);
+		}
+		$kept = array();
+		foreach (is_array($tokens) ? $tokens : array() as $token) {
+			if ($keep_hash !== null && hash_equals($keep_hash, (string)($token['hash'] ?? ''))) {
+				$kept[] = $token;
+			}
+		}
+		$kept_json = $kept ? json_encode($kept) : null;
+		try {
+			$q = DbConnector::get_instance()->get_db_link()->prepare(
+				'UPDATE usr_users SET usr_session_generation = COALESCE(usr_session_generation, 0) + 1,
+				        usr_remember_tokens = :tokens
+				  WHERE usr_user_id = :id RETURNING usr_session_generation');
+			$q->execute(array(':tokens' => $kept_json, ':id' => (int)$user->key));
+			$generation = (int)$q->fetchColumn();
+		} catch (\Throwable $e) {
+			error_log('end_other_sessions: user ' . $user->key . ': ' . $e->getMessage());
+			return;
+		}
+		// The object the caller holds says the same, so a later save of it
+		// cannot put the forgotten devices back.
+		$user->set('usr_remember_tokens', $kept_json);
+		$user->set('usr_session_generation', $generation);
+		if ($here) {
+			$_SESSION['session_generation'] = $generation;
+		}
+	}
+
+	private $_account_checked = false;
+
+	/** Every check a session must pass before it answers who is signed in. */
+	private function ensure_session_valid() {
 		$this->ensure_app_context_valid();
+		if (!$this->_account_checked) {
+			$this->validate_account_standing();
+		}
+	}
+
+	function get_user_id($initial_user=FALSE) {
+		$this->ensure_session_valid();
 
 		if ($initial_user && $this->get_initial_user_id() !== NULL) {
 			return $this->get_initial_user_id();
@@ -1259,7 +1360,7 @@ class SessionControl{
 
 
 	function is_logged_in(){
-		$this->ensure_app_context_valid();
+		$this->ensure_session_valid();
 		if(isset($_SESSION['loggedin'])){
 			return true;
 		}
@@ -1569,7 +1670,7 @@ class SessionControl{
 	}
 
 	function check_permission($level, $msgtext=NULL){
-		$this->ensure_app_context_valid();
+		$this->ensure_session_valid();
 
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN
 		$ipchange = FALSE;
@@ -1871,6 +1972,7 @@ class SessionControl{
 
 		$_SESSION['loggedin'] = TRUE;
 		$_SESSION['usr_user_id'] = $user->key;
+		$_SESSION['session_generation'] = (int)$user->get('usr_session_generation');
 		$_SESSION['ip_address'] = $this->_get_client_ip();
 		$_SESSION['timezone'] = $user->get('usr_timezone');
 		$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));

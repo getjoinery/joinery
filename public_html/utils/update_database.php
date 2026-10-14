@@ -770,6 +770,17 @@
 			echo "⚠️  File signing key provisioning failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 		}
 
+		// Step: the browser-push key pair, for the same reason and in the same
+		// place. A pair that exists but cannot be opened here is left for the
+		// sealed-secret reconcile below, which re-mints it.
+		try {
+			echo WebPushDriver::provisionKeys()
+				? "✓ Browser push key pair present<br>\n"
+				: "⚠️  Browser push key pair not usable yet (the sealed-secret reconcile re-mints it)<br>\n";
+		} catch (Throwable $e) {
+			echo "⚠️  Browser push key pair provisioning failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Seed the sealed-secret registry from every on-disk manifest, and
 		// mint the key canary. Both are cold writes and both want secret_box_key
 		// present (ensured above) and the ssr table created (schema step above).

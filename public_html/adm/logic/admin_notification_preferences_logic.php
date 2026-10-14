@@ -9,7 +9,7 @@
  *
  * See docs/signals.md and docs/notifications.md.
  *
- * @version 1.3
+ * @version 1.4 - a push choice per signal
  */
 
 function admin_notification_preferences_logic(array $input): LogicResult {
@@ -35,7 +35,9 @@ function admin_notification_preferences_logic(array $input): LogicResult {
 			? $input['subscribe'] : array();
 		$emails = (isset($input['notify_email']) && is_array($input['notify_email']))
 			? $input['notify_email'] : array();
-		Notify::save_preferences($user_id, $signals, $subscribed, $emails);
+		$pushes = (isset($input['notify_push']) && is_array($input['notify_push']))
+			? $input['notify_push'] : array();
+		Notify::save_preferences($user_id, $signals, $subscribed, $emails, $pushes);
 		return LogicResult::redirect('/admin/admin_notification_preferences');
 	}
 
