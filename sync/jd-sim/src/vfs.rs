@@ -381,11 +381,11 @@ pub struct MemFs {
     /// either side (`MemFs::while_renaming`).
     #[allow(clippy::type_complexity)]
     renaming: Arc<Mutex<Option<Box<dyn FnMut(&Path, &Path) + Send>>>>,
-    /// The disk changes under the executor between two of its reads of one
-    /// path: the stored key, whether the first read has happened, and what
-    /// the disk does before the second (`MemFs::between_reads`).
+    /// The disk changes under the engine between two of its reads of one
+    /// path: the stored key, how many reads still pass first, and what the
+    /// disk does before the next (`MemFs::between_reads`, `MemFs::after_reads`).
     #[allow(clippy::type_complexity)]
-    between_reads: Arc<Mutex<Option<(String, bool, Box<dyn FnOnce(&MemFs) + Send>)>>>,
+    between_reads: Arc<Mutex<Option<(String, u32, Box<dyn FnOnce(&MemFs) + Send>)>>>,
 }
 
 impl std::fmt::Debug for MemFs {
@@ -471,20 +471,27 @@ impl MemFs {
     /// swap there lands after the executor's first look and before anything
     /// it reads again by the path.
     pub fn between_reads(&self, path: &str, f: impl FnOnce(&MemFs) + Send + 'static) {
-        *self.between_reads.lock().unwrap() = Some((self.store_path(path), false, Box::new(f)));
+        self.after_reads(path, 1, f);
     }
 
-    /// The hook above, at an access to `key`: the first access arms it, the
-    /// second runs it before it is served.
+    /// The same once `reads` accesses to `path` have been served: `f` runs at
+    /// the start of the one after them. For a change that lands after a
+    /// pass's scan has read a file and before its executor does.
+    pub fn after_reads(&self, path: &str, reads: u32, f: impl FnOnce(&MemFs) + Send + 'static) {
+        *self.between_reads.lock().unwrap() = Some((self.store_path(path), reads, Box::new(f)));
+    }
+
+    /// The hooks above, at an access to `key`: each access counts one off,
+    /// and the access after the last runs it before it is served.
     fn run_between_reads(&self, key: &str) {
         let due = {
             let mut slot = self.between_reads.lock().unwrap();
             match slot.as_mut() {
-                Some((k, seen, _)) if k == key => {
-                    if *seen {
+                Some((k, left, _)) if k == key => {
+                    if *left == 0 {
                         slot.take().map(|(_, _, f)| f)
                     } else {
-                        *seen = true;
+                        *left -= 1;
                         None
                     }
                 }

@@ -22894,3 +22894,55 @@ fn an_upload_that_did_not_arrive_whole_is_sent_again() {
     assert!(tree.contains_key("b.txt") && !tree.keys().any(|k| k.contains("conflicted copy")), "{tree:?}");
     assert_converged(&world);
 }
+
+/// A new file goes up into a folder where another device's file has just
+/// taken its name, and lands beside it under a conflict name. The user moved
+/// it into a subfolder after the upload was planned: found there by its
+/// identity and sent from there, it was then renamed on the disk to the
+/// server's conflict name in the folder the user had taken it out of (rig
+/// runs 2341, 2342). The disk follows the server's name only where the file
+/// still stands at the name refused. Moved, it stays where the user put it,
+/// and the next pass sends the move.
+#[test]
+fn a_new_file_moved_while_its_upload_lands_beside_stays_where_the_user_put_it() {
+    let world = World::new(9_857, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Projects");
+    assert!(world.settle().is_some());
+    let projects = world.server.folders().into_iter().find(|f| f.name == "Projects").expect("the folder is on the server").id;
+    const MINE: &[u8] = b"this device's doc-1, written here";
+    const THEIRS: &[u8] = b"the other device's doc-1, first on the server";
+    laptop.fs.user_write("Projects/doc-1.txt", MINE);
+    // After the scan has read the file and before the upload does: the other
+    // device's file reaches the server under the same name, and the user
+    // moves this one into a new subfolder.
+    let server = world.server.clone();
+    laptop.fs.after_reads("Projects/doc-1.txt", 2, move |fs| {
+        server.seed_file(Some(projects), "doc-1.txt", THEIRS);
+        fs.user_mkdir("Projects/Sub 2");
+        fs.user_rename("Projects/doc-1.txt", "Projects/Sub 2/doc-1.txt");
+    });
+    let out = world.pass(laptop);
+    assert!(
+        out.round.plan.ops.iter().any(|o| matches!(&o.action, jd_core::reconcile::Action::UploadAsNew { placement } if placement.name == "doc-1.txt")),
+        "construction: the pass planned the upload at the name: {:?}",
+        out.round.plan
+    );
+    assert!(laptop.fs.peek("Projects/doc-1.txt").is_none(), "construction: the user's move landed before the upload read the file");
+    let mine = jd_sim::sha256_hex(MINE);
+    let up: Vec<String> = world.server.tree().into_iter().filter(|(_, h)| h.as_deref() == Some(mine.as_str())).map(|(p, _)| p).collect();
+    assert!(up.iter().any(|p| p.starts_with("Projects/doc-1 (")), "construction: it went up beside the other file: {up:?}");
+    assert_eq!(
+        laptop.fs.peek("Projects/Sub 2/doc-1.txt").as_deref(),
+        Some(MINE),
+        "the user's file was taken out of the folder the user put it in"
+    );
+    assert!(world.settle().is_some(), "never settled");
+    let at: Vec<String> = world.server.tree().into_iter().filter(|(_, h)| h.as_deref() == Some(mine.as_str())).map(|(p, _)| p).collect();
+    assert_eq!(at, vec!["Projects/Sub 2/doc-1.txt".to_string()], "the file is not where the user put it on the server");
+    for name in ["laptop", "desktop"] {
+        assert_eq!(world.device(name).fs.peek("Projects/Sub 2/doc-1.txt").as_deref(), Some(MINE), "{name}");
+        assert_eq!(world.device(name).fs.peek("Projects/doc-1.txt").as_deref(), Some(THEIRS), "{name}");
+    }
+    assert_converged(&world);
+}
