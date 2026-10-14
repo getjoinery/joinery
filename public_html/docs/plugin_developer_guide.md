@@ -551,7 +551,7 @@ A plugin whose feature a program outside the browser uses — a mail app, a cale
 - `borrowsUnlock` lets the credential read sealed content through a window borrowed from the person's website unlock. Leave it off unless the feature reads sealed content.
 - `requiresSetting` (optional) names the plugin's on/off setting for the feature. While it is off, credentials of the purpose are refused and none can be made.
 
-The plugin's actions for that purpose declare `'app_purpose' => 'mail'` at the top of their descriptor. They then admit that purpose's credentials and nothing else, and those credentials reach nothing else. Making one goes through core's `app_password_create` action (step-up), from the plugin's own page. Deactivating the plugin refuses every credential of the purpose at once. Never decide anything on the credential's kind (`apk_type`): rules attach to the purpose and the credential's id, so a second kind (browser sign-in) can arrive without touching plugin code. See [API § App credentials](api.md#app-credentials). The `mail_apps` plugin is the reference implementation.
+The plugin's actions for that purpose declare `'app_purpose' => 'mail'` at the top of their descriptor. They then admit that purpose's credentials and nothing else, and those credentials reach nothing else. Making one goes through core's `app_password_create` action (step-up), from the plugin's own page. Deactivating the plugin refuses every credential of the purpose at once; uninstalling it deletes them. Never decide anything on the credential's kind (`apk_type`): rules attach to the purpose and the credential's id, so a second kind (browser sign-in) can arrive without touching plugin code. See [API § App credentials](api.md#app-credentials). The `mail_apps` plugin is the reference implementation.
 
 ### Data Models
 
@@ -1215,6 +1215,7 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 
 **Uninstall** (`PluginManager::uninstall($name, $requested_by = null)`) — **destructive, cannot be undone.** Refused for an active plugin, for one other installed plugins depend on, and for one marked `is_system` (on its row or in its manifest).
 
+0. Deletes every app credential of the purposes its `appAccess` declares, live and revoked alike, so reinstalling the plugin brings none of them back. A purpose an active plugin declares is left alone.
 1. Deletes declared settings (from current `plugin.json`). Settings dropped from a later manifest version are left as orphans.
 2. Deletes declared admin menus
 3. Removes deletion rules
@@ -1227,7 +1228,7 @@ Sync is the recommended way to apply schema changes after code deploys. It is al
 
 Root does not trust the request (the queue is web-writable). Before deleting, `PluginRemoval::refusal()` checks that the name is a plugin name, that `plugins/<name>` is a real directory directly under `plugins/`, that the manifest does not say `is_system`, and that the row reads `uninstalled` and not active; any check failing leaves the directory and records why in the request's transcript. `PluginRemoval::remove()` never follows a symlink inside the plugin.
 
-**Hook failure is fatal.** If step 6 throws or returns false, steps 7 to 9 do NOT run — tables and the row remain intact. Steps 1–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
+**Hook failure is fatal.** If step 6 throws or returns false, steps 7 to 9 do NOT run — tables and the row remain intact. Steps 0–5 are idempotent, so the operator fixes the hook and re-runs uninstall. Use this to guard external work: if you can't revoke an API key, don't let the plugin's local state be destroyed.
 
 **After uninstall,** the Plugins page shows the row as **Uninstalled {date}**: "data removed; files being removed by the host" with the request's state while the directory exists, then "data and files removed" with one action, **Install** — the same `install_plugin` root request that fetches from the upgrade source, verifies and installs. For a plugin the source no longer publishes, Install is absent and the row says so. Install clears the stamp and the request record. Every list that means "installed plugins" leaves an `uninstalled` row out: `sync()` refreshes its metadata while the directory exists and never changes its status or adds a second row; the stale marker skips it; `getDependents()` ignores it; the management API's version list and the marketplace's local names omit it; activation refuses it.
 
@@ -1333,7 +1334,7 @@ SettingsWriter::reportTo($write, '~/plugins/myplugin/admin/~');
 
 ### Uninstall Script
 
-`uninstall.php` is **optional**. Most plugins don't need one — the system automatically drops tables, deletes declared settings and menus, removes scheduled task / version / dependency / migration records, and deletes the `plg_plugins` row.
+`uninstall.php` is **optional**. Most plugins don't need one — the system automatically drops tables, deletes declared settings and menus and the app credentials of its declared purposes, removes scheduled task / version / dependency / migration records, and deletes the `plg_plugins` row.
 
 Create `uninstall.php` only when you need external cleanup the system can't do:
 - Revoking an API key or token with a third-party service

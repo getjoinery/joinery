@@ -918,6 +918,13 @@ function harness_cleanup_stale_fixtures() {
 				foreach (new MultiApiKey(array('user_id' => (int)$row['usr_user_id'])) as $fixture_key) {
 					$fixture_key->permanent_delete();
 				}
+				// Nor while it owns a registered domain (the rule prevents it),
+				// and a killed managed-domain suite leaves its fixture domains.
+				if (class_exists('MultiRegisteredDomain')) {
+					foreach (new MultiRegisteredDomain(array('user_id' => (int)$row['usr_user_id'])) as $fixture_domain) {
+						$fixture_domain->permanent_delete();
+					}
+				}
 				$u = new User((int)$row['usr_user_id'], TRUE);
 				if ($u->key) { $u->permanent_delete(); }
 				harness_boot_note("  reclaimed stale fixture user " . $row['usr_email'] . " (a killed run's leftover)\n");

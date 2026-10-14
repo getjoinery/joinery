@@ -21,12 +21,16 @@
  *   - activating an uninstalled plugin is refused
  *   - install after uninstall clears the stamp and the request record
  *   - the installed-plugin lists leave the row out
+ *   - the app credentials of the purposes it declares (appAccess) are deleted,
+ *     live and revoked alike; another purpose's, and a purpose an active
+ *     plugin still declares, are kept
  *
  * Writes go to the test database; the fixture directory and the request file
  * are removed by the test itself.
  *
  * Run:  php tests/functional/plugins/plugin_uninstall_test.php
  *
+ * @version 1.2 - uninstall deletes the plugin's app credentials
  * @version 1.1 - fixture plugins are written with the tree's modes (755/644), not group-writable
  */
 
@@ -43,6 +47,7 @@ $queue_dir = $site_root . '/' . RootRequest::QUEUE_DIR;
 
 $NAME = 'zzuninstallfix';
 $SYS  = 'zzuninstallsys';
+$APPS = 'zzuninstallapps';
 $TABLE = 'zuf_fixture_rows';
 
 /**
@@ -88,20 +93,21 @@ $rm_tree = function (string $dir) {
     }
     @rmdir($dir);
 };
-$queued_removals = function () use ($queue_dir, $NAME) {
+$queued_removals = function (string $name = '') use ($queue_dir, $NAME) {
+    $name = $name !== '' ? $name : $NAME;
     $ids = array();
     foreach (glob($queue_dir . '/*.json') ?: array() as $f) {
         $r = json_decode((string)file_get_contents($f), true);
-        if (is_array($r) && ($r['kind'] ?? '') === 'remove_plugin' && ($r['args']['name'] ?? '') === $NAME) {
+        if (is_array($r) && ($r['kind'] ?? '') === 'remove_plugin' && ($r['args']['name'] ?? '') === $name) {
             $ids[] = basename($f, '.json');
         }
     }
     return $ids;
 };
-$drop_queued = function () use ($queue_dir, $queued_removals) {
+$drop_queued = function () use ($queue_dir, $queued_removals, $APPS) {
     // The dev host timer would otherwise pick a fixture request up: root reads
     // the LIVE database, finds no row, and records a failed request.
-    foreach ($queued_removals() as $id) { @unlink($queue_dir . '/' . $id . '.json'); }
+    foreach (array_merge($queued_removals(), $queued_removals($APPS)) as $id) { @unlink($queue_dir . '/' . $id . '.json'); }
 };
 $table_exists = function () use ($db, $TABLE) {
     return (bool)$db->query("SELECT to_regclass('" . $TABLE . "') IS NOT NULL")->fetchColumn();
@@ -116,15 +122,16 @@ $throws = function (callable $fn) {
 };
 
 // Nothing of an earlier run may be lying about.
-foreach (array($NAME, $SYS) as $n) {
+foreach (array($NAME, $SYS, $APPS) as $n) {
     $rm_tree(PathHelper::getIncludePath('plugins/' . $n));
     $db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($n));
 }
 $db->exec("DROP TABLE IF EXISTS $TABLE CASCADE");
 $drop_queued();
 
-harness_defer(function () use ($rm_tree, $db, $NAME, $SYS, $TABLE, $drop_queued) {
-    foreach (array($NAME, $SYS) as $n) {
+harness_defer(function () use ($rm_tree, $db, $NAME, $SYS, $APPS, $TABLE, $drop_queued) {
+    AppAccess::setDeclarationsForTests(null);
+    foreach (array($NAME, $SYS, $APPS) as $n) {
         $rm_tree(PathHelper::getIncludePath('plugins/' . $n));
         $db->prepare('DELETE FROM plg_plugins WHERE plg_name = ?')->execute(array($n));
     }
@@ -252,5 +259,47 @@ check(is_dir($sys_dir), 'the directory is untouched');
 file_put_contents($sys_dir . '/plugin.json', json_encode(array('name' => 'Sys', 'version' => '1.0.0')));
 $refused = $throws(function () use ($manager, $SYS) { $manager->uninstall($SYS); });
 check(strpos($refused, 'is_system') !== false, 'a row flagged is_system is refused whatever the manifest says now', $refused);
+
+// ---------------------------------------------------------------------------
+section('Uninstall deletes the app credentials of the purposes it declares');
+
+$PURPOSE = 'zzfixapps';
+$OTHER = 'zzotherapps';
+$write_plugin($APPS, array('appAccess' => array($PURPOSE => array('label' => 'Fixture apps'))), false);
+$person = make_user('uninstall_apps');
+$mint = function (string $purpose, string $device) use ($person) {
+    return ApiKey::CreateAppPassword((int)$person->key, $purpose, $device)['api_key'];
+};
+$exists = function ($key) use ($db) {
+    $q = $db->prepare('SELECT COUNT(*) FROM apk_api_keys WHERE apk_api_key_id = ?');
+    $q->execute(array((int)$key->key));
+    return (int)$q->fetchColumn() === 1;
+};
+// Standing in for the fixture's declaration while it would be active, and for
+// another plugin's purpose.
+AppAccess::setDeclarationsForTests(array(
+    $APPS => array($PURPOSE => array('label' => 'Fixture apps')),
+    'zzotherplugin' => array($OTHER => array('label' => 'Other apps')),
+));
+$live = $mint($PURPOSE, 'Laptop');
+$revoked = $mint($PURPOSE, 'Old phone');
+$revoked->soft_delete();
+$other = $mint($OTHER, 'Tablet');
+
+$manager->install($APPS, false);
+AppAccess::setDeclarationsForTests(array('zzotherplugin' => array($OTHER => array('label' => 'Other apps'))));
+$manager->uninstall($APPS);
+check(!$exists($live), 'a live app password of its purpose is deleted');
+check(!$exists($revoked), 'and a revoked one');
+check($exists($other), 'another purpose\'s app password is kept');
+
+// A purpose an active plugin still declares is not this plugin's to sweep.
+$manager->install($APPS, false);
+$kept = $mint($OTHER, 'Desk');
+$write_plugin($APPS, array('appAccess' => array($OTHER => array('label' => 'Other apps'))), false);
+$manager->uninstall($APPS);
+check($exists($kept) && $exists($other), 'a purpose an active plugin declares keeps its app passwords');
+AppAccess::setDeclarationsForTests(null);
+$drop_queued();
 
 harness_finish();
