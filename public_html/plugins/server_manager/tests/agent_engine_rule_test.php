@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_site_engine.sh]
  */
 /**
  * The agent names a host's container engine by the shell helper's rule.

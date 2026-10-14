@@ -4,6 +4,11 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.20 - On a machine that runs site containers, every run installs this release's
+#                site_quiet_host.sh (the copy the site container engine's hook runs) and asserts
+#                every quiet site's table in its own network namespace, so one removed by hand
+#                or lost to a restart Docker gave no hook is back within the run
+#                (specs/site_container_engine.md D9).
 # Version: 1.19 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3); a Podman site's Apache trusted no gateway and
 #                 logged every visitor as its host's proxy.
 # Version: 1.18 - Every machine pins the kernel settings that keep its surface small for an unprivileged
@@ -920,6 +925,25 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${FS_ROOT}/etc/syste
     else
         warn "the outbound limits: $(printf '%s' "${OBL_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
+    fi
+fi
+
+# --- 10b. A quiet site container is held from outside -----------------------
+# A dormant copy or a source frozen for a switch-over, when it is a container,
+# is kept off the network by its host: a table in its own network namespace
+# (site_quiet_host.sh). Every run brings the installed copy and the engine's
+# hook up to this release and loads any table that is missing.
+SQH="${SCRIPT_DIR}/../sysadmin_tools/site_quiet_host.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SQH}" ]] \
+        && { [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]] || command -v docker > /dev/null 2>&1; }; then
+    if ! SQH_OUT="$(bash "${SQH}" install 2>&1)"; then
+        warn "the quiet sites' hook: $(printf '%s' "${SQH_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    elif ! SQH_OUT="$(bash "${SQH}" assert 2>&1)"; then
+        warn "a quiet site's table: $(printf '%s' "${SQH_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    else
+        printf '%s\n' "${SQH_OUT}" | sed '/^$/d; s/^/housekeeping: /'
     fi
 fi
 

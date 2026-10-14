@@ -41,6 +41,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.50 - release_archive: a release's whole core archive, streamed, for a host installing a site
+ *                 from it (site_install, specs/site_container_engine.md D9); metered as a body
  * @version 1.49 - escrow: /api/v1/agent/escrow/* goes to EscrowEndpoint, signed by an encrypted data
  *                root's unlock identity (specs/hosted_data_promise_disk_encryption.md D3)
  * @version 1.48 - a claim can say idle (agent 1.72.0): the agent runs nothing and holds no undelivered result,
@@ -276,7 +278,7 @@ class AgentChannelEndpoint {
 	 * as a path on this plane.
 	 */
 	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body',
-		'release_manifest', 'release_file'];
+		'release_manifest', 'release_file', 'release_archive'];
 
 	/** Chunk size for streaming an artifact out. Bounds this plane's memory, not the transfer. */
 	const ARTIFACT_CHUNK_BYTES = 262144;
@@ -2237,6 +2239,9 @@ class AgentChannelEndpoint {
 			case 'release_file':
 				self::serve_release_file((string)($in['version'] ?? ''), (string)($in['file'] ?? ''));
 				break;
+			case 'release_archive':
+				self::serve_release_archive($node, (string)($in['version'] ?? ''));
+				break;
 			case 'agent_manifest':
 				self::serve_agent_manifest($dist_dir);
 				break;
@@ -2341,6 +2346,31 @@ class AgentChannelEndpoint {
 			'file'      => $file,
 			'content'   => base64_encode($body),
 		], '', 200);
+	}
+
+	/**
+	 * A release's whole core archive, for a host that installs a site from it
+	 * (site_install, specs/site_container_engine.md D9).
+	 *
+	 * The same position as the agent binary: bytes signed by a key this plane
+	 * does not hold, which the host unpacks and verifies, both ways and
+	 * against the public log where it holds the log's keys, before anything in
+	 * them runs. The node names a version; ReleaseManifestSource resolves it
+	 * against this plane's own layout. Metered as a body: tens of megabytes.
+	 */
+	private static function serve_release_archive($node, $version) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseManifestSource.php'));
+
+		$version = trim((string)$version);
+		if (!ReleaseManifestSource::valid_version($version)) {
+			api_error('A release archive request must name a version.', 'ValidationError', 400);
+		}
+		$path = ReleaseManifestSource::core_archive($version);
+		if ($path === null) {
+			api_error('This plane has no published archive of release ' . $version . '.', 'ActionError', 404);
+		}
+		self::meter_artifact_body($node, 'release_archive');
+		self::stream_artifact($path, basename($path));
 	}
 
 	/**

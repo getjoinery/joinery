@@ -879,7 +879,7 @@ the **management node** M and the **owner** O.
   DNS change (getjoinery, above).
   - Their certificate, DKIM keys and proxy vhost live on the host.
   - Their cron belongs to the container's start command.
-- **Container targets** are out of scope.
+- **Container targets** are out of scope here; a copy onto a host, as a container, is specs/site_container_engine.md D9 (WP5).
 - **Copy mode refuses on any machine that hosts another site.**
 
 ### The quiet state (the foundation; WP5)

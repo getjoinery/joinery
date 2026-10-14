@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 2.17 - site_quiet_host.sh's record of a quiet site ('quiet') goes with the site's other marks.
+#               A certificate retry armed for any name the site's vhost served (arm_ssl_retry.sh)
+#               is stopped with it: it kept waiting for a name whose site was gone, and would have
+#               issued for it had the name reached the machine again (B15, se1 2026-10-14).
 #VERSION 2.16 - reviewer2 R4, R8, S1: on the site container engine the site's id block is claimed
 #               (sites/<site>/idblock) before anything of it is removed, and the claim stays until a
 #               removal verifies it gone,
@@ -326,7 +330,8 @@ if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ] || [ -f "$LE_SSL_FILE" ]; t
 fi
 
 # The marks other scripts leave for this site by exact path: hold_container.sh's
-# 'held' (a switch-over's old container held stopped), suspended_page.sh's
+# 'held' (a switch-over's old container held stopped), site_quiet_host.sh's
+# 'quiet' (the host's record of a dormant copy or a frozen source), suspended_page.sh's
 # 'suspended', and the run spec (_site_run_spec.sh's run_spec_path). Cleared on
 # every path through this script, so a new site given this name starts clean.
 # Only a plain file is a mark: on a bare-metal site held/ is _site_state.sh's
@@ -335,7 +340,7 @@ fi
 # directory is not this script's to remove.
 clear_site_marks() {
     local mark path f
-    for mark in held suspended run_spec disk_allowance; do
+    for mark in held quiet suspended run_spec disk_allowance; do
         path="${SITES_STATE:?}/${SITE_NAME:?}/${mark}"
         if [ -f "$path" ] || [ -L "$path" ]; then
             rm -f "$path"
@@ -371,6 +376,14 @@ for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
                     grep -oE '/etc/ssl/joinery/[a-z0-9.-]+' "$vh" | cut -d/ -f5; } 2>/dev/null )
 done
 CERT_NAMES=$(printf '%s\n' "$CERT_NAMES" | grep -v '^$' | sort -u)
+# Every name the vhost served, for the certificate retry each may have armed.
+SERVED_NAMES=""
+for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+    [ -f "$vh" ] || continue
+    SERVED_NAMES="$SERVED_NAMES"$'\n'$(grep -iE '^[[:space:]]*Server(Name|Alias)[[:space:]]' "$vh" 2>/dev/null \
+        | sed -E 's/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr]([Nn][Aa][Mm][Ee]|[Aa][Ll][Ii][Aa][Ss])[[:space:]]+//' | tr ' \t' '\n\n' | tr 'A-Z' 'a-z')
+done
+SERVED_NAMES=$(printf '%s\n%s\n' "$SERVED_NAMES" "$CERT_NAMES" | grep -E '^[a-z0-9][a-z0-9.-]{0,252}$' | sort -u)
 
 if [ "$IS_DOCKER" = false ] && [ "$IS_BAREMETAL" = false ]; then
     # Nothing to remove. This is idempotent success, not an error: a decommission
@@ -641,6 +654,17 @@ if [ "$IS_BAREMETAL" = true ]; then
             fi
         done
     fi
+    # A certificate retry armed for any of its names (arm_ssl_retry.sh) stops:
+    # left, it waits on for a name whose site is gone, and issues for it if the
+    # name ever reaches this machine again.
+    for name in $SERVED_NAMES; do
+        if [ -f "$FS/etc/joinery/ssl-retry/${name}.conf" ] \
+           || systemctl is-enabled --quiet "joinery-ssl-retry@${name}.timer" 2>/dev/null; then
+            rm -f "$FS/etc/joinery/ssl-retry/${name}.conf"
+            systemctl disable --now "joinery-ssl-retry@${name}.timer" > /dev/null 2>&1 || true
+            echo "Stopped the certificate retry for ${name}"
+        fi
+    done
 
     # The site's databases live on the machine only for a bare-metal site; a
     # container's are in its volumes.

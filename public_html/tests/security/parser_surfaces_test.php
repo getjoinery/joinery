@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_plugin_installers_start.sh]
  */
 /**
  * No C parser opens outside bytes in the pool (specs/parser_jail.md).

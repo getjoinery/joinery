@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # migrate_site_to_code_volumes.sh — move a site's code onto named volumes.
 #
+# Version: 1.5 - a site its host holds quiet is refused before anything changes (run_spec_quiet_refusal,
+#               specs/site_container_engine.md D9).
 # Version: 1.4 - On the site container engine (specs/site_container_engine.md WP3) there is nothing to
 #                move: every site there is born with its code on volumes. It says so and stops.
 # Version: 1.3 - Refuses on a host whose Docker remaps user ids: docker cp into a volume's host
@@ -70,6 +72,7 @@ say()  { echo "[$(date -u +%H:%M:%S)] $*"; }
 die()  { echo "FATAL: $*" >&2; exit 1; }
 
 docker inspect "$SITE" > /dev/null 2>&1 || die "no container named ${SITE}"
+run_spec_quiet_refusal "$SITE" && die "${SITE} is quiet on this host and is not rebuilt"
 # The trees are copied out with docker cp into each volume's host directory,
 # which writes the container's own ids. Under user-namespace remapping those
 # are not the files' owners inside the container. A remapping host is always

@@ -222,6 +222,7 @@ class NodeDetailActions {
 		'restore_node'             => 'overview',
 		'copy_new_server'          => 'copy',
 		'copy_own_server'          => 'copy',
+		'copy_on_host'             => 'copy',
 		'copy_approve_join'        => 'copy',
 		'copy_again'               => 'copy',
 		'copy_discard'             => 'copy',
@@ -985,6 +986,7 @@ class NodeDetailActions {
 
 			case 'copy_new_server':
 			case 'copy_own_server':
+			case 'copy_on_host':
 			case 'copy_approve_join':
 			case 'copy_again':
 			case 'copy_discard':
@@ -1016,6 +1018,12 @@ class NodeDetailActions {
 				}
 				if ($action === 'copy_own_server') {
 					SiteCopyRunner::start_own_server($node, $uid, $copy_from);
+					return $copy_url;
+				}
+				if ($action === 'copy_on_host') {
+					SiteCopyRunner::start_on_host($node, (int)($_POST['copy_host'] ?? 0), $uid);
+					self::ok($session, $page_regex, 'The host is installing the copy. It builds the copy\'s image, which takes a few '
+						. 'minutes; the copy starts once its agent has joined.');
 					return $copy_url;
 				}
 				$site_copy = SiteCopy::live_for_source((int)$node->key);

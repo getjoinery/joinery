@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/provision_spam_scanner.sh, public_html/plugins/mailbox/provisioning/provision_relay.sh]
  */
 /**
  * What the mail stack installs.

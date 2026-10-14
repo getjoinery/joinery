@@ -65,11 +65,59 @@ Every base and site image is built with `podman build --format docker --no-cache
 - Every "am I in a container" check accepts `/run/.containerenv` beside `/.dockerenv` (fourteen places in the scripts and PHP, three more in the agent, WP4). The rule is one line, written at each place, and `site_engine_run_spec_gate` fails on any file whose code asks for the one and not the other.
 - The `DOCKER-USER` rule (ports 9080 to 9099 from the public interface) has no counterpart: on the site engine a run spec that publishes a site's database (5432) on any address but loopback runs no site, which is what the rule stood guard over. The walls' assert and their ordering, and the data root's `Requires=`, hang on `podman-restart.service` as on `docker.service`.
 - A helper container that writes into a site's volumes runs under the site's id map (`run_spec_idmap_args`): Podman gives a volume its first user's ids.
-- Agent: `engine.go` names the engine with the helper's rule (the current link, an unusable podman refused); `victim.go` reads a site's config volume under the engine's own root (`podman info`'s graphroot, laid out as Docker's root); `moved_site.go` copies through the named engine (`podman cp -` takes the same tar); `addresses.go` names `podman0` beside `jsnet*`; its three container checks go through `primitives.InSiteContainer`, either engine's marker, and a test fails on any other lookup of docker or of a marker.
+- Agent: `engine.go` names the engine with the helper's rule (the current link, an unusable podman refused); `victim.go` reads a site's config volume under the engine's own root (`podman info`'s graphroot, laid out as Docker's root); `moved_site.go` copies through the named engine (`podman cp -` takes the same tar); `addresses.go` names `podman0` beside `jsnet*`; its three container checks go through `primitives.RunsInContainer`, either engine's marker, and a test fails on any other lookup of docker or of a marker.
 
 ### D8. What this changes in multi_tenant_host_hardening
 
 D2's profile builds on `site_engine/site_seccomp.json`, moby's default, which every site already runs under on the site engine; containers-common's is not used, since it lets a site make user namespaces. D6 is replaced by D1 and D2 here. D9's recreate is built on Podman. D11 (remap on every new Docker host) holds until a host moves, then D4 here replaces it. WP3, WP5 and WP8 there wait for this spec's WP2, so none is built twice.
+
+### D9. A site moves between hosts by site copy into a container (WP5)
+
+A site leaves a Docker host by site copy from its backups into a container on an engine host, with a final copy of the frozen source before the switch (Q1, Q2). Four pieces, each usable beyond this move.
+
+**A site on a host that exists, through its host agent.** `site_install` (a host word, operate) installs one container site on the host it runs on. The release, named by version, comes from the plane over its channel (artifact kind `release_archive`) and is verified before any of it runs: its `RELEASE_MANIFEST` signature against the release key compiled into the agent; every file against the manifest, both ways, with no unlisted file but the one a published core archive carries (the config template); its `VERSION` the one asked for; and its `core` statement in the public log where the agent holds the log's keys. Then `install.sh site --docker SITE - DOMAIN PORT --enable-agent ... --release-tree-only` runs from the verified tree, with `--dormant --copy-of --copy-of-key` for a copy. **The site's code is that tree and nothing else:** `--release-tree-only` lays no core archive over it and fetches no theme, plugin or bundle from the upgrade server, which serves them unsigned (reviewer2 WP5 R1). So no code the plane served unsigned runs in the copy, not even the key page its owner types the recovery key into, and the copy is exactly the source's release. Routing serves nothing without the active theme, so the copy's first boot installs it through `install_extension.php`, inside the container, which writes only a package that verifies against the release keys the verified tree carries (signed and in the public log; proven on se1 2026-10-14: the key page served behind the look cookie, a visitor 503). The copy's restore then brings the source's own code, themes and plugins from its backups. The SSH bootstrap (`install_node`) stays the way a new machine is built. A site added to a machine that exists goes through that machine's agent: site copy now, and shared-host orders later, which today need the machine's root password and so cannot reach a keyless host.
+
+**The quiet state in a container.** The same file, reasons and words as on bare metal (site_copy.md, the quiet state), with each measure kept where a container keeps it:
+
+| What | In a container |
+|---|---|
+| Leaving the machine | An nftables table inside the site's own network namespace, loaded by the host: every account but the container's root is refused, loopback and replies apart (`meta skuid != { 0, BASE }`, BASE the site's first host id, which covers a namespace owned by the site's user namespace, by the host's, or a Docker site with no remap). Name lookups are refused with the rest, at once. On the site container engine the hook loads it before a quiet site's first process; on a Docker host (today's sources) there is no hook, so a frozen source that Docker restarts runs up to a minute without the table until the host's housekeeping asserts it. Its own drop-in and held cron outlive the restart, so its web page and scheduled tasks stay frozen; only what is queued could leave in that minute, which is accepted. The site holds no `CAP_NET_ADMIN` and cannot make a user namespace (multi_tenant_host_hardening D2), so it cannot lift it; its agent, as root, still reaches the plane and backup storage. On the engine an OCI hook at `createRuntime` loads it before the site's first process whenever the host's record says quiet, and a load that fails stops the start; on both engines the host's converge asserts it every minute. Proven on se1 (2026-10-14): the web user refused, root through, the local database open, the site's root unable to list or change the table. |
+| Site cron, scheduled tasks | The container's start writes no site cron while quiet; the converger's start gate runs no installer, as now. |
+| Web | The quiet drop-in inside the container's own Apache (look cookie and 503 as on bare metal), reloaded with `apache2ctl graceful`. |
+| Inbound mail, certificate | The host's: a copy's domain is served by its host's proxy with the placeholder certificate until the switch, and its host's mail gateway takes the domain only at the start. |
+
+- **Two records, each read only by its own side.** The host keeps `/etc/joinery/sites/SITE/quiet`, root-owned on the host, which the hook and converge read; nothing on the host reads the state from inside a site (reviewer2 WP4 T1), but for the one yes or no `off` asks, which only ever keeps the table. The container keeps its state folder in its own layer, which a restart keeps; a rebuild of a site with a host record is refused (`run_spec_quiet_refusal`, in the run spec's arguments and before install, rebase and the code-volume move change anything). The dormant install sets both: the container is made, given its state, recorded quiet on the host, then started. Promotion clears the copy's own first (`site_quiet off --copy-promoted`), then the host's (`site_quiet_host off`, refused while the site's own state file is there), which takes the table out of the running namespace. A host record left behind refuses the site's traffic and says so: it fails closed.
+- `copy` on the host is the dormant install's alone: it is written only where no record is, the `site_quiet_host` word sets `switchover`, and the script never turns a copy's record into one. The install runs the host's own installed `joinery-site-quiet`, which host housekeeping keeps current from the host's bundle, never the copy's release's (reviewer2 WP5 R5); without it the install is refused. A dormant copy that could not be started quiet is removed whole.
+- `discard_copy` removes a dormant copy without its owner's ceremony when both say it is one: the host's record says `copy`, and the copy's own state file, read out of its container with the engine's `cp`, says `quiet copy` (reviewer2 WP5 R2). A copy that has left its own quiet is serving and taking writes no backup holds, before its host lets its network go, so it is never discarded.
+- `site_quiet_host off` asks a copy whether it has left its own quiet, and refuses while it has not. A switch-over's record is lifted without asking, while the site still shows its 503, so the way back never serves a site with no network.
+
+**The plane: a container target.** A copy names its target host (`scp_mgh_managed_host_id`).
+- Preflight refuses unless:
+  - the host reports `site_engine` `podman` (`host_report` 1.26);
+  - its agent ships `site_install`, `site_quiet_host`, `provision_certificate` and `discard_copy`;
+  - it is not the source's host, and holds no site or container of that name;
+  - the source's release lists `site_quiet_host.sh` in a signed manifest this management node holds (a check of content, not of a version number, since the release that first carries this is not known when it is written);
+  - a container source's own host ships `site_quiet_host` and `hold_container`, and the source the words of a freeze and a backup it can run.
+  The host's own install refuses what does not fit its limits.
+- The copy's row is made at the start, with the container's name, the host link, a port allocated on the host, and the host's address. The install job records the port install.sh took and the key it printed for the copy's agent; the join from the host's address carrying that key is approved without a person, as a provisioned machine's is (`JoinAutoApproval`).
+- The run is the copy from backups.
+- **Looking at the copy and giving it its key.** A shared host answers only by name, so both take one hosts-file line naming the host's address, and the key page is the look path's `/key`.
+- **The switch freezes the source** (Q2):
+  - `site_quiet on` runs in the source container: its 503 up, its scheduled tasks held, its command-line PHP finished.
+  - The source's host loads the table (reviewer2 WP5 R4b: after the 503, so no visitor meets a site whose outside calls fail).
+  - `backup_run` runs on the source.
+  - The copy stages and restores that final part with the key the owner already gave it.
+  - Both censuses must match exactly.
+- **The address moves** by the proxy or the owner's DNS. `ip_swap` is refused for a container on either side, and says why.
+- **Start:**
+  - `take_node_id`;
+  - `site_quiet off --copy-promoted` on the copy;
+  - the copy's host lifts its table from the running namespace and clears its record (`site_quiet_host off`); no restart;
+  - `provision_certificate` for the domain on the copy's host;
+  - `hold_container stop` on the source's host.
+- **The way back**, until the copy takes the node: the source's host lifts the freeze behind its 503, then the source leaves its own quiet. After the node is taken it is closed, as for any copy from backups; the old container stays held stopped on its host until it is removed.
+- **Discard** asks the copy's host to remove it (`discard_copy`), once its install has finished.
+- The row swap moves `mgn_port` with the machine.
 
 ## Work packages
 
@@ -77,12 +125,30 @@ D2's profile builds on `site_engine/site_seccomp.json`, moby's default, which ev
 - **WP2 (D4, D5, D6, and D7's engine helper):** `_site_engine.sh`; the run spec on the engine (id blocks and their claims, run arguments with the site filter, networks); `install.sh`'s site path and base build through the helper, and `install.sh docker --site-engine` for a new host; the engine's own configuration in `install_site_engine.sh`; `_site_start.sh` and the Dockerfiles; the data root waiting for `podman-restart.service`; `site_engine_run_spec_gate`, `site_engine_gate`, and the text pins in `site_run_spec_gate`, `installer_contract_test`, `site_supervisor_gate`, `docker_disk_pool_gate`, `host_restrictions_gate`. Box: as the status line says.
 - **WP3 (D7, scripts), built:** the admin scripts in `sysadmin_tools` through the helper (rebase, migrate, remove_account, move_site, hold, restart, site_limits, host_report, audit, manage_domain), the five inspect templates outside the run spec, the container check at its fourteen places in the scripts and PHP (the agent's three are WP4), the disk pool on the engine (`--disk`), the outbound limits (with `_site_engine.sh` installed beside the run spec helper's copy in `/usr/local/lib/joinery-limits/`, which refuses every engine call on a site engine host without it, and name lookups to resolved's upstream servers let through), the database port refused beyond loopback in the run spec (D7: no `DOCKER-USER` counterpart), the walls' assert on every container start (an OCI hook) and on `podman-restart.service`, the data root's migrate, image pruning after rebuilds; their gates.
 - **WP4 (D7, agent), built:** agent 1.77.0: `engine.go`, `primitives/container.go`, `victim.go`, `moved_site.go`, `addresses.go`, `join.go`, `recipes/registry.go`, `primitives/observe_check_status.go`; `engine_test.go` (the engine rule, copy-in through podman, the source scan) and the victim and memory tests.
-- **WP5:** moving today's Docker hosts (Q1), then Docker's install path removed.
+- **WP5 (D9; Q1: B, Q2: B):**
+  - **WP5a:** `site_install`, with the verified release fetch, and its plane builder.
+  - **WP5b:** the quiet state in a container:
+    - the host record and `site_quiet_host`;
+    - the table in a site's namespace (the hook, converge);
+    - the container's start under quiet;
+    - the dormant container install.
+  - **WP5a and WP5b built 2026-10-14**, box-proven on se1 (the dormant copy quiet from its first start, a restart, the refusals, promotion; the real 0.8.495 archive verified by the agent). **WP5c built 2026-10-14** (`site_copy_on_host_test` 38/38); its proof through a plane is WP5d's. **reviewer2's review 2026-10-14:** R1 (the copy was built over code the plane served unsigned, its key page included) fixed by `--release-tree-only` and the active theme installed signed at first boot; R2 (a discard while the copy had left its own quiet), R2b, R4b (freeze order), R5 (the host's own quiet tool) and R6 (the fetched tree's unlisted files) fixed; R3 and R4 held; box-proven on se1 on 0.8.496. B16 (tests reading scripts with no `covers:`, so `--changed` reused stale passes) found and guarded.
+  - **WP5c:** the plane's container target:
+    - preflight, install and join;
+    - the freeze and final copy of a container source;
+    - start, the way back and discard;
+    - `mgn_port` in the swap.
+  - **WP5d:**
+    - box proof, a Docker host to an engine host through a plane;
+    - then today's Docker host's sites moved one at a time, each with the owner's go-ahead;
+    - the Docker host retired, and Docker's install path removed.
 - **WP6:** docs (installation.md, deploy_and_upgrade.md, server_manager overview, INSTALL_README).
 
 ## Open questions
 
-- **Q1. Moving today's hosts.** In place (sites stop, volumes move into Podman's store with their ids shifted to each site's block, Docker removed) or by site copy onto new Podman hosts. Raised when WP5 is next. Whichever it is: the engine's current link makes a host the engine's for every script and the agent, so an in-place move sets it last, or holds the host's jobs for the move; with it set while Docker sites remain, every engine call on a site not yet moved is refused (reviewer2 WP4 T6).
+- **Q1. Moving today's hosts. Decided (owner, 2026-10-14): B, by site copy onto a new engine host.** One engine host is built; site copy gains a target it lacks, a container on an engine host, and moves the Docker host's sites onto it one at a time from their backups, each domain switched as its copy is proven, the old container held stopped as the way back; the Docker host retires once empty. Not chosen: in place on the Docker host (every site down together, since the engine's link must come last, reviewer2 WP4 T6; no copy to fall back on mid-move; a one-off tool run once on the live host).
+- **B15 (found on se1, 2026-10-14, fixed in WP5b).** A removed site's certificate retry timer (`joinery-ssl-retry@DOMAIN`) kept running, waiting for a name whose site was gone, and would have issued for it had the name reached the host again. `remove_account.sh` 2.17 stops it for every name the site's vhost served.
+- **Q2. Writes after the last backup. Decided (owner, 2026-10-14): B, freeze then final copy.** For the last step the source shows its maintenance page and runs nothing. A final backup runs, the copy takes it, the two censuses match exactly, then the switch. Not chosen: the copy from the last backup alone, as getjoinery moved, where anything written between that backup and the switch is lost on every move.
 
 ## Testing
 

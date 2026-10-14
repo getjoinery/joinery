@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [public_html/plugins/mailbox/provisioning/rspamd_stateless.sh, public_html/plugins/mailbox/provisioning/provision_relay_main.sh]
  */
 /**
  * Send protection is an opt-in, and the DNS shape follows the opt-in

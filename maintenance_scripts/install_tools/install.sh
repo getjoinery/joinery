@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+#VERSION 3.23 - site --release-tree-only builds the site from the tree install.sh came from and nothing else:
+#               no core archive laid over it and no theme, plugin or bundle fetched, refused without
+#               the tree's signed manifest or with --activate. The host agent's site_install passes it,
+#               having verified that tree, so a copy runs the release it was installed at and no code
+#               the management node served unsigned (reviewer2 WP5 R1). A dormant container copy uses the
+#               host's installed site_quiet_host (joinery-site-quiet), refused when host housekeeping has
+#               not installed it, and a copy that could not be started quiet is removed whole (R2, R5).
+#VERSION 3.22 - A dormant copy can be a container (specs/site_container_engine.md D9): site --docker
+#               --dormant on a host whose sites run on the site container engine. Its own state goes
+#               into its container before its first start and its host records it quiet
+#               (site_quiet_host.sh), whose hook gives it the table that keeps its web user off the
+#               network; its start holds its cron; it gets the host's proxy with the placeholder
+#               certificate and no certificate attempt, and is proven serving through its look path.
+#               A site its host holds quiet is never rebuilt.
 #VERSION 3.21 - The engine is run and looked for by its command (site_engine_bin: /usr/local/bin/podman by
 #               path, whatever PATH holds; reviewer2 T3). The agent's identity is carried across a rebuild on the site container engine by unpacking
 #               the engine's archive on the host: it carries the site's own host ids, which the
@@ -1476,7 +1490,9 @@ name_resolves() {
 # a new visitor to /login read as a redirect to the machine's bare IP.
 probe_site_front() {
     local headers
-    headers=$(curl -s -o /dev/null -D - -H "Host: $DOMAIN_NAME" "$1/" 2>/dev/null | tr -d '\r' || true)
+    local -a cookie=()
+    [ -n "${PROBE_COOKIE:-}" ] && cookie=(-H "Cookie: ${PROBE_COOKIE}")
+    headers=$(curl -s -o /dev/null -D - -H "Host: $DOMAIN_NAME" ${cookie[@]+"${cookie[@]}"} "$1/" 2>/dev/null | tr -d '\r' || true)
     HTTP_CODE=$(printf '%s\n' "$headers" | awk 'NR == 1 { print $2 }')
     LOCATION=$(printf '%s\n' "$headers" | awk 'tolower($1) == "location:" { print $2; exit }')
     [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
@@ -1744,6 +1760,7 @@ setup_ssl_docker_proxy() {
     local sitename="$1"
     local domain="$2"
     local port="$3"
+    local cert="${4:-}"
 
     print_step "Setting up reverse proxy for $domain..."
 
@@ -1765,8 +1782,9 @@ setup_ssl_docker_proxy() {
     systemctl reload apache2 2>/dev/null || true
 
     # Provision the cert — never fails the install; issues nothing if neither
-    # HTTP-01 nor DNS-01 is available, leaving the site on HTTP.
-    provision_origin_cert "$domain"
+    # HTTP-01 nor DNS-01 is available, leaving the site on HTTP. A dormant copy
+    # asks for none (nocert): the placeholder answers until its switch.
+    [ "$cert" = "nocert" ] || provision_origin_cert "$domain"
 
     if apache2ctl configtest > /dev/null 2>&1; then
         systemctl reload apache2 || true
@@ -4052,6 +4070,7 @@ do_site_create() {
     local THEMES=""
     local ADMIN_EMAIL=""
     local DORMANT=false
+    local RELEASE_TREE_ONLY=false
     local COPY_OF=""
     local COPY_OF_KEY=""
 
@@ -4137,6 +4156,10 @@ do_site_create() {
                 ;;
             --dormant)
                 DORMANT=true
+                shift
+                ;;
+            --release-tree-only)
+                RELEASE_TREE_ONLY=true
                 shift
                 ;;
             --copy-of=*)
@@ -4239,9 +4262,13 @@ do_site_create() {
                 echo "  --management-node=URL  With --enable-agent: ask to join that management node"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
                 echo "  --dormant --copy-of=ID The target of a site copy: bare metal, alone on the"
-                echo "                         machine, no certificate attempt, and quiet when done"
-                echo "                         (no visitors, nothing sent, no cron, no installers)"
-                echo "                         until it takes over node ID's identity"
+                echo "                         machine, or with --docker and its port a container on"
+                echo "                         the site container engine; no certificate attempt, and"
+                echo "                         quiet (no visitors, nothing sent, no cron, no"
+                echo "                         installers) until it takes over node ID's identity"
+                echo "  --release-tree-only    Build the site from this release tree alone: no core archive"
+                echo "                         over it, no theme, plugin or bundle fetched (the tree must"
+                echo "                         carry its signed manifest; the host agent passes it)"
                 echo "  --copy-of-key=BASE64   With --copy-of: the source's agent public key, the one"
                 echo "                         key this copy takes the source's export from"
                 echo "  --memory=SIZE          Memory budget for the container (512m, 2g)."
@@ -4329,9 +4356,13 @@ do_site_create() {
 
     # A dormant install is the target of a site copy (specs/site_copy.md): a
     # site that will be replaced whole by its source's backups, and must never
-    # act before then. It says whose copy it is, it is bare metal and alone on
-    # the machine (the quiet state quiets the machine), and it makes no
-    # certificate attempt: the source's certificate travels with the copy.
+    # act before then. It says whose copy it is and makes no certificate
+    # attempt: the source's certificate travels with the copy, or a copy from
+    # backups gets its own at the switch. On bare metal it is alone on the
+    # machine (the quiet state quiets the machine). In a container, --docker
+    # with its port, on a host whose sites run on the site container engine,
+    # its host keeps it quiet beside the others (specs/site_container_engine.md D9).
+    local DORMANT_CONTAINER=false
     if [ "$DORMANT" = true ] || [ -n "$COPY_OF" ] || [ -n "$COPY_OF_KEY" ]; then
         if [ "$DORMANT" != true ] || ! [[ "$COPY_OF" =~ ^[1-9][0-9]{0,17}$ ]]; then
             print_error "--dormant and --copy-of=NODE_ID go together, and NODE_ID is the source's node number"
@@ -4343,11 +4374,38 @@ do_site_create() {
             print_error "--copy-of-key=BASE64 is the source's agent public key, as the management node prints it"
             exit 1
         fi
-        if [ "$WITH_TEST_SITE" = true ] || [ "$FORCE_MODE" = "docker" ] || [ -n "$PORT" ]; then
-            print_error "A dormant copy is one bare-metal site alone on its machine: no --with-test-site, --docker or port"
+        if [ "$WITH_TEST_SITE" = true ]; then
+            print_error "A dormant copy is one site: no --with-test-site"
             exit 1
         fi
-        NO_SSL=true
+        if [ "$FORCE_MODE" = "docker" ] || [ -n "$PORT" ]; then
+            if [ "$FORCE_MODE" != "docker" ] || [ -z "$PORT" ]; then
+                print_error "A dormant copy in a container names --docker and its port together"
+                exit 1
+            fi
+            DORMANT_CONTAINER=true
+        else
+            NO_SSL=true
+        fi
+    fi
+
+    # --release-tree-only: the site is this tree and nothing else. It is what a
+    # host agent passes when it has verified the tree against its signed
+    # manifest, so nothing the upgrade server serves unsigned becomes the
+    # site's code (reviewer2 WP5 R1); a site from it has no theme or plugin
+    # but what the tree carries, and installs no bundle.
+    if [ "$RELEASE_TREE_ONLY" = true ]; then
+        local tree_root
+        tree_root="$(dirname "$(dirname "$SCRIPT_DIR")")"
+        if [ ! -f "$tree_root/RELEASE_MANIFEST" ] || [ ! -f "$tree_root/RELEASE_MANIFEST.sig" ]; then
+            print_error "--release-tree-only builds from a release tree that carries its signed manifest, and $tree_root has none"
+            exit 1
+        fi
+        if [ -n "$ACTIVATE_THEME" ]; then
+            print_error "--release-tree-only adds no theme, so there is none to --activate"
+            exit 1
+        fi
+        export JOINERY_INSTALL_BUNDLE=none
     fi
 
     # What --enable-agent runs on the new site: switch the agent on and, given
@@ -4506,7 +4564,37 @@ do_site_create() {
         fi
     fi
 
-    if [ "$DORMANT" = true ]; then
+    if [ "$DORMANT" = true ] && [ "$DORMANT_CONTAINER" = true ]; then
+        if [ "$MODE" != "docker" ] || [ "$(site_engine_kind 2>/dev/null)" != "podman" ]; then
+            print_error "A dormant copy in a container goes on a host whose sites run on the site container engine, which keeps it quiet beside its other sites. This one's run on $(site_engine_kind 2>/dev/null || echo 'an engine that could not be named')."
+            exit 1
+        fi
+        # The host's own copy, which its housekeeping installs and keeps
+        # current from its support bundle, with the engine's hook: never this
+        # release's, which may be older than the host's (reviewer2 WP5 R5).
+        if [ ! -x /usr/local/sbin/joinery-site-quiet ] || [ ! -f /etc/containers/oci/hooks.d/joinery-site-quiet.json ]; then
+            print_error "A dormant copy in a container is kept quiet by its host, and this host's housekeeping has not installed that yet (/usr/local/sbin/joinery-site-quiet and its hook). Run the host's converge, then try again."
+            exit 1
+        fi
+        # A copy is a new site: a site of that name already here (its
+        # container, its run spec or any of its volumes, by exact name) is
+        # never rebuilt into one, which -y would otherwise do.
+        local copy_vol copy_clash=""
+        site_engine ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$SITENAME" && copy_clash="its container"
+        [ -e "/etc/joinery/sites/${SITENAME}/run_spec" ] && copy_clash="${copy_clash:+$copy_clash, }its run spec"
+        for copy_vol in "${ALL_SITE_VOLUMES[@]}"; do
+            if site_engine volume inspect "${SITENAME}_${copy_vol}" > /dev/null 2>&1; then
+                copy_clash="${copy_clash:+$copy_clash, }its volumes"
+                break
+            fi
+        done
+        if [ -n "$copy_clash" ]; then
+            print_error "This host already has a site named ${SITENAME} (${copy_clash}). A copy is a new site; nothing was changed."
+            exit 1
+        fi
+        export JOINERY_DORMANT_COPY_OF="$COPY_OF"
+        export JOINERY_DORMANT_COPY_OF_KEY="$COPY_OF_KEY"
+    elif [ "$DORMANT" = true ]; then
         if [ "$MODE" != "bare-metal" ]; then
             print_error "A dormant copy is bare metal; this machine would install it in Docker. Use --bare-metal."
             exit 1
@@ -4923,6 +5011,12 @@ do_site_docker() {
     # before the record existed has it read from Docker now, while it still
     # exists; nothing reads Docker's record of it again.
     . "$SCRIPT_DIR/_site_run_spec.sh"
+    # A site its host holds quiet keeps its own state in its container, so it
+    # is never rebuilt (specs/site_container_engine.md D9).
+    if run_spec_quiet_refusal "$SITENAME"; then
+        print_error "${SITENAME} is quiet on this host and is not rebuilt. Nothing was changed."
+        exit 1
+    fi
     if ! run_spec_exists "$SITENAME" && site_engine inspect "$SITENAME" > /dev/null 2>&1; then
         run_spec_adopt "$SITENAME" || { print_error "Could not record how ${SITENAME}'s container is run; nothing was changed"; exit 1; }
         print_info "Recorded ${SITENAME}'s run spec from its container: $(run_spec_path "$SITENAME")"
@@ -5230,8 +5324,9 @@ do_site_docker() {
 
     mkdir -p "$BUILD_DIR/$SITENAME"
 
-    # Download themes and plugins to archive before copying
-    if [ -n "$THEMES" ] || [ -n "$UPGRADE_SERVER" ]; then
+    # Download themes and plugins to archive before copying; a site built from
+    # its release tree alone fetches nothing.
+    if [ "${RELEASE_TREE_ONLY:-false}" != true ] && { [ -n "$THEMES" ] || [ -n "$UPGRADE_SERVER" ]; }; then
         download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
     fi
 
@@ -5242,8 +5337,11 @@ do_site_docker() {
     deploy_release_manifest "$ARCHIVE_ROOT" "$BUILD_DIR/$SITENAME"
 
     # Overlay fresh core files from the upgrade server so the image always ships
-    # with current code, not whatever was in the local archive.
-    download_core_archive "$BUILD_DIR/$SITENAME/public_html"
+    # with current code, not whatever was in the local archive. Not over a tree
+    # that is the site's release by its signature: that tree is the site.
+    if [ "${RELEASE_TREE_ONLY:-false}" != true ]; then
+        download_core_archive "$BUILD_DIR/$SITENAME/public_html"
+    fi
 
     print_info "Setting up config directory..."
     mkdir -p "$BUILD_DIR/$SITENAME/config"
@@ -5411,17 +5509,43 @@ EOF
     mapfile -d '' RUN_ARGS < <(run_spec_args "$SITENAME")
     [ "${#RUN_ARGS[@]}" -gt 0 ] || { print_error "${SITENAME}'s run spec gave no arguments"; exit 1; }
 
-    if [ "$QUIET_MODE" -eq 1 ]; then
-        site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
+    local LOOK_SECRET=""
+    if [ -n "${JOINERY_DORMANT_COPY_OF:-}" ]; then
+        # A dormant copy is quiet from its first process: made, given its
+        # state, recorded quiet on the host, and only then started.
+        LOOK_SECRET="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+        if ! site_engine create "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null; then
+            # As below: all of it is this install's (its run spec, volumes and
+            # image), and left it would hold the name with nothing that can
+            # discard it (reviewer2 WP5 R2c).
+            bash "$SCRIPT_DIR/../sysadmin_tools/remove_account.sh" "$SITENAME" -y > /dev/null 2>&1 \
+                || print_warning "What the copy left could not all be removed; remove_account.sh ${SITENAME} says what is left"
+            print_error "Failed to create the copy's container, and what it made was removed."
+            exit 1
+        fi
+        if ! start_dormant_container "$SITENAME" "$JOINERY_DORMANT_COPY_OF" "${JOINERY_DORMANT_COPY_OF_KEY:-}" "$LOOK_SECRET"; then
+            # The name was free when this install began, so all of it is this
+            # install's: removed whole, the host's record of it included.
+            site_engine rm -f "$SITENAME" > /dev/null 2>&1
+            bash "$SCRIPT_DIR/../sysadmin_tools/remove_account.sh" "$SITENAME" -y > /dev/null 2>&1 \
+                || print_warning "What the copy left could not all be removed; remove_account.sh ${SITENAME} says what is left"
+            print_error "The copy could not be started quiet, and was removed. Nothing of it runs."
+            exit 1
+        fi
+        print_success "Container started, quiet (a copy of node ${JOINERY_DORMANT_COPY_OF})"
     else
-        site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
-    fi
+        if [ "$QUIET_MODE" -eq 1 ]; then
+            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
+        else
+            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
+        fi
 
-    if [ $? -eq 0 ]; then
-        print_success "Container started"
-    else
-        print_error "Failed to start container"
-        exit 1
+        if [ $? -eq 0 ]; then
+            print_success "Container started"
+        else
+            print_error "Failed to start container"
+            exit 1
+        fi
     fi
     # The host's outbound limits take in the site's network (WP3).
     run_spec_limits_refresh
@@ -5450,6 +5574,10 @@ EOF
 
     MAX_ATTEMPTS=12
     ATTEMPT=1
+    # A dormant copy answers only its owner's look: the probe carries the look
+    # cookie, and an anonymous request is asked afterwards.
+    PROBE_COOKIE=""
+    [ -n "$LOOK_SECRET" ] && PROBE_COOKIE="joinery_look=${LOOK_SECRET}"
 
     while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
         print_info "Checking site availability (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
@@ -5489,6 +5617,17 @@ EOF
         ATTEMPT=$((ATTEMPT + 1))
         sleep 5
     done
+    if [ -n "$LOOK_SECRET" ]; then
+        PROBE_COOKIE=""
+        probe_site_front "http://127.0.0.1:$PORT"
+        if [ "$HTTP_CODE" != "503" ]; then
+            print_error "The copy answers a visitor with HTTP $HTTP_CODE, not 503: it is not quiet. Its container is stopped."
+            site_engine stop "$SITENAME" > /dev/null 2>&1
+            exit 1
+        fi
+        print_success "Quiet: a visitor gets 503; the look path opens it to its owner"
+        echo "DORMANT_COPY_OF=${JOINERY_DORMANT_COPY_OF}"
+    fi
 
     # --enable-agent for a Docker site: the site's agent runs INSIDE the
     # container (its join reads the site's own stg_settings), so it is enabled
@@ -5600,11 +5739,57 @@ EOF
     # (install.sh moves off a pinned port that is busy).
     echo "CONTAINER_PORT=$PORT"
 
-    # Set up SSL with reverse proxy if domain provided
+    # Set up SSL with reverse proxy if domain provided. A dormant copy gets the
+    # proxy and its placeholder certificate, and no attempt: its domain still
+    # names its source until the switch, which issues one.
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
-        setup_ssl_docker_proxy "$SITENAME" "$DOMAIN_NAME" "$PORT"
-        note_ssl_deferred_if_missing "$DOMAIN_NAME"
+        if [ -n "$LOOK_SECRET" ]; then
+            setup_ssl_docker_proxy "$SITENAME" "$DOMAIN_NAME" "$PORT" nocert
+        else
+            setup_ssl_docker_proxy "$SITENAME" "$DOMAIN_NAME" "$PORT"
+            note_ssl_deferred_if_missing "$DOMAIN_NAME"
+        fi
     fi
+}
+
+# start_dormant_container SITENAME COPY_OF COPY_OF_KEY LOOK_SECRET: a made,
+# never started container is given its quiet state (the state file, whose copy
+# it is, its source's key, the look secret), the host's installed
+# site_quiet_host records it quiet, and then it starts; the host's table must
+# be in its network before this returns 0 (specs/site_container_engine.md D9).
+start_dormant_container() {
+    local site="$1" copy_of="$2" copy_of_key="$3" secret="$4" stage rc=0
+    local quiet_host="/usr/local/sbin/joinery-site-quiet"
+    stage="$(mktemp -d)" || return 1
+    (
+        set -e
+        umask 077
+        mkdir -p "$stage/etc/joinery/sites/$site"
+        printf 'quiet copy\n' > "$stage/etc/joinery/sites/$site/state"
+        printf '%s\n' "$copy_of" > "$stage/etc/joinery/sites/$site/copy_of"
+        [ -z "$copy_of_key" ] || printf '%s\n' "$copy_of_key" > "$stage/etc/joinery/sites/$site/copy_of_key"
+        printf '%s\n' "$secret" > "$stage/etc/joinery/sites/$site/look_secret"
+        chmod 644 "$stage/etc/joinery/sites/$site/state" "$stage/etc/joinery/sites/$site/copy_of"
+        [ -z "$copy_of_key" ] || chmod 644 "$stage/etc/joinery/sites/$site/copy_of_key"
+    ) || rc=1
+    if [ "$rc" -eq 0 ]; then
+        tar -C "$stage" --owner=0 --group=0 --numeric-owner -cf - "etc/joinery/sites/$site" \
+            | site_engine cp - "$site:/" || { print_error "Could not give the copy its quiet state"; rc=1; }
+    fi
+    rm -rf "$stage"
+    [ "$rc" -eq 0 ] || return 1
+    bash "$quiet_host" on "$site" copy || return 1
+    if ! site_engine start "$site" > /dev/null; then
+        print_error "Failed to start the container"
+        bash "$quiet_host" status "$site"
+        return 1
+    fi
+    if [ "$(bash "$quiet_host" status "$site")" != "${site} quiet=copy running=yes table=yes" ]; then
+        print_error "The copy started without its host's table: $(bash "$quiet_host" status "$site")"
+        site_engine stop "$site" > /dev/null 2>&1
+        return 1
+    fi
+    return 0
 }
 
 #------------------------------------------------------------------------------
@@ -5666,8 +5851,11 @@ do_site_baremetal() {
 
     print_success "Source files located at $ARCHIVE_ROOT"
 
-    # Download themes and plugins to archive before deployment
-    download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
+    # Download themes and plugins to archive before deployment, unless the
+    # site is its release tree alone.
+    if [ "${RELEASE_TREE_ONLY:-false}" != true ]; then
+        download_themes_and_plugins "$ARCHIVE_ROOT/public_html" "$THEMES"
+    fi
 
     # Deploy application code
     deploy_application_code "$SITENAME" "$ARCHIVE_ROOT"

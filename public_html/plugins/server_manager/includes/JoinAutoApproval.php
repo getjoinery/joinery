@@ -19,6 +19,8 @@
  * provider. Check 4 runs inside the existing approval paths. Everything fails
  * closed: any doubt leaves the request pending, and nothing here ever rejects.
  *
+ * @version 1.1 - site_key_from_output(): the site agent's key an install printed, for a copy onto a host,
+ *                whose join SiteCopyRunner approves the same way (specs/site_container_engine.md D9)
  * @version 1.0
  */
 class JoinAutoApproval {
@@ -54,10 +56,17 @@ class JoinAutoApproval {
 				if ($hit[1] === $host_name) { $out['host'] = strtolower($hit[2]); } // the last one wins: a retry mints a new agent
 			}
 		}
-		if (preg_match_all('/^SITE_AGENT_KEY=([0-9a-f]{16})\s*$/mi', $output, $m)) {
-			$out['site'] = strtolower(end($m[1]));
-		}
+		$out['site'] = self::site_key_from_output($output);
 		return $out;
+	}
+
+	/** install.sh's `SITE_AGENT_KEY=<16 hex>` readback, the last one printed, or null. */
+	public static function site_key_from_output(string $output): ?string {
+		$output = str_replace("\r", '', preg_replace('/\x1b\[[0-9;]*m/', '', $output));
+		if (preg_match_all('/^SITE_AGENT_KEY=([0-9a-f]{16})\s*$/mi', $output, $m)) {
+			return strtolower(end($m[1]));
+		}
+		return null;
 	}
 
 	/**

@@ -212,6 +212,47 @@ out="$(bash "$RUNNER" --when-changed --site-root="$C" 2>&1)"
 chk "state gone: its leftovers are cleared" "$(printf '%s' "$out" | grep -c 'no longer quiet'):$([ -e "$CD" ] && echo left || echo gone):$(cat "$R/etc/cron.d/joinery-csite")" "1:gone:* * * * * www-data php csite"
 chk "and the site converges at once, with no release change" "$([ "$(printf '%s' "$out" | grep -c 'core installers: running')" -gt 0 ] && echo yes)" "yes"
 
+echo "=== In a site container: the host keeps the network, the container the rest ==="
+# specs/site_container_engine.md D9: either engine's marker makes this the
+# container's half. No nftables, boot unit or certbot timer here; the web
+# drop-in reloads with apache2ctl graceful, and only while Apache runs.
+R2="$T/fs2"; mkdir -p "$R2/etc/cron.d" "$R2/etc/apache2/conf-available" "$R2/etc/apache2/conf-enabled" "$R2/etc/systemd/system" "$R2/run"
+touch "$R2/run/.containerenv"
+echo "* * * * * www-data php /var/www/html/qsite/public_html/utils/process_scheduled_tasks.php" > "$R2/etc/cron.d/joinery-qsite"
+cat > "$B/pgrep" <<EOF
+#!/bin/bash
+if [ "\$1" = "-x" ] && [ "\$2" = "apache2" ]; then [ -f "$ST/apache_runs" ]; exit; fi
+[ -s "$ST/pgrep" ] && cat "$ST/pgrep"
+EOF
+chmod +x "$B/pgrep"
+: > "$ST/calls"; rm -f "$ST/nft_loaded"; touch "$ST/on.certbot.timer"
+SD2="$R2/etc/joinery/sites/qsite"
+out="$(JOINERY_SITE_STATE_ROOT="$R2" bash "$Q" on 2>&1)"; rc=$?
+chk "exit 0" "$rc" "0"
+chk "no nftables, no boot unit" "$(grep -c '^nft' "$ST/calls"):$([ -e "$SD2/quiet.nft" ] && echo file || echo nofile):$([ -e "$R2/etc/systemd/system/joinery-site-state.service" ] && echo unit || echo nounit)" "0:nofile:nounit"
+chk "certbot's timer is not the container's" "$(grep -c 'certbot.timer' "$ST/calls"):$([ -f "$ST/on.certbot.timer" ] && echo on)" "0:on"
+chk "the web drop-in is in place" "$(readlink "$R2/etc/apache2/conf-enabled/joinery-quiet-qsite.conf")" "../conf-available/joinery-quiet-qsite.conf"
+chk "Apache not running yet: checked, not reloaded (its start reads the drop-in)" "$(grep -c 'apache2ctl configtest' "$ST/calls"):$(grep -c -e 'apache2ctl -k graceful' -e 'systemctl reload' "$ST/calls")" "1:0"
+chk "the scheduled-task cron file is held" "$([ -e "$R2/etc/cron.d/joinery-qsite" ] && echo live || echo gone):$([ -f "$SD2/held/cron.d/joinery-qsite" ] && echo held)" "gone:held"
+JOINERY_SITE_STATE_ROOT="$R2" bash "$Q" off >/dev/null 2>&1
+touch "$ST/apache_runs"; : > "$ST/calls"
+out="$(JOINERY_SITE_STATE_ROOT="$R2" bash "$Q" on 2>&1)"; rc=$?
+chk "Apache running: reloaded gracefully, never through systemd" "$rc:$(grep -c 'apache2ctl -k graceful' "$ST/calls"):$(grep -c 'systemctl reload' "$ST/calls")" "0:1:0"
+: > "$ST/calls"
+out="$(JOINERY_SITE_STATE_ROOT="$R2" bash "$Q" off 2>&1)"; rc=$?
+chk "off: the cron file back, the drop-in gone, Apache reloaded the same way" "$rc:$([ -e "$R2/etc/cron.d/joinery-qsite" ] && echo back):$(ls "$R2/etc/apache2/conf-enabled" | grep -c quiet):$(grep -c 'apache2ctl -k graceful' "$ST/calls")" "0:back:0:1"
+rm -f "$ST/apache_runs"; rm -f "$R2/run/.containerenv"; touch "$R2/.dockerenv"
+JOINERY_SITE_STATE_ROOT="$R2" bash -c '. "$1"; site_state_init qsite; echo "$SS_CONTAINER"' _ "$TOOLS/_site_state.sh" > "$T/c.out"
+chk "Docker's marker makes it a container too" "$(cat "$T/c.out")" "1"
+
+echo "=== The container's start: a quiet site starts quiet ==="
+# _site_start.sh asserts the measures before cron and Apache start, and a cron
+# file it could not hold stops the start.
+START="$TOOLS/_site_start.sh"
+chk "the assert comes before cron starts" "$(( $(grep -n 'site_state_assert' "$START" | head -1 | cut -d: -f1) < $(grep -n 'service cron start' "$START" | cut -d: -f1) ))" "1"
+chk "only when the site's state file exists" "$(grep -c 'if \[ -e "/etc/joinery/sites/${SITENAME}/state" \]; then' "$START")" "1"
+chk "a cron file still there is fatal" "$(grep -A1 'if \[ -e "/etc/cron.d/joinery-${SITENAME}" \]; then' "$START" | grep -c 'FATAL: ${SITENAME} is quiet')" "1"
+
 echo "=== Not root and no fixture: nothing to do, refused ==="
 out="$(JOINERY_SITE_STATE_ROOT= bash "$Q" on 2>&1)"; rc=$?
 chk "refused, exit 2" "$rc" "2"

@@ -633,7 +633,7 @@ unset JOINERY_SITE_STATE_ROOT
 # remove_account.sh clears <SITES_STATE>/<site>/run_spec among its marks.
 ra_spec="$(sed -n 's/^SITES_STATE="\$FS\(.*\)"$/\1/p' "$REMOVE")/SITEX/run_spec"
 chk "remove_account removes the file run_spec_path names" \
-    "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held suspended run_spec disk_allowance; do$' "$REMOVE")" "1"
+    "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held quiet suspended run_spec disk_allowance; do$' "$REMOVE")" "1"
 
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

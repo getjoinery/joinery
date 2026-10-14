@@ -8,6 +8,10 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.124 - build_site_install, build_site_quiet_host and build_discard_copy: a dormant copy installed
+ *                  as a container on a host from its source's verified release, the host's half of a site
+ *                  container's quiet state for a switch-over, and a dormant copy removed from its host
+ *                  (specs/site_container_engine.md D9)
  * @version 1.123 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0,
  *                  the running list of specs/agent_recipes_and_vocabulary.md); reboot_refusal() names what the node
  *                  would refuse before a reboot is queued
@@ -2010,6 +2014,115 @@ class JobCommandBuilder {
 			throw new Exception("A container is held with stop or start, not '" . $action . "'.");
 		}
 		return ['primitive' => 'hold_container', 'params' => ['action' => $action, 'name' => $name]];
+	}
+
+	/**
+	 * Install a dormant copy of a site as a container on a host
+	 * (specs/site_container_engine.md D9). Addressed to the HOST's own agent,
+	 * which fetches the source's release from this management node, verifies
+	 * it before anything in it runs, and installs the copy quiet from its
+	 * first process. The new site joins the host's own management node: no
+	 * address is sent. $p: name, domain, port, release, copy_of, copy_of_key,
+	 * and memory ('' for none).
+	 */
+	public static function build_site_install($host_node, array $p) {
+		if (!self::has_primitive($host_node, 'site_install')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot install a copy of a site. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_install']));
+		}
+		return self::build_site_install_primitive($p);
+	}
+
+	public static function build_site_install_primitive(array $p) {
+		$name = (string)($p['name'] ?? '');
+		$domain = strtolower((string)($p['domain'] ?? ''));
+		$port = (int)($p['port'] ?? 0);
+		$release = (string)($p['release'] ?? '');
+		$copy_of = (int)($p['copy_of'] ?? 0);
+		$copy_key = (string)($p['copy_of_key'] ?? '');
+		$memory = (string)($p['memory'] ?? '');
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will install.");
+		}
+		if (!preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
+			throw new Exception("'" . $domain . "' is not a domain a copy can be installed for.");
+		}
+		if ($port < 1024 || $port > 65000) {
+			throw new Exception('A copy\'s container needs a port on its host (1024 to 65000), not ' . $port . '.');
+		}
+		if (!preg_match('/^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$/', $release)) {
+			throw new Exception('A copy is installed at its source\'s exact release (X.Y.Z), not \'' . $release . '\'.');
+		}
+		if ($copy_of <= 0) {
+			throw new Exception('A copy needs the node id of the site it copies.');
+		}
+		if (!preg_match('#^[A-Za-z0-9+/]{43}=$#', $copy_key)) {
+			throw new Exception('A copy needs its source\'s agent public key, which its install records to check every vouch by.');
+		}
+		if ($memory !== '' && !preg_match('/^[1-9][0-9]{0,5}[mg]$/', $memory)) {
+			throw new Exception("'" . $memory . "' is not a memory limit the host will set (a number and m or g).");
+		}
+		$params = ['name' => $name, 'domain' => $domain, 'port' => $port, 'release' => $release,
+			'copy_of' => $copy_of, 'copy_of_key' => $copy_key];
+		if ($memory !== '') { $params['memory'] = $memory; }
+		return ['primitive' => 'site_install', 'params' => $params];
+	}
+
+	/**
+	 * The host's half of one of its site containers' quiet state
+	 * (specs/site_container_engine.md D9): on, for a switch-over, holds every
+	 * account but the site's root off the network from outside; off lifts it,
+	 * a dormant copy's included, and the host refuses while the site still
+	 * says it is quiet. A copy's own record is its install's, never this
+	 * word's. Addressed to the HOST's own agent.
+	 */
+	public static function build_site_quiet_host($host_node, $name, $action, $reason = '') {
+		if (!self::has_primitive($host_node, 'site_quiet_host')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot hold a site container quiet. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['site_quiet_host']));
+		}
+		return self::build_site_quiet_host_primitive($name, $action, $reason);
+	}
+
+	/**
+	 * Remove a dormant copy from its host (specs/site_container_engine.md D9):
+	 * the host refuses unless it records the site as a copy, which only the
+	 * copy's install writes. Addressed to the HOST's own agent.
+	 */
+	public static function build_discard_copy($host_node, $name) {
+		if (!self::has_primitive($host_node, 'discard_copy')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot remove a dormant copy. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['discard_copy']));
+		}
+		return self::build_discard_copy_primitive($name);
+	}
+
+	public static function build_discard_copy_primitive($name) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will discard.");
+		}
+		return ['primitive' => 'discard_copy', 'params' => ['name' => $name]];
+	}
+
+	public static function build_site_quiet_host_primitive($name, $action, $reason = '') {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a container name the host will accept.");
+		}
+		if ($action === 'on') {
+			if ($reason !== 'switchover') {
+				throw new Exception('A site is held quiet by its host for a switch-over, not \'' . $reason . '\'; a copy is quiet from its install.');
+			}
+			return ['primitive' => 'site_quiet_host', 'params' => ['action' => 'on', 'name' => $name, 'reason' => $reason]];
+		}
+		if ($action !== 'off' || $reason !== '') {
+			throw new Exception('A site\'s quiet is held with on and a reason, or lifted with off alone.');
+		}
+		return ['primitive' => 'site_quiet_host', 'params' => ['action' => 'off', 'name' => $name]];
 	}
 
 	/**

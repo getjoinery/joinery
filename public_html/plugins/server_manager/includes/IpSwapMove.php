@@ -36,6 +36,9 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.6 - swapping back records the AAAA record still at the copy as aaaa_left (its domain and both IPv6
+ *                addresses), and aaaa_note() asks DNS each time it is shown, so one the owner has pointed back is
+ *                no longer named (B66)
  * @version 1.5 - a copy enrolled here opens by itself from the moment this management node holds its key, as its
  *                node page says, not from its next host report (B62)
  * @version 1.4 - swapping back notes a site AAAA record still naming the copy's IPv6, which no swap moves back (B61);
@@ -371,22 +374,40 @@ class IpSwapMove {
 		}
 		self::follow_records($plan, $want);
 		// IPv6 addresses never move: a record the owner pointed at the copy's
-		// before switching still sends IPv6 visitors there (B61).
-		$state['notes'] = array();
-		$c_v6 = (string)($plan['copy']['ipv6'] ?? '');
-		$domain = (string)($plan['domain'] ?? '');
-		if ($back && $c_v6 !== '' && $domain !== '') {
-			foreach (self::aaaa($domain) as $a) {
-				if (@inet_pton($a) === @inet_pton($c_v6)) {
-					$s_v6 = (string)($plan['source']['ipv6'] ?? '');
-					$state['notes'][] = "{$domain} has an AAAA record for the copy's IPv6 address {$c_v6}, which did not move back: "
-						. 'IPv6 visitors still reach the copy. Point it at the site\'s server' . ($s_v6 !== '' ? " ({$s_v6})" : '')
-						. ', or remove it.';
-					break;
-				}
+		// before switching still sends IPv6 visitors there (B61). Recorded as
+		// what it is, so it is named only while DNS still says so (B66).
+		$state['aaaa_left'] = null;
+		if ($back) {
+			$left = array('domain' => (string)($plan['domain'] ?? ''), 'copy_ipv6' => (string)($plan['copy']['ipv6'] ?? ''),
+				'source_ipv6' => (string)($plan['source']['ipv6'] ?? ''));
+			if (self::aaaa_note($left) !== '') {
+				$state['aaaa_left'] = $left;
 			}
 		}
 		return 'done';
+	}
+
+	/**
+	 * What to tell the owner about a site AAAA record left at the copy's IPv6
+	 * ($left: domain, copy_ipv6, source_ipv6, as a swap back records it), or ''
+	 * when DNS no longer names it. Asked each time: the owner fixes the record
+	 * at their DNS provider, which tells us nothing.
+	 */
+	public static function aaaa_note($left): string {
+		$domain = is_array($left) ? (string)($left['domain'] ?? '') : '';
+		$c_v6 = is_array($left) ? (string)($left['copy_ipv6'] ?? '') : '';
+		if ($domain === '' || $c_v6 === '' || @inet_pton($c_v6) === false) {
+			return '';
+		}
+		foreach (self::aaaa($domain) as $a) {
+			if (@inet_pton($a) === @inet_pton($c_v6)) {
+				$s_v6 = (string)($left['source_ipv6'] ?? '');
+				return "{$domain} has an AAAA record for the copy's IPv6 address {$c_v6}, which did not move back: "
+					. 'IPv6 visitors still reach the copy. Point it at the site\'s server' . ($s_v6 !== '' ? " ({$s_v6})" : '')
+					. ', or remove it.';
+			}
+		}
+		return '';
 	}
 
 	/** Do the provider's records put each address on the instance wanted? */

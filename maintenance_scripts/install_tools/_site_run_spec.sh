@@ -3,6 +3,11 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.14 - a site its host holds quiet (site_quiet_host.sh's record: a dormant copy, or a source
+#                 frozen for a switch-over) is never rebuilt: run_spec_quiet_refusal, which run_spec_args
+#                 asks first and each rebuild asks before it changes anything. On the site container
+#                 engine every site is started with the io.joinery.site annotation, which names it to
+#                 the engine's quiet hook (specs/site_container_engine.md D9).
 # Version: 1.13 - the missing-helper fallback names images as the helper does (site_engine_image). On the
 #                 site container engine a spec that publishes the site's database (5432) on any address
 #                 but loopback runs no site: no DOCKER-USER chain there drops it (WP3).
@@ -719,8 +724,21 @@ run_spec_idblock_claim_clear() {  # SITE
 # caller's. A spec that fails its own check, or was written by a newer format,
 # gives nothing and returns 1. The network the spec names exists, as the spec
 # says, by the time this returns.
+# A site its host holds quiet (site_quiet_host.sh: a dormant copy, or a source
+# frozen for a switch-over) keeps its own state in its container's layer, so it
+# is never rebuilt: a new container would start as a live site. 0 = refused
+# (said why), 1 = free to rebuild.
+run_spec_quiet_refusal() {  # SITE
+    local f
+    f="$(run_spec_root)/etc/joinery/sites/$1/quiet"
+    [[ -e "$f" || -L "$f" ]] || return 1
+    echo "run spec: $1 is quiet on this host (${f#"$(run_spec_root)"}): a dormant copy, or a source frozen for a switch-over, keeps its own state in its container, so it is never rebuilt. Discard the copy or finish the switch-over first; nothing was changed" >&2
+    return 0
+}
+
 run_spec_args() {  # SITE
     local site="$1" p v
+    run_spec_quiet_refusal "$site" && return 1
     p="$(run_spec_path "$site")" || return 1
     run_spec_check_file "$p" || return 1
     run_spec_fits_host "$p" || return 1
@@ -766,7 +784,8 @@ run_spec_args() {  # SITE
         # in the container's network, which Docker sets by itself and Apache
         # needs with the six capabilities above (D5).
         printf '%s\0' --uidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" --gidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" \
-            --sysctl net.ipv4.ip_unprivileged_port_start=0 --security-opt "seccomp=${RUN_SPEC_SITE_SECCOMP}"
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 --security-opt "seccomp=${RUN_SPEC_SITE_SECCOMP}" \
+            --annotation "io.joinery.site=${site}"
     fi
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -v "$v"; done < <(run_spec_list "$site" volume)

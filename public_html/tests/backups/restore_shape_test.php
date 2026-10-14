@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/sysadmin_tools/restore_project.sh, maintenance_scripts/sysadmin_tools/restore_chain.sh]
  */
 /**
  * A backup is supposed to rebuild a site anywhere. It could not: put a backup

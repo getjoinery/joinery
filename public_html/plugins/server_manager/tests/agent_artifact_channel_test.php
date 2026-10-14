@@ -265,8 +265,8 @@ check(AgentChannelEndpoint::validation_error(
 	'and a deployment file is accepted');
 
 $kinds = AgentChannelEndpoint::ARTIFACT_KINDS;
-check($kinds === ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body', 'release_manifest', 'release_file'],
-	'the artifact kinds are exactly the seven the agent asks for',
+check($kinds === ['agent_manifest', 'agent_binary', 'agent_statement', 'bundle_manifest', 'bundle_body', 'release_manifest', 'release_file', 'release_archive'],
+	'the artifact kinds are exactly the eight the agent asks for',
 	'the agent and the plane agree by convention here, the way the primitive vocabulary does; '
 	. 'a kind on one side and not the other is a request that silently 400s: ' . implode(',', $kinds));
 // Where the agent's source is on this box, its compiled-in list is read and
