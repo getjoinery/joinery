@@ -1,6 +1,7 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.14.0 — /manifest.webmanifest: the site's web app manifest (views/manifest.php).
 // @version 1.13.0 — Thunderbird autoconfig paths route to the mail_apps plugin while it is active.
 // @version 1.12.0 — an offloaded file streams from the file store its record names (specs/storage_targets.md WP6).
 // @version 1.11.0 — /plugins/{plugin}/admin/* 404s while the plugin is inactive, like every other /plugins/* path.
@@ -176,6 +177,7 @@ $routes = [
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],
         '/sitemap.xml' => ['view' => 'views/sitemap'],
+        '/manifest.webmanifest' => ['view' => 'views/manifest', 'valid_page' => false],
         '/index' => ['view' => 'views/index'],
         '/register' => ['view' => 'views/register'],
         

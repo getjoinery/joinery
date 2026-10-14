@@ -12,7 +12,7 @@ A member who turns push on in a browser sees their notifications on that compute
 
 Below, the **Push to my browsers** list has one box per event, ticked wherever the event itself is on. Signing out of a browser turns push off in it.
 
-iPhone and iPad Safari only allow push for a site added to the Home Screen and opened from there; the box says so in a browser that cannot receive push.
+iPhone and iPad Safari only allow push for a site added to the Home Screen and opened from there; the box says so in a browser that cannot receive push. The site's web app manifest (`display: standalone`) is what makes the Home Screen icon open as its own app, named after the site, rather than as a Safari bookmark.
 
 ## Pieces
 
@@ -24,6 +24,7 @@ iPhone and iPad Safari only allow push for a site added to the Home Screen and o
 | Sender | `includes/PushSender.php` | Who gets what, the content rule, sending, and the one cleanup path. |
 | Service worker | `/service-worker.js` (served from the site root by a static route in `serve.php`) | Shows the notification and opens its link on click, focusing a tab already on the site. |
 | Page script | `assets/js/joinery-push.js`, rendered by `PushPanel::html()` | The box above. |
+| Web app manifest | `/manifest.webmanifest` (`views/manifest.php`, routed in `serve.php`), linked from every page by `PublicPageBase::global_includes_top()` | Names the site and opens it standalone at `/` when launched from a Home Screen. |
 
 Nothing sends for a kind with no driver; core ships the `web` driver. A phone driver registers itself with `PushSender::register_driver()`.
 

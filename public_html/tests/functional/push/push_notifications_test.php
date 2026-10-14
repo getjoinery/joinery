@@ -27,11 +27,13 @@
  *    retires only that browser; an app key's destinations go with the key;
  *  - Notify pushes what it puts in the bell, unless push is unticked for the
  *    signal, and a payload marked push_protected is pushed generic;
- *  - the four browser actions work for the signed-in member only.
+ *  - the four browser actions work for the signed-in member only;
+ *  - the site has a standalone web app manifest, linked from every page (an
+ *    iPhone allows push only to a Home Screen app).
  *
  * Run: php tests/run.php test-db --filter=push_notifications
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../lib/harness.php');
@@ -390,6 +392,20 @@ try {
 
 	unset($_SESSION['usr_user_id'], $_SESSION['loggedin']);
 	check((bool)push_config_logic(array())->error, 'signed out, the actions refuse');
+
+	// ------------------------------------------------------------------
+	section('The Home Screen app');
+
+	// An iPhone opens a Home Screen site as its own app, the only place it
+	// allows push, only when the site's manifest says standalone.
+	ob_start();
+	include PathHelper::getIncludePath('views/manifest.php');
+	$manifest = json_decode((string)ob_get_clean(), true);
+	check(is_array($manifest) && ($manifest['display'] ?? '') === 'standalone' && ($manifest['start_url'] ?? '') === '/'
+		&& ($manifest['name'] ?? '') !== '', 'the manifest names the site and opens standalone at /', json_encode($manifest));
+	check(strpos((string)file_get_contents(PathHelper::getIncludePath('serve.php')), "'/manifest.webmanifest' => ['view' => 'views/manifest'") !== false
+		&& strpos((string)file_get_contents(PathHelper::getIncludePath('includes/PublicPageBase.php')), '<link rel="manifest" href="/manifest.webmanifest">') !== false,
+		'it is routed, and every page links it');
 } catch (\Throwable $e) {
 	check(false, 'suite ran without an exception', get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 }
