@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.17.0 - plugins declare their own origin tags (plugin.json "fileSources", FileSourceDeclarations);
+ * @version 1.18.0 - bytes_present(): whether this file's bytes are anywhere to serve; a thumbnail of a
+ *                   file without them is its type icon, never a broken image
+ * @changelog 1.17.0 - plugins declare their own origin tags (plugin.json "fileSources", FileSourceDeclarations);
  *                   source_catalog() merges them over core_source_catalog(). The mailbox, messenger,
  *                   joinery_ai, bug_reports and boards tags moved to their plugins
  *                   (specs/community_shared_components.md C6a)
@@ -711,6 +713,22 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * Are this file's bytes anywhere to serve? A record can outlive its bytes —
+	 * a site copied with its database but not its files, a legacy row never
+	 * given a blob — and then every link to it is a 404. A cloud blob counts as
+	 * present (its store holds it; asking the bucket per call would cost a round
+	 * trip); a local one, or a blob-less row, is present when its original is on
+	 * disk. One stat, cheap enough for a listing.
+	 */
+	function bytes_present(): bool {
+		if ($this->storage_driver() === 'cloud') {
+			return true;
+		}
+		$path = $this->get_filesystem_path('original');
+		return $path !== '' && $path !== null && is_file($path);
+	}
+
+	/**
 	 * This file's storage driver ('local' | 'cloud'), read from its blob. Null
 	 * when the file has no blob. The serving path and cloud-aware consumers
 	 * branch on this instead of a former fil_files column.
@@ -865,7 +883,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		$icon  = htmlspecialchars($this->type_icon_url());
 		$class = $css_class !== '' ? ' class="' . htmlspecialchars($css_class) . '"' : '';
 
-		if (!$this->is_image()) {
+		if (!$this->is_image() || !$this->bytes_present()) {
 			// Carries jy-thumb-icon from the start: it is already the icon, and
 			// an icon should look the same however it got on the page.
 			$icon_class = trim($css_class . ' jy-thumb-icon');

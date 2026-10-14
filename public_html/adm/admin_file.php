@@ -23,12 +23,21 @@
 	);
 	?>
 
+	<?php $bytes_present = $file->bytes_present(); ?>
+	<?php if(!$bytes_present): ?>
+	<div class="alert alert-warning mb-3">
+		<strong>This file's bytes are missing.</strong> The record is here, but there is nothing stored
+		to show or download, so every link to it answers 404. If you still have the file, upload it as a new
+		file and use that one; then delete this record (Actions).
+	</div>
+	<?php endif; ?>
+
 	<!-- Two Column Layout -->
 	<div class="row g-3">
 		<!-- Left Column -->
 		<div class="col-xxl-6">
 			<!-- File Preview Card (for images) -->
-			<?php if($file->is_image()): ?>
+			<?php if($file->is_image() && $bytes_present): ?>
 			<div class="card mb-3">
 				<div class="card-header bg-body-tertiary">
 					<h5 class="mb-0">File Preview</h5>
@@ -59,18 +68,16 @@
 								<td class="p-1 text-800 fw-semi-bold">Filename</td>
 								<td class="p-1 text-600"><code><?php echo htmlspecialchars($file->get('fil_name')); ?></code></td>
 							</tr>
-							<?php if($file->get('fil_mime_type')): ?>
+							<?php if($file->get('fil_type')): ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">File Type</td>
-								<td class="p-1"><span class="badge badge-subtle-info"><?php echo htmlspecialchars($file->get('fil_mime_type')); ?></span></td>
+								<td class="p-1"><span class="badge badge-subtle-info"><?php echo htmlspecialchars($file->get('fil_type')); ?></span></td>
 							</tr>
 							<?php endif; ?>
-							<?php if($file->get('fil_size')): ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">File Size</td>
-								<td class="p-1 text-600"><?php echo LibraryFunctions::format_bytes($file->get('fil_size')); ?></td>
+								<td class="p-1 text-600"><?php echo $bytes_present ? LibraryFunctions::format_bytes($file->size_bytes()) : 'Missing'; ?></td>
 							</tr>
-							<?php endif; ?>
 							<?php if($file->get('fil_description')): ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Description</td>
@@ -79,7 +86,7 @@
 							<?php endif; ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploader</td>
-								<td class="p-1 text-600"><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?></a></td>
+								<td class="p-1 text-600"><?php if($user): ?><a href="/admin/admin_user?usr_user_id=<?php echo $user->key; ?>"><?php echo htmlspecialchars($user->display_name()); ?></a><?php else: ?>—<?php endif; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploaded</td>

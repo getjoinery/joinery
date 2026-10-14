@@ -127,13 +127,7 @@ class ForumView {
 
 	/** A byte count people read ("2.4 MB"). */
 	public static function size(int $bytes): string {
-		if ($bytes >= 1048576) {
-			return round($bytes / 1048576, 1) . ' MB';
-		}
-		if ($bytes >= 1024) {
-			return round($bytes / 1024) . ' KB';
-		}
-		return $bytes . ' bytes';
+		return LibraryFunctions::format_bytes($bytes);
 	}
 
 	/**

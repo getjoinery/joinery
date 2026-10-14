@@ -194,6 +194,9 @@
 		if($file->get('fil_delete_time')){
 			$deleted = 'DELETED';
 		}
+		elseif(!$file->bytes_present()){
+			$deleted = '<span class="badge badge-warning" title="The record has no stored bytes: open it to upload again or delete">Missing</span>';
+		}
 		// Not every file has an owner: legacy rows predate the column being filled,
 		// and loading a User with no key throws. Ask before constructing — an
 		// unowned file is a row to render, not a page to lose.
