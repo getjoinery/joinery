@@ -5,7 +5,7 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
- * @version 1.3
+ * @version 1.4 - every_run reads every minute, and the suggested cron line fires every minute, as the installers write it
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -39,14 +39,14 @@ foreach ($day_labels as $num => $label) {
 
 // Frequency options
 $frequency_options = array(
-	'every_run' => 'Every 15 minutes (every cron run)',
+	'every_run' => 'Every minute (every cron run)',
 	'hourly' => 'Hourly',
 	'daily' => 'Daily',
 	'weekly' => 'Weekly',
 );
 
 $frequency_labels = array(
-	'every_run' => 'Every 15 min',
+	'every_run' => 'Every minute',
 	'hourly' => 'Hourly',
 	'daily' => 'Daily',
 	'weekly' => 'Weekly',
@@ -61,7 +61,7 @@ if (!$cron_is_active) {
 	$tasks_script  = '/var/www/html/' . $site_template . '/public_html/utils/process_scheduled_tasks.php';
 	$tasks_log     = '/var/www/html/' . $site_template . '/logs/cron_scheduled_tasks.log';
 	$cron_d_file   = '/etc/cron.d/joinery-' . $site_template;
-	$cron_line_with_user = htmlspecialchars('*/15 * * * * www-data php ' . $tasks_script . ' >> ' . $tasks_log . ' 2>&1');
+	$cron_line_with_user = htmlspecialchars('* * * * * www-data php ' . $tasks_script . ' >> ' . $tasks_log . ' 2>&1');
 
 	echo '<div style="border: 2px solid #856404; padding: 15px; margin-bottom: 20px; background-color: #fff3cd; color: #856404; border-radius: 4px;">';
 	echo '<strong>Cron Not Detected</strong> — ';
@@ -70,7 +70,7 @@ if (!$cron_is_active) {
 	} else {
 		echo 'The cron runner has never executed. ';
 	}
-	echo 'A cron job must run every 15 minutes to process scheduled tasks.';
+	echo 'A cron job must run every minute to process scheduled tasks.';
 
 	if ($is_docker) {
 		echo '<p style="margin-top: 12px; margin-bottom: 4px;">This server appears to be running in a <strong>Docker container</strong>. Ensure the <code>cron</code> package is installed and the daemon is running, then create <code>' . htmlspecialchars($cron_d_file) . '</code> with:</p>';
@@ -136,7 +136,7 @@ if (empty($active_tasks)) {
 		}
 
 		if ($frequency === 'every_run') {
-			$schedule_display = 'Every 15 min';
+			$schedule_display = 'Every minute';
 		} elseif ($frequency === 'hourly') {
 			$schedule_display = 'Hourly';
 		} elseif ($frequency === 'weekly' && $dow !== null && $dow !== '') {

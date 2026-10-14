@@ -688,6 +688,9 @@
 		// Show summary of warnings and errors
 		if (!empty($all_warnings)) {
 			echo "⚠️  " . count($all_warnings) . " warning(s) occurred (not blocking success)<br>\n";
+			foreach ($all_warnings as $warning) {
+				echo "  • " . htmlspecialchars($warning) . "<br>\n";
+			}
 		}
 		if (!empty($all_errors)) {
 			echo "❗ " . count($all_errors) . " error(s) occurred<br>\n";
