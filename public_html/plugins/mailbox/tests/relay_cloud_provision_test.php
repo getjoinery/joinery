@@ -87,6 +87,8 @@ class RelayCloudProvisionTest {
 			$this->testCreateCarriesFirstBoot();
 			$this->testCreateFails();
 			$this->testTransientRetries();
+			$this->testOneWorkerCreates();
+			$this->testInterruptedCreateFails();
 			$this->testBootTimeout();
 			$this->testBirthTimeout();
 			$this->testUpdateDrainsThenReimages();
@@ -175,6 +177,39 @@ class RelayCloudProvisionTest {
 		check((string)$run->get('rcl_status') === 'ready', '5xx stays put for the next tick');
 		check((string)$run->get('rcl_sealed_token') !== '', 'provider token kept while the run is live');
 		check(strpos((string)$run->get('rcl_error'), 'Transient') === 0, 'the transient reason is recorded');
+	}
+
+	private function testOneWorkerCreates() {
+		section('two workers find the run ready: one creates, the other leaves it alone');
+		if (!$this->bundleAvailable()) { harness_skip('one worker creates', 'no bundle'); return; }
+		$this->driver = new RcpFakeDriver();
+		$this->driver->boot_sequence = array('provisioning');
+		$run = $this->makeRun();
+		$stale = new RelayCloudProvision(intval($run->key), TRUE); // the other worker's copy, read while ready
+		(new RelayCloudProvisioner())->advance($run);
+		check((string)$run->get('rcl_status') === 'booting' && count($this->driver->instances) === 1, 'the first creates one server');
+		$said = (new RelayCloudProvisioner())->advanceCheap($stale);
+		$now = new RelayCloudProvision(intval($run->key), TRUE);
+		check(count($this->driver->instances) === 1 && strpos($said, 'another worker') !== false,
+			'the second creates nothing', $said);
+		check((string)$now->get('rcl_status') === 'booting' && (string)$now->get('rcl_instance_id') === 'fake-1'
+			&& (string)$now->get('rcl_sealed_token') !== '', '  and the run still names the first server, its token kept');
+	}
+
+	private function testInterruptedCreateFails() {
+		section('a create interrupted part-way fails, naming the server to look for');
+		$this->driver = new RcpFakeDriver();
+		$run = $this->makeRun();
+		check($run->claimForCreate() && (string)$run->get('rcl_status') === 'creating', 'the claim moves ready to creating');
+		check(!(new RelayCloudProvision(intval($run->key), TRUE))->claimForCreate(), '  and a second claim fails');
+		$p = new RelayCloudProvisioner();
+		check($p->advance($run) === 'the instance is being created', 'a fresh claim is left to its worker');
+		$this->age($run, RelayCloudProvisioner::CREATE_CLAIM_MINUTES * 60 + 60);
+		$p->advance($run);
+		check((string)$run->get('rcl_status') === 'failed'
+			&& strpos((string)$run->get('rcl_error'), RelayCloudProvisioner::instanceLabel('mx.rcp-test.example', intval($run->key))) !== false,
+			'a stale claim fails, naming the label', (string)$run->get('rcl_error'));
+		check(count($this->driver->instances) === 0, '  and nothing is created');
 	}
 
 	private function testBootTimeout() {

@@ -594,6 +594,7 @@ function mailbox_relay_section_render($page, array $v): void {
 		$run_status = $run ? (string)$run->get('rcl_status') : '';
 		$status_lines = array(
 			'ready'          => 'Creating the server in your account…',
+			'creating'       => 'Creating the server in your account…',
 			'draining'       => 'Emptying the relay\'s spool before it is re-imaged…',
 			'rebuilding'     => 'Re-imaging the relay from the current release…',
 			'booting'        => 'Server created in your account — waiting for it to boot…',

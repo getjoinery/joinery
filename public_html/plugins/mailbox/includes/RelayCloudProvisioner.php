@@ -120,6 +120,8 @@ class RelayCloudProvisioner {
 				// An upgrade has an instance already; what it needs first is for
 				// the relay to be empty, because the wipe takes the spool with it.
 				return $run->isUpgrade() ? $this->handleDraining($run) : $this->handleReady($run);
+			case 'creating':
+				return $this->awaitCreate($run);
 			case 'draining':
 				return $this->handleDraining($run);
 			case 'rebuilding':
@@ -179,6 +181,11 @@ class RelayCloudProvisioner {
 	 * machine, and never will.
 	 */
 	private function handleReady(RelayCloudProvision $run): string {
+		// One worker creates the instance: the page load's cheap advance and the
+		// scheduled task can both find the run ready at once.
+		if (!$run->claimForCreate()) {
+			return 'another worker is creating the instance';
+		}
 		try {
 			$first_boot = $this->prepareFirstBoot($run);
 		} catch (\Throwable $e) {
@@ -198,7 +205,13 @@ class RelayCloudProvisioner {
 			);
 			$instance = $driver->createInstance($opts + $this->firstBootOptions($driver, (string)$run->get('rcl_region'), $first_boot));
 		} catch (CloudComputeException $e) {
-			return $this->handleComputeFailure($run, $e, 'create');
+			$said = $this->handleComputeFailure($run, $e, 'create');
+			if ((string)$run->get('rcl_status') === 'creating') {
+				// Transient: nothing was created, so the run is ready again for the next try.
+				$run->set('rcl_status', 'ready');
+				$run->save();
+			}
+			return $said;
 		}
 
 		$run->set('rcl_instance_id', (string)$instance['id']);
@@ -473,6 +486,26 @@ class RelayCloudProvisioner {
 		$run->set('rcl_status', 'provisioning');
 		$run->save();
 		return 'boot complete - waiting for the relay to build itself and report in';
+	}
+
+	/**
+	 * A run left in creating: its worker is creating the instance, or stopped
+	 * part-way (a killed process). After CREATE_CLAIM_MINUTES it is failed,
+	 * naming the label to look for, rather than guessed at: a create that
+	 * reached the provider before the worker stopped is a server only the
+	 * provider knows of, and a second create would be a second server.
+	 */
+	const CREATE_CLAIM_MINUTES = 15;
+
+	private function awaitCreate(RelayCloudProvision $run): string {
+		$since = strtotime((string)$run->get('rcl_update_time') . ' UTC');
+		if ($since !== false && time() - $since < self::CREATE_CLAIM_MINUTES * 60) {
+			return 'the instance is being created';
+		}
+		$run->fail('Creating the relay\'s server was interrupted. Look in the provider account for a server labelled '
+			. self::instanceLabel((string)$run->get('rcl_mail_hostname'), intval($run->key))
+			. ' and delete it if it is there, then start again.');
+		return 'create interrupted - failed';
 	}
 
 	/**
