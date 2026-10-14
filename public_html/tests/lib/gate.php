@@ -27,7 +27,8 @@
  *
  *   Reuse. A recorded result is valid for the current tree when the suite's
  *   reach is complete (the files its process loaded plus its covers globs),
- *   the result is a pass or a fail (not a skip, crash or timeout), the debug
+ *   the result is a pass (a fail is re-proven first-hand: rerunning a red
+ *   suite alone is how a flaky one is told from a real one), the debug
  *   environment matches, and none of the files that reach names differ
  *   between the record's tree and this one — one `git diff-tree` per record
  *   answers that for every suite at once. The decision reuses the --changed
@@ -41,6 +42,9 @@
  *
  * @version 1.0 - lock, holder, run records, reuse (specs/gate_lock_and_shared_results.md)
  */
+
+require_once(__DIR__ . '/discovery.php'); // harness_rel()
+require_once(__DIR__ . '/coverage.php');  // coverage_select(): the reuse decision is the --changed selection
 
 /** A run selecting at most this many suites runs at once, beside whatever
  *  holds the gate: a --only, a narrow --filter, a --changed that reaches
@@ -346,7 +350,8 @@ function gate_reach_complete(array $r, array $meta) {
  */
 function gate_reuse_refusal(array $result, array $meta, $rel, array $changed, $debug_env_matches) {
 	if (empty($result['reach_complete'])) return 'reach not complete';
-	if (!in_array($result['status'] ?? '', array('pass', 'fail'), true)) return 'not a pass or fail';
+	if (($result['status'] ?? '') === 'fail') return 'a fail is never borrowed; it is re-proven here';
+	if (($result['status'] ?? '') !== 'pass') return 'not a pass';
 	if (!$debug_env_matches) return 'different debug environment';
 	$key = 'public_html/' . ltrim($rel, '/');
 	$entry = array('files' => array_values($result['files'] ?? array()), 'covers' => array_values($result['covers'] ?? array()));
@@ -360,10 +365,13 @@ function gate_reuse_refusal(array $result, array $meta, $rel, array $changed, $d
  * Decide reuse for a selection. $to_run: discovered records [{path, meta}];
  * $records: gate_records_load(); $my_tree: gate_tree_id(). Returns
  * [rel path => result with reused_from]. Every record is diffed at most once,
- * and only while a selected suite is still undecided.
+ * and only while a selected suite is still undecided. $why collects, for each
+ * suite NOT borrowed, the refusal from the newest record that had it, so the
+ * summary can say what blocked reuse (usually one widely loaded file).
  */
-function gate_reuse_plan(array $to_run, array $records, $my_tree, $site_root, $root, $debug_on) {
+function gate_reuse_plan(array $to_run, array $records, $my_tree, $site_root, $root, $debug_on, &$why = null) {
 	$reused = array();
+	if (!is_array($why)) $why = array();
 	if ($my_tree === null || !$records) return $reused;
 	$pending = array();
 	foreach ($to_run as $d) $pending[harness_rel($d['path'], $root)] = $d['meta'];
@@ -375,7 +383,9 @@ function gate_reuse_plan(array $to_run, array $records, $my_tree, $site_root, $r
 		if ($changed === null) continue;
 		$debug_matches = (bool)($run['debug_env'] ?? false) === (bool)$debug_on;
 		foreach ($wanted as $rel => $r) {
-			if (gate_reuse_refusal($r, $pending[$rel], $rel, $changed, $debug_matches) !== '') continue;
+			$refusal = gate_reuse_refusal($r, $pending[$rel], $rel, $changed, $debug_matches);
+			if ($refusal !== '') { if (!isset($why[$rel])) $why[$rel] = $refusal; continue; }
+			unset($why[$rel]);
 			$r['reused_from'] = array(
 				'run_id' => $run['run_id'], 'started' => $run['started'] ?? '',
 				'holder' => gate_holder_describe($run),
