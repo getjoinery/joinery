@@ -5,6 +5,8 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.8 - preserveReason() asks SandboxPlugins only where the running core has it; on a core
+ *                from before it, the self-updated copy of this file fataled mid-upgrade
  * @version 1.7 - servesReleases(): a site other sites upgrade from, which takes every package its source
  *                publishes (utils/upgrade.php 1.19)
  * @version 1.6 - preserveReason(): a sandboxed plugin folder is always kept (SandboxPlugins); no release ships one
@@ -1356,7 +1358,10 @@ class DeploymentHelper {
         }
         // A sandboxed plugin is never shipped in a release; one of the same
         // name in a release is someone else's, and does not replace it.
-        if (SandboxPlugins::isSandboxedDir($live_path)) {
+        // SandboxPlugins is core and does not self-update with this file: a
+        // site whose core predates it has no such class and no sandboxed
+        // plugin either.
+        if (class_exists('SandboxPlugins') && SandboxPlugins::isSandboxedDir($live_path)) {
             return 'sandboxed plugin (never shipped by a release)';
         }
         $flag = function ($dir) use ($manifest_filename) {
