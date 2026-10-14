@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.6.1 - config/admin_credentials.txt joins the root-only files an unprivileged run leaves out,
+#                  and says: _site_init.sh writes it 600 root:root, so a container site's own backup
+#                  (the web user, no sudo in the container) failed on it at every run
+#                  (multi_tenant_host_hardening live checks, 2026-10-14)
 # Version: 1.6.0 - a whole-tree archive leaves out the upgrade's own trees too (public_html_*, upgrades/,
 #                  upgrade_archives/, uploads/upgrades/, deploy/), as the data part does.
 #                  vendor/ is left out at the site root only: public_html/assets/vendor and a plugin's own
@@ -370,21 +374,24 @@ if [ -n "$SNAR" ]; then
     TAR_ARGS+=(--listed-incremental="$SNAR" --no-check-device)
 fi
 
-# The signing keys on a publishing box are readable by root only, on purpose:
-# the web user must never be able to sign code (agent_signing_key,
-# specs/agent_local_queue_retirement.md, "G1 — decided") or a release
-# statement (release_statement_key, release_transparency). An unprivileged run
-# therefore cannot carry them, and that is not the silent partial backup the
-# doctrine forbids — each is one named file, left out on purpose and said out
-# loud. The root-run manager backup of this same box carries them. Any other
-# unreadable file still fails the run.
-ROOT_ONLY_KEYS=(agent_signing_key release_statement_key)
+# Some config/ files are readable by root only, on purpose: the signing keys on a
+# publishing box, because the web user must never be able to sign code
+# (agent_signing_key, specs/agent_local_queue_retirement.md, "G1 — decided") or
+# a release statement (release_statement_key, release_transparency); and the
+# first-login password _site_init.sh leaves for the operator
+# (admin_credentials.txt, 600 root:root, which stays on the node). An
+# unprivileged run, a container site's own backup among them, therefore cannot
+# carry them, and that is not the silent partial backup the doctrine forbids —
+# each is one named file, left out on purpose and said out loud. The root-run
+# manager backup of this same site carries them. Any other unreadable file
+# still fails the run.
+ROOT_ONLY_FILES=(agent_signing_key release_statement_key admin_credentials.txt)
 if [ "$(id -u)" -ne 0 ]; then
-    for KEY_NAME in "${ROOT_ONLY_KEYS[@]}"; do
-        KEY_PATH="${PROJECT_DIR}/config/${KEY_NAME}"
-        if [ -e "$KEY_PATH" ] && [ ! -r "$KEY_PATH" ]; then
-            print_warning "config/${KEY_NAME} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
-            TAR_ARGS+=(--exclude="$KEY_NAME")
+    for FILE_NAME in "${ROOT_ONLY_FILES[@]}"; do
+        FILE_PATH="${PROJECT_DIR}/config/${FILE_NAME}"
+        if [ -e "$FILE_PATH" ] && [ ! -r "$FILE_PATH" ]; then
+            print_warning "config/${FILE_NAME} is root-only and this run is not root: left out of this archive (the root-run manager backup carries it)"
+            TAR_ARGS+=(--exclude="$FILE_NAME")
         fi
     done
 fi

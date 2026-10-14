@@ -249,7 +249,7 @@ chk "a Docker host with no sites made multi-tenant gives the data-root its proje
 chk "a host Docker is already on, asked for a data root, is refused" "$(grep -c 'data-root must be made before Docker is installed' "$INSTALL")" "1"
 chk "site --disk is refused where it cannot hold (can-cap)" "$(grep -c 'docker_disk_pool.sh" can-cap >/dev/null 2>&1; then' "$INSTALL")" "1"
 chk "the allowance is set once the volumes exist, after the container runs" \
-    "$(awk '/docker run -d "\$\{RUN_ARGS\[@\]\}"/ { r = NR } /docker_disk_pool.sh" allow/ { a = NR } END { print (r && a > r) ? "yes" : "no" }' "$INSTALL")" "yes"
+    "$(awk '/site_engine run -d "\$\{RUN_ARGS\[@\]\}"/ { r = NR } /docker_disk_pool.sh" allow/ { a = NR } END { print (r && a > r) ? "yes" : "no" }' "$INSTALL")" "yes"
 . "$TOOLS/_site_run_spec.sh"
 chk "the run spec takes disk= and checks it" "$(run_spec_check_line disk=4G && echo ok)|$(run_spec_check_line disk=4.5G || echo refused)" "ok|refused"
 mkdir -p "$T/rs/etc/joinery/sites/capped"

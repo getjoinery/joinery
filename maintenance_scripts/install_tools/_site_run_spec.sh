@@ -3,6 +3,15 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.11 - A host whose sites run on the site container engine (our own Podman build,
+#                 specs/site_container_engine.md WP2): every container command goes through
+#                 site_engine (_site_engine.sh); each site owns an id block, idblock=N, picked
+#                 under the network lock and held by a claim file until the spec is written, and
+#                 run with --uidmap/--gidmap from it and ip_unprivileged_port_start=0 (Docker sets
+#                 that by itself); networks are made --disable-dns with the bridge named, and read
+#                 in Podman's form; the CPU count and the remap check read Podman's; every site
+#                 runs under RUN_SPEC_SITE_SECCOMP (Docker's own default filter), and none runs
+#                 without it; adopt is Docker's alone. A Docker host's arguments and networks are as they were.
 # Version: 1.10 - A remapping host need not serve strangers (every new Docker host remaps,
 #                 multi_tenant_host_hardening D11): the refusal for a missing restrictions
 #                 directory names host_restrictions.sh init, which every new host runs.
@@ -85,8 +94,20 @@
 # A test points /etc at a fixture with JOINERY_SITE_STATE_ROOT, and only an
 # unprivileged run may, the same rule as _site_state.sh.
 #
+#   idblock=7            on a site engine host: the site's id block (D4), its ids host
+#                        2147483648 + 7 x 65536 onward; never changes while the site lives here
+#
 # Sourced, never executed:  . "${TOOLS_DIR}/_site_run_spec.sh"
 # Functions only; sourcing it runs nothing.
+
+# Which engine runs this host's sites, and the one way to call it.
+if [[ -f "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh" ]]; then
+    . "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh"
+else
+    site_engine() { docker "$@"; }
+    site_engine_kind() { echo docker; }
+    site_engine_is_podman() { return 1; }
+fi
 
 RUN_SPEC_VERSION=2
 
@@ -151,6 +172,12 @@ RUN_SPEC_CAPS=(CHOWN DAC_OVERRIDE FOWNER SETUID SETGID KILL)
 # platform's, like the capabilities: never a spec line, added for every site.
 RUN_SPEC_RESTRICTIONS_DIR="/etc/joinery/host_restrictions"
 
+# The system call filter every site runs under on the site engine
+# (install_site_engine.sh writes it from site_engine/site_seccomp.json): Docker's
+# own default, since Podman's built-in one lets a process with no CAP_SYS_ADMIN
+# make user namespaces. A Docker host's sites run under Docker's own copy of it.
+RUN_SPEC_SITE_SECCOMP="/etc/containers/joinery-site-seccomp.json"
+
 run_spec_root() {
     if [[ "$(id -u)" != "0" && -n "${JOINERY_SITE_STATE_ROOT:-}" ]]; then
         echo "${JOINERY_SITE_STATE_ROOT%/}"
@@ -214,7 +241,11 @@ run_spec_norm_cpus() {  # VALUE
 # CPU ceiling with (nproc can be told otherwise, by OMP_NUM_THREADS for one).
 run_spec_host_cpus() {
     local n
-    n="$(docker info -f '{{.NCPU}}' 2>/dev/null)"
+    if site_engine_is_podman; then
+        n="$(site_engine info -f '{{.Host.CPUs}}' 2>/dev/null)"
+    else
+        n="$(docker info -f '{{.NCPU}}' 2>/dev/null)"
+    fi
     [[ "$n" =~ ^[1-9][0-9]*$ ]] || return 1
     echo "$n"
 }
@@ -223,8 +254,12 @@ run_spec_host_cpus() {
 # does not, 2 Docker did not say. Under remapping a container's root is an
 # unprivileged user on the host, and a file written into a volume from the host
 # keeps the host's ids, which are not its owners inside the container.
+#
+# On a site engine host each site's ids are a block of their own (idblock), so
+# the answer there is always that it does.
 run_spec_docker_remaps_ids() {
     local opts
+    site_engine_is_podman && return 0
     opts="$(docker info -f '{{range .SecurityOptions}}{{.}} {{end}}' 2>/dev/null)" || return 2
     [[ -n "$opts" ]] || return 2
     [[ " ${opts}" == *" name=userns "* ]]
@@ -285,6 +320,7 @@ run_spec_check_line() {  # LINE
         cpus)         [[ -z "$v" ]] || { [[ "$v" =~ ^([0-9]+(\.[0-9]*)?|\.[0-9]+)$ ]] && awk -v n="$v" 'BEGIN { exit !(n >= 0.01) }'; } ;;
         pids_limit)   [[ -z "$v" || "$v" =~ ^[1-9][0-9]*$ ]] ;;
         disk)         [[ -z "$v" || "$v" =~ ^[1-9][0-9]*[MGT]$ ]] ;;
+        idblock)      [[ "$v" =~ ^[0-9]{1,5}$ ]] && (( 10#$v < ${SITE_ENGINE_IDBLOCKS:-32767} )) ;;
         publish)      [[ "$v" =~ ^((([0-9]{1,3}\.){3}[0-9]{1,3}|\[[0-9A-Fa-f:.]+\]):)?[0-9]{1,5}:[0-9]{1,5}(/(tcp|udp))?$ ]] ;;
         volume)       [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*:/[A-Za-z0-9_./-]+(:(ro|rw))?$ ]] ;;
         network)      [[ "$v" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ && "$v" != bridge && "$v" != host && "$v" != none ]] ;;
@@ -405,6 +441,8 @@ run_spec_net_no_ipv6_reason() {
     if [[ -z "$(ip -6 route show default 2>/dev/null)" ]]; then
         echo "this machine has no IPv6 route out"; return 0
     fi
+    # The site engine's netavark carries a container's IPv6 out itself.
+    site_engine_is_podman && return 0
     version="$(docker version -f '{{.Server.Version}}' 2>/dev/null)"
     if [[ ! "$version" =~ ^([0-9]+)\. ]] || (( BASH_REMATCH[1] < RUN_SPEC_DOCKER_IPV6_MAJOR )); then
         echo "Docker ${version:-of unknown version} is older than ${RUN_SPEC_DOCKER_IPV6_MAJOR}, the first to carry a container's IPv6 out on its own (apt-get install --only-upgrade docker-ce, then rebuild the site)"
@@ -419,13 +457,26 @@ run_spec_net_no_ipv6_reason() {
 # site network: a bridge its creator named, one IPv4 subnet and at most one
 # IPv6. Says why and returns 1 otherwise.
 run_spec_network_read() {  # NAME
-    local out driver bridge subnets s v4="" v6="" n4=0 n6=0
-    out="$(docker network inspect -f '{{.Driver}}|{{index .Options "com.docker.network.bridge.name"}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$1" 2>/dev/null)" \
-        || { echo "run spec: Docker has no network $1" >&2; return 1; }
-    IFS='|' read -r driver bridge subnets <<< "$out"
+    local out driver bridge subnets s v4="" v6="" n4=0 n6=0 dns=false
+    if site_engine_is_podman; then
+        # A site network on the site engine also has no DNS service of its own:
+        # the walls drop a site's traffic to the host, so one on the bridge would
+        # leave the site resolving nothing (D5).
+        out="$(site_engine network inspect -f '{{.Driver}}|{{.NetworkInterface}}|{{range .Subnets}}{{.Subnet}} {{end}}|{{.DNSEnabled}}' "$1" 2>/dev/null)" \
+            || { echo "run spec: the site engine has no network $1" >&2; return 1; }
+        IFS='|' read -r driver bridge subnets dns <<< "$out"
+    else
+        out="$(docker network inspect -f '{{.Driver}}|{{index .Options "com.docker.network.bridge.name"}}|{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$1" 2>/dev/null)" \
+            || { echo "run spec: Docker has no network $1" >&2; return 1; }
+        IFS='|' read -r driver bridge subnets <<< "$out"
+    fi
     for s in $subnets; do
         if [[ "$s" == *:* ]]; then v6="$s"; n6=$((n6 + 1)); else v4="$s"; n4=$((n4 + 1)); fi
     done
+    if [[ "$dns" != false ]]; then
+        echo "run spec: network $1 runs a DNS service on its bridge, which the walls drop; a site network on the site engine is made with --disable-dns" >&2
+        return 1
+    fi
     if [[ "$driver" != bridge || -z "$bridge" || "$n4" != 1 || "$n6" -gt 1 ]]; then
         echo "run spec: network $1 is not one a site runs on (driver '${driver}', bridge name '${bridge}', subnets '${subnets% }'): a site network is a bridge its creator named, with one IPv4 subnet and at most one IPv6" >&2
         return 1
@@ -439,10 +490,14 @@ run_spec_network_create() {  # < network lines
     lines="$(cat)"
     name="$(sed -n 's/^network=//p' <<< "$lines")"; bridge="$(sed -n 's/^bridge=//p' <<< "$lines")"
     subnet="$(sed -n 's/^subnet=//p' <<< "$lines")"; subnet6="$(sed -n 's/^subnet6=//p' <<< "$lines")"
-    args=(network create --driver bridge --subnet "$subnet" -o "com.docker.network.bridge.name=${bridge}")
+    if site_engine_is_podman; then
+        args=(network create --driver bridge --disable-dns --interface-name "$bridge" --subnet "$subnet")
+    else
+        args=(network create --driver bridge --subnet "$subnet" -o "com.docker.network.bridge.name=${bridge}")
+    fi
     [[ -n "$subnet6" ]] && args+=(--ipv6 --subnet "$subnet6")
-    out="$(docker "${args[@]}" "$name" 2>&1)" \
-        || { echo "run spec: Docker would not create network ${name} (${subnet}${subnet6:+ and ${subnet6}}, bridge ${bridge}): ${out}" >&2; return 1; }
+    out="$(site_engine "${args[@]}" "$name" 2>&1)" \
+        || { echo "run spec: the $(site_engine_kind) engine would not create network ${name} (${subnet}${subnet6:+ and ${subnet6}}, bridge ${bridge}): ${out}" >&2; return 1; }
 }
 
 # The lowest slot whose subnets and bridge nothing on this host holds: no run
@@ -457,9 +512,15 @@ run_spec_net_free_slot() {
         for spec in "$(run_spec_root)"/etc/joinery/sites/*/run_spec; do
             [[ -f "$spec" ]] && sed -n 's/^\(bridge\|subnet\|subnet6\)=\(..*\)$/\2/p' "$spec"
         done
-        for net in $(docker network ls -q 2>/dev/null); do
-            docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}{{index .Options "com.docker.network.bridge.name"}}' "$net" 2>/dev/null
-        done
+        if site_engine_is_podman; then
+            for net in $(site_engine network ls -q 2>/dev/null); do
+                site_engine network inspect -f '{{range .Subnets}}{{.Subnet}} {{end}}{{.NetworkInterface}}' "$net" 2>/dev/null
+            done
+        else
+            for net in $(docker network ls -q 2>/dev/null); do
+                docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}{{index .Options "com.docker.network.bridge.name"}}' "$net" 2>/dev/null
+            done
+        fi
         { ip -o -4 route show table all; ip -o -6 route show table all; } 2>/dev/null \
             | awk '{ t = $1; if (t ~ /^(local|broadcast|unreachable|blackhole|prohibit|anycast|multicast|throw|nat|unicast)$/) t = $2; print t }'
         ip -o link show 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print $2 }'
@@ -508,7 +569,7 @@ run_spec_network_lines() {  # SITE
         printf '%s\n' "$lines"
         return 0
     fi
-    if docker network inspect "$name" > /dev/null 2>&1; then
+    if site_engine network inspect "$name" > /dev/null 2>&1; then
         run_spec_network_read "$name"
         return
     fi
@@ -542,15 +603,19 @@ run_spec_ensure_network() {  # SITE
     [[ -n "$name" ]] || return 0
     want="$(printf 'network=%s\nbridge=%s\nsubnet=%s\nsubnet6=%s\n' "$name" "$(run_spec_get "$site" bridge)" \
         "$(run_spec_get "$site" subnet)" "$(run_spec_get "$site" subnet6)")"
-    if docker network inspect "$name" > /dev/null 2>&1; then
+    if site_engine network inspect "$name" > /dev/null 2>&1; then
         have="$(run_spec_network_read "$name" 2>/dev/null)"
         [[ "$have" == "$want" ]] && return 0
-        attached="$(docker network inspect -f '{{range $id, $c := .Containers}}{{$c.Name}} {{end}}' "$name" 2>/dev/null)" || attached="(unknown)"
+        if site_engine_is_podman; then
+            attached="$(site_engine ps -a --filter "network=${name}" --format '{{.Names}} ' 2>/dev/null | tr -d '\n')" || attached="(unknown)"
+        else
+            attached="$(docker network inspect -f '{{range $id, $c := .Containers}}{{$c.Name}} {{end}}' "$name" 2>/dev/null)" || attached="(unknown)"
+        fi
         if [[ -n "$attached" ]]; then
             echo "run spec: network ${name} is not what ${site}'s run spec says ($(grep -v '^network=' <<< "$want" | paste -sd ' ')), and ${attached% } still use it; nothing was changed. Stop what uses it, then run this again" >&2
             return 1
         fi
-        docker network rm "$name" > /dev/null 2>&1 \
+        site_engine network rm "$name" > /dev/null 2>&1 \
             || { echo "run spec: could not remove network ${name} to make it what ${site}'s run spec says" >&2; return 1; }
         # A rebuild has removed the site's container by now, so a network that
         # cannot be made as the spec says must not leave it with none: the one
@@ -578,6 +643,59 @@ run_spec_set_network() {  # SITE < network lines
         | sed "s/^spec_version=.*/spec_version=${RUN_SPEC_VERSION}/"; printf '%s\n' "$lines"; } | run_spec_write "$1"
 }
 
+# --- The site's own id block (site engine hosts, specs/site_container_engine.md D4) ---
+
+# SITE's id block line for its spec: the one its spec already has; the one a
+# claim holds for it (an install that stopped before it wrote the spec); or the
+# lowest block no run spec and no claim on this host names, claimed here under
+# the network lock until install.sh writes the spec and clears the claim, so two
+# installs never take one block.
+run_spec_idblock_line() {  # SITE
+    local site="$1" n claim lock fd
+    n="$(run_spec_get "$site" idblock)" || return 1
+    if [[ -n "$n" ]]; then printf 'idblock=%s\n' "$n"; return 0; fi
+    claim="$(run_spec_root)/etc/joinery/sites/${site}/idblock"
+    if [[ -f "$claim" ]] && n="$(cat "$claim")" && run_spec_check_line "idblock=${n}"; then
+        printf 'idblock=%s\n' "$n"; return 0
+    fi
+    lock="$(run_spec_root)/etc/joinery/sites/.networks.lock"
+    mkdir -p "$(dirname "$lock")" && exec {fd}> "$lock" \
+        || { echo "run spec: cannot open ${lock}" >&2; return 1; }
+    if ! flock -w 120 "$fd"; then
+        exec {fd}>&-; echo "run spec: another install has held ${lock} for two minutes" >&2; return 1
+    fi
+    n="$(cat "$(run_spec_root)"/etc/joinery/sites/*/run_spec 2>/dev/null | sed -n 's/^idblock=\([0-9]\{1,5\}\)$/\1/p'
+         cat "$(run_spec_root)"/etc/joinery/sites/*/idblock 2>/dev/null)"
+    n="$(awk -v max="${SITE_ENGINE_IDBLOCKS:-32767}" 'NF { used[$1 + 0] = 1 } END { for (i = 0; i < max; i++) if (!(i in used)) { print i; exit 0 } exit 1 }' <<< "$n")" \
+        || { exec {fd}>&-; echo "run spec: every id block on this host is taken" >&2; return 1; }
+    if ! { mkdir -p "$(dirname "$claim")" && printf '%s\n' "$n" > "$claim.tmp" && mv -f "$claim.tmp" "$claim"; }; then
+        exec {fd}>&-; echo "run spec: could not claim id block ${n} for ${site}" >&2; return 1
+    fi
+    exec {fd}>&-
+    printf 'idblock=%s\n' "$n"
+}
+
+# The id map a helper container needs to touch SITE's volumes, NUL-separated
+# (read with mapfile -d ''): on the site engine the site's own block, so what it
+# writes belongs to the site's ids, not host root's; nothing on Docker, whose
+# remapping is the daemon's. Returns 1 on the site engine for a site with none.
+run_spec_idmap_args() {  # SITE
+    local v base
+    site_engine_is_podman || return 0
+    v="$(run_spec_get "$1" idblock)"
+    [[ -n "$v" ]] || { echo "run spec: ${1} has no id block (idblock=)" >&2; return 1; }
+    base="$(site_engine_idblock_base "$v")" || return 1
+    printf '%s\0' --uidmap "0:${base}:${SITE_ENGINE_IDBLOCK_SIZE}" --gidmap "0:${base}:${SITE_ENGINE_IDBLOCK_SIZE}"
+}
+
+# The spec now holds SITE's block; its claim is done with.
+run_spec_idblock_claim_clear() {  # SITE
+    local claim
+    claim="$(run_spec_root)/etc/joinery/sites/${1}/idblock"
+    [[ -f "$claim" ]] && [[ "$(run_spec_get "$1" idblock)" == "$(cat "$claim")" ]] && rm -f "$claim"
+    return 0
+}
+
 # The `docker run` arguments the spec describes, NUL-separated (read them with
 # mapfile -d ''), ending before the environment and the image, which are the
 # caller's. A spec that fails its own check, or was written by a newer format,
@@ -590,6 +708,17 @@ run_spec_args() {  # SITE
     run_spec_fits_host "$p" || return 1
     run_spec_restrictions_present || return 1
     run_spec_ensure_network "$site" || return 1
+    # Everything checked before anything is printed: a caller reads the
+    # arguments through a pipe, which cannot see this function fail, so a
+    # refusal must leave it nothing to run.
+    local idbase=""
+    if site_engine_is_podman; then
+        v="$(run_spec_get "$site" idblock)"
+        [[ -n "$v" ]] || { echo "run spec: ${site} has no id block (idblock=), so on the site engine it would have no ids of its own; rebuild it with install.sh site" >&2; return 1; }
+        idbase="$(site_engine_idblock_base "$v")" || return 1
+        [[ -s "$(run_spec_root)${RUN_SPEC_SITE_SECCOMP}" ]] \
+            || { echo "run spec: no site system call filter at ${RUN_SPEC_SITE_SECCOMP}, so ${site} would run under the engine's own, which lets it make user namespaces; run install_tools/install_site_engine.sh converge as root" >&2; return 1; }
+    fi
     printf '%s\0' --name "$site" --hostname "$(run_spec_get "$site" hostname)"
     v="$(run_spec_get "$site" network)"
     [[ -n "$v" ]] && printf '%s\0' --network "$v"
@@ -607,6 +736,13 @@ run_spec_args() {  # SITE
     [[ -n "$v" ]] && printf '%s\0' --storage-opt "size=${RUN_SPEC_LAYER_SIZE}"
     printf '%s\0' --cap-drop=ALL
     for v in "${RUN_SPEC_CAPS[@]}"; do printf '%s\0' "--cap-add=${v}"; done
+    if [[ -n "$idbase" ]]; then
+        # The site's own ids (D4), and port 80 open to an unprivileged process
+        # in the container's network, which Docker sets by itself and Apache
+        # needs with the six capabilities above (D5).
+        printf '%s\0' --uidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" --gidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" \
+            --sysctl net.ipv4.ip_unprivileged_port_start=0 --security-opt "seccomp=${RUN_SPEC_SITE_SECCOMP}"
+    fi
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -v "$v"; done < <(run_spec_list "$site" volume)
     v="$(run_spec_root)${RUN_SPEC_RESTRICTIONS_DIR}"
@@ -666,6 +802,12 @@ run_spec_adopt() {  # SITE
     local priv netmode caps capdrop cap extra_caps="" kept_out="" nhosts ndev quota cpuset problems="" host_config ports mounts hostname
     local networks netlines=""
     run_spec_exists "$site" && return 0
+    # Adopt reads a container made before run specs, which only Docker has: a
+    # site engine host's every site was born from its spec.
+    if site_engine_is_podman; then
+        echo "run spec: ${site} has no run spec, and adopt reads only what Docker made before run specs; rebuild the site with install.sh site" >&2
+        return 1
+    fi
     docker inspect "$site" > /dev/null 2>&1 || { echo "run spec: no container ${site} to adopt" >&2; return 1; }
     # Every read must succeed: a template Docker cannot execute prints nothing,
     # and empty fields would read as no limit. A list Docker leaves unset is
@@ -759,7 +901,7 @@ run_spec_adopt() {  # SITE
 # read leaves any file already at PATH as it was and returns 1.
 run_spec_save_env() {  # SITE PATH
     local out e kept=0 tmp
-    out="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1")" \
+    out="$(site_engine inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$1")" \
         || { echo "run spec: could not read ${1}'s environment" >&2; return 1; }
     tmp="$(mktemp "$(dirname "$2")/.env.XXXXXX")" || return 1
     while IFS= read -r e; do

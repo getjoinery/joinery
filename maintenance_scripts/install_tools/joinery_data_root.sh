@@ -4,6 +4,9 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.22 - podman-restart.service joins the consumers: on a host whose sites run on the site
+#                container engine (specs/site_container_engine.md WP2) the containers come back
+#                at boot only once the data root holding their storage is mounted.
 # Version: 1.21 - An encrypt's start ends by saying the services stop again for a few seconds when it finishes (B59).
 # Version: 1.20 - An encrypt's start forgets the escrow holder and slot an earlier encryption recorded: its new
 #                 header holds no escrow slot, and an enrolment removed "the earlier slot" by that number (B55).
@@ -237,7 +240,7 @@ FSTAB_MARK="# joinery-data-root (joinery_data_root.sh)"
 BIND_MARK="# Written by joinery_data_root.sh (specs/one_data_root.md D1): a bind mount."
 # Every service whose data lives under the data root (D1). A drop-in for a
 # unit that is not installed does nothing, and is there when it is.
-CONSUMERS="postgresql.service postgresql@.service docker.service containerd.service apache2.service postfix.service postfix@.service rspamd.service"
+CONSUMERS="postgresql.service postgresql@.service docker.service containerd.service podman-restart.service apache2.service postfix.service postfix@.service rspamd.service"
 
 # On an encrypted data root, what else on the root disk would hold the data
 # (specs/hosted_data_promise_disk_encryption.md D10), each moved onto it once

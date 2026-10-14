@@ -305,6 +305,17 @@ unsigned_packages=refuse
 - Site projects are numbered from 1,000,000,000 up to 2,000,000,000 (`/etc/projid`, `/etc/projects`): the site's `joinery_<site>`, and `joinery_<site>.backups` and `joinery_<site>.deploy`, which no other site's name can be. A new number is one past every number in that range already in use on the pool, so a released site's files never join another site's project. Removing the site removes its projects.
 - Docker numbers its own layer quotas from the project of the folders it keeps them in, and after every start from past the highest number it finds there, the sites' volumes included. So Docker's data root (`/srv/joinery/docker`) carries project 2,000,000,000 from before Docker's first start, and every folder Docker makes inherits it: Docker's numbers all lie above it, however often Docker restarts. `can-cap` refuses a host whose Docker folders do not carry it.
 
+### A host on the site container engine
+
+`install.sh docker --site-engine` makes a new host whose sites run on the site container engine, Joinery's own build of Podman (`specs/site_container_engine.md`), in Docker's place. Each site gets a block of 65,536 host user ids of its own (`idblock=` in its run spec), so a process that breaks out of one site's container holds no id that owns another site's files. On Docker, every site's ids are the same two host users.
+
+- The engine is built with each release and installed from it (`install_tools/site_engine/`, `install_site_engine.sh converge`); Ubuntu's Podman packages are never installed beside it. Its runtime is Ubuntu's `runc`.
+- Every site runs under Docker's own default system call filter (`site_engine/site_seccomp.json`), because Podman's built-in one lets a process with no admin capability make user namespaces.
+- A site network runs no DNS service of its own: a site resolves through the host's resolvers, and the walls stay as they are.
+- Container storage is on the data root, at `/srv/joinery/containers/storage`.
+- It is for a new host; a host with Docker on it refuses `--site-engine`.
+- Not on this engine yet: a site's disk allowance (`--disk` is refused), the outbound limits, and the admin scripts and agent words that read containers (holds, restarts, limits, the host report). Until they are, it is for test hosts, and Docker is the default.
+
 ### Create a site
 
 ```bash

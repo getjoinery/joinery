@@ -3,6 +3,17 @@
 # install_site_engine.sh - install or converge the site container engine on a
 # container host (specs/site_container_engine.md D2, D3).
 #
+# Version: 1.2 - apt's package lists are fetched before runc and conmon are installed (a new
+#               machine has none), and a failed apt step stops the run; converge runs the install
+#               as a plain statement, since bash ignores errexit inside a condition and an install
+#               there carried on past a failure.
+# Version: 1.1 - the engine brings its own configuration instead of Ubuntu's containers-common
+#               (written for Podman 5.7, and pulling in the old CNI plugins once netavark is
+#               pinned out): the image policy, the registry list, and the system call filter
+#               every site runs under (site_engine/site_seccomp.json, Docker's own default, since
+#               Podman's built-in one lets www-data make user namespaces); container storage on
+#               the data root. converge writes them every run, so a new filter in the tree
+#               reaches the host without a new engine (specs/site_container_engine.md WP2).
 # Version: 1.0
 #
 # The engine is our own build of Podman, netavark and aardvark-dns
@@ -39,10 +50,13 @@
 #   /etc/systemd/system/podman-restart.service, enabled (not started): at boot it
 #         starts every container whose restart policy is always or unless-stopped
 #   /etc/apt/preferences.d/joinery-site-engine
-#         Ubuntu's podman, podman-docker, netavark, aardvark-dns and crun are never
-#         installed; any already installed are removed first
-#   runc (Ubuntu main, patched by Canonical), conmon and the containers-common
-#   configuration files, from Ubuntu's archive
+#         Ubuntu's podman, podman-docker, netavark, aardvark-dns, crun and their
+#         configuration packages are never installed; any already installed are
+#         removed first
+#   /etc/containers/policy.json, registries.conf    images from docker.io, unsigned, as Docker takes them
+#   /etc/containers/joinery-site-seccomp.json       the filter every site runs under (run_spec_args)
+#   /etc/containers/storage.conf                    overlay on the data root, where it is mounted
+#   runc (Ubuntu main, patched by Canonical) and conmon, from Ubuntu's archive
 #
 # The previous engine's directory is kept, so a bad engine is undone by
 # installing the previous archive again, which only moves `current` back. Older
@@ -67,8 +81,13 @@ CONF="${ROOT}/etc/containers/containers.conf.d/50-joinery-site-engine.conf"
 UNIT="${ROOT}/etc/systemd/system/podman-restart.service"
 PREF="${ROOT}/etc/apt/preferences.d/joinery-site-engine"
 STORAGE_CONF="${ROOT}/etc/containers/storage.conf"
-UBUNTU_ENGINE_PACKAGES="podman podman-docker netavark aardvark-dns crun"
-UBUNTU_KEPT_PACKAGES="runc conmon golang-github-containers-common"
+POLICY="${ROOT}/etc/containers/policy.json"
+REGISTRIES="${ROOT}/etc/containers/registries.conf"
+SITE_SECCOMP="${ROOT}/etc/containers/joinery-site-seccomp.json"
+SITE_SECCOMP_SRC="${SCRIPT_DIR}/site_engine/site_seccomp.json"
+DATA_ROOT_MNT="${ROOT}/srv/joinery"
+UBUNTU_ENGINE_PACKAGES="podman podman-docker netavark aardvark-dns crun golang-github-containers-common golang-github-containers-image containers-storage containernetworking-plugins"
+UBUNTU_KEPT_PACKAGES="runc conmon"
 ARCHIVE_RE='^(joinery-site-engine-([0-9]+\.[0-9]+\.[0-9]+)-([a-z0-9]+))\.tar\.xz$'
 SLOT_RE='^[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}$'
 
@@ -112,6 +131,36 @@ write_if_changed() {  # PATH MODE < text
     return 0
 }
 
+storage_text() {
+    cat <<'EOF'
+# Written by install_site_engine.sh (specs/site_container_engine.md D3): container
+# storage on the data root, XFS with project quotas, like Docker's before it.
+[storage]
+driver = "overlay"
+graphroot = "/srv/joinery/containers/storage"
+runroot = "/run/containers/storage"
+EOF
+}
+
+# What the engine needs beside its binaries, written whole every run.
+host_config() {
+    local seccomp_src_sha
+    printf '{\n  "default": [{"type": "insecureAcceptAnything"}],\n  "transports": {"docker-daemon": {"": [{"type": "insecureAcceptAnything"}]}}\n}\n' \
+        | write_if_changed "$POLICY" 644 && say "wrote ${POLICY#"$ROOT"}"
+    printf '# Written by install_site_engine.sh: a short image name is looked for on docker.io alone.\nunqualified-search-registries = ["docker.io"]\nshort-name-mode = "enforcing"\n' \
+        | write_if_changed "$REGISTRIES" 644 && say "wrote ${REGISTRIES#"$ROOT"}"
+    [[ -f "$SITE_SECCOMP_SRC" ]] || die "no site system call filter beside this script (${SITE_SECCOMP_SRC}); no site may run without it"
+    seccomp_src_sha="$(sed -n 's/^SHA256="\(.*\)"$/\1/p' "${SCRIPT_DIR}/site_engine/site_seccomp.source" 2>/dev/null)"
+    [[ -n "$seccomp_src_sha" && "$(sha256sum "$SITE_SECCOMP_SRC" | awk '{print $1}')" == "$seccomp_src_sha" ]] \
+        || die "${SITE_SECCOMP_SRC} is not the file site_seccomp.source records; nothing was changed"
+    write_if_changed "$SITE_SECCOMP" 644 < "$SITE_SECCOMP_SRC" && say "wrote ${SITE_SECCOMP#"$ROOT"}"
+    if [[ -n "$ROOT" && -d "$DATA_ROOT_MNT" ]] || mountpoint -q "$DATA_ROOT_MNT" 2>/dev/null; then
+        mkdir -p "${DATA_ROOT_MNT}/containers/storage"
+        storage_text | write_if_changed "$STORAGE_CONF" 644 && say "wrote ${STORAGE_CONF#"$ROOT"}"
+    fi
+    return 0
+}
+
 status() {
     [[ -f "$LIB/current/BUILDINFO" ]] || { echo "site engine: none installed"; exit 1; }
     cat "$LIB/current/BUILDINFO"
@@ -126,14 +175,18 @@ host_packages() {
     done
     if [[ -n "$installed" ]]; then
         say "removing Ubuntu's own engine packages:${installed}"
-        DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq $installed > /dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq $installed > /dev/null \
+            || die "could not remove${installed}; nothing else was changed"
     fi
     for p in $UBUNTU_KEPT_PACKAGES; do
         dpkg-query -W -f='${Status}\n' "$p" 2>/dev/null | grep -q '^install ok installed$' || missing="$missing $p"
     done
     if [[ -n "$missing" ]]; then
         say "installing from Ubuntu's archive:${missing}"
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $missing > /dev/null
+        # A new machine has no package lists yet.
+        apt-get update -qq || die "apt-get update failed; could not install${missing}"
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends $missing > /dev/null \
+            || die "could not install${missing} from Ubuntu's archive"
     fi
 }
 
@@ -185,7 +238,7 @@ install_engine() {  # ARCHIVE SHA256
     mkdir -p "$LIB"
     if [[ ! -d "$LIB/$slot" ]]; then
         incoming="$(mktemp -d "$LIB/.incoming.XXXXXX")"
-        trap 'rm -rf "$incoming"' EXIT
+        trap "rm -rf $(printf '%q' "$incoming")" EXIT
         tar -xJf "$archive" -C "$incoming" --no-same-owner
         top="$(ls -A "$incoming")"
         [[ "$top" == "$name" ]] || die "${base} unpacks to '${top}', not ${name}"
@@ -211,6 +264,7 @@ install_engine() {  # ARCHIVE SHA256
 
     conf_text | write_if_changed "$CONF" 644 && say "wrote ${CONF#"$ROOT"}"
     pref_text | write_if_changed "$PREF" 644 && say "wrote ${PREF#"$ROOT"}"
+    host_config
     if write_if_changed "$UNIT" 644 < "$LIB/current/systemd/podman-restart.service"; then
         say "wrote ${UNIT#"$ROOT"}"
         [[ -n "$ROOT" ]] || systemctl daemon-reload
@@ -251,20 +305,29 @@ converge() {  # [UPGRADE_SERVER]
     [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || die "${STAMP} has no SHA-256"
     slot="${slot}-${sha:0:12}"
     if [[ "$(readlink "$LIB/current" 2>/dev/null)" == "$slot" && -x "$BIN" ]] && cmp -s "$LIB/current/bin/podman" "$BIN"; then
+        # Current, and still checked: an earlier run that stopped after the
+        # switch (a package that would not install) left it named current.
+        host_packages
+        host_config
+        local why
+        why="$(check_engine "${slot%-*}")" || die "${slot} is current but fails its check (${why})"
         say "engine ${slot} is current"
         return 0
     fi
     [[ -z "$ROOT" && "$(id -u)" -ne 0 ]] && die "run as root"
     mkdir -p "${ROOT}/var/tmp"
     dl="$(mktemp -d "${ROOT}/var/tmp/site-engine-fetch.XXXXXX")"
-    trap 'rm -rf "$dl"' EXIT
+    # The path itself, not the variable: an exit errexit makes runs this after
+    # the function's locals are gone.
+    trap "rm -rf $(printf '%q' "$dl")" EXIT
     say "fetching ${archive} from ${server}"
     curl -sfL --max-time 900 -o "$dl/$archive" "${server%/}/static_files/site_engine/${archive}" \
         || die "could not fetch ${server%/}/static_files/site_engine/${archive}"
-    # In a subshell, so a refusal (install_engine exits) still removes the download.
-    if ! ( install_engine "$dl/$archive" "$sha" ); then
-        exit 1
-    fi
+    # In a subshell, so a refusal (install_engine exits) comes back here and the
+    # EXIT trap removes the download. A plain statement, never a condition: bash
+    # turns errexit off for everything run inside an if or a || list, so any
+    # failure in the install would go unnoticed.
+    ( install_engine "$dl/$archive" "$sha" )
     rm -rf "$dl"; trap - EXIT
 }
 
