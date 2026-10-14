@@ -434,6 +434,16 @@ and the restore check needed a shell on the box, which a TEST box no longer give
 | The converger's own journal on a bare-metal host (which run holds the lock, since when) | Read the container's converger log only; on bare metal nothing | `unit_journal` gains the converger's unit |
 | Restore one site's dump onto another site with a different `secret_box_key`, to see `RESTORE_SECRET_KEY_MISMATCH` | Proved on dev instead (tests/backups/restore_secret_key_gate.sh: the script's own check, read-only, plus a canary that does not open) | None needed for the platform; the end-to-end proof waits for a box the operator can reach |
 
+**2026-10-14, the data root's own mount point locked underneath it (`joinery_data_root.sh`
+1.24, site_container_engine WP3 review R2), landed on dev.** The first tick of a boot locks
+`/srv/joinery` underneath the mount, or names the files it holds. Whether it did was
+answered only because dev is the machine this session runs on: the tick's message went to
+the journal, which a non-root session cannot read, and the plane has no word for either.
+
+| Wanted | Done instead | Word or recipe |
+|---|---|---|
+| Whether the data root's mount point is locked underneath it, or holds files written while it was not mounted | Read `/run/joinery/data-root.mountpoint-seen` on dev (the tick records `locked`, `mode-only`, `holds-files`, `failed` or `unreachable` there) | `host_report`'s `data_root_script` carries `mountpoint`: that file's word, or none yet this boot, so the node page can say when a host's data root is not locked underneath |
+
 ## Settled 2026-09-23
 
 Owner-set. Each is built under its own spec; this fixes its shape.

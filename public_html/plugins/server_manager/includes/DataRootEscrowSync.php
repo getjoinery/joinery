@@ -33,8 +33,13 @@
  * it to its source's node at the switch-over (SiteCopySwap). A machine the
  * copy lets go (a discarded copy, the old server of a kept switch-over) has
  * its key given up (let_go()): its owner deletes it at the provider, and a
- * holder still answering it would open its data for whoever has it next.
+ * holder still answering it would open its data for whoever has it next. So
+ * does a node removed permanently (ManagedNode::permanent_delete, B69); a
+ * hidden one keeps its key, as it keeps every record, until it is restored.
  *
+ * @version 1.9 - no enrolment while a data root run is under way: a key change's mapping may hold either key, and a
+ *                slot made from the wrong one would not open the next boot; the report after the run enrols (B67).
+ *                let_go() says how many keys it gave up; removing a node permanently lets its machine go too (B69)
  * @version 1.8 - run_under_way(): the one reading of "a data root run is under way", for the uptime pass and the
  *                reboot's refusal
  * @version 1.7 - let_go(): a machine a site copy lets go (discarded, or the old server of a kept switch-over) has
@@ -128,10 +133,13 @@ class DataRootEscrowSync {
 	 * as Stop holding its key does, so it is answered no more (B64). Retired,
 	 * not removed: it records a key this holder gave up.
 	 */
-	public static function let_go(ManagedNode $node): void {
+	public static function let_go(ManagedNode $node): int {
+		$n = 0;
 		foreach (new MultiDataRootEscrow(array('node' => (int)$node->key, 'live' => true)) as $row) {
 			$row->retire();
+			$n++;
 		}
+		return $n;
 	}
 
 	/** Whether this plane should enrol the node's data root now. */
@@ -143,6 +151,12 @@ class DataRootEscrowSync {
 			return false;
 		}
 		if ($node->is_self()) {
+			return false;
+		}
+		// An encryption, its undo or a change of key under way: the mapping's
+		// key is the run's, and a slot made from it now may not open the next
+		// boot. The first report after the run ends enrols it (B67).
+		if ((string)($enc['reencrypt'] ?? '') !== '') {
 			return false;
 		}
 		$own = rtrim((string)LibraryFunctions::get_absolute_url(), '/');

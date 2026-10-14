@@ -450,10 +450,11 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 26 && array_key_exists('data_root_encryption', $capped)
+check(!isset($capped['surprise']) && count($capped) === 27 && array_key_exists('data_root_encryption', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
-	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, boot_id among them)', var_export(array_keys($capped), true));
+	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
+	&& array_key_exists('site_engine', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, boot_id, site_engine among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -638,6 +639,14 @@ check(!isset(JobResultProcessor::host_report_container_rates($prev, $backwards)[
 
 // Outbound limits (host_report 1.11, node_outbound_and_transfer WP3): the
 // machine's state, and the packets each site's limits dropped.
+// Which engine a machine's sites run on (host_report 1.26): one of four words,
+// anything else unknown, null from a node that does not say.
+foreach (array('podman' => 'podman', 'docker' => 'docker', 'none' => 'none', 'rm -rf /' => 'unknown', 7 => 'unknown') as $said => $kept) {
+	$se = JobResultProcessor::sanitise_host_report(array('site_engine' => $said))['site_engine'];
+	check($se === $kept, 'site_engine ' . var_export($said, true) . ' is kept as ' . $kept, var_export($se, true));
+}
+check(JobResultProcessor::sanitise_host_report(array())['site_engine'] === null, 'an older report: site_engine null');
+
 $lim = function ($since, $web = 'none', $state = 'on', $reason = 'none') {
 	return array('state' => $state, 'reason' => $reason, 'since' => $since, 'web_user_dropped' => $web);
 };
@@ -2014,6 +2023,17 @@ check(JobResultProcessor::sanitise_container_inventory(array('engine' => 'lxc', 
 	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'none'))['containers'] === 'none'
 	&& JobResultProcessor::sanitise_container_inventory(array('containers' => 'nonsense'))['containers'] === 'unknown',
 	'no docker is none; anything else that is not a list is unknown');
+// A site's sixteen volumes are all kept (B65); a container with more than 32, or more containers than 150, is a cut list.
+$vols = function ($n) { $m = array(); for ($i = 1; $i <= $n; $i++) { $m[] = array('type' => 'volume', 'name' => 'siteone_v' . $i); } return $m; };
+$ci16 = JobResultProcessor::sanitise_container_inventory(array('engine' => 'docker', 'truncated' => false,
+	'containers' => array(array('name' => 'siteone', 'install_sh' => true, 'image' => 'joinery/site:0.8.495', 'state' => 'running', 'mounts' => $vols(16), 'run_spec' => true))));
+check(count($ci16['containers'][0]['mounts']) === 16 && $ci16['truncated'] === false, 'container_inventory: a site\'s sixteen volumes all kept, nothing said cut (B65)', var_export($ci16['truncated'], true));
+$ci40 = JobResultProcessor::sanitise_container_inventory(array('engine' => 'docker', 'truncated' => false,
+	'containers' => array(array('name' => 'siteone', 'install_sh' => true, 'image' => 'joinery/site:0.8.495', 'state' => 'running', 'mounts' => $vols(40), 'run_spec' => true))));
+$many = array(); for ($i = 1; $i <= 151; $i++) { $many[] = array('name' => 'site' . $i, 'mounts' => array()); }
+$ci151 = JobResultProcessor::sanitise_container_inventory(array('engine' => 'docker', 'truncated' => false, 'containers' => $many));
+check(count($ci40['containers'][0]['mounts']) === 32 && $ci40['truncated'] === true && count($ci151['containers']) === 150 && $ci151['truncated'] === true,
+	'a list cut here, by mounts or by containers, says truncated though the node said not');
 
 // spam_learning_status: counts, a time, booleans.
 $sl = JobResultProcessor::sanitise_spam_learning_status(array('mailbox' => 'active', 'window_days' => 7,

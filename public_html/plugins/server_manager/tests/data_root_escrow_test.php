@@ -326,6 +326,12 @@ check(!DataRootEscrowSync::should_enrol($node, $crow, array_merge($enc, array('h
 harness_set_setting_mem('data_root_encryption_offered', '0');
 check(!DataRootEscrowSync::should_enrol($node, $crow, $enc), 'No enrolment job while this holder takes no new enrolments (D7)');
 harness_set_setting_mem('data_root_encryption_offered', '1');
+$mid_run = array();
+foreach (array('encrypt', 'decrypt', 'reencrypt') as $mode) {
+	$mid_run[] = DataRootEscrowSync::should_enrol($node, $crow, array_merge($enc, array('reencrypt' => $mode))) ? $mode : '-';
+}
+check(DataRootEscrowSync::should_enrol($node, $crow, $enc) && $mid_run === array('-', '-', '-'),
+	'Enrolled once no run is under way; not while an encryption, its undo or a change of key is (B67)', implode(',', $mid_run));
 // An older agent's dormant copy refuses an enrolment until it takes over its
 // source's node: it is known, and asked nothing.
 $dnode = new ManagedNode(NULL);
