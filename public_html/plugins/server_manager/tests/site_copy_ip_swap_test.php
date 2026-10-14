@@ -16,6 +16,8 @@
  * file, whose machines take a call or two to change state, as real ones do.
  * Agent jobs are finished by hand, as site_copy_switch does.
  *
+ * @version 1.2 - B58/B62: a copy enrolled here is offered the swap before its next host report names the holder;
+ *               a row for another machine's identity, or one not yet enrolled, is not proof
  * @version 1.1 - the source's backups are on a test target of its own (lib/node_space_fixture.php): since a node backs
  *               up only through a storage space, the suite had been skipping;
  *               the source on the broker's release floor
@@ -370,6 +372,28 @@ $m = SiteCopyRunner::switch_methods($copy)[SiteCopyRunner::METHOD_IP_SWAP];
 check($m && strpos(implode(' ', $m), 'no management node holds its unlock key') !== false, 'and the page says why the swap is not offered');
 $cnode_report('https://mgr.example.org');
 check(empty(SiteCopyRunner::switch_methods($copy)[SiteCopyRunner::METHOD_IP_SWAP]), 'once a holder opens it, the swap is offered again');
+// B62: enrolled here since its last report, which still names no holder.
+$c_identity = base64_encode(random_bytes(32));
+$cnode->set('mgn_last_host_report', json_encode(array('data_root_encryption' => array('backing' => 'luks-file', 'open' => true,
+	'identity' => $c_identity, 'holder' => '', 'slot' => 'unknown'))));
+$cnode->save();
+$c_row = new DataRootEscrow(NULL);
+$c_row->set('dre_identity_key', base64_encode(random_bytes(32)));
+$c_row->set('dre_status', 'enrolled');
+$c_row->set('dre_hostname', 'HarnessTest ip swap copy');
+$c_row->set('dre_mgn_managed_node_id', $cnode->key);
+$c_row->save();
+harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $c_row->key);
+check(!IpSwapMove::opens_by_itself($cnode), 'a row held here for another machine\'s identity is no proof it opens (B62)');
+$c_row->set('dre_identity_key', $c_identity);
+$c_row->set('dre_status', 'known');
+$c_row->save();
+check(!IpSwapMove::opens_by_itself($cnode), 'nor is its own row before it enrols');
+$c_row->set('dre_status', 'enrolled');
+$c_row->save();
+check(IpSwapMove::opens_by_itself($cnode) && empty(SiteCopyRunner::switch_methods($copy)[SiteCopyRunner::METHOD_IP_SWAP]),
+	'enrolled here, it opens by itself and the swap is offered before its next host report names the holder (B62)');
+$c_row->permanent_delete();
 $cnode->set('mgn_last_host_report', null);
 $cnode->save();
 $fake_reset();
@@ -413,6 +437,24 @@ check($cnode->get('mgn_host') === $T4 && trim((string)$cnode->get('mgn_install_s
 // ---------------------------------------------------------------------------
 section('The way back after the switch');
 
+// B63/B64: the owner pointed the site's AAAA at the copy, and this holder
+// holds the key of the copy's machine: on the site's node while the copy is
+// the site, on the copy row once the rows swap back.
+$aaaa = array('2600:3c03::2');
+$back_row = new DataRootEscrow(NULL);
+$back_row->set('dre_identity_key', base64_encode(random_bytes(32)));
+$back_row->set('dre_status', 'enrolled');
+$back_row->set('dre_hostname', 'HarnessTest ip swap back');
+$back_row->set('dre_mgn_managed_node_id', $src->key);
+$back_row->save();
+$old_row = new DataRootEscrow(NULL);
+$old_row->set('dre_identity_key', base64_encode(random_bytes(32)));
+$old_row->set('dre_status', 'enrolled');
+$old_row->set('dre_hostname', 'HarnessTest ip swap old');
+$old_row->set('dre_mgn_managed_node_id', $cnode->key);
+$old_row->save();
+harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $old_row->key);
+harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $back_row->key);
 SiteCopyRunner::go_back($copy, null);
 $copy->load();
 $drive($copy, array(SiteCopy::STATUS_RETURNING));
@@ -427,6 +469,18 @@ check($src->get('mgn_agent_public_key') === $source_key && $src->get('mgn_host')
 	&& $sprov->get('cvp_instance_ip') === $S4 && $cprov->get('cvp_instance_ip') === $T4,
 	'the node is the old machine at its own address, and the provisions say so');
 check(trim((string)$src->get('mgn_install_state')) === '', 'the site is no longer switching');
+$ended = SiteCopy::recently_ended_for_source((int)$src->key);
+$notes = $ended ? implode(' ', (array)($ended->switch_record()['moved_back_notes'] ?? array())) : '';
+check($ended && (int)$ended->key === (int)$copy->key && strpos($notes, 'AAAA record for the copy\'s IPv6 address 2600:3c03::2') !== false,
+	'discarded, the copy still carries what going back noted, for the ended-copy banner (B63)', $notes);
+$back_row = new DataRootEscrow($back_row->key, TRUE);
+$old_row = new DataRootEscrow($old_row->key, TRUE);
+check((string)$back_row->get('dre_status') === 'retired' && (int)$back_row->get('dre_mgn_managed_node_id') === (int)$cnode->key,
+	'and the key held for the discarded copy\'s machine is retired (B64)',
+	(string)$back_row->get('dre_status') . ' node ' . $back_row->get('dre_mgn_managed_node_id'));
+check((string)$old_row->get('dre_status') === 'enrolled' && (int)$old_row->get('dre_mgn_managed_node_id') === (int)$src->key,
+	'while the site\'s own machine, back on its node, keeps its key', (string)$old_row->get('dre_status'));
+$aaaa = array();
 
 // ---------------------------------------------------------------------------
 section('A copy that does not answer: the swap is undone');

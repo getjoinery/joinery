@@ -1933,4 +1933,36 @@ foreach (new MultiManagementJob(array('node_id' => $rk_node->key, 'job_type' => 
 	harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $rk_job->key);
 }
 
+
+// ---------------------------------------------------------------------------
+section('A data root job that ends asks for the machine after it (B62)');
+// The node page, the enrolment and the address swap's check read the last host
+// report; an encryption ends its job once under way, and an enrolment writes
+// the holder the machine reports.
+$dr_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x0b", 32)),
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
+	'mgn_agent_primitives' => 'check_status,host_report,data_root_encrypt,data_root_enrol,data_root_decrypt',
+));
+$dr_out = "=== [Step 1/1] data_root_encrypt ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+	'output' => "The data root is back, and encrypting in the background.\n"))) . "\n[Step 1/1 OK]";
+$dr_job = jrp_job($dr_node, 'data_root_encrypt', $dr_out);
+check(JobResultProcessor::process_if_due($dr_job), 'a finished data_root_encrypt is a job this processor folds');
+$queued = jrp_pending_host_reports($dr_node->key);
+foreach ($queued as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
+check(count($queued) === 1, 'one host_report is queued behind it', var_export($queued, true));
+$dr_enrol = jrp_job($dr_node, 'data_root_enrol', json_encode(array('api_version' => '1.0', 'data' => array('slot' => 1, 'unlock_fingerprint' => str_repeat('a', 16)))));
+JobResultProcessor::process($dr_enrol);
+check(count(jrp_pending_host_reports($dr_node->key)) === 1, 'an enrolment while that report is pending piles none on');
+DbConnector::get_instance()->get_db_link()->prepare("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = ?
+	WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'host_report'")->execute(array(gmdate('Y-m-d H:i:s', time() - 5), (int)$dr_node->key));
+$dr_enrol2 = jrp_job($dr_node, 'data_root_enrol', json_encode(array('api_version' => '1.0', 'data' => array('slot' => 1, 'unlock_fingerprint' => str_repeat('a', 16)))));
+JobResultProcessor::process($dr_enrol2);
+$queued = jrp_pending_host_reports($dr_node->key);
+foreach ($queued as $id) { harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $id); }
+check(count($queued) === 1, 'a report finished before the enrolment ended is no cover: one is asked for after it', var_export($queued, true));
+foreach (array('data_root_encrypt', 'data_root_decrypt', 'data_root_rekey', 'data_root_migrate', 'data_root_recipient', 'data_root_enrol') as $t) {
+	check(in_array($t, JobResultProcessor::processable_types(), true), "$t is a type this processor knows");
+}
+
 harness_finish();

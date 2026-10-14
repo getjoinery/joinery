@@ -21,6 +21,9 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.12 - a node whose last host report says its data root is being encrypted, decrypted or
+ *                 re-keyed is asked again every DATA_ROOT_RUN_REFRESH_SECONDS, so the run's end (and the
+ *                 enrolment it calls for) is seen within minutes, not the hour (B62)
  * @version 2.11 - a probe that does not find it locked ends the locked state (one failure after an unlock left it shown locked)
  * @version 2.10 - locked is its own state (mgn_uptime_locked_since), from either check, never down
  *                 (specs/hosted_data_promise_disk_encryption.md D2b)
@@ -75,6 +78,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const CERT_RECHECK_ALERT_DAYS = 3;
 	/** How old an agent node's status facts may be before a check_status is queued. */
 	const STATUS_REFRESH_SECONDS  = 3600;
+	/** How old a host report may be while it says a data root run is under way (B62). */
+	const DATA_ROOT_RUN_REFRESH_SECONDS = 300;
 
 	public function run(array $config): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nodes_class.php'));
@@ -210,6 +215,12 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * mgn_last_host_report_time is older than the same window. Two words, two
 	 * jobs, one loop; the count returned is jobs of both kinds.
 	 *
+	 * A machine whose last report says its data root is being encrypted,
+	 * decrypted or re-keyed is asked for its report every
+	 * DATA_ROOT_RUN_REFRESH_SECONDS instead: the run ends on its own, hours
+	 * later, and its end is what calls for the enrolment (DataRootEscrowSync)
+	 * and changes what the node page offers (B62).
+	 *
 	 * @param iterable $nodes   live ManagedNode rows
 	 * @param string   $now_utc 'Y-m-d H:i:s'
 	 * @return int jobs queued
@@ -218,7 +229,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_jobs_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 		$queued = 0;
-		$floor = strtotime($now_utc . ' UTC') - self::STATUS_REFRESH_SECONDS;
+		$now = strtotime($now_utc . ' UTC');
 		// The stamp only host_report's own job writes; check_status has none
 		// of its own, so only the job table speaks for it.
 		$words = [
@@ -233,11 +244,13 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				if (!JobCommandBuilder::has_primitive($node, $word)) {
 					continue;
 				}
+				$window = ($word === 'host_report' && self::data_root_run_under_way($node))
+					? self::DATA_ROOT_RUN_REFRESH_SECONDS : self::STATUS_REFRESH_SECONDS;
 				$last = $stamp_column === null ? '' : trim((string)$node->get($stamp_column));
-				if ($last !== '' && strtotime($last . ' UTC') >= $floor) {
+				if ($last !== '' && strtotime($last . ' UTC') >= $now - $window) {
 					continue;
 				}
-				if (ManagementJob::activeOrRecentForNode($node->key, $word, self::STATUS_REFRESH_SECONDS)) {
+				if (ManagementJob::activeOrRecentForNode($node->key, $word, $window)) {
 					continue;
 				}
 				$builder = 'build_' . $word . '_primitive';
@@ -246,6 +259,13 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			}
 		}
 		return $queued;
+	}
+
+	/** Its last host report says an encryption, its undo or a re-key is running on its data root. */
+	public static function data_root_run_under_way($node): bool {
+		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
+		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
+		return is_array($enc) && (string)($enc['reencrypt'] ?? '') !== '';
 	}
 
 	/**

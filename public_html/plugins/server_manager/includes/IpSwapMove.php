@@ -36,6 +36,8 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.5 - a copy enrolled here opens by itself from the moment this management node holds its key, as its
+ *                node page says, not from its next host report (B62)
  * @version 1.4 - swapping back notes a site AAAA record still naming the copy's IPv6, which no swap moves back (B61);
  *                refused while the copy's encrypted data root has no escrow holder: the swap restarts it, and it
  *                would wait for its recovery key (B58)
@@ -155,13 +157,21 @@ class IpSwapMove {
 
 	/**
 	 * Whether a machine boots without anyone typing its recovery key: its data
-	 * root is not encrypted, or an escrow holder opens it (its last report
-	 * names one). A machine that has not reported says nothing either way.
+	 * root is not encrypted, or an escrow holder opens it: its last report
+	 * names one, or this management node holds the key of the machine that
+	 * report describes (enrolled since it, B62). A machine that has not
+	 * reported says nothing either way.
 	 */
 	public static function opens_by_itself(ManagedNode $node): bool {
 		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
 		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
-		return !is_array($enc) || trim((string)($enc['holder'] ?? '')) !== '';
+		if (!is_array($enc) || trim((string)($enc['holder'] ?? '')) !== '') {
+			return true;
+		}
+		$identity = (string)($enc['identity'] ?? '');
+		$row = DataRootEscrow::for_node((int)$node->key);
+		return $identity !== '' && $row && (string)$row->get('dre_status') === 'enrolled'
+			&& hash_equals((string)$row->get('dre_identity_key'), $identity);
 	}
 
 	/** Which account a provision's instance lives on: 'oca:<id>' for one of ours, 'cca:<id>' for a connected one. */

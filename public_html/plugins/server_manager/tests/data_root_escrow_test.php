@@ -204,6 +204,12 @@ check(base64_decode((string)($escrow_page['data']['shared'] ?? ''), true) === $s
 $stored_shared = $db->query('SELECT dre_pending_shared FROM dre_data_root_escrows WHERE dre_data_root_escrow_id = ' . (int)$row->key)->fetchColumn();
 check($stored_shared === null || $stored_shared === false || $stored_shared === '', 'And it is forgotten once given');
 check(escrow_row($a)->get('dre_box_changed_time') !== null, 'A box that differs from the one recorded is marked changed (D2b warning)');
+// Opened, it says so, as every boot does; the next boot is answered only
+// after that report (one answer per boot). Without it the unlock after the
+// re-key below passed only when this answer and the earlier report fell in
+// the same second.
+check(isset(escrow_call(escrow_req($a, 'report', array('state' => 'unlocked', 'boot_id' => 'p1'), true), '192.0.2.10')['data']),
+	'Opened by that value, it reports unlocked');
 
 section('A new volume key (D8): proven with the old one, a new secret for the new slot');
 $old_rk = $a['rk'];
@@ -377,6 +383,19 @@ $erow = escrow_row($e);
 if ($erow) { $made_escrows[] = $erow->key; }
 check($erow && (int)$erow->get('dre_mgn_managed_node_id') === (int)$enode->key && $enrols($enode) === 1,
 	'A dormant copy on agent ' . DataRootEscrowSync::DORMANT_COPY_MIN_AGENT_VERSION . ': enrolled before its switch-over (B58)', 'jobs: ' . $enrols($enode));
+// B64: a machine the copy lets go (discarded, or the old server of a kept
+// switch-over) is answered no more; another node's row is untouched.
+if ($erow) {
+	$erow->set('dre_status', 'enrolled');
+	$erow->set('dre_slot', 0);
+	$erow->save();
+}
+DataRootEscrowSync::let_go($enode);
+$erow2 = $erow ? new DataRootEscrow($erow->key, TRUE) : null;
+check($erow2 && (string)$erow2->get('dre_status') === 'retired' && DataRootEscrow::for_node((int)$enode->key) === null
+	&& $crow && (string)(new DataRootEscrow($crow->key, TRUE))->get('dre_status') !== 'retired',
+	'A machine a site copy lets go has the key held for it retired; another node\'s row is untouched (B64)',
+	$erow2 ? (string)$erow2->get('dre_status') : 'no row');
 // B35: the same key is sent once an hour at most; a rotated one at once.
 $key_a = base64_encode(random_bytes(32));
 $key_b = base64_encode(random_bytes(32));
