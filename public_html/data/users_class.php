@@ -39,7 +39,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $api_writable = true;
 	public static $api_unwritable_fields = array(
 		'usr_permission', 'usr_is_disabled', 'usr_disabled_time',
-		'usr_email_is_verified', 'usr_password_recovery_disabled',
+		'usr_email_is_verified', 'usr_password_recovery_disabled', 'usr_session_generation',
 	);
 	// Derived keys export_as_array() injects that may leave over the API (fail-closed
 	// allowlist). The activation-token derivation is deliberately NOT here and is removed
@@ -59,7 +59,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	public static $ai_excluded_fields = [
 		'usr_totp_last_used_step', 'usr_signup_ip', 'usr_allowed_ips',
 		'usr_force_password_change', 'usr_password_recovery_disabled',
-		'usr_mailing_list_provider_id',
+		'usr_mailing_list_provider_id', 'usr_session_generation',
 	];
 	public static $ai_untrusted_fields = [
 		'usr_bio', 'usr_first_name', 'usr_last_name',
@@ -152,6 +152,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_password_recovery_disabled' => array('type'=>'bool'),
 	    'usr_allowed_ips' => array('type'=>'jsonb'),
 	    'usr_remember_tokens' => array('type'=>'jsonb', 'is_nullable'=>true),
+	    // Moves on with every real password change; a browser session stamped
+	    // with an older value is signed out (SessionControl::end_other_sessions()).
+	    'usr_session_generation' => array('type'=>'int4', 'default'=>0),
 	    'usr_force_password_change' => array('type'=>'bool', 'default'=>false),
 	    'usr_bio' => array('type'=>'varchar(500)'),
 	    'usr_date_of_birth' => array('type'=>'date'),
@@ -1189,6 +1192,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		if ($password_changed && !$this->suppress_session_key_revocation) {
 			require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
 			ApiKey::RevokeSessionKeysForUser($this->key);
+			// And every other way back in: the other browser sessions, and the
+			// remembered devices but this one.
+			SessionControl::get_instance()->end_other_sessions($this);
 		}
 		$this->loaded_password_hash = $this->get('usr_password');
 

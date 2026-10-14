@@ -44,6 +44,25 @@ password verifies, so it discloses nothing about account existence. Pinned by
 `tests/account_security/login_test.php` (web) and
 `tests/functional/api/session_keys_test.php` (API).
 
+**A disabled or deleted account acts nowhere.** Web sign-in, remember-me and
+API login refuse it (API login only after the password verifies). A session
+it already holds ends at its next request (`SessionControl`), and lifting the
+bar does not bring that session back. Every key it owns — machine, session
+key, app password — is refused by `ApiAuth` for as long as the bar stands. A
+disabled account's keys are refused, not revoked, so re-enabling it brings
+them back. Pinned by `tests/functional/api/browser_session_test.php` (web
+session) and `tests/functional/api/session_keys_test.php` (keys and login).
+
+**A password change ends every other way back in.** Beyond the session keys
+and app passwords it revokes, it moves the account's session generation on
+(`usr_session_generation`, which each browser session stamps at sign-in), so
+every other browser session ends at its next request, and it forgets every
+remembered device but the one making the change
+(`SessionControl::end_other_sessions()`). A change made on the website keeps
+the browser that made it; one made through the API, or by an admin or a reset
+link, keeps none. The silent hash upgrade at sign-in is not a change. Pinned by
+`tests/functional/api/browser_session_test.php` § 8.
+
 ## The role split: a passkey never opens both doors
 
 **A passkey never opens both the session and the vault on the same account.**
@@ -659,5 +678,5 @@ It is a narrow door on purpose:
 - **Making one** needs the website session and a recent step-up. Leaving a standing credential behind is a credential change, the same bar as linking a sync device.
 - **It reaches only its purpose.** It reaches the actions that purpose's plugin declares, and nothing else: no page, no CRUD, no `auth/*`, not the web-session bridge.
 - **It never opens a vault.** `requires_person_credential` and `requires_browser_session` refuse it. It cannot unlock, set up, rotate, approve a device or change a protection level. For a Private mailbox it reads through a window **borrowed** from the person's own website unlock ([Sealed Vault § Borrowed windows](sealed_vault.md#borrowed-windows)). The program's checks keep that window open up to its absolute cap (7 days, or 24 hours with a hardened add-on), and the person is told so before making the password. **Lock** on the website ends it, and signing out of one browser does not.
-- **It ends with its plugin.** Deactivating the plugin that declares the purpose refuses every credential of it at once. A password change revokes every app password with the session keys.
+- **It ends with its plugin.** Deactivating the plugin that declares the purpose refuses every credential of it at once, and uninstalling the plugin deletes them. A password change revokes every app password with the session keys.
 - **Failed sign-ins** are limited per source network and per username in their own bucket.
