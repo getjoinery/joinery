@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.67 - settings ask whether this node's incidents send alerts (ManagedNode::ALERTS)
  * @version 1.66 - the Machine box asks what the machine listens on, lists every container on a Docker host, and
  *                 reboots it behind a confirm (agent 1.76.0), saying when the last reboot was asked and whether the
  *                 machine came back; the Data root gauge names its script's version and any service kept there
@@ -2500,6 +2501,13 @@
 		'value'    => CloudAccounts::normalize_hosted_at($node->get('mgn_cloud_account')),
 		'helptext' => 'Where the machine runs. A machine in one of our accounts is removed for good only once it is deleted at the provider; '
 			. 'one hosted elsewhere keeps running and is simply no longer managed. A site placed on a server is hosted where its server is, whatever this says.',
+	]);
+
+	$formwriter->dropinput('mgn_alerts', 'Alerts', [
+		'options'  => ManagedNode::ALERTS,
+		'value'    => isset(ManagedNode::ALERTS[(string)$node->get('mgn_alerts')]) ? (string)$node->get('mgn_alerts') : '',
+		'helptext' => 'Whether the superadmins get a bell and an email when an incident opens on this node. Incidents open either way and wait in the incident inbox. '
+			. 'This node\'s alerts are ' . ($node->sends_alerts() ? 'on' : 'off') . ' now.',
 	]);
 
 	echo '<h6 class="text-muted mt-4 mb-3">Uptime Monitoring</h6>';

@@ -367,6 +367,50 @@ rename($repo . '/.git_away', $repo . '/.git');
 check(!NodeMonitorHealth::changed_here_after_publish($stranger, $MODIFIED_PREFIX . 'scripts/committed.sh', $repo),
 	'another node never gets this reading, whatever this checkout holds');
 
+// The poll's own file list gets the same reading. A stand-in for this plane's
+// own record, loaded from a fixture row so it reads like any node; it is never
+// saved, so no real row points at this site's URL.
+$self_row = st_node();
+$own = function () use ($self_row) {
+	return new class($self_row->key, TRUE) extends ManagedNode { public function is_self(): bool { return true; } };
+};
+$mine = $own();
+NodeMonitorHealth::note_reported_script_trust($mine, 'untrusted_file', array('scripts/committed.sh'), $repo);
+check($mine->get('mgn_script_trust') === 'unpublished_file',
+	'a deployment file the poll names, committed here after the publish, is this site\'s own change',
+	var_export($mine->get('mgn_script_trust'), true));
+check((new IncidentSourceUnmanageable())->evaluate($mine) === null, 'and raises no incident');
+$mine = $own();
+NodeMonitorHealth::note_reported_script_trust($mine, 'untrusted_file', array('scripts/committed.sh', 'scripts/edited.sh'), $repo);
+check($mine->get('mgn_script_trust') === 'untrusted_file',
+	'one named file this process could have changed keeps the alarm for the lot');
+NodeMonitorHealth::note_reported_script_trust($stranger, 'untrusted_file', array('scripts/committed.sh'), $repo);
+check($stranger->get('mgn_script_trust') === 'untrusted_file', 'another node\'s list never gets this reading');
+$mine = $own();
+
+// The worse finding wins, whichever arrived first: this site's own change
+// does not soften a refusal of a file it cannot account for, nor the reverse.
+$mine->set('mgn_script_trust', 'untrusted_file');
+$mine->set('mgn_script_trust_reason', $MODIFIED_PREFIX . 'scripts/edited.sh');
+$mine->set('mgn_script_trust_job_type', 'host_report');
+NodeMonitorHealth::note_reported_script_trust($mine, 'untrusted_file', array('scripts/committed.sh'), $repo);
+check($mine->get('mgn_script_trust') === 'untrusted_file',
+	'an unpublished deployment file leaves a refusal of an unaccounted-for script standing');
+$mine = $own();
+$mine->set('mgn_script_trust', 'unpublished_file');
+$mine->set('mgn_script_trust_reason', $MODIFIED_PREFIX . 'scripts/committed.sh');
+$mine->set('mgn_script_trust_job_type', 'host_report');
+NodeMonitorHealth::note_reported_script_trust($mine, 'untrusted_file', array('scripts/edited.sh'), $repo);
+check($mine->get('mgn_script_trust') === 'untrusted_file',
+	'and a refusal of this site\'s own change does not soften a deployment file it cannot account for');
+$mine = $own();
+$mine->set('mgn_script_trust', 'unpublished_file');
+$mine->set('mgn_script_trust_reason', $MODIFIED_PREFIX . 'scripts/committed.sh');
+$mine->set('mgn_script_trust_job_type', 'host_report');
+NodeMonitorHealth::note_reported_script_trust($mine, 'untrusted_file', array('scripts/committed.sh'), $repo);
+check($mine->get('mgn_script_trust') === 'unpublished_file',
+	'both findings this site\'s own change: still not an alarm');
+
 // A site that ships an agent built with another site's key cannot re-sign its
 // own tree; a publish would not clear the refusal, so it stays an alarm.
 mkdir($repo . '/public_html/agent_dist', 0755, true);
@@ -392,12 +436,69 @@ check(stripos($health['label'], 'changed here after the last publish') !== false
 check((new IncidentSourceUnmanageable())->evaluate($pub) === null, 'it raises no incident');
 check(stripos((new IncidentSourceUnmanageable())->cleared_text($pub), 'next publish') !== false,
 	'an open incident closes saying the next publish re-signs it');
-check(strpos((string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php')),
-	"self::changed_here_after_publish(\$node, (string)\$job->get('mjb_error_message'))") !== false,
-	'a refusal is checked for this case as it is recorded');
 NodeMonitorHealth::note_script_trust($pub, st_job($pub, 'host_report', 'completed', ''));
 $pub->load();
 check($pub->get('mgn_script_trust') === 'ok', 'the job type completing after the publish clears it');
+
+// ---------------------------------------------------------------------------
+section('A refusal and the poll\'s file report each clear only themselves');
+
+// The poll looks at the five deployment files and nothing else. Its "none
+// differ" says nothing about a script outside them, so a refusal of one stands
+// until its own job type completes.
+$other = st_node();
+$OTHER_SCRIPT = 'Refused by the node: primitive "host_report" refused: file does not match its signed hash '
+	. '— it has been modified since release: maintenance_scripts/sysadmin_tools/host_report.sh';
+NodeMonitorHealth::note_script_trust($other, st_job($other, 'host_report', 'refused', $OTHER_SCRIPT));
+$other->load();
+$since = (string)$other->get('mgn_script_trust_since');
+NodeMonitorHealth::note_reported_script_trust($other, 'ok', array());
+$other->save();
+$other->load();
+check($other->get('mgn_script_trust') === 'untrusted_file',
+	'the poll finding every deployment file intact leaves a refusal of another script standing');
+check((string)$other->get('mgn_script_trust_since') === $since, 'and its first-seen stamp');
+NodeMonitorHealth::note_script_trust($other, st_job($other, 'host_report', 'completed', ''));
+$other->load();
+check($other->get('mgn_script_trust') === 'ok', 'until the job type that refused completes');
+
+// A refusal of one of the deployment files is the poll's to answer for.
+$deployed = st_node();
+NodeMonitorHealth::note_script_trust($deployed, st_job($deployed, 'apply_update', 'refused', $FILE_MODIFIED));
+$deployed->load();
+NodeMonitorHealth::note_reported_script_trust($deployed, 'ok', array());
+$deployed->save();
+$deployed->load();
+check($deployed->get('mgn_script_trust') === 'ok',
+	'the poll finding a refused deployment file intact again clears the refusal');
+
+// And the reverse: a job completing vouches for the script it ran, not for
+// deployment files the poll still finds differing.
+$listed = st_node();
+NodeMonitorHealth::note_script_trust($listed, st_job($listed, 'host_report', 'refused', $OTHER_SCRIPT));
+$listed->load();
+NodeMonitorHealth::note_reported_script_trust($listed, 'untrusted_file', array('public_html/utils/upgrade.php'));
+$listed->save();
+$listed->load();
+$since = (string)$listed->get('mgn_script_trust_since');
+NodeMonitorHealth::note_script_trust($listed, st_job($listed, 'host_report', 'completed', ''));
+$listed->load();
+check($listed->get('mgn_script_trust') === 'untrusted_file' && NodeMonitorHealth::script_trust_files($listed) === array('public_html/utils/upgrade.php'),
+	'a completed job leaves the deployment files the poll still names standing');
+check((string)$listed->get('mgn_script_trust_since') === $since, 'with their first-seen stamp, so the incident does not reopen');
+check((string)$listed->get('mgn_script_trust_job_type') === '', 'while the refusal itself is released');
+NodeMonitorHealth::note_reported_script_trust($listed, 'ok', array());
+$listed->save();
+$listed->load();
+check($listed->get('mgn_script_trust') === 'ok', 'until the poll finds them intact');
+
+// A script job that ran proves the manifest usable, whichever finding said otherwise.
+$manifest = st_node();
+NodeMonitorHealth::note_script_trust($manifest, st_job($manifest, 'backup_run', 'refused', $MANIFEST_NONE));
+$manifest->load();
+NodeMonitorHealth::note_script_trust($manifest, st_job($manifest, 'backup_run', 'completed', ''));
+$manifest->load();
+check($manifest->get('mgn_script_trust') === 'ok', 'a completed job clears a manifest refusal');
 
 // ---------------------------------------------------------------------------
 section('What the operator is told');
