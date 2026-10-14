@@ -20,6 +20,7 @@
  * Creates its own user and keys and removes them afterwards. Requires the
  * apk_scope column (run update_database after deploying the feature).
  *
+ * @version 1.2 - a refusal names the entry the key lacked
  * @version 1.1 - record entries over HTTP
  * @version 1.0
  */
@@ -95,6 +96,8 @@ try {
 
 			$r = api_request('PUT', '/api/v1/Location/' . $location_id . '?loc_name=changed', $hr);
 			check($r['status'] === 403, 'Updating is refused: the scope gives read and create only', $r['status'] . ' ' . substr($r['raw'], 0, 200));
+			check(strpos((string)($r['json']['error'] ?? ''), "'Location:update'") !== false,
+				'and the refusal names the entry it lacked', $r['json']['error'] ?? $r['raw']);
 			$r = api_request('DELETE', '/api/v1/Location/' . $location_id, $hr);
 			check($r['status'] === 403, 'Deleting is refused', $r['status'] . ' ' . substr($r['raw'], 0, 200));
 			$still = new Location($location_id, TRUE);
@@ -123,6 +126,9 @@ try {
 			'auth/session'       => array('GET', '/api/v1/auth/session', null),
 			'a form definition'  => array('GET', '/api/v1/form/account_edit', null),
 		);
+		$r = api_request('GET', '/api/v1/Users', $hr);
+		check(strpos((string)($r['json']['error'] ?? ''), "'User:read'") !== false,
+			'Another model\'s refusal names the entry a read of it would need', $r['json']['error'] ?? $r['raw']);
 		foreach ($record_refusals as $label => $req) {
 			$r = api_request($req[0], $req[1], $hr, $req[2]);
 			check($r['status'] === 403, "Refused 403 on $label", $r['status'] . ' ' . substr($r['raw'], 0, 200));

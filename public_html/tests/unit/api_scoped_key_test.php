@@ -23,6 +23,7 @@
  *
  * Run: php tests/unit/api_scoped_key_test.php
  *
+ * @version 1.2 - a refusal names what the key lacked, and a sandboxed plugin's where its manifest asks
  * @version 1.1 - record entries, the scope grammar, the permission a scope
  *   needs, and the model/route-family name rule
  * @version 1.0
@@ -159,6 +160,24 @@ check(!$r['allowed'] && $r['status'] === 403, 'Delete is not implied by create')
 $r = $record_call($records, 'User', 'read');
 check(!$r['allowed'] && $r['status'] === 403, 'A model its scope does not name is refused');
 check(!$r['allowed'] && strpos($r['message'], 'Event: read, create') !== false, 'The refusal names the scope', $r['message'] ?? '');
+check(strpos($r['message'], "'User:read'") !== false, 'and the entry it would need', $r['message'] ?? '');
+$r = $record_call($records, 'Event', 'update');
+check(strpos($r['message'], "'Event:update' (update Event records)") !== false, 'A missing verb is named with its model', $r['message'] ?? '');
+$r = decide($READ, key_of(ApiKey::TYPE_MACHINE, 'Event:read'), 'notification_unread_count');
+check(!$r['allowed'] && strpos($r['message'], "the action 'notification_unread_count'") !== false, 'A missing action is named', $r['message'] ?? '');
+check(strpos($r['message'], 'manifest') === false, 'and a key that is no plugin\'s is not told about a manifest', $r['message'] ?? '');
+// A sandboxed plugin's key: the refusal says where its manifest asks.
+$plugin_key = new class(NULL) extends ApiKey {
+	function sandbox_plugin(): ?string { return 'notifier'; }
+};
+$plugin_key->set('apk_type', ApiKey::TYPE_MACHINE);
+$plugin_key->set('apk_scope', 'Event:read');
+$plugin_key->set('apk_permission', 1);
+$r = $record_call($plugin_key, 'User', 'read');
+check(strpos($r['message'], 'The plugin notifier asks for it in its manifest under permissions.records {"User": ["read"]}') !== false,
+	'A plugin\'s key is told the manifest line that asks for it', $r['message'] ?? '');
+$r = decide($READ, $plugin_key, 'notification_unread_count');
+check(strpos($r['message'], 'permissions.actions ["notification_unread_count"]') !== false, 'and for an action', $r['message'] ?? '');
 $r = decide($READ, $records, null);
 check(!$r['allowed'] && $r['status'] === 403, 'A surface with no name (forms, management) is still refused');
 $r = decide($READ, key_of(ApiKey::TYPE_MACHINE, 'Event:read'), $SNAP);
@@ -184,6 +203,16 @@ foreach (array('Users', 'User', 'management', 'auth', 'app', 'form', 'drive_uplo
 	check(!$r['allowed'] && $r['status'] === 403, "It is refused on '$family'");
 }
 check(outside_actions($event_key, 'action')['allowed'], 'Action dispatch is left to authorize()');
+$_SERVER['REQUEST_METHOD'] = 'DELETE';
+$r = outside_actions($event_key, 'User');
+check(strpos($r['message'], "'User:delete'") !== false, 'A model it does not name is named with the verb the request asks', $r['message'] ?? '');
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$r = outside_actions($event_key, 'Users');
+check(strpos($r['message'], "'User:read'") !== false && strpos($r['message'], 'Post: read') !== false,
+	'a list URL is named as its model, beside what the key has', $r['message'] ?? '');
+$r = outside_actions($event_key, 'auth');
+check(strpos($r['message'], 'no scoped key reaches this') !== false, 'A family no scope reaches says so', $r['message'] ?? '');
+unset($_SERVER['REQUEST_METHOD']);
 $r = outside_actions($event_key, 'Postx');
 check(!$r['allowed'], 'A list URL is the model name plus s, nothing else');
 $r = outside_actions(key_of(ApiKey::TYPE_MACHINE, 'Aut:read'), 'auth');

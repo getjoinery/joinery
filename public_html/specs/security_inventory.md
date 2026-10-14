@@ -53,10 +53,13 @@ PHP bugs). The separations are weeks to months.
    step, not a rewrite. Dev, where files are edited in place, needs its own
    exception. (S10, done; it makes S5/S6 structural)
 4. **Plugins run somewhere else.** The only genuinely hard one, and the only
-   place a new plugin contract is unavoidable. Today a plugin is PHP in the
+   place a new plugin contract is unavoidable. A native plugin is PHP in the
    same process that may call any class. Signing (Mitigation B, S9) is trust,
    not isolation: it decides *whose* code runs in the pool, not *what* that
-   code can reach.
+   code can reach. Built for outside code as the sandboxed tier (S22): a
+   stranger's plugin is a WebAssembly module in a host process outside the
+   pool, reaching core only through the API under a scoped key. Our own
+   plugins stay native, signed, in the pool.
 
 ### Isolated plugins: the two shapes
 
@@ -90,19 +93,25 @@ such plugin ships, and the API-only pool is the path that keeps PHP. Until
 that is answered, every plugin-facing change should be one both answers
 accept: the API surface grows, in-process reach does not.
 
-### Proposed answer: two plugin tiers
+### The answer: two plugin tiers (built 2026-10-14)
 
-The owner's proposal (2026-09-09) is its own spec, `plugin_tiers.md`, while
-it is discussed. The part that touches this list: the *policy* that the
-marketplace carries no third-party PHP closes the plugin question inside the
-1.0 bar with signing alone (S9); the sandboxed-tier host is post-1.0.
+Spec `plugin_tiers.md` (implemented; released 0.8.494, the container fixes
+0.8.495). Native: our signed PHP in the pool, and an uploaded unsigned one
+only through the warning. Sandboxed: a manifest and one WebAssembly module,
+run by `sandbox-host` under its own uid outside the pool (a hardened systemd
+unit, or a cron keepalive inside a site container), reaching core only
+through `/api/v1` with a key scoped to what an admin approved on the
+approval page, and the outside world only through HTTPS to the hosts that
+page named. The *policy* that the marketplace carries no third-party PHP
+still closes the plugin question inside the 1.0 bar with signing alone
+(S9); what the sandboxed tier leaves is residual 12.
 
 ### Order
 
 Parser jail and read-only tree first (cheap, and they close routes 1 and 2 of
 the malicious-message analysis); the unseal daemon next; the plugin question
-decided, not deferred. Wasm at the parsers now, at the plugin boundary later
-if the answer is "strangers", at PHP never.
+decided, not deferred. Wasm at the parsers now, at the plugin boundary for
+strangers' code (built 2026-10-14, S22), at PHP never.
 
 ### The threat model after all of it
 
@@ -161,12 +170,28 @@ attacker can still do, honestly, most to least likely:
     reader's browser, so a tracking pixel reports the open, the time, the
     reader's IP and browser to the sender. Accepted (S8, declined): the
     frame is sandboxed, so it is disclosure to one sender, never execution.
+12. **A sandboxed plugin an admin approved.** What its approval page listed
+    is what it can do, and that is a lot: its key acts as the approving
+    superadmin, so a model it may read it reads whole, not one member's
+    rows; and it can send whatever it reads to the hosts the page named.
+    The approval page is the control, and the call log (every door, every
+    refusal) the record. Beyond its approval, an escape needs a bug in
+    wazero's interpreter or the host's three doors. That lands as
+    `joinery-sbx`: on a server with systemd the unit hides the web root but
+    for the plugins and its socket, refuses internal addresses, filters
+    system calls and allows no writable-executable memory; inside a site
+    container only the container's own walls and file modes apply, so it
+    can read what any user there can (the code, not `config/` or uploads)
+    and reach whatever the container's network reaches.
+    An approval lapses when its admin is demoted, disabled or deleted.
+    Out of scope by design: sealed content (never granted, and never to a
+    plugin with outbound hosts) and public pages.
 
 **What is gone from the list:** a stranger's message reaching code; an admin
 page becoming code; a plugin ZIP as a door; permanent, portable loss of a
 long-term key from a pool compromise; anything persisting from a transient
 break-in; unapproved AI action on mail; mail leaving the box against the
-domain's consent.
+domain's consent; a stranger's plugin in the process that holds the keys.
 
 ## Items to handle soon
 
@@ -203,6 +228,7 @@ the owner is investigating and adding.
 | S19 | Closed 2026-09-09. The domain's `local|trusted|cloud` consent binds at every security level, shown on the domain form for Standard too (B10) — `security_inventory_closures_mail_2026_09.md` § S19 | mail leaving the box against the consent setting | small |
 | S20 | Closed 2026-09-09 (2429131f). The untrusted markers are built in one place and any marker inside content is rewritten (B11) — closures spec § S20 | envelope escape | one class |
 | S21 | Closed 2026-09-09. A third spool cap bounds held bytes per verified sending domain (`joinery_direct_spool_sender_cap_bytes`) — `security_inventory_closures_mail_2026_09.md` § S21 | storage from strangers | small |
+| S22 | **DONE 2026-10-14, `implemented/plugin_tiers.md`** (released 0.8.494; container fixes 0.8.495, proven on test servers). Separation 4 for outside code: the sandboxed tier (§ The answer: two plugin tiers; residual 12). Found building it and closed: every `secret: true` setting was stored plain (now sealed, and the reconciler seals old ones); the outbound guards had drifted: core's `UrlSafetyValidator` let NAT64 addresses carrying an internal IPv4 one (`64:ff9b::a9fe:a9fe` is the cloud metadata address), IPv6 multicast, `198.18/15`, `192.0.0/24` and the documentation ranges through, and judged an IPv6 address by how it was written (`::7f00:1` passed where `::127.0.0.1` did not); the relay's lacked three ranges; and all three let 6to4, Teredo, IPv4-translated and site-local addresses through. All three now judge an IPv6 address by its bytes, an embedded IPv4 one as that address, and are tested against one list (`tests/fixtures/outbound_address_cases.json`, reviewed by reviewer2); module randomness was a fixed seed; a scoped key's refusal now names what it lacked | a stranger's plugin reaching the pool; SSRF through NAT64 | large |
 
 
 ## What a message can make the system do (2026-09-09)

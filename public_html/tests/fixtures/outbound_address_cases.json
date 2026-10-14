@@ -1,0 +1,255 @@
+{
+  "_about": "The one list of addresses every outbound guard must refuse, and public ones it must allow. Read by tests/security/safe_http_client_test.php (UrlSafetyValidator::checkIp), the sandboxed plugin host's TestPublicAddressTable (maintenance_scripts/install_tools/sandbox_host/host_test.go) and the relay's TestIsPublicIPMatchesThePlatformTable (plugins/mailbox/provisioning/relay-sealer/direct_wire_test.go). A range added to one guard is added here, and the other two must then refuse it too.",
+  "refused": [
+    {
+      "address": "0.0.0.0",
+      "why": "0.0.0.0/8 this host, routes to loopback on Linux"
+    },
+    {
+      "address": "0.0.0.1",
+      "why": "0.0.0.0/8"
+    },
+    {
+      "address": "0.1.2.3",
+      "why": "0.0.0.0/8"
+    },
+    {
+      "address": "10.0.0.1",
+      "why": "10.0.0.0/8 private"
+    },
+    {
+      "address": "10.1.2.3",
+      "why": "10.0.0.0/8 private"
+    },
+    {
+      "address": "127.0.0.1",
+      "why": "127.0.0.0/8 loopback"
+    },
+    {
+      "address": "169.254.169.254",
+      "why": "169.254.0.0/16 link-local, the cloud metadata address"
+    },
+    {
+      "address": "169.254.1.1",
+      "why": "169.254.0.0/16 link-local"
+    },
+    {
+      "address": "172.16.0.1",
+      "why": "172.16.0.0/12 private"
+    },
+    {
+      "address": "172.31.255.255",
+      "why": "172.16.0.0/12 private, its last address"
+    },
+    {
+      "address": "192.168.1.1",
+      "why": "192.168.0.0/16 private"
+    },
+    {
+      "address": "100.64.0.1",
+      "why": "100.64.0.0/10 carrier-grade NAT"
+    },
+    {
+      "address": "100.127.255.255",
+      "why": "100.64.0.0/10 carrier-grade NAT, its last address"
+    },
+    {
+      "address": "192.0.0.8",
+      "why": "192.0.0.0/24 IETF protocol assignments"
+    },
+    {
+      "address": "192.0.2.1",
+      "why": "192.0.2.0/24 documentation (TEST-NET-1)"
+    },
+    {
+      "address": "198.51.100.1",
+      "why": "198.51.100.0/24 documentation (TEST-NET-2)"
+    },
+    {
+      "address": "203.0.113.1",
+      "why": "203.0.113.0/24 documentation (TEST-NET-3)"
+    },
+    {
+      "address": "198.18.0.1",
+      "why": "198.18.0.0/15 benchmarking, sometimes an internal network"
+    },
+    {
+      "address": "198.19.255.255",
+      "why": "198.18.0.0/15 benchmarking, its last address"
+    },
+    {
+      "address": "224.0.0.1",
+      "why": "224.0.0.0/4 multicast"
+    },
+    {
+      "address": "239.255.255.250",
+      "why": "224.0.0.0/4 multicast"
+    },
+    {
+      "address": "240.0.0.1",
+      "why": "240.0.0.0/4 reserved"
+    },
+    {
+      "address": "255.255.255.255",
+      "why": "broadcast"
+    },
+    {
+      "address": "::",
+      "why": "IPv6 unspecified"
+    },
+    {
+      "address": "::1",
+      "why": "IPv6 loopback"
+    },
+    {
+      "address": "fe80::1",
+      "why": "fe80::/10 IPv6 link-local"
+    },
+    {
+      "address": "fc00::1",
+      "why": "fc00::/7 IPv6 unique local"
+    },
+    {
+      "address": "fd12::1",
+      "why": "fc00::/7 IPv6 unique local"
+    },
+    {
+      "address": "ff02::1",
+      "why": "ff00::/8 IPv6 multicast"
+    },
+    {
+      "address": "::ffff:127.0.0.1",
+      "why": "IPv4-mapped loopback"
+    },
+    {
+      "address": "::ffff:10.0.0.1",
+      "why": "IPv4-mapped private"
+    },
+    {
+      "address": "::ffff:169.254.169.254",
+      "why": "IPv4-mapped cloud metadata"
+    },
+    {
+      "address": "::127.0.0.1",
+      "why": "IPv4-compatible (deprecated) loopback"
+    },
+    {
+      "address": "64:ff9b::a00:1",
+      "why": "64:ff9b::/96 NAT64, carrying 10.0.0.1"
+    },
+    {
+      "address": "64:ff9b::a9fe:a9fe",
+      "why": "64:ff9b::/96 NAT64, carrying the cloud metadata address"
+    },
+    {
+      "address": "64:ff9b:1::a00:1",
+      "why": "64:ff9b:1::/48 local-use NAT64 (RFC 8215), carrying 10.0.0.1"
+    },
+    {
+      "address": "2001:db8::1",
+      "why": "2001:db8::/32 IPv6 documentation"
+    },
+    {
+      "address": "::7f00:1",
+      "why": "::/96 IPv4-compatible loopback, written in hex: an address is judged by its bytes"
+    },
+    {
+      "address": "::a9fe:a9fe",
+      "why": "::/96 IPv4-compatible cloud metadata, written in hex"
+    },
+    {
+      "address": "::ffff:7f00:1",
+      "why": "IPv4-mapped loopback, written in hex"
+    },
+    {
+      "address": "::ffff:a9fe:a9fe",
+      "why": "IPv4-mapped cloud metadata, written in hex"
+    },
+    {
+      "address": "::ffff:0:a9fe:a9fe",
+      "why": "::ffff:0:0:0/96 IPv4-translated (RFC 6145), refused outright"
+    },
+    {
+      "address": "::ffff:0:808:808",
+      "why": "::ffff:0:0:0/96 IPv4-translated, refused even carrying a public address"
+    },
+    {
+      "address": "64:ff9b:1::808:808",
+      "why": "64:ff9b:1::/48 local-use NAT64, refused even carrying a public address"
+    },
+    {
+      "address": "64:ff9b:2::1",
+      "why": "the rest of 64:ff9b::/32"
+    },
+    {
+      "address": "2002:a9fe:a9fe::1",
+      "why": "2002::/16 6to4 carrying the cloud metadata address"
+    },
+    {
+      "address": "2002:7f00:1::1",
+      "why": "2002::/16 6to4 carrying loopback"
+    },
+    {
+      "address": "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+      "why": "2001::/32 Teredo hides its address"
+    },
+    {
+      "address": "fec0::1",
+      "why": "fec0::/10 site-local (deprecated)"
+    },
+    {
+      "address": "feff::1",
+      "why": "fec0::/10 site-local, its top: the range does not end on a byte"
+    },
+    {
+      "address": "2001:2::1",
+      "why": "2001:2::/48 IPv6 benchmarking, as 198.18/15 is for IPv4"
+    },
+    {
+      "address": "100::1",
+      "why": "100::/64 discard-only"
+    }
+  ],
+  "allowed": [
+    {
+      "address": "8.8.8.8",
+      "why": "public"
+    },
+    {
+      "address": "1.1.1.1",
+      "why": "public"
+    },
+    {
+      "address": "93.184.216.34",
+      "why": "public"
+    },
+    {
+      "address": "2606:4700:4700::1111",
+      "why": "public IPv6"
+    },
+    {
+      "address": "2606:4700::1111",
+      "why": "public IPv6"
+    },
+    {
+      "address": "2001:4860:4860::8888",
+      "why": "public IPv6"
+    },
+    {
+      "address": "::ffff:8.8.8.8",
+      "why": "IPv4-mapped public: judged as 8.8.8.8"
+    },
+    {
+      "address": "::ffff:808:808",
+      "why": "IPv4-mapped public, written in hex"
+    },
+    {
+      "address": "64:ff9b::808:808",
+      "why": "NAT64 carrying 8.8.8.8: an IPv6-only host behind DNS64 reaches public IPv4 this way"
+    },
+    {
+      "address": "2002:808:808::1",
+      "why": "6to4 carrying 8.8.8.8"
+    }
+  ]
+}

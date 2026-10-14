@@ -402,10 +402,16 @@ Extism memory:
 
 `joinery_api` calls the site as the plugin (its credential is added by the
 host; the module never sees it). `joinery_http` goes only to a public address,
-checked at the moment it is dialled, never follows a redirect, and drops
+checked at the moment it is dialled (the addresses refused are the platform's,
+listed once in `tests/fixtures/outbound_address_cases.json`, which the host's
+tests, `SafeHttpClient`'s and the relay's all read), never follows a redirect, and drops
 headers that steer the connection. Requests and answers are capped at 1 MB,
 and every door honours the call's deadline. What a module asked of a door, and
-whether it was done, refused or failed, is in the call log.
+whether it was done, refused or failed, is in the call log. An API call the
+plugin's approval does not cover is refused naming the entry it lacked and the
+manifest line that asks for it (`permissions.records {"Event": ["read"]}`,
+or an action under `permissions.actions`); a version asking for it then waits
+on an admin's approval like any other.
 
 **The author kit** is `sandbox_sdk/` at the top of the repository: a Rust
 crate (`rust/joinery-plugin`) and a JavaScript kit (`js/`) wrapping the calls

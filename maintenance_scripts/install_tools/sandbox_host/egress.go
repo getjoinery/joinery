@@ -99,11 +99,11 @@ func isPublicIP(ip net.IP) bool {
 			return false
 		case v4[0] == 192 && v4[1] == 0 && v4[2] == 0: // IETF protocol assignments 192.0.0/24
 			return false
-		case v4[0] == 192 && v4[1] == 0 && v4[2] == 2: // TEST-NET-1
+		case v4[0] == 192 && v4[1] == 0 && v4[2] == 2: // TEST-NET-1 192.0.2/24
 			return false
-		case v4[0] == 198 && v4[1] == 51 && v4[2] == 100: // TEST-NET-2
+		case v4[0] == 198 && v4[1] == 51 && v4[2] == 100: // TEST-NET-2 198.51.100/24
 			return false
-		case v4[0] == 203 && v4[1] == 0 && v4[2] == 113: // TEST-NET-3
+		case v4[0] == 203 && v4[1] == 0 && v4[2] == 113: // TEST-NET-3 203.0.113/24
 			return false
 		case v4[0] == 198 && (v4[1] == 18 || v4[1] == 19): // benchmarking 198.18/15
 			return false
@@ -112,26 +112,42 @@ func isPublicIP(ip net.IP) bool {
 		}
 		return true
 	}
-	if len(ip) == net.IPv6len {
-		// ::a.b.c.d (IPv4-compatible, deprecated): twelve zero bytes.
-		zeros := true
-		for i := 0; i < 12; i++ {
-			if ip[i] != 0 {
-				zeros = false
-				break
+	if len(ip) != net.IPv6len {
+		return false
+	}
+	zero := func(b []byte) bool {
+		for _, c := range b {
+			if c != 0 {
+				return false
 			}
 		}
-		if zeros {
-			return false
+		return true
+	}
+	switch {
+	case zero(ip[:12]): // ::/96, IPv4-compatible (deprecated), however it is written
+		return false
+	case zero(ip[:8]) && ip[8] == 0xff && ip[9] == 0xff && ip[10] == 0 && ip[11] == 0: // ::ffff:0:0:0/96, IPv4-translated
+		return false
+	case ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b:
+		// 64:ff9b::/96 (NAT64) carries an IPv4 address in its last 32 bits:
+		// judged as that address. The rest of 64:ff9b::/32, the local-use
+		// 64:ff9b:1::/48 among it, is refused: its embedding varies.
+		if zero(ip[4:12]) {
+			return isPublicIP(net.IPv4(ip[12], ip[13], ip[14], ip[15]))
 		}
-		// 64:ff9b::/96 (NAT64) carries an IPv4 address that may be internal.
-		if ip[0] == 0x00 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b {
-			return false
-		}
-		// 2001:db8::/32 documentation.
-		if ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8 {
-			return false
-		}
+		return false
+	case ip[0] == 0x20 && ip[1] == 0x02: // 2002::/16 (6to4) carries an IPv4 address: judged as that address
+		return isPublicIP(net.IPv4(ip[2], ip[3], ip[4], ip[5]))
+	case ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x00 && ip[3] == 0x00: // 2001::/32 (Teredo) hides its address
+		return false
+	case ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x00 && ip[3] == 0x02 && ip[4] == 0 && ip[5] == 0: // 2001:2::/48 benchmarking
+		return false
+	case ip[0] == 0x01 && ip[1] == 0x00 && zero(ip[2:8]): // 100::/64 discard-only
+		return false
+	case ip[0] == 0x20 && ip[1] == 0x01 && ip[2] == 0x0d && ip[3] == 0xb8: // 2001:db8::/32 documentation
+		return false
+	case ip[0] == 0xfe && ip[1]&0xc0 == 0xc0: // fec0::/10 site-local (deprecated)
+		return false
 	}
 	return true
 }
