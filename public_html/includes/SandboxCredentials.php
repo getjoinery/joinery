@@ -15,7 +15,8 @@
  *   reprovision()  the sealed-secret reconciler's recipe for a secret that
  *               can no longer be opened (the database moved): mint again
  *
- * @version 1.0
+ * @version 1.1 - a lapse ends the approval (approver cleared), so restoring the admin leaves the plugin waiting
+ *                rather than approved with its key off; reprovision() passes over a plugin waiting on approval
  */
 
 class SandboxCredentials {
@@ -119,14 +120,17 @@ class SandboxCredentials {
 
 	/**
 	 * The admin whose approvals these are can no longer give one (demoted
-	 * below superadmin, or disabled): each plugin they approved has its key
-	 * switched off, and waits on another admin's approval
-	 * (SandboxConsent::approver()). Never re-minted as someone else: that
-	 * would be an approval nobody gave.
+	 * below superadmin, disabled or deleted): each plugin they approved has
+	 * its key switched off and its approval ended, and waits on an admin's
+	 * approval, theirs included once they may give one again. Never
+	 * re-minted as someone else: that would be an approval nobody gave.
+	 * Nor revived when the admin is restored: that approval was ended.
 	 */
 	public static function lapseApprovalsOf(int $user_id): void {
 		foreach (new MultiSandboxInstall(array('sbi_usr_user_id' => $user_id)) as $install) {
 			self::suspend((string)$install->get('sbi_plugin'));
+			$install->set('sbi_usr_user_id', null);
+			$install->save();
 		}
 	}
 
@@ -161,6 +165,11 @@ class SandboxCredentials {
 		$ok = true;
 		foreach (array_keys(SandboxPlugins::active()) as $plugin) {
 			if (SandboxInstall::credentialFor($plugin) !== null) {
+				continue;
+			}
+			// Waiting on an admin's approval, not broken: its key comes with it.
+			$row = SandboxInstall::forPlugin($plugin);
+			if ($row === null || SandboxConsent::approver($row) === null) {
 				continue;
 			}
 			try {

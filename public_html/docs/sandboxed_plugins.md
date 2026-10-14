@@ -217,10 +217,13 @@ What a plugin may do is what its manifest asks for **and** the approval covers
 was approved and nothing more (a member page it adds is not shown); the
 Plugins page marks it **Waiting for approval**, and the review page lists what
 is new. An approval stands while the admin who gave it is a superadmin, not
-disabled and not deleted: demoting or disabling them switches the plugin's key
-off at once (`SandboxCredentials::lapseApprovalsOf()`, from `User::save()` and
-`User::soft_delete()`; a permanent delete takes the key with the account), and
-it waits on another admin's approval, which mints a key as them.
+disabled and not deleted: demoting, disabling or deleting them switches the
+plugin's key off at once and ends the approval
+(`SandboxCredentials::lapseApprovalsOf()`, from `User::save()` and
+`User::soft_delete()`; a permanent delete takes the key with the account). The
+plugin then waits on an admin's approval, which mints a key as that admin.
+Restoring the admin does not bring the ended approval back; they may approve
+it again like anyone else.
 Another superadmin may approve an approved plugin as themselves (**Approve as
 me**), which moves its credential to them.
 

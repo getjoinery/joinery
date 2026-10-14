@@ -334,6 +334,12 @@ try {
 	check(!$key->get('apk_is_active') && SandboxInstall::credentialFor($name) === null,
 		'Demoting the approving admin switches the plugin\'s key off at once');
 	check(SandboxConsent::needsApproval($name), 'and the plugin waits on another admin\'s approval');
+	$demoted = new User((int)$second->key, TRUE);
+	$demoted->set('usr_permission', 10);
+	$demoted->save();
+	$reset();
+	check(SandboxConsent::needsApproval($name) && SandboxInstall::credentialFor($name) === null,
+		'Promoting them again does not bring the approval back: the plugin still waits on one');
 	$sign_in($superadmin);
 	$approve($name);
 	$reset();
@@ -353,6 +359,11 @@ try {
 	check(!(new ApiKey($key_id, TRUE))->get('apk_is_active') && SandboxInstall::credentialFor($name) === null,
 		'Deleting the approving admin is not refused: the plugin\'s key switches off at once, as on a demotion');
 	check(SandboxConsent::needsApproval($name), 'and the plugin waits on another admin\'s approval');
+	(new User((int)$third->key, TRUE))->undelete();
+	$reset();
+	check(SandboxConsent::needsApproval($name) && SandboxInstall::credentialFor($name) === null,
+		'Restoring the deleted admin leaves it waiting too, not approved with its key off');
+	check(SandboxCredentials::reprovision(), 'and the secret heal passes over a plugin waiting on approval rather than failing on it');
 	$fourth = make_user('SbxFourth', 10);
 	$sign_in($fourth);
 	$approve($name);
