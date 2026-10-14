@@ -38,7 +38,7 @@ import (
 	"time"
 )
 
-const version = "1.0.0"
+const version = "1.0.1"
 
 // The most of a request this host reads: an envelope is a call's input and
 // its settings, never a file.
@@ -91,8 +91,12 @@ func main() {
 }
 
 // listen takes the socket path, removing a stale socket a previous run left.
-// The socket is the only way in: its directory decides who may call (the
-// installer makes it the host's own, readable by the web server's group).
+// The socket is the only way in, and its directory alone decides who may
+// call: the installer makes it the host's own, 0750, group the web server's,
+// so nobody else can reach the socket at all. The socket itself is open to
+// whoever reaches it. Its group is not relied on: in a site container a
+// setgid directory loses the bit (the container drops CAP_FSETID), and the
+// socket would be the host's group, closed to the web server.
 func listen(path string) (net.Listener, error) {
 	if fi, err := os.Lstat(path); err == nil {
 		if fi.Mode()&os.ModeSocket == 0 {
@@ -106,7 +110,7 @@ func listen(path string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return listener, os.Chmod(path, 0o660)
+	return listener, os.Chmod(path, 0o666)
 }
 
 // handler serves /call and /health.

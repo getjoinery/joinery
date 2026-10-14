@@ -15,6 +15,8 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
+ * @version 2.3 - a 'retry' result records its status and message but not a run, so the task is
+ *   due again on the next tick (it could not run yet: a prerequisite is starting)
  * @version 2.2 - every line is stamped when it is written and the Result line
  *   carries the task's elapsed seconds, so the log shows how long each task took
  * @version 2.1
@@ -204,8 +206,12 @@ foreach ($tasks as $task) {
 
 			// Update task record. The message column is 500 chars — a long task
 			// message must truncate, never abort the record update (an aborted
-			// update reads as a task failure and eats the real message).
-			$task->set('sct_last_run_time', 'now()');
+			// update reads as a task failure and eats the real message). A
+			// 'retry' is not a run: the last run time stays, so the task is due
+			// again on the next tick.
+			if ($status !== 'retry') {
+				$task->set('sct_last_run_time', 'now()');
+			}
 			$task->set('sct_last_run_status', mb_substr((string)$status, 0, 50));
 			$task->set('sct_last_run_message', $message !== null ? mb_substr((string)$message, 0, 500) : null);
 			if ($deactivate) {
@@ -239,7 +245,7 @@ foreach ($tasks as $task) {
 						echo "[" . cron_stamp() . "]   Chain error: " . $chain_e->getMessage() . "\n";
 					}
 				}
-			} elseif ($status === 'skipped') {
+			} elseif ($status === 'skipped' || $status === 'retry') {
 				$tasks_skipped++;
 			} else {
 				$tasks_errored++;

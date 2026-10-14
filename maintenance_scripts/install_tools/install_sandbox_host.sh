@@ -3,6 +3,9 @@
 # install_sandbox_host.sh - install or converge the sandboxed plugin host for
 # one site (plugin_tiers.md WP7, docs/sandboxed_plugins.md).
 #
+# Version: 1.2 - the socket's directory is 0750 with no setgid bit (a site container clears it) and the
+#                host makes the socket 0666; the cron keepalive closes inherited descriptors before
+#                runuser, which stayed alive holding the converger's lock
 # Version: 1.1 - the unit masks the web root, filters system calls, refuses internal addresses, yields CPU
 # Version: 1.0
 #
@@ -17,8 +20,9 @@
 #     sandbox_host/bin/sandbox-host-<uname -m> shipped beside this script
 #     (nothing is ever compiled on a node);
 #   - SITE_ROOT/run/sandbox-host/, owned by joinery-sbx, group www-data, mode
-#     2750: the host's socket is made there 0660, so the web server (and so
-#     core) can call it and nobody else can;
+#     0750: only the host and the web server (and so core) can reach the socket
+#     inside, which the host makes 0666. No setgid bit is relied on: a site
+#     container drops CAP_FSETID, and chmod then clears it;
 #   - supervision the way install_agent.sh supervises the agent: a systemd unit
 #     where systemd is PID 1 (sandboxed: no new privileges, no write-execute
 #     memory, a system-service syscall filter, a read-only system with the web
@@ -167,7 +171,8 @@ chown root:root "${SITE_ROOT}/run"
 chmod 755 "${SITE_ROOT}/run"
 mkdir -p "${RUN_DIR}"
 chown "${HOST_USER}:${WEB_GROUP}" "${RUN_DIR}"
-chmod 2750 "${RUN_DIR}"
+chmod 0750 "${RUN_DIR}"
+chmod g-s "${RUN_DIR}"
 
 ARGS="-socket ${SOCKET} -plugins-dir ${PLUGINS_DIR}"
 
@@ -257,10 +262,13 @@ else
 #!/bin/sh
 # ${SITENAME}'s sandboxed plugin host keepalive (install_sandbox_host.sh): start
 # the host if it is not running. Every descriptor above stdio is closed before
-# it starts, in a bash -c, for the reasons install_agent.sh's keepalive gives
-# (an inherited lock, a shell that cannot close fd 10).
+# runuser starts, in a bash -c, for the reasons install_agent.sh's keepalive
+# gives (an inherited lock, a shell that cannot close fd 10). Before runuser,
+# not inside it: runuser stays alive as the host's parent, and whatever it
+# inherited (the converger's lock, when the installer starts this) it holds
+# for as long as the host runs.
 if ! pgrep -u ${HOST_USER} -f -- "-socket ${SOCKET}" >/dev/null 2>&1; then
-    nohup runuser -u ${HOST_USER} -- bash -c 'for f in /proc/\$\$/fd/*; do n=\${f##*/}; case "\$n" in 0|1|2) continue;; esac; eval "exec \$n>&-" 2>/dev/null || true; done; umask 0007; exec ${DEST} ${ARGS}' >> ${LOG_FILE} 2>&1 < /dev/null &
+    nohup bash -c 'for f in /proc/\$\$/fd/*; do n=\${f##*/}; case "\$n" in 0|1|2) continue;; esac; eval "exec \$n>&-" 2>/dev/null || true; done; umask 0007; exec runuser -u ${HOST_USER} -- ${DEST} ${ARGS}' >> ${LOG_FILE} 2>&1 < /dev/null &
 fi
 SUPERVISE
     chmod 755 "${SUPERVISE_PATH}"
