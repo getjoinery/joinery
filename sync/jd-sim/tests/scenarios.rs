@@ -22859,11 +22859,13 @@ fn a_file_saved_again_with_the_same_bytes_survives_its_old_records_trash_on_a_st
 /// clash unless the server lists something under that name: here nothing is,
 /// so the file goes up under its own name on the next pass, never as a
 /// conflicted copy of itself beside nothing. RED before: the step-aside
-/// "succeeded" whatever the refusal was about (B-IR).
+/// "succeeded" whatever the refusal was about (B-IR). From an older server,
+/// which does not say its refusals are reasoned, where the guess is made.
 #[test]
 fn a_silent_refusal_of_a_new_upload_is_not_a_name_clash() {
     let world = World::new(9_863, &["laptop"]);
     let laptop = world.device("laptop");
+    world.server.refuses_without_saying_why(true);
     laptop.fs.user_write("a.txt", b"first");
     assert!(world.settle().is_some());
     world.server.answer_next("drive_upload_complete", 422);
@@ -22944,5 +22946,88 @@ fn a_new_file_moved_while_its_upload_lands_beside_stays_where_the_user_put_it() 
         assert_eq!(world.device(name).fs.peek("Projects/Sub 2/doc-1.txt").as_deref(), Some(MINE), "{name}");
         assert_eq!(world.device(name).fs.peek("Projects/doc-1.txt").as_deref(), Some(THEIRS), "{name}");
     }
+    assert_converged(&world);
+}
+
+/// A server that says every refusal it sends names its reason is taken at its
+/// word: a refusal with none is withdrawn and planned again, never guessed to
+/// be about the name -- no listing asked to check the guess, no conflict name
+/// tried. From an older server the guess is still made and checked, as it
+/// always was (B-IR). Either way the file goes up under its own name.
+#[test]
+fn a_reasoned_server_is_not_guessed_at() {
+    for older in [false, true] {
+        let world = World::new(9_853, &["laptop"]);
+        let laptop = world.device("laptop");
+        world.server.refuses_without_saying_why(older);
+        laptop.fs.user_write("a.txt", b"first");
+        assert!(world.settle().is_some());
+        let listed = world.server.list_requests();
+        world.server.answer_next("drive_upload_complete", 422);
+        laptop.fs.user_write("b.txt", b"second");
+        world.pass(laptop);
+        let asked = world.server.list_requests() - listed;
+        assert_eq!(asked > 0, older, "older server {older}: {asked} listing(s) asked to check a guess");
+        if !older {
+            let said = issues_of(laptop, "withdrawn");
+            assert!(said.len() == 1 && said[0].contains("refused without a reason"), "{said:?}");
+        }
+        assert!(world.settle().is_some(), "never settled");
+        let tree = world.server.tree();
+        assert!(tree.contains_key("b.txt") && !tree.keys().any(|k| k.contains("conflicted copy")), "{tree:?}");
+        assert_converged(&world);
+    }
+}
+
+/// A trash the server answers with `not_found` -- the platform's answer for
+/// something already gone -- is the outcome the trash wanted, not a refusal
+/// to tell anybody about. RED before: only a 404 read so, and the platform
+/// never sends one; the trash was withdrawn, and the user told.
+#[test]
+fn a_trash_of_what_the_server_no_longer_has_is_done() {
+    let world = World::new(9_852, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("c.txt", b"the file deleted twice");
+    assert!(world.settle().is_some());
+    let id = world.server.files().into_iter().find(|f| f.name == "c.txt").expect("on the server").id;
+    world.server.answer_next_because("drive_trash", 422, "not_found");
+    laptop.fs.user_remove("c.txt");
+    world.pass(laptop);
+    let said: Vec<String> = laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "withdrawn").map(|i| i.detail).collect();
+    assert!(said.is_empty(), "a trash of something already gone was withdrawn: {said:?}");
+    // What the answer said was so: the file was already gone.
+    world.server.action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": id })).expect("trash");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+}
+
+/// A change only the owner's unlock window allows (`vault_needed`) is held,
+/// not sent again: the window is a browser session's, and this computer never
+/// holds one, so asking again changes nothing until something it was asked
+/// about moves -- here, an hour. One issue says why. RED before: read as the
+/// server's state and retried on the backoff, each retry a fresh upload, so
+/// the whole file went up every quarter of an hour for ever, and nothing said
+/// why.
+#[test]
+fn a_change_only_the_vault_allows_is_held_not_retried() {
+    let world = World::new(9_851, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("a.txt", b"first");
+    assert!(world.settle().is_some());
+    world.server.answer_next_because("drive_upload_complete", 422, "vault_needed");
+    laptop.fs.user_write("a.txt", b"second");
+    world.pass(laptop);
+    let asked = world.server.upload_inits();
+    for _ in 0..10 {
+        world.clock.advance_secs(2 * 60);
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.upload_inits(), asked, "the refused upload was sent again with nothing changed");
+    let said = issues_of(laptop, "withdrawn");
+    assert!(said.len() == 1 && said[0].contains("only in a browser"), "{said:?}");
+    world.clock.advance_secs(61 * 60);
+    assert!(world.settle().is_some(), "never settled once the hold lifted");
+    assert_eq!(world.server.tree().get("a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"second")));
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
     assert_converged(&world);
 }

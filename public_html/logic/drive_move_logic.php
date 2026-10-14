@@ -14,10 +14,10 @@ function drive_move_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$entity_type = (string)($input['entity_type'] ?? '');
@@ -32,15 +32,15 @@ function drive_move_logic(array $input): LogicResult {
 	}
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
-		return LogicResult::error('Invalid entity type.');
+		return LogicResult::error('Invalid entity type.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$entity = DriveHelper::load_entity($entity_type, $entity_id);
 	if (!$entity) {
-		return LogicResult::error('Item not found.');
+		return LogicResult::error('Item not found.', array('reason' => 'not_found'));
 	}
 	if (!DriveHelper::can_write($entity_type, $entity, $user_id, $session->get_permission())) {
-		return LogicResult::error('You do not have permission to move this item.', array('standing' => true));
+		return LogicResult::error('You do not have permission to move this item.', array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	// Already there: nothing to move. Answered as success so a retried move
@@ -60,10 +60,10 @@ function drive_move_logic(array $input): LogicResult {
 	if ($parent_id > 0) {
 		$target = DriveHelper::load_folder($parent_id);
 		if (!$target) {
-			return LogicResult::error('Destination folder not found.');
+			return LogicResult::error('Destination folder not found.', array('reason' => 'parent_not_found'));
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $target, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to the destination folder.', array('standing' => true));
+			return LogicResult::error('You do not have access to the destination folder.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($target)) {
 			// Moving something into the trash is what drive_trash is for, and it
@@ -76,14 +76,14 @@ function drive_move_logic(array $input): LogicResult {
 		// delete-forever cascades (which select by folder) would operate on
 		// another user's rows.
 		if (DriveHelper::owner_id_of($entity_type, $entity) !== (int)$target->get('fol_usr_user_id')) {
-			return LogicResult::error('Items can only be moved within their owner\'s Drive.', array('standing' => true));
+			return LogicResult::error('Items can only be moved within their owner\'s Drive.', array('reason' => 'forbidden', 'standing' => true));
 		}
 	} elseif (!DriveHelper::owns($entity_type, $entity, $user_id)) {
 		// The top level is the item's OWNER's: moved there, it lands at the top of
 		// the owner's Drive, outside every folder shared with the mover. An editor
 		// reaches the item through a share, and taking it out of the share is not
 		// something that grant covers.
-		return LogicResult::error('Only the owner can move this to the top of their Drive.', array('standing' => true));
+		return LogicResult::error('Only the owner can move this to the top of their Drive.', array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	// Protection-boundary guard. A folder's level is the floor for everything
@@ -138,7 +138,7 @@ function drive_move_logic(array $input): LogicResult {
 			}
 			$plain_bytes = $entity->plain_size_bytes();
 			if ($plain_bytes > ProtectionLevelChange::BYTE_BUDGET) {
-				return LogicResult::error('That file is too large to convert during a move. Move it with its folder, or change the folder\'s protection level.');
+				return LogicResult::error('That file is too large to convert during a move. Move it with its folder, or change the folder\'s protection level.', array('reason' => 'level_change_refused', 'standing' => true));
 			}
 			// Private carries no public link and no member grant. A folder-wide
 			// level change reports those and revokes them once the owner confirms;
@@ -155,7 +155,8 @@ function drive_move_logic(array $input): LogicResult {
 						$parts[] = $shared['grants'] . ' member' . ($shared['grants'] === 1 ? '' : 's') . ' with access';
 					}
 					return LogicResult::error('That file has ' . implode(' and ', $parts)
-						. ', and a Private file can have neither. Remove the sharing first, then move it.');
+						. ', and a Private file can have neither. Remove the sharing first, then move it.',
+						array('reason' => 'level_change_refused', 'standing' => true));
 				}
 			}
 			$convert_file_to = $dest_level;
@@ -171,17 +172,18 @@ function drive_move_logic(array $input): LogicResult {
 			// a drag would be a surprise.
 			return LogicResult::error('That folder is ' . ProtectionLevel::label($item_level)
 				. ' and the destination is ' . ProtectionLevel::label($dest_level)
-				. '. Change the folder\'s protection level first, then move it.');
+				. '. Change the folder\'s protection level first, then move it.',
+				array('reason' => 'level_change_refused', 'standing' => true));
 		}
 	}
 
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
 		if (DriveHelper::would_create_cycle($entity_id, $parent_id)) {
-			return LogicResult::error('You cannot move a folder into itself or one of its subfolders.');
+			return LogicResult::error('You cannot move a folder into itself or one of its subfolders.', array('reason' => 'move_into_self'));
 		}
 		$base_depth = DriveHelper::depth($parent_id) + 1;
 		if ($base_depth + DriveHelper::subtree_height($entity_id) > DriveHelper::max_depth()) {
-			return LogicResult::error('That move would exceed the maximum folder depth.');
+			return LogicResult::error('That move would exceed the maximum folder depth.', array('reason' => 'too_deep', 'standing' => true));
 		}
 		$owner_id = (int)$entity->get('fol_usr_user_id');
 		if (DriveHelper::folder_name_taken($owner_id, $parent_id, $entity->get('fol_name'), $entity_id)) {
@@ -231,10 +233,10 @@ function drive_move_logic(array $input): LogicResult {
 					DriveSealed::unsealExistingFile($entity); // needs the window
 				}
 			} catch (VaultLockedException $e) {
-				return LogicResult::error('Unlock your vault to move a Private file out of its folder.');
+				return LogicResult::error('Unlock your vault to move a Private file out of its folder.', array('reason' => 'vault_needed'));
 			} catch (Exception $e) {
 				error_log('Drive move conversion failed for file ' . $entity_id . ': ' . $e->getMessage());
-				return LogicResult::error('That file could not be converted for its new folder.');
+				return LogicResult::error('That file could not be converted for its new folder.', array('reason' => 'storage_failed'));
 			}
 			$entity = DriveHelper::load_file($entity_id);
 		}

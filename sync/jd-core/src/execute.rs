@@ -424,7 +424,7 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
 pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // The server answered this op with a refusal that stands: the same
     // request is refused again until something it asked about moves
-    // (`ProtoError::standing`). Never a transport failure, a timeout, a 5xx,
+    // (`stands_here`). Never a transport failure, a timeout, a 5xx,
     // or a refusal a retry can cure (a checksum mismatch at completion): those
     // go as they always went.
     let mut refused = false;
@@ -442,9 +442,20 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 Err(e) => {
                     note_the_parent_is_in_the_trash(env, &e)?;
                     note_a_refused_name(env, op, &e)?;
-                    let outcome = classify(&e);
+                    let outcome = match classify(&e) {
+                        // A server that gives every refusal a reason sent one
+                        // without: its fault, and said so, so the issue tells
+                        // it from an ordinary withdrawal.
+                        OpOutcome::Withdrawn(why)
+                            if refusals_reasoned(env)
+                                && matches!(&e, ExecError::Proto(p) if p.refused_without_saying_why()) =>
+                        {
+                            OpOutcome::Withdrawn(format!("refused without a reason: {why}"))
+                        }
+                        other => other,
+                    };
                     refused = matches!(outcome, OpOutcome::Withdrawn(_))
-                        && matches!(&e, ExecError::Proto(p) if p.standing());
+                        && matches!(&e, ExecError::Proto(p) if stands_here(p));
                     outcome
                 }
             }
@@ -658,6 +669,31 @@ fn classify(e: &ExecError) -> OpOutcome {
         if p.parent_trashed() {
             return OpOutcome::Overtaken("the folder it was going into is in the trash".into());
         }
+        // What the rest of the reasons say (`docs/drive.md`, Refusal reasons).
+        // Gone, or a plan that cannot be carried out as it stands: planned
+        // again from what is there. The server's state, not the request:
+        // tried again. Anything else keeps its status's reading, and a
+        // standing one is held.
+        if let ProtoError::Api { message, .. } = p {
+            match p.reason() {
+                Some("not_found" | "parent_not_found" | "move_into_self") => {
+                    return OpOutcome::Overtaken(message.clone());
+                }
+                Some("no_room" | "storage_failed" | "drive_disabled" | "signed_out" | "action_failed") => {
+                    return OpOutcome::Retry(message.clone());
+                }
+                // Private content changes only inside its owner's unlock
+                // window, and the window is a browser session's: this
+                // computer never holds one, so asking again changes nothing.
+                // Held like a standing refusal (`stands_here`), and said.
+                Some("vault_needed") => {
+                    return OpOutcome::Withdrawn(format!(
+                        "{message} Private files change only in a browser, never through this computer."
+                    ));
+                }
+                _ => {}
+            }
+        }
     }
     match e {
         ExecError::Proto(ProtoError::Transport(m)) => OpOutcome::Retry(m.clone()),
@@ -703,6 +739,33 @@ fn classify(e: &ExecError) -> OpOutcome {
         ExecError::Store(m) => OpOutcome::Retry(m.to_string()),
         ExecError::Io(m) => OpOutcome::Retry(m.to_string()),
     }
+}
+
+/// A refusal the same request would meet again from here: one the server
+/// says stands, or one only an unlock window lifts (`vault_needed`), which
+/// this computer never holds. Held, not asked again, until something it was
+/// asked about moves (`pass::lift_or_keep_refusals`).
+fn stands_here(p: &ProtoError) -> bool {
+    p.standing() || p.reason() == Some("vault_needed")
+}
+
+/// Has this server said every refusal it sends names its reason
+/// (`refusals: reasoned` on its feed)? Then a refusal with none is a fault of
+/// the server's, withdrawn like any other, never a name clash to guess at
+/// (`docs/drive.md`, Refusal reasons).
+fn refusals_reasoned(env: &ExecEnv) -> bool {
+    env.store.get_meta(crate::pass::REFUSALS_REASONED).ok().flatten().as_deref() == Some("1")
+}
+
+/// A refusal with no reason, from a server that may refuse so.
+fn refused_without_saying_why(env: &ExecEnv, p: &ProtoError) -> bool {
+    p.refused_without_saying_why() && !refusals_reasoned(env)
+}
+
+/// A refusal that may be about the name: a taken name, or one with no reason
+/// from a server that may refuse so (`ProtoError::may_be_about_the_name`).
+fn may_be_about_the_name(env: &ExecEnv, p: &ProtoError) -> bool {
+    p.name_taken() || refused_without_saying_why(env, p)
 }
 
 /// Write down what a `parent_trashed` refusal just told us.
@@ -3065,7 +3128,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // predicate goes false, and the next attempt meets the real
             // refusal.
             Err(e)
-                if e.may_be_about_the_name()
+                if may_be_about_the_name(env, &e)
                     && held_by_a_rename_this_device_owes(env, op.entity, &params.name, params.folder_id)? =>
             {
                 return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
@@ -3225,7 +3288,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // converge and nothing is lost, which is why it is preferred to the
             // forever-loop, but it is a real cost and the cap of two is what
             // bounds it.
-            Err(e) if e.refused_without_saying_why() && !entry.is_encrypted && attempt < 2 => {
+            Err(e) if refused_without_saying_why(env, &e) && !entry.is_encrypted && attempt < 2 => {
                 // Only where the name is held. A refusal that would not say
                 // why may be about anything, and stepping aside "succeeds"
                 // whatever it was about: refused for its bytes, a new file went
@@ -4101,7 +4164,7 @@ fn create_remote_folder(
             // Capped hard, and far below the marked cap. A refusal that really
             // is about something else would otherwise mint a thousand conflict
             // names against a server that was never going to take any of them.
-            Err(e) if e.refused_without_saying_why() && attempt < 2 => {
+            Err(e) if refused_without_saying_why(env, &e) && attempt < 2 => {
                 attempt += 1;
                 wanted = (env.conflict_name)(&placement.name, attempt);
             }
@@ -4984,9 +5047,9 @@ fn move_remote(
         match (reparenting, renaming || attempt > 0) {
             (true, true) => match rename(wanted, attempt, "") {
                 Ok(()) => reparent(attempt, "")?,
-                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent(attempt, "-first") {
+                Err(ExecError::Proto(p)) if may_be_about_the_name(env, &p) => match reparent(attempt, "-first") {
                     Ok(()) => rename(wanted, attempt, "-after-move")?,
-                    Err(ExecError::Proto(p)) if p.may_be_about_the_name() => {
+                    Err(ExecError::Proto(p)) if may_be_about_the_name(env, &p) => {
                         park()?;
                         reparent(attempt, "-after-park")?;
                         rename(wanted, attempt, "-after-park")?;
@@ -5062,7 +5125,7 @@ fn move_remote(
             // sibling holds, so a refusal of it is not about a name and a
             // conflict name would change nothing; it is withdrawn as before.
             Err(ExecError::Proto(p))
-                if p.refused_without_saying_why()
+                if refused_without_saying_why(env, &p)
                     && op.entity.entity_type == EntityType::File
                     && !sealed_name
                     && attempt < 2 =>
@@ -5097,7 +5160,7 @@ fn move_remote(
             // the same cost: a holder a peer was about to rename away leaves a
             // conflict name behind that waiting would not have.
             Err(ExecError::Proto(p))
-                if p.refused_without_saying_why()
+                if refused_without_saying_why(env, &p)
                     && op.entity.entity_type == EntityType::Folder
                     && attempt < 2
                     && a_folder_the_server_keeps_holds(env, op.entity, &wanted, to.parent)?
@@ -7497,6 +7560,7 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Ok(_) => {}
         // Already gone from the server is the outcome we wanted.
         Err(ProtoError::Api { status: 404, .. }) => {}
+        Err(e) if e.reason() == Some("not_found") => {}
         // Something inside changed after this was decided. Nothing is wrong:
         // somebody else's work arrived. The next pass reads it and decides
         // again, keeping the folder for it (B-O1, D1). A refusal in prose
@@ -8225,6 +8289,31 @@ mod tests {
         move || {
             n += 1;
             format!("k{n}")
+        }
+    }
+
+    /// Each reason a reasoned server gives reads as its outcome
+    /// (`docs/drive.md`, Refusal reasons): gone or unplannable as it stands is
+    /// planned again, the server's own state is tried again, the rest keep
+    /// their status's reading.
+    #[test]
+    fn refusal_reasons_read_as_their_outcomes() {
+        let refusal = |reason: &str| {
+            ExecError::Proto(ProtoError::Api {
+                status: 422,
+                errortype: "ActionError".into(),
+                message: reason.into(),
+                data: serde_json::json!({ "reason": reason }),
+            })
+        };
+        for r in ["not_found", "parent_not_found", "move_into_self", "parent_trashed", "name_taken"] {
+            assert!(matches!(classify(&refusal(r)), OpOutcome::Overtaken(_)), "{r}");
+        }
+        for r in ["no_room", "storage_failed", "drive_disabled", "signed_out", "action_failed", "upload_incomplete"] {
+            assert!(matches!(classify(&refusal(r)), OpOutcome::Retry(_)), "{r}");
+        }
+        for r in ["invalid_request", "forbidden", "key_unavailable", "level_change_refused", "too_deep", "name_too_long", "vault_needed"] {
+            assert!(matches!(classify(&refusal(r)), OpOutcome::Withdrawn(_)), "{r}");
         }
     }
 

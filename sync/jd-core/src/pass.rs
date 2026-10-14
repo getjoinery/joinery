@@ -2218,8 +2218,29 @@ pub fn run_pass(
 /// reached, and whether the feed had to be abandoned for a full walk.
 pub type RemotePoll = (Vec<(EntityId, RemoteState)>, i64, bool);
 
+/// The store's note of whether this server gives every refusal a reason.
+pub(crate) const REFUSALS_REASONED: &str = "refusals_reasoned";
+
+/// Keep what this answer says of the server's refusals (`REFUSALS_REASONED`):
+/// written whenever it changes, so a server that stops saying so is read as
+/// one that may refuse without a reason again.
+fn note_whether_refusals_are_reasoned(env: &ExecEnv, answer: &Value) -> Result<(), ExecError> {
+    let reasoned = answer.get("refusals").and_then(Value::as_str) == Some("reasoned");
+    let value = if reasoned { "1" } else { "0" };
+    if env.store.get_meta(REFUSALS_REASONED)?.as_deref() != Some(value) {
+        env.store.set_meta(REFUSALS_REASONED, value)?;
+    }
+    Ok(())
+}
+
 /// Read the change feed, or walk the whole index when the feed cannot be
 /// resumed.
+///
+/// A server that gives every refusal a machine-readable reason says so on its
+/// feed and its index (`refusals: reasoned`); the store keeps what the latest
+/// answer said (`REFUSALS_REASONED`), so a refusal with no reason is guessed
+/// at only where the server may send one so (`docs/drive.md`, Refusal
+/// reasons).
 ///
 /// A cursor pointing into history the server no longer keeps is answered with a
 /// reset, and the only correct response is to look at everything. Carrying on
@@ -2231,6 +2252,7 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
         "drive_changes",
         json!({ "cursor": cursor, "limit": FEED_BATCH, "scope": "mine" }),
     )?;
+    note_whether_refusals_are_reasoned(env, &feed)?;
     let next = feed
         .get("next_cursor")
         .and_then(Value::as_i64)
@@ -2377,6 +2399,7 @@ pub fn walk_index(env: &ExecEnv) -> Result<Vec<(EntityId, RemoteState)>, ExecErr
         let page = env
             .api
             .action("drive_index", json!({ "after_id": token, "limit": 500, "scope": "mine" }))?;
+        note_whether_refusals_are_reasoned(env, &page)?;
         for item in page
             .get("items")
             .and_then(Value::as_array)

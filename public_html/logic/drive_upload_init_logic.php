@@ -28,7 +28,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to upload.');
+		return LogicResult::error('You must be signed in to upload.', array('reason' => 'signed_out'));
 	}
 
 	// A non-Drive purpose (specs/chunked_upload_purposes.md) takes the transport but
@@ -42,7 +42,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 	}
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 
 	$name       = trim((string)($input['name'] ?? ''));
@@ -53,20 +53,20 @@ function drive_upload_init_logic(array $input): LogicResult {
 	$file_id    = (isset($input['file_id']) && (int)$input['file_id'] > 0) ? (int)$input['file_id'] : 0;
 
 	if ($name === '' && !$file_id) {
-		return LogicResult::error('A file name is required.');
+		return LogicResult::error('A file name is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if ($size_bytes < 0) {
-		return LogicResult::error('Invalid file size.');
+		return LogicResult::error('Invalid file size.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if ($sha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $sha256)) {
-		return LogicResult::error('Invalid content hash.');
+		return LogicResult::error('Invalid content hash.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// The client's own modification time for the content, carried onto the file
 	// at complete. Optional — the browser uploader does not send one.
 	$modified_time = _drive_parse_modified_time($input['modified_time'] ?? null);
 	if ($modified_time === false) {
-		return LogicResult::error('Invalid modification time; use ISO-8601 UTC.');
+		return LogicResult::error('Invalid modification time; use ISO-8601 UTC.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// Resolve the write target: a new version of an existing file, or a new file
@@ -81,10 +81,10 @@ function drive_upload_init_logic(array $input): LogicResult {
 	if ($file_id) {
 		$target_file = DriveHelper::load_file($file_id);
 		if (!$target_file) {
-			return LogicResult::error('The file to update was not found.');
+			return LogicResult::error('The file to update was not found.', array('reason' => 'not_found'));
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FILE, $target_file, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have permission to update that file.', array('standing' => true));
+			return LogicResult::error('You do not have permission to update that file.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		// A new version of a file in the trash has nowhere to be seen. The row is
 		// hidden from every listing, so the bytes would be admitted, charged to
@@ -101,10 +101,10 @@ function drive_upload_init_logic(array $input): LogicResult {
 	} elseif ($folder_id) {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder) {
-			return LogicResult::error('Destination folder not found.');
+			return LogicResult::error('Destination folder not found.', array('reason' => 'parent_not_found'));
 		}
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to that folder.', array('standing' => true));
+			return LogicResult::error('You do not have access to that folder.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($folder)) {
 			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
@@ -120,7 +120,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 	// file was last worked on, so the vault path refuses it: the client puts the
 	// true mtime inside the encrypted metadata blob instead.
 	if ($encrypted && $modified_time !== null) {
-		return LogicResult::error('An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.');
+		return LogicResult::error('An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// Tier gates — the owner's plan, since the owner is billed. Either value at
@@ -147,7 +147,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 	// the rest of the deployment down with it.
 	$no_room = FileUpload::space_refusal($size_bytes);
 	if ($no_room !== '') {
-		return LogicResult::error($no_room);
+		return LogicResult::error($no_room, array('reason' => 'no_room'));
 	}
 
 	// A new file cannot take a name a live sibling already holds, and the
@@ -307,7 +307,7 @@ function drive_upload_init_for_purpose(string $purpose, int $user_id, array $inp
 
 	$spec = UploadPurposeRegistry::get($purpose);
 	if ($spec === null) {
-		return LogicResult::error('Unknown upload purpose.');
+		return LogicResult::error('Unknown upload purpose.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$name       = trim((string)($input['name'] ?? ''));
@@ -315,20 +315,20 @@ function drive_upload_init_for_purpose(string $purpose, int $user_id, array $inp
 	$mime       = (string)($input['mime_type'] ?? 'application/octet-stream');
 
 	if ($name === '') {
-		return LogicResult::error('A file name is required.');
+		return LogicResult::error('A file name is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if ($size_bytes <= 0) {
-		return LogicResult::error('A file size is required.');
+		return LogicResult::error('A file size is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$no_room = FileUpload::space_refusal($size_bytes);
 	if ($no_room !== '') {
-		return LogicResult::error($no_room);
+		return LogicResult::error($no_room, array('reason' => 'no_room'));
 	}
 
 	$refusal = UploadPurposeRegistry::authorize($purpose, $user_id, $input);
 	if ($refusal !== null) {
-		return LogicResult::error($refusal);
+		return LogicResult::error($refusal, array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	$raw_token = bin2hex(random_bytes(32));

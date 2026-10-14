@@ -34,10 +34,10 @@ function drive_list_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$view      = (string)($input['view'] ?? 'mine');
@@ -66,7 +66,7 @@ function drive_list_logic(array $input): LogicResult {
 		// source, and nothing here is Drive's to rename, move or trash — the
 		// owning subsystem (the mailbox, the chat) does that.
 		if (!in_array($source, DriveHelper::browsable_other_sources(), true)) {
-			return LogicResult::error('Unknown file source.');
+			return LogicResult::error('Unknown file source.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 		$opts = array('user_id' => $user_id, 'deleted' => false);
 		// The catalog's stand-in for "no origin tag" is only reachable through
@@ -105,10 +105,10 @@ function drive_list_logic(array $input): LogicResult {
 			$current_folder = DriveHelper::load_folder($folder_id);
 			$is_trashed = $current_folder && $current_folder->get('fol_delete_time') !== null && $current_folder->get('fol_delete_time') !== '';
 			if (!$current_folder || $is_trashed) {
-				return LogicResult::error('Folder not found.');
+				return LogicResult::error('Folder not found.', array('reason' => 'not_found'));
 			}
 			if (!DriveHelper::can_read(DriveHelper::ENTITY_FOLDER, $current_folder, $user_id, $session->get_permission())) {
-				return LogicResult::error('You do not have access to that folder.');
+				return LogicResult::error('You do not have access to that folder.', array('reason' => 'forbidden', 'standing' => true));
 			}
 			$is_owner = DriveHelper::owns(DriveHelper::ENTITY_FOLDER, $current_folder, $user_id);
 

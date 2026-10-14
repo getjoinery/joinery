@@ -31,7 +31,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to upload.');
+		return LogicResult::error('You must be signed in to upload.', array('reason' => 'signed_out'));
 	}
 
 	// Finishing an upload verifies and ingests the WHOLE file — hashing and
@@ -46,7 +46,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$token = (string)($input['upload_token'] ?? '');
 	$up = FileUpload::load_by_token($token);
 	if (!$up || (int)$up->get('fup_usr_user_id') !== $user_id) {
-		return LogicResult::error('Upload not found or already completed.');
+		return LogicResult::error('Upload not found or already completed.', array('reason' => 'not_found'));
 	}
 
 	// The purpose is read from the UPLOAD, never from this request: it was settled
@@ -56,12 +56,12 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	$is_drive = UploadPurposeRegistry::isDrive($purpose);
 
 	if ($is_drive && !$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 
 	$part = $up->part_path();
 	if ((int)$up->get('fup_received_bytes') !== (int)$up->get('fup_expected_bytes')) {
-		return LogicResult::error('Upload is incomplete.');
+		return LogicResult::error('Upload is incomplete.', array('reason' => 'upload_incomplete'));
 	}
 	if (!is_file($part)) {
 		// A genuinely empty (0-byte) upload never sends a chunk; materialize it.
@@ -107,7 +107,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$target_file = DriveHelper::load_file($file_id);
 		if (!$target_file || !DriveHelper::can_write(DriveHelper::ENTITY_FILE, $target_file, $user_id, $session->get_permission())) {
 			$up->discard();
-			return LogicResult::error('You can no longer update that file.');
+			return LogicResult::error('You can no longer update that file.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		// Trashed while the bytes were in flight — asked again here for the same
 		// reason the destination folder is: a version admitted into a hidden row
@@ -122,7 +122,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder || !DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
 			$up->discard();
-			return LogicResult::error('You can no longer upload into that folder.');
+			return LogicResult::error('You can no longer upload into that folder.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($folder)) {
 			// Trashed while the bytes were in flight. Discard the staged upload
@@ -164,14 +164,14 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		// content behind grants that wrap the old key. Refuse instead.
 		if (!empty($wrapped_keys) || isset($input['wrapped_file_key'])) {
 			$up->discard();
-			return LogicResult::error('A new version of an encrypted file must reuse its existing file key; do not send a new wrapped key.');
+			return LogicResult::error('A new version of an encrypted file must reuse its existing file key; do not send a new wrapped key.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 		// Holding a key grant is the only available proof the uploader COULD
 		// reuse the file key; without one the ciphertext is unreadable by every
 		// grant holder.
 		if (FileKeyGrant::wrapped_key_for($target_file->key, $user_id) === null) {
 			$up->discard();
-			return LogicResult::error('You do not hold this file\'s key, so you cannot upload a new version of it.');
+			return LogicResult::error('You do not hold this file\'s key, so you cannot upload a new version of it.', array('reason' => 'key_unavailable', 'standing' => true));
 		}
 	}
 	if ($encrypted && !$target_file) {
@@ -183,11 +183,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		// primitive.
 		if ($enc_metadata === null || $enc_metadata === '' || empty($wrapped_keys)) {
 			$up->discard();
-			return LogicResult::error('Encrypted upload is missing its metadata or keys.');
+			return LogicResult::error('Encrypted upload is missing its metadata or keys.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 		if (!isset($wrapped_keys[$owner_id])) {
 			$up->discard();
-			return LogicResult::error('Encrypted upload is missing the folder owner\'s wrapped key.');
+			return LogicResult::error('Encrypted upload is missing the folder owner\'s wrapped key.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 		$dest_folder = isset($folder) ? $folder : null;
 		foreach (array_keys($wrapped_keys) as $key_uid) {
@@ -195,7 +195,9 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				|| ($dest_folder && DriveHelper::can_read(DriveHelper::ENTITY_FOLDER, $dest_folder, $key_uid));
 			if (!$is_reader) {
 				$up->discard();
-				return LogicResult::error('Encrypted upload includes a wrapped key for a user without access.');
+				// Not standing: the key list was right when the client made it,
+				// and planned again from the member list as it is now, it is.
+				return LogicResult::error('Encrypted upload includes a wrapped key for a user without access.', array('reason' => 'invalid_request'));
 			}
 		}
 	}
@@ -256,10 +258,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					// must be sealed under the file's EXISTING key, and reading that
 					// key is what the window is for. The pending upload is kept, so
 					// unlocking and retrying costs no bytes.
-					return LogicResult::error('Unlock your vault to replace the contents of a Private file.');
+					return LogicResult::error('Unlock your vault to replace the contents of a Private file.', array('reason' => 'vault_needed'));
 				} catch (Exception $e) {
 					$up->discard();
-					return LogicResult::error('That file\'s key could not be read, so a new version cannot be stored.');
+					return LogicResult::error('That file\'s key could not be read, so a new version cannot be stored.', array('reason' => 'key_unavailable', 'standing' => true));
 				}
 				$sealed_tmp = $part . '.sealed';
 				try {
@@ -370,7 +372,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				$sealed_upload = DriveSealed::sealForCreate($part, $mime, $owner_id);
 			} catch (DriveSealedException $e) {
 				$up->discard();
-				return LogicResult::error($e->getMessage());
+				return LogicResult::error($e->getMessage(), array('reason' => 'storage_failed'));
 			}
 		}
 		DriveHelper::owner_write_lock($owner_id);
@@ -400,7 +402,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
 		} catch (DriveSealedException $e) {
 			$up->discard();
-			return LogicResult::error($e->getMessage());
+			return LogicResult::error($e->getMessage(), array('reason' => 'storage_failed'));
 		} catch (Exception $e) {
 			// The check above is a fast path: two uploads can both pass it and
 			// both reach the insert, where the partial unique index refuses the
@@ -417,7 +419,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		}
 		if (!$file || !$file->key) {
 			$up->discard();
-			return LogicResult::error('The file could not be stored.');
+			return LogicResult::error('The file could not be stored.', array('reason' => 'storage_failed'));
 		}
 		if ($encrypted) {
 			// One key grant per reader (validated above): the file key sealed to
@@ -480,7 +482,7 @@ function drive_upload_complete_for_purpose(string $purpose, $up, string $part, i
 	$up->discard();
 
 	if ($file === null) {
-		return LogicResult::error('The ' . UploadPurposeRegistry::label($purpose) . ' could not be stored.');
+		return LogicResult::error('The ' . UploadPurposeRegistry::label($purpose) . ' could not be stored.', array('reason' => 'storage_failed'));
 	}
 
 	return LogicResult::render(array(

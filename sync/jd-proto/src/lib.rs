@@ -117,6 +117,15 @@ impl ProtoError {
         }
     }
 
+    /// The refusal's machine-readable reason, where it gives one
+    /// (`docs/drive.md`, Refusal reasons).
+    pub fn reason(&self) -> Option<&str> {
+        match self {
+            ProtoError::Api { data, .. } => data.get("reason").and_then(Value::as_str),
+            _ => None,
+        }
+    }
+
     /// The bytes did not all arrive as declared -- missing, the wrong size, or
     /// failing their checksum -- which another attempt, sending them again,
     /// cures. The platform's completion says so (`upload_incomplete`); read

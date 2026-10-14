@@ -800,7 +800,7 @@ in `err_general_errors`, and the envelope carries a reference to the recorded ro
     "api_version": "1.0",
     "errortype": "ActionError",
     "error": "Something went wrong while doing that.",
-    "data": {},
+    "data": {"reason": "action_failed"},
     "error_ref": {"id": 92058, "hash": "e44d85d33874577ce1edd1fe657780dd", "report_url": "/report_problem?ref=92058&from=%2Fapi%2Fv1%2Faction%2Fexample"}
 }
 ```
@@ -816,7 +816,9 @@ nothing and carries no `error_ref`. An exception that escapes an action's logic 
 recorded like any uncaught error; the caller is told a user-safe message: the message
 itself when the exception is a `Displayable*` one, the user message of a displayable
 `BaseException`, the raw text when the site shows errors (`show_errors`), and a generic
-sentence otherwise. See [Error Handling and Problem Reports](error_handling.md).
+sentence otherwise. Whatever the action, that refusal carries `data.reason` set to
+`action_failed`: the action broke, not the request, so a client that acts on reasons
+tries it again. See [Error Handling and Problem Reports](error_handling.md).
 
 ## Rate Limiting
 
