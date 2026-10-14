@@ -3,8 +3,8 @@
 /**
  * drive_changes — the sync change feed. Given a cursor (the last fch_file_change_id
  * the client saw, 0 for a cold start), returns the changes after it that the
- * caller may see — their own entities, plus entities shared to them — with the
- * next cursor. A cursor that points before the retained window returns
+ * caller may see — their own entities, plus entities shared to them, or only
+ * their own with `scope: mine` — with the next cursor. A cursor that points before the retained window returns
  * {reset: true} so the client re-lists from scratch.
  *
  * This plus the upload actions is the complete server contract for sync clients.
@@ -33,6 +33,18 @@ function drive_changes_logic(array $input): LogicResult {
 
 	$cursor = (int)($input['cursor'] ?? 0);
 	if ($cursor < 0) { $cursor = 0; }
+
+	// `mine` is a sync client's scope: changes to the entities the caller owns,
+	// an editor's writes to them included (those rows are recorded against the
+	// owner), and nothing shared in -- neither those entities' changes nor the
+	// revocation notices addressed to the caller about them. A sync client
+	// syncs its own Drive; told about a folder somebody shared with it, it put
+	// that folder at the top of its own sync root (specs/drive_sync_clients.md,
+	// D12). `all`, the default, is everything the caller may see.
+	$scope = (string)($input['scope'] ?? 'all');
+	if ($scope !== 'mine' && $scope !== 'all') {
+		return LogicResult::error('Unknown scope.');
+	}
 
 	$dblink = DbConnector::get_instance()->get_db_link();
 
@@ -71,33 +83,38 @@ function drive_changes_logic(array $input): LogicResult {
 	// So the reach is expanded the way the index expands it, through the same
 	// helper, and files are matched by the folder they sit in rather than by
 	// listing every id in PHP.
-	$file_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FILE);
-	$granted_folders = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FOLDER);
-	$folder_ids = $granted_folders;
-	foreach ($granted_folders as $root_id) {
-		foreach (DriveHelper::descendant_folder_ids($root_id) as $did) {
-			$folder_ids[] = (int)$did;
+	if ($scope === 'mine') {
+		$visible = "fch_usr_user_id = :me";
+	} else {
+		$file_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FILE);
+		$granted_folders = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FOLDER);
+		$folder_ids = $granted_folders;
+		foreach ($granted_folders as $root_id) {
+			foreach (DriveHelper::descendant_folder_ids($root_id) as $did) {
+				$folder_ids[] = (int)$did;
+			}
 		}
-	}
-	$folder_ids = array_values(array_unique(array_map('intval', $folder_ids)));
-	$file_in = DriveHelper::int_in_list($file_ids);
-	$folder_in = DriveHelper::int_in_list($folder_ids);
+		$folder_ids = array_values(array_unique(array_map('intval', $folder_ids)));
+		$file_in = DriveHelper::int_in_list($file_ids);
+		$folder_in = DriveHelper::int_in_list($folder_ids);
 
-	// A row may also be addressed to one user directly. That is how a revoked
-	// share reaches the person who lost it: by the time the row is written their
-	// grant is gone, so every clause below would hide from them the one change
-	// they most need to hear about.
-	$sql = "SELECT fch_file_change_id, fch_entity_type, fch_entity_id, fch_change_kind,
-	               fch_usr_user_id, fch_source_usr_user_id, fch_create_time
-	          FROM fch_file_changes
-	         WHERE fch_file_change_id > :cursor
-	           AND (fch_usr_user_id = :me
+		// A row may also be addressed to one user directly. That is how a revoked
+		// share reaches the person who lost it: by the time the row is written their
+		// grant is gone, so every clause below would hide from them the one change
+		// they most need to hear about.
+		$visible = "(fch_usr_user_id = :me
 	                OR fch_audience_usr_user_id = :me
 	                OR (fch_entity_type = 'file'   AND fch_entity_id IN ($file_in))
 	                OR (fch_entity_type = 'folder' AND fch_entity_id IN ($folder_in))
 	                OR (fch_entity_type = 'file'   AND fch_entity_id IN (
 	                        SELECT fil_file_id FROM fil_files
-	                         WHERE fil_fol_folder_id IN ($folder_in))))
+	                         WHERE fil_fol_folder_id IN ($folder_in))))";
+	}
+	$sql = "SELECT fch_file_change_id, fch_entity_type, fch_entity_id, fch_change_kind,
+	               fch_usr_user_id, fch_source_usr_user_id, fch_create_time
+	          FROM fch_file_changes
+	         WHERE fch_file_change_id > :cursor
+	           AND $visible
 	         ORDER BY fch_file_change_id ASC
 	         LIMIT " . (int)DRIVE_CHANGES_BATCH;
 	$q = $dblink->prepare($sql);
@@ -161,6 +178,7 @@ function drive_changes_logic_descriptor(): array {
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(
 			'cursor' => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Last seen change id (0 for a cold start)'),
+			'scope'  => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'all'), 'label' => "'mine' (entities the caller owns) or 'all' (the default: everything the caller may see)"),
 		),
 	);
 }

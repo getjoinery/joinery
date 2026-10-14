@@ -78,6 +78,12 @@ function drive_move_logic(array $input): LogicResult {
 		if (DriveHelper::owner_id_of($entity_type, $entity) !== (int)$target->get('fol_usr_user_id')) {
 			return LogicResult::error('Items can only be moved within their owner\'s Drive.');
 		}
+	} elseif (!DriveHelper::owns($entity_type, $entity, $user_id)) {
+		// The top level is the item's OWNER's: moved there, it lands at the top of
+		// the owner's Drive, outside every folder shared with the mover. An editor
+		// reaches the item through a share, and taking it out of the share is not
+		// something that grant covers.
+		return LogicResult::error('Only the owner can move this to the top of their Drive.');
 	}
 
 	// Protection-boundary guard. A folder's level is the floor for everything

@@ -139,6 +139,9 @@ pub fn run_pass(
     for (id, state) in &fresh {
         absorb_remote(env, *id, state)?;
     }
+    if reset {
+        env.store.set_meta(OWN_DRIVE_ONLY, "1")?;
+    }
 
     // ---- files this device can open now that it holds the key ---------------
     open_what_the_key_unlocks(env)?;
@@ -168,7 +171,7 @@ pub fn run_pass(
         // missing ancestor, and the file beneath it retried an upload into a
         // path that could not be resolved — forever, silently, because the walk
         // from the root could not reach it to notice.
-        for (id, state) in walk_index(env)? {
+        for (id, state) in walk_index_and_the_rest(env)? {
             absorb_remote(env, id, &state)?;
         }
         out.reset = true;
@@ -2218,15 +2221,28 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
     let cursor = env.store.cursor()?;
     let feed = env.api.action(
         "drive_changes",
-        json!({ "cursor": cursor, "limit": FEED_BATCH }),
+        json!({ "cursor": cursor, "limit": FEED_BATCH, "scope": "mine" }),
     )?;
     let next = feed
         .get("next_cursor")
         .and_then(Value::as_i64)
         .unwrap_or(cursor);
 
-    if feed.get("reset").and_then(Value::as_bool) == Some(true) {
-        return Ok((walk_index(env)?, next, true));
+    // A store written before the own-Drive scope may hold what a folder shared
+    // in to the account brought down: walked once, in full, so the walk's
+    // second half finds every such record (`walk_index_and_the_rest`). A store
+    // this client starts, at no feed position and holding nothing, has
+    // nothing from before, and is marked so without a walk.
+    let mut walk = feed.get("reset").and_then(Value::as_bool) == Some(true);
+    if env.store.get_meta(OWN_DRIVE_ONLY)?.as_deref() != Some("1") {
+        if cursor == 0 && env.store.every_entry()?.is_empty() {
+            env.store.set_meta(OWN_DRIVE_ONLY, "1")?;
+        } else {
+            walk = true;
+        }
+    }
+    if walk {
+        return Ok((walk_index_and_the_rest(env)?, next, true));
     }
 
     let mut wanted: Vec<EntityId> = Vec::new();
@@ -2265,9 +2281,37 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
         }
     }
     if a_folder_came_back {
-        return Ok((walk_index(env)?, next, true));
+        return Ok((walk_index_and_the_rest(env)?, next, true));
     }
     Ok((stat_all(env, &wanted)?, next, false))
+}
+
+/// The store's mark that it has been walked in full under the own-Drive scope
+/// (`walk_index_and_the_rest`). Written only once the walk's findings are
+/// absorbed, so a pass cut off part-way walks again.
+pub const OWN_DRIVE_ONLY: &str = "own_drive_only";
+
+/// Walk the entire index, then ask the server about every live record the
+/// walk did not return. A walk only adds what it is given, so a record it
+/// cannot see -- an entity of somebody else's that a folder shared in to the
+/// account brought down, before this client synced its own Drive only, or
+/// anything else the server stopped showing -- otherwise stood here for ever.
+/// Asked by id, each is answered: still here, gone, or not this account's
+/// (`missing`, which reads as deleted). Never decided by its absence from the
+/// walk: only a walk that reached its last page gets here, and a failed
+/// question is an error, never an answer.
+pub fn walk_index_and_the_rest(env: &ExecEnv) -> Result<Vec<(EntityId, RemoteState)>, ExecError> {
+    let mut out = walk_index(env)?;
+    let walked: std::collections::HashSet<EntityId> = out.iter().map(|(id, _)| *id).collect();
+    let rest: Vec<EntityId> = env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|e| !e.id.is_provisional() && !e.remote_deleted && !walked.contains(&e.id))
+        .map(|e| e.id)
+        .collect();
+    out.extend(stat_all(env, &rest)?);
+    Ok(out)
 }
 
 /// Walk the entire index. Used after a feed reset, and on a first run.
@@ -2282,7 +2326,7 @@ pub fn walk_index(env: &ExecEnv) -> Result<Vec<(EntityId, RemoteState)>, ExecErr
         }
         let page = env
             .api
-            .action("drive_index", json!({ "after_id": token, "limit": 500 }))?;
+            .action("drive_index", json!({ "after_id": token, "limit": 500, "scope": "mine" }))?;
         for item in page
             .get("items")
             .and_then(Value::as_array)
@@ -2342,7 +2386,7 @@ pub(crate) fn stat_all(
             .collect();
         let answer = env
             .api
-            .action("drive_stat", json!({ "entities": entities, "urls": false }))?;
+            .action("drive_stat", json!({ "entities": entities, "urls": false, "scope": "mine" }))?;
         for item in answer
             .get("items")
             .and_then(Value::as_array)

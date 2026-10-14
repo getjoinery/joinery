@@ -36,9 +36,13 @@ $file = File::createFromBytes($bytes, $display_name, $mime, $owner_id, $restrict
 ## Origin tags — where a file came from
 
 Every file carries `fil_source`, a short key naming the subsystem that created it
-(`File::SOURCE_*`; NULL means a legacy row from before the tags). **Stamp one when
-you store a file**, and declare it in `File::source_catalog()` — the one place that
-says what each tag *is*:
+(NULL means a legacy row from before the tags). **Stamp one when you store a file,
+and declare it.** Core's own tags are `File::SOURCE_*` constants declared in
+`File::core_source_catalog()`. A plugin declares its tags under `fileSources` in its
+`plugin.json` and keeps the constant on one of its own classes (see the
+[Plugin Developer Guide](plugin_developer_guide.md#file-origin-tags-declarative)).
+`File::source_catalog()` merges the two and is the one place that says what each
+tag *is*:
 
 | Field | Meaning |
 |---|---|
@@ -407,14 +411,17 @@ subtrees.
 
 **Trees have a single owner.** Everything under a folder belongs to the
 folder's owner: an upload into a shared folder creates a file **owned by (and
-billed to) the folder owner**, whoever performs it (the actor is recorded in
-the change feed), and `drive_move` only accepts a destination folder owned by
-the moved item's owner. That invariant is what makes the folder trash and
-delete-forever cascades — which select by folder — safe: they can never touch
-another user's rows. It is also why a grantee browsing a shared folder sees
-the full listing (children are listed by the folder owner's id). A grantee's
-breadcrumb is cut at the topmost folder that carries a direct grant for them,
-so the owner's private ancestor names are never exposed.
+billed to) the folder owner**, and a folder made inside one is owned by the
+folder owner too, whoever performs either (the actor is recorded in the change
+feed); and `drive_move` only accepts a destination folder owned by the moved
+item's owner, or the top level when the caller is that owner: the top level is
+the owner's, and an editor's grant, which reaches the item through a share,
+does not cover taking it out of the share. That invariant is what makes the
+folder trash and delete-forever cascades — which select by folder — safe: they
+can never touch another user's rows. It is also why a grantee browsing a shared
+folder sees the full listing (children are listed by the folder owner's id). A
+grantee's breadcrumb is cut at the topmost folder that carries a direct grant
+for them, so the owner's private ancestor names are never exposed.
 
 Grant management is a full-set reconcile: `drive_share_sync` takes `grants` (a
 JSON object mapping each grantee — a user id **or** an email, resolved
@@ -589,7 +596,10 @@ folder tree's protection level; a member who lost a grant to it gets a `grant_ch
 row addressed to them). The feed is
 append-only and the primary key is the cursor. `drive_changes` takes a `{cursor}`
 and returns the changes after it that the caller may see — their own entities plus
-entities shared to them — with `next_cursor`. A nonzero cursor that cannot be
+entities shared to them — with `next_cursor`. With `scope: 'mine'`, a sync
+client's scope, it returns only the changes to entities the caller owns: an
+editor's change to them included, since that row is recorded against the owner,
+and nothing shared in to the caller. A nonzero cursor that cannot be
 proven contiguous with the retained window — it points before the earliest
 retained row, **or the log is empty after a purge** — returns `{reset: true}`
 so the client re-lists from scratch rather than silently missing changes.
@@ -631,7 +641,10 @@ client is; this turns a list of ids back into entities in one round trip.
 `{entities: [{entity_type, entity_id}, …]}`, up to 500, deduped. Entities that
 are gone or no longer visible come back under `missing` rather than as an
 error — a client must be able to tell "delete the local copy" from "retry
-later". Signed URLs are withheld unless `urls: true`.
+later". Those that still exist but are no longer the caller's to see are also
+listed under `not_yours`, a subset of `missing`; with `scope: 'mine'` an entity
+the caller does not own is answered that way too, however it is shared to them.
+Signed URLs are withheld unless `urls: true`.
 
 ### `drive_index` — full walk
 

@@ -207,6 +207,50 @@ $fileB->load();
 check($fileB->get('fil_fol_folder_id') === null, 'the file stays at its owner\'s root');
 
 // ---------------------------------------------------------------------------
+section('an editor cannot move a shared item to the top level (it is the owner\'s)');
+
+$rFileTop = drive_move_logic(array('entity_type' => 'file', 'entity_id' => $editor_file_id, 'parent_id' => 0));
+check($rFileTop->error !== null, 'an editor moving a shared file to the top level is refused');
+$still = new File($editor_file_id, TRUE);
+check((int)$still->get('fil_fol_folder_id') === $sharedF, 'the file stays in the shared folder');
+$session->clear_api_user();
+$session->set_api_user($ownerA->key);
+$rSub = drive_folder_create_logic(array('name' => 'FixSharedSub_' . bin2hex(random_bytes(3)), 'parent_id' => $sharedF));
+$sharedSub = (int)$rSub->data['folder']['id']; $made_folders[] = $sharedSub;
+$session->clear_api_user();
+$session->set_api_user($editorB->key);
+$rSubTop = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $sharedSub, 'parent_id' => 0));
+check($rSubTop->error !== null, 'an editor moving a shared folder to the top level is refused');
+$session->clear_api_user();
+$session->set_api_user($ownerA->key);
+$rOwnTop = drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $sharedSub, 'parent_id' => 0));
+check($rOwnTop->error === null, 'the owner may move it to the top of their Drive');
+$session->clear_api_user();
+$session->set_api_user($editorB->key);
+
+// ---------------------------------------------------------------------------
+section('a folder an editor makes in a shared folder belongs to the folder owner');
+
+$rEditorSub = drive_folder_create_logic(array('name' => 'FixEditorSub_' . bin2hex(random_bytes(3)), 'parent_id' => $sharedF));
+check($rEditorSub->error === null, 'an editor may make a folder inside the shared folder');
+$editorSub = (int)$rEditorSub->data['folder']['id']; $made_folders[] = $editorSub;
+$made = new Folder($editorSub, TRUE);
+check((int)$made->get('fol_usr_user_id') === (int)$ownerA->key, 'the new folder is owned by the shared folder\'s owner, not the editor');
+$dblink = DbConnector::get_instance()->get_db_link();
+$q = $dblink->prepare("SELECT fch_usr_user_id, fch_source_usr_user_id FROM fch_file_changes
+	WHERE fch_entity_type = 'folder' AND fch_entity_id = ? AND fch_change_kind = ? ORDER BY fch_file_change_id DESC LIMIT 1");
+$q->execute(array($editorSub, FileChange::KIND_CREATED));
+$row = $q->fetch(PDO::FETCH_ASSOC);
+check($row && (int)$row['fch_usr_user_id'] === (int)$ownerA->key && (int)$row['fch_source_usr_user_id'] === (int)$editorB->key,
+	'its creation is recorded against the owner, with the editor as the actor');
+$in = implode(',', array_map('intval', $made_folders));
+$crossed = (int)$dblink->query("SELECT count(*) FROM fol_folders c JOIN fol_folders p ON p.fol_folder_id = c.fol_parent_folder_id
+	WHERE c.fol_folder_id IN ($in) AND c.fol_usr_user_id <> p.fol_usr_user_id")->fetchColumn()
+	+ (int)$dblink->query("SELECT count(*) FROM fil_files f JOIN fol_folders p ON p.fol_folder_id = f.fil_fol_folder_id
+	WHERE p.fol_folder_id IN ($in) AND f.fil_usr_user_id <> p.fol_usr_user_id")->fetchColumn();
+check($crossed === 0, 'nothing in these trees has a parent with another owner');
+
+// ---------------------------------------------------------------------------
 section('breadcrumb for a grantee starts at the granted root');
 
 $session->clear_api_user();

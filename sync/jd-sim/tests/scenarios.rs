@@ -22438,3 +22438,141 @@ fn a_one_file_folder_renamed_on_a_fat_drive_is_not_followed_by_its_file() {
     );
     assert_converged(&world);
 }
+
+/// A folder another member shares with the account is that member's, not part
+/// of the account's own Drive, which is what a client syncs (D12 in
+/// `specs/drive_sync_clients.md`): it never appears on the disk and nothing is
+/// asked of the server about it, while the account's own files sync as before.
+/// RED before: the feed and `drive_stat` handed it over, and it was made at the
+/// top of the sync folder (live test 2026-10-14, drivetest).
+#[test]
+fn a_folder_shared_in_to_the_account_is_never_synced() {
+    let world = World::new(9_875, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("mine.txt", b"my own file");
+    assert!(world.settle().is_some());
+    let team = world.server.seed_shared_in_folder(None, "Team");
+    world.server.seed_file(Some(team), "a.txt", b"the owner's file");
+    let mine = world.server.files().into_iter().find(|f| f.name == "mine.txt").expect("mine.txt on the server").id;
+    world.server.seed_version(mine, b"my own file, edited elsewhere");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(!laptop.fs.all_paths().iter().any(|p| p.starts_with("Team")), "the shared folder came down: {:?}", laptop.fs.all_paths());
+    assert_eq!(laptop.fs.peek("mine.txt").as_deref(), Some(&b"my own file, edited elsewhere"[..]), "the account's own edit did not");
+    assert!(world.server.trash_calls().is_empty(), "{:?}", world.server.trash_calls());
+    assert_converged(&world);
+}
+
+/// What a folder shared in to the account brought down under an older client,
+/// or an older server, is cleaned up once the account syncs its own Drive
+/// only: the next full walk asks the server about every record it did not
+/// return, the server says they are not the account's, and each copy goes to
+/// this computer's trash as a deletion would. Nothing is trashed or moved on
+/// the server, where the member who owns it still has it. Two ways in: a feed
+/// reset, and the one walk a store written before the scope gets on its next
+/// pass. RED before: a walk only adds what it is given, so the copies and
+/// their records stood for ever.
+#[test]
+fn a_shared_in_copy_brought_down_before_the_own_drive_scope_goes_to_the_trash() {
+    for upgraded in [false, true] {
+        let world = World::new(9_874, &["laptop"]);
+        let laptop = world.device("laptop");
+        laptop.fs.user_write("mine.txt", b"my own file");
+        assert!(world.settle().is_some(), "never settled");
+        world.server.ignores_scope(true);
+        let team = world.server.seed_shared_in_folder(None, "Team");
+        world.server.seed_file(Some(team), "a.txt", b"the owner's file");
+        assert!(world.settle().is_some(), "never settled");
+        assert!(laptop.fs.exists("Team/a.txt"), "the premise: an older server handed the shared folder over: {:?}", laptop.fs.all_paths());
+        world.server.ignores_scope(false);
+        if upgraded {
+            laptop.store.set_meta(jd_core::pass::OWN_DRIVE_ONLY, "0").unwrap();
+        } else {
+            world.server.prune_feed_before(world.server.latest_change_id() + 1);
+        }
+        assert!(world.settle().is_some(), "never settled after the scope");
+        assert!(
+            !laptop.fs.all_paths().iter().any(|p| p.starts_with("Team")),
+            "upgraded={upgraded}: the shared copy is still synced here: {:?}",
+            laptop.fs.all_paths()
+        );
+        assert!(
+            laptop.fs.trashed().iter().any(|(p, _)| p.starts_with("Team")),
+            "upgraded={upgraded}: the copy did not go to this computer's trash: {:?}",
+            laptop.fs.trashed()
+        );
+        assert!(world.server.trash_calls().is_empty(), "upgraded={upgraded}: {:?}", world.server.trash_calls());
+        assert!(
+            world.server.folders().iter().any(|f| f.id == team && !f.trashed),
+            "upgraded={upgraded}: the owner's folder was touched on the server"
+        );
+        assert_converged(&world);
+    }
+}
+
+/// What a full walk did not return is asked about, never taken for gone: a
+/// walk that showed nothing at all deletes nothing, because the server, asked
+/// by id, answers that every one of the account's files is still there.
+#[test]
+fn a_walk_that_shows_nothing_deletes_nothing() {
+    let world = World::new(9_873, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Docs/a.txt", b"one");
+    laptop.fs.user_write("Docs/b.txt", b"two");
+    assert!(world.settle().is_some());
+    world.server.index_shows_nothing(true);
+    world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    assert!(world.settle().is_some(), "never settled");
+    world.server.index_shows_nothing(false);
+    assert_eq!(laptop.fs.peek("Docs/a.txt").as_deref(), Some(&b"one"[..]));
+    assert_eq!(laptop.fs.peek("Docs/b.txt").as_deref(), Some(&b"two"[..]));
+    assert!(laptop.fs.trashed().is_empty(), "{:?}", laptop.fs.trashed());
+    assert!(world.server.trash_calls().is_empty(), "{:?}", world.server.trash_calls());
+    assert_converged(&world);
+}
+
+/// A folder of the account's whose ownership moved to another member leaves
+/// the account's own Drive the way a deletion would: the copy goes to this
+/// computer's trash, and an edit made here that never reached the server is
+/// rescued, never lost -- into the folder it was made in, which the account
+/// can still write to, now in that member's Drive.
+#[test]
+fn a_folder_whose_ownership_moved_away_keeps_the_edit_made_here() {
+    let world = World::new(9_872, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Moved/doc.txt", b"agreed");
+    laptop.fs.user_write("Moved/other.txt", b"untouched");
+    assert!(world.settle().is_some());
+    let folder = world.server.folder_id_at("Moved").expect("Moved on the server");
+    laptop.fs.user_write("Moved/doc.txt", b"edited here, never sent");
+    world.server.hand_to_another_member("folder", folder);
+    world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    assert!(world.settle().is_some(), "never settled");
+    let edited = jd_sim::sha256_hex(b"edited here, never sent");
+    assert!(
+        world.server.files().iter().any(|f| f.sha256 == edited && !f.trashed),
+        "the edit made here was lost: {:?}",
+        world.server.files()
+    );
+    assert!(!laptop.fs.all_paths().iter().any(|p| p.starts_with("Moved")), "{:?}", laptop.fs.all_paths());
+    assert!(world.server.trash_calls().is_empty(), "{:?}", world.server.trash_calls());
+    assert_converged(&world);
+}
+
+/// A file rescued under a new id -- edited here while the server deleted it --
+/// is the new record's, and a full walk afterwards does not take it for the
+/// old record's and send it to the trash.
+#[test]
+fn a_rescued_file_survives_the_next_full_walk() {
+    let world = World::new(9_871, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("keep.txt", b"agreed");
+    assert!(world.settle().is_some());
+    let id = world.server.files().into_iter().find(|f| f.name == "keep.txt").expect("keep.txt").id;
+    laptop.fs.user_write("keep.txt", b"edited here while the server deleted it");
+    world.server.action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": id })).expect("trash");
+    assert!(world.settle().is_some(), "never settled after the rescue");
+    world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    assert!(world.settle().is_some(), "never settled after the walk");
+    assert_eq!(laptop.fs.peek("keep.txt").as_deref(), Some(&b"edited here while the server deleted it"[..]), "{:?}", laptop.fs.all_paths());
+    assert_converged(&world);
+}
