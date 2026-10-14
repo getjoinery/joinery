@@ -357,6 +357,21 @@ $refuse('Network Helper off on the copy', function () use ($fake) { $fake->helpe
 $refuse('a second public IPv4 on the site\'s server', function () use ($fake) { $fake->owner['192.0.2.99'] = '11'; }, 'exactly one');
 $refuse('a firewall on the site\'s server the copy lacks', function () use ($fake) { $fake->firewalls['12'] = array(); }, 'web-only');
 $refuse('an AAAA record naming the site\'s server\'s IPv6', function () use (&$aaaa) { $aaaa = array('2600:3c03::1'); }, 'IPv6 addresses do not move');
+// B58: the swap restarts the copy, and an encrypted data root no escrow holder
+// opens would wait there for its recovery key.
+$cnode_report = function (string $holder) use ($cnode) {
+	$cnode->set('mgn_last_host_report', json_encode(array('data_root_encryption' => array('backing' => 'luks-file', 'open' => true,
+		'holder' => $holder, 'slot' => $holder === '' ? 'unknown' : 0))));
+	$cnode->save();
+};
+$refuse('the copy\'s encrypted data root with no escrow holder (B58)', function () use ($cnode_report) { $cnode_report(''); },
+	'waiting for its recovery key');
+$m = SiteCopyRunner::switch_methods($copy)[SiteCopyRunner::METHOD_IP_SWAP];
+check($m && strpos(implode(' ', $m), 'no management node holds its unlock key') !== false, 'and the page says why the swap is not offered');
+$cnode_report('https://mgr.example.org');
+check(empty(SiteCopyRunner::switch_methods($copy)[SiteCopyRunner::METHOD_IP_SWAP]), 'once a holder opens it, the swap is offered again');
+$cnode->set('mgn_last_host_report', null);
+$cnode->save();
 $fake_reset();
 $aaaa = array();
 check($fake->calls === array(), 'checking calls nothing that changes a server');
@@ -368,7 +383,8 @@ SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_IP_SWAP, null, null);
 $copy->load();
 $sw = $copy->switch_record();
 check(($sw['method'] ?? '') === 'ip_swap' && ($sw['swap']['source']['ip'] ?? '') === $S4 && ($sw['swap']['copy']['ip'] ?? '') === $T4
-	&& ($sw['swap']['source']['rdns'] ?? '') === 'mail.example.org', 'the plan records each machine, its address and its reverse DNS');
+	&& ($sw['swap']['source']['rdns'] ?? '') === 'mail.example.org' && ($sw['swap']['domain'] ?? '') === 'sci.example.org',
+	'the plan records each machine, its address, its reverse DNS, and the site\'s name');
 $drive($copy, array(SiteCopy::STATUS_FREEZING));
 check($copy->status() === SiteCopy::STATUS_READY, 'the final copy runs as for any switch-over, and the copy is ready', $copy->status());
 check($fake->calls === array(), 'the servers are untouched until the move');
@@ -424,6 +440,8 @@ $cnode2 = $mk_node('copy2', array('mgn_web_root' => '/var/www/html/scisite/publi
 $cprov = $mk_prov('c2', $cnode2, '12', $T4);
 $fake_reset();
 $fake->drop_rdns = true;
+// The owner pointed the site's AAAA record at the copy's IPv6 before switching.
+$aaaa = array('2600:3c03::2');
 $copy2 = $mk_copy($cnode2);
 SiteCopyRunner::begin_switch($copy2, SiteCopyRunner::METHOD_IP_SWAP, null, null);
 $copy2->load();
@@ -456,6 +474,10 @@ check($fake->owner[$S4] === '11' && $fake->status['11'] === 'running' && $fake->
 	'each address is back, the old server runs (still frozen), and the copy runs on its own address');
 check(trim((string)$src->get('mgn_install_state')) === 'switching' && ($copy2->switch_record()['address_at'] ?? '') === 'source',
 	'the site is still frozen, its address at its own server');
+$notes = implode(' ', (array)($copy2->switch_record()['moved_back_notes'] ?? array()));
+check(strpos($notes, 'AAAA record for the copy\'s IPv6 address 2600:3c03::2') !== false && strpos($notes, '2600:3c03::1') !== false,
+	'the undo says the AAAA record still names the copy\'s IPv6, and where to point it back (B61)', $notes);
+$aaaa = array();
 SiteCopyRunner::go_back($copy2, null);
 $copy2->load();
 $drive($copy2, array(SiteCopy::STATUS_RETURNING));

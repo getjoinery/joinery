@@ -970,6 +970,7 @@ chk "a service that keeps a file on a bind: stopped for the start, the bind unmo
 chk "but never the service this run is part of (B42)" "$(grep -c 'joinery-host-converger' "$LOG")|$(grep -c 'joinery-host-converger' <<< "$out")" "0|0"
 cp "$T/systemctl.d5" "$T/bin/systemctl"; rm -f "$T/bin/fuser"; rm -rf "$R/proc"
 chk "encrypt: exit 0, and says it encrypts in the background" "$rc|$(grep -c 'encrypting in the background' <<< "$out")" "0|1"
+chk "encrypt: says the services stop again when it finishes (B59)" "$(grep -c 'When it finishes, the services stop again' <<< "$out")" "1"
 chk "the escrow holder and slot an earlier encryption recorded: gone with the old header (B55)" \
     "$( [ -e "$R/etc/joinery/data-root/holder" ] && echo kept || echo gone)" "gone"
 chk "the image grows by the 32 MiB the header takes, which XFS never sees" "$(grep -c "^fallocate -l $(( 8 * G + 32 * 1024 * 1024 )) $R/srv/joinery.img$" "$LOG")" "1"

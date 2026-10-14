@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.21 - an address swapped back passes on what the swap noted (an AAAA record still at the copy, B61); a
+ *                new move clears what the last undo said
  * @version 1.20 - a copy run from the running site backs it up first (backup_run, arg run) and copies the chain
  *                that backup lands in: the newest backup could be a day old and from before the source's
  *                upgrade, and its code was laid over the release the copy installed (B53). No age limit on the
@@ -1854,7 +1856,9 @@ class SiteCopyRunner {
 			}
 			$switch = $copy->switch_record();
 			$method = (string)($switch['method'] ?? self::METHOD_PROXIED);
+			// What the last undo said is about the move this one replaces.
 			$switch['move_failure'] = null;
+			$switch['moved_back_notes'] = array();
 			if ($method === self::METHOD_IP_SWAP) {
 				$template = array(
 					array('op' => 'power_off',   'on' => 'source', 'arg' => 'source'),
@@ -2112,7 +2116,8 @@ class SiteCopyRunner {
 				if ($done && $op === 'ip_swap') {
 					$switch['address_at'] = $arg === 'back' ? 'source' : 'copy';
 					$switch[$arg === 'back' ? 'moved_back_time' : 'swapped_time'] = gmdate('Y-m-d H:i:s');
-					$switch['moved_back_notes'] = array_merge((array)($switch['moved_back_notes'] ?? array()), (array)($state['rdns'] ?? array()));
+					$switch['moved_back_notes'] = array_merge((array)($switch['moved_back_notes'] ?? array()), (array)($state['rdns'] ?? array()),
+						(array)($state['notes'] ?? array()));
 				}
 				if ($done && $arg === 'source') {
 					$switch['source_off'] = $op === 'power_off';

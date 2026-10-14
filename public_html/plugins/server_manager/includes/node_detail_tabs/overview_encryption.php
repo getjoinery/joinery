@@ -17,6 +17,7 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.6 - the Encrypt offer says the services stop again when it finishes, and its confirm says who stops (B59)
  * @version 1.5 - Encrypt's confirm says the services stop again for a few seconds when it finishes (B45)
  * @version 1.4 - its escrow holder is this management node from the moment the enrolment is confirmed, not
  *                from its next host report (B30); what only a holder has to say (its answers, its refusals,
@@ -39,7 +40,7 @@ $dre_offer = $dre_enc === 'none' && is_array($dre_pool) && (string)$node->get('m
 if ($dre_offer && !$dre_row) {
 	echo '<div id="node-data-root-encryption"></div>';
 	$page->begin_box(['title' => 'Encrypted data root']);
-	echo '<p class="mb-2">Not encrypted. Its data root can be encrypted where it stands: its services stop for seconds, then it encrypts in the background, at idle disk priority, for hours.</p>';
+	echo '<p class="mb-2">Not encrypted. Its data root can be encrypted where it stands: its services stop for seconds, then it encrypts in the background, at idle disk priority, for hours, and they stop again for seconds when it finishes.</p>';
 	echo '<ul class="small mb-2">';
 	foreach (DataRootEncryptionOffer::preconditions($node) as $p) {
 		echo '<li>' . ($p['ok'] ? '<span class="text-success">&#10003;</span> ' : '<span class="text-danger">&#10007;</span> ')
@@ -58,7 +59,7 @@ if ($dre_offer && !$dre_row) {
 			. '<label class="form-check-label small" for="keep_provider_layer">Keep the provider\'s layer as well (two layers; this node page will say so)</label></div>';
 	}
 	echo '<button type="button" class="btn btn-sm btn-primary"' . ($ready ? '' : ' disabled')
-		. ' onclick="JoineryModal.confirm(\'Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours, and stop again for a few seconds when it finishes, as its logs move onto it. A reboot part-way opens it with the recovery key.\', function(){ document.getElementById(\'data_root_encrypt_form\').submit(); })">Encrypt the data root</button></form>';
+		. ' onclick="JoineryModal.confirm(\'Encrypt this data root where it stands? Its sites and services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. A reboot part-way opens it with the recovery key.\', function(){ document.getElementById(\'data_root_encrypt_form\').submit(); })">Encrypt the data root</button></form>';
 	$page->end_box();
 }
 if (is_array($dre_enc) || $dre_row) {
