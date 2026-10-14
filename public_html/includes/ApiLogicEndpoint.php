@@ -442,7 +442,9 @@ class ApiLogicEndpoint {
 				'note' => $e->getMessage()
 			]);
 			self::recordException($e);
-			$result = LogicResult::error(self::userSafeMessage($e, 'Something went wrong while doing that.'));
+			// `action_failed`: the action broke, not the request, so a client
+			// that acts on reasons tries again rather than giving up on it.
+			$result = LogicResult::error(self::userSafeMessage($e, 'Something went wrong while doing that.'), array('reason' => 'action_failed'));
 		} finally {
 			// Clean up session simulation. Must be finally, not post-try: with
 			// auth.session_write the session is open through logic execution,

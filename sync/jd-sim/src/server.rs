@@ -245,6 +245,7 @@ struct ServerState {
     upload_inits: usize,
     /// Every trash a client asked for, refused or not.
     trash_requests: usize,
+    list_requests: usize,
     /// The next call to each named action is answered with this status, once.
     answer_next: Vec<(String, u16, Option<&'static str>)>,
     /// Who is calling. Set by the network layer per device.
@@ -315,6 +316,27 @@ pub struct ApiRefusal {
 }
 
 pub type ServerResult = Result<Value, ApiRefusal>;
+
+/// A refusal as the platform answers every one from the actions a sync
+/// client calls: 422, with its reason in the data (`docs/drive.md`, Refusal
+/// reasons). Never the 404 or 400 an HTTP mock reaches for: the platform
+/// sends neither for these, and a client met in the field by a 422 where the
+/// mock had sent it a 404 was tested against a kinder server than it ran on.
+fn refused(reason: &'static str, message: impl Into<String>) -> ApiRefusal {
+    // A malformed request is refused again as sent: it stands, as the
+    // platform's does (`docs/drive.md`, Standing refusals).
+    let data = if reason == "invalid_request" {
+        json!({ "reason": reason, "standing": true })
+    } else {
+        json!({ "reason": reason })
+    };
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: message.into(),
+        data,
+    }
+}
 
 fn refuse(status: u16, errortype: &'static str, message: impl Into<String>) -> ApiRefusal {
     ApiRefusal {
@@ -504,6 +526,7 @@ impl MockServer {
                 shared_in_read_only: false,
                 upload_inits: 0,
                 trash_requests: 0,
+                list_requests: 0,
                 answer_next: Vec::new(),
                 actor: None,
                 caller: None,
@@ -550,6 +573,11 @@ impl MockServer {
     /// How many trashes clients have asked for.
     pub fn trash_requests(&self) -> usize {
         self.state.lock().unwrap().trash_requests
+    }
+
+    /// How many folder listings clients have asked for.
+    pub fn list_requests(&self) -> usize {
+        self.state.lock().unwrap().list_requests
     }
 
     /// The next call to `action` fails with `status`, once: a server error
@@ -621,7 +649,8 @@ impl MockServer {
     }
 
     /// Answer every refusal from here on in prose alone, with no marker saying
-    /// what kind of refusal it is. See [`MockServer::plain_refusals`].
+    /// what kind of refusal it is, and leave the feed's `refusals: reasoned`
+    /// out: an older server. See [`MockServer::plain_refusals`].
     pub fn refuses_without_saying_why(&self, on: bool) {
         *self.plain_refusals.lock().unwrap() = on;
     }
@@ -1237,6 +1266,12 @@ impl MockServer {
                 refusal.data = Value::Null;
                 Err(refusal)
             }
+            Ok(mut answer) if *self.plain_refusals.lock().unwrap() => {
+                if let Some(o) = answer.as_object_mut() {
+                    o.remove("refusals");
+                }
+                Ok(answer)
+            }
             other => other,
         }
     }
@@ -1246,6 +1281,9 @@ impl MockServer {
             let mut st = self.state.lock().unwrap();
             if name == "drive_trash" {
                 st.trash_requests += 1;
+            }
+            if name == "drive_list" {
+                st.list_requests += 1;
             }
             if let Some(i) = st.answer_next.iter().position(|(a, _, _)| a == name) {
                 let (_, status, reason) = st.answer_next.remove(i);
@@ -1341,6 +1379,7 @@ impl MockServer {
                 "reset": true,
                 "changes": [],
                 "next_cursor": st.next_change_id,
+                "refusals": "reasoned",
             }));
         }
 
@@ -1364,7 +1403,7 @@ impl MockServer {
             }));
             next = c.change_id;
         }
-        Ok(json!({ "ok": true, "changes": out, "next_cursor": next }))
+        Ok(json!({ "ok": true, "changes": out, "next_cursor": next, "refusals": "reasoned" }))
     }
 
     fn drive_stat(&self, body: &Value) -> ServerResult {
@@ -1374,16 +1413,14 @@ impl MockServer {
             .cloned()
             .unwrap_or_default();
         if entities.is_empty() {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "No entities were requested.",
             ));
         }
         if entities.len() > 500 {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "At most 500 entities may be requested at once.",
             ));
         }
@@ -1408,9 +1445,8 @@ impl MockServer {
             }
         }
         if wanted.is_empty() {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "No valid entities were requested.",
             ));
         }
@@ -1453,7 +1489,7 @@ impl MockServer {
         let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(500) as usize;
         let (phase, after) = parse_index_token(&token);
         if *self.index_shows_nothing.lock().unwrap() {
-            return Ok(json!({ "ok": true, "scope": "mine", "items": [], "next_after_id": token, "done": true }));
+            return Ok(json!({ "ok": true, "scope": "mine", "items": [], "next_after_id": token, "done": true, "refusals": "reasoned" }));
         }
 
         let mut st = self.state.lock().unwrap();
@@ -1522,6 +1558,7 @@ impl MockServer {
             "items": items,
             "next_after_id": last,
             "done": done,
+            "refusals": "reasoned",
         }))
     }
 
@@ -1551,13 +1588,13 @@ impl MockServer {
             .unwrap_or("")
             .to_string();
         if name.is_empty() {
-            return Err(refuse(400, "ValidationError", "A name is required."));
+            return Err(refused("invalid_request", "A name is required."));
         }
         let parent = body.get("parent_id").and_then(Value::as_i64);
         let mut st = self.state.lock().unwrap();
         if let Some(p) = parent {
             match st.folders.get(&p) {
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("parent_not_found", "That folder does not exist.")),
                 Some(f) if f.trashed => return Err(parent_trashed(p)),
                 Some(_) => {}
             }
@@ -1625,21 +1662,19 @@ impl MockServer {
         let encrypted_file = t == "file" && st.files.get(&id).map(|f| f.encrypted).unwrap_or(false);
         if encrypted_file {
             if !name.is_empty() {
-                return Err(refuse(
-                    400,
-                    "ValidationError",
+                return Err(refused(
+                    "invalid_request",
                     "Encrypted files are renamed via their encrypted metadata, not a plaintext name.",
                 ));
             }
             if enc_metadata.is_empty() {
-                return Err(refuse(
-                    400,
-                    "ValidationError",
+                return Err(refused(
+                    "invalid_request",
                     "Encrypted rename is missing its metadata.",
                 ));
             }
         } else if name.is_empty() {
-            return Err(refuse(400, "ValidationError", "A name is required."));
+            return Err(refused("invalid_request", "A name is required."));
         }
 
         // Renaming onto a name a live sibling already holds is refused, exactly
@@ -1654,7 +1689,7 @@ impl MockServer {
             let taken = if t == "folder" {
                 let parent = match st.folders.get(&id) {
                     Some(f) => f.parent,
-                    None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                    None => return Err(refused("not_found", "That folder does not exist.")),
                 };
                 st.folders
                     .values()
@@ -1662,7 +1697,7 @@ impl MockServer {
             } else {
                 let folder = match st.files.get(&id) {
                     Some(f) => f.folder,
-                    None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                    None => return Err(refused("not_found", "That file does not exist.")),
                 };
                 st.files
                     .values()
@@ -1676,7 +1711,7 @@ impl MockServer {
         if t == "folder" {
             match st.folders.get_mut(&id) {
                 Some(f) => f.name = name,
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             }
             Self::record(&mut st, "folder", id, "renamed");
         } else if encrypted_file {
@@ -1687,7 +1722,7 @@ impl MockServer {
         } else {
             match st.files.get_mut(&id) {
                 Some(f) => f.name = name,
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "renamed");
         }
@@ -1703,9 +1738,8 @@ impl MockServer {
         // could see it. A key the real endpoint does not read is not a
         // destination, so an unrecognized one is refused rather than guessed at.
         if body.get("folder_id").is_some() {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "drive_move takes parent_id; folder_id is not read.",
             ));
         }
@@ -1717,7 +1751,7 @@ impl MockServer {
         }
         if let Some(d) = dest {
             match st.folders.get(&d) {
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("parent_not_found", "That folder does not exist.")),
                 Some(f) if f.trashed => return Err(parent_trashed(d)),
                 Some(_) => {}
             }
@@ -1733,12 +1767,12 @@ impl MockServer {
         let item_encrypted = if t == "folder" {
             match st.folders.get(&id) {
                 Some(f) => f.encrypted,
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             }
         } else {
             match st.files.get(&id) {
                 Some(f) => f.encrypted,
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             }
         };
         if item_encrypted != dest_encrypted {
@@ -1760,7 +1794,7 @@ impl MockServer {
         let occupied = if t == "folder" {
             let name = match st.folders.get(&id) {
                 Some(f) => f.name.clone(),
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             };
             st.folders
                 .values()
@@ -1768,7 +1802,7 @@ impl MockServer {
         } else {
             let name = match st.files.get(&id) {
                 Some(f) => f.name.clone(),
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             };
             st.files
                 .values()
@@ -1784,21 +1818,20 @@ impl MockServer {
             // and makes it unreachable — no listing walks into it, so it is
             // gone without being deleted.
             if Some(id) == dest || Self::is_descendant(&st, dest, id) {
-                return Err(refuse(
-                    400,
-                    "ValidationError",
+                return Err(refused(
+                    "move_into_self",
                     "A folder cannot be moved inside itself.",
                 ));
             }
             match st.folders.get_mut(&id) {
                 Some(f) => f.parent = dest,
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             }
             Self::record(&mut st, "folder", id, "moved");
         } else {
             match st.files.get_mut(&id) {
                 Some(f) => f.folder = dest,
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "moved");
         }
@@ -1872,7 +1905,7 @@ impl MockServer {
                     }
                     f.trashed = true;
                 }
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             }
             // Trashing a folder takes its contents with it, and says so with
             // exactly ONE row -- the platform's shape.
@@ -1917,7 +1950,7 @@ impl MockServer {
                     }
                     f.trashed = true;
                 }
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "trashed");
         }
@@ -1945,7 +1978,7 @@ impl MockServer {
         if t == "folder" {
             match st.folders.get_mut(&id) {
                 Some(f) => f.trashed = false,
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("not_found", "That folder does not exist.")),
             }
             // Restoring a folder brings its contents back with it, and says so
             // with exactly ONE row -- which is what the platform does:
@@ -1975,7 +2008,7 @@ impl MockServer {
         } else {
             match st.files.get_mut(&id) {
                 Some(f) => f.trashed = false,
-                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                None => return Err(refused("not_found", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "restored");
         }
@@ -2009,7 +2042,7 @@ impl MockServer {
         let st = self.state.lock().unwrap();
         if let Some(id) = folder {
             if !st.folders.contains_key(&id) {
-                return Err(refuse(404, "NotFound", "That folder does not exist."));
+                return Err(refused("not_found", "That folder does not exist."));
             }
         }
         let keys = vec![json!({
@@ -2042,7 +2075,7 @@ impl MockServer {
         st.upload_inits += 1;
         if let Some(f) = folder {
             match st.folders.get(&f) {
-                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                None => return Err(refused("parent_not_found", "That folder does not exist.")),
                 Some(fo) if fo.trashed => return Err(parent_trashed(f)),
                 Some(_) => {}
             }
@@ -2079,9 +2112,8 @@ impl MockServer {
         };
 
         if name.is_empty() || size == u64::MAX {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "name and size_bytes are required.",
             ));
         }
@@ -2100,14 +2132,13 @@ impl MockServer {
         // it is below.
         if encrypted {
             if body.get("modified_time").is_some() {
-                return Err(refuse(
-                    400,
-                    "ValidationError",
+                return Err(refused(
+                    "invalid_request",
                     "An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.",
                 ));
             }
         } else if sha.is_empty() {
-            return Err(refuse(400, "ValidationError", "sha256 is required."));
+            return Err(refused("invalid_request", "sha256 is required."));
         }
 
         // Dedup: the server already holds these exact bytes, so there is
@@ -2209,12 +2240,11 @@ impl MockServer {
         }
         let mut st = self.state.lock().unwrap();
         let Some(session) = st.uploads.get(&token).cloned() else {
-            return Err(refuse(404, "NotFound", "Unknown or expired upload token."));
+            return Err(refused("not_found", "Unknown or expired upload token."));
         };
         if session.received.len() as u64 != session.expected {
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "upload_incomplete",
                 "The upload is not complete.",
             ));
         }
@@ -2284,9 +2314,8 @@ impl MockServer {
                 // grants that all wrap the old one.
                 if !wrapped_keys.is_empty() {
                     st.uploads.remove(&token);
-                    return Err(refuse(
-                        400,
-                        "ValidationError",
+                    return Err(refused(
+                        "invalid_request",
                         "A new version of an encrypted file must reuse its existing file key; do not send a new wrapped key.",
                     ));
                 }
@@ -2295,26 +2324,23 @@ impl MockServer {
                 // the owner it is a file in their own vault they can never open.
                 if enc_metadata.as_deref().unwrap_or("").is_empty() || wrapped_keys.is_empty() {
                     st.uploads.remove(&token);
-                    return Err(refuse(
-                        400,
-                        "ValidationError",
+                    return Err(refused(
+                        "invalid_request",
                         "Encrypted upload is missing its metadata or keys.",
                     ));
                 }
                 if !wrapped_keys.contains_key(&OWNER_USER_ID) {
                     st.uploads.remove(&token);
-                    return Err(refuse(
-                        400,
-                        "ValidationError",
+                    return Err(refused(
+                        "invalid_request",
                         "Encrypted upload is missing the folder owner's wrapped key.",
                     ));
                 }
             }
         } else if enc_metadata.is_some() || !wrapped_keys.is_empty() {
             st.uploads.remove(&token);
-            return Err(refuse(
-                400,
-                "ValidationError",
+            return Err(refused(
+                "invalid_request",
                 "A plaintext upload cannot carry encryption payloads.",
             ));
         }
@@ -3066,7 +3092,7 @@ mod tests {
                 &json!({ "entity_type": "folder", "entity_id": a, "folder_id": b }),
             )
             .unwrap_err();
-        assert_eq!(err.status, 400);
+        assert_eq!((err.status, err.data["reason"].as_str()), (422, Some("invalid_request")));
     }
 
     #[test]

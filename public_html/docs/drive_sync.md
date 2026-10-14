@@ -457,21 +457,37 @@ park's finish waits for its own park to land.
 A rename the server refuses because the name is taken lands beside what holds
 it, under a conflict name, and the disk follows; what holds a name this device
 is renaming away is waited for instead. A server that refuses without saying
-why is read the same way for a folder whose name this device knows another live
-folder holds there, one it is not itself renaming away: that folder's arrival
-waits on this one's directory leaving the name, so neither would ever move. Any
-other folder rename refused without a reason is withdrawn, and the next pass
-derives it again from the disk until the name frees up.
+why (one that does not say its refusals are reasoned, below) is read the same
+way for a folder whose name this device knows another live folder holds there,
+one it is not itself renaming away: that folder's arrival waits on this one's
+directory leaving the name, so neither would ever move. Any other folder rename
+refused without a reason is withdrawn, and the next pass derives it again from
+the disk until the name frees up.
 
-A new file whose upload is refused because its name is taken goes up beside
-the holder under a conflict name. Refused without a reason, it does so only
-where the server lists something under that name in that folder; otherwise the
-upload is withdrawn and planned again from the disk, never sent as a conflicted
-copy of itself beside nothing. The file on this disk takes the conflict name
-where it still stands at the name refused; one the user moved or renamed after
-the upload was planned is sent from where it stands and left there, and its
-move goes up on the next pass. An upload whose bytes did not all arrive
-(`upload_incomplete`) is sent again whole.
+A new file whose upload is refused because its name is taken goes up beside the
+holder under a conflict name. Refused without a reason by a server that does
+not say its refusals are reasoned, it does so only where the server lists
+something under that name in that folder; otherwise the upload is withdrawn and
+planned again from the disk, never sent as a conflicted copy of itself beside
+nothing. The file on this disk takes the conflict name where it still stands at
+the name refused; one the user moved or renamed after the upload was planned is
+sent from where it stands and left there, and its move goes up on the next
+pass. An upload whose bytes did not all arrive (`upload_incomplete`) is sent
+again whole.
+
+Every refusal is read by its reason ([Drive](drive.md#refusal-reasons)). A
+server that answers its feed and its index with `refusals: reasoned` gives
+every refusal one, and is taken at its word: `not_found`, `parent_not_found`
+and `move_into_self` plan the work again from what is there, a trash answered
+`not_found` is done, the server's own state (`no_room`, `storage_failed`,
+`drive_disabled`, `signed_out`, `action_failed`) is tried again on the
+backoff, `vault_needed` is held like a standing refusal (only an unlock
+window lifts it, a window belongs to a browser session, and this computer
+never holds one), and anything else keeps its status's reading, held where it
+stands. A refusal with no reason from such a server is withdrawn and planned
+again, never read as a name clash, and its issue says it came without a
+reason. The store keeps what the latest answer said, so a server that stops
+saying so is read the older way again.
 
 A create claims a directory already standing at its path — a stand-in it was
 handed, or its own earlier attempt — and waits while that directory is one

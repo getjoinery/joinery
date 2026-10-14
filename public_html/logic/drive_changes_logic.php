@@ -25,10 +25,10 @@ function drive_changes_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$cursor = (int)($input['cursor'] ?? 0);
@@ -43,7 +43,7 @@ function drive_changes_logic(array $input): LogicResult {
 	// D12). `all`, the default, is everything the caller may see.
 	$scope = (string)($input['scope'] ?? 'all');
 	if ($scope !== 'mine' && $scope !== 'all') {
-		return LogicResult::error('Unknown scope.');
+		return LogicResult::error('Unknown scope.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$dblink = DbConnector::get_instance()->get_db_link();
@@ -65,7 +65,7 @@ function drive_changes_logic(array $input): LogicResult {
 		$min_id = $dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
 		if ($min_id === null || $cursor + 1 < (int)$min_id) {
 			$max_id = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id), 0) FROM fch_file_changes")->fetchColumn();
-			return LogicResult::render(array('ok' => true, 'reset' => true, 'changes' => array(), 'next_cursor' => $max_id));
+			return LogicResult::render(array('ok' => true, 'reset' => true, 'changes' => array(), 'next_cursor' => $max_id, 'refusals' => 'reasoned'));
 		}
 	}
 
@@ -137,10 +137,14 @@ function drive_changes_logic(array $input): LogicResult {
 		);
 	}
 
+	// `refusals: reasoned`: every refusal from the actions a sync client calls
+	// carries a machine-readable `reason`, so a client reading this stops
+	// guessing what a refusal was about (docs/drive.md, Refusal reasons).
 	return LogicResult::render(array(
 		'ok'          => true,
 		'changes'     => $changes,
 		'next_cursor' => $next,
+		'refusals'    => 'reasoned',
 	));
 }
 

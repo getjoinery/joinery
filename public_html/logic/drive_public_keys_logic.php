@@ -31,17 +31,17 @@ function drive_public_keys_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$folder_id = (isset($input['folder_id']) && (int)$input['folder_id'] > 0) ? (int)$input['folder_id'] : 0;
 	if ($folder_id) {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder || !DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to that folder.');
+			return LogicResult::error('You do not have access to that folder.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		$raw = DriveHelper::reader_user_ids_for_folder($folder);
 	} else {

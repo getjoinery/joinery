@@ -12,18 +12,18 @@ function drive_folder_create_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$name = trim((string)($input['name'] ?? ''));
 	if ($name === '') {
-		return LogicResult::error('Folder name is required.');
+		return LogicResult::error('Folder name is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if (mb_strlen($name) > 255) {
-		return LogicResult::error('Folder name is too long.');
+		return LogicResult::error('Folder name is too long.', array('reason' => 'name_too_long', 'standing' => true));
 	}
 
 	$parent_id = (isset($input['parent_id']) && (int)$input['parent_id'] > 0) ? (int)$input['parent_id'] : 0;
@@ -40,7 +40,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 		$level = ProtectionLevel::FORTRESS;
 	}
 	if ($level === null || !in_array($level, ProtectionLevel::DRIVE_LEVELS, true)) {
-		return LogicResult::error('That is not a protection level Drive offers.');
+		return LogicResult::error('That is not a protection level Drive offers.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// The OWNER of the new folder is the parent folder's owner, else the actor
@@ -53,17 +53,17 @@ function drive_folder_create_logic(array $input): LogicResult {
 	if ($parent_id > 0) {
 		$parent = DriveHelper::load_folder($parent_id);
 		if (!$parent) {
-			return LogicResult::error('Parent folder not found.');
+			return LogicResult::error('Parent folder not found.', array('reason' => 'parent_not_found'));
 		}
 		$owner_id = (int)$parent->get('fol_usr_user_id');
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $parent, $user_id, $session->get_permission())) {
-			return LogicResult::error('You do not have access to that folder.', array('standing' => true));
+			return LogicResult::error('You do not have access to that folder.', array('reason' => 'forbidden', 'standing' => true));
 		}
 		if (DriveHelper::folder_is_trashed($parent)) {
 			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 		}
 		if (DriveHelper::depth($parent_id) + 1 > DriveHelper::max_depth()) {
-			return LogicResult::error('Maximum folder depth reached.', array('standing' => true));
+			return LogicResult::error('Maximum folder depth reached.', array('reason' => 'too_deep', 'standing' => true));
 		}
 		$parent_level = DriveHelper::folder_level($parent);
 		if ($parent_level !== ProtectionLevel::STANDARD) {
@@ -71,7 +71,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 		} elseif ($level !== ProtectionLevel::STANDARD) {
 			return LogicResult::error(ProtectionLevel::label($level)
 				. ' folders can only be created at the Drive root, or inside another '
-				. ProtectionLevel::label($level) . ' folder.');
+				. ProtectionLevel::label($level) . ' folder.', array('reason' => 'protection_boundary', 'standing' => true));
 		}
 	}
 
@@ -81,7 +81,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 	if ($level === ProtectionLevel::PRIVATE_) {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		if (UserEncryptionVault::loadForUser($owner_id, UserEncryptionVault::SCOPE_USER) === null) {
-			return LogicResult::error('Set up your vault before creating a Private folder.');
+			return LogicResult::error('Set up your vault before creating a Private folder.', array('reason' => 'vault_needed'));
 		}
 	}
 

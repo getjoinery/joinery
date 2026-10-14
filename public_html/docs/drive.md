@@ -640,13 +640,51 @@ A refusal the same request would get again — against the same entity, the same
 target and the same account limits — carries `standing: true` in its data,
 beside any `reason`: a quota or per-file limit, an owner-only trash or move, no
 write access to the destination, a protection boundary, a file in the trash, an
-invalid destination, the folder depth limit. A sync client holds a standing
-refusal rather than asking again until something it asked about changes. A
-refusal that depends on bytes in flight (a size or checksum mismatch), a cursor
-(`changed_since`), time or the server's health is not standing, and is retried.
+invalid destination, the folder depth limit, a malformed request. A sync client
+holds a standing refusal rather than asking again until something it asked
+about changes. A refusal that depends on bytes in flight (a size or checksum
+mismatch), a cursor (`changed_since`), time or the server's health is not
+standing, and is retried.
 The completion's integrity refusals (bytes missing, the wrong size, a failed
 checksum) say `reason: 'upload_incomplete'`: a client sends the bytes again,
 and never reads a name clash into a refusal that names its reason.
+
+### Refusal reasons
+
+Every refusal from the actions a sync client calls (`drive_changes`,
+`drive_index`, `drive_stat`, `drive_list`, `drive_upload_init`,
+`drive_upload_complete`, `drive_folder_create`, `drive_rename`, `drive_move`,
+`drive_trash`, `drive_public_keys`) carries a machine-readable `reason` in its
+data, and `drive_changes` and `drive_index` answer with `refusals: 'reasoned'`
+to say so. A client that has seen the marker acts on the reason alone, never
+on the message, which is prose for people.
+
+| Reason | Meaning |
+|---|---|
+| `name_taken` | another file or folder holds the name there (with the holder) |
+| `parent_trashed` | the destination folder is in the trash |
+| `file_trashed` | the file is in the trash |
+| `changed_since` | something in it changed after the client's cursor |
+| `upload_incomplete` | the upload's bytes are missing, the wrong size or fail their checksum |
+| `quota`, `file_too_large` | the account's storage or per-file limit |
+| `no_room` | the server's disk is short of space |
+| `storage_failed` | the bytes could not be stored, sealed or converted |
+| `not_found` | the entity, the file to update or the upload is gone |
+| `parent_not_found`, `invalid_parent` | the parent or destination folder is gone or not one |
+| `forbidden` | no permission, no access, or not the owner's to do |
+| `protection_boundary`, `level_change_refused` | a protection level the request would cross or change |
+| `vault_needed` | a Private change needs the vault set up or unlocked |
+| `key_unavailable` | the caller does not hold the file's key |
+| `move_into_self` | a folder moved into its own subtree |
+| `too_deep` | the folder depth limit |
+| `name_too_long` | the name is over the server's limit |
+| `invalid_request` | the request itself is malformed: a field missing or out of range, an unknown scope or cursor, encrypted metadata or keys missing |
+| `drive_disabled`, `signed_out` | Drive is off on the site, or there is no session |
+| `idempotency_key_reused` | the key was spent on a different request |
+| `action_failed` | the action itself broke (an exception, for any action) |
+
+A request the API's own input schema refuses, before the logic runs, comes
+back as a `ValidationError` instead.
 
 ### `drive_stat` — batch fetch
 

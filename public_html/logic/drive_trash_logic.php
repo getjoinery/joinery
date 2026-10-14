@@ -10,26 +10,26 @@ function drive_trash_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$entity_type = (string)($input['entity_type'] ?? '');
 	$entity_id   = (int)($input['entity_id'] ?? 0);
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
-		return LogicResult::error('Invalid entity type.');
+		return LogicResult::error('Invalid entity type.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$entity = DriveHelper::load_entity($entity_type, $entity_id);
 	if (!$entity) {
-		return LogicResult::error('Item not found.');
+		return LogicResult::error('Item not found.', array('reason' => 'not_found'));
 	}
 	// Trash (a soft delete) is owner-only — an editor grant never grants delete.
 	if (!DriveHelper::owns($entity_type, $entity, $user_id)) {
-		return LogicResult::error('You do not have permission to delete this item.', array('standing' => true));
+		return LogicResult::error('You do not have permission to delete this item.', array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	// A sync client sends the change it decided this trash at. Anything the

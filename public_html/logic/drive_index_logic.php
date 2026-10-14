@@ -37,15 +37,15 @@ function drive_index_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$scope = (string)($input['scope'] ?? 'mine');
 	if ($scope !== 'mine' && $scope !== 'shared') {
-		return LogicResult::error('Unknown scope.');
+		return LogicResult::error('Unknown scope.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	$limit = (int)($input['limit'] ?? DRIVE_INDEX_MAX);
 	if ($limit <= 0 || $limit > DRIVE_INDEX_MAX) {
@@ -54,7 +54,7 @@ function drive_index_logic(array $input): LogicResult {
 
 	list($phase, $cursor) = _drive_index_parse_cursor($input['after_id'] ?? null);
 	if ($phase === null) {
-		return LogicResult::error('Invalid cursor.');
+		return LogicResult::error('Invalid cursor.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	$dblink = DbConnector::get_instance()->get_db_link();
@@ -70,7 +70,7 @@ function drive_index_logic(array $input): LogicResult {
 		if (empty($grant_root_of_folder) && empty($granted_file_roots)) {
 			return LogicResult::render(array(
 				'ok' => true, 'scope' => $scope, 'items' => array(),
-				'next_after_id' => _drive_index_token('file', 0), 'done' => true,
+				'next_after_id' => _drive_index_token('file', 0), 'done' => true, 'refusals' => 'reasoned',
 			));
 		}
 	}
@@ -157,6 +157,7 @@ function drive_index_logic(array $input): LogicResult {
 		'items'         => $items,
 		'next_after_id' => $last_token,
 		'done'          => $done,
+		'refusals'      => 'reasoned',
 	));
 }
 

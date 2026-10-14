@@ -10,10 +10,10 @@ function drive_rename_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$entity_type = (string)($input['entity_type'] ?? '');
@@ -25,18 +25,18 @@ function drive_rename_logic(array $input): LogicResult {
 	$enc_metadata = isset($input['encrypted_metadata']) ? (string)$input['encrypted_metadata'] : '';
 
 	if ($entity_type !== DriveHelper::ENTITY_FILE && $entity_type !== DriveHelper::ENTITY_FOLDER) {
-		return LogicResult::error('Invalid entity type.');
+		return LogicResult::error('Invalid entity type.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if (mb_strlen($name) > 255) {
-		return LogicResult::error('That name is too long.');
+		return LogicResult::error('That name is too long.', array('reason' => 'name_too_long', 'standing' => true));
 	}
 
 	$entity = DriveHelper::load_entity($entity_type, $entity_id);
 	if (!$entity) {
-		return LogicResult::error('Item not found.');
+		return LogicResult::error('Item not found.', array('reason' => 'not_found'));
 	}
 	if (!DriveHelper::can_write($entity_type, $entity, $user_id, $session->get_permission())) {
-		return LogicResult::error('You do not have permission to rename this item.');
+		return LogicResult::error('You do not have permission to rename this item.', array('reason' => 'forbidden', 'standing' => true));
 	}
 
 	// An encrypted file's display name lives INSIDE fil_encrypted_metadata; its
@@ -46,13 +46,13 @@ function drive_rename_logic(array $input): LogicResult {
 	$is_encrypted_file = ($entity_type === DriveHelper::ENTITY_FILE) && $entity->is_encrypted();
 	if ($is_encrypted_file) {
 		if ($name !== '') {
-			return LogicResult::error('Encrypted files are renamed via their encrypted metadata, not a plaintext name.');
+			return LogicResult::error('Encrypted files are renamed via their encrypted metadata, not a plaintext name.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 		if ($enc_metadata === '') {
-			return LogicResult::error('Encrypted rename is missing its metadata.');
+			return LogicResult::error('Encrypted rename is missing its metadata.', array('reason' => 'invalid_request', 'standing' => true));
 		}
 	} elseif ($name === '') {
-		return LogicResult::error('A name is required.');
+		return LogicResult::error('A name is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {

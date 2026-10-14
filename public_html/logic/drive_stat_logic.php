@@ -33,18 +33,18 @@ function drive_stat_logic(array $input): LogicResult {
 	$user_id  = (int)$session->get_user_id();
 
 	if (!$settings->get_setting('drive_active')) {
-		return LogicResult::error('Drive is not enabled.');
+		return LogicResult::error('Drive is not enabled.', array('reason' => 'drive_disabled'));
 	}
 	if (!$user_id) {
-		return LogicResult::error('You must be signed in to use Drive.');
+		return LogicResult::error('You must be signed in to use Drive.', array('reason' => 'signed_out'));
 	}
 
 	$entities = isset($input['entities']) && is_array($input['entities']) ? $input['entities'] : array();
 	if (empty($entities)) {
-		return LogicResult::error('No entities were requested.');
+		return LogicResult::error('No entities were requested.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	if (count($entities) > DRIVE_STAT_MAX) {
-		return LogicResult::error('At most ' . DRIVE_STAT_MAX . ' entities may be requested at once.');
+		return LogicResult::error('At most ' . DRIVE_STAT_MAX . ' entities may be requested at once.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 	$with_urls = !empty($input['urls']);
 	// `mine`, a sync client's scope: an entity the caller does not own is not
@@ -52,7 +52,7 @@ function drive_stat_logic(array $input): LogicResult {
 	// `not_yours`, as an unshared one is.
 	$scope = (string)($input['scope'] ?? 'all');
 	if ($scope !== 'mine' && $scope !== 'all') {
-		return LogicResult::error('Unknown scope.');
+		return LogicResult::error('Unknown scope.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// Normalize and dedupe the request. A client replaying a feed run will ask
@@ -71,7 +71,7 @@ function drive_stat_logic(array $input): LogicResult {
 		$wanted[$type . ':' . $id] = array('entity_type' => $type, 'entity_id' => $id);
 	}
 	if (empty($wanted)) {
-		return LogicResult::error('No valid entities were requested.');
+		return LogicResult::error('No valid entities were requested.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
 	// Load and access-check first, so the batch helpers below only do work for
