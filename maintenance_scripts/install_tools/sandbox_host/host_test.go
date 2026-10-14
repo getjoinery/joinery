@@ -153,15 +153,19 @@ func TestLogDoorIsRecorded(t *testing.T) {
 func TestEnvelopeIsHeldToWhatCoreMayAsk(t *testing.T) {
 	h, module := fixtureHost(t, 4)
 	cases := map[string]func(e *envelope){
-		"plugin name":       func(e *envelope) { e.Plugin = "../etc" },
-		"export":            func(e *envelope) { e.Export = "_start" },
-		"module elsewhere":  func(e *envelope) { e.Module = "/etc/passwd" },
-		"another's module":  func(e *envelope) { e.Plugin = "other" },
-		"module not wasm":   func(e *envelope) { e.Module = strings.TrimSuffix(module, ".wasm") + ".txt" },
-		"api off the box":   func(e *envelope) { e.API = &apiCredential{BaseURL: "https://203.0.113.5", Hostname: "site.example", PublicKey: "p", SecretKey: "s"} },
-		"api by name":       func(e *envelope) { e.API = &apiCredential{BaseURL: "https://site.example", Hostname: "site.example", PublicKey: "p", SecretKey: "s"} },
-		"host is an IP":     func(e *envelope) { e.OutboundHosts = []string{"10.0.0.1"} },
-		"host with a port":  func(e *envelope) { e.OutboundHosts = []string{"example.com:8443"} },
+		"plugin name":      func(e *envelope) { e.Plugin = "../etc" },
+		"export":           func(e *envelope) { e.Export = "_start" },
+		"module elsewhere": func(e *envelope) { e.Module = "/etc/passwd" },
+		"another's module": func(e *envelope) { e.Plugin = "other" },
+		"module not wasm":  func(e *envelope) { e.Module = strings.TrimSuffix(module, ".wasm") + ".txt" },
+		"api off the box": func(e *envelope) {
+			e.API = &apiCredential{BaseURL: "https://203.0.113.5", Hostname: "site.example", PublicKey: "p", SecretKey: "s"}
+		},
+		"api by name": func(e *envelope) {
+			e.API = &apiCredential{BaseURL: "https://site.example", Hostname: "site.example", PublicKey: "p", SecretKey: "s"}
+		},
+		"host is an IP":    func(e *envelope) { e.OutboundHosts = []string{"10.0.0.1"} },
+		"host with a port": func(e *envelope) { e.OutboundHosts = []string{"example.com:8443"} },
 	}
 	for name, change := range cases {
 		env := uiCall(module, "echo", nil)
@@ -254,7 +258,9 @@ func TestHTTPDoorReachesOnlyApprovedPublicHosts(t *testing.T) {
 	h, module := fixtureHost(t, 4)
 	old := guardLookup
 	defer func() { guardLookup = old; guardAllowsPrivate = false; guardDialPort = ""; guardRootCAs = nil }()
-	guardLookup = func(ctx context.Context, host string) ([]net.IP, error) { return []net.IP{net.ParseIP("127.0.0.1")}, nil }
+	guardLookup = func(ctx context.Context, host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("127.0.0.1")}, nil
+	}
 	guardDialPort = port
 	guardRootCAs = pool
 
@@ -280,10 +286,10 @@ func TestHTTPDoorReachesOnlyApprovedPublicHosts(t *testing.T) {
 	}
 
 	for _, refused := range []struct{ url string }{
-		{"https://other.example/hook"},     // not approved
-		{"http://example.com/hook"},        // not https
-		{"https://example.com:8443/hook"},  // not 443
-		{"https://user@example.com/hook"},  // credentials in the URL
+		{"https://other.example/hook"},    // not approved
+		{"http://example.com/hook"},       // not https
+		{"https://example.com:8443/hook"}, // not 443
+		{"https://user@example.com/hook"}, // credentials in the URL
 	} {
 		a := call(refused.url, []string{"example.com"})
 		if len(a.Calls) != 1 || a.Calls[0].Status != "refused" {

@@ -7,7 +7,7 @@
  * timeout: 240
  */
 /**
- * Manifest-rendered UI (specs/plugin_tiers.md WP4): a sandboxed plugin's admin
+ * Manifest-rendered UI (plugin_tiers.md WP4): a sandboxed plugin's admin
  * and profile pages, its menus, its settings, and door 4 (a form the plugin
  * answers through the host), against a stand-in host.
  *

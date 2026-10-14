@@ -5,7 +5,7 @@
  * A folder is a sandboxed plugin when it holds exactly two files, the manifest
  * (manifest.json) and one WebAssembly module (*.wasm), and nothing else: no
  * other file, no folder. Anything else is a native plugin and is judged as
- * one (specs/plugin_tiers.md Q11). The kind is always read from the folder,
+ * one (plugin_tiers.md Q11). The kind is always read from the folder,
  * never from what a package or a row says about itself, so a sandboxed plugin
  * cannot become PHP without being judged as PHP.
  *

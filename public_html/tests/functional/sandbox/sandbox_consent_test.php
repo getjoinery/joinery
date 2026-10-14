@@ -8,7 +8,7 @@
  */
 /**
  * Approval, credentials, signals and schedules for sandboxed plugins
- * (specs/plugin_tiers.md WP5), against a stand-in host.
+ * (plugin_tiers.md WP5), against a stand-in host.
  *
  * What is pinned here:
  *  - a plugin needing an action, a model, a signal or a platform this site
@@ -310,13 +310,6 @@ try {
 		'Reactivating needs no new approval, and switches them on');
 
 	section('The approver and the key pages');
-	$held = null;
-	try {
-		$superadmin->permanent_delete();
-	} catch (Throwable $e) {
-		$held = $e->getMessage();
-	}
-	check($held !== null && strpos($held, $name) !== false, 'The approver\'s account is held while the plugin acts as it', (string)$held);
 	$key_id = (int)SandboxInstall::forPlugin($name)->get('sbi_apk_api_key_id');
 	foreach (array('permanent_delete', 'regenerate_secret', 'soft_delete') as $act) {
 		$result = harness_call_logic('adm/logic/admin_api_key_logic.php', 'admin_api_key_logic', array('apk_api_key_id' => $key_id, 'action' => $act), 'POST');
@@ -347,6 +340,47 @@ try {
 	$key = new ApiKey((int)SandboxInstall::forPlugin($name)->get('sbi_apk_api_key_id'), TRUE);
 	check($key->get('apk_is_active') && (int)$key->get('apk_usr_user_id') === (int)$superadmin->key && !SandboxConsent::needsApproval($name),
 		'which mints a key as them');
+
+	section('An approver who is deleted');
+	$third = make_user('SbxThird', 10);
+	$sign_in($third);
+	$approve($name);
+	$reset();
+	$key_id = (int)SandboxInstall::forPlugin($name)->get('sbi_apk_api_key_id');
+	$sign_in($superadmin);
+	$third->soft_delete();
+	$reset();
+	check(!(new ApiKey($key_id, TRUE))->get('apk_is_active') && SandboxInstall::credentialFor($name) === null,
+		'Deleting the approving admin is not refused: the plugin\'s key switches off at once, as on a demotion');
+	check(SandboxConsent::needsApproval($name), 'and the plugin waits on another admin\'s approval');
+	$fourth = make_user('SbxFourth', 10);
+	$sign_in($fourth);
+	$approve($name);
+	$reset();
+	$key_id = (int)SandboxInstall::forPlugin($name)->get('sbi_apk_api_key_id');
+	$sign_in($superadmin);
+	$fourth->permanent_delete();
+	$reset();
+	$row = SandboxInstall::forPlugin($name);
+	check(!(new ApiKey($key_id, TRUE))->key && !$row->get('sbi_apk_api_key_id') && !$row->get('sbi_usr_user_id'),
+		'Deleting them for good takes the key with the account, and the approval names nobody');
+	check(SandboxConsent::needsApproval($name) && SandboxInstall::credentialFor($name) === null, 'and the plugin waits on approval');
+	$approve($name);
+	$reset();
+	$key = new ApiKey((int)SandboxInstall::forPlugin($name)->get('sbi_apk_api_key_id'), TRUE);
+	check($key->get('apk_is_active') && (int)$key->get('apk_usr_user_id') === (int)$superadmin->key, 'which another admin gives as themselves');
+	$machine = make_machine_key((int)$third->key, 'SbxOtherMachine', 1);
+	$machine['api_key']->set('apk_scope', $action);
+	$machine['api_key']->save();
+	$held = null;
+	try {
+		(new User((int)$third->key, TRUE))->permanent_delete();
+	} catch (Throwable $e) {
+		$held = $e->getMessage();
+	}
+	check($held !== null && strpos($held, 'SbxOtherMachine') !== false,
+		'A scoped key another machine holds still keeps its owner\'s account until it is deleted', (string)$held);
+	$machine['api_key']->permanent_delete();
 
 	section('Uninstall');
 	$pm->deactivate($name);

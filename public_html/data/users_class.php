@@ -1246,13 +1246,19 @@ class User extends SystemBase {	public static $prefix = 'usr';
 
 	/**
 	 * A soft-deleted user's keys stop authenticating, so the same refusal as
-	 * permanent_delete() applies: see refuse_while_scoped_key_is_live().
+	 * permanent_delete() applies: see refuse_while_scoped_key_is_live(). The
+	 * sandboxed plugins they approved lapse, as on a demotion.
 	 */
 	function soft_delete(){
-		if($this->key !== NULL && $this->key !== ''){
-			$this->refuse_while_scoped_key_is_live();
+		if($this->key === NULL || $this->key === ''){
+			return parent::soft_delete();
 		}
-		return parent::soft_delete();
+		$this->refuse_while_scoped_key_is_live();
+		$result = parent::soft_delete();
+		if($result){
+			SandboxCredentials::lapseApprovalsOf((int)$this->key);
+		}
+		return $result;
 	}
 
 	/**
@@ -1262,6 +1268,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	 * account. Deleting the account would silently cut that machine off, and
 	 * permanent deletion would take the key with it; the key is deleted
 	 * first, on its own page.
+	 *
+	 * A sandboxed plugin's key is not refused: deleting the admin who approved
+	 * the plugin ends that approval, as demoting them does, and the plugin
+	 * waits on another admin's (SandboxConsent::approver()).
 	 */
 	private function refuse_while_scoped_key_is_live(){
 		require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -1274,14 +1284,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		foreach($keys as $key){
 			// A key that is switched off or past its expiry is in use by nothing.
 			$expired = $key->get('apk_expires_time') && $key->get('apk_expires_time') < $now_utc;
-			if($key->is_scoped() && $key->get('apk_is_active') && !$expired){
-				$plugin = $key->sandbox_plugin();
-				if($plugin !== null){
-					throw new SystemDisplayableError(
-						'This account approved the sandboxed plugin ' . $plugin . ', which acts on the site as it. '
-						. 'Have another admin approve it again first, at /admin/admin_sandbox_approve?plugin=' . rawurlencode($plugin)
-						. ', or deactivate it; deleting the account would cut the plugin off.');
-				}
+			if($key->is_scoped() && $key->get('apk_is_active') && !$expired && $key->sandbox_plugin() === null){
 				throw new SystemDisplayableError(
 					'This account owns the key "' . $key->get('apk_name') . '", which is limited to '
 					. $key->scope_label() . ' and is in use by another machine. Delete that key first, at '

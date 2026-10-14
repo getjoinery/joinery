@@ -2,7 +2,7 @@
 /**
  * SandboxHost — how core asks the plugin host to run a sandboxed plugin.
  *
- * The host is a separate process (specs/plugin_tiers.md WP7) that runs
+ * The host is a separate process (plugin_tiers.md WP7) that runs
  * WebAssembly modules and listens on a local socket. Core never runs a module
  * itself: it sends the host one request per call and waits for the answer,
  * bounded. Every request carries everything the call may use, so the host

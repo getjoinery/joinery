@@ -1,6 +1,6 @@
 <?php
 /**
- * Logic for a sandboxed plugin's call log (specs/plugin_tiers.md WP8): what
+ * Logic for a sandboxed plugin's call log (plugin_tiers.md WP8): what
  * the plugin was told and asked, what it called through each door, and what
  * was refused and why, newest first, from SandboxLog.
  *

@@ -7,7 +7,7 @@
 # timeout: 300
 #
 # The sandboxed plugin host (maintenance_scripts/install_tools/sandbox_host,
-# specs/plugin_tiers.md WP7): its Go tests, and the request and answer core
+# plugin_tiers.md WP7): its Go tests, and the request and answer core
 # and the host exchange.
 #
 # The host's own tests run a real WebAssembly module (testdata/fixture) in the

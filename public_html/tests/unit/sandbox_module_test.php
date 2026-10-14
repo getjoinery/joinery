@@ -7,7 +7,7 @@
  */
 /**
  * SandboxModule: what a sandboxed plugin's WebAssembly module exports and
- * imports, read from its bytes (specs/plugin_tiers.md WP8).
+ * imports, read from its bytes (plugin_tiers.md WP8).
  *
  * What is pinned here:
  *  - exports and imports are read from hand-built modules;

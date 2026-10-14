@@ -7,7 +7,7 @@
  * timeout: 120
  */
 /**
- * The signals plugins and webhooks are told about (specs/plugin_tiers.md WP6):
+ * The signals plugins and webhooks are told about (plugin_tiers.md WP6):
  * post.published, account.updated, message.received, file.uploaded.
  *
  * Each is observed the way a receiver sees it: a delivery row queued for a

@@ -1,4 +1,4 @@
-//! Notifier: a Joinery sandboxed plugin (specs/plugin_tiers.md WP9).
+//! Notifier: a Joinery sandboxed plugin (plugin_tiers.md WP9).
 //!
 //! Posts the site events an admin approved (a new member, a published post, a
 //! new comment) to a chat webhook, keeps a log of each post in its own model,

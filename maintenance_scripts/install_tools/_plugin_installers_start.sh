@@ -4,7 +4,7 @@
 # first, then every active plugin's.
 #
 # Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
-#                 host, a site without one has it stopped (specs/plugin_tiers.md WP7). A sandboxed plugin's
+#                 host, a site without one has it stopped (plugin_tiers.md WP7). A sandboxed plugin's
 #                 manifest.json is part of what "changed" means, so one arriving starts the host at the next tick.
 # Version: 2.35 - A site whose config/ is on the data root, found with the data root not mounted, runs the
 #                 data root's tick before it waits: a plain data root that is only unmounted (an encrypt's

@@ -44,7 +44,7 @@
  *                owning plugin is loaded. The locator is the floor that always
  *                works; the enumerator is the ceiling that works when code is up.
  *
- * @version 1.2 - every secret:true setting is an implicit operator entry (specs/plugin_tiers.md, Secret settings)
+ * @version 1.2 - every secret:true setting is an implicit operator entry (plugin_tiers.md, Secret settings)
  * @version 1.1 - the reconciler is what walks the declarations
  * @version 1.0
  */

@@ -1,6 +1,6 @@
 <?php
 /**
- * Manifest-declared data (specs/plugin_tiers.md WP3), over real requests.
+ * Manifest-declared data (plugin_tiers.md WP3), over real requests.
  *
  * A throwaway sandboxed plugin — a folder holding manifest.json and one .wasm —
  * goes through the same lifecycle as any plugin (PluginManager install,

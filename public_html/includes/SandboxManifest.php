@@ -5,7 +5,7 @@
  * A sandboxed plugin is a folder in plugins/ holding exactly two files: this
  * manifest (manifest.json) and one WebAssembly module (*.wasm). The manifest
  * declares everything the platform will let the module do; the module can do
- * nothing it does not declare (specs/plugin_tiers.md, docs/sandboxed_plugins.md).
+ * nothing it does not declare (plugin_tiers.md, docs/sandboxed_plugins.md).
  *
  * This class parses and validates a manifest and answers questions about it.
  * It never trusts the manifest: every name that becomes a class, table,

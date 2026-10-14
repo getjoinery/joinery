@@ -1,7 +1,7 @@
 <?php
 /**
  * A sandboxed plugin's page for a signed-in member, drawn from its manifest
- * (door 4, specs/plugin_tiers.md WP4): text and forms.
+ * (door 4, plugin_tiers.md WP4): text and forms.
  *
  * GET draws the page. A form submission (POST with `section`, the form's
  * index on the page) is the plugin's to answer through the plugin host, with
