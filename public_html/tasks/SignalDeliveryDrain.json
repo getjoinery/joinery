@@ -1,0 +1,6 @@
+{
+  "name": "Signal Delivery Drain",
+  "description": "Sends queued webhook messages to the URLs configured under System > Webhooks, and retries the ones that failed.",
+  "activate_on_install": true,
+  "default_frequency": "every_run"
+}

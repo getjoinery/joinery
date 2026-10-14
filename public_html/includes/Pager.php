@@ -3,6 +3,10 @@
 /**
  * Pager — offset/sort/filter links over the current request.
  *
+ * @version 1.2 - what is copied from the URL is escaped on the way back out:
+ *                url_vars_as_hidden_input() HTML-escapes names and values (it
+ *                wrote them into the page raw) and skips the excluded names
+ *                under this pager's prefix too; the links URL-encode them
  * @version 1.1 - the request URI is never parse_url()'d: a scheme-relative or
  *                absolute-form request line (GET //x:abc, GET http:///x, the
  *                shapes scanners send) makes parse_url() return false. The base
@@ -59,6 +63,13 @@ class Pager{
 			$query = substr($query, 0, $hash);
 		}
 		parse_str($query, $url_vars);
+		// The pager's own controls are single values; an array in their place
+		// (?filter[]=x) is not one this pager wrote, so it is dropped.
+		foreach (array('offset', 'sort', 'filter', 'sdirection', 'searchterm') as $control) {
+			if (isset($url_vars[$prefix . $control]) && !is_scalar($url_vars[$prefix . $control])) {
+				unset($url_vars[$prefix . $control]);
+			}
+		}
 		$this->url_vars = $url_vars;
 		// A base that is not a plain absolute path (a scheme-relative //host or
 		// an absolute-form http://... request line) would turn every pager link
@@ -128,9 +139,8 @@ class Pager{
 		
 		$this->remaining_url_vars = $url_vars;
 		
-		foreach($url_vars as $key => $value){
-			$this->remaining_var_string .= '&'. $key.'='.$value;
-		}
+		// Re-encoded: these are decoded values going back into a URL.
+		$this->remaining_var_string = $url_vars ? '&' . http_build_query($url_vars) : '';
 		
 		if(is_null($this->offset)){
 			$this->offset = 0;
@@ -237,14 +247,29 @@ class Pager{
 	}
 	
 	
+	/**
+	 * The request's other query variables as hidden inputs, so a toolbar form
+	 * (sort, filter, search) keeps them when it submits. The names and values
+	 * come straight from the URL, so both are escaped; an array variable
+	 * (x[]=1&x[]=2) becomes one input per value.
+	 */
 	function url_vars_as_hidden_input($exclude=array()){
-		
+		// The URL's keys already carry this pager's prefix ('rfilter').
+		$skip = array();
+		foreach ($exclude as $name) {
+			$skip[$name] = true;
+			$skip[$this->prefix . $name] = true;
+		}
+		$kept = array_diff_key($this->url_vars, $skip);
+		if (empty($kept)) {
+			return '';
+		}
+
 		$out_string = '';
-		
-		foreach($this->url_vars as $name=>$value){
-			if(!in_array($name, $exclude)){
-				$out_string .= '<input type="hidden"  name="'.$prefix . $name.'" value="'.$value.'">';
-			}
+		foreach (explode('&', http_build_query($kept)) as $pair) {
+			$parts = explode('=', $pair, 2);
+			$out_string .= '<input type="hidden" name="' . htmlspecialchars(urldecode($parts[0]), ENT_QUOTES)
+				. '" value="' . htmlspecialchars(urldecode($parts[1] ?? ''), ENT_QUOTES) . '">';
 		}
 		return $out_string;
 	}
@@ -286,7 +311,7 @@ class Pager{
 		
 		$url_pieces = array();
 		foreach ($url_vars as $name=>$value){
-			$url_pieces[] = $prefix . $name.'='.$value;
+			$url_pieces[] = $prefix . $name.'='.urlencode((string)$value);
 		}
 		$url_string = $base_url .'?'. implode('&', $url_pieces). $this->remaining_var_string;
 		return $url_string;
@@ -341,23 +366,23 @@ class Pager{
 
 		$new_get_vars = array();
 		if($newoffset){
-			$new_get_vars[] = $this->prefix.'offset='.$newoffset;
+			$new_get_vars[] = $this->prefix.'offset='.(int)$newoffset;
 		}
 
 		if($this->sort){
-			$new_get_vars[] = $this->prefix.'sort='.$this->sort;
+			$new_get_vars[] = $this->prefix.'sort='.urlencode((string)$this->sort);
 		}
 
 		if($this->filter){
-			$new_get_vars[] = $this->prefix.'filter='.$this->filter;
+			$new_get_vars[] = $this->prefix.'filter='.urlencode((string)$this->filter);
 		}
 		
 		if($this->sdirection){
-			$new_get_vars[] = $this->prefix.'sdirection='.$this->sdirection;
+			$new_get_vars[] = $this->prefix.'sdirection='.urlencode((string)$this->sdirection);
 		}
 		
 		if($this->searchterm){
-			$new_get_vars[] = $this->prefix.'searchterm='.$this->searchterm;
+			$new_get_vars[] = $this->prefix.'searchterm='.urlencode((string)$this->searchterm);
 		}
 		$out = $new_page.'?'.implode('&', $new_get_vars);
 		$out .= $this->remaining_var_string;

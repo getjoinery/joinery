@@ -296,6 +296,14 @@
             "parent": "system"
         },
         {
+            "slug": "webhooks",
+            "title": "Webhooks",
+            "url": "admin_webhooks",
+            "order": 4,
+            "permission": 8,
+            "parent": "system"
+        },
+        {
             "slug": "test-database",
             "title": "Test Database",
             "url": "admin_test_database",

@@ -329,7 +329,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
     protected function renderToolbar($sort_data, $filter_data, $search_on, $pager) {
         if (!$this->_box_has_toolbar) return;
         if ($sort_data) {
-            printf('<form method="get" action="%s" style="display:flex;align-items:center;gap:0.375rem;">', $pager->base_url());
+            printf('<form method="get" action="%s" style="display:flex;align-items:center;gap:0.375rem;">', htmlspecialchars($pager->base_url()));
             echo $pager->url_vars_as_hidden_input(['sort', 'sdirection']);
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Sort:</label>';
             echo '<select name="' . $pager->prefix() . 'sort" class="form-control form-control-sm" style="width:auto;">';
@@ -344,17 +344,15 @@ class PublicPageJoinerySystem extends PublicPageBase {
                 echo '<option value="' . htmlspecialchars($value) . '"' . $sel . '>' . htmlspecialchars($key) . '</option>';
             }
             echo '</select>';
-            foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
             echo '<button type="submit" class="btn btn-sm btn-soft-default">Sort</button></form>';
         }
         if ($filter_data) {
-            printf('<form method="get" action="%s" style="display:flex;align-items:center;gap:0.375rem;">', $pager->base_url());
+            printf('<form method="get" action="%s" style="display:flex;align-items:center;gap:0.375rem;">', htmlspecialchars($pager->base_url()));
             echo $pager->url_vars_as_hidden_input(['filter']);
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Show:</label>';
             echo '<select name="' . $pager->prefix() . 'filter" class="form-control form-control-sm" style="width:auto;">';
             $this->renderFilterOptions($filter_data, $pager->get_filter());
             echo '</select>';
-            foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
             echo '<button type="submit" class="btn btn-sm btn-soft-default">Go</button></form>';
         }
         if ($search_on) {
@@ -364,7 +362,6 @@ class PublicPageJoinerySystem extends PublicPageBase {
             echo '<div style="display:flex;align-items:center;gap:0.375rem;">';
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Search:</label>';
             echo '<input name="' . $pager->prefix() . 'searchterm" value="' . htmlspecialchars($pager->search_term()) . '" type="text" class="form-control form-control-sm" style="width:180px;" maxlength="100">';
-            foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
             echo '<button type="submit" class="btn btn-sm btn-soft-default">Search</button>';
             echo '</div>';
             echo $formwriter->end_form();

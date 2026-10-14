@@ -43,5 +43,34 @@ section('A fragment is not a query variable');
 $p = new Pager(array('getvars' => '/page?offset=2#top', 'numrecords' => 10));
 check(strpos($p->current_url(array('offset')), '?offset=2') !== false && strpos($p->current_url(array('offset')), '#') === false, 'the fragment is dropped', $p->current_url(array('offset')));
 
+section('What comes from the URL is escaped on the way back out');
+$warnings = array();
+$p = new Pager(array('getvars' => '/admin/admin_users?x=%22%3E%3Cscript%3Ealert(1)%3C%2Fscript%3E&filter=a&tags[]=b%26c', 'numrecords' => 100));
+$hidden = $p->url_vars_as_hidden_input(array('filter'));
+check(strpos($hidden, '<script>') === false && strpos($hidden, 'value="&quot;&gt;&lt;script&gt;') !== false,
+	'a query value cannot close the hidden input', $hidden);
+check(strpos($hidden, 'name="filter"') === false, 'the excluded name is left to its own control', $hidden);
+check(strpos($hidden, 'name="tags[0]" value="b&amp;c"') !== false, 'an array variable becomes one input per value', $hidden);
+check($warnings === array(), 'no warning', implode('; ', $warnings));
+
+$p = new Pager(array('getvars' => '/x?rfilter=old&keep=1', 'numrecords' => 100), 'r');
+$hidden = $p->url_vars_as_hidden_input(array('filter'));
+check(strpos($hidden, 'rfilter') === false && strpos($hidden, 'name="keep"') !== false,
+	'a prefixed pager excludes its own prefixed name', $hidden);
+
+section('Links re-encode the values they carry');
+$p = new Pager(array('getvars' => '/admin/admin_users?searchterm=a%26b%22c&x=%22%3E', 'numrecords' => 100, 'numperpage' => 10));
+$link = $p->get_url(2);
+check(strpos($link, '"') === false && strpos($link, '>') === false, 'no quote or bracket reaches a link', (string)$link);
+check(strpos($link, 'searchterm=a%26b%22c') !== false, 'the search term survives the round trip', (string)$link);
+
+section('An array in place of a pager control is ignored');
+$warnings = array();
+$p = new Pager(array('getvars' => '/x?filter[]=a&sort[]=b&offset[]=3', 'numrecords' => 100));
+check($p->get_filter() === null && $p->get_sort() === null, 'the controls read as unset', var_export($p->get_filter(), true));
+$p->url_vars_as_hidden_input(array('filter'));
+$p->get_url(2);
+check($warnings === array(), 'no warning', implode('; ', $warnings));
+
 restore_error_handler();
 harness_finish();
