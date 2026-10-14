@@ -112,7 +112,19 @@ impl ProtoError {
         match self {
             ProtoError::Api {
                 status: 422, data, ..
-            } => data.get("reason").is_none(),
+            } => data.get("reason").is_none() && data.get("standing").and_then(Value::as_bool) != Some(true),
+            _ => false,
+        }
+    }
+
+    /// The bytes did not all arrive as declared -- missing, the wrong size, or
+    /// failing their checksum -- which another attempt, sending them again,
+    /// cures. The platform's completion says so (`upload_incomplete`); read
+    /// without it, a corrupted chunk looked like a name clash and the new
+    /// file went up again under a conflict name (B-IR).
+    pub fn upload_incomplete(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => data.get("reason").and_then(Value::as_str) == Some("upload_incomplete"),
             _ => false,
         }
     }
@@ -157,6 +169,18 @@ impl ProtoError {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
         })
+    }
+
+    /// The server says this refusal stands: the same request, against the
+    /// same entity, target and account limits, is refused again, so asking
+    /// again before something moves only repeats it (`docs/drive.md`, Standing
+    /// refusals). A checksum or size mismatch, a cursor, time or the server's
+    /// health never stands.
+    pub fn standing(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => data.get("standing").and_then(Value::as_bool) == Some(true),
+            _ => false,
+        }
     }
 
     /// Whether the server refused this because the key on it has already been

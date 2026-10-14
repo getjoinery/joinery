@@ -22576,3 +22576,321 @@ fn a_rescued_file_survives_the_next_full_walk() {
     assert_eq!(laptop.fs.peek("keep.txt").as_deref(), Some(&b"edited here while the server deleted it"[..]), "{:?}", laptop.fs.all_paths());
     assert_converged(&world);
 }
+
+/// The open issues of one kind on a device.
+fn issues_of(device: &jd_sim::engine::Device, kind: &str) -> Vec<String> {
+    device.store.open_issues().unwrap().into_iter().filter(|i| i.kind == kind).map(|i| i.detail).collect()
+}
+
+/// An upload the server refuses for the account's quota is asked once and
+/// then held, not sent again, until something it was asked about moves:
+/// here, an hour, the one change the feed does not carry (a quota raised by
+/// an administrator). One issue says why. RED before: the upload went up
+/// whole every pass, for ever (B-SH3).
+#[test]
+fn an_upload_over_quota_is_held_not_sent_again() {
+    let world = World::new(9_869, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("small.txt", b"fits");
+    assert!(world.settle().is_some());
+    world.server.set_quota_bytes(Some(64));
+    laptop.fs.user_write("big.bin", &[7u8; 4096]);
+    world.pass(laptop);
+    let asked = world.server.upload_inits();
+    for _ in 0..10 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.upload_inits(), asked, "the refused upload was asked again with nothing changed");
+    let said = issues_of(laptop, "withdrawn");
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(said[0].contains("quota"), "{said:?}");
+    world.server.set_quota_bytes(None);
+    world.clock.advance_secs(61 * 60);
+    assert!(world.settle().is_some(), "never settled once the quota was raised");
+    assert!(world.server.tree().contains_key("big.bin"), "{:?}", world.server.tree());
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+    assert_converged(&world);
+}
+
+/// Only a refusal the server says stands is held. An upload whose completion
+/// met a 503, or a refusal that does not stand -- the checksum mismatch a
+/// corrupted chunk earns, which a retry cures (hostile2 74400 on the first
+/// cut, which held every refusal) -- holds nothing, and is retried as it
+/// always was.
+#[test]
+fn a_server_error_is_retried_not_held() {
+    for status in [503, 400] {
+        let world = World::new(9_868, &["laptop"]);
+        let laptop = world.device("laptop");
+        laptop.fs.user_write("a.txt", b"first");
+        assert!(world.settle().is_some());
+        world.server.answer_next("drive_upload_complete", status);
+        laptop.fs.user_write("b.txt", b"second");
+        world.pass(laptop);
+        assert!(laptop.store.refusals().unwrap().is_empty(), "{status} was held as a refusal");
+        assert!(world.settle().is_some(), "{status}: never settled");
+        assert!(world.server.tree().contains_key("b.txt"), "{status}: {:?}", world.server.tree());
+        assert_converged(&world);
+    }
+}
+
+/// A refused file the user renames is a new question: it is asked again at
+/// once, under its new name.
+#[test]
+fn renaming_a_refused_file_asks_again() {
+    let world = World::new(9_867, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("small.txt", b"fits");
+    assert!(world.settle().is_some());
+    world.server.set_quota_bytes(Some(64));
+    laptop.fs.user_write("big.bin", &[7u8; 4096]);
+    for _ in 0..3 {
+        world.pass(laptop);
+    }
+    let asked = world.server.upload_inits();
+    laptop.fs.user_rename("big.bin", "renamed.bin");
+    world.pass(laptop);
+    world.pass(laptop);
+    assert!(world.server.upload_inits() > asked, "the rename did not ask again");
+    assert_eq!(issues_of(laptop, "withdrawn").len(), 1, "{:?}", issues_of(laptop, "withdrawn"));
+}
+
+/// The live shape (drivetest, 2026-10-14): an editor deletes a file in a
+/// folder shared with them, and the server refuses the trash, which is the
+/// owner's. Asked once, said once, and not asked again while nothing moves.
+/// Under the own-Drive scope the folder is never on the editor's disk at all
+/// (`a_folder_shared_in_to_the_account_is_never_synced`); this is a server
+/// from before it.
+#[test]
+fn an_editors_refused_trash_is_asked_once() {
+    let world = World::new(9_866, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("mine.txt", b"my own file");
+    assert!(world.settle().is_some());
+    world.server.ignores_scope(true);
+    let team = world.server.seed_shared_in_folder(None, "Team");
+    world.server.seed_file(Some(team), "a.txt", b"the owner's file");
+    assert!(world.settle().is_some());
+    assert!(laptop.fs.exists("Team/a.txt"), "the premise: {:?}", laptop.fs.all_paths());
+    let before = world.server.trash_requests();
+    laptop.fs.user_remove("Team/a.txt");
+    for _ in 0..12 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.trash_requests() - before, 1, "the refused trash was asked again with nothing changed");
+    assert_eq!(issues_of(laptop, "withdrawn").len(), 1, "{:?}", issues_of(laptop, "withdrawn"));
+}
+
+/// An edit made here in a folder that left the account, sent back to that
+/// folder and refused there (the account can no longer write to it), is not
+/// held -- nobody asked for that upload, and the folder is on its way to the
+/// trash -- and not lost: it stays as a `(unsynced local edit)` file at the
+/// top of the sync folder, the account's own, and goes up from there.
+#[test]
+fn a_refused_rescue_is_kept_as_the_accounts_own() {
+    let world = World::new(9_865, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Moved/doc.txt", b"agreed");
+    laptop.fs.user_write("Moved/other.txt", b"untouched");
+    assert!(world.settle().is_some());
+    let folder = world.server.folder_id_at("Moved").expect("Moved on the server");
+    laptop.fs.user_write("Moved/doc.txt", b"edited here, never sent");
+    world.server.hand_to_another_member("folder", folder);
+    world.server.shared_in_read_only(true);
+    world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    assert!(world.settle().is_some(), "never settled");
+    let edited = jd_sim::sha256_hex(b"edited here, never sent");
+    let tree = world.server.tree();
+    assert!(
+        tree.iter().any(|(path, sha)| !path.contains('/') && path.contains("(unsynced local edit)") && sha.as_deref() == Some(edited.as_str())),
+        "the edit was not kept as the account's own: {tree:?} / disk {:?}",
+        laptop.fs.all_paths()
+    );
+    assert_converged(&world);
+}
+
+/// A folder the server will not take, with files waiting on it, is one
+/// refusal: one issue, the files waiting quietly behind it.
+#[test]
+fn a_held_folder_says_so_once() {
+    let world = World::new(9_864, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("mine.txt", b"my own file");
+    assert!(world.settle().is_some());
+    world.server.ignores_scope(true);
+    world.server.shared_in_read_only(true);
+    let team = world.server.seed_shared_in_folder(None, "Team");
+    world.server.seed_file(Some(team), "a.txt", b"the owner's file");
+    assert!(world.settle().is_some());
+    assert!(laptop.fs.exists("Team/a.txt"), "the premise: {:?}", laptop.fs.all_paths());
+    laptop.fs.user_mkdir("Team/Mine");
+    for i in 0..3 {
+        laptop.fs.user_write(&format!("Team/Mine/f{i}.txt"), format!("file {i}").as_bytes());
+    }
+    for _ in 0..8 {
+        world.pass(laptop);
+    }
+    let said = issues_of(laptop, "withdrawn");
+    assert_eq!(said.len(), 1, "{said:?}");
+}
+
+/// On a stick whose ids mean nothing, the user swaps two files' names and
+/// edits one where it landed; naming then gives the other's old slot to the
+/// edited file and parks the record that left it -- in the very pass whose
+/// scan finds, by its bytes, where that record's file went. The park stands
+/// down for the move, as it does where ids are identity. Disowned, its file
+/// stood on with no record, went up again as a new file, and the original
+/// went to the server's trash with no delete behind it (P2; frozen 75126 on B-IR).
+#[test]
+fn a_file_moved_on_a_stick_is_not_disowned_by_a_park() {
+    let world = World::new(9_861, &["stick", "desk"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::MountSession);
+    const A: &[u8] = b"the file that moves";
+    const B: &[u8] = b"the other file, edited where it lands";
+    stick.fs.user_mkdir("Sub");
+    stick.fs.user_mkdir("r");
+    stick.fs.user_write("Sub/a.txt", A);
+    stick.fs.user_write("r/b.txt", B);
+    assert!(world.settle().is_some());
+    stick.fs.user_trade_names("r/b.txt", "Sub/a.txt", "swap.tmp");
+    stick.fs.user_write("Sub/a.txt", b"the other file, edited after it moved");
+    world.pass(stick);
+    // The park's pass. The move it stands beside does not reach the server
+    // this pass or the next, as on the seed, so the next scan reads the disk
+    // before the server has the file where the user put it.
+    world.server.answer_next("drive_move", 503);
+    world.server.answer_next("drive_move", 503);
+    world.pass(stick);
+    assert!(world.settle().is_some(), "never settled");
+    let a = jd_sim::sha256_hex(A);
+    let holding_a: Vec<_> = world.server.files().into_iter().filter(|f| f.sha256 == a).collect();
+    assert_eq!(holding_a.len(), 1, "the moved file is on the server once, never trashed: {holding_a:?}");
+    assert!(!holding_a[0].trashed, "the moved file went to the trash with no delete: {holding_a:?}");
+    assert_converged(&world);
+}
+
+/// The user moves a file into another folder under the same name and saves a
+/// new file where it was; the move does not land, and another device makes
+/// the same move on the server. Naming judges the moved file at the slot it
+/// left, clashing with the new file, and parks it -- a park that stands down,
+/// its own file standing in the other folder -- while the round adopts the
+/// placement both sides agree on. The adoption is into another folder: the
+/// clash is not there, and the adoption is what ends it. Held because the
+/// name matched, the record kept claiming the old slot, the new file's
+/// upload waited on it, and the two never settled (P3; ring hostile2 74631,
+/// 74675 on B-IR).
+#[test]
+fn a_file_moved_to_another_folder_under_its_name_settles_beside_a_new_one() {
+    let world = World::new(9_860, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    const MOVED: &[u8] = b"the file both devices move";
+    const NEW: &[u8] = b"a new file saved under the old name";
+    laptop.fs.user_mkdir("X");
+    laptop.fs.user_mkdir("Y");
+    laptop.fs.user_write("X/doc.txt", MOVED);
+    assert!(world.settle().is_some());
+    desktop.fs.user_rename("X/doc.txt", "Y/doc.txt");
+    desktop.fs.user_write("X/doc.txt", NEW);
+    // The move does not land and is not kept: nothing is open on the record
+    // when naming next looks.
+    world.server.answer_next("drive_move", 404);
+    world.pass(desktop);
+    laptop.fs.user_rename("X/doc.txt", "Y/doc.txt");
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Y/doc.txt").cloned().flatten().as_deref(), Some(jd_sim::sha256_hex(MOVED).as_str()), "{tree:?}");
+    assert_eq!(tree.get("X/doc.txt").cloned().flatten().as_deref(), Some(jd_sim::sha256_hex(NEW).as_str()), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// A file deleted on one device and saved again there under the same name
+/// with the same bytes: another device meets both in one pass -- the old
+/// file's delete and the new file's arrival at the same path. The arrival
+/// finds its bytes already standing there and takes that file as its own;
+/// the old record, deleted on the server, has nothing of its own left to
+/// trash. Trashed anyway, it took the new file's only copy here, the next
+/// scan read the new file as deleted, and its delete went to the server and
+/// to every device (P4; ring platform3 75613 on B-IR).
+#[test]
+fn a_file_saved_again_with_the_same_bytes_survives_its_old_records_trash() {
+    let world = World::new(9_859, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+    const BYTES: &[u8] = b"the same bytes, saved twice";
+    laptop.fs.user_write("doc.txt", BYTES);
+    assert!(world.settle().is_some());
+    laptop.fs.user_remove("doc.txt");
+    world.pass(laptop);
+    laptop.fs.user_write("doc.txt", BYTES);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(BYTES)).collect();
+    assert_eq!(live.len(), 1, "the file saved again is on the server: {:?}", world.server.files());
+    assert_eq!(desktop.fs.peek("doc.txt").as_deref(), Some(BYTES), "and on the other device");
+    assert_converged(&world);
+}
+
+/// The same on a stick whose ids mean nothing, where the old record is known
+/// by its bytes at its own path.
+#[test]
+fn a_file_saved_again_with_the_same_bytes_survives_its_old_records_trash_on_a_stick() {
+    let world = World::new(9_858, &["laptop", "stick"]);
+    let laptop = world.device("laptop");
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::MountSession);
+    const BYTES: &[u8] = b"the same bytes, saved twice";
+    laptop.fs.user_write("doc.txt", BYTES);
+    assert!(world.settle().is_some());
+    laptop.fs.user_remove("doc.txt");
+    world.pass(laptop);
+    laptop.fs.user_write("doc.txt", BYTES);
+    world.pass(laptop);
+    assert!(world.settle().is_some(), "never settled");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(BYTES)).collect();
+    assert_eq!(live.len(), 1, "the file saved again is on the server: {:?}", world.server.files());
+    assert_eq!(stick.fs.peek("doc.txt").as_deref(), Some(BYTES), "and on the stick");
+    assert_converged(&world);
+}
+
+/// A refusal of a new upload that does not say why is not taken for a name
+/// clash unless the server lists something under that name: here nothing is,
+/// so the file goes up under its own name on the next pass, never as a
+/// conflicted copy of itself beside nothing. RED before: the step-aside
+/// "succeeded" whatever the refusal was about (B-IR).
+#[test]
+fn a_silent_refusal_of_a_new_upload_is_not_a_name_clash() {
+    let world = World::new(9_863, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("a.txt", b"first");
+    assert!(world.settle().is_some());
+    world.server.answer_next("drive_upload_complete", 422);
+    laptop.fs.user_write("b.txt", b"second");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("b.txt"), "{tree:?}");
+    assert!(!tree.keys().any(|k| k.contains("conflicted copy")), "a conflicted copy of a file beside nothing: {tree:?}");
+    assert_converged(&world);
+}
+
+/// An upload whose bytes did not all arrive (`upload_incomplete`, the
+/// platform's checksum, size and missing-bytes refusals) is sent again: a
+/// retry, said to nobody, under its own name.
+#[test]
+fn an_upload_that_did_not_arrive_whole_is_sent_again() {
+    let world = World::new(9_862, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("a.txt", b"first");
+    assert!(world.settle().is_some());
+    world.server.answer_next_because("drive_upload_complete", 422, "upload_incomplete");
+    laptop.fs.user_write("b.txt", b"second");
+    world.pass(laptop);
+    let said: Vec<String> = laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "withdrawn").map(|i| i.detail).collect();
+    assert!(said.is_empty(), "a retryable upload was withdrawn: {said:?}");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("b.txt") && !tree.keys().any(|k| k.contains("conflicted copy")), "{tree:?}");
+    assert_converged(&world);
+}

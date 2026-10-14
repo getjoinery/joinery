@@ -42,6 +42,19 @@ use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placemen
 /// the folder's files would be placed through its old name again.
 pub const SCHEMA_VERSION: i64 = 8;
 
+/// One refusal held (`Store::refusals`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub entity: EntityId,
+    /// The action refused and its target, as the op that was refused named them.
+    pub action: String,
+    /// The entity's state on both sides when it was refused.
+    pub inputs: String,
+    /// The feed position when it was refused.
+    pub cursor: i64,
+    pub refused_at: i64,
+}
+
 /// What makes a written-off note apply *right now*, as one SQL predicate over
 /// `entries e` joined to `unreadable u`.
 ///
@@ -321,6 +334,23 @@ impl Store {
                 size             INTEGER NOT NULL,
                 wrapped_file_key TEXT,
                 noticed_at       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (entity_type, server_id)
+            );
+
+            -- What the server refused for an entity, and what the refusal was
+            -- asked about: the action and its target, the entity's state on
+            -- both sides, and the feed position. Asked again with none of that
+            -- changed, the server answers the same, so the action is not asked
+            -- again until one of them moves (`pass::lift_or_keep_refusals`).
+            -- Kept on disk: a hold forgotten at a restart is the loop again at
+            -- every launch. One row per entity; a later refusal replaces it.
+            CREATE TABLE IF NOT EXISTS refusals (
+                entity_type TEXT NOT NULL,
+                server_id   INTEGER NOT NULL,
+                action      TEXT NOT NULL,
+                inputs      TEXT NOT NULL,
+                cursor      INTEGER NOT NULL,
+                refused_at  INTEGER NOT NULL,
                 PRIMARY KEY (entity_type, server_id)
             );
 
@@ -858,6 +888,10 @@ impl Store {
                     params![t, id.server_id],
                 )?;
                 self.conn.execute(
+                    "DELETE FROM refusals WHERE entity_type = ?1 AND server_id = ?2",
+                    params![t, id.server_id],
+                )?;
+                self.conn.execute(
                     "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                     params![t, id.server_id],
                 )?;
@@ -884,7 +918,7 @@ impl Store {
         let result = (|| -> StoreResult<()> {
             for id in forget {
                 let t = id.entity_type.to_string();
-                for table in ["ops", "local_index", "unreadable", "entries"] {
+                for table in ["ops", "local_index", "unreadable", "refusals", "entries"] {
                     self.conn.execute(
                         &format!("DELETE FROM {table} WHERE entity_type = ?1 AND server_id = ?2"),
                         params![t, id.server_id],
@@ -917,7 +951,7 @@ impl Store {
         let t = id.entity_type.to_string();
         self.conn.execute("BEGIN IMMEDIATE", [])?;
         let result = (|| -> StoreResult<()> {
-            for table in ["ops", "local_index", "unreadable", "entries"] {
+            for table in ["ops", "local_index", "unreadable", "refusals", "entries"] {
                 self.conn.execute(
                     &format!("DELETE FROM {table} WHERE entity_type = ?1 AND server_id = ?2"),
                     params![t, id.server_id],
@@ -942,6 +976,7 @@ impl Store {
         // nobody, but a row for an entity that no longer exists is a row that
         // never gets looked at again and never gets removed either.
         self.clear_unreadable(id)?;
+        self.clear_refusal(id)?;
         self.conn.execute(
             "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
             params![id.entity_type.to_string(), id.server_id],
@@ -1942,6 +1977,71 @@ impl Store {
             params![entity.entity_type.to_string(), entity.server_id],
         )?;
         Ok(())
+    }
+
+    /// Hold what the server refused for this entity (`refusals`).
+    pub fn hold_refusal(&self, entity: EntityId, action: &str, inputs: &str, cursor: i64, now: i64) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO refusals (entity_type, server_id, action, inputs, cursor, refused_at)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(entity_type, server_id) DO UPDATE SET
+                action = excluded.action,
+                inputs = excluded.inputs,
+                cursor = excluded.cursor,
+                refused_at = excluded.refused_at",
+            params![entity.entity_type.to_string(), entity.server_id, action, inputs, cursor, now],
+        )?;
+        Ok(())
+    }
+
+    /// Every refusal held, read once per pass.
+    pub fn refusals(&self) -> StoreResult<Vec<Refusal>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT entity_type, server_id, action, inputs, cursor, refused_at FROM refusals")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Refusal {
+                entity: EntityId {
+                    entity_type: parse_entity_type(&r.get::<_, String>(0)?),
+                    server_id: r.get(1)?,
+                },
+                action: r.get(2)?,
+                inputs: r.get(3)?,
+                cursor: r.get(4)?,
+                refused_at: r.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Lift the refusal held for this entity. True when there was one.
+    pub fn clear_refusal(&self, entity: EntityId) -> StoreResult<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM refusals WHERE entity_type = ?1 AND server_id = ?2",
+            params![entity.entity_type.to_string(), entity.server_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// The feed position the refusals held during this pass were decided at,
+    /// known only to the pass (`Refusal::cursor`): written with `-1` by the
+    /// executor, stamped once the pass has run them.
+    pub fn stamp_refusals(&self, cursor: i64) -> StoreResult<()> {
+        self.conn.execute("UPDATE refusals SET cursor = ?1 WHERE cursor = -1", params![cursor])?;
+        Ok(())
+    }
+
+    /// Dismiss every open issue of this kind about this entity, in one write.
+    pub fn dismiss_issues_about(&self, entity: EntityId, kind: &str) -> StoreResult<usize> {
+        Ok(self.conn.execute(
+            "UPDATE issues SET dismissed = 1
+              WHERE dismissed = 0 AND entity_type = ?1 AND server_id = ?2 AND kind = ?3",
+            params![entity.entity_type.to_string(), entity.server_id, kind],
+        )?)
     }
 
     pub fn raise_issue(

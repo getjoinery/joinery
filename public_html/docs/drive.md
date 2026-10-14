@@ -634,6 +634,20 @@ Listings prime these in two queries for the whole page
 a request calls `DriveHelper::forget_sync_meta()` so the export it returns
 reflects what it just wrote.
 
+### Standing refusals
+
+A refusal the same request would get again — against the same entity, the same
+target and the same account limits — carries `standing: true` in its data,
+beside any `reason`: a quota or per-file limit, an owner-only trash or move, no
+write access to the destination, a protection boundary, a file in the trash, an
+invalid destination, the folder depth limit. A sync client holds a standing
+refusal rather than asking again until something it asked about changes. A
+refusal that depends on bytes in flight (a size or checksum mismatch), a cursor
+(`changed_since`), time or the server's health is not standing, and is retried.
+The completion's integrity refusals (bytes missing, the wrong size, a failed
+checksum) say `reason: 'upload_incomplete'`: a client sends the bytes again,
+and never reads a name clash into a refusal that names its reason.
+
 ### `drive_stat` — batch fetch
 
 The change feed carries id-only rows so it stays cheap however far behind a

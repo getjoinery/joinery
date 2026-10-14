@@ -225,6 +225,18 @@ replaced by layer 1: a never-sent record's minted bytes are its last-seen
 bytes, so it follows by content. 2b stays on stable-id weak disks, where it
 was measured.
 
+**The park's row 4 follows the scan's move on positional disks (P2, found
+2026-10-14).** A park asks whether the record's own file stands somewhere
+other than its agreed path; if the user moved it there, the park stands down
+and the move ends the clash. The question was asked by identity alone, so on a
+positional disk it had no answer: naming parked a record (its old slot given
+to the file a swap left there) in the same pass whose scan found its file
+moved by its bytes, the park disowned the record, and while the move retried
+the next scan minted the moved file as new. Two server copies followed, and the
+original went to the trash with no delete behind it. Where ids are not
+identity, the file stands at the destination of a move queued for the record,
+when the file there holds the record's agreed bytes.
+
 ## Evidence (sweep, 2026-09-27, 420 seeds, births hidden)
 
 | Build | Seeds where one file's history holds both sides of a swap | Sealed-leak seeds |

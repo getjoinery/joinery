@@ -213,20 +213,24 @@ pub fn journal(
     // Parking first. A cycle's victim has to be out of its slot before any of
     // the moves that want it can run, and the moves are journaled below in the
     // order the planner ranked them.
+    //
+    // Only beside its finisher. A park is made to clear the way for the move
+    // that finishes it and is named after that move, so a cycle whose
+    // victim's move is no longer in the plan has no park to write: the pass
+    // drops the round's move to a name naming refused that same pass, and
+    // naming's own park frees the slot instead. Written regardless, it went
+    // up as a server rename to the engine's scratch name that nothing would
+    // ever finish, and stayed there until another device's pass happened to
+    // settle it (rig runs 2298, 2314: P1).
     for entity in &plan.broken_cycles {
-        let finisher = ordered.iter().position(|o| o.entity == *entity);
-        let side = finisher
-            .map(|i| match ordered[i].action {
-                Action::ApplyRemoteMove { .. } => "park_local",
-                _ => "park_remote",
-            })
-            .unwrap_or("park_remote");
-        let token = match finisher {
-            Some(i) => keys[i].clone(),
-            // Nothing planned to finish it. The planner does not produce this;
-            // the name still has to be unique.
-            None => key_for(),
+        let Some(finisher) = ordered.iter().position(|o| o.entity == *entity) else {
+            continue;
         };
+        let side = match ordered[finisher].action {
+            Action::ApplyRemoteMove { .. } => "park_local",
+            _ => "park_remote",
+        };
+        let token = keys[finisher].clone();
         // Tagged with this device, so a peer never takes the park for one
         // nobody is coming back for (see `order::tagged_swap_name`).
         let scratch = crate::order::tagged_swap_name(&store.park_tag(&token)?, &token);
@@ -250,6 +254,85 @@ pub fn journal(
         ids.push(store.queue_op(kind, op.entity, &params.to_string(), &key)?);
     }
     Ok(ids)
+}
+
+/// The action an op carries out and its target, as a refusal is held against
+/// it: its kind and parameters, less where the thing stood (`from`) and the
+/// feed position a trash was decided at, which say nothing of what is asked.
+pub(crate) fn action_key(kind: &str, params: &str) -> String {
+    let mut p: Value = serde_json::from_str(params).unwrap_or(Value::Null);
+    if let Some(o) = p.as_object_mut() {
+        o.remove("from");
+        o.remove("decided_at");
+    }
+    format!("{kind} {p}")
+}
+
+/// `action_key` of an action a round planned, before it is journaled.
+pub(crate) fn planned_action_key(action: &Action) -> String {
+    let (kind, params) = encode(action);
+    action_key(kind, &params.to_string())
+}
+
+/// The entity as a refusal of it was asked about, on both sides: what this
+/// disk last held and where, and what the server has and where. A rename or
+/// a move here, an edit, or any change on the server is a new question.
+pub(crate) fn refusal_inputs(e: &Entry) -> String {
+    format!(
+        "{:?}|{:?}|{:?}|{:?}|{}|{}",
+        e.last_seen_sha, e.local_placement(), e.remote, e.remote_content, e.remote_deleted, e.head_change_id
+    )
+}
+
+
+/// An edit sent back to the folder it was made in, refused there, while that
+/// folder leaves this computer: the folder is no longer the account's, and
+/// the server takes nothing into it from here. There is nothing of the
+/// user's to hold -- they asked for no upload -- and nothing to hold it at:
+/// the path is on its way to the trash. The bytes stay, as a new file at the
+/// top of the sync folder, `name (unsynced local edit).ext`, which the next
+/// scan sends up as the account's own; the record that asked is forgotten.
+/// `None` for anything else, which is held.
+fn keep_a_refused_rescue(env: &ExecEnv, op: &Op) -> Result<Option<String>, ExecError> {
+    if op.kind != "upload_new" {
+        return Ok(None);
+    }
+    let params: Value = serde_json::from_str(&op.params).unwrap_or(Value::Null);
+    let Some(parent) = params.get("parent").and_then(Value::as_i64) else {
+        return Ok(None);
+    };
+    if !env.store.get_entry(EntityId::folder(parent))?.is_some_and(|f| f.remote_deleted) {
+        return Ok(None);
+    }
+    let (Some(entry), Some(root)) = (env.store.get_entry(op.entity)?, env.vfs.root()) else {
+        return Ok(None);
+    };
+    let Placed::At(here) = local_path(env, &entry)? else {
+        return Ok(None);
+    };
+    let name = entry.effective_local_name().to_string();
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() => (stem.to_string(), format!(".{ext}")),
+        _ => (name.clone(), String::new()),
+    };
+    for n in 1..=1000 {
+        let kept = if n == 1 {
+            format!("{stem} (unsynced local edit){ext}")
+        } else {
+            format!("{stem} (unsynced local edit {n}){ext}")
+        };
+        let to = root.join(&kept);
+        if env.vfs.fingerprint(&to)?.is_some() || env.vfs.directory_identity(&to)?.is_some() {
+            continue;
+        }
+        env.vfs.rename(&here, &to)?;
+        env.store.forget_entry(op.entity)?;
+        return Ok(Some(format!(
+            "{name} could not go back to its folder, which is no longer in your Drive, so your \
+             changes were kept as {kept} at the top of your Drive"
+        )));
+    }
+    Ok(None)
 }
 
 fn encode(action: &Action) -> (&'static str, Value) {
@@ -339,6 +422,12 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
 
 /// Run one op, marking the crash window around it and recording how it ended.
 pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
+    // The server answered this op with a refusal that stands: the same
+    // request is refused again until something it asked about moves
+    // (`ProtoError::standing`). Never a transport failure, a timeout, a 5xx,
+    // or a refusal a retry can cure (a checksum mismatch at completion): those
+    // go as they always went.
+    let mut refused = false;
     let outcome = match readiness(env, op)? {
         // Decided before anything is in flight: an op that never left needs
         // no recovery and has nothing to ask the server about.
@@ -353,7 +442,10 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 Err(e) => {
                     note_the_parent_is_in_the_trash(env, &e)?;
                     note_a_refused_name(env, op, &e)?;
-                    classify(&e)
+                    let outcome = classify(&e);
+                    refused = matches!(outcome, OpOutcome::Withdrawn(_))
+                        && matches!(&e, ExecError::Proto(p) if p.standing());
+                    outcome
                 }
             }
         }
@@ -370,6 +462,30 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     match &outcome {
         OpOutcome::Done => {
             env.store.set_op_state(op.op_id, OpState::Done)?;
+            // Carried out at last: any refusal held for it, and what was
+            // said about it, however long ago the hold lifted.
+            env.store.clear_refusal(op.entity)?;
+            env.store.dismiss_issues_about(op.entity, "withdrawn")?;
+        }
+        OpOutcome::Withdrawn(why) if refused => {
+            let now = (env.now_ms)() as i64;
+            let detail = match keep_a_refused_rescue(env, op)? {
+                Some(kept) => kept,
+                None => {
+                    // Held, not asked again, until something it was asked
+                    // about moves (`pass::lift_or_keep_refusals`): asked again
+                    // unchanged, the server answers the same. An upload over
+                    // quota went up whole every pass, for ever (B-SH3).
+                    if let Some(entry) = env.store.get_entry(op.entity)? {
+                        env.store.hold_refusal(op.entity, &action_key(&op.kind, &op.params), &refusal_inputs(&entry), -1, now)?;
+                    }
+                    format!("{} was not carried out: {why}", op.kind)
+                }
+            };
+            // One issue per entity, in the words of its latest refusal.
+            env.store.dismiss_issues_about(op.entity, "withdrawn")?;
+            env.store.raise_issue(Some(op.entity), "withdrawn", &detail, now)?;
+            env.store.drop_op(op.op_id)?;
         }
         OpOutcome::Withdrawn(why) => {
             env.store.raise_issue(
@@ -529,6 +645,10 @@ fn classify(e: &ExecError) -> OpOutcome {
                 "something else is using that name; choosing again from what is there now".into(),
             );
         }
+        // The bytes did not all arrive; sent again, they do.
+        if p.upload_incomplete() {
+            return OpOutcome::Retry("the upload did not arrive whole; sending it again".into());
+        }
         // The destination went to the server's trash while we were working
         // towards it, so this op was overtaken by somebody else's delete rather
         // than failing. Saying so is what stops it being retried against a
@@ -550,6 +670,11 @@ fn classify(e: &ExecError) -> OpOutcome {
             404 => OpOutcome::Overtaken(message.clone()),
             // Out of step with the server, which is a thing that resolves.
             409 | 423 | 429 => OpOutcome::Retry(message.clone()),
+            // The credential, not this op: the account's to put right, and
+            // nothing about this entity. Held as a refusal of it, every
+            // entity it touched would wait an hour after the sign-in came
+            // back.
+            401 => OpOutcome::Retry(message.clone()),
             s if *s >= 500 => OpOutcome::Retry(message.clone()),
             _ => OpOutcome::Withdrawn(message.clone()),
         },
@@ -1439,6 +1564,29 @@ fn follow_the_server_name(
         (env.now_ms)() as i64,
     )?;
     Ok(to)
+}
+
+/// Does the server list something under this exact name in this folder now?
+/// Asked of the server, not the records here, which can lag it: the very
+/// refusal this answers is one the records may not explain.
+fn the_server_lists(env: &ExecEnv, parent: Option<i64>, name: &str) -> Result<bool, ExecError> {
+    let mut offset = 0usize;
+    for _ in 0..1000 {
+        let mut body = json!({ "offset": offset });
+        if let Some(p) = parent {
+            body["folder_id"] = json!(p);
+        }
+        let page = env.api.action("drive_list", body)?;
+        let items = page.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
+        if items.iter().any(|i| i.get("name").and_then(Value::as_str) == Some(name)) {
+            return Ok(true);
+        }
+        if page.get("truncated").and_then(Value::as_bool) != Some(true) || items.is_empty() {
+            return Ok(false);
+        }
+        offset += items.len();
+    }
+    Ok(false)
 }
 
 fn names_the_server_has(env: &ExecEnv, parent: Option<i64>) -> Result<Vec<String>, ExecError> {
@@ -2387,11 +2535,30 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 // placement, or its own upload whose answer was lost -- and it
                 // is handed over in the same step, never owned by both
                 // (`specs/drive_file_ownership.md`, design 1b).
-                let waiting: Vec<EntityId> = owners_here(env, &path, fp, true)?
+                let mut waiting: Vec<EntityId> = owners_here(env, &path, fp, true)?
                     .into_iter()
                     .filter(|o| o.id != entry.id && o.id.is_provisional() && o.synced_placement.is_none())
                     .map(|o| o.id)
                     .collect();
+                // And a record the server has deleted whose file this is, here:
+                // it is leaving, and what its trash would take is this
+                // download's file now; forgotten, its queued trash goes with
+                // it. Left owning it, its trash ran after this
+                // in the same pass and took the only copy here, the next scan
+                // read this file as deleted, and its delete went to the server
+                // and to every device -- a file deleted and saved again with
+                // the same bytes, lost (P4). Only at this path: on a volume
+                // known by bytes alone, a deleted record's same bytes elsewhere
+                // are its own file there.
+                for o in owners_here(env, &path, fp, false)? {
+                    if o.id != entry.id
+                        && o.remote_deleted
+                        && !waiting.contains(&o.id)
+                        && matches!(local_path(env, &o)?, Placed::At(ref theirs) if *theirs == path)
+                    {
+                        waiting.push(o.id);
+                    }
+                }
                 env.store.put_and_forget(&entry, &waiting)?;
                 env.store.cache_hash(
                     fp,
@@ -3048,6 +3215,16 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // forever-loop, but it is a real cost and the cap of two is what
             // bounds it.
             Err(e) if e.refused_without_saying_why() && !entry.is_encrypted && attempt < 2 => {
+                // Only where the name is held. A refusal that would not say
+                // why may be about anything, and stepping aside "succeeds"
+                // whatever it was about: refused for its bytes, a new file went
+                // up again as a conflicted copy of itself, beside nothing
+                // (B-IR). The server's own listing of the folder settles it --
+                // one call, made only on this silent path, and only for the
+                // name the file asked for.
+                if attempt == 0 && !the_server_lists(env, placement.parent, &placement.name)? {
+                    return Err(e.into());
+                }
                 // A conflict name this device already knows the server holds
                 // is no attempt at all: it earns the same refusal, and with a
                 // cap of two a folder already holding the first two such names
@@ -7760,8 +7937,16 @@ enum MovedFile {
 /// holding work the server does not have, the park stands down for that
 /// upload and comes again.
 ///
-/// `NotMoved` when the question cannot be asked (a folder, or a volume whose
-/// ids are not identity) or the answer is no.
+/// Where ids are not identity the file is known by its bytes, and the scan of
+/// this same pass has already said where it went: a move it found is queued
+/// for this record, and the file at that move's destination holds the bytes
+/// the record agreed. Asked by identity alone, a stick never had an answer:
+/// the record was disowned beside its own move, its file stood on with no
+/// record and went up again as new, and the original went to the server's
+/// trash with no delete behind it (P2).
+///
+/// `NotMoved` when the question cannot be asked (a folder) or the answer is
+/// no.
 fn keep_a_moved_file(
     env: &ExecEnv,
     entry: &Entry,
@@ -7769,10 +7954,11 @@ fn keep_a_moved_file(
     reason: &jd_vfs::UnsyncableReason,
 ) -> Result<MovedFile, ExecError> {
     use jd_vfs::UnsyncableReason as R;
-    let Some(own) = trusted_own_file(env, entry) else {
-        return Ok(MovedFile::NotMoved);
+    let found = match trusted_own_file(env, entry) {
+        Some(own) => where_file_stands(env, own)?,
+        None => where_its_move_found_it(env, entry)?,
     };
-    let stands = match where_file_stands(env, own)? {
+    let stands = match found {
         Some(stands) if stands != agreed => stands,
         _ => return Ok(MovedFile::NotMoved),
     };
@@ -7808,6 +7994,27 @@ fn keep_a_moved_file(
         Err(jd_vfs::VfsError::NotFound(_)) => Ok(MovedFile::NotMoved),
         Err(e) => Err(e.into()),
     }
+}
+
+/// Where a move the scan found for this file, queued and not yet sent, says
+/// it stands -- when the file there holds the bytes the record agreed. How a
+/// file is followed where ids are not identity: by its bytes.
+fn where_its_move_found_it(env: &ExecEnv, entry: &Entry) -> Result<Option<std::path::PathBuf>, ExecError> {
+    if entry.id.entity_type != EntityType::File {
+        return Ok(None);
+    }
+    let Some(agreed) = entry.synced_content.as_ref() else {
+        return Ok(None);
+    };
+    for raw in env.store.queued_params_of("move_remote", entry.id, i64::MIN)? {
+        let Ok(params) = serde_json::from_str::<Value>(&raw) else { continue };
+        let Ok(to) = read_place(&params) else { continue };
+        let Placed::At(dest) = path_for(env, &to)? else { continue };
+        if env.vfs.fingerprint(&dest)?.is_some() && env.vfs.hash(&dest)? == agreed.sha256 {
+            return Ok(Some(dest));
+        }
+    }
+    Ok(None)
 }
 
 /// Does something stand at `path` that is staying there? A record held where
@@ -7995,4 +8202,54 @@ fn hex(bytes: &[u8]) -> String {
         s.push_str(&format!("{b:02x}"));
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::order::{PlannedOp, Stage};
+
+    fn keys() -> impl FnMut() -> String {
+        let mut n = 0;
+        move || {
+            n += 1;
+            format!("k{n}")
+        }
+    }
+
+    /// A cycle's park is written beside the move that finishes it, and
+    /// named after that move's key.
+    #[test]
+    fn a_park_is_written_beside_its_finisher() {
+        let store = Store::open_in_memory().unwrap();
+        let victim = EntityId::file(901);
+        let plan = Plan {
+            ops: vec![PlannedOp {
+                entity: victim,
+                action: Action::ApplyRemoteMove {
+                    to: Placement { parent: None, name: "b.txt".into() },
+                    agree_at: None,
+                },
+                stage: Stage::Move,
+                rank: 0,
+                from: None,
+            }],
+            broken_cycles: vec![victim],
+        };
+        journal(&store, &plan, &mut keys()).unwrap();
+        let kinds: Vec<String> = store.queued_ops().unwrap().into_iter().map(|o| o.kind).collect();
+        assert_eq!(kinds, vec!["park_local".to_string(), "move_local".to_string()]);
+    }
+
+    /// No finisher in the plan, no park: the pass dropped the victim's move
+    /// for a name naming refused, and a park written anyway is a server
+    /// rename to a scratch name that nothing ever finishes (P1).
+    #[test]
+    fn a_park_whose_finisher_is_not_planned_is_not_written() {
+        let store = Store::open_in_memory().unwrap();
+        let plan = Plan { ops: Vec::new(), broken_cycles: vec![EntityId::file(901)] };
+        journal(&store, &plan, &mut keys()).unwrap();
+        let kinds: Vec<String> = store.queued_ops().unwrap().into_iter().map(|o| o.kind).collect();
+        assert!(kinds.is_empty(), "a park with nothing to finish it: {kinds:?}");
+    }
 }

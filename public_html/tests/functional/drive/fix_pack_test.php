@@ -147,6 +147,20 @@ check($done2->error !== null, 'second complete is rejected at the quota boundary
 $up2 = FileUpload::load_by_token($i2->data['upload_token']);
 check($up2 !== null, 'rejected upload keeps its pending row (retry after freeing space)');
 if ($up2) { $up2->discard(); }
+// A refusal that answers the same until something it was asked about changes
+// says so (`standing`), so a sync client holds it instead of sending the
+// bytes again every pass; one a retry can cure does not.
+check(!empty($done2->data['standing']), 'the quota refusal at completion is marked standing');
+$i3 = drive_upload_init_logic(array('name' => 'q3.bin', 'size_bytes' => 40000));
+check($i3->error !== null && !empty($i3->data['standing']), 'an upload over quota is refused at init, marked standing');
+$c4 = 'checksum-' . bin2hex(random_bytes(4));
+$i4 = drive_upload_init_logic(array('name' => 'q4.bin', 'size_bytes' => strlen($c4), 'sha256' => hash('sha256', 'something else')));
+fixpack_fill_upload($i4->data['upload_token'], $c4);
+$done4 = drive_upload_complete_logic(array('upload_token' => $i4->data['upload_token']));
+check($done4->error !== null && empty($done4->data['standing']), 'a checksum failure is refused without the mark: a retry can cure it');
+check(($done4->data['reason'] ?? '') === 'upload_incomplete', 'a checksum failure says upload_incomplete, so a client sends it again rather than reading a name clash into it');
+$up4 = FileUpload::load_by_token($i4->data['upload_token']);
+if ($up4) { $up4->discard(); }
 
 // Free B's quota space again for later sections.
 $fB1 = new File((int)$done1->data['file']['id'], true);
@@ -210,9 +224,11 @@ check($fileB->get('fil_fol_folder_id') === null, 'the file stays at its owner\'s
 section('an editor cannot move a shared item to the top level (it is the owner\'s)');
 
 $rFileTop = drive_move_logic(array('entity_type' => 'file', 'entity_id' => $editor_file_id, 'parent_id' => 0));
-check($rFileTop->error !== null, 'an editor moving a shared file to the top level is refused');
+check($rFileTop->error !== null && !empty($rFileTop->data['standing']), 'an editor moving a shared file to the top level is refused, marked standing');
 $still = new File($editor_file_id, TRUE);
 check((int)$still->get('fil_fol_folder_id') === $sharedF, 'the file stays in the shared folder');
+$rEditorTrash = drive_trash_logic(array('entity_type' => 'file', 'entity_id' => $editor_file_id));
+check($rEditorTrash->error !== null && !empty($rEditorTrash->data['standing']), 'an editor\'s trash of a shared file is refused, marked standing (trash is the owner\'s)');
 $session->clear_api_user();
 $session->set_api_user($ownerA->key);
 $rSub = drive_folder_create_logic(array('name' => 'FixSharedSub_' . bin2hex(random_bytes(3)), 'parent_id' => $sharedF));

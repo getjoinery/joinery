@@ -463,6 +463,13 @@ waits on this one's directory leaving the name, so neither would ever move. Any
 other folder rename refused without a reason is withdrawn, and the next pass
 derives it again from the disk until the name frees up.
 
+A new file whose upload is refused because its name is taken goes up beside
+the holder under a conflict name. Refused without a reason, it does so only
+where the server lists something under that name in that folder; otherwise the
+upload is withdrawn and planned again from the disk, never sent as a conflicted
+copy of itself beside nothing. An upload whose bytes did not all arrive
+(`upload_incomplete`) is sent again whole.
+
 A create claims a directory already standing at its path — a stand-in it was
 handed, or its own earlier attempt — and waits while that directory is one
 another live folder still holds, so the folder replacing a namesake never
@@ -949,6 +956,26 @@ pass plans afresh from what is actually there. Deleting a file you had just
 saved is an ordinary thing to do and must not leave an item asking you to look
 at it. Where an overtaken operation ran into something the user *does* need to
 know about — a conflict, say — that thing reports itself in its own words.
+
+**A refusal that stands is held, not asked again.** A refusal the server marks
+`standing` (the same request against the same entity, target and account limits
+is refused again: a quota, an owner-only trash, no write access; see
+[Drive](drive.md#standing-refusals)) is recorded in the store's `refusals`
+table: the action and its target, the entity on both sides, and the feed
+position the pass decided at. Asked again with none of that changed, the server
+answers the same, so the next passes do not plan it. The hold lifts the moment
+any of it moves (an edit, a rename or a move here, a change on the server, any
+change to the account, which is what frees room for an upload refused over
+quota) or after an hour, the one change the feed does not carry, such as a
+limit an administrator raised. One `withdrawn` issue says what was refused, in
+the words of the latest refusal, and goes when the operation is carried out.
+Any other refusal is withdrawn and planned afresh on the next pass, and a
+transport failure, a timeout, a 5xx, a refused sign-in or an upload whose bytes
+did not all arrive (`upload_incomplete`) is retried. An edit sent back to a
+folder that is leaving this computer, refused there, is not held: there is no
+upload of the user's to hold and no path to hold it at, so the bytes stay as
+`name (unsynced local edit).ext` at the top of the sync folder, and go up from
+there as the account's own.
 
 A `parent_trashed` refusal is read as overtaken for exactly that reason. The
 destination folder went to the server's trash while this device was working
