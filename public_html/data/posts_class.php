@@ -90,11 +90,28 @@ function prepare() {
 	}
 
 	function save($debug=false) {
+		$was_published = false;
 		if ($this->key) {
 			//SAVE THE OLD VERSION IN THE CONTENT_VERSION TABLE
 			ContentVersion::NewVersion(ContentVersion::TYPE_POST, $this->key, $this->get('pst_body'), $this->get('pst_title'), $this->get('pst_title'));			
+			$q = DbConnector::get_instance()->get_db_link()->prepare(
+				'SELECT pst_published_time IS NOT NULL AND pst_delete_time IS NULL FROM pst_posts WHERE pst_post_id = ?');
+			$q->execute(array((int)$this->key));
+			$was_published = (bool)$q->fetchColumn();
 		}
 		parent::save($debug);
+
+		// Published by this save: it has a publish time now and is not deleted,
+		// and had no publish time (or was deleted) before.
+		if (!$was_published && $this->get('pst_published_time') && !$this->get('pst_delete_time')) {
+			SignalBus::dispatch('post.published', array(
+				'post_id'        => (int)$this->key,
+				'post_title'     => (string)$this->get('pst_title'),
+				'post_url'       => $this->get_url('full'),
+				'author_user_id' => (int)$this->get('pst_usr_user_id'),
+				'source_user_id' => isset($_SESSION['usr_user_id']) ? (int)$_SESSION['usr_user_id'] : null,
+			));
+		}
 	}
 	
 	/**

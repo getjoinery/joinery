@@ -7,8 +7,17 @@ limits, secrets, outbound guard and WP1/WP2/WP9 are corrected below, and
 Q11 (install and signing), Q12 (where the host runs), Q13 (compatibility)
 and Q14 (UI calls wait, bounded) are decided. Only Q5 remains open. Built
 in small committed pieces on main (owner, 2026-10-14). WP1 built 2026-10-14
-(webhook receiver kind only; the plugin host kind waits for WP7); WP2 to WP9
-not started.
+(webhook receiver kind only; the plugin host kind waits for WP7), released
+0.8.492. WP2 to WP9 built 2026-10-14, each reviewed in full by reviewer2
+and every finding fixed; proven on dev end to end (see each WP's Built
+note). What a release still has to show is in the live verification queue
+(plugin_tiers WP2-WP9). Open for the owner: Q5 (billing), whether deleting an
+approving admin should lapse the approval rather than be refused, and whether
+a private conversation's message.received may carry who and where (it does
+not). Built overnight on the owner's word (2026-10-14): one work
+package after another, reviewer2 reviewing each, nothing committed until the
+whole spec is built. All nine work packages are built; the spec moved to
+specs/implemented/ on 2026-10-14.
 The security consequence is tracked in `security_inventory.md`; this spec is
 the design, the inventory of what already exists, the build list and the
 workflow.
@@ -175,9 +184,8 @@ A module can do these things and nothing else.
 
 **Settings and secrets:** declared in the manifest like `plugin.json`
 settings. A field marked secret is stored sealed with `SecretBox` and handed
-to the module per call; the module never reads the settings table. Core does
-not seal declared secrets today (see What already exists); WP5 depends on
-that being fixed for every declared secret, native ones included.
+to the module per call; the module never reads the settings table. Every
+declared secret, native or sandboxed, is stored sealed (built in WP5).
 
 **Data:** models declared in the manifest, owned and migrated by core,
 reachable only through door 1. No schema of the module's own.
@@ -200,7 +208,7 @@ host uses Extism's runtime. The host exposes the doors as host functions.
 
 | Need | Already in the tree | Gap |
 |---|---|---|
-| Per-plugin credential | Scoped machine keys: `apk_scope` names the actions a key may call, enforced in `ApiAuth::authorize()` | A scope can name actions only, and `apiv1.php` refuses a scoped key on every route family but actions, so record create/read/update/delete refuses it outright. No admin page creates a scoped key; one plugin (`dns_filtering`) makes one in code (WP2) |
+| Per-plugin credential | Scoped machine keys: `apk_scope` names actions and `Model:verb` record entries, enforced in `ApiAuth::authorize()`; the Add API key page makes them (WP2, built) | Minting one per sandboxed plugin at install from its manifest (WP5) |
 | API surface | 328 of 423 logic files carry `_logic_descriptor()` (counted 2026-10-14: the PHP files directly in core `logic/` and in each plugin's `logic/`) | 95 files not reachable; each is a feature the tier cannot use |
 | "Something happened" | `SignalBus` (spec `signal_bus`, doc `docs/signals.md`): 39 signals (6 core in `signals.json`, 33 in plugin manifests, counted 2026-10-14), flat JSON-safe payloads, signals and subscribers declared in manifests | Subscribers are PHP methods called in the request. Nothing queues a signal for delivery outside the pool (WP1). None yet for content published, user updated, message arrived or file uploaded (WP6) |
 | Scheduled runs | Scheduled task system, tasks declared in JSON | A task type that asks the host to run a module |
@@ -239,7 +247,8 @@ SecretBox), go out through `SafeHttpClient` over HTTPS only, retry at 1 m,
 attempt. A signal raised in a request that opened sealed content is
 recorded as withheld, with no payload. Admin pages: System › Webhooks
 (permission 8, like API keys). Retention: `signal_delivery_retention_days`
-(30). The plugin host joins by adding its kind and a drain of its own.
+(30). Sandboxed plugins joined in WP5 as a second receiver kind on the same
+queue and drain.
 
 **WP2 Scope reaches records.** Extend key scope so a credential can be
 limited to named models and verbs ("read event registrations, write its own
@@ -250,14 +259,67 @@ action-name check. Per-record authorization keeps applying underneath. An
 admin page creates, scopes and revokes keys, since Q9 ships scoped keys as
 an admin tool and none exists today.
 
+*Built 2026-10-14 (doc `docs/api.md` § Scoped machine keys).* A scope entry
+is an action name or `Model:verb` (read, create, update, delete; one verb per
+entry). The record endpoints pass their model and verb to
+`ApiAuth::authorize()`, and `ApiAuth::refuseScopedKeyOutsideItsScope()` lets a
+key past the pre-dispatch check only on a URL that is exactly a model its
+scope names, or that name plus s. The Add API key page makes a scoped key:
+the admin picks machine-callable actions and, per verb, the models the API
+exposes; the key acts as that admin, its permission is derived from the
+scope, and its scope is fixed for life (a new key replaces it). No wildcard
+for "a plugin's own models" yet: that waits for WP3, when a manifest names
+them.
+
 **WP3 Manifest-declared data.** A module's manifest declares its models;
 core creates and migrates the tables through the existing schema system,
 namespaced to the plugin, and exposes them through the record endpoints.
 Uninstall follows the deletion system.
 
+*Built 2026-10-14 (doc `docs/sandboxed_plugins.md`).* A sandboxed plugin is
+a folder of exactly `manifest.json` and one `.wasm` (`SandboxPlugins`), a
+`plg_plugins` row like any plugin, moved through the same lifecycle by
+`PluginManager`, which hands the steps that read a native plugin's PHP or
+`plugin.json` to `SandboxPluginManager`; native loading skips the folder.
+`SandboxManifest` validates the whole manifest (every door's section, not
+only models), holding each name that becomes code or SQL to a strict pattern.
+Each model becomes the class `Sbx_{plugin}_{Model}` (`SandboxModels` declares it
+and its collection at run time from one fixed template, the only `eval` in
+the tree), table `sbx_{plugin}__{model}`, columns `{plugin}__{model}_{field}`,
+settings `sbx_{plugin}__{name}`: unique by construction, and no core or
+native name starts `sbx` (reviewer2's W1);
+model discovery and the class autoloader find active plugins' models, so the
+schema builder, the record endpoints, WP2 scopes and deletion work unchanged.
+Uninstall drops the tables. Found on the way and fixed: a create's API answer
+carried no id (SystemBase::save() kept it off the record's fields), and
+activating then deactivating a plugin before a sync left its menu entry
+behind (the in-memory row overwrote the stored menu slugs).
+
 **WP4 Manifest-rendered UI.** Core renders admin pages, profile pages, menu
 entries and settings groups from the manifest. Tables read from door 1;
 forms post to an action the module handles. FormWriter emits every form.
+
+*Built 2026-10-14 (doc `docs/sandboxed_plugins.md` § Pages and settings, The
+plugin host).* `adm/admin_sandbox_page.php` (permission 8) and
+`views/profile/sandbox_page.php` draw a page's sections from the manifest
+(`SandboxPages`): text, a table of the plugin's own rows read as staff, a
+form whose fields are FormWriter's and whose submission goes to the module's
+`on_ui` through the host, and the plugin's settings. Settings are ordinary
+declarations (`SandboxSettings`, named `sbx_{plugin}__{name}`) saved by
+`SettingsWriter`. `SandboxHost` is core's side of the host: one JSON request
+per call over the host's Unix socket, carrying everything the call may use
+(module, input, limits, settings, approved hosts, credential), with Q14's
+bound for UI calls (5 s, two at once per site and one per person, a flock
+slot each) and a 1 MB cap on what the host answers. Every call is a
+`SandboxLog` row. A member page's form is also the API action `sandbox_page`,
+so the apps can submit it. reviewer2's WP4 review (X1-X9) is applied: the
+plugin's words are escaped wherever a page prints them (a table header was
+not, nor the title in two theme bases), menu columns are wide enough for any
+valid manifest, `core` and the system's URL names are reserved for both
+kinds of plugin, and a folder that is not installed declares no settings. Found on the way and fixed: a collection's sort on a
+model whose columns do not start with its table's first segment was refused
+(the query builder guessed the prefix from the table name; it takes the
+model's own when it queries the model's table).
 
 **WP5 Install, permissions, uninstall.** Teach the existing marketplace and
 upload flow to recognise a sandboxed package by its contents (Q11): no
@@ -266,14 +328,55 @@ the same way on a replacing upload. The install screen that shows
 permissions, signals, schedules, outbound hosts in plain words; credential
 mint and revoke; secret settings sealed through the general fix (What
 already exists, Secret settings). An upgrade that asks for more than the
-installed version had stops and asks the admin. The manifest names the
+installed version had keeps only what was approved until the admin approves
+the rest. The manifest names the
 platform version the module was built for, and install refuses a module
 that needs an action, signal or UI primitive the site lacks, naming it
 (Q13).
 
+*Built 2026-10-14 (doc `docs/sandboxed_plugins.md` § Installing, Approval,
+What an active plugin owns; `docs/settings.md` § Credentials;
+`docs/sealed_secrets.md`).* A zip of exactly a manifest and one module is
+recognised by `PluginManager` (staging) and by the root installer as its own
+kind: no warning on any host, `plg_trust = 'sandboxed'`, a
+`sandboxed_package_installed` event, no fork mark; deploys keep it
+(`DeploymentHelper::preserveReason`), the code check passes over it
+(`PackageSignature::verifyTree`), and a replacement may not change a plugin's
+kind. Activation waits on an approval (`SandboxConsent`, recorded on
+`SandboxInstall`): `/admin/admin_sandbox_approve` lists what the plugin asks in
+plain words, grouped by feature (Q2), names what a newer version adds, and
+approves and activates in one. What a plugin may do is what it asks and was
+approved; an approval stands while its admin does. `SandboxCompatibility`
+refuses a later platform and any missing action, model, record verb or
+signal (Q13). Approval mints the plugin's credential (`SandboxCredentials`: a
+loopback-only machine key scoped to the approval plus its own models, owned
+by the approver, its secret sealed and re-mintable), a `sandbox` signal
+receiver drained to the host on the WP1 queue, and a `SandboxScheduledRun`
+row per approved schedule. The key pages show a plugin's key as the plugin's
+and refuse to change it; the approver's account is held while it is live.
+Secret settings: every `secret: true` setting is stored sealed
+(`Setting::sealForStorage()`, opened by `Globalvars::get_setting()`) and is an
+implicit `operator` sealed secret, so the reconciler seals the ones stored
+plain (8 on dev) and reports dead ones. Found on the way and fixed: four core
+and four plugin logic files printed a blank line when included, which the
+action catalog then put before any page or API answer that read it.
+
 **WP6 More signals.** Add signals as real plugins need them: content
 published, user updated, message arrived, file uploaded. Each is a catalog
 entry and a dispatch call.
+
+*Built 2026-10-14 (catalog `signals.json`; test `tests/functional/signals_more_test.php`).*
+Four signals, each a catalog entry and one dispatch, raised where every path
+that does the thing passes: `post.published` from `Post::save()` when a post
+gets a publish time it did not have (again after being taken down);
+`account.updated` from `User::save()` naming the profile fields (name,
+nickname, organization, email, time zone) the save changed, against what was
+loaded, so the profile page, the admin page and an email-change confirmation
+all raise it; `message.received` from `Conversation::add_message()` with who,
+where and how many, never the text, and not for a system message;
+`file.uploaded` from `File::createFromUpload()` and `createFromExistingBlob()`
+for a public file only (`File::is_public()`), never for bytes the site makes
+itself (`createFromBytes()` passes `announce` false).
 
 **WP7 The plugin host.** Go on wazero. Loads modules, enforces per-call
 memory and time limits and a cap on concurrent calls, exposes the doors as
@@ -285,10 +388,47 @@ site's container (Q12). A systemd unit where PID 1 is systemd, a cron
 keepalive otherwise, and a health check. Runs modules in wazero's
 interpreter, and its unit keeps `MemoryDenyWriteExecute`.
 
+*Built 2026-10-14 (doc `docs/sandboxed_plugins.md` § The plugin host, Writing
+a module; gate `tests/integration/sandbox_host_gate.sh`).* `sandbox-host`
+(`maintenance_scripts/install_tools/sandbox_host`): Go 1.27 on Extism go-sdk
+1.7.1 and wazero 1.9.0, the interpreter only, WASI on with no files. Core
+drives it rather than it draining a queue or keeping a clock: the WP1 drain
+and the scheduler call it through `SandboxHost`, so the host holds nothing
+between calls and reads no database. The doors are three host functions
+(`joinery_api`, `joinery_http`, `joinery_log`); the outbound guard mirrors
+the relay's Direct egress and `UrlSafetyValidator` (address checked at dial
+time, no redirects, the platform's blocked ranges for IPv4 and IPv6). Its
+own tests run a real module (a Go fixture built for wasip1) through every
+door and limit. `SandboxHostPublisher` builds the shipped binaries at publish
+(a stale host refuses the release); `install_sandbox_host.sh`, a core host
+installer, supervises it per site under its own uid, as a hardened systemd
+unit or a cron keepalive, only while the site has a sandboxed plugin.
+Proven on dev end to end: a zip uploaded on the Plugins page, approved and
+activated, its form answered by the module through the host, and its API call
+made with its own key (HTTP 200).
+
 **WP8 Author kit.** SDK wrappers for the doors in at least Rust and
 JavaScript, a manifest validator, a command that loads a local module into a
 dev site and fires a test signal at it, and a log view per plugin (what it
 was told, what it called, what was refused and why).
+
+*Built 2026-10-14 (kit `sandbox_sdk/`, doc `docs/sandboxed_plugins.md` §
+Writing a module and the author kit; gates `tests/integration/sandbox_sdk_gate.sh`,
+`tests/unit/sandbox_module_test.php`).* A Rust crate (`joinery-plugin`, over
+Extism's Rust PDK 1.4) and a JavaScript kit (`joinery-sdk.js`, a `.d.ts` and a
+build script over extism-js 1.7, which needs exactly the plugin's exports
+named, so the script reads them from `module.exports`), each with a working
+example; a Go module works with Extism's Go PDK as the host's test module
+shows. `SandboxModule` reads a module's exports and imports from its bytes and
+refuses, at install and in the validator, a module lacking an export its
+manifest needs, importing anything the host does not give, or over 32 MB.
+`utils/sandbox_plugin.php` validates a folder, manifest or zip anywhere, and on
+a dev site loads a plugin (install, approve, activate), makes one call of any
+kind through the host and prints the log. The call log page
+(`/admin/admin_sandbox_log`, from the Plugins page) shows each call and what
+the module asked of each door. Found on the way and fixed: the outbound door
+logged a webhook's whole address, which is often its secret; it logs the host
+only.
 
 **WP9 One of our own, sandboxed.** A small real plugin built on the tier
 before any outsider is invited, to find the gaps ourselves. No existing
@@ -297,6 +437,20 @@ posts a signal to one declared host (doors 1, 2 and 5, and a secret
 setting), sends a daily digest (door 3), keeps a sent-log model of its own
 (WP3), and has an admin page listing what it sent beside its settings
 (door 4).
+
+*Built 2026-10-14 (`sandbox_sdk/examples/notifier`, Rust on the kit).* The
+notifier posts `account.signup`, `post.published` and `comment.posted` to a
+Slack, Discord or Mattermost webhook (its address a secret setting), records
+each post in its own `SentLog` model through the API, sends a daily digest
+counted from that log, and has an admin page with the log, a test form and its
+settings. Proven on dev with every door live: loaded with the author command,
+approved and activated; a real `comment.posted` went through the signal queue
+and the drain to the module, which posted to hooks.slack.com (a dummy webhook,
+answered 404) and wrote its log row through the API (200); the digest ran
+from the command; the page shows the rows. What it showed: record writes did
+not take a JSON body (fixed in apiv1, WP7's review), a module had no real
+randomness (fixed, same review), and the outbound log leaked the webhook path
+(fixed, WP8).
 
 ## How development changes
 

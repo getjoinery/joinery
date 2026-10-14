@@ -231,6 +231,9 @@ harness_defer(function () use ($copy_file, $had_copy, $had_mtime) {
 check(mkt_threw(function () { MarketplaceClient::published_names('widgets'); }, 'InvalidArgumentException'),
 	'An unknown type is refused');
 
+// A copy the web server wrote is its own: only an owner may set a file's
+// time, so the test's copy is a fresh file of its own.
+@unlink($copy_file);
 file_put_contents($copy_file, json_encode(array('fetched' => time(), 'names' => array('alpha', 'beta'))));
 touch($copy_file, time() - 60);
 check(MarketplaceClient::published_names('plugins') === array('alpha', 'beta'),

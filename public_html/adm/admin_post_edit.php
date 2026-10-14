@@ -41,7 +41,7 @@
 				$post->set('pst_link', $post->create_url($_POST['pst_link']));
 			}
 			else{
-				$post->set('pst_link', $post->create_url($event->get('pst_title')));
+				$post->set('pst_link', $post->create_url($post->get('pst_title')));
 			}
 		}
 		

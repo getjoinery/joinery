@@ -65,7 +65,11 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	    'apk_public_key' => array('type'=>'varchar(32)'),
 	    'apk_secret_key' => array('type'=>'varchar(64)'),
 	    'apk_type' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'machine'),
-	    'apk_permission' => array('type'=>'int4'),
+	    // 1 read, 2 write only, 3 read + write, 4 read + write + delete (the
+	    // capability gate in ApiAuth::authorize()). Any other number is
+	    // refused: a value past 4 would pass every gate. NULL stays legal for
+	    // rows that predate the rule (the gate reads it as read-only).
+	    'apk_permission' => array('type'=>'int4', 'allowed_values'=>array(1, 2, 3, 4)),
 	    'apk_ip_restriction' => array('type'=>'varchar(255)'),
 	    'apk_scope' => array('type'=>'text'),
 	    'apk_start_time' => array('type'=>'timestamp(6)'),
@@ -230,10 +234,28 @@ public static function GenerateKey($key) {
 	}
 
 	/**
-	 * The action names this key may call, from apk_scope (comma separated).
-	 * Empty means unscoped: the key reaches whatever its permission and its
-	 * user allow. A scoped key reaches only the actions named here — see
-	 * ApiAuth::authorize().
+	 * What a record entry in a scope may let a key do to a model, one per
+	 * CRUD verb: read (GET one or a list), create (POST), update (PUT),
+	 * delete (DELETE).
+	 */
+	const RECORD_VERBS = array('read', 'create', 'update', 'delete');
+
+	/** An action entry: '{action}' or '{plugin}/{action}'. */
+	const SCOPE_ACTION_PATTERN = '~^[a-z0-9_]+(/[a-z0-9_]+)?$~D';
+
+	/** A record entry: '{ModelClass}:{verb}'. */
+	const SCOPE_RECORD_PATTERN = '~^([A-Z][A-Za-z0-9_]*):(read|create|update|delete)$~D';
+
+	/**
+	 * The entries of apk_scope (comma separated). Empty means unscoped: the
+	 * key reaches whatever its permission and its user allow. A scoped key
+	 * reaches only what its entries name — see ApiAuth::authorize(). Two
+	 * kinds of entry:
+	 *
+	 *   dns_filtering/resolver_snapshot   an action it may call
+	 *   EventRegistrant:read              a model it may read (or create,
+	 *                                     update, delete) through the record
+	 *                                     endpoints, one verb per entry
 	 *
 	 * @return string[]
 	 */
@@ -250,14 +272,137 @@ public static function GenerateKey($key) {
 	}
 
 	/**
+	 * The sandboxed plugin this key is the credential of, or null. Such a key
+	 * is made and removed with its plugin (SandboxCredentials), not by hand.
+	 */
+	function sandbox_plugin(): ?string {
+		if (!$this->key) {
+			return null;
+		}
+		foreach (new MultiSandboxInstall(array('sbi_apk_api_key_id' => (int)$this->key)) as $install) {
+			return (string)$install->get('sbi_plugin');
+		}
+		return null;
+	}
+
+	/** @return string[] the action entries of the scope */
+	function scope_actions(): array {
+		return array_values(array_filter($this->scope(), function ($entry) {
+			return strpos($entry, ':') === false;
+		}));
+	}
+
+	/** @return array<string,string[]> model class => the verbs the scope gives it */
+	function scope_records(): array {
+		$records = array();
+		foreach ($this->scope() as $entry) {
+			if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m)) {
+				$records[$m[1]][] = $m[2];
+			}
+		}
+		return $records;
+	}
+
+	function scope_allows_action(string $action): bool {
+		return in_array($action, $this->scope_actions(), true);
+	}
+
+	function scope_allows_record(string $model, string $verb): bool {
+		$records = $this->scope_records();
+		return isset($records[$model]) && in_array($verb, $records[$model], true);
+	}
+
+	/**
+	 * Why an entry is not one a scope can hold, or null when it is. A record
+	 * entry must name a model class this site has (a typo, or a name that is
+	 * not a model, such as a route family, is refused). An action entry is
+	 * held to its shape only: an action that does not exist is simply never
+	 * matched.
+	 */
+	public static function scope_entry_problem(string $entry): ?string {
+		if (preg_match(self::SCOPE_ACTION_PATTERN, $entry)) {
+			return null;
+		}
+		if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m)) {
+			return self::is_model_class($m[1]) ? null : "'" . $m[1] . "' in '" . $entry . "' is not a model on this site.";
+		}
+		return "'" . $entry . "' is neither an action name nor Model:" . implode('|', self::RECORD_VERBS) . '.';
+	}
+
+	/** Whether a name is a data model class (loading it if it is one). */
+	public static function is_model_class(string $name): bool {
+		return preg_match('~^[A-Z][A-Za-z0-9_]*$~D', $name) === 1
+			&& class_exists($name) && is_subclass_of($name, 'SystemBase');
+	}
+
+	/**
+	 * The lowest apk_permission that lets every entry through the capability
+	 * gate (ApiAuth::authorize()), so a scoped key's permission is never a
+	 * second, contradicting answer to what it may do. Reading needs anything
+	 * but 2, writing 2 or more, deleting 4. $action_capabilities maps each
+	 * action entry to the capability its descriptor declares.
+	 */
+	public static function permission_for_scope(array $entries, array $action_capabilities): int {
+		$needs = array('read' => false, 'write' => false, 'delete' => false);
+		foreach ($entries as $entry) {
+			if (preg_match(self::SCOPE_RECORD_PATTERN, $entry, $m)) {
+				$capability = $m[2] === 'read' ? 'read' : ($m[2] === 'delete' ? 'delete' : 'write');
+			} else {
+				// An action declaring capability null gates on no permission.
+				$capability = array_key_exists($entry, $action_capabilities) ? $action_capabilities[$entry] : 'write';
+			}
+			if ($capability !== null && isset($needs[$capability])) {
+				$needs[$capability] = true;
+			}
+		}
+		if ($needs['delete']) {
+			return 4;
+		}
+		if ($needs['write']) {
+			return $needs['read'] ? 3 : 2;
+		}
+		return 1;
+	}
+
+	/** The scope in words, for admin pages and refusals. An entry that parses as neither kind is shown as stored. */
+	function scope_label(): string {
+		$parts = array();
+		foreach ($this->scope() as $entry) {
+			if (strpos($entry, ':') === false || !preg_match(self::SCOPE_RECORD_PATTERN, $entry)) {
+				$parts[] = $entry;
+			}
+		}
+		foreach ($this->scope_records() as $model => $verbs) {
+			$parts[] = $model . ': ' . implode(', ', $verbs);
+		}
+		return implode('; ', $parts);
+	}
+
+	/**
 	 * Only a machine key may be scoped: a session key is the user's own device
-	 * credential and carries the user's whole reach by design.
+	 * credential and carries the user's whole reach by design. Every entry
+	 * must be one ApiAuth can match, so a typo is refused here rather than
+	 * stored as a key that silently reaches nothing.
 	 */
 	function save($debug = false) {
 		// An unsaved key with no type takes the column default, machine.
 		$type = $this->get('apk_type') ?: self::TYPE_MACHINE;
 		if ($this->is_scoped() && $type !== self::TYPE_MACHINE) {
 			throw new ApiKeyException('Only a machine key may be scoped.');
+		}
+		// The scope is checked when it is set or changed, not on every save:
+		// revoking a key must work after a model its scope names has gone
+		// (an uninstalled plugin's), and that save does not change the scope.
+		if ($this->scope_is_new_or_changed()) {
+			if (trim((string)$this->get('apk_scope')) !== '' && !$this->is_scoped()) {
+				throw new ApiKeyException('This scope cannot be saved: it names nothing, which would leave the key unscoped.');
+			}
+			foreach ($this->scope() as $entry) {
+				$problem = self::scope_entry_problem($entry);
+				if ($problem !== null) {
+					throw new ApiKeyException('This scope cannot be saved: ' . $problem);
+				}
+			}
 		}
 		$result = parent::save($debug);
 		// A deactivated app credential stops reading at once: the window it
@@ -266,6 +411,17 @@ public static function GenerateKey($key) {
 			VaultUnlock::lockCredentialWindow((int)$this->get('apk_usr_user_id'), (int)$this->key);
 		}
 		return $result;
+	}
+
+	/** Whether apk_scope differs from what is stored, or the key is new. */
+	private function scope_is_new_or_changed(): bool {
+		if (!$this->key) {
+			return true;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare('SELECT apk_scope FROM apk_api_keys WHERE apk_api_key_id = ?');
+		$q->execute(array((int)$this->key));
+		$stored = $q->fetchColumn();
+		return $stored === false || (string)$stored !== (string)$this->get('apk_scope');
 	}
 
 	/**
@@ -308,12 +464,21 @@ public static function GenerateKey($key) {
 		if (!$ip_changed && $last && LibraryFunctions::time_shift($last, '1 hour', 'Y-m-d H:i:s') > $now_utc) {
 			return;
 		}
-		$this->set('apk_last_used_time', $now_utc);
+		$columns = array('apk_last_used_time' => $now_utc);
 		if ($ip !== null) {
-			$this->set('apk_last_used_ip', $ip);
+			$columns['apk_last_used_ip'] = $ip;
 		}
-		// Usage tracking persists on GET API requests too
-		SystemBase::server_initiated_write(function () { $this->save(); });
+		foreach ($columns as $column => $value) {
+			$this->set($column, $value);
+		}
+		// Usage tracking persists on GET API requests too. Only these columns
+		// are written: this runs inside authentication, where a full save()
+		// would re-validate the whole row and could refuse a key over a rule
+		// newer than the row, cutting the key off mid-request.
+		$id = (int)$this->key;
+		SystemBase::server_initiated_write(function () use ($id, $columns) {
+			self::updateColumns($id, $columns);
+		});
 	}
 
 	/** An address in canonical text form, IPv4 or IPv6, or null when it is not one. */

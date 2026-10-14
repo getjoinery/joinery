@@ -5,6 +5,8 @@ require_once(__DIR__ . '/ComponentBase.php');
  * PluginHelper - Manages plugin metadata and provides helper functions
  * Extends ComponentBase for common functionality
  *
+ * @version 1.4.0 - getAvailablePlugins() skips a sandboxed plugin's folder (SandboxPlugins): it has no
+ *   plugin.json and nothing in it is loaded natively. isActiveOfEitherKind() for the few questions about any plugin
  * @version 1.3.0 - validate() reports malformed or colliding "fileSources" declarations
  * @version 1.2.0 - activePluginNames(): the active plugins, or an exception when they cannot be read. The
  *   class autoloader caches a map per active set, and "the database did not answer" read as "nothing is
@@ -457,6 +459,11 @@ class PluginHelper extends ComponentBase {
             $directories = glob($pluginDir . '/*', GLOB_ONLYDIR);
             foreach ($directories as $dir) {
                 $pluginName = basename($dir);
+                // A sandboxed plugin has no plugin.json and no PHP: native
+                // loading takes nothing from its folder (SandboxPlugins).
+                if (SandboxPlugins::isSandboxedDir($dir)) {
+                    continue;
+                }
                 try {
                     $plugins[$pluginName] = self::getInstance($pluginName);
                 } catch (Exception $e) {
@@ -544,6 +551,17 @@ class PluginHelper extends ComponentBase {
         } catch (Exception $e) {
             return false;
         }
+    }
+
+    /**
+     * Whether a plugin of either kind, native or sandboxed (SandboxPlugins),
+     * is active. For the questions asked of any plugin: its declared
+     * settings, its API models, its secrets. A check for a plugin by name
+     * means its PHP is here, and asks isPluginActive(), which a sandboxed
+     * plugin never answers.
+     */
+    public static function isActiveOfEitherKind($pluginName) {
+        return self::isPluginActive($pluginName) || SandboxPlugins::isActive((string)$pluginName);
     }
     
     /**

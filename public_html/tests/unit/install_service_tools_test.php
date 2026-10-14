@@ -45,11 +45,13 @@ function install_tool_line(array $lines, string $key): string {
 }
 
 $db = DbConnector::get_instance()->get_db_link();
+// What a setting holds: a secret is stored sealed, and a revert may seal one
+// that was stored plain, so it is compared by what it opens to.
 $read = function (string $name) use ($db): string {
 	$q = $db->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
 	$q->execute(array($name));
 	$v = $q->fetchColumn();
-	return ($v === false || $v === null) ? '' : (string)$v;
+	return ($v === false || $v === null) ? '' : (string)Setting::openStored($name, (string)$v);
 };
 $count_targets = function () use ($db): int {
 	return (int)$db->query('SELECT count(*) FROM bkt_backup_targets')->fetchColumn();

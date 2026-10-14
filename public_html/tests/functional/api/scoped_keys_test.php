@@ -3,7 +3,8 @@
  * Scoped machine keys over HTTP — functional test suite
  *
  * A machine key whose apk_scope names actions can call those actions and
- * nothing else. The decisions themselves are pinned offline by
+ * nothing else; one whose scope names a model and verbs ('Location:read')
+ * reaches that model's record endpoints for those verbs and nothing else. The decisions themselves are pinned offline by
  * tests/unit/api_scoped_key_test.php; this suite proves the wiring over real
  * requests: that action dispatch passes the action's name to
  * ApiAuth::authorize(), and that every other route family refuses the key,
@@ -19,6 +20,7 @@
  * Creates its own user and keys and removes them afterwards. Requires the
  * apk_scope column (run update_database after deploying the feature).
  *
+ * @version 1.1 - record entries over HTTP
  * @version 1.0
  */
 
@@ -68,6 +70,88 @@ try {
 		check(strpos((string)($r['json']['error'] ?? ''), 'notification_unread_count') !== false,
 			"The refusal on $label names the scope", $r['json']['error'] ?? $r['raw']);
 	}
+
+	section('A key scoped to a model and verbs');
+	if (!class_exists('Location')) {
+		harness_skip('Record entries over HTTP', 'the event_manager plugin is not active, so Location is not a record endpoint');
+	} else {
+		$admin = make_user($suffix . 'SR', 5);
+		$rec = make_machine_key($admin->key, 'records-' . $suffix, 3);
+		$rec['api_key']->set('apk_scope', 'Location:read,Location:create');
+		$rec['api_key']->save();
+		$hr = key_headers($rec['api_key']->get('apk_public_key'), $rec['secret_key']);
+
+		$r = api_request('GET', '/api/v1/Locations', $hr);
+		check($r['status'] === 200, 'It reads the list of its model', $r['status'] . ' ' . substr($r['raw'], 0, 200));
+		$r = api_request('POST', '/api/v1/Location', $hr,
+			array('loc_name' => 'HarnessTest Location ' . $suffix, 'loc_link' => 'harnesstest-location-' . strtolower($suffix)), true);
+		check($r['status'] === 200, 'It creates a record of its model', $r['status'] . ' ' . substr($r['raw'], 0, 300));
+		$location_id = (int)($r['json']['data']['loc_location_id'] ?? 0);
+		check($location_id > 0, 'The create answers with the new record\'s id', substr($r['raw'], 0, 300));
+		if ($location_id > 0) {
+			harness_register_row('loc_locations', 'loc_location_id', $location_id);
+			$r = api_request('GET', '/api/v1/Location/' . $location_id, $hr);
+			check($r['status'] === 200, 'It reads one record of its model', $r['status']);
+
+			$r = api_request('PUT', '/api/v1/Location/' . $location_id . '?loc_name=changed', $hr);
+			check($r['status'] === 403, 'Updating is refused: the scope gives read and create only', $r['status'] . ' ' . substr($r['raw'], 0, 200));
+			$r = api_request('DELETE', '/api/v1/Location/' . $location_id, $hr);
+			check($r['status'] === 403, 'Deleting is refused', $r['status'] . ' ' . substr($r['raw'], 0, 200));
+			$still = new Location($location_id, TRUE);
+			check($still->get('loc_name') === 'HarnessTest Location ' . $suffix && !$still->get('loc_delete_time'),
+				'The refused update and delete changed nothing');
+		}
+
+		// The key acts as its owner, so the owner cannot be deleted under it,
+		// and the refusal says where the key is deleted.
+		$refused = '';
+		try {
+			$admin->soft_delete();
+		} catch (SystemDisplayableError $e) {
+			$refused = $e->getMessage();
+		}
+		check(strpos($refused, '/admin/admin_api_key?apk_api_key_id=' . (int)$rec['api_key']->key) !== false
+			&& strpos($refused, 'Location: read, create') !== false,
+			'Deleting the key\'s owner is refused, naming the key\'s page and its scope', $refused);
+
+		$record_refusals = array(
+			'another model'      => array('GET', '/api/v1/Users', null),
+			'another model, one' => array('GET', '/api/v1/User/' . $admin->key, null),
+			'an action'          => array('POST', '/api/v1/action/notification_unread_count', array()),
+			'the management API' => array('GET', '/api/v1/management', null),
+			'the actions listing'=> array('GET', '/api/v1/actions', null),
+			'auth/session'       => array('GET', '/api/v1/auth/session', null),
+			'a form definition'  => array('GET', '/api/v1/form/account_edit', null),
+		);
+		foreach ($record_refusals as $label => $req) {
+			$r = api_request($req[0], $req[1], $hr, $req[2]);
+			check($r['status'] === 403, "Refused 403 on $label", $r['status'] . ' ' . substr($r['raw'], 0, 200));
+			check(strpos((string)($r['json']['error'] ?? ''), 'Location: read, create') !== false,
+				"The refusal on $label names the scope", $r['json']['error'] ?? $r['raw']);
+		}
+	}
+
+	section('Authentication never re-validates a stored key');
+	// touch_last_used() runs inside authenticate(); a full save() there would
+	// refuse a row that predates a newer rule and fail the request.
+	$odd = make_machine_key($user->key, 'odd-' . $suffix, 1);
+	ApiKey::updateColumns((int)$odd['api_key']->key, array(
+		'apk_permission'     => null,
+		'apk_scope'          => 'Not An Entry',
+		'apk_last_used_time' => gmdate('Y-m-d H:i:s', time() - 7200),
+	));
+	$loaded = new ApiKey((int)$odd['api_key']->key, TRUE);
+	$threw = '';
+	try {
+		$loaded->touch_last_used('192.0.2.7');
+	} catch (\Throwable $e) {
+		$threw = get_class($e) . ': ' . $e->getMessage();
+	}
+	$after = new ApiKey((int)$odd['api_key']->key, TRUE);
+	check($threw === '' && strtotime($after->get('apk_last_used_time') . ' UTC') > time() - 60,
+		'Stamping last-used on a row no save() would accept still works', $threw);
+	check($after->get('apk_permission') === null && $after->get('apk_scope') === 'Not An Entry',
+		'and writes nothing but the stamp');
 
 	section('The same user\'s unscoped key is unaffected');
 	$r = api_request('POST', '/api/v1/action/notification_unread_count', $hp, array());

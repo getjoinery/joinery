@@ -1704,7 +1704,8 @@ abstract class PublicPageBase {
 			if ($value == "") {
 				$value = "&nbsp";
 			}
-			$label = isset($headers[$i]) ? trim(strip_tags((string)$headers[$i])) : '';
+			// The header is HTML; the label is its text, escaped once.
+			$label = isset($headers[$i]) ? trim(html_entity_decode(strip_tags((string)$headers[$i]), ENT_QUOTES | ENT_HTML5, 'UTF-8')) : '';
 			$attr  = $label !== '' ? ' data-label="' . htmlspecialchars($label, ENT_QUOTES) . '"' : '';
 			$cls   = $i === 0 ? ' class="cell-primary"' : '';
 			printf('<td%s%s>%s</td>', $cls, $attr, $value);

@@ -30,7 +30,12 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.7.0
+ * @version 1.8.1
+ * @changelog 1.8.1 - actionCatalog() swallows what a logic file prints on include, so a page or a
+ *   JSON answer that reads the catalog does not start with it.
+ * @changelog 1.8.0 - actionCatalog() (moved here from apiv1.php's GET actions
+ *   listing), machineKeyCanCall() and actionCapability(), for the admin page
+ *   that scopes keys.
  * @changelog 1.7.0 - A sessionless action refuses a request carrying the app-access
  *   headers. Action and form dispatch hand the descriptor's top-level
  *   `app_purpose` to ApiAuth::authorize(), which admits that purpose's app
@@ -73,6 +78,99 @@
  */
 
 class ApiLogicEndpoint {
+
+	/** Per-request cache of actionCatalog(). */
+	private static $catalog_cache = null;
+
+	/**
+	 * Every action this site exposes: core logic files and each active
+	 * plugin's, those carrying a descriptor, minus any whose feature setting
+	 * is off. Keyed by the name a request uses ('{action}' or
+	 * '{plugin}/{action}'), sorted. The GET actions listing and the admin
+	 * page that scopes keys both read this.
+	 *
+	 * @return array<string,array{meta:array,has_form:bool}>
+	 */
+	public static function actionCatalog(): array {
+		if (self::$catalog_cache !== null) {
+			return self::$catalog_cache;
+		}
+		$settings = Globalvars::get_instance();
+		$discover = function ($logic_dir, $name_prefix) use ($settings) {
+			$found = array();
+			foreach (glob($logic_dir . '/*_logic.php') ?: array() as $file) {
+				$basename = basename($file, '.php');           // e.g., "register_logic"
+				$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
+				$descriptor_function = $basename . '_descriptor';
+
+				// Look for the descriptor before including: some legacy files
+				// have top-level code that would execute on include.
+				$contents = file_get_contents($file);
+				if (!preg_match('/function\s+' . preg_quote($descriptor_function, '/') . '\s*\(/', $contents)) {
+					continue;
+				}
+				// Anything a file prints on include (a blank line after a
+				// closing tag) is not this caller's output: a JSON answer or
+				// a page would start with it.
+				ob_start();
+				try {
+					require_once($file);
+				} finally {
+					ob_end_clean();
+				}
+				if (!function_exists($descriptor_function)) {
+					continue;
+				}
+				$meta = call_user_func($descriptor_function);
+				// A feature that is switched off has no actions to offer
+				// (specs/api_action_feature_gate.md).
+				$required_setting = $meta['requires_setting'] ?? null;
+				if ($required_setting && !$settings->get_setting($required_setting)) {
+					continue;
+				}
+				$found[$name_prefix . $action_name] = array(
+					'meta'     => is_array($meta) ? $meta : array(),
+					'has_form' => function_exists($basename . '_form'),
+				);
+			}
+			return $found;
+		};
+
+		$actions = $discover(PathHelper::getIncludePath('logic'), '');
+		// Plugin actions are named {plugin}/{action}; only active plugins count.
+		foreach (array_keys(PluginHelper::getActivePlugins()) as $plugin_name) {
+			$actions += $discover(PathHelper::getIncludePath('plugins/' . $plugin_name . '/logic'), $plugin_name . '/');
+		}
+		ksort($actions);
+		self::$catalog_cache = $actions;
+		return $actions;
+	}
+
+	/**
+	 * Whether a machine key can ever call this action, from its descriptor:
+	 * not one that runs before authentication (anyone may call it, so a
+	 * scope adds nothing), one for a browser session or a person's own
+	 * credential, or one for an app purpose.
+	 */
+	public static function machineKeyCanCall(array $meta): bool {
+		if (!self::requiresSession($meta)) {
+			return false;
+		}
+		if (isset($meta['app_purpose']) && $meta['app_purpose'] !== '') {
+			return false;
+		}
+		$auth = $meta['auth'] ?? array();
+		return empty($auth['requires_browser_session']) && empty($auth['requires_person_credential']);
+	}
+
+	/**
+	 * The capability an action's contract gates on: its declared one, or the
+	 * action surface's default, write. Null means it gates on none.
+	 */
+	public static function actionCapability(array $meta): ?string {
+		$auth = $meta['auth'] ?? array();
+		return array_key_exists('capability', $auth) ? $auth['capability'] : ApiAuth::CAP_WRITE;
+	}
 
 	/**
 	 * Whether a request runs under a simulated session. Declared at the top

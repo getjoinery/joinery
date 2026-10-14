@@ -16,6 +16,8 @@
  * stat walk when it has not, which is what a probe for a class that does not
  * exist here (an inactive plugin's) comes to.
  *
+ * @version 1.6.0 - a miss is offered to SandboxModels last, which declares the
+ *   models an active sandboxed plugin's manifest names (they have no file)
  * @version 1.5.0 - a cached map is a site's and a plugin set's (B47, 10-10). The APCu key names the site
  *   root: every site on a host shares one PHP-FPM pool, and two sites on one release fingerprint alike, so
  *   one site loaded its classes from the other's tree. The map carries the active plugins it was built
@@ -67,6 +69,8 @@ class ClassAutoloader {
 	private static $rebuilt = false;
 	private static $resolving_theme_chain = false;
 	private static $core_only = false;
+	/** True while a miss is being offered to SandboxModels, against re-entry. */
+	private static $in_sandbox_lookup = false;
 	/** class => filepath for plugins allowed in before activation (allowPlugin), never cached. */
 	private static $allowed = array();
 	/** plugin name => the classes allowPlugin() added for it. */
@@ -193,6 +197,20 @@ class ClassAutoloader {
 				if (isset($map[$class]) && is_file($map[$class])) {
 					require_once($map[$class]);
 				}
+			}
+		}
+
+		// A model an active sandboxed plugin declares in its manifest has no
+		// file: it is declared on first use (SandboxModels). Never nested, so
+		// a class the lookup itself needs cannot loop back here.
+		if (!self::$core_only && !self::$in_sandbox_lookup && !self::defined_now($class)) {
+			self::$in_sandbox_lookup = true;
+			try {
+				SandboxModels::autoload($class);
+			} catch (Throwable $e) {
+				error_log('[ClassAutoloader] sandboxed model lookup for ' . $class . ' failed: ' . $e->getMessage());
+			} finally {
+				self::$in_sandbox_lookup = false;
 			}
 		}
 	}

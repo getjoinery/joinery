@@ -25,6 +25,7 @@
  * is what the setup-wizard pill and the management-node stats blob read, so
  * neither has to walk a live decrypt of every row on every admin request.
  *
+ * @version 1.5 - a secret of an active sandboxed plugin is ranked as an active plugin's (PluginHelper::isActiveOfEitherKind)
  * @version 1.4 - the unreadable signal declares its audience (superadmins); the payload names no recipients
  * @version 1.3 - the locator path asks for a table only when it exists (to_regclass), so a plugin
  *   never activated here leaves no ERROR in the PostgreSQL log on every census
@@ -499,7 +500,7 @@ class SecretReconciler {
 	}
 
 	private static function plugin_active(string $plugin): bool {
-		try { return class_exists('PluginHelper') && PluginHelper::isPluginActive($plugin); }
+		try { return class_exists('PluginHelper') && PluginHelper::isActiveOfEitherKind($plugin); }
 		catch (\Throwable $e) { return false; }
 	}
 

@@ -13,6 +13,12 @@ function admin_api_key_logic(array $input): LogicResult {
 
 	$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
 
+	// A sandboxed plugin's credential is made and removed with the plugin.
+	$sandbox_plugin = $api_key->sandbox_plugin();
+	if ($sandbox_plugin !== null && in_array($input['action'] ?? '', array('soft_delete', 'undelete', 'permanent_delete', 'regenerate_secret'), true)) {
+		return LogicResult::error('This key is the sandboxed plugin ' . $sandbox_plugin . "'s credential: it is made and removed with the plugin, on the Plugins page.");
+	}
+
 	if($input['action'] == 'soft_delete'){
 		$api_key->assert_can_write($session);
 		$api_key->soft_delete();
@@ -57,6 +63,7 @@ function admin_api_key_logic(array $input): LogicResult {
 		'api_key' => $api_key,
 		'owner' => $owner,
 		'now_utc' => $now_utc,
+		'sandbox_plugin' => $sandbox_plugin,
 	);
 
 	return LogicResult::render($page_vars);

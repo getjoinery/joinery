@@ -1,0 +1,18 @@
+[package]
+name = "notifier"
+version = "1.0.0"
+edition = "2021"
+description = "A Joinery sandboxed plugin: posts the site's signals to a chat webhook, keeps a log of what it sent, and sends a daily digest."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+joinery-plugin = { path = "../../rust/joinery-plugin" }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

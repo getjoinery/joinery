@@ -111,6 +111,12 @@ bus never looks at it):
 - **`payload`** is an advisory schema: field name → one-line description. It is
   documentation and a merge-field source for consumer UIs. It is not validated at
   dispatch except under `signal_bus_debug`.
+- **`personal_data`** says, in a sentence, what personal data the payload
+  carries ("The new member's email address and name."). Every signal whose
+  payload names or identifies a person declares it: it is shown beside the
+  signal wherever an admin chooses where signals go (the webhook form, a
+  sandboxed plugin's approval page), since choosing the signal sends that
+  data off the site.
 - **`notify`** is consumed only by Notify — see
   [Notifications](notifications.md). A signal with no `notify` block produces no
   notifications; it exists for other subscribers.

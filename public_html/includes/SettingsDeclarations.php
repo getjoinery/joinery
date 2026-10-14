@@ -28,6 +28,7 @@
  *   vault_gated  Writing it requires an open vault unlock window.
  *   managed      Machine-written. Never rendered on a form.
  *
+ * @version 1.3 - a sandboxed plugin's manifest settings are declarations too (SandboxSettings)
  * @version 1.2 - clearPagesFor(): a setting's declared clearsPages leave the static cache when any writer changes it
  * @changelog 1.1 - show_when takes a list of values
  * @version 1.0
@@ -77,6 +78,17 @@ class SettingsDeclarations {
 			}
 		}
 
+		// A sandboxed plugin declares its settings in its manifest.json
+		// (SandboxSettings maps them to this shape, named sbx_{plugin}__{name}).
+		foreach (SandboxSettings::declarationsByPlugin() as $plugin_name => $entries) {
+			foreach ($entries as $entry) {
+				$resolved = self::resolve($entry, $plugin_name);
+				if ($resolved !== null && !isset($declarations[$resolved['name']])) {
+					$declarations[$resolved['name']] = $resolved;
+				}
+			}
+		}
+
 		self::$cache = $declarations;
 		return self::$cache;
 	}
@@ -91,7 +103,7 @@ class SettingsDeclarations {
 
 		$active = array();
 		foreach (self::all() as $name => $declaration) {
-			if ($declaration['_source'] === 'core' || PluginHelper::isPluginActive($declaration['_source'])) {
+			if ($declaration['_source'] === 'core' || PluginHelper::isActiveOfEitherKind($declaration['_source'])) {
 				$active[$name] = $declaration;
 			}
 		}
@@ -371,6 +383,10 @@ class SettingsDeclarations {
 		self::$cache = null;
 		self::$active_cache = null;
 		self::$group_labels = null;
+		// Every secret setting is a sealed secret, read from these.
+		if (class_exists('SealedSecretsDeclarations', false)) {
+			SealedSecretsDeclarations::reset();
+		}
 	}
 
 	// ── internals ───────────────────────────────────────────────────────────
@@ -397,6 +413,15 @@ class SettingsDeclarations {
 			$data = json_decode((string)@file_get_contents($manifest_path), true);
 			if (is_array($data) && !empty($data['settingsGroups']) && is_array($data['settingsGroups'])) {
 				$labels[basename(dirname($manifest_path))] = $data['settingsGroups'];
+			}
+		}
+
+		// A sandboxed plugin's settings form one group, titled by the plugin.
+		foreach (SandboxPlugins::installedOnDisk() as $plugin_name) {
+			try {
+				$labels[$plugin_name] = array($plugin_name => SandboxPlugins::manifest($plugin_name)->title());
+			} catch (SandboxManifestException $e) {
+				continue;
 			}
 		}
 

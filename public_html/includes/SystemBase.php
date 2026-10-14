@@ -3318,6 +3318,11 @@ abstract class SystemBase {
 			}
 
 			$this->key = $dblink->lastInsertId($seq);
+			// The new row's id is one of its fields too: without it, an
+			// export straight after a create (the API's POST answer) had no id.
+			if ($this->key !== false && $this->key !== null && is_object($this->data)) {
+				$this->data->{static::$pkey_column} = is_numeric($this->key) ? (int)$this->key : $this->key;
+			}
 		}
 
 		if ($seal_plan !== null) {
@@ -3998,8 +4003,14 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		$bind_params = [];
 		$operation = $this->operation;
 
-		// Extract prefix from table name (everything before first underscore)
-		$prefix = substr($table, 0, strpos($table, '_'));
+		// The column prefix a sort may leave off: the model's own when this is
+		// its table (a sandboxed model's columns do not start with its table's
+		// first segment), else everything before the table's first underscore.
+		$model = isset(static::$model_class) ? static::$model_class : null;
+		$prefix = ($model && class_exists($model) && isset($model::$tablename) && $model::$tablename === $table
+				&& !empty($model::$prefix))
+			? $model::$prefix
+			: substr($table, 0, strpos($table, '_'));
 
 		foreach ($filters as $column => $condition) {
 			if (is_array($condition)) {

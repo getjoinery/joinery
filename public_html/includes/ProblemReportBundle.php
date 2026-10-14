@@ -23,6 +23,7 @@
  * sealed. Building a bundle opens no sealed content: settings are compared as
  * stored, never decrypted.
  *
+ * @version 1.3 - a secret setting counts as set only when it opens
  * @version 1.2 - clean() also drops the directory the install lives in, so a log line cut short mid-path does not show it
  * @version 1.1.0 - automatic(): the bundle a site sends on its own; fingerprint(): the same-fault key
  * @version 1.0.1
@@ -462,7 +463,8 @@ class ProblemReportBundle {
 					continue;
 				}
 				if (!empty($declaration['secret'])) {
-					if ($stored[$name] !== '') {
+					// Set means usable: a sealed one that no longer opens is not.
+					if ((string)Setting::openStored($name, $stored[$name]) !== '') {
 						$credentials_set++;
 					}
 					continue;

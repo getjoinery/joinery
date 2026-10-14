@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
 /**
  * admin_plugins_logic — the Plugins page.
  *
+ * @version 1.5 - a sandboxed plugin waiting on approval: activate says so, with a link to approve it; never looked up as a fork
  * @version 1.4 - `edited`: shipped plugins whose files changed here since
  *                install, for Edited since install and Keep my changes
  *                (specs/local_edits_detected.md)
@@ -251,6 +252,12 @@ function admin_plugins_logic(array $input): LogicResult {
 								$message_type = 'warning';
 							}
 						}
+					} catch (SandboxApprovalNeededException $e) {
+						// Not activated: an admin approves what it asks first,
+						// on the page that then activates it.
+						$message = 'Plugin "' . htmlspecialchars($plugin_name) . '" asks for things no admin has approved yet. '
+							. '<a href="' . htmlspecialchars(SandboxPluginManager::approvalUrl($plugin_name)) . '">Review and approve them</a>.';
+						$message_type = 'warning';
 					} catch (PluginComposerNeedsRootException $e) {
 						// Not a failure the operator can act on by retrying:
 						// the packages have to be installed by root, so queue
@@ -375,7 +382,8 @@ function admin_plugins_logic(array $input): LogicResult {
 		if (MarketplaceClient::is_root()) {
 			break;
 		}
-		if ($entry['plugin'] && $entry['directory_exists'] && !$entry['plugin']->receives_upgrades()) {
+		if ($entry['plugin'] && $entry['directory_exists'] && !$entry['plugin']->receives_upgrades()
+				&& !SandboxPlugins::isSandboxed($entry['name'])) {
 			try {
 				$fork_versions = MarketplaceClient::published_versions('plugins');
 			} catch (Throwable $e) {

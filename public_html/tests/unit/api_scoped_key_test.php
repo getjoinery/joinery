@@ -9,15 +9,22 @@
 /**
  * Scoped machine keys: the decisions ApiAuth::authorize() makes.
  *
- * A machine key may carry apk_scope, a list of action names. A scoped key
- * reaches those actions and nothing else, and an action declaring
+ * A machine key may carry apk_scope, a list of entries: action names, and
+ * record entries ('Event:read') naming a model and one verb. A scoped key
+ * reaches those and nothing else, and an action declaring
  * requires_scoped_key admits nothing but a key scoped to it. This drives
- * authorize() and refuseScopedKeyOutsideActions() directly with unsaved keys,
- * so it needs no database; the HTTP route families are covered by
+ * authorize() and refuseScopedKeyOutsideItsScope() directly with unsaved
+ * keys, so it needs no database; the HTTP route families are covered by
  * tests/functional/api/scoped_keys_test.php.
+ *
+ * It also holds the rule refuseScopedKeyOutsideItsScope() leans on: no model
+ * shares a name with a route family apiv1.php dispatches, so a key scoped to
+ * a model can never be let through to a family by name.
  *
  * Run: php tests/unit/api_scoped_key_test.php
  *
+ * @version 1.1 - record entries, the scope grammar, the permission a scope
+ *   needs, and the model/route-family name rule
  * @version 1.0
  */
 
@@ -46,9 +53,9 @@ function key_of($type, $scope = '', $permission = 1) {
 }
 
 /** Run authorize() and report 'allowed', or the refusal's status and message. */
-function decide(array $auth, $api_entry, $endpoint, $user_permission = 0) {
+function decide(array $auth, $api_entry, $endpoint, $user_permission = 0, $record = null) {
 	try {
-		ApiAuth::authorize($auth, $api_entry, $user_permission, 'Action', $endpoint);
+		ApiAuth::authorize($auth, $api_entry, $user_permission, 'Action', $endpoint, $record);
 		return array('allowed' => true);
 	} catch (RuntimeException $e) {
 		list($status, , $message) = explode('|', $e->getMessage(), 3);
@@ -58,7 +65,7 @@ function decide(array $auth, $api_entry, $endpoint, $user_permission = 0) {
 
 function outside_actions($api_entry, $family) {
 	try {
-		ApiAuth::refuseScopedKeyOutsideActions($api_entry, $family);
+		ApiAuth::refuseScopedKeyOutsideItsScope($api_entry, $family);
 		return array('allowed' => true);
 	} catch (RuntimeException $e) {
 		list($status, , $message) = explode('|', $e->getMessage(), 3);
@@ -127,6 +134,134 @@ foreach (array('management', 'auth', 'app', 'drive_upload', 'actions', 'user') a
 	$r = outside_actions($scoped, $family);
 	check(!$r['allowed'] && $r['status'] === 403, "A scoped key is refused on $family");
 }
+
+section('Record entries');
+
+$records = key_of(ApiKey::TYPE_MACHINE, "Event:read, Event:create, Post:delete, $SNAP", 4);
+check($records->scope_actions() === array($SNAP), 'Action entries are told apart from record entries');
+check($records->scope_records() === array('Event' => array('read', 'create'), 'Post' => array('delete')),
+	'Record entries group by model', json_encode($records->scope_records()));
+check($records->scope_label() === "$SNAP; Event: read, create; Post: delete", 'The scope reads in words', $records->scope_label());
+
+// A record endpoint's call: the capability its verb needs, and the model and
+// verb as authorize()'s own argument.
+$record_call = function ($api_entry, $model, $verb) {
+	$capability = $verb === 'read' ? ApiAuth::CAP_READ : ($verb === 'delete' ? ApiAuth::CAP_DELETE : ApiAuth::CAP_WRITE);
+	return decide(array('capability' => $capability), $api_entry, null, 0, array('model' => $model, 'verb' => $verb));
+};
+check($record_call($records, 'Event', 'read')['allowed'], 'It reads the model its scope names');
+check($record_call($records, 'Event', 'create')['allowed'], 'It creates where its scope says create');
+check($record_call($records, 'Post', 'delete')['allowed'], 'It deletes where its scope says delete');
+$r = $record_call($records, 'Event', 'update');
+check(!$r['allowed'] && $r['status'] === 403, 'A verb its scope does not give the model is refused');
+$r = $record_call($records, 'Event', 'delete');
+check(!$r['allowed'] && $r['status'] === 403, 'Delete is not implied by create');
+$r = $record_call($records, 'User', 'read');
+check(!$r['allowed'] && $r['status'] === 403, 'A model its scope does not name is refused');
+check(!$r['allowed'] && strpos($r['message'], 'Event: read, create') !== false, 'The refusal names the scope', $r['message'] ?? '');
+$r = decide($READ, $records, null);
+check(!$r['allowed'] && $r['status'] === 403, 'A surface with no name (forms, management) is still refused');
+$r = decide($READ, key_of(ApiKey::TYPE_MACHINE, 'Event:read'), $SNAP);
+check(!$r['allowed'] && $r['status'] === 403, 'A key with only record entries calls no action');
+$r = $record_call(key_of(ApiKey::TYPE_MACHINE, 'notification_unread_count'), 'Event', 'read');
+check(!$r['allowed'] && $r['status'] === 403, 'A key with only action entries reads no records');
+$r = $record_call(key_of(ApiKey::TYPE_MACHINE, 'Event:create', 1), 'Event', 'create');
+check(!$r['allowed'] && $r['status'] === 403, 'The capability gate still applies inside the scope');
+check($record_call($plain, 'User', 'update')['allowed'], 'An unscoped key reaches records as before');
+$r = decide(array('capability' => ApiAuth::CAP_READ, 'record' => array('model' => 'Event', 'verb' => 'read')),
+	key_of(ApiKey::TYPE_MACHINE, 'Event:read'), null);
+check(!$r['allowed'] && $r['status'] === 403,
+	'A record named inside a contract (a descriptor\'s auth block) opens nothing: only the record endpoints\' own argument counts');
+
+section('Record entries before a route family runs');
+
+$event_key = key_of(ApiKey::TYPE_MACHINE, 'Post:read');
+check(outside_actions($event_key, 'Post')['allowed'], 'A key scoped to a model reaches its one-record URL');
+check(outside_actions($event_key, 'Posts')['allowed'], 'and its list URL');
+check(outside_actions($event_key, 'post')['allowed'], 'resolved as apiv1.php resolves it (first letter raised)');
+foreach (array('Users', 'User', 'management', 'auth', 'app', 'form', 'drive_upload', 'actions', '') as $family) {
+	$r = outside_actions($event_key, $family);
+	check(!$r['allowed'] && $r['status'] === 403, "It is refused on '$family'");
+}
+check(outside_actions($event_key, 'action')['allowed'], 'Action dispatch is left to authorize()');
+$r = outside_actions($event_key, 'Postx');
+check(!$r['allowed'], 'A list URL is the model name plus s, nothing else');
+$r = outside_actions(key_of(ApiKey::TYPE_MACHINE, 'Aut:read'), 'auth');
+check(!$r['allowed'] && $r['status'] === 403, 'A model one letter short of a family name does not open that family');
+
+section('No model shares a name with a route family');
+
+// The families apiv1.php dispatches by name, read from its own source so a
+// new one is covered the day it is added.
+$router = file_get_contents(PathHelper::getIncludePath('api/apiv1.php'));
+preg_match_all("~strtolower\\(\\\$url_segments\\[2\\] \\?\\? ''\\) === '([a-z_]+)'~", $router, $m);
+$families = array_values(array_unique($m[1]));
+check(count($families) >= 5, 'The route families are found in apiv1.php', implode(', ', $families));
+$collisions = array();
+foreach (LibraryFunctions::discover_model_classes(array('include_plugins' => true)) as $class) {
+	foreach (array($class, $class . 's') as $url_name) {
+		if (in_array(strtolower($url_name), $families, true)) {
+			$collisions[] = $class;
+		}
+	}
+}
+check($collisions === array(), 'No model is named like a route family', implode(', ', $collisions));
+
+// A scope entry is only text: one naming a family must open nothing, and
+// cannot be saved in the first place.
+foreach ($families as $family) {
+	if ($family === 'action') {
+		continue;
+	}
+	$entry = ucfirst($family) . ':read';
+	$r = outside_actions(key_of(ApiKey::TYPE_MACHINE, $entry), $family);
+	check(!$r['allowed'] && $r['status'] === 403, "A key scoped '$entry' is refused on $family");
+	check(ApiKey::scope_entry_problem($entry) !== null, "'$entry' cannot be saved: it names no model");
+}
+
+section('The scope grammar');
+
+foreach (array('Event:read', 'EventRegistrant:delete', 'notification_unread_count', 'dns_filtering/resolver_snapshot') as $good) {
+	check(ApiKey::scope_entry_problem($good) === null, "'$good' is an entry");
+}
+foreach (array('Event:write', 'event:read', 'Event', 'a b', 'Event:read:x', 'x/y/z', '*') as $bad) {
+	check(ApiKey::scope_entry_problem($bad) !== null, "'$bad' is refused");
+}
+$threw = false;
+try {
+	key_of(ApiKey::TYPE_MACHINE, 'Event:read,Event:write')->save();
+} catch (ApiKeyException $e) {
+	$threw = strpos($e->getMessage(), 'Event:write') !== false;
+}
+check($threw, 'Saving a malformed scope is refused before it reaches the database, naming the entry');
+$threw = '';
+try {
+	key_of(ApiKey::TYPE_MACHINE, 'Evnet:read')->save();
+} catch (ApiKeyException $e) {
+	$threw = $e->getMessage();
+}
+check(strpos($threw, 'Evnet') !== false, 'A record entry naming no model (a typo) is refused', $threw);
+$threw = false;
+try {
+	key_of(ApiKey::TYPE_MACHINE, ' , ')->save();
+} catch (ApiKeyException $e) {
+	$threw = true;
+}
+check($threw, 'A scope that names nothing is refused: it would read as unscoped');
+check(key_of(ApiKey::TYPE_MACHINE, 'Post:Read')->scope_label() === 'Post:Read',
+	'An entry that parses as neither kind is shown as stored, so a refusal still says what the key holds');
+
+section('The permission a scope needs');
+
+$caps = array('reader' => ApiAuth::CAP_READ, 'writer' => ApiAuth::CAP_WRITE, 'free' => null);
+check(ApiKey::permission_for_scope(array('Event:read'), $caps) === 1, 'Reading only: 1');
+check(ApiKey::permission_for_scope(array('Event:create'), $caps) === 2, 'Writing only: 2');
+check(ApiKey::permission_for_scope(array('Event:read', 'Event:update'), $caps) === 3, 'Reading and writing: 3');
+check(ApiKey::permission_for_scope(array('Event:delete'), $caps) === 4, 'Deleting: 4');
+check(ApiKey::permission_for_scope(array('reader'), $caps) === 1, 'A read action: 1');
+check(ApiKey::permission_for_scope(array('reader', 'writer'), $caps) === 3, 'A read and a write action: 3');
+check(ApiKey::permission_for_scope(array('free'), $caps) === 1, 'An action gating on no capability: 1');
+check(ApiKey::permission_for_scope(array('unknown_action'), $caps) === 2, 'An action not described is taken as a write');
 
 section('Only a machine key may be scoped');
 

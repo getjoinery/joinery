@@ -15,6 +15,7 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.9 - the API secret counts as configured only when it opens (a dead sealed value is not set)
  * @version 1.8 - the hosted tier creates servers in the default cloud account of the list (OperatorCloudAccount);
  *                the operator token, its scopes record and their readers are gone (cloud_accounts_list); status()
  *                carries the cloud accounts for the Hosting tab
@@ -243,9 +244,10 @@ class ProvisioningSetup {
 	 *               user_created?:bool, key_created?:bool}
 	 */
 	public static function setupApiCredentials(bool $rotate = false): array {
+		// The secret counts when it opens: a sealed one that no longer does is not set.
 		$configured = self::readSetting('server_manager_getjoinery_api_url') !== ''
 			&& self::readSetting('server_manager_getjoinery_api_public_key') !== ''
-			&& self::readSetting('server_manager_getjoinery_api_secret_key') !== '';
+			&& (string)Setting::openStored('server_manager_getjoinery_api_secret_key', self::readSetting('server_manager_getjoinery_api_secret_key')) !== '';
 		$is_self = in_array(self::readSetting('server_manager_getjoinery_api_url'), array('', self::selfApiUrl()), true);
 		if ($configured && !$rotate && !$is_self) {
 			// A remote store's service account lives on the store site.
@@ -551,7 +553,7 @@ class ProvisioningSetup {
 		}
 		$api_url = self::readSetting('server_manager_getjoinery_api_url');
 		$api_pub = self::readSetting('server_manager_getjoinery_api_public_key');
-		$api_sec = self::readSetting('server_manager_getjoinery_api_secret_key');
+		$api_sec = (string)Setting::openStored('server_manager_getjoinery_api_secret_key', self::readSetting('server_manager_getjoinery_api_secret_key'));
 		$api_configured = $api_url !== '' && $api_pub !== '' && $api_sec !== '';
 
 		$qid = (int)self::readSetting('server_manager_provisioning_domain_question_id');

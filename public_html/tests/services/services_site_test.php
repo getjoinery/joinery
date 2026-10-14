@@ -242,7 +242,8 @@ $reqs = svc_operator_requests($op);
 check(count($reqs) === 1 && ($reqs[0]['body']['service'] ?? '') === 'mail' && ($reqs[0]['body']['host'] ?? '') === $site_host, 'one enrol call, for mail, naming the host');
 check((string)get_setting_raw('email_service') === 'joinery_services', 'email_service is joinery_services');
 check((string)get_setting_raw('smtp_host') === 'mail.smtp2go.com' && (string)get_setting_raw('smtp_port') === '587'
-	&& (string)get_setting_raw('smtp_username') === 't9-abc123' && (string)get_setting_raw('smtp_password') === 'Pw ' . str_repeat('x', 25)
+	&& (string)get_setting_raw('smtp_username') === 't9-abc123'
+	&& Setting::openStored('smtp_password', (string)get_setting_raw('smtp_password')) === 'Pw ' . str_repeat('x', 25)
 	&& (string)get_setting_raw('smtp_sender') === 'bounces@mail.' . $site_host && (string)get_setting_raw('smtp_helo') === 'mail.' . $site_host
 	&& (string)get_setting_raw('smtp_hostname') === 'mail.' . $site_host && (string)get_setting_raw('smtp_auth') === '1',
 	'the SMTP values land through the shared map, the password untrimmed');

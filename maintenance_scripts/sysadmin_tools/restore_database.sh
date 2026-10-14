@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.14 - After the load, the key canary says whether the database's sealed values open with this
+#               site's secret_box_key; a dump from a site with another key is said loudly
+#               (RESTORE_SECRET_KEY_MISMATCH), with the remedy, since every secret setting is sealed
 #Version 3.13 - The recovery key the database holds proven is put back after the load: a dump from before a
 #              key rotation names the key rotated away from, and loaded as it is the site would seal its next
 #              backups to it and its management node would re-seal every machine's break-glass copy to it
@@ -568,6 +571,31 @@ else
     fi
 fi
 
+# Every secret setting, and every other sealed value, is sealed with the
+# secret_box_key of the site it was written on, and a database dump does not
+# carry it (config/Globalvars_site.php does). Loaded on a site with another
+# key, they will not open: the site reads them as unset. The key canary says
+# so after the load. The restore has succeeded either way, so this only warns,
+# loudly, with the remedy.
+check_secret_key() {
+    [ -n "${CONFIG_FILE:-}" ] || return 0
+    local public_html state
+    public_html="$(dirname "$(dirname "$CONFIG_FILE")")/public_html"
+    [ -f "${public_html}/includes/PathHelper.php" ] && command -v php >/dev/null 2>&1 || return 0
+    # Only for the site's own database: a restore into another (a backup
+    # verification's scratch copy) is not what the site's code would read.
+    state="$(php -r 'require $argv[1] . "/includes/PathHelper.php"; if ((string)Globalvars::get_instance()->get_setting("dbname", false, true) !== $argv[2]) { echo "other"; exit; } try { echo SecretBox::canaryState(); } catch (Throwable $e) { echo "unknown"; }' \
+        "$public_html" "$DB_NAME" 2>/dev/null | tail -n1)"
+    if [ "$state" = "dead" ]; then
+        info "⚠ The restored database's sealed values do not open with this site's secret_box_key:"
+        info "  it came from a site with another key. Its secret settings (mail, payment and API"
+        info "  credentials) will read as unset. Restore it with the key it was sealed with:"
+        info "  restore_chain.sh --adopt-secret-key, or put that site's secret_box_key in"
+        info "  config/Globalvars_site.php."
+        echo "RESTORE_SECRET_KEY_MISMATCH"
+    fi
+}
+
 info "📥 Loading dump under ON_ERROR_STOP..."
 if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     keep_recovery_key
@@ -579,6 +607,7 @@ if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     if ! psql -U "$DB_USER" -d "$DB_NAME" -XqAc 'ANALYZE' 1>&2; then
         info "⚠ ANALYZE did not complete; the nightly Database maintenance task will analyze these tables."
     fi
+    check_secret_key
     info "✅ Restore of '$DB_NAME' complete."
     echo "RESTORE_OK"
     exit 0

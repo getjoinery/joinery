@@ -38,10 +38,13 @@ class AdminMenu extends SystemBase {	public static $prefix = 'amu';
 	 */
 	public static $field_specifications = array(
 	    'amu_admin_menu_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-	    'amu_menudisplay' => array('type'=>'varchar(32)', 'required'=>true),
-	    'amu_slug' => array('type'=>'varchar(32)', 'unique'=>true),
+	    // Wide enough for what a sandboxed plugin's manifest may declare
+	    // (SandboxPluginManager::menus): an 80-character page title, a
+	    // 57-character slug, a page URL carrying its plugin and page names.
+	    'amu_menudisplay' => array('type'=>'varchar(100)', 'required'=>true),
+	    'amu_slug' => array('type'=>'varchar(64)', 'unique'=>true),
 	    'amu_parent_menu_id' => array('type'=>'int4'),
-	    'amu_defaultpage' => array('type'=>'varchar(64)', 'required'=>true),
+	    'amu_defaultpage' => array('type'=>'varchar(255)', 'required'=>true),
 	    'amu_order' => array('type'=>'int2', 'required'=>true),
 	    'amu_min_permission' => array('type'=>'int4', 'required'=>true),
 	    'amu_disable' => array('type'=>'int2', 'default'=>0),

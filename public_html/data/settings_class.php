@@ -67,9 +67,54 @@ private function _check_for_duplicate_setting() {
 	 * a credential and then checks it reads the value from before the save.
 	 */
 	function save($debug = false) {
+		$this->set('stg_value', self::sealForStorage((string)$this->get('stg_name'), $this->get('stg_value')));
 		$result = parent::save($debug);
 		Globalvars::get_instance()->forget_setting((string)$this->get('stg_name'));
 		return $result;
+	}
+
+	/**
+	 * What a setting's value is stored as. A declared secret (`secret: true`)
+	 * is sealed with SecretBox under its own name, which makes it a sealed
+	 * secret like any other (SealedSecretsDeclarations; the reconciler finds
+	 * and reports it); Globalvars::get_setting() opens it again. Anything
+	 * else, an empty value and one already sealed are stored as they are.
+	 * With no SecretBox key on this deployment a secret is stored as entered,
+	 * and the reconciler seals it once there is one.
+	 *
+	 * @param mixed $value
+	 * @return mixed
+	 */
+	public static function sealForStorage(string $name, $value) {
+		if (!is_string($value) || $value === '' || SecretBox::looksEncrypted($value)
+				|| !SettingsDeclarations::isSecret($name)) {
+			return $value;
+		}
+		try {
+			return (new SecretBox())->seal($name, $value);
+		} catch (Throwable $e) {
+			error_log("[Setting] the secret setting '$name' is stored unsealed: " . $e->getMessage());
+			return $value;
+		}
+	}
+
+	/**
+	 * The value a stored setting holds: a declared secret's sealed value
+	 * opened, anything else as stored. Null when a sealed secret can no
+	 * longer be opened (its key is not this deployment's): a dead secret is
+	 * no value, never its ciphertext.
+	 */
+	public static function openStored(string $name, string $stored): ?string {
+		if ($stored === '' || !SecretBox::looksEncrypted($stored) || !SettingsDeclarations::isSecret($name)) {
+			return $stored;
+		}
+		try {
+			$opened = (new SecretBox())->open($stored);
+		} catch (Throwable $e) {
+			return null;
+		}
+		return in_array($opened['state'], array(SecretBox::OPEN_OK, SecretBox::OPEN_PLAINTEXT), true)
+			? (string)$opened['value'] : null;
 	}
 
 	function prepare() {
@@ -182,6 +227,7 @@ private function _check_for_duplicate_setting() {
 			$value = $value ? '1' : '0';
 		}
 		$value = ($value === null) ? '' : (string)$value;
+		$value = (string)self::sealForStorage($name, $value);
 
 		$dblink = DbConnector::get_instance()->get_db_link();
 		$before = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
@@ -193,7 +239,8 @@ private function _check_for_duplicate_setting() {
 			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
 		$stmt->execute(array($name, $value));
 		Globalvars::get_instance()->forget_setting($name);
-		if ($previous === false || (string)$previous !== $value) {
+		// A sealed secret is compared by what it holds: each sealing differs.
+		if ($previous === false || self::openStored($name, (string)$previous) !== self::openStored($name, $value)) {
 			SettingsDeclarations::clearPagesFor(array($name));
 		}
 	}

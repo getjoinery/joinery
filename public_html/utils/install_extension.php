@@ -61,6 +61,11 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.10 - a sandboxed plugin (exactly manifest.json and one .wasm, SandboxPlugins) is its own kind:
+ *                like a style theme it installs without the warning, on any host; its manifest is
+ *                validated on root's copy; it is recorded plg_trust = 'sandboxed' with a
+ *                sandboxed_package_installed event and no email; it carries no fork mark; a
+ *                replacement may not change a plugin's kind
  * @version 1.9 - on a host that refuses unsigned packages (specs/host_restrictions.md D3) an unverified
  *                plugin or page theme is refused acknowledged or not, staged or from disk
  * @version 1.8 - keys a package proves that cannot be recorded stop the install
@@ -361,7 +366,7 @@ function install_extension_register_as_web_user(string $type, string $name): voi
 		fwrite(STDERR, "install_extension: neither runuser nor su is available to run the unsigned $type's migrations as $web_user; refusing to run them as root\n");
 		exit(1);
 	}
-	echo "unsigned $type: running its database half as $web_user\n";
+	echo "$type $name is not one Joinery built: running its database half as $web_user\n";
 	passthru('cd / && ' . $cmd, $rc);
 	if ((int)$rc !== 0) {
 		fwrite(STDERR, "install_extension: the $type's database half failed as $web_user (exit $rc)\n");
@@ -398,6 +403,12 @@ function install_extension_approver(int $approved_by, string $approved_ip, int $
  * with the reason. A plugin is always 'page': it is code.
  */
 function install_extension_kind(string $type, string $dir): string {
+	if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($dir)) {
+		// Exactly a manifest and one WebAssembly module: nothing in it runs in
+		// the site's PHP, so like a style theme it has nothing to warn about.
+		echo "kind: sandboxed (a WebAssembly module and its manifest; nothing in it runs in the site's PHP)\n";
+		return 'sandboxed';
+	}
 	if ($type !== 'theme') {
 		return 'page';
 	}
@@ -441,22 +452,23 @@ function install_extension_record_unsigned(string $type, string $name, string $v
 	}
 
 	$site = (string)Globalvars::get_instance()->get_setting('webDir');
+	$quiet = $kind === 'style' || $kind === 'sandboxed';
 	$note = "type=$type kind=$kind name=$name version=$version trust=$trust"
-		. ($kind === 'style' ? ' installed_without_warning=yes' : ' approved_by=' . $approver['who']
+		. ($quiet ? ' installed_without_warning=yes' : ' approved_by=' . $approver['who']
 			. ' ip=' . $approver['ip'] . ' at=' . $approver['at'])
 		. ' verdict=' . $verdict_line;
 	try {
 		$log = new EventLog(NULL);
-		$log->set('evl_event', 'unsigned_package_installed');
+		$log->set('evl_event', $kind === 'sandboxed' ? 'sandboxed_package_installed' : 'unsigned_package_installed');
 		$log->set('evl_usr_user_id', $approver['user_id'] > 0 ? $approver['user_id'] : null);
 		$log->set('evl_was_success', true);
 		$log->set('evl_note', $note);
 		$log->save();
-		echo "event log: unsigned_package_installed (kind=$kind)\n";
+		echo 'event log: ' . ($kind === 'sandboxed' ? 'sandboxed' : 'unsigned') . "_package_installed (kind=$kind)\n";
 	} catch (Throwable $e) {
 		fwrite(STDERR, 'warning: could not write the event log row: ' . $e->getMessage() . "\n");
 	}
-	if ($kind === 'style') {
+	if ($quiet) {
 		return;
 	}
 
@@ -595,6 +607,24 @@ try {
 		// what names the extension is what is in the directory root is about to
 		// move, not what a web request said about it.
 		$manifest_file = $dir . '/' . ($type === 'theme' ? 'theme.json' : 'plugin.json');
+		if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($dir)) {
+			// A sandboxed plugin's manifest is checked here, on root's own
+			// copy, before anything moves: the name it gives must be the
+			// directory's, and a manifest the tier would refuse is refused now.
+			$manifest_file = $dir . '/' . SandboxManifest::FILE;
+			try {
+				SandboxManifest::fromFile($manifest_file, $staged_name);
+				// The module's bytes, read as bytes: exports and imports the
+				// host gives, and no larger than the host will load.
+				foreach (glob($dir . '/*.wasm') ?: array() as $module) {
+					SandboxModule::fromFile($module);
+				}
+			} catch (SandboxManifestException | SandboxModuleException $e) {
+				fwrite(STDERR, "install_extension: " . $e->getMessage() . "\n");
+				install_extension_rmtree($work);
+				exit(2);
+			}
+		}
 		if (!is_file($manifest_file)) {
 			fwrite(STDERR, "install_extension: no " . basename($manifest_file) . " in the staged directory\n");
 			install_extension_rmtree($work);
@@ -629,7 +659,10 @@ try {
 			// Signed by us but not shown to be logged is no better than
 			// unsigned: handled the same, recorded as what it is (D6).
 			$restricted = install_extension_restricted_trust($verdict);
-			if ($kind === 'style') {
+			if ($kind === 'sandboxed') {
+				$trust = 'sandboxed';
+				echo "sandboxed plugin: it reaches the site only through what its manifest declares, so it installs without the warning\n";
+			} elseif ($kind === 'style') {
 				$trust = $restricted;
 				echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
 			} elseif (HostRestrictions::has('unsigned_packages')) {
@@ -669,6 +702,15 @@ try {
 				install_extension_rmtree($work);
 				exit(2);
 			}
+			// A plugin keeps its kind: a native plugin's tables, hooks and
+			// row are not a sandboxed one's, nor the other way round.
+			if ($type === 'plugin' && SandboxPlugins::isSandboxedDir($target) !== SandboxPlugins::isSandboxedDir($dir)) {
+				fwrite(STDERR, "install_extension: plugin '$staged_name' is installed as a "
+					. (SandboxPlugins::isSandboxedDir($target) ? 'sandboxed' : 'native') . " plugin and the upload is not; "
+					. "a plugin cannot change kind in place. Uninstall it first.\n");
+				install_extension_rmtree($work);
+				exit(2);
+			}
 			// A system extension is pulled fresh by every deploy whatever its
 			// manifest says, so replacing it would last until the next one.
 			if ($manager->isSystemExtension($staged_name)) {
@@ -694,7 +736,11 @@ try {
 		// EXDEV. A failure part way leaves the bytes in staging, where they can
 		// be looked at — and puts the set-aside copy back, so a failed
 		// replacement is not a missing extension.
-		if (!install_extension_copy_tree($dir, $target)) {
+		$copied = install_extension_copy_tree($dir, $target);
+		// What this process read of the old copy (liveManifest()) is not what
+		// is on disk now.
+		SandboxPlugins::reset();
+		if (!$copied) {
 			fwrite(STDERR, "install_extension: could not copy the staged $type into place\n");
 			install_extension_rmtree($target);
 			if ($replaced !== null && @rename($dest_parent . '/' . $replaced['kept'], $target)) {
@@ -713,8 +759,12 @@ try {
 		$name = $staged_name;
 
 		// Uploaded, so a local fork: the mark goes into the live manifest
-		// before anything reads it for the row.
-		install_extension_mark_fork($type, $name, $manager, $target);
+		// before anything reads it for the row. A sandboxed plugin carries no
+		// mark (its manifest admits no such key): no release ships one, so a
+		// deploy always keeps it (DeploymentHelper::preserveReason).
+		if ($kind !== 'sandboxed') {
+			install_extension_mark_fork($type, $name, $manager, $target);
+		}
 
 		if ($type === 'plugin') {
 			// The pool's class map named files in the directory that just
@@ -726,6 +776,7 @@ try {
 
 		if ($replaced !== null) {
 			$new_manifest = json_decode((string)@file_get_contents($target . '/' . basename($manifest_file)), true);
+			// (manifest.json for a sandboxed plugin, set above)
 			$new_version = is_array($new_manifest) ? (string)($new_manifest['version'] ?? '') : '';
 			$replaced['new_version'] = $new_version;
 			echo "replaced $type $name " . ($replaced['old_version'] !== '' ? $replaced['old_version'] : '(version not stated)')
@@ -781,7 +832,10 @@ try {
 						$existing = $type === 'plugin' ? Plugin::get_by_plugin_name($name) : Theme::get_by_theme_name($name);
 						$trust_column = $type === 'plugin' ? 'plg_trust' : 'thm_trust';
 						$restricted = install_extension_restricted_trust($verdict);
-						if ($kind === 'style') {
+						if ($kind === 'sandboxed') {
+							$trust = 'sandboxed';
+							echo "sandboxed plugin: it reaches the site only through what its manifest declares, so it installs without the warning\n";
+						} elseif ($kind === 'style') {
 							$trust = $restricted;
 							echo "$restricted style theme: nothing in it runs, so it installs without the warning\n";
 						} elseif (HostRestrictions::has('unsigned_packages')) {
@@ -821,7 +875,8 @@ try {
 	}
 
 	// Root's word on who built it, and the record of an unsigned install.
-	$manifest_path = $dest_parent . '/' . $name . '/' . ($type === 'theme' ? 'theme.json' : 'plugin.json');
+	$manifest_path = $dest_parent . '/' . $name . '/' . ($type === 'theme' ? 'theme.json'
+		: ($kind === 'sandboxed' ? SandboxManifest::FILE : 'plugin.json'));
 	$manifest = json_decode((string)@file_get_contents($manifest_path), true);
 	$version = is_array($manifest) ? (string)($manifest['version'] ?? '') : '';
 	$approver = install_extension_approver($approved_by, $approved_ip, $approved_at);

@@ -1034,6 +1034,17 @@
       "helptext": "Delivered and given-up webhook messages older than this are removed by the daily retention sweep. Messages still waiting to be sent are kept. 0 keeps them indefinitely."
     },
     {
+      "name": "sandbox_log_retention_days",
+      "default": "14",
+      "group": "logging",
+      "label": "Days to keep the sandboxed plugin call log",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Each call to a sandboxed plugin, with what it used and what was refused, is kept this long. 0 keeps them indefinitely."
+    },
+    {
       "name": "allowed_upload_extensions",
       "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a",
       "group": "files",
@@ -3072,6 +3083,13 @@
       "feature": "Outgoing webhooks",
       "kind": "regenerable-breaks-things",
       "locator": "sgr_signal_receivers.sgr_signing_secret"
+    },
+    {
+      "label": "Sandboxed plugin API key secret",
+      "feature": "Sandboxed plugins",
+      "kind": "regenerable",
+      "locator": "sbi_sandbox_installs.sbi_api_secret",
+      "reprovision": "SandboxCredentials::reprovision"
     }
   ]
 }

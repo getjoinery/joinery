@@ -2,7 +2,18 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.24
+ * @version 2.28
+ * @changelog 2.28 - A collection read answers with at most API_MAX_PAGE (200) rows; numperpage above it
+ *   reads as 200.
+ * @changelog 2.27 - A record create or update takes its fields from a JSON object body (Content-Type
+ *   application/json) as the actions do; form fields and the query string still work.
+ * @changelog 2.26 - A member's list request on a model only staff can read (not public, no owner
+ *   column, SystemBase's own read rule) is refused before it is counted: num_results answered for
+ *   rows the member could not see.
+ * @changelog 2.25 - A scoped key may name models ('Event:read'): the record endpoints pass their
+ *   model and verb to ApiAuth::authorize(), and ApiAuth::refuseScopedKeyOutsideItsScope() lets
+ *   such a key reach the models it names. The GET actions listing reads
+ *   ApiLogicEndpoint::actionCatalog().
  * @changelog 2.24 - An app-shaped request (the app-access headers on an action) is metered per
  *   person after authentication and its failed sign-ins counted in app_access_auth; the
  *   headers switch no limiter off on any other route family. An app credential (one purpose, AppAccess) is refused on every route
@@ -93,6 +104,9 @@ $api_start_time = microtime(true);
 /**
  * Send a JSON error response and exit.
  */
+/** The most rows one collection read answers with. */
+const API_MAX_PAGE = 200;
+
 function api_error($message, $error_type = 'TransactionError', $status_code = 400, $data = array()) {
 	header("Content-Type: application/json");
 	http_response_code($status_code);
@@ -288,6 +302,23 @@ function api_flag($class_name, $prop) {
 function api_owner_column($class_name) {
 	$col = $class_name::$prefix . '_usr_user_id';
 	return array_key_exists($col, $class_name::$field_specifications) ? $col : null;
+}
+
+/**
+ * A record write's fields: a JSON object body when the request sends one
+ * (Content-Type application/json, as the actions take theirs and as a
+ * sandboxed plugin's API door sends), otherwise $fallback: the form fields of
+ * a create, the query string of an update.
+ */
+function api_record_write_fields(array $fallback) {
+	$type = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
+	if (strpos($type, 'application/json') === 0) {
+		$body = json_decode((string)file_get_contents('php://input'), true);
+		if (is_array($body) && ($body === array() || array_keys($body) !== range(0, count($body) - 1))) {
+			return $body;
+		}
+	}
+	return $fallback;
 }
 
 /**
@@ -573,11 +604,12 @@ if ($api_user === null && strtolower($url_segments[2] ?? '') !== 'action') {
 	api_error('Authentication required', 'AuthenticationError', 401);
 }
 
-// A scoped machine key reaches only the actions its scope names. Action
-// dispatch checks the name in ApiAuth::authorize(); every other route family
-// refuses the key here, including the ones that never call authorize().
+// A scoped machine key reaches only what its scope names. Action dispatch
+// and the record endpoints check the name in ApiAuth::authorize(); every
+// other route family refuses the key here, including the ones that never
+// call authorize().
 if (strtolower($url_segments[2] ?? '') !== 'action') {
-	ApiAuth::refuseScopedKeyOutsideActions($api_entry, strtolower($url_segments[2] ?? ''));
+	ApiAuth::refuseScopedKeyOutsideItsScope($api_entry, $url_segments[2] ?? '');
 	ApiAuth::refuseAppCredentialOutsideActions($api_entry, strtolower($url_segments[2] ?? ''));
 }
 
@@ -658,7 +690,8 @@ if (in_array($operation, $classes)) {
 		}
 
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
-			$auth_data['current_user_permission'], 'Fetch object');
+			$auth_data['current_user_permission'], 'Fetch object',
+			null, ['model' => $class_name, 'verb' => 'read']);
 
 		// Single object GET
 		try {
@@ -699,7 +732,8 @@ if (in_array($operation, $classes)) {
 		}
 
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
-			$auth_data['current_user_permission'], 'Update object');
+			$auth_data['current_user_permission'], 'Update object',
+			null, ['model' => $class_name, 'verb' => 'update']);
 
 		parse_str($_SERVER['QUERY_STRING'], $url_parts);
 
@@ -709,7 +743,7 @@ if (in_array($operation, $classes)) {
 			// only update a row you already own (the owner column is unwritable below, so
 			// it cannot be flipped to forge ownership mid-update).
 			api_authorize_row($object, 'authenticate_write', $auth_data);
-			foreach (api_sanitize_write_input($url_parts, $class_name) as $key => $value) {
+			foreach (api_sanitize_write_input(api_record_write_fields($url_parts), $class_name) as $key => $value) {
 				$object->set($key, $value);
 			}
 			$object->prepare();
@@ -737,13 +771,14 @@ if (in_array($operation, $classes)) {
 		}
 
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_WRITE], $api_entry,
-			$auth_data['current_user_permission'], 'Create object');
+			$auth_data['current_user_permission'], 'Create object',
+			null, ['model' => $class_name, 'verb' => 'create']);
 
 		try {
 			// Boundary sanitize BEFORE dispatch so the floor wraps both CreateNew() and the
 			// raw set-loop; then stamp the owner server-side so created rows belong to the
 			// caller by construction (and a supplied owner cannot spoof).
-			$write_input = api_sanitize_write_input($_POST, $class_name);
+			$write_input = api_sanitize_write_input(api_record_write_fields($_POST), $class_name);
 			$owner_col = api_owner_column($class_name);
 			if ($owner_col !== null) {
 				$write_input[$owner_col] = $auth_data['current_user_id'];
@@ -781,7 +816,8 @@ if (in_array($operation, $classes)) {
 		}
 
 		ApiAuth::authorize(['capability' => ApiAuth::CAP_DELETE], $api_entry,
-			$auth_data['current_user_permission'], 'Delete object');
+			$auth_data['current_user_permission'], 'Delete object',
+			null, ['model' => $class_name, 'verb' => 'delete']);
 
 		try {
 			$object = new $class_name($entity_id, TRUE);
@@ -815,7 +851,18 @@ if (in_array($operation, $classes)) {
 	}
 
 	ApiAuth::authorize(['capability' => ApiAuth::CAP_READ], $api_entry,
-		$auth_data['current_user_permission'], 'Fetch objects');
+		$auth_data['current_user_permission'], 'Fetch objects',
+		null, ['model' => $class_name, 'verb' => 'read']);
+
+	// A model with no owner column, not public, keeping SystemBase's own read
+	// rule is staff only: a member is never shown a row. The list would still
+	// answer num_results for whatever the member filtered on, a yes-or-no on
+	// rows they may not see, so the list is refused before it is counted.
+	if (!$class_name::$api_public_read && api_owner_column($class_name) === null
+			&& (int)$auth_data['current_user_permission'] < 5
+			&& (new ReflectionMethod($class_name, 'authenticate_read'))->getDeclaringClass()->getName() === 'SystemBase') {
+		api_error('Fetch objects: ' . $class_name . ' can be read by staff only', 'AuthenticationError', 403);
+	}
 
 	$multiclassname = 'Multi' . $class_name;
 
@@ -829,7 +876,9 @@ if (in_array($operation, $classes)) {
 	$page = isset($url_parts['page']) ? $url_parts['page'] : 0;
 	unset($url_parts['page']);
 
-	$numperpage = isset($url_parts['numperpage']) ? $url_parts['numperpage'] : 3;
+	// At most API_MAX_PAGE rows in one answer: a whole large model is read
+	// page by page, never in one response.
+	$numperpage = isset($url_parts['numperpage']) ? max(1, min((int)$url_parts['numperpage'], API_MAX_PAGE)) : 3;
 	unset($url_parts['numperpage']);
 
 	$sort = isset($url_parts['sort']) ? $url_parts['sort'] : NULL;
@@ -899,53 +948,19 @@ if (in_array($operation, $classes)) {
 
 } else if (strtolower($url_segments[2] ?? '') === 'actions' && $request_method === 'get') {
 	// Action discovery endpoint: GET /api/v1/actions
-	$discover_actions = function ($logic_dir, $name_prefix) use ($settings) {
-		$found = [];
-		foreach (glob($logic_dir . '/*_logic.php') as $file) {
-			$basename = basename($file, '.php');           // e.g., "register_logic"
-			$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
-			$descriptor_function = $basename . '_descriptor'; // the metadata companion
-
-			// Check file contents for a metadata companion without including
-			// (some legacy files have top-level code that would execute on include)
-			$contents = file_get_contents($file);
-			if (preg_match('/function\s+' . preg_quote($descriptor_function, '/') . '\s*\(/', $contents)) {
-				require_once($file);
-				if (function_exists($descriptor_function)) {
-					$meta = call_user_func($descriptor_function);
-					// A feature that is switched off has no actions to offer.
-					// Same rule as an inactive plugin below, declared per
-					// action (specs/api_action_feature_gate.md).
-					$required_setting = $meta['requires_setting'] ?? null;
-					if ($required_setting && !$settings->get_setting($required_setting)) {
-						continue;
-					}
-					$found[$name_prefix . $action_name] = [
-						'description' => $meta['description'] ?? '',
-						'requires_session' => $meta['requires_session'] ?? true,
-						// Typed input schema, when the descriptor declares one
-						'input' => (isset($meta['input']) && is_array($meta['input'])) ? $meta['input'] : null,
-						// Form builder companion → GET /api/v1/form/{action} works
-						'has_form' => function_exists($basename . '_form'),
-					];
-				}
-			}
-		}
-		return $found;
-	};
-
-	$actions = $discover_actions(PathHelper::getIncludePath('logic'), '');
-
-	// Plugin actions are listed under their namespaced name
-	// ({plugin}/{action}); only active plugins are discoverable.
-	foreach (array_keys(PluginHelper::getActivePlugins()) as $plugin_name) {
-		$actions += $discover_actions(
-			PathHelper::getIncludePath('plugins/' . $plugin_name . '/logic'),
-			$plugin_name . '/'
-		);
+	$actions = array();
+	foreach (ApiLogicEndpoint::actionCatalog() as $name => $entry) {
+		$meta = $entry['meta'];
+		$actions[$name] = [
+			'description' => $meta['description'] ?? '',
+			'requires_session' => $meta['requires_session'] ?? true,
+			// Typed input schema, when the descriptor declares one
+			'input' => (isset($meta['input']) && is_array($meta['input'])) ? $meta['input'] : null,
+			// Form builder companion → GET /api/v1/form/{action} works
+			'has_form' => $entry['has_form'],
+		];
 	}
 
-	ksort($actions);
 	$response = array(
 		'api_version' => '1.0',
 		'success_message' => 'Available actions',

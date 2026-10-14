@@ -58,6 +58,12 @@ $active = new MultiPlugin(array('plg_active' => 1));
 $active->load();
 foreach ($active as $p) { $active_names[] = $p->get('plg_name'); }
 check(count($active_names) > 0, 'there is at least one active plugin to sync', implode(', ', $active_names));
+// What follows is about native plugins (plugin.json and PHP folders). A
+// sandboxed plugin is exactly a manifest.json and a module (SandboxPlugins),
+// held to SandboxManifest's rules, and is never shipped.
+$native_names = array_values(array_filter($active_names, function ($name) {
+    return !SandboxPlugins::isSandboxed($name);
+}));
 
 // ---------------------------------------------------------------------------
 section('The flat-namespace collision guard fires on a real collision');
@@ -69,7 +75,7 @@ section('The flat-namespace collision guard fires on a real collision');
 check(pm_call($manager, 'validateFlatNamespaceCollisions') === null,
     'the current tree has no flat-namespace collision');
 
-$victim = $active_names[0];
+$victim = $native_names[0];
 $victim_dir = PathHelper::getIncludePath('plugins/' . $victim . '/utils');
 $core_utils = glob(PathHelper::getIncludePath('utils') . '/*.php');
 check(count($core_utils) > 0, 'core ships utils/ files to collide with');
@@ -190,7 +196,7 @@ section('Every shipped plugin manifest passes those rules');
 // The rules above are only worth having if the tree actually satisfies them. A
 // manifest that violates one would otherwise surface for the first time during
 // a deploy, inside the step that is already mutating schema.
-foreach ($active_names as $name) {
+foreach ($native_names as $name) {
     try {
         $helper = PluginHelper::getInstance($name);
     } catch (Exception $e) {

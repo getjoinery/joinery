@@ -19,6 +19,7 @@
  *
  * Run: php tests/run.php --only=tests/core/deploy_preserve_fork_test.php
  *
+ * @version 1.1 - a live sandboxed plugin is kept
  * @version 1.0
  */
 require_once(__DIR__ . '/../lib/harness.php');
@@ -55,7 +56,7 @@ $marker = function (string $tree, string $sub, string $name): string {
 	return (string)@file_get_contents("$tree/$sub/$name/MARKER");
 };
 
-section('preserveReason(): the three reasons, in order, and nothing else');
+section('preserveReason(): the reasons, in order, and nothing else');
 
 $live = "$work/reason/live";
 $stage = "$work/reason/stage";
@@ -77,6 +78,15 @@ $put($live, 'plugins', 'plain', array('receives_upgrades' => true), 'live');
 $put($stage, 'plugins', 'plain', array('receives_upgrades' => true), 'incoming');
 check(DeploymentHelper::preserveReason("$live/plugins/plain", "$stage/plugins/plain", 'plugin.json') === '',
 	'true on both sides: the incoming copy stands');
+
+// A sandboxed plugin is never shipped: one of its name in a release is
+// someone else's, and the live one stays.
+@mkdir("$live/plugins/sbxmod", 0770, true);
+file_put_contents("$live/plugins/sbxmod/manifest.json", '{"name":"sbxmod"}');
+file_put_contents("$live/plugins/sbxmod/sbxmod.wasm", "\0asm\x01\0\0\0");
+$put($stage, 'plugins', 'sbxmod', array('receives_upgrades' => true), 'incoming');
+$reason = DeploymentHelper::preserveReason("$live/plugins/sbxmod", "$stage/plugins/sbxmod", 'plugin.json');
+check(strpos($reason, 'sandboxed plugin') === 0, 'a live sandboxed plugin is kept, whatever the release carries', $reason);
 
 $put($live, 'plugins', 'silent', array('name' => 'silent'), 'live');
 $put($stage, 'plugins', 'silent', array('name' => 'silent'), 'incoming');

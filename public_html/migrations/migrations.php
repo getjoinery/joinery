@@ -1765,3 +1765,26 @@
 	$migration['migration_file'] = 'notification_preferences_signal_name.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// An API key's permission is one of 1-4 (ApiKey::$field_specifications).
+	// A stored value outside it came from an unchecked form post; move it to
+	// the in-range value the capability gate already treated it as (past 4
+	// passed every gate, as 4 does; below 1 read only, as 1 does), so saving,
+	// revoking or deleting such a key is not refused.
+	$migration = array();
+	$migration['database_version'] = '217';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM apk_api_keys WHERE apk_permission < 1 OR apk_permission > 4) THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "UPDATE apk_api_keys SET apk_permission = CASE WHEN apk_permission > 4 THEN 4 ELSE 1 END WHERE apk_permission < 1 OR apk_permission > 4";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
+
+	// A file is announced (the file.uploaded signal) once, and
+	// fil_announced_time records that it was. Files that were already here
+	// when it arrived are counted as announced, so saving an old file's
+	// details does not announce it as new.
+	$migration = array();
+	$migration['database_version'] = '218';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM fil_files WHERE fil_announced_time IS NULL) THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "UPDATE fil_files SET fil_announced_time = COALESCE(fil_create_time, now()) WHERE fil_announced_time IS NULL";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

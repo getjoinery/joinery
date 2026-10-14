@@ -8,6 +8,8 @@ The Joinery license includes a **plugin and theme exception**. Plugins and theme
 
 This guide outlines the current plugin and theme architecture after implementing the hybrid plugin/theme system. The system provides clear separation of concerns between plugins (backend-only) and themes (user-facing routing and presentation), while enabling themes to seamlessly integrate with plugin functionality through a sophisticated view resolution system.
 
+It covers native plugins: PHP with a `plugin.json`. A folder holding only a `manifest.json` and one `.wasm` module is a sandboxed plugin instead, which native loading skips; see [Sandboxed Plugins](sandboxed_plugins.md).
+
 ## Current Architecture
 
 ### Plugin Architecture

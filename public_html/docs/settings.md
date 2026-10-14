@@ -154,6 +154,17 @@ missing from the request is kept. One that arrives blank is removed, and one
 with text replaces what was there. `SettingsWriter` reads each submitted secret
 through `FormWriterV2Base::process_secretinput()`, which is the whole rule.
 
+**Stored sealed.** A `secret` setting is stored sealed with
+[`SecretBox`](secret_box.md), under its own name: `Setting::put()` and every
+model save seal it (`Setting::sealForStorage()`; a value already sealed is
+stored as it is), and `Globalvars::get_setting()` opens it again, so code
+reads a secret setting like any other. One that can no longer be opened (its
+key is not this deployment's) reads as no value. Every secret setting is
+therefore a [sealed secret](sealed_secrets.md): one no manifest declares
+otherwise is an `operator` secret, which the reconciler reports when it is
+dead and seals when it finds it stored plain. With no `secret_box_key` on a
+deployment a secret is stored as entered until there is one.
+
 A `secret` normally renders as a password input. Declare `"type": "textarea"`
 alongside it for a genuinely multi-line credential — a PEM private key, a
 service-account JSON. It is drawn with the same three states, and the value is
@@ -282,12 +293,10 @@ The domain-registration leg's credentials
 (`server_manager_namecheap_api_user`, `_api_key`, `_client_ip`, `_sandbox`,
 `_promotion_code`, and `server_manager_domain_tlds`) are declared by the
 server_manager plugin but entered on **Server Manager → Provisioning**, not on
-the settings page — the card there seals the API key and the promotion code
-at rest through `ProvisioningSetup::writeSecret()` and shows the
+the settings page — the card there writes the API key and the promotion code
+through `ProvisioningSetup::writeSecret()` and shows the
 account-eligibility and IP-allowlist constraints beside the field they apply
-to. `secret: true` on a declaration marks a value
-as one not to display; it does not encrypt it, which is why the credential
-has a writer that does.
+to.
 
 ### Missing settings
 

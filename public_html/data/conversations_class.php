@@ -421,6 +421,7 @@ class Conversation extends SystemBase {
 				? $sender_label . ' in ' . $this->display_title()
 				: 'New message from ' . $sender_label);
 
+		$recipient_count = 0;
 		foreach ($participants as $participant) {
 			$p_user_id = $participant->get('cnp_usr_user_id');
 
@@ -434,6 +435,7 @@ class Conversation extends SystemBase {
 			if ($sender_user_id !== null && $p_user_id == $sender_user_id) {
 				continue;
 			}
+			$recipient_count++;
 
 			// Create notification unless muted
 			if (!$participant->get('cnp_is_muted')) {
@@ -455,6 +457,22 @@ class Conversation extends SystemBase {
 
 		// Invalidate sender's unread count cache
 		$_SESSION['message_unread_count'] = null;
+
+		// Never what it says. Who wrote to whom only for a standard
+		// conversation: a private one's metadata stays on this site
+		// (docs/social_features.md, Protection levels), so its signal says
+		// only that a message arrived.
+		if ($message_type !== self::TYPE_SYSTEM) {
+			$standard = $this->protection_level() === 'standard';
+			SignalBus::dispatch('message.received', array(
+				'message_id'      => (int)$message->key,
+				'conversation_id' => $standard ? (int)$this->key : null,
+				'sender_user_id'  => $standard && $sender_user_id !== null ? (int)$sender_user_id : null,
+				'recipient_count' => $recipient_count,
+				'protection'      => $this->protection_level(),
+				'source_user_id'  => $standard && $sender_user_id !== null ? (int)$sender_user_id : null,
+			));
+		}
 
 		$this->notify_message_event($message);
 

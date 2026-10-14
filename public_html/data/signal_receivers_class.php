@@ -7,10 +7,12 @@
  * signal); SignalDeliveryQueue writes one delivery row per matching receiver
  * when a signal fires, and a scheduled drain sends them.
  *
- * One kind exists: `webhook`, an operator-configured HTTPS URL that receives a
- * signed POST. The kind column is what lets another kind of receiver share the
- * same queue (specs/plugin_tiers.md WP1). See docs/webhooks.md.
+ * Two kinds: `webhook`, an operator-configured HTTPS URL that receives a
+ * signed POST (docs/webhooks.md), and `sandbox`, a sandboxed plugin, whose
+ * signals core hands to the plugin host (sgr_plugin names it, and its signals
+ * are what its admin approved; docs/sandboxed_plugins.md).
  *
+ * @version 1.1 - the sandbox kind and sgr_plugin
  * @version 1.0
  */
 
@@ -22,6 +24,7 @@ class SignalReceiver extends SystemBase {
 	public static $pkey_column = 'sgr_signal_receiver_id';
 
 	const KIND_WEBHOOK = 'webhook';
+	const KIND_SANDBOX = 'sandbox';
 
 	/** The value of sgr_signals that means "every signal". */
 	const ALL_SIGNALS = '*';
@@ -37,9 +40,11 @@ class SignalReceiver extends SystemBase {
 	public static $field_specifications = array(
 		'sgr_signal_receiver_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
 		'sgr_kind'               => array('type' => 'varchar(20)', 'is_nullable' => false, 'required' => true,
-			'default' => self::KIND_WEBHOOK, 'allowed_values' => array(self::KIND_WEBHOOK)),
+			'default' => self::KIND_WEBHOOK, 'allowed_values' => array(self::KIND_WEBHOOK, self::KIND_SANDBOX)),
 		'sgr_name'               => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
 		'sgr_url'                => array('type' => 'varchar(2000)'),
+		// The sandboxed plugin a `sandbox` receiver delivers to.
+		'sgr_plugin'             => array('type' => 'varchar(20)', 'index' => true),
 		// A SecretBox blob (SecretBox::seal under SECRET_LOCATOR), never plain text.
 		'sgr_signing_secret'     => array('type' => 'text'),
 		// JSON array of signal names, or ["*"].
@@ -143,6 +148,10 @@ class SignalReceiver extends SystemBase {
 				throw new DisplayableUserException($problem);
 			}
 		}
+		if ($this->get('sgr_kind') === self::KIND_SANDBOX
+				&& !preg_match(SandboxManifest::NAME_PATTERN, (string)$this->get('sgr_plugin'))) {
+			throw new DisplayableUserException('A sandboxed plugin receiver must name its plugin.');
+		}
 		if (empty($this->signals())) {
 			throw new DisplayableUserException('Choose at least one signal.');
 		}
@@ -165,6 +174,10 @@ class MultiSignalReceiver extends SystemMultiBase {
 
 		if (isset($this->options['active'])) {
 			$filters['sgr_is_active'] = $this->options['active'] ? '= TRUE' : '= FALSE';
+		}
+
+		if (isset($this->options['plugin'])) {
+			$filters['sgr_plugin'] = array($this->options['plugin'], PDO::PARAM_STR);
 		}
 
 		return $this->_get_resultsv2('sgr_signal_receivers', $filters, $this->order_by, $only_count, $debug);

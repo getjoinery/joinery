@@ -26,6 +26,7 @@
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.4 - --tree names each sandboxed plugin it passes over (`sandboxed plugin:`, TSV `sandboxed\tplugin`)
  * @version 1.3 - --tree: every package in a site root, core included (specs/host_restrictions.md D5, D8)
  * @version 1.2 - keys a package proves that cannot be recorded exit 1, so the host installer waits for the next converge
  * @version 1.1 - the release log: `unlogged`, and proven keys persisted by root
@@ -64,14 +65,19 @@ if ($dir === '') {
 if ($tree) {
 	// Every package in a site root (PackageSignature::verifyTree()): one
 	// `fail: <what>: <verdict line>` per failure, one `style theme: <name>`
-	// per unsigned style theme passed over, `tree: ok` when nothing failed.
+	// per unsigned style theme and one `sandboxed plugin: <name>` per
+	// sandboxed plugin passed over, `tree: ok` when nothing failed.
 	// Persists no keys: this reports, it installs nothing. --tsv prints each
 	// failure as `fail<TAB>kind<TAB>name<TAB>verdict<TAB>file` instead, for
 	// config/code_check (site_housekeeping.sh), which the host report reads.
 	$style = array();
-	$failures = PackageSignature::verifyTree($dir, $keys_file, $style);
+	$sandboxed = array();
+	$failures = PackageSignature::verifyTree($dir, $keys_file, $style, $sandboxed);
 	foreach ($style as $name) {
 		echo ($tsv ? "style\ttheme\t" . $name : 'style theme: ' . $name . ' (unsigned; nothing in it runs)') . "\n";
+	}
+	foreach ($sandboxed as $name) {
+		echo ($tsv ? "sandboxed\tplugin\t" . $name : 'sandboxed plugin: ' . $name . ' (a WebAssembly module; nothing in it runs in the site\'s PHP)') . "\n";
 	}
 	foreach ($failures as $f) {
 		if ($tsv) {

@@ -2,6 +2,7 @@
     "account.signup": {
         "label": "New user registration",
         "description": "A new user account was registered.",
+        "personal_data": "The new member's email address and name.",
         "category": "Members",
         "payload": {
             "user_id": "New user id",
@@ -21,6 +22,7 @@
     "newsletter.signup": {
         "label": "Newsletter signup",
         "description": "Someone subscribed to a mailing list / newsletter.",
+        "personal_data": "Which member joined which mailing list.",
         "category": "Members",
         "payload": {
             "mailing_list_id": "Mailing list id",
@@ -40,6 +42,7 @@
     "content.reported": {
         "label": "Content reported",
         "description": "A member reported someone else's content (a forum post, a chat message) for an admin to look at.",
+        "personal_data": "Who reported what, and why.",
         "category": "Content",
         "payload": {
             "report_id": "Content report id",
@@ -64,6 +67,7 @@
     "comment.posted": {
         "label": "New comment posted",
         "description": "A new comment was posted on a blog post.",
+        "personal_data": "The commenter's name and the start of the comment.",
         "category": "Content",
         "payload": {
             "comment_id": "Comment id",
@@ -120,6 +124,61 @@
             "title_template": "This server has sent {sent} this month",
             "body_template": "{detail}",
             "link_template": "/admin/admin_settings"
+        }
+    },
+    "post.published": {
+        "label": "Blog post published",
+        "description": "A blog post was published: saved with a publish time for the first time, or published again after being taken down.",
+        "personal_data": "Who wrote the post.",
+        "category": "Content",
+        "payload": {
+            "post_id": "Blog post id",
+            "post_title": "Blog post title",
+            "post_url": "Blog post URL",
+            "author_user_id": "Author user id",
+            "source_user_id": "Acting user id (who published it), when a person did"
+        }
+    },
+    "account.updated": {
+        "label": "Member profile changed",
+        "description": "A member's name, nickname, organization, email address or time zone changed, by the member, an admin or an email-change confirmation.",
+        "personal_data": "The member's email address and name, and which profile fields changed.",
+        "category": "Members",
+        "payload": {
+            "user_id": "User id",
+            "display_name": "Display name, after the change",
+            "email": "Email address, after the change",
+            "changed": "The fields that changed, comma-separated: first_name, last_name, nickname, organization_name, email, timezone",
+            "source_user_id": "Acting user id, when a person did"
+        }
+    },
+    "message.received": {
+        "label": "New message",
+        "description": "A message was added to a conversation (Messages). Never what it says; for a private conversation not who wrote it or where either, only that it arrived.",
+        "personal_data": "Who wrote to whom in a standard conversation (never the text).",
+        "category": "Members",
+        "payload": {
+            "message_id": "Message id",
+            "conversation_id": "Conversation id (empty for a private conversation)",
+            "sender_user_id": "Sender user id (empty for a private conversation, or a message from another site)",
+            "recipient_count": "How many other members of the conversation it reached",
+            "protection": "The conversation's protection level: standard or private",
+            "source_user_id": "Acting user id (the sender; empty as sender_user_id is)"
+        }
+    },
+    "file.uploaded": {
+        "label": "Public file uploaded",
+        "description": "A person uploaded a file anyone may see (no privacy, permission, group or tier restriction): a library file, a photo, an image in a post.",
+        "personal_data": "Who uploaded the file, and its name.",
+        "category": "Content",
+        "payload": {
+            "file_id": "File id",
+            "file_title": "The name it was uploaded with",
+            "mime_type": "Its type, from its bytes",
+            "file_url": "Its URL",
+            "source": "What it was uploaded for (the file's origin tag), when it says",
+            "owner_user_id": "Uploader user id",
+            "source_user_id": "Acting user id (the uploader)"
         }
     }
 }

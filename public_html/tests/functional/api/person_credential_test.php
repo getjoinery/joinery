@@ -60,6 +60,9 @@ $expected = array(
 	'mailbox/relay_seal_target', 'mailbox/rule_backlog', 'mailbox/rule_outcomes',
 	'mailbox/search_entries',
 	'device_key_enroll',
+	// A sandboxed plugin's member page form (docs/sandboxed_plugins.md): a
+	// machine key, a plugin's own among them, must never submit it as its admin.
+	'sandbox_page',
 );
 $declared = array();
 $roots = array('logic' => '');

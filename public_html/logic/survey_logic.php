@@ -136,4 +136,3 @@ function survey_logic_descriptor() {
     ];
 }
 ?>
-

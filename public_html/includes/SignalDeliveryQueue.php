@@ -22,6 +22,7 @@
  *
  * See docs/webhooks.md.
  *
+ * @version 1.1 - drain() also delivers to sandboxed plugins through the plugin host
  * @version 1.0
  */
 
@@ -69,7 +70,8 @@ class SignalDeliveryQueue {
 	}
 
 	/**
-	 * Send what is due to webhook receivers.
+	 * Send what is due: to webhook receivers as signed POSTs, and to
+	 * sandboxed plugins through the plugin host (SandboxHost::signal()).
 	 *
 	 * @param object|null $client anything with post($url, $body, $headers)
 	 *        returning a SafeHttpResponse; tests pass a stand-in. Null builds
@@ -88,11 +90,11 @@ class SignalDeliveryQueue {
 			   JOIN sgr_signal_receivers r ON r.sgr_signal_receiver_id = d.sgd_sgr_signal_receiver_id
 			  WHERE d.sgd_status = 'pending'
 			    AND d.sgd_next_attempt_time <= now()
-			    AND r.sgr_kind = :kind
+			    AND r.sgr_kind IN (:webhook, :sandbox)
 			    AND r.sgr_is_active = TRUE
 			  ORDER BY d.sgd_signal_delivery_id
 			  LIMIT " . (int)self::DRAIN_BATCH);
-		$q->execute(array(':kind' => SignalReceiver::KIND_WEBHOOK));
+		$q->execute(array(':webhook' => SignalReceiver::KIND_WEBHOOK, ':sandbox' => SignalReceiver::KIND_SANDBOX));
 		$ids = $q->fetchAll(PDO::FETCH_COLUMN);
 
 		$receivers = array();
@@ -157,6 +159,11 @@ class SignalDeliveryQueue {
 		$error = null;
 		$unreachable = false;
 
+		if ($receiver->get('sgr_kind') === SignalReceiver::KIND_SANDBOX) {
+			list($error, $unreachable) = self::toSandbox($delivery, $receiver);
+			return self::record($delivery, $code, $error, $unreachable);
+		}
+
 		$secret = $receiver->signing_secret();
 		$url_problem = SignalReceiver::url_problem((string)$receiver->get('sgr_url'));
 		if ($url_problem !== null) {
@@ -190,6 +197,38 @@ class SignalDeliveryQueue {
 			}
 		}
 
+		return self::record($delivery, $code, $error, $unreachable);
+	}
+
+	/**
+	 * Hand one delivery to a sandboxed plugin through the host. Its payload
+	 * goes as it was raised; what the plugin did is in its call log.
+	 *
+	 * @return array{0:?string,1:bool} the error, or null, and whether the host was unreachable
+	 */
+	private static function toSandbox(SignalDelivery $delivery, SignalReceiver $receiver): array {
+		$plugin = (string)$receiver->get('sgr_plugin');
+		$payload = $delivery->get_json_decoded('sgd_payload');
+		$created = strtotime((string)$delivery->get('sgd_create_time') . ' UTC');
+		$result = SandboxHost::signal($plugin, (string)$delivery->get('sgd_signal'), is_array($payload) ? $payload : array(),
+			(string)$delivery->get('sgd_message_id'), gmdate('Y-m-d\TH:i:s\Z', $created ?: time()));
+		if ($result['status'] === SandboxLog::STATUS_OK) {
+			return array(null, false);
+		}
+		// A plugin that did not answer, or not in time, is not tried again this
+		// pass: one slow module must not spend the drain's budget for everyone.
+		$unreachable = in_array($result['status'], array(SandboxLog::STATUS_UNAVAILABLE, SandboxLog::STATUS_BUSY, SandboxLog::STATUS_TIMEOUT), true);
+		return array('The plugin ' . ($result['status'] === SandboxLog::STATUS_TIMEOUT ? 'timed out' : 'failed') . ': '
+			. ($result['message'] !== '' ? $result['message'] : $result['status']), $unreachable);
+	}
+
+	/**
+	 * Write one attempt's outcome on its row: delivered, or the next try, or
+	 * given up after the last.
+	 *
+	 * @return array result (delivered|retrying|given_up), message, unreachable
+	 */
+	private static function record(SignalDelivery $delivery, ?int $code, ?string $error, bool $unreachable): array {
 		$attempts = (int)$delivery->get('sgd_attempts') + 1;
 		$columns = array(
 			'sgd_attempts'           => $attempts,

@@ -25,6 +25,7 @@
  *                an edit (reviewer2 F1, F4)
  * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
  *                and a stranger's key are not; one answer per request (specs/local_edits_detected.md)
+ * @version 1.2 - verifyTree() passes over a sandboxed plugin, and judges one with PHP beside its module as native
  * @version 1.1 - verifyTree(): a whole site root, every failure listed, style themes passed over, data
  *                folders never walked, the machine's keys and never the tree's (specs/host_restrictions.md)
  * @version 1.0
@@ -263,13 +264,19 @@ exec('cp -a ' . escapeshellarg($tree . '/public_html/plugins/good') . ' ' . esca
 $put($tree . '/public_html/theme/looks', array('theme.json' => '{"name":"looks","styles":["css/a.css"]}', 'css/a.css' => "body{}\n"));
 // Data folders and config/ are never walked: whatever is in them is not code the check owns.
 $put($tree, array('uploads/x.php' => "<?php evil();\n", 'config/anything.php' => "<?php\n", 'static_files/y.php' => "<?php\n"));
+// A sandboxed plugin: exactly a manifest and one module, nothing that runs in PHP.
+$put($tree . '/public_html/plugins/notify', array('manifest.json' => '{"name":"notify"}', 'notify.wasm' => "\0asm\x01\0\0\0"));
 $style = null;
-$f = PackageSignature::verifyTree($tree, $keys_file, $style);
+$sandboxed = null;
+$f = PackageSignature::verifyTree($tree, $keys_file, $style, $sandboxed);
 check($f === array(), 'a node-shaped tree of signed packages verifies, data folders and config/ never walked',
 	json_encode(array_map(function ($x) { return $x['what'] . ': ' . $x['verdict']->line(); }, $f)));
 check($style === array('looks'), 'an unsigned style theme is not a failure, and is named as passed over', json_encode($style));
+check($sandboxed === array('notify'), 'nor is a sandboxed plugin, named as passed over', json_encode($sandboxed));
 
 $put($tree . '/public_html/plugins/evil', array('plugin.json' => '{"name":"evil"}'));
+// One file more than a sandboxed plugin holds makes it a native one, judged as one.
+$put($tree . '/public_html/plugins/notmod', array('manifest.json' => '{"name":"notmod"}', 'notmod.wasm' => "\0asm", 'run.php' => "<?php\n"));
 $put($tree . '/public_html/theme/pagey', array('theme.json' => '{"name":"pagey"}', 'index.php' => "<?php\n"));
 file_put_contents($tree . '/public_html/plugins/loose.php', "<?php\n");
 file_put_contents($tree . '/public_html/plugins/good/includes/G.php', "<?php class G { /* x */ }\n");
@@ -283,8 +290,9 @@ check($got === array(
 		'plugin evil' => 'unsigned',
 		'plugin good' => 'tampered includes/G.php',
 		'plugin loose.php' => 'extra_file',
+		'plugin notmod' => 'unsigned',
 		'theme pagey' => 'unsigned',
-	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, an edited plugin, a loose file',
+	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, a module folder with PHP in it, an edited plugin, a loose file',
 	json_encode($got));
 
 // The keys are the machine's, never the tree's: a tree carrying a key file of

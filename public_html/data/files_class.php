@@ -275,6 +275,9 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // that references it.
 	    'fil_fbb_file_blob_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
 	    'fil_source' => array('type'=>'varchar(64)', 'is_nullable'=>true),
+	    // When the file.uploaded signal went out for it (announce_upload()):
+	    // a file is announced once, when it is public.
+	    'fil_announced_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	    // Drive folder placement. NULL = the drive root (implicit, no root row).
 	    // A file only carries this when it lives in a user's Drive; every other
 	    // creation site leaves it NULL.
@@ -400,10 +403,12 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @param string $content_type MIME hint (fallback; the blob's magic-byte detection wins)
 	 * @param int    $owner_id     fil_usr_user_id — the honest owner
 	 * @param array  $restrictions extra columns to set at creation, e.g. ['fil_private' => true]
+	 * @param bool   $announce     raise file.uploaded for a public file (announce_upload());
+	 *                             false for bytes the site made rather than a person uploaded
 	 * @return File the saved, reloaded File
 	 * @throws FileException when the bytes cannot be placed
 	 */
-	public static function createFromUpload($src_path, $display_name, $content_type, $owner_id, array $restrictions = array()) {
+	public static function createFromUpload($src_path, $display_name, $content_type, $owner_id, array $restrictions = array(), bool $announce = true) {
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 
 		if (!is_file($src_path)) {
@@ -471,8 +476,36 @@ public static function get_by_name($name, $search_deleted = false) {
 			// row to hold the reference. Give it back, and hand the caller the
 			// same keyless File it has always got here.
 			FileBlob::release($blob->key);
+		} elseif ($announce) {
+			$file->announce_upload();
 		}
 		return $file;
+	}
+
+	/**
+	 * The file.uploaded signal, for a file a person uploaded that anyone may
+	 * see (is_public()), once (fil_announced_time). A private or restricted
+	 * file is nobody else's news, and a file the site made itself
+	 * (createFromBytes) is no upload. A file uploaded in Files, whose
+	 * restrictions are set after it lands, is announced when its details are
+	 * saved and it is public then (admin_file_edit).
+	 */
+	public function announce_upload(): void {
+		if (!$this->key || !$this->is_public() || $this->get('fil_announced_time')) {
+			return;
+		}
+		$now = gmdate('Y-m-d H:i:s');
+		self::updateColumns((int)$this->key, array('fil_announced_time' => $now));
+		$this->set('fil_announced_time', $now);
+		SignalBus::dispatch('file.uploaded', array(
+			'file_id'        => (int)$this->key,
+			'file_title'     => (string)$this->get('fil_title'),
+			'mime_type'      => (string)$this->get('fil_type'),
+			'file_url'       => LibraryFunctions::get_absolute_url((string)$this->get_url()),
+			'source'         => $this->get('fil_source') !== null ? (string)$this->get('fil_source') : null,
+			'owner_user_id'  => $this->get('fil_usr_user_id') !== null ? (int)$this->get('fil_usr_user_id') : null,
+			'source_user_id' => $this->get('fil_usr_user_id') !== null ? (int)$this->get('fil_usr_user_id') : null,
+		));
 	}
 
 	/**
@@ -497,7 +530,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		@chmod($tmp, 0666);
 		try {
-			return self::createFromUpload($tmp, ($filename !== null && $filename !== '') ? $filename : 'attachment', $content_type, $owner_id, $restrictions);
+			return self::createFromUpload($tmp, ($filename !== null && $filename !== '') ? $filename : 'attachment', $content_type, $owner_id, $restrictions, false);
 		} finally {
 			if (is_file($tmp)) {
 				@unlink($tmp);
@@ -561,6 +594,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			FileBlob::release($blob->key);
 			return false;
 		}
+		$file->announce_upload();
 		return $file;
 	}
 

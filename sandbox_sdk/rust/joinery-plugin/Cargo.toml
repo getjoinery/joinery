@@ -1,0 +1,11 @@
+[package]
+name = "joinery-plugin"
+version = "1.0.0"
+edition = "2021"
+description = "Write a Joinery sandboxed plugin in Rust: the plugin's calls, its settings, and the three doors (the site's API, the web, a log)."
+license = "MIT"
+
+[dependencies]
+extism-pdk = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

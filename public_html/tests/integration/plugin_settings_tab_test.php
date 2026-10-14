@@ -95,7 +95,7 @@ check(!empty($sources), 'at least one active plugin declares settings', implode(
 
 $all_active = true;
 foreach ($sources as $plugin) {
-	if (!PluginHelper::isPluginActive($plugin)) $all_active = false;
+	if (!PluginHelper::isActiveOfEitherKind($plugin)) $all_active = false;
 }
 check($all_active, 'every discovered plugin is active');
 
