@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.56 - removing a node permanently gives up the data root keys this holder kept for its machine
+ *                 (DataRootEscrowSync::let_go): no longer managed here, it is no longer opened from here (B69).
+ *                 Hiding it keeps them, as it keeps every record, so Restore to Dashboard finds it as it was
  * @version 1.55 - mgn_alerts / sends_alerts(): whether this node's incidents notify anyone; a box in our test
  *                cloud account does not unless someone turns its alerts on
  * @version 1.54 - probe_joinery_version(): the release the node's site says it runs, read now
@@ -1007,7 +1010,8 @@ class ManagedNode extends SystemBase {
 
 	/**
 	 * Permanent deletion cancels the node's unfinished jobs (withdraw_open_jobs),
-	 * waits for a running incident pass and keeps the next one out until it
+	 * gives up the data root keys held for its machine (let_go, B69), waits for
+	 * a running incident pass and keeps the next one out until it
 	 * commits. A pass lists the nodes and then opens incidents
 	 * on them; a node deleted in between would otherwise get an incident after
 	 * its own incidents were deleted, one whose node no longer exists.
@@ -1022,6 +1026,8 @@ class ManagedNode extends SystemBase {
 			if (!$debug) {
 				$db->query('SELECT pg_advisory_xact_lock(' . IncidentReconciler::LOCK_KEY . ')');
 				$this->withdraw_open_jobs();
+				// Before the row goes and its escrow rows lose their node (B69).
+				DataRootEscrowSync::let_go($this);
 			}
 			$done = parent::permanent_delete($debug);
 			if ($own) {
@@ -1107,6 +1113,9 @@ class ManagedNode extends SystemBase {
 		}
 		try {
 			$notes = $this->get('mgn_delete_time') ? [] : $this->release_site_records();
+			if (DataRootEscrowSync::let_go($this) > 0) {
+				$notes[] = 'This management node no longer holds its encrypted data root\'s key: if the machine still runs, it opens only with its recovery key after a reboot.';
+			}
 			$this->permanent_delete();
 			if ($own) {
 				$db->commit();

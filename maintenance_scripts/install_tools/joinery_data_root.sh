@@ -4,6 +4,8 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.25 - What opened the volume (/run/joinery/data-root.opened-by, the node page's 'opened by') follows it: a
+#                 decrypt's finish removes it, and an encrypt's start records the volume as opened by its encryption (B68).
 # Version: 1.24 - The data root's own mount point is locked underneath it, as a bind's is: at create before the
 #                 first mount, and on an existing host at the first tick of each boot while it is empty. A
 #                 Podman call while /srv/joinery is not mounted fails, where it made a new, empty store on the
@@ -243,6 +245,9 @@ LOCK_FILE="${ROOT}/run/joinery/data-root.lock"
 CANNOT_GROW_FLAG="${ROOT}/run/joinery/data-root.cannot-grow"
 # The tick said once that the data root would not mount again.
 NOT_MOUNTED_FLAG="${ROOT}/run/joinery/data-root.not-mounted"
+# What opened the encrypted volume this boot, written by the agent's unlock, and
+# by an encrypt's start for the volume it opens.
+OPENED_BY="${ROOT}/run/joinery/data-root.opened-by"
 # The tick looked once this boot at the data root's own mount point underneath it; it holds
 # how that stands (lock_data_root_mountpoint).
 MOUNTPOINT_FLAG="${ROOT}/run/joinery/data-root.mountpoint-seen"
@@ -2596,6 +2601,9 @@ do_encrypt() {
         conf_set backing "luks-${backing}" sidecar "$sidecar_real" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
     fi
     ENC_STAGE=recorded
+    # The volume open now was opened by this start, not by whatever opened
+    # one at boot (B68).
+    { printf 'its encryption, at %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')" > "$OPENED_BY" && chmod 644 "$OPENED_BY"; } 2>/dev/null || true
     fstab_line absent
     ensure_units || say "WARNING: the units could not all be written; see above"
     # The record, the units and the run's enable link on disk before anything runs on them.
@@ -2934,6 +2942,8 @@ decrypt_finish() {  # DEV
         cryptsetup close "$MAPPING" 2>/dev/null || dmsetup remove "$MAPPING" 2>/dev/null \
             || { say "data root: the mapping would not close; tried again"; return 1; }
     fi
+    # What opened the volume opened one that is gone (B68).
+    rm -f "$OPENED_BY"
     [[ "$plain" == "file" ]] && losetup -n -O NAME -j "$IMAGE_REAL" 2>/dev/null | while read -r d; do losetup -d "$d" 2>/dev/null || true; done
     # From here the record says plain.
     local plain_uuid=""
@@ -3340,7 +3350,7 @@ backing=$(conf_get backing)"
         out+="
 encrypted=1
 open=$(mapping_open && echo 1 || echo 0)
-opened_by=$(head -n 1 "${ROOT}/run/joinery/data-root.opened-by" 2>/dev/null | tr -cd '[:print:]' | cut -c1-120)
+opened_by=$(head -n 1 "$OPENED_BY" 2>/dev/null | tr -cd '[:print:]' | cut -c1-120)
 recipient_fingerprint=$(recipient_get fingerprint)
 recipient_set_by=$(recipient_get set_by)
 sidecar=$([[ -f "$sidecar" ]] && echo 1 || echo 0)
@@ -3498,7 +3508,7 @@ luks_status() {
     else
         say "break-glass copy: MISSING (${sidecar}); only the slots above open it"
     fi
-    opened="$(cat "${ROOT}/run/joinery/data-root.opened-by" 2>/dev/null || true)"
+    opened="$(cat "$OPENED_BY" 2>/dev/null || true)"
     [[ -z "$opened" ]] || say "opened this boot by: ${opened}"
     if [[ -n "$(reencrypt_mode)" ]]; then
         local p done_text

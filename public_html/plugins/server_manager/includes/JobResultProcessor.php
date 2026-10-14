@@ -5,6 +5,10 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.84 - a host report's site_engine (host_report 1.26) is kept: podman, docker, none or unknown, null
+ *                from an older node, for a copy onto a host to be placed by (specs/site_container_engine.md D9)
+ * @version 1.83 - container_inventory keeps 32 mounts a container (a site has 16 volumes), as container_inventory.sh
+ *                 1.2 lists, and a list it cuts, by containers or by mounts, says truncated (B65)
  * @version 1.82 - listening_sockets, container_inventory, spam_learning_status and reboot_machine results (agent
  *                 1.76.0); a host report keeps data_root_script and boot_id (host_report 1.23), and a boot id that
  *                 is not the one a reboot_machine job recorded says the machine came back (reboot_seen)
@@ -3262,9 +3266,9 @@ HTML;
 
 	/** The mount types a container_inventory result names; any other is other. */
 	const CONTAINER_MOUNT_TYPES = ['volume', 'bind', 'tmpfs', 'npipe', 'cluster', 'image'];
-	/** Entries container_inventory.sh lists at most (its MAX_CONTAINERS), and mounts each. */
+	/** Entries container_inventory.sh lists at most (its MAX_CONTAINERS), and mounts each (its MAX_MOUNTS). */
 	const CONTAINER_INVENTORY_MAX = 150;
-	const CONTAINER_INVENTORY_MAX_MOUNTS = 10;
+	const CONTAINER_INVENTORY_MAX_MOUNTS = 32;
 
 	/**
 	 * A container_inventory job's result (agent 1.76.0): every container on
@@ -3282,6 +3286,8 @@ HTML;
 			return ['read' => true, 'engine' => $engine, 'containers' => ($list === 'none') ? 'none' : 'unknown', 'truncated' => false];
 		}
 		$out = [];
+		// Cut here, by containers or by mounts, it says so as the node does.
+		$truncated = ($d['truncated'] ?? false) === true || count($list) > self::CONTAINER_INVENTORY_MAX;
 		foreach (array_slice(array_values($list), 0, self::CONTAINER_INVENTORY_MAX) as $c) {
 			if (!is_array($c)) { continue; }
 			$name = self::host_report_name($c['name'] ?? '');
@@ -3290,6 +3296,7 @@ HTML;
 			$mounts = 'unknown';
 			if (is_array($c['mounts'] ?? null)) {
 				$mounts = [];
+				$truncated = $truncated || count($c['mounts']) > self::CONTAINER_INVENTORY_MAX_MOUNTS;
 				foreach (array_slice(array_values($c['mounts']), 0, self::CONTAINER_INVENTORY_MAX_MOUNTS) as $m) {
 					if (!is_array($m)) { continue; }
 					$mounts[] = [
@@ -3307,7 +3314,7 @@ HTML;
 				'run_spec'   => ($c['run_spec'] ?? null) === true,
 			];
 		}
-		return ['read' => true, 'engine' => $engine, 'containers' => $out, 'truncated' => ($d['truncated'] ?? false) === true];
+		return ['read' => true, 'engine' => $engine, 'containers' => $out, 'truncated' => $truncated];
 	}
 
 	private static function process_container_inventory($job) {
@@ -3784,6 +3791,9 @@ HTML;
 			'served_certificates'          => array_key_exists('served_certificates', $in) ? self::host_report_certificates($in['served_certificates']) : null,
 			// What the machine refuses its sites (host_report 1.21): name => value, none, or unknown.
 			'host_restrictions'            => array_key_exists('host_restrictions', $in) ? self::host_report_restrictions($in['host_restrictions']) : null,
+			// Which engine the machine's sites run on (host_report 1.26); null from an older node.
+			'site_engine'                  => array_key_exists('site_engine', $in)
+				? (in_array($in['site_engine'], array('podman', 'docker', 'none'), true) ? $in['site_engine'] : 'unknown') : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,

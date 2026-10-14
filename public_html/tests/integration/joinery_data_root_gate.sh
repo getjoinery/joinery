@@ -1027,6 +1027,8 @@ cp "$T/cryptsetup.ok" "$T/bin/cryptsetup"
 truncate -s $(( 8 * G )) "$R/srv/joinery.img"
 held_binds; touch "$T/mounted"
 printf 'url=https://holder.example\nslot=0\n' > "$R/etc/joinery/data-root/holder"
+# What opened a volume earlier this boot (a decrypt before this fix left it).
+mkdir -p "$R/run/joinery"; echo 'the escrow holder, https://holder.example, at 2026-10-14 17:31:22 UTC' > "$R/run/joinery/data-root.opened-by"
 : > "$LOG"
 out="$(run encrypt 2>&1)"; rc=$?
 chk "a service that keeps a file on a bind: stopped for the start, the bind unmounted, started again after" \
@@ -1035,6 +1037,8 @@ chk "but never the service this run is part of (B42)" "$(grep -c 'joinery-host-c
 cp "$T/systemctl.d5" "$T/bin/systemctl"; rm -f "$T/bin/fuser"; rm -rf "$R/proc"
 chk "encrypt: exit 0, and says it encrypts in the background" "$rc|$(grep -c 'encrypting in the background' <<< "$out")" "0|1"
 chk "encrypt: says the services stop again when it finishes (B59)" "$(grep -c 'When it finishes, the services stop again' <<< "$out")" "1"
+chk "the volume it opened is recorded as opened by its encryption, not by what opened one earlier (B68)" \
+    "$(grep -c '^its encryption, at 20[0-9-]* [0-9:]* UTC$' "$R/run/joinery/data-root.opened-by")|$(grep -c escrow "$R/run/joinery/data-root.opened-by")" "1|0"
 chk "the escrow holder and slot an earlier encryption recorded: gone with the old header (B55)" \
     "$( [ -e "$R/etc/joinery/data-root/holder" ] && echo kept || echo gone)" "gone"
 chk "the image grows by the 32 MiB the header takes, which XFS never sees" "$(grep -c "^fallocate -l $(( 8 * G + 32 * 1024 * 1024 )) $R/srv/joinery.img$" "$LOG")" "1"
@@ -1221,6 +1225,17 @@ chk "move-in to a place that holds data already: refused, nothing changed" \
     "$rc|$(grep -c 'holds data already' <<< "$out")|$(cat "$R/var/www/html/other/config/f")|$(cat "$B" | grep -c other)" "1|1|x|0"
 rm -rf "${R:?}/var/www/html/other" "${R:?}/srv/joinery/sites/other" "${T:?}/hide_on_mount" "${R:?}/dev/mapper/joinery-data" "${R:?}/etc/php"
 sed -i 's/^reencrypt=.*/reencrypt=encrypt/' "$C"
+
+echo "--- a decrypt that finishes (B68) ---"
+sed -i 's/^reencrypt=.*/reencrypt=decrypt/' "$C"
+mkdir -p "$R/run/joinery"; echo 'the escrow holder, https://holder.example, at 2026-10-14 17:31:22 UTC' > "$R/run/joinery/data-root.opened-by"
+cp "$T/bin/blkid" "$T/blkid.ok"
+stub blkid 'case "$*" in "-p -s TYPE -o value "*) echo xfs ;; *) exec "$GATE_T/blkid.ok" "$@" ;; esac'
+rm -f "$R/dev/mapper/joinery-data"; touch "$T/mounted"; : > "$LOG"
+out="$(run encrypt-resume 2>&1)"; rc=$?
+chk "plain again, and the record of what opened the volume gone with the volume" \
+    "$rc|$(grep -c '^backing=file$' "$C")|$(grep -c 'decrypted, and mounted as it was' <<< "$out")|$( [ -e "$R/run/joinery/data-root.opened-by" ] && echo kept || echo gone)" "0|1|1|gone"
+cp "$T/blkid.ok" "$T/bin/blkid"
 
 echo "--- a create that does not finish leaves nothing ---"
 rm -rf "${R:?}/etc/joinery/data_root" "${R:?}/srv/joinery.img" "${R:?}/srv/joinery.img.recovery" "${R:?}/srv/joinery" "${SD:?}" "${R:?}/run" "${R:?}/dev/mapper"

@@ -24,7 +24,9 @@
  *  - sm_008 releases a provision left live by a removal before this existed;
  *  - removal cancels the node's unfinished jobs (its agent is refused from
  *    then on, so nothing else ends them), either way it is removed, and
- *    sm_012 cancels those a removal before this left open.
+ *    sm_012 cancels those a removal before this left open;
+ *  - removing it for good gives up the data root key this holder kept for
+ *    its machine; hiding it keeps it, as it keeps every record (B69).
  *
  * Run: php plugins/server_manager/tests/node_removal_releases_site_records_test.php
  */
@@ -296,6 +298,40 @@ $j_other_running = nr_job($jobs_other->key, 'running');
 $jobs_other->permanent_delete();
 check(!nr_fresh($j_other)->key && !nr_fresh($j_other_running)->key,
 	'a permanent delete takes its jobs with it (spec node_hide_and_remove)');
+
+// ---------------------------------------------------------------------------
+section('Removed for good, its machine\'s data root key is given up; hidden, it is kept (B69)');
+
+function nr_escrow($node_id) {
+	$row = new DataRootEscrow(NULL);
+	$row->set('dre_identity_key', base64_encode(random_bytes(32)));
+	$row->set('dre_status', 'enrolled');
+	$row->set('dre_hostname', 'HarnessTest node removal escrow');
+	$row->set('dre_mgn_managed_node_id', $node_id);
+	$row->save();
+	$row->load();
+	harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $row->key);
+	return $row;
+}
+
+$esc_node = nr_node('nr-esc-' . $suffix);
+$esc_row = nr_escrow($esc_node->key);
+$esc_node->soft_delete();
+check((string)nr_fresh($esc_row)->get('dre_status') === 'enrolled',
+	'hidden: its key is kept, as every record is, so Restore to Dashboard finds it opening as before');
+$esc_notes = $esc_node->remove_permanently();
+$esc_row = nr_fresh($esc_row);
+check((string)$esc_row->get('dre_status') === 'retired' && !$esc_row->get('dre_mgn_managed_node_id'),
+	'removed for good: what this holder kept for the machine is retired, so no boot of it is answered from here',
+	(string)$esc_row->get('dre_status'));
+check(nr_mentions($esc_notes, 'no longer holds its encrypted data root\'s key'), 'and the page that removed it says so', json_encode($esc_notes));
+$esc_direct = nr_node('nr-esc-direct-' . $suffix);
+$esc_direct_row = nr_escrow($esc_direct->key);
+$esc_other = nr_node('nr-esc-other-' . $suffix);
+$esc_other_row = nr_escrow($esc_other->key);
+$esc_direct->permanent_delete();
+check((string)nr_fresh($esc_direct_row)->get('dre_status') === 'retired' && (string)nr_fresh($esc_other_row)->get('dre_status') === 'enrolled',
+	'a permanent delete by any path does the same, and another node\'s key is untouched');
 
 // ---------------------------------------------------------------------------
 section('sm_012 cancels the jobs a removal before this left open');
