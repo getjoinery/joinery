@@ -3,11 +3,11 @@
 The signal bus is the platform's canonical "something happened" primitive.
 `SignalBus::dispatch($signal, $payload)` records a structured fact at the point
 it occurs and fans it out to every registered subscriber — notifications,
-(future) outgoing webhooks, email workflows, analytics, and plugin handlers.
-Each subscriber derives its own presentation and side effects from the payload.
+outgoing webhooks, and plugin handlers. Each subscriber derives its own
+presentation and side effects from the payload.
 
-Notifications are the first subscriber; see [Notifications](notifications.md)
-for that consumer specifically.
+The two core subscribers have their own docs: [Notifications](notifications.md)
+and [Outgoing Webhooks](webhooks.md).
 
 ## Concepts
 
@@ -59,7 +59,7 @@ The core setting `signal_bus_debug` (default off) makes the bus log each dispatc
 (signal name + JSON payload) to the error log and flag any non-JSON-serializable
 payload value. It is debug-only, so production dispatch never pays for the check.
 Keeping payloads JSON-serializable is the single most important discipline —
-it is what lets webhooks and email workflows ship the payload as-is.
+it is what lets webhooks ship the payload as-is.
 
 ## Payload conventions
 
@@ -116,8 +116,8 @@ bus never looks at it):
   notifications; it exists for other subscribers.
 
 **Never rename a signal in place** — its name is the contract with subscriber
-declarations, stored `ntp_signal_name` preference rows, and future webhook
-subscriptions. To rename, introduce the new name and deprecate the old.
+declarations, stored `ntp_signal_name` preference rows, and the signal lists
+webhooks are subscribed to (`sgr_signals`). To rename, introduce the new name and deprecate the old.
 
 ## Registering subscribers
 
@@ -154,7 +154,7 @@ they ship in the repo, are edited in source, and deploy through the upgrade
 pipeline (like `admin_menus.json`, `theme.json`, `plugin.json`). Never hand-edit
 `signals.json` / `signal_subscribers.json` on a deployed site; a site needing its
 own signals or subscribers ships a plugin. Runtime-mutable state (per-user
-preferences, future webhook URLs) lives in DB tables, never in these files.
+preferences, webhook URLs) lives in DB tables, never in these files.
 
 ## How to add a signal
 

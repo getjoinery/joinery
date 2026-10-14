@@ -811,7 +811,7 @@ class PublicPageFalcon extends PublicPageBase {
 
 		if($sort_data){
 			echo '<div class="col-sm-auto">';
-			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			printf('<form method="get" ACTION="%s">', htmlspecialchars($pager->base_url()));
 			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
 			echo '<label for="'.$pager->prefix().'sort'.'">Sort: </label><select name="'.$pager->prefix().'sort'.'">';
 			foreach ($sort_data as $key => $value) {
@@ -834,24 +834,18 @@ class PublicPageFalcon extends PublicPageBase {
 			}
 			echo '</select>';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
-			}
 			echo '<input type="submit" value="sort" /></form>';
 			echo '</div>';
 		}
 
 		if($filter_data){
 			echo '<div class="col-sm-auto">';
-			printf('<form method="get" ACTION="%s">', $pager->base_url());
+			printf('<form method="get" ACTION="%s">', htmlspecialchars($pager->base_url()));
 			echo $pager->url_vars_as_hidden_input(array('filter'));
 			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
 			$this->renderFilterOptions($filter_data, $pager->get_filter());
 			echo '</select>';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
-			}
 			echo '<input type="submit" value="submit" /></form>';
 			echo '</div>';
 		}
@@ -863,11 +857,8 @@ class PublicPageFalcon extends PublicPageBase {
 			$formwriter->begin_form();
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));
 			echo '<label for="searchterm">Search: </label>
-						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.$pager->search_term().'" size="20" type="text" class="textInput" maxlength="">';
+						  <input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.htmlspecialchars((string)$pager->search_term()).'" size="20" type="text" class="textInput" maxlength="">';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.$key.'" value="'.$value.'">';
-			}
 			echo '<input type="submit" value="Search" />';
 			echo $formwriter->end_form();
 			echo '</div>';
@@ -889,7 +880,7 @@ class PublicPageFalcon extends PublicPageBase {
 			$chevron_right = '<svg class="svg-inline--fa fa-chevron-right fa-w-10" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="chevron-right" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><path fill="currentColor" d="M285.476 272.971L91.132 467.314c-9.373 9.373-24.569 9.373-33.941 0l-22.667-22.667c-9.357-9.357-9.375-24.522-.04-33.901L188.505 256 34.484 101.255c-9.335-9.379-9.317-24.544.04-33.901l22.667-22.667c9.373-9.373 24.569-9.373 33.941 0L285.475 239.03c9.373 9.372 9.373 24.568.001 33.941z"></path></svg>';
 
 			if ($data['prev_10_url']) {
-				echo '<a href="' . $data['prev_10_url'] . '"><button class="btn btn-sm btn-falcon-default me-1" type="button" title="Previous 10">' . $chevron_left . '</button></a>';
+				echo '<a href="' . htmlspecialchars($data['prev_10_url']) . '"><button class="btn btn-sm btn-falcon-default me-1" type="button" title="Previous 10">' . $chevron_left . '</button></a>';
 			} else {
 				echo '<button class="btn btn-sm btn-falcon-default me-1 disabled" type="button" title="Previous 10" disabled="">' . $chevron_left . '</button>';
 			}
@@ -899,13 +890,13 @@ class PublicPageFalcon extends PublicPageBase {
 				if ($page['is_current']) {
 					echo '<li class="active"><button class="page btn btn-sm btn-falcon-default disabled" type="button" disabled="">' . $page['number'] . '</button></li> ';
 				} else {
-					echo '<a href="' . $page['url'] . '"><button class="page btn btn-sm btn-falcon-default" type="button">' . $page['number'] . '</button></a> ';
+					echo '<a href="' . htmlspecialchars($page['url']) . '"><button class="page btn btn-sm btn-falcon-default" type="button">' . $page['number'] . '</button></a> ';
 				}
 			}
 			echo '</ul>';
 
 			if ($data['next_10_url']) {
-				echo '<a href="' . $data['next_10_url'] . '"><button class="btn btn-sm btn-falcon-default ms-1" type="button" title="Next 10">' . $chevron_right . '</button></a>';
+				echo '<a href="' . htmlspecialchars($data['next_10_url']) . '"><button class="btn btn-sm btn-falcon-default ms-1" type="button" title="Next 10">' . $chevron_right . '</button></a>';
 			} else {
 				echo '<button class="btn btn-sm btn-falcon-default ms-1 disabled" type="button" title="Next 10" disabled="">' . $chevron_right . '</button>';
 			}

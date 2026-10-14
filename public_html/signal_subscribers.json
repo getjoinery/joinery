@@ -4,5 +4,11 @@
         "class": "Notify",
         "method": "handle_signal",
         "signals": ["*"]
+    },
+    "signal_delivery_queue": {
+        "file": "includes/SignalDeliveryQueue.php",
+        "class": "SignalDeliveryQueue",
+        "method": "handle_signal",
+        "signals": ["*"]
     }
 }

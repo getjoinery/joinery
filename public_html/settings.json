@@ -1023,6 +1023,17 @@
       "helptext": "Only notifications a member has already read are removed; unread ones are kept however old. 0 keeps everything indefinitely."
     },
     {
+      "name": "signal_delivery_retention_days",
+      "default": "30",
+      "group": "logging",
+      "label": "Days to keep webhook deliveries",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "Delivered and given-up webhook messages older than this are removed by the daily retention sweep. Messages still waiting to be sent are kept. 0 keeps them indefinitely."
+    },
+    {
       "name": "allowed_upload_extensions",
       "default": "gif,jpeg,jpg,png,avif,webp,pdf,xls,doc,xlsx,docx,mp3,mp4,m4a",
       "group": "files",
@@ -3055,6 +3066,12 @@
       "kind": "operator",
       "locator": "bkt_backup_targets.bkt_credentials",
       "enumerator": "BackupTarget::eachCredentialBlob"
+    },
+    {
+      "label": "Webhook signing secret",
+      "feature": "Outgoing webhooks",
+      "kind": "regenerable-breaks-things",
+      "locator": "sgr_signal_receivers.sgr_signing_secret"
     }
   ]
 }

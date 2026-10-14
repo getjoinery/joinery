@@ -1647,7 +1647,7 @@ abstract class PublicPageBase {
 		echo '<div class="table-toolbar">';
 
 		if($sort_data){
-			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
+			printf('<form method="get" action="%s" class="toolbar-form">', htmlspecialchars($pager->base_url()));
 			echo $pager->url_vars_as_hidden_input(array('sort', 'sdirection'));
 			echo '<label for="'.$pager->prefix().'sort">Sort: </label>';
 			echo '<select name="'.$pager->prefix().'sort">';
@@ -1665,35 +1665,26 @@ abstract class PublicPageBase {
 			}
 			echo '</select>';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
-			}
 			echo ' <button type="submit">Sort</button></form>';
 		}
 
 		if($filter_data){
-			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
+			printf('<form method="get" action="%s" class="toolbar-form">', htmlspecialchars($pager->base_url()));
 			echo $pager->url_vars_as_hidden_input(array('filter'));
 			echo '<label for="'.$pager->prefix().'filter">Show: </label>';
 			echo '<select name="'.$pager->prefix().'filter">';
 			$this->renderFilterOptions($filter_data, $pager->get_filter());
 			echo '</select>';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
-			}
 			echo ' <button type="submit">Filter</button></form>';
 		}
 
 		if($search_on){
-			printf('<form method="get" action="%s" class="toolbar-form">', $pager->base_url());
+			printf('<form method="get" action="%s" class="toolbar-form">', htmlspecialchars($pager->base_url()));
 			echo $pager->url_vars_as_hidden_input(array('searchterm'));
 			echo '<label for="'.$pager->prefix().'searchterm">Search: </label>';
 			echo '<input name="'.$pager->prefix().'searchterm" id="'.$pager->prefix().'searchterm" value="'.htmlspecialchars($pager->search_term()).'" size="20" type="text" maxlength="">';
 
-			foreach($pager->url_vars() as $key=>$value){
-				echo '<input type="hidden" name="'.htmlspecialchars($key).'" value="'.htmlspecialchars($value).'">';
-			}
 			echo ' <button type="submit">Search</button></form>';
 		}
 
