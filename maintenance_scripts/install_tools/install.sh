@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-#VERSION 3.21 - The agent's identity is carried across a rebuild on the site container engine by unpacking
+#VERSION 3.21 - The engine is run and looked for by its command (site_engine_bin: /usr/local/bin/podman by
+#               path, whatever PATH holds; reviewer2 T3). The agent's identity is carried across a rebuild on the site container engine by unpacking
 #               the engine's archive on the host: it carries the site's own host ids, which the
 #               id-mapped helper could not set (reviewer2 V1, tar: Cannot change ownership); the
 #               volume's root takes the folder's owner and mode (S2), and a copy that dies part way
@@ -688,7 +689,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/_site_engine.sh" ]; then
     . "$SCRIPT_DIR/_site_engine.sh"
 else
-    site_engine_is_podman() { [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; }
+    site_engine_is_podman() { [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ] || [ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; }
     site_engine_kind() {
         if site_engine_is_podman; then
             echo "install.sh: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $SCRIPT_DIR/install.sh; nothing was done" >&2
@@ -698,6 +699,7 @@ else
     }
     site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
     site_engine_image() { printf '%s\n' "${1#localhost/}"; }
+    site_engine_bin() { site_engine_kind; }
 fi
 # A build on the site engine never trusts the layer cache (a second site's build
 # reused the first site's layers, build arguments and all) and keeps the health
@@ -1794,7 +1796,7 @@ is_port_in_use() {
     fi
 
     # Check Docker container port mappings
-    if command -v "$(site_engine_kind)" &> /dev/null && site_engine info &> /dev/null 2>&1; then
+    if command -v "$(site_engine_bin)" &> /dev/null && site_engine info &> /dev/null 2>&1; then
         if site_engine ps --format '{{.Ports}}' 2>/dev/null | grep -q ":${port}->"; then
             return 0
         fi
@@ -2293,7 +2295,7 @@ is_docker() {
 
 # Check if Docker is installed and running
 is_docker_available() {
-    command -v "$(site_engine_kind)" &> /dev/null && site_engine info &> /dev/null 2>&1
+    command -v "$(site_engine_bin)" &> /dev/null && site_engine info &> /dev/null 2>&1
 }
 
 # Check if bare-metal prerequisites are met
@@ -3016,7 +3018,7 @@ do_build_base() {
 
     print_header "Building Joinery Base Image"
 
-    if ! command -v "$(site_engine_kind)" >/dev/null 2>&1; then
+    if ! command -v "$(site_engine_bin)" >/dev/null 2>&1; then
         print_error "No container engine is installed ($(site_engine_kind)). Run './install.sh docker' first."
         exit 1
     fi
@@ -5859,7 +5861,7 @@ do_list() {
     print_header "Existing Joinery Sites"
 
     # Check for Docker sites
-    if command -v "$(site_engine_kind)" &> /dev/null; then
+    if command -v "$(site_engine_bin)" &> /dev/null; then
         echo -e "${BLUE}Site containers ($(site_engine_kind)):${NC}"
 
         local found=false

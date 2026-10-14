@@ -134,15 +134,16 @@ fi
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$HERE/../install_tools/_site_engine.sh" ]; then
     . "$HERE/../install_tools/_site_engine.sh"
-elif [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; then
+elif [ -L "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ] || [ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; then
     echo "ERROR: this machine's sites run on the site container engine, and there is no install_tools/_site_engine.sh beside this script. Nothing was removed."
     exit 1
 else
     site_engine_kind() { echo docker; }
+    site_engine_bin() { echo docker; }
     site_engine_is_podman() { return 1; }
     site_engine_image() { printf '%s\n' "${1#localhost/}"; }
 fi
-ENGINE="$(site_engine_kind)" || { echo "ERROR: this machine's container engine could not be named. Nothing was removed."; exit 1; }
+ENGINE="$(site_engine_bin)" || { echo "ERROR: this machine's container engine could not be named. Nothing was removed."; exit 1; }
 
 WEB_DIR="$FS/var/www/html"
 APACHE_SITES="$FS/etc/apache2/sites-available"

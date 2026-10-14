@@ -318,7 +318,8 @@ unsigned_packages=refuse
 - The admin scripts (holds, restarts, limits, removal, rebase, the host report, the mail gateway) ask the engine through `install_tools/_site_engine.sh`. A script whose tree has no helper answers Docker, except on a machine with the site container engine installed, where it refuses.
 - A rebuilt site's untagged images older than ten minutes are removed: the engine builds with no cache.
 - It is for a new host; a host with Docker on it refuses `--site-engine`.
-- Not on this engine yet: the agent's own words that read containers. Until they are, it is for test hosts, and Docker is the default.
+- The host agent names the engine by the same rule (`engine.go`), reads a site's volumes under the engine's storage, and copies into a site through it; a site's own agent knows it is in a container by either engine's marker.
+- It is opt-in, for a new host: Docker is the default.
 
 ### Create a site
 

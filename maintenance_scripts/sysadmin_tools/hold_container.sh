@@ -57,7 +57,7 @@ NAME="${2:-}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [[ -f "$HERE/../install_tools/_site_engine.sh" ]] || refuse "there is no install_tools/_site_engine.sh beside this script's tree; nothing was held"
 . "$HERE/../install_tools/_site_engine.sh"
-ENGINE="$(site_engine_kind)" || refuse "this machine's container engine could not be named; nothing was held"
+ENGINE="$(site_engine_bin)" || refuse "this machine's container engine could not be named; nothing was held"
 command -v "$ENGINE" >/dev/null 2>&1 || refuse "this machine has no ${ENGINE}"
 
 # The host's own list: every container, running or not, whose name is its

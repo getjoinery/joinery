@@ -94,7 +94,7 @@ if [[ "${MACHINE}" == "1" ]]; then
     # installers run again only when a bundle arrives or once a day. Installed
     # here, switched off, the converge timer serves a site within a minute of
     # it asking, however soon after the host was built.
-    if ! command -v docker >/dev/null 2>&1 && [[ ! -L /usr/local/lib/joinery-site-engine/current ]]; then
+    if ! command -v docker >/dev/null 2>&1 && [[ ! -L /usr/local/lib/joinery-site-engine/current && ! -e /usr/local/lib/joinery-site-engine/current ]]; then
         echo "mail gateway: not a container host (no docker, no site container engine) - nothing to install."
         exit 0
     fi
@@ -545,10 +545,11 @@ docker_root() {
     local r
     # The site container engine's storage (its graphroot) holds volumes/<name>/_data
     # as Docker's root does; a host has it where its current link is (_site_engine.sh).
-    if [[ -L /usr/local/lib/joinery-site-engine/current ]]; then
-        # Installed but unusable is a refusal, never Docker.
-        [[ -x /usr/local/bin/podman ]] || { echo "mail gateway: the site container engine is installed and /usr/local/bin/podman is not usable" >&2; return 1; }
-        r="$(podman info -f '{{.Store.GraphRoot}}' 2>/dev/null || true)"
+    if [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]]; then
+        # Installed but unusable (no podman, or not a link) is a refusal, never Docker.
+        [[ -L /usr/local/lib/joinery-site-engine/current && -x /usr/local/bin/podman ]] \
+            || { echo "mail gateway: the site container engine is installed and not usable (current link, /usr/local/bin/podman)" >&2; return 1; }
+        r="$(/usr/local/bin/podman info -f '{{.Store.GraphRoot}}' 2>/dev/null || true)"
     else
         r="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)"
     fi
