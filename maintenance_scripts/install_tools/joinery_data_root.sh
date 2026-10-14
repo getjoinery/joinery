@@ -4,6 +4,7 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.21 - An encrypt's start ends by saying the services stop again for a few seconds when it finishes (B59).
 # Version: 1.20 - An encrypt's start forgets the escrow holder and slot an earlier encryption recorded: its new
 #                 header holds no escrow slot, and an enrolment removed "the earlier slot" by that number (B55).
 # Version: 1.19 - An encrypt's start cut off while cryptsetup made the header is put back as it was: cryptsetup
@@ -2537,7 +2538,7 @@ do_encrypt() {
     mounted_ok || die "the encryption has started, but ${MNT_REAL} is not mounted; see: systemctl status ${MOUNT_UNIT}"
     # Step 4: online, at idle priority.
     systemctl start --no-block "$ENCRYPT_UNIT" || say "WARNING: ${ENCRYPT_UNIT} did not start; see: systemctl status ${ENCRYPT_UNIT}"
-    say "The data root is back, and encrypting in the background (joinery_data_root.sh status shows how far). A reboot part-way opens it with the recovery key."
+    say "The data root is back, and encrypting in the background (joinery_data_root.sh status shows how far). When it finishes, the services stop again for a few seconds, as the logs move onto it. A reboot part-way opens it with the recovery key."
 }
 
 # The start's end, whichever way it came, once the services were stopped:

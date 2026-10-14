@@ -36,6 +36,9 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.4 - swapping back notes a site AAAA record still naming the copy's IPv6, which no swap moves back (B61);
+ *                refused while the copy's encrypted data root has no escrow holder: the swap restarts it, and it
+ *                would wait for its recovery key (B58)
  * @version 1.3 - an escrow row held here follows its machine's address (encrypted data root D3)
  * @version 1.2 - each of our accounts is its own account: two servers swap only within one (cloud_accounts_list)
  * @version 1.1 - a container site's shared server is never swapped or powered off
@@ -126,6 +129,12 @@ class IpSwapMove {
 				$why[] = "The {$whose} server was handed to its customer's own account.";
 			}
 		}
+		if (!self::opens_by_itself($copy)) {
+			$why[] = 'The copy\'s server keeps its data encrypted and no management node holds its unlock key yet, so the restart '
+				. 'an address swap makes would leave it waiting for its recovery key. It is enrolled within minutes of reporting '
+				. 'once its agent is ' . DataRootEscrowSync::DORMANT_COPY_MIN_AGENT_VERSION . ' or newer; its node page then names '
+				. 'the holder. Try again then.';
+		}
 		if (self::account_of($s) !== self::account_of($c)) {
 			$why[] = 'The two servers are on different cloud accounts; an address moves only between servers of one account.';
 		}
@@ -142,6 +151,17 @@ class IpSwapMove {
 			}
 		}
 		return $why;
+	}
+
+	/**
+	 * Whether a machine boots without anyone typing its recovery key: its data
+	 * root is not encrypted, or an escrow holder opens it (its last report
+	 * names one). A machine that has not reported says nothing either way.
+	 */
+	public static function opens_by_itself(ManagedNode $node): bool {
+		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
+		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
+		return !is_array($enc) || trim((string)($enc['holder'] ?? '')) !== '';
 	}
 
 	/** Which account a provision's instance lives on: 'oca:<id>' for one of ours, 'cca:<id>' for a connected one. */
@@ -222,7 +242,8 @@ class IpSwapMove {
 			foreach (self::aaaa($domain) as $a) {
 				if (@inet_pton($a) === @inet_pton($s_v6)) {
 					$why[] = "{$domain} has an AAAA record for the site's server's IPv6 address {$s_v6}, and IPv6 addresses do "
-						. 'not move. Remove it, or point it at the copy\'s IPv6 (' . ($c['ipv6'] ?: 'none') . '), before switching.';
+						. 'not move. Remove it, or point it at the copy\'s IPv6 (' . ($c['ipv6'] ?: 'none') . '), before switching; '
+						. 'if the site goes back, point it back.';
 				}
 			}
 		}
@@ -232,6 +253,7 @@ class IpSwapMove {
 		return array(
 			'provider' => 'linode',
 			'region'   => (string)$s['region'],
+			'domain'   => $domain,
 			'source'   => array('provision_id' => (int)$sp->key, 'instance_id' => (string)$sp->get('cvp_instance_id'),
 				'ip' => $s_ip, 'ipv6' => $s_v6, 'rdns' => (string)$s_addr['rdns']),
 			'copy'     => array('provision_id' => (int)$cp->key, 'instance_id' => (string)$cp->get('cvp_instance_id'),
@@ -338,6 +360,22 @@ class IpSwapMove {
 			}
 		}
 		self::follow_records($plan, $want);
+		// IPv6 addresses never move: a record the owner pointed at the copy's
+		// before switching still sends IPv6 visitors there (B61).
+		$state['notes'] = array();
+		$c_v6 = (string)($plan['copy']['ipv6'] ?? '');
+		$domain = (string)($plan['domain'] ?? '');
+		if ($back && $c_v6 !== '' && $domain !== '') {
+			foreach (self::aaaa($domain) as $a) {
+				if (@inet_pton($a) === @inet_pton($c_v6)) {
+					$s_v6 = (string)($plan['source']['ipv6'] ?? '');
+					$state['notes'][] = "{$domain} has an AAAA record for the copy's IPv6 address {$c_v6}, which did not move back: "
+						. 'IPv6 visitors still reach the copy. Point it at the site\'s server' . ($s_v6 !== '' ? " ({$s_v6})" : '')
+						. ', or remove it.';
+					break;
+				}
+			}
+		}
 		return 'done';
 	}
 

@@ -320,8 +320,8 @@ check(!DataRootEscrowSync::should_enrol($node, $crow, array_merge($enc, array('h
 harness_set_setting_mem('data_root_encryption_offered', '0');
 check(!DataRootEscrowSync::should_enrol($node, $crow, $enc), 'No enrolment job while this holder takes no new enrolments (D7)');
 harness_set_setting_mem('data_root_encryption_offered', '1');
-// A dormant copy refuses an enrolment until it takes over its source's node:
-// it is known, and asked nothing.
+// An older agent's dormant copy refuses an enrolment until it takes over its
+// source's node: it is known, and asked nothing.
 $dnode = new ManagedNode(NULL);
 $dnode->set('mgn_name', 'HarnessTest escrow copy');
 $dnode->set('mgn_slug', 'escrowtest-' . bin2hex(random_bytes(3)));
@@ -341,13 +341,42 @@ if ($drow) { $made_escrows[] = $drow->key; }
 $asked = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$dnode->key
 	. " AND mjb_job_type IN ('data_root_enrol', 'data_root_recipient')")->fetchColumn();
 check($drow && $drow->get('dre_status') === 'known' && $asked === 0,
-	'A dormant copy, open: known, and sent no enrolment or recipient it would refuse every hour', 'jobs: ' . $asked);
+	'An older agent\'s dormant copy, open: known, and sent no enrolment or recipient it would refuse every hour', 'jobs: ' . $asked);
+$enrols = function (ManagedNode $n) use ($db) {
+	return (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$n->key
+		. " AND mjb_job_type = 'data_root_enrol'")->fetchColumn();
+};
 $dnode->set('mgn_install_state', null);
 $dnode->save();
 DataRootEscrowSync::from_host_report($dnode, $denc);
-$asked = (int)$db->query("SELECT count(*) FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = " . (int)$dnode->key
-	. " AND mjb_job_type = 'data_root_enrol'")->fetchColumn();
-check($asked === 1, 'once it is the site, its next host report enrols it', 'jobs: ' . $asked);
+check($enrols($dnode) === 1, 'once it is the site, its next host report enrols it', 'jobs: ' . $enrols($dnode));
+DataRootEscrowSync::from_host_report($dnode, $denc);
+check($enrols($dnode) === 1, 'that job not yet done holds the next back an hour');
+// B60: a job that succeeded holds nothing back. A machine reported not
+// enrolled after it is another machine (a switch-over), or a header made again.
+$db->exec("UPDATE mjb_management_jobs SET mjb_status = 'completed', mjb_completed_time = now() WHERE mjb_mgn_managed_node_id = "
+	. (int)$dnode->key . " AND mjb_job_type = 'data_root_enrol'");
+DataRootEscrowSync::from_host_report($dnode, $denc);
+check($enrols($dnode) === 2, 'one that succeeded, with this machine still not enrolled: enrolled again at once (B60)', 'jobs: ' . $enrols($dnode));
+// B58: a dormant copy whose agent takes the escrow words on a quiet site is
+// enrolled before its switch-over, whose address swap restarts it.
+$enode = new ManagedNode(NULL);
+$enode->set('mgn_name', 'HarnessTest escrow copy 2');
+$enode->set('mgn_slug', 'escrowtest-' . bin2hex(random_bytes(3)));
+$enode->set('mgn_host', '127.0.0.1');
+$enode->set('mgn_uptime_enabled', false);
+$enode->set('mgn_install_state', 'copy');
+$enode->set('mgn_agent_primitives', 'data_root_enrol,data_root_recipient,host_report');
+$enode->set('mgn_agent_version', DataRootEscrowSync::DORMANT_COPY_MIN_AGENT_VERSION);
+$enode->set('mgn_agent_public_key', base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair())));
+$enode->save();
+$made_nodes[] = $enode->key;
+$e = escrow_machine();
+DataRootEscrowSync::from_host_report($enode, array_merge($enc, array('identity' => $e['pub'], 'open' => true)));
+$erow = escrow_row($e);
+if ($erow) { $made_escrows[] = $erow->key; }
+check($erow && (int)$erow->get('dre_mgn_managed_node_id') === (int)$enode->key && $enrols($enode) === 1,
+	'A dormant copy on agent ' . DataRootEscrowSync::DORMANT_COPY_MIN_AGENT_VERSION . ': enrolled before its switch-over (B58)', 'jobs: ' . $enrols($enode));
 // B35: the same key is sent once an hour at most; a rotated one at once.
 $key_a = base64_encode(random_bytes(32));
 $key_b = base64_encode(random_bytes(32));

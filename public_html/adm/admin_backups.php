@@ -2,6 +2,7 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.22 - Encrypt's confirm says who stops again when it finishes: the services (B59)
  * @version 1.21 - Encrypt's confirm says its services stop again for a few seconds when it finishes (B45)
  * @version 1.20 - the Data root line: encrypted, what opened it, whose key its break-glass copy is sealed
  *                 to, advice, and Encrypt the data root on a server not hosted by an operator (WP4)
@@ -352,7 +353,7 @@ if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
 			}
 			if ($offer['ready']) {
 				$dr_form('data_root_encrypt', 'Encrypt the data root',
-					'Encrypt this server\'s data root where it stands? Its services stop for a few seconds, then it encrypts in the background for hours, and stop again for a few seconds when it finishes, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key, so a reboot part-way, or a lost key slot, opens with that key.');
+					'Encrypt this server\'s data root where it stands? Its services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key, so a reboot part-way, or a lost key slot, opens with that key.');
 			}
 		}
 	}

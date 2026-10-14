@@ -27,6 +27,14 @@
  * ever encrypted, and an encryption made again enrols afresh. A retired row
  * stays: it records a key this holder gave up.
  *
+ * A DORMANT COPY (B58) is enrolled and sent its recipient as any machine is,
+ * once its agent takes both on a quiet site (DORMANT_COPY_MIN_AGENT_VERSION):
+ * an address swap restarts it, and it must open by escrow then. Its row follows
+ * it to its source's node at the switch-over (SiteCopySwap).
+ *
+ * @version 1.6 - a dormant copy is enrolled and sent its recipient once its agent takes both on a quiet site (B58);
+ *                only an enrolment job that has not succeeded holds the next back an hour, so the machine that
+ *                takes over a node is enrolled at once (B60)
  * @version 1.5 - from_plain_report(): a node reporting a plain data root drops what this holder kept for it; its
  *                enrolled row stayed, hid its node page's Encrypt and stopped a new encryption from enrolling (B55)
  * @version 1.4 - a dormant copy is sent no enrolment and no recipient: it refuses both until it takes over its
@@ -39,8 +47,11 @@
 
 class DataRootEscrowSync {
 
-	/** No second enrolment job for a node inside this many seconds of one. */
+	/** No second enrolment job for a node inside this many seconds of one that has not succeeded. */
 	const ENROL_RETRY_SECONDS = 3600;
+
+	/** The first agent that takes data_root_enrol and data_root_recipient on a dormant copy (B58). */
+	const DORMANT_COPY_MIN_AGENT_VERSION = '1.75.5';
 
 	public static function from_host_report(ManagedNode $node, array $enc): void {
 		$identity = (string)($enc['identity'] ?? '');
@@ -63,10 +74,9 @@ class DataRootEscrowSync {
 		$row->note_box(json_encode(array('fingerprint' => $enc['box_fingerprint'] ?? '', 'sealed' => $enc['box_sealed'] ?? '')));
 		$row->save();
 
-		// A dormant copy runs only read-only words and its copy's own until it
-		// takes over its source's node, and refuses both of these. They follow
-		// its first host report after the switch-over.
-		if (trim((string)$node->get('mgn_install_state')) === 'copy') {
+		// An older agent's dormant copy refuses both of these until it takes
+		// over its source's node; they follow its first report after that.
+		if (trim((string)$node->get('mgn_install_state')) === 'copy' && !self::copy_takes_escrow($node)) {
 			return;
 		}
 		if (!empty($enc['open'])) {
@@ -112,8 +122,24 @@ class DataRootEscrowSync {
 		return !self::enrol_job_recent($node);
 	}
 
+	/** Whether a dormant copy's agent takes the escrow words on a quiet site (B58). */
+	public static function copy_takes_escrow(ManagedNode $node): bool {
+		$v = AgentVocabulary::version($node);
+		return $v !== '' && version_compare($v, self::DORMANT_COPY_MIN_AGENT_VERSION, '>=');
+	}
+
+	/**
+	 * An enrolment job within the retry window that has not succeeded. One
+	 * that succeeded holds nothing back: a machine reported not enrolled after
+	 * it is another machine on this node (a switch-over) or a header made
+	 * again (an encryption after a decryption), and is enrolled at once (B60).
+	 */
 	private static function enrol_job_recent(ManagedNode $node): bool {
-		return self::job_recent($node, 'data_root_enrol');
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare("SELECT 1 FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'data_root_enrol'
+			AND mjb_status <> 'completed' AND mjb_create_time > now() - (? * interval '1 second') LIMIT 1");
+		$q->execute(array($node->key, self::ENROL_RETRY_SECONDS));
+		return (bool)$q->fetchColumn();
 	}
 
 	/** A data_root_recipient job carrying this very key, made within the retry window. */
@@ -122,14 +148,6 @@ class DataRootEscrowSync {
 		$q = $db->prepare("SELECT 1 FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = 'data_root_recipient'
 			AND mjb_commands->'params'->>'public_key' = ? AND mjb_create_time > now() - (? * interval '1 second') LIMIT 1");
 		$q->execute(array($node->key, $key, self::ENROL_RETRY_SECONDS));
-		return (bool)$q->fetchColumn();
-	}
-
-	private static function job_recent(ManagedNode $node, string $type): bool {
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare("SELECT 1 FROM mjb_management_jobs WHERE mjb_mgn_managed_node_id = ? AND mjb_job_type = ?
-			AND mjb_create_time > now() - (? * interval '1 second') LIMIT 1");
-		$q->execute(array($node->key, $type, self::ENROL_RETRY_SECONDS));
 		return (bool)$q->fetchColumn();
 	}
 
