@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.21 - carries _site_engine.sh, which install.sh and _site_run_spec.sh source to name the engine a
+ *                 host's sites run on: without it a site container engine host's reach probe (setup_ssl.sh)
+ *                 called Docker, which is not there, and no certificate was ever issued (B11)
  * @version 1.20 - carries host_swap.sh, the host installer that keeps a machine's swap in compressed memory (B32)
  * @version 1.19 - carries the mail gateway's installer and binaries: a Docker host runs it --machine for its
  *                 container sites (HOST_PLUGIN_INSTALLERS, specs/mail_apps_plugin.md § A4)
@@ -136,6 +139,10 @@ class SupportBundlePublisher {
 		// setup_ssl.sh sources this for provision_origin_cert() and its
 		// helpers; without it the bundle ships a script that cannot run.
 		'maintenance_scripts/install_tools/install.sh',
+		// install.sh and _site_run_spec.sh source this for the engine a host's
+		// sites run on (Docker, or the site container engine) and call every
+		// container command through it. Sources nothing.
+		'maintenance_scripts/install_tools/_site_engine.sh',
 		// decommission_site (self-verifying; sources nothing).
 		'maintenance_scripts/sysadmin_tools/remove_account.sh',
 		// remove_site_certificate, and what remove_account.sh runs as its

@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/_site_engine.sh, maintenance_scripts/install_tools/_site_run_spec.sh]
+# covers: [maintenance_scripts/install_tools/_site_engine.sh, maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/install_tools/install.sh]
 #
 # A site's run spec on a host whose sites run on the site container engine
 # (specs/site_container_engine.md D4, D5), against a stand-in podman on PATH:
@@ -24,6 +24,8 @@
 #   - a site network is made with no DNS service and its bridge named, read back
 #     from Podman's account, and one with a DNS service is not a site network
 #   - adopt is Docker's alone, and the CPU count and the remap answer are Podman's
+#   - install.sh calls docker by name only in Docker's own host install, and
+#     names the engine itself in what it tells the operator to type
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -145,6 +147,33 @@ chk "adopt is refused on the site engine" "$(in_lib "run_spec_adopt nospec"; ech
 chk "  saying the site is rebuilt instead" "$(grep -c 'rebuild the site with install.sh site' "$T/err")" "1"
 chk "the CPU count is Podman's" "$(STUB_CPUS=8 in_lib "run_spec_host_cpus")" "8"
 chk "and every site's ids are its own" "$(in_lib "run_spec_docker_remaps_ids; echo \$?")" "0"
+
+echo "install.sh speaks to the site's engine"
+# Every docker command outside Docker's own host install, by function (B10: the
+# reach probe's docker exec failed on every site engine host).
+bare_docker() {  # FILE
+    awk '/^[a-zA-Z_][a-zA-Z0-9_]*\(\) *\{/ { fn = $1; sub(/\(\).*/, "", fn) } /^}/ { fn = "" } /^[[:space:]]*#/ { next }
+         /(^|[^_a-z-])docker (exec|ps|run|inspect|cp|volume|network|image|images|build|stop|rm|start|logs|port|info|version|pull|tag|rmi|kill|restart|wait|update|system)( |$)/ \
+         && fn != "do_docker_install" && fn != "docker_multi_tenant_existing" { print NR ":" (fn == "" ? "(top)" : fn) }' "$1"
+}
+INSTALL="$TOOLS/install.sh"
+chk "no docker command outside Docker's own host install" "$(bare_docker "$INSTALL" | tr '\n' ' ')" ""
+sed 's/site_engine exec "$sitename" sh -c "mkdir -p/docker exec "$sitename" sh -c "mkdir -p/' "$INSTALL" > "$T/install_mut.sh"
+chk "  which a docker exec put back in the reach probe fails" "$(bare_docker "$T/install_mut.sh" | grep -c ':name_reaches_here$')" "1"
+chk "what the operator is told to type names the engine, not this script's function" "$(grep -v '^[[:space:]]*#' "$INSTALL" | grep -E 'echo|print_' | grep -c 'site_engine \(exec\|logs\|stop\|start\)')" "0"
+
+echo "A copy without the helper beside it"
+# outbound_limits.sh installs _site_run_spec.sh alone; a tree missing the helper
+# must never send a site engine host's calls to Docker (B11).
+mkdir -p "$T/lone"; cp "$TOOLS/_site_run_spec.sh" "$TOOLS/install.sh" "$T/lone/"
+lone() { (unset JOINERY_SITE_ENGINE_KIND; bash -c ". '$T/lone/$1'; $2" 2>"$T/err"); }
+chk "the run spec helper alone, where the engine is not installed: docker" "$(SITE_ENGINE_ROOT="$T/none" lone _site_run_spec.sh site_engine_kind)" "docker"
+chk "  and install.sh alone: docker" "$(SITE_ENGINE_ROOT="$T/none" lone install.sh site_engine_kind)" "docker"
+: > "$STUB_CALLS"
+chk "the run spec helper alone, where the engine is installed: every call refused" "$(SITE_ENGINE_ROOT="$FX" lone _site_run_spec.sh 'site_engine ps; echo $?')" "1"
+chk "  saying the helper is missing" "$(grep -c 'no _site_engine.sh beside' "$T/err")" "1"
+chk "  and nothing reached docker" "$(grep -c '^ps' "$STUB_CALLS")" "0"
+chk "install.sh alone, where the engine is installed: refused too, and errexit stops its caller there" "$(SITE_ENGINE_ROOT="$FX" lone install.sh 'site_engine ps; echo carried on') $(grep -c 'no _site_engine.sh beside' "$T/err")" " 1"
 
 echo
 echo "site_engine_run_spec gate: $passed passed, $failed failed"

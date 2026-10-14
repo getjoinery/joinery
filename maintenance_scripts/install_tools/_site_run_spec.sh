@@ -3,6 +3,10 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.12 - Without _site_engine.sh beside it (outbound_limits.sh installs a copy alone) it
+#                 answers Docker only where the site container engine is not installed; on a
+#                 machine where it is, every engine call is refused and says why, never sent to
+#                 Docker (B11: the agent's support bundle carried no helper).
 # Version: 1.11 - A host whose sites run on the site container engine (our own Podman build,
 #                 specs/site_container_engine.md WP2): every container command goes through
 #                 site_engine (_site_engine.sh); each site owns an id block, idblock=N, picked
@@ -100,13 +104,22 @@
 # Sourced, never executed:  . "${TOOLS_DIR}/_site_run_spec.sh"
 # Functions only; sourcing it runs nothing.
 
-# Which engine runs this host's sites, and the one way to call it.
+# Which engine runs this host's sites, and the one way to call it. A copy of
+# this file with no helper beside it (outbound_limits.sh installs one) answers
+# Docker, which is the helper's own answer on any machine the site container
+# engine is not installed on; on one it is, every engine call is refused.
 if [[ -f "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh" ]]; then
     . "$(dirname "${BASH_SOURCE[0]}")/_site_engine.sh"
 else
-    site_engine() { docker "$@"; }
-    site_engine_kind() { echo docker; }
-    site_engine_is_podman() { return 1; }
+    site_engine_is_podman() { [[ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]]; }
+    site_engine_kind() {
+        if site_engine_is_podman; then
+            echo "run spec: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $(dirname "${BASH_SOURCE[0]}")/_site_run_spec.sh; nothing was done" >&2
+            return 1
+        fi
+        echo docker
+    }
+    site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
 fi
 
 RUN_SPEC_VERSION=2

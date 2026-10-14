@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 3.20 - The reach probe is placed in a site's container through site_engine, so a name on a
+#               site container engine host can be found to reach it (it always failed there: B10,
+#               site_container_engine release proof on 0.8.494); the hints after a site install
+#               name the engine itself, never this script's site_engine function. Were a tree
+#               ever without _site_engine.sh, it refuses every engine call on a machine with the
+#               site container engine instead of sending them to Docker (B11).
 #VERSION 3.19 - A host's sites run on the engine _site_engine.sh names (specs/site_container_engine.md
 #               WP2): every container command in the site path, the base build and the listings
 #               goes through site_engine; on the site container engine an image is built in Docker's
@@ -661,14 +667,23 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Which engine runs this host's sites (_site_engine.sh, specs/site_container_engine.md
-# D7): the site and host paths call it through site_engine. The base image's build
-# copies install.sh without it, so a missing helper means Docker.
+# D7): the site and host paths call it through site_engine. Every tree that carries
+# install.sh carries the helper beside it (the release, the base image's build, the
+# agent's support bundle); were one ever without it, it answers Docker only where
+# the site container engine is not installed, and refuses every engine call where
+# it is, rather than sending them to Docker (B11).
 if [ -f "$SCRIPT_DIR/_site_engine.sh" ]; then
     . "$SCRIPT_DIR/_site_engine.sh"
 else
-    site_engine() { docker "$@"; }
-    site_engine_kind() { echo docker; }
-    site_engine_is_podman() { return 1; }
+    site_engine_is_podman() { [ -e "${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}/usr/local/lib/joinery-site-engine/current" ]; }
+    site_engine_kind() {
+        if site_engine_is_podman; then
+            echo "install.sh: this machine's sites run on the site container engine, and there is no _site_engine.sh beside $SCRIPT_DIR/install.sh; nothing was done" >&2
+            return 1
+        fi
+        echo docker
+    }
+    site_engine() { local kind; kind="$(site_engine_kind)" || return 1; command "$kind" "$@"; }
 fi
 # A build on the site engine never trusts the layer cache (a second site's build
 # reused the first site's layers, build arguments and all) and keeps the health
@@ -1534,7 +1549,7 @@ name_reaches_here() {
     # site, inside the container for a proxied one (the host's tree is not
     # what the proxy forwards to).
     if [ "$kind" = "proxy" ]; then
-        docker exec "$sitename" sh -c "mkdir -p '${dir}' && printf '%s' '${body}' > '${file}'" 2>/dev/null \
+        site_engine exec "$sitename" sh -c "mkdir -p '${dir}' && printf '%s' '${body}' > '${file}'" 2>/dev/null \
             || { REACH_STATE="none"; print_warning "Could not place the reach probe in container ${sitename}."; rm -f "$out"; return 1; }
     else
         mkdir -p "$dir" 2>/dev/null || true
@@ -5420,7 +5435,7 @@ EOF
 
         if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
             print_warning "Site not responding after $MAX_ATTEMPTS attempts"
-            print_info "This may be normal - check logs with: docker logs $SITENAME"
+            print_info "This may be normal - check logs with: $(site_engine_kind) logs $SITENAME"
         fi
 
         ATTEMPT=$((ATTEMPT + 1))
@@ -5515,7 +5530,7 @@ EOF
         if [ -n "$CONTAINER_STATUS" ]; then
             echo -e "Container status: ${GREEN}$CONTAINER_STATUS${NC}"
         else
-            print_warning "Container may not be running. Check logs with: docker logs $SITENAME"
+            print_warning "Container may not be running. Check logs with: $ENGINE_CMD logs $SITENAME"
         fi
 
         list_docker_containers

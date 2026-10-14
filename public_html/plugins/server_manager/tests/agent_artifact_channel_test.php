@@ -323,6 +323,28 @@ check($copied, 'every declared bundle file exists in this tree',
 	'SupportBundlePublisher declares a file the platform does not ship: '
 	. implode(', ', SupportBundlePublisher::declaredContents()));
 
+// A bundled script that sources a helper needs the helper in the bundle too
+// (B11: install.sh sourced _site_engine.sh, which the bundle did not carry, and
+// on a site container engine host every engine call it made went to Docker).
+// The exceptions are helpers the runner sources only for a site, never in the
+// --machine mode a bundle runs it in, each guarded by its own presence check.
+$site_only = array(
+	'maintenance_scripts/install_tools/_plugin_installers_start.sh' => array('_site_state.sh', '_host_restrictions.sh', '_config_secrets.sh'),
+);
+$bundled_names = array_map('basename', SupportBundlePublisher::declaredContents());
+$unbundled = array();
+foreach (SupportBundlePublisher::declaredContents() as $rel) {
+	if (substr($rel, -3) !== '.sh') { continue; }
+	foreach ((array)@file(rtrim($real_site, '/') . '/' . $rel) as $n => $line) {
+		if (!preg_match('/^\s*(?:\.|source)\s/', (string)$line) || !preg_match_all('/([A-Za-z0-9_.-]+\.sh)\b/', (string)$line, $m)) { continue; }
+		$helper = end($m[1]);
+		if (!in_array($helper, $bundled_names, true) && !in_array($helper, $site_only[$rel] ?? array(), true)) {
+			$unbundled[] = $rel . ':' . ($n + 1) . ' sources ' . $helper;
+		}
+	}
+}
+check($unbundled === array(), 'every helper a bundled script sources is in the bundle', implode('; ', $unbundled));
+
 $first = SupportBundlePublisher::publish($site);
 check($first['status'] === 'built', 'the bundle builds', $first['message']);
 check(!empty($first['version']), 'the bundle carries a version', $first['message']);
