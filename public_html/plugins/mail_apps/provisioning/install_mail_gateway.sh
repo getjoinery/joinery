@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # install_mail_gateway.sh - host installer for the mail_apps plugin.
+# Version: 2.3 - the site's own www. name is refused saying it is its own front door's, not another site's.
 # Version: 2.2 - recheck fixes (reviewer2): one pending name per site (a second failed name drops the first); a
 #                switch whose gateway did not come up drops its old name on the next pass (<site>.previous); a
 #                site already serving a name keeps it and answers on, even if another site claims it later; a
@@ -646,7 +647,11 @@ mail_name_problem() {
                 for (i = 2; i <= NF; i++) { v = tolower($i)
                     if (v == n || (substr(v, 1, 2) == "*." && length(n) > length(v) - 1 && substr(n, length(n) - length(v) + 2) == substr(v, 2))) found = 1 } }
                 END { exit !found }' "${conf}"; then
-            echo "${name} belongs to another site on this server."
+            if [[ "${c}" == "${site}" ]]; then
+                echo "${name} is answered by the site's own front door (its www. redirect); use a name of its own, such as mail.${web#www.}."
+            else
+                echo "${name} belongs to another site on this server."
+            fi
             return 0
         fi
     done
