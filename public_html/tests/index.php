@@ -17,6 +17,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('tests/lib/discovery.php'));
+require_once(PathHelper::getIncludePath('tests/lib/gate.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10); // superadmin; redirects if not authorized
@@ -24,6 +25,7 @@ $session->check_permission(10); // superadmin; redirects if not authorized
 $root = rtrim(PathHelper::getIncludePath(''), '/');
 $debug_on = (bool)Globalvars::get_instance()->get_setting('debug');
 $discovered = harness_discover($root);
+$gate_holder = gate_holder_read(gate_dir($root, $debug_on));
 
 // Group declared tests by tier in a fixed order.
 $tier_order = array('safe', 'db', 'test-db', 'live');
@@ -121,6 +123,14 @@ $csrf = $session->get_api_csrf_token();
       <strong>dev-only</strong> tests are locked; <strong>live</strong> and <strong>prod-verify</strong> tests require confirmation.
     <?php endif; ?>
   </div>
+
+<?php if ($gate_holder): ?>
+  <div class="env-banner">
+    A gate is running on this box: <strong><?php echo htmlspecialchars(gate_holder_describe($gate_holder)); ?></strong>
+    <?php if (empty($gate_holder['unknown'])): ?>— <?php echo htmlspecialchars(gate_holder_summary($gate_holder)); ?><?php endif; ?>.
+    Runs from this page are single suites and do not queue behind it.
+  </div>
+<?php endif; ?>
 
 <?php foreach ($tier_order as $tier): $tests = $by_tier[$tier]; if (!$tests) continue; ?>
   <section class="tier" data-tier="<?php echo $tier; ?>">

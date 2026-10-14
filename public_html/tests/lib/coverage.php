@@ -15,6 +15,7 @@
  * tests/unit/changed_selection_test.php exercises the selection logic with
  * fabricated maps and change lists.
  *
+ * @version 1.2 - tests/lib/gate.php (the lock, run records and reuse) is harness: a change runs everything
  * @version 1.1 - only the runner, the selection, the discovery and the harness run everything; a
  *                fixture library under tests/lib/ selects by reach like any other file
  * @version 1.0
@@ -121,7 +122,8 @@ function coverage_select($tests, $map, $changed) {
 	// library, the HTTP or logic helpers — is loaded by the suites that use it
 	// and recorded in their reach, so it selects like any other file.
 	$harness = array('public_html/tests/run.php', 'public_html/tests/lib/harness.php',
-		'public_html/tests/lib/coverage.php', 'public_html/tests/lib/discovery.php');
+		'public_html/tests/lib/coverage.php', 'public_html/tests/lib/discovery.php',
+		'public_html/tests/lib/gate.php');
 	foreach ($changed as $c) {
 		if (in_array($c, $harness, true)) {
 			return array('run_all' => 'the test harness itself changed (' . $c . ')',

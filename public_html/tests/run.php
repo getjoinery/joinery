@@ -18,6 +18,17 @@
  *   php tests/run.php db --serial     # disable the test-db lane overlap
  *   php tests/run.php --json          # emit the aggregate JSON contract
  *   php tests/run.php --list          # list discovered tests, run nothing
+ *   php tests/run.php db --fresh      # run every selected suite; borrow no result
+ *   php tests/run.php db --no-wait    # exit 3 at once if another run holds the gate
+ *
+ * One run at a time per box. A run selecting more than GATE_QUEUE_CUTOFF
+ * suites takes the gate lock and holds it to its last result; a second such
+ * run waits, naming the holder and its progress, and starts the moment the
+ * lock frees. Smaller runs (a --only, a narrow --filter or --changed) never
+ * queue. Every run leaves a record of the tree it tested and the files each
+ * suite reached, and a later run borrows a suite's result when none of those
+ * files differ between the two trees — --fresh refuses to. The pre-publish
+ * gate is `db --fresh`. See tests/lib/gate.php.
  *
  * tier and env are separate axes: tier (safe|db|test-db|live|deploy) is blast radius
  * and drives which batch runs; env (any|prod-verify|dev-only) is where a test
@@ -42,6 +53,7 @@ if (php_sapi_name() !== 'cli') {
 require_once(__DIR__ . '/lib/harness.php');    // parser + Globalvars, no side effects until harness_boot()
 require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_rel()
 require_once(__DIR__ . '/lib/coverage.php');   // coverage map + --changed selection
+require_once(__DIR__ . '/lib/gate.php');       // the lock, run records, result reuse
 
 // ---------------------------------------------------------------------------
 // Arguments
@@ -56,7 +68,11 @@ $filter = '';
 $only = '';                  // exact repo-relative path — run just this one declared test
 $tier_arg = 'safe';
 $timeout_override = null;     // --timeout= overrides every test's declared timeout
+$want_fresh = false;          // --fresh: run everything selected, borrow no result
+$no_wait = false;             // --no-wait: exit 3 when the gate is held instead of waiting
 foreach ($args as $a) {
+	if ($a === '--fresh') { $want_fresh = true; continue; }
+	if ($a === '--no-wait') { $no_wait = true; continue; }
 	if (strpos($a, '--filter=') === 0)  { $filter = substr($a, strlen('--filter=')); continue; }
 	if (strpos($a, '--only=') === 0)    { $only = substr($a, strlen('--only=')); continue; }
 	if (strpos($a, '--timeout=') === 0) { $timeout_override = max(1, (int)substr($a, strlen('--timeout='))); continue; }
@@ -419,6 +435,102 @@ if ($selection_matched === 0) {
 	exit(2);
 }
 
+// ---------------------------------------------------------------------------
+// The gate: one run at a time per box, a record of what this run tests, and
+// results borrowed from earlier runs (tests/lib/gate.php).
+// ---------------------------------------------------------------------------
+$gate_dir = gate_dir($ROOT, $debug_on);
+gate_prune($gate_dir);
+$SITE_ROOT = dirname($ROOT);
+$my_tree = $tier_arg === 'deploy' ? null : gate_tree_id($SITE_ROOT);
+$reused = array();      // rel path => a result borrowed from an earlier run
+$reuse_runs = array();  // run_id => how many results came from it
+$take_reuse = function () use (&$to_run, &$reused, &$reuse_runs, $gate_dir, $my_tree, $SITE_ROOT, $ROOT, $debug_on, $want_fresh) {
+	if ($want_fresh || $my_tree === null || !$to_run) return;
+	$plan = gate_reuse_plan($to_run, gate_records_load($gate_dir), $my_tree, $SITE_ROOT, $ROOT, $debug_on);
+	if (!$plan) return;
+	$kept = array();
+	foreach ($to_run as $d) {
+		$rel = harness_rel($d['path'], $ROOT);
+		if (!isset($plan[$rel])) { $kept[] = $d; continue; }
+		$reused[$rel] = $plan[$rel];
+		$from = $plan[$rel]['reused_from']['run_id'];
+		$reuse_runs[$from] = ($reuse_runs[$from] ?? 0) + 1;
+	}
+	$to_run = $kept;
+};
+$take_reuse();
+
+// Low priority: the sessions on the box win the CPU and the gate takes what
+// is left, which on a quiet box is everything. Every suite subprocess, the
+// lane worker and any compiler they start inherit it. Postgres is untouched.
+if ($tier_arg !== 'deploy' && function_exists('proc_nice')) @proc_nice(10);
+
+$gate_cutoff = gate_cutoff($debug_on);
+$gate_fh = null;
+$gate_held = false;
+$gate_waited_s = 0;
+if ($tier_arg !== 'deploy' && count($to_run) > $gate_cutoff) {
+	$gate_fh = gate_lock_open($gate_dir);
+	if ($gate_fh === null) {
+		if (!$want_json) echo "Gate directory $gate_dir is not writable; running without the lock.\n";
+	} elseif (gate_try_lock($gate_fh)) {
+		$gate_held = true;
+	} else {
+		$holder = gate_holder_read($gate_dir);
+		$who = $holder ? gate_holder_describe($holder) : 'another run';
+		if ($no_wait) {
+			$msg = "Gate held by $who" . ($holder ? ' (' . gate_holder_summary($holder) . ')' : '') . '; --no-wait, so not waiting.';
+			if ($want_json) echo json_encode(array('error' => 'gate_held', 'message' => $msg, 'holder' => $holder)) . "\n";
+			else fwrite(STDERR, $msg . "\n");
+			exit(GATE_EXIT_HELD);
+		}
+		if (!$want_json) {
+			echo "Gate held by $who" . ($holder ? ': ' . gate_holder_summary($holder) : '')
+				. '. Waiting (' . count($to_run) . ' suite' . (count($to_run) === 1 ? '' : 's') . " to run, more than the cutoff of $gate_cutoff)...\n";
+		}
+		$t0 = time(); $last = $t0;
+		while (!gate_try_lock($gate_fh)) {
+			usleep(500000);
+			if (!$want_json && time() - $last >= GATE_WAIT_PROGRESS_S) {
+				$last = time();
+				$holder = gate_holder_read($gate_dir);
+				echo '  still waiting (' . gate_fmt_duration(time() - $t0) . ')'
+					. ($holder ? ': ' . gate_holder_summary($holder) : '') . "\n";
+			}
+		}
+		$gate_held = true;
+		$gate_waited_s = time() - $t0;
+		if (!$want_json) echo 'Gate acquired after ' . gate_fmt_duration($gate_waited_s) . ".\n";
+		// The holder's results are all in now; take the ones that apply here.
+		$take_reuse();
+	}
+}
+
+$run_info = array(
+	'pid' => getmypid(), 'started' => gmdate('Y-m-d\TH:i:s\Z'), 'started_ts' => time(),
+	'tier' => $tier_arg, 'args' => array_values(array_filter($args, function ($a) { return strpos($a, '--') === 0; })),
+	'filter' => $filter, 'only' => $only, 'changed_mode' => $changed_mode,
+	'selected' => count($to_run) + count($reused), 'tree' => $my_tree, 'debug_env' => $debug_on,
+	'locked' => $gate_held,
+) + gate_session_identity();
+$run_id = gate_record_start($gate_dir, $run_info);
+if ($gate_held) gate_holder_write($gate_dir, $run_info + array('run_id' => $run_id));
+
+// Every result lands here: into the aggregate and onto the run record, one
+// line as it completes, which is what a waiting runner reads for progress.
+$results = array();
+$land = function (array $r) use (&$results, $gate_dir, $run_id) {
+	if (!isset($r['reach_complete'])) $r['reach_complete'] = false;
+	gate_record_append($gate_dir, $run_id, $r);
+	$results[] = $r;
+	return $r;
+};
+foreach ($reused as $rel => $r) {
+	$land($r);
+	if (!$want_json) print_human_line($r, $ROOT, 'reused: ' . substr($r['reused_from']['started'], 0, 16) . 'Z by ' . $r['reused_from']['holder']);
+}
+
 // The test-db suites form their own lane: every write they make goes through
 // DbConnector::set_test_mode() to the copied test database, so they conflict
 // with nothing the main batch touches. When a run selects both lanes, the
@@ -460,9 +572,8 @@ if (count($lane_tests) > 0 && $debug_on) {
 // honoured only on the safe tier — anything else declaring it fails by name
 // rather than running beside suites it could collide with — and --serial or
 // --only turns the pool off.
-$results = array();
 $pool_tests = array();
-$split_pool = function (array $list) use (&$pool_tests, &$results, $want_serial, $only, $ROOT, $want_json) {
+$split_pool = function (array $list) use (&$pool_tests, $land, $want_serial, $only, $ROOT, $want_json) {
 	$serial = array();
 	foreach ($list as $d) {
 		if (empty($d['meta']['parallel'])) { $serial[] = $d; continue; }
@@ -472,7 +583,7 @@ $split_pool = function (array $list) use (&$pool_tests, &$results, $want_serial,
 				'stats' => array('total' => 0, 'passed' => 0, 'failed' => 1, 'skipped' => 0),
 				'sections' => array(), 'duration_ms' => 0, 'exit' => 0,
 				'note' => "'parallel: true' is for safe-tier suites only; this one is tier '" . $d['meta']['tier'] . "'");
-			$results[] = $r;
+			$land($r);
 			if (!$want_json) print_human_line($r, $ROOT);
 			continue;
 		}
@@ -481,8 +592,8 @@ $split_pool = function (array $list) use (&$pool_tests, &$results, $want_serial,
 	}
 	return $serial;
 };
-$pool_done = function ($r) use (&$results, $ROOT, $want_json) {
-	$results[] = $r;
+$pool_done = function ($r) use ($land, $ROOT, $want_json) {
+	$land($r);
 	if (!$want_json) print_human_line($r, $ROOT);
 };
 
@@ -492,8 +603,8 @@ if (!$overlap) {
 	foreach ($to_run as $d) {
 		// A test uses its own declared timeout unless --timeout= overrides all tests.
 		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
-		$results[] = run_one($d, $ROOT, $effective_timeout);
-		if (!$want_json) print_human_line(end($results), $ROOT);
+		$r = $land(run_one($d, $ROOT, $effective_timeout));
+		if (!$want_json) print_human_line($r, $ROOT);
 	}
 } else {
 	$payload = array();
@@ -521,10 +632,10 @@ if (!$overlap) {
 
 	$lane_state = array('rf' => fopen($lane_path, 'rb'), 'buf' => '');
 	$lane_done = array(); // repo-relative path => true, for crash accounting
-	$absorb = function ($records) use (&$results, &$lane_done, $ROOT, $want_json) {
+	$absorb = function ($records) use ($land, &$lane_done, $ROOT, $want_json) {
 		foreach ($records as $r) {
 			$lane_done[$r['path']] = true;
-			$results[] = $r;
+			$land($r);
 			if (!$want_json) print_human_line($r, $ROOT, 'test-db');
 		}
 	};
@@ -535,8 +646,8 @@ if (!$overlap) {
 	});
 	foreach ($main_tests as $d) {
 		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
-		$results[] = run_one($d, $ROOT, $effective_timeout);
-		if (!$want_json) print_human_line(end($results), $ROOT);
+		$r = $land(run_one($d, $ROOT, $effective_timeout));
+		if (!$want_json) print_human_line($r, $ROOT);
 		$absorb(lane_drain($lane_state)); // print lane completions as they land
 	}
 
@@ -564,7 +675,7 @@ if (!$overlap) {
 		);
 		$tail = trim(substr((string)$lane_stderr, -400));
 		if ($tail !== '') $r['output_tail'] = $tail;
-		$results[] = $r;
+		$land($r);
 		if (!$want_json) print_human_line($r, $ROOT, 'test-db');
 	}
 }
@@ -694,6 +805,14 @@ function run_one_start($d, $root, $timeout_s) {
  * PHP hands an exit code out once, so proc_close() would then answer -1.
  */
 function run_one_finish(array $h, $exit = null) {
+	$r = run_one_finish_raw($h, $exit);
+	// Is this result a complete statement of what it depends on? Decided here,
+	// where the suite's header is at hand, so a lane worker's results carry it too.
+	$r['reach_complete'] = gate_reach_complete($r, $h['d']['meta']);
+	return $r;
+}
+
+function run_one_finish_raw(array $h, $exit = null) {
 	$d = $h['d']; $root = $h['root']; $timeout_s = $h['timeout_s']; $is_sh = $h['is_sh'];
 	$path = $d['path']; $out = $h['out']; $err = $h['err'];
 	$closed = proc_close($h['proc']);
@@ -792,8 +911,10 @@ function print_human_line($r, $root, $tag = '') {
 }
 
 // Record what each suite reached into the coverage map, whatever mode this run
-// was in — every run refreshes the entries for the suites it ran.
-coverage_map_update($results, $ROOT);
+// was in — every run refreshes the entries for the suites it ran. A borrowed
+// result stays out: the map already holds exactly that reach from the run
+// that produced it.
+coverage_map_update(array_values(array_filter($results, function ($r) { return empty($r['reused_from']); })), $ROOT);
 
 // ---------------------------------------------------------------------------
 // Aggregate + report
@@ -804,19 +925,29 @@ $tests_passed = $tests_total - $tests_failed;
 $checks_passed = array_sum(array_map(function ($r) { return $r['stats']['passed']; }, $results));
 $checks_failed = array_sum(array_map(function ($r) { return $r['stats']['failed']; }, $results));
 $checks_skipped = array_sum(array_map(function ($r) { return $r['stats']['skipped'] ?? 0; }, $results));
+$totals = array(
+	'tests' => $tests_total, 'tests_passed' => $tests_passed, 'tests_failed' => $tests_failed,
+	'checks_passed' => $checks_passed, 'checks_failed' => $checks_failed, 'checks_skipped' => $checks_skipped,
+);
+$reuse_summary = array('reused' => count($reused), 'ran' => $tests_total - count($reused),
+	'from_runs' => $reuse_runs, 'fresh' => $want_fresh);
+$gate_summary = array('locked' => $gate_held, 'waited_s' => $gate_waited_s, 'cutoff' => $gate_cutoff);
+gate_record_finish($gate_dir, $run_id, array('totals' => $totals, 'reuse' => $reuse_summary, 'waited_s' => $gate_waited_s));
+if ($gate_held) { gate_holder_clear($gate_dir); gate_unlock($gate_fh); }
 
 if ($want_json) {
 	echo json_encode(array(
+		'run_id' => $run_id,
+		'tree' => $my_tree,
+		'reuse' => $reuse_summary,
+		'gate' => $gate_summary,
 		'tier_requested' => $tier_arg,
 		'tiers_run' => $selected_tiers,
 		'filter' => $filter,
 		'debug_env' => $debug_on,
 		'test_db_refresh' => $test_db_refresh,
 		'selection' => $selection,
-		'totals' => array(
-			'tests' => $tests_total, 'tests_passed' => $tests_passed, 'tests_failed' => $tests_failed,
-			'checks_passed' => $checks_passed, 'checks_failed' => $checks_failed, 'checks_skipped' => $checks_skipped,
-		),
+		'totals' => $totals,
 		'results' => $results,
 		'skipped_env' => array_map(function ($s) use ($ROOT) {
 			return array('name' => $s['meta']['name'], 'path' => harness_rel($s['path'], $ROOT), 'reason' => $s['reason']);
@@ -832,6 +963,13 @@ if ($want_json) {
 echo "\n================================================================\n";
 echo "Tier: $tier_arg" . ($filter ? " (filter: $filter)" : '') . "   Environment: " . ($debug_on ? 'dev (debug on)' : 'production (debug off)') . "\n";
 echo "Tests: $tests_passed passed, $tests_failed failed of $tests_total   |   Checks: $checks_passed passed, $checks_failed failed" . ($checks_skipped ? ", $checks_skipped skipped" : '') . "\n";
+if (count($reused) > 0) {
+	echo 'Reused: ' . count($reused) . " of $tests_total results from " . count($reuse_runs) . ' earlier run' . (count($reuse_runs) === 1 ? '' : 's')
+		. ' (' . implode(', ', array_keys($reuse_runs)) . '); ' . ($tests_total - count($reused)) . " run now\n";
+} elseif (!$want_fresh && $tier_arg !== 'deploy' && $my_tree === null) {
+	echo "Reuse: unavailable here (no repository tree id).\n";
+}
+echo 'Run record: ' . $run_id . ($gate_held ? ' (held the gate' . ($gate_waited_s ? ', waited ' . gate_fmt_duration($gate_waited_s) : '') . ')' : ' (below the cutoff, no lock)') . "\n";
 
 // Failures are named again at the end, not only where they occurred. A long
 // run scrolls its failures far above the summary, and anything reading the
