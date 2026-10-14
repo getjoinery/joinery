@@ -229,6 +229,9 @@ check(AccessGateRegistry::userMayAccess(ForumAttachmentGate::KEY, (int)$topics['
 $reloaded = new File((int)$file->key, TRUE);
 check($reloaded->get('fil_access_provider') === ForumAttachmentGate::KEY && !$reloaded->get('fil_private'),
 	'a claimed upload is gated on its post and no longer private to its uploader');
+$listed = EntityAttachment::forEntity(ForumPost::ENTITY_TYPE, (int)$topics['members']['post']->key);
+check(count($listed) === 1 && (int)$listed[0]->get('eat_byte_size') === strlen('bytes ' . $suffix) && $listed[0]->get('eat_byte_size') > 0,
+	'the attachment row records the file\'s real size', (string)($listed[0] ?? null ? $listed[0]->get('eat_byte_size') : ''));
 $caught = '';
 try {
 	ForumUploads::claimAll(array((int)$file->key), $author, $topics['public']['post']);

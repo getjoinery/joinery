@@ -34,7 +34,8 @@
  * VaultUnlock::capsForUser() treats as "the strictest window policy may be
  * missing" and fails CLOSED to the hardened caps.
  *
- * @version 1.1 - the fail-closed caps are named the hardened caps
+ * @version 1.2 - a bootstrap's stray output is discarded, never printed into a page
+ * @changelog 1.1 - the fail-closed caps are named the hardened caps
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
@@ -74,9 +75,14 @@ class PluginBootstraps {
 				continue;
 			}
 			VaultConsumers::beginLoading($name);
+			// A bootstrap only registers. Anything it prints (a stray line
+			// after a closing tag) is discarded: this can run in the middle of
+			// a page's <head>.
+			ob_start();
 			try {
 				require_once($path);
 			} finally {
+				ob_end_clean();
 				VaultConsumers::endLoading();
 			}
 		}

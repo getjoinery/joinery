@@ -1031,8 +1031,8 @@
 		try {
 			require_once(PathHelper::getIncludePath('data/seo_page_metadata_class.php'));
 			$seo_result = SeoPageMetadata::sync_inventory();
-			echo sprintf("✓ SEO inventory synced: %d entity inserted, %d static inserted, %d path updates, %d soft-deleted<br>\n",
-				$seo_result['inserted_entity'], $seo_result['inserted_static'],
+			echo sprintf("✓ SEO inventory synced: %d entity inserted, %d adopted, %d static inserted, %d path updates, %d soft-deleted<br>\n",
+				$seo_result['inserted_entity'], $seo_result['adopted_entity'], $seo_result['inserted_static'],
 				$seo_result['updated_path'], $seo_result['soft_deleted']);
 			if (!empty($seo_result['errors'])) {
 				foreach ($seo_result['errors'] as $err) {

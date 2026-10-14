@@ -190,12 +190,8 @@ class ForumUploads {
 		return $n;
 	}
 
+	/** The file's size: it belongs to its bytes (the blob), not the File row. */
 	private static function byteSize(File $file): int {
-		foreach (array('fil_plain_size_bytes', 'fil_size_bytes', 'fil_size') as $col) {
-			if (array_key_exists($col, File::$field_specifications) && $file->get($col) !== null) {
-				return (int)$file->get($col);
-			}
-		}
-		return 0;
+		return $file->size_bytes();
 	}
 }

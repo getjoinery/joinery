@@ -85,7 +85,7 @@ Nobody hears about their own post; a mentioned person gets the mention instead o
 
 Public category and topic pages are served to signed-out visitors from the static page cache. Every change that alters one (a reply, an edit, a removal, a pin, a lock, a move) clears that topic's pages, its category's list, the forum home and the sitemap in one pass (`ForumCache`). A change to who may read a category clears the whole forum, and so do turning the forum off (`forum_active` declares `clearsPages`) and the upkeep task re-rendering posts.
 
-`forum_topic` and `forum_category` are registered with `SeoPageMetadata` from `serve.php`, so their pages get their title, description and Open Graph tags from the single emitter. Their `seo_public_records()` list only live public categories and live, approved topics in them for the sitemap; `/forum` is declared in `publicPaths`.
+`forum_topic` and `forum_category` are registered with `SeoPageMetadata` from the plugin bootstrap (`includes/bootstrap.php`, so the command-line SEO sweep knows them too), so their pages get their title, description and Open Graph tags from the single emitter. Their `seo_public_records()` list only live public categories and live, approved topics in them for the sitemap; `/forum` is declared in `publicPaths`.
 
 ## API actions
 

@@ -85,8 +85,8 @@ check(strpos($html, '[x](<code>a</code>)') !== false && strpos($html, '<code>b</
 $html = MarkdownRenderer::render('@[Na`me`](user:7) @[Bo``b``](user:8)', true, true);
 check(strpos($html, "\x02") === false && strpos($html, '@Na<code>me</code>') !== false, 'code in a mention name is shown as code, never a raw placeholder', $html);
 $t = microtime(true);
-MarkdownRenderer::render(str_repeat("# a `b`\n", 32768), true, false);
-check(microtime(true) - $t < 2.0, 'thousands of headings with code render quickly in the full profile too', sprintf('%.2fs', microtime(true) - $t));
+$headings = MarkdownRenderer::render(str_repeat("# a `b`\n", 32768), true, false);
+check(microtime(true) - $t < 2.0 && substr_count($headings, '<h1') === 32768, 'thousands of headings with code render quickly in the full profile too', sprintf('%.2fs', microtime(true) - $t));
 
 // =====================================================================
 section('the restricted markdown editor');
@@ -152,6 +152,17 @@ check(StaticPageCache::checkCache('/forum/t/55/other', array()) !== false, 'a to
 check(StaticPageCache::invalidatePath('/forum') === 1, 'without children, only the path itself goes');
 check(StaticPageCache::checkCache('/forum/general', array()) !== false, 'so the category page stays');
 check(StaticPageCache::invalidatePath('/forum', true) === 2, 'with children, everything under it goes');
+// A setting's declared clearsPages leave the cache when it changes (forum_active declares /forum and /sitemap).
+StaticPageCache::createCache('/forum', array(), '<html><head></head><body>f</body></html>');
+StaticPageCache::createCache('/forum/t/5/x', array('page' => '2'), '<html><head></head><body>t</body></html>');
+StaticPageCache::createCache('/about', array(), '<html><head></head><body>a</body></html>');
+SettingsDeclarations::clearPagesFor(array('forum_active'));
+check(StaticPageCache::checkCache('/forum', array()) === false && StaticPageCache::checkCache('/forum/t/5/x', array('page' => '2')) === false,
+	'changing a setting that declares clearsPages clears those pages and everything under them');
+check(StaticPageCache::checkCache('/about', array()) !== false, 'and nothing else');
+SettingsDeclarations::clearPagesFor(array('no_such_setting'));
+check(StaticPageCache::checkCache('/about', array()) !== false, 'a setting that declares nothing clears nothing');
+
 StaticPageCache::skipThisRequest();
 check(StaticPageCache::createCache('/forum/search', array('q' => 'x'), '<html><head></head><body>s</body></html>') === false
 	&& StaticPageCache::markAsNostatic('/forum/search', array('q' => 'y')) === false,

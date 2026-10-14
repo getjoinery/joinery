@@ -205,7 +205,8 @@ function admin_plugins_logic(array $input): LogicResult {
 				if (!empty($result['deletion_rule_messages'])) {
 					$message .= '<br><small>Deletion rules: ' . htmlspecialchars(implode('; ', $result['deletion_rule_messages'])) . '</small>';
 				}
-				$message_type = 'success';
+				// A clash to fix outranks "Sync complete".
+				$message_type = empty($result['warnings']) ? 'success' : 'warning';
 			} catch (Exception $e) {
 				$message = 'Sync failed: ' . htmlspecialchars($e->getMessage());
 				$message_type = 'danger';
