@@ -289,6 +289,21 @@ try {
 	$r = api_request('GET', '/api/v1/auth/session', $d_machine_h);
 	check($r['status'] === 200, 'and the machine key', $r['raw']);
 
+	// A deleted owner: said only to a caller holding the secret.
+	(new User($user_d->key, TRUE))->soft_delete();
+	$r = api_request('GET', '/api/v1/auth/session', key_headers($d_machine['api_key']->get('apk_public_key'), 'wrong-secret'));
+	check($r['status'] === 401 && stripos($r['raw'], 'deleted') === false,
+		'a deleted owner\'s key with a wrong secret gets the ordinary 401, saying nothing about the account', $r['raw']);
+	$r = api_request('GET', '/api/v1/auth/session', $d_machine_h);
+	check($r['status'] === 400 && stripos($r['raw'], 'deleted') !== false, 'with its secret it is told the owner is deleted', $r['raw']);
+
+	// Those refusals count toward the failed-auth limit from this run's
+	// address; clear them, as Cleanup does, so the sections after this one
+	// are not locked out.
+	$q = DbConnector::get_instance()->get_db_link()->prepare("DELETE FROM rql_request_logs
+		WHERE rql_feature = 'api_auth' AND rql_was_success = FALSE AND rql_ip_address = ?");
+	$q->execute([(string)$GLOBALS['__harness_http']['from']]);
+
 	// ------------------------------------------------------------------
 	section('Management boundary (LOAD-BEARING — acceptance #6)');
 	// Superadmin logs in on a "phone" — that session key must never reach the

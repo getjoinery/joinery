@@ -84,6 +84,7 @@ VaultConsumers::setPluginDeclarationsForTests(array(
 PluginBootstraps::load();
 check(in_array('ghostly', PluginBootstraps::notLoaded(), true),
 	'the consumer whose bootstrap never ran is recorded');
+check(!isset(PluginBootstraps::failed()['ghostly']), 'a missing bootstrap is not counted as one that failed');
 $unmet = VaultConsumers::unmetObligations();
 check(isset($unmet['ghostly']), 'its reseal obligation reads unmet, so a rotation would refuse');
 
@@ -125,6 +126,8 @@ $logged = (string)@file_get_contents($log_path);
 
 check($thrown === null, 'loading bootstraps does not throw' . ($thrown ? ': ' . $thrown->getMessage() : ''));
 check(in_array('halfway', PluginBootstraps::notLoaded(), true), 'the consumer whose bootstrap threw is recorded as not loaded');
+check(isset(PluginBootstraps::failed()['halfway']) && strpos(PluginBootstraps::failed()['halfway'], 'SOURCE_NO_SUCH_TAG') !== false,
+	'and as failed, with its error, which is what the deploy tier refuses a release on');
 check(strpos($logged, 'halfway') !== false && strpos($logged, 'SOURCE_NO_SUCH_TAG') !== false,
 	'and the log names the consumer and the error');
 $caps = VaultUnlock::capsForUser(1);

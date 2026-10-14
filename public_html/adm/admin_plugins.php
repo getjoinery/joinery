@@ -1,4 +1,5 @@
 <?php
+// @version 1.7 - Waiting for approval says why: a lapsed approval (access off) or a newer version asking for more
 // @version 1.6 - a sandboxed plugin: the Sandboxed badge, Waiting for approval, Review and activate / What it may do
 //               (admin_sandbox_approve) in place of Activate while it waits on an approval; never a fork
 // @version 1.5 - the Edited since install badge naming the first changed file, and Keep my changes in place of Disable upgrade for an edited plugin (specs/local_edits_detected.md)
@@ -220,7 +221,12 @@ $page->begin_box(array('altlinks' => $altlinks));
                             $waits_on_approval = false;
                         }
                         if ($waits_on_approval && $plugin['plugin']->is_active()) {
-                            $status_cell .= ' <span class="badge bg-warning" title="A newer version asks for more than was approved; until it is approved it keeps only what was.">Waiting for approval</span>';
+                            // Two reasons it waits, and they leave it in different states.
+                            $install = SandboxInstall::forPlugin($plugin['name']);
+                            $wait_reason = ($install !== null && $install->get('sbi_consent_time') && SandboxConsent::approver($install) === null)
+                                ? 'The admin who approved it can no longer give approval (demoted, disabled or deleted), so its access is off until an admin approves it again.'
+                                : 'A newer version asks for more than was approved; until it is approved it keeps only what was.';
+                            $status_cell .= ' <span class="badge bg-warning" title="' . htmlspecialchars($wait_reason) . '">Waiting for approval</span>';
                         }
                     }
                 }

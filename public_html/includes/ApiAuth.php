@@ -62,7 +62,8 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.7.0
+ * @version 1.7.1
+ * @changelog 1.7.1 - A deleted owner is reported only after the secret verifies, like a disabled one.
  * @changelog 1.7.0 - A disabled account (User::actions_allowed()) is refused on every key it owns
  *   (machine, session, app password), on a browser session, and at auth/login (reason 'disabled').
  *   Only a deleted account was refused before.
@@ -214,10 +215,6 @@ class ApiAuth {
 			self::auth_failure(400, 'Unable to find the api user', 'Unable to find the api user');
 		}
 
-		if ($api_user->get('usr_delete_time')) {
-			self::auth_failure(400, 'API user has been deleted', 'API user has been deleted');
-		}
-
 		if ($authorized_ips = $api_entry->get('apk_ip_restriction')) {
 			// Empty escape (RFC 4180) rather than the deprecated default. An IP
 			// allowlist holds neither backslashes nor quotes, so this parses the
@@ -233,10 +230,15 @@ class ApiAuth {
 			self::auth_failure(401, 'Incorrect secret key', 'Incorrect secret key');
 		}
 
+		// What became of the account is said only to a caller holding the
+		// secret: a public key alone learns nothing about it.
+		if ($api_user->get('usr_delete_time')) {
+			self::auth_failure(400, 'API user has been deleted', 'API user has been deleted');
+		}
+
 		// A disabled account signs in nowhere, the website included: every key
 		// it owns is refused while it stays disabled, and works again if it is
-		// re-enabled (disabling is undone, so its keys are not revoked). Asked
-		// after the secret verifies, so a public key alone learns nothing.
+		// re-enabled (disabling is undone, so its keys are not revoked).
 		if (!$api_user->actions_allowed()) {
 			self::auth_failure(401, 'API user is disabled', 'This account is disabled');
 		}
