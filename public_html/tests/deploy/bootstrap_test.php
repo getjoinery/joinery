@@ -26,7 +26,7 @@
  *
  * Run: php tests/deploy/bootstrap_test.php
  *
- * @version 1.0.0
+ * @version 1.1.0 - every active plugin's bootstrap loads (PluginBootstraps::failed())
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -97,6 +97,28 @@ if ($dblink instanceof PDO) {
 $settings = Globalvars::get_instance();
 check(trim((string)$settings->get_setting('site_template')) !== '',
 	'the site knows its own directory name');
+
+// ---------------------------------------------------------------------------
+section('Every active plugin starts on this release');
+// ---------------------------------------------------------------------------
+
+// A plugin this release does not replace (a local fork, one its upgrade source
+// does not publish) keeps its old code against the new core. If that code names
+// something the core no longer has, its bootstrap throws on every request that
+// loads bootstraps; vault unlock is one. A bootstrap only registers, so loading
+// them all is a read. Missing bootstrap files are not counted here: the loader
+// already fails the unlock caps closed for those.
+try {
+	PluginBootstraps::load();
+	$failed = PluginBootstraps::failed();
+	$lines = array();
+	foreach ($failed as $consumer => $error) {
+		$lines[] = $consumer . ': ' . $error;
+	}
+	check($failed === array(), 'every active plugin\'s bootstrap loads', implode('; ', $lines));
+} catch (\Throwable $e) {
+	check(false, 'every active plugin\'s bootstrap loads', get_class($e) . ': ' . $e->getMessage());
+}
 
 // ---------------------------------------------------------------------------
 section('The release is internally consistent');

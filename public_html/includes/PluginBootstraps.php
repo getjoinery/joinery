@@ -35,6 +35,7 @@
  * VaultUnlock::capsForUser() treats as "the strictest window policy may be
  * missing" and fails CLOSED to the hardened caps.
  *
+ * @version 1.4 - failed(): the bootstraps that threw, with their errors, for the deploy tier
  * @version 1.3 - a bootstrap that throws lands in notLoaded() with the error logged, never fatal
  *                to the request that loaded it (vault unlock among them)
  * @version 1.2 - a bootstrap's stray output is discarded, never printed into a page
@@ -50,6 +51,9 @@ class PluginBootstraps {
 
 	/** @var string[] declared bootstraps that never ran (missing on disk, or no path). */
 	private static $not_loaded = array();
+
+	/** @var array<string,string> bootstraps that threw as they ran: consumer => the error. */
+	private static $failed = array();
 
 	/**
 	 * Load every registered bootstrap — core consumers and active plugins — in
@@ -94,6 +98,7 @@ class PluginBootstraps {
 					. $e->getMessage() . ' (' . $e->getFile() . ':' . $e->getLine() . ')'
 					. ' — unlock windows fail closed to the hardened caps until it is fixed.');
 				self::$not_loaded[] = $name;
+				self::$failed[$name] = get_class($e) . ': ' . $e->getMessage() . ' (' . $e->getFile() . ':' . $e->getLine() . ')';
 			} finally {
 				ob_end_clean();
 				VaultConsumers::endLoading();
@@ -110,6 +115,18 @@ class PluginBootstraps {
 	 */
 	public static function notLoaded(): array {
 		return self::$not_loaded;
+	}
+
+	/**
+	 * The bootstraps that threw as they ran, each with its error: code that no
+	 * longer fits the core it runs on. A subset of notLoaded(), which also
+	 * holds the ones missing on disk. The deploy tier refuses a release while
+	 * this is non-empty (tests/deploy/bootstrap_test.php).
+	 *
+	 * @return array<string,string>
+	 */
+	public static function failed(): array {
+		return self::$failed;
 	}
 
 	/**
@@ -136,6 +153,7 @@ class PluginBootstraps {
 	public static function resetForTests(): void {
 		self::$loaded = false;
 		self::$not_loaded = array();
+		self::$failed = array();
 	}
 }
 ?>
