@@ -9,12 +9,14 @@ package main
 // completes the ACME order with its own Let's Encrypt account (TLS-ALPN-01 on
 // its 443) and answers the chain.
 //
-// Refused unless: the caller is the relay's one tenant (a shared shard issues
-// nothing, so no tenant can obtain a certificate for a name another uses), the
-// CSR names this relay's hostname and nothing else, its signature verifies,
-// and no certificate was issued in the last mailAppsCertInterval (the relay's
-// own certificate shares Let's Encrypt's duplicate-certificate limit for the
-// name: five a week).
+// Refused unless: the CSR names exactly the caller's mail name and nothing
+// else (mailAppsPass.mailName: on a shard, the slot name the operator assigned
+// to the tenant whose signature is on the request, never anything the tenant
+// sent; on a self-hosted relay, the relay's own name, for its one tenant), its
+// signature verifies, and no certificate was issued for that tenant in the last
+// mailAppsCertInterval (a self-hosted relay's own certificate shares Let's
+// Encrypt's duplicate-certificate limit for the name: five a week). Each
+// tenant's record is its own.
 
 import (
 	"context"
@@ -39,7 +41,8 @@ import (
 const (
 	mailAppsCertInterval = 12 * time.Hour
 	mailAppsCertTimeout  = 3 * time.Minute
-	mailAppsCertState    = "mail_apps_certificate.json"
+	// One record per tenant: mail_apps_certificate-<slug>.json.
+	mailAppsCertStatePrefix = "mail_apps_certificate-"
 	// autocert's name for its account key in the cache (x/crypto acme/autocert).
 	acmeAccountKeyName = "acme_account+key"
 )
@@ -56,8 +59,9 @@ func (s *relayServer) mailAppsCertificate(w http.ResponseWriter, tenant string, 
 		refuse(w, http.StatusForbidden, "the operator has no mail gateway")
 		return
 	}
-	if sole, _ := s.mailApps.soleTenant(); sole != tenant {
-		refuse(w, http.StatusForbidden, "only a relay's one tenant gets a certificate for its name")
+	name, why := s.mailApps.mailName(tenant)
+	if name == "" {
+		refuse(w, http.StatusForbidden, why)
 		return
 	}
 	var req struct {
@@ -67,7 +71,7 @@ func (s *relayServer) mailAppsCertificate(w http.ResponseWriter, tenant string, 
 		refuse(w, http.StatusBadRequest, "the body is not {\"csr\": PEM}")
 		return
 	}
-	csr, why := s.checkMailAppsCSR(req.CSR)
+	csr, why := s.checkMailAppsCSR(req.CSR, name)
 	if csr == nil {
 		refuse(w, http.StatusUnprocessableEntity, why)
 		return
@@ -75,11 +79,11 @@ func (s *relayServer) mailAppsCertificate(w http.ResponseWriter, tenant string, 
 
 	// One order at a time, and none inside the interval.
 	if !s.mailAppsCertMu.TryLock() {
-		refuse(w, http.StatusConflict, "a certificate is being issued")
+		refuse(w, http.StatusConflict, "another certificate is being issued on this relay; try again in a few minutes")
 		return
 	}
 	defer s.mailAppsCertMu.Unlock()
-	rec := s.readMailAppsCertRecord()
+	rec := s.readMailAppsCertRecord(tenant)
 	if t, err := time.Parse(time.RFC3339, rec.IssuedUTC); err == nil && time.Since(t) < mailAppsCertInterval {
 		w.Header().Set("Retry-After", time.Until(t.Add(mailAppsCertInterval)).Round(time.Second).String())
 		refuse(w, http.StatusTooManyRequests, "a certificate was issued at "+rec.IssuedUTC+"; the next may be issued 12 hours after")
@@ -88,20 +92,20 @@ func (s *relayServer) mailAppsCertificate(w http.ResponseWriter, tenant string, 
 
 	ctx, cancel := context.WithTimeout(context.Background(), mailAppsCertTimeout)
 	defer cancel()
-	chain, notAfter, err := s.issueMailAppsCert(ctx, csr)
+	chain, notAfter, err := s.issueMailAppsCert(ctx, csr, name)
 	if err != nil {
 		rec.Error, rec.ErrorUTC = err.Error(), time.Now().UTC().Format(time.RFC3339)
-		s.writeMailAppsCertRecord(rec)
+		s.writeMailAppsCertRecord(tenant, rec)
 		refuse(w, http.StatusBadGateway, "the certificate was not issued: "+err.Error())
 		return
 	}
 	rec = mailAppsCertRecord{IssuedUTC: time.Now().UTC().Format(time.RFC3339), NotAfter: notAfter.UTC().Format(time.RFC3339)}
-	s.writeMailAppsCertRecord(rec)
+	s.writeMailAppsCertRecord(tenant, rec)
 	answerJSON(w, http.StatusOK, map[string]any{"chain": chain, "not_after": rec.NotAfter})
 }
 
-// checkMailAppsCSR returns the parsed CSR, or nil and why it is refused.
-func (s *relayServer) checkMailAppsCSR(text string) (*x509.CertificateRequest, string) {
+// checkMailAppsCSR returns the parsed CSR for name, or nil and why it is refused.
+func (s *relayServer) checkMailAppsCSR(text, name string) (*x509.CertificateRequest, string) {
 	block, _ := pem.Decode([]byte(text))
 	if block == nil || block.Type != "CERTIFICATE REQUEST" {
 		return nil, "csr is not a PEM CERTIFICATE REQUEST"
@@ -113,11 +117,11 @@ func (s *relayServer) checkMailAppsCSR(text string) (*x509.CertificateRequest, s
 	if csr.CheckSignature() != nil {
 		return nil, "csr signature does not verify"
 	}
-	if len(csr.DNSNames) != 1 || strings.ToLower(csr.DNSNames[0]) != s.hostname {
-		return nil, "csr must name exactly this relay's hostname, " + s.hostname
+	if len(csr.DNSNames) != 1 || strings.ToLower(csr.DNSNames[0]) != name {
+		return nil, "csr must name exactly this deployment's mail name, " + name
 	}
-	if cn := strings.ToLower(csr.Subject.CommonName); cn != "" && cn != s.hostname {
-		return nil, "csr common name is not this relay's hostname"
+	if cn := strings.ToLower(csr.Subject.CommonName); cn != "" && cn != name {
+		return nil, "csr common name is not this deployment's mail name"
 	}
 	if len(csr.IPAddresses)+len(csr.EmailAddresses)+len(csr.URIs) > 0 {
 		return nil, "csr names something other than the hostname"
@@ -140,7 +144,7 @@ func (s *relayServer) checkMailAppsCSR(text string) (*x509.CertificateRequest, s
 // issueMailAppsCert runs one ACME order for the CSR's name with the relay's own
 // account, answering the TLS-ALPN-01 challenge on 443 (tlsConfig consults
 // alpnCerts before autocert). Returns the chain as PEM and its leaf's expiry.
-func (s *relayServer) issueMailAppsCert(ctx context.Context, csr *x509.CertificateRequest) (string, time.Time, error) {
+func (s *relayServer) issueMailAppsCert(ctx context.Context, csr *x509.CertificateRequest, name string) (string, time.Time, error) {
 	key, err := s.acmeAccountKey()
 	if err != nil {
 		return "", time.Time{}, err
@@ -149,7 +153,6 @@ func (s *relayServer) issueMailAppsCert(ctx context.Context, csr *x509.Certifica
 	if _, err := client.Register(ctx, &acme.Account{}, acme.AcceptTOS); err != nil && !errors.Is(err, acme.ErrAccountAlreadyExists) {
 		return "", time.Time{}, errors.New("the relay's ACME account: " + err.Error())
 	}
-	name := s.hostname
 	order, err := client.AuthorizeOrder(ctx, acme.DomainIDs(name))
 	if err != nil {
 		return "", time.Time{}, errors.New("order: " + err.Error())
@@ -241,17 +244,27 @@ func (s *relayServer) alpnChallengeCert(hello *tls.ClientHelloInfo, name string)
 	return nil
 }
 
-func (s *relayServer) readMailAppsCertRecord() mailAppsCertRecord {
+func (s *relayServer) mailAppsCertPath(tenant string) string {
+	return filepath.Join(s.stateDir, mailAppsCertStatePrefix+tenant+".json")
+}
+
+func (s *relayServer) readMailAppsCertRecord(tenant string) mailAppsCertRecord {
 	var rec mailAppsCertRecord
-	if data, err := os.ReadFile(filepath.Join(s.stateDir, mailAppsCertState)); err == nil {
+	if !slugRe.MatchString(tenant) {
+		return rec
+	}
+	if data, err := os.ReadFile(s.mailAppsCertPath(tenant)); err == nil {
 		_ = json.Unmarshal(data, &rec)
 	}
 	return rec
 }
 
-func (s *relayServer) writeMailAppsCertRecord(rec mailAppsCertRecord) {
+func (s *relayServer) writeMailAppsCertRecord(tenant string, rec mailAppsCertRecord) {
+	if !slugRe.MatchString(tenant) {
+		return
+	}
 	data, _ := json.Marshal(rec)
-	path := filepath.Join(s.stateDir, mailAppsCertState)
+	path := s.mailAppsCertPath(tenant)
 	_ = os.MkdirAll(s.stateDir, 0o700)
 	tmp := path + ".tmp"
 	if os.WriteFile(tmp, data, 0o600) == nil {
@@ -259,9 +272,9 @@ func (s *relayServer) writeMailAppsCertRecord(rec mailAppsCertRecord) {
 	}
 }
 
-// mailAppsCertStatus is the certificate's part of the ping's mail_apps group.
-func (s *relayServer) mailAppsCertStatus() map[string]interface{} {
-	rec := s.readMailAppsCertRecord()
+// mailAppsCertStatus is the tenant's certificate in the ping's mail_apps group.
+func (s *relayServer) mailAppsCertStatus(tenant string) map[string]interface{} {
+	rec := s.readMailAppsCertRecord(tenant)
 	out := map[string]interface{}{}
 	if rec.IssuedUTC != "" {
 		out["certificate_issued_utc"] = rec.IssuedUTC

@@ -15,7 +15,7 @@
  * active relay. Checks:
  *  - the version gate (RelayVersion::passesMailApps, 3.12);
  *  - the name programs use is the relay's mail host name;
- *  - cannotTurnOn() names what is missing, in order: a shared relay, an older
+ *  - cannotTurnOn() names what is missing, in order: a shared relay older than 3.13, an older
  *    relay, the relay's name or address, this server's IPv4;
  *  - the fragment carries this server's IPv4 exactly while mail apps are on
  *    through this relay, and nothing otherwise.
@@ -85,8 +85,17 @@ Setting::put('mailbox_public_ip', '203.0.113.10');
 check(MailAppGateway::cannotTurnOn() === null, 'A 3.12 relay with a name and address, and the server\'s IPv4: allowed',
 	(string)MailAppGateway::cannotTurnOn());
 $set(array('mrl_is_hosted' => true));
-check(strpos((string)MailAppGateway::cannotTurnOn(), 'shared relay') !== false, 'A shared relay passes none');
-$set(array('mrl_is_hosted' => false, 'mrl_public_ip' => ''));
+$why = (string)MailAppGateway::cannotTurnOn();
+check(strpos($why, 'shared relay') !== false && strpos($why, RelayVersion::PASSES_MAIL_APPS_SHARED) !== false,
+	'A shared relay older than 3.13 passes none, and says which version will', $why);
+$set(array('mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.13')),
+	'mrl_mx_hostname' => 'T7.Fleet.Example'));
+check(MailAppGateway::cannotTurnOn() === null && MailAppGateway::mailHostname() === 't7.fleet.example',
+	'A shared relay at 3.13: allowed, programs connecting to the slot\'s own mail name', (string)MailAppGateway::cannotTurnOn());
+check(RelayVersion::passesMailAppsShared('3.13') && !RelayVersion::passesMailAppsShared('3.12') && !RelayVersion::passesMailAppsShared(''),
+	'  3.13 and later carry it');
+$set(array('mrl_is_hosted' => false, 'mrl_mx_hostname' => 'MX.Relay.Example', 'mrl_public_ip' => '',
+	'mrl_last_health_json' => json_encode(array('state' => 'ok', 'provisioned' => '3.12'))));
 check(strpos((string)MailAppGateway::cannotTurnOn(), 'no mail host name or public address') !== false, 'A relay with no address yet');
 $set(array('mrl_public_ip' => '198.51.100.7'));
 

@@ -114,7 +114,7 @@ func (s *relayServer) buildPing(tenant string) map[string]any {
 	}
 
 	// --- mail apps pass-through (mailapps_pass.go) ---------------------------
-	ping["mail_apps"] = s.mailApps.status()
+	ping["mail_apps"] = s.mailApps.status(tenant)
 
 	// --- tls -----------------------------------------------------------------
 	tlsGroup := map[string]any{"acme_certificate": false}

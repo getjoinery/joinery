@@ -28,6 +28,8 @@
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.6 - phase 5 settles each shard's version from its ping before the walk
+ * @version 1.5 - phase 5 re-adds an active slot whose shard keeps mail names (3.13) but not yet its own
  * @version 1.4 - phase 3 reports the relay's scanner on its own; its signals carry no coverage line
  * @version 1.3 - phase 5 walks each slot down the core ServiceTenantLadder; a blank grace setting
  *                reads as 14 days and 0 is honoured
@@ -317,6 +319,10 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 
 		$dispatched = 0; $reconciled = 0; $suspended = 0; $notes = array();
 
+		// Each shard's running version first: which shards keep slot mail names
+		// (relay 3.13) is read from what they report.
+		FleetService::settleShardVersions();
+
 		$slots = new MultiMailboxFleetSlot(array('deleted' => false));
 		$slots->load();
 
@@ -348,6 +354,12 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 					$dispatched++;
 				}
 				continue;
+			}
+			// The slot's mail name, for a shard that passes mail programs through
+			// (relay 3.13) and does not have it yet: a re-add updates the
+			// registration in place. The ladder below still runs.
+			if (FleetService::mailNameOwed($slot) && FleetService::applyTenant($slot, 'add_tenant')) {
+				$dispatched++;
 			}
 
 			// 2. The entitlement ladder (core ServiceTenantLadder): active →

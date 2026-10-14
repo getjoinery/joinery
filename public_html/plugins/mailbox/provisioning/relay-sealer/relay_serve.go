@@ -594,9 +594,10 @@ func (s *relayServer) tenantRoute(w http.ResponseWriter, r *http.Request, caller
 		return
 	}
 	var change struct {
-		PublicKey string        `json:"public_key"`
-		Domains   []string      `json:"domains"`
-		Limits    *tenantLimits `json:"limits"`
+		PublicKey  string        `json:"public_key"`
+		Domains    []string      `json:"domains"`
+		Limits     *tenantLimits `json:"limits"`
+		MxHostname string        `json:"mx_hostname"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &change); err != nil {
@@ -611,6 +612,7 @@ func (s *relayServer) tenantRoute(w http.ResponseWriter, r *http.Request, caller
 		req.PublicKey = change.PublicKey
 		req.Domains = change.Domains
 		req.Limits = change.Limits
+		req.MxHostname = change.MxHostname
 	case tail == "domains" && r.Method == http.MethodPut:
 		req.Type = requestTypeTenantSetDomains
 		req.Domains = change.Domains

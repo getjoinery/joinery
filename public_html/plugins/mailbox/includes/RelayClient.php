@@ -21,6 +21,7 @@
  * that answered something this code cannot read. MailboxRelay::pollHealth
  * records the class so the Setup tab can say which.
  *
+ * @version 1.3 - tenantAdd() carries the slot's mail name (mx_hostname) for a shard (relay 3.13)
  * @version 1.2 - mailAppsCertificate(): the mail gateway's certificate for the relay's name, from a CSR
  * @version 1.1 - sealTarget(): the signed seal-target statement, raw
  * @version 1.0
@@ -236,10 +237,14 @@ class RelayClient {
 	}
 
 	/** POST /relay/tenants/{slug}: operator only. Returns the verdict. */
-	public function tenantAdd(string $slug, string $public_key, array $domains, array $limits = array()): array {
-		return $this->verdict('POST', '/relay/tenants/' . rawurlencode($slug), json_encode(array(
-			'public_key' => $public_key, 'domains' => array_values($domains), 'limits' => (object)$limits,
-		)));
+	public function tenantAdd(string $slug, string $public_key, array $domains, array $limits = array(), string $mx_hostname = ''): array {
+		$body = array('public_key' => $public_key, 'domains' => array_values($domains), 'limits' => (object)$limits);
+		if ($mx_hostname !== '') {
+			// The slot's mail name (relay 3.13): the only name the shard passes
+			// this tenant's mail programs under and certifies it for.
+			$body['mx_hostname'] = $mx_hostname;
+		}
+		return $this->verdict('POST', '/relay/tenants/' . rawurlencode($slug), json_encode($body));
 	}
 
 	/** PUT /relay/tenants/{slug}/domains: operator only. */

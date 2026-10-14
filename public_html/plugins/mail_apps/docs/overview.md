@@ -197,11 +197,11 @@ The **Allow mail apps** switch (`/plugins/mail_apps/admin/admin_mail_apps`, perm
 
 The relay checks each minute that this server answers on every port it dials onward, and reports it in its ping (`reaches_server`); the check connects and closes, and the gateway closes it without logging. An update that changes the ports a route needs takes effect by itself: the helper's `refresh`, which runs after every changed install, re-applies the firewall and `proxy_from`. The admin page shows the relay's view from the report the site keeps (`MailAppGateway::relayReport()`): whether the relay reaches this server for IMAP and for submission, connections passed and refused in the last hour, and the last refusal with its reason. A blocked port shows there before a member meets it.
 
-It is offered when the relay is this deployment's own (not a shared one), runs 3.12 or later, has its name and address, and `mailbox_public_ip` is set; the admin page says which is missing.
+It is offered when the relay is this deployment's own and runs 3.12 or later, or is a shared fleet shard running 3.13 or later (`RelayVersion::PASSES_MAIL_APPS_SHARED`), and has its name and address, and `mailbox_public_ip` is set; the admin page says which is missing. On a shard, programs connect to the slot's own mail name (`mrl_mx_hostname`, `t<id>.<fleet zone>`), which the operator assigns: the shard routes by that name to this deployment alone and certifies it under that name alone.
 
 **The route is kept.** Mail programs store the name they connect to, so the switch records the route with the name (`mail_apps_route`: `direct` or `relay`, beside `mail_apps_served_name`) and keeps it. The rule (`MailAppGateway::preferredRoute()`): through a relay of this deployment's own, otherwise direct; never directly while a relay hides this server's address, since a direct name would publish it. `MailAppGateway::routeState()` compares the recorded name and route with what the rule picks now:
 - **offer**: the rule picks another name or route (a relay of its own was added, or the mail host name changed). The admin page says so, says each member must change the server name in their mail program, and offers **Switch**, which is Allow again by the new route. Nothing changes until it is pressed.
-- **exposed**: programs connect directly while mail now arrives through a relay that cannot pass them through (a shared one, or one older than 3.11). There is nothing to switch to; the page warns that this server's address is public.
+- **exposed**: programs connect directly while mail now arrives through a relay that cannot pass them through (one older than the version that passes them: 3.12, or 3.13 for a shared shard). There is nothing to switch to; the page warns that this server's address is public.
 - **gone**: programs connect through a relay this deployment no longer has. A relay that is only disabled (mailbox's emergency stop) is not gone: its row stays, and programs wait for it as mail does.
 
 The scheduled task **KeepMailAppsReachable** (hourly, `MailAppGateway::keepReachable()`) never changes a working route. It:
@@ -253,8 +253,6 @@ The admin page shows:
 | `provisioning/mail-gateway` (`go test`) | the gateway's IMAP and SMTP sessions against a fake site |
 
 **Where it is not offered yet:**
-- A deployment on a shared relay (a hosted fleet slot).
-- A site container.
 - A site with no mail host name set.
 
 The admin page says which applies.

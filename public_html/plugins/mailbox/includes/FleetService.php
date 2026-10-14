@@ -17,6 +17,10 @@
  *   - The relay reconcile scheduled task (cron, operator context) dispatches
  *     the flagged jobs, reconciles finished ones, and re-checks entitlement.
  *
+ * @version 1.7 - review fixes: the delivered name is recorded with its shard (mailNameKey), and
+ *                settleShardVersions() reads each shard's version from its ping
+ * @version 1.6 - add_tenant carries the slot's mail name (mx_hostname) and records it once a shard that keeps it
+ *                (relay 3.13) has it; mailNameOwed() says when an active slot's shard still lacks it
  * @version 1.5 - the ssh era is over: no tunnel allocation, no lifecycle jobs; applyTenant()
  *                drives every shard through its operator-signed tenant routes
  *                (specs/relay_without_a_shell.md)
@@ -272,6 +276,60 @@ class FleetService {
 	// ---------------------------------------- tenant lifecycle (cron only)
 
 	/**
+	 * Whether an active slot's shard keeps mail names (relay 3.13) and does not
+	 * have this slot's yet: the reconcile then re-adds the tenant, which updates
+	 * its registration in place and carries the name.
+	 */
+	public static function mailNameOwed(MailboxFleetSlot $slot): bool {
+		$name = strtolower(trim((string)$slot->get('mft_mx_hostname')));
+		if ($name === '' || (string)$slot->get('mft_status') !== MailboxFleetSlot::STATUS_ACTIVE
+				|| (string)$slot->get('mft_mx_hostname_applied') === self::mailNameKey($slot)) {
+			return false;
+		}
+		$shard = new MailboxFleetShard(intval($slot->get('mft_mfs_mailbox_fleet_shard_id')), TRUE);
+		return RelayVersion::passesMailAppsShared((string)$shard->get('mfs_provisioned_version'));
+	}
+
+	/**
+	 * What mft_mx_hostname_applied records once delivered: the shard and the
+	 * name, so a slot moved to another shard is owed its name there too.
+	 */
+	public static function mailNameKey(MailboxFleetSlot $slot): string {
+		return intval($slot->get('mft_mfs_mailbox_fleet_shard_id')) . ':' . strtolower(trim((string)$slot->get('mft_mx_hostname')));
+	}
+
+	/**
+	 * Each born, active shard's running version, from its operator-signed ping
+	 * (the version it reports, not only the one it was provisioned with), so a
+	 * shard renewed or upgraded any way is seen at its version. Unreachable
+	 * shards keep what was recorded. Returns how many changed.
+	 */
+	public static function settleShardVersions(): int {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayClient.php'));
+		$changed = 0;
+		foreach (new MultiMailboxFleetShard(array('active' => true, 'deleted' => false)) as $shard) {
+			$ip = trim((string)$shard->get('mfs_public_ip'));
+			$pin = trim((string)$shard->get('mfs_identity_fingerprint'));
+			if ($ip === '' || $pin === '') {
+				continue;
+			}
+			try {
+				$ping = RelayClient::forOperator($ip, $pin)->ping();
+			} catch (\Throwable $e) {
+				error_log('FleetService: shard ' . $shard->key . ' did not answer its ping: ' . $e->getMessage());
+				continue;
+			}
+			$version = substr(trim((string)($ping['provisioned'] ?? '')), 0, 20);
+			if ($version !== '' && preg_match('/^\d+(\.\d+)*$/', $version) && $version !== (string)$shard->get('mfs_provisioned_version')) {
+				$shard->set('mfs_provisioned_version', $version);
+				$shard->save();
+				$changed++;
+			}
+		}
+		return $changed;
+	}
+
+	/**
 	 * Perform one tenant lifecycle act for a slot: add_tenant | set_domains |
 	 * remove_tenant - one operator-signed request to the shard's tenant routes,
 	 * the slot's status moving on the verdict here and now. Returns true when
@@ -289,11 +347,20 @@ class FleetService {
 		try {
 			switch ($kind) {
 				case 'add_tenant':
+					$mx_hostname = strtolower(trim((string)$slot->get('mft_mx_hostname')));
 					$verdict = $client->tenantAdd($slug, (string)$slot->get('mft_public_key'), $slot->verifiedDomains(), array(
 						'forward_hourly_limit' => intval($slot->get('mft_forward_hourly_limit')),
 						'spool_max_mib'        => intval($slot->get('mft_spool_max_mib')),
 						'spool_max_entries'    => intval($slot->get('mft_spool_max_entries')),
-					));
+					), $mx_hostname);
+					// A shard that keeps the name (3.13) now has it; an older one
+					// ignores it, so it stays owed until the shard is renewed.
+					if (($verdict['status'] ?? '') === 'ok' && $mx_hostname !== ''
+							&& RelayVersion::passesMailAppsShared((string)$shard->get('mfs_provisioned_version'))
+							&& (string)$slot->get('mft_mx_hostname_applied') !== self::mailNameKey($slot)) {
+						$slot->set('mft_mx_hostname_applied', self::mailNameKey($slot));
+						$slot->save();
+					}
 					if (($verdict['status'] ?? '') === 'ok'
 							&& (string)$slot->get('mft_status') === MailboxFleetSlot::STATUS_PROVISIONING) {
 						$slot->set('mft_status', MailboxFleetSlot::STATUS_ACTIVE);

@@ -13,6 +13,7 @@
  * already the source of truth. Parsing it here rather than duplicating it means a
  * version bump has exactly one place to happen.
  *
+ * @version 1.7 - PASSES_MAIL_APPS_SHARED 3.13: a shared shard passes each tenant's mail programs under its slot name
  * @version 1.6 - PASSES_MAIL_APPS 3.12: 3.11 dialed the server's 465 onward, which cloud providers block, so
  *                sending never got through; 3.12 dials 10465
  * @version 1.5 - PASSES_MAIL_APPS 3.11: the relay that passes mail programs through to the mail gateway
@@ -147,6 +148,21 @@ class RelayVersion {
 	 * relay-fronted site only when its relay reports this or later.
 	 */
 	const PASSES_MAIL_APPS = '3.12';
+
+	/**
+	 * The first relay version whose shared shards pass mail programs through:
+	 * each tenant under its slot's mail name, assigned by the operator's signed
+	 * tenant-add (specs/mail_apps_plugin.md § Shared hosted relays). A hosted
+	 * site is offered mail apps through its shard only from this version.
+	 */
+	const PASSES_MAIL_APPS_SHARED = '3.13';
+
+	/** Does a shared shard running $running pass its tenants' mail apps through? Unknown reads as no. */
+	public static function passesMailAppsShared(string $running): bool {
+		$running = trim($running);
+		return preg_match('/^\d+(\.\d+)*$/', $running) === 1
+			&& version_compare($running, self::PASSES_MAIL_APPS_SHARED, '>=');
+	}
 
 	/** Does a relay running $running pass mail apps through? Unknown reads as no. */
 	public static function passesMailApps(string $running): bool {

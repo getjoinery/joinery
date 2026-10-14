@@ -14,6 +14,10 @@
 # comment text changed in them, no setting, so they moved no RELAY_VERSION; a
 # relay picks up the text when it is next rebuilt.
 #
+# Version: 3.13 - a shared shard passes mail programs through too (RelayVersion::PASSES_MAIL_APPS_SHARED): each
+#                tenant under its slot's mail name, which the operator's signed tenant-add assigns
+#                (tenants/<slug>/mx_hostname); the shard certifies a tenant only under that name; caps,
+#                certificate records and the ping's mail_apps group are per tenant.
 # Version: 3.12 - the mail apps pass-through dials the server's submission on 10465, not 465 (relay-serve's
 #                mailAppsSubmissionTarget): cloud providers block outbound 25, 465 and 587, so the relay
 #                could not reach the server's 465. Programs still use 465 here. The ping's mail_apps group
@@ -108,7 +112,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="3.12"
+RELAY_VERSION="3.13"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
