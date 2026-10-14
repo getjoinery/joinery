@@ -29,11 +29,14 @@
  * plugin without a `vaultConsumer` block simply accrues no obligations from
  * the attribution.)
  *
- * A declared bootstrap that cannot load is never fatal, but it is never
- * silent either: the consumer lands in notLoaded(), which
+ * A declared bootstrap that cannot load — missing on disk, or throwing as
+ * it runs — is never fatal, but it is never silent either: the error is
+ * logged and the consumer lands in notLoaded(), which
  * VaultUnlock::capsForUser() treats as "the strictest window policy may be
  * missing" and fails CLOSED to the hardened caps.
  *
+ * @version 1.3 - a bootstrap that throws lands in notLoaded() with the error logged, never fatal
+ *                to the request that loaded it (vault unlock among them)
  * @version 1.2 - a bootstrap's stray output is discarded, never printed into a page
  * @changelog 1.1 - the fail-closed caps are named the hardened caps
  */
@@ -81,6 +84,16 @@ class PluginBootstraps {
 			ob_start();
 			try {
 				require_once($path);
+			} catch (Throwable $e) {
+				// One plugin written against a core it no longer matches must
+				// not take down every request that loads bootstraps. It may
+				// have registered part of its hooks before it stopped, so it
+				// counts as not loaded: the caps fail closed and the rotation
+				// guard refuses for it.
+				error_log('[VaultConsumers] consumer "' . $name . '" bootstrap failed: ' . get_class($e) . ': '
+					. $e->getMessage() . ' (' . $e->getFile() . ':' . $e->getLine() . ')'
+					. ' — unlock windows fail closed to the hardened caps until it is fixed.');
+				self::$not_loaded[] = $name;
 			} finally {
 				ob_end_clean();
 				VaultConsumers::endLoading();

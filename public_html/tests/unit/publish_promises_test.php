@@ -22,7 +22,7 @@
  *
  * Run:  php tests/unit/publish_promises_test.php
  *
- * @version 1.2
+ * @version 1.3 - a site others upgrade from carries every package it serves
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -112,6 +112,23 @@ check($license_at !== false && $bundle_at !== false && $version_at !== false
     'aborting later would leave a bumped VERSION and a saved release row');
 check(preg_match('/a default bundle names a plugin this release cannot carry.*?Nothing has been written/s', $publisher_src) === 1,
     'saying plainly that nothing has been written');
+
+
+section('A site others upgrade from carries every package it serves');
+
+// A release-serving site (getjoinery) republishes what is on its own disk. When
+// its upgrade fetched only the plugins it had installed, every other plugin
+// fell out of the releases it served, and each site running one kept its old
+// copy against the new core — messenger 1.0.19 under 0.8.492 named a File
+// constant that release had moved, and vault unlock fataled on that site.
+check(strpos($helper_src, 'function servesReleases') !== false,
+    'DeploymentHelper says whether this site serves releases',
+    'upgrade.php asks it, and it travels with the self-updating set');
+check(preg_match("/method_exists\('DeploymentHelper',\s*'servesReleases'\)\s*&&\s*DeploymentHelper::servesReleases\(\)/", $upgrader_src) === 1,
+    'upgrade.php asks it, guarded for the pass that runs against old core');
+check(preg_match('/array_diff\(\$source_published_plugin_names,\s*\$plugins_to_download\)/', $upgrader_src) === 1
+    && preg_match('/array_diff\(\$source_published_theme_names,\s*\$themes_to_download\)/', $upgrader_src) === 1,
+    'and such a site takes every published plugin and theme, not only the ones it has');
 
 
 section('A version number identifies one build');

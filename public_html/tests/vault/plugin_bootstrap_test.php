@@ -93,6 +93,46 @@ check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS
 	'and unlock windows fail closed to the hardened caps while it is missing');
 
 // ---------------------------------------------------------------------------
+section('A bootstrap that throws is skipped, logged, and fails the caps closed');
+// ---------------------------------------------------------------------------
+// A plugin left behind by a newer core dies on a name core no longer has. That
+// must not take down the request that loaded it — vault unlock among them —
+// and must not pass for loaded either.
+VaultUnlock::resetForTests();
+VaultConsumers::resetForTests();
+VaultConsumers::setPluginDeclarationsForTests(array(
+	'halfway' => array(
+		'declaration' => array('reseals' => true),
+		'active'      => true,
+		'bootstrap'   => 'includes/bootstrap.php',
+		'path'        => PathHelper::getIncludePath('tests/vault/fixtures/throwing_consumer_bootstrap.php'),
+	),
+));
+
+$log_path = tempnam(sys_get_temp_dir(), 'bootlog');
+$previous_log = ini_get('error_log');
+ini_set('error_log', $log_path);
+$thrown = null;
+try {
+	PluginBootstraps::load();
+} catch (Throwable $e) {
+	$thrown = $e;
+} finally {
+	ini_set('error_log', $previous_log === false ? '' : $previous_log);
+}
+$logged = (string)@file_get_contents($log_path);
+@unlink($log_path);
+
+check($thrown === null, 'loading bootstraps does not throw' . ($thrown ? ': ' . $thrown->getMessage() : ''));
+check(in_array('halfway', PluginBootstraps::notLoaded(), true), 'the consumer whose bootstrap threw is recorded as not loaded');
+check(strpos($logged, 'halfway') !== false && strpos($logged, 'SOURCE_NO_SUCH_TAG') !== false,
+	'and the log names the consumer and the error');
+$caps = VaultUnlock::capsForUser(1);
+check($caps['idle'] === VaultUnlock::HARDENED_IDLE_CAP_SECONDS
+		&& $caps['absolute'] === VaultUnlock::HARDENED_ABSOLUTE_CAP_SECONDS,
+	'and unlock windows fail closed to the hardened caps');
+
+// ---------------------------------------------------------------------------
 section('A vaultConsumer without a top-level bootstrap keeps its obligations');
 // ---------------------------------------------------------------------------
 // The fail-safe direction: a resealer that lost its load point must refuse

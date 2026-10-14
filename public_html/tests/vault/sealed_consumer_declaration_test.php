@@ -222,6 +222,25 @@ $after = new UserEncryptionVault($vault_id, TRUE);
 check((int)$after->get('uev_key_generation') === $generation_before, 'again, nothing was minted');
 
 // ---------------------------------------------------------------------------
+section('A resealer whose bootstrap threw refuses the rotation, even with its callback registered');
+// ---------------------------------------------------------------------------
+// A plugin left behind by a newer core can register its reseal callback and
+// die on the next line. Its obligation reads met; the rest of its load point
+// never ran.
+$message = $rotate_with(array(
+	'halfway' => array(
+		'declaration' => array('reseals' => true),
+		'active'      => true,
+		'bootstrap'   => 'includes/bootstrap.php',
+		'path'        => PathHelper::getIncludePath('tests/vault/fixtures/throwing_consumer_bootstrap.php'),
+	),
+));
+check($message !== null && strpos($message, 'halfway') !== false,
+	'the rotation is refused and the refusal names the consumer');
+$after = new UserEncryptionVault($vault_id, TRUE);
+check((int)$after->get('uev_key_generation') === $generation_before, 'nothing was minted');
+
+// ---------------------------------------------------------------------------
 section('A plugin NEVER activated on this instance does not block the rotation');
 // ---------------------------------------------------------------------------
 // Every deployment ships every plugin's code, so an on-disk declaration alone

@@ -30,6 +30,8 @@
  * unlock. A code set's wrappings carry its id and each code's index, and a
  * code used here spends its root-vault twin in the same statement.
  *
+ * @version 1.5 - the reseal guard refuses for a resealing consumer whose bootstrap did not
+ *   load (PluginBootstraps::notLoaded()), even one that registered its callback first
  * @version 1.4 - setup/rotate take a browser-made code set and passphrase KEK;
  *   recovery and passphrase unlock take a KEK; a used code spends its root twin;
  *   a recovery use stamps every vault and forgets the linked devices' keys
@@ -515,7 +517,9 @@ class VaultCeremonies {
 
 	/**
 	 * Refuse the rotation while any consumer that declared it stores sealed
-	 * content has no re-seal callback in place.
+	 * content has no re-seal callback in place, or its bootstrap did not load:
+	 * one that threw part-way may have registered the callback and nothing
+	 * after it.
 	 *
 	 * Without this the rotation completes, retires the old wrappings, and that
 	 * consumer's content is gone — the one failure mode a platform cannot ask a
@@ -554,6 +558,12 @@ class VaultCeremonies {
 				$blocking[$name] = $is_inactive_plugin;
 			}
 		}
+		foreach (PluginBootstraps::notLoaded() as $name) {
+			$declaration = VaultConsumers::declaration($name);
+			if ($declaration !== null && !empty($declaration[VaultConsumers::OBLIGATION_RESEAL])) {
+				$blocking[$name] = false;
+			}
+		}
 		if (!$blocking) {
 			return;
 		}
@@ -561,7 +571,7 @@ class VaultCeremonies {
 		$inactive = array_keys(array_filter($blocking));
 		$broken   = array_keys(array_filter($blocking, function ($is_inactive) { return !$is_inactive; }));
 
-		error_log('Vault rotation refused: consumers declaring reseals with no callback registered - '
+		error_log('Vault rotation refused: consumers declaring reseals with no callback registered or no bootstrap loaded - '
 			. implode(', ', array_keys($blocking)));
 
 		if ($inactive) {
