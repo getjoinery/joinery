@@ -123,8 +123,15 @@ class SettingsDeclarations {
 			}
 		}
 		if ($paths) {
-			require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
-			StaticPageCache::invalidatePaths(array(), array_keys($paths));
+			// Best effort: the setting is already written, which is the work. A
+			// cache that cannot be cleared (a full disk) is logged, never a failure
+			// of the save.
+			try {
+				require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+				StaticPageCache::invalidatePaths(array(), array_keys($paths));
+			} catch (Throwable $e) {
+				error_log('SettingsDeclarations::clearPagesFor: could not clear ' . implode(', ', array_keys($paths)) . ': ' . $e->getMessage());
+			}
 		}
 	}
 

@@ -1018,7 +1018,7 @@ never overwritten.
 | `vault_gated` | No | `false` | Changing it requires an open vault unlock window. |
 | `managed` | No | `false` | Machine-written. Never rendered. Mutually exclusive with `label`. |
 | `legacy_core` | No | `false` | Opts this one setting out of the prefix rule so it keeps an unprefixed core-era name. See below. |
-| `clearsPages` | No | — | Same-site paths whose static-cached pages (and everything under them) are cleared when an operator changes this setting — e.g. `["/forum", "/sitemap"]` on a setting that turns public pages on or off. The cache answers signed-out visitors before any code runs, so without it a page the setting turns off goes on being served. |
+| `clearsPages` | No | — | Same-site paths whose static-cached pages (and everything under them) are cleared whenever its stored value changes (the settings form or `Setting::put()`) — e.g. `["/forum", "/sitemap"]` on a setting that turns public pages on or off. The cache answers signed-out visitors before any code runs, so without it a page the setting turns off goes on being served. |
 
 The full field-spec reference, including how a plugin admin page requests a group
 and wraps it with context, is in [Settings](settings.md).
@@ -1066,7 +1066,7 @@ Every file row carries an origin tag (`fil_source`) naming what created it, and 
 
 - **Keep the tag string as a constant on one of the plugin's own classes**, e.g. `BoardsUploads::FILE_SOURCE = 'boards_attachment'`, and stamp it when the file is created: `File::createFromUpload($tmp, $name, $mime, $user_id, array('fil_source' => BoardsUploads::FILE_SOURCE, ...))`. Core's `File::SOURCE_*` constants are core's own tags only.
 - **Declarations are read off disk, active or not** (`FileSourceDeclarations`, cached per request), so a deactivated plugin's files keep their name and an internal tag stays unlisted while its plugin is off.
-- **A tag core owns, or one another plugin declares, is refused** by the manifest check (`PluginHelper::validate()`), along with a malformed entry. At runtime core's entry wins, and between two plugins the first in directory order wins.
+- **A tag core owns, or one an active plugin declares, is refused** when a plugin is activated or installed, along with a malformed entry; every sync reports clashes among active plugins on the Plugins page and in `update_database`. At runtime core's entry wins, and between two plugins the active one installed first keeps the tag.
 - **An undeclared tag** (files left by an uninstalled plugin) reads as its raw name and stays listable, so it is noticed rather than lost.
 - A test that needs a throwaway tag declares it for its own process with `FileSourceDeclarations::declareForTest($tag, $spec)` (CLI only).
 

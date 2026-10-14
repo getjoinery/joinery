@@ -21,9 +21,10 @@
  * their name, and an internal tag stays unlisted while its plugin is off.
  *
  * A tag core owns cannot be declared by a plugin, and two plugins cannot declare
- * the same tag. Either is reported by errorsFor() (run by PluginHelper::validate());
- * at runtime core's entry wins, and between plugins the first in directory order
- * wins, so the catalog is total whether or not the check has been run.
+ * the same tag. Either is reported by errorsFor() (run when a plugin is
+ * validated, and on every sync); at runtime core's entry wins, and between
+ * plugins the active one installed first keeps the tag (byPrecedence), so the
+ * catalog is total whether or not the check has been run.
  *
  * @version 1.2 - a tag two plugins claim goes to the active plugin installed first, not to directory order
  * @changelog 1.1 - a usable tag with a stray key stays in the catalog as declared; errorsFor() can check against a set of plugins
@@ -164,6 +165,25 @@ class FileSourceDeclarations {
 		self::reset();
 		self::$test_declarations = array();
 		self::$test_plugin_dir = null;
+		self::$test_rank = null;
+	}
+
+	/** @var array|null plugin => installed time, standing in for plg_plugins in a test process */
+	private static $test_rank = null;
+
+	/**
+	 * Treat these plugins as active, installed at these times, instead of reading
+	 * plg_plugins — so a test can stand up a clash between active plugins.
+	 *
+	 * @param array<string,string> $rank plugin => installed time
+	 * @throws LogicException outside the CLI
+	 */
+	public static function usePluginRankForTest(array $rank): void {
+		if (php_sapi_name() !== 'cli') {
+			throw new LogicException('FileSourceDeclarations::usePluginRankForTest is for test processes only.');
+		}
+		self::$test_rank = $rank;
+		self::$catalog = null;
 	}
 
 	// ── internals ───────────────────────────────────────────────────────────
@@ -201,16 +221,20 @@ class FileSourceDeclarations {
 	 */
 	private static function byPrecedence(array $manifests): array {
 		$rank = array();
-		try {
-			$q = DbConnector::GetPreparedStatement('SELECT plg_name, plg_active, plg_installed_time FROM plg_plugins');
-			$q->execute();
-			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-				if ((int)$row['plg_active'] === 1) {
-					$rank[$row['plg_name']] = (string)($row['plg_installed_time'] ?? '9999');
+		if (self::$test_rank !== null) {
+			$rank = self::$test_rank;
+		} else {
+			try {
+				$q = DbConnector::GetPreparedStatement('SELECT plg_name, plg_active, plg_installed_time FROM plg_plugins');
+				$q->execute();
+				foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+					if ((int)$row['plg_active'] === 1) {
+						$rank[$row['plg_name']] = (string)($row['plg_installed_time'] ?? '9999');
+					}
 				}
+			} catch (Throwable $e) {
+				// No plugin table to read (a fresh install): directory order.
 			}
-		} catch (Throwable $e) {
-			// No plugin table to read (a fresh install): directory order.
 		}
 		uksort($manifests, function ($a, $b) use ($rank) {
 			$ra = isset($rank[$a]);

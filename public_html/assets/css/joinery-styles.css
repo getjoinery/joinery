@@ -194,7 +194,14 @@ body.jy-default blockquote {
   align-items: center;
   gap: var(--jy-space-4);
   flex: 1;
+  min-width: 0;
   justify-content: flex-end;
+}
+/* Between the phone layout and a wide desktop, a signed-in admin's header
+   (menu, Admin link, icons, account name) is wider than the window. The
+   account name goes first, as on a phone: the avatar still opens the menu. */
+@media (max-width: 960px) {
+  .jy-header-icons .jy-user-name { display: none; }
 }
 
 /* Secondary member nav (Profile / Email / Calendar / Drive / AI ...).

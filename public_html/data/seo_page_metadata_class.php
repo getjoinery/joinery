@@ -536,6 +536,7 @@ class SeoPageMetadata extends SystemBase {
 		$result = array(
 			'inserted_static'  => 0,
 			'inserted_entity'  => 0,
+			'adopted_entity'   => 0,
 			'updated_path'     => 0,
 			'soft_deleted'     => 0,
 			'errors'           => array(),
@@ -563,6 +564,12 @@ class SeoPageMetadata extends SystemBase {
 
 					if ($existing) {
 						if ($existing['spm_path'] !== $rec['path']) {
+							// An untyped row made lazily at the new path would block the
+							// move for good (one live row per path); the entity's row,
+							// which carries its SEO copy, takes the path.
+							$clear = $dblink->prepare("UPDATE spm_seo_page_metadata SET spm_delete_time = now()
+								WHERE spm_path = ? AND spm_delete_time IS NULL AND spm_entity_type IS NULL");
+							$clear->execute(array($rec['path']));
 							$upd = $dblink->prepare("UPDATE spm_seo_page_metadata
 								SET spm_path = ?, spm_update_time = now()
 								WHERE spm_seo_page_metadata_id = ?");
@@ -586,7 +593,7 @@ class SeoPageMetadata extends SystemBase {
 								WHERE spm_path = ? AND spm_delete_time IS NULL AND spm_entity_type IS NULL");
 							$adopt->execute(array($rec['entity_type'], $rec['entity_id'], $rec['path']));
 							if ($adopt->rowCount() > 0) {
-								$result['adopted_entity'] = ($result['adopted_entity'] ?? 0) + 1;
+								$result['adopted_entity']++;
 							}
 						}
 					}

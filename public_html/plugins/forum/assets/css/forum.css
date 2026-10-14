@@ -2,7 +2,7 @@
  * Forum — styles for /forum pages. Built only from the kit's --jy-* tokens, so
  * the active theme's colours, and its dark mode, carry through.
  *
- * @version 1.0.0
+ * @version 1.0.1 - the report dialog's fields fit inside it
  */
 
 .jy-ui.forum { display: flex; flex-direction: column; gap: var(--jy-space-4); }
@@ -178,7 +178,8 @@
 
 /* ---------------------------------------------------------- report modal */
 
-.jy-ui .forum-report-box { display: flex; flex-direction: column; gap: var(--jy-space-2); min-width: min(28rem, 80vw); }
+.jy-ui .forum-report-box { display: flex; flex-direction: column; gap: var(--jy-space-2); width: min(28rem, 100%); max-width: 100%; }
+.jy-ui .forum-report-box .form-control { width: 100%; max-width: 100%; box-sizing: border-box; }
 
 /* ---------------------------------------------------------- narrow screens */
 

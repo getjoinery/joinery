@@ -105,7 +105,15 @@ check(count($clash) === 1 && strpos($clash[0], 'core already owns') !== false,
 	"the manifest check refuses a tag core owns", json_encode($clash));
 
 check($catalog['shared_tag']['label'] === 'First claim',
-	'two plugins claiming one tag: the first in directory order wins at runtime', json_encode($catalog['shared_tag']));
+	'two plugins claiming one tag, neither active: the first by name keeps it', json_encode($catalog['shared_tag']));
+FileSourceDeclarations::usePluginRankForTest(array('ccc_first' => '2026-10-01 00:00:00', 'ddd_second' => '2026-01-01 00:00:00'));
+check(File::source_catalog()['shared_tag']['label'] === 'Second claim',
+	'both active: the plugin installed first keeps the tag, whatever its name');
+FileSourceDeclarations::usePluginRankForTest(array('ccc_first' => '2026-10-01 00:00:00'));
+check(File::source_catalog()['shared_tag']['label'] === 'First claim',
+	'only one active: the active plugin keeps it');
+FileSourceDeclarations::usePluginRankForTest(array());
+$catalog = File::source_catalog();
 $first = FileSourceDeclarations::errorsFor('ccc_first');
 $second = FileSourceDeclarations::errorsFor('ddd_second');
 check(count($first) === 1 && strpos($first[0], "also declared by plugin 'ddd_second'") !== false
