@@ -742,7 +742,9 @@
 		// agent. A stale agent runs on every node in the
 		// fleet; a stale bundle affects only machines with no site, and carrying
 		// the previous one forward leaves those machines exactly where they were
-		// rather than blocking a release the rest of the fleet needs.
+		// rather than blocking a release the rest of the fleet needs. No bundle
+		// at all is another matter, and refuses below: a relay is born from
+		// it, and a machine with no site would be left with nothing (B70).
 		//
 		// Its scripts come from the build directory, the commit. The binaries
 		// just built are copied into it first, so the bundle and the version
@@ -757,6 +759,15 @@
 		if (!$republish && SupportBundlePublisher::hasConsumer()) {
 			publish_output("Bundling agent support bundle...");
 			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output', $build_root);
+		}
+		$bundle_dir = $full_site_dir . '/public_html/agent_dist';
+		if (SupportBundlePublisher::hasConsumer()
+				&& (SupportBundlePublisher::info($bundle_dir) === null || !is_file($bundle_dir . '/' . SupportBundlePublisher::BUNDLE_NAME))) {
+			publish_output("\nRefusing to publish {$version} — it would ship no support bundle (agent_dist/"
+				. SupportBundlePublisher::BUNDLE_NAME . ' and ' . SupportBundlePublisher::INFO_NAME . ' are not both there): '
+				. ($republish ? 'the release this site received carries none.' : 'none was built here, and there was none to carry forward; the support bundle line above says why.'));
+			publish_output('No release was published.');
+			exit(1);
 		}
 
 		// Write the new version to public_html/VERSION so it ships in the tarball and

@@ -10,7 +10,8 @@
  *
  * Behavior contract:
  * - Agent source present and its version differs from the bundled manifest:
- *   cross-compile, sign, regenerate agent_dist.
+ *   cross-compile, sign, regenerate the agent's own files in agent_dist
+ *   (ownFile()); what other publishers keep there goes on as it was.
  * - Agent source present, version unchanged: leave agent_dist byte-identical
  *   (keeps the server_manager plugin tree hash stable between publishes).
  * - Agent source absent (a management node publishing without the agent repo):
@@ -25,6 +26,8 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.11 - a rebuild replaces the agent's own files only (ownFile()): the support bundle and the release
+ *                 statement beside them go on into the new agent_dist, so a bundle carried forward is there (B70)
  * @version 2.10 - publish() takes $source: the agent is built from a copy of its source commit, so an
  *                 uncommitted edit in the agent source is not compiled into a release; uncommittedAdvice()
  *                 no longer names agent changes, which are left out rather than in the way;
@@ -284,6 +287,20 @@ class AgentDistPublisher {
 				throw new Exception('cannot write manifest.json');
 			}
 
+			// agent_dist also holds what other publishers put there: the support
+			// bundle, the release statement. The rebuild replaces the agent's own
+			// files only, so the rest goes on into the new directory, and a
+			// publisher that keeps its previous output (a support bundle carried
+			// forward) still has it to keep (B70).
+			foreach (is_dir($dist_dir) ? (scandir($dist_dir) ?: array()) : array() as $f) {
+				if ($f[0] === '.' || self::ownFile($f) || !is_file($dist_dir . '/' . $f) || file_exists($staging . '/' . $f)) {
+					continue;
+				}
+				if (!copy($dist_dir . '/' . $f, $staging . '/' . $f)) {
+					throw new Exception("cannot carry {$f} into the new agent_dist");
+				}
+			}
+
 			// Swap staging into place; the old artifact survives any failure above.
 			$old = $dist_dir . '.old';
 			if (!self::rrmdir($old)) {
@@ -449,6 +466,15 @@ class AgentDistPublisher {
 		if ($raw === false) { return null; }
 		$m = json_decode($raw, true);
 		return is_array($m) ? $m : null;
+	}
+
+	/**
+	 * Whether a file in agent_dist is the agent's own (its binaries, its unit,
+	 * its manifest), which a rebuild writes afresh; any other belongs to
+	 * another publisher and outlives the rebuild.
+	 */
+	public static function ownFile($name) {
+		return $name === 'manifest.json' || strpos($name, 'joinery-agent') === 0;
 	}
 
 	/**

@@ -36,7 +36,16 @@ $tmp = sys_get_temp_dir() . '/release_commit_test_' . getmypid();
 exec('rm -rf ' . escapeshellarg($tmp));
 mkdir($tmp, 0755, true);
 
+// Every repository this test runs git in is a throwaway one under $tmp: it
+// commits, pushes and rewrites remotes there. Pointed anywhere else (a check
+// that reused $repo for the real tree did, on 2026-10-14) it would do all of
+// that to a real repository, so it stops instead.
 function rc_git($repo, $args) {
+	global $tmp;
+	if ((string)$repo !== $tmp && strpos((string)$repo, $tmp . '/') !== 0) {
+		fwrite(STDERR, "release_commit_test: refusing to run git in {$repo}, which is not under {$tmp}\n");
+		exit(1);
+	}
 	return ReleaseCommit::git($repo, $args);
 }
 
@@ -235,6 +244,14 @@ $held = array(
 	'maintenance_scripts/install_tools/joinery_jail/src/main.rs'        => true,  // compiled on this box
 	'maintenance_scripts/install_tools/site_engine/versions.env'        => true,  // the engine is built from it here
 	'public_html/plugins/mailbox/provisioning/relay-sealer/src/main.rs' => true,
+	// publish's own code runs from this disk and decides what the release holds (B70)
+	'public_html/plugins/server_manager/includes/publish_upgrade.php'   => true,
+	'public_html/includes/ReleaseCommit.php'                            => true,
+	'public_html/plugins/server_manager/includes/SupportBundlePublisher.php' => true,
+	'public_html/includes/ParserJailPublisher.php'                      => true,
+	'public_html/plugins/mailbox/includes/RelaySealerPublisher.php'     => true,
+	'public_html/plugins/server_manager/includes/JobCommandBuilder.php' => false,
+	'public_html/plugins/server_manager/views/admin/publisher.php'      => false,
 	'public_html/includes/DriveHelper.php'                              => false,
 	'public_html/logic/drive_trash_logic.php'                           => false,
 	'public_html/plugins/store/includes/Cart.php'                       => false,
@@ -246,6 +263,18 @@ $held = array(
 foreach ($held as $path => $expected) {
 	check(ReleaseCommit::heldPath($path) === $expected, ($expected ? 'held:      ' : 'left out:  ') . $path);
 }
+// Every publisher in the tree, the next one too, is held without a list to keep.
+// Only read here: $repo below is the throwaway repository, never this one.
+$publisher_root = dirname(PathHelper::getIncludePath(''));
+$publishers = array_merge(glob($publisher_root . '/public_html/includes/*Publisher.php') ?: array(),
+	glob($publisher_root . '/public_html/plugins/*/includes/*Publisher.php') ?: array());
+$not_held = array();
+foreach ($publishers as $p) {
+	if (!ReleaseCommit::heldPath(substr($p, strlen($publisher_root) + 1))) {
+		$not_held[] = substr($p, strlen($publisher_root) + 1);
+	}
+}
+check(count($publishers) >= 10 && $not_held === array(), 'every *Publisher class in the tree is held (' . count($publishers) . ')', json_encode($not_held));
 check(strpos(implode(' ', ReleaseCommit::JOINERY_HELD_DIRS), ParserJailPublisher::SOURCE_SUBDIR . '/') !== false,
 	'the parser jail source held is the one its publisher compiles');
 check(in_array(SandboxHostPublisher::SOURCE_SUBDIR . '/', ReleaseCommit::JOINERY_HELD_DIRS, true)
@@ -347,6 +376,13 @@ check(!ReleaseCommit::exportCommit($buildr, $commit, $whole)['ok'], 'and refuses
 
 // ---------------------------------------------------------------------------
 section('On the remote');
+
+// From here on the test fetches, commits, pushes and rewrites remotes in
+// $repo, some of it through ReleaseCommit directly rather than rc_git().
+if (strpos((string)$repo, $tmp . '/') !== 0) {
+	fwrite(STDERR, "release_commit_test: \$repo is {$repo}, not the throwaway repository under {$tmp}; stopping\n");
+	exit(1);
+}
 
 $remote = ReleaseCommit::onRemote($repo, ReleaseCommit::head($repo));
 check($remote['on_remote'] === false && strpos($remote['reason'], 'could not fetch') === 0,

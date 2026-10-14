@@ -412,6 +412,13 @@ check($export_a < $at('SupportBundlePublisher::publish(') && $export_a < $at('$c
     'and the support bundle and the version decisions read that copy');
 check(strpos($publisher_src, "SupportBundlePublisher::publish(\$full_site_dir, 'publish_output', \$build_root)") !== false,
     'the support bundle copies its scripts from the commit');
+// A bundle carried forward ships the previous release's scripts; no bundle at
+// all ships nothing for a relay or a machine with no site, and 0.8.496 did (B70).
+$no_bundle = $at('it would ship no support bundle');
+check($no_bundle > $at('SupportBundlePublisher::publish(') && $no_bundle < $at('publish_output("Wrote version')
+    && strpos(substr($publisher_src, $at('SupportBundlePublisher::publish('), max(0, $no_bundle - $at('SupportBundlePublisher::publish('))),
+        "if (SupportBundlePublisher::hasConsumer()\n\t\t\t\t&& (SupportBundlePublisher::info(\$bundle_dir) === null") !== false,
+    'a release that would ship no support bundle refuses before anything is written, a republish too');
 check($export_b > $own_commit && $export_b < $at('Create CORE archive'),
     'the release commit is copied out once publish has made it, before anything is built');
 foreach (array("\$build_root . '/public_html/'", "\$build_root . '/public_html/theme'", "\$build_root . '/public_html/plugins'",
