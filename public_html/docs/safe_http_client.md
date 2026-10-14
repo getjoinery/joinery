@@ -10,7 +10,14 @@ the default so that safety is not a per-callsite discipline nobody keeps.
 - **Validation before a socket opens.** The URL, and every redirect hop, passes
   through `UrlSafetyValidator` (scheme allowlist, port policy, hostname-literal
   rejection, DNS resolution of every A/AAAA record against private / loopback /
-  link-local / reserved ranges).
+  link-local / reserved ranges). An IPv6 address is judged by its bytes, not
+  how it is written, and one carrying an IPv4 address (IPv4-mapped, NAT64,
+  6to4) is judged as that address; IPv4-compatible, IPv4-translated, Teredo
+  and site-local addresses are refused outright. The addresses it must refuse
+  and the public ones it must allow are listed once in
+  `tests/fixtures/outbound_address_cases.json`; the Go guards in the sandboxed
+  plugin host and the mail relay are tested against the same list, so a range
+  one learns cannot stay open in another.
 - **Connection pinned to the validated IPs** via `CURLOPT_RESOLVE` — the real
   hostname is still used for SNI, Host and certificate verification, but the
   socket cannot be re-resolved to a rebinding target between the check and the

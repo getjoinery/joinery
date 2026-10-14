@@ -250,7 +250,7 @@ A machine key that sits on another machine should be able to do one job and noth
 A scoped key:
 
 - does what its entries name, subject to the rest of each endpoint's contract (capability, user floor) and, on records, to per-record authorization as its owner. A key made on the API Keys page belongs to the admin who makes it, so it reaches every row of the models it names, as staff do;
-- is refused 403 everywhere else: every other action, model and verb, forms, management, `auth/*`, `app/*`, `drive_upload` and the `GET /api/v1/actions` listing. The message names the scope.
+- is refused 403 everywhere else: every other action, model and verb, forms, management, `auth/*`, `app/*`, `drive_upload` and the `GET /api/v1/actions` listing. The message names what the key lacked (`'Event:read' (read Event records)`, or the action) beside the scope it has, so the fix is one entry on a new key.
 
 `ApiAuth::authorize()` makes the decision: action dispatch passes the action's name, and each record endpoint passes its model and verb as an argument of their own (never a contract key, so no descriptor can name a record). Forms and management pass neither, so no scope reaches them. Before any route family but action dispatch runs, `apiv1.php` calls `ApiAuth::refuseScopedKeyOutsideItsScope()`, which lets a key through only to a URL that is exactly a model its scope names (`Event`, or `Events` for the list), and only when that name is a model class on this site; that covers the families that never call `authorize()`. No model shares a name with a route family (`tests/unit/api_scoped_key_test.php` holds this). Sessionless actions (`requires_session: false`) run before authentication and never see a key; anyone may call them.
 

@@ -466,17 +466,29 @@ func TestEgressTargetGuard(t *testing.T) {
 	}
 }
 
+// The one list every outbound guard is tested against
+// (tests/fixtures/outbound_address_cases.json): this relay's, the platform's
+// UrlSafetyValidator and the sandboxed plugin host's.
 func TestIsPublicIPMatchesThePlatformTable(t *testing.T) {
-	blocked := []string{"0.0.0.1", "10.0.0.1", "127.0.0.1", "169.254.169.254",
-		"172.16.0.1", "192.168.1.1", "100.64.0.1", "224.0.0.1", "240.0.0.1", "::1"}
-	for _, s := range blocked {
-		if isPublicIP(parseIP(s)) {
-			t.Fatalf("%s must not count as public", s)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "tests", "fixtures", "outbound_address_cases.json"))
+	if err != nil {
+		t.Fatalf("the shared address list: %v", err)
+	}
+	var cases struct {
+		Refused []struct{ Address, Why string } `json:"refused"`
+		Allowed []struct{ Address string }      `json:"allowed"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil || len(cases.Refused) == 0 || len(cases.Allowed) == 0 {
+		t.Fatalf("the shared address list does not read: %v", err)
+	}
+	for _, c := range cases.Refused {
+		if isPublicIP(parseIP(c.Address)) {
+			t.Errorf("%s (%s) must not count as public", c.Address, c.Why)
 		}
 	}
-	for _, s := range []string{"8.8.8.8", "1.1.1.1", "2606:4700::1111"} {
-		if !isPublicIP(parseIP(s)) {
-			t.Fatalf("%s must count as public", s)
+	for _, c := range cases.Allowed {
+		if !isPublicIP(parseIP(c.Address)) {
+			t.Errorf("%s must count as public", c.Address)
 		}
 	}
 }

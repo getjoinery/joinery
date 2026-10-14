@@ -62,7 +62,9 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.7.1
+ * @version 1.8.0
+ * @changelog 1.8.0 - A scope refusal names what the key lacked ('Event:read', the action) beside
+ *   what it is limited to, and for a sandboxed plugin's key where its manifest asks for it.
  * @changelog 1.7.1 - A deleted owner is reported only after the secret verifies, like a disabled one.
  * @changelog 1.7.0 - A disabled account (User::actions_allowed()) is refused on every key it owns
  *   (machine, session, app password), on a browser session, and at auth/login (reason 'disabled').
@@ -607,8 +609,15 @@ class ApiAuth {
 		// and every other surface pass neither, so no scope reaches them.
 		if ($api_entry && $api_entry->is_scoped()
 			&& !self::scopeAdmits($api_entry, $endpoint, $record)) {
-			api_error($message_prefix . ': this key is limited to ' . $api_entry->scope_label(),
-				'AuthenticationError', 403);
+			if ($endpoint !== null) {
+				self::refuseOutsideScope($api_entry, $message_prefix, "the action '" . $endpoint . "'",
+					'permissions.actions ["' . $endpoint . '"]');
+			}
+			if (is_array($record) && isset($record['model'], $record['verb'])) {
+				self::refuseOutsideScope($api_entry, $message_prefix, self::recordEntry($record['model'], $record['verb']),
+					'permissions.records {"' . $record['model'] . '": ["' . $record['verb'] . '"]}');
+			}
+			self::refuseOutsideScope($api_entry, $message_prefix, null, '');
 		}
 		// The inverse: an endpoint that admits only a key scoped to it. The
 		// gate above already refused a key scoped elsewhere, so what remains
@@ -717,8 +726,43 @@ class ApiAuth {
 				return;
 			}
 		}
-		api_error(($segment !== '' ? strtolower($segment) : 'This endpoint') . ': this key is limited to '
-			. $api_entry->scope_label(), 'AuthenticationError', 403);
+		$prefix = $segment !== '' ? strtolower($segment) : 'This endpoint';
+		// A model the scope does not name: say which entry it would need, with
+		// the verb the request's method asks for.
+		$model = ApiKey::is_model_class($operation) ? $operation
+			: ((substr($operation, -1) === 's' && ApiKey::is_model_class(substr($operation, 0, -1))) ? substr($operation, 0, -1) : null);
+		if ($model !== null) {
+			$verbs = array('GET' => 'read', 'POST' => 'create', 'PUT' => 'update', 'PATCH' => 'update', 'DELETE' => 'delete');
+			$verb = $verbs[strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'))] ?? 'read';
+			self::refuseOutsideScope($api_entry, $prefix, self::recordEntry($model, $verb),
+				'permissions.records {"' . $model . '": ["' . $verb . '"]}');
+		}
+		self::refuseOutsideScope($api_entry, $prefix, null, '');
+	}
+
+	/** A record entry as a scope writes it, and in words: 'Event:read' (read Event records). */
+	protected static function recordEntry(string $model, string $verb): string {
+		return "'" . $model . ':' . $verb . "' (" . $verb . ' ' . $model . ' records)';
+	}
+
+	/**
+	 * Refuse a scoped key, naming what it lacked ($needed: the entry its scope
+	 * would need, or null for a surface no scope reaches) beside what it is
+	 * limited to. For a sandboxed plugin's key it also says where the plugin's
+	 * manifest asks for it ($manifest), so an author fixes a line rather than
+	 * guessing. Never returns.
+	 */
+	protected static function refuseOutsideScope($api_entry, string $prefix, ?string $needed, string $manifest): void {
+		$message = $prefix . ': ' . ($needed !== null
+			? "this key's scope does not include " . $needed
+			: 'no scoped key reaches this')
+			. '; this key is limited to ' . $api_entry->scope_label() . '.';
+		$plugin = $needed !== null && $manifest !== '' ? $api_entry->sandbox_plugin() : null;
+		if ($plugin !== null) {
+			$message .= ' The plugin ' . $plugin . ' asks for it in its manifest under ' . $manifest
+				. ', and an admin approves the version that asks.';
+		}
+		api_error($message, 'AuthenticationError', 403);
 	}
 
 	/**

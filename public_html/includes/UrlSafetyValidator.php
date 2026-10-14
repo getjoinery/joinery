@@ -55,9 +55,11 @@ class UrlSafetyValidator {
     /**
      * The single authoritative table of blocked IPv4 ranges. Every guard in the
      * platform consults this one list — this is the divergence that T13/T21
-     * closed. IPv6 private/reserved ranges are covered by PHP's filter flags in
-     * checkIp(); the explicit CIDR list here is the belt-and-suspenders layer for
-     * IPv4 blocks PHP's FILTER_FLAG_NO_RES_RANGE does not reliably catch.
+     * closed. PHP's filter flags in checkIp() cover the private and reserved
+     * ranges they know; these tables are what they do not reliably catch. The
+     * addresses each guard must refuse, this one and the Go guards in the
+     * sandboxed plugin host and the relay alike, are listed once in
+     * tests/fixtures/outbound_address_cases.json, which all three tests read.
      *
      * @var string[]
      */
@@ -69,8 +71,29 @@ class UrlSafetyValidator {
         '172.16.0.0/12',   // RFC1918 private
         '192.168.0.0/16',  // RFC1918 private
         '100.64.0.0/10',   // CGNAT (RFC 6598)
+        '192.0.0.0/24',    // IETF protocol assignments
+        '192.0.2.0/24',    // documentation (TEST-NET-1)
+        '198.18.0.0/15',   // benchmarking, sometimes an internal network
+        '198.51.100.0/24', // documentation (TEST-NET-2)
+        '203.0.113.0/24',  // documentation (TEST-NET-3)
         '224.0.0.0/4',     // multicast
         '240.0.0.0/4',     // reserved / future
+    ];
+
+    /**
+     * Blocked IPv6 ranges PHP's filter flags let through. Loopback, link-local
+     * and unique-local addresses are refused by the flags; an IPv6 address
+     * that carries an IPv4 one is judged by its bytes first (ipv6Embedded()).
+     *
+     * @var string[]
+     */
+    private static $blocked_ipv6_cidrs = [
+        'ff00::/8',        // multicast
+        '100::/64',        // discard-only
+        '2001::/32',       // Teredo: the client's address is hidden in it
+        '2001:2::/48',     // benchmarking
+        '2001:db8::/32',   // documentation
+        'fec0::/10',       // site-local (deprecated)
     ];
 
     /**
@@ -154,9 +177,28 @@ class UrlSafetyValidator {
             throw new UnsafeUrlException("Not a valid IP: $ip");
         }
 
+        // An IPv6 address is judged by its bytes, never by how it is written
+        // (::127.0.0.1 and ::7f00:1 are one address). One that carries an IPv4
+        // address is judged as that address, or refused where it hides it.
+        if (strpos($ip, ':') !== false) {
+            $embedded = self::ipv6Embedded((string)inet_pton($ip));
+            if ($embedded === false) {
+                throw new UnsafeUrlException("IP '$ip' carries an IPv4 address in a form that is never reached.");
+            }
+            if ($embedded !== null) {
+                try {
+                    self::checkIp($embedded);
+                } catch (UnsafeUrlException $e) {
+                    throw new UnsafeUrlException("IP '$ip' carries $embedded: " . $e->getMessage());
+                }
+                return;
+            }
+        }
+
         // PHP's FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE rejects
         // RFC1918 and reserved blocks for both v4 and v6 in one call — this is
-        // what covers IPv6 loopback/link-local/unique-local/v4-mapped.
+        // what covers IPv6 loopback/link-local/unique-local (an address that
+        // carries an IPv4 one was judged above, by ipv6Embedded()).
         if (!filter_var(
             $ip,
             FILTER_VALIDATE_IP,
@@ -165,12 +207,18 @@ class UrlSafetyValidator {
             throw new UnsafeUrlException("IP '$ip' is in a private, loopback, or reserved range.");
         }
 
-        // Belt-and-suspenders: explicit CIDR checks for IPv4 ranges PHP's filter
-        // misses (notably 0.0.0.0/8, 100.64/10 CGNAT). The single authoritative
-        // range table lives in $blocked_ipv4_cidrs.
+        // Belt-and-suspenders: explicit CIDR checks for ranges PHP's filter
+        // misses (notably 0.0.0.0/8, 100.64/10 CGNAT, NAT64). The single
+        // authoritative range tables are $blocked_ipv4_cidrs and $blocked_ipv6_cidrs.
         if (strpos($ip, ':') === false) {
             foreach (self::$blocked_ipv4_cidrs as $cidr) {
                 if (self::ipInCidr($ip, $cidr)) {
+                    throw new UnsafeUrlException("IP '$ip' falls in blocked range $cidr.");
+                }
+            }
+        } else {
+            foreach (self::$blocked_ipv6_cidrs as $cidr) {
+                if (self::ipv6InCidr($ip, $cidr)) {
                     throw new UnsafeUrlException("IP '$ip' falls in blocked range $cidr.");
                 }
             }
@@ -187,6 +235,64 @@ class UrlSafetyValidator {
         } catch (DnsLookupException $e) {
             throw new UnsafeUrlException("Could not resolve '$host' — refusing to fetch.");
         }
+    }
+
+    /**
+     * The IPv4 address a 16-byte IPv6 address carries, when it is one that
+     * reaches that address (IPv4-mapped ::ffff:0:0/96, NAT64 64:ff9b::/96,
+     * 6to4 2002::/16); false for one refused outright (IPv4-compatible ::/96,
+     * IPv4-translated ::ffff:0:0:0/96, the rest of 64:ff9b::/32, the local-use
+     * 64:ff9b:1::/48 among it); null for an ordinary IPv6 address. The Go
+     * guards in the sandboxed plugin host and the relay judge the same way.
+     *
+     * @return string|false|null
+     */
+    private static function ipv6Embedded(string $bin) {
+        if (strlen($bin) !== 16) {
+            return false;
+        }
+        $v4 = function (int $at) use ($bin) {
+            return implode('.', array_map('ord', str_split(substr($bin, $at, 4))));
+        };
+        $zero = function (int $from, int $length) use ($bin) {
+            return substr($bin, $from, $length) === str_repeat("\0", $length);
+        };
+        if ($zero(0, 12)) {
+            return false;
+        }
+        if ($zero(0, 10) && substr($bin, 10, 2) === "\xff\xff") {
+            return $v4(12);
+        }
+        if ($zero(0, 8) && substr($bin, 8, 4) === "\xff\xff\0\0") {
+            return false;
+        }
+        if (substr($bin, 0, 4) === "\x00\x64\xff\x9b") {
+            return $zero(4, 8) ? $v4(12) : false;
+        }
+        if (substr($bin, 0, 2) === "\x20\x02") {
+            return $v4(2);
+        }
+        return null;
+    }
+
+    private static function ipv6InCidr(string $ip, string $cidr): bool {
+        list($subnet, $bits) = explode('/', $cidr);
+        $ip_bin = @inet_pton($ip);
+        $subnet_bin = @inet_pton($subnet);
+        if ($ip_bin === false || $subnet_bin === false || strlen($ip_bin) !== 16 || strlen($subnet_bin) !== 16) {
+            return false;
+        }
+        $bits = (int)$bits;
+        $whole = intdiv($bits, 8);
+        if (substr($ip_bin, 0, $whole) !== substr($subnet_bin, 0, $whole)) {
+            return false;
+        }
+        $rest = $bits % 8;
+        if ($rest === 0) {
+            return true;
+        }
+        $mask = (0xff << (8 - $rest)) & 0xff;
+        return (ord($ip_bin[$whole]) & $mask) === (ord($subnet_bin[$whole]) & $mask);
     }
 
     private static function ipInCidr(string $ip, string $cidr): bool {

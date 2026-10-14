@@ -38,7 +38,7 @@ import (
 	"time"
 )
 
-const version = "1.0.1"
+const version = "1.0.2"
 
 // The most of a request this host reads: an envelope is a call's input and
 // its settings, never a file.

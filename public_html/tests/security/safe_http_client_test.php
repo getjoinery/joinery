@@ -23,6 +23,8 @@
  * never actually reached — a URL that must be refused is refused during
  * validation, which is the whole point.
  *
+ * @version 1.1 - every address in tests/fixtures/outbound_address_cases.json, the list the Go
+ *   guards (sandboxed plugin host, relay) are tested against too
  * @version 1.0
  */
 
@@ -72,6 +74,33 @@ $blocked = array(
 foreach ($blocked as $url => $why) {
 	check(refuses($direct, $url), $why . ' is refused before a socket opens');
 }
+
+// ---------------------------------------------------------------------------
+section('The shared list: what every outbound guard refuses and allows');
+// ---------------------------------------------------------------------------
+
+// One list for this guard and the Go ones in the sandboxed plugin host and the
+// relay, so a range one of them learns cannot stay open in another.
+$cases = json_decode((string)file_get_contents(__DIR__ . '/../fixtures/outbound_address_cases.json'), true);
+check(is_array($cases) && !empty($cases['refused']) && !empty($cases['allowed']), 'the shared address list reads');
+$open = array();
+foreach ((array)($cases['refused'] ?? array()) as $case) {
+	try {
+		UrlSafetyValidator::checkIp($case['address']);
+		$open[] = $case['address'] . ' (' . $case['why'] . ')';
+	} catch (UnsafeUrlException $e) {
+	}
+}
+check($open === array(), 'every address on it to refuse is refused (' . count((array)($cases['refused'] ?? array())) . ')', implode('; ', $open));
+$shut = array();
+foreach ((array)($cases['allowed'] ?? array()) as $case) {
+	try {
+		UrlSafetyValidator::checkIp($case['address']);
+	} catch (UnsafeUrlException $e) {
+		$shut[] = $case['address'];
+	}
+}
+check($shut === array(), 'and every public address on it is allowed', implode('; ', $shut));
 
 // ---------------------------------------------------------------------------
 section('Only http and https, and only the ports the policy names');
