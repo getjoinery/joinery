@@ -329,7 +329,7 @@ func TestServesOverItsSocket(t *testing.T) {
 	server := &http.Server{Handler: h.handler()}
 	go server.Serve(listener)
 	defer server.Close()
-	if fi, err := os.Stat(socket); err != nil || fi.Mode().Perm() != 0o660 {
+	if fi, err := os.Stat(socket); err != nil || fi.Mode().Perm() != 0o666 {
 		t.Fatalf("socket mode %v %v", fi.Mode(), err)
 	}
 

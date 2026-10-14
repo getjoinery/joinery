@@ -31,6 +31,7 @@
  *
  * Run: php tests/integration/scheduled_task_crash_containment_test.php
  *
+ * @version 1.1 - D: a 'retry' result is recorded but not counted as a run
  * @version 1.0
  */
 
@@ -43,7 +44,7 @@ $db = DbConnector::get_instance()->get_db_link();
 $tasks_dir = PathHelper::getIncludePath('tasks');
 $runner = PathHelper::getIncludePath('utils/process_scheduled_tasks.php');
 
-$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit');
+$fixtures = array('CrashTestFatal', 'CrashTestCanary', 'CrashTestParseError', 'CrashTestExit', 'CrashTestRetry');
 
 // ---- fixture lifecycle ----------------------------------------------------
 $write_task = function ($class, $body) use ($tasks_dir) {
@@ -205,6 +206,36 @@ PHP
 	check(strpos((string)$exited['sct_last_run_message'], 'STALE') === false,
 		'it does NOT still read as the previous successful run',
 		(string)$exited['sct_last_run_message']);
+
+	// -----------------------------------------------------------------------
+	section('D. A task that cannot run yet says retry, and is due again next tick');
+
+	$db->exec("DELETE FROM sct_scheduled_tasks WHERE sct_task_class LIKE 'CrashTest%'");
+	$write_task('CrashTestRetry', <<<'PHP'
+<?php
+require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+class CrashTestRetry implements ScheduledTaskInterface {
+	public function run(array $config) {
+		return array('status' => 'retry', 'message' => 'not ready yet');
+	}
+}
+PHP
+	);
+	$retry_id = $activate('CrashTestRetry');
+	$db->prepare("UPDATE sct_scheduled_tasks SET sct_frequency = 'daily', sct_schedule_time = '00:00:00',
+		sct_last_run_time = '2026-01-01 00:00:00' WHERE sct_scheduled_task_id = ?")->execute(array($retry_id));
+
+	$output = array();
+	exec('php ' . escapeshellarg($runner) . ' 2>&1', $output, $exit_code);
+
+	$retried = $status_of('CrashTestRetry');
+	$q = $db->prepare("SELECT sct_last_run_time FROM sct_scheduled_tasks WHERE sct_scheduled_task_id = ?");
+	$q->execute(array($retry_id));
+	$last_run = (string)$q->fetchColumn();
+	check($retried['sct_last_run_status'] === 'retry' && $retried['sct_last_run_message'] === 'not ready yet',
+		'the row says retry, with the task\'s message', json_encode($retried));
+	check(strpos($last_run, '2026-01-01') === 0, 'its last run time is not moved: it did not run', $last_run);
+	check((new ScheduledTask($retry_id, TRUE))->is_due(), 'so a daily task is still due, and the next tick runs it');
 
 } finally {
 	$remove_fixtures();

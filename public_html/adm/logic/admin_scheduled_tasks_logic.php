@@ -5,6 +5,7 @@
  * Handles task discovery, activation, deactivation, configuration,
  * and run-now functionality.
  *
+ * @version 1.4 - Run Now does not count a retry result as a run
  * @version 1.3
  */
 
@@ -335,7 +336,10 @@ function _handle_run_now($task_id) {
 			$run_message = null;
 		}
 
-		$task->set('sct_last_run_time', 'now()');
+		// A 'retry' is not a run (process_scheduled_tasks.php): the next tick tries again.
+		if ($status !== 'retry') {
+			$task->set('sct_last_run_time', 'now()');
+		}
 		$task->set('sct_last_run_status', $status);
 		$task->set('sct_last_run_message', $run_message);
 		$task->save();

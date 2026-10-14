@@ -358,8 +358,8 @@ calls_running}`.
 every converge. While the site has a sandboxed plugin on disk it keeps the
 host running as the system user `joinery-sbx` (no shell, no home, no groups),
 its socket in `{site root}/run/sandbox-host/` (owned by that user, group
-`www-data`, mode 2750, the socket 0660, so the web server can call it and no
-one else can): under a systemd unit `joinery-sandbox-host-{site}` where systemd
+`www-data`, mode 0750, so only the host and the web server can reach the
+socket inside, which is 0666): under a systemd unit `joinery-sandbox-host-{site}` where systemd
 is PID 1 (no new privileges, no capabilities, a read-only system, the site's
 `config/`, `uploads/`, `backups/`, `storage/`, `static_files/`, `logs/` and
 `cache/` hidden, 512 MB), a cron keepalive otherwise (a site container). With

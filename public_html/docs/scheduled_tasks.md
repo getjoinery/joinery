@@ -117,6 +117,8 @@ class MyTaskName implements ScheduledTaskInterface {
         //   'success'  — Ran and completed (with or without work to do)
         //   'skipped'  — Could not run (misconfigured, missing prerequisite)
         //   'error'    — Attempted to run but failed
+        //   'retry'    — Could not run yet (a prerequisite is starting); not
+        //                counted as a run, so the task is due again next tick
         return array('status' => 'success', 'message' => 'Processed 5 items');
     }
 }
@@ -177,7 +179,7 @@ class MyTaskName implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 ```
 
 **Return keys:**
-- `status` (string, required) — Same as `run()`: `success`, `skipped`, `error`
+- `status` (string, required) — Same as `run()`: `success`, `skipped`, `error`, `retry`
 - `message` (string, required) — Summary of what *would* happen (e.g., "Would send 5 events to 42 recipients")
 - `html` (string, optional) — HTML preview displayed inline on the admin page (e.g., the email body)
 
@@ -397,7 +399,7 @@ why.
 | `sct_schedule_time` | time | Time of day in site timezone (daily/weekly only) |
 | `sct_task_config` | jsonb | Task-specific configuration |
 | `sct_last_run_time` | timestamp | When task last ran |
-| `sct_last_run_status` | varchar(50) | `success` / `error` / `skipped` / `retired` |
+| `sct_last_run_status` | varchar(50) | `success` / `error` / `skipped` / `retry` / `retired` |
 | `sct_last_run_message` | varchar(500) | Human-readable result detail |
 | `sct_create_time` | timestamp | Row creation time |
 | `sct_delete_time` | timestamp | Soft delete time |

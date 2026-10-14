@@ -5,6 +5,7 @@
  * Shows active tasks and available (discovered) tasks.
  * Supports activate, deactivate, configure, and run-now actions.
  *
+ * @version 1.5 - a 'retry' result shows as Waiting
  * @version 1.4 - every_run reads every minute, and the suggested cron line fires every minute, as the installers write it
  */
 
@@ -194,6 +195,8 @@ if (empty($active_tasks)) {
 			$status_display = '<span class="badge bg-danger" style="background-color: #dc3545; color: #fff; padding: 3px 8px; border-radius: 3px;">Error</span>';
 		} elseif ($status === 'skipped') {
 			$status_display = '<span class="badge bg-warning" style="background-color: #ffc107; color: #000; padding: 3px 8px; border-radius: 3px;">Skipped</span>';
+		} elseif ($status === 'retry') {
+			$status_display = '<span class="badge bg-info" style="background-color: #17a2b8; color: #fff; padding: 3px 8px; border-radius: 3px;">Waiting</span>';
 		} else {
 			$status_display = '<span style="color: #999;">—</span>';
 		}
