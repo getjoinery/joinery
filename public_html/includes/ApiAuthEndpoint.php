@@ -22,7 +22,8 @@
  * class owns only the transport concerns — method checks, request parsing,
  * request logging, and response shaping (user_summary).
  *
- * @version 1.6.0
+ * @version 1.7.0
+ * @changelog 1.7.0 - auth/login refuses a disabled account with 403 and the web login's words
  * @changelog 1.6.0 - the device-link poll is a POST: the approved answer hands over a
  *   one-time secret and scrubs it, which is a write, and a GET never writes
  * @changelog 1.5.0 - a bound device link (opened by a signed-in app, device_key_enroll)
@@ -121,6 +122,18 @@ class ApiAuthEndpoint {
 		$result = ApiAuth::attemptLogin($email, $password, $device_label);
 
 		if (!$result['ok']) {
+			// Valid credentials on a disabled account: refused with the web
+			// login door's words (SessionControl::store_session_variables()).
+			if (($result['reason'] ?? '') === 'disabled') {
+				RequestLogger::log('api_auth', 'auth/login', false, [
+					'user_id' => $result['user']->key,
+					'status_code' => 403,
+					'error_type' => 'AuthenticationError',
+					'note' => 'Account disabled'
+				]);
+				api_error('This account is currently de-activated.  Please contact us to resolve the situation.',
+					'AuthenticationError', 403);
+			}
 			// Valid credentials on an unactivated account (activation_required_login
 			// on): refused with the reason, matching the web login door. The
 			// activation email was re-sent by attemptLogin.

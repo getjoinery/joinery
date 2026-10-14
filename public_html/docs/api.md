@@ -236,6 +236,8 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 | `permission` | Access level (see Permission Levels below) |
 | `scope` | Comma-separated entries (machine keys only; empty = unscoped): action names, and `Model:verb` record entries. A scoped key can do only what they name — see [Scoped machine keys](#scoped-machine-keys) |
 
+A key also stops working while its owner's account is deleted or disabled. A disabled account's keys get 401 for as long as it stays disabled and work again if it is re-enabled; they are not revoked. The browser-session credential is refused the same way.
+
 ### Scoped machine keys
 
 A machine key that sits on another machine should be able to do one job and nothing else. `apk_scope` lists what a key may do, one entry per item, comma separated. Two kinds of entry:
@@ -313,7 +315,7 @@ Success returns the key pair — **the only time the secret plaintext is ever re
 }
 ```
 
-Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit.
+Store the two strings and send them as the standard key headers on every subsequent request. Failed logins return 401 `AuthenticationError` (identical response for unknown email, deleted user, and wrong password) and count toward the failed-auth rate limit. The right password on a disabled account returns 403 `AuthenticationError` saying the account is de-activated, the same words the website's login uses.
 
 ### `GET /api/v1/auth/session` — any credential
 
