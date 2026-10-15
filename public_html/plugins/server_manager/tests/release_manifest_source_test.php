@@ -198,4 +198,56 @@ if ($core_version === '' || !is_array($pair ?? null)) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+section('A deployment file found by the hash the node\'s manifest lists (read_file_by_hash)');
+
+// A node rolled back under a newer release's manifest holds the old VERSION and
+// the new manifest; a file served for the VERSION's release is the one it
+// refuses. So the node names the hash and the plane finds the release.
+$any_hash = str_repeat('ab', 32);
+foreach (['public_html/index.php', '../etc/passwd', '', 'RELEASE_MANIFEST'] as $bad) {
+	check(ReleaseManifestSource::read_file_by_hash($bad, $any_hash) === null, 'not found by hash, whatever the hash: ' . var_export($bad, true));
+}
+foreach (['', 'not-a-hash', strtoupper($any_hash), substr($any_hash, 0, 63), $any_hash . 'a', '../' . substr($any_hash, 3)] as $bad) {
+	check(ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $bad) === null, 'refused as a hash: ' . var_export($bad, true));
+}
+check(ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $any_hash, '../0.8.370') === null,
+	'a traversal hint finds nothing and reaches nothing');
+check(ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', hash('sha256', 'no release has this'), $core_version) === null,
+	'a hash no published release carries is nothing to offer');
+
+$versions = ReleaseManifestSource::published_core_versions();
+check(is_array($versions) && ($core_version === '' || in_array($core_version, $versions, true)),
+	'published_core_versions lists the newest core archive', json_encode($versions));
+foreach ($versions as $v) {
+	check(ReleaseManifestSource::valid_version($v), 'every listed version is a version: ' . $v);
+}
+
+if ($core_version === '' || !is_array($pair ?? null) || empty($listed)) {
+	check(true, 'no core archive on this box - finding by hash not exercised (skipped)');
+} else {
+	// The proof that matters: asked for the newest release's upgrade.php by the
+	// hash ITS manifest lists, with an OLDER version as the hint (the VERSION a
+	// rolled-back node still shows), the plane finds the newest release's copy.
+	$want  = $listed['public_html/utils/upgrade.php'];
+	$older = array_values(array_filter($versions, function ($v) use ($core_version) { return version_compare($v, $core_version, '<'); }));
+	usort($older, 'version_compare');
+	$hint  = $older ? end($older) : '';
+	$found = ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $want, $hint);
+	check(is_array($found) && hash('sha256', $found['body']) === $want,
+		'found by hash: the bytes hash to what the manifest lists (hint ' . ($hint ?: 'none') . ')');
+	check(is_array($found) && $found['version'] === $core_version,
+		'and the release it was found in is the one that signed that hash, not the hint', json_encode($found['version'] ?? null));
+	$again = ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $want);
+	check(is_array($again) && $again['version'] === $core_version, 'with no hint at all the same release is found');
+	if ($hint !== '') {
+		// The hint's own file differs from the newest (a release that did not change
+		// upgrade.php is possible; only assert when it did).
+		$hinted = ReleaseManifestSource::read_file($hint, 'public_html/utils/upgrade.php');
+		if (is_string($hinted) && hash('sha256', $hinted) !== $want) {
+			check(true, 'the hint release carries a different upgrade.php, so the hash is what chose');
+		}
+	}
+}
+
 harness_finish();

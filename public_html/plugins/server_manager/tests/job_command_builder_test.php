@@ -1607,8 +1607,17 @@ foreach (array('', 'public_html/index.php', '../etc/passwd', 'public_html/utils/
 	try { JobCommandBuilder::build_restore_release_file($host_pf_node, $bad); } catch (Exception $e) { $rr_msg = $e->getMessage(); }
 	check($rr_msg !== '', "restore_release_file refuses '{$bad}'");
 }
+// repair_release_files: every differing file in one parameterless word (specs/release_file_repair_by_hash.md).
+list($host_rf, $host_rf_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status,upgrade_preflight,restore_release_file,repair_release_files'));
+$rfenv = JobCommandBuilder::build_repair_release_files($host_rf_node);
+check(($rfenv['primitive'] ?? '') === 'repair_release_files' && ($rfenv['params'] ?? null) === array(),
+	'repair_release_files routes the word with no parameters', json_encode($rfenv));
+$rf_msg = '';
+try { JobCommandBuilder::build_repair_release_files($host_pf_node); } catch (Exception $e) { $rf_msg = $e->getMessage(); }
+check(strpos($rf_msg, 'repair_release_files') !== false, 'an agent with restore_release_file but not repair_release_files refuses, naming the word', $rf_msg);
 list($host_nopf, $host_nopf_node) = jcb_host_with_agent(array('mgn_agent_primitives' => 'check_status'));
 foreach (array('upgrade_preflight' => function () use ($host_nopf_node) { JobCommandBuilder::build_upgrade_preflight($host_nopf_node); },
+	'repair_release_files' => function () use ($host_nopf_node) { JobCommandBuilder::build_repair_release_files($host_nopf_node); },
 	'restore_release_file' => function () use ($host_nopf_node) { JobCommandBuilder::build_restore_release_file($host_nopf_node, 'public_html/utils/upgrade.php'); }) as $word => $call) {
 	$pf_msg = '';
 	try { $call(); } catch (Exception $e) { $pf_msg = $e->getMessage(); }

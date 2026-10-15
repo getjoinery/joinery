@@ -52,6 +52,9 @@
  *                 'lost'. The poll's sweep fails a claim past its budget (failStaleClaims), never requeues it.
  *                 A late take_node_id result never swaps rows (the copy dropped its staged identity), and a
  *                 late result is not folded over a newer job of its type that finished since (reviewer2 F1, F6).
+ * @version 1.48 - a release_file request may name the sha256 its manifest lists; the file is then found by hash
+ *                across the published core archives (ReleaseManifestSource::read_file_by_hash) and the version
+ *                is only a hint, so a node rolled back under a newer manifest gets the bytes it will accept
  * @version 1.47 - release_file artifact kind (one of five deployment files from a core archive) and the claim's
  *                script_trust_files list, for restore_release_file and the poll's file report
  * @version 1.46 - a join and a claim can say container: the node is named and placed as a container site (ManagedNode::adopt_reported_container)
@@ -2214,6 +2217,10 @@ class AgentChannelEndpoint {
 			// For a release_file: which of the five deployment files. A closed
 			// set re-checked by ReleaseManifestSource; never joined onto a path.
 			'file'     => ['type' => 'string', 'max' => 64, 'pattern' => '/^public_html\/(utils|includes)\/[A-Za-z_]+\.php$/'],
+			// For a release_file: the sha256 the node's signed manifest lists for
+			// it. Lower-case hex only; compared against archive members, never
+			// joined onto a path. With it, the version is a hint of where to look.
+			'sha256'   => ['type' => 'string', 'max' => 64, 'pattern' => '/^[0-9a-f]{64}$/'],
 		];
 	}
 
@@ -2237,7 +2244,7 @@ class AgentChannelEndpoint {
 				self::serve_release_manifest((string)($in['owner'] ?? ''), (string)($in['version'] ?? ''));
 				break;
 			case 'release_file':
-				self::serve_release_file((string)($in['version'] ?? ''), (string)($in['file'] ?? ''));
+				self::serve_release_file((string)($in['version'] ?? ''), (string)($in['file'] ?? ''), (string)($in['sha256'] ?? ''));
 				break;
 			case 'release_archive':
 				self::serve_release_archive($node, (string)($in['version'] ?? ''));
@@ -2320,23 +2327,37 @@ class AgentChannelEndpoint {
 	 * The same position as serve_release_manifest(): bytes the publisher signed,
 	 * checked by the node against the signed manifest it already holds before a
 	 * byte is written, so a plane that sends anything else restores nothing. The
-	 * node names a version and one of five files; ReleaseManifestSource resolves
-	 * both against this plane's own layout. Logged, not metered as a body: it is
-	 * fetched by a node that cannot upgrade, about 150 KB at a time.
+	 * node names one of five files and either the sha256 its signed manifest
+	 * lists for it (found across every published core archive, the version a
+	 * hint of where to look first: ReleaseManifestSource::read_file_by_hash) or,
+	 * from an agent below 1.79.0, a version alone. By hash is what gets a node
+	 * out whose VERSION and manifest disagree, as a rollback under the new
+	 * release's manifest leaves it. Logged, not metered as a body: it is fetched
+	 * by a node that cannot upgrade, about 150 KB at a time.
 	 */
-	private static function serve_release_file($version, $file) {
+	private static function serve_release_file($version, $file, $sha256 = '') {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/ReleaseManifestSource.php'));
 
 		$version = trim((string)$version);
 		$file    = trim((string)$file);
-		if (!ReleaseManifestSource::valid_version($version) || !in_array($file, ReleaseManifestSource::SELF_UPDATE_FILES, true)) {
-			api_error('A release file request must name a version and one of the deployment files.',
+		$sha256  = trim((string)$sha256);
+		if (!in_array($file, ReleaseManifestSource::SELF_UPDATE_FILES, true)
+			|| ($sha256 === '' && !ReleaseManifestSource::valid_version($version))
+			|| ($sha256 !== '' && !preg_match('/^[0-9a-f]{64}$/', $sha256))
+			|| ($version !== '' && !ReleaseManifestSource::valid_version($version))) {
+			api_error('A release file request must name one of the deployment files and the sha256 its manifest lists, or a version.',
 				'ValidationError', 400);
 		}
 
-		RequestLogger::log('api_agent_artifact', 'release_file ' . $file . ' ' . $version, true);
+		RequestLogger::log('api_agent_artifact', 'release_file ' . $file . ' ' . ($sha256 !== '' ? 'sha256 ' . substr($sha256, 0, 12) . ' hint ' : '') . $version, true);
 
-		$body = ReleaseManifestSource::read_file($version, $file);
+		if ($sha256 !== '') {
+			$found = ReleaseManifestSource::read_file_by_hash($file, $sha256, $version);
+			$body = $found['body'] ?? null;
+			$version = (string)($found['version'] ?? $version);
+		} else {
+			$body = ReleaseManifestSource::read_file($version, $file);
+		}
 		if ($body === null) {
 			api_success(['available' => false], '', 200);
 		}

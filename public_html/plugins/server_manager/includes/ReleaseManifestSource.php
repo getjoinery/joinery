@@ -26,6 +26,9 @@
  * happens entirely here, out of this plane's own directory layout, for the same
  * reason serve_agent_binary() takes an architecture rather than a filename.
  *
+ * @version 1.4 - read_file_by_hash(): a deployment file found by the sha256 the node's signed manifest lists,
+ *                across every published core archive, so a node whose VERSION and manifest disagree (a rollback
+ *                under the new release's manifest) still gets the bytes its manifest accepts
  * @version 1.3 - core_archive(): the published core archive of a version, whole, for a host installing a
  *                site from it (site_install, specs/site_container_engine.md D9)
  * @version 1.2 - read_file(): one of the five self-update files out of a published core archive, for a node
@@ -129,6 +132,66 @@ class ReleaseManifestSource {
 		$body = self::extract($archive, $file);
 		if ($body === null || strlen($body) > self::MAX_FILE_BYTES) { return null; }
 		return $body;
+	}
+
+	/**
+	 * The bytes of one self-update file found BY HASH: the published core
+	 * archive whose copy of $file has sha256 $sha256, searched newest-first
+	 * after the hinted version, with the version it was found in. NULL when
+	 * no archive this plane holds carries such bytes.
+	 *
+	 * Why by hash. A node checks every one of these files against the signed
+	 * manifest at its site root before it will run them. A deploy that failed
+	 * and rolled back can leave the old release's code, and so the old VERSION,
+	 * under the new release's manifest; a file served for the VERSION's release
+	 * is then exactly the file the node refuses, and the node stays stuck. The
+	 * hash the manifest lists is the one fact the node and this plane agree on,
+	 * so the node names that and the version only as a hint of where to look.
+	 *
+	 * The order tried: the hinted version; then every published version above
+	 * it, oldest first (a rollback leaves the manifest one release ahead); then
+	 * the rest, newest first. Each try extracts one member of one archive.
+	 *
+	 * @return array{version:string, body:string}|null
+	 */
+	public static function read_file_by_hash(string $file, string $sha256, string $hint = ''): ?array {
+		if (!in_array($file, self::SELF_UPDATE_FILES, true))   { return null; }
+		if (!preg_match('/^[0-9a-f]{64}$/', $sha256))           { return null; }
+		$versions = self::published_core_versions();
+		$order = [];
+		if ($hint !== '' && self::valid_version($hint)) {
+			if (in_array($hint, $versions, true)) { $order[] = $hint; }
+			$above = array_values(array_filter($versions, function ($v) use ($hint) { return version_compare($v, $hint, '>'); }));
+			usort($above, 'version_compare');
+			foreach ($above as $v) { $order[] = $v; }
+		}
+		$rest = array_values(array_diff($versions, $order));
+		usort($rest, function ($a, $b) { return version_compare($b, $a); });
+		foreach (array_merge($order, $rest) as $version) {
+			$body = self::read_file($version, $file);
+			if ($body !== null && hash('sha256', $body) === $sha256) {
+				return ['version' => $version, 'body' => $body];
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Every core release this plane has an archive of, as version strings,
+	 * unordered. Read from this plane's own directory; nothing a node sends
+	 * reaches it.
+	 *
+	 * @return string[]
+	 */
+	public static function published_core_versions(): array {
+		$static = PathHelper::getSiteRoot() . '/static_files';
+		$out = [];
+		foreach (glob($static . '/joinery-core-*.tar.gz') ?: [] as $path) {
+			if (preg_match('/^joinery-core-(.+)\.tar\.gz$/', basename($path), $m) && self::valid_version($m[1])) {
+				$out[] = $m[1];
+			}
+		}
+		return $out;
 	}
 
 	/** Is this an artifact owner this plane will resolve? */

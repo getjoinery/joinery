@@ -92,6 +92,8 @@
  *                 certificate card's DNS check skips any node in an install state
  * @version 1.27 - Remove from Dashboard's confirmation says what else goes with the node, and what is kept
  * @version 1.26 - the Service box reads a DNS server's source_ok only; no DNS server reports db_connected
+ * @version 1.26 - a node whose deployment files differ offers Put them all back (repair_release_files, agent
+ *                 1.79.0) above the per-file Restore signed copy, and the Agent box names recipe release_files
  * @version 1.25 - the Service box reads a DNS server's source_ok (site reachable/unreachable), and
  *                 db_connected only from a 1.8 server that reports it instead
  * @version 1.24 - specs/agent_recipes_and_vocabulary.md: services answer/Restart, served certificates, site
@@ -1895,6 +1897,22 @@
 			// release's own bytes back, keeping what is there for inspection.
 			if ($trust === 'untrusted_file' && JobCommandBuilder::has_primitive($node, 'restore_release_file')) {
 				$trust_files = NodeMonitorHealth::script_trust_files($node);
+				// One job for all of them, on a node whose agent has the word: each
+				// file back from the kept copy or this management node, asked for by
+				// the hash the node's own manifest lists. The node's release_files
+				// recipe does the same on its own clock; this is it now.
+				if ($trust_files && JobCommandBuilder::has_primitive($node, 'repair_release_files')) {
+					$confirm_all = 'Put every differing deployment file back to the bytes this node\'s signed release lists? '
+						. 'Each file now on the node is kept for inspection. Nothing else is changed.';
+					echo '<div class="small mt-2">'
+						. '<button type="button" class="btn btn-sm btn-outline-danger py-0 px-2 svm-fs-075"'
+						. ' onclick="' . htmlspecialchars('JoineryModal.confirm(' . json_encode($confirm_all) . ', function(){ document.getElementById('
+							. json_encode('nodeActionRepairFiles') . ').submit(); })', ENT_QUOTES, 'UTF-8') . '">Put them all back</button>'
+						. ' <span class="text-muted">The node also does this itself within about twenty minutes (recipe release_files).</span>'
+						. '<form id="nodeActionRepairFiles" method="post" action="' . htmlspecialchars($base_url, ENT_QUOTES, 'UTF-8') . '" hidden>'
+						. '<input type="hidden" name="action" value="repair_release_files">'
+						. SmAdminCsrf::field() . '</form></div>';
+				}
 				if ($trust_files) {
 					echo '<ul class="list-unstyled small mt-2 mb-0">';
 					foreach ($trust_files as $i => $tf) {
@@ -1927,6 +1945,7 @@
 			'container_health'   => 'Site containers run and answer',
 			'disk_headroom'      => 'The disk keeps free space',
 			'fail2ban'           => 'fail2ban runs and bans',
+			'release_files'      => 'Deployment files match the signed release',
 			'service_health'     => 'Database, PHP and web server answer',
 		);
 		$mode_words = array('armed' => 'repairs', 'report-only' => 'reports only', 'not-applicable' => 'not here');

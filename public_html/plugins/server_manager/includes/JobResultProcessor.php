@@ -22,6 +22,8 @@
  * @version 1.77 - a host report's mail_gateway (host_report 1.20) is kept
  * @version 1.76 - process_data_root_enrol; a host report's data_root_encryption (host_report 1.19) is kept
  *                 and handed to DataRootEscrowSync (specs/hosted_data_promise_disk_encryption.md WP2)
+ * @version 1.76 - process_repair_release_files: which files were put back, from where, and which remain
+ *                 (agent 1.79.0, specs/release_file_repair_by_hash.md)
  * @version 1.75 - a lost apply_update keeps its own message ("what it did is unknown"), never "finished but
  *                 the node is still on X" (reviewer2 F5)
  * @version 1.74 - a host report's disk_pool keeps not_mounted (host_report 1.18): a data root declared and down,
@@ -3083,6 +3085,41 @@ HTML;
 			'version'       => substr(preg_replace('/[^0-9.]/', '', (string)($data['version'] ?? '')), 0, 24),
 			'source'        => in_array((string)($data['source'] ?? ''), ['kept copy', 'management node'], true) ? (string)$data['source'] : '',
 			'replaced_kept' => !empty($data['replaced_kept']),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * A repair_release_files job's result: each file put back with where its
+	 * bytes came from, each that could not be with the node's reason, and the
+	 * release. Compiled facts and the node's own refusal text only, bounded.
+	 */
+	private static function process_repair_release_files($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+		if (!is_array($data) || !isset($data['restored']) || !is_array($data['restored'])) {
+			$job->set('mjb_result', json_encode(['repaired' => false]));
+			$job->save();
+			return;
+		}
+		$restored = [];
+		foreach ($data['restored'] as $r) {
+			if (!is_array($r) || !in_array((string)($r['file'] ?? ''), ReleaseManifestSource::SELF_UPDATE_FILES, true)) { continue; }
+			$restored[] = [
+				'file'          => (string)$r['file'],
+				'source'        => in_array((string)($r['source'] ?? ''), ['kept copy', 'management node'], true) ? (string)$r['source'] : '',
+				'replaced_kept' => !empty($r['replaced_kept']),
+			];
+		}
+		$failed = [];
+		foreach ((is_array($data['failed'] ?? null) ? $data['failed'] : []) as $f) {
+			if (!is_array($f) || !in_array((string)($f['file'] ?? ''), ReleaseManifestSource::SELF_UPDATE_FILES, true)) { continue; }
+			$failed[] = ['file' => (string)$f['file'], 'reason' => substr((string)($f['reason'] ?? ''), 0, 500)];
+		}
+		$job->set('mjb_result', json_encode([
+			'repaired' => count($restored) > 0 && count($failed) === 0,
+			'version'  => substr(preg_replace('/[^0-9.]/', '', (string)($data['version'] ?? '')), 0, 24),
+			'restored' => $restored,
+			'failed'   => $failed,
 		]));
 		$job->save();
 	}

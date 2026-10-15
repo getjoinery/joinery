@@ -13,6 +13,7 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.26 - the untrusted_file health names the one-step repair and the node's own recipe (agent 1.79.0)
  * @version 1.25 - a refusal and the poll's file report are two findings, and each clears only itself: a completed
  *                job no longer clears deployment files the poll still names, and the poll's "none differ" no
  *                longer clears a refusal of a file it never checks. The poll's files get the same
@@ -774,8 +775,10 @@ class NodeMonitorHealth {
 				'The signed manifest is good and a file on disk does not match it, so the agent will '
 				. 'not run it as root. This is not fixed by re-delivering a manifest — find out why the '
 				. 'file differs before anything else.'
-				. ($files ? ' Differing: ' . implode(', ', $files) . '. If one is a deployment file an upgrade '
-					. 'replaced and stopped, Restore signed copy puts the release\'s own bytes back and keeps what it replaced.' : '')
+				. ($files ? ' Differing: ' . implode(', ', $files) . '. These are deployment files; an upgrade that stopped, '
+					. 'or a rollback under a newer release\'s manifest, leaves them so. Put them all back (or Restore signed copy, one at a time) '
+					. 'writes the release\'s own bytes and keeps what it replaced, and an agent from 1.79.0 does the same on its own '
+					. 'within about twenty minutes (recipe release_files).' : '')
 				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
 				. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
 		}
