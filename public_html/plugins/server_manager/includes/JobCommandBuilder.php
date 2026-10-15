@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.126 - copy_stage takes vouched_seq: that run's own manifest is sent (a version-3 chain keeps one per
+ *                  run), not the newest, which names runs nobody vouched for to the copy (B20)
  * @version 1.125 - build_repair_release_files: every deployment file that differs from the signed release put
  *                  back in one word (agent 1.79.0, specs/release_file_repair_by_hash.md)
  * @version 1.124 - build_site_install, build_site_quiet_host and build_discard_copy: a dormant copy installed
@@ -2801,6 +2803,8 @@ class JobCommandBuilder {
 	 *   chain_id  - the chain (required)
 	 *   profile   - whose backups the source's chain is among: manager (default) or site
 	 *   seq       - stage as at this run; default the newest
+	 *   vouched_seq - the run whose manifest the copy holds the vouch for: that run's own manifest is sent,
+	 *               and the copy stages as at it (sign_chain_links)
 	 */
 	public static function build_copy_stage($node, $params = []) {
 		if (!self::has_primitive($node, 'copy_stage')) {
@@ -4052,6 +4056,21 @@ class JobCommandBuilder {
 		// whatever run is asked for; the node lands it as manifest.json. The
 		// other manifests of a version-3 chain travel nowhere.
 		$manifest_name = ShelfObject::preferredManifestName((int)$space->key, $chain_key . '/', array_keys($names));
+		// But a copy that holds the vouch for one run is sent that run's own
+		// manifest, the bytes it holds the hash of, and stages as at that run.
+		// The newest names the runs its source has made since, which nobody has
+		// vouched for to the copy; the switch's final copy brings those, vouched
+		// then (B20). A chain older than per-run manifests keeps only the one.
+		if (isset($params['vouched_seq']) && $params['vouched_seq'] !== '') {
+			$vouched_seq = (int)$params['vouched_seq'];
+			if ($vouched_seq < 0 || $vouched_seq > 100000) {
+				throw new Exception('A chain run number must be between 0 and 100000.');
+			}
+			if (isset($names[BackupChain::manifest_name($vouched_seq)])) {
+				$manifest_name = BackupChain::manifest_name($vouched_seq);
+			}
+			$params['seq'] = $vouched_seq;
+		}
 		$manifest_url = '';
 		$artifact_urls = [];
 		foreach ($names as $name => $key) {

@@ -114,7 +114,9 @@ $listing = array('chains' => array(array('chain_id' => $chain_id, 'profile' => B
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 3600),
 		'artifacts' => array('files' => 69000000, 'db' => 140000))))), 'objects' => array(), 'error' => null);
 SiteCopyRunner::$chain_lister = function ($node) use (&$listing) { return $listing; };
-SiteCopyRunner::$stage_builder = function ($node, $chain) {
+$staged_with = array();
+SiteCopyRunner::$stage_builder = function ($node, $chain) use (&$staged_with) {
+	$staged_with[] = $chain;
 	return array('primitive' => 'copy_stage', 'params' => array('chain_id' => $chain['chain_id'],
 		'manifest_url' => 'https://x.invalid/m', 'artifact_urls' => array()));
 };
@@ -294,6 +296,8 @@ $ops = $drive($copy, array(SiteCopy::STATUS_WAITING, SiteCopy::STATUS_COPYING), 
 check($ops === array('host_report@copy', 'copy_look@copy', 'copy_take_key@copy', 'copy_stage@copy', 'copy_restore@copy', 'site_census@copy'),
 	'the run is a copy from backups, every step on the copy', json_encode($ops));
 check($copy->status() === SiteCopy::STATUS_DORMANT, 'and ends dormant', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
+check(count($staged_with) === 1 && ($staged_with[0]['vouched_seq'] ?? null) === 0,
+	'it stages the run whose key its owner opened (B20)', json_encode($staged_with));
 
 // ---------------------------------------------------------------------------
 section('The switch-over: the site frozen, inside and out, and a final copy that matches');
@@ -321,6 +325,8 @@ $ops = $drive($copy, array(SiteCopy::STATUS_FREEZING), $freeze);
 check($ops === array('site_quiet:on@source', 'site_quiet_host:on@source_host', 'backup_run@source', 'copy_vouch@source',
 		'copy_take_vouch@copy', 'copy_stage@copy', 'copy_restore@copy', 'site_census@source', 'site_census@copy'),
 	'it freezes itself (its maintenance page up), then its host holds it off the network, and the final copy runs', json_encode($ops));
+check(count($staged_with) === 2 && !array_key_exists('vouched_seq', $staged_with[1]),
+	'the final copy stages the newest run, which the frozen source vouched for just before', json_encode($staged_with[1] ?? null));
 check($jobs_on['site_quiet_host:on@source_host'][0] === (int)$src_host_agent->key
 	&& ($jobs_on['site_quiet_host:on@source_host'][1]['params'] ?? null) == array('action' => 'on', 'name' => 'schsite', 'reason' => 'switchover'),
 	'on the site\'s own host, for a switch-over', json_encode($jobs_on['site_quiet_host:on@source_host']));

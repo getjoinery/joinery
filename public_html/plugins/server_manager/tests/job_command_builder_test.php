@@ -2701,6 +2701,33 @@ if (!$cp_target) {
 	try { JobCommandBuilder::build_copy_stage($cp_source, array('chain_id' => 'chain-20260930_010203')); }
 	catch (Exception $e) { $threw = $e->getMessage(); }
 	check(strpos($threw, 'not a dormant copy') !== false, 'a site that is not a copy is not staged as one', $threw);
+
+	// B20: a version-3 chain keeps each run's manifest. A copy vouched for run 0
+	// is sent run 0's own manifest, not the newer one its source's schedule added.
+	JobCommandBuilder::set_shelf_listing_for_tests(array(
+		array('key' => $cp_prefix . 'manifest-0000.json',    'size' => 900),
+		array('key' => $cp_prefix . 'manifest-0001.json',    'size' => 950),
+		array('key' => $cp_prefix . 'files-0000.tar.gz.enc', 'size' => 1000),
+		array('key' => $cp_prefix . 'files-0001.tar.gz.enc', 'size' => 100),
+	));
+	$cp_newest = JobCommandBuilder::build_copy_stage($cp_copy, array('chain_id' => 'chain-20260930_010203'));
+	check(strpos($cp_newest['params']['manifest_url'], '/chain-20260930_010203/manifest-0001.json') !== false && !isset($cp_newest['params']['seq']),
+		'with no vouched run, the newest manifest goes, for the newest run', $cp_newest['params']['manifest_url']);
+	$cp_vouched = JobCommandBuilder::build_copy_stage($cp_copy, array('chain_id' => 'chain-20260930_010203', 'vouched_seq' => 0));
+	check(strpos($cp_vouched['params']['manifest_url'], '/chain-20260930_010203/manifest-0000.json') !== false
+		&& ($cp_vouched['params']['seq'] ?? null) === 0 && !isset($cp_vouched['params']['vouched_seq']),
+		'a copy vouched for run 0 is sent run 0\'s own manifest and stages as at run 0', json_encode(array_diff_key($cp_vouched['params'], array('artifact_urls' => 1))));
+	JobCommandBuilder::set_shelf_listing_for_tests(array(
+		array('key' => $cp_prefix . 'manifest.json',         'size' => 900),
+		array('key' => $cp_prefix . 'files-0000.tar.gz.enc', 'size' => 1000),
+	));
+	$cp_old = JobCommandBuilder::build_copy_stage($cp_copy, array('chain_id' => 'chain-20260930_010203', 'vouched_seq' => 0));
+	check(strpos($cp_old['params']['manifest_url'], '/chain-20260930_010203/manifest.json') !== false && ($cp_old['params']['seq'] ?? null) === 0,
+		'a chain from before per-run manifests sends its one manifest');
+	$threw = '';
+	try { JobCommandBuilder::build_copy_stage($cp_copy, array('chain_id' => 'chain-20260930_010203', 'vouched_seq' => -1)); }
+	catch (Exception $e) { $threw = $e->getMessage(); }
+	check(strpos($threw, 'between 0 and 100000') !== false, 'a vouched run that is not a run number is refused', $threw);
 }
 
 $cp_orphan = jcb_node(array('mgn_install_state' => 'copy', 'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32))));

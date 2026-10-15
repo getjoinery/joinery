@@ -4,7 +4,7 @@
  * tier: db
  * env: any
  * needs: []
- * covers: [includes/SiteCensus.php, includes/SecretReconciler.php, includes/SecretBox.php, ../maintenance_scripts/sysadmin_tools/site_census.php]
+ * covers: [includes/SiteCensus.php, includes/SecretReconciler.php, includes/SecretBox.php, ../maintenance_scripts/sysadmin_tools/site_census.php, ../maintenance_scripts/install_tools/_restore_guard.sh, ../maintenance_scripts/sysadmin_tools/backup_files.sh]
  */
 /**
  * The census (specs/site_copy.md WP3): what a site holds, counted so a copy can
@@ -137,6 +137,20 @@ $census = function (array $files, array $tables = array('usr_users' => 3), array
 };
 $r = SiteCensus::compare($census($fs), $census($fc), true);
 check($r['match'] && $r['blocking'] === 0, 'the exact comparison matches', json_encode($r['differences']));
+
+// B22: the copy's host refuses unsigned code and writes config/code_check and
+// its own trust files; the source's host does not. Still the same site.
+$h = $tmp . '/copy/hosted';
+sc_site($h, array(
+	'config/Globalvars_site.php' => "<?php \$this->settings['dbpassword'] = 'the copy has a longer one';",
+	'config/code_check'          => "ok 2026-10-15T03:28:00Z\n",
+	'config/tree_owner'          => "root\n",
+	'config/release_log_required' => '',
+));
+@unlink($h . '/static_files/offloaded.jpg');
+$fh = SiteCensus::files($h, $names, $paths);
+$r = SiteCensus::compare($census($fs), $census($fh), true);
+check($r['match'], 'a copy whose host writes code_check and its own trust files still matches its source', json_encode($r['differences']));
 
 // ---------------------------------------------------------------- differences
 
@@ -304,5 +318,15 @@ foreach (array('public_html_*', 'upgrades', 'upgrade_archives', 'uploads/upgrade
 check(preg_match('/case "\$name" in public_html\|public_html_\*\|upgrades\|upgrade_archives\|vendor\) skip=true/', $bf) === 1,
 	'and the data identity ignores the upgrade\'s staging and archives, which every upgrade makes anew, and the root\'s vendor/');
 check(strpos($bf, '--exclude="${BASE}/vendor"') !== false, 'and the files engine leaves out the root\'s vendor/ only, as the census does');
+
+section('One list with the restore guard');
+
+$rg = (string)file_get_contents(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/_restore_guard.sh');
+preg_match('/^MACHINE_CONFIG_FILES=\(([^)]*)\)/m', $rg, $m);
+$machine = preg_split('/\s+/', trim($m[1] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+check(count($machine) >= 10, 'the restore guard lists the config files a restore keeps the machine\'s own copy of', implode(' ', $machine));
+check(array_diff($machine, SiteCensus::OWN_PATHS) === array(),
+	'the census leaves out every one of them: a machine\'s own file is never a difference (B22)',
+	implode(' ', array_diff($machine, SiteCensus::OWN_PATHS)));
 
 harness_finish();

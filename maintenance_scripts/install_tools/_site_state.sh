@@ -3,6 +3,11 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.7 - the look paths answer with a relative Location, so the browser stays on the https
+#               address it came in on. Redirect alone names the scheme Apache was reached on,
+#               which in a site container behind its host's proxy is http, and a key page
+#               served over http has no WebCrypto: no owner could unlock the copy's backup (B19).
+#               Relative rather than https://HOST, which Apache escapes for an IPv6 address.
 # Version: 1.6 - in a site container (either engine's marker) the machine's measures are the host's: its
 #               table inside the site's own network namespace is site_quiet_host.sh's, and the
 #               container keeps the rest here - the web drop-in (reloaded with apache2ctl graceful
@@ -227,10 +232,12 @@ ss_render_apache() {
         cat <<EOF
 <LocationMatch "^/\\.joinery-look/${secret}\$">
     Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
+    Header always set Location "/"
     Redirect 303 /
 </LocationMatch>
 <LocationMatch "^/\\.joinery-look/${secret}/key\$">
     Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
+    Header always set Location "/copy-key"
     Redirect 303 /copy-key
 </LocationMatch>
 <LocationMatch "^/(?!\\.joinery-look/${secret}(?:/key)?\$)">

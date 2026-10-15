@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.18 - the site's state folder goes once nothing is left in it: an empty one kept the name looking
+#               like a site in its own right (another_site); one holding a kept id block stays (B24).
 #VERSION 2.17 - site_quiet_host.sh's record of a quiet site ('quiet') goes with the site's other marks.
 #               A certificate retry armed for any name the site's vhost served (arm_ssl_retry.sh)
 #               is stopped with it: it kept waiting for a name whose site was gone, and would have
@@ -730,6 +732,10 @@ if [ -n "$SITE_IDBLOCK" ]; then
         rm -f "$SITES_STATE/$SITE_NAME/idblock"
     fi
 fi
+# Its state folder goes once nothing is left in it, or the empty folder would
+# keep the name looking like a site in its own right (another_site). A folder
+# still holding a kept id block or anything else stays (B24).
+rmdir "$SITES_STATE/$SITE_NAME" 2>/dev/null || true
 
 for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
     if [ -f "$vh" ]; then

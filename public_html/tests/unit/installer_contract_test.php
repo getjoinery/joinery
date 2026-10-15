@@ -1697,6 +1697,10 @@ check(strpos($fix_perms_src_s10, '"$SITE_ROOT/config/tree_owner"') !== false
 // the account that owns the repository. Every line of it that names the record
 // may only read it; a reader that gained a write would fail here like any file.
 $tree_owner_readers = array('includes/ReleaseCommit.php');
+// And one lister: SiteCensus names it among the files each machine keeps as its
+// own, to leave it out of the count (B22). Its lines that name it are data and
+// may call nothing at all.
+$tree_owner_listers = array('includes/SiteCensus.php');
 $php_writers = array();
 foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $dir) {
     $base = PathHelper::getIncludePath($dir);
@@ -1707,6 +1711,11 @@ foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $d
         $src = (string)file_get_contents($f->getPathname());
         if (!preg_match('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', $src)) continue;
         $rel = substr($f->getPathname(), strlen(PathHelper::getIncludePath('')));
+        if (in_array(ltrim($rel, '/'), $tree_owner_listers, true)) {
+            $calls = preg_grep('~\b[A-Za-z_][A-Za-z0-9_]*\s*\(~',
+                preg_grep('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', explode("\n", $src)));
+            if (!$calls) continue;
+        }
         if (in_array(ltrim($rel, '/'), $tree_owner_readers, true)) {
             $naming = preg_grep('~[\'"]config/tree_owner|tree_owner[\'"]\s*\)~', explode("\n", $src));
             $only_reads = true;
@@ -1722,7 +1731,7 @@ foreach (array('includes', 'adm', 'utils', 'api', 'ajax', 'data', 'logic') as $d
     }
 }
 check(empty($php_writers),
-    'no PHP names the config/tree_owner file except to read it in ReleaseCommit, so nothing on the web side can create or change it',
+    'no PHP names the config/tree_owner file except to read it in ReleaseCommit or list it in SiteCensus, so nothing on the web side can create or change it',
     implode(', ', $php_writers));
 
 // --- the runner: assert, refuse, then run -------------------------------

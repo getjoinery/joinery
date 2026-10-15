@@ -50,8 +50,11 @@ $manifest = json_encode(array('version' => 1, 'chain_id' => $chain_id, 'slug' =>
 	)),
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 8 * 86400)))));
 $manifest_link = 'https://s3.us-west-004.backblazeb2.com/harness/x/manager/' . $chain_id . '/manifest-0000.json?X-Amz-Signature=1';
-SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest, $manifest_link) {
-	return array('body' => $manifest, 'url' => $manifest_link);
+// $grown: the manifest as storage holds it once the source has run again after
+// the copy's key step was built (B20); null while it has not.
+$grown = null;
+SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest, &$grown, $manifest_link) {
+	return array('body' => $grown ?? $manifest, 'url' => $manifest_link);
 };
 
 $mk_node = function (string $suffix, array $set) use ($tag) {
@@ -94,7 +97,9 @@ $listing = array('chains' => array(array('chain_id' => $chain_id, 'profile' => B
 	'runs' => array(array('seq' => 0, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 8 * 86400),
 		'artifacts' => array('files' => 69000000, 'db' => 140000))))), 'objects' => array(), 'error' => null);
 SiteCopyRunner::$chain_lister = function ($node) use (&$listing) { return $listing; };
-SiteCopyRunner::$stage_builder = function ($node, $chain) {
+$staged_with = array();
+SiteCopyRunner::$stage_builder = function ($node, $chain) use (&$staged_with) {
+	$staged_with[] = $chain;
 	return array('primitive' => 'copy_stage', 'params' => array('chain_id' => $chain['chain_id'],
 		'manifest_url' => 'https://x.invalid/m', 'artifact_urls' => array()));
 };
@@ -158,7 +163,7 @@ $copy->save();
 section('The run: no step on the source, and the key from the owner');
 
 $take_key_params = null;
-$drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, $src, &$take_key_params) {
+$drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, $src, &$take_key_params, &$manifest, &$grown) {
 	$ops = array();
 	for ($guard = 0; $guard < 40 && in_array($copy->status(), $statuses, true); $guard++) {
 		SiteCopyRunner::advance($copy);
@@ -178,6 +183,11 @@ $drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, 
 		$key = $current['op'] . (!empty($current['arg']) ? ':' . $current['arg'] : '') . '@' . $current['on'];
 		$ops[] = $key;
 		if ($current['op'] === 'copy_take_key') {
+			// The source's own schedule runs again while the copy waits for its
+			// key: storage now holds a newer manifest, with run 1 in it.
+			$grow = json_decode($manifest, true);
+			$grow['runs'][] = array('seq' => 1, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 3600));
+			$grown = json_encode($grow);
 			$p = $job->get('mjb_parameters');
 			$p = is_string($p) ? json_decode($p, true) : $p;
 			$take_key_params = $p;
@@ -230,6 +240,8 @@ check($sealed !== '' && sodium_crypto_box_seal_open($sealed, $recovery) === $dat
 	'and is handed the data key as sealed to the recovery key: ciphertext only this management node cannot open');
 check(strpos(json_encode($params), $data_key) === false, 'the data key itself is nowhere in the job');
 check($copy->get('scp_look_path') === $look, 'the copy\'s look path is recorded, for the owner to reach its own page');
+check(count($staged_with) === 1 && ($staged_with[0]['vouched_seq'] ?? null) === 0,
+	'the copy stages run 0, whose key its owner opened, though its source has run again since (B20)', json_encode($staged_with));
 check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'census') !== false,
 	'a dead sealed secret on the copy stops it: its census is judged alone', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
 
@@ -240,6 +252,7 @@ $drive($copy, array(SiteCopy::STATUS_COPYING), $run_results);
 check($copy->status() === SiteCopy::STATUS_DORMANT && !empty($copy->census()['match']),
 	'a clean census: the copy is dormant and current as of the backup', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
 
+$grown = null;
 $manifest_was = $manifest;
 $manifest = str_replace($recovery_fpr, str_repeat('c', 64), $manifest);
 $threw = '';
