@@ -23234,6 +23234,40 @@ fn a_private_file_carried_out_here_is_not_sent_in_the_clear() {
     assert!(laptop.fs.exists("Plain/day1.txt"));
 }
 
+/// A Private file edited here while its folder was Private, then carried out
+/// of it, has two things refused: its move (out of Private needs the owner's
+/// window) and its new contents (a Private file changes only in a browser).
+/// Both are held, and nothing more is asked pass after pass. RED before: a
+/// file held one refusal at a time, each replacing the other, so the move and
+/// the whole file went to the server again on every pass (live on dev,
+/// 2026-10-15: 54 refused uploads in 75 seconds).
+#[test]
+fn a_private_file_edited_then_carried_out_here_is_asked_about_once() {
+    let world = World::new(9_844, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    laptop.fs.user_write("Plain/notes.txt", b"plain");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary, edited here");
+    assert!(world.settle().is_some());
+    let sent = world.server.upload_inits();
+    laptop.fs.user_rename("Diary/day1.txt", "Plain/day1.txt");
+    world.pass(laptop);
+    let asked = world.server.upload_inits();
+    assert!(asked <= sent + 1, "sent {sent}, then {asked} in one pass");
+    for _ in 0..6 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.upload_inits(), asked, "the refused upload was sent again");
+    assert_eq!(server_sha(&world, "Diary/day1.txt"), Some(jd_sim::sha256_hex(b"dear diary")));
+    assert!(server_sha(&world, "Plain/day1.txt").is_none(), "{:?}", world.server.tree());
+    let said = issues_of(laptop, "withdrawn");
+    assert!(!said.is_empty() && said.iter().all(|s| s.contains("only in a browser")), "{said:?}");
+    assert!(laptop.fs.exists("Plain/day1.txt"));
+}
+
 /// A file saved into a Private folder on this computer goes nowhere, and
 /// carried out of it into a plain folder it goes up from where it now stands,
 /// as any new file: it was never the server's to seal.

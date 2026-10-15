@@ -11,7 +11,7 @@
  *
  * Usage — put the config on the card and mark the pieces:
  *
- *   <div data-ceremony-batch='{"action":"drive/level_batch",
+ *   <div data-ceremony-batch='{"action":"drive_level_batch",
  *                              "payload":{"folder_id":12},
  *                              "remaining":42,
  *                              "labels":{...}}'>
@@ -28,6 +28,8 @@
  * failure mode that must never become an infinite loop. It stops and says what
  * is left.
  *
+ * @version 1.2 - the usage example names a core action by its own name (drive_level_batch);
+ *   plugin/action is a plugin's shape
  * @version 1.1
  */
 window.JoineryCeremonyBatch = (function () {

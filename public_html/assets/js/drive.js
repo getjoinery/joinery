@@ -686,7 +686,7 @@
 		box.hidden = false;
 		var verb = (target === 'private') ? 'Sealing' : 'Opening';
 		box.setAttribute('data-ceremony-batch', JSON.stringify({
-			action: 'drive/level_batch',
+			action: 'drive_level_batch',
 			payload: { folder_id: folderId },
 			remaining: remaining,
 			doneKey: 'converted',
