@@ -20,6 +20,7 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.6 - a machine that told the escrow holder it opened after its last host report is asked within minutes (B74)
  * @version 1.5 - the scheduled pass leaves a test's fixture nodes alone (RunNodeUptimeChecks::watched_nodes())
  * @version 1.4 - a machine asked to reboot is asked for its host report every REBOOT_REFRESH_SECONDS until it is seen back
  * @version 1.3 - a host report saying a data root run is under way is asked again after
@@ -192,6 +193,48 @@ $rr['came_back_at'] = gmdate('Y-m-d H:i:s');
 $rj->set('mjb_result', json_encode($rr));
 $rj->save();
 check(!JobResultProcessor::reboot_awaited($rebooting), 'once it is seen back, nothing is awaited and the hour applies again');
+
+section('A machine that opened its data root after its last report is asked again within minutes (B74)');
+// A boot not asked from here (a site copy's go-back power-cycles the source)
+// is heard of only when the machine tells this escrow holder it is unlocked;
+// until a new report, the node page says 'opened by' the boot before.
+$srt_report_at = gmdate('Y-m-d H:i:s', time() - RunNodeUptimeChecks::REBOOT_REFRESH_SECONDS - 120);
+$srt_enc_report = json_encode(array('data_root_encryption' => array('backing' => 'luks-file', 'open' => true, 'holder' => '',
+	'reencrypt' => '', 'reencrypt_percent' => '', 'opened_by' => 'the escrow holder, at earlier')));
+$srt_opened = srt_node($tag, 'opened', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $srt_report_at, 'mgn_last_host_report' => $srt_enc_report));
+$srt_quiet = srt_node($tag, 'notopened', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $srt_report_at, 'mgn_last_host_report' => $srt_enc_report));
+$srt_dres = array();
+foreach (array(array($srt_opened, gmdate('Y-m-d H:i:s', time() - 60)), array($srt_quiet, gmdate('Y-m-d H:i:s', time() - 3 * 86400))) as $srt_pair) {
+	$srt_dre = new DataRootEscrow(NULL);
+	$srt_dre->set('dre_identity_key', base64_encode(random_bytes(32)));
+	$srt_dre->set('dre_status', 'enrolled');
+	$srt_dre->set('dre_mgn_managed_node_id', $srt_pair[0]->key);
+	$srt_dre->set('dre_unlocked_time', $srt_pair[1]);
+	$srt_dre->save();
+	harness_register_row('dre_data_root_escrows', 'dre_data_root_escrow_id', $srt_dre->key);
+	$srt_dres[] = $srt_dre;
+	$srt_hj = ManagementJob::createFromBuild($srt_pair[0]->key, 'host_report', JobCommandBuilder::build_host_report_primitive($srt_pair[0]), null, null);
+	$srt_hj->set('mjb_status', 'completed');
+	$srt_hj->set('mjb_completed_time', $srt_report_at);
+	$srt_hj->save();
+}
+check(DataRootEscrowSync::opened_since_report($srt_opened) && !DataRootEscrowSync::opened_since_report($srt_quiet),
+	'an unlock after the last report means the report is a boot behind; one before it does not');
+check(!JobResultProcessor::reboot_awaited($srt_opened), 'no reboot was asked from here: only the unlock says it booted');
+$queued = $task->refresh_status_facts(array($srt_opened, $srt_quiet), gmdate('Y-m-d H:i:s'));
+check($queued === 1 && srt_jobs($srt_opened, 'host_report') === 2 && srt_jobs($srt_quiet, 'host_report') === 1,
+	'four minutes after its last report, the machine that opened since is asked again; the other waits out the hour', "queued=$queued");
+$srt_opened->set('mgn_last_host_report_time', gmdate('Y-m-d H:i:s'));
+$srt_opened->save();
+check(!DataRootEscrowSync::opened_since_report($srt_opened), 'a report after the unlock settles it: the hour applies again');
+$srt_plain = srt_node($tag, 'plainopen', array('mgn_agent_public_key' => 'harnesstest-key', 'mgn_agent_primitives' => 'host_report',
+	'mgn_last_host_report_time' => $srt_report_at, 'mgn_last_host_report' => json_encode(array('boot_id' => 'x'))));
+$srt_dres[1]->set('dre_mgn_managed_node_id', $srt_plain->key);
+$srt_dres[1]->set('dre_unlocked_time', gmdate('Y-m-d H:i:s'));
+$srt_dres[1]->save();
+check(!DataRootEscrowSync::opened_since_report($srt_plain), 'a machine whose report says no encrypted data root is not asked for this');
 
 // The scheduled pass never sees a suite's own nodes: it queued check_status
 // and host_report for them mid-run, and those jobs outlived the nodes.

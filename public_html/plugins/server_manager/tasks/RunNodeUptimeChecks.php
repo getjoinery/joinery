@@ -21,6 +21,9 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.15 - a machine that told this escrow holder it opened its data root after its last host report is
+ *                 asked every REBOOT_REFRESH_SECONDS too (DataRootEscrowSync::opened_since_report): a boot not asked
+ *                 from here left its node page saying 'opened by' the boot before for up to the hour (B74)
  * @version 2.14 - leaves a test's fixture nodes alone (ManagedNode::is_fixture_name()), as the incident pass does: it
  *                 queued jobs for a running suite's nodes, which outlived them when the suite deleted its nodes
  * @version 2.13 - data_root_run_under_way() reads DataRootEscrowSync::run_under_way(); a node this plane asked to
@@ -85,7 +88,10 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	const STATUS_REFRESH_SECONDS  = 3600;
 	/** How old a host report may be while it says a data root run is under way (B62). */
 	const DATA_ROOT_RUN_REFRESH_SECONDS = 300;
-	/** How old a host report may be while a reboot this plane asked for is not yet seen to have happened. */
+	/**
+	 * How old a host report may be while a reboot this plane asked for is not
+	 * yet seen to have happened, or once its machine has said it opened since.
+	 */
 	const REBOOT_REFRESH_SECONDS = 120;
 
 	public function run(array $config): array {
@@ -242,7 +248,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * later, and its end is what calls for the enrolment (DataRootEscrowSync)
 	 * and changes what the node page offers (B62). A machine this plane asked
 	 * to reboot is asked every REBOOT_REFRESH_SECONDS until a report carries a
-	 * new boot id (JobResultProcessor::reboot_awaited).
+	 * new boot id (JobResultProcessor::reboot_awaited), and so is one whose
+	 * machine told this escrow holder it opened its data root after its last
+	 * report: a boot not asked from here (DataRootEscrowSync::opened_since_report).
 	 *
 	 * @param iterable $nodes   live ManagedNode rows
 	 * @param string   $now_utc 'Y-m-d H:i:s'
@@ -269,7 +277,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				}
 				$window = self::STATUS_REFRESH_SECONDS;
 				if ($word === 'host_report') {
-					if (JobResultProcessor::reboot_awaited($node)) {
+					if (JobResultProcessor::reboot_awaited($node) || DataRootEscrowSync::opened_since_report($node)) {
 						$window = self::REBOOT_REFRESH_SECONDS;
 					} elseif (self::data_root_run_under_way($node)) {
 						$window = self::DATA_ROOT_RUN_REFRESH_SECONDS;

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.69 - Remove Permanently of a container site whose host has no node here asks for its host machine's
+ *                 address (NodeRemoval::host_attest_text); it was refused for ever, so the site could only be hidden (B76)
  * @version 1.68 - the Hide confirmation says the node's cloud server stays recorded (B71)
  * @version 1.67 - settings ask whether this node's incidents send alerts (ManagedNode::ALERTS)
  * @version 1.66 - the Machine box asks what the machine listens on, lists every container on a Docker host, and
@@ -304,8 +306,15 @@
 	if ($is_removed) {
 		$remove_block = NodeRemoval::backups_refusal($node);
 	}
+	$attest_host = false;
 	if ($remove_block === '' && $remove_kind === NodeRemoval::MACHINE_CONTAINER) {
 		$remove_block = NodeRemoval::container_refusal($node);
+		// Its host has no node here to remove the container: the person
+		// confirms the host machine deleted, by its address (B76).
+		if ($remove_block !== '' && ($remove_attest = NodeRemoval::host_attest_text($node)) !== '') {
+			$remove_block = '';
+			$attest_host = true;
+		}
 	}
 	if ($remove_block === '' && $remove_kind === NodeRemoval::MACHINE_ATTEST) {
 		$remove_attest = NodeRemoval::attest_text($node);
@@ -321,10 +330,15 @@
 		$remove_message .= ' Its machine at ' . $remove_hosted_at . ' must already be deleted: the provider is asked first, and nothing is removed while the machine is still there.';
 	} elseif ($remove_kind === NodeRemoval::MACHINE_ATTEST) {
 		$remove_message .= ' Its machine at ' . $remove_hosted_at . ' must already be deleted; you confirm that next.';
+	} elseif ($attest_host) {
+		$remove_message .= ' Its host machine at ' . $remove_hosted_at . ' must already be deleted: its host has no node here to remove the container. You confirm that next.';
 	}
-	$attest_message = 'This management node cannot ask ' . $remove_hosted_at . ' about its machines. Confirm you deleted this machine there.'
-		. ' Your confirmation is logged.';
-	$attest_is_id = NodeRemoval::instance_id($node) !== '';
+	$attest_message = $attest_host
+		? 'Nothing here can remove its container: its host has no node on this management node. Confirm you deleted the host machine at ' . $remove_hosted_at . '. Your confirmation is logged.'
+		: 'This management node cannot ask ' . $remove_hosted_at . ' about its machines. Confirm you deleted this machine there.'
+			. ' Your confirmation is logged.';
+	$attest_is_id = !$attest_host && NodeRemoval::instance_id($node) !== '';
+	$attest_machine = $attest_host ? 'its host machine' : 'this machine';
 
 	// Restore is refused while another live site has taken the slug.
 	$restore_block = '';
@@ -417,7 +431,7 @@
 						<input type="hidden" name="confirm_machine" value="">
 						<?php echo SmAdminCsrf::field(); ?>
 						<?php if ($remove_attest !== ''): ?>
-							<button type="button" class="dropdown-item text-danger" onclick="var f=document.getElementById('purge_node_form'); JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($attest_message . ' I deleted this machine at ' . $remove_hosted_at . '. Its ' . ($attest_is_id ? 'instance ID' : 'IP address') . ' is ' . $remove_attest . '.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>, function(){ f.elements['confirm_machine'].value = <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>; f.submit(); }, {confirmLabel: 'I deleted it'}); })">Remove Permanently&hellip;</button>
+							<button type="button" class="dropdown-item text-danger" onclick="var f=document.getElementById('purge_node_form'); JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($attest_message . ' I deleted ' . $attest_machine . ' at ' . $remove_hosted_at . '. Its ' . ($attest_is_id ? 'instance ID' : 'IP address') . ' is ' . $remove_attest . '.'), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>, function(){ f.elements['confirm_machine'].value = <?php echo htmlspecialchars(json_encode($remove_attest), ENT_QUOTES); ?>; f.submit(); }, {confirmLabel: 'I deleted it'}); })">Remove Permanently&hellip;</button>
 						<?php else: ?>
 							<button type="button" class="dropdown-item text-danger" onclick="JoineryModal.confirmTyped(<?php echo htmlspecialchars(json_encode($remove_message), ENT_QUOTES); ?>, <?php echo htmlspecialchars(json_encode($node->get('mgn_slug')), ENT_QUOTES); ?>, function(){ document.getElementById('purge_node_form').submit(); })">Remove Permanently&hellip;</button>
 						<?php endif; ?>

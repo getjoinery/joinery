@@ -11,7 +11,10 @@
  *      unclaimed on the target.
  *   2. A site in a container on a server of ours: its host verified the
  *      container gone (Permanently Delete Site stamps mgn_site_removed_time),
- *      or no site was ever seen there.
+ *      or no site was ever seen there. When its host has no node here (never
+ *      paired, or removed for good, its machine with it), nothing can remove
+ *      the container from here: the person types the host machine's address
+ *      to say they deleted it, logged as [NODE_REMOVE_ATTEST].
  *   3. A machine of ours: the provider says the instance is gone, asked with
  *      the credential of the account the machine is in (its provision record
  *      names it). Where this management node does not hold that account (no
@@ -24,6 +27,8 @@
  *
  * The platform never deletes an instance itself.
  *
+ * @version 1.2 - a container site whose host has no node here (never paired, or removed for good) goes once the
+ *                person confirms its host machine deleted by its address; it could only be hidden (B76)
  * @version 1.1 - the provider is asked with the machine's own account's credential, and only when that
  *                account is held (cloud_accounts_list)
  * @version 1.0
@@ -82,13 +87,84 @@ class NodeRemoval {
 	}
 
 	/** Guard 2, from records alone. */
-	public static function container_refusal(ManagedNode $node): string {
+	public static function container_refusal(ManagedNode $node, ?callable $resolve = null): string {
 		if ($node->get('mgn_site_removed_time') || !self::site_ever_confirmed($node)) {
 			return '';
 		}
-		return 'Its site may still be running in its container on '
-			. self::account_label($node)
-			. '. Use Permanently Delete Site first; once its host verifies the container gone, this can go.';
+		$on = 'Its site may still be running in its container on ' . self::account_label($node) . '. ';
+		$server = self::host_server($node);
+		if ($server !== null) {
+			return $on . ($server->get('mgn_delete_time')
+					? 'Its host\'s node (' . $server->get('mgn_name') . ') is hidden: restore it and use Permanently Delete Site; once its host verifies the container gone, this can go. '
+					: 'Use Permanently Delete Site first; once its host verifies the container gone, this can go. ')
+				. 'If its host machine is gone, remove the host\'s own node permanently first; this then asks you to confirm the machine deleted.';
+		}
+		return $on . 'Its host has no node here to remove the container (never paired, or removed), so this goes once you confirm '
+			. 'you deleted the host machine, by its IP address.'
+			. (self::host_addresses($node, $resolve) ? '' : ' No address of the host machine is on record to confirm it by: set the host\'s address on its host record.');
+	}
+
+	/** The host record a container site is placed on, or null. */
+	private static function placement(ManagedNode $node): ?ManagedHost {
+		$id = (int)$node->get('mgn_mgh_managed_host_id');
+		if (!$id) {
+			return null;
+		}
+		$host = new ManagedHost($id, TRUE);
+		return ($host->key && !$host->get('mgh_delete_time')) ? $host : null;
+	}
+
+	/**
+	 * The host's own node for a container site, hidden ones included, or null
+	 * when its host has none here: never paired, or removed for good.
+	 */
+	public static function host_server(ManagedNode $node): ?ManagedNode {
+		$host = self::placement($node);
+		$id = $host ? (int)$host->get('mgh_mgn_managed_node_id') : 0;
+		if (!$id || $id === (int)$node->key) {
+			return null;
+		}
+		$server = new ManagedNode($id, TRUE);
+		return $server->key ? $server : null;
+	}
+
+	/**
+	 * The public addresses of the machine a container site ran on: its host
+	 * record's address and the site's own records (its Host, provisioning
+	 * records and the join its agent made, all from that machine).
+	 *
+	 * @return string[]
+	 */
+	public static function host_addresses(ManagedNode $node, ?callable $resolve = null): array {
+		$resolve = $resolve ?? array('MachineTransferWatch', 'resolve');
+		$host = self::placement($node);
+		$candidates = array();
+		$at = $host ? trim((string)$host->get('mgh_host')) : '';
+		if ($at !== '') {
+			$candidates = IpAddress::binary($at) !== null ? array($at) : (array)$resolve($at);
+		}
+		$out = array();
+		foreach (array_merge($candidates, self::addresses($node, $resolve)) as $a) {
+			$a = trim((string)$a);
+			$b = IpAddress::binary($a);
+			if ($b !== null && !isset($out[$b]) && IpAddress::isPublic($a)) {
+				$out[$b] = $a;
+			}
+		}
+		return array_values($out);
+	}
+
+	/**
+	 * What the person types to remove a container site whose host has no node
+	 * here: the host machine's first address. '' when guard 2 passes on its
+	 * own, when the host has a node (it removes the container), or when no
+	 * address is known.
+	 */
+	public static function host_attest_text(ManagedNode $node, ?callable $resolve = null): string {
+		if (self::container_refusal($node, $resolve) === '' || self::host_server($node) !== null) {
+			return '';
+		}
+		return self::host_addresses($node, $resolve)[0] ?? '';
 	}
 
 	/** The cloud instance on record for the node (its newest provisioning record that names one, removed ones included), or ''. */
@@ -246,7 +322,16 @@ class NodeRemoval {
 		$account_token = $account_token ?? self::account_token($node);
 		switch (self::machine_kind($node, $account_token)) {
 			case self::MACHINE_CONTAINER:
-				return self::container_refusal($node);
+				$why = self::container_refusal($node, $resolve);
+				if ($why === '' || self::host_attest_text($node, $resolve) === '') {
+					return $why;
+				}
+				$typed = trim($typed_attest);
+				if ($typed === '' || IpAddress::binary($typed) === null || !IpAddress::in($typed, self::host_addresses($node, $resolve))) {
+					return 'Type the IP address of its host machine to confirm you deleted it at ' . self::account_label($node)
+						. '. Nothing was removed.';
+				}
+				return '';
 			case self::MACHINE_PROVIDER:
 				return self::provider_refusal($node, $driver ?? OperatorCloudAccount::driver_for($account_token), $resolve);
 			case self::MACHINE_ATTEST:
@@ -277,7 +362,13 @@ class NodeRemoval {
 		if ($why !== '') {
 			throw new DisplayableUserException($why);
 		}
-		if (self::machine_kind($node, $account_token) === self::MACHINE_ATTEST) {
+		$kind = self::machine_kind($node, $account_token);
+		if ($kind === self::MACHINE_CONTAINER && self::host_attest_text($node, $resolve) !== '') {
+			error_log('[NODE_REMOVE_ATTEST] user ' . $user_id . ' attested the host machine of container site "' . $node->get('mgn_name')
+				. '" (' . $node->get('mgn_slug') . ', #' . (int)$node->key . ') deleted at '
+				. self::account_label($node) . '; typed "' . trim($typed_attest) . '"');
+		}
+		if ($kind === self::MACHINE_ATTEST) {
 			error_log('[NODE_REMOVE_ATTEST] user ' . $user_id . ' attested the machine of node "' . $node->get('mgn_name')
 				. '" (' . $node->get('mgn_slug') . ', #' . (int)$node->key . ') deleted at '
 				. self::account_label($node) . '; typed "' . trim($typed_attest) . '"');

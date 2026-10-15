@@ -37,6 +37,9 @@
  * does a node removed permanently (ManagedNode::permanent_delete, B69); a
  * hidden one keeps its key, as it keeps every record, until it is restored.
  *
+ * @version 1.10 - opened_since_report(): a machine that told this holder it opened its data root after its last host
+ *                 report is asked for a new one within minutes, whatever restarted it (a site copy's go-back, the
+ *                 provider, a crash); its node page said 'opened by' the boot before for up to the hour (B74)
  * @version 1.9 - no enrolment while a data root run is under way: a key change's mapping may hold either key, and a
  *                slot made from the wrong one would not open the next boot; the report after the run enrols (B67).
  *                let_go() says how many keys it gave up; removing a node permanently lets its machine go too (B69)
@@ -126,6 +129,29 @@ class DataRootEscrowSync {
 		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
 		$enc = is_array($hr) ? ($hr['data_root_encryption'] ?? null) : null;
 		return is_array($enc) && (string)($enc['reencrypt'] ?? '') !== '';
+	}
+
+	/**
+	 * Whether the machine told this holder its data root opened after its last
+	 * host report: it has booted since, so the report's "opened by" and boot
+	 * id are the boot before. A reboot asked from here is watched by its job
+	 * (JobResultProcessor::reboot_awaited); this is every other boot of an
+	 * enrolled machine, a site copy's go-back, the provider's, a crash. The
+	 * agent writes what opened it before it tells the holder
+	 * (joinery-agent unlock), so the next report reads the new line.
+	 */
+	public static function opened_since_report($node): bool {
+		$hr = json_decode((string)$node->get('mgn_last_host_report'), true);
+		if (!is_array($hr) || !is_array($hr['data_root_encryption'] ?? null)) {
+			return false;
+		}
+		$row = DataRootEscrow::for_node((int)$node->key);
+		$unlocked = $row ? trim((string)$row->get('dre_unlocked_time')) : '';
+		if ($unlocked === '') {
+			return false;
+		}
+		$reported = trim((string)$node->get('mgn_last_host_report_time'));
+		return $reported === '' || strtotime($unlocked . ' UTC') > strtotime($reported . ' UTC');
 	}
 
 	/**
