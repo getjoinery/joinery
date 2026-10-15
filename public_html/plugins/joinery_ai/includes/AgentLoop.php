@@ -242,6 +242,16 @@ class AgentLoop {
             $tool_result_blocks = [];
             $iter_had_error = false;
             foreach ($tool_uses as $tu) {
+                // Only the tools this run offered run. The registry knows every
+                // tool of every plugin, and a model that names one it was not
+                // offered (from a transcript, a fetched page, a guess) must get
+                // a refusal, not the tool: a chat with Web search off would
+                // otherwise still fetch a URL by naming fetch_url.
+                if (!in_array((string)($tu['name'] ?? ''), $allowed_tools, true)) {
+                    $tool_result_blocks[] = self::refuseUnoffered($tu, $context);
+                    $iter_had_error = true;
+                    continue;
+                }
                 $hot_egress = RiskHeuristic::isHotEgress($tu);
                 if ($context->queuesWrites() && ($hot_egress || RiskHeuristic::isMutating($tu))
                         && !$context->executesInline((string)($tu['name'] ?? ''))) {
@@ -351,6 +361,29 @@ class AgentLoop {
             'completed_time' => gmdate('Y-m-d H:i:s.u'),
             'is_error'       => true,
             'output'         => 'refused: hot-turn egress on an autonomous run',
+            'duration_ms'    => 0,
+        ]);
+        return ['type' => 'tool_result', 'tool_use_id' => $tool_use['id'] ?? '',
+            'content' => $msg, 'is_error' => true];
+    }
+
+    /**
+     * A call to a tool this run did not offer: refused before anything is
+     * looked up, and audited, so a model reaching for a tool it was not given
+     * leaves a trace. A surface that wants to know which tools were reached
+     * for reads the trace.
+     */
+    private static function refuseUnoffered(array $tool_use, ToolContext $ctx): array {
+        $name = (string)($tool_use['name'] ?? '');
+        $msg = "Tool '$name' is not available here. Use only the tools you were given.";
+        $now = gmdate('Y-m-d H:i:s.u');
+        $ctx->appendToolCall([
+            'name'           => $name,
+            'input'          => $tool_use['input'] ?? [],
+            'started_time'   => $now,
+            'completed_time' => $now,
+            'is_error'       => true,
+            'output'         => 'refused: not offered in this run',
             'duration_ms'    => 0,
         ]);
         return ['type' => 'tool_result', 'tool_use_id' => $tool_use['id'] ?? '',
