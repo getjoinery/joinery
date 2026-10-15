@@ -8,7 +8,7 @@
  * @version 0.1.0
  */
 function desk_escalate_logic(array $input): LogicResult {
-	if ($limited = SupportApi::rateLimit('desk_escalate')) {
+	if ($limited = SupportApi::limit('desk_escalate')) {
 		return $limited;
 	}
 	try {

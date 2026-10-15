@@ -8,7 +8,7 @@
  * @version 0.1.0
  */
 function desk_feedback_logic(array $input): LogicResult {
-	if ($limited = SupportApi::rateLimit('desk_feedback')) {
+	if ($limited = SupportApi::limit('desk_feedback')) {
 		return $limited;
 	}
 	try {
@@ -17,11 +17,7 @@ function desk_feedback_logic(array $input): LogicResult {
 		if (!in_array($verdict, array('up', 'down'), true)) {
 			throw new SupportRefusal('Say up or down.', 'bad_verdict');
 		}
-		$msg = new AiConversationMessage((int)($input['message_id'] ?? 0), TRUE);
-		if (!$msg->key || (int)$msg->get('aim_aic_conversation_id') !== (int)$thread->get('sth_aic_conversation_id')
-				|| $msg->get('aim_role') !== AiConversationMessage::ROLE_ASSISTANT) {
-			throw new SupportRefusal('That answer is not in this thread.', 'no_message', 404);
-		}
+		$msg = SupportIntake::answerIn($thread, (int)($input['message_id'] ?? 0));
 		$note = trim((string)($input['note'] ?? ''));
 		AiConversationMessage::updateColumns((int)$msg->key, array(
 			'aim_feedback'      => $verdict,

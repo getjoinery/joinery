@@ -53,13 +53,13 @@
             "helptext": "Input and output tokens across every site in a UTC day. 0 means no limit beyond Joinery AI's monthly cap."
         },
         {
-            "name": "support_desk_rate_limit_requests",
-            "default": "120",
+            "name": "support_desk_new_threads_per_hour",
+            "default": "20",
             "group": "support_desk",
-            "label": "Requests accepted per hour from one address",
+            "label": "New threads accepted per hour from one address",
             "type": "number",
             "validation": {"number": true, "min": 1},
-            "helptext": "Questions, polls and the rest together. A site's panel polls while an answer is written, so this is well above the number of questions a person asks."
+            "helptext": "Questions that open a new thread, from one site or one visitor's address, counted when tried. Each one costs a call back to the site. Questions in an open thread, and the panel's polling, are not counted here: they carry the thread's token. Every container site on one host shares the host's address."
         },
         {
             "name": "support_desk_node_reads_per_thread",

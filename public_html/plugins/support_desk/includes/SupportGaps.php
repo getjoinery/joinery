@@ -4,8 +4,9 @@
  * (specs/support_chatbot.md, The admin page):
  *
  *   - questions the docs could not answer: every turn that escalated or was
- *     thumbed down, grouped by the searches the model ran, with the releases
- *     asked. Read from the transcripts at view time; nothing extra is stored.
+ *     thumbed down, with the searches the model ran and the release asked,
+ *     until its thread is answered once or closed by naming what answers it
+ *     now (sth_gap_note). Read from the transcripts at view time.
  *   - words the site could not read: an observe word the model reached for
  *     that the site's agent does not offer, counted in SupportWordGap.
  *
@@ -53,22 +54,21 @@ class SupportGaps {
 	 * question that started it. Newest first.
 	 *
 	 * @return array<int, array{thread_id:int, message_id:int, release:string, host:string, question:string,
-	 *         queries:array, reason:string, time:string, state:string, answered:bool}>
+	 *         queries:array, reason:string, time:string, state:string}>
 	 */
 	public static function unanswered(int $limit = 100): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare("SELECT m.aim_conversation_message_id AS mid, m.aim_tool_calls, m.aim_feedback, m.aim_feedback_note,
-				m.aim_create_time, t.sth_support_thread_id AS tid, t.sth_version, t.sth_host, t.sth_state, t.sth_surface
+				m.aim_create_time, t.sth_support_thread_id AS tid, t.sth_version, t.sth_host, t.sth_state, t.sth_surface, t.sth_gap_note
 			FROM aim_conversation_messages m
 			JOIN aic_conversations c ON c.aic_conversation_id = m.aim_aic_conversation_id
 			JOIN sth_support_threads t ON t.sth_support_thread_id = c.aic_support_thread_id
 			WHERE m.aim_role = 'assistant' AND m.aim_author IS NULL AND m.aim_delete_time IS NULL
-			  AND t.sth_delete_time IS NULL
+			  AND t.sth_delete_time IS NULL AND t.sth_gap_closed_time IS NULL
 			  AND (m.aim_feedback = 'down' OR m.aim_tool_calls LIKE '%\"name\":\"escalate\"%')
 			ORDER BY m.aim_conversation_message_id DESC LIMIT " . (int)$limit);
 		$stmt->execute();
 		$out = array();
-		$faq_threads = self::threadsWithFaq();
 		foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
 			$calls = json_decode((string)$r['aim_tool_calls'], true);
 			$queries = array();
@@ -98,10 +98,22 @@ class SupportGaps {
 				'reason'     => implode('; ', $reason),
 				'time'       => (string)$r['aim_create_time'],
 				'state'      => (string)$r['sth_state'],
-				'answered'   => isset($faq_threads[(int)$r['tid']]),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Close a thread's row on the gap report by naming what answers it now: a
+	 * doc commit, an agent word, a FAQ entry. An Answer once closes it too.
+	 */
+	public static function close(SupportThread $thread, string $note): void {
+		$note = trim($note);
+		if ($note === '') {
+			throw new SupportThreadException('Say what answers it now: a doc commit, an agent word, a FAQ entry.');
+		}
+		SupportThread::updateColumns((int)$thread->key, array('sth_gap_note' => mb_substr($note, 0, 500),
+			'sth_gap_closed_time' => gmdate('Y-m-d H:i:s')));
 	}
 
 	/** The person's message the assistant row answered. */
@@ -116,17 +128,4 @@ class SupportGaps {
 		return (string)$stmt->fetchColumn();
 	}
 
-	/** thread id => true for threads an Answer once already came from. */
-	private static function threadsWithFaq(): array {
-		$out = array();
-		try {
-			$q = DbConnector::get_instance()->get_db_link()->query(
-				'SELECT DISTINCT sfq_sth_support_thread_id FROM sfq_faq_entries WHERE sfq_sth_support_thread_id IS NOT NULL AND sfq_delete_time IS NULL');
-			foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $id) {
-				$out[(int)$id] = true;
-			}
-		} catch (\Throwable $e) {
-		}
-		return $out;
-	}
 }

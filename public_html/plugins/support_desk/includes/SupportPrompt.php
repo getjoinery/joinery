@@ -40,7 +40,7 @@ class SupportPrompt {
 	const WIDGET_RULES = "## How you work\n\n"
 		. "- Search before you answer: search_docs, then read_doc_section on the section you rely on.\n"
 		. "- Cite what you drew on as the path and heading, or the public page.\n"
-		. "- The person has no site yet; nothing about any site can be read from here.";
+		. "- Nothing about any site can be read from here.";
 
 	/**
 	 * The system blocks for a turn: [layer 1 with the one-hour breakpoint,
@@ -83,7 +83,7 @@ class SupportPrompt {
 		$lines = array('## This conversation', '');
 		$lines[] = 'Date: ' . gmdate('l, F j, Y') . ' (UTC).';
 		if ($widget) {
-			$lines[] = 'A visitor to the public pages, with no site yet. You are reading the documentation of release ' . $release . ', the newest here.';
+			$lines[] = 'A visitor to the public pages; you cannot see any site of theirs. You are reading the documentation of release ' . $release . ', the newest here.';
 		} else {
 			$version = (string)$thread->get('sth_version');
 			$lines[] = 'The person runs release ' . $version . ($exact

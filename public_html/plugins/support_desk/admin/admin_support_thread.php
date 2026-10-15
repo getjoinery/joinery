@@ -106,7 +106,7 @@ if ((string)$thread->get('sth_state') === SupportThread::STATE_CLOSED) {
 } else {
 	echo AdminPage::action_button('Close', $self, array('hidden' => array('action' => 'close'))) . ' ';
 }
-echo '<a class="btn btn-outline-secondary" href="/plugins/support_desk/admin/admin_support_faq_edit?sth_support_thread_id=' . (int)$thread->key . '">Answer once</a>';
+echo '<a class="btn btn-sm btn-outline-secondary" href="/plugins/support_desk/admin/admin_support_faq_edit?sth_support_thread_id=' . (int)$thread->key . '">Answer once</a>';
 echo '</p>';
 
 $bundle = $thread->bundle();
@@ -115,18 +115,26 @@ if ($bundle) {
 		. $h(json_encode($bundle, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) . '</pre></details>';
 }
 
+echo ChatTranscript::assets(false);
 echo '<div style="max-width:52rem">' . SupportAdmin::transcriptHtml($thread, $tz) . '</div>';
 
-echo '<h4 style="margin-top:1.5rem">Reply as a person</h4>';
-echo '<p>The site\'s Help panel shows your reply marked as from a person. '
-	. ($thread->isConnected() ? 'The site\'s account gets one email saying there is a reply; the email carries none of its words.' : 'This site is not connected to an account, so it learns of the reply from the mark on its Help button.')
-	. ' The next question from the site goes back to the model unless you take the thread.</p>';
-$fw = $page->getFormWriter('support_reply', array('action' => $self));
-$fw->begin_form();
-$fw->hiddeninput('action', '', array('value' => 'reply'));
-$fw->hiddeninput('sth_support_thread_id', '', array('value' => (int)$thread->key));
-$fw->textarea('reply', 'Reply', array('rows' => 6, 'required' => true));
-$fw->submitbutton('btn_reply', 'Send reply');
-$fw->end_form();
+if ((string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET) {
+	echo '<h4 style="margin-top:1.5rem">Teach the desk</h4>';
+	echo '<p>A visitor on the public pages leaves no address and the widget shows only answers to their own questions, so a reply would reach nobody. '
+		. 'When the answer here was missing or wrong, <a href="/plugins/support_desk/admin/admin_support_faq_edit?sth_support_thread_id=' . (int)$thread->key
+		. '">write it once as a FAQ entry</a>: the next person who asks gets it.</p>';
+} else {
+	echo '<h4 style="margin-top:1.5rem">Reply as a person</h4>';
+	echo '<p>The site\'s Help panel shows your reply marked as from a person. '
+		. ($thread->isConnected() ? 'The site\'s account gets one email saying there is a reply; the email carries none of its words.' : 'This site is not connected to an account, so it learns of the reply from the mark on its Help button.')
+		. ' The next question from the site goes back to the model unless you take the thread.</p>';
+	$fw = $page->getFormWriter('support_reply', array('action' => $self));
+	$fw->begin_form();
+	$fw->hiddeninput('action', '', array('value' => 'reply'));
+	$fw->hiddeninput('sth_support_thread_id', '', array('value' => (int)$thread->key));
+	$fw->textarea('reply', 'Reply', array('rows' => 6, 'required' => true));
+	$fw->submitbutton('btn_reply', 'Send reply');
+	$fw->end_form();
+}
 
 $page->admin_footer();

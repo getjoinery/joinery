@@ -17,7 +17,7 @@
  * @version 0.1.0
  */
 function desk_ask_logic(array $input): LogicResult {
-	if ($limited = SupportApi::rateLimit('desk_ask')) {
+	if ($limited = SupportApi::limit('desk_ask', empty($input['thread_id']))) {
 		return $limited;
 	}
 	try {

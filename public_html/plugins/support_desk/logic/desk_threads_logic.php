@@ -14,7 +14,7 @@
  * @version 0.1.0
  */
 function desk_threads_logic(array $input): LogicResult {
-	if ($limited = SupportApi::rateLimit('desk_threads')) {
+	if ($limited = SupportApi::limit('desk_threads')) {
 		return $limited;
 	}
 	try {
@@ -64,7 +64,11 @@ function desk_threads_logic_descriptor(): array {
 		'description'      => 'A site\'s support threads, their state and unread replies; with thread_id, that thread\'s transcript.',
 		'requires_session' => false,
 		'input'            => SupportApi::siteInput() + array(
-			'threads' => array('type' => 'array', 'required' => false, 'label' => 'Threads the site keeps: [{thread_id, token}]'),
+			'threads' => array('type' => 'array', 'required' => false, 'max_items' => 50, 'label' => 'Threads the site keeps',
+				'items' => array(
+					'thread_id' => array('type' => 'int', 'required' => true, 'label' => 'Thread'),
+					'token'     => array('type' => 'text', 'required' => false, 'max_length' => 128, 'label' => 'Thread token (none for an account thread opened by key)'),
+				)),
 		),
 	);
 }

@@ -52,8 +52,8 @@ class SupportAdmin {
 	}
 
 	/**
-	 * Save a FAQ entry. With a thread (Answer once) a new entry also answers
-	 * that thread as a person, with the entry's answer.
+	 * Save a FAQ entry. With a site's thread (Answer once) a new entry also
+	 * answers that thread as a person, with the entry's answer.
 	 */
 	public static function saveFaq(?SupportFaqEntry $entry, array $fields, ?SupportThread $thread, int $user_id): SupportFaqEntry {
 		$is_new = $entry === null || !$entry->key;
@@ -74,7 +74,11 @@ class SupportAdmin {
 		}
 		$entry->save();
 		$entry->load();
+		// A site's thread hears the answer as a reply; a widget visitor cannot be reached.
 		if ($is_new && $thread !== null) {
+			SupportGaps::close($thread, 'FAQ entry faq/local/' . (int)$entry->key);
+		}
+		if ($is_new && $thread !== null && (string)$thread->get('sth_surface') === SupportThread::SURFACE_SITE) {
 			self::reply($thread, $user_id, (string)$entry->get('sfq_answer'));
 		}
 		return $entry;

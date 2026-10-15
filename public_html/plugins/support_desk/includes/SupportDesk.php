@@ -25,7 +25,7 @@ class SupportDesk {
 
 	/** The voice for a visitor with no site yet (the public widget). */
 	const WIDGET_VOICE =
-		"You help people decide whether Joinery fits them and how to install it. The person has no Joinery site yet. "
+		"You help people learn what Joinery does, install it and run it. You cannot see any site of theirs. Answer the question they ask. "
 		. "Answer from the documentation and the public pages, and name the document or page you drew on. "
 		. "If they do not settle the question, say so plainly. Keep answers short, in the person's terms.";
 

@@ -45,7 +45,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 	try {
 		$saved = SupportAdmin::saveFaq($entry, $_POST, $entry ? null : $thread, (int)$session->get_user_id());
 		$session->save_message(new DisplayMessage(
-			($entry ? 'Saved; the index reads it as it is now.' : 'Saved and indexed.') . ((!$entry && $thread) ? ' The answer went to thread #' . (int)$thread->key . ' as your reply.' : ''),
+			($entry ? 'Saved; the index reads it as it is now.' : 'Saved and indexed.') . ((!$entry && $thread && $thread->get('sth_surface') === SupportThread::SURFACE_SITE) ? ' The answer went to thread #' . (int)$thread->key . ' as your reply.' : ''),
 			'FAQ entry', NULL, DisplayMessage::MESSAGE_ANNOUNCEMENT));
 		header('Location: ' . $list);
 		exit;
@@ -71,7 +71,7 @@ echo '<div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:flex-start">'
 echo '<div style="flex:1 1 28rem;min-width:20rem">';
 echo '<p>Write the question the way the next person will ask it, and the answer the way you would want the model to give it. '
 	. 'The model reads this entry, never the thread it came from.'
-	. ($thread && !$entry ? ' Saving also sends the answer to thread #' . (int)$thread->key . ' as your reply.' : '') . '</p>';
+	. ($thread && !$entry && $thread->get('sth_surface') === SupportThread::SURFACE_SITE ? ' Saving also sends the answer to thread #' . (int)$thread->key . ' as your reply.' : '') . '</p>';
 $fw = $page->getFormWriter('support_faq', array('action' => $self));
 $fw->begin_form();
 if ($entry) {
@@ -84,9 +84,9 @@ $fw->textinput('sfq_question', 'Question', array('required' => true, 'maxlength'
 	'value' => $entry ? (string)$entry->get('sfq_question') : (string)($_POST['sfq_question'] ?? '')));
 $fw->textarea('sfq_answer', 'Answer (Markdown)', array('rows' => 12, 'required' => true,
 	'value' => $entry ? (string)$entry->get('sfq_answer') : (string)($_POST['sfq_answer'] ?? '')));
-$fw->textinput('sfq_topic', 'Topic', array('help_text' => 'Optional: install, upgrade, mail, backups, …',
+$fw->textinput('sfq_topic', 'Topic', array('helptext' => 'Optional: install, upgrade, mail, backups, …',
 	'value' => $entry ? (string)$entry->get('sfq_topic') : (string)($_POST['sfq_topic'] ?? '')));
-$fw->submitbutton('btn_save', $entry ? 'Save' : ($thread ? 'Save and answer the thread' : 'Save'));
+$fw->submitbutton('btn_save', ($thread && !$entry && $thread->get('sth_surface') === SupportThread::SURFACE_SITE) ? 'Save and answer the thread' : 'Save');
 $fw->end_form();
 if ($entry) {
 	echo '<p style="margin-top:1rem">' . AdminPage::action_button('Delete', $self, array(

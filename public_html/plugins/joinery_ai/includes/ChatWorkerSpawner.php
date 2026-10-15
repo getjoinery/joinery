@@ -25,10 +25,9 @@ class ChatWorkerSpawner {
      * run_support_turn.php). Same detachment, same log, same fallback answer.
      */
     public static function spawnWorker(string $script_path, int $message_id): bool {
-        if (!function_exists('exec')) return false;
+        if (!self::canSpawn($script_path)) return false;
 
         $script = PathHelper::getIncludePath($script_path);
-        if (!is_file($script)) return false;
         // Site logs live at site-root/logs/, not under public_html — shared with
         // the recipe worker log for one AI audit trail.
         $log = PathHelper::getSiteRoot() . '/logs/joinery_ai_worker.log';
@@ -40,6 +39,14 @@ class ChatWorkerSpawner {
         $cmd .= ' >> ' . escapeshellarg($log) . ' 2>&1 &';
         exec($cmd);
         return true;
+    }
+
+    /**
+     * Whether spawnWorker() can run this script in the background here, asked
+     * before any row is made by a caller that has no synchronous fallback.
+     */
+    public static function canSpawn(string $script_path): bool {
+        return function_exists('exec') && is_file(PathHelper::getIncludePath($script_path));
     }
 
     /**
