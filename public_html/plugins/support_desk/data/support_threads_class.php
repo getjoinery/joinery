@@ -108,6 +108,10 @@ class SupportThread extends SystemBase {
 		// browser session.
 		'sth_sender_ip'           => array('type' => 'varchar(64)', 'is_nullable' => true),
 		'sth_visitor'             => array('type' => 'varchar(64)', 'is_nullable' => true, 'index' => true),
+		// The gap report's close: what answers this thread's question now (a doc
+		// commit, an agent word, a FAQ entry), and when it was said.
+		'sth_gap_note'            => array('type' => 'varchar(500)', 'is_nullable' => true),
+		'sth_gap_closed_time'     => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'sth_last_activity_time'  => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 		'sth_closed_time'         => array('type' => 'timestamp(6)', 'is_nullable' => true),
 		'sth_create_time'         => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
@@ -277,6 +281,9 @@ class MultiSupportThread extends SystemMultiBase {
 		$filters = array();
 		if (isset($this->options['state'])) {
 			$filters['sth_state'] = array($this->options['state'], PDO::PARAM_STR);
+		}
+		if (isset($this->options['state_not'])) {
+			$filters['sth_state'] = "<> " . DbConnector::get_instance()->get_db_link()->quote((string)$this->options['state_not']);
 		}
 		if (isset($this->options['host'])) {
 			$filters['sth_host'] = array($this->options['host'], PDO::PARAM_STR);

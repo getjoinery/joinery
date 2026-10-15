@@ -25,6 +25,19 @@ $session->check_permission(9);
 $session->set_return();
 
 $base = '/plugins/support_desk/admin/admin_support_threads';
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'close_gap') {
+	$t = SupportIntake::load((int)($_POST['sth_support_thread_id'] ?? 0));
+	try {
+		if ($t === null) {
+			throw new SupportThreadException('That thread is gone.');
+		}
+		SupportGaps::close($t, (string)($_POST['gap_note'] ?? ''));
+	} catch (SupportThreadException $e) {
+		$session->save_message(new DisplayMessage($e->getMessage(), 'Not closed', NULL, DisplayMessage::MESSAGE_WARNING));
+	}
+	header('Location: ' . $base . '?view=gaps');
+	exit;
+}
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['action'] ?? '') === 'index_now') {
 	$messages = SupportDocIndex::sweep();
 	$session->save_message(new DisplayMessage(implode(' ', $messages), 'Index', NULL, DisplayMessage::MESSAGE_ANNOUNCEMENT));
@@ -70,21 +83,8 @@ if ($view === 'threads') {
 	echo '<p>' . implode(' · ', $links) . '</p>';
 	$numperpage = 30;
 	$offset = max(0, (int)($_GET['offset'] ?? 0));
-	$threads = new MultiSupportThread($filter, array('sth_last_activity_time' => 'DESC'), $numperpage, $offset);
-	$rows = array();
-	foreach ($threads as $t) {
-		$rows[] = $t;
-	}
-	usort($rows, function ($a, $b) {
-		$wa = (string)$a->get('sth_state') === SupportThread::STATE_WAITING;
-		$wb = (string)$b->get('sth_state') === SupportThread::STATE_WAITING;
-		return $wa === $wb ? strcmp((string)$b->get('sth_last_activity_time'), (string)$a->get('sth_last_activity_time')) : ($wa ? -1 : 1);
-	});
-	$thumbs = SupportAdmin::thumbs(array_map(function ($t) { return (int)$t->key; }, $rows));
-	$pager = new Pager(array('numrecords' => $threads->count_all(), 'numperpage' => $numperpage));
-	$page->tableheader(array('Thread', 'Site', 'Release', 'Joined', 'Connected', 'Thumbs', 'Reads today', 'Tokens', 'State', 'Last activity'),
-		array('title' => $state ? SupportThread::STATES[$state] : 'Threads'), $pager);
-	foreach ($rows as $t) {
+	$columns = array('Thread', 'Site', 'Release', 'Joined', 'Connected', 'Thumbs', 'Reads today', 'Tokens', 'State', 'Last activity');
+	$row = function (SupportThread $t, array $thumbs) use ($page, $h, $when) {
 		$th = $thumbs[(int)$t->key] ?? array(0, 0);
 		$page->disprow(array(
 			'<a href="/plugins/support_desk/admin/admin_support_thread?sth_support_thread_id=' . (int)$t->key . '">#' . (int)$t->key . ' '
@@ -99,12 +99,42 @@ if ($view === 'threads') {
 			$h($t->stateLabel()) . ((int)$t->get('sth_pinned_user_id') ? ' (taken)' : ''),
 			$h($when($t->get('sth_last_activity_time'))),
 		));
+	};
+	$ids = function ($multi) { $out = array(); foreach ($multi as $t) { $out[] = (int)$t->key; } return $out; };
+	// Waiting on a person first, whole, then everything else a page at a time.
+	if (!$state) {
+		$waiting = new MultiSupportThread(array('state' => SupportThread::STATE_WAITING), array('sth_last_activity_time' => 'DESC'));
+		if (count($waiting)) {
+			$thumbs = SupportAdmin::thumbs($ids($waiting));
+			$page->tableheader($columns, array('title' => 'Waiting on a person'));
+			foreach ($waiting as $t) { $row($t, $thumbs); }
+			$page->endtable();
+		}
+		$filter['state_not'] = SupportThread::STATE_WAITING;
 	}
+	$threads = new MultiSupportThread($filter, array('sth_last_activity_time' => 'DESC'), $numperpage, $offset);
+	$thumbs = SupportAdmin::thumbs($ids($threads));
+	$pager = new Pager(array('numrecords' => $threads->count_all(), 'numperpage' => $numperpage));
+	$page->tableheader($columns, array('title' => $state ? SupportThread::STATES[$state] : 'Threads'), $pager);
+	foreach ($threads as $t) { $row($t, $thumbs); }
 	$page->endtable($pager);
 } elseif ($view === 'gaps') {
 	echo '<p>Every answer that handed the thread to a person or was thumbed down, newest first, with the searches the model ran. '
 		. 'This is where the documentation is missing something. <strong>Answer once</strong> writes the general question and its answer as a FAQ entry '
 		. 'the model reads from then on, and sends the answer to that thread as a reply from you.</p>';
+	echo '<p>A row leaves this list when it is answered once, or when you close it by naming what answers it now: the commit that fixed the documentation, '
+		. 'the agent word that reads it, or a FAQ entry.</p>';
+	$close_form = function (int $thread_id) use ($page, $base) {
+		ob_start();
+		$fw = $page->getFormWriter('gap_close_' . $thread_id, array('action' => $base . '?view=gaps'));
+		$fw->begin_form();
+		$fw->hiddeninput('action', '', array('value' => 'close_gap'));
+		$fw->hiddeninput('sth_support_thread_id', '', array('value' => $thread_id));
+		$fw->textinput('gap_note', 'What answers it now', array('required' => true, 'maxlength' => 500, 'placeholder' => 'doc commit, agent word, FAQ entry'));
+		$fw->submitbutton('btn_close_' . $thread_id, 'Close');
+		$fw->end_form();
+		return '<details style="margin-top:0.35rem"><summary>Close</summary>' . ob_get_clean() . '</details>';
+	};
 	$page->tableheader(array('Question', 'Searches the model ran', 'Release', 'Site', 'Why', 'When', ''), array('title' => 'Questions the docs could not answer'));
 	foreach (SupportGaps::unanswered() as $g) {
 		$page->disprow(array(
@@ -115,8 +145,8 @@ if ($view === 'threads') {
 			$h($g['host']),
 			$h($g['reason']),
 			$h($when($g['time'])),
-			$g['answered'] ? 'Answered' : '<a class="btn btn-outline-secondary btn-sm" href="/plugins/support_desk/admin/admin_support_faq_edit?sth_support_thread_id='
-				. $g['thread_id'] . '">Answer once</a>',
+			'<a class="btn btn-outline-secondary btn-sm" href="/plugins/support_desk/admin/admin_support_faq_edit?sth_support_thread_id='
+				. $g['thread_id'] . '">Answer once</a>' . $close_form($g['thread_id']),
 		));
 	}
 	$page->endtable();

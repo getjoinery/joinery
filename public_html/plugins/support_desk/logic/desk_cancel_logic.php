@@ -8,15 +8,12 @@
  * @version 0.1.0
  */
 function desk_cancel_logic(array $input): LogicResult {
-	if ($limited = SupportApi::rateLimit('desk_cancel')) {
+	if ($limited = SupportApi::limit('desk_cancel')) {
 		return $limited;
 	}
 	try {
 		$thread = SupportApi::thread($input);
-		$msg = new AiConversationMessage((int)($input['message_id'] ?? 0), TRUE);
-		if (!$msg->key || (int)$msg->get('aim_aic_conversation_id') !== (int)$thread->get('sth_aic_conversation_id')) {
-			throw new SupportRefusal('That answer is not in this thread.', 'no_message', 404);
-		}
+		$msg = SupportIntake::answerIn($thread, (int)($input['message_id'] ?? 0));
 		if ((string)$msg->get('aim_status') === AiConversationMessage::STATUS_RUNNING) {
 			AiConversationMessage::updateColumns((int)$msg->key, array('aim_cancel_requested' => true));
 		}

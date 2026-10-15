@@ -62,10 +62,13 @@ class SdeRecordingProvider extends FakeLlmProvider {
 /** The asking site, as the origin callback sees it. */
 class SdeOriginClient extends SafeHttpClient {
 	public $confirm = true;
+	/** @var string|null the desk the site issued its code for; null is this node */
+	public $destination = null;
 	public $asked = array();
 	public function post(string $url, string $body, array $headers = array()): SafeHttpResponse {
 		$this->asked[] = array($url, $body);
-		$data = $this->confirm ? array('confirmed' => true, 'version' => SDE_RELEASE) : array('confirmed' => false);
+		$data = $this->confirm ? array('confirmed' => true, 'version' => SDE_RELEASE,
+			'destination' => $this->destination ?? ServicesClient::host()) : array('confirmed' => false);
 		return new SafeHttpResponse(200, array(), json_encode(array('success' => true, 'data' => $data)), $url);
 	}
 }
@@ -126,6 +129,10 @@ file_put_contents($tree . '/public_html/docs/backups.md', $md);
 file_put_contents($tree . '/public_html/docs/email_system.md', "# Email\n\nHow mail is sent.\n\n## Sender domain\n\nVerify the sender domain with DKIM records before sending.\n");
 file_put_contents($tree . '/public_html/docs/faq/mail.md', "# Mail\n\n## Why does my site say the sender domain is not verified?\n\nAdd the DKIM and SPF records the Email step shows, then press Check again.\n");
 file_put_contents($tree . '/public_html/plugins/fixtureplugin/docs/overview.md', "# Fixture plugin\n\n## Zebra crossings\n\nStripes.\n");
+file_put_contents($tree . '/public_html/plugins/fixtureplugin/plugin.json', '{"name": "Fixture plugin"}');
+@mkdir($tree . '/public_html/plugins/keptplugin/docs', 0700, true);
+file_put_contents($tree . '/public_html/plugins/keptplugin/docs/overview.md', "# Kept plugin\n\n## Okapi\n\nKept to this node.\n");
+file_put_contents($tree . '/public_html/plugins/keptplugin/plugin.json', '{"name": "Kept plugin", "included_in_publish": false}');
 $r = SupportDocIndex::buildFromTree(SDE_RELEASE, $tree . '/public_html');
 check($r['built'] && $r['sections'] >= 6, 'built from the tree', $r['message']);
 $again = SupportDocIndex::buildFromTree(SDE_RELEASE, $tree . '/public_html');
@@ -134,6 +141,8 @@ $rel = SupportDocRelease::forRelease(SDE_RELEASE);
 check($rel && strpos((string)$rel->get('sdr_map'), 'docs/backups.md') !== false
 	&& strpos((string)$rel->get('sdr_map'), 'plugins/fixtureplugin/docs/overview.md') !== false,
 	'the map names core and plugin documents');
+check(strpos((string)$rel->get('sdr_map'), 'plugins/keptplugin/') === false,
+	'a plugin that does not go out with releases is not indexed');
 check(strpos((string)$rel->get('sdr_map'), 'docs/faq/mail.md') === false
 	&& strpos((string)$rel->get('sdr_faq'), 'sender domain is not verified') !== false,
 	'the FAQ is carried whole, not as a map line');
@@ -179,6 +188,15 @@ try {
 	check($e->reason === 'unconfirmed', 'a new thread without the site\'s code is refused', $e->getMessage());
 }
 $client->confirm = true;
+$client->destination = 'another-desk.example.net';
+try {
+	SupportIntake::ask($ask, array(), '203.0.113.9');
+	check(false, 'a code issued for another desk is refused');
+} catch (SupportRefusal $e) {
+	check($e->reason === 'unconfirmed' && strpos($e->getMessage(), 'another-desk.example.net') !== false,
+		'a code the site issued for another desk opens nothing here', $e->getMessage());
+}
+$client->destination = null;
 $first = SupportIntake::ask($ask, array(), '203.0.113.9');
 $threads_made[] = $first['thread_id'];
 check($first['thread_id'] > 0 && strlen($first['token'] ?? '') >= 32 && $first['message_id'] > 0,
@@ -207,6 +225,27 @@ section('The prompt, in three layers');
 $second = SupportIntake::ask(array_merge($ask, array('message' => 'Another thread', 'origin_nonce' => str_repeat('m', 24))), array(), '203.0.113.9');
 $threads_made[] = $second['thread_id'];
 $thread2 = new SupportThread($second['thread_id'], TRUE);
+
+// A thread an account opened: that account's key opens it, with no token (a
+// reinstalled site); without the key, or with another account's, nothing does.
+$t2_token = (string)$second['token'];
+SupportThread::updateColumns((int)$thread2->key, array('sth_account_user_id' => 424242));
+$acct_key = array('key_id' => 1, 'user_id' => 424242);
+$opened = SupportIntake::openThread((int)$thread2->key, '', SDE_HOST, $acct_key);
+check((int)$opened->key === (int)$thread2->key, 'the account\'s key opens its thread with no token');
+foreach (array(
+	'the token but no key'       => array($t2_token, null),
+	'another account\'s key'     => array('', array('key_id' => 2, 'user_id' => 434343)),
+	'the key and a wrong token'  => array(str_repeat('a', 48), $acct_key),
+) as $label => $args) {
+	try {
+		SupportIntake::openThread((int)$thread2->key, $args[0], SDE_HOST, $args[1]);
+		check(false, 'refused: ' . $label);
+	} catch (SupportRefusal $e) {
+		check($e->reason === 'no_thread', 'an account\'s thread is refused with ' . $label);
+	}
+}
+SupportThread::updateColumns((int)$thread2->key, array('sth_account_user_id' => null));
 $tools = SupportTools::forThread($thread);
 $b1 = SupportPrompt::systemBlocks($thread, SDE_RELEASE, true, $tools);
 $b2 = SupportPrompt::systemBlocks($thread2, SDE_RELEASE, true, SupportTools::forThread($thread2));
@@ -257,8 +296,15 @@ check((int)$thread->get('sth_input_tokens') === 760 && (int)$thread->get('sth_ou
 // ---------------------------------------------------------------------------
 section('Follow-up, poll, escalate');
 
+// What a running turn wrote must survive a question that overlaps it, and the
+// node is matched again from the host (here: none).
+SupportThread::updateColumns((int)$thread->key, array('sth_node_reads' => 3, 'sth_node_id' => 999999));
 $follow = SupportIntake::ask(array_merge($ask, array('thread_id' => $first['thread_id'], 'token' => $first['token'],
 	'message' => 'It still fails.', 'origin_nonce' => null)), array(), '203.0.113.9');
+$after = new SupportThread($first['thread_id'], TRUE);
+check((int)$after->get('sth_node_reads') === 3 && (int)$after->get('sth_input_tokens') === 760,
+	'a later question writes only its own columns: the turn\'s reads and tokens stand');
+check(!$after->get('sth_node_id'), 'the joined node is matched again from the host on every question');
 check($follow['thread_id'] === $first['thread_id'] && empty($follow['token']) && $follow['message_id'] > 0,
 	'a later question continues the thread without a new token');
 $poll = SupportIntake::poll($thread, $follow['message_id']);
@@ -280,22 +326,31 @@ check($held['message_id'] === 0 && $held['state'] === SupportThread::STATE_WAITI
 $gaps = SupportGaps::unanswered();
 check((bool)array_filter($gaps, function ($g) use ($first) { return $g['thread_id'] === $first['thread_id']; }),
 	'the escalated turn is on the gap report');
+SupportGaps::close($thread, 'docs commit abc123');
+$still = array_filter(SupportGaps::unanswered(), function ($g) use ($first) { return $g['thread_id'] === $first['thread_id']; });
+$thread->load();
+check(!$still && (string)$thread->get('sth_gap_note') === 'docs commit abc123', 'closing it by naming what answers it takes it off');
 
 // ---------------------------------------------------------------------------
 section('Budgets');
 
 harness_set_setting_mem('support_desk_daily_tokens_per_host', '100');
+$callbacks_before = count($client->asked);
+$threads_before = count(new MultiSupportThread(array('host' => SDE_HOST)));
 try {
 	SupportIntake::ask(array_merge($ask, array('message' => 'over budget', 'origin_nonce' => str_repeat('o', 24))), array(), '203.0.113.9');
 	check(false, 'a site over its day is refused');
 } catch (SupportRefusal $e) {
 	check($e->reason === 'budget', 'a site over its day is refused, in words the panel shows', $e->getMessage());
 }
+check(count($client->asked) === $callbacks_before && count(new MultiSupportThread(array('host' => SDE_HOST))) === $threads_before,
+	'refused before the call back: no callback, no empty thread');
+// The first thread waits on a person (escalated above): a message for a person
+// is kept even over the day, because budgets bound model turns only.
+$kept = SupportIntake::ask(array_merge($ask, array('thread_id' => $first['thread_id'], 'token' => $first['token'],
+	'message' => 'over budget too', 'origin_nonce' => null)), array(), '203.0.113.9');
+check($kept['message_id'] === 0 && $kept['state'] === SupportThread::STATE_WAITING, 'a message for a person is kept over the day');
 harness_set_setting_mem('support_desk_daily_tokens_per_host', '0');
-// The refused question still made its thread (its origin was confirmed first).
-foreach (new MultiSupportThread(array('host' => SDE_HOST)) as $t) {
-	if (!in_array((int)$t->key, $threads_made, true)) { $threads_made[] = (int)$t->key; }
-}
 
 // ---------------------------------------------------------------------------
 section('Local FAQ enters and leaves the index');

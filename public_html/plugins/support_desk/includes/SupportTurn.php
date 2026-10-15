@@ -26,20 +26,22 @@ class SupportTurn {
 	/**
 	 * Run the turn and write its result onto $assistant. $resolution stands in
 	 * for the model in a test; production resolves from the plugin's setting.
+	 * Returns what the provider reported (input, cache_write, cache_read,
+	 * output tokens, model, stop reason), or null when the turn failed.
 	 */
-	public static function runAndFinalize(SupportThread $thread, AiConversationMessage $assistant, ?AiModelResolution $resolution = null): void {
+	public static function runAndFinalize(SupportThread $thread, AiConversationMessage $assistant, ?AiModelResolution $resolution = null): ?array {
 		$stamper = ChatAsync::activityStamper($assistant);
 		$stamper('Starting…');
 
 		$conversation = $thread->conversation();
 		if ($conversation === null) {
 			self::markFailed($assistant, 'This thread has no transcript.');
-			return;
+			return null;
 		}
 		list($release, $exact) = self::releaseFor($thread);
 		if ($release === null) {
 			self::markFailed($assistant, 'The support desk has no documentation indexed yet. Try again later.');
-			return;
+			return null;
 		}
 
 		$ctx = new SupportTurnContext($thread, (int)$assistant->key, $release, $exact);
@@ -53,18 +55,18 @@ class SupportTurn {
 			$messages = self::history($conversation, $thread, (int)$assistant->key);
 			if (!$messages) {
 				self::markFailed($assistant, 'There is no question to answer.');
-				return;
+				return null;
 			}
 			$result = AgentLoop::run($resolution, $system, $messages, $tools, $ctx,
 				self::MAX_ITERATIONS, self::OUTPUT_BUDGET);
 		} catch (LlmProviderException $e) {
 			ChatAsync::log('[support] provider error on message #' . (int)$assistant->key . ': ' . $e->getMessage());
 			self::markFailed($assistant, 'The support desk could not reach its model just now. Try again in a few minutes.');
-			return;
+			return null;
 		} catch (\Throwable $e) {
 			ChatAsync::log('[support] turn failed on message #' . (int)$assistant->key . ': ' . get_class($e) . ': ' . $e->getMessage());
 			self::markFailed($assistant, 'The support desk could not answer this one. Try again, or ask for a person.');
-			return;
+			return null;
 		}
 
 		$text = trim((string)($result['assistant_text'] ?? ''));
@@ -103,6 +105,14 @@ class SupportTurn {
 			. ' in ' . (int)$result['input_tokens'] . ' cache_write ' . (int)($result['cache_write_tokens'] ?? 0)
 			. ' cache_read ' . (int)($result['cache_read_tokens'] ?? 0) . ' out ' . $out
 			. ' stop ' . ($result['stop_reason'] ?? ''));
+		return array(
+			'input_tokens'       => (int)$result['input_tokens'],
+			'cache_write_tokens' => (int)($result['cache_write_tokens'] ?? 0),
+			'cache_read_tokens'  => (int)($result['cache_read_tokens'] ?? 0),
+			'output_tokens'      => $out,
+			'model'              => (string)($result['model'] ?? ''),
+			'stop_reason'        => (string)($result['stop_reason'] ?? ''),
+		);
 	}
 
 	/** The model the desk answers with. */

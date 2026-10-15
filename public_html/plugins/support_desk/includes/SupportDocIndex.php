@@ -103,7 +103,7 @@ class SupportDocIndex {
 		$files = self::collect($public_html, dirname($public_html));
 		foreach (glob($public_html . '/plugins/*', GLOB_ONLYDIR) ?: array() as $plugin_dir) {
 			$name = basename($plugin_dir);
-			if (!preg_match('/^[a-z0-9_]+$/', $name)) {
+			if (!preg_match('/^[a-z0-9_]+$/', $name) || !self::published($plugin_dir)) {
 				continue;
 			}
 			foreach (self::markdownUnder($plugin_dir . '/docs') as $rel => $abs) {
@@ -338,6 +338,17 @@ class SupportDocIndex {
 
 	private static function isFaqPath(string $path): bool {
 		return (bool)preg_match('#(^|/)docs/faq/[^/]+\.md$#', $path);
+	}
+
+	/**
+	 * Whether a plugin in the tree goes out with releases: the same test the
+	 * publisher applies (included_in_publish, true unless it says false). A
+	 * plugin kept to this node, or with no manifest, is not documentation a
+	 * site or a visitor can be pointed to.
+	 */
+	private static function published(string $plugin_dir): bool {
+		$manifest = json_decode((string)@file_get_contents($plugin_dir . '/plugin.json'), true);
+		return is_array($manifest) && ($manifest['included_in_publish'] ?? true) !== false;
 	}
 
 	/** The documentation files under a release's public_html, plus the root files. */

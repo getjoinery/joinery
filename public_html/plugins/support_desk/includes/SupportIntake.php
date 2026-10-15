@@ -15,13 +15,18 @@
  *   Joinery site exists at a host is not enough to speak for it: that is what
  *   keeps anyone from opening a thread as someone else's joined site and
  *   reading its logs.
+ *   The site answers with the host its code was issued for, and this node
+ *   accepts only its own: a code handed to one desk cannot open a thread at
+ *   another.
  *   Every later call proves CONTINUITY with the thread's token, which only
  *   the site that opened the thread was given (stored here as a hash).
  *   A connected site also signs with its services key pair; a thread opened
- *   with a key accepts calls with that key only.
+ *   by an account accepts calls signed with that account's key only, and
+ *   with that key needs no token (a reinstalled site keeps its history).
  *
- * The matched ManagedNode comes from the confirmed host, never from anything
- * the request names. A thread's identity is fixed when it is made.
+ * The matched ManagedNode comes from the proven host, never from anything
+ * the request names; it is matched again on every question, so a site that
+ * joins this node later is read from its next question on.
  *
  * Everything the site sends is untrusted text: stored as text, escaped on
  * display, wrapped on the way to the model, never a path.
@@ -48,6 +53,9 @@ class SupportIntake {
 
 	/** The site-side action that confirms a thread's origin. */
 	const CONFIRM_PATH = '/api/v1/action/support_origin_confirm';
+
+	/** The background worker that runs one support turn. */
+	const WORKER = 'plugins/support_desk/cli/run_support_turn.php';
 
 	/** @var SafeHttpClient|null a stand-in client for the origin callback, for tests */
 	private static $client = null;
@@ -86,6 +94,13 @@ class SupportIntake {
 		if ($thread_id > 0) {
 			$thread = self::openThread($thread_id, (string)($input['token'] ?? ''), $host, $key);
 		} else {
+			// Refused before the call back and before any row: a site over its
+			// budget, or a node that cannot answer, costs nothing and leaves nothing.
+			self::assertCanAnswer();
+			$refusal = SupportBudget::refusalFor(SupportThread::SURFACE_SITE, $host, null);
+			if ($refusal !== null) {
+				throw new SupportRefusal($refusal, 'budget', 429);
+			}
 			$confirmed_version = self::confirmOrigin($host, (string)($input['origin_nonce'] ?? ''));
 			$bundle = $consent['bundle'] ? self::bundle($input, $host) : null;
 			list($thread, $token) = self::createThread(SupportThread::SURFACE_SITE, array(
@@ -99,13 +114,21 @@ class SupportIntake {
 			));
 		}
 
-		// The site's latest word on itself and on what it allows.
-		$thread->set('sth_version', $thread_id > 0 ? $version : $thread->get('sth_version'));
-		$thread->set('sth_consent_bundle', $consent['bundle']);
-		$thread->set('sth_consent_live_reads', $consent['live_reads']);
-		$thread->set('sth_route', $route !== '' ? $route : null);
-		$thread->set('sth_sender_ip', mb_substr($ip, 0, 64));
-		$thread->save();
+		// The site's latest word on itself and on what it allows, and the node
+		// it is now. Only these columns: a turn may be running in this thread,
+		// and its token and read counts must not be written back stale.
+		$columns = array(
+			'sth_version'            => $thread_id > 0 ? $version : (string)$thread->get('sth_version'),
+			'sth_consent_bundle'     => $consent['bundle'],
+			'sth_consent_live_reads' => $consent['live_reads'],
+			'sth_route'              => $route !== '' ? $route : null,
+			'sth_sender_ip'          => mb_substr($ip, 0, 64),
+			'sth_node_id'            => self::nodeIdForHost($host),
+		);
+		SupportThread::updateColumns((int)$thread->key, $columns);
+		foreach ($columns as $column => $value) {
+			$thread->set($column, $value);
+		}
 
 		return self::addQuestion($thread, $message, $token);
 	}
@@ -124,9 +147,12 @@ class SupportIntake {
 		$for_person = $pinned || $state === SupportThread::STATE_WAITING;
 		$next_state = $for_person ? SupportThread::STATE_WAITING : SupportThread::STATE_OPEN;
 
-		$refusal = $for_person ? null : SupportBudget::refusal($thread);
-		if ($refusal !== null) {
-			throw new SupportRefusal($refusal, 'budget', 429);
+		if (!$for_person) {
+			self::assertCanAnswer();
+			$refusal = SupportBudget::refusal($thread);
+			if ($refusal !== null) {
+				throw new SupportRefusal($refusal, 'budget', 429);
+			}
 		}
 
 		$conversation = $thread->conversation();
@@ -171,13 +197,22 @@ class SupportIntake {
 		$out['message_id'] = (int)$assistant->key;
 		$out['status'] = AiConversationMessage::STATUS_RUNNING;
 
-		if (self::$spawn && !ChatWorkerSpawner::spawnWorker('plugins/support_desk/cli/run_support_turn.php', (int)$assistant->key)) {
-			// No background execution here: answer before replying.
-			SupportTurn::runAndFinalize($thread, $assistant);
-			$assistant->load();
-			$out['status'] = (string)$assistant->get('aim_status');
+		if (self::$spawn && !ChatWorkerSpawner::spawnWorker(self::WORKER, (int)$assistant->key)) {
+			SupportTurn::markFailed($assistant, 'The support desk could not start answering. Ask a person, or try again later.');
+			throw new SupportRefusal('The support desk is not set up to answer on this node.', 'not_ready', 503);
 		}
 		return $out;
+	}
+
+	/**
+	 * A turn runs in the background or not at all: run inline, it would
+	 * outlast the asking site's wait, and the answer would land in a thread
+	 * nobody holds. Checked before any row is made. @throws SupportRefusal
+	 */
+	public static function assertCanAnswer(): void {
+		if (self::$spawn && !ChatWorkerSpawner::canSpawn(self::WORKER)) {
+			throw new SupportRefusal('The support desk is not set up to answer on this node.', 'not_ready', 503);
+		}
 	}
 
 	/**
@@ -207,9 +242,6 @@ class SupportIntake {
 		if (!empty($f['bundle'])) {
 			$thread->set('sth_bundle', json_encode($f['bundle'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 		}
-		if ($surface === SupportThread::SURFACE_SITE && !empty($f['host'])) {
-			$thread->set('sth_node_id', self::nodeIdForHost((string)$f['host']));
-		}
 		$thread->set('sth_state', SupportThread::STATE_OPEN);
 		$thread->save();
 		$thread->load();
@@ -228,28 +260,47 @@ class SupportIntake {
 	// ------------------------------------------------------- proving things
 
 	/**
-	 * The thread a later call names, if the call may speak for it: the token
-	 * opens it, the host is its host, and a thread opened with a key is called
-	 * with that key.
+	 * The thread a later call names, if the call may speak for it: the host
+	 * is its host, a thread an account opened is called with a key of that
+	 * account (presentedKey() has proven the key is the account's for this
+	 * host), and the token opens it. With the account's key, no token is
+	 * needed: that is how a reinstalled site, connected again, opens its
+	 * account's threads. A wrong token is refused even then.
 	 *
 	 * @throws SupportRefusal
 	 */
 	public static function openThread(int $thread_id, string $token, string $host, ?array $key): SupportThread {
-		$thread = new SupportThread($thread_id, TRUE);
 		// One answer for every way of not matching, so a caller learns nothing
 		// about threads it does not hold.
 		$nope = new SupportRefusal('That thread is not one this site can open.', 'no_thread', 404);
-		if (!$thread->key || $thread->get('sth_delete_time')
+		$thread = self::load($thread_id);
+		if ($thread === null || $thread->get('sth_delete_time')
 				|| (string)$thread->get('sth_surface') !== SupportThread::SURFACE_SITE
-				|| !$thread->tokenOpens($token)
 				|| strtolower((string)$thread->get('sth_host')) !== $host) {
 			throw $nope;
 		}
-		$thread_key = (int)$thread->get('sth_apk_api_key_id');
-		if ($thread_key > 0 && ($key === null || (int)$key['key_id'] !== $thread_key)) {
+		$account = (int)$thread->get('sth_account_user_id');
+		$by_account = $account > 0 && $key !== null && (int)$key['user_id'] === $account;
+		if ($account > 0 && !$by_account) {
+			throw $nope;
+		}
+		if (!$thread->tokenOpens($token) && !($token === '' && $by_account)) {
 			throw $nope;
 		}
 		return $thread;
+	}
+
+	/** A thread by id, or null when there is none (a missing row is an answer, not an error). */
+	public static function load(int $thread_id): ?SupportThread {
+		if ($thread_id <= 0) {
+			return null;
+		}
+		try {
+			$thread = new SupportThread($thread_id, TRUE);
+		} catch (\Throwable $e) {
+			return null;
+		}
+		return $thread->key ? $thread : null;
 	}
 
 	/** Host and version from the call, checked for shape only. @throws SupportRefusal */
@@ -368,6 +419,14 @@ class SupportIntake {
 		if ($response->status !== 200 || empty($data['confirmed'])) {
 			throw new SupportRefusal($host . ' did not confirm that this question came from it.', 'unconfirmed', 403);
 		}
+		// The code was issued for one desk. Here only if that desk is this node.
+		$meant_for = strtolower(trim((string)($data['destination'] ?? '')));
+		$this_node = ServicesClient::host();
+		if ($meant_for !== $this_node) {
+			throw new SupportRefusal($host . ' sent its question to ' . ($meant_for !== '' ? $meant_for : 'another support desk')
+				. ', not to ' . $this_node . '. If both names reach this node, set the site\'s support address to '
+				. $this_node . '.', 'unconfirmed', 403);
+		}
 		$version = trim((string)($data['version'] ?? ''));
 		return SupportDocIndex::isVersion($version) ? $version : '';
 	}
@@ -404,11 +463,7 @@ class SupportIntake {
 	 * status line), complete (the answer), cancelled, or failed (the reason).
 	 */
 	public static function poll(SupportThread $thread, int $message_id): array {
-		$msg = new AiConversationMessage($message_id, TRUE);
-		if (!$msg->key || (int)$msg->get('aim_aic_conversation_id') !== (int)$thread->get('sth_aic_conversation_id')
-				|| $msg->get('aim_role') !== AiConversationMessage::ROLE_ASSISTANT) {
-			throw new SupportRefusal('That answer is not in this thread.', 'no_message', 404);
-		}
+		$msg = self::answerIn($thread, $message_id);
 		if (ChatAsync::sweepMessage($msg)) {
 			$msg->load();
 		}
@@ -465,6 +520,24 @@ class SupportIntake {
 			$out[] = array('word' => $name, 'job' => $job, 'ok' => empty($tc['is_error']));
 		}
 		return $out;
+	}
+
+	/** An answer (assistant row) of this thread, or the refusal. @throws SupportRefusal */
+	public static function answerIn(SupportThread $thread, int $message_id): AiConversationMessage {
+		$msg = null;
+		if ($message_id > 0) {
+			try {
+				$msg = new AiConversationMessage($message_id, TRUE);
+			} catch (\Throwable $e) {
+				$msg = null;
+			}
+		}
+		if ($msg === null || !$msg->key || $msg->get('aim_delete_time')
+				|| (int)$msg->get('aim_aic_conversation_id') !== (int)$thread->get('sth_aic_conversation_id')
+				|| $msg->get('aim_role') !== AiConversationMessage::ROLE_ASSISTANT) {
+			throw new SupportRefusal('That answer is not in this thread.', 'no_message', 404);
+		}
+		return $msg;
 	}
 
 	/** Thread summary for lists and the unread mark. */

@@ -20,6 +20,15 @@ class SupportBudget {
 
 	/** The sentence the panel shows when a budget is spent, or null when the turn may run. */
 	public static function refusal(SupportThread $thread): ?string {
+		return self::refusalFor((string)$thread->get('sth_surface'), (string)$thread->get('sth_host'), (string)$thread->get('sth_sender_ip'));
+	}
+
+	/**
+	 * The same, for a thread not made yet: a site's host, or a widget
+	 * visitor's address. Asked before a new thread is opened, so a refusal
+	 * leaves no empty thread behind.
+	 */
+	public static function refusalFor(string $surface, ?string $host, ?string $widget_ip): ?string {
 		try {
 			CostGuard::enforceGlobalCap();
 		} catch (CapExceededException $e) {
@@ -29,15 +38,15 @@ class SupportBudget {
 		if ($total > 0 && self::spentToday(null, null) >= $total) {
 			return 'The support desk has answered all it can for today. The documentation is still open to you, and you can ask for a person.';
 		}
-		if ((string)$thread->get('sth_surface') === SupportThread::SURFACE_WIDGET) {
+		if ($surface === SupportThread::SURFACE_WIDGET) {
 			$per = SupportDesk::intSetting('support_desk_widget_daily_tokens_per_address', 60000);
-			if ($per > 0 && self::spentToday(null, (string)$thread->get('sth_sender_ip')) >= $per) {
+			if ($per > 0 && self::spentToday(null, (string)$widget_ip) >= $per) {
 				return 'You have asked all this desk can answer for one visitor today. The documentation is still open to you.';
 			}
 			return null;
 		}
 		$per = SupportDesk::intSetting('support_desk_daily_tokens_per_host', 400000);
-		if ($per > 0 && self::spentToday((string)$thread->get('sth_host'), null) >= $per) {
+		if ($per > 0 && self::spentToday((string)$host, null) >= $per) {
 			return 'Your site has used the support desk\'s answers for today. The documentation is still open to you, and you can ask for a person.';
 		}
 		return null;
