@@ -34,6 +34,10 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.22 - the previous release's maintenance_scripts and RELEASE_MANIFEST(.sig) are kept under
+	 *                public_html_last/.release_last before the deploy replaces them, and every rollback puts them back
+	 *                with the code (DeploymentHelper 1.10); fix_permissions.sh runs again after the composer step, so
+	 *                what composer installs is owned and moded like the rest of the tree before the deploy tier reads it
 	 * @version 1.21 - a site container engine site (/run/.containerenv) keeps its held release manifest as a Docker
 	 *                one does (specs/site_container_engine.md WP3): a rebuild puts the image's older one back
 	 * @version 1.20 - no 'Plugin loading' step before the swap (it matched no plugin file); the deploy tier
@@ -610,6 +614,31 @@
 		}
 		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed'
 			. ($verdict->log ? ', logged at ' . htmlspecialchars($verdict->log['origin']) . ' index ' . (int)$verdict->log['index'] : '') . '<br>');
+	}
+
+	// Permissions for the deployed tree come from fix_permissions.sh and from
+	// nowhere else. It is the one place that knows the two sets apart — the
+	// code the PHP pool executes, which belongs to the tree owner and is
+	// read-only to the pool, and the data the pool writes
+	// (specs/read_only_tree.md). There is no chmod fallback: a blanket 770
+	// over the live tree would hand the pool write access to every file it
+	// runs, which is the state this release exists to end. If the script is
+	// missing or fails, the deploy says so and rolls back. It changes only
+	// entries whose owner or mode is wrong, so a second pass costs a walk.
+	function upgrade_fix_permissions($full_site_dir, $site_template, $root_prefix, $verbose) {
+		$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
+		if (!file_exists($fix_permissions_script)) {
+			upgrade_permissions_failed($site_template, $verbose,
+				'fix_permissions.sh is not present at ' . htmlspecialchars($fix_permissions_script));
+		}
+		if ($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';
+		$perm_output = array(); $perm_exit = 0;
+		exec($root_prefix . escapeshellarg($fix_permissions_script) . " " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
+		if ($perm_exit !== 0) {
+			upgrade_permissions_failed($site_template, $verbose,
+				'fix_permissions.sh did not complete: '
+				. htmlspecialchars(implode(' ', array_slice($perm_output, -2))));
+		}
 	}
 
 	// A tree that cannot be given its ownership and modes does not get to run.
@@ -1640,6 +1669,25 @@
 			$is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
 			$root_prefix = $is_root ? '' : 'sudo -n ';
 
+			// Keep the rest of the previous release beside its code, before
+			// either step below replaces it: a rollback puts public_html,
+			// maintenance_scripts and the manifest pair back together, so the
+			// site root never holds one release's manifest over another's code
+			// (which the agent reads as modified deployment files and refuses).
+			$kept_release = DeploymentHelper::keepPreviousRelease($full_site_dir, $backup_directory);
+			if (!empty($kept_release['failed'])) {
+				echo '<strong>The previous release could not be kept for a rollback.</strong><br>';
+				echo 'Not kept: ' . htmlspecialchars(implode(', ', $kept_release['failed'])) . '<br>';
+				echo 'Rolling back — a deploy that could not be undone is not carried on with.<br>';
+				apply_result_rolled_back('keep_previous_release', false);
+				$rollback = DeploymentHelper::performRollback($site_template, true, $verbose);
+				echo $rollback['success'] ? "✓ Rollback completed successfully<br>" : '✗ Rollback FAILED: ' . htmlspecialchars($rollback['error']) . '<br>';
+				exit(1);
+			}
+			if ($verbose && !empty($kept_release['kept'])) {
+				echo 'Kept the previous release\'s ' . htmlspecialchars(implode(', ', $kept_release['kept'])) . ' for a rollback<br>';
+			}
+
 			// Deploy maintenance_scripts/ from the staging area.
 			//
 			// The core archive ships install_tools/ and sysadmin_tools/ alongside
@@ -1727,26 +1775,10 @@
 			}
 
 			// Permissions for the deployed tree come from fix_permissions.sh and
-			// from nowhere else. It is the one place that knows the two sets
-			// apart — the code the PHP pool executes, which belongs to the tree
-			// owner and is read-only to the pool, and the data the pool writes
-			// (specs/read_only_tree.md). There is no chmod fallback: a blanket
-			// 770 over the live tree would hand the pool write access to every
-			// file it runs, which is the state this release exists to end. If
-			// the script is missing or fails, the deploy says so and stops.
-			$fix_permissions_script = $full_site_dir . '/maintenance_scripts/install_tools/fix_permissions.sh';
-			if(file_exists($fix_permissions_script)) {
-				if($verbose) echo 'Setting permissions using fix_permissions.sh --production<br>';
-				exec($root_prefix . escapeshellarg($fix_permissions_script) . " " . escapeshellarg($site_template) . " --production 2>&1", $perm_output, $perm_exit);
-				if($perm_exit !== 0) {
-					upgrade_permissions_failed($site_template, $verbose,
-						'fix_permissions.sh did not complete: '
-						. htmlspecialchars(implode(' ', array_slice($perm_output, -2))));
-				}
-			} else {
-				upgrade_permissions_failed($site_template, $verbose,
-					'fix_permissions.sh is not present at ' . htmlspecialchars($fix_permissions_script));
-			}
+			// from nowhere else (upgrade_fix_permissions). It runs here, as
+			// soon as the tree is swapped, and again after the composer step
+			// below has added whatever packages this release declares.
+			upgrade_fix_permissions($full_site_dir, $site_template, $root_prefix, $verbose);
 
 			// Check if deployment succeeded
 			$deployment_failed = false;
@@ -1948,6 +1980,14 @@
 		} else {
 			echo "⚠ Composer validation script not found (skipping)<br>";
 		}
+
+		// What composer just installed carries the ownership and mode of the
+		// process that ran it, not the tree's: a package added by this release
+		// is written after the permission pass above, and the deploy tier's
+		// read-only-tree gate then found vendor/ files the pool owned or could
+		// write, and reverted a good release. The pass is the same one as
+		// before the composer step, and changes only what is wrong.
+		upgrade_fix_permissions($full_site_dir, $site_template, $root_prefix, $verbose);
 
 		// ============================================
 		// OPCACHE RESET

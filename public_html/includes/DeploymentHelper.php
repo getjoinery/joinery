@@ -5,6 +5,9 @@
  * Provides validation, rollback, and theme/plugin preservation functionality
  * used by both web-based (upgrade.php) and command-line (build_dev_from_source.sh) deployment systems.
  *
+ * @version 1.10 - a rollback puts the whole previous release back: public_html from public_html_last, and the
+ *                 maintenance_scripts and RELEASE_MANIFEST(.sig) the deploy replaced from public_html_last/.release_last,
+ *                 which upgrade.php keeps there before it touches either (keepPreviousRelease / restorePreviousRelease)
  * @version 1.9 - testPluginLoading() is gone: it looked for a _class.php in each plugin folder, which no plugin has
  * @version 1.8 - preserveReason() asks SandboxPlugins only where the running core has it; on a core
  *                from before it, the self-updated copy of this file fataled mid-upgrade
@@ -784,6 +787,115 @@ class DeploymentHelper {
     }
 
     /**
+     * Where a deploy keeps the parts of the previous release that live outside
+     * public_html, inside the rollback backup so they share its lifecycle:
+     * cleared before a deploy, removed after a completed one, never archived
+     * by a backup, and restored by the same rollback.
+     */
+    const PREVIOUS_RELEASE_DIR = '.release_last';
+
+    /** The site-root paths a deploy replaces besides public_html. */
+    const PREVIOUS_RELEASE_PATHS = array('maintenance_scripts', 'RELEASE_MANIFEST', 'RELEASE_MANIFEST.sig');
+
+    /**
+     * Keep the previous release's maintenance_scripts and RELEASE_MANIFEST(.sig)
+     * under $backup_dir/.release_last, before the deploy replaces them.
+     *
+     * A rollback that put back public_html alone left the site root holding
+     * the new release's manifest and scripts over the old code. The agent
+     * verifies every script it runs as root against that manifest, so the
+     * restored upgrade.php no longer matched it and no later apply could run:
+     * a node that failed its deploy tier could not be upgraded forward without
+     * a hand on the box. The previous release goes back as one unit.
+     *
+     * Returns ['kept' => [paths kept], 'failed' => [paths that could not be kept]].
+     * A path the site does not have (a site with no manifest yet) is neither.
+     */
+    public static function keepPreviousRelease($site_dir, $backup_dir) {
+        $site_dir = rtrim((string)$site_dir, '/');
+        $keep_dir = rtrim((string)$backup_dir, '/') . '/' . self::PREVIOUS_RELEASE_DIR;
+        $prefix = self::rootPrefixFor(dirname($keep_dir));
+        $result = array('kept' => array(), 'failed' => array());
+        exec($prefix . 'rm -rf ' . escapeshellarg($keep_dir) . ' 2>&1');
+        exec($prefix . 'mkdir -p ' . escapeshellarg($keep_dir) . ' 2>&1', $mk_out, $mk_exit);
+        if ($mk_exit !== 0) {
+            $result['failed'] = self::PREVIOUS_RELEASE_PATHS;
+            return $result;
+        }
+        foreach (self::PREVIOUS_RELEASE_PATHS as $rel) {
+            $src = $site_dir . '/' . $rel;
+            if (!file_exists($src)) {
+                continue;
+            }
+            $cp_out = array(); $cp_exit = 0;
+            exec($prefix . 'cp -a ' . escapeshellarg($src) . ' ' . escapeshellarg($keep_dir . '/' . $rel) . ' 2>&1', $cp_out, $cp_exit);
+            if ($cp_exit === 0) {
+                $result['kept'][] = $rel;
+            } else {
+                $result['failed'][] = $rel;
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * Put back what keepPreviousRelease() kept: maintenance_scripts by content
+     * (no deletion, as the deploy syncs them, so a node's own scripts stay and
+     * a file the failed release added is left inert), and the manifest pair as
+     * it was. Nothing kept is a no-op.
+     *
+     * Returns ['restored' => [paths put back], 'failed' => [paths that could not be]].
+     */
+    public static function restorePreviousRelease($site_dir, $backup_dir, $verbose = false) {
+        $site_dir = rtrim((string)$site_dir, '/');
+        $keep_dir = rtrim((string)$backup_dir, '/') . '/' . self::PREVIOUS_RELEASE_DIR;
+        $prefix = self::rootPrefixFor($site_dir);
+        $result = array('restored' => array(), 'failed' => array());
+        if (!is_dir($keep_dir)) {
+            return $result;
+        }
+        foreach (self::PREVIOUS_RELEASE_PATHS as $rel) {
+            $kept = $keep_dir . '/' . $rel;
+            if (!file_exists($kept)) {
+                continue;
+            }
+            $out = array(); $exit = 0;
+            if (is_dir($kept)) {
+                exec($prefix . 'rsync -a --checksum ' . escapeshellarg($kept . '/') . ' '
+                    . escapeshellarg($site_dir . '/' . $rel . '/') . ' 2>&1', $out, $exit);
+            } else {
+                exec($prefix . 'cp -a ' . escapeshellarg($kept) . ' ' . escapeshellarg($site_dir . '/' . $rel) . ' 2>&1', $out, $exit);
+            }
+            if ($exit === 0) {
+                $result['restored'][] = $rel;
+                if ($verbose) {
+                    echo "  Previous release's $rel put back\n";
+                }
+            } else {
+                $result['failed'][] = $rel;
+                if ($verbose) {
+                    echo "  WARNING: could not put back the previous release's $rel: " . implode(' ', array_slice($out, -2)) . "\n";
+                }
+            }
+        }
+        return $result;
+    }
+
+    /**
+     * 'sudo -n ' when this process could not write $path itself. The site
+     * root and maintenance_scripts belong to the tree owner: in a container
+     * this process is root, on bare metal it may be the agent user. A path it
+     * can write (its own backup directory, a test's tree) needs no root.
+     */
+    private static function rootPrefixFor($path) {
+        if (is_writable($path)) {
+            return '';
+        }
+        $is_root = function_exists('posix_geteuid') ? (posix_geteuid() === 0) : (trim((string)shell_exec('id -u')) === '0');
+        return $is_root ? '' : 'sudo -n ';
+    }
+
+    /**
      * Rollback to previous deployment
      * @param string $target_site Site name (e.g., 'joinerytest')
      * @param bool $preserve_failed Save failed deployment for debugging
@@ -791,6 +903,7 @@ class DeploymentHelper {
      * @return array ['success' => bool,
      *                'failed_dir' => string|null,
      *                'backup_restored' => bool,
+     *                'release_restored' => string[] (maintenance_scripts, RELEASE_MANIFEST, RELEASE_MANIFEST.sig put back),
      *                'permissions_fixed' => bool,
      *                'error' => string|null]
      */
@@ -799,6 +912,7 @@ class DeploymentHelper {
             'success' => false,
             'failed_dir' => null,
             'backup_restored' => false,
+            'release_restored' => array(),
             'permissions_fixed' => false,
             'error' => null,
             'warnings' => [],
@@ -893,8 +1007,11 @@ class DeploymentHelper {
             @mkdir($public_html, 0770, true);
         }
 
+        // The kept previous release (.release_last) is the backup's, never the
+        // live tree's: it is restored to the site root below, not into public_html.
         $rsync_cmd = sprintf(
-            'rsync -a --delete %s/ %s/ 2>&1',
+            'rsync -a --delete --exclude=/%s %s/ %s/ 2>&1',
+            self::PREVIOUS_RELEASE_DIR,
             escapeshellarg($backup_dir),
             escapeshellarg($public_html)
         );
@@ -913,6 +1030,17 @@ class DeploymentHelper {
         $result['backup_restored'] = true;
         if ($verbose) {
             echo "  Backup restored to $public_html\n";
+        }
+
+        // The rest of the previous release: its maintenance_scripts and its
+        // signed manifest pair, kept beside the code before the deploy replaced
+        // them. Without this the site root would hold the failed release's
+        // manifest over the restored code, and the agent would refuse the
+        // deployment files it verifies against it, upgrade.php first.
+        $release = self::restorePreviousRelease("/var/www/html/$target_site", $backup_dir, $verbose);
+        $result['release_restored'] = $release['restored'];
+        foreach ($release['failed'] as $rel) {
+            $result['warnings'][] = "Could not put back the previous release's $rel";
         }
 
         // Fix permissions

@@ -11,6 +11,8 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
+ * @version 1.5 - composer runs under umask 022: what it writes into vendor/ is never group- or world-writable,
+ *                whatever the caller's umask (a deploy's read-only-tree gate reverted a release over it)
  * @version 1.4 - the active plugins are the ones with plg_active = 1; plg_status can read 'stale'
  *                while a plugin runs, and its packages were left out
  * @version 1.3 - Presence is not enough: an installed package whose version
@@ -577,7 +579,10 @@ class ComposerValidator {
         if (!is_dir($composer_home)) {
             @mkdir($composer_home, 0770, true);
         }
-        $prefix = 'COMPOSER_HOME=' . escapeshellarg($composer_home) . ' ';
+        // umask 022 first: vendor/ is part of the executable set
+        // (specs/read_only_tree.md), and a package composer writes under a
+        // permissive caller umask arrives group- or world-writable.
+        $prefix = 'umask 022 && COMPOSER_HOME=' . escapeshellarg($composer_home) . ' ';
         if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
             $prefix .= 'COMPOSER_ALLOW_SUPERUSER=1 ';
         }
