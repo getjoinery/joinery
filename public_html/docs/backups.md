@@ -704,11 +704,15 @@ machine keeps as its own: the names the files engine never archives, at any
 depth, and the site's `backup_exclude` names (a pattern matched as tar matches
 it: any tail of the path that starts at a name, `*` crossing `/`); `public_html_*`,
 `upgrades` and `upgrade_archives`; the local copies of offloaded files; this machine's
-`config/Globalvars_site.php`, `config/backup_site_key` and
-`config/backup-ledger`; and the rows of `bkh_backup_history`, which a backup
-run writes after its dump. The list lives in `includes/SiteCensus.php`, and
-`tests/backups/site_census_test.php` holds its names equal to
-`backup_files.sh`'s.
+own config, every file a restore keeps the machine's copy of
+(`_restore_guard.sh`'s `MACHINE_CONFIG_FILES`: `Globalvars_site.php`,
+`backup_site_key`, the trust files, `tree_owner`, `disk_allowance` and the
+host's `code_check`), and `config/backup-ledger`; and the rows of
+`bkh_backup_history`, which a backup run writes after its dump. So a copy on a
+host that refuses unsigned code still matches a source whose host does not. The
+list lives in `includes/SiteCensus.php`, and `tests/backups/site_census_test.php`
+holds its names equal to `backup_files.sh`'s and holds every restore-guard
+machine file in it.
 
 `SiteCensus::compare($source, $copy, $exact)` lists every difference. A canary
 that opens on the source and not on the copy, or more dead secrets on the copy,

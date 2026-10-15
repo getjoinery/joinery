@@ -162,8 +162,12 @@ chk "and its source's agent key (WP4)" "$(cat "$SD/copy_of_key")" "$QKEY"
 secret="$(cat "$SD/look_secret")"
 chk "a copy has a look secret, 32 hex, 0600" "$([[ "$secret" =~ ^[0-9a-f]{32}$ ]] && echo ok):$(stat -c %a "$SD/look_secret")" "ok:600"
 CONF="$R/etc/apache2/conf-available/joinery-quiet-qsite.conf"
-chk "the look path sets the cookie and lands on the home page" "$(grep -A2 -F "<LocationMatch \"^/\\.joinery-look/${secret}\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Redirect 303 /$')" "2"
-chk "the key look path sets the cookie and lands on the key page" "$(grep -A2 -F "<LocationMatch \"^/\\.joinery-look/${secret}/key\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Redirect 303 /copy-key$')" "2"
+chk "the look path sets the cookie and lands on the home page" "$(grep -A3 -F "<LocationMatch \"^/\\.joinery-look/${secret}\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Location "/"$' -e 'Redirect 303 /$')" "3"
+chk "the key look path sets the cookie and lands on the key page" "$(grep -A3 -F "<LocationMatch \"^/\\.joinery-look/${secret}/key\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Location "/copy-key"$' -e 'Redirect 303 /copy-key$')" "3"
+# B19: a relative Location keeps the browser on the https address it came in on;
+# a container's Apache is reached over http behind its host's proxy, and a key
+# page served over http has no WebCrypto.
+chk "both look paths answer with a relative Location, never a scheme" "$(grep -c -E 'Header always set Location "/(copy-key)?"$' "$CONF"):$(grep -c -E 'Redirect 303 "?https?:' "$CONF")" "2:0"
 chk "both look paths, and nothing else, pass without the cookie" "$(grep -c -F "<LocationMatch \"^/(?!\\.joinery-look/${secret}(?:/key)?\$)\">" "$CONF")" "1"
 chk "without the cookie, 503" "$(grep -c "HTTP_COOKIE} =~ /(?:^|;\\\\s\*)joinery_look=${secret}(?:;|\\$)/" "$CONF"):$(grep -c 'Redirect 503' "$CONF")" "1:1"
 chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2>&1; echo $?)" "2"

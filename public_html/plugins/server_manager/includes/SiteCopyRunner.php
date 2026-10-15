@@ -98,6 +98,9 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.25 - a copy from backups stages the run whose key its owner opened (key_step_seq, vouched_seq):
+ *                 a run the source made since is in a newer manifest the copy holds no vouch for, and staging
+ *                 the newest halted every copy whose source backed up while it waited for its key (B20)
  * @version 1.24 - a copy onto a host, as a container there (specs/site_container_engine.md D9): start_on_host() and
  *                 host_refusals(); the host's agent installs it (site_install) and its join is approved by the key its
  *                 install printed; its switch-over freezes the site, from outside by a container source's own host too,
@@ -1637,7 +1640,18 @@ class SiteCopyRunner {
 				}
 				return JobCommandBuilder::build_copy_import($node, $bundle);
 			case 'copy_stage':
-				return self::$stage_builder ? (self::$stage_builder)($node, $chain) : JobCommandBuilder::build_copy_stage($node, $chain);
+				// A copy from backups stages the run whose key its owner opened:
+				// the source's own schedule goes on meanwhile, and a run it adds is
+				// in a newer manifest the copy holds no vouch for (B20). The
+				// switch's final copy brings those, vouched by the source then.
+				$stage = $chain;
+				if (!self::step_job($steps, 'copy_take_vouch')) {
+					$seq = self::key_step_seq($steps, $source, $chain['chain_id']);
+					if ($seq !== null) {
+						$stage['vouched_seq'] = $seq;
+					}
+				}
+				return self::$stage_builder ? (self::$stage_builder)($node, $stage) : JobCommandBuilder::build_copy_stage($node, $stage);
 			case 'copy_restore':
 				return JobCommandBuilder::build_copy_restore($node, array('chain_id' => $chain['chain_id']));
 			case 'site_census':
@@ -1787,6 +1801,31 @@ class SiteCopyRunner {
 			throw new SiteCopyException('This management node keeps no backup storage for the source.');
 		}
 		throw new SiteCopyException("chain {$chain_id}'s manifest could not be fetched from backup storage (HTTP " . $status . ')');
+	}
+
+	/**
+	 * The run whose key the owner opened on the copy's page: the run of the
+	 * manifest the key step read that has its newest time. Null when the steps
+	 * took no key (a copy of a running source is vouched for by its export).
+	 */
+	private static function key_step_seq(array $steps, ManagedNode $source, string $chain_id): ?int {
+		$job = self::step_job($steps, 'copy_take_key');
+		if (!$job) {
+			return null;
+		}
+		$commands = json_decode((string)$job->get('mjb_commands'), true);
+		$run_time = (string)($commands['params']['run_time'] ?? '');
+		if ($run_time === '') {
+			return null;
+		}
+		$read = self::$manifest_reader ? (self::$manifest_reader)($source, $chain_id) : self::read_manifest($source, $chain_id);
+		$manifest = json_decode((string)($read['body'] ?? ''), true);
+		foreach ((array)($manifest['runs'] ?? array()) as $run) {
+			if ((string)($run['time'] ?? '') === $run_time && isset($run['seq'])) {
+				return (int)$run['seq'];
+			}
+		}
+		throw new SiteCopyException("chain {$chain_id} no longer lists the run of {$run_time} whose key the copy took");
 	}
 
 	/** The job of the first step with this op that has one, or null. */

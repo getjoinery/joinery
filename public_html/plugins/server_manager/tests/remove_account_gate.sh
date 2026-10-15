@@ -199,6 +199,7 @@ chk "A: no database dropped on a Docker host" "$(logged '^dropdb')" "0"
 chk "A: rebase work dir gone" "$(there /root/rebase/getjoinery)" "no"
 chk "A: a sibling's rebase work dir kept" "$(there /root/rebase/getjoinery_orgs)" "yes"
 chk "A: held, quiet and suspended marks gone" "$(ls "$T/fs/etc/joinery/sites/getjoinery" | wc -l | tr -d ' ')" "0"
+chk "A: and its state folder with them, once empty (B24)" "$(there /etc/joinery/sites/getjoinery)" "no"
 chk "A: its certificate retry stopped, the sibling's kept (B15)" \
     "$(there /etc/joinery/ssl-retry/getjoinery.example.conf):$(logged 'disable --now joinery-ssl-retry@getjoinery.example.timer'):$(there /etc/joinery/ssl-retry/getjoinery_orgs.example.conf):$(logged 'joinery-ssl-retry@getjoinery_orgs')" \
     "no:1:yes:0"

@@ -37,11 +37,14 @@
  *     releases staged);
  *   - offloaded files' local copies: they live in the bucket, and the archive
  *     leaves them out (BackupObjects::exclude_lines);
- *   - each machine's own config/Globalvars_site.php, config/backup_site_key and
- *     config/backup-ledger;
+ *   - each machine's own config: the files a restore keeps the machine's copy
+ *     of (Globalvars_site.php, backup_site_key, the trust and host files, the
+ *     host's code_check) and config/backup-ledger;
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.5 - every config file a restore keeps the machine's own copy of is left out, as the restore guard lists
+ *               them: a host's code_check made every copy onto a host that refuses unsigned code differ (B22)
  * @version 1.4 - vendor/ is left out at the site root only, as backup_files.sh 1.6.0 leaves it out: a vendor/
  *               inside public_html (assets/vendor, a plugin's Composer tree) is signed code the archive carries
  * @version 1.3 - upgrades and upgrade_archives, where an upgrade stages beside the code, are left out
@@ -60,8 +63,19 @@ class SiteCensus {
 	 */
 	const NAMED_EXCLUDES = array('backups', 'node_modules', 'target', '.git', 'logs', 'cache', 'tmp', 'sessions');
 
-	/** Paths, relative to the site root, each machine keeps as its own. */
-	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger', 'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');
+	/**
+	 * Paths, relative to the site root, each machine keeps as its own: every
+	 * config file a restore keeps this machine's copy of (_restore_guard.sh
+	 * MACHINE_CONFIG_FILES; site_census_test pins it a subset), the ledger, and
+	 * the upgrade's staging. A copy onto a host that refuses unsigned code has
+	 * a config/code_check its source's host never wrote, and the two still
+	 * hold the same site (B22).
+	 */
+	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger',
+		'config/release_verify_keys', 'config/release_statement_keys', 'config/transparency_log_keys',
+		'config/release_log_required', 'config/release_log_optional', 'config/tree_owner', 'config/agent_signing_key',
+		'config/release_statement_key', 'config/disk_allowance', 'config/code_check',
+		'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');
 
 	/** Tables a backup run writes on the source after its dump. */
 	const OWN_TABLES = array('bkh_backup_history');

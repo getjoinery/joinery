@@ -18,6 +18,11 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.20 - a copy onto a host's switch-over is described, confirmed and undone as the freeze and final copy it
+ *                 is, not as a dead source's switch as of its last backup (B21); its discard says its host removes the
+ *                 container, not that a server waits to be deleted at a provider (B23)
+ * @version 1.19 - a site neither way can copy yet lists each way's reasons under its name, so a container
+ *                 site's (from its backups) is shown (B18)
  * @version 1.18 - Copy onto a host: the hosts that can take a copy as a container, and why the others cannot; a copy
  *                 being installed on its host; its key page reached at the site's name through one hosts-file line;
  *                 the labels of the host's quiet steps (specs/site_container_engine.md D9)
@@ -181,11 +186,24 @@ if (!$site_copy) {
 		$copy_from_options[SiteCopy::FROM_BACKUPS] = 'From its backups';
 	}
 	if (!$copy_from_options) {
-		echo '<div class="alert alert-warning"><strong>This site cannot be copied yet.</strong><ul class="mb-0">';
-		foreach ($copy_from_refusals[SiteCopy::FROM_SOURCE] as $why) {
-			echo '<li>' . $copy_h($why) . '</li>';
+		// Both ways, each under its name: a container site's only way is from
+		// its backups, so that way's reason is the one its owner acts on. A
+		// reason both ways give is said once.
+		echo '<div class="alert alert-warning"><strong>This site cannot be copied yet.</strong>';
+		$said = array();
+		foreach (array(SiteCopy::FROM_SOURCE => 'From this running site', SiteCopy::FROM_BACKUPS => 'From its backups') as $from => $from_label) {
+			$lines = array();
+			foreach ($copy_from_refusals[$from] as $why) {
+				if (!isset($said[$why])) {
+					$said[$why] = true;
+					$lines[] = '<li>' . $copy_h($why) . '</li>';
+				}
+			}
+			if ($lines) {
+				echo '<div class="mt-2">' . $copy_h($from_label) . ':</div><ul class="mb-0">' . implode('', $lines) . '</ul>';
+			}
 		}
-		echo '</ul></div>';
+		echo '</div>';
 		$page->end_box();
 		return;
 	}
@@ -556,8 +574,13 @@ if (in_array($copy_status, array(SiteCopy::STATUS_DORMANT, SiteCopy::STATUS_HALT
 if (!$in_switch) {
 	echo '<form method="post" action="' . $copy_h($base_url . '&tab=copy') . '" id="copy_discard_form">';
 	echo '<input type="hidden" name="action" value="copy_discard">' . SmAdminCsrf::field();
-	echo '<button type="button" class="btn btn-outline-danger" onclick="JoineryModal.confirm(\'Discard this copy? Its record leaves the dashboard. '
-		. 'The server itself is not deleted: delete it at its provider afterwards.\', function(){ document.getElementById(\'copy_discard_form\').submit(); })">Discard the copy</button></form>';
+	// A copy onto a host is a container its host removes; any other copy's
+	// server is the owner's to delete at its provider (B23).
+	$discard_note = $site_copy->on_host()
+		? 'Its host removes the copy\\\'s container and everything in it, and its record leaves the dashboard.'
+		: 'Its record leaves the dashboard. The server itself is not deleted: delete it at its provider afterwards.';
+	echo '<button type="button" class="btn btn-outline-danger" onclick="JoineryModal.confirm(\'Discard this copy? ' . $discard_note
+		. '\', function(){ document.getElementById(\'copy_discard_form\').submit(); })">Discard the copy</button></form>';
 }
 echo '</div>';
 $page->end_box();
@@ -570,6 +593,11 @@ $copy_dns_class = $copy_domain !== '' ? ProxiedOriginMove::driver_class_for($cop
 $copy_address_at_copy = ($copy_switch['address_at'] ?? '') === 'copy';
 $copy_swapped = $copy_node && trim((string)$copy_node->get('mgn_install_state')) === 'retired';
 $copy_backups = $site_copy->from_backups();
+// A copy from backups whose source is gone switches over as of its last
+// backup. A copy onto a host comes from backups too, but its source is a
+// running container: it is frozen and copied once more, as a running site's
+// copy is (B21).
+$copy_dead_source = $copy_backups && !$site_copy->on_host();
 $copy_method_names = array(
 	SiteCopyRunner::METHOD_PROXIED => 'through the proxy in front of the site (Cloudflare)',
 	SiteCopyRunner::METHOD_IP_SWAP => 'by swapping the two servers\' IP addresses at Linode',
@@ -643,7 +671,7 @@ $copy_records_list = function () use ($copy_switch, $copy_h) {
 
 if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->begin_box(['title' => 'Switch over to the copy']);
-	if ($copy_backups) {
+	if ($copy_dead_source) {
 		// The old server is powered off by the switch-over when this management
 		// node created it; a container is stopped on its shared server, and kept
 		// stopped, once the copy has taken over. Otherwise the owner turns it off.
@@ -657,6 +685,12 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 				: '<strong>Turn the old server off first</strong>: this management node did not create it and cannot. '))
 			. 'Then the address moves, the copy takes over this node, starts and gets its own certificate; until then browsers '
 			. 'warn, and a proxy set to strict refuses it. You can go back until the copy takes over, not after.</p>';
+	} elseif ($site_copy->on_host()) {
+		echo '<p>A switch-over makes the copy the site. This site is frozen (visitors see a short "back in a few minutes" page) '
+			. 'and its host holds it off the network; one final backup is copied across and both are counted, which must match '
+			. 'exactly. Then you move the address, the copy takes over this node, starts and gets its own certificate, and this '
+			. 'management node stops the old container on its host and keeps it stopped until you remove it. Until the copy takes '
+			. 'over, you can go back to this site.</p>';
 	} else {
 		echo '<p>A switch-over makes the copy the site. This site is frozen (visitors see a short "back in a few minutes" page), '
 			. 'one final backup is copied across and both are counted, which must match exactly. Then you move the address, the '
@@ -670,7 +704,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		}
 		echo '</ul></div>';
 	} else {
-		$confirm = $copy_backups
+		$confirm = $copy_dead_source
 			? ($copy_powers_off
 				? 'Power the old server off and switch over. Anything written to it after the backup is lost.'
 				: ($copy_holds
@@ -712,7 +746,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	$page->end_box();
 } elseif ($in_switch || in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
 	$page->begin_box(['title' => 'Switch-over']);
-	if (!$copy_backups && !empty($copy_switch['frozen_time']) && !in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
+	if (!$copy_dead_source && !empty($copy_switch['frozen_time']) && !in_array($copy_status, array(SiteCopy::STATUS_SWITCHED, SiteCopy::STATUS_RETURNING), true)) {
 		echo '<p><strong>This site has been frozen since ' . $copy_h($copy_switch['frozen_time']) . ' UTC.</strong> Visitors see the '
 			. 'maintenance page.</p>';
 	}
@@ -736,8 +770,8 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 
 	$phase = (string)($copy_switch['phase'] ?? '');
 	if ($copy_status === SiteCopy::STATUS_READY) {
-		echo '<p>' . ($copy_backups ? 'The copy is ready.' : 'The final copy matches this site exactly.')
-			. ' Move the address now' . ($copy_backups ? '.' : ': the site is down until you do, or until you go back.') . '</p>';
+		echo '<p>' . ($copy_dead_source ? 'The copy is ready.' : 'The final copy matches this site exactly.')
+			. ' Move the address now' . ($copy_dead_source ? '.' : ': the site is down until you do, or until you go back.') . '</p>';
 		if ($copy_method === SiteCopyRunner::METHOD_PROXIED) {
 			$copy_press_form('copy_move', 'Move the address to the copy', 'btn-primary', '', array(), true);
 		} elseif ($copy_method === SiteCopyRunner::METHOD_IP_SWAP) {
@@ -775,6 +809,10 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 		if ($copy_swapped) {
 			echo '<p>This server becomes the site again. <strong>Anything written on the new server since it started is lost</strong>: '
 				. 'its server is discarded afterwards. Keeping those writes would be a copy in the other direction.</p>';
+		} elseif ($site_copy->on_host()) {
+			echo '<p>This site runs again: its host lets it back onto the network, then it leaves its maintenance page. The copy stays '
+				. 'a dormant copy.' . ($copy_method === SiteCopyRunner::METHOD_MANUAL && $copy_address_at_copy ? ' Point the DNS back yourself.' : '')
+				. '</p>';
 		} elseif ($copy_backups) {
 			echo '<p>The copy stays a dormant copy, and the old ' . (trim((string)$node->get('mgn_container_name')) !== ''
 					? 'container keeps running: it is stopped only once the copy has taken over.' : 'server stays off.')
