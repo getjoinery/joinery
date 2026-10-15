@@ -4,18 +4,21 @@
  * tier: db
  * env: dev-only
  * needs: []
+ * covers: [public_html/plugins/server_manager/includes/node_detail_tabs/updates.php]
  */
 /**
  * The Updates page's pieces (/admin/admin_updates, spec release_transparency D7).
  *
  * ReleaseProvenance reads the running release from its statement: the version,
  * the public commits and the log entry, and nothing from a file that is not a
- * statement. The page's lists read only: who installed what with Install anyway,
+ * statement. It asks the upgrade source which version it offers, as the Updates
+ * page and the node Updates tab both show. The page's lists read only: who installed what with Install anyway,
  * and which local copies are kept out of updates. The install history the
  * upgrade writes is a model, round-tripped by the model suites.
  *
  * Run: php tests/run.php db --filter=updates_page
  *
+ * @version 1.1 - what the upgrade source offers, and the node Updates tab asking it for this node's own row
  * @version 1.0
  */
 
@@ -64,6 +67,35 @@ file_put_contents($dir . '/' . PackageSignature::STATEMENT_NAME, $statement);
 check((ReleaseProvenance::running($dir)['version'] ?? '') === '0.8.470', 'a tree\'s statement is found at its top');
 @unlink($dir . '/' . PackageSignature::STATEMENT_NAME);
 @rmdir($dir);
+
+section('What the upgrade source offers');
+
+// offered() asks the question upgrade.php asks. A fixture source on disk
+// answers it here; curl reads a file URL's path and leaves the query aside.
+$src_dir = sys_get_temp_dir() . '/updates_page_source_' . getmypid();
+@mkdir($src_dir . '/utils', 0700, true);
+file_put_contents($src_dir . '/utils/upgrade', json_encode(array('system_version' => '0.8.497')));
+$offer = ReleaseProvenance::offered('file://' . $src_dir . '/');
+check($offer === array('version' => '0.8.497', 'error' => ''), 'a source names the version it offers', json_encode($offer));
+file_put_contents($src_dir . '/utils/upgrade', json_encode(array('upgrade_name' => 'x')));
+$offer = ReleaseProvenance::offered('file://' . $src_dir);
+check($offer['version'] === '' && strpos($offer['error'], 'named no version') !== false, 'an answer with no version is said so');
+@unlink($src_dir . '/utils/upgrade');
+@rmdir($src_dir . '/utils');
+@rmdir($src_dir);
+$offer = ReleaseProvenance::offered('http://127.0.0.1:1');
+check($offer['version'] === '' && strpos($offer['error'], 'Could not reach') === 0, 'a source that cannot be reached is an error to show', $offer['error']);
+$offer = ReleaseProvenance::offered('  ');
+check($offer['version'] === '' && $offer['error'] === 'No upgrade source is set for this site.', 'no source set is said so');
+
+// A management node that takes its releases from an upstream compared its own
+// row with itself, so its Updates tab always read current (2026-10-15, on
+// getjoinery after 0.8.497). Its own row is compared with its source instead.
+$tab = (string)file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/node_detail_tabs/updates.php'));
+check(preg_match('/if \(\$node->is_self\(\) && !DeploymentHelper::isOriginNode\(\)\) \{[^}]*ReleaseProvenance::offered\(\$source\)/s', $tab) === 1,
+	'the node Updates tab compares this management node\'s own row with what its upgrade source offers');
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('adm/logic/admin_updates_logic.php')), 'ReleaseProvenance::offered($source)') !== false,
+	'and the Updates page asks the same question');
 
 section('What the upgrade records for each run');
 

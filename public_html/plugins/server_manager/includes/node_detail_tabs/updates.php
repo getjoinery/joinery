@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.8 - this management node's own row is compared with the version its upgrade source offers, not with itself
  * @version 1.7 - Publish Release on this management node itself is not offered while its repositories have uncommitted work
  * @version 1.6 - Publish Release on This Node offers Deploy to all managed nodes, as the Upgrades page does
  * @version 1.5 - Upgrade All Sites on This Host is offered only when more than one site shares the host
@@ -36,12 +37,27 @@
 		return;
 	}
 
-	// Get local version
+	// A node takes its releases from this management node, so it is current
+	// when it runs this node's version. This node's own row is compared with
+	// where this node takes ITS releases from: compared with itself it would
+	// always read current. The origin takes releases from nowhere; it publishes.
 	$settings = Globalvars::get_instance();
 	$local_version = $settings->get_setting('system_version') ?: '-';
-
-	$node_version = $node->get('mgn_joinery_version') ?: 'Unknown';
-	$up_to_date = ($node_version === $local_version);
+	$offer_error = '';
+	if ($node->is_self() && !DeploymentHelper::isOriginNode()) {
+		$node_version = $local_version;
+		$source = trim((string)$settings->get_setting('upgrade_source'));
+		$offered = ReleaseProvenance::offered($source);
+		$offer_error = $offered['error'];
+		$compare_label = 'Upgrade source (' . ($source !== '' ? $source : 'none set') . ') offers';
+		$compare_version = $offered['version'] !== '' ? $offered['version'] : 'unknown';
+		$up_to_date = $offered['version'] !== '' ? ($node_version === $offered['version']) : null;
+	} else {
+		$node_version = $node->get('mgn_joinery_version') ?: 'Unknown';
+		$compare_label = 'Management Node Version';
+		$compare_version = $local_version;
+		$up_to_date = ($node_version === $local_version);
+	}
 
 	$pageoptions = ['title' => 'Version Status'];
 	$page->begin_box($pageoptions);
@@ -51,16 +67,21 @@
 			<strong>Current Version:</strong> <?php echo htmlspecialchars($node_version); ?>
 		</div>
 		<div class="col-md-4">
-			<strong>Management Node Version:</strong> <?php echo htmlspecialchars($local_version); ?>
+			<strong><?php echo htmlspecialchars($compare_label); ?>:</strong> <?php echo htmlspecialchars($compare_version); ?>
 		</div>
 		<div class="col-md-4">
-			<?php if ($up_to_date): ?>
+			<?php if ($up_to_date === null): ?>
+				<span class="badge bg-secondary">Not known</span>
+			<?php elseif ($up_to_date): ?>
 				<span class="badge bg-success">Up to date</span>
 			<?php else: ?>
 				<span class="badge bg-warning">Update available</span>
 			<?php endif; ?>
 		</div>
 	</div>
+	<?php if ($offer_error !== ''): ?>
+		<div class="jy-callout jy-callout-warning"><?php echo htmlspecialchars($offer_error); ?></div>
+	<?php endif; ?>
 	<div class="mt-2">
 		<form method="post" class="svm-inline-form" id="apply_update_form">
 			<input type="hidden" name="action" value="apply_update">
