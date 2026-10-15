@@ -18,6 +18,7 @@
  *   php tests/run.php db --serial     # disable the test-db lane overlap
  *   php tests/run.php --json          # emit the aggregate JSON contract
  *   php tests/run.php --list          # list discovered tests, run nothing
+ *   php tests/run.php --help          # usage; an option nobody declared is refused, not ignored
  *   php tests/run.php db --fresh      # run every selected suite; borrow no result
  *   php tests/run.php db --no-wait    # exit 3 at once if another run holds the gate
  *
@@ -82,9 +83,34 @@ foreach ($args as $a) {
 	if (strpos($a, '--timeout=') === 0) { $timeout_override = max(1, (int)substr($a, strlen('--timeout='))); continue; }
 	if ($a === '--changed') { $changed_mode = true; continue; }
 	if (strpos($a, '--changed=') === 0) { $changed_mode = true; $changed_ref = substr($a, strlen('--changed=')); continue; }
-	if ($a === '--json' || $a === '--list') continue;
-	if (strpos($a, '--') === 0) continue;
+	if ($a === '--json' || $a === '--list' || $a === '--serial' || $a === '--lane-worker') continue;
+	if ($a === '--help' || $a === '-h') { fwrite(STDOUT, runner_usage()); exit(0); }
+	if (strpos($a, '-') === 0) {
+		// An option nobody declared is a typo. A typo must not quietly run the
+		// safe tier; it is refused the way an unknown tier is.
+		fwrite(STDERR, "Unknown option '$a'.\n\n" . runner_usage());
+		exit(2);
+	}
 	$tier_arg = $a; // first bare positional is the tier
+}
+
+/** The one-screen usage text: --help prints it, an unknown option or tier prints it after the complaint. */
+function runner_usage(): string {
+	return "Usage: php tests/run.php [tier] [options]\n"
+		. "\n"
+		. "Tiers: safe (default) | db (safe + db + test-db, the pre-deploy gate) | test-db | live | deploy\n"
+		. "\n"
+		. "Options:\n"
+		. "  --filter=TEXT    narrow by name or path substring\n"
+		. "  --only=PATH      run just this one declared test, by repo-relative path\n"
+		. "  --changed[=REF]  only the suites the edited files can reach (not for live or deploy)\n"
+		. "  --fresh          run every selected suite; borrow no earlier result\n"
+		. "  --no-wait        exit 3 at once if another run holds the gate\n"
+		. "  --serial         disable the test-db lane overlap\n"
+		. "  --timeout=SECS   override every test's declared timeout\n"
+		. "  --json           emit the aggregate JSON contract\n"
+		. "  --list           list discovered tests, run nothing\n"
+		. "  --help, -h       this text\n";
 }
 
 $valid_tiers = array('safe', 'db', 'test-db', 'live', 'deploy');
@@ -100,7 +126,7 @@ if ($changed_mode && $only !== '') {
 	exit(2);
 }
 if (!in_array($tier_arg, $valid_tiers, true)) {
-	fwrite(STDERR, "Unknown tier '$tier_arg'. Use one of: " . implode(', ', $valid_tiers) . "\n");
+	fwrite(STDERR, "Unknown tier '$tier_arg'. Use one of: " . implode(', ', $valid_tiers) . "\n\n" . runner_usage());
 	exit(2);
 }
 
