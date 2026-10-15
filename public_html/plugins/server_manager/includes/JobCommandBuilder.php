@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.125 - build_repair_release_files: every deployment file that differs from the signed release put
+ *                  back in one word (agent 1.79.0, specs/release_file_repair_by_hash.md)
  * @version 1.124 - build_site_install, build_site_quiet_host and build_discard_copy: a dormant copy installed
  *                  as a container on a host from its source's verified release, the host's half of a site
  *                  container's quiet state for a switch-over, and a dormant copy removed from its host
@@ -3229,6 +3231,28 @@ class JobCommandBuilder {
 			throw new Exception('restore_release_file names one of the five deployment files an upgrade replaces first.');
 		}
 		return ['primitive' => 'restore_release_file', 'params' => ['file' => $file]];
+	}
+
+	/**
+	 * Put every deployment file that differs from the node's signed release
+	 * back at once: the repair_release_files operate word (agent 1.79.0,
+	 * specs/release_file_repair_by_hash.md). No parameters: the node decides
+	 * which of the five differ, takes each from its kept copy or asks this
+	 * management node for it by the hash its manifest lists, and refuses bytes
+	 * that are not the signed ones whoever offers them. The same word recipe
+	 * release_files runs on the node's own clock; this is it on demand.
+	 */
+	public static function build_repair_release_files($node) {
+		if (!self::has_primitive($node, 'repair_release_files')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot repair its release files in one step. "
+				. AgentVocabulary::needs_newer_agent_text($node, ['repair_release_files']));
+		}
+		return self::build_repair_release_files_primitive($node);
+	}
+
+	public static function build_repair_release_files_primitive($node) {
+		return ['primitive' => 'repair_release_files', 'params' => []];
 	}
 
 	/**

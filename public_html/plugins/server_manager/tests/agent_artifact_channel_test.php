@@ -253,6 +253,21 @@ check(AgentChannelEndpoint::validation_error(
 	'a request that names a file is refused as an undeclared field',
 	'a node that could name a file could name any file; the plane names it from its own manifest');
 
+// A release_file asked for by the hash the node's manifest lists (agent 1.79.0):
+// lower-case hex of exactly 64 characters, with or without a version hint.
+$sha = str_repeat('ab', 32);
+check(AgentChannelEndpoint::validation_error(
+		['node_id' => 1, 'kind' => 'release_file', 'file' => 'public_html/utils/upgrade.php', 'sha256' => $sha, 'version' => '0.8.494'], $spec) === null,
+	'a release_file request by hash with a version hint is accepted');
+check(AgentChannelEndpoint::validation_error(
+		['node_id' => 1, 'kind' => 'release_file', 'file' => 'public_html/utils/upgrade.php', 'sha256' => $sha], $spec) === null,
+	'a release_file request by hash with no version is accepted: the hash is what resolves');
+foreach ([strtoupper($sha), substr($sha, 0, 63), $sha . 'a', 'not a hash', '../' . substr($sha, 3)] as $bad) {
+	check(AgentChannelEndpoint::validation_error(
+			['node_id' => 1, 'kind' => 'release_file', 'file' => 'public_html/utils/upgrade.php', 'sha256' => $bad], $spec) !== null,
+		'refused as a sha256: ' . var_export($bad, true));
+}
+
 // The one field that names a file, for release_file, is a closed pattern: a
 // deployment file under utils/ or includes/, never a path that climbs.
 foreach (['public_html/utils/../../config/x.php', '/etc/passwd', 'public_html/utils/upgrade.sh', 'public_html/plugins/x/y.php', '../public_html/utils/upgrade.php'] as $bad) {

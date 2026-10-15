@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.63 - repair_release_files: every differing deployment file put back in one job (agent 1.79.0)
  * @version 1.62 - Hide from Dashboard calls ManagedNode::hide(), which keeps the node's cloud server recorded (B71)
  * @version 1.61 - the settings form saves mgn_alerts (whether this node's incidents notify anyone)
  * @version 1.60 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0)
@@ -195,6 +196,7 @@ class NodeDetailActions {
 		'schema_probe'             => 'overview',
 		'reclaim_managed_file'     => 'overview',
 		'restore_release_file'     => 'overview',
+		'repair_release_files'     => 'overview',
 		'page_probe'               => 'overview',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
@@ -409,6 +411,12 @@ class NodeDetailActions {
 			case 'restore_release_file': {
 				$built = JobCommandBuilder::build_restore_release_file($node, (string)($_POST['file'] ?? ''));
 				$job = ManagementJob::createFromBuild($node->key, 'restore_release_file', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'repair_release_files': {
+				$built = JobCommandBuilder::build_repair_release_files($node);
+				$job = ManagementJob::createFromBuild($node->key, 'repair_release_files', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 
