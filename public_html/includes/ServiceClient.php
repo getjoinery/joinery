@@ -15,6 +15,7 @@
  * secret key. The secret is read through SecretBox::open(), so a value the
  * reconciler has sealed and a plaintext one both work.
  *
+ * @version 1.2 - authHeaders(): the key pair as headers, for a caller with its own HTTP client
  * @version 1.1 - secretKey() answers on a deployment with no secret_box_key instead of throwing
  * @version 1.0 - lifted from the mailbox FleetClient's configured() and call()
  */
@@ -120,13 +121,10 @@ class ServiceClient {
 			throw new ServiceClientException($this->notConfiguredMessage());
 		}
 		$url = $this->serviceUrl() . '/api/v1/action/' . $this->segment . '/' . rawurlencode($action);
-		$headers = array(
-			'Content-Type: application/json',
-			// Dash spelling: Apache→FPM stacks silently drop header names
-			// containing underscores (see api/apiv1.php's normalization).
-			'public-key: ' . $this->publicKey(),
-			'secret-key: ' . $this->secretKey(),
-		);
+		$headers = array('Content-Type: application/json');
+		foreach ($this->authHeaders() as $name => $value) {
+			$headers[] = $name . ': ' . $value;
+		}
 		$response = $this->transport($url, $headers, (string)json_encode($payload));
 
 		if ($response['body'] === false) {
@@ -141,6 +139,17 @@ class ServiceClient {
 			throw new ServiceClientException($this->label() . ': ' . $msg);
 		}
 		return is_array($decoded['data'] ?? null) ? $decoded['data'] : array();
+	}
+
+	/**
+	 * The key pair as request headers, name => value: the identity on the wire,
+	 * for a caller that speaks to the same operator over its own client (the
+	 * Help panel's SupportChatClient). Dash spelling: Apache→FPM stacks
+	 * silently drop header names containing underscores (see api/apiv1.php's
+	 * normalization).
+	 */
+	public function authHeaders(): array {
+		return array('public-key' => $this->publicKey(), 'secret-key' => $this->secretKey());
 	}
 
 	/**

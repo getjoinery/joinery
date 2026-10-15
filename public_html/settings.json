@@ -1001,6 +1001,26 @@
       "helptext": "When an unexpected error happens, this site sends a report on its own, with no one reviewing it first. It carries versions, the error and its place in the code, and the page's address masked to its shape; never who was affected, log lines, member data or setting values. The same error is sent once per version, then as a count of how often it recurs. Needs sending switched on above."
     },
     {
+      "name": "support_url",
+      "default": "",
+      "group": "problem_reports",
+      "label": "Support desk",
+      "type": "text",
+      "helptext": "The management node the Help button asks, as https://host. Blank means no Help button: the panel is off until this names a node that runs the support desk."
+    },
+    {
+      "name": "support_chat_consent",
+      "default": "",
+      "managed": true,
+      "helptext": "Whether the Help panel sends this site's facts (what a problem report carries, and the page asked from) with the first question of each thread: yes, no, or blank until someone answers the question the panel asks once. Changeable on the Management Node page."
+    },
+    {
+      "name": "support_chat_live_reads",
+      "default": "no",
+      "managed": true,
+      "helptext": "Whether a management node this site is joined to may read it (logs, journals, configuration, disk, ports) while answering a Help panel question: yes or no. Needs support_chat_consent yes, and the agent's own log-access switch still decides the log words. Changeable on the Management Node page."
+    },
+    {
       "name": "problem_reports_retention_days",
       "default": "90",
       "group": "problem_reports",

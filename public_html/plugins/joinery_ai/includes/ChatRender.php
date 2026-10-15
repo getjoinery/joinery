@@ -9,8 +9,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/message_attachm
  * send/confirm AJAX endpoints both go through here so a freshly-returned turn
  * looks identical to one rendered on reload — no drift between the two paths.
  *
- * Admin theme is not the .jy-ui kit, so the markup uses plain joai-chat-*
- * classes styled in joinery_ai.css.
+ * A turn is drawn by the core ChatTranscript (one renderer for every
+ * conversation with a model, styled by assets/css/chat_transcript.css); this
+ * class adds what is Joinery AI's own: attachments, usage and cost, the
+ * Copy/Delete actions, and event chips.
  */
 class ChatRender {
 
@@ -18,16 +20,12 @@ class ChatRender {
      *  (copy / delete); the optimistic bubble built client-side on send omits it
      *  until the page reloads with the persisted row. */
     public static function userBubble(string $text, string $time, int $message_id = 0): string {
-        $raw = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
-        $id_attr = $message_id ? ' data-message-id="' . $message_id . '"' : '';
-        $attachments = $message_id
-            ? self::attachmentsHtml(AiMessageAttachment::displayListForMessage($message_id)) : '';
-        $body = $raw !== '' ? '<div class="joai-chat-body">' . nl2br($raw) . '</div>' : '';
-        return '<div class="joai-chat-msg joai-chat-mine"' . $id_attr . ' data-raw="' . $raw . '">'
-             . $body
-             . $attachments
-             . self::footHtml('', $time, [], (bool)$message_id)
-             . '</div>';
+        return ChatTranscript::userBubble($text, $time, [
+            'message_id'       => $message_id,
+            'attachments_html' => $message_id
+                ? self::attachmentsHtml(AiMessageAttachment::displayListForMessage($message_id)) : '',
+            'actions_html'     => $message_id ? self::actionsHtml() : '',
+        ]);
     }
 
     /**
@@ -175,15 +173,7 @@ class ChatRender {
      *  then time · context · cost, with the hover-only Copy/Delete actions pushed
      *  right. `$meta_extra` are the turn-usage parts (empty for user bubbles). */
     public static function footHtml(string $trace, string $time, array $meta_extra, bool $with_actions): string {
-        $meta = array_merge(
-            ['<span class="joai-chat-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</span>'],
-            $meta_extra
-        );
-        return '<div class="joai-chat-foot">'
-             . $trace
-             . '<span class="joai-chat-meta-line">' . implode(' · ', $meta) . '</span>'
-             . ($with_actions ? self::actionsHtml() : '')
-             . '</div>';
+        return ChatTranscript::footHtml($trace, $time, $meta_extra, $with_actions ? self::actionsHtml() : '');
     }
 
     /** Per-turn action toolbar (copy / delete). Shared by both bubble kinds; the
@@ -206,7 +196,6 @@ class ChatRender {
         );
 
         $body_md = (string)$msg->get('aim_content');
-        $body_html = self::renderMarkdown($body_md);
 
         $trace = self::traceHtml($msg->get('aim_tool_calls'));
 
@@ -225,16 +214,13 @@ class ChatRender {
         // A turn the user stopped mid-flight keeps its partial answer and carries
         // a small "Cancelled" marker — persistent across reloads (keyed on the
         // stored status), not just in the live poll.
-        $cancelled = ((string)$msg->get('aim_status') === AiConversationMessage::STATUS_CANCELLED)
-            ? '<div class="joai-chat-cancelled-marker">Cancelled</div>'
-            : '';
-
-        return '<div class="joai-chat-msg joai-chat-assistant" data-message-id="' . (int)$msg->key . '"'
-             . ' data-raw="' . htmlspecialchars($body_md, ENT_QUOTES, 'UTF-8') . '">'
-             . '<div class="joai-chat-body">' . $body_html . '</div>'
-             . $cancelled
-             . self::footHtml($trace, $time, $meta_extra, true)
-             . '</div>';
+        return ChatTranscript::assistantBubble($body_md, $time, [
+            'message_id'   => (int)$msg->key,
+            'trace_html'   => $trace,
+            'meta_parts'   => $meta_extra,
+            'cancelled'    => (string)$msg->get('aim_status') === AiConversationMessage::STATUS_CANCELLED,
+            'actions_html' => self::actionsHtml(),
+        ]);
     }
 
     /** Above this, an event chip collapses its tail behind a details toggle —
@@ -269,34 +255,7 @@ class ChatRender {
 
     /** Collapsible per-turn tool trace. Empty string when there were none. */
     public static function traceHtml($tool_calls): string {
-        if (is_string($tool_calls)) $tool_calls = json_decode($tool_calls, true);
-        if (!is_array($tool_calls) || empty($tool_calls)) return '';
-
-        $items = '';
-        foreach ($tool_calls as $tc) {
-            $name = htmlspecialchars((string)($tc['name'] ?? '?'), ENT_QUOTES, 'UTF-8');
-            $is_error = !empty($tc['is_error']);
-            $dur = isset($tc['duration_ms']) && $tc['duration_ms'] !== null
-                ? ' · ' . (int)$tc['duration_ms'] . 'ms' : '';
-            $cls = $is_error ? ' joai-chat-tool-error' : '';
-            $items .= '<li class="joai-chat-tool' . $cls . '">' . $name . $dur . '</li>';
-        }
-        $count = count($tool_calls);
-        return '<details class="joai-chat-trace"><summary>' . $count . ' tool call'
-             . ($count === 1 ? '' : 's') . '</summary><ul>' . $items . '</ul></details>';
-    }
-
-    /** Markdown → HTML for assistant text, with chat-style soft breaks (a
-     *  single newline renders as a line break). Falls back to escaped text if
-     *  the renderer isn't available. */
-    private static function renderMarkdown(string $md): string {
-        if ($md === '') return '';
-        try {
-            require_once(PathHelper::getIncludePath('includes/MarkdownRenderer.php'));
-            return MarkdownRenderer::render($md, true);
-        } catch (Throwable $e) {
-            return nl2br(htmlspecialchars($md, ENT_QUOTES, 'UTF-8'));
-        }
+        return ChatTranscript::traceHtml($tool_calls);
     }
 
 }

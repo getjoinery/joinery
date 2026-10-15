@@ -487,6 +487,9 @@ class PublicPageJoinerySystem extends PublicPageBase {
         </li>
         <?php endif;
 
+        // --- Help: the support desk (support_chatbot.md) ---
+        $this->render_support_help_slot('li', 'nav-item');
+
         // --- Setup wizard pill (specs/setup_wizard.md) ---
         $this->render_setup_pill('li', 'nav-item');
 
