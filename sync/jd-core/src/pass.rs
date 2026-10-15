@@ -426,6 +426,7 @@ pub fn run_pass(
     // directory as the vault and the vault's sealed file as carried into a
     // plain folder -- and every pass after built on it (FAT hostile2 74400).
     park_vaults_on_a_weak_volume(env)?;
+    keep_private_content_off_this_computer(env)?;
     say_whether_renames_can_be_tracked(env)?;
     let (followed, traded_with_a_vault) =
         follow_parked_vaults_by_their_contents(env, &observed, &dirs_on_disk, &dir_tie_breaks, &tie_breaks, &mut folder_ids)?;
@@ -776,14 +777,15 @@ pub fn run_pass(
     // After the walk, so that what is held under it is what is on the disk
     // now, and before the round, which skips what this parks.
     park_stand_ins_of_trashed_vaults(env, &observed)?;
-    let parked_on_a_weak_volume: std::collections::HashSet<EntityId> = env
+    let parked_out_of_scope: std::collections::HashSet<EntityId> = env
         .store
         .open_issues()?
         .into_iter()
-        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter(|i| PARKS.contains(&i.kind.as_str()))
         .filter_map(|i| i.entity)
         .collect();
-    let held_by_park = held_by_a_weak_volume_park(env)?;
+    let held_by_park = held_by_a_park(env)?;
+    let held_by_private_park = held_by_a_private_park(env)?;
     // Everything under a folder parked out of scope is parked with it. A
     // claimant released by a key that arrives while its folder is still in
     // the trash would otherwise be planned as an upload into a trashed
@@ -1038,10 +1040,11 @@ pub fn run_pass(
         // parked. Left where it was, the directory and every file in it stood
         // on the disk with no record claiming them, and nothing would ever
         // scan, send, move or remove them (hidden hostile2 and clean2, the
-        // ring rotation carrying the vault's name to a plain folder).
+        // ring rotation carrying the vault's name to a plain folder). A
+        // Private folder parked off this computer does the same.
         if entry.id.entity_type == EntityType::Folder
             && entry.status == LocalStatus::OutOfScope
-            && parked_on_a_weak_volume.contains(&entry.id)
+            && parked_out_of_scope.contains(&entry.id)
         {
             if let Some(to) = folders.moves.get(&entry.id) {
                 let mut moved = entry.clone();
@@ -1083,8 +1086,15 @@ pub fn run_pass(
         // to be held there (D1): skipped with its vault, its move was never
         // read, and the file standing outside minted as a new plain one and
         // went up in the clear (D3 on a weak volume, case (b)).
+        // So is a file carried out of a Private folder parked off this
+        // computer, known by the tree it leaves: a level change converts its
+        // files with no change on the feed, so its own record need not know.
+        // A Private file's move goes to the server, which needs the owner's
+        // window to open it and refuses (held, and said); one never sent goes
+        // up from where it now stands, as any new file.
         let leaving_a_parked_vault = entry.id.entity_type == EntityType::File
-            && entry.is_encrypted
+            && (entry.is_encrypted
+                || entry.local_placement().parent.is_some_and(|p| held_by_private_park.contains(&p)))
             && match scan.change_for(entry.id) {
                 Some(LocalChange::Moved { to_path, .. } | LocalChange::MovedAndEdited { to_path, .. }) => {
                     placement_of(to_path, &folder_ids).is_some_and(|to| !to.parent.is_some_and(|p| shadowed.contains(&p)))
@@ -2507,6 +2517,7 @@ pub(crate) fn stat_all(
                         is_encrypted: false,
                         wrapped_file_key: None,
                         encrypted_metadata: None,
+                        syncable: true,
                     },
                 ));
             }
@@ -2567,6 +2578,7 @@ fn state_of(item: &Value) -> Option<(EntityId, RemoteState)> {
                 .get("encrypted_metadata")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            syncable: item.get("syncable").and_then(Value::as_bool) != Some(false),
         },
     ))
 }
@@ -2592,6 +2604,7 @@ pub(crate) fn absorb_remote(
                 entry.remote_content = state.content.clone();
                 entry.head_change_id = state.head_change_id;
                 entry.is_encrypted = state.is_encrypted;
+                entry.remote_unsyncable = !state.syncable;
                 // A key that has ARRIVED is recorded; a key that is absent from
                 // this observation does not erase one already held. The grant
                 // travels on its own schedule, and a stat taken before it lands
@@ -2615,6 +2628,7 @@ pub(crate) fn absorb_remote(
             entry.remote_content = state.content.clone();
             entry.head_change_id = state.head_change_id;
             entry.is_encrypted = state.is_encrypted;
+            entry.remote_unsyncable = !state.syncable;
             entry.wrapped_file_key = state.wrapped_file_key.clone();
             entry.status = match id.entity_type {
                 EntityType::Folder => LocalStatus::PendingDownload,
@@ -2781,6 +2795,7 @@ fn observed_remote(entry: &Entry) -> RemoteState {
         // the moment it is opened, and keeping a stale copy would invite a
         // decode of a name the server has since re-encrypted.
         encrypted_metadata: None,
+        syncable: true,
     }
 }
 
@@ -3459,14 +3474,97 @@ fn park_vaults_on_a_weak_volume(env: &ExecEnv) -> Result<(), ExecError> {
     Ok(())
 }
 
-/// The folders a D3 park holds on this disk: every vault parked on a weak
-/// volume, and everything under it by the local tree.
-pub(crate) fn held_by_a_weak_volume_park(env: &ExecEnv) -> Result<std::collections::HashSet<i64>, ExecError> {
+/// The issue a Private folder kept off this computer carries, which is also
+/// what marks the park as this rule's to lift.
+pub(crate) const PRIVATE_NOT_SYNCED: &str = "private_not_synced";
+
+/// Private is not synced to a computer (`drive_private_not_synced.md`):
+/// its bytes open only inside the owner's unlock window, the window belongs to
+/// a browser session, and this computer never holds one. The server says so
+/// on its exports (`syncable: false`), and the Private tree's top folder is
+/// parked out of scope, as a vault is on a weak volume: everything under it
+/// waits with it, nothing is downloaded or made there, nothing saved there is
+/// sent, and nothing already there is moved or removed. Said once, in one
+/// issue, and lifted when the server says it syncs again, or deletes it.
+///
+/// Only a top-level folder's own flag is read. A level is a top-level tree's
+/// promise (`DriveFolderLevel`), the feed carries one change for it, on the
+/// top folder, and the files under it are converted afterwards with none, so
+/// a file's or a subfolder's own flag is stale whichever way the tree went:
+/// read, a file seen while the tree was Private was parked on its own once
+/// the tree was Standard again, and never came down.
+fn keep_private_content_off_this_computer(env: &ExecEnv) -> Result<(), ExecError> {
+    let entries = all_entries(env)?;
+    let parked_here: std::collections::HashSet<EntityId> = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .filter(|i| i.kind == PRIVATE_NOT_SYNCED)
+        .filter_map(|i| i.entity)
+        .collect();
+    for mut entry in entries {
+        let top = entry.id.entity_type == EntityType::Folder
+            && entry.remote.parent.is_none()
+            && entry.remote_unsyncable
+            && !entry.remote_deleted;
+        let ours = parked_here.contains(&entry.id);
+        if top && !ours && !matches!(entry.status, LocalStatus::OutOfScope | LocalStatus::Unsyncable(_)) {
+            let kept = entry.synced_placement.is_some();
+            entry.status = LocalStatus::OutOfScope;
+            env.store.put_entry(&entry)?;
+            let mut said = format!(
+                "{} is a Private folder. Private files open only in a browser, where your vault \
+                 is unlocked, so they are not synced to this computer.",
+                entry.remote.name
+            );
+            if kept {
+                said.push_str(
+                    " The copy already here stays as it is and is no longer synced: changes \
+                     you make to it here are not uploaded.",
+                );
+            }
+            env.store.raise_issue(Some(entry.id), PRIVATE_NOT_SYNCED, &said, (env.now_ms)() as i64)?;
+        } else if ours && !top {
+            if entry.status == LocalStatus::OutOfScope {
+                entry.status = if entry.synced_placement.is_some() {
+                    LocalStatus::Synced
+                } else {
+                    LocalStatus::PendingDownload
+                };
+                env.store.put_entry(&entry)?;
+            }
+            for issue in env.store.open_issues()? {
+                if issue.kind == PRIVATE_NOT_SYNCED && issue.entity == Some(entry.id) {
+                    env.store.dismiss_issue(issue.issue_id)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The issues that mark a folder parked out of scope on this disk, each its
+/// own rule's mark to lift: a vault on a weak volume (D3), and a Private
+/// folder (`keep_private_content_off_this_computer`).
+const PARKS: [&str; 2] = [VAULT_ON_A_WEAK_DRIVE, PRIVATE_NOT_SYNCED];
+
+/// The folders a park holds on this disk (`PARKS`): every folder parked out
+/// of scope, and everything under it by the local tree.
+pub(crate) fn held_by_a_park(env: &ExecEnv) -> Result<std::collections::HashSet<i64>, ExecError> {
+    held_by_parks_of(env, &PARKS)
+}
+
+/// The folders a Private park holds on this disk, by the local tree.
+fn held_by_a_private_park(env: &ExecEnv) -> Result<std::collections::HashSet<i64>, ExecError> {
+    held_by_parks_of(env, &[PRIVATE_NOT_SYNCED])
+}
+
+fn held_by_parks_of(env: &ExecEnv, kinds: &[&str]) -> Result<std::collections::HashSet<i64>, ExecError> {
     let mut set: std::collections::HashSet<i64> = env
         .store
         .open_issues()?
         .into_iter()
-        .filter(|i| i.kind == VAULT_ON_A_WEAK_DRIVE)
+        .filter(|i| kinds.contains(&i.kind.as_str()))
         .filter_map(|i| i.entity)
         .filter(|id| id.entity_type == EntityType::Folder)
         .map(|id| id.server_id)
@@ -7438,6 +7536,7 @@ pub(crate) fn blank(id: EntityId, placement: &Placement) -> Entry {
         last_seen_sha: None,
         // A record never sent is minted from a file found where it is placed.
         own_file_seen_at: (id.is_provisional() && id.entity_type == EntityType::File).then(|| placement.clone()),
+        remote_unsyncable: false,
     }
 }
 
@@ -7989,4 +8088,20 @@ fn depth_for(env: &ExecEnv, entry: &Entry) -> Result<i64, ExecError> {
     Ok(relative_path(env, entry)?
         .map(|p| depth_of(&p))
         .unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An export that does not say whether a sync client may hold it (an
+    /// older server's) reads as syncable; one that says no is kept as no.
+    #[test]
+    fn an_export_that_does_not_say_is_syncable() {
+        let plain = json!({ "entity_type": "file", "id": 7, "name": "a.txt", "folder_id": null });
+        assert!(state_of(&plain).unwrap().1.syncable);
+        let mut private = plain.clone();
+        private["syncable"] = json!(false);
+        assert!(!state_of(&private).unwrap().1.syncable);
+    }
 }

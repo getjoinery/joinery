@@ -48,6 +48,11 @@ struct FolderRow {
     name: String,
     trashed: bool,
     encrypted: bool,
+    /// Private: the server holds the key wrapping and opens the bytes only
+    /// inside the owner's unlock window, which a sync client never holds.
+    /// Set on a top-level folder and its whole subtree at once
+    /// ([`MockServer::set_private`]), and inherited by a folder made inside.
+    private: bool,
 }
 
 /// One folder as the server knows it, for oracles that ask by id.
@@ -96,6 +101,10 @@ struct FileRow {
     /// The `{name, mime, size, cid, …}` blob. Opaque to the server, exactly as
     /// it is to the real one — it is stored and handed back, never inspected.
     encrypted_metadata: Option<String>,
+    /// Sealed by the server (Private): its bytes open only inside the owner's
+    /// window, so a sync client is given no link to them, and replacing them
+    /// or moving the file out of its Private folder needs the window.
+    sealed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -360,12 +369,12 @@ fn upload_incomplete(message: &'static str) -> ApiRefusal {
 
 /// A refusal the same request would get again (`standing: true`), as the
 /// platform renders every one: 422, with its data beside the message.
-fn standing(message: &'static str) -> ApiRefusal {
+fn standing(reason: &'static str, message: &'static str) -> ApiRefusal {
     ApiRefusal {
         status: 422,
         errortype: "ActionError",
         message: message.into(),
-        data: json!({ "standing": true }),
+        data: json!({ "reason": reason, "standing": true }),
     }
 }
 
@@ -831,6 +840,35 @@ impl MockServer {
 
     /// The live folder standing at this path, if any. Paths are the same
     /// slash-joined form [`tree`](Self::tree) reports.
+    /// Turn a top-level folder Private, or back to Standard, as its owner does
+    /// in a browser (`drive_level_change`): the whole subtree's promise flips
+    /// at once, its files are sealed or opened, and the feed carries one
+    /// change, on the top folder (`level_changed`), as the platform's does.
+    pub fn set_private(&self, path: &str, on: bool) {
+        let top = self.folder_id_at(path).expect("a folder at that path");
+        let mut st = self.state.lock().unwrap();
+        assert!(st.folders[&top].parent.is_none(), "only a top-level folder changes level");
+        assert!(!st.folders[&top].encrypted, "a vault is not a level this changes");
+        let mut tree = vec![top];
+        let mut i = 0;
+        while i < tree.len() {
+            let here = tree[i];
+            tree.extend(st.folders.values().filter(|f| f.parent == Some(here)).map(|f| f.id));
+            i += 1;
+        }
+        for id in &tree {
+            if let Some(f) = st.folders.get_mut(id) {
+                f.private = on;
+            }
+        }
+        for f in st.files.values_mut() {
+            if f.folder.is_some_and(|d| tree.contains(&d)) {
+                f.sealed = on;
+            }
+        }
+        Self::record(&mut st, "folder", top, "level_changed");
+    }
+
     pub fn folder_id_at(&self, path: &str) -> Option<i64> {
         let st = self.state.lock().unwrap();
         st.folders
@@ -955,6 +993,7 @@ impl MockServer {
         let id = st.next_file_id;
         st.blobs.insert(sha.clone(), bytes.to_vec());
         let change_id = Self::record(&mut st, "file", id, "created");
+        let sealed = folder.is_some_and(|d| st.folders.get(&d).is_some_and(|f| f.private));
         st.files.insert(
             id,
             FileRow {
@@ -969,6 +1008,7 @@ impl MockServer {
                 encrypted: false,
                 wrapped_file_key: None,
                 encrypted_metadata: None,
+                sealed,
             },
         );
         st.versions.push(VersionRow {
@@ -1243,6 +1283,7 @@ impl MockServer {
             .and_then(|p| st.folders.get(&p))
             .map(|f| f.encrypted)
             .unwrap_or(false);
+        let private = parent.is_some_and(|p| st.folders.get(&p).is_some_and(|f| f.private));
         st.folders.insert(
             id,
             FolderRow {
@@ -1251,6 +1292,7 @@ impl MockServer {
                 name: name.to_string(),
                 trashed: false,
                 encrypted,
+                private,
             },
         );
         id
@@ -1599,7 +1641,7 @@ impl MockServer {
                 Some(_) => {}
             }
             if st.shared_in_read_only && Self::is_shared_in(&st, "folder", p) {
-                return Err(standing("You do not have access to that folder."));
+                return Err(standing("forbidden", "You do not have access to that folder."));
             }
         }
         // A live folder of that name in that parent already exists. The real
@@ -1636,6 +1678,8 @@ impl MockServer {
                 .and_then(|p| st.folders.get(&p))
                 .map(|f| f.encrypted)
                 .unwrap_or(false),
+            // So is Private.
+            private: parent.is_some_and(|p| st.folders.get(&p).is_some_and(|f| f.private)),
         };
         st.folders.insert(id, row.clone());
         Ok(json!({ "ok": true, "folder": Self::folder_export(&row) }))
@@ -1747,7 +1791,7 @@ impl MockServer {
         let mut st = self.state.lock().unwrap();
         // The top level is the owner's.
         if dest.is_none() && Self::is_shared_in(&st, t, id) {
-            return Err(standing("Only the owner can move this to the top of their Drive."));
+            return Err(standing("forbidden", "Only the owner can move this to the top of their Drive."));
         }
         if let Some(d) = dest {
             match st.folders.get(&d) {
@@ -1777,6 +1821,19 @@ impl MockServer {
         };
         if item_encrypted != dest_encrypted {
             return Err(protection_boundary(t, dest));
+        }
+        let dest_private = dest.and_then(|d| st.folders.get(&d)).is_some_and(|f| f.private);
+        if t == "folder" {
+            if st.folders.get(&id).is_some_and(|f| f.private) != dest_private {
+                return Err(ApiRefusal {
+                    status: 422,
+                    errortype: "ActionError",
+                    message: "Change the folder's protection level first, then move it.".into(),
+                    data: json!({ "reason": "level_change_refused", "standing": true }),
+                });
+            }
+        } else if st.files.get(&id).is_some_and(|f| f.sealed) && !dest_private {
+            return Err(refused("vault_needed", "Unlock your vault to move a Private file out of its folder."));
         }
 
         // Something of that name is already living there. The real server
@@ -1830,7 +1887,12 @@ impl MockServer {
             Self::record(&mut st, "folder", id, "moved");
         } else {
             match st.files.get_mut(&id) {
-                Some(f) => f.folder = dest,
+                Some(f) => {
+                    f.folder = dest;
+                    // Sealed on its way into a Private folder, with the
+                    // owner's public key alone.
+                    f.sealed = dest_private;
+                }
                 None => return Err(refused("not_found", "That file does not exist.")),
             }
             Self::record(&mut st, "file", id, "moved");
@@ -1843,7 +1905,7 @@ impl MockServer {
         let mut st = self.state.lock().unwrap();
         // Trash is owner-only; an editor's grant never confers it.
         if Self::is_shared_in(&st, t, id) {
-            return Err(standing("You do not have permission to delete this item."));
+            return Err(standing("forbidden", "You do not have permission to delete this item."));
         }
         // The platform refuses a trash when something it would take changed
         // after the cursor the client sent (`specs/drive_trash_unchanged_since.md`):
@@ -2090,14 +2152,14 @@ impl MockServer {
             None => folder.is_some_and(|f| Self::is_shared_in(&st, "folder", f)),
         };
         if st.shared_in_read_only && into_shared {
-            return Err(standing("You do not have access to that folder."));
+            return Err(standing("forbidden", "You do not have access to that folder."));
         }
         // The platform refuses at init, before a byte moves, and asks again at
         // completion only for uploads that raced each other past it.
         if let Some(quota) = st.quota_bytes {
             let used: u64 = st.blobs.values().map(|b| b.len() as u64).sum();
             if size != u64::MAX && used + size > quota {
-                return Err(standing("That upload would exceed the storage quota."));
+                return Err(standing("quota", "That upload would exceed the storage quota."));
             }
         }
         // Whether this upload is encrypted is the DESTINATION's property, never
@@ -2269,6 +2331,12 @@ impl MockServer {
                 st.uploads.remove(&token);
                 return Err(file_trashed(id));
             }
+            // Sealed under the file's existing key, which only the owner's
+            // window opens; the pending upload is kept for a retry made
+            // inside it, as the platform keeps it.
+            if st.files.get(&id).is_some_and(|f| f.sealed) {
+                return Err(refused("vault_needed", "Unlock your vault to replace the contents of a Private file."));
+            }
         }
         // Checked whenever one was declared, encrypted or not, exactly as
         // `drive_upload_complete_logic` checks `fup_expected_sha256`. Skipping
@@ -2286,7 +2354,7 @@ impl MockServer {
             let used: u64 = st.blobs.values().map(|b| b.len() as u64).sum();
             if used + session.expected > quota {
                 st.uploads.remove(&token);
-                return Err(standing("That upload would exceed the storage quota."));
+                return Err(standing("quota", "That upload would exceed the storage quota."));
             }
         }
 
@@ -2509,6 +2577,7 @@ impl MockServer {
             "created"
         };
         let change_id = Self::record(st, "file", id, kind);
+        let sealed_here = folder.is_some_and(|d| st.folders.get(&d).is_some_and(|f| f.private));
         match st.files.get_mut(&id) {
             Some(f) => {
                 f.sha256 = sha.to_string();
@@ -2538,6 +2607,7 @@ impl MockServer {
                         encrypted,
                         wrapped_file_key: wrapped_key,
                         encrypted_metadata: enc_metadata,
+                        sealed: sealed_here,
                     },
                 );
             }
@@ -2563,7 +2633,21 @@ impl MockServer {
             "parent_id": f.parent,
             "deleted": f.trashed,
             "encrypted": f.encrypted,
+            "protection_level": Self::level_of(f.encrypted, f.private),
+            // A sync client skips a Private subtree: it could never open the
+            // bytes (docs/drive.md).
+            "syncable": !f.private,
         })
+    }
+
+    fn level_of(encrypted: bool, private: bool) -> &'static str {
+        if encrypted {
+            "fortress"
+        } else if private {
+            "private"
+        } else {
+            "standard"
+        }
     }
 
     /// `now_ms` stamps any URL this mints, so the link ages with the simulated
@@ -2588,7 +2672,15 @@ impl MockServer {
         out.insert("content_sha256".into(), json!(f.sha256));
         out.insert("modified_time".into(), json!(f.modified_time));
         out.insert("head_change_id".into(), json!(f.head_change_id));
-        let url = if with_urls {
+        out.insert("protection_level".into(), json!(Self::level_of(f.encrypted, f.sealed)));
+        out.insert("syncable".into(), json!(!f.sealed));
+        if f.sealed {
+            // The bytes open only in the owner's window, on a browser session:
+            // a sync client is told so and given no link, as the platform
+            // gives an API caller none (`DriveHelper::export_file`).
+            out.insert("requires_window".into(), json!(true));
+        }
+        let url = if with_urls && !f.sealed {
             st.next_url += 1;
             let u = format!("/sim/download/{}", st.next_url);
             st.signed.insert(
