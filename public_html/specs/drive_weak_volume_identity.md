@@ -587,6 +587,24 @@ the engine has one bool.
   binding, or a heuristic)? Only if layer 2 is built.
 - **F4:** On Windows FAT, does tunnelling fire for a swap through a temporary
   name, as documented? **Yes, on FAT32 and exFAT (traced 2026-09-28).**
+- **F5:** Do a FAT drive's DIRECTORIES keep their ids, where its files do
+  not? **On macOS, yes, for FAT32 and exFAT alike; on Linux, no (traced
+  2026-10-14, `hdiutil` images on the Mac mini, a loop-mounted vfat image on
+  Linux).**
+  - **macOS 15, FAT32 and exFAT:** a directory's id is its first cluster. It
+    survives a rename to a much longer name, a move into another folder,
+    growth to 400 entries and a remount. A directory made at a name another
+    left gets a new id. Within one mount a freed id is not handed out again
+    (allocation runs forward); after a remount the next directories made take
+    the lowest freed ids first, so an id alone can name a deleted directory.
+    Births are reported (F2): whole seconds on FAT32, 10 ms on exFAT, kept
+    through a rename and a remount. The id and the birth together name one
+    directory: reuse needs a remount, and the birth then differs.
+  - **Linux, vfat:** directory ids survive a rename and a move within one
+    mount and are all new after a remount, as file ids are (F1). No use.
+  - **Windows:** not traced for directories; file ids there are a directory
+    entry's position (F1), and directories are read the same way until a
+    trace says otherwise.
 
 Disk images can answer F1, F2 and F4 without a physical stick: a loop-mounted
 vfat/exfat image on Linux (needs root to mount), `hdiutil` on the Mac mini, a
@@ -689,6 +707,47 @@ FAT-formatted VHD on the Windows VM.
   with it under its own name, whatever it holds: its parent's whole set
   already took its files in. Everything else keeps the reading above, and
   the standing notice names what that leaves.
+- **D-FAT9 (owner, 2026-10-14: B): on a Mac, a FAT or exFAT drive's folders
+  are known by their own identity.** Found on the FAT soak line (runs 9 and
+  11): the user renamed a folder and then saved into it through its old name,
+  which made a new directory there. With no directory ids the folder was not
+  gone, so the follow by bytes above never ran; the record stayed on the
+  rebuilt directory, every file read as moved into a new folder, and a peer's
+  rename of the same folder went to the rebuilt one, carrying the peer's
+  files out of the folder its user had put them in. The two readings (renamed
+  and remade at the old name, or every file moved out) cannot be told apart
+  by contents, and each guess fails the other case. F5 says a Mac's FAT and
+  exFAT directories tell them apart without a guess. So there
+  (`Personality::fat_directories_hold`) the folder scan reads each
+  directory's id and birth into a map of its own, folder records learn them
+  as on a strong volume, and before any reading by bytes a folder whose old
+  name holds a directory no folder record knows, while its own directory
+  stands, by both, at a directory no other folder holds, is followed there;
+  the directory at its old name is a new folder. Never a vault, never into
+  or out of a vault's directory or a park, never into its own subtree. A
+  plain rename (the old name gone) and a rotation of folders through a
+  scratch name (every old name holding another folder's directory) stay the
+  follow by bytes' to read. No other rule matches by those ids: the
+  strong-volume folder rules corroborate a directory's id with its files'
+  ids, which such a disk has not, so `Vfs::directory_id` still reports 0
+  there. The forget of a directory the disk shows reborn
+  (`forget_directories_the_disk_has_reborn`) keeps reading that zero map, and
+  stops at its own gate besides: handed the pairs, it would forget the one a
+  record holds at its remade old name, which is the pair the follow goes by.
+  A folder record knowing its directory does let the scan note where
+  a followed folder stands until its move lands (`note_where_folders_stand`),
+  as on a strong volume, for a follow by bytes as for one by identity. Two wider
+  cuts failed the sweep's Mac mode. Showing the ids to every reader
+  livelocked three seeds (a folder followed into a parked vault waited for a
+  replacement that never lands; a create was refused for a parked vault's
+  directory). Following every folder whose directory moved read one
+  rotation two ways on two devices, one following a folder the other read
+  as deleted, and a file moved between them waited for ever. Files stay
+  positional, and on Linux and Windows nothing changes (C). Built
+  2026-10-14 and reviewed VALID (reviewer1): pins 9854 to 9856, each red
+  under its knockout; the sweep's Mac mode changes 20 journals, each traced
+  to this rule; the Mac FAT soak line's runs are in the live verification
+  queue.
 
 ## D3 as built behaviour (proposed 2026-09-28; revised with a5's B5, 2026-09-29; built in scratch wf5 2026-09-29)
 

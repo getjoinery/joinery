@@ -175,7 +175,7 @@ include_internal: bool,
             fingerprint: match kind {
                 EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
                 EntryKind::Directory => {
-                    Some(personality.seen(Fingerprint::of_directory(directory_id_of(&entry.path(), &md), birth_of(&md))))
+                    Some(personality.seen_directory(Fingerprint::of_directory(directory_id_of(&entry.path(), &md), birth_of(&md))))
                 }
                 _ => None,
             },
@@ -403,6 +403,22 @@ pub(crate) fn id_tie_break_on_this_volume(dir: &Path) -> crate::personality::IdT
 #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
 pub(crate) fn id_tie_break_on_this_volume(_dir: &Path) -> crate::personality::IdTieBreak {
     crate::personality::IdTieBreak::None
+}
+
+/// Do this FAT or exFAT volume's directories keep their ids (F5)? On macOS,
+/// for FAT32 and exFAT alike: a directory's id is its first cluster, measured
+/// on macOS 15 to survive a rename, a move, growth and a remount, while a new
+/// directory at a name another left gets a new one. Linux renumbers every
+/// directory at a mount, as it does every file, and Windows numbers one by its
+/// entry's position.
+#[cfg(target_os = "macos")]
+pub(crate) fn fat_directories_hold_on_this_volume(dir: &Path) -> bool {
+    ids_are_positions_on_this_volume(dir)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn fat_directories_hold_on_this_volume(_dir: &Path) -> bool {
+    false
 }
 
 /// The filesystem's name for the volume holding `dir`, or None unanswered.
@@ -1047,7 +1063,7 @@ fn folder_on_disk(path: &Path) -> VfsResult<()> {
 fn directory_identity_at(path: &Path, personality: &Personality) -> VfsResult<Option<crate::FileIdentity>> {
     match path.symlink_metadata() {
         Ok(md) if md.is_dir() && !md.file_type().is_symlink() => Ok(Some(
-            personality.seen_identity(crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }),
+            personality.seen_directory_identity(crate::FileIdentity { file_id: directory_id_of(path, &md), birth_ns: birth_of(&md) }),
         )),
         Ok(_) => Ok(None),
         Err(e) if not_there(&e) => Ok(None),

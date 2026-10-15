@@ -78,6 +78,20 @@ pub struct Personality {
     /// one (`specs/drive_weak_volume_identity.md`, B1 and B1a). Implies
     /// `stable_file_identity` is false.
     pub positional_file_ids: bool,
+    /// On a volume whose file ids are positions, does a DIRECTORY keep one
+    /// identity for as long as it exists? True on macOS FAT32 and exFAT,
+    /// named by the filesystem type: there a directory's id is its first
+    /// cluster, kept through a rename, a move into another folder, growth and
+    /// a remount, and a directory made at a name another left gets a new one.
+    /// A freed cluster is handed out again after a remount, so the id alone
+    /// names nothing; the birth beside it does, as on a strong volume. False
+    /// on Linux FAT and exFAT, whose directory ids are renumbered at every
+    /// mount, and on Windows, whose are a directory entry's position. Where
+    /// it is true a listing and `Vfs::directory_identity` show directories'
+    /// ids and births while files stay positional, and `Vfs::directory_id`
+    /// still reports 0, so nothing that matches by a bare id reads one
+    /// (`specs/drive_weak_volume_identity.md`, F5).
+    pub fat_directories_hold: bool,
     /// On a volume whose ids are no identity (`positional_file_ids`), may an
     /// id still break a tie between files the bytes cannot tell apart? Never
     /// identity, and never read by anything that reads identity: only a
@@ -162,6 +176,7 @@ impl Personality {
             mtime_granularity_ns: 1,
             stable_file_identity: true,
             positional_file_ids: false,
+            fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: false,
         }
@@ -196,6 +211,7 @@ impl Personality {
             mtime_granularity_ns: 1,
             stable_file_identity: true,
             positional_file_ids: false,
+            fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: false,
         }
@@ -235,6 +251,7 @@ impl Personality {
             mtime_granularity_ns: 100,
             stable_file_identity: true,
             positional_file_ids: false,
+            fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: true,
         }
@@ -287,6 +304,7 @@ impl Personality {
             // guess is none, which costs only the older rules.
             p.stable_file_identity = false;
             p.positional_file_ids = crate::real::ids_are_positions_on_this_volume(dir);
+            p.fat_directories_hold = p.positional_file_ids && crate::real::fat_directories_hold_on_this_volume(dir);
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
             p.births_are_names = crate::real::births_are_names_on_this_volume(dir);
             return p;
@@ -362,6 +380,7 @@ impl Personality {
             p.positional_file_ids = true;
             p.stable_file_identity = false;
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
+            p.fat_directories_hold = crate::real::fat_directories_hold_on_this_volume(dir);
         }
 
         // Named, never probed: the rename above lands on a name nothing left,
@@ -380,6 +399,26 @@ impl Personality {
             crate::Fingerprint { file_id: 0, birth_ns: 0, ..fp }
         } else {
             crate::Fingerprint { birth_ns: birth_as_seen(fp.birth_ns, self.births_are_names), ..fp }
+        }
+    }
+
+    /// A directory's fingerprint as the engine is shown it: as any file's
+    /// (`seen`), except on a FAT volume whose directories hold, where the
+    /// directory's id and birth are shown (`fat_directories_hold`).
+    pub fn seen_directory(&self, fp: crate::Fingerprint) -> crate::Fingerprint {
+        if self.positional_file_ids && self.fat_directories_hold {
+            crate::Fingerprint { birth_ns: birth_as_seen(fp.birth_ns, self.births_are_names), ..fp }
+        } else {
+            self.seen(fp)
+        }
+    }
+
+    /// A directory's identity as the engine is shown it (`seen_directory`).
+    pub fn seen_directory_identity(&self, id: crate::FileIdentity) -> crate::FileIdentity {
+        if self.positional_file_ids && self.fat_directories_hold {
+            crate::FileIdentity { birth_ns: birth_as_seen(id.birth_ns, self.births_are_names), ..id }
+        } else {
+            self.seen_identity(id)
         }
     }
 

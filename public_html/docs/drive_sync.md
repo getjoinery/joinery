@@ -98,7 +98,9 @@ the file to another record.
   names may get their histories mixed up, each such pair named when it
   happens, and a renamed folder that holds fewer than two files, or whose
   files were being moved or changed at the same time, may be read as deleted,
-  its copy on the server going to the trash.
+  its copy on the server going to the trash. On a Mac, whose FAT and exFAT
+  drives keep each folder's identity (below), the notice names the files
+  alone.
 - **The scan pairs by identity first** on a strong volume: a record's own file
   is that record's wherever it stands, and the path decides only for a file no
   record owns. A weak volume pairs path-first. Where a record's file stands
@@ -168,15 +170,25 @@ follows takes that directory as the vault's own.
   files point to one new directory while its id stands at another is held,
   present and unmoved: the issues panel names both places, and the hold lifts
   when the directory is back at the folder's own path or gone.
-- **No ids at all** (FAT and exFAT, whose ids are positions). A folder gone
+- **No ids at all** (FAT and exFAT, whose ids are positions). On a Mac a FAT or
+  exFAT drive keeps each folder's own identity, its first cluster and its
+  birth, which a rename, a move and a remount keep
+  (`Personality::fat_directories_hold`), while its files' ids are positions as
+  on any FAT drive. There a folder whose old name holds a new directory, one no
+  folder record knows, while its own directory stands, by id and birth, at a
+  directory no other folder holds, is that folder renamed: the user renamed it
+  and then saved through its old name. Never a vault, never into or out of a
+  vault's directory or a park, and only where the id and birth stand once (a
+  freed cluster comes back after a remount, never with its birth). No other
+  rule matches by those ids. Otherwise, and on Linux and Windows, a folder gone
   from its path is found by its files' bytes: the one new directory holding
   every file the folder has, at least two, each at its place inside the folder
   and with the bytes the engine last saw, is the folder renamed, so long as no
   other gone folder fits that directory and it holds no sealed file. A folder
   inside it goes with it under its own name, whatever it holds. Anything else
   (a folder of one file or none, one whose files were moved or changed in the
-  same breath, two folders that fit one directory, a vault) is read as
-  deleted, its copy on the server going to the trash.
+  same breath, two folders that fit one directory, a vault) is read as deleted,
+  its copy on the server going to the trash.
 
 ---
 

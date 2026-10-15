@@ -391,7 +391,12 @@ pub fn run_pass(
     // the loop below can treat it like any other entry. Folders first: a new
     // file inside a new folder cannot say where it lives until the folder has
     // one.
-    let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births) = observed_dirs_and_tie_breaks(env)?;
+    let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births, fat_dirs) = observed_dirs_and_tie_breaks(env)?;
+    // On a Mac FAT disk this reads the zero map, and returns at its
+    // `stable_file_identity` gate besides: the pairs live in `fat_dirs`
+    // alone. Keep both so. The pair a record holds at its remade old name,
+    // forgotten here, is the pair `detect_folder_moves` follows the folder by
+    // (B-FAT9, pin 9856).
     forget_directories_the_disk_has_reborn(env, &dir_identity, &dir_births)?;
     let mut folder_ids = folder_paths(env, Some(&dir_identity))?;
     // What each folder record says its own path is, before this pass moves
@@ -430,6 +435,7 @@ pub fn run_pass(
         &dirs_on_disk,
         &dir_identity,
         &dir_births,
+        &fat_dirs,
         &mut folder_ids,
         &followed,
         &traded_with_a_vault,
@@ -549,7 +555,8 @@ pub fn run_pass(
             .get(dir)
             .copied()
             .filter(|id| *id != 0)
-            .map(|id| jd_vfs::Fingerprint::of_directory(id, dir_births.get(dir).copied().unwrap_or(0)));
+            .map(|id| jd_vfs::Fingerprint::of_directory(id, dir_births.get(dir).copied().unwrap_or(0)))
+            .or_else(|| fat_dirs.get(dir).map(|(id, birth)| jd_vfs::Fingerprint::of_directory(*id, *birth)));
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
         // A folder made inside a vault this device cannot open waits for a
         // key, exactly as a file made there does (below). Pushed instead, it
@@ -571,6 +578,13 @@ pub fn run_pass(
     let mut folders = folders;
     folders.place_deferred(env, &folder_ids)?;
     record_directory_identities(env, &agreed_paths, &dir_identity, &dir_births)?;
+    // And on a FAT disk whose directories hold, by theirs: what the FAT
+    // follow by identity reads (`FatDirectories`).
+    if !fat_dirs.is_empty() {
+        let ids: HashMap<String, u64> = fat_dirs.iter().map(|(p, (id, _))| (p.clone(), *id)).collect();
+        let births: HashMap<String, u64> = fat_dirs.iter().map(|(p, (_, b))| (p.clone(), *b)).collect();
+        record_directory_identities(env, &agreed_paths, &ids, &births)?;
+    }
     note_where_folders_stand(env, &folder_ids)?;
     // Sealed files this scan finds outside every vault while the server keeps
     // them in one: held from this pass on, and their names in the vault are
@@ -3005,7 +3019,7 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
 /// on this disk is a fact about the disk, and a parked folder's directory
 /// stands as surely as any other.
 pub(crate) fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<String, u64>), ExecError> {
-    let (out, identity, _, _) = observed_dirs_and_tie_breaks(env)?;
+    let (out, identity, _, _, _) = observed_dirs_and_tie_breaks(env)?;
     Ok((out, identity))
 }
 
@@ -3013,16 +3027,26 @@ pub(crate) fn observed_dirs(env: &ExecEnv) -> Result<(Vec<String>, HashMap<Strin
 /// where the volume's ids may break a tie, and each directory's birth where
 /// the volume reports one (absent where it does not).
 #[allow(clippy::type_complexity)]
+/// Each directory's id and birth on a FAT disk whose directories hold
+/// (`Personality::fat_directories_hold`), by path, for the one rule that
+/// reads them (`detect_folder_moves`, the FAT follow by identity). Never in
+/// the identity map: everything else that reads a directory's id reads it
+/// as a strong volume's, beside its files' ids, which such a disk has not.
+pub(crate) type FatDirectories = HashMap<String, (u64, u64)>;
+
 pub(crate) fn observed_dirs_and_tie_breaks(
     env: &ExecEnv,
-) -> Result<(Vec<String>, HashMap<String, u64>, HashMap<String, u64>, HashMap<String, u64>), ExecError> {
+) -> Result<(Vec<String>, HashMap<String, u64>, HashMap<String, u64>, HashMap<String, u64>, FatDirectories), ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok((Vec::new(), HashMap::new(), HashMap::new(), HashMap::new()));
+        return Ok((Vec::new(), HashMap::new(), HashMap::new(), HashMap::new(), HashMap::new()));
     };
+    let personality = env.vfs.personality();
+    let fat_held = personality.positional_file_ids && personality.fat_directories_hold;
     let mut out = Vec::new();
     let mut identity = HashMap::new();
     let mut tie_breaks = HashMap::new();
     let mut births = HashMap::new();
+    let mut fat: FatDirectories = HashMap::new();
     let mut queue = vec![(root, String::new())];
     let mut guard = 0;
     while let Some((dir, rel)) = queue.pop() {
@@ -3039,9 +3063,16 @@ pub(crate) fn observed_dirs_and_tie_breaks(
             } else {
                 format!("{rel}/{}", child.name)
             };
-            identity.insert(path.clone(), child.fingerprint.map(|fp| fp.file_id).unwrap_or(0));
-            if let Some(birth) = child.fingerprint.map(|fp| fp.birth_ns).filter(|b| *b != 0) {
-                births.insert(path.clone(), birth);
+            if fat_held {
+                identity.insert(path.clone(), 0);
+                if let Some(fp) = child.fingerprint.filter(|fp| fp.file_id != 0 && fp.birth_ns != 0) {
+                    fat.insert(path.clone(), (fp.file_id, fp.birth_ns));
+                }
+            } else {
+                identity.insert(path.clone(), child.fingerprint.map(|fp| fp.file_id).unwrap_or(0));
+                if let Some(birth) = child.fingerprint.map(|fp| fp.birth_ns).filter(|b| *b != 0) {
+                    births.insert(path.clone(), birth);
+                }
             }
             if child.tie_break_id != 0 {
                 tie_breaks.insert(path.clone(), child.tie_break_id);
@@ -3058,7 +3089,7 @@ pub(crate) fn observed_dirs_and_tie_breaks(
     // Shallowest first, so a parent always has an identity before its children
     // need one.
     out.sort_by_key(|p| (depth_of(p), p.clone()));
-    Ok((out, identity, tie_breaks, births))
+    Ok((out, identity, tie_breaks, births, fat))
 }
 
 /// A folder record forgets a directory the disk shows reborn: its id
@@ -3478,20 +3509,29 @@ const RENAMES_UNTRACKED_TEXT: &str = "This drive is formatted FAT or exFAT, whic
      being moved or changed at the same time, may be read as deleted, sending its copy on the server \
      to the trash, where it can be restored. For important work, use the computer's own drive.";
 
+/// The same notice where the drive's folders keep track of themselves
+/// (`fat_directories_hold`): only files lose track of a rename there.
+const FILE_RENAMES_UNTRACKED_TEXT: &str = "This drive is formatted FAT or exFAT, which cannot keep track of files \
+     when they are renamed. Syncing still works, but files with identical contents that swap names may \
+     get their version histories mixed up (you will be told which files each time). For important work, \
+     use the computer's own drive.";
+
 /// Raised per pair when it happens (`say_where_two_files_may_have_swapped`).
 pub(crate) const NAMES_MAY_HAVE_SWAPPED: &str = "names_may_have_swapped";
 
 fn say_whether_renames_can_be_tracked(env: &ExecEnv) -> Result<(), ExecError> {
-    let untracked = env.vfs.personality().positional_file_ids;
+    let personality = env.vfs.personality();
+    let untracked = personality.positional_file_ids;
+    let text = if personality.fat_directories_hold { FILE_RENAMES_UNTRACKED_TEXT } else { RENAMES_UNTRACKED_TEXT };
     let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == RENAMES_UNTRACKED).collect();
-    let current = open.iter().any(|i| i.detail == RENAMES_UNTRACKED_TEXT);
+    let current = open.iter().any(|i| i.detail == text);
     for issue in &open {
-        if !untracked || issue.detail != RENAMES_UNTRACKED_TEXT {
+        if !untracked || issue.detail != text {
             env.store.dismiss_issue(issue.issue_id)?;
         }
     }
     if untracked && !current {
-        env.store.raise_issue(None, RENAMES_UNTRACKED, RENAMES_UNTRACKED_TEXT, (env.now_ms)() as i64)?;
+        env.store.raise_issue(None, RENAMES_UNTRACKED, text, (env.now_ms)() as i64)?;
     }
     Ok(())
 }
@@ -4627,6 +4667,7 @@ fn detect_folder_moves(
     dirs_on_disk: &[String],
     dir_identity: &HashMap<String, u64>,
     dir_births: &HashMap<String, u64>,
+    fat_dirs: &FatDirectories,
     folder_ids: &mut HashMap<String, i64>,
     followed: &std::collections::HashSet<EntityId>,
     traded_with_a_vault: &[(EntityId, String)],
@@ -5259,7 +5300,70 @@ fn detect_folder_moves(
             contested.push((path.clone(), *id));
         }
     }
-    if missing.is_empty() && displaced.is_empty() && contested.is_empty() {
+    // On a FAT disk whose directories hold (macOS FAT32 and exFAT), a
+    // folder's own directory, known by its id and birth, standing at a
+    // directory no record holds, is the folder renamed or moved -- whatever
+    // its files did, and whatever now stands at its old name. Read by bytes
+    // alone, a folder the user renamed and then saved into through its old
+    // name was not gone, the record stayed on the rebuilt directory, every
+    // file read as moved into a new folder, and a peer's rename of the same
+    // folder went to the rebuilt one, carrying the peer's files out of the
+    // folder its user had put them in (FAT soak runs 9 and 11). A deleted
+    // directory's id can come back after a remount, never with its birth.
+    // Never a vault, which such a disk parks (D3), never into or out of a
+    // vault's directory or a park (a folder followed into a parked vault
+    // waited there for a replacement that never lands), never into its own
+    // subtree, never onto a path another record holds, and only where the
+    // pair stands once. Only where the folder's old name holds a directory
+    // no folder record knows -- the one made through the old name -- which
+    // is what the follow by bytes cannot read. A plain rename, its old name
+    // gone, stays the follow by bytes' to read, and so does a rotation of
+    // folders through a scratch name, every old name holding another
+    // folder's directory: read by identity there, the devices of one
+    // account read one rotation two ways, one following a folder the other
+    // read as deleted, and a file moved between them waited for ever.
+    let fat_moves: Vec<(String, EntityId, String)> = if fat_dirs.is_empty() {
+        Vec::new()
+    } else {
+        let mut unfollowed = standing_parks(env)?;
+        unfollowed.extend(park_directories(env)?.into_iter().map(|(dir, _)| dir));
+        unfollowed.extend(vault_directories(env)?.into_iter().map(|(dir, _)| dir));
+        let mut at_pair: HashMap<(u64, u64), Vec<&String>> = HashMap::new();
+        for (path, pair) in fat_dirs {
+            at_pair.entry(*pair).or_default().push(path);
+        }
+        // Any folder record's, tracked or not: a parked vault's directory is
+        // not new because its record is held out of the scan.
+        let known: std::collections::HashSet<u64> = all_entries(env)?
+            .iter()
+            .filter(|e| e.id.entity_type == EntityType::Folder)
+            .filter_map(|e| e.synced_fingerprint.map(|fp| fp.file_id).filter(|id| *id != 0))
+            .collect();
+        let mut out = Vec::new();
+        for (old, id) in &tracked {
+            if encrypted.contains(id) || under_one_of(&unfollowed, old) {
+                continue;
+            }
+            let Some((here, _)) = fat_dirs.get(old) else { continue };
+            if known.contains(here) {
+                continue;
+            }
+            let (Some(rid), Some(rbirth)) = (record_identity.get(id), record_birth.get(id)) else { continue };
+            let Some([at]) = at_pair.get(&(*rid, *rbirth)).map(|v| v.as_slice()) else { continue };
+            if *at == old
+                || at.starts_with(&format!("{old}/"))
+                || under_one_of(&unfollowed, at)
+                || tracked.contains_key(*at)
+                || at.split('/').any(jd_vfs::is_internal)
+            {
+                continue;
+            }
+            out.push((old.clone(), *id, (*at).clone()));
+        }
+        out.sort_by_key(|(_, _, at)| (depth_of(at), at.clone()));
+        out
+    };
+    if missing.is_empty() && displaced.is_empty() && contested.is_empty() && fat_moves.is_empty() {
         return Ok(scan);
     }
     // Every file this disk holds, by its identity on the volume. Used only to
@@ -5335,6 +5439,43 @@ fn detect_folder_moves(
         .collect();
     candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
     let mut taken: std::collections::HashSet<&String> = std::collections::HashSet::new();
+
+    // The FAT follow by identity (`fat_moves`, above), before any reading by
+    // contents: the folder is where its own directory went, and the
+    // directory at its old name, freed, is a candidate like any other -- a
+    // new folder, unless another gone folder's files say it is theirs.
+    for (old, id, at) in &fat_moves {
+        let Some(at) = dirs_on_disk.iter().find(|d| *d == at) else { continue };
+        if claimed.contains(id) || taken.contains(at) || scan.held.contains(at.as_str()) {
+            continue;
+        }
+        claimed.push(*id);
+        taken.insert(at);
+        scan.present.insert(*id);
+        if folder_ids.get(old) == Some(&id.server_id) {
+            folder_ids.remove(old);
+            if let Some(dir) = dirs_on_disk.iter().find(|d| *d == old) {
+                if !candidates.contains(&dir) && !taken.contains(dir) && !scan.held.contains(dir.as_str()) {
+                    candidates.push(dir);
+                }
+            }
+        }
+        folder_ids.insert(at.clone(), id.server_id);
+        match placement_of(at, folder_ids) {
+            Some(placement) => {
+                let unchanged = env
+                    .store
+                    .get_entry(*id)?
+                    .and_then(|e| e.synced_placement.clone())
+                    .is_some_and(|p| p == placement);
+                if !unchanged {
+                    scan.moves.insert(*id, placement);
+                }
+            }
+            None => scan.deferred.push((*id, at.clone())),
+        }
+    }
+    candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
 
     // A plain folder that traded names with a parked vault the pass followed
     // by its contents (`follow_parked_vaults_by_their_contents`): it stands

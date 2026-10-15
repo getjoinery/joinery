@@ -163,6 +163,18 @@ struct MemFsState {
     reuse_file_ids: bool,
     /// What an id means on this disk. See [`FileIds`].
     file_id_model: FileIds,
+    /// On a FAT model: do directories keep their ids, as on macOS FAT32 and
+    /// exFAT (`Personality::fat_directories_hold`)? A directory's id then
+    /// survives a rename, a move and a remount, and after a remount a freed
+    /// one is handed to the next directory made, lowest first, as macOS
+    /// allocates clusters again from the start of the volume.
+    fat_directories_hold: bool,
+    /// The ids directories hold under `fat_directories_hold`, and those freed.
+    dir_ids: std::collections::HashSet<u64>,
+    freed_dir_ids: BTreeSet<u64>,
+    /// Set by a remount under `fat_directories_hold`: freed directory ids are
+    /// taken again from here on.
+    dir_ids_first_fit: bool,
     /// Under `DirectorySlot`: the entry slots freed in each directory, by
     /// the directory's key, taken again lowest first.
     free_slots: BTreeMap<String, BTreeSet<u64>>,
@@ -420,6 +432,10 @@ impl MemFs {
                 freed_ids: Vec::new(),
                 reuse_file_ids: false,
                 file_id_model: FileIds::Stable,
+                fat_directories_hold: false,
+                dir_ids: std::collections::HashSet::new(),
+                freed_dir_ids: BTreeSet::new(),
+                dir_ids_first_fit: false,
                 free_slots: BTreeMap::new(),
                 vacated: BTreeMap::new(),
                 births_are_names: personality.births_are_names,
@@ -600,21 +616,38 @@ impl MemFs {
     /// Number files the way a FAT or exFAT volume does on one system. Set
     /// before anything is written; `reuse_file_ids` no longer applies.
     pub fn file_ids(&self, model: FileIds) {
-        self.state.lock().unwrap().file_id_model = model;
+        let mut st = self.state.lock().unwrap();
+        st.file_id_model = model;
+        // macOS FAT32's directories keep their clusters (F5).
+        st.fat_directories_hold = model == FileIds::DataCluster;
+    }
+
+    /// Say whether this FAT model's directories keep their ids
+    /// (`Personality::fat_directories_hold`): on by default for `DataCluster`
+    /// (macOS FAT32), off for the rest; on for `MountSession`, it is macOS
+    /// exFAT, whose files are renumbered at a mount and whose directories are
+    /// not. Set after `file_ids`, before anything is written.
+    pub fn fat_directories_hold(&self, on: bool) {
+        self.state.lock().unwrap().fat_directories_hold = on;
     }
 
     /// The volume unplugged and plugged in again, between passes. What that
-    /// does to ids depends on the volume: every id new (`MountSession`), the
-    /// temporary ids of empty files new (`DataCluster`), nothing (the rest).
-    /// Births are the disk's own and survive it.
+    /// does to ids depends on the volume: every id new (`MountSession`, but a
+    /// directory's where `fat_directories_hold`), the temporary ids of empty
+    /// files new (`DataCluster`), nothing (the rest). Births are the disk's
+    /// own and survive it. Where directories hold, a freed directory id is
+    /// handed out again from here on.
     pub fn remount(&self) {
         let mut st = self.state.lock().unwrap();
         // Nothing watched the stick while it was out.
         st.watch_lost = true;
         let keys: Vec<String> = st.file_ids.keys().filter(|k| !k.is_empty()).cloned().collect();
+        if st.fat_directories_hold {
+            st.dir_ids_first_fit = true;
+        }
         for k in keys {
             let renew = match st.file_id_model {
-                FileIds::MountSession => true,
+                FileIds::MountSession => !(st.fat_directories_hold && matches!(st.nodes.get(&k), Some(Node::Dir))),
                 FileIds::DataCluster => matches!(st.nodes.get(&k), Some(Node::File { bytes, .. }) if bytes.is_empty()),
                 FileIds::Stable | FileIds::DirectorySlot => false,
             };
@@ -1452,7 +1485,11 @@ impl MemFs {
             FileIds::DirectorySlot => {
                 st.free_slots.entry(Self::parent_key(key).to_string()).or_default().insert(id);
             }
-            FileIds::DataCluster | FileIds::MountSession => {}
+            FileIds::DataCluster | FileIds::MountSession => {
+                if st.fat_directories_hold && st.dir_ids.remove(&id) {
+                    st.freed_dir_ids.insert(id);
+                }
+            }
         }
     }
 
@@ -1547,8 +1584,15 @@ impl MemFs {
             FileIds::Stable => Self::alloc_id(st),
             FileIds::DirectorySlot => Self::slot_id(st, key),
             FileIds::DataCluster | FileIds::MountSession => {
-                st.next_file_id += 1;
-                st.next_file_id
+                let reused = if st.dir_ids_first_fit { st.freed_dir_ids.pop_first() } else { None };
+                let id = reused.unwrap_or_else(|| {
+                    st.next_file_id += 1;
+                    st.next_file_id
+                });
+                if st.fat_directories_hold {
+                    st.dir_ids.insert(id);
+                }
+                id
             }
         };
         st.file_ids.insert(key.to_string(), id);
@@ -1676,7 +1720,7 @@ impl MemFs {
     }
 
     fn directory_id_of(st: &MemFsState, key: &str) -> u64 {
-        if st.directory_ids_unreadable || st.file_id_model != FileIds::Stable {
+        if st.directory_ids_unreadable || (st.file_id_model != FileIds::Stable && !st.fat_directories_hold) {
             return 0;
         }
         st.file_ids.get(key).copied().unwrap_or(0)
@@ -1831,6 +1875,7 @@ impl Vfs for MemFs {
                 FileIds::MountSession => jd_vfs::IdTieBreak::MountSession,
                 _ => jd_vfs::IdTieBreak::None,
             };
+            p.fat_directories_hold = st.fat_directories_hold;
             p.mtime_granularity_ns = p.mtime_granularity_ns.max(Self::FAT_MTIME_NS);
         }
         p
@@ -1863,7 +1908,10 @@ impl Vfs for MemFs {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::Fingerprint, &key, path)?;
         let st = self.state.lock().unwrap();
+        // A bare id names nothing on a FAT model, whatever its directories
+        // hold: as the real volume, 0 (`Personality::fat_directories_hold`).
         Ok(match st.nodes.get(&key) {
+            Some(Node::Dir) if st.file_id_model != FileIds::Stable => Some(0),
             Some(Node::Dir) => Some(Self::directory_id_of(&st, &key)),
             _ => None,
         })
