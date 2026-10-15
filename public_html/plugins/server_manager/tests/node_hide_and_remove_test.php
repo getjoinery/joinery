@@ -19,7 +19,9 @@
  *  - The guards: backups that cannot be checked, a container not verified
  *    gone, a machine the provider still has (or cannot be asked about), an
  *    attestation typed wrong. A matching attestation passes and is logged;
- *    a node hosted elsewhere has no machine guard.
+ *    a node hosted elsewhere has no machine guard. A container site whose
+ *    host has no node here (never paired, or removed for good) goes once its
+ *    host machine's address is typed (B76).
  *  - The Jobs listing leaves out a hidden node's jobs on request.
  *  - sm_018 deletes jobs of no node or a missing one (but not a nodeless
  *    Publish Upgrade run) and ledger
@@ -318,13 +320,53 @@ check(strpos(NodeRemoval::refusal($g_space, '', null, $no_dns, 'tok'), 'could no
 
 $c_live = nhr_node('cont', array('mgn_cloud_account' => $ours, 'mgn_container_name' => 'nhrc', 'mgn_joinery_version' => '0.8.1'));
 check(NodeRemoval::machine_kind($c_live, 'tok') === NodeRemoval::MACHINE_CONTAINER, 'a container site of ours waits for its container');
-check(strpos(NodeRemoval::refusal($c_live, '', null, $no_dns, 'tok'), 'Permanently Delete Site first') !== false,
-	'one its host has not verified gone is refused');
+check(strpos(NodeRemoval::refusal($c_live, '', null, $no_dns, 'tok'), 'Type the IP address of its host machine') !== false
+	&& strpos(NodeRemoval::container_refusal($c_live, $no_dns), 'has no node here') !== false,
+	'one not verified gone, placed on no host, is refused until its host machine is confirmed deleted');
 $c_live->set('mgn_site_removed_time', gmdate('Y-m-d H:i:s'));
 $c_live->save();
 check(NodeRemoval::refusal($c_live, '', null, $no_dns, 'tok') === '', 'once its host verified it gone, it may go');
 $c_never = nhr_node('contnever', array('mgn_cloud_account' => $ours, 'mgn_container_name' => 'nhrc2'));
 check(NodeRemoval::refusal($c_never, '', null, $no_dns, 'tok') === '', 'a container where no site was ever seen has nothing to tear down');
+
+// B76: a container site whose host machine is gone. While the host has a node
+// here, that node removes the container (Permanently Delete Site); once the
+// host's node is removed for good, nothing here can, so the person confirms
+// the host machine deleted by its address.
+$b76_server = nhr_node('b76server', array('mgn_cloud_account' => $ours, 'mgn_host' => '198.51.100.81'));
+$b76_host = new ManagedHost(NULL);
+$b76_host->set('mgh_name', 'HarnessTest NHR b76 host ' . $suffix);
+$b76_host->set('mgh_slug', 'nhr-b76host-' . $suffix);
+$b76_host->set('mgh_host', '198.51.100.81');
+$b76_host->set('mgh_mgn_managed_node_id', (int)$b76_server->key);
+$b76_host->prepare();
+$b76_host->save();
+$b76_host->load();
+harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $b76_host->key);
+$b76_site = nhr_node('b76site', array('mgn_cloud_account' => $ours, 'mgn_container_name' => 'nhrc3', 'mgn_joinery_version' => '0.8.1',
+	'mgn_mgh_managed_host_id' => (int)$b76_host->key, 'mgn_host' => 'b76-site.invalid'));
+check(NodeRemoval::machine_kind($b76_site, 'tok') === NodeRemoval::MACHINE_CONTAINER
+	&& (int)NodeRemoval::host_server($b76_site)->key === (int)$b76_server->key, 'a placed container site knows its host\'s node');
+check(strpos(NodeRemoval::refusal($b76_site, '198.51.100.81', null, $no_dns, 'tok'), 'Permanently Delete Site first') !== false
+	&& NodeRemoval::host_attest_text($b76_site, $no_dns) === '',
+	'while its host has a node, the host removes the container: typing the host\'s address does not stand in');
+$b76_server->soft_delete();
+check(strpos(NodeRemoval::container_refusal($b76_site, $no_dns), 'is hidden: restore it') !== false,
+	'a hidden host\'s node is named, with how to go on');
+$b76_server->undelete();
+$b76_server->remove_permanently();
+$b76_host->load();
+check(!(int)$b76_host->get('mgh_mgn_managed_node_id') && NodeRemoval::host_server($b76_site) === null,
+	'removing the host\'s node for good leaves its host record naming no node');
+check(NodeRemoval::host_attest_text($b76_site, $no_dns) === '198.51.100.81', 'the host record\'s address is what is typed');
+check(strpos(NodeRemoval::refusal($b76_site, '', null, $no_dns, 'tok'), 'Type the IP address of its host machine') !== false,
+	'with nothing typed it is refused');
+check(strpos(NodeRemoval::refusal($b76_site, '198.51.100.82', null, $no_dns, 'tok'), 'Type the IP address of its host machine') !== false,
+	'another address is refused');
+check(NodeRemoval::refusal($b76_site, ' 198.51.100.81 ', null, $no_dns, 'tok') === '', 'the host machine\'s address passes');
+$b76_id = (int)$b76_site->key;
+NodeRemoval::remove($b76_site, '198.51.100.81', (int)$buyer->key, null, $no_dns, 'tok');
+check(!nhr_exists('mgn_managed_nodes', 'mgn_managed_node_id', $b76_id), 'and the site is removed for good');
 
 $m = nhr_node('machine', array('mgn_cloud_account' => $ours));
 nhr_provision($buyer, $m, array('cvp_instance_id' => '424242'));
