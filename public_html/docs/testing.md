@@ -92,7 +92,13 @@ php tests/run.php --list       # list discovered tests, run nothing
 php tests/run.php --json       # emit the aggregate JSON contract (for CI)
 php tests/run.php db --fresh   # run every selected suite; borrow no earlier result
 php tests/run.php db --no-wait # exit 3 at once if another run holds the gate
+php tests/run.php --help       # the usage text; runs nothing
 ```
+
+An option the runner does not declare is refused with the usage text and exit
+2, never ignored: a misspelled `--onyl=` must not quietly run the whole safe
+tier in place of the one test that was meant. `--only` takes one path; a comma
+list matches nothing and the run says so.
 
 `safe`, `db` and `test-db` are cumulative, so `php tests/run.php db` is the
 pre-deploy gate and covers the model CRUD suite. `live` runs only when named and
