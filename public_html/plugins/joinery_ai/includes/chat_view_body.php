@@ -36,6 +36,9 @@ $conv_model = $selected ? ChatRender::conversationModel($selected) : '';
 $joai_api_js = PathHelper::getIncludePath('assets/js/joinery-api.js');
 echo '<script src="/assets/js/joinery-api.js?v='
    . (is_file($joai_api_js) ? filemtime($joai_api_js) : '1') . '"></script>' . "\n";
+// Turns are drawn by the core transcript, the same one the Help panel uses:
+// its sheet, and its module for the running turn (includes/ChatTranscript.php).
+echo ChatTranscript::assets();
 if ($session->is_logged_in()) {
     echo '<meta name="joinery-api-csrf" content="'
        . htmlspecialchars($session->get_api_csrf_token(), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
@@ -520,62 +523,43 @@ if (!function_exists('joai_pin_svg')) {
     var POLL_GIVE_UP_MS = 3600 * 1000;   // beyond the server-side stale ceiling
 
     function pollMessage(messageId, onPartial, onComplete, onFailed) {
-        var startedAt = Date.now();
-        function tick() {
-            fetch(JOAI_BASE + 'chat_poll?message_id=' + encodeURIComponent(messageId))
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return; }
-                    // Vault locked mid-turn (idle close, or a lock from another
-                    // tab): one-tap unlock, then resume polling where we left off.
-                    if (data.locked) {
-                        unlockVault().then(function (ok) {
-                            if (ok) { tick(); return; }
-                            onFailed(data.message || 'Unlock your vault to view this reply.');
-                        });
-                        return;
-                    }
-                    // Cancelled settles like complete: the server renders the kept
-                    // partial answer with its own "Cancelled" marker, so the same
-                    // handler swaps the final bubble in and unlocks the composer.
-                    if (data.status === 'complete' || data.status === 'cancelled') { onComplete(data.assistant_html, data.conversation_usage); return; }
-                    if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return; }
-                    if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
-                    if (Date.now() - startedAt > POLL_GIVE_UP_MS) {
-                        onFailed('This is taking longer than expected. It may still finish — reload to check.');
-                        return;
-                    }
-                    setTimeout(tick, POLL_INTERVAL_MS);
-                })
-                .catch(function () {
-                    if (Date.now() - startedAt > POLL_GIVE_UP_MS) { onFailed('Lost connection while waiting for the reply.'); return; }
-                    setTimeout(tick, POLL_INTERVAL_MS);
-                });
-        }
-        setTimeout(tick, POLL_INTERVAL_MS);
+        JoineryChatTranscript.poll({
+            interval: POLL_INTERVAL_MS,
+            giveUp: POLL_GIVE_UP_MS,
+            fetch: function () {
+                return fetch(JOAI_BASE + 'chat_poll?message_id=' + encodeURIComponent(messageId))
+                    .then(function (r) { return r.json(); });
+            },
+            onData: function (data, resume) {
+                if (!data.success) { onFailed(data.message || 'Could not load the reply.'); return false; }
+                // Vault locked mid-turn (idle close, or a lock from another
+                // tab): one-tap unlock, then resume polling where we left off.
+                if (data.locked) {
+                    unlockVault().then(function (ok) {
+                        if (ok) { resume(); return; }
+                        onFailed(data.message || 'Unlock your vault to view this reply.');
+                    });
+                    return false;
+                }
+                // Cancelled settles like complete: the server renders the kept
+                // partial answer with its own "Cancelled" marker, so the same
+                // handler swaps the final bubble in and unlocks the composer.
+                if (data.status === 'complete' || data.status === 'cancelled') { onComplete(data.assistant_html, data.conversation_usage); return false; }
+                if (data.status === 'failed') { onFailed(data.error || 'The assistant could not complete this turn.'); return false; }
+                if (typeof data.partial_text === 'string') onPartial(data.partial_text, data);
+                return true;
+            },
+            onGiveUp: onFailed
+        });
     }
 
     // A live assistant bubble that streamed partial text fills, then the final
     // server-rendered (markdown) bubble replaces. Reuses an existing bubble with
     // the same id (the confirm flow reuses the pending bubble).
     function ensureLiveBubble(messageId) {
-        var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
-        if (!el) {
-            el = document.createElement('div');
-            el.setAttribute('data-message-id', messageId);
-            transcript.appendChild(el);
-        }
-        el.className = 'joai-chat-msg joai-chat-assistant joai-chat-streaming';
-        el.innerHTML = '<div class="joai-chat-body"></div><div class="joai-chat-activity" hidden></div>';
+        var el = JoineryChatTranscript.liveBubble(transcript, messageId);
         scrollToBottom();
         return el;
-    }
-
-    // "2m 40s" from a seconds count, for the live activity line.
-    function formatElapsed(seconds) {
-        seconds = Math.max(0, Math.floor(seconds));
-        if (seconds < 60) return seconds + 's';
-        return Math.floor(seconds / 60) + 'm ' + (seconds % 60) + 's';
     }
 
     // Show a live bubble for messageId and stream into it until the turn lands.
@@ -585,17 +569,9 @@ if (!function_exists('joai_pin_svg')) {
     function streamInto(messageId) {
         inflightMessageId = messageId;   // now the Cancel button has a target
         var bubble = ensureLiveBubble(messageId);
-        var body = bubble.querySelector('.joai-chat-body');
-        var activityEl = bubble.querySelector('.joai-chat-activity');
         pollMessage(messageId,
             function (text, data) {
-                body.textContent = text;
-                var line = (data && data.activity) ? data.activity : '';
-                if (line && typeof data.running_seconds === 'number') {
-                    line += ' · ' + formatElapsed(data.running_seconds);
-                }
-                activityEl.textContent = line;
-                activityEl.hidden = !line;
+                JoineryChatTranscript.showPartial(bubble, text, data);
                 scrollToBottom();
             },
             function (html, usage) {
@@ -1665,32 +1641,8 @@ if (!function_exists('joai_pin_svg')) {
     // set via textContent — provider error text is not trusted markup.
     function renderFailedBubble(messageId, errorText) {
         setBusy(false);
-        var el = transcript.querySelector('.joai-chat-msg[data-message-id="' + messageId + '"]');
-        if (!el) {
-            el = document.createElement('div');
-            el.setAttribute('data-message-id', messageId);
-            transcript.appendChild(el);
-        }
-        el.className = 'joai-chat-msg joai-chat-assistant joai-chat-failed';
-        el.textContent = '';
-        var body = document.createElement('div');
-        body.className = 'joai-chat-body';
-        body.textContent = errorText || 'The turn could not be completed.';
-        el.appendChild(body);
-        if (lastTurn) {
-            var actions = document.createElement('div');
-            actions.className = 'joai-chat-failed-actions';
-            var retry = document.createElement('button');
-            retry.type = 'button';
-            retry.className = 'joai-chat-retry';
-            retry.textContent = 'Retry';
-            retry.addEventListener('click', function () {
-                if (el.parentNode) el.parentNode.removeChild(el);
-                retryLastTurn();
-            });
-            actions.appendChild(retry);
-            el.appendChild(actions);
-        }
+        JoineryChatTranscript.failedBubble(transcript, messageId, errorText,
+            lastTurn ? retryLastTurn : null);
         scrollToBottom();
     }
 

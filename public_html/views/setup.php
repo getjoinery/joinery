@@ -134,6 +134,8 @@
 <?php if ($setup_step_copy !== '') { ?>
 			<p class="setup-copy"><?php echo htmlspecialchars($setup_step_copy); ?></p>
 <?php } ?>
+<?php // Help with this step, asked with the step as context (support_chatbot.md). ?>
+<?php $page->render_support_help_slot('div', 'setup-help', 'setup:' . $current_key, 'Ask for help with this step'); ?>
 
 <?php
 		$force_render = ($page_vars['force_render_step'] ?? '') === $current_key;

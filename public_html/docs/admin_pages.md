@@ -242,6 +242,41 @@ the header honest:
 A renderer that throws is logged and skipped, so a page never fails to load
 because a notice could not decide. Tests: `tests/unit/admin_notices_test.php`.
 
+### The Help button
+
+Every admin page header carries a **Help** button for permission 5 and up
+(`PublicPageBase::render_support_help_slot()`, placed by the admin theme's
+`top_right_menu()`); each setup wizard step carries one too, with the step as
+its route (`setup:{key}`). It opens the Help panel (`assets/js/support_panel.js`),
+which asks the support desk of the node named by `support_url`. With
+`support_url` blank there is no Help button, and the panel's actions refuse.
+The browser only calls this site's own actions —
+`support_state`, `support_consent`, `support_send`, `support_poll`,
+`support_cancel`, `support_threads`, `support_feedback`, `support_escalate` —
+and `SupportChatClient` sends them on from the server.
+
+- The first question of a thread carries this site's facts
+  (`ProblemReportBundle`, built for the asking person's own permission, plus
+  the page or step) only when `support_chat_consent` is `yes`; the panel asks
+  once, showing every section as it would be sent. `support_chat_live_reads`
+  lets a node this site is joined to read it during a thread. Both are
+  changeable on the Management Node page.
+- A new thread is confirmed by the desk calling back
+  `support_origin_confirm` with a one-time code this site issued and stored
+  (`SiteSupportThread`); later calls carry the token the desk gave. The
+  site's threads live in `spt_support_threads`.
+- The button's mark counts threads with a reply from a person nobody here has
+  opened: learned when the panel lists threads, by `SupportReplyCheck`
+  (daily), and from the header once in a while when the panel was used in
+  the last week.
+
+A conversation with a model is drawn by one renderer wherever it appears:
+`ChatTranscript` (PHP, finished turns), `assets/js/chat_transcript.js` (the
+turn being written, its status line, the poll loop and Retry) and
+`assets/css/chat_transcript.css`. Joinery AI's chat and the Help panel both
+use it. Test: `tests/integration/support_panel_test.php`. The serving side is
+the support_desk plugin (`plugins/support_desk/docs/overview.md`).
+
 ## Common Patterns by Page Type
 
 ### List Page

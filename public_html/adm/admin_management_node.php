@@ -7,6 +7,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.10 - The Help panel card says it is off while support_url is blank
+ * @version 1.9 - The Help panel card: whether the panel sends this site's facts, and live reads by a joined node
  * @version 1.8 - The agent switch says it takes effect at the host converger's next run, within a minute or two (B24)
  * @version 1.7 - The lists state their own bullets (the admin theme resets list-style, so "What the agent does" showed as
  *                plain lines); Extra permissions names every log and host file the switch opens, as always-visible bullets,
@@ -274,6 +276,30 @@ echo '<form method="POST" action="' . $self . '" class="d-inline">'
    . ($log_access ? 'Turn off log access' : 'Turn on log access') . '</button>'
    . '</form>';
 echo '</div></div>';
+
+// ---- The Help panel: what it may send, and live reads ----------------------
+// The support desk this site asks (support_chatbot.md, Consent). The
+// panel asks the first question once; this is where it is changed.
+$support_consent = SupportChatClient::consent();
+echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
+echo '<h5 class="card-title mb-2">The Help panel</h5>';
+if (!SupportChatClient::enabled()) {
+	echo '<p class="mb-0">Off: no support desk is set. The Help button appears once <a href="/admin/admin_settings">support_url</a> names a management node that runs the support desk.</p>';
+	echo '</div></div>';
+} else {
+echo '<p class="mb-2">The Help button asks the support desk at <strong>' . htmlspecialchars(SupportChatClient::destinationHost()) . '</strong>. '
+   . 'With this site\'s facts, the first message of each question carries what a problem report carries (versions, plugins, the names of changed settings, recent error lines, masked) '
+   . 'and the page it was asked from; the person asking sees all of it before the first one is sent.</p>';
+echo '<p class="mb-1">Site facts: <strong>' . ($support_consent['answered'] ? ($support_consent['bundle'] ? 'sent' : 'not sent') : 'not decided yet') . '</strong>.</p>';
+echo '<form method="POST" action="' . $self . '" class="d-inline"><input type="hidden" name="action" value="' . ($support_consent['bundle'] ? 'support_facts_off' : 'support_facts_on') . '">'
+   . '<button type="submit" class="btn btn-sm btn-outline-secondary mb-3">' . ($support_consent['bundle'] ? 'Stop sending them' : 'Send them') . '</button></form>';
+echo '<p class="mb-2">Live reads: <strong>' . ($support_consent['live_reads'] ? 'allowed' : 'not allowed') . '</strong>. '
+   . htmlspecialchars(SupportPanel::LIVE_READS_TEXT) . ' Only where this site is joined to that node, and only within what log access above allows.</p>';
+echo '<form method="POST" action="' . $self . '" class="d-inline"><input type="hidden" name="action" value="' . ($support_consent['live_reads'] ? 'support_reads_off' : 'support_reads_on') . '">'
+   . '<button type="submit" class="btn btn-sm ' . ($support_consent['live_reads'] ? 'btn-outline-secondary' : 'btn-primary') . '">'
+   . ($support_consent['live_reads'] ? 'Stop live reads' : 'Allow live reads') . '</button></form>';
+echo '</div></div>';
+}
 
 // ---- Turning the agent off: strongly discouraged, typed confirmation -------
 $consequence = $is_managed

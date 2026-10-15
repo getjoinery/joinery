@@ -7,6 +7,7 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.8 - the uptime line takes whole seconds (% on /proc/uptime's float was a deprecated conversion)
  * @version 1.7 - memory in a container counts the site container engine's too (/run/.containerenv beside
  *                Docker's /.dockerenv, specs/site_container_engine.md WP3)
  * @version 1.6 - plugins: each plugin's name, version, whether it is switched on and its status, as the agent's
@@ -336,6 +337,9 @@ function _mgmt_stats_backup_profile($profile) {
 }
 
 function _mgmt_stats_format_uptime($secs) {
+	// /proc/uptime is fractional; % on a float is a deprecated implicit
+	// conversion (an error under the test harness). Whole seconds suffice.
+	$secs = (int)$secs;
 	$days    = intval($secs / 86400);
 	$hours   = intval(($secs % 86400) / 3600);
 	$minutes = intval(($secs % 3600) / 60);

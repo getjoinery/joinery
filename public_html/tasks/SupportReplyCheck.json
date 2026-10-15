@@ -1,0 +1,7 @@
+{
+    "name": "Support Reply Check",
+    "description": "Once a day, asks the support desk this site's Help panel uses whether a person replied in any of this site's open threads, so the Help button shows a mark even when nobody has opened Help lately. Does nothing on a site that has never asked.",
+    "default_frequency": "daily",
+    "default_time": "06:10:00",
+    "activate_on_install": true
+}

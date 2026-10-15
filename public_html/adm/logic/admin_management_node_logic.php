@@ -12,6 +12,7 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.8 - support_facts_on/off and support_reads_on/off: the Help panel's consent (support_chatbot.md)
  * @version 1.7 - the switch takes effect at the host converger's next tick, which counts it as a change (B24)
  * @version 1.6 - disable_agent needs the typed words "disable agent" (the page dialog asks; this refuses without)
  * @version 1.5 - admin_management_node_cli_join_request(): a CLI join naming the URL of a request not yet
@@ -73,6 +74,25 @@ function admin_management_node_logic(array $input): LogicResult {
 		Setting::put('agent_log_access', '');
 		Setting::put('agent_log_access_notice_seen', '1');
 		return LogicResult::redirect('/admin/admin_management_node?logs=off');
+	}
+
+	// What the Help panel may send to the support desk, and whether a
+	// management node this site is joined to may read it during a support
+	// thread (support_chatbot.md, Consent). Live reads need the facts.
+	if (isset($input['action']) && in_array($input['action'], array('support_facts_on', 'support_facts_off', 'support_reads_on', 'support_reads_off'), true)) {
+		$a = $input['action'];
+		if ($a === 'support_facts_on') {
+			Setting::put('support_chat_consent', 'yes');
+		} elseif ($a === 'support_facts_off') {
+			Setting::put('support_chat_consent', 'no');
+			Setting::put('support_chat_live_reads', 'no');
+		} elseif ($a === 'support_reads_on') {
+			Setting::put('support_chat_consent', 'yes');
+			Setting::put('support_chat_live_reads', 'yes');
+		} else {
+			Setting::put('support_chat_live_reads', 'no');
+		}
+		return LogicResult::redirect('/admin/admin_management_node?support=saved');
 	}
 
 	// The one-time notice's acknowledgement: a POST from the notice itself or
