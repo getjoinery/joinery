@@ -115,20 +115,35 @@ class AiPromptBuilder {
              . "— are authoritative.";
     }
 
+    /** The provider's longer cache lifetime, for a prefix whose turns arrive
+     *  sparsely (the support desk's fixed prefix). */
+    const CACHE_TTL_HOUR = '1h';
+
     /**
      * Assemble the system prompt as cached-prefix text plus the optional
      * untrusted block. cache_control on the first block caches the tools+system
      * prefix together; the untrusted block (nonce-bearing) follows the
      * breakpoint so it never busts the cache.
+     *
+     * $ttl '' keeps the provider's default (five minutes), which chat and
+     * recipes use; CACHE_TTL_HOUR keeps the prefix an hour between turns.
      */
-    public static function systemBlocks(string $cachedText, string $untrustedBlock = ''): array {
+    public static function systemBlocks(string $cachedText, string $untrustedBlock = '', string $ttl = ''): array {
         $blocks = [
-            ['type' => 'text', 'text' => $cachedText, 'cache_control' => ['type' => 'ephemeral']],
+            ['type' => 'text', 'text' => $cachedText, 'cache_control' => self::cacheControl($ttl)],
         ];
         if ($untrustedBlock !== '') {
             $blocks[] = ['type' => 'text', 'text' => $untrustedBlock];
         }
         return $blocks;
+    }
+
+    /** One cache_control block: ephemeral, with the lifetime when one is named. */
+    public static function cacheControl(string $ttl = ''): array {
+        if ($ttl !== '' && $ttl !== self::CACHE_TTL_HOUR) {
+            throw new InvalidArgumentException("Unknown cache lifetime '$ttl'.");
+        }
+        return $ttl === '' ? ['type' => 'ephemeral'] : ['type' => 'ephemeral', 'ttl' => $ttl];
     }
 
 }

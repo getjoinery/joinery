@@ -51,6 +51,8 @@ class AiConversationMessage extends SystemBase {
 
     protected static $foreign_key_actions = [
         'aim_aic_conversation_id' => ['action' => 'permanent_delete'],
+        // A person's reply outlives the person: the row stays, the name goes.
+        'aim_author' => ['action' => 'null', 'source_table' => 'usr_users'],
     ];
 
     public static $field_specifications = array(
@@ -107,6 +109,15 @@ class AiConversationMessage extends SystemBase {
         // specs/ai_chat_turn_activity.md.
         'aim_activity'            => array('type'=>'varchar(160)'),
         'aim_error'               => array('type'=>'text'),
+        // An assistant-role row a person wrote rather than the model: the user
+        // id of the operator who replied (a support thread's human reply,
+        // specs/support_chatbot.md). NULL for every model-written row. The
+        // transcript renders it with a "from a person" mark.
+        'aim_author'              => array('type'=>'int8', 'is_nullable'=>true),
+        // The asker's verdict on an assistant row ('up' | 'down') and the
+        // optional line that came with it. NULL until given.
+        'aim_feedback'            => array('type'=>'varchar(8)', 'is_nullable'=>true),
+        'aim_feedback_note'       => array('type'=>'text', 'is_nullable'=>true),
         'aim_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'aim_delete_time'         => array('type'=>'timestamp(6)'),
     );

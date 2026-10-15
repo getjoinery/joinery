@@ -1,0 +1,7 @@
+{
+  "name": "Support Desk Index Sweep",
+  "description": "Indexes the documentation of every release this node holds that the support desk has not indexed yet (its own release, and the newest release archives it serves), and re-reads its public pages.",
+  "activate_on_install": true,
+  "default_frequency": "hourly",
+  "config_fields": {}
+}

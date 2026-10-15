@@ -16,9 +16,19 @@ class ChatWorkerSpawner {
      * disabled) so the caller can fall back to running the turn synchronously.
      */
     public static function spawn(int $message_id): bool {
+        return self::spawnWorker('plugins/joinery_ai/cli/run_chat_turn.php', $message_id);
+    }
+
+    /**
+     * Kick off another turn worker of the same shape — a CLI script under the
+     * tree that takes one assistant message id (the support desk's
+     * run_support_turn.php). Same detachment, same log, same fallback answer.
+     */
+    public static function spawnWorker(string $script_path, int $message_id): bool {
         if (!function_exists('exec')) return false;
 
-        $script = PathHelper::getIncludePath('plugins/joinery_ai/cli/run_chat_turn.php');
+        $script = PathHelper::getIncludePath($script_path);
+        if (!is_file($script)) return false;
         // Site logs live at site-root/logs/, not under public_html — shared with
         // the recipe worker log for one AI audit trail.
         $log = PathHelper::getSiteRoot() . '/logs/joinery_ai_worker.log';

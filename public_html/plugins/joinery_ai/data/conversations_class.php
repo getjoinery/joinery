@@ -116,6 +116,11 @@ class AiConversation extends SystemBase {
         // PDF as a document block, HTML as raw markup). Read at send time and
         // applied to the whole history that turn. See the file-uploads spec §1.
         'aic_attachment_mode'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'extract'),
+        // The support thread this transcript belongs to (support_desk plugin,
+        // specs/support_chatbot.md), NULL for every ordinary chat. A support
+        // transcript is owned by the support desk's reserved user, so it never
+        // appears in a person's own chat list.
+        'aic_support_thread_id'  => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
         'aic_total_input_tokens' => array('type'=>'int8', 'default'=>0),
         'aic_total_output_tokens'=> array('type'=>'int8', 'default'=>0),
         'aic_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),

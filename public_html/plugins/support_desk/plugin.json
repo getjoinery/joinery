@@ -1,0 +1,124 @@
+{
+    "name": "Support Desk",
+    "version": "0.1.0",
+    "description": "Answers questions from the administrators of the sites that upgrade from this one, from the documentation and FAQ for the release each site runs and, for a site joined to this management node, from what the site is doing now. Install it on a management node that serves sites.",
+    "author": "System Developer",
+    "license": "PolyForm-Noncommercial-1.0.0",
+    "status": "experimental",
+    "depends": { "joinery_ai": ">=0.26.0" },
+    "receives_upgrades": true,
+    "included_in_publish": false,
+    "bootstrap": "includes/bootstrap.php",
+    "styles": [
+        "assets/css/support_desk.css"
+    ],
+    "publicPaths": ["/support_desk/ask"],
+    "settingsGroups": {
+        "support_desk": "Support desk"
+    },
+    "settings": [
+        {
+            "name": "support_desk_model",
+            "default": "",
+            "group": "support_desk",
+            "label": "Model that answers",
+            "type": "text",
+            "helptext": "The model the support desk answers with, as your host or vendor names it. A support answer leaves this machine for the model's company, so this is normally a cloud model on your own key. Blank answers with whatever model with tools this node can reach."
+        },
+        {
+            "name": "support_desk_system_prompt",
+            "default": "",
+            "group": "support_desk",
+            "label": "Voice of the support desk",
+            "type": "textarea",
+            "rows": 8,
+            "helptext": "How the support desk speaks. Blank uses the shipped voice. The tool rules, the documentation map and the FAQ are always added after it and cannot be removed here."
+        },
+        {
+            "name": "support_desk_daily_tokens_per_host",
+            "default": "400000",
+            "group": "support_desk",
+            "label": "Tokens one site may spend in a day",
+            "type": "number",
+            "validation": {"number": true, "min": 0},
+            "helptext": "Input and output tokens across every thread from one site in a UTC day. Over it, the site's panel says so and offers the documentation and a person. 0 means no per-site limit."
+        },
+        {
+            "name": "support_desk_daily_tokens_total",
+            "default": "4000000",
+            "group": "support_desk",
+            "label": "Tokens the support desk may spend in a day",
+            "type": "number",
+            "validation": {"number": true, "min": 0},
+            "helptext": "Input and output tokens across every site in a UTC day. 0 means no limit beyond Joinery AI's monthly cap."
+        },
+        {
+            "name": "support_desk_rate_limit_requests",
+            "default": "120",
+            "group": "support_desk",
+            "label": "Requests accepted per hour from one address",
+            "type": "number",
+            "validation": {"number": true, "min": 1},
+            "helptext": "Questions, polls and the rest together. A site's panel polls while an answer is written, so this is well above the number of questions a person asks."
+        },
+        {
+            "name": "support_desk_node_reads_per_thread",
+            "default": "20",
+            "group": "support_desk",
+            "label": "Reads of a site per thread per day",
+            "type": "number",
+            "validation": {"number": true, "min": 0},
+            "helptext": "How many times in a UTC day one thread may ask a joined site's agent for something (a log, a report). 0 turns live reads off for every thread."
+        },
+        {
+            "name": "support_desk_notify_email",
+            "default": "",
+            "group": "support_desk",
+            "label": "Email when a thread waits for a person",
+            "type": "text",
+            "helptext": "One email when a thread asks for a person, naming the site, its version and the last message, at most one an hour for a thread. Empty sends none."
+        },
+        {
+            "name": "support_desk_thread_retention_days",
+            "default": "0",
+            "group": "support_desk",
+            "label": "Days to keep closed threads",
+            "type": "number",
+            "validation": {"number": true, "min": 0},
+            "helptext": "Closed threads older than this are deleted with their transcripts by the daily retention sweep. 0 keeps them: the threads, their thumbs and the answers people wrote are the record a better support desk is built from."
+        },
+        {
+            "name": "support_desk_widget_enabled",
+            "default": "0",
+            "group": "support_desk",
+            "label": "Answer visitors on the public pages",
+            "type": "checkbox",
+            "helptext": "Offers the support desk to visitors with no site yet, at /support_desk/ask, with a captcha on the first question and a per-address budget. They get the documentation of the newest release and the public pages; never a site's facts."
+        },
+        {
+            "name": "support_desk_widget_daily_tokens_per_address",
+            "default": "60000",
+            "group": "support_desk",
+            "label": "Tokens one visitor address may spend in a day",
+            "type": "number",
+            "validation": {"number": true, "min": 0},
+            "helptext": "For the public widget only. 0 means no per-address limit."
+        },
+        {
+            "name": "support_desk_system_user_id",
+            "default": "",
+            "managed": true,
+            "helptext": "The reserved account that owns every support transcript, by user id. Made by the plugin's sync, disabled for sign-in; never a person."
+        }
+    ],
+    "adminMenu": [
+        {
+            "slug": "support-desk",
+            "title": "Support Desk",
+            "url": "/plugins/support_desk/admin/admin_support_threads",
+            "icon": "question-circle",
+            "order": 78,
+            "permission": 9
+        }
+    ]
+}
