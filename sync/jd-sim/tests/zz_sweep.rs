@@ -366,7 +366,9 @@ thread_local! {
 }
 
 /// The FAT disk model a sweep runs on, from `FATDISK`: `win` (Windows FAT and
-/// exFAT), `mac` (macOS FAT32) or `linux` (Linux FAT and exFAT, macOS exFAT).
+/// exFAT), `mac` (macOS FAT32, whose folders keep their identity) or `linux`
+/// (Linux FAT and exFAT). macOS exFAT -- files numbered per mount, folders
+/// kept -- is pinned by its own scenarios, not swept.
 fn fat_disk() -> Option<jd_sim::FileIds> {
     if let Some(model) = FAT_DISK_HERE.with(|m| m.get()) {
         return Some(model);

@@ -22277,25 +22277,26 @@ fn fat_notices(device: &jd_sim::engine::Device) -> Vec<String> {
 /// standing notice that renames there cannot be tracked, naming what can go
 /// wrong; a drive with ids and births carries none (owner decision
 /// 2026-10-13). RED before: only a Windows stick was told, and not of the
-/// folder that may be read as deleted.
+/// folder that may be read as deleted. On a Mac, whose FAT and exFAT drives
+/// keep each folder's identity, the notice names the files alone.
 #[test]
 fn every_fat_drive_is_told_renames_cannot_be_tracked() {
-    for (label, model) in [
-        ("windows", jd_sim::FileIds::DirectorySlot),
-        ("linux", jd_sim::FileIds::MountSession),
-        ("macos", jd_sim::FileIds::DataCluster),
+    for (label, model, folders_hold) in [
+        ("windows", jd_sim::FileIds::DirectorySlot, false),
+        ("linux", jd_sim::FileIds::MountSession, false),
+        ("macos fat32", jd_sim::FileIds::DataCluster, true),
+        ("macos exfat", jd_sim::FileIds::MountSession, true),
     ] {
         let world = World::new(9_880, &["stick"]);
         let stick = world.device("stick");
         stick.fs.file_ids(model);
+        stick.fs.fat_directories_hold(folders_hold);
         stick.fs.user_write("a.txt", b"a file on a stick");
         assert!(world.settle().is_some(), "{label}: never settled");
         let told = fat_notices(stick);
         assert_eq!(told.len(), 1, "{label}: {told:?}");
-        assert!(
-            told[0].contains("FAT or exFAT") && told[0].contains("folder") && told[0].contains("trash"),
-            "{label}: {told:?}"
-        );
+        assert!(told[0].contains("FAT or exFAT") && told[0].contains("identical contents"), "{label}: {told:?}");
+        assert_eq!(told[0].contains("folder") && told[0].contains("trash"), !folders_hold, "{label}: {told:?}");
     }
     let world = World::new(9_880, &["disk"]);
     let disk = world.device("disk");
@@ -22946,6 +22947,101 @@ fn a_new_file_moved_while_its_upload_lands_beside_stays_where_the_user_put_it() 
         assert_eq!(world.device(name).fs.peek("Projects/Sub 2/doc-1.txt").as_deref(), Some(MINE), "{name}");
         assert_eq!(world.device(name).fs.peek("Projects/doc-1.txt").as_deref(), Some(THEIRS), "{name}");
     }
+    assert_converged(&world);
+}
+
+/// The user renames a folder on a Mac's FAT stick and then saves into it
+/// through its old name, which makes a new folder there, while another
+/// device's user renames the same folder. The stick knows its directory by
+/// its cluster and birth, so the folder follows it to its new name and the
+/// directory at the old name is a new folder. Read by the files' bytes, every
+/// file moved into a new folder while the record stayed on the rebuilt
+/// directory, and the other device's rename went to that one: on the server
+/// the files left the folder the other device's user had put them in (FAT
+/// soak runs 9 and 11).
+#[test]
+fn a_folder_renamed_on_a_mac_fat_stick_and_saved_into_by_its_old_name_keeps_its_files() {
+    let world = World::new(9_856, &["stick", "desk"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DataCluster);
+    a_folder_renamed_and_saved_into_by_its_old_name_keeps_its_files(&world, false);
+}
+
+/// The same on a Mac's exFAT stick, whose files are renumbered at every mount
+/// and whose directories are not, with the stick unplugged and plugged in
+/// again between the folder's making and its rename.
+#[test]
+fn a_folder_renamed_on_a_mac_exfat_stick_and_saved_into_by_its_old_name_keeps_its_files() {
+    let world = World::new(9_855, &["stick", "desk"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::MountSession);
+    stick.fs.fat_directories_hold(true);
+    a_folder_renamed_and_saved_into_by_its_old_name_keeps_its_files(&world, true);
+}
+
+fn a_folder_renamed_and_saved_into_by_its_old_name_keeps_its_files(world: &World, remount: bool) {
+    let stick = world.device("stick");
+    let desk = world.device("desk");
+    stick.fs.user_mkdir("Projects");
+    stick.fs.user_mkdir("Projects/Sub 1");
+    stick.fs.user_write("Projects/a.txt", b"a, written on the stick");
+    stick.fs.user_write("Projects/b.txt", b"b, written on the stick");
+    stick.fs.user_write("Projects/Sub 1/c.txt", b"c, in a subfolder");
+    assert!(world.settle().is_some());
+    if remount {
+        stick.fs.remount();
+        assert!(world.settle().is_some());
+    }
+    let folder = world.server.folders().into_iter().find(|f| f.name == "Projects" && f.parent.is_none()).expect("on the server").id;
+    desk.fs.user_rename("Projects", "Projects (1)");
+    world.pass(desk);
+    stick.fs.user_rename("Projects", "Projects (2)");
+    stick.fs.user_write("Projects/Sub 1/Sub 3/new.txt", b"saved through the old name");
+    assert!(world.settle().is_some(), "never settled");
+    let files = world.server.files();
+    for name in ["a.txt", "b.txt"] {
+        let f = files.iter().find(|f| f.name == name && !f.trashed).expect(name);
+        assert_eq!(f.folder, Some(folder), "{name} left its folder on the server: {:?}", world.server.tree());
+    }
+    let named = world.server.folders().into_iter().find(|f| f.id == folder).expect("the folder").name;
+    for d in ["stick", "desk"] {
+        let dev = world.device(d);
+        assert_eq!(dev.fs.peek(&format!("{named}/a.txt")).as_deref(), Some(&b"a, written on the stick"[..]), "{d}");
+        assert_eq!(dev.fs.peek(&format!("{named}/Sub 1/c.txt")).as_deref(), Some(&b"c, in a subfolder"[..]), "{d}");
+        assert_eq!(dev.fs.peek("Projects/Sub 1/Sub 3/new.txt").as_deref(), Some(&b"saved through the old name"[..]), "{d}");
+    }
+    assert_converged(world);
+}
+
+/// A Mac's FAT stick hands a freed directory's cluster to the next directory
+/// made after a remount. The user deletes a folder, unplugs the stick and
+/// plugs it in again, makes a new folder -- which takes the deleted one's
+/// cluster -- and then a folder at the deleted one's name. The new folder
+/// stands on the deleted one's id with a birth of its own: it is a new
+/// folder, and the deleted folder is not followed into it.
+#[test]
+fn a_new_folder_on_a_deleted_folders_cluster_is_not_that_folder_on_a_mac_fat_stick() {
+    let world = World::new(9_854, &["stick", "desk"]);
+    let stick = world.device("stick");
+    stick.fs.file_ids(jd_sim::FileIds::DataCluster);
+    stick.fs.user_mkdir("Old");
+    stick.fs.user_write("Old/x.txt", b"x, in the folder deleted");
+    stick.fs.user_write("Old/y.txt", b"y, in the folder deleted");
+    assert!(world.settle().is_some());
+    let old = world.server.folders().into_iter().find(|f| f.name == "Old").expect("on the server").id;
+    let old_directory = stick.fs.file_id_of("Old");
+    stick.fs.user_remove("Old");
+    stick.fs.remount();
+    stick.fs.user_mkdir("Stranger");
+    assert_eq!(stick.fs.file_id_of("Stranger"), old_directory, "construction: the new folder stands on the deleted one's id");
+    stick.fs.user_mkdir("Old");
+    stick.fs.user_write("Stranger/z.txt", b"z, in the new folder");
+    assert!(world.settle().is_some(), "never settled");
+    let folders = world.server.folders();
+    let stranger = folders.iter().find(|f| f.name == "Stranger" && !f.trashed).expect("the new folder");
+    assert_ne!(stranger.id, old, "the deleted folder was taken for the new one, renamed: {folders:?}");
+    let live: Vec<String> = world.server.files().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    assert_eq!(live, vec!["z.txt".to_string()], "{live:?}");
     assert_converged(&world);
 }
 
