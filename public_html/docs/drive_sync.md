@@ -496,7 +496,10 @@ and `move_into_self` plan the work again from what is there, a trash answered
 backoff, `vault_needed` is held like a standing refusal (only an unlock
 window lifts it, a window belongs to a browser session, and this computer
 never holds one), and anything else keeps its status's reading, held where it
-stands. A refusal with no reason from such a server is withdrawn and planned
+stands. Each action refused is held on its own, so a file with two things
+refused (a Private file edited here and carried out: its move and its new
+contents) asks about neither again until something it was asked about moves.
+A refusal with no reason from such a server is withdrawn and planned
 again, never read as a name clash, and its issue says it came without a
 reason. The store keeps what the latest answer said, so a server that stops
 saying so is read the older way again.

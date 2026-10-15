@@ -40,7 +40,11 @@ use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placemen
 /// 8: where a folder's directory stands while its move is not agreed
 /// (`Entry::stands_at`). An older engine writing an entry would drop it, and
 /// the folder's files would be placed through its old name again.
-pub const SCHEMA_VERSION: i64 = 8;
+///
+/// 9: a refusal held per action (`refusals` keyed by the action too). An
+/// older engine's hold upserts on (entity_type, server_id), which no longer
+/// names a key of this table, so SQLite refuses every hold it makes.
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// One refusal held (`Store::refusals`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -345,7 +349,10 @@ impl Store {
             -- changed, the server answers the same, so the action is not asked
             -- again until one of them moves (`pass::lift_or_keep_refusals`).
             -- Kept on disk: a hold forgotten at a restart is the loop again at
-            -- every launch. One row per entity; a later refusal replaces it.
+            -- every launch. One row per entity and action: a file can have two
+            -- things refused (a Private file edited here and carried out: its
+            -- move and its contents), and a hold that replaced the other's
+            -- freed it to be asked again, every pass.
             CREATE TABLE IF NOT EXISTS refusals (
                 entity_type TEXT NOT NULL,
                 server_id   INTEGER NOT NULL,
@@ -353,7 +360,7 @@ impl Store {
                 inputs      TEXT NOT NULL,
                 cursor      INTEGER NOT NULL,
                 refused_at  INTEGER NOT NULL,
-                PRIMARY KEY (entity_type, server_id)
+                PRIMARY KEY (entity_type, server_id, action)
             );
 
             CREATE TABLE IF NOT EXISTS issues (
@@ -400,6 +407,7 @@ impl Store {
             store.add_column_if_missing("entries", column, ddl)?;
         }
         store.add_column_if_missing("local_index", "cached_at_ns", "INTEGER")?;
+        store.key_refusals_by_action()?;
         // Who holds this disk identity: asked by `make_room` for every file it
         // moves aside, so it is an index and not a table read.
         store.conn.execute_batch(
@@ -427,6 +435,36 @@ impl Store {
         // refused help by every later start.
         store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(store)
+    }
+
+    /// A store from before schema 9 holds one refusal per entity: its table
+    /// is made again keyed by the action too, its holds carried across.
+    fn key_refusals_by_action(&self) -> StoreResult<()> {
+        let keyed: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('refusals') WHERE name = 'action' AND pk > 0",
+            [],
+            |r| r.get(0),
+        )?;
+        if keyed == 0 {
+            self.conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE refusals RENAME TO refusals_one_per_entity;
+                 CREATE TABLE refusals (
+                     entity_type TEXT NOT NULL,
+                     server_id   INTEGER NOT NULL,
+                     action      TEXT NOT NULL,
+                     inputs      TEXT NOT NULL,
+                     cursor      INTEGER NOT NULL,
+                     refused_at  INTEGER NOT NULL,
+                     PRIMARY KEY (entity_type, server_id, action)
+                 );
+                 INSERT INTO refusals SELECT entity_type, server_id, action, inputs, cursor, refused_at
+                     FROM refusals_one_per_entity;
+                 DROP TABLE refusals_one_per_entity;
+                 COMMIT;",
+            )?;
+        }
+        Ok(())
     }
 
     /// Add a column an older store predates. Idempotent, and quiet about it.
@@ -1996,8 +2034,7 @@ impl Store {
         self.conn.execute(
             "INSERT INTO refusals (entity_type, server_id, action, inputs, cursor, refused_at)
              VALUES (?1,?2,?3,?4,?5,?6)
-             ON CONFLICT(entity_type, server_id) DO UPDATE SET
-                action = excluded.action,
+             ON CONFLICT(entity_type, server_id, action) DO UPDATE SET
                 inputs = excluded.inputs,
                 cursor = excluded.cursor,
                 refused_at = excluded.refused_at",
@@ -2030,7 +2067,16 @@ impl Store {
         Ok(out)
     }
 
-    /// Lift the refusal held for this entity. True when there was one.
+    /// Lift the refusal held for this one action on this entity.
+    pub fn clear_refusal_of(&self, entity: EntityId, action: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "DELETE FROM refusals WHERE entity_type = ?1 AND server_id = ?2 AND action = ?3",
+            params![entity.entity_type.to_string(), entity.server_id, action],
+        )?;
+        Ok(())
+    }
+
+    /// Lift every refusal held for this entity. True when there was one.
     pub fn clear_refusal(&self, entity: EntityId) -> StoreResult<bool> {
         let n = self.conn.execute(
             "DELETE FROM refusals WHERE entity_type = ?1 AND server_id = ?2",
@@ -2514,6 +2560,55 @@ mod tests {
             Ok(_) => panic!("an older build must refuse a newer state store, not open it"),
         }
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_action_refused_is_held_on_its_own() {
+        // A Private file edited here and carried out has its move and its
+        // contents refused. Held one per entity, each refusal replaced the
+        // other's hold, and both were asked again every pass.
+        let s = Store::open_in_memory().unwrap();
+        let id = EntityId::file(7);
+        s.hold_refusal(id, "move_remote {}", "in", -1, 100).unwrap();
+        s.hold_refusal(id, "upload_version {}", "in", -1, 101).unwrap();
+        s.hold_refusal(id, "upload_version {}", "in2", -1, 102).unwrap();
+        let mut held: Vec<(String, String)> = s.refusals().unwrap().into_iter().map(|r| (r.action, r.inputs)).collect();
+        held.sort();
+        assert_eq!(
+            held,
+            vec![("move_remote {}".to_string(), "in".to_string()), ("upload_version {}".to_string(), "in2".to_string())]
+        );
+        s.clear_refusal_of(id, "move_remote {}").unwrap();
+        let left: Vec<String> = s.refusals().unwrap().into_iter().map(|r| r.action).collect();
+        assert_eq!(left, vec!["upload_version {}".to_string()]);
+    }
+
+    #[test]
+    fn a_store_from_before_schema_9_keeps_its_holds_keyed_by_action() {
+        let dir = std::env::temp_dir().join(format!("jd-store-refusals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+        let _ = std::fs::remove_file(&path);
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE refusals (entity_type TEXT NOT NULL, server_id INTEGER NOT NULL,
+                     action TEXT NOT NULL, inputs TEXT NOT NULL, cursor INTEGER NOT NULL,
+                     refused_at INTEGER NOT NULL, PRIMARY KEY (entity_type, server_id));
+                 INSERT INTO refusals VALUES ('file', 7, 'move_remote {}', 'in', 3, 100);",
+            )
+            .unwrap();
+        }
+        {
+            let s = Store::open(&path).unwrap();
+            let held = s.refusals().unwrap();
+            assert_eq!(held.len(), 1, "{held:?}");
+            assert_eq!((held[0].action.as_str(), held[0].cursor), ("move_remote {}", 3));
+            s.hold_refusal(EntityId::file(7), "upload_version {}", "in", 3, 101).unwrap();
+            assert_eq!(s.refusals().unwrap().len(), 2, "the older store still held one refusal per entity");
+        }
+        assert_eq!(Store::open(&path).unwrap().refusals().unwrap().len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

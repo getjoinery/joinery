@@ -2353,14 +2353,17 @@ const REFUSAL_HOLD_MS: i64 = 60 * 60 * 1000;
 /// A hold lifts the moment any of that moves: an edit, a rename or a move
 /// here (a new target), a change on the server, any change to the account
 /// (room freed elsewhere), or an hour. The op it lifts for is planned as any
-/// other, and a refusal again is held again in the same issue.
+/// other, and a refusal again is held again in the same issue. Each action
+/// is held on its own: a Private file edited here and carried out has its
+/// move and its contents refused, and held one at a time, each refusal freed
+/// the other, so both went again every pass (live on dev, 2026-10-15).
 fn lift_or_keep_refusals(env: &ExecEnv, plan: &mut crate::order::Plan, at: i64) -> Result<(), ExecError> {
     let held = env.store.refusals()?;
     if held.is_empty() {
         return Ok(());
     }
     let now = (env.now_ms)() as i64;
-    let mut standing: HashMap<EntityId, String> = HashMap::new();
+    let mut standing: std::collections::HashSet<(EntityId, String)> = std::collections::HashSet::new();
     for r in held {
         let still = r.cursor == at
             && now - r.refused_at < REFUSAL_HOLD_MS
@@ -2369,16 +2372,12 @@ fn lift_or_keep_refusals(env: &ExecEnv, plan: &mut crate::order::Plan, at: i64) 
                 .get_entry(r.entity)?
                 .is_some_and(|e| crate::execute::refusal_inputs(&e) == r.inputs);
         if still {
-            standing.insert(r.entity, r.action);
+            standing.insert((r.entity, r.action));
         } else {
-            env.store.clear_refusal(r.entity)?;
+            env.store.clear_refusal_of(r.entity, &r.action)?;
         }
     }
-    plan.ops.retain(|op| {
-        standing
-            .get(&op.entity)
-            .is_none_or(|action| crate::execute::planned_action_key(&op.action) != *action)
-    });
+    plan.ops.retain(|op| !standing.contains(&(op.entity, crate::execute::planned_action_key(&op.action))));
     Ok(())
 }
 
