@@ -508,6 +508,7 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -600,6 +601,7 @@ fn a_file_that_lost_a_naming_race_still_converges() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -921,6 +923,7 @@ fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -5801,6 +5804,7 @@ fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
         own_file: None,
         last_seen_sha: None,
         own_file_seen_at: None,
+        remote_unsyncable: false,
     };
     laptop.store.put_entry(&orphan).unwrap();
     assert!(
@@ -6256,6 +6260,7 @@ fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -6317,6 +6322,7 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -9936,6 +9942,7 @@ fn scratch_asymmetric_land_beside() {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         })
         .unwrap();
 
@@ -20501,6 +20508,7 @@ fn a_never_sent_file_is_not_folded_into_a_record_that_owns_no_file() {
             own_file: Some(jd_vfs::FileIdentity { file_id: fid, birth_ns: birth }),
             last_seen_sha: None,
             own_file_seen_at: Some(here),
+            remote_unsyncable: false,
         })
         .unwrap();
     assert!(world.settle().is_some(), "never settled");
@@ -23125,5 +23133,181 @@ fn a_change_only_the_vault_allows_is_held_not_retried() {
     assert!(world.settle().is_some(), "never settled once the hold lifted");
     assert_eq!(world.server.tree().get("a.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"second")));
     assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+    assert_converged(&world);
+}
+
+/// The server's file at `path`, if it holds one live: its content hash.
+fn server_sha(world: &World, path: &str) -> Option<String> {
+    world.server.tree().get(path).cloned().flatten()
+}
+
+/// A Private folder on the server never comes to a computer: nothing of it is
+/// made here, nothing about it is asked again pass after pass, and one issue
+/// says why. The rest of the Drive syncs as ever. RED before: every pass
+/// planned the Private file's download, the server gave a sync client no link
+/// to sealed bytes, and the download was withdrawn, said, and planned again,
+/// for ever.
+#[test]
+fn a_private_folder_on_the_server_never_comes_to_a_computer() {
+    let world = World::new(9_850, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("notes.txt", b"plain");
+    let diary = world.server.seed_folder(None, "Diary");
+    world.server.seed_file(Some(diary), "day1.txt", b"dear diary");
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some(), "never settled");
+    for _ in 0..5 {
+        world.pass(laptop);
+    }
+    assert!(!laptop.fs.exists("Diary"), "{:?}", disk_tree(laptop));
+    let said = issues_of(laptop, "private_not_synced");
+    assert!(said.len() == 1 && said[0].contains("Diary") && !said[0].contains("stays as it is"), "{said:?}");
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+    assert_eq!(server_sha(&world, "notes.txt"), Some(jd_sim::sha256_hex(b"plain")));
+}
+
+/// A folder that synced and is then made Private stays on the computer as it
+/// was, and is no longer synced: an edit made to it here and a file saved into
+/// it here go nowhere, and the server's copy is left alone. Made Standard
+/// again, it syncs again: what was done here meanwhile goes up, and the issue
+/// goes. RED before: the edit met `vault_needed` (held, and sent whole again
+/// every hour), and the new file went up into the Private folder.
+#[test]
+fn a_folder_made_private_stays_here_unsynced_until_it_is_standard_again() {
+    let world = World::new(9_849, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    laptop.fs.user_write("notes.txt", b"plain");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some(), "never settled once the folder was Private");
+    let said = issues_of(laptop, "private_not_synced");
+    assert!(said.len() == 1 && said[0].contains("stays as it is"), "{said:?}");
+    assert_eq!(disk_tree(laptop).get("Diary/day1.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"dear diary")));
+
+    let sent = world.server.upload_inits();
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary, again");
+    laptop.fs.user_write("Diary/day2.txt", b"a new day");
+    assert!(world.settle().is_some(), "never settled after a change in the Private folder");
+    for _ in 0..5 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.upload_inits(), sent, "something in the Private folder was sent");
+    assert_eq!(server_sha(&world, "Diary/day1.txt"), Some(jd_sim::sha256_hex(b"dear diary")));
+    assert!(server_sha(&world, "Diary/day2.txt").is_none(), "{:?}", world.server.tree());
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+
+    world.server.set_private("Diary", false);
+    assert!(world.settle().is_some(), "never settled once the folder was Standard again");
+    assert!(issues_of(laptop, "private_not_synced").is_empty(), "{:?}", issues_of(laptop, "private_not_synced"));
+    assert_eq!(server_sha(&world, "Diary/day1.txt"), Some(jd_sim::sha256_hex(b"dear diary, again")));
+    assert_eq!(server_sha(&world, "Diary/day2.txt"), Some(jd_sim::sha256_hex(b"a new day")));
+    assert_converged(&world);
+}
+
+/// A Private file carried out of its folder on a computer is not sent up in
+/// the clear: its move goes to the server, which needs the owner's window to
+/// open it and refuses, and the refusal is held and said. Guards the park:
+/// with its folder parked and this let-through knocked out, the file's record
+/// waited with its folder, and the file standing in the plain folder went
+/// nowhere and nothing said why.
+#[test]
+fn a_private_file_carried_out_here_is_not_sent_in_the_clear() {
+    let world = World::new(9_848, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    laptop.fs.user_write("Plain/notes.txt", b"plain");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some());
+    let sent = world.server.upload_inits();
+    laptop.fs.user_rename("Diary/day1.txt", "Plain/day1.txt");
+    world.settle();
+    for _ in 0..5 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.upload_inits(), sent, "the Private file went up in the clear");
+    assert_eq!(server_sha(&world, "Diary/day1.txt"), Some(jd_sim::sha256_hex(b"dear diary")));
+    assert!(server_sha(&world, "Plain/day1.txt").is_none(), "{:?}", world.server.tree());
+    let said = issues_of(laptop, "withdrawn");
+    assert!(said.len() == 1 && said[0].contains("only in a browser"), "{said:?}");
+    assert!(laptop.fs.exists("Plain/day1.txt"));
+}
+
+/// A file saved into a Private folder on this computer goes nowhere, and
+/// carried out of it into a plain folder it goes up from where it now stands,
+/// as any new file: it was never the server's to seal.
+#[test]
+fn a_file_saved_in_a_private_folder_here_goes_up_once_carried_out() {
+    let world = World::new(9_847, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    laptop.fs.user_write("Plain/notes.txt", b"plain");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Diary/draft.txt", b"not for the diary");
+    assert!(world.settle().is_some());
+    assert!(server_sha(&world, "Diary/draft.txt").is_none(), "{:?}", world.server.tree());
+    laptop.fs.user_rename("Diary/draft.txt", "Plain/draft.txt");
+    assert!(world.settle().is_some(), "never settled once the draft was carried out");
+    assert_eq!(server_sha(&world, "Plain/draft.txt"), Some(jd_sim::sha256_hex(b"not for the diary")));
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+}
+
+/// A Private folder renamed on this computer follows on this disk only:
+/// nothing is asked of the server, whose folder keeps its name and its files,
+/// and the files here stay with the folder.
+#[test]
+fn a_private_folder_renamed_here_follows_here_only() {
+    let world = World::new(9_846, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some());
+    let sent = world.server.upload_inits();
+    laptop.fs.user_rename("Diary", "Journal");
+    assert!(world.settle().is_some(), "never settled after the rename");
+    for _ in 0..5 {
+        world.pass(laptop);
+    }
+    assert!(world.server.tree().contains_key("Diary"), "{:?}", world.server.tree());
+    assert!(!world.server.tree().contains_key("Journal"), "{:?}", world.server.tree());
+    assert_eq!(server_sha(&world, "Diary/day1.txt"), Some(jd_sim::sha256_hex(b"dear diary")));
+    assert_eq!(world.server.upload_inits(), sent);
+    assert!(laptop.fs.exists("Journal/day1.txt") && !laptop.fs.exists("Diary"), "{:?}", disk_tree(laptop));
+    assert!(issues_of(laptop, "withdrawn").is_empty(), "{:?}", issues_of(laptop, "withdrawn"));
+}
+
+/// A file the server reports Private while its tree is Private comes down
+/// once the tree is Standard again: the level is the top folder's promise,
+/// and the file's own flag is not read. The feed carries one change for a
+/// level change, on the top folder, and the files are converted with none,
+/// so the flag a file was last seen with goes stale. RED before: the file,
+/// seen sealed while the tree was Private, was parked on its own once the
+/// folder lifted, with an issue calling it a Private file, and never came
+/// down.
+#[test]
+fn a_file_seen_private_comes_down_once_its_tree_is_standard_again() {
+    let world = World::new(9_845, &["laptop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("Diary/day1.txt", b"dear diary");
+    assert!(world.settle().is_some());
+    world.server.set_private("Diary", true);
+    assert!(world.settle().is_some());
+    let diary = world.server.folder_id_at("Diary").expect("Diary on the server");
+    world.server.seed_file(Some(diary), "day2.txt", b"written in the browser");
+    assert!(world.settle().is_some());
+    assert!(!laptop.fs.exists("Diary/day2.txt"));
+    world.server.set_private("Diary", false);
+    assert!(world.settle().is_some(), "never settled once the folder was Standard again");
+    assert_eq!(
+        disk_tree(laptop).get("Diary/day2.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"written in the browser")),
+        "{:?}",
+        disk_tree(laptop)
+    );
+    assert!(issues_of(laptop, "private_not_synced").is_empty(), "{:?}", issues_of(laptop, "private_not_synced"));
     assert_converged(&world);
 }

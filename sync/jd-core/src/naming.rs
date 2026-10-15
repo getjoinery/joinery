@@ -330,7 +330,7 @@ pub fn apply_naming(
         .filter(|e| !e.remote_deleted && e.status != LocalStatus::OutOfScope)
         .filter_map(|e| e.replaces)
         .collect();
-    let parked = crate::pass::held_by_a_weak_volume_park(env)?;
+    let parked = crate::pass::held_by_a_park(env)?;
     let waiting: std::collections::HashSet<EntityId> = env
         .store
         .open_issues()?
@@ -923,7 +923,7 @@ fn judge_destinations(
     let already: std::collections::HashSet<EntityId> =
         out.give_up_local_copy.iter().map(|(id, _, _)| *id).collect();
     let (trading, pending) = trading_names(env, personality, settled, leaving_this_pass, busy)?;
-    let parked = crate::pass::held_by_a_weak_volume_park(env)?;
+    let parked = crate::pass::held_by_a_park(env)?;
     let all = crate::pass::all_entries(env)?;
     // A source a claimant replaces is going, as the main loop reads it: its
     // file is the claimant's, and its trash follows the claimant's upload
@@ -1348,6 +1348,7 @@ mod tests {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         }
     }
 

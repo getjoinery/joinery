@@ -556,11 +556,21 @@ of becoming a conflicted copy.
 ### Encrypted files and folders
 
 This section is about **Fortress** folders — the client-custody level, where the
-device holds the keys. **Private** folders are excluded from sync entirely: their
-bytes are opened by the server inside the owner's unlock window, and a headless
-daemon has no window to open. Both exports carry `protection_level` and a
-`syncable` flag, and a client skips anything marked unsyncable; the Drive UI says
-so on the folder rather than leaving a member wondering why files never arrive.
+device holds the keys. **Private** folders are not synced to computers: their
+bytes are opened by the server inside the owner's unlock window, the window
+belongs to a browser session, and a sync client never holds one. Both exports
+carry `protection_level` and a `syncable` flag (an export without the flag reads
+as syncable). The client parks a Private tree's top folder out of scope, as it
+parks a vault on a FAT drive, and everything under it waits with it: nothing is
+downloaded or created there, nothing saved there is uploaded, and nothing
+already there is moved or removed. A folder that synced before it was made
+Private keeps its copy on the computer, no longer synced, and one issue
+(`private_not_synced`) says so; the Drive UI says so on the folder. A file
+carried out of the folder on the computer is sent as a move, which the server
+refuses until the owner's window is open (`vault_needed`, held like a standing
+refusal), and a file never sent goes up from where it now stands. Made
+Standard again, the folder syncs again, and what was done to it on the computer
+meanwhile goes up.
 
 Fortress content syncs like anything else, with one difference that runs
 through everything: the engine works in the **plaintext** domain and the server

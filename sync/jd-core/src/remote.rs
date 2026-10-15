@@ -48,6 +48,10 @@ pub struct RemoteState {
     /// The encrypted `{name, mime, size, cid, ...}` blob. Opening it needs the
     /// file key, so the plaintext name is not knowable until that is unwrapped.
     pub encrypted_metadata: Option<String>,
+    /// The server says a sync client may hold this (`syncable`). Private is
+    /// not: its bytes open only in a browser. An export that does not say
+    /// (an older server's) reads as syncable.
+    pub syncable: bool,
 }
 
 /// What the server did to an entry we already track, measured from the
@@ -210,6 +214,7 @@ mod tests {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         }
     }
 
@@ -222,6 +227,7 @@ mod tests {
             is_encrypted: false,
             wrapped_file_key: None,
             encrypted_metadata: None,
+            syncable: true,
         }
     }
 

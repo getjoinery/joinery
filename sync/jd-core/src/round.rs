@@ -575,6 +575,7 @@ mod tests {
             own_file: None,
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         }
     }
 

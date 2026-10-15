@@ -1199,6 +1199,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
     let probe = Entry {
         id: EntityId::file(0),
         own_file_seen_at: None,
+        remote_unsyncable: false,
         remote: p.clone(),
         remote_content: None,
         remote_modified_time: None,
@@ -3837,6 +3838,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         id,
         // Minted from the file it keeps, which stands there.
         own_file_seen_at: Some(kept.clone()),
+        remote_unsyncable: false,
         remote: kept,
         remote_content: None,
         remote_modified_time: None,

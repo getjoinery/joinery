@@ -223,6 +223,8 @@ impl Store {
                 -- where a never-sent record's own file last stood
                 seen_at_parent_id          INTEGER,
                 seen_at_name               TEXT,
+                -- the server says a sync client does not hold it (Private)
+                remote_unsyncable          INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -393,6 +395,7 @@ impl Store {
             ("stands_at_agreed_name", "TEXT"),
             ("seen_at_parent_id", "INTEGER"),
             ("seen_at_name", "TEXT"),
+            ("remote_unsyncable", "INTEGER NOT NULL DEFAULT 0"),
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
@@ -522,8 +525,9 @@ impl Store {
                 content_id, synced_remote_sha256, synced_remote_size,
                 replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                 synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38)
+                stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                remote_unsyncable
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -560,7 +564,8 @@ impl Store {
                 stands_at_agreed_parent_id = excluded.stands_at_agreed_parent_id,
                 stands_at_agreed_name = excluded.stands_at_agreed_name,
                 seen_at_parent_id = excluded.seen_at_parent_id,
-                seen_at_name = excluded.seen_at_name",
+                seen_at_name = excluded.seen_at_name,
+                remote_unsyncable = excluded.remote_unsyncable",
         )?.execute(
             params![
                 e.id.entity_type.to_string(),
@@ -601,6 +606,7 @@ impl Store {
                 e.stands_at.as_ref().map(|s| s.agreed.name.clone()),
                 e.own_file_seen_at.as_ref().and_then(|p| p.parent),
                 e.own_file_seen_at.as_ref().map(|p| p.name.clone()),
+                e.remote_unsyncable as i64,
             ],
         )?;
         Ok(())
@@ -621,7 +627,8 @@ impl Store {
                         content_id, synced_remote_sha256, synced_remote_size,
                         replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
             )?
             .query_row(params![id.entity_type.to_string(), id.server_id], row_to_entry)
@@ -1001,7 +1008,8 @@ impl Store {
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                      FROM entries
                     ORDER BY entity_type, server_id";
         let mut stmt = self.conn.prepare_cached(sql)?;
@@ -1023,7 +1031,8 @@ impl Store {
                           content_id, synced_remote_sha256, synced_remote_size,
                           replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -1754,7 +1763,8 @@ impl Store {
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2",
         )?;
@@ -1779,7 +1789,8 @@ impl Store {
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                FROM entries
               WHERE entity_type = 'file'
                 AND (own_file_id = ?1 OR (own_file_id IS NULL AND synced_fp_file_id = ?1))",
@@ -1805,7 +1816,8 @@ impl Store {
                     content_id, synced_remote_sha256, synced_remote_size,
                     replaces_type, replaces_id, stand_in_parent_id, stand_in_name,
                         synced_fp_birth_ns, own_file_id, own_file_birth_ns, last_seen_sha256,
-                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name
+                        stands_at_parent_id, stands_at_name, stands_at_agreed_parent_id, stands_at_agreed_name, seen_at_parent_id, seen_at_name,
+                        remote_unsyncable
                FROM entries
               WHERE entity_type = ?1 AND synced_fp_file_id = ?2 AND remote_deleted = 0",
         )?;
@@ -2351,6 +2363,7 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
         },
         last_seen_sha,
         own_file_seen_at,
+        remote_unsyncable: r.get::<_, Option<i64>>(38)?.unwrap_or(0) != 0,
     })
 }
 
@@ -2467,6 +2480,7 @@ mod tests {
             own_file: Some(jd_vfs::FileIdentity { file_id: 99, birth_ns: 5678 }),
             last_seen_sha: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         }
     }
 

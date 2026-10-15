@@ -273,6 +273,11 @@ pub struct Entry {
     /// agreement (`never_sent_again`) asking where its file stands now. `None`
     /// is not known: a store older than the field, or a file found nowhere.
     pub own_file_seen_at: Option<Placement>,
+    /// The server says a sync client does not hold this (`syncable: false`):
+    /// Private, whose bytes open only inside the owner's unlock window, which
+    /// belongs to a browser session (`drive_private_not_synced.md`).
+    /// False where an export does not say, as an older server's do not.
+    pub remote_unsyncable: bool,
 }
 
 impl Entry {

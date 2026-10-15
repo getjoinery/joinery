@@ -630,6 +630,7 @@ mod tests {
             status: LocalStatus::Synced,
             wrapped_file_key: None,
             own_file_seen_at: None,
+            remote_unsyncable: false,
         }
     }
 
