@@ -11,6 +11,7 @@
  * A managed site is updated by its management node, and the origin publishes
  * releases instead of installing them, so neither is offered the button.
  *
+ * @version 1.1 - the offered version is ReleaseProvenance::offered(), shared with the node Updates tab
  * @version 1.0
  */
 function admin_updates_logic(array $input): LogicResult {
@@ -37,7 +38,7 @@ function admin_updates_logic(array $input): LogicResult {
 
 	$settings = Globalvars::get_instance();
 	$source = trim((string)$settings->get_setting('upgrade_source'));
-	$offered = $origin ? array('version' => '', 'error' => '') : admin_updates_offered($source);
+	$offered = $origin ? array('version' => '', 'error' => '') : ReleaseProvenance::offered($source);
 
 	return LogicResult::render(array(
 		'session'      => $session,
@@ -55,36 +56,6 @@ function admin_updates_logic(array $input): LogicResult {
 		'sideloaded'   => admin_updates_sideloaded(),
 		'forks'        => admin_updates_forks($origin),
 	));
-}
-
-/**
- * The version the upgrade source offers now, asked live: ['version' => '', 'error' => ''].
- * A source that cannot be reached is shown, not stopped for: the operator may
- * be here to read a transcript.
- */
-function admin_updates_offered(string $source): array {
-	if ($source === '') {
-		return array('version' => '', 'error' => 'No upgrade source is set for this site.');
-	}
-	$curl = curl_init();
-	curl_setopt_array($curl, array(
-		CURLOPT_URL => rtrim($source, '/') . '/utils/upgrade?serve-upgrade=1',
-		CURLOPT_RETURNTRANSFER => true,
-		CURLOPT_FOLLOWLOCATION => true,
-		CURLOPT_TIMEOUT => 15,
-		CURLOPT_CONNECTTIMEOUT => 8,
-	));
-	$body = curl_exec($curl);
-	$err  = curl_error($curl);
-	curl_close($curl);
-	if ($body === false || $err !== '') {
-		return array('version' => '', 'error' => 'Could not reach ' . $source . ': ' . $err);
-	}
-	$decoded = json_decode((string)$body, true);
-	$version = is_array($decoded) ? trim((string)($decoded['system_version'] ?? '')) : '';
-	return $version === ''
-		? array('version' => '', 'error' => 'The upgrade source answered, but named no version.')
-		: array('version' => $version, 'error' => '');
 }
 
 /**

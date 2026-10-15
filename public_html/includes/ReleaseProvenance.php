@@ -13,6 +13,10 @@
  * prove anything about that machine anyway. The proof is utils/verify_release.php,
  * run somewhere else.
  *
+ * It also asks the site's upgrade source which release it offers now
+ * (offered()), for the pages that say whether this site is current.
+ *
+ * @version 1.1 - offered(): the version the upgrade source offers, asked live
  * @version 1.0
  */
 class ReleaseProvenance {
@@ -57,6 +61,38 @@ class ReleaseProvenance {
 			'log_origin'   => (string)($entry['log_origin'] ?? ''),
 			'log_index'    => isset($entry['log_index']) && is_numeric($entry['log_index']) ? (int)$entry['log_index'] : null,
 		);
+	}
+
+	/**
+	 * The version $source offers now, asked live: ['version' => '', 'error' => ''].
+	 * It is the question utils/upgrade.php asks before it downloads. A source
+	 * that cannot be reached comes back as an error to show, not a throw: the
+	 * page asking still has the rest of itself to render.
+	 */
+	public static function offered(string $source): array {
+		$source = trim($source);
+		if ($source === '') {
+			return array('version' => '', 'error' => 'No upgrade source is set for this site.');
+		}
+		$curl = curl_init();
+		curl_setopt_array($curl, array(
+			CURLOPT_URL => rtrim($source, '/') . '/utils/upgrade?serve-upgrade=1',
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_TIMEOUT => 15,
+			CURLOPT_CONNECTTIMEOUT => 8,
+		));
+		$body = curl_exec($curl);
+		$err  = curl_error($curl);
+		curl_close($curl);
+		if ($body === false || $err !== '') {
+			return array('version' => '', 'error' => 'Could not reach ' . $source . ': ' . $err);
+		}
+		$decoded = json_decode((string)$body, true);
+		$version = is_array($decoded) ? trim((string)($decoded['system_version'] ?? '')) : '';
+		return $version === ''
+			? array('version' => '', 'error' => 'The upgrade source answered, but named no version.')
+			: array('version' => $version, 'error' => '');
 	}
 
 	/** A commit's page in its public repository; '' for anything that is not a full commit hash. */
