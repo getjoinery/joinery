@@ -46,6 +46,7 @@ if (!defined('JOINERY_HARNESS_LOADED')) {
 	require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 	require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+	require_once(__DIR__ . '/repo_guard.php');       // a test never changes the real repository
 
 	// ---- shared mutable state (global script scope) ------------------------
 	$GLOBALS['__harness'] = array(
@@ -172,6 +173,16 @@ function harness_boot(array $overrides = array()) {
 
 	$h['started'] = microtime(true);
 	$h['booted'] = true;
+
+	// Before the test runs anything: mark it, so the guard hooks refuse its
+	// commits and pushes in the real repository, and note how that repository
+	// stands, so harness_finish() can say if the test changed it anyway
+	// (tests/lib/repo_guard.php). A node has no checkout: both are no-ops.
+	repo_guard_mark($h['meta']['name'] ?? '');
+	if (($rg_root = repo_guard_root()) !== null) {
+		repo_guard_install_hooks($rg_root);
+		$h['repo_guard'] = array('root' => $rg_root, 'before' => repo_guard_snapshot($rg_root));
+	}
 
 	harness_enforce_env();
 
@@ -1353,6 +1364,13 @@ function harness_finish() {
 			&& !DbConnector::get_instance()->test_mode_was_used()) {
 		check(false, 'a test-db tier suite must enter test-database mode',
 			'no set_test_mode()/harness_test_mode() call happened — writes went to the live database');
+	}
+
+	// The real repository as the test found it: its config, the shared index,
+	// and nothing the guard hooks had to refuse.
+	if (!empty($h['repo_guard']['before'])) {
+		$rg = repo_guard_changes($h['repo_guard']['root'], $h['repo_guard']['before'], repo_guard_snapshot($h['repo_guard']['root']));
+		check($rg['fail'] === array(), 'the real repository is as this test found it', implode("\n", $rg['fail']));
 	}
 
 	$h['finished'] = true;

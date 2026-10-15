@@ -55,6 +55,10 @@ require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_re
 require_once(__DIR__ . '/lib/coverage.php');   // coverage map + --changed selection
 require_once(__DIR__ . '/lib/gate.php');       // the lock, run records, result reuse
 
+// Every suite this run starts, and the lane worker, inherit the mark the git
+// guard hooks look for (tests/lib/repo_guard.php).
+repo_guard_mark(null);
+
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
@@ -518,6 +522,13 @@ $run_info = array(
 $run_id = gate_record_start($gate_dir, $run_info);
 if ($gate_held) gate_holder_write($gate_dir, $run_info + array('run_id' => $run_id));
 
+// The real repository as this run found it, with the guard hooks in place.
+// Each PHP suite checks itself (harness_finish()); this pass also covers the
+// shell gates, and is compared once every suite has ended.
+$rg_root = $tier_arg === 'deploy' ? null : repo_guard_root();
+$rg_setup = $rg_root !== null ? repo_guard_install_hooks($rg_root) : null;
+$rg_before = $rg_root !== null ? repo_guard_snapshot($rg_root) : null;
+
 // Every result lands here: into the aggregate and onto the run record, one
 // line as it completes, which is what a waiting runner reads for progress.
 $results = array();
@@ -785,8 +796,10 @@ function run_one_start($d, $root, $timeout_s) {
 	// dash cannot express closing a two-digit descriptor.
 	$closes = '';
 	for ($fd = 3; $fd <= 31; $fd++) { $closes .= ' ' . $fd . '>&-'; }
+	// The suite's name rides along, so a change the git guard refuses names it.
 	$cmd = 'bash -c ' . escapeshellarg(
-		'exec' . $closes . '; exec timeout -k 5s ' . (int)$timeout_s . 's ' . $inner);
+		'exec' . $closes . '; exec env ' . REPO_GUARD_SUITE_ENV . '=' . escapeshellarg(preg_replace('/[^A-Za-z0-9_.:-]/', '_', (string)$d['meta']['name']))
+		. ' timeout -k 5s ' . (int)$timeout_s . 's ' . $inner);
 
 	// Capture stdout/stderr to temp files, not pipes: a child that writes more
 	// than the ~64KB pipe buffer to one stream before we drain it would deadlock.
@@ -917,6 +930,27 @@ function print_human_line($r, $root, $tag = '') {
 // that produced it.
 coverage_map_update(array_values(array_filter($results, function ($r) { return empty($r['reused_from']); })), $ROOT);
 
+// The real repository, compared with how this run found it. A change a suite
+// made fails the run as an entry of its own, saying what to put back; a
+// branch that moved under the guard hooks is someone's commit, only noted.
+$rg_notes = array();
+if ($rg_before !== null) {
+	$rg = repo_guard_changes($rg_root, $rg_before, repo_guard_snapshot($rg_root));
+	$rg_notes = $rg['note'];
+	foreach (array('kept_foreign' => 'a hook of the same name that is not the guard\'s was kept: ',
+			'failed' => 'the guard hook could not be installed: ') as $k => $why) {
+		foreach ($rg_setup[$k] ?? array() as $p) $rg_notes[] = $why . $p;
+	}
+	if ($rg['fail']) {
+		$r = $land(array(
+			'name' => 'repo_guard', 'path' => 'tests/lib/repo_guard.php', 'tier' => $tier_arg, 'env' => 'dev-only',
+			'status' => 'fail', 'stats' => array('total' => count($rg['fail']), 'passed' => 0, 'failed' => count($rg['fail']), 'skipped' => 0),
+			'duration_ms' => 0, 'note' => 'the real repository changed during this run', 'fail_lines' => $rg['fail'],
+		));
+		if (!$want_json) print_human_line($r, $ROOT);
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Aggregate + report
 // ---------------------------------------------------------------------------
@@ -952,6 +986,7 @@ if ($want_json) {
 		'test_db_refresh' => $test_db_refresh,
 		'selection' => $selection,
 		'totals' => $totals,
+		'repository_notes' => $rg_notes,
 		'results' => $results,
 		'skipped_env' => array_map(function ($s) use ($ROOT) {
 			return array('name' => $s['meta']['name'], 'path' => harness_rel($s['path'], $ROOT), 'reason' => $s['reason']);
@@ -981,6 +1016,7 @@ if ($not_borrowed) {
 	$rest = count($not_borrowed) > 3 ? '; and ' . (count($not_borrowed) - 3) . ' other reason' . (count($not_borrowed) === 4 ? '' : 's') : '';
 	echo 'Not borrowed: ' . implode('; ', $parts) . $rest . "\n";
 }
+foreach ($rg_notes as $n) echo 'Repository: ' . $n . "\n";
 echo 'Run record: ' . $run_id . ($gate_held ? ' (held the gate' . ($gate_waited_s ? ', waited ' . gate_fmt_duration($gate_waited_s) : '') . ')' : ' (below the cutoff, no lock)') . "\n";
 
 // Failures are named again at the end, not only where they occurred. A long

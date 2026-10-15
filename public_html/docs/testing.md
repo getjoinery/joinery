@@ -515,6 +515,33 @@ pass (`RunNodeUptimeChecks::watched_nodes()`) leave it alone, so no superadmin
 is told about a suite's node and no job is queued for one that the suite then
 deletes. A suite that wants either pass over its nodes calls it with them.
 
+### A test never changes the real repository
+
+A suite that exercises git makes its own throwaway repositories under the
+temp directory (`sys_get_temp_dir()`, never `cache/tests/`, which sits inside
+the checkout) and commits, pushes and rewrites remotes there. The real
+checkout is guarded two ways (`tests/lib/repo_guard.php`):
+
+- **Refused.** `harness_boot()` and `tests/run.php` mark every test process
+  with `JOINERY_TEST_RUN` and the suite's name in `JOINERY_TEST_SUITE`, and
+  install two git hooks in the real repository. `reference-transaction`
+  refuses a marked process moving a branch, a tag or `HEAD` (a fetch's
+  remote-tracking refs pass); `pre-push` refuses its push. Each refusal is
+  logged with the suite's name in `.git/joinery-test-refusals.log`. Nothing
+  else is affected: an unmarked process, and every throwaway repository,
+  has no such hook to meet.
+- **Compared.** What a hook cannot see is snapshotted when a suite boots and
+  compared in `harness_finish()`: `.git/config` and `config.worktree`, the
+  shared index (it stays empty; commits are prepared in private indexes), and
+  the refusal log. The runner does the same around its whole pass, which
+  covers the shell gates. A change fails the suite (the check *the real
+  repository is as this test found it*) or the run (an entry named
+  `repo_guard`), saying what changed and what to put back. A branch that
+  moved while the hooks stood is someone's commit and is only noted
+  (`Repository:` in the summary); with no hook standing it fails.
+
+A machine whose site root is not a git checkout has nothing to guard.
+
 ### Mail a run sends is cleaned up too
 
 `harness_boot()` points sending at the local relay and redirects every recipient
