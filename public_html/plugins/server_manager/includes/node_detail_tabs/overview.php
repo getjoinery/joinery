@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.68 - the Hide confirmation says the node's cloud server stays recorded (B71)
  * @version 1.67 - settings ask whether this node's incidents send alerts (ManagedNode::ALERTS)
  * @version 1.66 - the Machine box asks what the machine listens on, lists every container on a Docker host, and
  *                 reboots it behind a confirm (agent 1.76.0), saying when the last reboot was asked and whether the
@@ -388,7 +389,7 @@
 					<form method="post" action="<?php echo $base_url; ?>" id="delete_node_form" style="margin:0;">
 						<input type="hidden" name="action" value="delete_node">
 						<?php echo SmAdminCsrf::field(); ?>
-						<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Hide this site from the dashboard? The site keeps running on its host and every record is kept; Restore to Dashboard brings it back. Hiding stops the work on it: unfinished jobs are cancelled, its backup storage takes no new backups, any provisioning record and hosted trial from its hosting order are removed, and a domain bought for it is parked for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Hide from Dashboard</button>
+						<button type="button" class="dropdown-item" onclick="JoineryModal.confirm('Hide this site from the dashboard? The site keeps running on its host and every record is kept; Restore to Dashboard brings it back. Hiding stops the work on it: unfinished jobs are cancelled, its backup storage takes no new backups, any provisioning record and hosted trial from its hosting order are removed (its cloud server stays recorded), and a domain bought for it is parked for its buyer.', function(){ document.getElementById('delete_node_form').submit(); })">Hide from Dashboard</button>
 					</form>
 				</li>
 			<?php else: ?>

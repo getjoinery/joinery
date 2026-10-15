@@ -2,6 +2,10 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.57 - hiding keeps the node's cloud server recorded: the order's provisioning record still goes, and an
+ *                 adopted record of the same server is left in its place (keep_server_link()), so Restore to Dashboard
+ *                 finds escrow Tier 2, reverse DNS and an address swap as they were; an adopted record is kept as it
+ *                 is (B71). Remove Permanently lets both go, as before
  * @version 1.56 - removing a node permanently gives up the data root keys this holder kept for its machine
  *                 (DataRootEscrowSync::let_go): no longer managed here, it is no longer opened from here (B69).
  *                 Hiding it keeps them, as it keeps every record, so Restore to Dashboard finds it as it was
@@ -962,8 +966,27 @@ class ManagedNode extends SystemBase {
 	 * site's other records go first, so a failure leaves the node listed and
 	 * the removal can simply be asked again.
 	 */
+	/** Set by hide() for the length of its soft_delete(). */
+	private $keeps_server = false;
+
+	/**
+	 * Hide from Dashboard: soft_delete(), with the node's cloud server kept on
+	 * record, since the site goes on running there (release_site_records(),
+	 * B71). The other ways a node leaves the dashboard let its machine go
+	 * (a discarded copy, the old server of a switch-over, a container the
+	 * host removed) and call soft_delete() itself.
+	 */
+	public function hide() {
+		$this->keeps_server = true;
+		try {
+			return $this->soft_delete();
+		} finally {
+			$this->keeps_server = false;
+		}
+	}
+
 	function soft_delete() {
-		$this->removal_notes = $this->key ? $this->release_site_records() : [];
+		$this->removal_notes = $this->key ? $this->release_site_records(!$this->keeps_server) : [];
 		if ($this->key) {
 			$withdrawn = $this->withdraw_open_jobs();
 			if ($withdrawn > 0) {
@@ -1138,6 +1161,12 @@ class ManagedNode extends SystemBase {
 	 * and a domain step asking the removed node to prepare mail every tick.
 	 *
 	 * - The order's provisioning record and its hosted trial are removed.
+	 * - Hidden, not removed for good ($for_good false), the site still runs
+	 *   on its server, so the server stays recorded: an adopted record
+	 *   (no order, never billed, no trial) takes the order record's place
+	 *   (keep_server_link()), and one that was adopted already is kept. The
+	 *   escrow holder's Tier 2 check, reverse DNS and an address swap find
+	 *   the server through it, before and after Restore to Dashboard (B71).
 	 * - A domain bought for the site is kept: the buyer is its registrant,
 	 *   and the record carries its renewals and its hand-over. One still being
 	 *   bought or wired up is parked for a person on the Domains page, with
@@ -1150,16 +1179,23 @@ class ManagedNode extends SystemBase {
 	 *
 	 * @return string[] one plain sentence per thing it did or found.
 	 */
-	public function release_site_records(): array {
+	public function release_site_records(bool $for_good = true): array {
 		$notes = [];
 		foreach (new MultiCustomerCloudProvision(['cvp_mgn_managed_node_id' => (int)$this->key, 'deleted' => false]) as $provision) {
 			$domain = (string)$provision->get('cvp_domain');
+			if (!$for_good && (string)$provision->get('cvp_install_mode') === 'adopted') {
+				// The server alone, with no order behind it: nothing to let go of.
+				continue;
+			}
 			$trial = HostedTrial::for_provision($provision->key);
 			if ($trial !== null) {
 				$trial->soft_delete();
 			}
 			$provision->soft_delete();
 			$notes[] = 'The provisioning record for ' . $domain . ($trial !== null ? ' and its hosted trial were' : ' was') . ' removed.';
+			if (!$for_good && ($kept = $this->keep_server_link($provision)) !== null) {
+				$notes[] = 'Its cloud server stays recorded (provision #' . (int)$kept->key . '), so its escrow checks, reverse DNS and address swap work as before once it is restored.';
+			}
 
 			$item_id = (int)$provision->get('cvp_external_order_item_id');
 			if ($item_id > 0 && class_exists('OrderItem')) {
@@ -1177,6 +1213,45 @@ class ManagedNode extends SystemBase {
 			}
 		}
 		return $notes;
+	}
+
+	/**
+	 * The server a removed order record named, recorded again as adopted, as
+	 * Adopt cloud server records one (CloudServerAdoption::adopt): the same
+	 * account, instance, addresses and region, and no order, trial, buyer,
+	 * password or mail leg, so nothing is billed, seeded or powered off for
+	 * it. No provider is asked: this is the server this node already had.
+	 * It belongs to whoever is hiding the node, else to whoever added the
+	 * cloud account it is in. Null when the record named no server, or no
+	 * one can own the new record.
+	 */
+	private function keep_server_link(CustomerCloudProvision $order): ?CustomerCloudProvision {
+		$instance_id = trim((string)$order->get('cvp_instance_id'));
+		if ($instance_id === '') {
+			return null;
+		}
+		$user_id = (int)SessionControl::get_instance()->get_user_id();
+		$oca_id = (int)$order->get('cvp_oca_operator_cloud_account_id');
+		if ($user_id <= 0 && $oca_id > 0) {
+			$user_id = (int)(new OperatorCloudAccount($oca_id, TRUE))->get('oca_added_by_usr_user_id');
+		}
+		if ($user_id <= 0) {
+			return null;
+		}
+		$link = new CustomerCloudProvision(NULL);
+		$link->set('cvp_origin', 'admin');
+		$link->set('cvp_usr_user_id', $user_id);
+		foreach (['cvp_hosting_mode', 'cvp_oca_operator_cloud_account_id', 'cvp_cca_customer_cloud_account_id', 'cvp_domain',
+				'cvp_slug', 'cvp_provider', 'cvp_instance_id', 'cvp_instance_ip', 'cvp_instance_ipv6', 'cvp_region',
+				'cvp_instance_type', 'cvp_docker_mode', 'cvp_provider_disk_encryption', 'cvp_data_root_encrypted'] as $field) {
+			$link->set($field, $order->get($field));
+		}
+		$link->set('cvp_status', 'done');
+		$link->set('cvp_install_mode', 'adopted');
+		$link->set('cvp_mgn_managed_node_id', (int)$this->key);
+		$link->save();
+		$link->load();
+		return $link;
 	}
 
 	function prepare() {

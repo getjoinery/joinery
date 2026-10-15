@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.62 - Hide from Dashboard calls ManagedNode::hide(), which keeps the node's cloud server recorded (B71)
  * @version 1.61 - the settings form saves mgn_alerts (whether this node's incidents notify anyone)
  * @version 1.60 - listening_sockets, container_inventory, spam_learning_status and reboot_machine (agent 1.76.0)
  * @version 1.59 - retry_install is refused only when this plane no longer holds the install password, for any
@@ -1216,7 +1217,7 @@ class NodeDetailActions {
 				if (!$node->key) {
 					return $base_url;
 				}
-				$node->soft_delete();
+				$node->hide();
 				$session->save_message(new DisplayMessage(
 					trim('Hidden from the dashboard. The site itself keeps running on its host, and every record is kept; '
 						. 'Restore to Dashboard brings it back. ' . implode(' ', $node->removal_notes())), 'Success', $page_regex,
