@@ -194,6 +194,72 @@ $states = array((string)(new StorageSpace($hr2_old, TRUE))->get('sps_state'), (s
 check($states === array('draining', 'active'), 'only one space is given back: the one hiding drained', json_encode($states));
 
 // ---------------------------------------------------------------------------
+section('Hidden, its cloud server stays recorded; a machine let go keeps none (B71)');
+
+// Escrow Tier 2, reverse DNS and an address swap find a node's server only
+// through a live provision record. Hiding removes the hosting order's record,
+// and once took the server's record with it, so a node hidden and restored
+// was quietly answered at Tier 1.
+$srv_oca = new OperatorCloudAccount(NULL);
+$srv_oca->set('oca_method', OperatorCloudAccount::METHOD_KEY);
+$srv_oca->set('oca_account_name', 'nhr server ' . $suffix);
+$srv_oca->set('oca_added_by_usr_user_id', $buyer->key);
+$srv_oca->store_credential('nhr-server-token');
+$srv_oca->save();
+$srv_oca->load();
+harness_register_row('oca_operator_cloud_accounts', 'oca_operator_cloud_account_id', $srv_oca->key);
+$server = array('cvp_oca_operator_cloud_account_id' => (int)$srv_oca->key, 'cvp_instance_id' => 'nhr-inst-' . $suffix,
+	'cvp_instance_ip' => '198.51.100.72', 'cvp_instance_ipv6' => '2001:db8::72', 'cvp_region' => 'us-east',
+	'cvp_docker_mode' => 'bare-metal', 'cvp_data_root_encrypted' => true);
+$live_rows = function ($node_id) {
+	$rows = array();
+	foreach (new MultiCustomerCloudProvision(array('node_id' => (int)$node_id, 'deleted' => false)) as $p) { $rows[] = $p; }
+	return $rows;
+};
+
+$kept_node = nhr_node('keepsrv');
+$order_rec = nhr_provision($buyer, $kept_node, $server);
+$kept_node->hide();
+$kept_notes = $kept_node->removal_notes();
+$rows = $live_rows($kept_node->key);
+$link = $rows[0] ?? null;
+if ($link) { harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $link->key); }
+check((string)(new CustomerCloudProvision($order_rec->key, TRUE))->get('cvp_delete_time') !== '', 'hidden: the order\'s record is removed, as before');
+check(count($rows) === 1 && (int)$link->key !== (int)$order_rec->key && (string)$link->get('cvp_install_mode') === 'adopted'
+	&& (string)$link->get('cvp_instance_id') === $server['cvp_instance_id'] && (string)$link->get('cvp_instance_ipv6') === '2001:db8::72'
+	&& (int)$link->get('cvp_oca_operator_cloud_account_id') === (int)$srv_oca->key && (bool)$link->get('cvp_data_root_encrypted')
+	&& !$link->get('cvp_external_order_item_id') && (int)$link->get('cvp_usr_user_id') === (int)$buyer->key,
+	'and an adopted record of the same server takes its place: its account, instance, addresses, no order; owned by whoever added the account',
+	json_encode(array_map(function ($p) { return array($p->key, $p->get('cvp_install_mode'), $p->get('cvp_instance_id')); }, $rows)));
+check(strpos(implode(' ', $kept_notes), 'Its cloud server stays recorded') !== false, 'the page that hid it says so', json_encode($kept_notes));
+$kept_node = new ManagedNode($kept_node->key, TRUE);
+check(($p = IpSwapMove::provision_of($kept_node)) !== null && (int)$p->key === (int)$link->key,
+	'hidden, the node still finds its server (escrow Tier 2, reverse DNS, an address swap read it this way)');
+$kept_node->undelete();
+$kept_node = new ManagedNode($kept_node->key, TRUE);
+check(($p = IpSwapMove::provision_of($kept_node)) !== null && (int)$p->key === (int)$link->key, 'restored, it finds it as before');
+
+$adopted_node = nhr_node('adoptedsrv');
+$adopted_rec = nhr_provision($buyer, $adopted_node, array('cvp_install_mode' => 'adopted', 'cvp_instance_id' => 'nhr-inst-a-' . $suffix,
+	'cvp_instance_ip' => '198.51.100.73', 'cvp_docker_mode' => 'bare-metal'));
+$adopted_node->hide();
+$rows = $live_rows($adopted_node->key);
+check(count($rows) === 1 && (int)$rows[0]->key === (int)$adopted_rec->key, 'a record that was adopted already is kept as it is: no order to let go of');
+
+$letgo_node = nhr_node('letgosrv');
+nhr_provision($buyer, $letgo_node, array('cvp_instance_id' => 'nhr-inst-l-' . $suffix, 'cvp_instance_ip' => '198.51.100.74',
+	'cvp_docker_mode' => 'bare-metal', 'cvp_oca_operator_cloud_account_id' => (int)$srv_oca->key));
+$letgo_node->soft_delete();
+check($live_rows($letgo_node->key) === array(), 'a node whose machine is let go (soft_delete() alone: a discarded copy, a switch-over\'s old server) keeps no record of it');
+
+$kept_node->hide();
+$kept_node = new ManagedNode($kept_node->key, TRUE);
+$kept_node->remove_permanently();
+$left = $db->prepare('SELECT count(*) FROM cvp_customer_cloud_provisions WHERE cvp_mgn_managed_node_id = ?');
+$left->execute(array($kept_node->key));
+check((int)$left->fetchColumn() === 0, 'removed for good, the kept record goes with the node');
+
+// ---------------------------------------------------------------------------
 section('Remove Permanently takes every record the node owns');
 
 $victim = nhr_node('victim');
