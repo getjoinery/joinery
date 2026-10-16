@@ -4,6 +4,9 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.29 - The status file says when the data root was stopped by hand (stopped_by_hand=, empty when it
+#                 was not), written as stop and start finish as well as each tick, so the site's pages and
+#                 the host report tell a deliberate stop from a fault (reviewer2 B17 D2).
 # Version: 1.28 - The tick makes the chip's slot follow the record on an open volume with no run going (wanted
 #                 and none: enrolled; not wanted and one: taken away), so a choice made while the volume
 #                 was locked or busy, or a change that failed, is carried out (reviewer1 B43 F1); once a
@@ -3486,7 +3489,8 @@ write_public_status() {
     out="# Written by joinery_data_root.sh each tick (specs/hosted_data_promise_disk_encryption.md WP4).
 backing=$(conf_get backing)
 tpm2_chip=$(tpm2_present && echo 1 || echo 0)
-tpm2=$( [[ "$(conf_get tpm2)" == off ]] && echo off || echo auto)"
+tpm2=$( [[ "$(conf_get tpm2)" == off ]] && echo off || echo auto)
+stopped_by_hand=$(stopped_at)"
     if is_luks; then
         sidecar="${ROOT}$(conf_get sidecar)"
         [[ -f "$sidecar" ]] && sfpr="$(grep -o '"fingerprint": *"[0-9a-f]*"' "$sidecar" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' || true)"
@@ -3687,6 +3691,13 @@ do_stop() {
     say "data root: stopped$( is_luks && printf ', its volume closed')$( (( ${#running[@]} > 0 )) && printf ', with %s' "${running[*]}"). It stays stopped until joinery_data_root.sh start, or the next boot."
 }
 
+# When the data root was stopped by hand ("YYYY-MM-DD HH:MM:SS UTC"), or
+# nothing while it is not stopped.
+stopped_at() {
+    [[ -f "$STOPPED_FLAG" ]] || return 0
+    head -n 1 "$STOPPED_FLAG" 2>/dev/null | sed -n 's/^stopped by hand at \([0-9: -]*UTC\)$/\1/p' | head -c 40
+}
+
 # What stop stopped: when, then a unit a line.
 stop_record() {  # UNIT...
     { printf 'stopped by hand at %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"; printf '%s\n' "$@" | sort -u | grep -v '^$' || true; } > "$STOPPED_FLAG.tmp"
@@ -3846,8 +3857,8 @@ case "${1:-}" in
     encrypt-resume) do_encrypt_resume ;;
     decrypt) do_decrypt ;;
     rekey)   do_rekey ;;
-    stop)    do_stop ;;
-    start)   do_start ;;
+    stop)    do_stop; write_public_status ;;
+    start)   do_start; write_public_status ;;
     tpm2)    do_tpm2 "${2:-}" ;;
     *) die "usage: joinery_data_root.sh create [--encrypted [--no-tpm2]] [SIZE] [DEVICE] | recipient [--set-by=site|operator] [PUBLIC_KEY] | check | grow [SIZE] | status | tick | bind REL TARGET | move-in REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE] | encrypt [--keep-provider-layer] [--no-tpm2] | decrypt | rekey | stop | start | tpm2 on|off" ;;
 esac

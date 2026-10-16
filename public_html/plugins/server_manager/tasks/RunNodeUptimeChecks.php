@@ -21,6 +21,9 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.17 - a machine whose site, or a site container on it, went down or locked after its last host report
+ *                 is asked every REBOOT_REFRESH_SECONDS (IncidentSourceDataRootStopped::report_wanted): the report
+ *                 says whether its data root was stopped by hand, which the site-down alarm waits for (reviewer2 F1)
  * @version 2.16 - a node in an install state is not asked for its status facts either (ManagedNode::is_operational()):
  *                 a switch-over's old container is held stopped, so its check_status and host_report jobs never
  *                 ran, and a pending job refused Permanently Delete Site on it (site_container_engine B31)
@@ -254,6 +257,10 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * new boot id (JobResultProcessor::reboot_awaited), and so is one whose
 	 * machine told this escrow holder it opened its data root after its last
 	 * report: a boot not asked from here (DataRootEscrowSync::opened_since_report).
+	 * So is a machine whose site, or a site container placed on it, went down
+	 * or locked after its last report (IncidentSourceDataRootStopped::
+	 * report_wanted): the report says whether its data root was stopped by
+	 * hand, and the site-down and locked alarms wait for it.
 	 *
 	 * @param iterable $nodes   live ManagedNode rows
 	 * @param string   $now_utc 'Y-m-d H:i:s'
@@ -286,7 +293,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 				}
 				$window = self::STATUS_REFRESH_SECONDS;
 				if ($word === 'host_report') {
-					if (JobResultProcessor::reboot_awaited($node) || DataRootEscrowSync::opened_since_report($node)) {
+					if (JobResultProcessor::reboot_awaited($node) || DataRootEscrowSync::opened_since_report($node)
+							|| IncidentSourceDataRootStopped::report_wanted($node)) {
 						$window = self::REBOOT_REFRESH_SECONDS;
 					} elseif (self::data_root_run_under_way($node)) {
 						$window = self::DATA_ROOT_RUN_REFRESH_SECONDS;

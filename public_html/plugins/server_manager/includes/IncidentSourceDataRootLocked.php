@@ -12,6 +12,11 @@
  * does not hold it, since a machine in someone else's hands could serve a page
  * that takes the whole recovery key.
  *
+ * Not while the data root was stopped by hand: a stopped encrypted data root
+ * reads as locked, and that is IncidentSourceDataRootStopped, a warning.
+ *
+ * @version 1.1 - waits, up to IncidentSourceDataRootStopped::HOLD_SECONDS, for the machine's host report it asked
+ *                for, then stands down while the data root was stopped by hand (reviewer2 B17 D2)
  * @version 1.0
  */
 class IncidentSourceDataRootLocked implements IncidentSource {
@@ -27,6 +32,10 @@ class IncidentSourceDataRootLocked implements IncidentSource {
 			return null;
 		}
 		if ((string)$node->get('mgn_uptime_last_status') !== 'locked') {
+			return null;
+		}
+		if (IncidentSourceDataRootStopped::stopped_for($node) !== null
+				|| IncidentSourceDataRootStopped::awaiting_report($node, 'mgn_uptime_locked_since')) {
 			return null;
 		}
 		$detail = array();
@@ -58,6 +67,9 @@ class IncidentSourceDataRootLocked implements IncidentSource {
 	public function cleared_text(ManagedNode $node): string {
 		if (!$node->get('mgn_enabled') || !$node->get('mgn_uptime_enabled')) {
 			return 'Uptime monitoring for this node was turned off, so whether it is locked is no longer checked.';
+		}
+		if (IncidentSourceDataRootStopped::stopped_for($node) !== null) {
+			return 'Its data root was stopped by hand, which its machine\'s incident says; it opens when it is started again.';
 		}
 		return 'Its data root is open and it answers again.';
 	}

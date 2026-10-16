@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.87 - a host report's data_root_stopped (host_report 1.28): when a data root was stopped by hand, and
+ *                which services stopped with it; null while it is not (reviewer2 B17 D2)
  * @version 1.86 - a status check's release_trust (agent 1.81.0): the release and statement keys the site and the
  *                agent trust, with the authority over them, by 12-hex name, kept only in that shape; a code
  *                check may name unauthorized_keys (specs/release_key_rotation.md R6)
@@ -3823,6 +3825,8 @@ HTML;
 			// The data root script's version beside the release's, and each service it orders
 			// after the data root (host_report 1.23); null from an older node.
 			'data_root_script'             => array_key_exists('data_root_script', $in) ? self::host_report_data_root_script($in['data_root_script']) : null,
+			// A data root stopped by hand (host_report 1.28): null while it is not.
+			'data_root_stopped'            => self::host_report_data_root_stopped($in['data_root_stopped'] ?? null),
 			'memory'                       => self::host_report_gauge($in['memory'] ?? null),
 			'swap'                         => self::host_report_gauge($in['swap'] ?? null),
 			// Processors, for reading the load average against (host_report 1.6).
@@ -4373,6 +4377,26 @@ HTML;
 			// "<epoch> <why>": a reboot an update asked for, held back (D4).
 			'reboot_held'           => substr(preg_replace('#[^A-Za-z0-9 ,.:/()_-]#', '', (string)($v['reboot_held'] ?? '')), 0, 400),
 		];
+	}
+
+	/**
+	 * A data root stopped by hand (host_report 1.28, joinery_data_root.sh
+	 * stop): {at: 'YYYY-MM-DD HH:MM:SS' UTC, services: [unit]}, or null while
+	 * it is not stopped, the host declares no data root, or the report is
+	 * older than the field.
+	 */
+	public static function host_report_data_root_stopped($v) {
+		if (!is_array($v) || !is_string($v['at'] ?? null)
+				|| !preg_match('/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})Z$/', $v['at'], $m)) {
+			return null;
+		}
+		$services = array();
+		foreach (array_slice(is_array($v['services'] ?? null) ? array_values($v['services']) : array(), 0, self::HOST_REPORT_MAX_LIST) as $u) {
+			if (is_string($u) && preg_match('/^[a-z0-9@._-]{1,60}\.(service|socket|mount|target)$/', $u)) {
+				$services[] = $u;
+			}
+		}
+		return array('at' => $m[1] . ' ' . $m[2], 'services' => $services);
 	}
 
 	/**

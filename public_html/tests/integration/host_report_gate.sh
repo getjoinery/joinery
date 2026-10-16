@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -605,6 +605,22 @@ chk "the installed copy's version beside the release's, and each consumer's drop
 chk "no installed copy: none, not unknown" "$(drs_v "$T/drs/conf" "$T/drs/absent" | cut -d/ -f1)" "none"
 chk "a host that declares no data root: none" "$(drs "$T/drs/no_conf" "$T/drs/sbin")" '"none"'
 chk "the boot id is the kernel's" "$(jv "$T/root.json" boot_id)" "$(tr -cd '0-9a-f-' < /proc/sys/kernel/random/boot_id)"
+
+echo "=== A data root stopped by hand (host_report 1.28, reviewer2 B17 D2) ==="
+eval "$(sed -n -e '/^safe_name() {/,/^}/p' -e '/^json_str() {/,/^}/p' -e '/^emit_data_root_stopped() {/,/^}/p' "$SCRIPT")"
+eval "$(grep '^MAX_NAME=' "$SCRIPT")"
+drst() { HOST_REPORT_DATA_ROOT_CONF="$1" HOST_REPORT_DATA_ROOT_STOPPED="$2" emit_data_root_stopped; }
+printf 'stopped by hand at 2026-10-16 17:02:03 UTC\npostgresql.service\nsyslog.socket\nbad;unit.service\nnot a unit\n' > "$T/drs/stopped"
+chk "stopped by hand: when, in ISO UTC, and the units it stopped; a line that is no unit left out" \
+    "$(drst "$T/drs/conf" "$T/drs/stopped" | php -r '$o=json_decode(stream_get_contents(STDIN),true); echo $o["at"], "|", implode(",", $o["services"]);')" \
+    "2026-10-16T17:02:03Z|postgresql.service,syslog.socket"
+chk "not stopped: null" "$(drst "$T/drs/conf" "$T/drs/absent")" "null"
+chk "no data root declared: null, whatever lies in /run" "$(drst "$T/drs/no_conf" "$T/drs/stopped")" "null"
+printf 'something else\npostgresql.service\n' > "$T/drs/odd"
+chk "a record not in the form the stop writes: null" "$(drst "$T/drs/conf" "$T/drs/odd")" "null"
+ln -s "$T/drs/stopped" "$T/drs/link"
+chk "a symlink in its place: null" "$(drst "$T/drs/conf" "$T/drs/link")" "null"
+chk "the real run carries the key (null here: nothing is stopped)" "$(jv "$T/real.json" data_root_stopped)" "null"
 
 echo "=== A command that hangs costs its key, not the report ==="
 cat > "$T/bin/fail2ban-client" <<'STUB'

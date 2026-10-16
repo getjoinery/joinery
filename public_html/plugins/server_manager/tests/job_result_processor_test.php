@@ -450,11 +450,11 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 27 && array_key_exists('data_root_encryption', $capped)
+check(!isset($capped['surprise']) && count($capped) === 28 && array_key_exists('data_root_encryption', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
-	&& array_key_exists('site_engine', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, boot_id, site_engine among them)', var_export(array_keys($capped), true));
+	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
