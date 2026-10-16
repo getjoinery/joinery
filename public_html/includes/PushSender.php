@@ -32,6 +32,9 @@
  *
  * See docs/push_notifications.md.
  *
+ * @version 1.0.1 - a queued message is sent only from the database that queued it: one queued in a
+ *                  test-db suite and sent at shutdown, after test mode closed, read the live
+ *                  database's destinations for the test database's member id
  * @version 1.0.0
  */
 class PushSender {
@@ -242,7 +245,7 @@ class PushSender {
 		if ($user_id <= 0) {
 			return;
 		}
-		self::$queue[] = array($user_id, $message);
+		self::$queue[] = array($user_id, $message, DbConnector::get_instance()->in_test_mode());
 		if (!self::$flush_registered) {
 			self::$flush_registered = true;
 			register_shutdown_function(array(self::class, 'send_after_response'));
@@ -264,8 +267,22 @@ class PushSender {
 	 * (see send()).
 	 */
 	public static function flush(): array {
-		$queue = self::$queue;
-		self::$queue = array();
+		// Only what the open database queued: a member id means nothing on the
+		// other one, and a message queued in test mode and sent once test mode
+		// has closed went to whoever holds that id on the live database. The
+		// rest waits for its own database (the harness drops it before test
+		// mode closes; the shutdown hook drops what is left).
+		$test_mode = DbConnector::get_instance()->in_test_mode();
+		$queue = array();
+		$held = array();
+		foreach (self::$queue as $item) {
+			if ((bool)($item[2] ?? false) === $test_mode) {
+				$queue[] = $item;
+			} else {
+				$held[] = $item;
+			}
+		}
+		self::$queue = $held;
 		$outcomes = array();
 		foreach ($queue as $item) {
 			try {
@@ -293,6 +310,11 @@ class PushSender {
 		} catch (Throwable $e) {
 			error_log('[PushSender] flush failed: ' . $e->getMessage());
 		}
+		foreach (self::$queue as $item) {
+			error_log('[PushSender] not sent to user ' . (int)$item[0] . ': it was queued on the '
+				. (!empty($item[2]) ? 'test' : 'live') . ' database, and that is not the one open at shutdown');
+		}
+		self::$queue = array();
 	}
 
 	/**
