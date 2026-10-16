@@ -436,8 +436,14 @@ fn cmd_status() -> Result<(), String> {
     println!("  keys     : {}", get("custody"));
     println!(
         "  encrypted: {}",
-        match answer.get("vault").and_then(Value::as_bool) {
-            Some(true) => "folders can be opened on this device".to_string(),
+        match (
+            answer.get("vault").and_then(Value::as_bool),
+            answer.get("vault_relink").and_then(Value::as_bool),
+        ) {
+            (_, Some(true)) => "the key was replaced in the browser — link this computer again \
+                                (joinery-drive login, from the desktop session)"
+                .to_string(),
+            (Some(true), _) => "folders can be opened on this device".to_string(),
             _ => "not enabled here — link again to turn on encrypted folders".to_string(),
         }
     );

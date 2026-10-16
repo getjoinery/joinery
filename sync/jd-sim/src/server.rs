@@ -279,7 +279,19 @@ struct ServerState {
     /// file key to. A user absent from here has no vault, which is a state the
     /// upload path has to handle rather than a state that cannot happen.
     vault_public_keys: BTreeMap<i64, String>,
+    /// The owner's vault key generation, as `vault_client_probe` answers it:
+    /// 1 once a vault is set up, one more at every rotation.
+    vault_key_generation: i64,
+    /// The devices the owner's vault secret was handed to, by name: the
+    /// scopes a device row lists (`sde_vault_scopes`). A rotation takes the
+    /// scope off every one of them (`VaultClientCustody::forgetScopeOnDevices`).
+    vault_holders: std::collections::BTreeSet<String>,
+    index_requests: usize,
+    probe_requests: usize,
 }
+
+/// Code a scenario runs inside one of the server's calls.
+type ServerHook = Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>;
 
 /// The server. Cloning shares it — two simulated devices hold the same one.
 #[derive(Clone)]
@@ -295,7 +307,10 @@ pub struct MockServer {
     /// inode over the path the moment the write finishes — so it is not a rare
     /// interleaving, and the client has a whole branch for it that nothing
     /// could exercise. The soak rig found what lived in that branch.
-    during_upload: Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>,
+    during_upload: ServerHook,
+    /// Run when a download asks for its link: the operation has started and
+    /// no byte has moved. See [`MockServer::while_minting_a_download`].
+    minting_a_download: ServerHook,
     /// Refuse in English only: every refusal leaves without the machine-readable
     /// marker that says WHY.
     ///
@@ -573,9 +588,14 @@ impl MockServer {
                 caller: None,
                 trash_calls: Vec::new(),
                 vault_public_keys: BTreeMap::new(),
+                vault_key_generation: 0,
+                vault_holders: std::collections::BTreeSet::new(),
+                index_requests: 0,
+                probe_requests: 0,
             })),
             clock,
             during_upload: Arc::new(Mutex::new(None)),
+            minting_a_download: Arc::new(Mutex::new(None)),
             plain_refusals: Arc::new(Mutex::new(false)),
             ignores_unchanged_since: Arc::new(Mutex::new(false)),
             ignores_scope: Arc::new(Mutex::new(false)),
@@ -619,6 +639,17 @@ impl MockServer {
     /// How many folder listings clients have asked for.
     pub fn list_requests(&self) -> usize {
         self.state.lock().unwrap().list_requests
+    }
+
+    /// How many index pages were asked for: every full walk asks for at
+    /// least one.
+    pub fn index_requests(&self) -> usize {
+        self.state.lock().unwrap().index_requests
+    }
+
+    /// How many times a device asked about the vault (`vault_client_probe`).
+    pub fn probe_requests(&self) -> usize {
+        self.state.lock().unwrap().probe_requests
     }
 
     /// The next call to `action` fails with `status`, once: a server error
@@ -689,6 +720,18 @@ impl MockServer {
         *self.during_upload.lock().unwrap() = Some(Box::new(f));
     }
 
+    /// Do something to the world each time a download asks for its link,
+    /// just before the server answers.
+    ///
+    /// The download is under way at that instant -- planned, journaled, its
+    /// own fresh look at the file asked for -- and not one byte has moved.
+    /// Whatever the server changes now is what the download is about to be
+    /// decided against: a key withdrawn here is withdrawn from a download in
+    /// flight.
+    pub fn while_minting_a_download(&self, f: impl FnMut() + Send + 'static) {
+        *self.minting_a_download.lock().unwrap() = Some(Box::new(f));
+    }
+
     /// Answer every refusal from here on in prose alone, with no marker saying
     /// what kind of refusal it is, and leave the feed's `refusals: reasoned`
     /// out: an older server. See [`MockServer::plain_refusals`].
@@ -709,11 +752,49 @@ impl MockServer {
     /// that an encrypted upload has to ASK who the readers are and seal to every
     /// one of them, and that a reader without a vault is a case it survives.
     pub fn set_vault_public_key(&self, user_id: i64, public_key: &str) {
-        self.state
-            .lock()
-            .unwrap()
-            .vault_public_keys
-            .insert(user_id, public_key.to_string());
+        let mut st = self.state.lock().unwrap();
+        st.vault_public_keys.insert(user_id, public_key.to_string());
+        if user_id == OWNER_USER_ID && st.vault_key_generation == 0 {
+            st.vault_key_generation = 1;
+        }
+    }
+
+    /// The owner's vault secret was handed to this device at its link, so
+    /// its device row lists the scope (`sde_vault_scopes`).
+    pub fn hand_vault_to(&self, device: &str) {
+        self.state.lock().unwrap().vault_holders.insert(device.to_string());
+    }
+
+    /// Rotate the owner's vault key, as the browser and the platform do it
+    /// (`docs/sealed_vault.md`, Rotating a client-custody key): every grant
+    /// the owner holds is opened with the old secret and sealed to the new
+    /// public key (`drive_key_grants_reseal`), the new key becomes the key
+    /// and its generation moves on, and the scope is taken off every device
+    /// that held the old one. No file's bytes, content id or file key
+    /// change, and no feed row is written: the reseal records none, so a
+    /// device learns of a rotation only by asking (`vault_client_probe`).
+    ///
+    /// Returns how many grants were re-sealed.
+    pub fn rotate_vault(&self, from: &crate::engine::SimVault, to: &crate::engine::SimVault) -> usize {
+        let mut st = self.state.lock().unwrap();
+        let mut resealed = 0;
+        for f in st.files.values_mut() {
+            let Some(wrapped) = f.wrapped_file_key.as_deref() else {
+                continue;
+            };
+            let key = jd_crypto::drive::open_wrapped_file_key(
+                wrapped,
+                &from.secret_key_pkcs8,
+                &from.public_key_b64,
+            )
+            .expect("rotate_vault: a grant the old vault key does not open");
+            f.wrapped_file_key = Some(to.grant(&key));
+            resealed += 1;
+        }
+        st.vault_public_keys.insert(OWNER_USER_ID, to.public_key_b64.clone());
+        st.vault_key_generation += 1;
+        st.vault_holders.clear();
+        resealed
     }
 
     /// The device whose call created this entity, as the change feed
@@ -1114,6 +1195,25 @@ impl MockServer {
         plaintext: &[u8],
         vault_public_key_b64: &str,
     ) -> i64 {
+        let (id, grant) = self.seed_vault_file_awaiting_its_key(folder, name, plaintext, vault_public_key_b64);
+        if let Some(f) = self.state.lock().unwrap().files.get_mut(&id) {
+            f.wrapped_file_key = Some(grant);
+        }
+        id
+    }
+
+    /// The same file, with this user's key not issued yet: the file row and
+    /// its bytes are on the server, and the grant is handed back for the
+    /// scenario to issue later (`grant_file_key`). What a member a file was
+    /// shared with sees between the owner's two calls: `drive_share_sync`
+    /// grants access, and `drive_key_grants_sync` the key, after it.
+    pub fn seed_vault_file_awaiting_its_key(
+        &self,
+        folder: Option<i64>,
+        name: &str,
+        plaintext: &[u8],
+        vault_public_key_b64: &str,
+    ) -> (i64, String) {
         let file_key = jd_crypto::drive::FileKey::generate();
         let content_id = jd_crypto::drive::new_content_id();
         let ciphertext = jd_crypto::drive::encrypt_content(plaintext, &file_key, &content_id);
@@ -1132,12 +1232,11 @@ impl MockServer {
         if let Some(f) = st.files.get_mut(&id) {
             f.encrypted = true;
             f.encrypted_metadata = Some(blob);
-            f.wrapped_file_key = Some(grant);
             // The real export sends no plaintext modification time for an
             // encrypted file; the true one lives inside the blob.
             f.modified_time = None;
         }
-        id
+        (id, grant)
     }
 
     /// Everything the server holds encrypted, in a shape the harness can open.
@@ -1175,10 +1274,37 @@ impl MockServer {
     /// gap between them is a state the client has to handle rather than a state
     /// that cannot happen. A scenario that always seeded both together would
     /// never produce a file whose key has not arrived yet.
+    ///
+    /// A key that arrives is a `grant_changed` row on the feed, addressed to
+    /// the user who gained it -- the platform's contract for a key grant
+    /// (`drive_key_grants_sync`), one row per file per user who gained or
+    /// lost the key. Everything here belongs to one user, so that user is the
+    /// row's whole audience. Without the row nothing tells a device the grant
+    /// is there: the feed names only what changed, and the file itself did
+    /// not.
     pub fn grant_file_key(&self, file_id: i64, wrapped_file_key: &str) {
         let mut st = self.state.lock().unwrap();
-        if let Some(f) = st.files.get_mut(&file_id) {
-            f.wrapped_file_key = Some(wrapped_file_key.to_string());
+        let Some(f) = st.files.get_mut(&file_id) else {
+            return;
+        };
+        let gained = f.wrapped_file_key.is_none();
+        f.wrapped_file_key = Some(wrapped_file_key.to_string());
+        if gained {
+            Self::record(&mut st, "file", file_id, "grant_changed");
+        }
+    }
+
+    /// Take this caller's key to an encrypted file away again: the grant row
+    /// deleted, as `drive_key_grants_sync` deletes one for a user left out of
+    /// a file's set, and a `grant_changed` row addressed to the user who lost
+    /// it. The file and its bytes stay; what is gone is this user's way in.
+    pub fn revoke_file_key(&self, file_id: i64) {
+        let mut st = self.state.lock().unwrap();
+        let Some(f) = st.files.get_mut(&file_id) else {
+            return;
+        };
+        if f.wrapped_file_key.take().is_some() {
+            Self::record(&mut st, "file", file_id, "grant_changed");
         }
     }
 
@@ -1370,6 +1496,12 @@ impl MockServer {
             if name == "drive_list" {
                 st.list_requests += 1;
             }
+            if name == "drive_index" {
+                st.index_requests += 1;
+            }
+            if name == "vault_client_probe" {
+                st.probe_requests += 1;
+            }
             if let Some(i) = st.answer_next.iter().position(|(a, _, _)| a == name) {
                 let (_, status, reason) = st.answer_next.remove(i);
                 let mut refusal = refuse(status, "ServerError", "The server could not answer just now.");
@@ -1393,6 +1525,7 @@ impl MockServer {
             "drive_upload_init" => self.drive_upload_init(body),
             "drive_public_keys" => self.drive_public_keys(body),
             "drive_upload_complete" => self.drive_upload_complete(body),
+            "vault_client_probe" => self.vault_client_probe(body),
             other => Err(refuse(404, "NotFound", format!("no such action: {other}"))),
         }
     }
@@ -1528,6 +1661,13 @@ impl MockServer {
             ));
         }
         let with_urls = body.get("urls").and_then(Value::as_bool).unwrap_or(false);
+        // Before the server state is locked, as for the upload hook: the
+        // scenario's code changes the server, through its own calls.
+        if with_urls {
+            if let Some(f) = self.minting_a_download.lock().unwrap().as_mut() {
+                f();
+            }
+        }
 
         // Dedupe: a client replaying a feed run asks for the same file several
         // times over (created, renamed, content). Answering once is correct and
@@ -2148,6 +2288,43 @@ impl MockServer {
             .map(|v| json!({ "sha256": v.sha256, "size": v.size, "change_id": v.change_id }))
             .collect();
         Ok(json!({ "ok": true, "versions": rows }))
+    }
+
+    // ---- vault ---------------------------------------------------------------
+
+    /// `vault_client_probe`: the facts a native client may know about the
+    /// caller's vault, and nothing an unlock is made from
+    /// (`logic/vault_client_probe_logic.php`). Drive's scope only: the mock
+    /// has no other client-custody vault.
+    fn vault_client_probe(&self, body: &Value) -> ServerResult {
+        let scope = body.get("scope").and_then(Value::as_str).unwrap_or("drive");
+        if scope != "drive" {
+            return Err(refused("invalid_request", "That is not a client-custody vault scope."));
+        }
+        let st = self.state.lock().unwrap();
+        let held = st.caller.as_ref().is_some_and(|d| st.vault_holders.contains(d));
+        Ok(match st.vault_public_keys.get(&OWNER_USER_ID) {
+            None => json!({
+                "ok": true,
+                "scope": scope,
+                "set_up": false,
+                "public_key": null,
+                "key_generation": 0,
+                "pending_public_key": null,
+                "held_by_this_device": false,
+                "device_linked": true,
+            }),
+            Some(public_key) => json!({
+                "ok": true,
+                "scope": scope,
+                "set_up": true,
+                "public_key": public_key,
+                "key_generation": st.vault_key_generation,
+                "pending_public_key": null,
+                "held_by_this_device": held,
+                "device_linked": true,
+            }),
+        })
     }
 
     // ---- upload ------------------------------------------------------------
@@ -3380,5 +3557,79 @@ mod tests {
             .unwrap();
         let out = s.action("drive_changes", &json!({ "cursor": at })).unwrap();
         assert_eq!(out["changes"][0]["actor"], json!("laptop"));
+    }
+
+    fn kinds_after(s: &MockServer, cursor: i64) -> Vec<(i64, String)> {
+        let out = s.action("drive_changes", &json!({ "cursor": cursor })).unwrap();
+        out["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| (c["entity_id"].as_i64().unwrap(), c["kind"].as_str().unwrap().to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn a_key_granted_or_withdrawn_is_a_feed_row_for_the_user_it_concerns() {
+        // The platform's contract (`drive_key_grants_sync`): one
+        // `grant_changed` row per file per user who gained or lost the key.
+        // A key issued again unchanged in who holds it is no row at all.
+        let s = server();
+        let vault = crate::engine::SimVault::new(7);
+        let (id, grant) = s.seed_vault_file_awaiting_its_key(None, "a.txt", b"one", &vault.public_key_b64);
+        let at = s.latest_change_id();
+        s.grant_file_key(id, &grant);
+        s.grant_file_key(id, &grant);
+        assert_eq!(kinds_after(&s, at), vec![(id, "grant_changed".to_string())]);
+        let stat = s
+            .action("drive_stat", &json!({ "entities": [{ "entity_type": "file", "entity_id": id }] }))
+            .unwrap();
+        assert_eq!(stat["items"][0]["wrapped_file_key"], json!(grant));
+
+        let at = s.latest_change_id();
+        s.revoke_file_key(id);
+        s.revoke_file_key(id);
+        assert_eq!(kinds_after(&s, at), vec![(id, "grant_changed".to_string())]);
+        let stat = s
+            .action("drive_stat", &json!({ "entities": [{ "entity_type": "file", "entity_id": id }] }))
+            .unwrap();
+        assert_eq!(stat["items"][0]["wrapped_file_key"], Value::Null, "an encrypted file says it has no grant");
+    }
+
+    #[test]
+    fn a_rotation_reseals_every_grant_and_the_probe_says_so() {
+        let s = server();
+        let old = crate::engine::SimVault::new(8);
+        let new = crate::engine::SimVault::new(9);
+        s.set_vault_public_key(OWNER_USER_ID, &old.public_key_b64);
+        s.hand_vault_to("laptop");
+        let id = s.seed_vault_file(None, "a.txt", b"one", &old.public_key_b64);
+        let probe = |device: &str| {
+            s.calling_from(Some(device));
+            let out = s.action("vault_client_probe", &json!({ "scope": "drive" })).unwrap();
+            s.calling_from(None);
+            out
+        };
+        let before = probe("laptop");
+        assert_eq!(before["public_key"], json!(old.public_key_b64));
+        assert_eq!(before["key_generation"], json!(1));
+        assert_eq!(before["held_by_this_device"], json!(true));
+        let at = s.latest_change_id();
+
+        assert_eq!(s.rotate_vault(&old, &new), 1);
+        let after = probe("laptop");
+        assert_eq!(after["public_key"], json!(new.public_key_b64));
+        assert_eq!(after["key_generation"], json!(2));
+        assert_eq!(after["held_by_this_device"], json!(false), "a rotation takes the scope off every device");
+        assert!(kinds_after(&s, at).is_empty(), "the reseal writes nothing to the feed");
+        let grant = s.vault_files()[0].wrapped_file_key.clone().unwrap();
+        let opened = jd_crypto::drive::open_wrapped_file_key(&grant, &new.secret_key_pkcs8, &new.public_key_b64);
+        assert!(opened.is_ok(), "the grant is sealed to the new key");
+        assert!(
+            jd_crypto::drive::open_wrapped_file_key(&grant, &old.secret_key_pkcs8, &old.public_key_b64).is_err(),
+            "and no longer to the old one"
+        );
+        assert_eq!(s.vault_files()[0].id, id);
+        assert!(s.action("vault_client_probe", &json!({ "scope": "mail" })).is_err());
     }
 }

@@ -2309,6 +2309,395 @@ fn a_device_without_the_key_will_not_upload_into_a_vault_folder() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Keys that come late, are withdrawn, or are replaced
+// ---------------------------------------------------------------------------
+
+/// The plaintext of every file the server holds sealed, as its owner reads it.
+fn owner_reads(world: &World) -> Vec<(String, Option<String>)> {
+    let mut out: Vec<(String, Option<String>)> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| jd_sim::scenario::open_as_the_owner(world, f))
+        .collect();
+    out.sort();
+    out
+}
+
+/// A key that arrives after its file opens the file, and the file comes down
+/// from the feed, not from a walk of the index.
+///
+/// A grant is a record of its own on its own schedule: a file shared with
+/// this account appears (`drive_share_sync`) before its key is issued
+/// (`drive_key_grants_sync`), and a device that looks in between holds the
+/// file as waiting for a key. The row the platform writes when the key is
+/// issued -- `grant_changed`, addressed to the user who gained it -- is the
+/// only thing that names the file again: the file itself did not change, and
+/// a device asks the server only about what the feed names. Without the row
+/// the file waited for a key it already had until something walked the index.
+#[test]
+fn a_key_that_arrives_after_its_file_opens_it_from_the_feed() {
+    let vault = SimVault::new(9_311);
+    let mut world = World::new(9_311, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    let body = b"shared before its key was";
+    let (id, grant) =
+        world
+            .server
+            .seed_vault_file_awaiting_its_key(Some(private), "late.txt", body, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "a file with no key yet waits, quietly");
+    let laptop = world.device("laptop");
+    let waiting = laptop
+        .store
+        .get_entry(jd_core::model::EntityId::file(id))
+        .unwrap()
+        .expect("the file is known here");
+    assert_eq!(waiting.status, jd_core::model::LocalStatus::PendingKey, "{waiting:?}");
+    assert_eq!(
+        laptop.fs.all_paths(),
+        vec!["Private".to_string()],
+        "nothing of a file with no key may stand on the disk"
+    );
+
+    let walks = world.server.index_requests();
+    world.server.grant_file_key(id, &grant);
+    assert!(world.settle().is_some(), "the key arrives and the file comes down");
+    committed.note("Private/late.txt", body);
+
+    let laptop = world.device("laptop");
+    assert_eq!(
+        disk_tree(laptop).get("Private/late.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the file did not come down when its key arrived: {:?}",
+        disk_tree(laptop)
+    );
+    assert_eq!(world.server.index_requests(), walks, "it took a walk of the index to find the key");
+    no_plaintext_of(&world, body);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// A key withdrawn while its file is downloading leaves nothing of the file
+/// on this computer, and says why.
+///
+/// The download is under way -- planned, journaled, asking the server for
+/// its link -- when the owner takes the key back (`drive_key_grants_sync`
+/// leaving this user out). The device still holds the grant it was given
+/// earlier, and that grant still opens the file: a key once seen cannot be
+/// unseen. What the download goes by is the server's answer to its own
+/// question, which carries no grant now; the file is not fetched, nothing is
+/// written, not even to the spool, and one issue says the key was withdrawn.
+/// Given the key again, the file comes down and the issue goes.
+#[test]
+fn a_key_withdrawn_while_its_file_downloads_writes_nothing_and_says_why() {
+    let vault = SimVault::new(9_312);
+    let mut world = World::new(9_312, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    let body = b"the owner changed their mind about this one";
+    let (id, grant) =
+        world
+            .server
+            .seed_vault_file_awaiting_its_key(Some(private), "withdrawn.txt", body, &vault.public_key_b64);
+    world.server.grant_file_key(id, &grant);
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let spooled = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let spooled = spooled.clone();
+        world.device("laptop").fs.while_a_spool_opens(move |_| {
+            spooled.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+    }
+    {
+        let server = world.server.clone();
+        let fired = fired.clone();
+        world.server.while_minting_a_download(move || {
+            if fired.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                server.revoke_file_key(id);
+            }
+        });
+    }
+    assert!(world.settle().is_some(), "a withdrawn key leaves the device quiet, not retrying");
+    world.server.while_minting_a_download(|| {});
+    assert_eq!(
+        fired.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the download asked for its link once and was not planned again"
+    );
+
+    let laptop = world.device("laptop");
+    assert_eq!(
+        laptop.fs.all_paths(),
+        vec!["Private".to_string()],
+        "a file whose key was withdrawn was written here"
+    );
+    assert_eq!(spooled.load(std::sync::atomic::Ordering::SeqCst), 0, "its bytes were written to a spool");
+    let told: Vec<_> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.entity == Some(jd_core::model::EntityId::file(id)))
+        .collect();
+    assert!(
+        told.len() == 1 && told[0].kind == "withdrawn" && told[0].detail.contains("key to this encrypted file was withdrawn"),
+        "the device did not say why the file is not here: {told:?}"
+    );
+
+    world.server.grant_file_key(id, &grant);
+    assert!(world.settle().is_some(), "given the key again, the file comes down");
+    committed.note("Private/withdrawn.txt", body);
+    let laptop = world.device("laptop");
+    assert_eq!(
+        disk_tree(laptop).get("Private/withdrawn.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "{:?}",
+        disk_tree(laptop)
+    );
+    assert!(
+        laptop.store.open_issues().unwrap().is_empty(),
+        "the issue outlived the withdrawal: {:?}",
+        laptop.store.open_issues().unwrap()
+    );
+    no_plaintext_of(&world, body);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// Two computers edit one file in a vault at once: both versions are kept,
+/// each sealed, and nothing of either reaches the server in the clear.
+///
+/// The edit that reaches the server first is the file's next version, under
+/// the key it always had; the other computer keeps its own edit beside it as
+/// a conflicted copy, which is a new file and so gets a new key of its own,
+/// sealed to the vault. A Mac and a PC, so the copy's name has to be
+/// spellable on both.
+#[test]
+fn two_computers_editing_one_vault_file_keep_both_versions_sealed() {
+    let vault = SimVault::new(9_313);
+    let mut world = World::of(
+        9_313,
+        &[("desktop", jd_sim::Platform::Windows), ("laptop", jd_sim::Platform::MacOs)],
+    );
+    world.give_vault("desktop", &vault);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    let first = b"the plan, as both computers first had it";
+    world.device("desktop").fs.user_write("Private/plan.md", first);
+    committed.note("Private/plan.md", first);
+    assert!(world.settle().is_some(), "the first draft reaches both");
+
+    let on_desktop = b"the plan, as the desktop changed it";
+    let on_laptop = b"the plan, as the laptop changed it at the same time";
+    world.device("desktop").fs.user_write("Private/plan.md", on_desktop);
+    world.device("laptop").fs.user_write("Private/plan.md", on_laptop);
+    committed.note("Private/plan.md", on_desktop);
+    committed.note("Private/plan.md (laptop's)", on_laptop);
+    world.pass(world.device("desktop"));
+    assert!(world.settle().is_some(), "both edits settle");
+
+    for body in [&first[..], on_desktop, on_laptop] {
+        no_plaintext_of(&world, body);
+    }
+    assert!(
+        world.server.plaintext_inside_a_vault().is_empty(),
+        "{:?}",
+        world.server.plaintext_inside_a_vault()
+    );
+    let names = world.server.tree();
+    assert!(!names.keys().any(|p| p.contains("plan")), "a real name reached the server: {names:?}");
+
+    let read = owner_reads(&world);
+    let hash = |b: &[u8]| Some(jd_sim::sha256_hex(b));
+    assert_eq!(read.len(), 2, "two files, one per edit: {read:?}");
+    assert!(read.contains(&("plan.md".to_string(), hash(on_desktop))), "{read:?}");
+    let copy = read
+        .iter()
+        .find(|(n, h)| n.starts_with("plan (conflicted copy") && *h == hash(on_laptop))
+        .unwrap_or_else(|| panic!("the laptop's edit was not kept as a sealed copy: {read:?}"));
+    let keys: std::collections::BTreeSet<_> =
+        world.server.vault_files().into_iter().filter_map(|f| f.wrapped_file_key).collect();
+    assert_eq!(keys.len(), 2, "the copy is a file of its own, with a key of its own");
+
+    for d in ["desktop", "laptop"] {
+        let disk = disk_tree(world.device(d));
+        assert_eq!(disk.get("Private/plan.md").cloned().flatten(), hash(on_desktop), "{d}: {disk:?}");
+        assert_eq!(disk.get(&format!("Private/{}", copy.0)).cloned().flatten(), hash(on_laptop), "{d}: {disk:?}");
+    }
+    jd_sim::scenario::assert_the_vault_opens(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// A vault key rotated in the browser is noticed on a computer that still
+/// holds the old one, said once, and ended by linking that computer again.
+///
+/// A rotation seals everything saved afterwards to a key the old computers
+/// were never given, re-seals every existing grant to it, and writes nothing
+/// to the feed. On the laptop still holding the old key, a file saved after
+/// the rotation waits, and the device says why, once: the encrypted folders
+/// need it linked again. Asking the server is what tells a rotation apart
+/// from a grant sealed to the wrong key (`vault_client_probe`); it asks only
+/// while something waits, and not every pass. Everything it could open
+/// before it still can -- a file's key never changes -- so a file renamed on
+/// the other computer is followed, and an edit made here goes up. Linked
+/// again with the new key, the issue goes, the waiting file comes down, and
+/// the grants it held for the retired key are replaced, so a rename made
+/// here afterwards reaches the server.
+#[test]
+fn a_rotated_vault_key_is_noticed_and_linking_again_ends_it() {
+    let old = SimVault::new(9_321);
+    let new = SimVault::new(9_322);
+    let mut world = World::new(9_321, &["laptop", "desktop"]);
+    world.give_vault("laptop", &old);
+    world.give_vault("desktop", &old);
+    world.server.set_vault_public_key(1, &old.public_key_b64);
+    let mut committed = Committed::default();
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let before = b"saved before the key was rotated";
+    world.server.seed_vault_file(Some(private), "before.txt", before, &old.public_key_b64);
+    assert!(world.settle().is_some(), "both computers hold the vault");
+
+    // Rotated in the browser; the desktop is linked again straight away.
+    assert_eq!(world.server.rotate_vault(&old, &new), 1);
+    world.give_vault("desktop", &new);
+    let after = b"saved in the browser after the rotation";
+    world.server.seed_vault_file(Some(private), "after.txt", after, &new.public_key_b64);
+    world.device("desktop").fs.user_rename("Private/before.txt", "Private/renamed.txt");
+    let probes = world.server.probe_requests();
+    assert!(world.settle().is_some(), "the laptop goes quiet with the new file waiting");
+
+    let laptop = world.device("laptop");
+    let relink: Vec<_> = laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "vault_relink").collect();
+    assert_eq!(relink.len(), 1, "{:?}", laptop.store.open_issues().unwrap());
+    assert!(relink[0].detail.contains("joinery-drive login"), "{}", relink[0].detail);
+    assert!(
+        world.device("desktop").store.open_issues().unwrap().is_empty(),
+        "the computer holding the new key was told something: {:?}",
+        world.device("desktop").store.open_issues().unwrap()
+    );
+    let disk = disk_tree(laptop);
+    assert_eq!(
+        disk.get("Private/renamed.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(before)),
+        "the old key no longer followed a file it could always open: {disk:?}"
+    );
+    assert!(!disk.keys().any(|p| p.contains("after") || p.contains("enc-")), "{disk:?}");
+    assert!(world.server.probe_requests() > probes, "the laptop never asked about the vault");
+
+    // An edit here goes up under the key the file always had.
+    let edited = b"edited on the laptop, which still holds the old key";
+    laptop.fs.user_write("Private/renamed.txt", edited);
+    committed.note("Private/renamed.txt", edited);
+    assert!(world.settle().is_some());
+    assert_eq!(
+        disk_tree(world.device("desktop")).get("Private/renamed.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(edited)),
+        "the laptop's edit did not reach the desktop"
+    );
+    // Quiet means quiet: once it has asked, more passes ask nothing more. The
+    // first pass may ask again, since an hour may have gone by while work
+    // waited out its backoff; the five after it, on a clock that does not
+    // move, may not.
+    world.pass(world.device("laptop"));
+    let probes = world.server.probe_requests();
+    for _ in 0..5 {
+        world.pass(world.device("laptop"));
+    }
+    assert_eq!(world.server.probe_requests(), probes, "the laptop asks about the vault every pass");
+
+    // Linked again.
+    world.give_vault("laptop", &new);
+    assert!(world.settle().is_some(), "linked again, the laptop settles");
+    let laptop = world.device("laptop");
+    assert!(
+        laptop.store.open_issues().unwrap().is_empty(),
+        "the issue outlived the re-link: {:?}",
+        laptop.store.open_issues().unwrap()
+    );
+    assert_eq!(
+        disk_tree(laptop).get("Private/after.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(after)),
+        "the waiting file did not come down: {:?}",
+        disk_tree(laptop)
+    );
+    committed.note("Private/after.txt", after);
+
+    // And the grant it held for the retired key was replaced when it was
+    // linked again: a rename here, which re-seals the name under the file's
+    // key, goes up on its first try. Holding the old grant, it failed and
+    // waited out a backoff, as every edit of a file synced before the
+    // rotation did.
+    laptop.fs.user_rename("Private/renamed.txt", "Private/final.txt");
+    world.pass(laptop);
+    assert!(
+        owner_reads(&world).iter().any(|(n, h)| n == "final.txt" && *h == Some(jd_sim::sha256_hex(edited))),
+        "the rename made after linking again did not go up at once: {:?}",
+        owner_reads(&world)
+    );
+    assert!(world.settle().is_some(), "the rename settles");
+    for body in [&before[..], after, edited] {
+        no_plaintext_of(&world, body);
+    }
+    jd_sim::scenario::assert_the_vault_opens(&world);
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// A server that refuses the vault probe is held like an answer: nothing is
+/// raised on its word, it is not asked again every pass, and the refusal is
+/// noted in the store for the daemon to say once in its log -- the only
+/// trace there would otherwise be of a device that cannot notice a rotation.
+/// Asked again when more files wait, and answered, the rotation is noticed
+/// after all and the note is cleared.
+#[test]
+fn a_refused_vault_probe_raises_nothing_and_is_noted_for_the_log() {
+    let old = SimVault::new(9_323);
+    let new = SimVault::new(9_324);
+    let mut world = World::new(9_323, &["laptop"]);
+    world.give_vault("laptop", &old);
+    world.server.set_vault_public_key(1, &old.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    world.server.rotate_vault(&old, &new);
+    world.server.answer_next("vault_client_probe", 403);
+    world.server.seed_vault_file(Some(private), "one.txt", b"sealed to the new key", &new.public_key_b64);
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    let relinks = |d: &jd_sim::engine::Device| {
+        d.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "vault_relink").count()
+    };
+    let note = laptop.store.get_meta(jd_core::pass::VAULT_PROBE_REFUSED).unwrap();
+    assert!(note.as_deref().is_some_and(|n| n.starts_with("403")), "the refusal was not noted: {note:?}");
+    assert_eq!(relinks(laptop), 0, "a refusal is no answer to raise anything on");
+    let probes = world.server.probe_requests();
+    for _ in 0..3 {
+        world.pass(laptop);
+    }
+    assert_eq!(world.server.probe_requests(), probes, "a refused probe is asked again every pass");
+
+    world.server.seed_vault_file(Some(private), "two.txt", b"and another", &new.public_key_b64);
+    assert!(world.settle().is_some());
+    let laptop = world.device("laptop");
+    assert_eq!(relinks(laptop), 1, "{:?}", laptop.store.open_issues().unwrap());
+    assert_eq!(laptop.store.get_meta(jd_core::pass::VAULT_PROBE_REFUSED).unwrap().as_deref(), Some(""));
+}
+
 /// Renaming a file in a vault never tells the server its new name.
 ///
 /// The server refuses a plaintext name on an encrypted file, so getting this
@@ -3440,18 +3829,16 @@ fn a_held_files_plain_folder_dragged_into_a_vault_takes_it_into_the_vault() {
     assert_converged(&world);
 }
 
-/// A record the server trashes drops out of the scan's inode owners in the
-/// same pass, so its still-standing file is read as nobody's. Here a vault
-/// file and a plain file trade places, and a peer trashes the vault file
-/// before this device has seen the trade: the plain partner reads the sealed
-/// bytes now standing at its path as its own edit and sends them up as its
-/// version, in the clear. Not D1's -- it reproduces with no hold involved --
-/// and not generic AH either: the mechanism is the trashed record's ownership
-/// vanishing mid-pass (plat3 75409 is the held form: the trashed record is
-/// Forgotten, its standing file minted new and plain). Its own open item in
-/// the reset spec; RED today.
+/// A vault file and a plain file trade places on this disk, and a peer
+/// trashes the vault file before this device has seen the trade. The sealed
+/// bytes now stand at the plain file's path, and the record the server
+/// trashed drops out of the scan's file owners in that same pass, so nothing
+/// on this disk claims them. Read as the plain partner's own edit, they went
+/// up as its new version, in the clear (plat3 75409 is the held form: the
+/// trashed record forgotten, its standing file minted new and plain). Pinned:
+/// the sealed bytes never reach the server in the clear, whichever record
+/// the scan hands them to.
 #[test]
-#[ignore = "open: a record the server trashes drops out of the scan's inode owners in the same pass (reset spec, plat3 75409)"]
 fn a_file_traded_across_the_vault_edge_as_the_server_trashes_it_is_not_published() {
     let vault = SimVault::new(9_981);
     let mut world = World::new(9_981, &["holder", "peer"]);
@@ -9336,19 +9723,19 @@ fn a_nested_placeholder_follows_each_rename_above_and_of_it() {
     assert_nothing_lost(&world, &committed);
 }
 
-/// RED, open on this axis: a keyless guest renames its own placeholder.
+/// A keyless guest renames the directory standing in for a vault it cannot
+/// open, with a file saved in it that was never sent.
 ///
-/// The tie (`Entry::stand_in`) names the directory by path, and a directory
-/// has no identity of its own to be found by once it leaves that path. The
-/// files held under it have never been uploaded, so there is no agreed
-/// fingerprint or content to find them by either. The renamed directory is
-/// adopted as a plain folder of the new name and the held files go up in the
-/// clear under it -- the same reading as the user dragging them out of the
-/// vault, which from the outside it is. Directory identity from the
-/// filesystem, or a fingerprint recorded for a held claimant, would settle
-/// it; neither is made here. Ignored so the suite stays green.
+/// The renamed directory is no longer the vault's: the tie lapses, and the
+/// directory goes up as a plain folder of its new name. The file saved in it
+/// does not. It was saved inside a vault, so it is held as encrypted work this
+/// device cannot send, wherever the user takes it -- the same reading as
+/// dragging it out of the vault, which from the outside this is -- and it
+/// stays on the disk, never sent. Pinned: the vault stays live on the server,
+/// nothing goes up in the clear, and the user's file stays on their disk.
+/// (Read by name, the tie used to let the renamed directory carry the held
+/// file up in the clear under it.)
 #[test]
-#[ignore]
 fn a_keyless_guest_renaming_its_placeholder_keeps_the_tie() {
     let vault = SimVault::new(9_260);
     let mut world = World::new(9_260, &["holder", "guest"]);
@@ -13234,9 +13621,13 @@ fn a_locked_vaults_folder_trash_waits_for_a_child_the_server_moved_out() {
     assert!(world.settle().is_some());
     let disk = disk_tree(holder);
     let sha = jd_sim::sha256_hex(body);
-    assert!(
-        disk.iter().any(|(p, s)| p.starts_with("Private/B/") && s.as_deref() == Some(sha.as_str())),
-        "the file did not reach the folder it was moved to: {disk:?}"
+    // Under its own name: moved while the vault was locked, the record held
+    // the server's placeholder name with the old content id, and the file was
+    // renamed here to `enc-…` once the key opened again.
+    assert_eq!(
+        disk.get("Private/B/note.txt").cloned().flatten().as_deref(),
+        Some(sha.as_str()),
+        "the file did not reach the folder it was moved to under its own name: {disk:?}"
     );
     assert!(!disk.keys().any(|p| p.starts_with("Private/A")), "the trashed folder stood on: {disk:?}");
     assert!(!holder.store.open_issues().unwrap().iter().any(|i| i.kind == "trash_waits"));

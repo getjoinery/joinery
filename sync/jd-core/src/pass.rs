@@ -144,7 +144,8 @@ pub fn run_pass(
     }
 
     // ---- files this device can open now that it holds the key ---------------
-    open_what_the_key_unlocks(env)?;
+    let sealed_elsewhere = open_what_the_key_unlocks(env)?;
+    notice_a_replaced_vault_key(env, sealed_elsewhere)?;
 
     // ---- nothing left with no way back to the root --------------------------
     //
@@ -2609,10 +2610,26 @@ pub(crate) fn absorb_remote(
                 // this observation does not erase one already held. The grant
                 // travels on its own schedule, and a stat taken before it lands
                 // must not look like the grant being taken away.
-                if state.wrapped_file_key.is_some() {
-                    entry.wrapped_file_key = state.wrapped_file_key.clone();
+                if let Some(arrived) = state.wrapped_file_key.as_deref() {
+                    entry.wrapped_file_key = Some(grant_to_hold(env, entry.wrapped_file_key.as_deref(), arrived));
                 }
-                let _ = open_metadata(env, &mut entry, state);
+                // The name just taken is the server's placeholder unless the
+                // metadata opens, and the file's name and content id may both
+                // have changed since they were last read: a peer renamed or
+                // moved it while the vault was locked here, or after the key
+                // was rotated away from this device. Kept, the old content id
+                // said the entry still knew the file, so nothing read the
+                // metadata again and the file was renamed on this disk to the
+                // placeholder (`enc-…`) the moment a key opened anything.
+                // Forgotten, the file waits for a key (`no_key_for`), and
+                // `open_what_the_key_unlocks` reads its real name the first
+                // pass a key opens its grant.
+                if !open_metadata(env, &mut entry, state)
+                    && state.is_encrypted
+                    && id.entity_type == EntityType::File
+                {
+                    entry.content_id = None;
+                }
             }
             env.store.put_entry(&entry)?;
         }
@@ -2639,6 +2656,25 @@ pub(crate) fn absorb_remote(
         }
     }
     Ok(())
+}
+
+/// The grant a record keeps when the server sends one: the one that arrived,
+/// unless the one held opens with this device's key and the one that arrived
+/// does not.
+///
+/// Both wrap the same file key -- a file's key never changes, and a rotation
+/// re-seals the wrapping, not the key -- so keeping the held one loses
+/// nothing. Taking the other left a device holding the retired vault key
+/// unable to follow a rename, read a new version, or send an edit of a file
+/// it had always been able to open, from the first time the server described
+/// that file after the rotation.
+pub(crate) fn grant_to_hold(env: &ExecEnv, held: Option<&str>, arrived: &str) -> String {
+    if let (Some(vault), Some(held)) = (env.vault, held) {
+        if held != arrived && vault.open_file_key(held).is_ok() && vault.open_file_key(arrived).is_err() {
+            return held.to_string();
+        }
+    }
+    arrived.to_string()
 }
 
 /// Does this "move" leave the entry in the slot the agreement already gives
@@ -3846,6 +3882,118 @@ fn dir_is_empty(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError
     Ok(true)
 }
 
+/// The store's note of the vault key its recorded grants were last checked
+/// against (`open_what_the_key_unlocks`): the key's public half.
+const VAULT_KEY_CHECKED: &str = "vault_key_checked";
+
+/// The state issue that says this device holds a vault key the account has
+/// replaced (`notice_a_replaced_vault_key`).
+pub const VAULT_RELINK: &str = "vault_relink";
+
+const VAULT_RELINK_TEXT: &str = "The key for encrypted folders was replaced in the browser, and this \
+     computer still holds the old one, so encrypted files saved since then cannot be opened here and \
+     wait on the server. Link this computer again to be given the new key: run `joinery-drive login` \
+     from the desktop session. Everything else keeps syncing.";
+
+/// The store's note of the last vault probe: the key it was asked about, how
+/// many files then waited sealed to another key, and when.
+const VAULT_PROBED: &str = "vault_probed";
+
+/// How long a probe's answer stands while nothing it was asked about moves.
+const VAULT_PROBE_HOLD_MS: i64 = 60 * 60 * 1000;
+
+/// The store's note of the server refusing the last vault probe, as `status
+/// message`, empty once one is answered. A refusal raises nothing -- the server
+/// may simply not let this device ask -- so this is what the daemon reads to
+/// say once, in its log, that a rotation cannot be noticed here.
+pub const VAULT_PROBE_REFUSED: &str = "vault_probe_refused";
+
+/// Say so when the account's vault key is no longer the one this device holds.
+///
+/// A rotation (`docs/sealed_vault.md`, Rotating a client-custody key) seals
+/// everything saved afterwards to a key this device was never given, and
+/// tells no device: the server re-seals grants without a feed row. Those
+/// files arrive with grants this key does not open and wait, which is right,
+/// and said nowhere, which is not -- they waited for good while `status`
+/// said encrypted folders open here. The server answers the one question
+/// that tells a rotation from a grant somebody sealed to the wrong key:
+/// `vault_client_probe`, whose `public_key` is the account's key now.
+///
+/// Asked only with a reason: files waiting sealed to another key, or the
+/// issue standing (to learn when it ends). And not again, once answered,
+/// until the key held here changes (linked again: asked at once), more files
+/// wait than when it was asked, or an hour has passed -- a device that cannot
+/// open new files is not one that should ask the server every pass. A server
+/// that cannot be reached says nothing either way, and is asked next pass.
+fn notice_a_replaced_vault_key(env: &ExecEnv, sealed_elsewhere: usize) -> Result<(), ExecError> {
+    let standing = env.store.open_issues()?.iter().any(|i| i.kind == VAULT_RELINK);
+    // No key here at all: there is nothing to link "again" for, and the
+    // device-level "not enabled" says the rest.
+    let Some(vault) = env.vault else {
+        if standing {
+            env.store.withdraw_issues(VAULT_RELINK)?;
+        }
+        return Ok(());
+    };
+    if sealed_elsewhere == 0 && !standing {
+        return Ok(());
+    }
+    let now = (env.now_ms)() as i64;
+    let asked = env.store.get_meta(VAULT_PROBED)?;
+    let fresh = asked.as_deref().and_then(|a| {
+        let mut parts = a.splitn(3, '|');
+        let key = parts.next()?;
+        let count: usize = parts.next()?.parse().ok()?;
+        let at: i64 = parts.next()?.parse().ok()?;
+        Some(key == vault.public_key_b64() && sealed_elsewhere <= count && now - at < VAULT_PROBE_HOLD_MS)
+    });
+    if fresh == Some(true) {
+        return Ok(());
+    }
+    let answer = match env.api.action("vault_client_probe", json!({ "scope": "drive" })) {
+        Ok(a) => Ok(a),
+        // Answered with a refusal: a server that cannot say, or will not let
+        // this device ask. Held like an answer, so it is not asked every pass,
+        // and noted for the daemon to say.
+        Err(jd_proto::ProtoError::Api { status, message, .. }) => Err(format!("{status} {message}")),
+        Err(_) => return Ok(()),
+    };
+    env.store.set_meta(VAULT_PROBED, &format!("{}|{sealed_elsewhere}|{now}", vault.public_key_b64()))?;
+    let answer = match answer {
+        Ok(a) => {
+            env.store.set_meta(VAULT_PROBE_REFUSED, "")?;
+            a
+        }
+        Err(refusal) => {
+            env.store.set_meta(VAULT_PROBE_REFUSED, &refusal)?;
+            return Ok(());
+        }
+    };
+    // Compared as keys, not as text: one spelling of a key in base64 is not
+    // the only one, and telling a device its key was replaced when it was not
+    // sends the user to link it again for nothing.
+    let replaced = answer.get("set_up").and_then(Value::as_bool) == Some(true)
+        && answer
+            .get("public_key")
+            .and_then(Value::as_str)
+            .is_some_and(|current| !same_key(current, vault.public_key_b64()));
+    if replaced {
+        env.store.raise_issue(None, VAULT_RELINK, VAULT_RELINK_TEXT, now)?;
+    } else if standing {
+        env.store.withdraw_issues(VAULT_RELINK)?;
+    }
+    Ok(())
+}
+
+/// Do two base64 public keys name the same key?
+fn same_key(a: &str, b: &str) -> bool {
+    a == b
+        || matches!(
+            (jd_crypto::b64::decode(a.trim()), jd_crypto::b64::decode(b.trim())),
+            (Ok(x), Ok(y)) if x == y
+        )
+}
+
 /// Open the encrypted files this device absorbed before it had the key.
 ///
 /// A file's real name and content id live in metadata only the key opens, and
@@ -3860,33 +4008,66 @@ fn dir_is_empty(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError
 /// something to open: a file whose metadata will not open is asked about every
 /// pass, which is bounded and visible, where a file never asked about is
 /// neither.
-fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<(), ExecError> {
+///
+/// A key this store has not been checked against -- the device linked again
+/// after the vault key was rotated -- also asks about every file whose
+/// recorded grant it does not open. Those grants were sealed to the retired
+/// key, the server re-sealed them to the new one without a feed row, and a
+/// record holding the old grant could neither send an edit nor follow a
+/// rename for good. Once per key: opening every grant is a scalar
+/// multiplication per file, which is no price to pay every pass.
+///
+/// Returns how many files wait with a grant this key does not open: sealed
+/// to another key, which is what a rotation leaves behind
+/// (`notice_a_replaced_vault_key`).
+fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<usize, ExecError> {
     let Some(vault) = env.vault else {
-        return Ok(());
+        return Ok(0);
     };
-    let waiting: Vec<EntityId> = all_entries(env)?
-        .into_iter()
-        .filter(|e| {
-            e.id.entity_type == EntityType::File
-                && e.is_encrypted
-                && !e.remote_deleted
-                && !e.id.is_provisional()
-                && e.content_id.is_none()
-                && e.wrapped_file_key
-                    .as_deref()
-                    .is_some_and(|w| vault.open_file_key(w).is_ok())
-        })
-        .map(|e| e.id)
-        .collect();
+    let checked = env.store.get_meta(VAULT_KEY_CHECKED)?.as_deref() == Some(vault.public_key_b64());
+    let mut waiting: Vec<EntityId> = Vec::new();
+    let mut sealed_elsewhere = 0usize;
+    for e in all_entries(env)? {
+        if e.id.entity_type != EntityType::File || !e.is_encrypted || e.remote_deleted || e.id.is_provisional() {
+            continue;
+        }
+        let Some(wrapped) = e.wrapped_file_key.as_deref() else {
+            continue;
+        };
+        if e.content_id.is_some() && checked {
+            continue;
+        }
+        match (e.content_id.is_some(), vault.open_file_key(wrapped).is_ok()) {
+            (false, true) => waiting.push(e.id),
+            (false, false) if checked => sealed_elsewhere += 1,
+            (_, false) => waiting.push(e.id),
+            (true, true) => {}
+        }
+    }
     if waiting.is_empty() {
-        return Ok(());
+        if !checked {
+            env.store.set_meta(VAULT_KEY_CHECKED, vault.public_key_b64())?;
+        }
+        return Ok(sealed_elsewhere);
     }
     for (id, state) in stat_all(env, &waiting)? {
         absorb_remote(env, id, &state)?;
+        let Some(entry) = env.store.get_entry(id)? else {
+            continue;
+        };
+        // Asked about for a new key, and the server's grant is not for it
+        // either: it waits like any file sealed to another key.
+        let opens = entry.wrapped_file_key.as_deref().is_some_and(|w| vault.open_file_key(w).is_ok());
+        if entry.content_id.is_none() && !opens {
+            if !entry.remote_deleted {
+                sealed_elsewhere += 1;
+            }
+            continue;
+        }
         // The grant opens and the metadata still does not: a blob this build
         // cannot read, or none stored. Asked about again every pass, which is
         // bounded, and said once, which is what makes it visible.
-        if env.store.get_entry(id)?.is_some_and(|e| e.content_id.is_none()) {
+        if entry.content_id.is_none() {
             env.store.raise_issue(
                 Some(id),
                 "metadata_unreadable",
@@ -3904,7 +4085,11 @@ fn open_what_the_key_unlocks(env: &ExecEnv) -> Result<(), ExecError> {
             }
         }
     }
-    Ok(())
+    // Written once the answers are in: a pass cut off before them asks again.
+    if !checked {
+        env.store.set_meta(VAULT_KEY_CHECKED, vault.public_key_b64())?;
+    }
+    Ok(sealed_elsewhere)
 }
 
 /// A directory standing in for a vault this device cannot open follows the
@@ -8157,6 +8342,20 @@ fn depth_for(env: &ExecEnv, entry: &Entry) -> Result<i64, ExecError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A key is the same key however its base64 is padded or spaced; a
+    /// different key is never taken for this one.
+    #[test]
+    fn a_probed_key_is_compared_as_a_key() {
+        let kp = jd_crypto::vault::generate_vault_keypair();
+        let other = jd_crypto::vault::generate_vault_keypair();
+        let ours = kp.public_key_b64.clone();
+        assert!(same_key(&ours, &ours));
+        assert!(same_key(&format!(" {}\n", ours), &ours));
+        assert!(same_key(ours.trim_end_matches('='), &ours), "unpadded");
+        assert!(!same_key(&other.public_key_b64, &ours));
+        assert!(!same_key("not a key at all", &ours));
+    }
 
     /// An export that does not say whether a sync client may hold it (an
     /// older server's) reads as syncable; one that says no is kept as no.

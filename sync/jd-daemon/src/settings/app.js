@@ -324,7 +324,7 @@
       ['Site', s.base_url],
       ['This computer', s.device_name],
       ['Keys are stored', s.custody],
-      ['Encrypted folders', s.vault ? 'Can be opened on this computer' : 'Not enabled on this computer']
+      ['Encrypted folders', vaultState(s)]
     ]);
     var auto = $('autostart');
     var knows = typeof s.autostart === 'boolean';
@@ -340,6 +340,16 @@
       if (target) target.scrollIntoView();
       scrolled = true;
     }
+  }
+
+  // Three states, not two: a computer holding a vault key the account has
+  // since replaced is neither one that can open encrypted folders nor one that
+  // never had them, and the fix for it is different from both.
+  function vaultState(s) {
+    if (s.vault_relink) {
+      return 'The key was replaced in the browser. Link this computer again (joinery-drive login, from the desktop session) to open encrypted files saved since.';
+    }
+    return s.vault ? 'Can be opened on this computer' : 'Not enabled on this computer';
   }
 
   function facts(list, rows) {

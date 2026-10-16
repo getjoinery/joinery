@@ -701,6 +701,58 @@ placeholder name, because the feed mentions each file once; when the key
 arrives, the files whose grant it opens are asked about again in one batched
 stat and opened from the answer.
 
+**A grant that arrives later** — a file shared with the account is visible
+before its key is issued — comes with a `grant_changed` row on the feed,
+addressed to the user who gained it, and that row is what names the file again:
+it is asked about like any other change, and opened and downloaded from the
+answer, with no walk of the index. A grant that is **withdrawn** is honoured by
+the download itself, which goes by the grant in its own fresh `drive_stat`
+answer rather than the one the record last heard of (a grant once seen still
+opens the file, and the record never erases one on a stat's silence). With no
+grant in that answer the file is not fetched and nothing of it is written, not
+even to the spool; the record forgets the grant, so the file waits for a key,
+and a `withdrawn` issue says the key was withdrawn. A key given again brings the
+file down and withdraws the issue.
+
+Of two grants for one file, the record keeps the one this device's key opens.
+Both wrap the same file key — a file's key never changes, and a rotation
+re-seals the wrapping, not the key — so a grant that arrives sealed to a key
+this device does not hold never replaces one that opens, and a device holding a
+retired vault key goes on following renames, reading new versions and sending
+edits of every file it could already open. And whenever an encrypted file's
+metadata does not open — the vault locked here, or the grant sealed to another
+key — the record forgets its content id along with its real name: it waits for
+a key, and its name is read again the first pass a key opens its grant. An old
+content id kept would tell the engine it still knows the file, nothing would read
+the metadata again, and a file renamed or moved elsewhere meanwhile would be
+renamed on this disk to the server's placeholder.
+
+**A rotated vault key is noticed.** Rotating the Drive vault key in the browser
+(`drive_encryption.md`, Device custody) seals everything saved afterwards to a
+key no linked computer holds, re-seals every existing grant to it, and writes
+nothing to the feed. Files saved since then arrive here with grants this
+device's key does not open, and wait. While any do — and only then — the
+engine asks `vault_client_probe`, whose `public_key` is the account's current key;
+when it is not the one this device's secret derives, one `vault_relink` state
+issue says the encrypted folders need this computer linked again (`joinery-drive
+login`, from the desktop session, where the keychain is open). An answer is not
+asked for again until this device's key changes, more files are waiting than
+when it was asked, or an hour has passed; a server that cannot be reached is
+asked next pass. While the issue stands, `status` says the key was replaced
+rather than that encrypted folders open here (`vault: false` and
+`vault_relink: true` on the control channel). Everything it could open before
+keeps syncing: a rotation closes only what is sealed afterwards, and does not shut
+a computer out — removing the device does (`drive_encryption.md`, Device
+custody).
+
+Linked again, the device holds the new key. The issue is withdrawn on the next
+pass the probe agrees, the waiting files open and come down, and the grants the
+store holds are checked once against the new key: each that it does not open —
+sealed to the retired key — is asked about again and replaced from the answer,
+so editing or renaming a file synced before the rotation works as before.
+Checking every grant costs a scalar multiplication per file, so it runs once per
+key, not every pass.
+
 A device with no key never materializes a vault folder, but nothing stops the
 user making a directory of the vault's name and saving into it; what they save
 there is held for a key. That directory is the vault's by identity, not by
@@ -1697,7 +1749,8 @@ deterministic simulator rather than a list of hand-written cases.
 `jd-sim` provides a virtual filesystem with a per-OS personality (case-folding,
 NFD, coarse mtimes, inode reuse, scheduled failures), a mock server implementing
 the documented contract (cursor feed with resets, chunk resync, dedup, quota,
-idempotency replay, declared modification times), a controlled clock, and a
+idempotency replay, declared modification times, key grants that arrive and are
+withdrawn on the feed, a vault key rotation), a controlled clock, and a
 network that loses, delays, reorders, and duplicates. Every run is reproducible from a seed, and seeds that
 found bugs are frozen in the repository.
 
