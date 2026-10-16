@@ -127,7 +127,7 @@ class Activation {
 			VALUES (:act_usr_email, :usr_user_id,:act_code,:act_expires_time, :act_purpose, :act_phn_phone_number_id)');
 		$statement->bindParam(':act_usr_email', $email, PDO::PARAM_STR);
 		$statement->bindParam(':usr_user_id', $usr_user_id, PDO::PARAM_INT);
-		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
+		$statement->bindValue(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->bindParam(':act_expires_time', $expires_time_formatted, PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $purpose, PDO::PARAM_INT);
 		$statement->bindParam(':act_phn_phone_number_id', $phn_phone_number_id, PDO::PARAM_INT);
@@ -139,7 +139,7 @@ class Activation {
 	static function deleteTempCode($act_code){
 		$statement = DbConnector::GetPreparedStatement(
 			"UPDATE act_activation_codes SET act_delete_time = now() WHERE act_code = :act_code AND act_delete_time IS NULL");
-		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
+		$statement->bindValue(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->execute();
 	}
 
@@ -202,7 +202,7 @@ class Activation {
 	static function checkTempCode($code, $purpose){
 		$statement = DbConnector::GetPreparedStatement('
 			SELECT 1 FROM act_activation_codes WHERE act_delete_time IS NULL AND act_code = :code AND act_expires_time > NOW() AND act_purpose = :act_purpose');
-		$statement->bindParam(':code', strtolower($code), PDO::PARAM_STR);
+		$statement->bindValue(':code', strtolower($code), PDO::PARAM_STR);
 		$statement->bindParam(':act_purpose', $purpose, PDO::PARAM_INT);
 		$statement->execute();
 		return $statement->fetch() !== FALSE;
@@ -212,7 +212,7 @@ class Activation {
 		$statement = DbConnector::GetPreparedStatement(
 			'SELECT * FROM act_activation_codes
 			 WHERE act_delete_time IS NULL AND act_code = :act_code AND act_phn_phone_number_id IS NOT NULL');
-		$statement->bindParam(':act_code', strtolower($act_code), PDO::PARAM_STR);
+		$statement->bindValue(':act_code', strtolower($act_code), PDO::PARAM_STR);
 		$statement->execute();
 		$statement->setFetchMode(PDO::FETCH_OBJ);
 		$result = $statement->fetch();

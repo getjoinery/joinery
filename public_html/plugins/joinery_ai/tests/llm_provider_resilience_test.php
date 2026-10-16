@@ -129,23 +129,79 @@ foreach ($config_failures as $label => $message) {
         "$label empty-setting message reaches the row verbatim");
 }
 
-// Every other class keeps the friendly text — the provider's own wording there is
-// third-party and not actionable, and the detail still reaches the worker log.
+// Network, timeout, rate-limit and server failures keep the friendly text alone:
+// the provider's wording there names nothing to change, and the detail still
+// reaches the worker log.
 $generic_failures = [
-    'api_network_error'   => 'The local model host is not reachable at http://127.0.0.1:1/v1',
-    'api_no_response'     => 'The model did not start responding within 60 seconds',
-    'api_auth_failed'     => 'Anthropic API 4xx: authentication_error invalid x-api-key',
-    'api_quota_exceeded'  => 'Anthropic API 4xx: rate_limit_error',
-    'api_request_invalid' => 'Anthropic API 4xx: invalid_request_error bad model',
-    'api_server_error'    => 'Anthropic API 5xx: overloaded_error',
+    ['api_network_error',  0,   'The local model host is not reachable at http://127.0.0.1:1/v1'],
+    ['api_no_response',    0,   'The model did not start responding within 60 seconds'],
+    ['api_quota_exceeded', 429, 'Anthropic 4xx: rate_limit_error: Number of request tokens has exceeded your per-minute rate limit'],
+    ['api_quota_exceeded', 0,   'Anthropic API 4xx: rate_limit_error'],
+    ['api_server_error',   0,   'Anthropic API 5xx: overloaded_error'],
+    ['api_server_error',   0,   'Anthropic stream error: overloaded_error: Overloaded'],
 ];
-foreach ($generic_failures as $expected_code => $message) {
-    $e = new LlmProviderException($message);
+foreach ($generic_failures as [$expected_code, $status, $message]) {
+    $e = new LlmProviderException($message, $status);
     check(LlmProviderException::classify($e) === $expected_code,
         "$message classifies as $expected_code", 'code=' . LlmProviderException::classify($e));
     check(LlmProviderException::operatorMessage($e) === LlmProviderException::friendlyMessage($expected_code),
         "$expected_code keeps its friendly message");
 }
+
+// ---------------------------------------------------------------------------
+section('A refusal about the key, account, model or request says what the provider said');
+
+// Each is the shape AnthropicProvider / OpenAiCompatibleProvider throw: the HTTP
+// status as the code, "<Provider> 4xx: <type>: <message>". The row reads the
+// friendly sentence, then the provider's own words without the type prefix.
+$worded_failures = [
+    ['api_request_invalid',   400, 'Anthropic 4xx: invalid_request_error: This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use.',
+        'Anthropic', 'This API key is not scoped to a workspace'],
+    ['api_auth_failed',       401, 'Anthropic 4xx: authentication_error: invalid x-api-key', 'Anthropic', 'invalid x-api-key'],
+    ['api_auth_failed',       0,   'Anthropic API 4xx: authentication_error invalid x-api-key', 'Anthropic', 'authentication_error invalid x-api-key'],
+    ['api_billing',           400, 'Anthropic 4xx: invalid_request_error: Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.',
+        'Anthropic', 'Your credit balance is too low'],
+    ['api_billing',           429, 'Fireworks 4xx: insufficient_quota: You exceeded your current quota, please check your plan and billing details.',
+        'Fireworks', 'You exceeded your current quota'],
+    ['api_permission_denied', 403, 'Anthropic 4xx: permission_error: Your API key does not have permission to use the specified resource.',
+        'Anthropic', 'does not have permission'],
+    ['api_model_not_found',   404, 'Anthropic 4xx: not_found_error: model: claude-sonnet-9-9', 'Anthropic', 'model: claude-sonnet-9-9'],
+    ['api_model_not_found',   0,   'Fireworks 4xx: The model accounts/fireworks/models/gone does not exist', 'Fireworks', 'does not exist'],
+    ['api_request_too_large', 413, 'Anthropic 4xx: request_too_large: Request exceeds the maximum allowed number of bytes.', 'Anthropic', 'maximum allowed number of bytes'],
+    ['api_request_too_large', 400, 'Anthropic 4xx: invalid_request_error: prompt is too long: 250000 tokens > 200000 maximum', 'Anthropic', 'prompt is too long'],
+];
+foreach ($worded_failures as [$expected_code, $status, $message, $provider, $words]) {
+    $e = new LlmProviderException($message, $status);
+    $row = LlmProviderException::operatorMessage($e);
+    check(LlmProviderException::classify($e) === $expected_code,
+        "$status " . substr($message, 0, 60) . "… classifies as $expected_code", 'code=' . LlmProviderException::classify($e));
+    check(strpos($row, LlmProviderException::friendlyMessage($expected_code) . ' ' . $provider . ' said: “') === 0
+        && strpos($row, $words) !== false && strpos($row, '_error:') === false,
+        "$expected_code row carries the friendly text and $provider's words", $row);
+}
+
+// A message with no provider shape gets the friendly text alone, and an
+// endless provider message is cut short.
+check(LlmProviderException::operatorMessage(new LlmProviderException('something 4xx-ish happened', 400))
+    === LlmProviderException::friendlyMessage('api_request_invalid'), 'no provider shape: friendly text alone');
+$long = LlmProviderException::operatorMessage(new LlmProviderException('Anthropic 4xx: invalid_request_error: ' . str_repeat('x', 2000), 400));
+check(mb_strlen($long) < 500 && substr($long, -strlen('…”')) === '…”', 'a long provider message is cut to a few hundred characters');
+
+// End to end: the status a real response carries reaches classify().
+$workspace_body = json_encode(['type' => 'error', 'error' => ['type' => 'invalid_request_error',
+    'message' => 'This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the ID of the workspace to use.']]);
+$refusing = new AnthropicProvider('test-key', AnthropicProvider::API_URL,
+    jai_mock_client(new Response(400, ['Content-Type' => 'application/json'], $workspace_body)));
+$caught = null;
+try {
+    $refusing->createMessage(jai_min_params());
+} catch (LlmProviderException $e) {
+    $caught = $e;
+}
+check($caught !== null && (int)$caught->getCode() === 400, 'a 400 from Anthropic throws with the status as its code',
+    $caught ? 'code=' . $caught->getCode() : 'no throw');
+check($caught !== null && strpos(LlmProviderException::operatorMessage($caught), 'Anthropic said: “This API key is not scoped to a workspace') !== false,
+    'the chat row names the workspace problem', $caught ? LlmProviderException::operatorMessage($caught) : '');
 
 // ---------------------------------------------------------------------------
 section('Turn diagnostics survive the detached path');

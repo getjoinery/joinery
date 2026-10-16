@@ -134,6 +134,17 @@ check(strpos($p['html'], '<strong>DKIM</strong>') !== false && strpos($p['html']
 check(strpos($p['html'], 'read site_log (job #77)') !== false && strpos($p['html'], 'data-verdict="down"') !== false,
 	'the reads it made and the thumbs are on the bubble');
 
+// An answer a poll brings is timed in the asker's timezone, as the thread's
+// first load draws it, not in UTC.
+$admin->set('usr_timezone', 'America/New_York');
+$admin->save();
+$desk->answers[] = array(200, array('api_version' => '1.0', 'data' => array('status' => 'complete', 'state' => 'open',
+	'message' => array('id' => 11, 'role' => 'assistant', 'author' => 'assistant', 'content' => 'Timed.',
+		'status' => 'complete', 'time' => '2026-10-16 19:08:40', 'feedback' => '', 'reads' => array()))));
+$p = SupportChatClient::about('desk_poll', (int)$local->key, array('message_id' => 11));
+check(strpos($p['html'], '3:08 PM') !== false && strpos($p['html'], '7:08 PM') === false,
+	'a polled answer shows the asker\'s local time (19:08 UTC reads 3:08 PM in New York)');
+
 // ---------------------------------------------------------------------------
 section('Refusals keep their reason');
 
@@ -210,6 +221,21 @@ try {
 } catch (SupportChatException $e) {
 	check($e->reason === 'off' && count($desk->calls) === $calls_before, 'and nothing is sent anywhere');
 }
+
+// Blank asks the upgrade source, where problem reports go; with that not an
+// https node either, the panel is off. A blank in memory reads through to the
+// stored row, so the stored support_url is blanked and put back as found.
+$spp_url = get_setting_raw('support_url');
+harness_defer(function () use ($spp_url) { set_setting_raw('support_url', (string)$spp_url); });
+set_setting_raw('support_url', '');
+Globalvars::get_instance()->forget_setting('support_url');
+harness_set_setting_mem('upgrade_source', 'https://source.example.net/');
+check(SupportChatClient::enabled() && SupportChatClient::destinationUrl() === 'https://source.example.net'
+	&& SupportChatClient::destinationHost() === 'source.example.net', 'a blank support_url asks the upgrade source');
+harness_set_setting_mem('upgrade_source', 'http://plain.example.net');
+check(!SupportChatClient::enabled(), 'an upgrade source that is not https is no desk: the panel is off');
+set_setting_raw('support_url', (string)$spp_url);
+Globalvars::get_instance()->forget_setting('support_url');
 harness_set_setting_mem('support_url', 'https://desk.example.org');
 
 $session->clear_api_user();

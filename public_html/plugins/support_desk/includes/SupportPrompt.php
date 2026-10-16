@@ -19,12 +19,13 @@
  *
  * The whole docs are deliberately not loaded: retrieval keeps a turn at cents.
  *
- * @version 0.1.0
+ * @version 0.1.1 - the tool rules keep every answer to Joinery and decline the rest
  */
 class SupportPrompt {
 
 	/** The rules the operator's voice cannot remove. */
 	const TOOL_RULES = "## How you work\n\n"
+		. "- Stay on Joinery: installing, running and fixing it, and the person's own site. Decline anything else in one sentence (general coding, writing, other products, questions about the world) and say what you can help with.\n"
 		. "- Search before you answer anything about how Joinery works: search_docs with the words the documentation would use, "
 		. "then read_doc_section on the section you rely on. Search again with other words before you say the documentation is silent.\n"
 		. "- Cite what you drew on as the path and heading, e.g. docs/backups.md > Restore.\n"
@@ -38,6 +39,7 @@ class SupportPrompt {
 
 	/** The widget's rules: no site, no reads, no handoff. */
 	const WIDGET_RULES = "## How you work\n\n"
+		. "- Stay on Joinery: installing, running and fixing it, and what it does. Decline anything else in one sentence (general coding, writing, other products, questions about the world) and say what you can help with.\n"
 		. "- Search before you answer: search_docs, then read_doc_section on the section you rely on.\n"
 		. "- Cite what you drew on as the path and heading, or the public page.\n"
 		. "- Nothing about any site can be read from here.";

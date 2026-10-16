@@ -248,8 +248,8 @@ Every admin page header carries a **Help** button for permission 5 and up
 (`PublicPageBase::render_support_help_slot()`, placed by the admin theme's
 `top_right_menu()`); each setup wizard step carries one too, with the step as
 its route (`setup:{key}`). It opens the Help panel (`assets/js/support_panel.js`),
-which asks the support desk of the node named by `support_url`. With
-`support_url` blank there is no Help button, and the panel's actions refuse.
+which asks the support desk of the node named by `support_url`, or of the
+upgrade source (where problem reports go) when `support_url` is blank.
 The browser only calls this site's own actions —
 `support_state`, `support_consent`, `support_send`, `support_poll`,
 `support_cancel`, `support_threads`, `support_feedback`, `support_escalate` —
