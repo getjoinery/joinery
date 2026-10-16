@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.72 - a data root stopped by hand says so, when and with what, instead of not mounted (reviewer2 B17 D2)
  * @version 1.71 - Release keys: the keys the site and the agent trust, beside the ones this management node expects
  *                (the status check's release_trust, specs/release_key_rotation.md R6)
  * @version 1.70 - a retired source that is a container says what it is: held stopped on its host, removed from it by
@@ -1018,6 +1019,12 @@
 			$class = ($free < $dp['total_bytes'] * 0.10) ? 'bg-danger' : $gauge_class($pct);
 			$gauge('Data root', $pct, $class, $pct . '%', $size($dp['used_bytes']) . ' of ' . $size($dp['total_bytes']) . ' used · <strong>' . $size($free) . ' free</strong>'
 				. ($dp['prjquota'] ? '' : ' · <span class="text-danger">project quotas are off: no site\'s allowance holds</span>'), $drs_extra);
+		} elseif ($dp === 'not_mounted' && is_array($hr['data_root_stopped'] ?? null)) {
+			// Stopped by hand (joinery_data_root.sh stop): deliberate, and says so.
+			$drstop = $hr['data_root_stopped'];
+			$gauge('Data root', null, '', '<span class="text-warning fs-6">stopped by hand</span>',
+				'Stopped at ' . $hr_str($drstop['at']) . ' UTC' . ($drstop['services'] ? ', with ' . $hr_str(implode(', ', $drstop['services'])) : '')
+				. '. Everything kept on it is down until <code>joinery_data_root.sh start</code> on the host starts it again; a boot starts it too.', $drs_extra);
 		} elseif ($dp === 'not_mounted') {
 			// Declared and down: nothing that keeps data starts until it is back.
 			$gauge('Data root', null, '', '<span class="text-danger fs-6">not mounted</span>',

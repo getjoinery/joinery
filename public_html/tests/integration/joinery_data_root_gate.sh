@@ -283,6 +283,8 @@ chk "stop: the socket that would start a consumer goes first, then the mount" \
 chk "and what it stopped is recorded, with when, and said" \
     "$(head -n 1 "$SF" | grep -c '^stopped by hand at ')|$(tail -n +2 "$SF" | paste -sd,)|$(grep -c 'It stays stopped until joinery_data_root.sh start, or the next boot' <<< "$out")" \
     "1|apache2.service,docker.socket,postgresql@16-main.service|1"
+chk "the status file the site and the host report read says when, at once (reviewer2 B17 D2)" \
+    "$(grep -c '^stopped_by_hand=[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9:]\{8\} UTC$' "$T/root/run/joinery/data-root.status")" "1"
 : > "$LOG"
 out="$(run tick 2>&1)"; rc=$?
 chk "the tick leaves a stopped data root stopped: exit 1, nothing started, nothing said" \
@@ -296,6 +298,7 @@ out="$(run start 2>&1)"; rc=$?
 chk "start: the data root, then what the stop stopped, then the record gone" \
     "$rc|$(grep -e '^systemctl start joinery-data.target$' -e '^systemctl start apache2.service docker.socket postgresql@16-main.service$' "$LOG" | paste -sd,)|$( [ -e "$SF" ] && echo kept || echo gone)|$(grep -c '^data root: started, with apache2.service docker.socket postgresql@16-main.service$' <<< "$out")" \
     "0|systemctl start joinery-data.target,systemctl start apache2.service docker.socket postgresql@16-main.service|gone|1"
+chk "and the status file says it is not stopped" "$(grep -c '^stopped_by_hand=$' "$T/root/run/joinery/data-root.status")" "1"
 # Something keeps the filesystem mounted elsewhere, and no service owns it.
 mkdir -p "$T/root/proc/self"
 printf '36 25 0:42 / /srv/joinery rw - xfs /dev/loop7 rw\n37 25 0:42 /x /var/spool/postfix/dev/log rw - xfs /dev/loop7 rw\n' > "$T/root/proc/self/mountinfo"

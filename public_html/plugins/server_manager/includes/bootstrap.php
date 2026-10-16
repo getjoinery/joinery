@@ -13,6 +13,7 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.18 - plane:data_root_stopped: a data root stopped by hand (reviewer2 B17 D2)
  * @version 1.17 - plane:cloud_account_key: an encrypted machine's cloud account key does not work, or expires soon (B77)
  * @version 1.16 - plane:site_code_unverified (specs/host_restrictions.md D8)
  * @version 1.15 - plane:mail_gateway (IncidentSourceMailGateway)
@@ -43,7 +44,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceTestCloudCleanup', 'IncidentSourceAgentUpdateRefused', 'IncidentSourceAgentBundleRefused',
 	'IncidentSourceReleaseLogEntry', 'IncidentSourceReleaseLogTailBlind', 'IncidentSourceCustomerBackups',
 	'IncidentSourceDataRootLocked', 'IncidentSourceMailGateway', 'IncidentSourceSiteCodeUnverified',
-	'IncidentSourceCloudAccountKey') as $incident_source) {
+	'IncidentSourceCloudAccountKey', 'IncidentSourceDataRootStopped') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // Incident analysis spends model tokens through joinery_ai; they count toward

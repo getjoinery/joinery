@@ -9,6 +9,11 @@
  * failed, the check is misconfigured) never changes it, so it never opens
  * or clears this incident. Critical: visitors cannot reach the site.
  *
+ * Not while the data root the site lives on was stopped by hand: that is
+ * IncidentSourceDataRootStopped, a warning on the machine.
+ *
+ * @version 1.1 - waits, up to IncidentSourceDataRootStopped::HOLD_SECONDS, for the machine's host report it asked
+ *                for, then stands down while the site's data root was stopped by hand (reviewer2 B17 D2)
  * @version 1.0
  */
 class IncidentSourceSiteDown implements IncidentSource {
@@ -24,6 +29,10 @@ class IncidentSourceSiteDown implements IncidentSource {
 			return null;
 		}
 		if ((string)$node->get('mgn_uptime_last_status') !== 'down') {
+			return null;
+		}
+		if (IncidentSourceDataRootStopped::stopped_for($node) !== null
+				|| IncidentSourceDataRootStopped::awaiting_report($node, 'mgn_uptime_down_since')) {
 			return null;
 		}
 		$detail = array();
@@ -50,6 +59,9 @@ class IncidentSourceSiteDown implements IncidentSource {
 	public function cleared_text(ManagedNode $node): string {
 		if (!$node->get('mgn_enabled') || !$node->get('mgn_uptime_enabled')) {
 			return 'Uptime monitoring for this node was turned off, so whether the site answers is no longer checked.';
+		}
+		if (IncidentSourceDataRootStopped::stopped_for($node) !== null) {
+			return 'Its data root was stopped by hand, which its machine\'s incident says; the site is down until it is started again.';
 		}
 		return 'The site answers again.';
 	}

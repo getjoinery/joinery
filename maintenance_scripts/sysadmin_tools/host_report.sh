@@ -8,6 +8,9 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.28 - data_root_stopped: a data root stopped by hand (joinery_data_root.sh stop) says when, and
+#                which services stopped with it, so the management node tells a deliberate stop from a
+#                fault (reviewer2 B17 D2); null while it is not stopped, or there is no data root
 # Version: 1.27 - a site container this host records as quiet (/etc/joinery/sites/<site>/quiet, a dormant
 #                copy or a frozen source) answers "quiet", not "no": its pages are the quiet state's 503,
 #                and container_health restarted a copy waiting for its key for not answering through PHP
@@ -486,6 +489,26 @@ emit_data_root_encryption() {
     fi
     printf '{"backing":%s,"open":%s,"opened_by":"%s","identity":"%s","holder":"%s","slot":%s,"recipient_fingerprint":"%s","box_fingerprint":"%s","box_sealed":"%s","reboot_held":"%s","reencrypt":"%s","reencrypt_percent":"%s"}' \
         "$(json_str "$backing")" "$open" "$opened" "$identity" "$holder" "$(json_num_or_unknown "${slot:-}")" "$recipient" "$fpr" "$sealed" "$held" "$mode" "$pct"
+}
+
+# A data root stopped by hand (joinery_data_root.sh stop; reviewer2 B17 D2):
+# {"at": ISO UTC time, "services": [unit, ...]}, from the record the stop
+# writes and start or the tick removes; null while it is not stopped, or the
+# host declares no data root. Plain or encrypted alike.
+emit_data_root_stopped() {
+    local conf="${HOST_REPORT_DATA_ROOT_CONF:-/etc/joinery/data_root}"
+    local flag="${HOST_REPORT_DATA_ROOT_STOPPED:-/run/joinery/data-root.stopped}" first at unit k=0 sep=""
+    [[ -f "$conf" && -f "$flag" && ! -L "$flag" ]] || { printf 'null'; return; }
+    first="$(head -n 1 "$flag" 2>/dev/null)"
+    [[ "$first" =~ ^stopped\ by\ hand\ at\ ([0-9]{4}-[0-9]{2}-[0-9]{2})\ ([0-9]{2}:[0-9]{2}:[0-9]{2})\ UTC$ ]] || { printf 'null'; return; }
+    at="${BASH_REMATCH[1]}T${BASH_REMATCH[2]}Z"
+    printf '{"at":"%s","services":[' "$at"
+    while IFS= read -r unit; do
+        [[ "$unit" =~ ^[a-z0-9@._-]{1,60}\.(service|socket|mount|target)$ ]] || continue
+        (( k < MAX_LIST )) || break
+        printf '%s%s' "$sep" "$(json_str "$unit")"; sep=","; k=$((k + 1))
+    done < <(tail -n +2 "$flag" 2>/dev/null | head -n 200)
+    printf ']}'
 }
 
 # The data root's own script, on a host that declares a data root
@@ -1325,6 +1348,7 @@ printf '"disk":%s,' "$(emit_disk)"
 printf '"disk_pool":%s,' "$(emit_disk_pool)"
 printf '"data_root_encryption":%s,' "$(emit_data_root_encryption)"
 printf '"data_root_script":%s,' "$(emit_data_root_script)"
+printf '"data_root_stopped":%s,' "$(emit_data_root_stopped)"
 printf '"memory":%s,' "$(emit_memory)"
 printf '"swap":%s,' "$(emit_swap)"
 printf '"cpus":%s,' "$(emit_cpus)"
