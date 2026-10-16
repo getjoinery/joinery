@@ -159,6 +159,7 @@ impl Rig {
                 unix_home: None,
                 unix_user: None,
                 service: None,
+                program: None,
             })
             .collect();
         for device in &devices {

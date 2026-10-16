@@ -18,8 +18,9 @@ with real faults injected on a schedule, for weeks. Specified in
 | `soak_reset.sh` | Archives the last run's evidence to `/root/soak-evidence/`, wipes the devices and provisions the next `soak-rig-N` account. Called by `soak_forever.sh`. |
 | `soak_clear_partitions.sh` | Lifts any partition a killed campaign left in iptables. Called by `soak_forever.sh`. |
 | `soak_account_setup.php` | Creates a soak account on the soak instance through the model classes. Run inside the instance's container by `soak_reset.sh`. |
-| `purge_soak.php` | Purges the Drive data of retired soak accounts so the instance's volume does not fill, keeping the newest accounts still holding files in each pool (`soak-rig-*`, `soak-mac-*`). Run inside the container by `soak_forever.sh`. |
+| `purge_soak.php` | Purges the Drive data of retired soak accounts so the instance's volume does not fill, keeping the newest accounts still holding files in each line's pool on its own (`soak-rig-*`, `soak-mac-*`, `soak-mac-fat-*`, `soak-mac-win-*`, and any other `soak-mac-<word>-*`). Run inside the container by `soak_forever.sh`. |
 | `soak_mac_pool.sh` | Run from the dev box: makes the next `soak-mac-N` accounts on the rig for the Mac mini's campaign, adds them to the mini's `~/soak-mac/accounts.txt`, and installs `purge_soak.php`. |
+| `windows/` | The Windows soak line: the same campaign on real NTFS in the Windows VM on the Mac mini (`windows/README.md`). |
 | `soak_clock.py` | Reads the ledger and reports how far the current client build is along the release bar. |
 
 ## Shape

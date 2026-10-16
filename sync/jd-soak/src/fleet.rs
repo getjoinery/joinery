@@ -84,6 +84,16 @@ pub struct Device {
     /// it was doing. Without one, a kill is just a device that never comes back.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service: Option<String>,
+    /// The copy of `joinery-drive` this device's daemon runs, when each device
+    /// runs its own.
+    ///
+    /// The Windows rig's answer to `unix_user`. Windows cannot be asked which
+    /// process was started with which `JOINERY_DRIVE_HOME`, and its firewall
+    /// names a program rather than an account, so a device there is found, and
+    /// cut off from the server, by the path of the program it runs. Two devices
+    /// sharing one copy could be told apart by neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<PathBuf>,
 }
 
 impl Device {
@@ -118,9 +128,21 @@ impl Device {
     /// Two devices' daemons are told apart by the `JOINERY_DRIVE_HOME` they
     /// were started with: the process names are identical, and anything that
     /// found a daemon by name would hit the whole fleet.
+    #[cfg(not(windows))]
     pub fn daemon_pid(&self) -> Option<u32> {
         let home = format!("JOINERY_DRIVE_HOME={}", self.home.to_string_lossy());
         daemon_pid_with(&home)
+    }
+
+    /// The daemon on this host that runs this device's copy of the program.
+    ///
+    /// Windows will not show one process another's environment, so the home
+    /// a daemon was started with cannot tell two devices apart there; the
+    /// path of the program each one runs can (see `program`). A device that
+    /// names no program of its own has no daemon this can find.
+    #[cfg(windows)]
+    pub fn daemon_pid(&self) -> Option<u32> {
+        crate::win::running(self.program.as_deref()?)
     }
 }
 
@@ -148,7 +170,7 @@ fn daemon_pid_with(home: &str) -> Option<u32> {
 /// There is no `/proc` off Linux. `ps -E` prints each process's environment
 /// after its command, for processes this account owns, which is every device
 /// on a rig that runs unprivileged.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn daemon_pid_with(home: &str) -> Option<u32> {
     let out = std::process::Command::new("ps")
         .args(["-E", "-ww", "-A", "-o", "pid=,command="])
@@ -351,6 +373,7 @@ mod tests {
                 "soak-device@{}.service",
                 name.trim_start_matches("device-")
             )),
+            program: None,
         }
     }
 

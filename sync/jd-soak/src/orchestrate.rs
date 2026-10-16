@@ -733,6 +733,7 @@ mod tests {
                     unix_home: None,
                     unix_user: Some("soak-a".into()),
                     service: Some("soak-device@a.service".into()),
+                    program: None,
                 },
                 Device {
                     name: "device-b".into(),
@@ -742,6 +743,7 @@ mod tests {
                     unix_home: None,
                     unix_user: Some("soak-b".into()),
                     service: Some("soak-device@b.service".into()),
+                    program: None,
                 },
             ],
             journal_dir: dir.join("journal"),

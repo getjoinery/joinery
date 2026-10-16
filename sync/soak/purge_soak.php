@@ -11,13 +11,19 @@
  * reference and the bytes actually leave the disk; deleting rows would strand
  * every blob instead.
  *
- * Two pools, each kept on its own: soak-rig-* (the ext4 rig, one account per
- * run, about 70 a day) and soak-mac-* (the Mac mini's campaign, a pool made
- * ahead of time and used one run at a time). The newest N accounts STILL
- * HOLDING FILES are kept in each, so an account in use is never purged: a
- * Mac pool made ahead holds nothing until its turn, and counted by id alone
- * it would push the Mac's live account out of the kept set within a day of
- * rig runs.
+ * One pool per soak line, each kept on its own. A line is an account name
+ * with its number taken off: soak-rig-* (the ext4 rig, one account per run,
+ * about 70 a day), soak-mac-* (the Mac mini's APFS campaign), soak-mac-fat-*
+ * (its FAT line), soak-mac-win-* (the Windows VM's line), and any other
+ * soak-rig-<word>-* or soak-mac-<word>-* a test line makes. Lines other than
+ * the rig's draw from a pool made ahead and use it one run at a time. The
+ * newest N accounts STILL HOLDING FILES are kept in each line, so the account
+ * a line is using is never purged: a pool made ahead holds nothing until its
+ * turn, and counted by id alone it would push the Mac's live account out of
+ * the kept set within a day of rig runs. Counted across lines, it is pushed
+ * out by the other lines' runs instead: every account in a pool made after
+ * the Mac's sorts above the Mac's live one, so N runs of the FAT and Windows
+ * lines together would purge it while it was in use.
  *
  * usage: purge_soak.php <keep_newest_accounts> [--apply] [--max-accounts=N]
  */
@@ -37,24 +43,39 @@ $apply = in_array('--apply', $argv, true);
 $max   = 1000;
 foreach ($argv as $a) { if (strpos($a, '--max-accounts=') === 0) { $max = (int)substr($a, 15); } }
 
+// The line an account belongs to: its address up to the number.
+function soak_line($email) {
+    return preg_match('/^(soak-(?:rig|mac)-(?:[a-z]+-)*)[0-9]+@/', $email, $m) ? $m[1] : null;
+}
+
 // Emptying an account does not remove it, so an already-purged one stays on
 // the list forever. Left in, each pass would spend its whole budget on the
 // oldest accounts -- which have nothing left -- and never reach the ones still
 // holding bytes: a purge that runs every run, reports success, and reclaims
-// nothing. So only accounts still holding files are counted at all.
+// nothing. So only accounts still holding files are counted at all. Holding
+// is read as a number: a boolean column can reach PHP as the string 'f',
+// which is true, and would count every empty account made ahead as holding.
+$q = $link->query("SELECT u.usr_user_id, u.usr_email,
+                          CASE WHEN EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_usr_user_id = u.usr_user_id)
+                               THEN 1 ELSE 0 END AS holding
+                     FROM usr_users u
+                    WHERE u.usr_email LIKE 'soak-rig-%' OR u.usr_email LIKE 'soak-mac-%'
+                    ORDER BY u.usr_user_id DESC");
+$lines = array();
+foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $u) {
+    $line = soak_line($u['usr_email']);
+    if ($line === null) { continue; }
+    if (!isset($lines[$line])) { $lines[$line] = array('total' => 0, 'holding' => array()); }
+    $lines[$line]['total']++;
+    if ((int)$u['holding'] === 1) { $lines[$line]['holding'][] = $u; }
+}
+// The rig's line first: it makes an account every run, and is what fills the
+// volume when a pass's budget goes elsewhere.
+uksort($lines, function ($a, $b) { return ($b === 'soak-rig-') - ($a === 'soak-rig-') ?: strcmp($a, $b); });
 $retire = array();
-foreach (array('soak-rig-', 'soak-mac-') as $prefix) {
-    $q = $link->prepare("SELECT COUNT(*) FROM usr_users WHERE usr_email LIKE ?");
-    $q->execute([$prefix . '%']);
-    $total = (int)$q->fetchColumn();
-    $q = $link->prepare("SELECT u.usr_user_id, u.usr_email FROM usr_users u
-                          WHERE u.usr_email LIKE ?
-                            AND EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_usr_user_id = u.usr_user_id)
-                          ORDER BY u.usr_user_id DESC");
-    $q->execute([$prefix . '%']);
-    $holding = $q->fetchAll(PDO::FETCH_ASSOC);
-    $old = array_slice($holding, $keep);
-    echo "$total $prefix accounts, " . count($holding) . " holding files; keeping newest $keep; "
+foreach ($lines as $line => $l) {
+    $old = array_slice($l['holding'], $keep);
+    echo "{$l['total']} $line accounts, " . count($l['holding']) . " holding files; keeping newest $keep; "
         . count($old) . " to purge\n";
     $retire = array_merge($retire, $old);
 }

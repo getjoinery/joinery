@@ -128,6 +128,7 @@ fn cmd_init(rest: &[String]) -> Result<bool, String> {
                 unix_home: Some(PathBuf::from(format!("/var/lib/soak-{letter}"))),
                 unix_user: Some(format!("soak-{letter}")),
                 service: Some(format!("soak-device@{letter}.service")),
+                program: None,
                 name,
             }
         })
@@ -586,6 +587,7 @@ mod tests {
                 unix_home: None,
                 unix_user: Some("soak-a".into()),
                 service: None,
+                program: None,
             }],
             journal_dir: "/soak/journal".into(),
             bundle_dir: "/soak/bundles".into(),

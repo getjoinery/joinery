@@ -144,6 +144,11 @@ impl Reach for RealReach {
     fn can_partition(&self, device: &Device) -> bool {
         // The one refusal known before trying: pf needs root (see
         // `set_partition`). A containerized device is cut with iptables.
+        if cfg!(windows) && device.container.is_none() {
+            // The firewall cuts a program, so only a device running its own
+            // copy can be cut alone.
+            return device.program.is_some();
+        }
         device.container.is_some() || !cfg!(target_os = "macos")
     }
 
@@ -160,13 +165,13 @@ impl Reach for RealReach {
             ]),
             None => {
                 // On the host, two devices' daemons are told apart by the home
-                // directory they were started with — the process names are
-                // identical, and killing by name would take out the whole fleet
-                // on every fault.
+                // directory they were started with (on Windows, by the copy of
+                // the program each runs) — the process names are identical, and
+                // killing by name would take out the whole fleet on every fault.
                 let pid = device
                     .daemon_pid()
                     .ok_or_else(|| format!("no daemon found for {}", device.name))?;
-                RealReach::run(&["kill", &format!("-{signal}"), &pid.to_string()])
+                send_signal(pid, signal)
             }
         }
     }
@@ -193,6 +198,9 @@ impl Reach for RealReach {
                 "-j",
                 "DROP",
             ]);
+        }
+        if cfg!(windows) {
+            return windows_partition(device, server_host, on);
         }
         let user = device.unix_user.as_ref().ok_or_else(|| {
             format!(
@@ -234,6 +242,9 @@ impl Reach for RealReach {
                 device.name
             )
         })?;
+        if cfg!(windows) {
+            return self.restart_windows(device, service);
+        }
         if cfg!(target_os = "macos") {
             // The Mac device's supervisor is a loop in this account's own
             // session, not launchd: a daemon launchd starts in the GUI session
@@ -246,6 +257,96 @@ impl Reach for RealReach {
             return RealReach::run(&["kill", "-TERM", &pid.to_string()]);
         }
         RealReach::run(&["systemctl", "restart", service])
+    }
+}
+
+/// Cut one Windows device's traffic to the server, or restore it.
+///
+/// A firewall rule that blocks this device's own copy of the program from
+/// the server's addresses: Windows names a program in a rule where Linux names
+/// an account, which is why each Windows device runs its own copy. The rule
+/// is named after the device, so lifting it lifts every copy a storm left
+/// behind at once, and lifting one that is not there fails, which is how
+/// `Chaos::clear` knows to stop. Both address families are blocked: a daemon
+/// that reaches the server over IPv6 while only IPv4 is cut is not
+/// partitioned at all.
+///
+/// The rule takes the daemon's open connections down with it (Windows
+/// re-authorizes every flow when its firewall policy changes), and refuses
+/// each new one at once: a network that says no, where `iptables -j DROP` is
+/// one that never answers. Both are partitions a real computer has.
+fn windows_partition(device: &Device, server_host: &str, on: bool) -> Result<(), String> {
+    use std::net::ToSocketAddrs;
+    let program = device.program.as_ref().ok_or_else(|| {
+        format!(
+            "{} does not run a copy of the program of its own, so its traffic cannot be cut without cutting every device's",
+            device.name
+        )
+    })?;
+    // No spaces anywhere in the rule's arguments, so nothing depends on how
+    // netsh reads a quoted one.
+    let name = format!("name=jd-soak-partition-{}", device.name);
+    if !on {
+        return RealReach::run(&["netsh", "advfirewall", "firewall", "delete", "rule", &name, "dir=out"]);
+    }
+    let mut addresses: Vec<String> = (server_host, 443)
+        .to_socket_addrs()
+        .map_err(|e| format!("cannot resolve {server_host}: {e}"))?
+        .map(|a| a.ip().to_string())
+        .collect();
+    addresses.sort();
+    addresses.dedup();
+    if addresses.is_empty() {
+        return Err(format!("{server_host} resolves to no address"));
+    }
+    RealReach::run(&[
+        "netsh",
+        "advfirewall",
+        "firewall",
+        "add",
+        "rule",
+        &name,
+        "dir=out",
+        "action=block",
+        &format!("program={}", program.display()),
+        &format!("remoteip={}", addresses.join(",")),
+        "enable=yes",
+    ])
+}
+
+#[cfg(not(windows))]
+fn send_signal(pid: u32, signal: &str) -> Result<(), String> {
+    RealReach::run(&["kill", &format!("-{signal}"), &pid.to_string()])
+}
+
+/// Windows has no signals; `win::signal` does what each one would.
+#[cfg(windows)]
+fn send_signal(pid: u32, signal: &str) -> Result<(), String> {
+    crate::win::signal(pid, signal)
+}
+
+impl RealReach {
+    /// Take a Windows device down and bring it back: its supervisor is a
+    /// scheduled task, ended and run again, as `systemctl restart` does to a
+    /// unit on Linux.
+    ///
+    /// The daemon is ended separately when the task's end leaves it running.
+    /// Nothing would then stop the task's next run from starting a second
+    /// daemon on the same state store beside it, which is not a fault any
+    /// real computer has.
+    fn restart_windows(&self, device: &Device, service: &str) -> Result<(), String> {
+        RealReach::run(&["schtasks", "/End", "/TN", service])?;
+        for _ in 0..50 {
+            if device.daemon_pid().is_none() {
+                break;
+            }
+            let _ = self.signal(device, "KILL");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if device.daemon_pid().is_some() {
+            return Err(format!("{}'s daemon outlived the end of {service}", device.name));
+        }
+        RealReach::run(&["schtasks", "/Run", "/TN", service])
     }
 }
 
@@ -332,7 +433,7 @@ impl<'a> Chaos<'a> {
     /// and send somebody hunting a bug in the client.
     pub fn clear(&mut self, devices: &[Device]) {
         for device in devices {
-            if device.container.is_none() && device.unix_user.is_none() {
+            if device.container.is_none() && device.unix_user.is_none() && device.program.is_none() {
                 continue;
             }
             // Repeated because iptables holds duplicates, and one storm can
@@ -405,6 +506,7 @@ mod tests {
             unix_home: None,
             unix_user: Some("soak-a".into()),
             service: Some("soak-device@a.service".into()),
+            program: None,
         }
     }
 
@@ -525,6 +627,27 @@ mod tests {
         d.unix_user = None;
         let err = RealReach.set_partition(&d, "10.0.0.5", true).unwrap_err();
         assert!(err.contains("every device"), "{err}");
+    }
+
+    #[test]
+    fn a_device_that_runs_no_copy_of_its_own_refuses_a_windows_partition() {
+        // The Windows firewall cuts a program. With one copy shared by every
+        // device, a rule for one would cut them all and the journal would
+        // name one.
+        let mut d = device();
+        d.program = None;
+        let err = windows_partition(&d, "10.0.0.5", true).unwrap_err();
+        assert!(err.contains("every device"), "{err}");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn on_windows_only_a_device_with_its_own_program_is_offered_partitions() {
+        let mut d = device();
+        d.program = None;
+        assert!(!RealReach.can_partition(&d));
+        d.program = Some(r"C:\soak\device-a\joinery-drive.exe".into());
+        assert!(RealReach.can_partition(&d));
     }
 
     #[test]
