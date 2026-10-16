@@ -1153,24 +1153,40 @@ returns `{ok, model, label, endpoint, ms}`; failure returns the transport/auth e
 wizard's AI step and the plugin's Plugin Settings subtab (`includes/settings_actions.php`);
 the flow is always save-then-test.
 
-**Errors.** Each provider throws `LlmProviderException` with a message carrying its own
-label (`Local model …`, `Fireworks …`, `Anthropic …`, via the overridable
-`providerLabel()`) and the `4xx`/`5xx` token that `classify()` keys on. `classify()`
-reduces a failure to a stable code (`api_not_configured`, `api_auth_failed`,
-`api_quota_exceeded`, `api_request_invalid`, `api_server_error`, `api_network_error`,
-`api_no_response` — the host connected but never began streaming within the first-token
-bound) recognising both Anthropic and OpenAI-style wording (e.g. an `unauthorized` / "the
-API key … is invalid" body classifies as auth). Recipes record `[code] <raw message>` in
-Run History. Only `api_network_error`, `api_server_error` and `api_no_response` earn a
-failover — an auth or quota error would fail identically on the sibling.
+**Errors.** Each provider throws `LlmProviderException` with the HTTP status as its code and
+a message carrying its own label (`Local model …`, `Fireworks …`, `Anthropic …`, via the
+overridable `providerLabel()`), the `4xx`/`5xx` token, then the provider's error type and
+sentence (`Anthropic 4xx: invalid_request_error: …`). `classify()` reduces a failure to a
+stable code from the status and the error type, recognising both Anthropic and
+OpenAI-style wording:
 
-Chat puts `LlmProviderException::operatorMessage()` on the failed row, which splits on
-how actionable the detail is. `api_not_configured` — nothing was sent because a required
-setting is empty — passes the exception's own message through verbatim: those strings are
-written in this plugin, name the empty setting rather than any value, and tell the
-operator exactly what to fill in. Every other code shows `friendlyMessage()`, since its
-detail is third-party wording the operator cannot act on. Any failure class matched by a
-substring must keep `api_not_configured`'s `is empty` check ahead of the `4xx` branch — a
+| Code | When |
+|---|---|
+| `api_not_configured` | nothing was sent: a required setting is empty |
+| `api_network_error` | the host could not be reached |
+| `api_no_response` | the host connected but never began streaming within the first-token bound |
+| `api_auth_failed` | 401, `authentication_error`, an invalid key |
+| `api_permission_denied` | 403, `permission_error`: a good key that may not do this |
+| `api_model_not_found` | 404, `not_found_error`, a model that does not exist |
+| `api_billing` | out of credit or over a spending limit (a credit-balance 400, `insufficient_quota`, 402) |
+| `api_quota_exceeded` | rate limited (429, `rate_limit_error`) |
+| `api_request_too_large` | 413, `request_too_large`, a prompt longer than the context |
+| `api_request_invalid` | any other 4xx |
+| `api_server_error` | 5xx, `overloaded`, anything unrecognised |
+
+Recipes record `[code] <raw message>` in Run History. Only `api_network_error`,
+`api_server_error` and `api_no_response` earn a failover — an auth or quota error would
+fail identically on the sibling.
+
+Chat puts `LlmProviderException::operatorMessage()` on the failed row. `api_not_configured`
+passes the exception's own message through verbatim: those strings are written in this
+plugin, name the empty setting rather than any value, and tell the operator exactly what
+to fill in. A refusal about the key, account, model or request (`api_auth_failed`,
+`api_permission_denied`, `api_model_not_found`, `api_billing`, `api_request_too_large`,
+`api_request_invalid`) shows `friendlyMessage()` followed by the provider's own sentence
+(`Anthropic said: “This API key is not scoped to a workspace…”`), cut to 300 characters,
+because that sentence names the fix. Network, timeout, rate-limit and server failures show
+`friendlyMessage()` alone. The `is empty` check stays ahead of the `4xx` branch — a
 configuration failure has no HTTP status to key on.
 
 **Turn diagnostics.** `ChatTurn` logs through `ChatAsync::log()`, which appends to

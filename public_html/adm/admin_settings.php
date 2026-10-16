@@ -387,6 +387,7 @@
 			'api_rate_limits',
 			'logging',
 			'upgrade',
+			'problem_reports',
 			'oauth',
 			'dns',
 			'joinery_direct',

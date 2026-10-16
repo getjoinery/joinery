@@ -7,7 +7,7 @@ site joined to this node that allowed it, from reads of the site through its
 agent. It runs on joinery_ai's agent loop with a fixed, read-only tool set.
 
 Install it on a management node that serves sites. A site asks the node named
-by its `support_url` setting; a site with none set has no Help panel. A node
+by its `support_url` setting, or its upgrade source when that is blank. A node
 without this plugin answers "Unknown action", which a site's Help panel shows
 as "support is not offered here".
 

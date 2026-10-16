@@ -395,7 +395,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				throw new SystemDisplayablePermanentError("Missing email in create user.");
 			}
 					
-			if(!$password = $data['password']){
+			if(!$password = ($data['password'] ?? null)){
 				$password = NULL;
 			}
 			
@@ -434,7 +434,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 				$user->set('usr_nickname', strip_tags(trim($data['usr_nickname'])));
 			}		
 
-			if($data['usr_timezone']){
+			if(!empty($data['usr_timezone'])){
 				try {
 					new DateTimeZone($data['usr_timezone']);
 					$user->set('usr_timezone', $data['usr_timezone']);
@@ -501,7 +501,7 @@ class User extends SystemBase {	public static $prefix = 'usr';
 					$tdata['usr_nickname'] = $data['usr_nickname'];
 				}
 
-				if($data['usr_timezone']){
+				if(!empty($data['usr_timezone'])){
 					$tdata['usr_timezone'] = $data['usr_timezone'];
 				}
 

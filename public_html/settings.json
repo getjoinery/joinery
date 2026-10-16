@@ -1006,7 +1006,7 @@
       "group": "problem_reports",
       "label": "Support desk",
       "type": "text",
-      "helptext": "The management node the Help button asks, as https://host. Blank means no Help button: the panel is off until this names a node that runs the support desk."
+      "helptext": "The management node the Help button asks, as https://host. Blank asks the upgrade source, where problem reports go."
     },
     {
       "name": "support_chat_consent",

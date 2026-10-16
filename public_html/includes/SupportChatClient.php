@@ -9,10 +9,12 @@
  * /api/v1/action/support_desk/desk_* actions from the server: the site is the
  * identity, the browser holds no key, and the facts are built where they are.
  *
- * Where: support_url, an https address. Blank means no Help panel on this
- * site: no button, and the panel's actions refuse (enabled()). A node
- * without the support desk answers that support is not offered there, and
- * the panel says so with a link to the public documentation.
+ * Where: support_url, an https address. Blank asks the upgrade source, where
+ * this site's problem reports go (ProblemReport::destinationUrl()). With
+ * neither naming an https node there is no Help panel: no button, and the
+ * panel's actions refuse (enabled()). A node without the support desk answers
+ * that support is not offered there, and the panel says so with a link to the
+ * public documentation.
  *
  * Identity: a new thread carries a one-time code this site issued and stored
  * (SiteSupportThread); the desk calls the site back and support_origin_confirm
@@ -27,7 +29,8 @@
  * or setup step it was asked from and the consent flags. Only when
  * support_chat_consent is yes. Later messages carry the route.
  *
- * @version 1.1.0
+ * @version 1.2.0 - a blank support_url asks the upgrade source
+ * @version 1.1.1 - a message a poll brings is drawn in the asker's timezone, not UTC
  */
 class SupportChatException extends Exception {
 	/** @var string a reason the panel can act on (not_offered, budget, consent, ...) */
@@ -61,13 +64,19 @@ class SupportChatClient {
 		self::$client = $client;
 	}
 
-	/** The serving node's base URL, or '' when support_url names none (the panel is off). */
+	/**
+	 * The serving node's base URL: support_url, or the upgrade source when it
+	 * is blank; '' when neither names an https node (the panel is off).
+	 */
 	public static function destinationUrl(): string {
 		$url = trim((string)Globalvars::get_instance()->get_setting('support_url', true, true));
+		if ($url === '') {
+			$url = ProblemReport::destinationUrl();
+		}
 		return preg_match('#^https://[^/\s]+#', $url) ? rtrim($url, '/') : '';
 	}
 
-	/** Whether this site has a Help panel: support_url names a desk. */
+	/** Whether this site has a Help panel: a desk to ask. */
 	public static function enabled(): bool {
 		return self::destinationUrl() !== '';
 	}
@@ -269,7 +278,8 @@ class SupportChatClient {
 			$local->noteState((string)$data['state'], false);
 		}
 		if (isset($data['message']) && is_array($data['message'])) {
-			$data['html'] = self::transcriptHtml(array($data['message']), 0);
+			// Drawn in the asker's timezone, as the first load of the thread is.
+			$data['html'] = self::transcriptHtml(array($data['message']), (int)SessionControl::get_instance()->get_user_id());
 		}
 		return $data;
 	}

@@ -7,6 +7,7 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.11 - The Help panel card names the upgrade source as the desk a blank support_url asks
  * @version 1.10 - The Help panel card says it is off while support_url is blank
  * @version 1.9 - The Help panel card: whether the panel sends this site's facts, and live reads by a joined node
  * @version 1.8 - The agent switch says it takes effect at the host converger's next run, within a minute or two (B24)
@@ -284,7 +285,7 @@ $support_consent = SupportChatClient::consent();
 echo '<div class="card mb-3" style="max-width:46rem;"><div class="card-body">';
 echo '<h5 class="card-title mb-2">The Help panel</h5>';
 if (!SupportChatClient::enabled()) {
-	echo '<p class="mb-0">Off: no support desk is set. The Help button appears once <a href="/admin/admin_settings">support_url</a> names a management node that runs the support desk.</p>';
+	echo '<p class="mb-0">Off: no support desk is set. The Help button appears once <a href="/admin/admin_settings">support_url</a>, or the upgrade source when it is blank, names an https management node.</p>';
 	echo '</div></div>';
 } else {
 echo '<p class="mb-2">The Help button asks the support desk at <strong>' . htmlspecialchars(SupportChatClient::destinationHost()) . '</strong>. '
