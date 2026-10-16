@@ -33,8 +33,21 @@ const REFRESH: Duration = Duration::from_secs(2);
 fn main() {
     let mut tray = platform::Tray::new();
     let mut last: Option<Presentation> = None;
+    // An update, or a package manager, replaces this program's file while it
+    // runs; this is how the tray notices and becomes the new copy.
+    let mut me = jd_platform::install::ExeWatch::current();
 
     loop {
+        if me.as_mut().is_some_and(|w| w.replaced()) {
+            if let Some(w) = &me {
+                if jd_platform::install::spawn_detached(w.path(), &[]).is_ok() {
+                    return;
+                }
+            }
+            // Could not start the new copy; keep drawing with this one.
+            me = None;
+        }
+
         let status = fetch_status();
         let presentation = present(status.as_ref());
 

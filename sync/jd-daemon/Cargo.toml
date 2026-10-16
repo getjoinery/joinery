@@ -18,10 +18,21 @@ thiserror = "1"
 # The asking half of the control channel. Already in the dependency tree for the
 # server API, so it costs nothing here.
 ureq = { version = "2", features = ["json"] }
+# The update feed: Ed25519 signatures and SHA-256 (`src/update`). Both already in
+# the tree under the TLS stack, so neither is a new thing to build or audit.
+ring = "0.17"
+# The update payload is a gzipped tar; already in the tree under the tray icons.
+flate2 = "1"
 
 [[bin]]
 name = "joinery-drive"
 path = "src/main.rs"
+
+# The publisher's tool: packs an update payload, writes the channel manifest,
+# and signs it with a key it is given. Never shipped to users.
+[[bin]]
+name = "joinery-drive-release"
+path = "src/bin/joinery_drive_release.rs"
 
 [features]
 default = []

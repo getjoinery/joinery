@@ -8,7 +8,9 @@
 //!   joinery-drive dismiss <id>
 //!   joinery-drive pause | resume | sync-now | stop
 //!   joinery-drive autostart on|off
+//!   joinery-drive check-update  look for a newer version now
 //!   joinery-drive unlink        revoke this device and forget its keys
+//!   joinery-drive --version     the workspace version every installer carries
 //!
 //! Everything except `login` and `daemon` is a request to a running daemon, so
 //! the answer to every one of them is whatever the daemon actually believes
@@ -54,7 +56,18 @@ fn main() -> ExitCode {
         "sync-now" => simple_command("/sync-now", "Checking now."),
         "stop" => simple_command("/stop", "Stopping."),
         "autostart" => cmd_autostart(&rest),
+        "check-update" => simple_command("/check-update", "Checking for updates."),
         "unlink" => cmd_unlink(),
+        // What an installer, a bug report, or the upgrade gate's minimum is
+        // compared against: the same number the server sees in client-version.
+        // The updater also runs a staged copy with this, and installs it only
+        // if it answers with the version the feed promised. That makes the
+        // first line a contract: its last word is the version
+        // (`update::preflight`), so this wording changes only with that.
+        "--version" | "-V" | "version" => {
+            println!("{} {}", jd_platform::BINARY_NAME, jd_proto::CLIENT_VERSION);
+            Ok(())
+        }
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -77,7 +90,9 @@ usage: joinery-drive login <instance-url> [--device NAME] [--root PATH]
        joinery-drive status | issues | dismiss <id>
        joinery-drive pause | resume | sync-now | stop
        joinery-drive autostart on|off
-       joinery-drive unlink";
+       joinery-drive check-update
+       joinery-drive unlink
+       joinery-drive --version";
 
 // ---------------------------------------------------------------------------
 // Linking
@@ -163,6 +178,9 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
 fn cmd_daemon() -> Result<(), String> {
     let paths = Paths::discover();
     paths.create().map_err(|e| e.to_string())?;
+    // Before anything that can fail: a new copy that dies on the way up has
+    // to have counted the attempt first (`jd_daemon::update::pending`).
+    let start = jd_daemon::update::on_start(&paths);
 
     // A config that is there but unreadable is refused before anything opens,
     // as it always was: carrying on would point a client that had been syncing
@@ -174,6 +192,7 @@ fn cmd_daemon() -> Result<(), String> {
     }
 
     let shared = Arc::new(Shared::new());
+    let update = jd_daemon::update::start(&paths, &shared, &start);
     // The channel opens first, linked or not, and stays the same one for the
     // life of the process: the settings page that walks a user through setup
     // is still talking to the same port, with the same session, when syncing
@@ -195,6 +214,11 @@ fn cmd_daemon() -> Result<(), String> {
     // A stale endpoint file sends the tray and the CLI to whatever holds that
     // port next, so it goes with the process.
     server.shutdown();
+    // Stopped for an update: the store is closed, so the files can move.
+    if let Some(restart) = update.take_restart() {
+        let paused = shared.snapshot().is_some_and(|s| s.paused);
+        jd_daemon::update::restart(restart, &paths, paused);
+    }
     outcome
 }
 
@@ -276,6 +300,8 @@ fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Resul
 
     let (tx, rx) = channel();
     shared.attach(tx);
+    // Paused before an update stays paused after it, from the first pass.
+    jd_daemon::update::keep_paused(shared);
     println!(
         "joinery-drive: syncing {} with {} (control on 127.0.0.1:{port})",
         config.sync_root.display(),
@@ -424,6 +450,9 @@ fn cmd_status() -> Result<(), String> {
         if pending > 0 {
             println!("  waiting  : {pending} transfers");
         }
+    }
+    if let Some(update) = answer.pointer("/update/summary").and_then(Value::as_str) {
+        println!("  updates  : {update}");
     }
     if let Some(blocker) = answer.get("blocker").and_then(Value::as_str) {
         println!("\n  {blocker}");

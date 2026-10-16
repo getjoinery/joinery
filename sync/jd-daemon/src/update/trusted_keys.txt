@@ -1,0 +1,12 @@
+# Public keys the Joinery Drive client accepts an update feed from.
+#
+# One base64 Ed25519 public key (32 bytes) per line; '#' starts a comment.
+# A manifest signed by ANY key listed here is accepted, so a key is rotated by
+# adding the new one, shipping a release, signing with both until the old
+# clients have moved, then removing the old line (docs/drive_sync.md, Updates).
+#
+# The matching private key never lives in this repository. The signer
+# (joinery-drive-release) takes it from a path or an environment variable.
+#
+# Empty: no update key has been minted yet, and a build with no key checks no
+# feed and installs nothing.
