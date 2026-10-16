@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.59 - a host whose agent this node was is retired even with Enable automated provisioning checked
+ *                (ManagedHost 1.7; owner 2026-10-16)
  * @version 1.58 - removing a node for good also retires the host records it was the agent of, and its own
  *                placement, once nothing is left on them (ManagedHost::retire_if_empty): a host's agent is linked
  *                from the host's side, so its record stayed with no agent and was offered in every Copy tab's
@@ -1146,16 +1148,17 @@ class ManagedNode extends SystemBase {
 			// The host records this node leaves: its placement, and any host it
 			// is the agent of (linked from the host's side, and unlinked by the
 			// delete). Read before the delete clears those links.
+			// host id => whether this node is its agent, removed for good now.
 			$host_ids = array();
 			if ((int)$this->get('mgn_mgh_managed_host_id') > 0) {
-				$host_ids[] = (int)$this->get('mgn_mgh_managed_host_id');
+				$host_ids[(int)$this->get('mgn_mgh_managed_host_id')] = false;
 			}
 			foreach (new MultiManagedHost(array('mgh_mgn_managed_node_id' => (int)$this->key, 'deleted' => false)) as $agent_of) {
-				$host_ids[] = (int)$agent_of->key;
+				$host_ids[(int)$agent_of->key] = true;
 			}
 			$this->permanent_delete();
-			foreach (array_unique($host_ids) as $host_id) {
-				if (ManagedHost::retire_if_empty($host_id)) {
+			foreach ($host_ids as $host_id => $agent_removed) {
+				if (ManagedHost::retire_if_empty($host_id, $agent_removed)) {
 					$notes[] = 'Its host record had nothing left on it and was removed from the dashboard too.';
 				}
 			}
