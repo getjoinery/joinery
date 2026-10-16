@@ -194,6 +194,125 @@ class DriveHelper {
 	}
 
 	/**
+	 * Change an item's parent and tell whoever it leaves, as one write.
+	 *
+	 * The change feed judges what a caller may see by where an entity is now,
+	 * so a row recorded once the item has landed reaches nobody it left: a
+	 * member whose share it was in matches nothing that names it, and the copy
+	 * their devices synced stays with them for good. Each user whose share the
+	 * item leaves (roots_changed_by_reparent) gets a `moved` row addressed to
+	 * them: their client asks about the entity and is told it is no longer
+	 * theirs there. A folder's subtree goes with it, so the row on the folder
+	 * speaks for what is inside.
+	 *
+	 * $write saves the item at its new place and returns false, having written
+	 * nothing, when the name is taken there. $kind, when given, is the change's
+	 * own row (drive_move's `moved`); a caller that records its own row once
+	 * the rest of its work is done passes none (drive_restore's `restored`).
+	 * The write, that row and the addressed rows are one transaction, so no
+	 * device reads the item in its new place with those rows missing. Returns
+	 * what $write returned.
+	 */
+	public static function reparent_and_tell($entity_type, $entity_id, $from_folder_id, $to_folder_id, $owner_id, $actor_id, callable $write, $kind = null) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$own = !$db->inTransaction();
+		if ($own) $db->beginTransaction();
+		try {
+			$left = self::roots_changed_by_reparent($entity_type, $entity_id, $from_folder_id, $to_folder_id);
+			if (!$write()) {
+				if ($own) $db->rollBack();
+				return false;
+			}
+			if ($kind !== null) {
+				FileChange::record($kind, $entity_type, $entity_id, $owner_id, $actor_id);
+			}
+			// `moved` whatever the change was called: to the people it left, it
+			// moved out of the share they had it in. It names only the entity;
+			// one who no longer reaches it at all is answered `not_yours` by
+			// drive_stat, with no name and no place, and so learns they lost
+			// it and nothing about where it went.
+			foreach ($left as $uid) {
+				FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner_id, $actor_id, $uid);
+			}
+			if ($own) $db->commit();
+			return true;
+		} catch (Throwable $e) {
+			if ($own && $db->inTransaction()) $db->rollBack();
+			throw $e;
+		}
+	}
+
+	/**
+	 * The users whose share an item leaves when its parent changes from
+	 * $from_folder_id to $to_folder_id (0 is the top of the owner's Drive).
+	 *
+	 * A user's share of an item is the OUTERMOST thing they hold a grant on
+	 * that reaches it: the topmost granted folder above it, or the item itself
+	 * when nothing above is granted to them. Every grant that reaches an item
+	 * sits on its one chain of ancestors, so each user has exactly one. A user
+	 * is returned when theirs is not the same afterwards: gone (they no longer
+	 * reach the item at all), or another one (it moved between two folders
+	 * both shared with them, or out from under a folder share onto a grant on
+	 * the item itself). Asking only "reached before and not after" would miss
+	 * the second case, and the share the item left would keep a copy for good.
+	 *
+	 * Call it before the item moves: it reads the chain the item leaves. Three
+	 * queries whatever the size of the item's subtree: the two ancestor walks
+	 * (depth-capped) and one read of the grants on both chains and the item.
+	 *
+	 * @return int[] user ids
+	 */
+	public static function roots_changed_by_reparent($entity_type, $entity_id, $from_folder_id, $to_folder_id) {
+		$from = self::folder_and_ancestors($from_folder_id);
+		if (empty($from)) {
+			// At the top nothing above it was granted, and the item's own
+			// grants travel with it.
+			return array();
+		}
+		$to = self::folder_and_ancestors($to_folder_id);
+		$entity_id = (int)$entity_id;
+		$q = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT fga_usr_user_id, fga_entity_type, fga_entity_id FROM fga_file_access_grants
+			  WHERE (fga_entity_type = ? AND fga_entity_id IN (" . self::int_in_list(array_merge($from, $to)) . "))
+			     OR (fga_entity_type = ? AND fga_entity_id = ?)");
+		$q->execute(array(self::ENTITY_FOLDER, $entity_type, $entity_id));
+		$on_folder = array();
+		$on_item = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $g) {
+			$uid = (int)$g['fga_usr_user_id'];
+			if ($g['fga_entity_type'] === $entity_type && (int)$g['fga_entity_id'] === $entity_id) {
+				$on_item[$uid] = true;
+			} else {
+				$on_folder[$uid][(int)$g['fga_entity_id']] = true;
+			}
+		}
+		$root_of = function ($uid, array $chain) use ($on_folder, $on_item) {
+			// $chain is nearest first, so the outermost grant is the last hit.
+			$root = isset($on_item[$uid]) ? 'item' : null;
+			foreach ($chain as $folder_id) {
+				if (isset($on_folder[$uid][$folder_id])) {
+					$root = $folder_id;
+				}
+			}
+			return $root;
+		};
+		$changed = array();
+		foreach (array_keys($on_folder + $on_item) as $uid) {
+			$before = $root_of($uid, $from);
+			if ($before !== null && $before !== $root_of($uid, $to)) {
+				$changed[] = (int)$uid;
+			}
+		}
+		return $changed;
+	}
+
+	/** A folder and every folder above it, nearest first; nothing for the top. */
+	private static function folder_and_ancestors($folder_id) {
+		$folder_id = (int)$folder_id;
+		return $folder_id > 0 ? array_merge(array($folder_id), self::ancestors($folder_id)) : array();
+	}
+
+	/**
 	 * Largest legal ciphertext size for a plaintext cap. The client container
 	 * (assets/js/drive-crypto.js) adds 32 bytes per chunk — 4-byte length prefix
 	 * + 12-byte IV + 16-byte GCM tag — over 4 MiB chunks; these constants must
@@ -1066,7 +1185,7 @@ class DriveHelper {
 	public static function save_folder_unless_name_taken($folder) {
 		self::require_classes();
 		try {
-			$folder->save();
+			self::save_behind_savepoint($folder);
 			return true;
 		} catch (Exception $e) {
 			if (strpos($e->getMessage(), '23505') === false) {
@@ -1132,7 +1251,7 @@ class DriveHelper {
 	public static function save_file_unless_name_taken($file) {
 		self::require_classes();
 		try {
-			$file->save();
+			self::save_behind_savepoint($file);
 			return true;
 		} catch (Exception $e) {
 			if (strpos($e->getMessage(), '23505') === false) {
@@ -1149,6 +1268,32 @@ class DriveHelper {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Save, and inside the caller's transaction, behind a savepoint.
+	 *
+	 * Postgres aborts the whole transaction on a refused statement. Without
+	 * this, a name race lost inside one (drive_move lands an item and its
+	 * change rows as one write) would leave the name check above unable to
+	 * run, and the refusal would come back as a database error instead of
+	 * `name_taken`. The savepoint takes back the refused save alone. Outside a
+	 * transaction the save is its own statement and needs none.
+	 */
+	private static function save_behind_savepoint($model) {
+		$db = DbConnector::get_instance()->get_db_link();
+		if (!$db->inTransaction()) {
+			$model->save();
+			return;
+		}
+		$db->exec('SAVEPOINT drive_save');
+		try {
+			$model->save();
+		} catch (Exception $e) {
+			$db->exec('ROLLBACK TO SAVEPOINT drive_save');
+			throw $e;
+		}
+		$db->exec('RELEASE SAVEPOINT drive_save');
 	}
 
 	// ------------------------------------------------------------------

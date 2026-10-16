@@ -427,8 +427,10 @@ Grant management is a full-set reconcile: `drive_share_sync` takes `grants` (a
 JSON object mapping each grantee — a user id **or** an email, resolved
 server-side — to a role) and `FileAccessGrant::sync_for_entity` inserts new
 grants, updates changed roles, and hard-deletes ones no longer in the set
-(revocation is a row deletion; there is no `delete_time`). Newly-granted users get
-a `drive_share` notification, gated by their `NotificationPreference`.
+(revocation is a row deletion; there is no `delete_time`). Each member it removes
+is told through a change-feed row addressed to them (see Change feed).
+Newly-granted users get a `drive_share` notification, gated by their
+`NotificationPreference`.
 
 Public links (`drive_link_create`, owner-only, gated by the `drive_share_links`
 tier feature) mint a `FileShareLink`: the raw token is returned once, only its
@@ -442,8 +444,11 @@ URL is the transport. `drive_link_revoke` stamps `fsl_revoked_time`.
 the share dialog: a `FileAccessGrant` grants access, and a `FileKeyGrant` grants
 readability — the owner's browser wraps the file key to each recipient's Drive
 vault public key, and an upload seals the new file's key to the destination's
-full reader set. An encrypted vault folder exists only at the Drive root or
-inside another vault, so a plaintext subtree never hides encrypted content.
+full reader set. `drive_key_grants_sync` reconciles each file's key set to the
+listed members (the owner's own key is always kept) and tells each member whose
+key it added or removed through the change feed. An encrypted vault folder
+exists only at the Drive root or inside another vault, so a plaintext subtree
+never hides encrypted content.
 Encrypted files rename via their re-encrypted metadata (`drive_rename` with
 `encrypted_metadata`), never a plaintext `name`. Public links carry the file key
 in the URL fragment and are single-file only (encrypted folders can't use them).
@@ -592,8 +597,7 @@ needed) so it never reappears inside an unreachable parent.
 Every mutation records one `FileChange` via `FileChange::record($kind,
 $entity_type, $entity_id, $owner_id, $actor_id)` — kinds `created`, `content`,
 `renamed`, `moved`, `trashed`, `restored`, `deleted`, `grant_changed`, `level_changed` (a
-folder tree's protection level; a member who lost a grant to it gets a `grant_changed`
-row addressed to them). The feed is
+folder tree's protection level). The feed is
 append-only and the primary key is the cursor. `drive_changes` takes a `{cursor}`
 and returns the changes after it that the caller may see — their own entities plus
 entities shared to them — with `next_cursor`. With `scope: 'mine'`, a sync
@@ -612,6 +616,50 @@ the trimmed rows, so a client reset once on a quiet site parks there and is not
 reset again on every poll.
 The daily retention sweep trims rows past `drive_change_feed_retention_days`
 (default 30).
+
+**Rows addressed to one member.** The feed decides what a caller may see by
+where an entity is *now*, so a change that takes something away from a member
+would never reach them. Such a change also records a row for each member it
+touches, passing them as `FileChange::record`'s sixth argument
+(`fch_audience_usr_user_id`). `drive_changes` returns that row to them beside
+their own and their shared entities' rows (not under `scope: 'mine'`), and its
+`owner_id` still names the real owner. Anyone else who can see the entity sees
+the row too; the feed returns no audience field, so a row says nothing of whom
+it was for.
+
+| Change | Row for each member it touches |
+|---|---|
+| `drive_share_sync` removes a member's grant | `grant_changed` on the entity |
+| a folder made Private ends its grants | `grant_changed` on each entity whose grant ended |
+| `drive_move`, or `drive_restore` bringing an item back at the top because its folder is still in the trash, takes the item out of a member's share | `moved` on the item (a folder's row speaks for its subtree) |
+| `drive_key_grants_sync` adds or removes a member's key to an encrypted file | `grant_changed` on the file |
+
+A member's *share* of an item is the outermost thing they hold a grant on that
+reaches it: the topmost granted folder above it, or the item itself when nothing
+above is granted to them. Every grant that reaches an item sits on its one chain
+of ancestors, so each member has exactly one. An item leaves a member's share
+when theirs is not the same afterwards: gone, or another one, as when the owner
+moves a file between two folders that are both shared with the same member, or
+out of a shared folder onto a grant on the file itself
+(`DriveHelper::roots_changed_by_reparent`). The row is `moved` whatever the
+action was called: to the member it left, the item went somewhere their share
+does not reach.
+
+A member who no longer reaches the item at all asks `drive_stat` about it and
+finds it under `not_yours`, which carries no name and no place: the row tells
+them it is gone for them, never where it went. One it moved to another of their
+shares finds it there. A member given a key finds it in the file's
+`wrapped_file_key`. A key re-wrapped for a member who already holds one is not
+announced: the owner's browser re-wraps every recipient's key on every change to
+a share, and a sealed box is randomized, so a different blob is the ordinary
+case.
+
+`drive_move`, a re-rooting `drive_restore` and `drive_key_grants_sync` write
+the change and its addressed rows in one transaction, so no device reads a move
+or a key the feed has not announced.
+`FileChange::record` swallows and logs a failure only outside a transaction,
+where the mutation has already committed; inside the caller's transaction it
+rethrows, and the mutation fails whole.
 
 ## Sync clients
 

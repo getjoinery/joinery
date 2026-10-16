@@ -12,6 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * (no delete_time column) — the ieg_ precedent. Authorization for who may sync
  * lives in the logic layer (drive_share_sync); this class stays CRUD.
  *
+ * @version 1.2.0 - fga_entity_type indexed with fga_entity_id, for lookups by entity
  * @version 1.1.0
  */
 class FileAccessGrant extends SystemBase {
@@ -27,7 +28,11 @@ class FileAccessGrant extends SystemBase {
 
 	public static $field_specifications = array(
 		'fga_file_access_grant_id' => array('type' => 'int8', 'is_nullable' => false, 'serial' => true, 'is_primary_key' => true),
-		'fga_entity_type'          => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true),
+		// Indexed by entity: who holds a grant on this folder or file is asked
+		// on every move (DriveHelper::roots_changed_by_reparent) and by
+		// user_ids_for_entity. The unique index leads with the user, so it
+		// cannot answer that.
+		'fga_entity_type'          => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true, 'index_with' => array('fga_entity_id')),
 		'fga_entity_id'            => array('type' => 'int8', 'is_nullable' => false, 'required' => true),
 		'fga_usr_user_id'          => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'unique_with' => array('fga_entity_type', 'fga_entity_id')),
 		'fga_role'                 => array('type' => 'varchar(16)', 'is_nullable' => false, 'required' => true),
