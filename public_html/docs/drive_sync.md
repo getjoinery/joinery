@@ -967,6 +967,14 @@ name. Otherwise the user carries a permanent warning about a file that is now
 perfectly fine, clearable only by hand, and it inflates the attention count the
 tray reads from.
 
+Work that keeps failing is a state too. Once an operation's backoff reaches its
+fifteen-minute cap it is tried every quarter of an hour for as long as it
+fails, and one `keeps_failing` issue says how many operations are stuck and why
+the first of them fails; it is withdrawn on the first pass that leaves nothing
+at the cap. It is one issue for the device, not one per operation: an outage on
+the server fails every queued operation at once, and a thousand identical
+issues would hide the one that matters.
+
 What decides is the entry's own `LocalStatus`, not the naming pass's report of
 what it just did: an entry already settled as unsyncable is not re-reported each
 pass, so reading that report as the full set withdraws a complaint that is still

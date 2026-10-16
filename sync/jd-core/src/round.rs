@@ -515,13 +515,15 @@ fn count_actions(resolved: &[(RoundInput, Vec<Action>)], pred: impl Fn(&Action) 
 /// quarter of an hour of being fixed, without anyone touching the client.
 pub fn retry_delay_ms(attempts: i64) -> u64 {
     const BASE_MS: u64 = 1_000;
-    const CAP_MS: u64 = 15 * 60 * 1_000;
     if attempts <= 0 {
         return BASE_MS;
     }
     let shift = attempts.min(20) as u32;
-    BASE_MS.saturating_mul(1u64 << shift.min(20)).min(CAP_MS)
+    BASE_MS.saturating_mul(1u64 << shift.min(20)).min(RETRY_CAP_MS)
 }
+
+/// The longest wait between two tries of an op (`retry_delay_ms`).
+pub const RETRY_CAP_MS: u64 = 15 * 60 * 1_000;
 
 /// Group a round's issues by entity, for the panel a person reads.
 pub fn issues_by_entity(outcome: &RoundOutcome) -> HashMap<EntityId, Vec<&Issue>> {

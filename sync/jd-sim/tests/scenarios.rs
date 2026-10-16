@@ -23136,6 +23136,71 @@ fn a_change_only_the_vault_allows_is_held_not_retried() {
     assert_converged(&world);
 }
 
+/// Work the server keeps failing is said, in one issue for the device, once
+/// its backoff has reached the cap, and the issue goes when the work gets
+/// through. RED before: an op was tried every fifteen minutes for as long as
+/// it failed, and nothing but 'Syncing -- 1 to go' said so (B-RT).
+#[test]
+fn work_that_keeps_failing_is_said_and_unsaid() {
+    let world = World::new(9_843, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..12 {
+        world.server.answer_next("drive_upload_init", 503);
+    }
+    laptop.fs.user_write("report.txt", b"quarterly");
+    let mut said = Vec::new();
+    for _ in 0..40 {
+        world.clock.advance_secs(16 * 60);
+        world.pass(laptop);
+        said = issues_of(laptop, "keeps_failing");
+        if !said.is_empty() {
+            break;
+        }
+    }
+    assert!(said.len() == 1 && said[0].contains("report.txt") && said[0].contains("every 15 minutes"), "{said:?}");
+    assert!(server_sha(&world, "report.txt").is_none(), "{:?}", world.server.tree());
+    assert!(world.settle().is_some(), "never settled once the server answered");
+    assert_eq!(server_sha(&world, "report.txt"), Some(jd_sim::sha256_hex(b"quarterly")));
+    assert!(issues_of(laptop, "keeps_failing").is_empty(), "{:?}", issues_of(laptop, "keeps_failing"));
+}
+
+/// Two things stuck, then one of them through: the device still carries one
+/// issue, in words naming what is still stuck, and none once both are
+/// through. Guards the replace: an issue raised beside the old one each time
+/// the count changed would pile up a panel of stale counts.
+#[test]
+fn work_that_keeps_failing_is_said_in_one_issue_as_it_changes() {
+    let world = World::new(9_842, &["laptop"]);
+    let laptop = world.device("laptop");
+    for _ in 0..12 {
+        world.server.answer_next("drive_upload_init", 503);
+    }
+    for _ in 0..16 {
+        world.server.answer_next("drive_folder_create", 503);
+    }
+    laptop.fs.user_write("report.txt", b"quarterly");
+    laptop.fs.user_mkdir("Empty");
+    let mut seen = Vec::new();
+    for _ in 0..40 {
+        world.clock.advance_secs(16 * 60);
+        world.pass(laptop);
+        let said = issues_of(laptop, "keeps_failing");
+        assert!(said.len() <= 1, "{said:?}");
+        if let Some(s) = said.first() {
+            if seen.last() != Some(s) {
+                seen.push(s.clone());
+            }
+        }
+        if server_sha(&world, "report.txt").is_some() && world.server.folder_id_at("Empty").is_some() {
+            break;
+        }
+    }
+    assert!(seen.iter().any(|s| s.starts_with("2 changes")), "{seen:?}");
+    assert!(seen.iter().any(|s| s.starts_with("A change") && s.contains("Empty")), "{seen:?}");
+    assert!(world.settle().is_some(), "never settled once the server answered");
+    assert!(issues_of(laptop, "keeps_failing").is_empty(), "{:?}", issues_of(laptop, "keeps_failing"));
+}
+
 /// The server's file at `path`, if it holds one live: its content hash.
 fn server_sha(world: &World, path: &str) -> Option<String> {
     world.server.tree().get(path).cloned().flatten()
