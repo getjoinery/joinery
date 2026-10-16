@@ -2,6 +2,9 @@
 /**
  * admin_backups — the Backups page.
  *
+ * @version 1.23 - Where the server has a TPM2 chip, the data root's line says what the chip's slot protects and
+ *                offers the stricter way: encrypt asking for the key at every boot, or stop the chip opening an
+ *                encrypted one (B43)
  * @version 1.22 - Encrypt's confirm says who stops again when it finishes: the services (B59)
  * @version 1.21 - Encrypt's confirm says its services stop again for a few seconds when it finishes (B45)
  * @version 1.20 - the Data root line: encrypted, what opened it, whose key its break-glass copy is sealed
@@ -302,11 +305,15 @@ $dr = DataRootStatus::read();
 $dr_offer = DataRootStatus::encrypt_offer($dr);
 if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
 	$site_fpr = $recovery['is_ready'] ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
-	$dr_form = function ($action, $label, $confirm) use ($page) {
-		$fw = $page->getFormWriter($action . '_form');
+	// $variant names a second form for the same action (its own CSRF token and button).
+	$dr_form = function ($action, $label, $confirm, $hidden = array(), $variant = '') use ($page) {
+		$fw = $page->getFormWriter($action . $variant . '_form');
 		$fw->begin_form();
 		$fw->hiddeninput('action', '', array('value' => $action));
-		$fw->submitbutton('btn_' . $action, $label, array('class' => 'btn btn-sm btn-outline-primary mt-1',
+		foreach ($hidden as $name => $value) {
+			$fw->hiddeninput($name, '', array('value' => $value));
+		}
+		$fw->submitbutton('btn_' . $action . $variant, $label, array('class' => 'btn btn-sm btn-outline-primary mt-1',
 			'onclick' => 'event.preventDefault(); var b=this, f=this.form; JoineryModal.confirm('
 				. json_encode($confirm, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)
 				. ', function(){ f.requestSubmit(b); });'));
@@ -340,6 +347,18 @@ if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
 			$dr_form('data_root_rekey', 'Re-encrypt under a new key…',
 				'Re-encrypt this server\'s data root under a new volume key? Do this after rotating a recovery key someone else could have seen: from then on that key opens no copy of its disk. It runs in the background for hours.');
 		}
+		// A TPM2 chip opens it for whoever boots the server whole (B43).
+		if (DataRootStatus::tpm2_chip($dr)) {
+			if (DataRootStatus::tpm2_off($dr)) {
+				echo '<div class="small text-muted mt-1">Its TPM2 chip is not used: each boot asks for the recovery key. Letting the chip open it again is a command on the server, as root: <code>joinery_data_root.sh tpm2 on</code>.</div>';
+			} else {
+				echo '<div class="small text-muted mt-1">' . htmlspecialchars(DataRootStatus::TPM2_TEXT) . '</div>';
+				if (($dr['reencrypt'] ?? '') === '') {
+					$dr_form('data_root_tpm2_off', 'Ask for the key at every boot…',
+						'Stop this server\'s TPM2 chip opening its data root? From the next boot it waits for the recovery key, at the console or on its unlock page, before its sites start. Letting the chip back in is a command on the server, as root.');
+				}
+			}
+		}
 		if ($reseal) {
 			$dr_form('data_root_reseal', 'Seal it to this site\'s recovery key',
 				'Seal this server\'s break-glass copy to this site\'s recovery key? Whoever holds the key it is sealed to now can no longer open a copy of its disk made from then on.');
@@ -352,8 +371,18 @@ if ($dr !== null && (DataRootStatus::encrypted($dr) || $dr_offer['offered'])) {
 				echo '<div class="small text-muted mt-1">' . htmlspecialchars($why) . '</div>';
 			}
 			if ($offer['ready']) {
-				$dr_form('data_root_encrypt', 'Encrypt the data root',
-					'Encrypt this server\'s data root where it stands? Its services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key, so a reboot part-way, or a lost key slot, opens with that key.');
+				$encrypt_confirm = 'Encrypt this server\'s data root where it stands? Its services stop for a few seconds, then it encrypts in the background for hours, and they stop again for a few seconds when it finishes, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key, so a reboot part-way, or a lost key slot, opens with that key.';
+				if (DataRootStatus::tpm2_chip($dr)) {
+					// B43: the chip, or the key at every boot.
+					echo '<div class="small text-muted mt-1">' . htmlspecialchars(DataRootStatus::TPM2_TEXT) . '</div>';
+					$dr_form('data_root_encrypt', 'Encrypt the data root',
+						$encrypt_confirm . ' At each boot its TPM2 chip opens it.');
+					$dr_form('data_root_encrypt', 'Encrypt it, asking for the key at every boot',
+						$encrypt_confirm . ' Its TPM2 chip is never used: each boot waits for the recovery key, at the console or on its unlock page, before its sites start.',
+						array('tpm2' => 'off'), '_keyed');
+				} else {
+					$dr_form('data_root_encrypt', 'Encrypt the data root', $encrypt_confirm);
+				}
 			}
 		}
 	}

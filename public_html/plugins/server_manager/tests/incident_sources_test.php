@@ -19,6 +19,7 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.6 - plane:cloud_account_key is registered (its conditions: escrow_tier2_test, B77)
  * @version 1.5 - the node's alerts are on: a hand-made node on dev is a test cloud box, which is quiet by default
  * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
  *                for a running site not checked on a host that refuses unsigned code (host_restrictions D8)
@@ -71,7 +72,8 @@ $names = array_keys(IncidentSources::all());
 foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped', 'plane:backup_unverified', 'plane:failed_units',
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
-	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified') as $want) {
+	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified',
+	'plane:cloud_account_key') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 

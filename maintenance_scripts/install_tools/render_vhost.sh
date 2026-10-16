@@ -3,6 +3,11 @@
 # render_vhost.sh - keep this site's Apache vhost in step with the template the
 # deployed release ships.
 #
+# Version: 1.12 - The history templates are rendered whole, as they were rendered when shipped, so a companion
+#                test site's old vhost is still recognised and adopted (reviewer2 D3).
+# Version: 1.11 - The render is _vhost_render.sh's, the one _site_init.sh writes a site's first
+#                vhost with. A companion test site's render carries no test site of its
+#                own, and its <site>_test_test folders are never made (one_data_root B1).
 # Version: 1.10 - The current template names no address, so a re-render moves a site off its
 #                pinned IP onto any address (default_virtualhost.conf 2.08, specs/site_copy.md
 #                B25). The address read from disk now serves only to match older renders.
@@ -216,22 +221,31 @@ fi
 # render. 0600 root:root beside the vhost: it is a record, not configuration.
 STATE="/etc/apache2/sites-available/.${SITENAME}.conf.rendered"
 
-# One render, the way install.sh, _site_init.sh and the container image all
-# do it: four plain substitutions over the whole template. Anything a box was
-# given by one of those is reproducible here from the values it still carries.
+# One render, the one _site_init.sh writes a site's first vhost with
+# (_vhost_render.sh): plain substitutions over the whole template, and for a
+# companion test site no test site of its own. Anything a box was given that
+# way is reproducible here from the values it still carries.
+[[ -f "${SCRIPT_DIR}/_vhost_render.sh" ]] || { say "_vhost_render.sh missing beside this script - skipping" >&2; exit 0; }
+# shellcheck source=_vhost_render.sh
+. "${SCRIPT_DIR}/_vhost_render.sh"
 render_template() {
-    sed -e "s|{{DOMAIN_NAME}}|${DOMAIN}|g" \
-        -e "s|{{SITE_NAME}}|${SITENAME}|g" \
-        -e "s|{{SERVER_IP}}|${SERVER_IP}|g" \
-        -e "s|{{PORT}}|${PORT}|g" \
-        "$1"
+    vhost_render "$1" "${SITE_ROOT}" "${DOMAIN}"
+}
+# A template we shipped before, rendered as it was then: a companion test
+# site's test-site host included, since no release before _vhost_render.sh 1.0
+# left it out.
+render_history() {
+    vhost_render "$1" "${SITE_ROOT}" "${DOMAIN}" whole
 }
 
 # The template's test-site vhost names {site}_test/public_html and
 # {site}_test/logs, and Apache refuses a configuration whose ErrorLog directory
 # does not exist. _site_init.sh and the container image create both; a box
-# whose vhost was hand-trimmed may never have had them.
-mkdir -p "${SITE_ROOT}_test/public_html" "${SITE_ROOT}_test/logs" 2>/dev/null || true
+# whose vhost was hand-trimmed may never have had them. A companion test site
+# renders no test site, so it needs neither.
+if ! vhost_is_companion_test_site "${SITE_ROOT}"; then
+    mkdir -p "${SITE_ROOT}_test/public_html" "${SITE_ROOT}_test/logs" 2>/dev/null || true
+fi
 
 RENDERED="$(mktemp)"
 trap 'rm -f "${RENDERED}"' EXIT
@@ -250,7 +264,7 @@ vhost_matches_history() {
     rendered_old="$(mktemp)"
     for old in "${history_dir}"/*.conf; do
         [[ -f "${old}" ]] || continue
-        render_template "${old}" > "${rendered_old}"
+        render_history "${old}" > "${rendered_old}"
         if vhost_is_render_plus_certbot "${rendered_old}" "${on_disk}" "${DOMAIN}"; then
             rm -f "${rendered_old}"
             echo "${old##*/}"

@@ -20,6 +20,7 @@
  *
  * Run: php tests/unit/root_request_test.php
  *
+ * @version 1.4 - thirteen kinds: data_root_tpm2_off, and data_root_encrypt's tpm2 'off', the stricter way only (B43)
  * @version 1.3 - the runner's lock pin reads the bounded wait (flock -w), the shape the lock has since the runner's 2.16
  * @version 1.2 - remove_plugin is a kind; root's checks before it deletes a plugin directory (specs/post_release_fleet_defects.md B1)
  * @version 1.1 - install_package is a kind, because root verifies before it moves (specs/package_signing.md WP3)
@@ -98,7 +99,24 @@ check(strpos($installer, "'unsigned_package_installed'") !== false
 // verifies a staged upload, writes something that is not executed, or seals
 // this server's data root to the site's own recovery key, which its backups
 // already trust. If that stops being true, this is the check that should stop it.
-check(count(RootRequest::KINDS) === 12, 'there are twelve kinds', implode(', ', RootRequest::KINDS));
+check(count(RootRequest::KINDS) === 13, 'there are thirteen kinds', implode(', ', RootRequest::KINDS));
+
+// B43: the TPM2 choice. The queue is the web user's to write, so only the
+// stricter way is read from a request: data_root_encrypt's tpm2 'off' (and
+// nothing looser than an exact 'off'), and data_root_tpm2_off. No kind lets
+// the chip open the data root again; that is root's own command.
+$encrypt_case = substr($dispatcher, strpos($dispatcher, "case 'data_root_encrypt'"));
+$encrypt_case = substr($encrypt_case, 0, strpos($encrypt_case, "\n}\n"));
+check(strpos($encrypt_case, "\$no_tpm2 = ((\$args['tpm2'] ?? null) === 'off') ? ' --no-tpm2' : '';") !== false
+	&& strpos($encrypt_case, "' encrypt' . \$no_tpm2 . ' 2>&1 </dev/null'") !== false,
+	'data_root_encrypt passes --no-tpm2 for exactly tpm2 \'off\' and reads nothing else from the request');
+$tpm2_case = substr($dispatcher, strpos($dispatcher, "case 'data_root_tpm2_off'"));
+$tpm2_case = substr($tpm2_case, 0, strpos($tpm2_case, "\tcase '", 5));
+check(strpos($tpm2_case, "' tpm2 off'") !== false && strpos($tpm2_case, '$args') === false
+	&& strpos($tpm2_case, 'DataRootStatus::encrypted(DataRootStatus::read())') !== false,
+	'data_root_tpm2_off runs tpm2 off on an encrypted data root and reads nothing from the request');
+check(strpos($dispatcher, "tpm2 on'") === false && strpos($dispatcher, '"tpm2 on') === false,
+	'no kind runs tpm2 on');
 
 section('remove_plugin: root deletes a plugin directory only when the row and the manifest agree it may');
 

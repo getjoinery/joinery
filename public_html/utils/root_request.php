@@ -24,6 +24,9 @@
  * Exit 0 = done. Anything else is recorded against the request and shown to
  * whoever submitted it.
  *
+ * @version 1.6 - data_root_encrypt passes --no-tpm2 when the request says tpm2 'off', and data_root_tpm2_off takes
+ *                the TPM2 chip's slot away (B43). Only the stricter way is read from a request: the queue is the
+ *                web user's to write, so letting the chip open the data root again is root's own command.
  * @version 1.5 - data_root_encrypt lets go of its transcript for the start (it is on the data root, and the start
  *                stops what keeps a file there) and writes what the start said after.
  * @version 1.4 - data_root_encrypt, data_root_reseal, data_root_rekey: this server's data root encrypted, and its
@@ -323,6 +326,19 @@ switch ($kind) {
 		echo "removed plugins/$name ($count files and directories)\n";
 		exit(0);
 
+	case 'data_root_tpm2_off': {
+		// The TPM2 chip no longer opens the data root (B43): each boot asks
+		// for the recovery key. The request carries nothing. Its opposite is
+		// not a kind: the queue is the web user's to write, so a chip let
+		// back in is root's own command (joinery_data_root.sh tpm2 on).
+		if (!DataRootStatus::encrypted(DataRootStatus::read())) {
+			fwrite(STDERR, "root_request: data_root_tpm2_off refused: this server's data root is not encrypted\n");
+			exit(1);
+		}
+		passthru('bash ' . escapeshellarg(PathHelper::getSiteRoot() . '/maintenance_scripts/install_tools/joinery_data_root.sh') . ' tpm2 off', $code);
+		exit((int)$code);
+	}
+
 	case 'data_root_rekey': {
 		// A recovery key that may have been seen (D8): the volume key changes.
 		// Only where the break-glass copy is sealed to this site's own key.
@@ -377,7 +393,11 @@ switch ($kind) {
 		fclose(STDOUT);
 		fclose(STDERR);
 		$said = array();
-		exec('bash ' . $tool . ' encrypt 2>&1 </dev/null', $said, $code);
+		// The one argument read from the request, and only the stricter way:
+		// with 'off' the TPM2 chip never opens the data root (B43). Anything
+		// else leaves the script's default, as a request with no arguments did.
+		$no_tpm2 = (($args['tpm2'] ?? null) === 'off') ? ' --no-tpm2' : '';
+		exec('bash ' . $tool . ' encrypt' . $no_tpm2 . ' 2>&1 </dev/null', $said, $code);
 		file_put_contents($transcript, implode("\n", $said) . "\n", FILE_APPEND);
 		exit((int)$code);
 	}

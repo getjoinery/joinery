@@ -3138,8 +3138,13 @@ $history = array_merge($history, $proxy_history);
 $render_fn = '';
 $match_fn = '';
 if (preg_match('/^render_template\(\) \{.*?^\}$/ms', $render_src, $m)) { $render_fn = $m[0]; }
+// The history is rendered whole (render_history), as it was rendered when shipped.
+if ($render_fn !== '' && preg_match('/^render_history\(\) \{.*?^\}$/ms', $render_src, $m)) { $render_fn .= "\n" . $m[0]; }
 if (preg_match('/^vhost_matches_history\(\) \{.*?^\}$/ms', $render_src, $m)) { $match_fn = $m[0]; }
 check($render_fn !== '' && $match_fn !== '', 'the render and history-match functions are findable');
+// render_template renders through the shared helper (_vhost_render.sh), as the
+// script sources it.
+$render_fn = (string)file_get_contents($tools_dir . '/_vhost_render.sh') . "\n" . $render_fn;
 // The history match compares through the certbot-tolerant test, so it needs
 // that and the insertion list alongside.
 foreach (array('is_certbot_insertion', 'vhost_is_render_plus_certbot') as $needed) {
@@ -3151,7 +3156,7 @@ $vh2 = harness_scratch_dir('vhost_history');
 $drive = function (string $on_disk_text) use ($render_fn, $match_fn, $vh2, $history_dir): string {
     file_put_contents($vh2 . '/disk.conf', $on_disk_text);
     $script = $vh2 . '/drive.sh';
-    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SERVER_IP='*'; PORT=''\n"
+    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SITE_ROOT=/var/www/html/site1; SERVER_IP='*'; PORT=''\n"
         . $render_fn . "\n" . $match_fn . "\n"
         . 'vhost_matches_history ' . escapeshellarg($vh2 . '/disk.conf') . ' ' . escapeshellarg($history_dir) . "\n");
     return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
@@ -3172,6 +3177,21 @@ check($drive(str_replace('AllowOverride All', 'AllowOverride None', $two)) === '
     'one changed directive and no template matches');
 check($drive('') === '', 'an empty file matches nothing');
 
+// A companion test site's vhost from before _vhost_render.sh carries the
+// template's test-site host; it is still recognised as ours (reviewer2 D3).
+$vh_comp = harness_scratch_dir('vhost_history_companion');
+@mkdir($vh_comp . '/site1/config', 0700, true);
+@mkdir($vh_comp . '/site1_test', 0700, true);
+touch($vh_comp . '/site1/config/Globalvars_site.php');
+file_put_contents($vh_comp . '/disk.conf', str_replace(array('{{DOMAIN_NAME}}', '{{SITE_NAME}}', '{{SERVER_IP}}', '{{PORT}}'),
+	array('test.example.org', 'site1_test', '*', ''), (string)file_get_contents($history_dir . '/default_virtualhost-2.07.conf')));
+file_put_contents($vh_comp . '/drive.sh', "DOMAIN=test.example.org; SITENAME=site1_test; SITE_ROOT=" . escapeshellarg($vh_comp . '/site1_test') . "; SERVER_IP='*'; PORT=''\n"
+	. $render_fn . "\n" . $match_fn . "\n"
+	. 'vhost_matches_history ' . escapeshellarg($vh_comp . '/disk.conf') . ' ' . escapeshellarg($history_dir) . "\n");
+check(trim((string)shell_exec('bash ' . escapeshellarg($vh_comp . '/drive.sh') . ' 2>/dev/null')) === 'default_virtualhost-2.07.conf',
+	'a companion test site\'s old render, test-site host and all, is matched to its template');
+shell_exec('rm -rf ' . escapeshellarg($vh_comp));
+
 // Every template up to 2.07 pinned the machine's first IP; the current one
 // answers on any address (specs/site_copy.md B25). A box still carrying a
 // pinned render is recognised through the address read off its own file, so
@@ -3180,7 +3200,7 @@ check($drive('') === '', 'an empty file matches nothing');
 $drive_at = function (string $on_disk_text, string $ip) use ($render_fn, $match_fn, $vh2, $history_dir): string {
     file_put_contents($vh2 . '/disk.conf', $on_disk_text);
     $script = $vh2 . '/drive_ip.sh';
-    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SERVER_IP=" . escapeshellarg($ip) . "; PORT=''\n"
+    file_put_contents($script, "DOMAIN=example.org; SITENAME=site1; SITE_ROOT=/var/www/html/site1; SERVER_IP=" . escapeshellarg($ip) . "; PORT=''\n"
         . $render_fn . "\n" . $match_fn . "\n"
         . 'vhost_matches_history ' . escapeshellarg($vh2 . '/disk.conf') . ' ' . escapeshellarg($history_dir) . "\n");
     return trim((string)shell_exec('bash ' . escapeshellarg($script) . ' 2>/dev/null'));
@@ -4160,5 +4180,102 @@ check(strpos($data_root_src, "migrate_forget_old || true") !== false
 	'the copies from before are removed only by a tick on a later boot, after check');
 check(strpos($mig_body, 'mv -T "$t" "${OLD}/${rel}"') !== false && strpos($mig_body, 'chmod 700 "$OLD"') !== false,
 	'the originals go aside by a rename into /srv/joinery.old, root\'s only');
+
+
+section('--no-tpm2 reaches every encrypted create (hosted_data_promise_disk_encryption B43)');
+
+// A TPM2 chip's slot opens the volume for whoever boots the machine whole, so
+// an owner can keep the chip out at install, on each of the three paths that
+// make an encrypted data root, and only with an encrypted one.
+$inst_b43 = (string)file_get_contents($tools_dir . '/install.sh');
+$pool_b43 = (string)file_get_contents($tools_dir . '/docker_disk_pool.sh');
+check(substr_count($inst_b43, '--no-tpm2) NO_TPM2=1 ;;') === 2, 'server and docker both take --no-tpm2');
+check(substr_count($inst_b43, 'create --encrypted $(no_tpm2_flag)') === 3 && strpos($inst_b43, 'create --encrypted ${') === false,
+	'every encrypted create passes it: server, docker (through the pool) and the site engine host');
+check(substr_count($inst_b43, "\n    no_tpm2_needs_encryption\n") === 2,
+	'and both refuse it without --encrypted-data-root');
+check(strpos($pool_b43, '--no-tpm2) notpm="--no-tpm2" ;;') !== false
+	&& strpos($pool_b43, 'data_root create ${enc:+"$enc"} ${notpm:+"$notpm"} ${want:+"$want"}') !== false,
+	'docker_disk_pool.sh create passes it on to the data root');
+$nt = (string)shell_exec('bash -c ' . escapeshellarg('NO_TPM2=1; ' . (preg_match('/^no_tpm2_flag\(\) \{.*\}$/m', $inst_b43, $m) ? $m[0] : '') . '; echo "[$(no_tpm2_flag)]"; NO_TPM2=0; echo "[$(no_tpm2_flag)]"') . ' 2>&1');
+check(trim($nt) === "[--no-tpm2]\n[]", 'no_tpm2_flag says --no-tpm2 only when asked', $nt);
+
+section('A companion test site has no test site of its own (one_data_root B1)');
+
+// install.sh site --with-test-site initialises <site>_test like any site, so its
+// vhost used to carry the template's test-site host too (test.test.<domain> on
+// /var/www/html/<site>_test_test), with folders and a data-root logs bind made
+// for it. One render (_vhost_render.sh) is shared by the first vhost and every
+// converge, so neither can bring it back.
+$vr_src = (string)file_get_contents($tools_dir . '/_vhost_render.sh');
+$init_src_b1 = (string)file_get_contents($tools_dir . '/_site_init.sh');
+$render_src_b1 = (string)file_get_contents($tools_dir . '/render_vhost.sh');
+check(strpos($init_src_b1, '. "${SCRIPT_DIR}/_vhost_render.sh"') !== false
+    && strpos($init_src_b1, 'vhost_render "$VIRTUALHOST_TEMPLATE" "$SITE_ROOT" "$DOMAIN" > "/etc/apache2/sites-available/${SITENAME}.conf"') !== false
+    && strpos($init_src_b1, 'sed -i "s/{{SITE_NAME}}/') === false,
+    '_site_init.sh writes a site\'s first vhost through _vhost_render.sh, with no render of its own');
+check(strpos($render_src_b1, '. "${SCRIPT_DIR}/_vhost_render.sh"') !== false
+    && strpos($render_src_b1, 'vhost_render "$1" "${SITE_ROOT}" "${DOMAIN}"') !== false,
+    'render_vhost.sh renders through the same helper on every converge');
+$b1_dirs = strpos($init_src_b1, 'if ! vhost_is_companion_test_site "$SITE_ROOT"; then');
+check($b1_dirs !== false && $b1_dirs < strpos($init_src_b1, 'site_data_on_data_root "${SITENAME}_test" logs'),
+    '_site_init.sh makes the <site>_test folders and logs bind only for a site that is not itself a companion test site');
+check(preg_match('/if ! vhost_is_companion_test_site "\$\{SITE_ROOT\}"; then\s+mkdir -p "\$\{SITE_ROOT\}_test\/public_html"/', $render_src_b1) === 1,
+    'and render_vhost.sh likewise');
+$inst_b1 = (string)file_get_contents($tools_dir . '/install.sh');
+$name_check = strpos($inst_b1, 'if ! [[ "$SITENAME" =~ ^[a-z0-9][a-z0-9_-]{1,49}$ ]]; then');
+$companion_refusal = strpos($inst_b1, 'if [[ "$SITENAME" == *_test && -f "/var/www/html/${SITENAME%_test}/config/Globalvars_site.php" ]]; then');
+check($name_check !== false && $companion_refusal !== false && $companion_refusal > $name_check
+    && $companion_refusal < strpos($inst_b1, 'PASSWORD_WAS_GENERATED=0', $name_check),
+    'install.sh site refuses <name>_test beside a site <name>, before anything is made: the rule would read it as a test site (reviewer2 D5)');
+
+// Executed: the helper over the shipped template.
+$b1 = harness_scratch_dir('vhost_companion');
+foreach (array('www/site/config', 'www/site_test', 'www/lone_test') as $d) { @mkdir($b1 . '/' . $d, 0755, true); }
+touch($b1 . '/www/site/config/Globalvars_site.php');
+$tpl_text = (string)file_get_contents($tools_dir . '/default_virtualhost.conf');
+$b1_render = function (string $root, string $domain) use ($tools_dir): string {
+    return (string)shell_exec('bash -c ' . escapeshellarg('set -u; . ' . $tools_dir . '/_vhost_render.sh; vhost_render '
+        . $tools_dir . '/default_virtualhost.conf ' . $root . ' ' . $domain) . ' 2>&1');
+};
+$plain = function (string $site, string $domain) use ($tpl_text): string {
+    return str_replace(array('{{DOMAIN_NAME}}', '{{SITE_NAME}}'), array($domain, $site), $tpl_text);
+};
+check($b1_render($b1 . '/www/site', 'example.test') === $plain('site', 'example.test'),
+    'a main site renders byte for byte as plain substitution (no vhost on the fleet changes)');
+check($b1_render($b1 . '/www/lone_test', 'lone.test') === $plain('lone_test', 'lone.test'),
+    'a site named *_test with no main site beside it is an ordinary site');
+$comp = $b1_render($b1 . '/www/site_test/', 'test.example.test');
+check(strpos($comp, '_test_test') === false && strpos($comp, 'ServerName test.test.') === false,
+    'a companion test site\'s render names no <site>_test_test folder and no test.test. host', substr($comp, 0, 200));
+check(preg_match_all('/^\s*ServerName test\.example\.test$/m', $comp) === 2 && strpos($comp, 'ServerName www.test.example.test') !== false,
+    'and keeps its own hosts: :80 and :443 for test.<domain>, and the www redirect');
+$removed = array_values(array_diff(preg_split('/\R/', $plain('site_test', 'test.example.test')), preg_split('/\R/', $comp)));
+check(count(preg_split('/\R/', $plain('site_test', 'test.example.test'))) - count(preg_split('/\R/', $comp)) === 20
+    && in_array('<Directory /var/www/html/site_test_test/public_html>', $removed, true)
+    && in_array('        ServerName test.test.example.test', $removed, true),
+    'exactly the test-site <Directory> block and the test-site host are left out (20 lines)', implode(' | ', $removed));
+foreach (array('VirtualHost', 'Directory', 'IfFile') as $tag) {
+    check(preg_match_all('/^\s*<' . $tag . '[\s>]/m', $comp) === preg_match_all('/^\s*<\/' . $tag . '>/m', $comp),
+        "the companion render's <$tag> blocks are balanced");
+}
+$apache_b1 = trim((string)shell_exec('command -v apache2 2>/dev/null'));
+if ($apache_b1 !== '' && is_file('/usr/lib/apache2/modules/mod_info.so')) {
+    foreach (array('site_test/public_html', 'site_test/logs', 'logs') as $d) { @mkdir($b1 . '/' . $d, 0755, true); }
+    $mods = '';
+    foreach (array('mpm_event', 'authz_core', 'ssl', 'rewrite', 'headers', 'alias', 'dir', 'setenvif', 'mime', 'info') as $mname) {
+        $mods .= "LoadModule {$mname}_module /usr/lib/apache2/modules/mod_{$mname}.so\n";
+    }
+    file_put_contents($b1 . '/main.conf', "ServerRoot \"{$b1}\"\nServerName localhost\nPidFile logs/pid\nErrorLog logs/error.log\n{$mods}Listen 18080\nListen 18443\n");
+    file_put_contents($b1 . '/companion.conf', str_replace(array('/var/www/html/', '/etc/letsencrypt/live', '/etc/ssl/joinery'),
+        array($b1 . '/', $b1 . '/no-le', $b1 . '/no-ph'), $comp));
+    $d = (string)shell_exec(escapeshellarg($apache_b1) . ' -t -f ' . escapeshellarg($b1 . '/main.conf')
+        . ' -C ' . escapeshellarg('Include ' . $b1 . '/companion.conf') . ' -D DUMP_VHOSTS 2>&1; echo "RC=$?"');
+    check(substr(trim($d), -4) === 'RC=0' && preg_match('/namevhost test\.example\.test /', $d) === 1 && strpos($d, 'test.test.') === false,
+        'the companion render parses under Apache and serves test.<domain> alone', implode(' | ', array_slice(preg_split('/\R/', trim($d)), -4)));
+} else {
+    check(true, 'apache2 with mod_info is not on this box; the companion render was not parsed');
+}
+shell_exec('rm -rf ' . escapeshellarg($b1));
 
 harness_finish();

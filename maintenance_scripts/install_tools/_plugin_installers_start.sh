@@ -3,6 +3,7 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.38 - Root request data_root_tpm2_off: the TPM2 chip no longer opens this server's data root (B43).
 # Version: 2.37 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
 #                 host, a site without one has it stopped (plugin_tiers.md WP7). A sandboxed plugin's
@@ -1527,7 +1528,7 @@ run_root_requests() {
         ' "${req}" 2>/dev/null || true)"
 
         case "${kind}" in
-            # The same twelve as RootRequest::KINDS, and no more. install_package
+            # The same thirteen as RootRequest::KINDS, and no more. install_package
             # installs a staged upload only after root has verified it against
             # the release key, or on the owner's acknowledgement checked
             # against the second-factor marker (RootRequest::PACKAGE_KIND).
@@ -1535,7 +1536,7 @@ run_root_requests() {
             # row as uninstalled and the manifest as not is_system (PluginRemoval).
             upgrade|install_plugin|install_theme|install_package|reconcile_composer|\
             write_agent_files|save_doc|set_receives_upgrades|remove_plugin|\
-            data_root_encrypt|data_root_reseal|data_root_rekey) : ;;
+            data_root_encrypt|data_root_reseal|data_root_rekey|data_root_tpm2_off) : ;;
             *)
                 echo "root request: ${id} names no known kind - refused" >&2
                 printf '2\n' > "${queue}/failed/${id}.exit" 2>/dev/null || true

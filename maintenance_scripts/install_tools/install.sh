@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#VERSION 3.24 - server and docker take --no-tpm2 with --encrypted-data-root: the TPM2 chip never opens the
+#               data root, and every boot asks for its key, so a machine taken whole stays locked (B43).
+#               site refuses <name>_test beside a site <name>: that name is the site's test site, and a
+#               site made under it would be read as one (one_data_root B1, reviewer2 D5).
 #VERSION 3.23 - site --release-tree-only builds the site from the tree install.sh came from and nothing else:
 #               no core archive laid over it and no theme, plugin or bundle fetched, refused without
 #               the tree's signed manifest or with --activate. The host agent's site_install passes it,
@@ -610,7 +614,7 @@
 #               cd out of BUILD_DIR before removing it to avoid getcwd() warnings.
 #
 # Usage:
-#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
+#   ./install.sh docker [--management-node=URL] [--node-name=NAME] [--multi-tenant] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [OUTBOUND FIGURES]  # Install Docker + the siteless host agent (joins URL if given, as NAME)
 #                       Docker keeps its data on the host's data root, /srv/joinery/docker: XFS with project
 #                       quotas, made before Docker's first start and grown as it fills
 #                       Root in a container is not root on the host (userns-remap) on every new Docker host,
@@ -625,8 +629,9 @@
 #                       OUTBOUND FIGURES: --outbound-ceiling=MBIT|off --outbound-conn-rate=N
 #                       --outbound-conn-burst=N --outbound-open-conns=N (the machine's own; server takes them too)
 #   ./install.sh build-base                          # One-time per host: build joinery-base image
-#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
+#   ./install.sh server [--allow-unsupported-os] [--data-root=SIZE|DEVICE] [--encrypted-data-root --recovery-public-key=KEY [--no-tpm2]] [--no-outbound-limits] [OUTBOUND FIGURES]  # One-time: set up bare-metal server
 #                       --encrypted-data-root: the data root on a LUKS2 volume, its key sealed to the recovery key
+#                       --no-tpm2: a TPM2 chip never opens it; every boot asks for the key
 #                       whose public half KEY is (specs/hosted_data_promise_disk_encryption.md)
 #                       Postgres, the mail queue and rspamd keep their data on the host's data root, /srv/joinery
 #   ./install.sh site SITENAME [DOMAIN] [PORT]      # Create a site (auto-generates password)
@@ -2589,7 +2594,7 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
         0) print_success "The data root is mounted" ;;
         2) if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
                encrypted_data_root_prepare || exit 1
-               bash "$SCRIPT_DIR/joinery_data_root.sh" create --encrypted ${data_root:+"$data_root"} || exit 1
+               bash "$SCRIPT_DIR/joinery_data_root.sh" create --encrypted $(no_tpm2_flag) ${data_root:+"$data_root"} || exit 1
            else
                bash "$SCRIPT_DIR/joinery_data_root.sh" create ${data_root:+"$data_root"} || exit 1
            fi
@@ -2640,12 +2645,14 @@ do_docker_install() {
             --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
             --encrypted-data-root) ENCRYPTED_DATA_ROOT=1 ;;
             --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
+            --no-tpm2) NO_TPM2=1 ;;
             --no-outbound-limits) NO_OUTBOUND_LIMITS=1 ;;
             --site-engine) SITE_ENGINE_HOST=1 ;;
             --outbound-*) consume_outbound_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; } ;;
         esac
     done
+    no_tpm2_needs_encryption
 
     if [ "${SITE_ENGINE_HOST:-0}" -eq 1 ]; then
         do_site_engine_host "$MGMT_NODE_URL" "$NODE_NAME" "$MULTI_TENANT" "$DATA_ROOT" "$NO_OUTBOUND_LIMITS"
@@ -2748,7 +2755,7 @@ do_docker_install() {
     print_step "Making the data root (/srv/joinery) for Docker's data..."
     if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
         encrypted_data_root_prepare || exit 1
-        bash "$SCRIPT_DIR/docker_disk_pool.sh" create --encrypted ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
+        bash "$SCRIPT_DIR/docker_disk_pool.sh" create --encrypted $(no_tpm2_flag) ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
     fi
     bash "$SCRIPT_DIR/docker_disk_pool.sh" create ${DATA_ROOT:+"$DATA_ROOT"} || exit 1
     print_success "Docker keeps its data at /srv/joinery/docker: XFS with project quotas, grown as it fills (docker_disk_pool.sh)"
@@ -3143,8 +3150,20 @@ SERVER_DATA_BINDS=("postgresql /var/lib/postgresql" "mail/postfix /var/spool/pos
 # volume. The agent's service comes where it always does, with the site
 # install or at the end of install.sh docker, which keeps a binary of the
 # version it ships.
+# --no-tpm2: on a machine with a TPM2 chip, the chip never opens the data root
+# (its slot opens the volume for whoever boots the machine as it is), so every
+# boot asks for the key (B43).
 ENCRYPTED_DATA_ROOT=0
 RECOVERY_PUBLIC_KEY=""
+NO_TPM2=0
+no_tpm2_flag() { [ "$NO_TPM2" -eq 1 ] && echo "--no-tpm2"; return 0; }
+# --no-tpm2 means something only for an encrypted data root.
+no_tpm2_needs_encryption() {
+    if [ "$NO_TPM2" -eq 1 ] && [ "$ENCRYPTED_DATA_ROOT" -ne 1 ]; then
+        print_error "--no-tpm2 goes with --encrypted-data-root: only an encrypted data root has a TPM2 slot"
+        exit 1
+    fi
+}
 encrypted_data_root_prepare() {
     local tool="$SCRIPT_DIR/joinery_data_root.sh" dist_dir="$SCRIPT_DIR/../../public_html/agent_dist"
     if [ -z "$RECOVERY_PUBLIC_KEY" ]; then
@@ -3200,7 +3219,7 @@ server_data_root() {  # [SIZE|DEVICE]
            print_step "Making the data root (/srv/joinery)..."
            if [ "$ENCRYPTED_DATA_ROOT" -eq 1 ]; then
                encrypted_data_root_prepare || return 1
-               bash "$tool" create --encrypted ${want:+"$want"} || { print_error "The encrypted data root could not be made (above). Nothing that keeps data was installed."; return 1; }
+               bash "$tool" create --encrypted $(no_tpm2_flag) ${want:+"$want"} || { print_error "The encrypted data root could not be made (above). Nothing that keeps data was installed."; return 1; }
            else
                bash "$tool" create ${want:+"$want"} || { print_error "The data root could not be made (above). Nothing that keeps data was installed."; return 1; }
            fi ;;
@@ -3236,10 +3255,12 @@ do_server_setup() {
             --data-root=*) DATA_ROOT="${arg#--data-root=}" ;;
             --encrypted-data-root) ENCRYPTED_DATA_ROOT=1 ;;
             --recovery-public-key=*) RECOVERY_PUBLIC_KEY="${arg#--recovery-public-key=}" ;;
+            --no-tpm2) NO_TPM2=1 ;;
             --password-file=*) PASSWORD_FILE="${arg#*=}" ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac
     done
+    no_tpm2_needs_encryption
 
     # Check if running as root
     if [ "$EUID" -ne 0 ]; then
@@ -4427,6 +4448,13 @@ do_site_create() {
     # outbound limits' counter's. Docker takes no one-letter container name.
     if ! [[ "$SITENAME" =~ ^[a-z0-9][a-z0-9_-]{1,49}$ ]]; then
         print_error "SITENAME '${SITENAME}' is not a site name: 2 to 50 of a-z, 0-9, _ and -, starting with a letter or digit"
+        exit 1
+    fi
+    # <name>_test beside a site <name> is that site's test site (--with-test-site
+    # makes it without coming here): a site made under the name would be read as
+    # one, and given no test-site host of its own (_vhost_render.sh).
+    if [[ "$SITENAME" == *_test && -f "/var/www/html/${SITENAME%_test}/config/Globalvars_site.php" ]]; then
+        print_error "A site named ${SITENAME} beside the site ${SITENAME%_test} is that site's test site (install.sh site ${SITENAME%_test} --with-test-site makes it). Choose another name. Nothing was changed."
         exit 1
     fi
 

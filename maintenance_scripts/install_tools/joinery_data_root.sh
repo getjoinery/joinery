@@ -4,6 +4,23 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.28 - The tick makes the chip's slot follow the record on an open volume with no run going (wanted
+#                 and none: enrolled; not wanted and one: taken away), so a choice made while the volume
+#                 was locked or busy, or a change that failed, is carried out (reviewer1 B43 F1); once a
+#                 boot if it fails. A slot made for the moment that would not go is kept by its key in /run
+#                 and removed first next time, and none is made past 24 slots (N2).
+# Version: 1.27 - A machine with a TPM2 chip can be told never to let the chip open it: create --encrypted
+#                 --no-tpm2, encrypt --no-tpm2, and tpm2 off|on later, recorded as tpm2=off. A chip's slot
+#                 opens the volume for anyone who boots the machine as it is, so a machine that must stay
+#                 locked when it is taken whole asks for its key at every boot (B43). Every enrolment (create,
+#                 an encryption's and a rekey's finish, the re-seal after a boot the chip did not open)
+#                 follows the record. The tick's status file says whether there is a chip, and the choice.
+# Version: 1.26 - stop and start: the data root stopped by hand, its services with it, and on an encrypted
+#                 one the volume closed; started again, asking for the key as a boot does. A stop by hand
+#                 through systemctl was undone: a log line woke rsyslog through its socket, which pulled the
+#                 data root up again and canceled the stop, and the next tick started a stopped plain one
+#                 (B17). stop stops the sockets first, and the tick leaves a stopped one until start or the
+#                 next boot.
 # Version: 1.25 - What opened the volume (/run/joinery/data-root.opened-by, the node page's 'opened by') follows it: a
 #                 decrypt's finish removes it, and an encrypt's start records the volume as opened by its encryption (B68).
 # Version: 1.24 - The data root's own mount point is locked underneath it, as a bind's is: at create before the
@@ -245,6 +262,9 @@ LOCK_FILE="${ROOT}/run/joinery/data-root.lock"
 CANNOT_GROW_FLAG="${ROOT}/run/joinery/data-root.cannot-grow"
 # The tick said once that the data root would not mount again.
 NOT_MOUNTED_FLAG="${ROOT}/run/joinery/data-root.not-mounted"
+# Stopped by hand (stop): when, then the services and sockets stop stopped,
+# which start starts again. In /run, so the next boot starts it as ever.
+STOPPED_FLAG="${ROOT}/run/joinery/data-root.stopped"
 # What opened the encrypted volume this boot, written by the agent's unlock, and
 # by an encrypt's start for the volume it opens.
 OPENED_BY="${ROOT}/run/joinery/data-root.opened-by"
@@ -986,6 +1006,17 @@ recipient_ok() {
 # The machine has a TPM2 chip systemd can enrol.
 tpm2_present() { [[ -e "${ROOT}/dev/tpmrm0" ]] && command -v systemd-cryptenroll >/dev/null 2>&1; }
 
+# The chip is enrolled where there is one, unless the record says tpm2=off
+# (B43). A chip's slot opens the volume for whoever boots the machine as it
+# is: it keeps a disk taken out of the machine locked, not the machine taken
+# whole. create reads TPM2_OFF, since the record is written after the slot.
+TPM2_OFF=0
+tpm2_wanted() {
+    tpm2_present || return 1
+    (( TPM2_OFF == 0 )) || return 1
+    [[ "$(conf_get tpm2)" != off ]]
+}
+
 # Everything an encrypted data root needs, said before anything changes.
 luks_preflight() {
     [[ -f "$RECIPIENT" ]] || die "an encrypted data root is sealed to a recovery key, and none is set: run joinery_data_root.sh recipient PUBLIC_KEY first. Nothing was changed."
@@ -1048,12 +1079,14 @@ luks_make() {  # DEV SIDECAR_REAL
     cryptsetup luksFormat --batch-mode "${LUKS_FORMAT[@]}" "${LUKS_SLOT[@]}" --key-slot 0 \
         --volume-key-file "${CREATE_KEYS}/volume.key" "$dev" "${CREATE_KEYS}/slot.key" \
         || die "could not make ${dev#"$ROOT"} an encrypted volume"
-    if tpm2_present; then
+    if tpm2_wanted; then
         if systemd-cryptenroll --unlock-key-file="${CREATE_KEYS}/slot.key" --tpm2-device=auto --tpm2-pcrs=7 "$dev" >/dev/null 2>&1; then
             say "TPM2: this machine's chip opens the data root at boot"
         else
             say "WARNING: this machine has a TPM2 chip, but enrolling it failed; the data root opens with the recovery key until it is enrolled"
         fi
+    elif tpm2_present; then
+        say "TPM2: this machine has a chip, and it is not used: the data root asks for its key at every boot"
     fi
     # By its own secret: luksKillSlot asks stdin for "any remaining passphrase"
     # whenever stdin is not a terminal, batch mode or not.
@@ -1083,6 +1116,7 @@ do_create() {
     for arg in "$@"; do
         case "$arg" in
             --encrypted) encrypted=1 ;;
+            --no-tpm2) TPM2_OFF=1 ;;
             /*) device="$arg" ;;
             *) want="$arg" ;;
         esac
@@ -1209,6 +1243,7 @@ do_create() {
         fi
     fi
     chmod 644 "$CONF"
+    (( encrypted == 0 || TPM2_OFF == 0 )) || conf_set tpm2 off
 
     mkdir -p "$MNT"
     # Locked before the first mount hides it; the tick tries again if not.
@@ -2458,11 +2493,12 @@ consumer_sockets() {
 }
 
 do_encrypt() {
-    local keep_layer=0 arg why=() backing source dev sidecar_real bytes fsize sector
+    local keep_layer=0 arg why=() backing source dev sidecar_real bytes fsize sector tpm2_choice=""
     for arg in "$@"; do
         case "$arg" in
             --keep-provider-layer) keep_layer=1 ;;
-            *) die "encrypt takes --keep-provider-layer only" ;;
+            --no-tpm2) tpm2_choice=off ;;
+            *) die "encrypt takes --keep-provider-layer and --no-tpm2 only" ;;
         esac
     done
     need_root
@@ -2596,9 +2632,9 @@ do_encrypt() {
     local luks_uuid=""
     [[ "$backing" == "device" ]] && luks_uuid="$(cryptsetup luksUUID "$dev")"
     if [[ -n "$luks_uuid" ]]; then
-        conf_set backing "luks-${backing}" sidecar "$sidecar_real" uuid "$luks_uuid" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
+        conf_set backing "luks-${backing}" sidecar "$sidecar_real" uuid "$luks_uuid" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL" tpm2 "$tpm2_choice"
     else
-        conf_set backing "luks-${backing}" sidecar "$sidecar_real" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL"
+        conf_set backing "luks-${backing}" sidecar "$sidecar_real" reencrypt encrypt driving_slot 0 driving_sidecar "$DRIVING_SIDECAR_REAL" tpm2 "$tpm2_choice"
     fi
     ENC_STAGE=recorded
     # The volume open now was opened by this start, not by whatever opened
@@ -2725,7 +2761,7 @@ encrypt_finish() {  # DEV KEYFILE
     local dev="$1" key="$2"
     # A TPM2 chip is enrolled now, through the driving slot before it goes: no
     # slot can be added while an encryption is part-way.
-    if tpm2_present && ! "$AGENT_BIN" data-root slots "$dev" 2>/dev/null | grep -q 'token=systemd-tpm2'; then
+    if tpm2_wanted && ! "$AGENT_BIN" data-root slots "$dev" 2>/dev/null | grep -q 'token=systemd-tpm2'; then
         if systemd-cryptenroll --unlock-key-file="$key" --tpm2-device=auto --tpm2-pcrs=7 "$dev" >/dev/null 2>&1; then
             say "data root: TPM2: this machine's chip opens it at boot"
         else
@@ -2823,7 +2859,7 @@ rekey_finish() {  # DEV KEYFILE
     if [[ -s "$pending" ]]; then
         mv -f "$pending" "${ROOT}$(conf_get sidecar)" || { say "data root: re-encrypted, but its new break-glass copy did not replace the old; tried again"; return 1; }
     fi
-    if tpm2_present; then
+    if tpm2_wanted; then
         if systemd-cryptenroll --unlock-key-file="$key" --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$dev" >/dev/null 2>&1; then
             say "data root: TPM2: this machine's chip opens it at boot again"
         else
@@ -2949,9 +2985,9 @@ decrypt_finish() {  # DEV
     local plain_uuid=""
     [[ "$plain" == "device" ]] && plain_uuid="$(blkid -s UUID -o value "$(conf_get source)" 2>/dev/null)"
     if [[ -n "$plain_uuid" ]]; then
-        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar "" uuid "$plain_uuid"
+        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar "" tpm2 "" uuid "$plain_uuid"
     else
-        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar ""
+        conf_set backing "$plain" reencrypt "" driving_slot "" driving_sidecar "" decrypt_header "" sidecar "" tpm2 ""
     fi
     rm -f "${SYSTEMD_DIR}/${MOUNT_UNIT}" "${SYSTEMD_DIR}/${UNLOCK_UNIT}" "${SYSTEMD_DIR}/${ENCRYPT_UNIT}"
     rm -rf "${SYSTEMD_DIR}/$(systemd-escape -p --suffix=device "$MAPPER_REAL").d"
@@ -3087,26 +3123,130 @@ luks_tpm2_reseal_if_due() {
     [[ -f "$TPM2_FAILED_MARK" ]] || return 0
     [[ -z "$(conf_get reencrypt)" ]] || return 0
     mapping_open || return 0
-    tpm2_present || { rm -f "$TPM2_FAILED_MARK"; return 0; }
-    local dev tmp
-    dev="$(luks_dev)" || return 1
-    tmp="$(mktemp -d "${ROOT}/run/joinery/tpm2-reseal.XXXXXX")" || return 1
-    head -c 64 /dev/urandom > "${tmp}/k"
+    tpm2_wanted || { rm -f "$TPM2_FAILED_MARK"; return 0; }
+    local rc=0
+    tpm2_through_temp_slot --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 || rc=$?
+    case "$rc" in
+        0) rm -f "$TPM2_FAILED_MARK"
+           say "data root: TPM2: the chip did not open it at this boot; it is sealed again to this boot's measurements" ;;
+        2) say "data root: TPM2: the chip did not open it at this boot, and no slot could be made to seal it again; it is tried each minute"
+           return 1 ;;
+        *) say "data root: WARNING: TPM2: sealing the chip again failed; it opens with escrow or the recovery key until it is" ;;
+    esac
+}
+
+# systemd-cryptenroll ARGS on the open volume, through a slot made for the
+# moment from its key (the agent reads it from the open mapping) and taken
+# away after: 0 done, 1 cryptenroll failed, 2 no slot could be made.
+# A slot made for the moment that would not go is kept by its key in /run
+# (TPM2_ORPHAN_KEY) and taken away before another is made; while it stays,
+# none is made. None is made past TEMP_SLOT_CEILING slots either: LUKS2 holds
+# 32, and a slot that cannot be opened cannot be taken away.
+TPM2_ORPHAN_KEY="${ROOT}/run/joinery/data-root.tpm2-orphan.key"
+TEMP_SLOT_CEILING=24
+tpm2_through_temp_slot() {  # CRYPTENROLL_ARGS...
+    local dev tmp rc=0 n
+    dev="$(luks_dev)" || return 2
+    if [[ -f "$TPM2_ORPHAN_KEY" ]]; then
+        if cryptsetup luksRemoveKey --batch-mode "$dev" "$TPM2_ORPHAN_KEY" >/dev/null 2>&1; then
+            rm -f "$TPM2_ORPHAN_KEY"
+        else
+            return 2
+        fi
+    fi
+    n="$("$AGENT_BIN" data-root slots "$dev" 2>/dev/null | grep -c '^slot=' || true)"
+    (( n < TEMP_SLOT_CEILING )) || return 2
+    tmp="$(mktemp -d "${ROOT}/run/joinery/tpm2-reseal.XXXXXX")" || return 2
+    ( umask 077; head -c 64 /dev/urandom > "${tmp}/k" )
     if ! "$AGENT_BIN" data-root add-slot "$dev" < "${tmp}/k" >/dev/null 2>&1; then
         rm -rf "$tmp"
-        say "data root: TPM2: the chip did not open it at this boot, and no slot could be made to seal it again; it is tried each minute"
-        return 1
+        return 2
     fi
-    if systemd-cryptenroll --unlock-key-file="${tmp}/k" --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7 "$dev" >/dev/null 2>&1; then
-        rm -f "$TPM2_FAILED_MARK"
-        say "data root: TPM2: the chip did not open it at this boot; it is sealed again to this boot's measurements"
-    else
-        say "data root: WARNING: TPM2: sealing the chip again failed; it opens with escrow or the recovery key until it is"
+    systemd-cryptenroll --unlock-key-file="${tmp}/k" "$@" "$dev" >/dev/null 2>&1 || rc=1
+    if ! cryptsetup luksRemoveKey --batch-mode "$dev" "${tmp}/k" >/dev/null 2>&1; then
+        mv -f "${tmp}/k" "$TPM2_ORPHAN_KEY" 2>/dev/null && chmod 600 "$TPM2_ORPHAN_KEY" 2>/dev/null || true
+        say "data root: WARNING: the slot made for the TPM2 chip's change did not go; its key is kept in /run and it is taken away before another is made"
     fi
-    cryptsetup luksRemoveKey --batch-mode "$dev" "${tmp}/k" >/dev/null 2>&1 \
-        || say "data root: WARNING: the slot made to seal the chip again did not go; it is a slot of ours, sealed nowhere"
     rm -rf "$tmp"
     "$AGENT_BIN" data-root prune-tokens "$dev" >/dev/null 2>&1 || true
+    return "$rc"
+}
+
+# The chip's slot follows the record (B43): on an open volume with no run
+# going, a chip that is wanted and has no slot is enrolled, and one that is
+# not wanted and has a slot loses it. That carries out a choice made while
+# the volume was locked or a run was going, and one whose change failed.
+# Said when it acts; a change that fails is said once and left for the next
+# boot (TPM2_FOLLOW_FAILED), so a chip that will not enrol costs nothing each
+# minute.
+TPM2_FOLLOW_FAILED="${ROOT}/run/joinery/data-root.tpm2-follow-failed"
+luks_tpm2_follow_record() {
+    [[ -z "$(conf_get reencrypt)" ]] || return 0
+    mapping_open || return 0
+    [[ -f "$TPM2_FOLLOW_FAILED" ]] && return 0
+    local dev has=0 rc=0
+    dev="$(luks_dev)" || return 1
+    [[ "$("$AGENT_BIN" data-root slots "$dev" 2>/dev/null | grep -c 'token=systemd-tpm2' || true)" != 0 ]] && has=1
+    if tpm2_wanted && (( has == 0 )); then
+        tpm2_through_temp_slot --tpm2-device=auto --tpm2-pcrs=7 || rc=$?
+        if (( rc == 0 )); then
+            say "data root: TPM2: this machine's chip opens it at boot, as its record says"
+        else
+            touch "$TPM2_FOLLOW_FAILED"
+            say "data root: WARNING: TPM2: the chip could not be enrolled, as its record says it should be; tried again next boot (or: joinery_data_root.sh tpm2 on)"
+        fi
+    elif ! tpm2_wanted && (( has == 1 )) && [[ "$(conf_get tpm2)" == off ]]; then
+        tpm2_through_temp_slot --wipe-slot=tpm2 || rc=$?
+        if (( rc == 0 )); then
+            say "data root: TPM2: the chip's slot is taken away, as its record says (tpm2 off)"
+        else
+            touch "$TPM2_FOLLOW_FAILED"
+            say "data root: WARNING: TPM2: its record says tpm2 off, and the chip's slot could not be taken away: the chip still opens it. Tried again next boot (or: joinery_data_root.sh tpm2 off)"
+        fi
+    fi
+    return 0
+}
+
+# Whether the TPM2 chip may open the data root (B43). off: recorded, and the
+# chip's slot taken away now; each boot then asks the escrow holder, or for
+# the recovery key, so the machine taken whole stays locked. on: the record
+# cleared, and the chip enrolled now. On an open volume with no run going;
+# during a run the choice is recorded and the run's finish follows it.
+do_tpm2() {  # on|off
+    local want="${1:-}" dev has=0 rc=0
+    [[ "$want" == on || "$want" == off ]] || die "tpm2 takes on or off"
+    need_root
+    take_lock
+    [[ -f "$CONF" ]] && is_luks || die "this host has no encrypted data root"
+    if [[ "$want" == off ]]; then
+        conf_set tpm2 off
+    else
+        conf_set tpm2 ""
+    fi
+    # A choice made by hand is tried by the tick again, even after a failure this boot.
+    rm -f "$TPM2_FOLLOW_FAILED"
+    if [[ -n "$(reencrypt_mode)" ]]; then
+        say "data root: recorded; its $(reencrypt_mode)ion is running, and the chip's slot follows the record at the first tick after it finishes"
+        return 0
+    fi
+    mapping_open || { say "data root: recorded; it is locked, and the chip's slot changes at the first tick it is open"; return 0; }
+    dev="$(luks_dev)" || die "the encrypted volume's device could not be found"
+    # Counted, not grep -q: closing the pipe early fails it under pipefail.
+    [[ "$("$AGENT_BIN" data-root slots "$dev" 2>/dev/null | grep -c 'token=systemd-tpm2' || true)" != 0 ]] && has=1
+    if [[ "$want" == off ]]; then
+        if (( has )); then
+            tpm2_through_temp_slot --wipe-slot=tpm2 || rc=$?
+            (( rc == 0 )) || die "the choice is recorded, but the chip's slot could not be taken away ($( (( rc == 2 )) && echo 'no slot could be made to do it' || echo 'systemd-cryptenroll failed')); run this again"
+        fi
+        say "data root: the TPM2 chip does not open it: each boot asks its escrow holder, then for the recovery key at the console or its unlock page"
+        return 0
+    fi
+    tpm2_present || { say "data root: recorded; this machine has no TPM2 chip, so each boot asks its escrow holder or for the recovery key"; return 0; }
+    if (( has == 0 )); then
+        tpm2_through_temp_slot --tpm2-device=auto --tpm2-pcrs=7 || rc=$?
+        (( rc == 0 )) || die "the choice is recorded, but the chip could not be enrolled ($( (( rc == 2 )) && echo 'no slot could be made to do it' || echo 'systemd-cryptenroll failed')); run this again"
+    fi
+    say "data root: TPM2: this machine's chip opens it at boot"
 }
 
 # Space a discard took back from the image is allocated again. fallocate
@@ -3289,6 +3429,7 @@ tick_upkeep() {
         luks_reboot_policy || true
         luks_reseal_if_due || true
         luks_tpm2_reseal_if_due || true
+        luks_tpm2_follow_record || true
         luks_escrow_rekey_due || true
         luks_hardening
         luks_moves_due || true
@@ -3343,7 +3484,9 @@ write_public_status() {
     local out sidecar sfpr=""
     [[ -f "$CONF" ]] || { rm -f "$STATUS_PUBLIC"; return 0; }
     out="# Written by joinery_data_root.sh each tick (specs/hosted_data_promise_disk_encryption.md WP4).
-backing=$(conf_get backing)"
+backing=$(conf_get backing)
+tpm2_chip=$(tpm2_present && echo 1 || echo 0)
+tpm2=$( [[ "$(conf_get tpm2)" == off ]] && echo off || echo auto)"
     if is_luks; then
         sidecar="${ROOT}$(conf_get sidecar)"
         [[ -f "$sidecar" ]] && sfpr="$(grep -o '"fingerprint": *"[0-9a-f]*"' "$sidecar" 2>/dev/null | head -n 1 | grep -o '[0-9a-f]\{64\}' || true)"
@@ -3432,10 +3575,14 @@ do_tick() {
         return 1
     fi
     do_check ready >/dev/null 2>&1 || rc=$?
+    # Stopped by hand: left so until start, or the next boot (B17).
+    if (( rc == 1 )) && [[ -f "$STOPPED_FLAG" ]] && ! mounted_ok; then
+        return 1
+    fi
     # Not mounted, and no run of this script has it (an encrypt holds the
     # lock while the data root is stopped for its start): a start that ended
-    # without starting it again (B42), or a stop by hand. Started again, and
-    # said once while it will not mount.
+    # without starting it again (B42), or a stop by hand that went around
+    # stop. Started again, and said once while it will not mount.
     if (( rc == 1 )) && ! mounted_ok; then
         need_root
         if take_lock nowait; then
@@ -3476,10 +3623,117 @@ do_tick() {
     need_root
     # Another tick, or a hand's grow, has it: this tick has nothing to add.
     take_lock nowait || return 0
+    # Running, so a stop's record is over (started some way other than start).
+    rm -f "$STOPPED_FLAG"
     if ! ( tick_upkeep ); then
         say "data root: this tick's upkeep did not finish (see above); the data root is mounted, so the run goes on and the next tick tries again"
     fi
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# stop / start
+# ---------------------------------------------------------------------------
+
+# The data root stopped by hand, and every service on it with it; on an
+# encrypted one, the volume closed and its loop device let go, so it is
+# locked as at a boot (T-V7). The sockets that start a consumer go first: one
+# log line wakes rsyslog through syslog.socket, which pulls the data root up
+# again and cancels a stop in flight (B17). What stopped is recorded for
+# start, and the tick leaves a stopped data root alone until then; a boot
+# starts it as ever. A filesystem something will not let go of is started
+# again, and said.
+do_stop() {
+    local -a sockets=() running=() holders=()
+    local fs_id held m
+    need_root
+    take_lock
+    [[ -f "$CONF" ]] || die "this host has no data root to stop"
+    [[ -z "$(reencrypt_mode)" ]] || die "its $(reencrypt_mode)ion is running (joinery_data_root.sh status shows how far); stop it once that is done"
+    if ! mounted_ok && ! { is_luks && mapping_open; }; then
+        say "data root: not running; nothing to stop$( [[ -f "$STOPPED_FLAG" ]] && printf ' (%s)' "$(head -n 1 "$STOPPED_FLAG")")"
+        return 0
+    fi
+    mapfile -t sockets < <(consumer_sockets | sort -u)
+    mapfile -t running < <({ active_consumers; printf '%s\n' "${sockets[@]}"; } | grep -v '^$' | sort -u)
+    fs_id="$(fs_id_at "$MNT_REAL")"
+    mkdir -p "$(dirname "$STOPPED_FLAG")"
+    stop_record "${running[@]}"
+    say "Stopping the data root and the services on it..."
+    (( ${#sockets[@]} == 0 )) || systemctl stop "${sockets[@]}" || true
+    stop_units
+    held="$(mounts_of_fs "$fs_id")"
+    if [[ -n "$held" ]]; then
+        # shellcheck disable=SC2086
+        mapfile -t holders < <(holder_units $held)
+        if (( ${#holders[@]} > 0 )); then
+            say "data root: ${holders[*]} keep a file on it; stopping them too"
+            running+=("${holders[@]}")
+            stop_record "${running[@]}"
+            systemctl stop "${holders[@]}" 2>/dev/null || true
+            for m in $held; do
+                systemctl stop "$(systemd-escape -p --suffix=mount "$m")" 2>/dev/null || umount "$m" 2>/dev/null || true
+            done
+            stop_units
+            held="$(mounts_of_fs "$fs_id")"
+        fi
+    fi
+    if [[ -n "$held" ]] || mounted_ok || { is_luks && mapping_open; }; then
+        rm -f "$STOPPED_FLAG"
+        systemctl start "$TARGET_UNIT" 2>/dev/null || true
+        (( ${#running[@]} == 0 )) || systemctl start --no-block "${running[@]}" 2>/dev/null || true
+        die "the data root did not stop: $( [[ -n "$held" ]] && printf 'its filesystem is still mounted at %s, and something there would not let go (fuser -vm shows what)' "$held" || printf 'see: systemctl status %s %s' "$MOUNT_UNIT" "$UNLOCK_UNIT"). It is started again, with its services."
+    fi
+    say "data root: stopped$( is_luks && printf ', its volume closed')$( (( ${#running[@]} > 0 )) && printf ', with %s' "${running[*]}"). It stays stopped until joinery_data_root.sh start, or the next boot."
+}
+
+# What stop stopped: when, then a unit a line.
+stop_record() {  # UNIT...
+    { printf 'stopped by hand at %s\n' "$(date -u '+%Y-%m-%d %H:%M:%S UTC')"; printf '%s\n' "$@" | sort -u | grep -v '^$' || true; } > "$STOPPED_FLAG.tmp"
+    mv -f "$STOPPED_FLAG.tmp" "$STOPPED_FLAG"
+}
+
+# The units whose stop takes the data root down: the volume's opener on an
+# encrypted one (the mount requires it, so goes first, and every consumer
+# with the mount), the mount on a plain one.
+stop_units() {
+    if is_luks; then
+        systemctl stop "$UNLOCK_UNIT" 2>/dev/null || true
+    else
+        systemctl stop "$MOUNT_UNIT" 2>/dev/null || true
+    fi
+}
+
+# The data root started again after a stop by hand, with what the stop
+# stopped. An encrypted one asks for its key as a boot does (the TPM2 chip,
+# its escrow holder, then the recovery key at the console or its unlock
+# page): asked and left to it, its services waiting on it.
+do_start() {
+    local -a again=()
+    need_root
+    take_lock
+    [[ -f "$CONF" ]] || die "this host has no data root to start"
+    [[ -f "$STOPPED_FLAG" ]] && mapfile -t again < <(tail -n +2 "$STOPPED_FLAG" | grep -v '^$')
+    if mounted_ok; then
+        rm -f "$STOPPED_FLAG"
+        (( ${#again[@]} == 0 )) || systemctl start --no-block "${again[@]}" 2>/dev/null || true
+        say "data root: already running"
+        return 0
+    fi
+    rm -f "$STOPPED_FLAG"
+    systemctl reset-failed "$MOUNT_UNIT" "$UNLOCK_UNIT" 2>/dev/null || true
+    if is_luks && ! mapping_open; then
+        systemctl start --no-block "$TARGET_UNIT" || die "${TARGET_UNIT} could not be asked to start; see: systemctl status ${UNLOCK_UNIT}"
+        (( ${#again[@]} == 0 )) || systemctl start --no-block "${again[@]}" 2>/dev/null || true
+        systemctl start --no-block default.target 2>/dev/null || true
+        say "data root: asking for its key, as at a boot (its TPM2 chip, its escrow holder, then the recovery key at the console or its unlock page); its services start once it opens. joinery_data_root.sh status says when it is open."
+        return 0
+    fi
+    systemctl start "$TARGET_UNIT" 2>/dev/null || true
+    mounted_ok || die "the data root did not start: $(ready_reason)"
+    (( ${#again[@]} == 0 )) || systemctl start "${again[@]}" || say "WARNING: not every service started again: ${again[*]}"
+    systemctl start --no-block default.target 2>/dev/null || true
+    say "data root: started$( (( ${#again[@]} > 0 )) && printf ', with %s' "${again[*]}")"
 }
 
 # ---------------------------------------------------------------------------
@@ -3501,6 +3755,9 @@ luks_status() {
         say "key slots: none; it opens with the recovery key"
     else
         say "key slots: ${n}$( (( tpm )) && printf ', one of them the TPM2 chip')"
+    fi
+    if [[ "$(conf_get tpm2)" == off ]]; then
+        say "TPM2: never used to open it (tpm2 off)$( tpm2_present && printf '; this machine has a chip')"
     fi
     sidecar="$(conf_get sidecar)"
     if [[ -f "${ROOT}${sidecar}" ]]; then
@@ -3529,6 +3786,10 @@ do_status() {
     [[ -f "$CONF" ]] || { say "data root: none on this host"; return 0; }
     say "data root: ${MNT_REAL}, on $(conf_get backing) $(conf_get source)"
     why="$(ready_reason)"
+    if [[ -n "$why" && -f "$STOPPED_FLAG" ]]; then
+        say "state: STOPPED - $(head -n 1 "$STOPPED_FLAG"); joinery_data_root.sh start starts it"
+        return 1
+    fi
     if [[ -n "$why" ]]; then
         say "state: NOT READY - ${why}"
         return 1
@@ -3585,5 +3846,8 @@ case "${1:-}" in
     encrypt-resume) do_encrypt_resume ;;
     decrypt) do_decrypt ;;
     rekey)   do_rekey ;;
-    *) die "usage: joinery_data_root.sh create [--encrypted] [SIZE] [DEVICE] | recipient [--set-by=site|operator] [PUBLIC_KEY] | check | grow [SIZE] | status | tick | bind REL TARGET | move-in REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE] | encrypt [--keep-provider-layer] | decrypt | rekey" ;;
+    stop)    do_stop ;;
+    start)   do_start ;;
+    tpm2)    do_tpm2 "${2:-}" ;;
+    *) die "usage: joinery_data_root.sh create [--encrypted [--no-tpm2]] [SIZE] [DEVICE] | recipient [--set-by=site|operator] [PUBLIC_KEY] | check | grow [SIZE] | status | tick | bind REL TARGET | move-in REL TARGET | unbind TARGET | remove-site NAME | migrate [SIZE|DEVICE] | encrypt [--keep-provider-layer] [--no-tpm2] | decrypt | rekey | stop | start | tpm2 on|off" ;;
 esac

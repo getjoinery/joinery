@@ -6,6 +6,8 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.23 - data_root_encrypt takes tpm2 'off' from its second form (the key at every boot, never the TPM2
+ *                chip), and data_root_tpm2_off stops the chip opening an encrypted data root (B43)
  * @version 1.22 - data_root_encrypt's answer says the services stop again for a few seconds when it finishes (B45)
  * @version 1.21 - data_root_encrypt and data_root_reseal: this server's data root encrypted, and its
  *                 break-glass copy sealed, to this site's recovery key, asked of root (WP4)
@@ -239,8 +241,11 @@ function _admin_backups_handle($action, array $input, $session) {
 			// stops the server's services for seconds and runs for hours.
 			case 'data_root_encrypt':
 			case 'data_root_reseal':
-			case 'data_root_rekey': {
-				$fw = new FormWriterV2HTML5($action . '_form');
+			case 'data_root_rekey':
+			case 'data_root_tpm2_off': {
+				// Encrypting with the key at every boot is its own form (B43).
+				$keyed = $action === 'data_root_encrypt' && ($input['tpm2'] ?? '') === 'off';
+				$fw = new FormWriterV2HTML5($action . ($keyed ? '_keyed' : '') . '_form');
 				if (!$fw->validateCSRF($input)) {
 					$say('That request could not be verified — reload the Backups page and try again.', false);
 					return $url . '#data-root';
@@ -253,6 +258,11 @@ function _admin_backups_handle($action, array $input, $session) {
 							: 'this site does not offer it, or the data root is encrypted already.'), false);
 						return $url . '#data-root';
 					}
+				} elseif ($action === 'data_root_tpm2_off') {
+					if (!DataRootStatus::encrypted($st) || !DataRootStatus::tpm2_chip($st) || DataRootStatus::tpm2_off($st)) {
+						$say('Nothing to change: the data root is not encrypted, the server has no TPM2 chip, or the chip is kept from opening it already.', false);
+						return $url . '#data-root';
+					}
 				} elseif ($action === 'data_root_rekey') {
 					$fpr = BackupRecoveryKey::is_ready() ? (string)BackupRecoveryKey::key_report()['fingerprint'] : '';
 					if (DataRootStatus::sealed_to($st, $fpr) !== 'this_site' || ($st['reencrypt'] ?? '') !== '') {
@@ -263,9 +273,11 @@ function _admin_backups_handle($action, array $input, $session) {
 					$say('Nothing to seal: the data root is not encrypted, or this site\'s recovery key is not proven.', false);
 					return $url . '#data-root';
 				}
-				RootRequest::submit($action, array(), (int)$session->get_user_id());
+				RootRequest::submit($action, $keyed ? array('tpm2' => 'off') : array(), (int)$session->get_user_id());
 				$say(array(
-					'data_root_encrypt' => 'Asked. Within a minute the server stops its services for a few seconds, then encrypts its data root in the background, which takes hours; when it finishes they stop again for a few seconds, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key.',
+					'data_root_encrypt' => 'Asked. Within a minute the server stops its services for a few seconds, then encrypts its data root in the background, which takes hours; when it finishes they stop again for a few seconds, as its logs move onto it. Its break-glass copy is sealed to this site\'s recovery key.'
+						. ($keyed ? ' Its TPM2 chip is never used: each boot waits for the recovery key.' : ''),
+					'data_root_tpm2_off' => 'Asked. Within a minute the server stops its TPM2 chip opening its data root; from the next boot it waits for the recovery key.',
 					'data_root_reseal'  => 'Asked. Within two minutes the server seals its break-glass copy to this site\'s recovery key.',
 					'data_root_rekey'   => 'Asked. Within a minute the server starts re-encrypting its data root under a new volume key, in the background, for hours. From then on the old recovery key opens no copy of its disk.',
 				)[$action], true);

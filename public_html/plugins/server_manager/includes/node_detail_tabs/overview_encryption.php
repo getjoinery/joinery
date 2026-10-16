@@ -17,6 +17,8 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.7 - Before it answers: a Tier 2 machine whose cloud account's key does not work is shown as Tier 2 that cannot
+ *               read the activity log now, with what to do, not as Tier 1 (B77)
  * @version 1.6 - the Encrypt offer says the services stop again when it finishes, and its confirm says who stops (B59)
  * @version 1.5 - Encrypt's confirm says the services stop again for a few seconds when it finishes (B45)
  * @version 1.4 - its escrow holder is this management node from the moment the enrolment is confirmed, not
@@ -163,10 +165,14 @@ if (is_array($dre_enc) || $dre_row) {
 		}
 		// Tier 2 (D3): what the holder reads before it answers.
 		$t2_why = '';
-		$t2 = EscrowTier2::context($dre_row, $t2_why) !== null;
+		$t2_blocked = null;
+		$t2 = EscrowTier2::context($dre_row, $t2_why, $t2_blocked) !== null;
 		$row_out('Before it answers', $t2
 			? 'Tier 2: it reads the provider\'s activity log, and refuses a boot after a rescue boot, a root-password reset, a rebuild, a clone or a restore'
-			: 'Tier 1: it answers from the machine\'s own addresses. <span class="text-muted">Not Tier 2: ' . $dre_h($t2_why) . '.</span>');
+			: ($t2_blocked !== null
+				// Tier 2 still, and unable to check (B77): its boots are refused.
+				? '<span class="text-danger">Tier 2, and it cannot read the activity log now. ' . $dre_h($t2_blocked) . '</span>'
+				: 'Tier 1: it answers from the machine\'s own addresses. <span class="text-muted">Not Tier 2: ' . $dre_h($t2_why) . '.</span>'));
 		if ((string)$dre_row->get('dre_tier2_event') !== '') {
 			$row_out('Refused for', '<span class="text-danger">' . $dre_h($dre_row->get('dre_tier2_event'))
 				. '</span>. Nothing on its root disk can be trusted after that. Two ways on: say you did it yourself, or recover the site by '

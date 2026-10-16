@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.18 - CloudKeyExpiry: the key's own expiry from profile/tokens, matched by its first 16 characters,
+ *                which any scoped key may read (B77)
  * @version 1.17 - CloudVolumeFacts: a Block Storage volume's own encryption, by the path Linode gives it on the
  *                  instance (/dev/disk/by-id/scsi-0Linode_Volume_<label>)
  * @version 1.16 - CloudProviderEvents: account/events for one instance (its disks' and backups' too), and the
@@ -56,7 +58,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents, CloudVolumeFacts {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents, CloudVolumeFacts, CloudKeyExpiry {
 
 	const API_BASE = 'https://api.linode.com/v4/';
 
@@ -839,6 +841,35 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 
 	public function deleteVolume(string $volume_id): void {
 		$this->request('DELETE', 'volumes/' . rawurlencode($volume_id));
+	}
+
+	/**
+	 * When this key stops working. profile/tokens lists the profile's
+	 * personal access tokens with their expiry and their first 16 characters,
+	 * and a key with any scope may read it. A key that never expires, or one
+	 * not listed there (an OAuth grant), is null.
+	 */
+	public function keyExpiry(): ?string {
+		$prefix = substr($this->access_token, 0, 16);
+		if (strlen($prefix) < 16) {
+			return null;
+		}
+		for ($page = 1; $page <= 20; $page++) {
+			$result = $this->request('GET', 'profile/tokens?page_size=500&page=' . $page);
+			foreach ((array)($result['data'] ?? array()) as $t) {
+				if (substr((string)($t['token'] ?? ''), 0, 16) !== $prefix) {
+					continue;
+				}
+				// A key that never expires is listed with no expiry, or one centuries off.
+				$raw = trim((string)($t['expiry'] ?? ''));
+				$at = $raw === '' ? false : strtotime($raw . ' UTC');
+				return ($at === false || (int)gmdate('Y', $at) >= 2900) ? null : gmdate('Y-m-d H:i:s', $at);
+			}
+			if ($page >= (int)($result['pages'] ?? 1)) {
+				break;
+			}
+		}
+		return null;
 	}
 
 	/**

@@ -15,6 +15,8 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.2 - Remove names the encrypted servers it drops to Tier 1 (B77 N1)
+ * @version 2.1 - an API key's expiry on its account's row, and Expires soon within a week of it (B77)
  * @version 2.0 - tabs; the Hosting tab and its cloud accounts list, with both ways to add one; the hosted card names
  *                the default account instead of taking a token; the cleanup card covers every test account
  *                (cloud_accounts_list WP4)
@@ -236,6 +238,13 @@ every account, the default chosen.</p>
 						<span class="small">until <?= htmlspecialchars($oca->get_local('oca_token_expires', 'M j, g:i a T')) ?>.
 						A sign-in lasts two hours and cannot be renewed: right for one server in somebody's account,
 						wrong for an account this node keeps managing.</span>
+					<?php elseif ($oca->key_expires_within(OperatorCloudAccount::KEY_EXPIRY_WARNING_SECONDS) !== null): ?>
+						<br><?= smps_badge(false, '', 'Expires soon', 'warning') ?>
+						<span class="small">The key expires <?= htmlspecialchars($oca->get_local('oca_token_expires', 'M j, g:i a T')) ?>.
+						Replace it before then: once it stops working, nothing here reaches the account, and an encrypted
+						server in it that reboots is not opened until it is replaced.</span>
+					<?php elseif (trim((string)$oca->get('oca_token_expires')) !== ''): ?>
+						<br><span class="text-muted small">The key expires <?= htmlspecialchars($oca->get_local('oca_token_expires', 'M j, Y')) ?>.</span>
 					<?php endif; ?>
 				<?php endif; ?>
 				<?php if ($row['problem'] === '' && $row['missing_scopes'] === null): ?>
@@ -264,7 +273,8 @@ every account, the default chosen.</p>
 				<?php if (!$oca->is_default()): ?>
 					<?= smps_account_button('remove_account', (int)$oca->key, 'Remove', 'btn btn-sm btn-outline-danger',
 						'Remove ' . $oca->label() . '? Its credential is erased. '
-						. ((int)$row['servers'] ? $row['servers'] . ' server(s) in it will no longer be reached from here.' : '')) ?>
+						. ((int)$row['servers'] ? $row['servers'] . ' server(s) in it will no longer be reached from here.' : '')
+						. ($row['tier2'] ? ' Its encrypted server(s) ' . implode(', ', $row['tier2']) . ' are opened here only after their activity log at the provider is read (Tier 2); without the account they are opened without that check (Tier 1).' : '')) ?>
 				<?php endif; ?>
 				<?php if (!$is_connect): ?>
 					<details class="mt-1"><summary class="small">Replace key</summary>

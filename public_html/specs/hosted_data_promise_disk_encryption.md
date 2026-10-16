@@ -574,6 +574,21 @@ key, D8, leaves them), so the chip is never asked for a slot that is not
 there. Proven on the VM: three boots in a row opened by the chip after the
 re-seal and a rekey.
 
+**What a TPM2 slot does not protect (B43, 2026-10-15).** A chip's slot opens
+the volume for whoever boots the machine as it is: there is no PIN and, by
+D2a, no passphrase slot. It keeps a disk taken out of the machine locked, not
+the machine taken whole. So the chip is the owner's choice where there is one:
+`create --encrypted --no-tpm2` and `encrypt --no-tpm2` never enrol it, and
+`joinery_data_root.sh tpm2 off` takes its slot away later. The choice is
+recorded (`tpm2=off`) and every enrolment follows it (create, an encryption's
+and a rekey's finish, the re-seal above). A machine that chooses so asks for
+its key at every boot, from its escrow holder where it has one, else the
+recovery key at the console or on its unlock page. The Backups page says what
+the chip protects and offers only the stricter way (a root request carries
+`tpm2: off` or nothing, `data_root_tpm2_off` takes the slot away); letting
+the chip back in is root's own command (`tpm2 on`), since the request queue is
+the web user's to write. The default stays: a chip that is there is enrolled.
+
 ### D2a. A person opens a machine with the recovery key
 
 Wherever a machine has to be opened by a person — an unmanaged machine
@@ -879,6 +894,22 @@ built whole (WP5).
 - **A log that cannot be read refuses.** The machine asks again every ten
   seconds, so an outage at the provider delays an unlock and never skips the
   check.
+- **A key that stops working refuses too (B77, 2026-10-15).** Found on the
+  0.8.499 round: the rig's 48-hour key expired, the account stayed active,
+  and node-n's reboot waited 12 minutes with nothing saying why ahead of time.
+  Worse, the code then treated an account that "cannot be used now" as Tier 1:
+  marked refused (the daily transfer watch marks a 401), it answered boots
+  unchecked, so a stolen hosting login could revoke our key, wait a day,
+  rescue-boot the machine and plant code the next boot would be handed the key
+  by. Now: a machine in one of our accounts held by a lasting key with the
+  events scope stays Tier 2 whatever that key's state; refused, expired or
+  unreadable, its boots are refused with what to do. A 401 marks the account
+  refused. Each API key's own expiry is read at every check (Linode
+  `profile/tokens`, readable with any scope) and checked daily; the Hosting
+  tab shows it, and `plane:cloud_account_key` is critical on each covered
+  machine when the key does not work, a warning within a week of its expiry.
+  Tier 1 by design: the owner's own account, a two-hour sign-in, a key that
+  never had the events scope, an account removed from the management node.
 - **The owner's word ("I did this myself")** is superadmin-only. It is
   recorded with the user's name and excuses every event up to then. The
   preflight before a planned reboot runs the same check, so a reboot that
@@ -1701,7 +1732,7 @@ Each is a few minutes on a Nanode and settles a fact the design rests on.
 after):** T-L1 pass (created `disabled`, instance and disks report
 `disabled`); T-L2 pass (no field: `enabled`); T-L3 not runnable (the account
 is offered no distributed region; all 33 regions are `core` with the "Disk
-Encryption" capability); T-L4 not yet run; T-L5 not yet run; **T-L6 fails**:
+Encryption" capability); T-L4 pass (run 2026-10-15: a rebuild with no `disk_encryption` field keeps the setting, `disabled` stays `disabled` and the default `enabled` stays `enabled`, on the instance and every disk); T-L5 pass (run 2026-10-15: a Nanode with the provider's layer `enabled` and Backups on; a marker written, a snapshot taken, restored onto a new Nanode, whose disks also report `enabled`; booted, the marker reads back as written: the provider's layer is no protection from whoever holds the account or its backups); **T-L6 fails**:
 cloning into an existing Linode with the other setting is refused ("cannot
 clone to a linode with different encryption status"), and a plain clone to a
 new Linode inherits `enabled` (a 25 GB disk cloned in 132 s); T-L7 pass
