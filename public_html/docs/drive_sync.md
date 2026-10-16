@@ -324,6 +324,44 @@ hard-pauses rather than reading as a mass local delete.
 
 ---
 
+## A file's date
+
+A file shows the date its content was last changed on every device it reaches,
+not the moment it arrived there.
+
+**An upload declares the date**, read off the same open handle its bytes are
+sent from: the `modified_time` parameter for a plaintext file, and the `mtime`
+field inside the encrypted metadata for a vault file, whose date the server is
+never told ([below](#encrypted-files-and-folders)). Both are written as a
+browser writes a date, `2026-07-20T12:34:56.789Z` (`jd-proto/src/mtime.rs`).
+The server keeps a plaintext file's date to the second, so that is what the
+other devices get; a vault file's keeps milliseconds. A date more than forty
+years past this device's clock is not declared, because the server refuses one
+fifty years past its own and the upload would never land; the content still
+goes up.
+
+**A download puts the date on the file before anyone can see it.** It goes on
+the spool after the last byte and before the rename
+(`SpoolFile::set_modified`), never on the path afterwards, where it would land
+on whatever the user had saved there in the meantime. The fingerprint the
+commit returns is read after the rename, so the agreement records the file with
+its date on it. Recorded before the date went on, it would describe a file that
+is no longer there, and the next scan would read every downloaded file as
+edited. The volume keeps what it can (two-second steps on FAT, whole seconds on
+HFS+) and the agreement records what it kept. A file put up with no date, as
+the browser's uploader puts one, lands with the time it arrived. A volume that
+will not take a date at all still takes the file.
+
+**Dates follow content and nothing else.** An edit carries its new date. A
+rename or a move sends no content, so it keeps the date the content had, on the
+server and on every device. A date changed with the bytes left alone (`touch`)
+sends nothing, because the hash, not the date, decides whether anything
+changed. A fingerprint's time is nanoseconds since 1970 on every platform,
+Windows included, so the date a fingerprint holds is the date every other
+program on the computer reads.
+
+---
+
 ## Filesystem personalities
 
 The engine is written against one clean tree: case-sensitive, NFC, legal names
@@ -613,6 +651,15 @@ checked against — without it an encrypted upload has no integrity check at all
 and a chunk corrupted on the way up becomes a file no device can ever open. The owner's key is
 mandatory: a vault file its owner can never open would be a file they can see,
 are billed for, and have permanently lost.
+
+The metadata carries the file's type and date as well as its name and size.
+The type is the one a browser gives a file of that name (`jd-core/src/mime.rs`:
+the extension, through the mappings browsers carry, or
+`application/octet-stream`), because the server cannot read a type from
+ciphertext and the browser shows a vault file by the type its metadata names: a
+photo saved into a vault on a computer shows in the browser as a photo, not as
+an unknown file. The date is the content's ([A file's date](#a-files-date)); a new version seals its
+own, and a rename seals the date it found.
 
 **Editing** an encrypted file uploads a new version under the *same* file key
 and content id, with no key payload at all. A fresh key would leave the new
@@ -1650,8 +1697,8 @@ deterministic simulator rather than a list of hand-written cases.
 `jd-sim` provides a virtual filesystem with a per-OS personality (case-folding,
 NFD, coarse mtimes, inode reuse, scheduled failures), a mock server implementing
 the documented contract (cursor feed with resets, chunk resync, dedup, quota,
-idempotency replay), a controlled clock, and a network that loses, delays,
-reorders, and duplicates. Every run is reproducible from a seed, and seeds that
+idempotency replay, declared modification times), a controlled clock, and a
+network that loses, delays, reorders, and duplicates. Every run is reproducible from a seed, and seeds that
 found bugs are frozen in the repository.
 
 Two invariants are asserted around **every pass**, not at the end of a run:

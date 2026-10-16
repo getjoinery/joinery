@@ -563,15 +563,27 @@ fn index_of_handle(file: &File) -> Option<u64> {
     }
 }
 
+/// A file's modification time in nanoseconds since the Unix epoch, as every
+/// platform's fingerprint carries it. Windows keeps 100-nanosecond ticks since
+/// 1601; read raw, that number is not a date anywhere else, and it does not fit
+/// the signed 64 bits the hash cache stores it in, where it wrapped negative
+/// and the cache's same-tick guard (`Store::cached_hash`) always passed. As
+/// seconds since 1970 it is the date the file carries to other devices
+/// (`jd_proto::mtime`). 0 for a time before 1970, which reads as unknown.
+#[cfg(windows)]
+fn modified_ns(md: &fs::Metadata) -> u64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
 #[cfg(windows)]
 fn fingerprint_of(path: &Path, md: &fs::Metadata) -> Fingerprint {
-    use std::os::windows::fs::MetadataExt;
     Fingerprint {
         size: md.len(),
-        // Windows reports 100-nanosecond ticks since 1601; the epoch does not
-        // matter because every comparison is against another value from the
-        // same source.
-        mtime_ns: md.last_write_time().saturating_mul(100),
+        mtime_ns: modified_ns(md),
         // Zero when the handle could not be opened. That reads as "identity
         // unknown", which the fingerprint comparison treats as changed — the
         // safe direction: it costs a hash, where a wrong identity costs a file.
@@ -636,10 +648,9 @@ fn fingerprint_of_handle(_file: &File, md: &fs::Metadata) -> Fingerprint {
 
 #[cfg(windows)]
 fn fingerprint_of_handle(file: &File, md: &fs::Metadata) -> Fingerprint {
-    use std::os::windows::fs::MetadataExt;
     Fingerprint {
         size: md.len(),
-        mtime_ns: md.last_write_time().saturating_mul(100),
+        mtime_ns: modified_ns(md),
         file_id: index_of_handle(file).unwrap_or(0),
         birth_ns: birth_of(md),
     }
@@ -793,6 +804,7 @@ impl Vfs for OsVfs {
             target: target.to_path_buf(),
             folder_at_open,
             op,
+            modified: None,
             rename: |from, to| fs::rename(from, to),
             after_copy: |_| {},
         }))
@@ -932,6 +944,9 @@ struct OsSpoolFile {
     folder_at_open: crate::FileIdentity,
     /// The download op this spool lands for; carried in a landing name.
     op: i64,
+    /// The modification time the file carries once visible
+    /// (`SpoolFile::set_modified`), or none: the time it landed.
+    modified: Option<std::time::SystemTime>,
     /// `fs::rename`. A seam so a test can make the spool's rename cross a
     /// volume, which one machine's temp directory cannot be relied on to do.
     rename: fn(&Path, &Path) -> std::io::Result<()>,
@@ -1071,6 +1086,21 @@ fn directory_identity_at(path: &Path, personality: &Personality) -> VfsResult<Op
     }
 }
 
+/// Put a modification time on a file through its open handle: `futimens` on
+/// Unix, `SetFileTime` on Windows, on the file the handle holds, whatever its
+/// path names by now.
+///
+/// Best effort, on purpose. A volume that refuses times (some network
+/// shares, some FUSE mounts) still takes the content, and refusing a download
+/// over its date would leave the user without the file. The caller reads the
+/// fingerprint off the disk afterwards, so what is recorded is whatever the
+/// volume kept, never what was asked for.
+fn stamp(file: &File, modified: Option<std::time::SystemTime>) {
+    if let Some(when) = modified {
+        let _ = file.set_modified(when);
+    }
+}
+
 impl OsSpoolFile {
     /// The commit proper. Split out so every way it can fail runs through one
     /// cleanup path rather than each needing to remember.
@@ -1079,8 +1109,13 @@ impl OsSpoolFile {
         // rename can leave a file that exists, has the right name and length,
         // and contains zeroes — the worst possible outcome, because everything
         // downstream would treat it as real content.
+        //
+        // The modification time goes on after the last byte, which would
+        // otherwise move it again, and before the sync, so the time is as
+        // durable as the bytes it describes.
         if let Some(mut f) = self.file.take() {
             f.flush().map_err(|e| io_err(&self.path, e))?;
+            stamp(&f, self.modified);
             f.sync_all().map_err(|e| io_err(&self.path, e))?;
         }
 
@@ -1142,6 +1177,9 @@ impl OsSpoolFile {
                 let mut out = out;
                 let mut from = File::open(&self.path).map_err(|e| io_err(&self.path, e))?;
                 std::io::copy(&mut from, &mut out).map_err(|e| io_err(&land, e))?;
+                // A copy is a new file with the copy's time: the spool's is
+                // put on it again.
+                stamp(&out, self.modified);
                 out.sync_all().map_err(|e| io_err(&land, e))?;
             } // Closed before anything renames or removes it: Windows refuses both on an open file.
             (self.after_copy)(target);
@@ -1258,6 +1296,10 @@ impl Write for OsSpoolFile {
 }
 
 impl SpoolFile for OsSpoolFile {
+    fn set_modified(&mut self, mtime_ns: u64) {
+        self.modified = Some(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(mtime_ns));
+    }
+
     fn commit(
         mut self: Box<Self>,
         target: &Path,
@@ -1645,6 +1687,88 @@ mod tests {
         assert_eq!(fs::read(&target).unwrap(), b"new content");
     }
 
+    /// 2020-09-13T12:26:40.1234567Z: a whole number of 100 ns ticks, which
+    /// every volume these run on keeps exactly (ext4, APFS, NTFS).
+    const DATED: u64 = 1_600_000_000_123_456_700;
+
+    /// A download carries the date its content was last changed, not the
+    /// moment it landed, and the fingerprint the commit hands back -- the one
+    /// the engine records as agreed -- is the file with that date on it, read
+    /// off the disk. One taken before the date went on describes a file that
+    /// is no longer there, and the next scan reads every download as an edit.
+    #[test]
+    fn a_download_carries_the_date_it_was_given() {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+        let d = TempDir::new("dated");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("dated.txt");
+
+        let mut spool = v.spool(&target, 1).unwrap();
+        spool.write_all(b"the server's bytes").unwrap();
+        spool.set_modified(DATED);
+        let fp = spool.commit(&target, None).unwrap();
+        assert_eq!(fp.mtime_ns, DATED, "the date it was given, not the moment it landed");
+        assert_eq!(Some(fp), v.fingerprint(&target).unwrap(), "what the commit hands back is the file as it stands");
+        assert_eq!(
+            fs::metadata(&target).unwrap().modified().unwrap(),
+            UNIX_EPOCH + Duration::from_nanos(DATED),
+            "every other program reads the same date"
+        );
+
+        // A new version over it carries its own.
+        let later = DATED + 86_400 * 1_000_000_000;
+        let mut spool = v.spool(&target, 2).unwrap();
+        spool.write_all(b"a newer version").unwrap();
+        spool.set_modified(later);
+        let fp = spool.commit(&target, Some(fp)).unwrap();
+        assert_eq!(fp.mtime_ns, later);
+        assert_eq!(Some(fp), v.fingerprint(&target).unwrap());
+
+        // Given none, it lands with the time it landed.
+        let before = SystemTime::now() - Duration::from_secs(60);
+        let mut spool = v.spool(&target, 3).unwrap();
+        spool.write_all(b"nobody said when").unwrap();
+        let fp = spool.commit(&target, Some(fp)).unwrap();
+        assert!(UNIX_EPOCH + Duration::from_nanos(fp.mtime_ns) > before, "{}", fp.mtime_ns);
+    }
+
+    /// Landed on another volume the bytes are copied, and a copy is a new
+    /// file with the copy's time: the date is put on it again.
+    #[test]
+    fn a_download_copied_onto_another_volume_carries_its_date() {
+        let d = TempDir::new("dated-across");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let target = root.join("far.txt");
+        let mut spool = spool_across(&v, &target, |_| {});
+        spool.write_all(b"copied, not renamed").unwrap();
+        spool.set_modified(DATED);
+        let fp = spool.commit(&target, None).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"copied, not renamed");
+        assert_eq!(fp.mtime_ns, DATED);
+        assert_eq!(Some(fp), v.fingerprint(&target).unwrap());
+        no_litter(&v, &root);
+    }
+
+    /// The date a fingerprint carries is the one every other program reads,
+    /// in nanoseconds since 1970 on every platform: it is what an upload
+    /// tells the other devices. Windows keeps its own count since 1601, and
+    /// read raw that was what went into a fingerprint.
+    #[test]
+    fn a_fingerprint_carries_the_date_other_programs_read() {
+        use std::time::UNIX_EPOCH;
+        let d = TempDir::new("epoch");
+        let v = vfs(&d);
+        let path = v.root().unwrap().join("written.txt");
+        fs::write(&path, b"written by someone").unwrap();
+        let file = File::options().write(true).open(&path).unwrap();
+        file.set_modified(UNIX_EPOCH + std::time::Duration::from_nanos(DATED)).unwrap();
+        drop(file);
+        assert_eq!(v.fingerprint(&path).unwrap().unwrap().mtime_ns, DATED);
+        let (_, by_handle) = v.open_file(&path).unwrap().unwrap();
+        assert_eq!(by_handle.mtime_ns, DATED, "read off an open handle, the same");
+    }
+
     #[test]
     fn a_spool_dropped_without_a_commit_leaves_nothing_behind() {
         let dir = TempDir::new("spool-drop");
@@ -1676,6 +1800,7 @@ mod tests {
             target: target.to_path_buf(),
             folder_at_open: directory_identity_at(target.parent().unwrap(), &v.personality).unwrap().unwrap(),
             op: 7,
+            modified: None,
             rename: |_, _| Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices)),
             after_copy,
         })

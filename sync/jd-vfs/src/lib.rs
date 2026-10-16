@@ -197,6 +197,29 @@ impl Fingerprint {
 
 /// A handle to a spool file being filled before it becomes visible.
 pub trait SpoolFile: std::io::Write {
+    /// The modification time the file is to carry once it is visible, in
+    /// nanoseconds since the Unix epoch: when its content was last changed,
+    /// as the device that wrote it said. Without one the file carries the
+    /// moment it landed, and every computer shows a different date for the
+    /// same file.
+    ///
+    /// Put on the spool by `commit`, after the last byte and before the
+    /// rename, never on the path once it is visible. Set on the path, it
+    /// would land on whatever stands there by then -- a save the user made in
+    /// the instant after the rename -- and the fingerprint read after it would
+    /// describe that save, wearing the server's date, as the bytes that
+    /// arrived: an edit recorded as already synced. Set on the spool, the
+    /// time is part of the file from the moment anyone can see it, and the
+    /// fingerprint `commit` returns, read after the rename, carries it: what
+    /// the engine records as agreed is the file as it now stands, so the next
+    /// scan does not read a downloaded file as edited.
+    ///
+    /// The volume stores what it can of it -- two-second steps on FAT, a
+    /// second on HFS+ -- and the fingerprint says what it kept. A volume that
+    /// will not take a time at all leaves the file with the time it landed:
+    /// a date is not worth refusing the content over.
+    fn set_modified(&mut self, mtime_ns: u64);
+
     /// Flush to durable storage and rename onto `target`, replacing whatever is
     /// there. The rename is the moment the file becomes visible, and it is
     /// atomic — there is no instant at which a reader sees half of it.

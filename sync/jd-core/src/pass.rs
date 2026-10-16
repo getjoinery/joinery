@@ -2751,10 +2751,10 @@ pub(crate) fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteStat
         entry.content_id = Some(meta.cid);
     }
     // The mtime the uploading device recorded, which for an encrypted file the
-    // server is never told.
-    if meta.mtime.is_some() {
-        entry.remote_modified_time = meta.mtime;
-    }
+    // server is never told. Taken as the blob says it, absent too: a version
+    // sealed without one (the browser's) has no date of its own, and the one
+    // before it describes other bytes.
+    entry.remote_modified_time = meta.mtime;
     true
 }
 

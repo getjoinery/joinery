@@ -77,6 +77,10 @@ pub struct FileFact {
     pub sha256: String,
     pub encrypted: bool,
     pub trashed: bool,
+    /// The content's modification time as the server stores it
+    /// (`fil_content_modified_time`): whole seconds, UTC, no zone. Never set
+    /// on an encrypted file.
+    pub modified_time: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +92,8 @@ struct FileRow {
     size: u64,
     trashed: bool,
     head_change_id: i64,
+    /// What `fil_content_modified_time` holds: the time the uploading client
+    /// declared, normalized as `drive_upload_init` normalizes it.
     modified_time: Option<String>,
     /// The server holds these bytes encrypted. It models only what the SERVER
     /// knows: the name and sha here are then the placeholder and the ciphertext
@@ -191,6 +197,9 @@ struct UploadSession {
     /// The destination is a vault, so the bytes arriving are ciphertext and the
     /// completion call must carry metadata and keys.
     encrypted: bool,
+    /// Settled at init, as `fup_content_modified_time` is: an upload cannot
+    /// acquire a time it was not opened with.
+    modified_time: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +354,29 @@ fn refused(reason: &'static str, message: impl Into<String>) -> ApiRefusal {
         message: message.into(),
         data,
     }
+}
+
+/// `drive_upload_init`'s reading of a declared modification time
+/// (`_drive_parse_modified_time`): nothing sent is `None`; a time it cannot
+/// use -- not a time, before 1970, or more than fifty years past the server's
+/// clock -- is `Err`, refused rather than dropped; anything else is stored to
+/// the second, in UTC, with no zone, which is the spelling `file_export` then
+/// hands back.
+fn modified_time_of(raw: Option<&Value>, now_ms: u64) -> Result<Option<String>, ()> {
+    let text = match raw {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => return Ok(None),
+        Some(Value::String(t)) if t.is_empty() => return Ok(None),
+        Some(Value::String(t)) => t.clone(),
+        Some(_) => return Err(()),
+    };
+    let at = jd_proto::mtime::parse(&text).ok_or(())?;
+    let fifty_years_ns = 50 * 365 * 24 * 3600 * 1_000_000_000u64;
+    if at > now_ms.saturating_mul(1_000_000).saturating_add(fifty_years_ns) {
+        return Err(());
+    }
+    // Whole seconds, as `strtotime` reads it.
+    let iso = jd_proto::mtime::format(at / 1_000_000_000 * 1_000_000_000);
+    Ok(Some(format!("{} {}", &iso[..10], &iso[11..19])))
 }
 
 fn refuse(status: u16, errortype: &'static str, message: impl Into<String>) -> ApiRefusal {
@@ -765,6 +797,7 @@ impl MockServer {
                 sha256: f.sha256.clone(),
                 encrypted: f.encrypted,
                 trashed: f.trashed,
+                modified_time: f.modified_time.clone(),
             })
             .collect();
         out.sort_by_key(|f| f.id);
@@ -1039,6 +1072,16 @@ impl MockServer {
             size: bytes.len() as u64,
             change_id,
         });
+    }
+
+    /// Give a plain file the modification time a client declared for it, in
+    /// the server's spelling (`2021-03-04 05:06:07`), or none: a file put up
+    /// by a client that declares one, as the browser's uploader does not.
+    pub fn seed_modified_time(&self, file_id: i64, modified_time: Option<&str>) {
+        let mut st = self.state.lock().unwrap();
+        let f = st.files.get_mut(&file_id).expect("seed_modified_time: no such file");
+        assert!(!f.encrypted, "the server holds no time for an encrypted file");
+        f.modified_time = modified_time.map(str::to_string);
     }
 
     /// Seed a file the server holds ENCRYPTED.
@@ -2150,6 +2193,12 @@ impl MockServer {
             .to_string();
         let folder = body.get("folder_id").and_then(Value::as_i64);
         let file_id = body.get("file_id").and_then(Value::as_i64);
+        // Read before anything else, as the platform reads it: an unusable
+        // time is refused for any destination rather than dropped, since the
+        // client believes it set one.
+        let Ok(modified_time) = modified_time_of(body.get("modified_time"), self.clock.now_ms()) else {
+            return Err(refused("invalid_request", "Invalid modification time; use ISO-8601 UTC."));
+        };
 
         let mut st = self.state.lock().unwrap();
         st.upload_inits += 1;
@@ -2211,7 +2260,7 @@ impl MockServer {
         // So the guard belongs on the dedup short-circuit alone, which is where
         // it is below.
         if encrypted {
-            if body.get("modified_time").is_some() {
+            if modified_time.is_some() {
                 return Err(refused(
                     "invalid_request",
                     "An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.",
@@ -2227,7 +2276,7 @@ impl MockServer {
         // it usually takes and therefore one worth exercising constantly.
         if !encrypted && st.blobs.contains_key(&sha) {
             let file = Self::commit_content(
-                &mut st, file_id, folder, &name, &sha, size, false, None, None,
+                &mut st, file_id, folder, &name, &sha, size, false, None, None, modified_time,
             )?;
             return Ok(json!({ "ok": true, "deduped": true, "file": file }));
         }
@@ -2247,6 +2296,7 @@ impl MockServer {
                 received: Vec::new(),
                 created_ms: now,
                 encrypted,
+                modified_time,
             },
         );
         Ok(json!({
@@ -2447,6 +2497,7 @@ impl MockServer {
             session.encrypted,
             enc_metadata,
             mine,
+            session.modified_time.clone(),
         )?;
         st.uploads.remove(&session.token);
         Ok(json!({ "ok": true, "file": file }))
@@ -2554,6 +2605,7 @@ impl MockServer {
         encrypted: bool,
         enc_metadata: Option<String>,
         wrapped_key: Option<String>,
+        modified_time: Option<String>,
     ) -> ServerResult {
         let id = match file_id {
             Some(id) => {
@@ -2609,6 +2661,12 @@ impl MockServer {
                         f.encrypted_metadata = Some(blob);
                     }
                 }
+                // Carried onto the file only when the upload declared one, as
+                // `drive_upload_complete_logic` carries it: a version without
+                // one keeps the time the file had.
+                if !f.encrypted && modified_time.is_some() {
+                    f.modified_time = modified_time;
+                }
             }
             None => {
                 st.files.insert(
@@ -2621,7 +2679,7 @@ impl MockServer {
                         size,
                         trashed: false,
                         head_change_id: change_id,
-                        modified_time: None,
+                        modified_time: if encrypted { None } else { modified_time },
                         encrypted,
                         wrapped_file_key: wrapped_key,
                         encrypted_metadata: enc_metadata,

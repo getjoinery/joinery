@@ -190,10 +190,12 @@ function drive_upload_init_logic(array $input): LogicResult {
 							FileBlob::release($cand->key);
 							throw $e;
 						}
-						if ($modified_time !== null) {
-							$target_file->set('fil_content_modified_time', $modified_time);
-							$target_file->save();
-						}
+						// The date is this upload's, or none: a new version sent
+						// without one (a browser) must not keep the previous
+						// version's, or every computer gets the edit stamped with
+						// the old time.
+						$target_file->set('fil_content_modified_time', $modified_time);
+						$target_file->save();
 						DriveUsage::recompute($owner_id);
 						FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
 						DriveHelper::forget_sync_meta($target_file->key);
