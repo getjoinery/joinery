@@ -45,11 +45,13 @@ if (!$db->query("SELECT to_regclass('public.svt_service_tenants') IS NOT NULL")-
 	exit;
 }
 $cleanup = array();
-harness_defer(function () use (&$cleanup, $db) {
+// Registered after the fixture users (below): teardown runs last-first, and an
+// account is never removed while its tenants hold anything at a provider.
+$tenant_cleanup = function () use (&$cleanup, $db) {
 	foreach (array_reverse($cleanup) as $row) {
 		$db->exec("DELETE FROM {$row[0]} WHERE {$row[1]} = " . (int)$row[2]);
 	}
-});
+};
 $track_rows = function (int $user_id) use (&$cleanup) {
 	$rows = new MultiServiceTenant(array('user_id' => $user_id, 'deleted' => false));
 	foreach ($rows as $row) {
@@ -72,6 +74,7 @@ $keys_of = function (int $user_id): array {
 harness_set_setting_mem('webDir', 'plane.example.com');
 
 $owner = make_user('ConnOwner');
+harness_defer($tenant_cleanup);
 $host = 'conn-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';
 
 // ── cleanReturn ─────────────────────────────────────────────────────────────

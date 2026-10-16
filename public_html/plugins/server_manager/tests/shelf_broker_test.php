@@ -55,11 +55,13 @@ foreach (array('svt_service_tenants', 'svr_shelf_runs', 'svo_shelf_objects') as 
 }
 
 $cleanup = array();   // [table, column, id]
-harness_defer(function () use (&$cleanup, $db) {
+// Registered after the fixture users (below): teardown runs last-first, and an
+// account is never removed while its tenants hold anything at a provider.
+$tenant_cleanup = function () use (&$cleanup, $db) {
 	foreach (array_reverse($cleanup) as $row) {
 		$db->exec("DELETE FROM {$row[0]} WHERE {$row[1]} = " . (int)$row[2]);
 	}
-});
+};
 
 // ── The presigner ───────────────────────────────────────────────────────────
 section('presigner: GET parity with S3Signer, every verb but DELETE');
@@ -117,6 +119,7 @@ $owner = make_user('ShelfOwner');
 $key = make_machine_key($owner->key, 'Joinery services', 3);
 $key_id = (int)$key['api_key']->key;
 $stranger = make_user('ShelfStranger');
+harness_defer($tenant_cleanup);
 $skey = make_machine_key($stranger->key, 'Joinery services', 3);
 $skey_id = (int)$skey['api_key']->key;
 
