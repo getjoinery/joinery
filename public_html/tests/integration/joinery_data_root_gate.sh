@@ -4,7 +4,7 @@
 # tier: safe
 # env: any
 # needs: []
-# timeout: 120
+# timeout: 300
 # covers: [maintenance_scripts/install_tools/joinery_data_root.sh]
 #
 # The host's data root (specs/one_data_root.md WP1), against a scratch root
@@ -54,6 +54,17 @@
 #     services again, and moves Docker's data-root by daemon.json. A move whose
 #     mount fails puts every folder back and starts the services. Run again, it
 #     moves only what is not moved.
+#   - stop / start by hand (B17): stop stops the sockets that would start a
+#     consumer before the data root (a log line through syslog.socket canceled
+#     a stop), then the mount, or on an encrypted one the volume's opener;
+#     records what it stopped; the tick leaves a stopped one alone; a
+#     filesystem still held is started again and said; start starts it and
+#     what stopped, and an encrypted one is asked for its key as at a boot.
+#   - the TPM2 chip by choice (B43): tpm2 off records tpm2=off and wipes the
+#     chip's slot through a slot made for the moment; the re-seal, a rekey's
+#     finish and create --encrypted --no-tpm2 then leave the chip alone; tpm2
+#     on enrols it again; during a run the choice is only recorded; decrypt
+#     clears it; the status file says whether there is a chip, and the choice.
 #
 # The real XFS behaviour (the loop device, online growth, project quotas) is
 # the multi-tenant spec's proof on a scratch Linode; this pins the decisions.
@@ -248,6 +259,63 @@ run tick >/dev/null 2>&1
 chk "but never while a run is recorded: the run resumes on the copy it started with" \
     "$(cmp -s "$T/root/usr/local/sbin/joinery-data-root" "$SCRIPT" && echo same || echo old)" "old"
 sed -i '/^reencrypt=/d' "$T/root/etc/joinery/data_root"; rm -rf "$T/root/usr/local/sbin"; : > "$LOG"
+
+echo "=== stop and start by hand (B17) ==="
+cp "$T/bin/systemctl" "$T/systemctl.b17"
+# docker.socket starts Docker, a consumer; Apache and a PostgreSQL cluster run.
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"
+case "$*" in
+  "list-units --type=socket"*) echo "docker.socket loaded active running Docker Socket" ;;
+  "show -p Triggers --value docker.socket") echo docker.service ;;
+  "is-active --quiet apache2.service") exit 0 ;;
+  "is-active --quiet"*) exit 3 ;;
+  "list-units --type=service"*) echo "postgresql@16-main.service loaded active running PostgreSQL" ;;
+  "stop srv-joinery.mount") rm -f "$GATE_T/mounted" ;;
+  "start joinery-data.target") touch "$GATE_T/mounted" ;;
+esac
+exit 0'
+SF="$T/root/run/joinery/data-root.stopped"
+touch "$T/mounted"; rm -f "$SF"; : > "$LOG"
+out="$(run stop 2>&1)"; rc=$?
+chk "stop: the socket that would start a consumer goes first, then the mount" \
+    "$rc|$(grep -n -e '^systemctl stop docker.socket$' -e '^systemctl stop srv-joinery.mount$' "$LOG" | cut -d: -f2 | paste -sd,)" \
+    "0|systemctl stop docker.socket,systemctl stop srv-joinery.mount"
+chk "and what it stopped is recorded, with when, and said" \
+    "$(head -n 1 "$SF" | grep -c '^stopped by hand at ')|$(tail -n +2 "$SF" | paste -sd,)|$(grep -c 'It stays stopped until joinery_data_root.sh start, or the next boot' <<< "$out")" \
+    "1|apache2.service,docker.socket,postgresql@16-main.service|1"
+: > "$LOG"
+out="$(run tick 2>&1)"; rc=$?
+chk "the tick leaves a stopped data root stopped: exit 1, nothing started, nothing said" \
+    "$rc|$(grep -c '^systemctl start' "$LOG")|${out:-quiet}" "1|0|quiet"
+chk "status says it is stopped, and how to start it" \
+    "$(run status 2>&1 | grep -c '^state: STOPPED - stopped by hand at .*; joinery_data_root.sh start starts it$')" "1"
+out="$(run stop 2>&1)"; rc=$?
+chk "stop again: nothing to stop, and since when" "$rc|$(grep -c 'not running; nothing to stop (stopped by hand at' <<< "$out")" "0|1"
+: > "$LOG"
+out="$(run start 2>&1)"; rc=$?
+chk "start: the data root, then what the stop stopped, then the record gone" \
+    "$rc|$(grep -e '^systemctl start joinery-data.target$' -e '^systemctl start apache2.service docker.socket postgresql@16-main.service$' "$LOG" | paste -sd,)|$( [ -e "$SF" ] && echo kept || echo gone)|$(grep -c '^data root: started, with apache2.service docker.socket postgresql@16-main.service$' <<< "$out")" \
+    "0|systemctl start joinery-data.target,systemctl start apache2.service docker.socket postgresql@16-main.service|gone|1"
+# Something keeps the filesystem mounted elsewhere, and no service owns it.
+mkdir -p "$T/root/proc/self"
+printf '36 25 0:42 / /srv/joinery rw - xfs /dev/loop7 rw\n37 25 0:42 /x /var/spool/postfix/dev/log rw - xfs /dev/loop7 rw\n' > "$T/root/proc/self/mountinfo"
+stub fuser 'exit 1'
+: > "$LOG"
+out="$(run stop 2>&1)"; rc=$?
+chk "a filesystem something will not let go of: exit 1, said, started again, no record left" \
+    "$rc|$(grep -c 'still mounted at /srv/joinery /var/spool/postfix/dev/log' <<< "$out")|$(grep -c -e '^systemctl start joinery-data.target$' -e '^systemctl start --no-block apache2.service docker.socket postgresql@16-main.service$' "$LOG")|$( [ -e "$SF" ] && echo kept || echo gone)" \
+    "1|1|2|gone"
+rm -rf "$T/root/proc" "$T/bin/fuser"
+echo 'reencrypt=encrypt' >> "$T/root/etc/joinery/data_root"; touch "$T/mounted"; : > "$LOG"
+out="$(run stop 2>&1)"; rc=$?
+chk "stop while a run is recorded: refused, nothing stopped" "$rc|$(grep -c 'is running' <<< "$out")|$(grep -c '^systemctl stop' "$LOG")" "1|1|0"
+sed -i '/^reencrypt=/d' "$T/root/etc/joinery/data_root"
+# Started some other way (systemctl): the next tick drops the stop's record.
+echo 'stopped by hand at then' > "$SF"; touch "$T/mounted"
+figs data 20*G 4*G 16*G
+run tick >/dev/null 2>&1
+chk "a running data root's stale stop record is dropped by the tick" "$( [ -e "$SF" ] && echo kept || echo gone)" "gone"
+cp "$T/systemctl.b17" "$T/bin/systemctl"; : > "$LOG"
 unmount; : > "$LOG"
 ( exec 8>>"$T/root/run/joinery/data-root.lock"; flock 8; run tick >/dev/null 2>&1 )
 chk "while a run holds the data root's lock (an encrypt's start): left stopped" "$(grep -c '^systemctl start joinery-data.target$' "$LOG")" "0"
@@ -841,6 +909,29 @@ chk "the volume not open: check 1, locked, and where to look" "$rc|$(grep -c 'th
 chk "tick: 1, not ready" "$(run tick >/dev/null 2>&1; echo $?)" "1"
 : > "$R/dev/mapper/joinery-data"
 
+echo "--- stop and start by hand, encrypted (B17) ---"
+cp "$T/bin/systemctl" "$T/systemctl.b17e"
+# The opener's stop takes the mount with it (the mount requires it) and closes the volume.
+stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"
+case "$*" in
+  "stop joinery-data-unlock.service") rm -f "$GATE_T/mounted" "$GATE_T/root/dev/mapper/joinery-data" ;;
+esac
+exit 0'
+SF="$R/run/joinery/data-root.stopped"
+was_mounted="$( [ -e "$T/mounted" ] && echo 1 || echo 0)"
+touch "$T/mounted"; rm -f "$SF"; : > "$LOG"
+out="$(run stop 2>&1)"; rc=$?
+chk "stop: the volume's opener is stopped, the volume closed, and said" \
+    "$rc|$(grep -c '^systemctl stop joinery-data-unlock.service$' "$LOG")|$(grep -c '^systemctl stop srv-joinery.mount$' "$LOG")|$( [ -e "$R/dev/mapper/joinery-data" ] && echo open || echo closed)|$(grep -c '^data root: stopped, its volume closed' <<< "$out")" \
+    "0|1|0|closed|1"
+: > "$LOG"
+chk "the tick: 1, locked, nothing started" "$(run tick >/dev/null 2>&1; echo $?)|$(grep -c '^systemctl start' "$LOG")" "1|0"
+out="$(run start 2>&1)"; rc=$?
+chk "start: the target asked for without waiting, as at a boot, and the key asked for" \
+    "$rc|$(grep -c '^systemctl start --no-block joinery-data.target$' "$LOG")|$(grep -c 'asking for its key, as at a boot' <<< "$out")|$( [ -e "$SF" ] && echo kept || echo gone)" "0|1|1|gone"
+cp "$T/systemctl.b17e" "$T/bin/systemctl"
+: > "$R/dev/mapper/joinery-data"; [ "$was_mounted" = 1 ] || rm -f "$T/mounted"; : > "$LOG"
+
 echo "--- grow, through the mapping, with its own key ---"
 : > "$LOG"
 figs data 25*G 20*G 5*G
@@ -917,6 +1008,8 @@ chk "a key it was moved off: refused, nothing changed, and it says why (B41: a r
     "$rc|$(grep -c 'moved off the recovery key' <<< "$out")|$(cmp -s "$T/recipient.now" "$R/etc/joinery/data-root/recovery_recipient" && echo same)" "1|1|same"
 echo "--- the TPM2 chip did not open this boot, something else did: sealed again to this boot (D2) ---"
 mkdir -p "$R/dev" "$R/run/joinery"; : > "$R/dev/tpmrm0"; echo "2026-10-11 21:13:00 UTC" > "$R/run/joinery/data-root.tpm2-failed"
+# The chip's slot, which the re-seal replaces (the tick then finds it as its record says).
+printf 'slot=2 kdf=pbkdf2 hash=sha512 iterations=1000 token=systemd-tpm2\n' > "$T/slots"
 : > "$LOG"; out="$(run tick 2>&1)"
 chk "a slot from the open volume's key, the chip sealed again through it, the slot taken away" \
     "$(grep -n -e '^agent data-root add-slot' -e '^systemd-cryptenroll --unlock-key-file=.* --wipe-slot=tpm2 --tpm2-device=auto --tpm2-pcrs=7' -e '^cryptsetup luksRemoveKey --batch-mode' "$LOG" | cut -d: -f2 | cut -d' ' -f1 | paste -sd,)|$(grep -c 'sealed again to this boot' <<< "$out")|$( [ -e "$R/run/joinery/data-root.tpm2-failed" ] && echo marked || echo cleared)" \
@@ -924,6 +1017,84 @@ chk "a slot from the open volume's key, the chip sealed again through it, the sl
 chk "and the token of the slot it replaced is pruned" "$(grep -c '^agent data-root prune-tokens /dev/loop7$' "$LOG")" "1"
 : > "$LOG"; run tick >/dev/null 2>&1
 chk "and only then: the next tick does nothing more" "$(grep -c -e 'add-slot' -e cryptenroll "$LOG")" "0"
+echo "--- the TPM2 chip never used, by choice (B43) ---"
+printf 'slot=1 kdf=pbkdf2 hash=sha256 iterations=1000 token=systemd-tpm2\nslot=2 kdf=pbkdf2 hash=sha256 iterations=1000000 token=-\n' > "$T/slots"
+: > "$LOG"; out="$(run tpm2 off 2>&1)"; rc=$?
+printf 'slot=2 kdf=pbkdf2 hash=sha256 iterations=1000000 token=-\n' > "$T/slots.after_off"
+chk "tpm2 off: recorded, the chip's slot wiped through a slot made for the moment, that slot taken away, tokens pruned" \
+    "$rc|$(grep -c '^tpm2=off$' "$C")|$(grep -e '^agent data-root add-slot' -e '^systemd-cryptenroll' -e '^cryptsetup luksRemoveKey' -e '^agent data-root prune-tokens' "$LOG" | cut -d' ' -f1-3 | sed 's/ --unlock-key-file=[^ ]*//' | paste -sd,)" \
+    "0|1|agent data-root add-slot,systemd-cryptenroll --wipe-slot=tpm2,cryptsetup luksRemoveKey --batch-mode,agent data-root prune-tokens"
+chk "and only wiped, nothing enrolled in its place; said" \
+    "$(grep -c '^systemd-cryptenroll --unlock-key-file=[^ ]* --wipe-slot=tpm2 /dev/loop7$' "$LOG")|$(grep -c 'the TPM2 chip does not open it' <<< "$out")" "1|1"
+cp "$T/slots.after_off" "$T/slots"
+chk "status says the chip is never used" "$(run status 2>&1 | grep -c '^TPM2: never used to open it (tpm2 off); this machine has a chip$')" "1"
+echo "2026-10-15 05:00:00 UTC" > "$R/run/joinery/data-root.tpm2-failed"; : > "$LOG"
+run tick >/dev/null 2>&1
+chk "the tick: no re-seal of a chip that is off, its mark dropped; the status file says chip and choice" \
+    "$(grep -c -e add-slot -e cryptenroll "$LOG")|$( [ -e "$R/run/joinery/data-root.tpm2-failed" ] && echo marked || echo cleared)|$(grep -c -e '^tpm2_chip=1$' -e '^tpm2=off$' "$R/run/joinery/data-root.status")" "0|cleared|2"
+echo 'reencrypt=reencrypt' >> "$C"; : > "$LOG"
+out="$(run tpm2 on 2>&1)"; rc=$?
+chk "tpm2 on during a run: only recorded, the finish follows it" \
+    "$rc|$(grep -c '^tpm2=' "$C")|$(grep -c cryptenroll "$LOG")|$(grep -c 'follows the record at the first tick after it finishes' <<< "$out")" "0|0|0|1"
+sed -i '/^reencrypt=/d' "$C"; echo 'tpm2=off' >> "$C"
+printf 'slot=2 kdf=pbkdf2 hash=sha256 iterations=1000000 token=-\n' > "$T/slots"; : > "$LOG"
+out="$(run tpm2 on 2>&1)"; rc=$?
+chk "tpm2 on: the record cleared and the chip enrolled through a slot made for the moment" \
+    "$rc|$(grep -c '^tpm2=' "$C")|$(grep -c '^systemd-cryptenroll --unlock-key-file=[^ ]* --tpm2-device=auto --tpm2-pcrs=7 /dev/loop7$' "$LOG")|$(grep -c 'chip opens it at boot' <<< "$out")" "0|0|1|1"
+printf 'slot=1 kdf=pbkdf2 hash=sha256 iterations=1000 token=systemd-tpm2\n' > "$T/slots"; : > "$LOG"
+out="$(run tpm2 on 2>&1)"; rc=$?
+chk "tpm2 on with the chip enrolled already: nothing more" "$rc|$(grep -c cryptenroll "$LOG")" "0|0"
+out="$(run tpm2 maybe 2>&1)"; rc=$?
+chk "tpm2 takes on or off only" "$rc|$(grep -c 'tpm2 takes on or off' <<< "$out")" "1|1"
+# reviewer1 B43 F1: a choice made while the volume is locked is carried out by
+# the tick once it is open, not left for a re-seal mark that may never come.
+rm -f "$R/dev/mapper/joinery-data"; : > "$LOG"
+out="$(run tpm2 off 2>&1)"; rc=$?
+chk "tpm2 off while locked: recorded, nothing touched yet" "$rc|$(grep -c '^tpm2=off$' "$C")|$(grep -c -e add-slot -e cryptenroll "$LOG")" "0|1|0"
+: > "$R/dev/mapper/joinery-data"; : > "$LOG"
+out="$(run tick 2>&1)"
+chk "open again: the tick takes the chip's slot away through a slot made for the moment, and says so" \
+    "$(grep -c '^systemd-cryptenroll --unlock-key-file=[^ ]* --wipe-slot=tpm2 /dev/loop7$' "$LOG")|$(grep -c 'taken away, as its record says' <<< "$out")" "1|1"
+cp "$T/slots.after_off" "$T/slots"; : > "$LOG"
+run tick >/dev/null 2>&1
+chk "and once the slot is gone, the next tick does nothing" "$(grep -c -e add-slot -e cryptenroll "$LOG")" "0"
+# The mirror: wanted (record cleared by hand) and no slot: enrolled by the tick.
+sed -i '/^tpm2=/d' "$C"; : > "$LOG"
+out="$(run tick 2>&1)"
+chk "wanted and no slot: the tick enrols the chip, and says so" \
+    "$(grep -c '^systemd-cryptenroll --unlock-key-file=[^ ]* --tpm2-device=auto --tpm2-pcrs=7 /dev/loop7$' "$LOG")|$(grep -c 'opens it at boot, as its record says' <<< "$out")" "1|1"
+# An enrolment that fails is said once, and left for the next boot.
+cp "$T/bin/systemd-cryptenroll" "$T/cryptenroll.ok"
+stub systemd-cryptenroll 'echo "systemd-cryptenroll $*" >> "$GATE_LOG"; exit 1'
+rm -f "$R/run/joinery/data-root.tpm2-follow-failed"; : > "$LOG"
+out="$(run tick 2>&1)"; out2="$(run tick 2>&1)"
+chk "a chip that will not enrol: tried once, said once, left until the next boot" \
+    "$(grep -c '^systemd-cryptenroll' "$LOG")|$(grep -c 'could not be enrolled' <<< "$out")|$(grep -c 'could not be enrolled' <<< "$out2")" "1|1|0"
+cp "$T/cryptenroll.ok" "$T/bin/systemd-cryptenroll"
+rm -f "$R/run/joinery/data-root.tpm2-follow-failed"
+# N2: a slot made for the moment that would not go is kept by its key and
+# taken away first next time; none is made past the ceiling.
+cp "$T/bin/cryptsetup" "$T/cryptsetup.n2"
+stub cryptsetup 'echo "cryptsetup $*" >> "$GATE_LOG"; [ "$1" = luksRemoveKey ] && [ ! -f "$GATE_T/remove_ok" ] && exit 1; exit 0'
+echo 'tpm2=off' >> "$C"; printf 'slot=1 kdf=pbkdf2 hash=sha512 iterations=1000 token=systemd-tpm2\n' > "$T/slots"; : > "$LOG"
+run tpm2 off >/dev/null 2>&1
+chk "a slot made for the moment that does not go: its key kept in /run, root's only" \
+    "$( [ -f "$R/run/joinery/data-root.tpm2-orphan.key" ] && stat -c %a "$R/run/joinery/data-root.tpm2-orphan.key" || echo none)" "600"
+: > "$LOG"; out="$(run tpm2 off 2>&1)"; rc=$?
+chk "while it stays: no new slot is made, and the change says it could not be done" \
+    "$rc|$(grep -c 'add-slot' "$LOG")|$(grep -c 'could not be taken away' <<< "$out")" "1|0|1"
+touch "$T/remove_ok"; : > "$LOG"; run tpm2 off >/dev/null 2>&1
+chk "once it goes: it is taken away first, then the change is made" \
+    "$(grep -n -e '^cryptsetup luksRemoveKey --batch-mode /dev/loop7 .*tpm2-orphan.key$' -e '^agent data-root add-slot' "$LOG" | cut -d: -f2 | cut -d' ' -f1-2 | paste -sd,)|$( [ -f "$R/run/joinery/data-root.tpm2-orphan.key" ] && echo kept || echo gone)" \
+    "cryptsetup luksRemoveKey,agent data-root|gone"
+rm -f "$T/remove_ok"; cp "$T/cryptsetup.n2" "$T/bin/cryptsetup"
+for i in $(seq 1 24); do printf 'slot=%d kdf=pbkdf2 hash=sha256 iterations=1000000 token=-\n' "$i"; done > "$T/slots"
+printf 'slot=25 kdf=pbkdf2 hash=sha512 iterations=1000 token=systemd-tpm2\n' >> "$T/slots"; : > "$LOG"
+out="$(run tpm2 off 2>&1)"; rc=$?
+chk "with 24 slots or more, no slot is made for the moment" "$rc|$(grep -c add-slot "$LOG")" "1|0"
+rm -f "$R/run/joinery/data-root.tpm2-follow-failed"
+sed -i '/^tpm2=/d; /^reencrypt=/d' "$C"
+: > "$T/slots"
 rm -f "$R/dev/tpmrm0"
 echo "--- a leaked recovery key: re-encrypted under a new volume key (D8) ---"
 : > "$LOG"
@@ -1227,7 +1398,7 @@ rm -rf "${R:?}/var/www/html/other" "${R:?}/srv/joinery/sites/other" "${T:?}/hide
 sed -i 's/^reencrypt=.*/reencrypt=encrypt/' "$C"
 
 echo "--- a decrypt that finishes (B68) ---"
-sed -i 's/^reencrypt=.*/reencrypt=decrypt/' "$C"
+sed -i 's/^reencrypt=.*/reencrypt=decrypt/' "$C"; echo 'tpm2=off' >> "$C"
 mkdir -p "$R/run/joinery"; echo 'the escrow holder, https://holder.example, at 2026-10-14 17:31:22 UTC' > "$R/run/joinery/data-root.opened-by"
 cp "$T/bin/blkid" "$T/blkid.ok"
 stub blkid 'case "$*" in "-p -s TYPE -o value "*) echo xfs ;; *) exec "$GATE_T/blkid.ok" "$@" ;; esac'
@@ -1235,6 +1406,7 @@ rm -f "$R/dev/mapper/joinery-data"; touch "$T/mounted"; : > "$LOG"
 out="$(run encrypt-resume 2>&1)"; rc=$?
 chk "plain again, and the record of what opened the volume gone with the volume" \
     "$rc|$(grep -c '^backing=file$' "$C")|$(grep -c 'decrypted, and mounted as it was' <<< "$out")|$( [ -e "$R/run/joinery/data-root.opened-by" ] && echo kept || echo gone)" "0|1|1|gone"
+chk "and the TPM2 choice goes with the encryption (B43)" "$(grep -c '^tpm2=' "$C")" "0"
 cp "$T/blkid.ok" "$T/bin/blkid"
 
 echo "--- a create that does not finish leaves nothing ---"
@@ -1244,6 +1416,13 @@ out="$(run create --encrypted 16G 2>&1)"; rc=$?
 chk "the seal fails: exit 1, no volume written, nothing left" \
     "$rc|$(grep -c 'could not seal' <<< "$out")|$(grep -c luksFormat "$LOG")|$( [ -e "$R/srv/joinery.img" ] && echo img)$( [ -e "$C" ] && echo conf)$( [ -e "$R/srv/joinery.img.recovery" ] && echo sidecar)|$(ls "$R/run/joinery" 2>/dev/null | grep -c data-root-key)" "1|1|0||0"
 rm -f "$T/seal_fails"
+echo "--- born encrypted on a machine with a chip, never to use it (B43) ---"
+rm -rf "${R:?}/etc/joinery/data_root" "${R:?}/srv/joinery.img" "${R:?}/srv/joinery.img.recovery" "${R:?}/srv/joinery" "${SD:?}" "${R:?}/run" "${R:?}/dev/mapper"
+unmount; mkdir -p "$R/dev"; : > "$R/dev/tpmrm0"; : > "$LOG"
+out="$(run create --encrypted --no-tpm2 16G 2>&1)"; rc=$?
+chk "create --encrypted --no-tpm2: no chip enrolled, recorded tpm2=off, and said" \
+    "$rc|$(grep -c cryptenroll "$LOG")|$(grep -c '^tpm2=off$' "$C")|$(grep -c 'has a chip, and it is not used' <<< "$out")" "0|0|1|1"
+rm -f "$R/dev/tpmrm0"
 cp "$T/systemctl.plain" "$T/bin/systemctl"
 
 echo

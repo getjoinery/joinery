@@ -16,9 +16,21 @@
  * runs nothing as root. It asks, through RootRequest ('data_root_encrypt',
  * 'data_root_reseal'), and the root side checks everything again itself.
  *
+ * TPM2 (B43). A chip's slot opens the data root for whoever boots the server
+ * as it is: it keeps a disk taken out of the server locked, not the server
+ * taken whole. Where the server has a chip, the page offers the stricter way
+ * only (encrypt without it, or stop it opening an encrypted one); letting the
+ * chip back in is root's own command on the server.
+ *
+ * @version 1.1 - tpm2_chip() and tpm2_off(): whether the server has a TPM2 chip, and whether it is kept from
+ *               opening the data root (B43); TPM2_TEXT says what a chip's slot does and does not protect.
  * @version 1.0
  */
 class DataRootStatus {
+
+	/** What a TPM2 chip's slot protects, said wherever the choice is offered (B43). */
+	const TPM2_TEXT = 'This server has a TPM2 chip. Left to open the data root at each boot, it keeps a disk taken out of the server locked, but not the server taken whole: whoever boots it as it is gets its data. Asking for the key at every boot keeps a taken server locked; each boot then needs the recovery key, at the console or on the server\'s unlock page.';
+
 
 	const STATUS_FILE = '/run/joinery/data-root.status';
 
@@ -27,7 +39,7 @@ class DataRootStatus {
 
 	/**
 	 * The status, or null where this site sees none (no data root, or a site
-	 * in a container). Keys: backing, encrypted, and on an encrypted one open,
+	 * in a container). Keys: backing, tpm2_chip, tpm2 (off or auto), encrypted, and on an encrypted one open,
 	 * opened_by, recipient_fingerprint, recipient_set_by, sidecar,
 	 * sidecar_fingerprint, reencrypt, reencrypt_percent.
 	 */
@@ -95,6 +107,16 @@ class DataRootStatus {
 					. ': one it has retired, or the one given when the server was installed. Whoever holds that key can open this server\'s data.');
 		}
 		return $out;
+	}
+
+	/** The server has a TPM2 chip systemd can enrol (B43). */
+	public static function tpm2_chip(?array $st): bool {
+		return is_array($st) && ($st['tpm2_chip'] ?? '') === '1';
+	}
+
+	/** The chip is kept from opening the data root: each boot asks for the key (B43). */
+	public static function tpm2_off(?array $st): bool {
+		return is_array($st) && ($st['tpm2'] ?? '') === 'off';
 	}
 
 	/** What opened it at the last boot, in words, or ''. */

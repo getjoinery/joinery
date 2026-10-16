@@ -16,6 +16,9 @@
  * passed. One node speaks for each machine, so a server of twelve sites raises
  * one incident.
  *
+ * @version 1.5 - each held API key is checked first (OperatorCloudAccount::check): a refused or expired key, and
+ *               its expiry, are on record every day, for the Hosting tab and IncidentSourceCloudAccountKey; and
+ *               revoke_rejected() is public: EscrowTier2 marks an account refused by the same rule (B77)
  * @version 1.4 - every account of ours is read, keyed oca:<id> (cloud_accounts_list)
  * @version 1.3 - a connected account the provider answers 401 is marked revoked instead of failing every day
  * @version 1.2 - accounts(), node_addresses() and nodes_on() are public: adopting a node's cloud server
@@ -61,7 +64,9 @@ class MachineTransferWatch {
 		$now = $now ?? time();
 		$problems = array();
 		if ($accounts === null) {
-			list($accounts, $problems) = self::accounts();
+			$problems = self::check_keys();
+			list($accounts, $more) = self::accounts();
+			$problems = array_merge($problems, $more);
 		}
 		if (!$accounts) {
 			return array('status' => $problems ? 'error' : 'skipped',
@@ -264,9 +269,10 @@ class MachineTransferWatch {
 	 * provisioning pipeline marks it: the grant is gone, not passing through
 	 * an outage, so reading it again tomorrow cannot succeed. One of ours is
 	 * marked refused, which the Hosting tab of Provisioning Setup shows until
-	 * its credential is replaced. True when an account was marked.
+	 * its credential is replaced. True when an account was marked. Also used
+	 * by EscrowTier2, when a boot's check is refused the same way.
 	 */
-	private static function revoke_rejected(string $key, Exception $e): bool {
+	public static function revoke_rejected(string $key, Exception $e): bool {
 		if ((int)$e->getCode() !== 401) {
 			return false;
 		}
@@ -290,6 +296,26 @@ class MachineTransferWatch {
 		$account->set('cca_status', 'revoked');
 		$account->save();
 		return true;
+	}
+
+	/**
+	 * Each API key of ours asked about itself once a day (OperatorCloudAccount::check):
+	 * whether the provider still answers to it and when it expires, so a key
+	 * that stops working is on record before an encrypted server's reboot
+	 * needs it (B77). The sentences for those the provider did not answer.
+	 */
+	public static function check_keys(): array {
+		$problems = array();
+		foreach (OperatorCloudAccount::held() as $oca) {
+			if ((string)$oca->get('oca_method') === OperatorCloudAccount::METHOD_CONNECT || $oca->token() === '') {
+				continue;
+			}
+			$err = $oca->check();
+			if ($err !== '') {
+				$problems[] = $oca->label() . ': ' . $err;
+			}
+		}
+		return $problems;
 	}
 
 	/**

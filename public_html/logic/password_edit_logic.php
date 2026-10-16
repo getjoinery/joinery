@@ -73,7 +73,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 
 			$msgtext = '<p>Your password has been updated!</p>';
-			$message = new DisplayMessage($msgtxt, 'Success', '/\/profile\/password_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "addressbox", TRUE);
+			$message = new DisplayMessage($msgtext, 'Success', '/\/profile\/password_edit.*/', DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, "addressbox", TRUE);
 			$session->save_message($message);
 		}
 	}

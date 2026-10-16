@@ -29,6 +29,9 @@
  * record (cvp_oca_operator_cloud_account_id), and everything done to it later
  * is done with that account's credential (HeldCloudAccounts).
  *
+ * @version 1.2 - An API key's own expiry, read at each check where the provider says (CloudKeyExpiry), into
+ *               oca_token_expires: a key past it is not usable and says to replace it, and key_expires_within()
+ *               warns before. expired() stays a Connect grant's (B77).
  * @version 1.1 - events:read_only: the activity log read before an encrypted data root is opened (Tier 2)
  * @version 1.0
  */
@@ -49,6 +52,9 @@ class OperatorCloudAccount extends SystemBase {
 	const STATUS_ACTIVE = 'active';
 	/** The provider refused the credential at its last check. */
 	const STATUS_REFUSED = 'refused';
+
+	/** How long before an API key expires that the Hosting tab and the node's incident warn (B77). */
+	const KEY_EXPIRY_WARNING_SECONDS = 7 * 86400;
 
 	/** The managed setting naming the default account's id. */
 	const DEFAULT_SETTING = 'server_manager_default_cloud_account_id';
@@ -126,7 +132,10 @@ class OperatorCloudAccount extends SystemBase {
 
 	// ── The credential ───────────────────────────────────────────────────────
 
-	/** Seal a token onto this entry, with a Connect grant's end when there is one. Does not save. */
+	/**
+	 * Seal a token onto this entry, with a Connect grant's end when there is
+	 * one. Does not save. An API key's expiry is read at its next check.
+	 */
 	public function store_credential(string $token, ?string $expires = null): void {
 		$this->set('oca_credential', (new SecretBox())->seal(self::LOCATOR, trim($token)));
 		$this->set('oca_token_expires', $expires !== null && trim($expires) !== '' ? $expires : null);
@@ -146,10 +155,29 @@ class OperatorCloudAccount extends SystemBase {
 		return trim((string)$opened['value']);
 	}
 
-	/** A Connect grant past its two hours. An API key never expires here. */
+	/** A Connect grant past its two hours: it did its one job, and is offered nowhere. */
 	public function expired(): bool {
+		return (string)$this->get('oca_method') === self::METHOD_CONNECT && $this->past_expiry(0);
+	}
+
+	/** An API key past the expiry its provider reported: a fault, to be replaced. */
+	public function key_expired(): bool {
+		return (string)$this->get('oca_method') !== self::METHOD_CONNECT && $this->past_expiry(0);
+	}
+
+	/** An API key that stops working within $seconds (and has not yet): its expiry, else null. */
+	public function key_expires_within(int $seconds): ?string {
+		if ((string)$this->get('oca_method') === self::METHOD_CONNECT || $this->key_expired() || !$this->past_expiry($seconds)) {
+			return null;
+		}
+		return trim((string)$this->get('oca_token_expires'));
+	}
+
+	/** The recorded expiry is $seconds or less away (or past). False when none is recorded. */
+	private function past_expiry(int $seconds): bool {
 		$expires = trim((string)$this->get('oca_token_expires'));
-		return $expires !== '' && strtotime($expires . ' UTC') <= time();
+		$at = $expires === '' ? false : strtotime($expires . ' UTC');
+		return $at !== false && $at <= time() + $seconds;
 	}
 
 	public function removed(): bool {
@@ -159,7 +187,7 @@ class OperatorCloudAccount extends SystemBase {
 	/** Can anything be done with it now: held, not refused, not expired, a credential that opens. */
 	public function usable(): bool {
 		return $this->key && !$this->removed() && (string)$this->get('oca_status') === self::STATUS_ACTIVE
-			&& !$this->expired() && $this->token() !== '';
+			&& !$this->expired() && !$this->key_expired() && $this->token() !== '';
 	}
 
 	/** Why it cannot be used, in a sentence, or '' when it can. */
@@ -173,6 +201,10 @@ class OperatorCloudAccount extends SystemBase {
 		if ($this->expired()) {
 			return 'The Linode sign-in for ' . $this->label() . ' has expired (a sign-in lasts two hours). '
 				. 'Reconnect it on the Hosting tab of Provisioning Setup.';
+		}
+		if ($this->key_expired()) {
+			return 'The API key for ' . $this->label() . ' expired on ' . $this->get_local('oca_token_expires', 'M j, Y g:i a T')
+				. '. Replace it on the Hosting tab of Provisioning Setup.';
 		}
 		if ((string)$this->get('oca_status') === self::STATUS_REFUSED) {
 			return 'The provider refused the credential for ' . $this->label() . ' at its last check'
@@ -274,6 +306,14 @@ class OperatorCloudAccount extends SystemBase {
 			$company = $driver->accountCompany();
 		} catch (CloudComputeException $e) {
 			$company = '';
+		}
+		// An API key's own expiry, where the provider says (B77). A failed read
+		// leaves what was known.
+		if ((string)$this->get('oca_method') !== self::METHOD_CONNECT && $driver instanceof CloudKeyExpiry) {
+			try {
+				$this->set('oca_token_expires', $driver->keyExpiry());
+			} catch (CloudComputeException $e) {
+			}
 		}
 		$this->set('oca_scopes', implode(' ', $scopes));
 		$this->set('oca_account_name', mb_substr($name, 0, 255));

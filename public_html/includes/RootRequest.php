@@ -27,6 +27,8 @@
  *
  * @version 1.5 - actorState() reads HostConvergerNotice::runState(): a converger installed minutes ago is
  *                present while its first tick comes, so a new site's upload pages no longer say it has not run
+ * @version 1.5 - data_root_tpm2_off: the TPM2 chip no longer opens this server's data root, and data_root_encrypt
+ *                takes tpm2 'off' (B43); only the stricter way, since the queue is the web user's to write.
  * @version 1.4 - data_root_encrypt, data_root_reseal and data_root_rekey: a self-hosted server's data root encrypted, and its
  *                break-glass copy sealed, to this site's own recovery key from its Backups page (WP4).
  * @version 1.3 - install_package carries `replace` (the operator confirmed
@@ -68,16 +70,21 @@ class RootRequest {
 		'data_root_encrypt',       // encrypt this server's data root, sealed to this site's own proven recovery key
 		'data_root_reseal',        // seal the data root's break-glass copy to this site's own proven recovery key
 		'data_root_rekey',         // re-encrypt this server's data root under a new volume key (a key that may have been seen)
+		'data_root_tpm2_off',      // {}: the TPM2 chip no longer opens this server's data root; each boot asks for its key
 	);
 	/*
-	 * data_root_encrypt, data_root_reseal, data_root_rekey
+	 * data_root_encrypt, data_root_reseal, data_root_rekey, data_root_tpm2_off
 	 * (specs/hosted_data_promise_disk_encryption.md WP4, D2, D8): a server not
 	 * hosted by an operator, encrypted, sealed and re-keyed from its own
 	 * Backups page. The request carries nothing; root reads the conditions
 	 * (DataRootStatus) and the key itself. The key is this site's backup
 	 * recovery key, the one every backup is already sealed to, so a web tier
 	 * that could swap it to its own (it is a setting) already has the backups;
-	 * the break-glass copy trusts nothing the backups do not.
+	 * the break-glass copy trusts nothing the backups do not. The one
+	 * exception is data_root_encrypt's optional tpm2 'off' (B43), and it can
+	 * only make the machine stricter: with it the TPM2 chip never opens the
+	 * data root. Nothing read from a request lets the chip back in; that is
+	 * root's own command (joinery_data_root.sh tpm2 on).
 	 */
 
 	/**

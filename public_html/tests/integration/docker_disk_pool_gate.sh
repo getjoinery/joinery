@@ -40,6 +40,10 @@
 # The real XFS behaviour (a project's limit as df's size, writes stopping at
 # it, direct I/O on the loop device) was proven on a scratch Linode,
 # 2026-10-07; see the spec.
+#
+# The root disk the data root is sized against is a stub (df answers 100 GiB
+# with 80 free for it), never the machine running the gate: on a fuller one,
+# create would refuse above the reserve and every case after it would fail.
 
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -71,6 +75,10 @@ stub mount 'echo "mount $*" >> "$GATE_LOG"; touch "$GATE_MOUNTED"'
 stub systemctl 'echo "systemctl $*" >> "$GATE_LOG"'
 stub apt-get 'echo "apt-get $*" >> "$GATE_LOG"'
 stub findmnt '[ -f "$GATE_MOUNTED" ] || exit 1; case "$*" in *FSTYPE,OPTIONS*) echo "xfs rw,relatime,inode64,prjquota" ;; *) echo /srv/joinery ;; esac'
+# The root disk the data root is sized against: 100 GiB with 80 free, whatever
+# the machine running this has free (dev at 87% full left it nothing to give
+# above its reserve, and create refused). Anything else is the real df.
+stub df 'case "${@: -1}" in */srv) echo "1B-blocks Used Avail"; echo "107374182400 21474836480 85899345920" ;; *) exec /usr/bin/df "$@" ;; esac'
 stub xfs_quota 'echo "xfs_quota $*" >> "$GATE_LOG"; case "$*" in *report*) cat "$GATE_T/report" 2>/dev/null ;; esac'
 # A folder's project id is the .gate_projid file in it; chproj is logged.
 cat > "$T/bin/xfs_io" <<'STUB'
@@ -99,6 +107,8 @@ out="$(run create 68GB 2>&1)"; rc=$?
 chk "refused: a size that is not one" "$rc|$(grep -c 'not .68GB.' <<< "$out")" "1|1"
 out="$(run create 999T 2>&1)"; rc=$?
 chk "refused: a size the root disk cannot give above its reserve" "$rc|$(grep -c 'under its reserve' <<< "$out")" "1|1"
+out="$(run create --no-tpm2 1G 2>&1)"; rc=$?
+chk "refused: --no-tpm2 without --encrypted (only an encrypted data root has a TPM2 slot, B43)" "$rc|$(grep -c 'goes with --encrypted' <<< "$out")" "1|1"
 chk "and nothing was allocated or written" \
     "$(wc -l < "$LOG" | tr -d ' ')|$( [ -e "$T/root/etc/fstab" ] && echo fstab || echo none)|$( [ -e "$DJ" ] && echo dj || echo none)" "0|none|none"
 mkdir -p "$(dirname "$DJ")"; printf '{"userns-remap": "default"}\n' > "$DJ"

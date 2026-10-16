@@ -26,6 +26,19 @@
  * A log that cannot be read refuses: the machine asks again every ten
  * seconds, so a provider's outage delays an unlock, never skips the check.
  *
+ * A KEY THAT STOPS WORKING. A machine whose account is held by a lasting key
+ * with the events scope stays Tier 2 when that key stops working (refused by
+ * the provider, past its expiry, or unreadable here): its boot is refused
+ * until the key is replaced, and opens meanwhile by its recovery key. It is
+ * never answered unchecked, because revoking this plane's key is the first
+ * thing a stolen hosting login can do. A 401 from the provider marks the
+ * account refused, so the Hosting tab of Provisioning Setup says so (B77).
+ *
+ * @version 1.2 - A key whose scopes were never read is not Tier 1 either: unread is not "chosen without the
+ *               events scope", it is the dead-key shape, so the boot is refused until a check reads them
+ *               (reviewer1 F1); machines_in_account() names what removing an account drops to Tier 1 (N1).
+ * @version 1.1 - A Tier 2 machine whose account's key stops working is refused, with what to do, instead of being
+ *               answered at Tier 1; a 401 marks the account refused (B77). Connect accounts are Tier 1 throughout.
  * @version 1.0
  */
 
@@ -33,7 +46,7 @@ class EscrowTier2 {
 
 	const REREAD_SECONDS = 5;
 
-	/** The tests point this at a fake provider: callable(DataRootEscrow, &$why): ?array. */
+	/** The tests point this at a fake provider: callable(DataRootEscrow, &$why, &$blocked): ?array. */
 	public static $context_override = null;
 
 	/** The scope a credential needs for it. */
@@ -54,13 +67,16 @@ class EscrowTier2 {
 	);
 
 	/**
-	 * [driver, instance id] where Tier 2 applies to the row's machine, or
-	 * null (Tier 1). $why is set to the reason when it is null.
+	 * [driver, instance id] where Tier 2 applies to the row's machine and can
+	 * be checked now, or null. Null with $why: Tier 1. Null with $blocked set
+	 * as well: Tier 2 applies and its account's key does not work now, so the
+	 * boot is refused with $blocked (B77).
 	 */
-	public static function context(DataRootEscrow $row, ?string &$why = null) {
+	public static function context(DataRootEscrow $row, ?string &$why = null, ?string &$blocked = null) {
 		$why = '';
+		$blocked = null;
 		if (self::$context_override !== null) {
-			return (self::$context_override)($row, $why);
+			return (self::$context_override)($row, $why, $blocked);
 		}
 		$node_id = (int)$row->get('dre_mgn_managed_node_id');
 		if (!$node_id) {
@@ -79,13 +95,30 @@ class EscrowTier2 {
 			return null;
 		}
 		$account = new OperatorCloudAccount($oca_id, TRUE);
-		if (!$account->key || !$account->usable()) {
-			$why = 'the cloud account it is in cannot be used now';
+		if (!$account->key || $account->removed()) {
+			$why = 'the cloud account it was in is no longer held here';
+			return null;
+		}
+		if ((string)$account->get('oca_method') === OperatorCloudAccount::METHOD_CONNECT) {
+			$why = 'its cloud account is held by a Linode sign-in, which lasts two hours, not by a lasting key';
 			return null;
 		}
 		$missing = $account->missing_scopes(array(self::EVENTS_SCOPE => ''));
-		if ($missing === null || $missing) {
+		if ($missing === null) {
+			// Never read: not the owner's choice of a key without the scope, but
+			// a key this node has not managed to ask about.
+			$why = 'its cloud account\'s key has not been checked yet';
+			$blocked = 'Its cloud account\'s key has never been checked, so whether it can read the activity log is not known: check it on the Hosting tab of Provisioning Setup (the daily check also does). Until then its boot is refused here, never answered unchecked; it opens by its recovery key.';
+			return null;
+		}
+		if ($missing) {
 			$why = 'the key for its cloud account cannot read the activity log (events:read_only)';
+			return null;
+		}
+		if (!$account->usable()) {
+			$why = 'its cloud account\'s key does not work now';
+			$blocked = 'Its cloud account\'s key does not work, so its provider\'s activity log cannot be read: '
+				. $account->unusable_reason() . ' Until then its boot is refused here, never answered unchecked; it opens by its recovery key.';
 			return null;
 		}
 		$driver = $account->driver();
@@ -96,8 +129,11 @@ class EscrowTier2 {
 		return array($driver, (string)$provision->get('cvp_instance_id'));
 	}
 
+	/** Tier 2 applies, whether or not it can be checked now. */
 	public static function applies(DataRootEscrow $row): bool {
-		return self::context($row) !== null;
+		$why = '';
+		$blocked = null;
+		return self::context($row, $why, $blocked) !== null || $blocked !== null;
 	}
 
 	/**
@@ -107,9 +143,11 @@ class EscrowTier2 {
 	 * @param callable|null $sleep  injected for tests; sleep() otherwise
 	 */
 	public static function refusal(DataRootEscrow $row, string $addr, ?callable $sleep = null): ?string {
-		$ctx = self::context($row);
+		$why = '';
+		$blocked = null;
+		$ctx = self::context($row, $why, $blocked);
 		if ($ctx === null) {
-			return null;
+			return $blocked;
 		}
 		list($driver, $instance) = $ctx;
 		$row->set('dre_tier2_event', null);
@@ -133,10 +171,67 @@ class EscrowTier2 {
 				}
 			}
 		} catch (Exception $e) {
+			// The key itself refused: the account is marked so, for the Hosting
+			// tab and every machine in it, and the boot waits for a new key.
+			if ((int)$e->getCode() === 401 && self::account_refused($row, $e)) {
+				return 'Its cloud account\'s key was refused by the provider (' . substr($e->getMessage(), 0, 120)
+					. '): replace it on the Hosting tab of Provisioning Setup. Until then its boot is refused here, never answered unchecked; it opens by its recovery key.';
+			}
 			return 'Its provider\'s activity log could not be read (' . substr($e->getMessage(), 0, 160)
 				. '), and the boot is answered only once it has been; the machine asks again every ten seconds.';
 		}
 		return null;
+	}
+
+	/** The account of the row's machine is marked refused after a 401 (MachineTransferWatch's rule). True when it is refused now. */
+	private static function account_refused(DataRootEscrow $row, Exception $e): bool {
+		$account = self::account_for($row);
+		if ($account === null) {
+			return false;
+		}
+		MachineTransferWatch::revoke_rejected($account->choice_key(), $e);
+		$account = new OperatorCloudAccount((int)$account->key, TRUE);
+		return (string)$account->get('oca_status') === OperatorCloudAccount::STATUS_REFUSED;
+	}
+
+	/**
+	 * The account of ours, held by a lasting key with the events scope, whose
+	 * log Tier 2 reads for the row's machine, whether or not its key works now;
+	 * null where Tier 2 does not apply (IncidentSourceCloudAccountKey).
+	 */
+	public static function account_for(DataRootEscrow $row): ?OperatorCloudAccount {
+		$node = new ManagedNode((int)$row->get('dre_mgn_managed_node_id'), TRUE);
+		$provision = $node->key ? IpSwapMove::provision_of($node) : null;
+		$oca_id = $provision ? (int)$provision->get('cvp_oca_operator_cloud_account_id') : 0;
+		if (!$oca_id) {
+			return null;
+		}
+		$account = new OperatorCloudAccount($oca_id, TRUE);
+		if (!$account->key || $account->removed() || (string)$account->get('oca_method') === OperatorCloudAccount::METHOD_CONNECT) {
+			return null;
+		}
+		$missing = $account->missing_scopes(array(self::EVENTS_SCOPE => ''));
+		return ($missing === null || !$missing) ? $account : null;
+	}
+
+	/**
+	 * The machines whose boots this node checks at Tier 2 through account
+	 * $oca_id: [node id => node name]. Removing the account drops each to
+	 * Tier 1, which the Hosting tab says before it is removed (reviewer1 N1).
+	 */
+	public static function machines_in_account(int $oca_id): array {
+		$out = array();
+		foreach (new MultiDataRootEscrow(array('live' => true)) as $row) {
+			if ((string)$row->get('dre_status') !== 'enrolled') {
+				continue;
+			}
+			$account = self::account_for($row);
+			if ($account !== null && (int)$account->key === $oca_id) {
+				$node = new ManagedNode((int)$row->get('dre_mgn_managed_node_id'), TRUE);
+				$out[(int)$node->key] = (string)$node->get('mgn_name');
+			}
+		}
+		return $out;
 	}
 
 	/** From when events count: the last unlock reported, or the enrolment, or the owner's excuse, whichever is latest. */

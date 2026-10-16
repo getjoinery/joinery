@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 3.16 - A companion test site (install.sh site --with-test-site's <site>_test) makes no
+#                 test site of its own: its vhost is rendered by _vhost_render.sh without the
+#                 template's test-site host, and no <site>_test_test folders or logs bind are made
+#                 (one_data_root B1).
 # VERSION: 3.15 - A new site whose active theme is not on disk installs it at first boot through
 #                 utils/install_extension.php, which installs only a package that verifies against
 #                 the release keys this tree carries: a site built from its release tree alone
@@ -887,19 +891,23 @@ fi
 # =============================================================================
 
 if [ "$DOCKER_MODE" = false ]; then
+    # shellcheck source=_vhost_render.sh
+    . "${SCRIPT_DIR}/_vhost_render.sh"
+
     # Create test site directories FIRST — the virtualhost template references them, so
-    # Apache reload will fail if they don't exist yet when the vhost is enabled.
-    log "Creating test site directories..."
-    site_data_on_data_root "${SITENAME}_test" logs
-    mkdir -p "/var/www/html/${SITENAME}_test/public_html"
-    mkdir -p "/var/www/html/${SITENAME}_test/logs"
+    # Apache reload will fail if they don't exist yet when the vhost is enabled. A
+    # companion test site renders no test site of its own, so it makes none.
+    if ! vhost_is_companion_test_site "$SITE_ROOT"; then
+        log "Creating test site directories..."
+        site_data_on_data_root "${SITENAME}_test" logs
+        mkdir -p "/var/www/html/${SITENAME}_test/public_html"
+        mkdir -p "/var/www/html/${SITENAME}_test/logs"
+    fi
 
     log "Configuring Apache virtualhost..."
 
     if [ -f "$VIRTUALHOST_TEMPLATE" ]; then
-        cp "$VIRTUALHOST_TEMPLATE" "/etc/apache2/sites-available/${SITENAME}.conf"
-        sed -i "s/{{DOMAIN_NAME}}/${DOMAIN}/g" "/etc/apache2/sites-available/${SITENAME}.conf"
-        sed -i "s/{{SITE_NAME}}/${SITENAME}/g" "/etc/apache2/sites-available/${SITENAME}.conf"
+        vhost_render "$VIRTUALHOST_TEMPLATE" "$SITE_ROOT" "$DOMAIN" > "/etc/apache2/sites-available/${SITENAME}.conf"
 
         # Disable default site
         a2dissite 000-default.conf 2>/dev/null || true
@@ -971,5 +979,5 @@ log "Site: $SITENAME"
 log "Domain: $DOMAIN"
 if [ "$DOCKER_MODE" = false ]; then
     log "Main site: http://${DOMAIN}"
-    log "Test site: http://test.${DOMAIN}"
+    vhost_is_companion_test_site "$SITE_ROOT" || log "Test site: http://test.${DOMAIN}"
 fi

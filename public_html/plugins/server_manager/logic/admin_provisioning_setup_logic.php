@@ -9,6 +9,7 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.2 - each of our accounts carries the encrypted machines it opens at Tier 2, for Remove's question (B77 N1)
  * @version 2.1 - an account added, or a key replaced, is said as done, and a scope its token lacks (or a check
  *   that failed) beside it as a warning, not the whole as an error (B25)
  * @version 2.0 - tabs; the Hosting tab's cloud accounts: add by API key or Connect with Linode, check, replace a key,
@@ -310,6 +311,7 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 			'missing_scopes' => $account->missing_scopes(),
 			'default_refusal' => $account->default_refusal(),
 			'servers'        => $used,
+			'tier2'          => EscrowTier2::machines_in_account((int)$account->key),
 		);
 	}
 	$customers = array();

@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.11 - CloudKeyExpiry: when the credential itself stops working, where the provider says (B77)
  * @version 1.10 - CloudVolumeFacts: the provider's own encryption of a storage volume at a device path
  * @version 1.9 - CloudProviderEvents: an instance's activity log, and the instance an address belongs to
  *                (Tier 2 of specs/hosted_data_promise_disk_encryption.md D3)
@@ -384,6 +385,23 @@ interface CloudAccountIdentity {
 	 * @throws CloudComputeException when the token cannot read it
 	 */
 	public function accountName(): string;
+}
+
+/**
+ * Optional capability: when the credential the driver holds stops working.
+ * An API key can be made to expire, and nothing else says so until it is
+ * refused, which for a management node opening encrypted machines is a boot
+ * that cannot be checked (B77). The caller asks `instanceof CloudKeyExpiry`.
+ */
+interface CloudKeyExpiry {
+
+	/**
+	 * 'Y-m-d H:i:s' UTC when this credential stops working, or null when it
+	 * never does, or the provider does not list it.
+	 *
+	 * @throws CloudComputeException when the token cannot read it
+	 */
+	public function keyExpiry(): ?string;
 }
 
 /**

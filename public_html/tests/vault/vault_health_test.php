@@ -12,6 +12,7 @@
  * branches are driven here with fixtures rather than with whatever this box
  * happens to be (specs/vault_exposure_quick_fixes.md Q2-Q4).
  *
+ * @version 1.7 - DataRootStatus's TPM2 chip and choice (B43)
  * @version 1.6 - the unsigned-extensions row (specs/package_signing.md WP6)
  * @version 1.5 - the release-key row counts among the host facts, and is
  *   driven from a fixture key file (specs/package_signing.md WP1)
@@ -299,10 +300,16 @@ file_put_contents($tmp, "# Written by joinery_data_root.sh\nbacking=luks-file\ne
 $st = DataRootStatus::read($tmp);
 check(DataRootStatus::encrypted($st) && DataRootStatus::opened_by($st) === 'the TPM2 chip, at 2026-10-11 20:00:00 UTC'
 	&& DataRootStatus::sealed_to($st, $site) === 'this_site', 'parsed: encrypted, what opened it, sealed to this site');
-file_put_contents($tmp, "backing=file\nencrypted=0\n");
+check(!DataRootStatus::tpm2_chip($st) && !DataRootStatus::tpm2_off($st), 'a status from before B43 names no chip and no choice');
+file_put_contents($tmp, "backing=file\ntpm2_chip=1\ntpm2=auto\nencrypted=0\n");
 $st = DataRootStatus::read($tmp);
 check($st !== null && !DataRootStatus::encrypted($st) && DataRootStatus::advice($st, $site, true) === array(),
 	'a plain data root: read, not encrypted, no advice');
+check(DataRootStatus::tpm2_chip($st) && !DataRootStatus::tpm2_off($st), 'a TPM2 chip, left to open the data root (B43)');
+file_put_contents($tmp, "backing=luks-file\ntpm2_chip=1\ntpm2=off\nencrypted=1\n");
+check(DataRootStatus::tpm2_off(DataRootStatus::read($tmp)), 'a chip kept from opening it: tpm2=off (B43)');
+check(strpos(DataRootStatus::TPM2_TEXT, 'whoever boots it as it is gets its data') !== false,
+	'what a chip protects, and what it does not, is said where the choice is offered (B43)');
 unlink($tmp);
 check(DataRootStatus::read('/nonexistent/data-root.status') === null, 'no status file (no data root, or a container): null');
 harness_set_setting_mem('data_root_encryption_offered', '0');
