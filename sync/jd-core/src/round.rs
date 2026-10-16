@@ -36,6 +36,50 @@ pub struct MassDeletePause {
     pub direction: DeleteDirection,
     pub would_delete: usize,
     pub synced_total: usize,
+    /// The entries whose deletes were withheld, sorted: what the person is
+    /// asked about, and all an approval of it covers (`held_fingerprint`).
+    pub held: Vec<EntityId>,
+}
+
+/// A short, stable name for a set of withheld deletes: the same entries held
+/// in the same directions give the same name on every pass, and any other set
+/// gives another. A person approves the deletes they were shown by this name
+/// (`DeletePolicy::ApprovedFor`), so an approval cannot carry out a delete
+/// that joined the set after they looked -- one more file gone, a second
+/// direction held -- and is spent, not stretched, when the set changes.
+///
+/// Sixteen hex digits of a SHA-256 over the sorted (direction, entity) list.
+/// It tells two held sets apart; it guards nothing against a person who
+/// can already reach the control channel, so it need not be longer.
+pub fn held_fingerprint(paused: &[MassDeletePause]) -> String {
+    use sha2::Digest;
+    let mut lines: Vec<String> = paused
+        .iter()
+        .flat_map(|p| {
+            let side = match p.direction {
+                DeleteDirection::Local => "here",
+                DeleteDirection::Remote => "server",
+            };
+            p.held
+                .iter()
+                .map(move |id| format!("{side}:{}:{}", id.entity_type, id.server_id))
+        })
+        .collect();
+    lines.sort();
+    lines.dedup();
+    let digest = sha2::Sha256::digest(lines.join("\n").as_bytes());
+    digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
+}
+
+/// A record both sides agree on, and the folder it sits in on each side: what
+/// a delete of a folder above it takes with it (`run_round`, the guard).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncedRecord {
+    pub id: EntityId,
+    /// Its folder on this disk, where this round's scan found it.
+    pub here: Option<i64>,
+    /// Its folder on the server.
+    pub there: Option<i64>,
 }
 
 /// Everything one entry contributed to the round.
@@ -55,6 +99,9 @@ pub struct RoundOutcome {
     /// Deletes that were withheld pending a human answer. Their entries are
     /// untouched; nothing is lost by waiting.
     pub paused: Vec<MassDeletePause>,
+    /// Deletes the guard would have withheld that a person had approved, set
+    /// by set (`DeletePolicy::ApprovedFor`), and that this round lets through.
+    pub approved: Vec<MassDeletePause>,
 }
 
 impl RoundOutcome {
@@ -69,21 +116,28 @@ impl RoundOutcome {
 }
 
 /// How the caller answered the mass-delete prompt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeletePolicy {
     /// Stop and ask. The default, and what a headless run does when it cannot.
     Guard,
     /// The user looked at it and said go ahead.
     Approved,
+    /// A person approved the held set they were shown, by its fingerprint
+    /// (`held_fingerprint`). This round lets its deletes through only if what
+    /// it would hold is exactly that set; anything else is held and asked
+    /// about as under `Guard`.
+    ApprovedFor(String),
 }
 
 /// Run one reconciliation round.
 ///
 /// `synced_total` is the number of entries currently in agreement — the
-/// denominator the guard measures against.
+/// denominator the guard measures against. `synced` is each of them with its
+/// folder on each side, which is what a folder's delete is weighed by.
 pub fn run_round(
     inputs: Vec<RoundInput>,
     synced_total: usize,
+    synced: &[SyncedRecord],
     ctx: &Context,
     policy: DeletePolicy,
     parents: &FolderParents,
@@ -357,30 +411,48 @@ pub fn run_round(
     // that tidies up locally is not evidence about the server and vice versa,
     // so a legitimate bulk local cleanup must not be blocked by a coincidental
     // handful of remote deletes.
-    let local_deletes = count_actions(&resolved, |a| matches!(a, Action::TrashLocal));
-    let remote_deletes = count_actions(&resolved, |a| matches!(a, Action::TrashRemote));
+    //
+    // Counted in records, not in deletes: a folder's delete removes every
+    // synced record under it as well. A folder deleted here reaches the round
+    // as a delete of each record in it, but a folder trashed on the server
+    // arrives as one change, and counted as one delete, a web trash of the
+    // folder holding everything emptied every device without asking (B1). The
+    // records under it on both sides are what its delete takes -- one moved
+    // out on either side is moved out first -- so they are counted, held and
+    // named with it, and an approval covers exactly them.
+    let local_deletes = removed_by(&resolved, synced, parents, |a| matches!(a, Action::TrashLocal));
+    let remote_deletes = removed_by(&resolved, synced, parents, |a| matches!(a, Action::TrashRemote));
 
-    let mut block_local = false;
-    let mut block_remote = false;
-
-    if policy == DeletePolicy::Guard {
-        if is_mass_delete(local_deletes, synced_total) {
-            block_local = true;
-            out.paused.push(MassDeletePause {
+    let mut paused: Vec<MassDeletePause> = Vec::new();
+    if policy != DeletePolicy::Approved {
+        if is_mass_delete(local_deletes.len(), synced_total) {
+            paused.push(MassDeletePause {
                 direction: DeleteDirection::Local,
-                would_delete: local_deletes,
+                would_delete: local_deletes.len(),
                 synced_total,
+                held: local_deletes,
             });
         }
-        if is_mass_delete(remote_deletes, synced_total) {
-            block_remote = true;
-            out.paused.push(MassDeletePause {
+        if is_mass_delete(remote_deletes.len(), synced_total) {
+            paused.push(MassDeletePause {
                 direction: DeleteDirection::Remote,
-                would_delete: remote_deletes,
+                would_delete: remote_deletes.len(),
                 synced_total,
+                held: remote_deletes,
             });
         }
     }
+    // An approval is for the deletes the person was shown, all of them or
+    // none: a set that has grown, shrunk or turned since is a question they
+    // have not answered, and it is held and asked again.
+    if let DeletePolicy::ApprovedFor(shown) = &policy {
+        if !paused.is_empty() && held_fingerprint(&paused) == *shown {
+            out.approved = std::mem::take(&mut paused);
+        }
+    }
+    let block_local = paused.iter().any(|p| p.direction == DeleteDirection::Local);
+    let block_remote = paused.iter().any(|p| p.direction == DeleteDirection::Remote);
+    out.paused = paused;
 
     // Folders the user removed on this computer: their trash is in the plan
     // this round, or still in the journal from an earlier one (refused once
@@ -498,12 +570,50 @@ fn move_target(action: &Action) -> Option<crate::model::Placement> {
     }
 }
 
-fn count_actions(resolved: &[(RoundInput, Vec<Action>)], pred: impl Fn(&Action) -> bool) -> usize {
-    resolved
+/// What the deletes of this kind would remove, sorted and once each: every
+/// entry with such a delete, and every synced record under a folder with
+/// one, on both sides.
+fn removed_by(
+    resolved: &[(RoundInput, Vec<Action>)],
+    synced: &[SyncedRecord],
+    parents: &FolderParents,
+    pred: impl Fn(&Action) -> bool,
+) -> Vec<EntityId> {
+    let mut ids: std::collections::BTreeSet<EntityId> = resolved
         .iter()
-        .flat_map(|(_, actions)| actions.iter())
-        .filter(|a| pred(a))
-        .count()
+        .filter(|(_, actions)| actions.iter().any(&pred))
+        .map(|(input, _)| input.entry.id)
+        .collect();
+    let folders: std::collections::HashSet<i64> = ids
+        .iter()
+        .filter(|id| id.entity_type == crate::model::EntityType::Folder)
+        .map(|id| id.server_id)
+        .collect();
+    if !folders.is_empty() {
+        // Asked of the folder itself before its own parent, so a folder the
+        // map leaves out -- one the server has deleted -- still holds what is
+        // in it.
+        let under = |mut at: Option<i64>, chain: &HashMap<i64, Option<i64>>| {
+            let mut guard = 0;
+            while let Some(f) = at {
+                if folders.contains(&f) {
+                    return true;
+                }
+                guard += 1;
+                if guard > 512 {
+                    break;
+                }
+                at = chain.get(&f).copied().flatten();
+            }
+            false
+        };
+        for record in synced {
+            if under(record.here, &parents.local) && under(record.there, &parents.remote) {
+                ids.insert(record.id);
+            }
+        }
+    }
+    ids.into_iter().collect()
 }
 
 /// How long to wait before retrying a failed operation.
@@ -643,7 +753,7 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 100, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 100, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
         assert_eq!(out.plan.ops.len(), 2);
         assert!(!out.needs_confirmation());
     }
@@ -653,6 +763,7 @@ mod tests {
         let out = run_round(
             deleted_on(5, Side::ThisComputer),
             500,
+            &[],
             &ctx(),
             DeletePolicy::Guard,
             &FolderParents::default(),
@@ -669,6 +780,7 @@ mod tests {
         let out = run_round(
             deleted_on(200, Side::ThisComputer),
             400,
+            &[],
             &ctx(),
             DeletePolicy::Guard,
             &FolderParents::default(),
@@ -690,6 +802,7 @@ mod tests {
         let out = run_round(
             deleted_on(200, Side::Server),
             400,
+            &[],
             &ctx(),
             DeletePolicy::Guard,
             &FolderParents::default(),
@@ -704,6 +817,7 @@ mod tests {
         let out = run_round(
             deleted_on(200, Side::ThisComputer),
             400,
+            &[],
             &ctx(),
             DeletePolicy::Approved,
             &FolderParents::default(),
@@ -711,6 +825,191 @@ mod tests {
         );
         assert!(!out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 200);
+    }
+
+    #[test]
+    fn a_pause_names_every_delete_it_holds() {
+        let out = run_round(
+            deleted_on(200, Side::ThisComputer),
+            400,
+            &[],
+            &ctx(),
+            DeletePolicy::Guard,
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        let held: Vec<EntityId> = (1..=200).map(EntityId::file).collect();
+        assert_eq!(out.paused[0].held, held);
+    }
+
+    #[test]
+    fn a_held_set_is_named_by_what_it_holds_and_nothing_else() {
+        let pause = |direction, ids: &[i64]| MassDeletePause {
+            direction,
+            would_delete: ids.len(),
+            synced_total: 400,
+            held: ids.iter().copied().map(EntityId::file).collect(),
+        };
+        let a = held_fingerprint(&[pause(DeleteDirection::Remote, &[1, 2, 3])]);
+        assert_eq!(a.len(), 16);
+        // The same set, however it was listed, is the same name.
+        assert_eq!(a, held_fingerprint(&[pause(DeleteDirection::Remote, &[3, 1, 2])]));
+        // One more, one fewer, or the same entries going the other way: a
+        // question the person has not been asked.
+        assert_ne!(a, held_fingerprint(&[pause(DeleteDirection::Remote, &[1, 2, 3, 4])]));
+        assert_ne!(a, held_fingerprint(&[pause(DeleteDirection::Remote, &[1, 2])]));
+        assert_ne!(a, held_fingerprint(&[pause(DeleteDirection::Local, &[1, 2, 3])]));
+        assert_ne!(
+            a,
+            held_fingerprint(&[pause(DeleteDirection::Remote, &[1, 2, 3]), pause(DeleteDirection::Local, &[9])])
+        );
+        // A folder is not the file with its number.
+        let folder = MassDeletePause { held: vec![EntityId::folder(1), EntityId::file(2), EntityId::file(3)], ..pause(DeleteDirection::Remote, &[]) };
+        assert_ne!(a, held_fingerprint(&[folder]));
+    }
+
+    #[test]
+    fn an_approval_lets_through_exactly_the_set_it_was_given_for() {
+        let asked = run_round(
+            deleted_on(200, Side::ThisComputer),
+            400,
+            &[],
+            &ctx(),
+            DeletePolicy::Guard,
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        let shown = held_fingerprint(&asked.paused);
+        let out = run_round(
+            deleted_on(200, Side::ThisComputer),
+            400,
+            &[],
+            &ctx(),
+            DeletePolicy::ApprovedFor(shown),
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        assert!(!out.needs_confirmation());
+        assert_eq!(out.plan.ops.len(), 200);
+        assert!(out.plan.ops.iter().all(|op| op.action == Action::TrashRemote));
+        assert_eq!(out.approved, asked.paused, "the round says which approval it used");
+    }
+
+    #[test]
+    fn an_approval_for_a_set_that_has_changed_lets_nothing_through() {
+        // Shown 200, and one more file went before the answer came back: the
+        // person never saw that one, so none of them go and the round asks
+        // about all 201.
+        let asked = run_round(
+            deleted_on(200, Side::ThisComputer),
+            400,
+            &[],
+            &ctx(),
+            DeletePolicy::Guard,
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        let shown = held_fingerprint(&asked.paused);
+        let out = run_round(
+            deleted_on(201, Side::ThisComputer),
+            400,
+            &[],
+            &ctx(),
+            DeletePolicy::ApprovedFor(shown.clone()),
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        assert!(out.plan.is_empty(), "a delete the person was never shown went through");
+        assert!(out.approved.is_empty());
+        assert_eq!(out.paused[0].would_delete, 201);
+        assert_ne!(held_fingerprint(&out.paused), shown);
+    }
+
+    #[test]
+    fn an_approval_with_nothing_held_changes_nothing() {
+        let out = run_round(
+            deleted_on(5, Side::ThisComputer),
+            500,
+            &[],
+            &ctx(),
+            DeletePolicy::ApprovedFor("0123456789abcdef".into()),
+            &FolderParents::default(),
+            &Default::default(),
+        );
+        assert!(out.approved.is_empty() && !out.needs_confirmation());
+        assert_eq!(out.plan.ops.len(), 5);
+    }
+
+    /// A folder the server trashed, one change in the round, and the synced
+    /// records under it: `files` in it on both sides, two at the root.
+    fn a_folder_trashed_on_the_server(files: i64) -> (Vec<RoundInput>, Vec<SyncedRecord>) {
+        let art = Entry {
+            id: EntityId::folder(1),
+            synced_content: None,
+            remote_content: None,
+            ..entry(1, "Art")
+        };
+        let inputs = vec![RoundInput {
+            entry: art,
+            local: Delta::None,
+            remote: Delta::Deleted,
+            depth: 0,
+        }];
+        let mut synced = vec![SyncedRecord { id: EntityId::folder(1), here: None, there: None }];
+        for n in 0..files {
+            synced.push(SyncedRecord { id: EntityId::file(100 + n), here: Some(1), there: Some(1) });
+        }
+        synced.push(SyncedRecord { id: EntityId::file(7), here: None, there: None });
+        synced.push(SyncedRecord { id: EntityId::file(8), here: None, there: None });
+        (inputs, synced)
+    }
+
+    #[test]
+    fn a_folder_trashed_on_the_server_weighs_everything_in_it() {
+        // One change in the feed, sixty files on this disk. Counted as one
+        // delete, the whole folder left this computer without anybody asked
+        // (B1).
+        let (inputs, synced) = a_folder_trashed_on_the_server(60);
+        let out = run_round(inputs, synced.len(), &synced, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        assert_eq!(out.paused.len(), 1);
+        assert_eq!(out.paused[0].direction, DeleteDirection::Local);
+        assert_eq!(out.paused[0].would_delete, 61);
+        assert!(out.paused[0].held.contains(&EntityId::folder(1)) && out.paused[0].held.contains(&EntityId::file(159)));
+        assert!(!out.paused[0].held.contains(&EntityId::file(7)), "a file outside the folder was counted");
+        assert!(out.plan.is_empty(), "the folder's trash went through unasked");
+
+        // Approved by the set it showed, the one trash goes through.
+        let shown = held_fingerprint(&out.paused);
+        let (inputs, synced) = a_folder_trashed_on_the_server(60);
+        let out = run_round(inputs, synced.len(), &synced, &ctx(), DeletePolicy::ApprovedFor(shown), &FolderParents::default(), &Default::default());
+        assert_eq!(out.plan.ops.len(), 1);
+        assert_eq!(out.plan.ops[0].action, Action::TrashLocal);
+    }
+
+    #[test]
+    fn a_folder_trashed_on_the_server_with_less_than_the_threshold_in_it_just_goes() {
+        let (inputs, synced) = a_folder_trashed_on_the_server(30);
+        let out = run_round(inputs, synced.len(), &synced, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        assert!(!out.needs_confirmation());
+        assert_eq!(out.plan.ops.len(), 1);
+        assert_eq!(out.plan.ops[0].action, Action::TrashLocal);
+    }
+
+    #[test]
+    fn a_record_moved_out_of_a_deleted_folder_on_either_side_is_not_counted_with_it() {
+        // Moved out here, or by the server, before the trash: the move goes
+        // first and the trash does not take it.
+        let (inputs, mut synced) = a_folder_trashed_on_the_server(60);
+        for r in synced.iter_mut().filter(|r| r.id.entity_type == crate::model::EntityType::File && r.id.server_id >= 100) {
+            if r.id.server_id % 2 == 0 {
+                r.here = None;
+            } else {
+                r.there = Some(42);
+            }
+        }
+        let parents = FolderParents { local: Default::default(), remote: [(42, None)].into_iter().collect() };
+        let out = run_round(inputs, synced.len(), &synced, &ctx(), DeletePolicy::Guard, &parents, &Default::default());
+        assert!(!out.needs_confirmation(), "{:?}", out.paused);
     }
 
     #[test]
@@ -724,7 +1023,7 @@ mod tests {
             depth: 0,
         });
 
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 400, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
 
         assert_eq!(out.paused.len(), 1);
         assert_eq!(out.paused[0].direction, DeleteDirection::Remote);
@@ -747,7 +1046,7 @@ mod tests {
             depth: 0,
         });
 
-        let out = run_round(inputs, 400, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 400, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
 
         assert!(out.needs_confirmation());
         assert_eq!(out.plan.ops.len(), 1);
@@ -766,7 +1065,7 @@ mod tests {
             },
             depth: 0,
         }];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 10, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
 
         assert_eq!(out.issues.len(), 1);
         assert_eq!(out.issues[0].0, EntityId::file(1));
@@ -792,7 +1091,7 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 10, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
         assert_eq!(out.plan.broken_cycles.len(), 1);
     }
 
@@ -822,14 +1121,14 @@ mod tests {
                 depth: 0,
             },
         ];
-        let out = run_round(inputs, 10, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(inputs, 10, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
         let stages: Vec<Stage> = out.plan.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(stages, vec![Stage::CreateFolders, Stage::Transfer]);
     }
 
     #[test]
     fn an_empty_round_is_empty() {
-        let out = run_round(vec![], 0, &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
+        let out = run_round(vec![], 0, &[], &ctx(), DeletePolicy::Guard, &FolderParents::default(), &Default::default());
         assert!(out.is_empty() && !out.needs_confirmation());
     }
 

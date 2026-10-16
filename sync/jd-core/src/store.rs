@@ -503,6 +503,11 @@ impl Store {
         Ok(())
     }
 
+    pub fn delete_meta(&self, key: &str) -> StoreResult<()> {
+        self.conn.execute("DELETE FROM meta WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
     /// This device's park tag, minted the first time it parks anything.
     ///
     /// Taken from the key of that first park rather than drawn fresh, so no

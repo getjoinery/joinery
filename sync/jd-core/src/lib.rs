@@ -65,7 +65,7 @@ pub use naming::{apply_naming, NamingOutcome};
 pub use pass::{run_pass, PassOutcome};
 pub use reconcile::{is_mass_delete, reconcile, Action, Context, Issue, RaceHalf, Resolution, Side};
 pub use remote::{local_delta, remote_delta, RemoteState};
-pub use round::{run_round, DeletePolicy, MassDeletePause, RoundInput, RoundOutcome};
+pub use round::{run_round, DeletePolicy, MassDeletePause, RoundInput, RoundOutcome, SyncedRecord};
 pub use scan::{pair, KnownLocal, LocalChange, ObservedFile, ScanOutcome};
 pub use store::{Op, OpState, Store, StoreError, StoredIssue};
 pub use vault::{key_state, KeyState, Vault, VaultError};

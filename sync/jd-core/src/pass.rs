@@ -2010,7 +2010,20 @@ pub fn run_pass(
     // side prefers what the scan found over the agreement, because a folder
     // the user moved is where they put it.
     let mut parents = crate::order::FolderParents::default();
+    // And every record in agreement, with its folder on each side: what a
+    // folder's delete takes with it, which is what the guard weighs it by.
+    // Here is where this round's scan found it.
+    let moved_here: HashMap<EntityId, Option<i64>> =
+        inputs.iter().filter_map(|i| i.local.placement().map(|p| (i.entry.id, p.parent))).collect();
+    let mut synced: Vec<crate::round::SyncedRecord> = Vec::new();
     for e in all_entries(env)? {
+        if e.status == LocalStatus::Synced {
+            synced.push(crate::round::SyncedRecord {
+                id: e.id,
+                here: moved_here.get(&e.id).copied().unwrap_or(e.local_placement().parent),
+                there: e.remote.parent,
+            });
+        }
         if e.id.entity_type != EntityType::Folder || e.remote_deleted {
             continue;
         }
@@ -2034,7 +2047,14 @@ pub fn run_pass(
         .filter(|op| op.kind == "trash_remote" && op.entity.entity_type == EntityType::Folder)
         .map(|op| op.entity.server_id)
         .collect();
-    out.round = run_round(inputs, synced_total, ctx, policy, &parents, &trash_already_queued);
+    // A person's answer to the guard, kept until a round has read it: it goes
+    // through only for the set it names (`approve_deletes`).
+    let approval = env.store.get_meta(DELETES_APPROVED)?;
+    let policy = match (policy, &approval) {
+        (DeletePolicy::Guard, Some(shown)) => DeletePolicy::ApprovedFor(shown.clone()),
+        (policy, _) => policy,
+    };
+    out.round = run_round(inputs, synced_total, &synced, ctx, policy, &parents, &trash_already_queued);
     if let Some(t) = trace.as_mut() {
         t.round_ended_ms = (env.now_ms)();
         for op in &out.round.plan.ops {
@@ -2210,6 +2230,13 @@ pub fn run_pass(
             env.store.set_op_params(op.op_id, &serde_json::json!({ "decided_at": next_cursor }).to_string())?;
         }
     }
+    // An approval answers one question, once. Used, its deletes are in the
+    // journal now and it is spent; unused, what it named is no longer what
+    // is held, and the person is asked about what is.
+    if approval.is_some() {
+        env.store.delete_meta(DELETES_APPROVED)?;
+    }
+    say_what_deletes_are_held(env, &out.round.paused)?;
     out.exec = match trace.as_mut() {
         Some(t) => crate::execute::run_queued_with(env, &mut |op, outcome| {
             t.ops.push((op.op_id, op.kind.clone(), crate::trace::name(op.entity), format!("{outcome:?}")));
@@ -3715,6 +3742,138 @@ fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
         env.store.raise_issue(None, KEEPS_FAILING, &t, (env.now_ms)() as i64)?;
     }
     Ok(())
+}
+
+/// The one issue for deletes the mass-delete guard holds
+/// (`say_what_deletes_are_held`).
+pub const DELETES_HELD: &str = "deletes_held";
+
+/// The store's note of a person's approval of a held set: its fingerprint
+/// (`round::held_fingerprint`), until the next round reads it.
+pub(crate) const DELETES_APPROVED: &str = "deletes_approved";
+
+/// How many held deletes the issue names; the count says how many there are.
+const HELD_EXAMPLES: usize = 3;
+
+/// Approve the deletes the guard holds, by the fingerprint the issue showed
+/// (`held_deletes_fingerprint`). Kept in the store, so an approval given
+/// while a pass runs, or before a restart, is read by the next round; that
+/// round carries the deletes out if, and only if, what it would hold is still
+/// exactly that set, and spends the approval either way.
+pub fn approve_deletes(store: &crate::store::Store, fingerprint: &str) -> crate::store::StoreResult<()> {
+    store.set_meta(DELETES_APPROVED, fingerprint)
+}
+
+/// The fingerprint a held-deletes issue's detail names, which is what an
+/// approval of it has to quote. The detail is written in one place
+/// (`held_deletes_text`), so it is read in one place too.
+pub fn held_deletes_fingerprint(detail: &str) -> Option<&str> {
+    let start = detail.find(HELD_SET_MARK)? + HELD_SET_MARK.len();
+    let fingerprint = detail[start..].split(')').next()?;
+    is_a_held_set(fingerprint).then_some(fingerprint)
+}
+
+/// Whether this could name a held set at all (`round::held_fingerprint`):
+/// what a caller is refused for before anything is asked.
+pub fn is_a_held_set(fingerprint: &str) -> bool {
+    fingerprint.len() == 16 && fingerprint.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+const HELD_SET_MARK: &str = "(held set ";
+
+/// Deletes the guard holds are said, in one issue for the device: how many,
+/// on which side, a few of them by name, and what to do -- put them back, or
+/// approve exactly this set. Without it a person who deleted more than a
+/// quarter of their files saw those deletes never reach the server, with the
+/// tray green and nothing said, for ever. A state, so it is withdrawn the pass
+/// nothing is held: the deletes approved and carried out, or the files back.
+/// A held set that changes is a new question, and its words (and the
+/// fingerprint in them) change with it, so an approval of the old set is
+/// never read as an answer to the new one.
+fn say_what_deletes_are_held(env: &ExecEnv, paused: &[crate::round::MassDeletePause]) -> Result<(), ExecError> {
+    let text = if paused.is_empty() {
+        None
+    } else {
+        let mut sides = Vec::new();
+        for pause in paused {
+            let held: std::collections::HashSet<EntityId> = pause.held.iter().copied().collect();
+            let mut tops: Vec<(String, bool)> = Vec::new();
+            for id in &pause.held {
+                let Some(entry) = env.store.get_entry(*id)? else { continue };
+                // What the person deleted, not everything under it: a held
+                // folder speaks for the held files inside it.
+                if entry.agreed_placement().parent.is_some_and(|p| held.contains(&EntityId::folder(p))) {
+                    continue;
+                }
+                let path = agreed_path(env, &entry)?.unwrap_or_else(|| entry.agreed_local_name().to_string());
+                tops.push((path, id.entity_type == EntityType::Folder));
+            }
+            tops.sort();
+            tops.truncate(HELD_EXAMPLES);
+            sides.push((pause.direction, pause.held.len(), tops));
+        }
+        Some(held_deletes_text(&sides, &crate::round::held_fingerprint(paused)))
+    };
+    let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == DELETES_HELD).collect();
+    let current = text.as_ref().is_some_and(|t| open.iter().any(|i| &i.detail == t));
+    for issue in &open {
+        if text.as_ref() != Some(&issue.detail) {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    if let Some(t) = text.filter(|_| !current) {
+        env.store.raise_issue(None, DELETES_HELD, &t, (env.now_ms)() as i64)?;
+    }
+    Ok(())
+}
+
+/// The words of the held-deletes issue: per side, how many and a few of them
+/// by path (a folder said as one), then why nothing went, how to keep them,
+/// and the set an approval names.
+fn held_deletes_text(sides: &[(crate::round::DeleteDirection, usize, Vec<(String, bool)>)], fingerprint: &str) -> String {
+    use crate::round::DeleteDirection;
+    let mut text = String::new();
+    for (direction, count, examples) in sides {
+        let named: Vec<String> = examples
+            .iter()
+            .map(|(path, folder)| {
+                if *folder {
+                    format!("the folder \u{201c}{path}\u{201d}")
+                } else {
+                    format!("\u{201c}{path}\u{201d}")
+                }
+            })
+            .collect();
+        let among = match named.split_last() {
+            None => String::new(),
+            Some((last, [])) => format!(", among them {last}"),
+            Some((last, rest)) => format!(", among them {} and {last}", rest.join(", ")),
+        };
+        if !text.is_empty() {
+            text.push(' ');
+        }
+        text.push_str(&match direction {
+            DeleteDirection::Remote => {
+                format!("{count} items deleted on this computer have not been deleted on the server{among}.")
+            }
+            DeleteDirection::Local => format!(
+                "{count} items deleted on the server or on another device have not been removed from this computer{among}."
+            ),
+        });
+    }
+    let here = sides.iter().any(|(d, _, _)| *d == DeleteDirection::Remote);
+    let there = sides.iter().any(|(d, _, _)| *d == DeleteDirection::Local);
+    let keep = match (here, there) {
+        (true, false) => "put them back where they were",
+        (false, true) => "restore them from the trash on the web",
+        _ => "put back what was deleted here, and restore from the trash on the web what was deleted there",
+    };
+    text.push_str(&format!(
+        " That is more than a quarter of everything synced, and a mistake, a disk that came back empty \
+         and ransomware all look like this, so nothing is deleted until you say so. To keep them, {keep}. \
+         To go ahead, approve these deletes {HELD_SET_MARK}{fingerprint})."
+    ));
+    text
 }
 
 fn say_whether_renames_can_be_tracked(env: &ExecEnv) -> Result<(), ExecError> {
@@ -8366,5 +8525,57 @@ mod tests {
         let mut private = plain.clone();
         private["syncable"] = json!(false);
         assert!(!state_of(&private).unwrap().1.syncable);
+    }
+
+    /// The held-deletes issue says how many, on which side, a few by name
+    /// (a folder as one), how to keep them, and the set an approval names;
+    /// and the set is read back out of the words exactly.
+    #[test]
+    fn held_deletes_are_said_with_the_set_an_approval_names() {
+        use crate::round::DeleteDirection;
+        let text = held_deletes_text(
+            &[(
+                DeleteDirection::Remote,
+                61,
+                vec![("Art".into(), true), ("notes.txt".into(), false)],
+            )],
+            "0123456789abcdef",
+        );
+        assert!(text.starts_with("61 items deleted on this computer have not been deleted on the server"), "{text}");
+        assert!(text.contains("among them the folder \u{201c}Art\u{201d} and \u{201c}notes.txt\u{201d}."), "{text}");
+        assert!(text.contains("To keep them, put them back where they were."), "{text}");
+        assert_eq!(held_deletes_fingerprint(&text), Some("0123456789abcdef"));
+
+        let there = held_deletes_text(&[(DeleteDirection::Local, 80, vec![("a.txt".into(), false)])], "fedcba9876543210");
+        assert!(there.contains("80 items deleted on the server or on another device have not been removed from this computer, among them \u{201c}a.txt\u{201d}."), "{there}");
+        assert!(there.contains("restore them from the trash on the web"), "{there}");
+        assert_eq!(held_deletes_fingerprint(&there), Some("fedcba9876543210"));
+
+        let both = held_deletes_text(
+            &[(DeleteDirection::Local, 80, vec![]), (DeleteDirection::Remote, 61, vec![])],
+            "00000000ffffffff",
+        );
+        assert!(both.contains("put back what was deleted here, and restore from the trash on the web what was deleted there"), "{both}");
+
+        // Words that only look like it name no set.
+        assert_eq!(held_deletes_fingerprint("approve these deletes (held set 0123)"), None);
+        assert_eq!(held_deletes_fingerprint("nothing here"), None);
+    }
+
+    /// An approval is a note in the store until a round reads it: given
+    /// before a restart, it is still there after.
+    #[test]
+    fn an_approval_is_kept_until_a_round_reads_it() {
+        let dir = std::env::temp_dir().join(format!("jd-approval-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+        approve_deletes(&crate::store::Store::open(&path).unwrap(), "0123456789abcdef").unwrap();
+        let store = crate::store::Store::open(&path).unwrap();
+        assert_eq!(store.get_meta(DELETES_APPROVED).unwrap().as_deref(), Some("0123456789abcdef"));
+        store.delete_meta(DELETES_APPROVED).unwrap();
+        assert_eq!(store.get_meta(DELETES_APPROVED).unwrap(), None);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
