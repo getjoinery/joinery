@@ -20,6 +20,7 @@
  * that way while its agent had not been asked for days (the plugin checks
  * never reached the dashboard).
  *
+ * @version 1.7 - a node in an install state (a held or retired container, a dormant copy) is asked for neither (B31)
  * @version 1.6 - a machine that told the escrow holder it opened after its last host report is asked within minutes (B74)
  * @version 1.5 - the scheduled pass leaves a test's fixture nodes alone (RunNodeUptimeChecks::watched_nodes())
  * @version 1.4 - a machine asked to reboot is asked for its host report every REBOOT_REFRESH_SECONDS until it is seen back
@@ -235,6 +236,26 @@ $srt_dres[1]->set('dre_mgn_managed_node_id', $srt_plain->key);
 $srt_dres[1]->set('dre_unlocked_time', gmdate('Y-m-d H:i:s'));
 $srt_dres[1]->save();
 check(!DataRootEscrowSync::opened_since_report($srt_plain), 'a machine whose report says no encrypted data root is not asked for this');
+
+section('A node in an install state is asked for nothing (B31)');
+// A switch-over's old container is held stopped: a job queued for it never
+// ran, and a pending one refused Permanently Delete Site on it.
+$srt_states = array();
+foreach (array('retired', 'held', 'copy', 'switching') as $srt_state) {
+	$srt_states[$srt_state] = srt_node($tag, 'state' . $srt_state, array('mgn_agent_public_key' => 'harnesstest-key',
+		'mgn_agent_primitives' => 'check_status,host_report', 'mgn_last_status_check' => $stale_at,
+		'mgn_install_state' => $srt_state, 'mgn_container_name' => 'harnesstestsrt' . $srt_state));
+}
+$queued = $task->refresh_status_facts(array_values($srt_states), gmdate('Y-m-d H:i:s'));
+check($queued === 0, 'no job for a retired, held, copy or switching node', "queued=$queued");
+foreach ($srt_states as $srt_state => $srt_n) {
+	check(srt_jobs($srt_n) === 0 && srt_jobs($srt_n, 'host_report') === 0, "a $srt_state node has no check_status and no host_report");
+}
+$srt_states['retired']->set('mgn_install_state', null);
+$srt_states['retired']->save();
+$queued = $task->refresh_status_facts(array($srt_states['retired']), gmdate('Y-m-d H:i:s'));
+check($queued === 2 && srt_jobs($srt_states['retired']) === 1 && srt_jobs($srt_states['retired'], 'host_report') === 1,
+	'the same node back at work (the way back) is asked for both again', "queued=$queued");
 
 // The scheduled pass never sees a suite's own nodes: it queued check_status
 // and host_report for them mid-run, and those jobs outlived the nodes.

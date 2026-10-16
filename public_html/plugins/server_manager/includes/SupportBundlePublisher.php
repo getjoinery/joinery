@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.24 - carries install_site_engine.sh and the five site_engine/ files it reads (ENGINE and the site
+ *                system call filter with their records): host housekeeping converges an engine host onto its
+ *                release's engine and filter, which only install.sh did before (specs/site_container_engine.md B32)
  * @version 1.23 - carries site_quiet_host.sh, the host's half of a site container's quiet state (the
  *                site_quiet_host word, host housekeeping, the engine's hook), and discard_copy.sh, a dormant
  *                copy removed from its host (specs/site_container_engine.md D9)
@@ -182,6 +185,17 @@ class SupportBundlePublisher {
 		'maintenance_scripts/sysadmin_tools/restart_unit.sh',
 		'maintenance_scripts/sysadmin_tools/restart_container.sh',
 		'maintenance_scripts/sysadmin_tools/hold_container.sh',
+		// The site container engine and the filter every site runs under:
+		// host_housekeeping.sh runs install_site_engine.sh converge on a host
+		// that has the engine, which installs ENGINE's engine when it is not
+		// the current one and writes the filter from the profile and its
+		// records (each checked against the other). Sources nothing.
+		'maintenance_scripts/install_tools/install_site_engine.sh',
+		'maintenance_scripts/install_tools/site_engine/ENGINE',
+		'maintenance_scripts/install_tools/site_engine/site_seccomp.json',
+		'maintenance_scripts/install_tools/site_engine/site_seccomp.source',
+		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.json',
+		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.source',
 		// site_quiet_host: the host's half of a site container's quiet state
 		// (specs/site_container_engine.md D9), run by the word of that name,
 		// by host_housekeeping.sh (install and assert) and, as its installed

@@ -5,6 +5,9 @@
 # from the same figures and cannot drift apart
 # (specs/multi_tenant_docker_hosts.md WP2).
 #
+# Version: 1.0.2 - a container with no memory limit is told to get one from install.sh site or site_limits.sh,
+#                which take it on Docker and on the site container engine alike, not from docker commands
+#                (specs/site_container_engine.md B33)
 # Version: 1.0.1 - notes that ImageDecoder (public_html/includes/ImageDecoder.php) mirrors the
 #                  base and shared_buffers figures to size its decode ceiling; a unit test
 #                  (tests/unit/image_decoder_test.php) pins the two equal, so change both.
@@ -102,8 +105,9 @@ container's budget: every container on the host reads the same figure, so
 sizing from it hands each one a fraction of memory they all share.
 
 Give the container a limit, and this sizes itself from that:
-    docker run --memory=512m ...          (install.sh site --memory=512m)
-    docker update --memory=512m NAME      (an already running container)
+    install.sh site NAME DOMAIN --memory=512m        (a new site)
+    sysadmin_tools/site_limits.sh NAME 512m          (a site already running, on its host;
+                                                      or Site limits on the host's node page)
 Or state the budget directly with --ram-mb=512.
 MSG
         return 3
