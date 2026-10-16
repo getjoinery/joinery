@@ -513,12 +513,17 @@ impl World {
     /// case: one laptop can read the encrypted folder and another cannot, and
     /// they have to sync everything else without either of them getting it
     /// wrong.
+    ///
+    /// The server learns it too, as the approval records the scopes a device
+    /// was handed: after a rotation, giving a device the new key is what
+    /// linking it again does.
     pub fn give_vault(&mut self, device_name: &str, vault: &SimVault) {
         self.devices
             .iter_mut()
             .find(|d| d.name == device_name)
             .unwrap_or_else(|| panic!("no device called {device_name}"))
             .set_vault(vault);
+        self.server.hand_vault_to(device_name);
         if !self
             .vaults
             .iter()

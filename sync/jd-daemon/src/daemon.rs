@@ -238,6 +238,9 @@ pub struct Daemon {
     /// Where each pass's trace goes, on a soak device that asked
     /// (`crate::passlog`). None on every user's client.
     pass_journal: Option<crate::passlog::PassJournal>,
+    /// The vault probe refusal this process last wrote to its log
+    /// (`say_a_refused_vault_probe`).
+    probe_refusal_said: Option<String>,
 }
 
 impl Daemon {
@@ -286,6 +289,7 @@ impl Daemon {
             custody,
             vault,
             pass_journal,
+            probe_refusal_said: None,
         }
     }
 
@@ -449,8 +453,25 @@ impl Daemon {
                     self.last_poll_ms = 0;
                     self.publish_folders();
                 }
+                self.say_a_refused_vault_probe();
             }
             Err(e) => self.blocker = Some(blocker_for(&e)),
+        }
+    }
+
+    /// Say once, in the log, that the server will not answer this device's
+    /// vault probe. While it refuses, a rotated vault key cannot be noticed
+    /// here, and the refusal raises no issue (it is held like an answer), so
+    /// without this line nothing anywhere would show why nothing was said.
+    fn say_a_refused_vault_probe(&mut self) {
+        let refusal = self
+            .store
+            .get_meta(jd_core::pass::VAULT_PROBE_REFUSED)
+            .ok()
+            .flatten()
+            .filter(|r| !r.is_empty());
+        if let Some(line) = vault_probe_refusal_line(&mut self.probe_refusal_said, refusal) {
+            eprintln!("{line}");
         }
     }
 
@@ -497,6 +518,9 @@ impl Daemon {
         let Ok(health) = health::read(&self.store, self.blocker.clone(), self.last_pass_ms) else {
             return;
         };
+        // Holding a key the account has replaced is not being able to open
+        // encrypted folders here.
+        let vault = health.vault_opens(self.vault.is_some());
         let snapshot = Snapshot {
             health,
             paused: self.paused,
@@ -504,7 +528,7 @@ impl Daemon {
             base_url: self.config.base_url.clone(),
             sync_root: self.config.sync_root.display().to_string(),
             custody: self.custody.clone(),
-            vault: self.vault.is_some(),
+            vault,
         };
         if let Ok(mut slot) = self.shared.snapshot.lock() {
             *slot = Some(snapshot);
@@ -566,6 +590,21 @@ pub fn open_store(path: &std::path::Path, config: &Config) -> Result<Store, Stri
         .and_then(|_| store.set_meta(STORE_ROOT, &root))
         .map_err(|e| e.to_string())?;
     Ok(store)
+}
+
+/// The log line for a vault probe refusal, once per refusal: `None` while the
+/// refusal is the one already said, or there is none.
+fn vault_probe_refusal_line(said: &mut Option<String>, now: Option<String>) -> Option<String> {
+    if *said == now {
+        return None;
+    }
+    *said = now.clone();
+    now.map(|why| {
+        format!(
+            "warning: the server does not let this device ask about the vault key ({why}); \
+             a rotation of the key cannot be noticed here"
+        )
+    })
 }
 
 /// Turn an engine error into something the user can act on.
@@ -975,6 +1014,7 @@ pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         "sync_root": s.sync_root,
         "custody": s.custody,
         "vault": s.vault,
+        "vault_relink": s.health.vault_needs_relink(),
         "waiting_for_keys": s.health.waiting_for_keys(),
         "tracked": s.health.tracked(),
         "settled": s.health.settled(),
@@ -1086,6 +1126,55 @@ mod tests {
             bytes < 64 * 1024,
             "a status answer grew to {bytes} bytes with 400 issues open"
         );
+    }
+
+    #[test]
+    fn a_status_answer_says_when_encrypted_folders_need_this_computer_linked_again() {
+        // The CLI and every shell read these two fields; the first alone said
+        // "folders can be opened on this device" to a device holding a key
+        // the account had replaced.
+        let health = Health {
+            indicator: Indicator::Attention,
+            entries: Default::default(),
+            pending_ops: 0,
+            issues: vec![crate::health::Issue {
+                id: 1,
+                kind: jd_core::pass::VAULT_RELINK.into(),
+                detail: String::new(),
+                summary: String::new(),
+                created_at: 0,
+            }],
+            blocker: None,
+            last_pass_ms: None,
+            cursor: 0,
+        };
+        let snapshot = Snapshot {
+            vault: health.vault_opens(true),
+            health,
+            paused: false,
+            device_name: "device-a".into(),
+            base_url: "https://example.com".into(),
+            sync_root: "/home/u/Joinery Drive".into(),
+            custody: "in a file".into(),
+        };
+        let json = snapshot_json(&snapshot);
+        assert_eq!(json["vault"], false);
+        assert_eq!(json["vault_relink"], true);
+    }
+
+    #[test]
+    fn a_refused_vault_probe_is_said_once_per_refusal() {
+        // Every pass reads the note; the log hears of a refusal once, again
+        // only when it changes, and again after one was answered in between.
+        let mut said = None;
+        let refused = || Some("403 Forbidden".to_string());
+        let line = vault_probe_refusal_line(&mut said, refused()).expect("said the first time");
+        assert!(line.contains("does not let this device ask about the vault key"), "{line}");
+        assert!(line.contains("403 Forbidden"), "{line}");
+        assert_eq!(vault_probe_refusal_line(&mut said, refused()), None, "said every pass");
+        assert!(vault_probe_refusal_line(&mut said, Some("404 no such action".into())).is_some());
+        assert_eq!(vault_probe_refusal_line(&mut said, None), None, "an answer is not a warning");
+        assert!(vault_probe_refusal_line(&mut said, refused()).is_some(), "refused again after an answer");
     }
 
     #[test]

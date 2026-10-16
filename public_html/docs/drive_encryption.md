@@ -307,10 +307,27 @@ folders. A device that never offered a public key is not offered the choice.
 Rotating the drive vault key (`docs/sealed_vault.md` § Rotating a
 client-custody key) takes `drive` off every linked device: each holds the
 retired secret, and must be linked again to receive the new one. A sync client
-notices through `vault_client_probe`, whose key generation moves on. The
-rotation re-seals every `FileKeyGrant` the member holds — on their own files and
-on files shared with them — to the new key in the browser
+notices through `vault_client_probe`: the public key it answers is no longer the
+one the device's secret derives, and the client raises a `vault_relink` issue
+asking for this computer to be linked again (`drive_sync.md`, Encrypted files
+and folders). The rotation re-seals every `FileKeyGrant` the member holds — on
+their own files and on files shared with them — to the new key in the browser
 (`assets/js/drive-reseal.js`, through `drive_key_grants_reseal`).
+
+**Rotating the vault key does not shut a device out.** A file's key never
+changes: a rotation re-seals the wrappings, not the keys. So a computer still
+holding the retired vault secret goes on opening every file key it already
+unwrapped — every file it could open before the rotation, including new
+versions of those files — and only what is saved afterwards, under new file
+keys, is closed to it. Rotation is the answer to a vault secret that may have
+been copied, not to a lost or stolen computer. To shut a computer out, remove
+it (`drive_device_revoke`, from the Sync Devices list): its session key stops
+working, so the server answers it nothing more — no grants, no download links,
+no feed. A download link it was already handed works until it expires (an hour
+at most); the sync client goes by the grant in the server's own answer for
+every download, so a grant withdrawn before that answer stops the file there,
+and nothing of it is written. What the computer had already synced stays on
+its disk; nothing on the server reaches back into it.
 
 ### Timestamps
 

@@ -138,6 +138,20 @@ impl Health {
         self.entries.get("pending_key").copied().unwrap_or(0)
     }
 
+    /// The account's vault key was replaced, and this device holds the old
+    /// one (`jd_core::pass::VAULT_RELINK`). Encrypted files saved since then
+    /// cannot be opened here until it is linked again, so nothing may say
+    /// that encrypted folders open on this device while this stands.
+    pub fn vault_needs_relink(&self) -> bool {
+        self.issues.iter().any(|i| i.kind == jd_core::pass::VAULT_RELINK)
+    }
+
+    /// Whether encrypted folders open on this device: it holds a vault key,
+    /// and that key is still the account's.
+    pub fn vault_opens(&self, key_held: bool) -> bool {
+        key_held && !self.vault_needs_relink()
+    }
+
     /// One line for a tray tooltip or a CLI header.
     pub fn summary(&self) -> String {
         if let Some(blocker) = &self.blocker {
@@ -241,6 +255,7 @@ fn describe(raw: StoredIssue) -> Issue {
         "pending_key" => {
             "Waiting for the owner to grant this device a key for an encrypted folder.".into()
         }
+        "vault_relink" => "The key for encrypted folders was replaced, and this computer holds the old one. Link it again (joinery-drive login, from the desktop session) to open encrypted files saved since; everything else keeps syncing.".into(),
         _ => plain_enough(&raw.detail),
     };
     Issue {
@@ -388,6 +403,27 @@ mod tests {
             last_pass_ms: None,
             cursor: 0,
         }
+    }
+
+    /// A device holding a vault key the account replaced cannot open what is
+    /// sealed since, so it must not be described as one that can, and the
+    /// issue says what to do in words.
+    #[test]
+    fn a_replaced_vault_key_is_not_described_as_opening_encrypted_folders() {
+        let mut h = health(&[("synced", 3), ("pending_key", 2)], 0, 0);
+        assert!(h.vault_opens(true));
+        assert!(!h.vault_opens(false));
+        h.issues.push(describe(StoredIssue {
+            issue_id: 7,
+            entity: None,
+            kind: jd_core::pass::VAULT_RELINK.into(),
+            detail: "the engine's sentence".into(),
+            created_at: 0,
+            dismissed: false,
+        }));
+        assert!(h.vault_needs_relink());
+        assert!(!h.vault_opens(true), "a replaced key opens nothing saved since");
+        assert!(h.issues[0].summary.contains("joinery-drive login"), "{}", h.issues[0].summary);
     }
 
     /// A file whose delete lost to an edit says so, and says the folder came

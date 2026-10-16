@@ -2278,6 +2278,42 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // An encrypted file needs its key before a single byte is worth fetching.
     // Asked for here rather than at the top: an entry can lose its grant between
     // the round that planned this and the moment it runs.
+    //
+    // So the grant is the one in this answer, not the one the record holds.
+    // `drive_stat` carries the caller's grant on every encrypted file, null
+    // when they hold none, and the record keeps whatever grant it last heard
+    // of (`absorb_remote` never erases one). Read from the record, a key the
+    // owner withdrew after the round planned this still opened the file, and
+    // its plaintext was written here after the server had said this user may
+    // no longer read it.
+    let entry = match item.get("wrapped_file_key").and_then(Value::as_str) {
+        Some(arrived) if entry.is_encrypted => {
+            let hold = crate::pass::grant_to_hold(env, entry.wrapped_file_key.as_deref(), arrived);
+            if entry.wrapped_file_key.as_deref() == Some(hold.as_str()) {
+                entry
+            } else {
+                let mut entry = entry;
+                entry.wrapped_file_key = Some(hold);
+                env.store.put_entry(&entry)?;
+                entry
+            }
+        }
+        None if entry.is_encrypted && entry.wrapped_file_key.is_some() => {
+            // Withdrawn. The record forgets the grant, so naming holds the
+            // file as one waiting for a key (`no_key_for`) and nothing plans
+            // this download again until a key arrives on the feed; the
+            // issue says so, and the download that lands then withdraws it.
+            let mut entry = entry;
+            entry.wrapped_file_key = None;
+            env.store.put_entry(&entry)?;
+            return Ok(OpOutcome::Withdrawn(
+                "the key to this encrypted file was withdrawn before it arrived, so nothing of it \
+                 was written to this computer; it comes down if the key is given again"
+                    .into(),
+            ));
+        }
+        _ => entry,
+    };
     let file_key = if entry.is_encrypted {
         let (Some(vault), Some(wrapped)) = (env.vault, entry.wrapped_file_key.as_deref()) else {
             return Ok(OpOutcome::Retry(
