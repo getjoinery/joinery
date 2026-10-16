@@ -331,6 +331,15 @@ chk "and keeps the old one" "$(grep -cxF "$KEY_A" "$KEYS")" "1"
 printf '{"version":"1.2","signing_public_key":"not-a-key"}\n' > "$T/public_html/agent_dist/manifest.json"
 JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" >/dev/null 2>&1
 chk "a malformed bundle key is not written" "$(wc -l < "$KEYS")" "2"
+# Once a verdict has recorded the trusted set (config/release_trust,
+# specs/release_key_rotation.md R1, F3), the set is the record's: a bundle
+# manifest, which any installed release puts here, adds nothing to it.
+KEY_C="$(php -r 'echo base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()));')"
+printf '{"format":1}\n' > "$T/config/release_trust"
+printf '{"version":"1.2","signing_public_key":"%s","release_keys":["%s"]}\n' "$KEY_C" "$KEY_C" > "$T/public_html/agent_dist/manifest.json"
+out=$(JOINERY_CONVERGER_ENTRY=/dev/null bash "$T/nogate.sh" --site-root="$T" 2>&1)
+chk "with the set recorded, a bundle's new release key is not appended (R1)" "$(grep -cxF "$KEY_C" "$KEYS")|$(echo "$out" | grep -c "release key: config/release_verify_keys carries")" "0|0"
+rm -f "$T/config/release_trust"
 
 echo "== the release log's keys, and the switch that requires it (release_transparency D5, D6) =="
 # The statement and log keys come from the same manifest, appended like the

@@ -157,12 +157,17 @@ if ($admin === null) {
 	$_SESSION['usr_user_id'] = $admin->key;
 	$_SESSION['loggedin'] = true;
 	$_SESSION['permission'] = 10;
-	$queued_before = count(RootRequest::pending());
+	// Upgrade requests only, by id: other suites and the machine queue root
+	// requests of their own while this runs.
+	$upgrade_ids = function () {
+		return array_column(array_filter(RootRequest::pending(), function ($r) { return $r['kind'] === 'upgrade'; }), 'id');
+	};
+	$queued_before = $upgrade_ids();
 	$saved_method = $_SERVER['REQUEST_METHOD'] ?? null;
 	$_SERVER['REQUEST_METHOD'] = 'GET';
 	$result = admin_updates_logic(array('action' => 'queue_upgrade'));
 	if ($saved_method === null) { unset($_SERVER['REQUEST_METHOD']); } else { $_SERVER['REQUEST_METHOD'] = $saved_method; }
-	check($result->redirect === null && count(RootRequest::pending()) === $queued_before,
+	check($result->redirect === null && array_diff($upgrade_ids(), $queued_before) === array(),
 		'a GET carrying action=queue_upgrade renders the page and queues nothing');
 	$_SESSION = $saved_session;
 }

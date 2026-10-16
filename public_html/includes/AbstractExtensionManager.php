@@ -14,6 +14,8 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
  * utils/install_extension.php. refreshFromUpstream(), installFromZip() and
  * installFromTarGz() refuse at the door when called under the web server.
  *
+ * @version 1.7 - refreshFromUpstream() writes the trusted set a package's release leaves once the package is in
+ *                place, the log keys before (specs/release_key_rotation.md R1)
  * @version 1.6 - writeManifestReceivesUpgrades() changes the one value in place, so writing back the
  *                shipped value restores the signed bytes (specs/local_edits_detected.md, reviewer2 F1)
  * @version 1.5 - keys a package proves that cannot be recorded stop the refresh before the live copy is replaced
@@ -431,10 +433,12 @@ abstract class AbstractExtensionManager {
             throw new PackageUnverifiedException($verdict);
         }
         // Keys its release-log chain proved go to the node's key files - by
-        // root only: the verifier never writes them (B9).
-        if ($verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+        // root only: the verifier never writes them (B9). The log keys now,
+        // the trusted set once the package is in place (persistProvenKeys()).
+        $writes_keys = $verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0;
+        if ($writes_keys) {
             try {
-                PackageSignature::persistProvenKeys($verdict->keys_proven);
+                PackageSignature::persistProvenKeys(PackageSignature::withoutTrust($verdict->keys_proven));
             } catch (Throwable $e) {
                 // The keys first, or nothing: a refresh whose keys were not
                 // kept lowers the bar the next release is checked against.
@@ -469,6 +473,16 @@ abstract class AbstractExtensionManager {
             $rmtree($aside);
         }
         $rmtree($work);
+        if ($writes_keys && PackageSignature::trustOf($verdict->keys_proven)) {
+            try {
+                PackageSignature::persistProvenKeys(PackageSignature::trustOf($verdict->keys_proven));
+            } catch (Throwable $e) {
+                // In place either way: root's next verify of the live tree
+                // records the same set (the code check on a host that refuses
+                // unsigned code, else the plugin installers' run, at least daily).
+                error_log('refreshFromUpstream: the release keys ' . $name . ' sets could not be recorded: ' . $e->getMessage());
+            }
+        }
         return true;
     }
 

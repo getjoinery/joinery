@@ -26,6 +26,10 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 2.12 - repoAuthority(): the keys allowed to change the trusted set, from release_keys/authority
+ *                (specs/release_key_rotation.md R1, F2); the agent is built with every listed release key
+ *                (baked_keys.release_keys, R3), and a key list or signing key changed at the same agent
+ *                version is refused (F12)
  * @version 2.11 - a rebuild replaces the agent's own files only (ownFile()): the support bundle and the release
  *                 statement beside them go on into the new agent_dist, so a bundle carried forward is there (B70)
  * @version 2.10 - publish() takes $source: the agent is built from a copy of its source commit, so an
@@ -175,6 +179,24 @@ class AgentDistPublisher {
 				// site sign" is read, not inferred, from here on.
 				$keys = self::ensureKeys($full_site_dir . '/config');
 				$key_lists = self::assertOwnKeyListed($full_site_dir, $keys['public_b64']);
+				// The binaries carry the release keys they were built with and
+				// the signature of the key that built them. A changed key list
+				// or signing key at the same version would ship a manifest
+				// naming keys its binaries do not hold (specs/release_key_rotation.md
+				// F12): the version has to move, so they are built again.
+				// A manifest from before the signing key was recorded was built
+				// here with this site's key, as the refresh below says.
+				$signed_by = (string)($manifest['signing_public_key'] ?? '') !== '' ? (string)$manifest['signing_public_key'] : $keys['public_b64'];
+				$baked_was = self::bakedReleaseKeys(array('signing_public_key' => $signed_by) + $manifest);
+				$baked_now = $key_lists['release_keys'];
+				sort($baked_was);
+				sort($baked_now);
+				if ($baked_was !== $baked_now || $signed_by !== $keys['public_b64']) {
+					$rebuild_required = true;
+					throw new Exception("the release keys (release_keys/release/) or this site's signing key changed since agent v{$agent_version} "
+						. 'was built, and the version did not: its binaries hold the old keys. Raise the version in main.go so the agent '
+						. 'is built again with these keys, then publish again');
+				}
 				$wanted = array('signing_public_key' => $keys['public_b64']) + $key_lists;
 				$current = array();
 				foreach ($wanted as $k => $v) { $current[$k] = $manifest[$k] ?? null; }
@@ -240,7 +262,7 @@ class AgentDistPublisher {
 			$binaries = array();
 			foreach (self::ARCHES as $arch) {
 				$raw_path = $staging . '/joinery-agent-linux-' . $arch;
-				self::buildBinary($go, $src, $arch, $agent_version, $keys['public_b64'], $key_lists, $raw_path);
+				self::buildBinary($go, $src, $arch, $agent_version, implode(',', $key_lists['release_keys']), $key_lists, $raw_path);
 
 				$raw = file_get_contents($raw_path);
 				if ($raw === false || strlen($raw) < 1024 * 1024) {
@@ -280,7 +302,7 @@ class AgentDistPublisher {
 				      // What the binaries above were built with. The lists beside
 				      // them follow release_keys/ on every publish; these stay as
 				      // built until the agent is rebuilt.
-				      'baked_keys' => array('statement_keys' => $key_lists['statement_keys'], 'log_keys' => $key_lists['log_keys'])) + $key_lists,
+				      'baked_keys' => array('release_keys' => $key_lists['release_keys'], 'statement_keys' => $key_lists['statement_keys'], 'log_keys' => $key_lists['log_keys'])) + $key_lists,
 				JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES
 			);
 			if (file_put_contents($staging . '/manifest.json', $manifest_json . "\n") === false) {
@@ -422,6 +444,54 @@ class AgentDistPublisher {
 		sort($release);
 		sort($statement);
 		return array('release_keys' => $release, 'statement_keys' => $statement, 'log_keys' => $log);
+	}
+
+	/**
+	 * The authority this release names (specs/release_key_rotation.md R1, F2):
+	 * the release and statement keys allowed to sign the next change to the
+	 * keys nodes trust. release_keys/authority lists the files that form it,
+	 * one per line ('release/joinery.pub', 'statement/joinery-7516f013.pub');
+	 * without that file the authority is every release and statement key
+	 * listed. Each line must name a key repoKeyLists() lists, and the
+	 * authority must hold at least one of each kind, or nothing could ever
+	 * change the set again.
+	 *
+	 * @return array{release_keys:string[], statement_keys:string[]}
+	 * @throws Exception when the file names a key that is not listed, or leaves a kind empty
+	 */
+	public static function repoAuthority($full_site_dir) {
+		$lists = self::repoKeyLists($full_site_dir);
+		$base = rtrim($full_site_dir, '/') . '/maintenance_scripts/install_tools/release_keys';
+		$file = $base . '/authority';
+		if (!is_file($file)) {
+			return array('release_keys' => $lists['release_keys'], 'statement_keys' => $lists['statement_keys']);
+		}
+		$out = array('release_keys' => array(), 'statement_keys' => array());
+		foreach (preg_split('/\r\n|\r|\n/', (string)file_get_contents($file)) as $line) {
+			$line = trim($line);
+			if ($line === '' || $line[0] === '#') {
+				continue;
+			}
+			if (!preg_match('#^(release|statement)/[A-Za-z0-9._-]+\.pub$#', $line, $m) || !is_file($base . '/' . $line)) {
+				throw new Exception("release_keys/authority names {$line}, which is not a key file under release_keys/release/ or release_keys/statement/");
+			}
+			$raw = base64_decode(trim((string)file_get_contents($base . '/' . $line)), true);
+			$b64 = $raw === false ? '' : base64_encode($raw);
+			$list = $m[1] . '_keys';
+			if (!in_array($b64, $lists[$list], true)) {
+				throw new Exception("release_keys/authority names {$line}, whose key is not one this release installs");
+			}
+			if (!in_array($b64, $out[$list], true)) {
+				$out[$list][] = $b64;
+			}
+		}
+		foreach ($out as $list => $keys) {
+			if ($keys === array()) {
+				throw new Exception("release_keys/authority names no {$list}: nothing could change the keys nodes trust after this release");
+			}
+			sort($out[$list]);
+		}
+		return $out;
 	}
 
 	/**
@@ -593,6 +663,20 @@ class AgentDistPublisher {
 	}
 
 	/**
+	 * The release keys a bundle's binaries were built with (main.updatePubKeyB64,
+	 * comma-separated: specs/release_key_rotation.md R3): baked_keys.release_keys,
+	 * or for a bundle built before the agent took a list, its one signing key.
+	 */
+	public static function bakedReleaseKeys(array $manifest) {
+		$listed = $manifest['baked_keys']['release_keys'] ?? null;
+		if (is_array($listed) && $listed !== array()) {
+			return array_values($listed);
+		}
+		$one = (string)($manifest['signing_public_key'] ?? '');
+		return $one === '' ? array() : array($one);
+	}
+
+	/**
 	 * Build the source again with the inputs the bundle records (its version,
 	 * signing key and baked keys) and return the platforms whose binary is not
 	 * the bundled one. Empty when the source still builds the bundle's bytes.
@@ -608,7 +692,7 @@ class AgentDistPublisher {
 			foreach ($manifest['binaries'] ?? array() as $platform => $bin) {
 				$out = $scratch . '/' . $platform;
 				self::buildBinary($go, $src, substr($platform, strlen('linux-')), $version,
-					(string)($manifest['signing_public_key'] ?? ''), (array)($manifest['baked_keys'] ?? array()), $out);
+					implode(',', self::bakedReleaseKeys($manifest)), (array)($manifest['baked_keys'] ?? array()), $out);
 				if (hash_file('sha256', $out) !== ($bin['sha256'] ?? null)) {
 					$changed[] = $platform;
 				}
@@ -619,7 +703,7 @@ class AgentDistPublisher {
 		return $changed;
 	}
 
-	/** Cross-compile one arch with the version, update public key and release-log keys baked in. */
+	/** Cross-compile one arch with the version, the release keys (comma-separated) and release-log keys baked in. */
 	private static function buildBinary($go, $src, $arch, $version, $public_b64, array $key_lists, $out_path) {
 		// Persistent caches so repeat publishes are fast and root/user1 runs
 		// do not depend on either account's home directory.

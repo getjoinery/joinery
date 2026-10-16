@@ -43,6 +43,7 @@
  *   - the rows a backup run writes on the source after its dump
  *     (bkh_backup_history).
  *
+ * @version 1.6 - config/release_trust is the machine's own (specs/release_key_rotation.md R1)
  * @version 1.5 - every config file a restore keeps the machine's own copy of is left out, as the restore guard lists
  *               them: a host's code_check made every copy onto a host that refuses unsigned code differ (B22)
  * @version 1.4 - vendor/ is left out at the site root only, as backup_files.sh 1.6.0 leaves it out: a vendor/
@@ -72,7 +73,7 @@ class SiteCensus {
 	 * hold the same site (B22).
 	 */
 	const OWN_PATHS = array('config/Globalvars_site.php', 'config/backup_site_key', 'config/backup-ledger',
-		'config/release_verify_keys', 'config/release_statement_keys', 'config/transparency_log_keys',
+		'config/release_verify_keys', 'config/release_statement_keys', 'config/release_trust', 'config/transparency_log_keys',
 		'config/release_log_required', 'config/release_log_optional', 'config/tree_owner', 'config/agent_signing_key',
 		'config/release_statement_key', 'config/disk_allowance', 'config/code_check',
 		'upgrades', 'upgrade_archives', 'uploads/upgrades', 'deploy');

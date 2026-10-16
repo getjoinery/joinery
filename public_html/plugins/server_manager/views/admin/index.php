@@ -3,6 +3,8 @@
  * Server Manager Dashboard
  * URL: /admin/server_manager
  *
+ * @version 1.55 - a node whose reported release keys are not the ones expected says so (release keys differ,
+ *                specs/release_key_rotation.md R6), and one whose agent reports them and has not, says that
  * @version 1.54 - the approve list leaves out this management node's own row, and the approve refuses it (B29)
  * @version 1.53 - machines asking to have their encrypted data root's key held here (C-3): approved or refused
  *                 after comparing the fingerprint their machine printed (specs/hosted_data_promise_disk_encryption.md)
@@ -1200,7 +1202,17 @@ function render_node_row($node, $db, $session, $role_badge = '', $show_ip = fals
 			<?php else: ?>
 				<small class="svm-muted"><?php echo htmlspecialchars($spread['label']); ?></small>
 			<?php endif;
-		endif; ?>
+		endif;
+		// The release keys it trusts, when they are not the ones expected
+		// (specs/release_key_rotation.md R6): during a rotation, the nodes
+		// still to take a step; at any time, a node holding a key no release
+		// of ours introduced.
+		$trust_attention = ReleaseTrustView::attention($node->get('mgn_last_status_data'), $node->get('mgn_agent_version'));
+		if ($trust_attention === 'differs'): ?>
+			<span class="badge badge-warning" title="The release keys this node reports trusting are not the ones expected. Its page says which.">release keys differ</span>
+		<?php elseif ($trust_attention === 'unreported'): ?>
+			<span class="badge badge-secondary" title="This node's agent reports its release keys with each status check, and none has reached this management node. Run a status check.">release keys not reported</span>
+		<?php endif; ?>
 		<small class="svm-muted js-last-check"><?php
 			if ($last_check) {
 				echo '(' . htmlspecialchars(LibraryFunctions::time_ago_or_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')) . ')';

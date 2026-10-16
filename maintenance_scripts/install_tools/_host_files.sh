@@ -3,6 +3,9 @@
 # converge, and the repair of reclaim_managed_file). Functions only; sourcing
 # it runs nothing.
 #
+# Version: 1.5 - host_files_write_release_verify_keys() leaves the release and statement keys alone on a node
+#                that holds config/release_trust: the set is then changed only by a verdict
+#                (specs/release_key_rotation.md R1, F3)
 # Version: 1.4 - host_files_write_release_verify_keys() also writes config/release_statement_keys and
 #                config/transparency_log_keys from the bundle's lists, takes release_keys as
 #                well as signing_public_key, and creates config/release_log_required once the
@@ -137,6 +140,10 @@ host_files_heal_renewal_confs() {  # $1 the letsencrypt directory
 # and not created when config/release_log_optional exists - a fork owner's
 # opt-out, which nothing writes. Monotone: a release can only tighten.
 #
+# A node that holds config/release_trust (written by root from a verdict,
+# PackageSignature::persistProvenKeys) has its release and statement keys from
+# that record, and they are left alone here: only the log keys are appended.
+#
 # The converger calls this on every tick; _site_init.sh calls it before a
 # fresh site installs its plugin bundle, whose packages are verified against
 # these keys.
@@ -213,8 +220,19 @@ host_files_write_release_verify_keys() {  # $1 the site root
         esac
     done <<< "${lines}"
 
-    _host_files_append_key_lines "${site_root}/config/release_verify_keys" "release key(s)" "${release[@]+"${release[@]}"}"
-    _host_files_append_key_lines "${site_root}/config/release_statement_keys" "statement key(s)" "${statement[@]+"${statement[@]}"}"
+    # Once a verdict has recorded the trusted set (config/release_trust,
+    # specs/release_key_rotation.md R1, F3), the release and statement keys
+    # are that record's: changed only by a release the set's authority signed,
+    # never from a bundle manifest any installed release could have put here.
+    if [[ -f "${site_root}/config/release_trust" ]]; then
+        chown root:root "${site_root}/config/release_trust" "${site_root}/config/release_verify_keys" \
+            "${site_root}/config/release_statement_keys" 2>/dev/null || true
+        chmod 644 "${site_root}/config/release_trust" "${site_root}/config/release_verify_keys" \
+            "${site_root}/config/release_statement_keys" 2>/dev/null || true
+    else
+        _host_files_append_key_lines "${site_root}/config/release_verify_keys" "release key(s)" "${release[@]+"${release[@]}"}"
+        _host_files_append_key_lines "${site_root}/config/release_statement_keys" "statement key(s)" "${statement[@]+"${statement[@]}"}"
+    fi
     _host_files_append_key_lines "${site_root}/config/transparency_log_keys" "log key(s)" "${log[@]+"${log[@]}"}"
 
     local required="${site_root}/config/release_log_required"

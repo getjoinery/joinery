@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 4.10 - config/release_trust (the trusted set and its authority, specs/release_key_rotation.md R1)
+#               is pinned root:root 0644 and pruned from the config/ sweep like the key files it records
 #VERSION 4.9 - On a host that refuses unsigned code (host_restrictions.sh) the tree owner is root,
 #              whatever config/tree_owner records or the mode asks (specs/host_restrictions.md D6).
 #VERSION 4.8 - A site whose folders are on the data root waits for it: while it is not mounted
@@ -263,6 +265,7 @@ PINNED=(
     # anyone but root or the tree owner could have written.
     "$SITE_ROOT/config/release_verify_keys"
     "$SITE_ROOT/config/release_statement_keys"
+    "$SITE_ROOT/config/release_trust"
     "$SITE_ROOT/config/transparency_log_keys"
     "$SITE_ROOT/config/release_log_required"
     "$SITE_ROOT/config/release_log_optional"
@@ -527,7 +530,7 @@ fi
 # D5, D6): root's for the same reason. A statement or log key file anyone else
 # can write is a file anyone else can add a key to, and the verifier ignores an
 # opt-out it cannot trust to be root's.
-for LOG_FILE in release_statement_keys transparency_log_keys release_log_required release_log_optional; do
+for LOG_FILE in release_statement_keys release_trust transparency_log_keys release_log_required release_log_optional; do
     if [ -f "$SITE_ROOT/config/$LOG_FILE" ]; then
         echo "  Pinning $SITE_ROOT/config/$LOG_FILE to 644 root:root..."
         chown root:root "$SITE_ROOT/config/$LOG_FILE" 2>/dev/null || true

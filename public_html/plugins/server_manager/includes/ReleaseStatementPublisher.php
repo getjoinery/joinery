@@ -35,6 +35,9 @@
  * Runs on the publisher only, from publish_upgrade.php. A republishing site
  * never writes one: it carries what it received, as a listed file.
  *
+ * @version 1.4 - the authority (specs/release_key_rotation.md R1, F1, F2): payload() records the keys allowed
+ *                to change the trusted set; it joins the chain's comparison; walkChain() follows the
+ *                set and refuses a chain whose set changes are not authorised; verifyDocument() checks it
  * @version 1.3 - binaryArtifacts() records every GoBinaryPublisher::PLUGIN_PUBLISHERS binary, not the relay sealer by name
  * @version 1.2 - verifyDocument() checks the entry against every key the release installs for its log (review B7a)
  * @version 1.1 - held() keeps every log key a release installed, origin => list (WP7 review B7)
@@ -211,7 +214,11 @@ class ReleaseStatementPublisher {
 	 * these exact bytes and a verifier never re-encodes them (D4).
 	 *
 	 * @param array $facts version, core_commit, agent_commit, go_toolchain, compressors,
-	 *                     artifacts (name => sha256), keys_installed (AgentDistPublisher::repoKeyLists)
+	 *                     artifacts (name => sha256), keys_installed (AgentDistPublisher::repoKeyLists),
+	 *                     and optionally authority (AgentDistPublisher::repoAuthority): the keys
+	 *                     allowed to sign the next change to the set (specs/release_key_rotation.md R1).
+	 *                     Every release from M on carries it; a statement without it has the whole
+	 *                     set as its authority.
 	 */
 	public static function payload(array $facts, ?int $now = null): string {
 		foreach (array('version', 'core_commit', 'agent_commit', 'go_toolchain', 'compressors', 'artifacts', 'keys_installed') as $field) {
@@ -233,7 +240,17 @@ class ReleaseStatementPublisher {
 			throw new Exception('a release statement must record the core manifest');
 		}
 		$keys = $facts['keys_installed'];
-		return json_encode(array(
+		$authority = null;
+		if (isset($facts['authority'])) {
+			foreach (array('release_keys', 'statement_keys') as $list) {
+				$named = array_values((array)($facts['authority'][$list] ?? array()));
+				if ($named === array() || array_diff($named, (array)($keys[$list] ?? array())) !== array()) {
+					throw new Exception("a release statement's authority must name {$list} the release installs, at least one");
+				}
+				$authority[$list] = $named;
+			}
+		}
+		$doc = array(
 			'version'        => (string)$facts['version'],
 			'core_commit'    => (string)$facts['core_commit'],
 			'agent_commit'   => (string)$facts['agent_commit'],
@@ -245,8 +262,12 @@ class ReleaseStatementPublisher {
 				'statement_keys' => array_values($keys['statement_keys'] ?? array()),
 				'log_keys'       => array_values($keys['log_keys'] ?? array()),
 			),
-			'published_at'   => gmdate('Y-m-d\TH:i:s\Z', $now ?? time()),
-		), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+		);
+		if ($authority !== null) {
+			$doc['authority'] = $authority;
+		}
+		$doc['published_at'] = gmdate('Y-m-d\TH:i:s\Z', $now ?? time());
+		return json_encode($doc, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 	}
 
 	/**
@@ -260,17 +281,23 @@ class ReleaseStatementPublisher {
 			return array();
 		}
 		$chain = is_array($previous['key_chain'] ?? null) ? array_values($previous['key_chain']) : array();
-		$before = $chain === array() ? array() : self::keySet(self::payloadOf(end($chain))['keys_installed']);
-		$now = self::keySet(self::payloadOf($previous)['keys_installed']);
-		if (array_diff($now, $before) !== array()) {
+		$before = $chain === array() ? array() : self::keySet(self::payloadOf(end($chain)));
+		$now = self::keySet(self::payloadOf($previous));
+		// Any difference: a key added, one dropped (a retirement), or the
+		// authority changed. A node walks each such link (R1).
+		if (array_diff($now, $before) !== array() || array_diff($before, $now) !== array()) {
 			$chain[] = array('envelope' => $previous['envelope'], 'entry' => $previous['entry']);
 		}
 		return $chain;
 	}
 
-	/** Every key in a keys_installed block, one string each, for set comparison. */
-	private static function keySet(array $keys): array {
+	/** Every key a payload installs, and its authority, one string each, for set comparison. */
+	private static function keySet(array $payload): array {
+		$keys = $payload['keys_installed'];
 		$set = array();
+		foreach (is_array($payload['authority'] ?? null) ? $payload['authority'] : array() as $list => $named) {
+			foreach ((array)$named as $k) { $set[] = 'authority ' . $list . ' ' . $k; }
+		}
 		foreach ($keys['release_keys'] ?? array() as $k) { $set[] = 'release ' . $k; }
 		foreach ($keys['statement_keys'] ?? array() as $k) { $set[] = 'statement ' . $k; }
 		foreach ($keys['log_keys'] ?? array() as $p) { $set[] = 'log ' . ($p['origin'] ?? '') . ' ' . ($p['key'] ?? ''); }
@@ -295,29 +322,102 @@ class ReleaseStatementPublisher {
 	}
 
 	/**
-	 * Walk a key chain as a node would: the first link (genesis) against its
-	 * own keys, each later link against every key the links before it
-	 * installed. Returns the statement and log keys a node holding only the
-	 * genesis keys ends up with: {statement: DER[], log: origin => DER}.
+	 * The trusted set a payload installs (specs/release_key_rotation.md R1):
+	 * {release: base64[], statement: DER[], authority: {release: base64[],
+	 * statement: DER[]}}, the authority being the whole set when the payload
+	 * names none (a release from before M).
+	 */
+	public static function trustOf(array $payload): array {
+		$keys = $payload['keys_installed'];
+		$release = array_values($keys['release_keys'] ?? array());
+		$statement = array_map(function ($b64) { return (string)base64_decode((string)$b64, true); }, array_values($keys['statement_keys'] ?? array()));
+		$authority = array('release' => $release, 'statement' => $statement);
+		if (is_array($payload['authority'] ?? null)) {
+			$authority = array(
+				'release'   => array_values($payload['authority']['release_keys'] ?? array()),
+				'statement' => array_map(function ($b64) { return (string)base64_decode((string)$b64, true); }, array_values($payload['authority']['statement_keys'] ?? array())),
+			);
+		}
+		return array('release' => $release, 'statement' => $statement, 'authority' => $authority);
+	}
+
+	/** Whether two trustOf() sets hold the same keys and the same authority. */
+	public static function sameTrust(array $a, array $b): bool {
+		foreach (array(array($a['release'], $b['release']), array($a['statement'], $b['statement']),
+				array($a['authority']['release'], $b['authority']['release']), array($a['authority']['statement'], $b['authority']['statement'])) as $pair) {
+			sort($pair[0]);
+			sort($pair[1]);
+			if ($pair[0] !== $pair[1]) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Refuse, before anything is logged, a release that changes the trusted
+	 * set without the authority to (R1): the set the newest logged release
+	 * installed may be changed only by a release whose manifest is signed by
+	 * one of its authority's release keys ($release_key, base64) and whose
+	 * statement by one of its statement keys ($statement_der). Every node that
+	 * holds that set would refuse anything else (`unauthorized_keys`). At
+	 * genesis there is no set yet.
+	 */
+	public static function assertMayChangeSet(?array $previous, array $keys_installed, ?array $authority, string $release_key, string $statement_der): void {
+		if ($previous === null) {
+			return;
+		}
+		$was = self::trustOf(self::payloadOf($previous));
+		$next = self::trustOf(array('keys_installed' => $keys_installed, 'authority' => $authority));
+		if (self::sameTrust($was, $next)) {
+			return;
+		}
+		if (!in_array($release_key, $was['authority']['release'], true) || !in_array($statement_der, $was['authority']['statement'], true)) {
+			throw new Exception('this release changes the keys nodes trust (release_keys/ or release_keys/authority), but it would be signed by '
+				. 'keys the last logged release does not allow to change them; nodes would refuse it. Sign it with the authority\'s keys '
+				. '(specs/release_key_rotation.md R5), or put release_keys/ back as the last release had it');
+		}
+	}
+
+	/**
+	 * Walk a key chain as a node would (R1, R2): the first link (genesis)
+	 * against its own keys, each later link against the set the links before
+	 * it left, and a link that changes the set only with a statement signed by
+	 * that set's authority, which here is refused rather than skipped: a chain
+	 * this publisher ships must walk whole. Returns the set a node holding
+	 * only the genesis keys ends with: {statement: DER[], log: origin => DER[],
+	 * release: base64[], authority: {release, statement}}.
 	 */
 	public static function walkChain(array $chain): array {
-		$held = array('statement' => array(), 'log' => array());
+		$held = null;
+		$log = array();
 		foreach (array_values($chain) as $i => $link) {
-			$installed = self::held(array('envelope' => $link['envelope'] ?? array()));
-			$check = $i === 0 ? $installed : $held;
+			$envelope = (array)($link['envelope'] ?? array());
+			$entry = (array)($link['entry'] ?? array());
+			$installed_log = self::held(array('envelope' => $envelope))['log'];
+			$installed = self::trustOf(self::payloadOf(array('envelope' => $envelope)));
+			$check_statement = $held === null ? $installed['statement'] : $held['statement'];
+			$check_log = $held === null ? $installed_log : $log;
 			try {
-				TransparencyProof::verifyEntry((array)($link['envelope'] ?? array()), (array)($link['entry'] ?? array()), $check['statement'], $check['log']);
+				TransparencyProof::verifyEntry($envelope, $entry, $check_statement, $check_log);
 			} catch (TransparencyProofException $e) {
 				throw new Exception('link ' . ($i + 1) . ' of the key chain does not verify against the keys before it: ' . $e->getMessage());
 			}
-			foreach ($installed['statement'] as $der) {
-				if (!in_array($der, $held['statement'], true)) { $held['statement'][] = $der; }
+			if ($held !== null && !self::sameTrust($held, $installed)) {
+				try {
+					TransparencyProof::verifyEntry($envelope, $entry, $held['authority']['statement'], $check_log);
+				} catch (TransparencyProofException $e) {
+					throw new Exception('link ' . ($i + 1) . ' of the key chain changes the trusted set, but is not signed by a statement key '
+						. 'of the authority before it, so a node would not follow it');
+				}
 			}
+			$held = $installed;
 			// A log's key may rotate in place: a later link's key for an
 			// origin is the one later statements are checked against.
-			$held['log'] = $installed['log'] + $held['log'];
+			$log = $installed_log + $log;
 		}
-		return $held;
+		$held = $held ?? array('release' => array(), 'statement' => array(), 'authority' => array('release' => array(), 'statement' => array()));
+		return array('statement' => $held['statement'], 'log' => $log, 'release' => $held['release'], 'authority' => $held['authority']);
 	}
 
 	/**
@@ -329,7 +429,7 @@ class ReleaseStatementPublisher {
 	 * with, as on a node that skipped every release since genesis. Returns
 	 * the payload.
 	 */
-	public static function verifyDocument(string $bytes, array $keys_installed, array $subjects): array {
+	public static function verifyDocument(string $bytes, array $keys_installed, array $subjects, ?array $authority = null): array {
 		$doc = json_decode($bytes, true);
 		if (!is_array($doc) || ($doc['format'] ?? null) !== self::FORMAT || !is_array($doc['envelope'] ?? null) || !is_array($doc['entry'] ?? null)) {
 			throw new Exception('the release statement is not the format this publisher writes');
@@ -346,6 +446,7 @@ class ReleaseStatementPublisher {
 		} catch (TransparencyProofException $e) {
 			throw new Exception('the release statement does not verify against the keys this release installs: ' . $e->getMessage());
 		}
+		$payload = self::payloadOf($doc);
 		if (!empty($doc['key_chain'])) {
 			$walked = self::walkChain($doc['key_chain']);
 			try {
@@ -353,8 +454,18 @@ class ReleaseStatementPublisher {
 			} catch (TransparencyProofException $e) {
 				throw new Exception('the release statement does not verify against the keys its key chain hands a node: ' . $e->getMessage());
 			}
+			if (!self::sameTrust($walked, self::trustOf($payload))) {
+				try {
+					TransparencyProof::verifyEntry($doc['envelope'], $doc['entry'], $walked['authority']['statement'], $walked['log']);
+				} catch (TransparencyProofException $e) {
+					throw new Exception('the release statement changes the trusted set, but is not signed by a statement key of the authority its key chain hands a node');
+				}
+			}
 		}
-		$payload = self::payloadOf($doc);
+		if ($authority !== null && ($payload['authority'] ?? null) !== array('release_keys' => array_values($authority['release_keys']),
+				'statement_keys' => array_values($authority['statement_keys']))) {
+			throw new Exception('the release statement names a different authority than release_keys/authority');
+		}
 		if ($payload['keys_installed'] !== array('release_keys' => array_values($keys_installed['release_keys']),
 				'statement_keys' => array_values($keys_installed['statement_keys']), 'log_keys' => array_values($keys_installed['log_keys']))) {
 			throw new Exception('the release statement lists different keys than this release installs');

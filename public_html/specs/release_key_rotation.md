@@ -3,8 +3,13 @@
 **Status:** DRAFT 2026-10-11; Q1 and Q2 decided the same day; reviewed by
 reviewer2 the same day (K1-K10, applied: release keys learned from the chain,
 a trusted set changed only by its authority instead of a retired list, the
-three writers replacing the set, the bridge kept by version, the watch's
-settle time, fresh installs and both copy floors). Nothing built. Comes out of
+three writers replacing the set, the bridge kept by version (since dropped,
+Q3), the watch's settle time, fresh installs and both copy floors). BUILT
+2026-10-16 (owner: build it), awaiting review: WR1, WR2 and WR3's
+serve-verify-key and downgrade refusal, to ship as release M; the copy
+floors move with WR4, which waits as below. The code was
+inventoried again before building; what changed in the design is under "What
+building found" at the end. Comes out of
 `hosted_data_promise_disk_encryption` O12. Stands on `release_transparency`
 (implemented), whose key chain this extends. Waits on the encryption spec's
 D7 step 3 (dev encrypted in place, `config/` under its data root, dev's Linode
@@ -164,8 +169,10 @@ encryption.
    their public halves to `release_keys/`. Publish release N, signed with the
    old release key and logged under the old statement key. N's set adds the
    new keys; N's authority is the new release key alone.
-3. **Check.** Every node shows N's set and authority (R6). The watch has
-   settled past N's log entry, which takes its 600-second settle time plus a
+3. **Check.** Every node shows N's set and authority, recorded (R6): a node
+   that shows the keys without a record still has the whole old set as its
+   authority. The watch has settled past N's log entry, which takes its
+   600-second settle time plus a
    run (R7), with nothing unrecorded.
 4. **Retire.** Publish release N+1, signed with the new release key and
    logged under the new statement key. N+1's set is the new keys alone. Steps
@@ -175,24 +182,18 @@ encryption.
    from dev's `config/`; their public halves move to `release_keys/retired/`.
 
 **A node that missed the ceremony.** On M or later, it walks the chain (R2),
-installs N+1, and adopts its set. Older than M, it cannot walk for release
-keys, so it is given a **bridge**: the plane serves release N, and N's agent,
-to a site or agent that reports a version older than M; from N it walks on to
-N+1 like anyone. Today the plane cannot do that: agents never name a version
-when they fetch (`artifactsource.go`; the channel endpoint treats "never a
-version" as a safety property) and `agent_dist/` is replaced whole on each
-publish with one `.old` kept. So the plane keeps N's site release and agent
-artifacts after newer ones ship, and chooses by the version it already
-records for each node (`mgn_agent_version`, and the release the site
-reports).
+installs N+1, and adopts its set. A node older than M cannot walk for release
+keys and is not bridged (Q3): before step 2 every node is upgraded to M or
+later, or migrated to a new node, and step 1's check holds the ceremony
+until it is.
 
 ### R6. Seeing what every node trusts
 
-The host report gains, for the site and for the agent, the fingerprints of
-the keys in the node's set and of its authority. The management node shows
-them on each node page and as one fleet column during a rotation, so steps
-1, 3 and 5 are checks, not hopes, and a node holding a key no publish of ours
-introduced stands out.
+The agent's status check gains, for the site and for the agent, the
+fingerprints of the keys in the node's set and of its authority (F14). The
+management node shows them on each node page, and the dashboard marks any
+node whose set is not the expected one, so steps 1, 3 and 5 are checks, not
+hopes, and a node holding a key no publish of ours introduced stands out.
 
 ### R7. Watching the window
 
@@ -245,12 +246,11 @@ reach a fork's nodes, and need not.
   `release_transparency`'s contract amended; the agent's list of release keys
   in all four uses; one signature per manifest, read through `verified_by`;
   `release_keys/retired/` for `verify_release.php`.
-- **WR2 — Seeing it (R6, R7).** Set and authority fingerprints in the host
-  report, on the node page and as a fleet column; the ceremony's waits on the
+- **WR2 — Seeing it (R6, R7).** Set and authority fingerprints in the
+  agent's status check, on the node page and as a fleet badge; the ceremony's waits on the
   release log watch.
-- **WR3 — The bridge and the other paths (R5, R8).** The plane keeping N's
-  site release and agent artifacts and serving them to anything older than M;
-  both copy floors at N+1; `serve-verify-key` serving the current set; the
+- **WR3 — The other paths (R8).** Both copy floors at N+1 (set at the
+  ceremony, with WR4); `serve-verify-key` serving the current set; the
   downgrade refusal with its reason.
 - **WR4 — The ceremony (R5).** Run once on dev after the encryption spec's D7
   step 3, every check recorded in this spec's status line.
@@ -267,8 +267,6 @@ until every test passes.
   all work after.
 - **T2** A node offline from before N until after N+1, **site tree and agent
   both**: it walks the chain, installs N+1 and adopts its set.
-- **T3** A node older than M: served the bridge (N's release and agent), then
-  N+1.
 - **T4** A thief with the old keys, after step 4: a release signed and logged
   under them is refused everywhere; their set change is refused.
 - **T5** A thief with the old keys, between steps 2 and 4: a set change signed
@@ -298,3 +296,112 @@ until every test passes.
   `package_signing` R3 recorded as missing and assigned there).
 - **Q2 — Accepted** (owner, 2026-10-11): releases signed only by a retired
   key cannot be installed (R8).
+
+- **Q3 — No bridge** (owner, 2026-10-16): a node older than M is upgraded
+  or migrated before the ceremony, never served release N on its way to
+  N+1.
+
+## What building found (2026-10-16)
+
+The code was inventoried again before WR1 (PHP verifier and publisher, the
+host converger, the agent, the management node). Where it differs from the
+text above, this section is what is built.
+
+- **F1. The authority covers both keys.** A chain link carries only its
+  statement envelope, signed by a statement key; the release key signs
+  manifests, which are not in the chain. So the authority names release keys
+  AND statement keys: a set change is obeyed only when its statement is
+  signed by a statement key in the authority, and, for the release being
+  installed, its manifest by a release key in the authority. Release N's
+  authority is the new release key and the new statement key.
+- **F2. Where the authority is declared.** `release_keys/authority` lists, one
+  per line, the files under `release_keys/release/` and
+  `release_keys/statement/` that form the authority (`release/joinery.pub`).
+  Absent, the authority is every release and statement key listed. Every
+  statement payload carries it as `authority` {release_keys,
+  statement_keys}; a statement without it (before M) has the whole set as
+  its authority. The authority joins the key chain's comparison, so a change
+  to it alone makes a link.
+- **F3. Only a verdict changes the set.** The host converger writes the key
+  files from `agent_dist/manifest.json`, and any release installed on a node
+  puts that file there, including one signed by the old key between N and
+  N+1. A converger that replaced the set from it would let that release
+  rewrite the trust R1 guards. So the set and its authority are written only
+  by a root caller from a verdict (`PackageSignature::persistTrust`), into
+  `config/release_trust` (the set, the authority, the version that set
+  them) with `release_verify_keys` and `release_statement_keys` rewritten to
+  match. The converger seeds the files on a node that holds no
+  `release_trust` yet and leaves them alone after. The other writers
+  (`upgrade_ensure_verify_keys`, `install.sh write_release_verify_key`) only
+  ever seed an empty file and stay as they are. The agent reads the site's
+  record only when root owns it (the agent runs as root); the site's own
+  reader also accepts the tree owner. Every writer runs as root, so the two
+  agree; a record written by the tree owner would count for the site and be
+  reported by the agent as not recorded.
+- **F4. The log keys stay as they are.** Sigstore's keys are not ours (R1),
+  so `transparency_log_keys` keeps growing as now; only release and
+  statement keys are a replaced set.
+- **F5. The verifier walks first.** `verify()` reads the statement the
+  manifest lists before the signature check (the statement is
+  self-authenticating: logged, and signed by a held statement key), walks
+  its chain under R1's rules, checks the manifest's signature against the
+  release keys the walk ends with, then checks that the release's own set,
+  when it differs, is authorised. A release whose set change is not
+  authorised is refused whole (`unauthorized_keys`), not installed with the
+  change ignored: a release carrying a set we did not publish is not ours. A
+  node without the log required, and a package without a statement, verify
+  as before.
+- **F6. A downgrade below N+1 refuses by itself.** Its manifest is signed by
+  the retired key, which is not in the set; the refusal names the key as
+  retired.
+- **F7. The agent has six uses of its release key, not four:** also
+  `release_archive.go` (`site_install`'s core archive). Its chain walk
+  (`releaselog.go`) reads statement and log keys only, and it persists
+  statement and log keys append-only in its state directory; it gets a
+  `release_trust` file of its own beside them.
+- **F8. No earlier agent is kept.** `AgentDistPublisher::publish()` removes
+  `agent_dist.old` after a good swap, and the agent kinds never take a
+  version, so a bridge would have needed a versioned store. None is built
+  (Q3).
+- **F9. The watch would stop watching the stolen key.** `ReleaseLogTail`
+  takes "our statement keys" from `release_keys/statement/` and the newest
+  release's `keys_installed`; once the old key is retired it is in neither.
+  The watch also reads `release_keys/retired/statement/`.
+- **F10. `verify_release.php` needs no `retired/`.** It checks each release
+  against `release_keys/` at that release's own commit. `retired/` is for
+  the watch (F9) and for people.
+- **F11. `serve-verify-key` serves every key ever appended** to the server's
+  `release_verify_keys`. It serves the repository's `release_keys/release/`
+  and the server's own public key instead.
+- **F12. A key switch must change the agent's version.** On a publish whose
+  agent version is unchanged, `AgentDistPublisher` rewrites the manifest's
+  `signing_public_key` without rebuilding, so N+1's manifest would name the
+  new key over binaries built with and signed by the old one. A publish
+  whose signing key differs from the one the current agent was built with
+  rebuilds, or is refused until the agent version changes.
+- **F13. A package no release publishes keeps the old signature.** An upgrade
+  takes every package its source publishes again, signed under the new key;
+  one installed from elsewhere is not, and fails the code check after N+1
+  until it is reinstalled or removed. Step 5 checks every node's code check.
+- **F14. The keys travel in the status check, not the host report.** The host
+  report is one per machine and kept under 60 KiB at 100 site containers; a
+  key list per container overflows it (62 KB measured). Every site container
+  runs an agent of its own and is a node of its own, so the agent's
+  check_status reports the site's and the agent's sets for every kind of node,
+  and the plane keeps them in the node's status data. The management API's
+  stats call does not report them: it cannot read the agent's set, and the
+  status fold would replace the agent's report with a half one.
+- **F15. A node writes the set after the code it came with** (reviewer2 A).
+  The log keys are written at the verdict, before the install, since they
+  only grow; the set is written once the code is in place (`upgrade.php`
+  after the deploy tier, `install_extension.php` and the extension refresh
+  once the package is placed). A deploy that rolls back keeps the set its
+  code is signed under; a set not written is written by root's next verify
+  of the live tree: `verify_package.php --tree`, the code check each
+  housekeeping tick on a host that refuses unsigned code, which writes the
+  live core's set; else the plugin installers' run, at least daily. The agent's self-update keeps
+  its order: a binary rolled back is never checked against its own record.
+- **F16. Nothing reported is marked too** (reviewer2 B). The dashboard marks a
+  node whose agent reports its keys (1.81.0 or later) and whose status data
+  holds none, so "every node shows" at steps 1, 3 and 5 is read off the
+  dashboard; an older agent's row already says it is behind.

@@ -37,6 +37,13 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.8 - the trusted set (specs/release_key_rotation.md R1, R2, F3, F5): verify() walks the
+ *                statement's key chain before the signature, learning release keys too, and changes the
+ *                set only as its authority allows; a release whose set change is not authorised is
+ *                `unauthorized_keys`; the set a verdict leaves is keys_proven['trust'], which
+ *                persistProvenKeys() writes to config/release_trust and the two key files it replaces;
+ *                a manifest signed by a retired key says so; withoutTrust()/trustOf() let an installer write
+ *                the set only after the code it came with is in place; verifyTree() hands back the core verdict
  * @version 1.7 - verifyTree() asks SandboxPlugins only where the running core has it (self-update safety)
  * @version 1.6 - verifyTree() passes over a sandboxed plugin as it does an unsigned style theme ($sandboxed)
  * @version 1.5 - editedSinceInstall(): whether a live package's files still match its signed listing, the
@@ -82,6 +89,17 @@ class PackageSignature {
 	/** The log checkpoint keys a node holds: "<origin> <base64 SubjectPublicKeyInfo>" per line. */
 	const LOG_KEYS_FILE = 'config/transparency_log_keys';
 
+	/**
+	 * The trusted set as this node holds it (specs/release_key_rotation.md R1,
+	 * F3): JSON {format, release_keys, statement_keys, authority {release_keys,
+	 * statement_keys}, set_by, retired {release_keys, statement_keys},
+	 * recorded_at}, base64. Written by root from a verdict only
+	 * (persistProvenKeys), with KEYS_FILE and STATEMENT_KEYS_FILE rewritten to
+	 * the same set. Its presence tells the host converger the set is no longer
+	 * its to write. `retired` is for sentences only, never trusted.
+	 */
+	const TRUST_FILE = 'config/release_trust';
+
 	/** Present: this node installs only logged releases (D6). Written by root, never removed. */
 	const LOG_REQUIRED_FILE = 'config/release_log_required';
 
@@ -101,6 +119,7 @@ class PackageSignature {
 	const MISSING_FILE = 'missing_file';  // a listed file is absent
 	const UNREADABLE   = 'unreadable';    // the manifest or signature is not the format we write
 	const UNLOGGED     = 'unlogged';      // signed by a key we trust, but not shown to be in the public log
+	const UNAUTHORIZED_KEYS = 'unauthorized_keys'; // changes the keys this node trusts without the authority to
 
 	/**
 	 * Paths never listed, matched against the site-root-relative path.
@@ -169,6 +188,51 @@ class PackageSignature {
 		);
 	}
 
+	/**
+	 * The trust record (TRUST_FILE) as written, or null when there is none or
+	 * it is not root's alone (keyFileRefusal) or not readable.
+	 */
+	public static function readTrustRecord(?string $site_root = null): ?array {
+		$path = rtrim($site_root ?? PathHelper::getSiteRoot(), '/') . '/' . self::TRUST_FILE;
+		if (!is_file($path) || self::keyFileRefusal($path) !== '') {
+			return null;
+		}
+		$record = json_decode((string)@file_get_contents($path), true);
+		return (is_array($record) && ($record['format'] ?? null) === 1) ? $record : null;
+	}
+
+	/**
+	 * The authority this node holds (R1): {release: raw[], statement: DER[]},
+	 * or null when it has recorded none, which verify() reads as the whole set.
+	 */
+	public static function nodeAuthority(?string $site_root = null): ?array {
+		$record = self::readTrustRecord($site_root);
+		if ($record === null || !is_array($record['authority'] ?? null)) {
+			return null;
+		}
+		$release = self::decodeRelease((array)($record['authority']['release_keys'] ?? array()));
+		$statement = array();
+		foreach ((array)($record['authority']['statement_keys'] ?? array()) as $b64) {
+			$der = base64_decode((string)$b64, true);
+			if ($der !== false && TransparencyProof::isP256($der)) { $statement[] = $der; }
+		}
+		return ($release !== array() && $statement !== array()) ? array('release' => $release, 'statement' => $statement) : null;
+	}
+
+	/** The keys this node's set has dropped, for saying so: {release: raw[], statement: DER[]}. Never trusted. */
+	public static function nodeRetired(?string $site_root = null): array {
+		$record = self::readTrustRecord($site_root);
+		$out = array('release' => array(), 'statement' => array());
+		if ($record !== null) {
+			$out['release'] = self::decodeRelease((array)($record['retired']['release_keys'] ?? array()));
+			foreach ((array)($record['retired']['statement_keys'] ?? array()) as $b64) {
+				$der = base64_decode((string)$b64, true);
+				if ($der !== false) { $out['statement'][] = $der; }
+			}
+		}
+		return $out;
+	}
+
 	/** The P-256 statement keys in a key file, as DER. Any other kind is skipped (D5). */
 	public static function readStatementKeys(string $path): array {
 		$keys = array();
@@ -214,15 +278,24 @@ class PackageSignature {
 	}
 
 	/**
-	 * Append keys a verdict proved (PackageVerdict::$keys_proven) to the
+	 * Write what a verdict proved (PackageVerdict::$keys_proven) to the
 	 * node's key files. For the root callers only - upgrade.php,
 	 * install_extension.php, the converger - after a verdict that installs:
-	 * verify() never writes (B9). Append-only, nothing removed; a key already
-	 * held is not written twice. Returns the lines added.
+	 * verify() never writes (B9). Log keys are appended, nothing removed, a
+	 * key already held not written twice. The trusted set ('trust',
+	 * specs/release_key_rotation.md R1) replaces KEYS_FILE and
+	 * STATEMENT_KEYS_FILE and is recorded in TRUST_FILE, with the keys it
+	 * drops kept there as retired. Returns a line for each change.
+	 *
+	 * An installer writes the log keys before it installs (withoutTrust()) and
+	 * the set only once the code it came with is in place (trustOf()): the
+	 * log keys only ever grow, but a set that drops a key would leave code
+	 * signed by that key refused if the install then failed and put the old
+	 * code back.
 	 */
 	public static function persistProvenKeys(array $keys_proven, ?string $site_root = null): array {
 		$root = rtrim($site_root ?? PathHelper::getSiteRoot(), '/');
-		$added = array();
+		$added = is_array($keys_proven['trust'] ?? null) ? self::persistTrust($keys_proven['trust'], $root) : array();
 		$plan = array(
 			self::STATEMENT_KEYS_FILE => array_map('base64_encode', $keys_proven['statement'] ?? array()),
 			self::LOG_KEYS_FILE       => array(),
@@ -251,6 +324,90 @@ class PackageSignature {
 			foreach ($new as $line) { $added[] = $rel . ': ' . $line; }
 		}
 		return $added;
+	}
+
+	/** $keys_proven without the trusted set: what an installer writes before it installs. */
+	public static function withoutTrust(array $keys_proven): array {
+		unset($keys_proven['trust']);
+		return $keys_proven;
+	}
+
+	/** The trusted set alone, or none: what an installer writes once the code is in place. */
+	public static function trustOf(array $keys_proven): array {
+		return is_array($keys_proven['trust'] ?? null) ? array('trust' => $keys_proven['trust']) : array();
+	}
+
+	/**
+	 * Replace the node's trusted set with $trust (exportTrust()'s shape): the
+	 * two key files rewritten to it when they differ, and TRUST_FILE written
+	 * when the set or authority it records differs or it is absent. Each
+	 * write goes to a temporary file in the same directory first and is
+	 * renamed over the old, so a reader never sees half a set.
+	 */
+	private static function persistTrust(array $trust, string $root): array {
+		$lines = array();
+		$release = array_values(array_filter((array)($trust['release_keys'] ?? array()), 'is_string'));
+		$statement = array_values(array_filter((array)($trust['statement_keys'] ?? array()), 'is_string'));
+		if ($release === array() || $statement === array()) {
+			return $lines;
+		}
+		$held_release = array_map('base64_encode', self::readKeys($root . '/' . self::KEYS_FILE));
+		$held_statement = array_map('base64_encode', is_file($root . '/' . self::STATEMENT_KEYS_FILE)
+			? self::readStatementKeys($root . '/' . self::STATEMENT_KEYS_FILE) : array());
+		$record = self::readTrustRecord($root);
+
+		$same = function (array $x, array $y) {
+			sort($x);
+			sort($y);
+			return $x === $y;
+		};
+		$retired = array(
+			'release_keys'   => array_values(array_unique(array_merge((array)($record['retired']['release_keys'] ?? array()), array_diff($held_release, $release)))),
+			'statement_keys' => array_values(array_unique(array_merge((array)($record['retired']['statement_keys'] ?? array()), array_diff($held_statement, $statement)))),
+		);
+		$retired['release_keys'] = array_values(array_diff($retired['release_keys'], $release));
+		$retired['statement_keys'] = array_values(array_diff($retired['statement_keys'], $statement));
+
+		$writes = array();
+		if (!$same($held_release, $release)) {
+			$writes[self::KEYS_FILE] = implode("\n", $release) . "\n";
+			$lines[] = self::KEYS_FILE . ': ' . count($release) . ' release key(s)'
+				. (array_diff($held_release, $release) ? ', ' . count(array_diff($held_release, $release)) . ' retired' : '');
+		}
+		if (!$same($held_statement, $statement)) {
+			$writes[self::STATEMENT_KEYS_FILE] = implode("\n", $statement) . "\n";
+			$lines[] = self::STATEMENT_KEYS_FILE . ': ' . count($statement) . ' statement key(s)'
+				. (array_diff($held_statement, $statement) ? ', ' . count(array_diff($held_statement, $statement)) . ' retired' : '');
+		}
+		$authority = array(
+			'release_keys'   => array_values((array)($trust['authority']['release_keys'] ?? $release)),
+			'statement_keys' => array_values((array)($trust['authority']['statement_keys'] ?? $statement)),
+		);
+		if ($record === null || !$same((array)($record['release_keys'] ?? array()), $release)
+			|| !$same((array)($record['statement_keys'] ?? array()), $statement)
+			|| !$same((array)($record['authority']['release_keys'] ?? array()), $authority['release_keys'])
+			|| !$same((array)($record['authority']['statement_keys'] ?? array()), $authority['statement_keys'])) {
+			$writes[self::TRUST_FILE] = json_encode(array(
+				'format'         => 1,
+				'release_keys'   => $release,
+				'statement_keys' => $statement,
+				'authority'      => $authority,
+				'set_by'         => isset($trust['set_by']) ? (string)$trust['set_by'] : null,
+				'retired'        => $retired,
+				'recorded_at'    => gmdate('Y-m-d\TH:i:s\Z'),
+			), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
+			$lines[] = self::TRUST_FILE . ': the set ' . (isset($trust['set_by']) ? (string)$trust['set_by'] . ' ' : '')
+				. 'installs, its authority ' . count($authority['release_keys']) . ' release and ' . count($authority['statement_keys']) . ' statement key(s)';
+		}
+		foreach ($writes as $rel => $body) {
+			$path = $root . '/' . $rel;
+			$tmp = $path . '.new.' . getmypid();
+			if (@file_put_contents($tmp, $body) === false || !@chmod($tmp, 0644) || !@rename($tmp, $path)) {
+				@unlink($tmp);
+				throw new RuntimeException('could not write ' . $path);
+			}
+		}
+		return $lines;
 	}
 
 	/**
@@ -403,25 +560,10 @@ class PackageSignature {
 				'the manifest or its signature is not in the format the publisher writes');
 		}
 
-		$verified_by = null;
-		foreach ($keys as $key) {
-			if (sodium_crypto_sign_verify_detached($signature, $body, $key)) {
-				$verified_by = base64_encode($key);
-				break;
-			}
-		}
-		if ($verified_by === null) {
-			return new PackageVerdict(self::UNKNOWN_KEY,
-				'the manifest is signed, but not by any of the ' . count($keys) . ' key(s) this machine trusts');
-		}
-
-		// The signature is good, so the LISTING is trusted from here; what
-		// remains is whether the bytes on disk are the bytes it lists.
 		$listed = self::parse($body);
 		if ($listed === null) {
 			return new PackageVerdict(self::UNREADABLE, 'the manifest has a line that is not "<sha256>  <path>"');
 		}
-
 		$root = self::commonRoot(array_keys($listed));
 		$name = isset($opts['name']) ? (string)$opts['name'] : basename($dir);
 		if ($root !== '' && basename($root) !== $name) {
@@ -429,6 +571,51 @@ class PackageSignature {
 				'the manifest describes ' . $root . ', which is not ' . $name);
 		}
 		$prefix = $root === '' ? '' : $root . '/';
+
+		// The key chain first (specs/release_key_rotation.md R2, F5): the
+		// statement the manifest lists is logged and signed by a statement key
+		// this machine holds, so it can be read before the manifest's signature
+		// is, and its chain may carry release keys this machine has not seen.
+		// The walk changes the trusted set only as each set's authority allows
+		// (R1); the signature is then checked against the release keys it ends
+		// with. Nothing is written here.
+		$statement_doc = null;
+		$chain_walk = null;
+		if (self::statementLines($body) !== array()
+			&& ($log['statement_keys'] ?? array()) !== array() && ($log['log_keys'] ?? array()) !== array()) {
+			$statement_doc = self::readStatement($dir, $prefix, $body);
+			if (is_array($statement_doc)) {
+				$authority = array_key_exists('authority', $opts) ? $opts['authority'] : ($own_keys ? self::nodeAuthority() : null);
+				$chain_walk = self::walkTrust($statement_doc, array(
+					'release'   => array_values($keys),
+					'statement' => array_values($log['statement_keys']),
+					'authority' => $authority,
+				), $log['log_keys']);
+			}
+		}
+		$check_keys = $chain_walk !== null ? $chain_walk['state']['release'] : $keys;
+
+		$verified_by = null;
+		foreach ($check_keys as $key) {
+			if (sodium_crypto_sign_verify_detached($signature, $body, $key)) {
+				$verified_by = base64_encode($key);
+				break;
+			}
+		}
+		if ($verified_by === null) {
+			foreach ($own_keys ? self::nodeRetired()['release'] : array() as $key) {
+				if (sodium_crypto_sign_verify_detached($signature, $body, $key)) {
+					return new PackageVerdict(self::UNKNOWN_KEY,
+						'the manifest is signed by a release key this machine has retired (' . substr(base64_encode($key), 0, 12)
+						. '...): a release signed only by a retired key is never installed; install a newer release');
+				}
+			}
+			return new PackageVerdict(self::UNKNOWN_KEY,
+				'the manifest is signed, but not by any of the ' . count($check_keys) . ' key(s) this machine trusts');
+		}
+
+		// The signature is good, so the LISTING is trusted from here; what
+		// remains is whether the bytes on disk are the bytes it lists.
 
 		// Walk $dir. Every file found must be listed with a matching hash,
 		// unless the rule says a manifest never lists it. Symlinks are not
@@ -499,11 +686,20 @@ class PackageSignature {
 		if (self::statementLines($body) === array() && empty($log['required'])) {
 			return $signed;
 		}
-		$logged = self::checkLogged($dir, $prefix, $body, $log);
+		$logged = self::checkLogged($body, $log, $statement_doc, $chain_walk, (string)base64_decode($verified_by, true));
+		if (!empty($logged['unauthorized'])) {
+			return new PackageVerdict(self::UNAUTHORIZED_KEYS, $logged['why'], $root, $verified_by, null, count($listed));
+		}
 		if ($logged['ok']) {
 			$signed->detail .= ', logged publicly at ' . $logged['origin'] . ' index ' . $logged['index'];
 			$signed->log = array('origin' => $logged['origin'], 'index' => $logged['index'], 'version' => $logged['version']);
+			$signed->trust = $logged['trust'];
 			$signed->keys_proven = $logged['keys_proven'];
+			// The trusted set is the node's own: only a verdict against the
+			// node's own key files may replace it (R1, F3).
+			if ($own_keys) {
+				$signed->keys_proven['trust'] = $logged['trust'];
+			}
 			return $signed;
 		}
 		if (!empty($log['required'])) {
@@ -585,9 +781,10 @@ class PackageSignature {
 	 * @param string|null $keys_file    The key file; the node's own when null
 	 * @param array       $style_themes Out: names of unsigned style themes passed over
 	 * @param array       $sandboxed    Out: names of sandboxed plugins passed over
+	 * @param PackageVerdict|null $core_verdict Out: the core package's verdict
 	 * @return array<int, array{what:string, kind:string, name:string, verdict:PackageVerdict}>
 	 */
-	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null, ?array &$sandboxed = null): array {
+	public static function verifyTree(string $site_root, ?string $keys_file = null, ?array &$style_themes = null, ?array &$sandboxed = null, ?PackageVerdict &$core_verdict = null): array {
 		$site_root = rtrim($site_root, '/');
 		$style_themes = array();
 		$sandboxed = array();
@@ -598,6 +795,7 @@ class PackageSignature {
 		// carries a config/ of its own, and its keys are the archive's word.
 		$core = self::verify($site_root, $keys_file,
 			array('walk' => self::TREE_CODE_DIRS, 'skip' => array_values(self::TREE_PACKAGE_DIRS), 'name' => ''));
+		$core_verdict = $core;
 		if (!$core->signed()) {
 			$failures[] = array('what' => 'core', 'kind' => 'core', 'name' => '', 'verdict' => $core);
 		}
@@ -661,69 +859,109 @@ class PackageSignature {
 	}
 
 	/**
-	 * D5's four checks on a package whose listing is already verified and
-	 * whose files already match it: the statement it lists, its envelope, its
-	 * leaf, its checkpoint, its inclusion proof, and that it records this
-	 * manifest. Reads only $dir and the keys in $log; walks the key chain in
-	 * memory, and returns what the walk proved without writing it (B9).
+	 * The release statement a manifest lists, decoded, or why it cannot be
+	 * read: exactly one statement line, inside the package, naming the file
+	 * that is there. Reads $dir and nothing else.
 	 *
-	 * @return array{ok:bool, why:string, origin:?string, index:?int, version:?string, keys_proven:array}
+	 * @return array|string the document, or the reason
 	 */
-	private static function checkLogged(string $dir, string $prefix, string $body, array $log): array {
-		$fail = function ($why) {
-			return array('ok' => false, 'why' => $why, 'origin' => null, 'index' => null, 'version' => null, 'keys_proven' => array());
-		};
+	private static function readStatement(string $dir, string $prefix, string $body) {
 		$lines = self::statementLines($body);
 		if ($lines === array()) {
-			return $fail('the package carries no ' . self::STATEMENT_NAME);
+			return 'the package carries no ' . self::STATEMENT_NAME;
 		}
 		if (count(array_unique($lines)) !== 1) {
-			return $fail('the package lists more than one ' . self::STATEMENT_NAME . ', and they differ');
+			return 'the package lists more than one ' . self::STATEMENT_NAME . ', and they differ';
 		}
 		$first = (string)array_key_first($lines);
 		if ($prefix !== '' && strpos($first, $prefix) !== 0) {
-			return $fail('the statement is listed outside the package');
+			return 'the statement is listed outside the package';
 		}
 		$bytes = @file_get_contents($dir . '/' . substr($first, strlen($prefix)));
 		// Every line statementSubject() leaves out must be this statement (B1).
 		if ($bytes === false || !hash_equals(reset($lines), hash('sha256', $bytes))) {
-			return $fail('the listed statement is not the file in the package');
+			return 'the listed statement is not the file in the package';
 		}
 		$doc = json_decode($bytes, true);
 		if (!is_array($doc) || !is_array($doc['envelope'] ?? null) || !is_array($doc['entry'] ?? null)) {
-			return $fail('the statement is not the format the publisher writes');
+			return 'the statement is not the format the publisher writes';
 		}
+		return $doc;
+	}
 
-		$held_statement = array_values($log['statement_keys'] ?? array());
-		$held_log = $log['log_keys'] ?? array();
-		if ($held_statement === array() || $held_log === array()) {
-			return $fail('this machine holds no statement key or no log key to check a statement with');
-		}
-
-		// The chain, forward from what this machine holds: a link that
-		// verifies under the keys held so far adds the keys it installs; one
-		// that does not adds nothing.
-		$statement = $held_statement;
-		$logs = $held_log;
+	/**
+	 * Walk a statement's key chain forward from what this machine trusts
+	 * (specs/release_key_rotation.md R1, R2). $state is the trusted set:
+	 * {release: raw Ed25519[], statement: P-256 DER[], authority: null |
+	 * {release: raw[], statement: DER[]}}, a null authority being the whole
+	 * set (a machine that has seen no release naming one). A link that does
+	 * not verify under the statement keys held so far adds nothing. One that
+	 * does and installs the set already held adds the log keys it installs. One
+	 * that installs a different set replaces the set, and adds its log keys,
+	 * only when its statement is signed by a statement key of the authority
+	 * held so far; otherwise it adds nothing. Log keys only ever grow (F4).
+	 *
+	 * @return array{state:array, logs:array<string,string[]>}
+	 */
+	private static function walkTrust(array $doc, array $state, array $logs): array {
 		foreach (is_array($doc['key_chain'] ?? null) ? $doc['key_chain'] : array() as $link) {
 			if (!is_array($link['envelope'] ?? null) || !is_array($link['entry'] ?? null)) {
 				continue;
 			}
-			if (self::entryVerifies($link['envelope'], $link['entry'], $statement, $logs) !== '') {
+			if (self::entryVerifies($link['envelope'], $link['entry'], $state['statement'], $logs) !== '') {
 				continue;
 			}
-			$installed = self::payloadKeys($link['envelope']);
-			foreach ($installed['statement'] as $der) {
-				if (!in_array($der, $statement, true)) { $statement[] = $der; }
+			$installed = self::payloadTrust($link['envelope']);
+			if ($installed !== null && !self::sameTrust($installed, $state)) {
+				if (self::entryVerifies($link['envelope'], $link['entry'], self::effectiveAuthority($state)['statement'], $logs) !== '') {
+					continue;
+				}
+				$state = $installed;
 			}
-			foreach ($installed['log'] as $origin => $ders) {
+			foreach (self::payloadKeys($link['envelope'])['log'] as $origin => $ders) {
 				foreach ($ders as $der) {
 					if (!in_array($der, $logs[$origin] ?? array(), true)) { $logs[$origin][] = $der; }
 				}
 			}
 		}
+		return array('state' => $state, 'logs' => $logs);
+	}
 
-		$why = self::entryVerifies($doc['envelope'], $doc['entry'], $statement, $logs);
+	/**
+	 * D5's checks on a package whose listing is already verified and whose
+	 * files already match it, against the trusted set the key chain walk ended
+	 * with ($walk): the statement's envelope, leaf, checkpoint and inclusion
+	 * proof, and that it records this manifest. Then R1: when the release
+	 * installs a set other than the one the walk ended with, its statement
+	 * must be signed by a statement key of that set's authority and its
+	 * manifest ($verified_by, raw) by a release key of it; otherwise the
+	 * release is refused whole ('unauthorized'). Returns, without writing it,
+	 * the set the release leaves this machine with ('trust') and the log keys
+	 * the walk proved (B9).
+	 *
+	 * @param array|string|null $doc  readStatement()'s answer, or null when it was not read
+	 * @return array{ok:bool, why:string, origin:?string, index:?int, version:?string, keys_proven:array, trust:?array, unauthorized?:bool}
+	 */
+	private static function checkLogged(string $body, array $log, $doc, ?array $walk, string $verified_by): array {
+		$fail = function ($why) {
+			return array('ok' => false, 'why' => $why, 'origin' => null, 'index' => null, 'version' => null, 'keys_proven' => array(), 'trust' => null);
+		};
+		if (self::statementLines($body) === array()) {
+			return $fail('the package carries no ' . self::STATEMENT_NAME);
+		}
+		if (($log['statement_keys'] ?? array()) === array() || ($log['log_keys'] ?? array()) === array()) {
+			return $fail('this machine holds no statement key or no log key to check a statement with');
+		}
+		if (!is_array($doc)) {
+			return $fail(is_string($doc) ? $doc : 'the statement could not be read');
+		}
+		if ($walk === null) {
+			return $fail('the statement could not be read');
+		}
+		$state = $walk['state'];
+		$logs = $walk['logs'];
+
+		$why = self::entryVerifies($doc['envelope'], $doc['entry'], $state['statement'], $logs);
 		if ($why !== '') {
 			return $fail($why);
 		}
@@ -732,8 +970,25 @@ class PackageSignature {
 		if (!in_array(self::statementSubject($body), array_values($artifacts), true)) {
 			return $fail('the logged statement does not record this package');
 		}
+		$version = isset($payload['version']) ? (string)$payload['version'] : null;
 
-		$proven = array('statement' => array_values(array_diff($statement, $held_statement)), 'log' => array());
+		$offered = self::payloadTrust($doc['envelope']);
+		if ($offered !== null && !self::sameTrust($offered, $state)) {
+			$authority = self::effectiveAuthority($state);
+			if (self::entryVerifies($doc['envelope'], $doc['entry'], $authority['statement'], $logs) !== ''
+				|| !in_array($verified_by, $authority['release'], true)) {
+				$out = $fail('the release changes which keys this machine trusts, but is not signed by the keys allowed to change them'
+					. ' (release ' . implode(', ', array_map(array(self::class, 'keyId'), $authority['release']))
+					. '; statement ' . implode(', ', array_map(array(self::class, 'keyId'), $authority['statement']))
+					. '): it is not one of our releases');
+				$out['unauthorized'] = true;
+				return $out;
+			}
+			$state = $offered;
+		}
+
+		$held_log = $log['log_keys'];
+		$proven = array('statement' => array(), 'log' => array());
 		foreach ($logs as $origin => $ders) {
 			$new = array_values(array_filter($ders, function ($der) use ($held_log, $origin) {
 				return !in_array($der, $held_log[$origin] ?? array(), true);
@@ -741,7 +996,92 @@ class PackageSignature {
 			if ($new) { $proven['log'][$origin] = $new; }
 		}
 		return array('ok' => true, 'why' => '', 'origin' => (string)$doc['entry']['log_origin'], 'index' => (int)$doc['entry']['log_index'],
-			'version' => isset($payload['version']) ? (string)$payload['version'] : null, 'keys_proven' => $proven);
+			'version' => $version, 'keys_proven' => $proven, 'trust' => self::exportTrust($state, $version));
+	}
+
+	/**
+	 * The trusted set a statement's payload installs, or null when it names
+	 * no release key or no statement key: {release: raw[], statement: DER[],
+	 * authority: null | {release: raw[], statement: DER[]}}. A payload from
+	 * before release M names no authority (null: the whole set). A key the
+	 * authority names outside the set is dropped from it; an authority left
+	 * with no release key or no statement key is read as none (null), which
+	 * no release we publish carries (AgentDistPublisher::repoAuthority).
+	 */
+	private static function payloadTrust(array $envelope): ?array {
+		$payload = json_decode((string)base64_decode((string)($envelope['payload'] ?? ''), true), true);
+		$keys = is_array($payload['keys_installed'] ?? null) ? $payload['keys_installed'] : array();
+		$release = self::decodeRelease(is_array($keys['release_keys'] ?? null) ? $keys['release_keys'] : array());
+		$statement = self::payloadKeys($envelope)['statement'];
+		if ($release === array() || $statement === array()) {
+			return null;
+		}
+		$authority = null;
+		if (is_array($payload['authority'] ?? null)) {
+			$a_release = self::decodeRelease(is_array($payload['authority']['release_keys'] ?? null) ? $payload['authority']['release_keys'] : array());
+			$a_statement = array();
+			foreach (is_array($payload['authority']['statement_keys'] ?? null) ? $payload['authority']['statement_keys'] : array() as $b64) {
+				$der = base64_decode((string)$b64, true);
+				if ($der !== false && in_array($der, $statement, true) && !in_array($der, $a_statement, true)) { $a_statement[] = $der; }
+			}
+			$a_release = array_values(array_intersect($a_release, $release));
+			if ($a_release !== array() && $a_statement !== array()) {
+				$authority = array('release' => $a_release, 'statement' => $a_statement);
+			}
+		}
+		return array('release' => $release, 'statement' => $statement, 'authority' => $authority);
+	}
+
+	/** Base64 Ed25519 public keys, decoded and de-duplicated; anything else skipped. */
+	private static function decodeRelease(array $b64s): array {
+		$out = array();
+		foreach ($b64s as $b64) {
+			$raw = base64_decode((string)$b64, true);
+			if ($raw !== false && strlen($raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES && !in_array($raw, $out, true)) {
+				$out[] = $raw;
+			}
+		}
+		return $out;
+	}
+
+	/** A set's authority, the whole set when it names none. */
+	private static function effectiveAuthority(array $state): array {
+		return is_array($state['authority'] ?? null) ? $state['authority']
+			: array('release' => $state['release'], 'statement' => $state['statement']);
+	}
+
+	/** Whether two trusted sets hold the same keys and the same authority. */
+	private static function sameTrust(array $a, array $b): bool {
+		$same = function (array $x, array $y) {
+			sort($x);
+			sort($y);
+			return $x === $y;
+		};
+		$aa = self::effectiveAuthority($a);
+		$ba = self::effectiveAuthority($b);
+		return $same($a['release'], $b['release']) && $same($a['statement'], $b['statement'])
+			&& $same($aa['release'], $ba['release']) && $same($aa['statement'], $ba['statement']);
+	}
+
+	/** A trusted set as the node records it (base64), with the release that set it. */
+	private static function exportTrust(array $state, ?string $version): array {
+		$authority = self::effectiveAuthority($state);
+		$b64 = function (array $keys) {
+			$out = array_map('base64_encode', $keys);
+			sort($out);
+			return $out;
+		};
+		return array(
+			'release_keys'   => $b64($state['release']),
+			'statement_keys' => $b64($state['statement']),
+			'authority'      => array('release_keys' => $b64($authority['release']), 'statement_keys' => $b64($authority['statement'])),
+			'set_by'         => $version,
+		);
+	}
+
+	/** A key's short name for a sentence: the first 12 characters of its sha256, hex. */
+	public static function keyId(string $raw): string {
+		return substr(hash('sha256', $raw), 0, 12);
 	}
 
 	/** '' when the entry verifies against one of the held keys for its log, else why not. */
@@ -963,6 +1303,15 @@ class PackageVerdict {
 	 *            them; a root caller persists them after installing (B9).
 	 */
 	public $keys_proven = array();
+	/**
+	 * @var array|null The trusted set this release leaves the node with
+	 *                 (specs/release_key_rotation.md R1), base64: {release_keys,
+	 *                 statement_keys, authority {release_keys, statement_keys},
+	 *                 set_by}, when the package was shown to be logged. A verdict
+	 *                 on the node's own key files also carries it as
+	 *                 keys_proven['trust'] for persistProvenKeys().
+	 */
+	public $trust = null;
 
 	public function __construct(string $verdict, string $detail, string $root = '',
 			?string $key = null, ?string $file = null, int $files = 0) {
