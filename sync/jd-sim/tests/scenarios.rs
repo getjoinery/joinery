@@ -22496,7 +22496,10 @@ fn a_shared_in_copy_brought_down_before_the_own_drive_scope_goes_to_the_trash() 
         if upgraded {
             laptop.store.set_meta(jd_core::pass::OWN_DRIVE_ONLY, "0").unwrap();
         } else {
+            // The laptop's place in the feed is lost the way a real server
+            // loses it: history trimmed, and activity after the gap.
             world.server.prune_feed_before(world.server.latest_change_id() + 1);
+            world.server.seed_file(None, "later.txt", b"activity after the gap");
         }
         assert!(world.settle().is_some(), "never settled after the scope");
         assert!(
@@ -22518,6 +22521,29 @@ fn a_shared_in_copy_brought_down_before_the_own_drive_scope_goes_to_the_trash() 
     }
 }
 
+/// A computer linked to an account whose files have not changed for longer
+/// than the feed keeps its history gets every one of them. RED before: a store
+/// this client started read the feed from its first retained row and never
+/// walked the index, so a file untouched for longer than the retention window
+/// never came down (B-CS, 2026-10-15: on dev six live files already had no
+/// feed row left).
+#[test]
+fn a_new_computer_gets_files_older_than_the_feed_remembers() {
+    let world = World::new(9_841, &["laptop"]);
+    let laptop = world.device("laptop");
+    let archive = world.server.seed_folder(None, "Archive");
+    world.server.seed_file(Some(archive), "2019.txt", b"old taxes");
+    world.server.seed_file(None, "readme.txt", b"hello");
+    world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    world.server.seed_file(None, "new.txt", b"this week");
+    assert!(world.settle().is_some(), "never settled");
+    let tree = disk_tree(laptop);
+    assert_eq!(tree.get("Archive/2019.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"old taxes")), "{tree:?}");
+    assert_eq!(tree.get("readme.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"hello")), "{tree:?}");
+    assert_eq!(tree.get("new.txt").cloned().flatten(), Some(jd_sim::sha256_hex(b"this week")), "{tree:?}");
+    assert_converged(&world);
+}
+
 /// What a full walk did not return is asked about, never taken for gone: a
 /// walk that showed nothing at all deletes nothing, because the server, asked
 /// by id, answers that every one of the account's files is still there.
@@ -22529,7 +22555,11 @@ fn a_walk_that_shows_nothing_deletes_nothing() {
     laptop.fs.user_write("Docs/b.txt", b"two");
     assert!(world.settle().is_some());
     world.server.index_shows_nothing(true);
+    // A feed reset, the way a real server sends one: history trimmed, and
+    // activity after the gap -- the laptop's own, a file it then sends, so
+    // the walk that shows nothing has nothing it should have shown.
     world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    laptop.fs.user_write("later.txt", b"activity after the gap");
     assert!(world.settle().is_some(), "never settled");
     world.server.index_shows_nothing(false);
     assert_eq!(laptop.fs.peek("Docs/a.txt").as_deref(), Some(&b"one"[..]));
@@ -22554,7 +22584,10 @@ fn a_folder_whose_ownership_moved_away_keeps_the_edit_made_here() {
     let folder = world.server.folder_id_at("Moved").expect("Moved on the server");
     laptop.fs.user_write("Moved/doc.txt", b"edited here, never sent");
     world.server.hand_to_another_member("folder", folder);
+    // A feed reset, the way a real server sends one: history trimmed, and
+    // activity after the gap.
     world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    world.server.seed_file(None, "later.txt", b"activity after the gap");
     assert!(world.settle().is_some(), "never settled");
     let edited = jd_sim::sha256_hex(b"edited here, never sent");
     assert!(
@@ -22580,7 +22613,10 @@ fn a_rescued_file_survives_the_next_full_walk() {
     laptop.fs.user_write("keep.txt", b"edited here while the server deleted it");
     world.server.action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": id })).expect("trash");
     assert!(world.settle().is_some(), "never settled after the rescue");
+    // A full walk, from a feed reset the way a real server sends one:
+    // history trimmed, and activity after the gap.
     world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    world.server.seed_file(None, "later.txt", b"activity after the gap");
     assert!(world.settle().is_some(), "never settled after the walk");
     assert_eq!(laptop.fs.peek("keep.txt").as_deref(), Some(&b"edited here while the server deleted it"[..]), "{:?}", laptop.fs.all_paths());
     assert_converged(&world);
@@ -22706,7 +22742,10 @@ fn a_refused_rescue_is_kept_as_the_accounts_own() {
     laptop.fs.user_write("Moved/doc.txt", b"edited here, never sent");
     world.server.hand_to_another_member("folder", folder);
     world.server.shared_in_read_only(true);
+    // A feed reset, the way a real server sends one: history trimmed, and
+    // activity after the gap.
     world.server.prune_feed_before(world.server.latest_change_id() + 1);
+    world.server.seed_file(None, "later.txt", b"activity after the gap");
     assert!(world.settle().is_some(), "never settled");
     let edited = jd_sim::sha256_hex(b"edited here, never sent");
     let tree = world.server.tree();

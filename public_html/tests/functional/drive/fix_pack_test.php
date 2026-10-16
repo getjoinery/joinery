@@ -327,12 +327,19 @@ check($fInC2->get('fil_delete_time') === null, 'its file came back with it');
 // ---------------------------------------------------------------------------
 section('change feed resets when the retained log is empty');
 
-$max_cursor = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+// The head is the id sequence's, which the trim does not rewind: a cursor
+// short of it may have missed a trimmed change and is reset; a cursor at it
+// missed nothing, so a client reset once parks there instead of being reset,
+// and walking the index, on every poll of a quiet site.
+$head = _drive_changes_head($dblink);
 $dblink->beginTransaction();
 try {
 	$dblink->exec("DELETE FROM fch_file_changes");
-	$rEmpty = drive_changes_logic(array('cursor' => max(1, $max_cursor)));
-	check(!empty($rEmpty->data['reset']), 'a nonzero cursor against an emptied change log returns reset:true');
+	$rEmpty = drive_changes_logic(array('cursor' => max(1, $head - 1)));
+	check(!empty($rEmpty->data['reset']), 'a cursor short of the head against an emptied change log returns reset:true');
+	check((int)($rEmpty->data['next_cursor'] ?? -1) === $head, 'the reset hands back the head, which outlives the trimmed rows');
+	$rHead = drive_changes_logic(array('cursor' => $head));
+	check(empty($rHead->data['reset']), 'a cursor at the head of an emptied change log is up to date, not reset');
 } finally {
 	$dblink->rollBack();
 }

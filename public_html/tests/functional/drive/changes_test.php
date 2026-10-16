@@ -141,6 +141,38 @@ check(empty($reset_feed->data['changes']), 'reset response carries no incrementa
 
 
 // ---------------------------------------------------------------------------
+section('a cold start is told to walk');
+
+// No row vouches for cursor 0: the log keeps only its retention window, so a
+// file untouched for longer has no row left, and a client reading the feed
+// from 0 never hears of it (B-CS). A cold start is answered with a reset at
+// the feed's head, which sends the client to drive_index.
+$head = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+$cold = drive_changes_logic(array('cursor' => 0));
+check(!empty($cold->data['reset']), 'a cold start (cursor 0) is answered with a reset');
+check(empty($cold->data['changes']), 'the cold-start reset carries no changes');
+check((int)$cold->data['next_cursor'] >= $head, 'the cold-start reset hands back the feed head', 'head=' . $head . ' next=' . var_export($cold->data['next_cursor'] ?? null, true));
+$cold_mine = drive_changes_logic(array('cursor' => 0, 'scope' => 'mine'));
+check(!empty($cold_mine->data['reset']), "a sync client's own-Drive cold start is reset too");
+$parked = drive_changes_logic(array('cursor' => (int)$cold->data['next_cursor']));
+check(empty($parked->data['reset']), 'a client handed the head is not reset again');
+
+// The rule itself, case by case. An empty log cannot be made on a shared
+// table, so the quiet site whose every row was trimmed is pinned here: reset
+// once, then parked at the head, never reset (and so made to walk the index)
+// on every poll.
+check(_drive_changes_must_reset(0, null, 0) === false, 'a site that never recorded a change resets nothing, not even a cold start');
+check(_drive_changes_must_reset(0, 40, 90) === true, 'a cold start on a site with history is reset');
+check(_drive_changes_must_reset(0, null, 90) === true, 'a cold start on a site whose log was trimmed empty is reset');
+check(_drive_changes_must_reset(90, null, 90) === false, 'a cursor at the head of an empty log is up to date, not reset');
+check(_drive_changes_must_reset(50, null, 90) === true, 'a cursor short of the head of an empty log is reset');
+check(_drive_changes_must_reset(38, 40, 90) === true, 'a cursor before the window is reset');
+check(_drive_changes_must_reset(39, 40, 90) === false, 'a cursor just before the first retained row is contiguous');
+check(_drive_changes_must_reset(120, 40, 90) === true, 'a cursor ahead of the head, one this server never issued, is reset');
+check(_drive_changes_must_reset(5, null, 0) === true, 'a cursor on a site restored to before any change is reset');
+
+
+// ---------------------------------------------------------------------------
 section('a folder shared to me reaches the files inside it');
 
 // drive_index expands a granted folder to its whole subtree, so a cold start

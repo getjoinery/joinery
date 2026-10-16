@@ -4,8 +4,8 @@
  * drive_changes — the sync change feed. Given a cursor (the last fch_file_change_id
  * the client saw, 0 for a cold start), returns the changes after it that the
  * caller may see — their own entities, plus entities shared to them, or only
- * their own with `scope: mine` — with the next cursor. A cursor that points before the retained window returns
- * {reset: true} so the client re-lists from scratch.
+ * their own with `scope: mine` — with the next cursor. A cold start (cursor 0), and a cursor that points before
+ * the retained window, return {reset: true} so the client re-lists from scratch.
  *
  * This plus the upload actions is the complete server contract for sync clients.
  */
@@ -58,15 +58,12 @@ function drive_changes_logic(array $input): LogicResult {
 	_drive_changes_stamp_device($cursor);
 
 	// Reset when the cursor cannot be proven contiguous with the retained
-	// window: it points before the earliest retained row, or the log is empty
-	// (MIN is NULL after a purge) so nothing can vouch for the gap. Either way
-	// the client may have missed changes and must re-list.
-	if ($cursor > 0) {
-		$min_id = $dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
-		if ($min_id === null || $cursor + 1 < (int)$min_id) {
-			$max_id = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id), 0) FROM fch_file_changes")->fetchColumn();
-			return LogicResult::render(array('ok' => true, 'reset' => true, 'changes' => array(), 'next_cursor' => $max_id, 'refusals' => 'reasoned'));
-		}
+	// window (`_drive_changes_must_reset`); the client may have missed changes
+	// and must re-list, from the head this answer hands back.
+	$min_id = $dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
+	$head = _drive_changes_head($dblink);
+	if (_drive_changes_must_reset($cursor, $min_id === null ? null : (int)$min_id, $head)) {
+		return LogicResult::render(array('ok' => true, 'reset' => true, 'changes' => array(), 'next_cursor' => $head, 'refusals' => 'reasoned'));
 	}
 
 	// Visibility: own changes plus changes on entities shared to me.
@@ -153,6 +150,54 @@ function drive_changes_logic(array $input): LogicResult {
  * all (a browser or a machine key is not). Never allowed to disturb the
  * response it rode in on.
  */
+/**
+ * Must a feed read from this cursor start over? It must when a change after
+ * the cursor may have been trimmed from the log:
+ * - a cold start (cursor 0), on a site that has ever recorded a change: no row
+ *   vouches for what came before the retention window, so a file untouched for
+ *   longer has no row left, and a client that read the feed from 0 instead of
+ *   walking never heard of it (B-CS);
+ * - a cursor before the earliest retained row;
+ * - an empty log (every row trimmed on a quiet site) and a cursor short of the
+ *   head. A cursor AT the head missed nothing, so a client reset once parks
+ *   there instead of being reset, and walking the index, on every poll;
+ * - a cursor ahead of the head: one this server never issued, as after the
+ *   site is restored from an older backup (the sequence goes back with it) or
+ *   a device is pointed at a copy of the site. It vouches for nothing, and
+ *   read as it is it would miss every change until the ids caught up.
+ *
+ * @param int      $cursor the client's cursor, 0 for a cold start
+ * @param int|null $min_id the earliest retained row, null when none is retained
+ * @param int      $head   the newest change id ever issued (`_drive_changes_head`),
+ *                         0 when none ever was: then nothing can have been missed
+ */
+function _drive_changes_must_reset(int $cursor, ?int $min_id, int $head): bool {
+	if ($cursor > $head) {
+		return true;
+	}
+	if ($head === 0) {
+		return false;
+	}
+	if ($cursor === 0) {
+		return true;
+	}
+	if ($min_id === null) {
+		return $cursor < $head;
+	}
+	return $cursor + 1 < $min_id;
+}
+
+/**
+ * The newest change id ever issued: the id sequence's last value, which
+ * outlives the rows the retention sweep trims and never rewinds, or the
+ * newest row if that is higher. 0 on a site that never recorded a change.
+ */
+function _drive_changes_head($dblink): int {
+	$seq = $dblink->query("SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM fch_file_changes_fch_file_change_id_seq")->fetchColumn();
+	$max = $dblink->query("SELECT COALESCE(MAX(fch_file_change_id), 0) FROM fch_file_changes")->fetchColumn();
+	return max((int)$seq, (int)$max);
+}
+
 function _drive_changes_stamp_device($cursor) {
 	try {
 		$session = SessionControl::get_instance();
@@ -181,7 +226,7 @@ function drive_changes_logic_descriptor(): array {
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(
-			'cursor' => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Last seen change id (0 for a cold start)'),
+			'cursor' => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Last seen change id (0 for a cold start, answered with a reset)'),
 			'scope'  => array('type' => 'string', 'required' => false, 'enum' => array('mine', 'all'), 'label' => "'mine' (entities the caller owns) or 'all' (the default: everything the caller may see)"),
 		),
 	);

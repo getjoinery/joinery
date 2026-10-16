@@ -397,13 +397,14 @@ mod tests {
     /// A server that records what it was asked and answers a fixed feed page.
     struct Feed {
         rows: Vec<Value>,
+        reset: bool,
         asked: RefCell<Vec<Value>>,
     }
 
     impl DriveApi for Feed {
         fn action(&self, _name: &str, body: Value) -> Result<Value, ProtoError> {
             self.asked.borrow_mut().push(body);
-            Ok(json!({ "ok": true, "changes": self.rows.clone(), "next_cursor": 9 }))
+            Ok(json!({ "ok": true, "reset": self.reset, "changes": self.rows.clone(), "next_cursor": 9 }))
         }
         fn action_idempotent(
             &self,
@@ -432,6 +433,7 @@ mod tests {
     fn a_cursor_with_nothing_after_it_is_up_to_date() {
         let feed = Feed {
             rows: vec![],
+            reset: false,
             asked: RefCell::new(Vec::new()),
         };
         assert!(!changes_pending(&feed, 41).unwrap());
@@ -450,9 +452,23 @@ mod tests {
         // than two faults.
         let feed = Feed {
             rows: vec![json!({ "change_id": 42, "entity_type": "folder", "kind": "trashed" })],
+            reset: false,
             asked: RefCell::new(Vec::new()),
         };
         assert!(changes_pending(&feed, 41).unwrap());
+    }
+
+    #[test]
+    fn a_reset_means_the_device_has_a_walk_to_do() {
+        // A reset carries no rows. Read by its rows alone it would say the
+        // device is up to date while the server is sending it to walk the
+        // index -- and a cold start is always answered so.
+        let feed = Feed {
+            rows: vec![],
+            reset: true,
+            asked: RefCell::new(Vec::new()),
+        };
+        assert!(changes_pending(&feed, 0).unwrap());
     }
 
     #[test]
@@ -620,9 +636,15 @@ mod tests {
 ///
 /// Asked the way the client asks, with the client's own cursor: an empty answer
 /// is the server saying there is nothing after that point. One row is enough to
-/// know, so the page is one row.
+/// know, so the page is one row. A reset is work too: it carries no rows, and it
+/// sends the device to walk the index -- a cold start, cursor 0, is always
+/// answered with one, because no row vouches for what came before the feed's
+/// retention window.
 pub fn changes_pending(api: &dyn DriveApi, cursor: i64) -> Result<bool, ProtoError> {
     let answer = api.action("drive_changes", json!({ "cursor": cursor, "limit": 1 }))?;
+    if answer.get("reset").and_then(Value::as_bool) == Some(true) {
+        return Ok(true);
+    }
     Ok(answer
         .get("changes")
         .and_then(Value::as_array)
