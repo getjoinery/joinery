@@ -3,6 +3,15 @@
 # install_site_engine.sh - install or converge the site container engine on a
 # container host (specs/site_container_engine.md D2, D3).
 #
+# Version: 1.5 - the system call filter every site runs under is site_engine/joinery_site_seccomp.json,
+#               generated from Docker's default (site_seccomp.json, still checked against its record)
+#               by make_site_profile.php with the narrowing of specs/multi_tenant_host_hardening.md D2.
+#               It applies to a container made after this converge; a running one keeps the filter it
+#               was made under until it is made again.
+# Version: 1.4 - an engine is installed only on the Ubuntu release it was built on (its BUILDINFO's
+#               built_on), read from the archive before anything is unpacked or switched: it links
+#               against that release's libraries (gpgme's among them), and on another it failed only
+#               after the switch, 'podman reports version ''' (B30, on 24.04).
 # Version: 1.3 - the engine's containers.conf drop-in and apt pin are written by every converge, with
 #               the rest of its configuration: a changed one reached a host only with a new engine.
 #               The engine reads OCI hooks from /etc/containers/oci/hooks.d too, where the host's own
@@ -68,8 +77,8 @@
 # conmon, and only the next podman command runs the new binaries.
 #
 # Refuses, changing nothing, when the archive's hash is not SHA256, its name is
-# not an engine for this machine's architecture, or what it unpacks to is not
-# the engine it names. After the switch, on a host whose container storage is
+# not an engine for this machine's architecture, it was built on another Ubuntu
+# release than this machine's, or what it unpacks to is not the engine it names. After the switch, on a host whose container storage is
 # configured, it checks podman itself: the version, runc as the runtime,
 # seccomp on, and AppArmor on where the kernel has it; on any miss `current`
 # goes back to what it was and it exits 1.
@@ -88,8 +97,10 @@ STORAGE_CONF="${ROOT}/etc/containers/storage.conf"
 POLICY="${ROOT}/etc/containers/policy.json"
 REGISTRIES="${ROOT}/etc/containers/registries.conf"
 SITE_SECCOMP="${ROOT}/etc/containers/joinery-site-seccomp.json"
-SITE_SECCOMP_SRC="${SCRIPT_DIR}/site_engine/site_seccomp.json"
+SITE_SECCOMP_DOCKER="${SCRIPT_DIR}/site_engine/site_seccomp.json"
+SITE_SECCOMP_SRC="${SCRIPT_DIR}/site_engine/joinery_site_seccomp.json"
 DATA_ROOT_MNT="${ROOT}/srv/joinery"
+OS_RELEASE="${JOINERY_SITE_ENGINE_OS_RELEASE:-${ROOT}/etc/os-release}"  # tests only: another file
 UBUNTU_ENGINE_PACKAGES="podman podman-docker netavark aardvark-dns crun golang-github-containers-common golang-github-containers-image containers-storage containernetworking-plugins"
 UBUNTU_KEPT_PACKAGES="runc conmon"
 ARCHIVE_RE='^(joinery-site-engine-([0-9]+\.[0-9]+\.[0-9]+)-([a-z0-9]+))\.tar\.xz$'
@@ -159,15 +170,46 @@ host_config() {
     printf '# Written by install_site_engine.sh: a short image name is looked for on docker.io alone.\nunqualified-search-registries = ["docker.io"]\nshort-name-mode = "enforcing"\n' \
         | write_if_changed "$REGISTRIES" 644 && say "wrote ${REGISTRIES#"$ROOT"}"
     [[ -f "$SITE_SECCOMP_SRC" ]] || die "no site system call filter beside this script (${SITE_SECCOMP_SRC}); no site may run without it"
+    # The filter is made from Docker's own default; that one is the file its
+    # record names, or the tree is not what was released.
     seccomp_src_sha="$(sed -n 's/^SHA256="\(.*\)"$/\1/p' "${SCRIPT_DIR}/site_engine/site_seccomp.source" 2>/dev/null)"
-    [[ -n "$seccomp_src_sha" && "$(sha256sum "$SITE_SECCOMP_SRC" | awk '{print $1}')" == "$seccomp_src_sha" ]] \
-        || die "${SITE_SECCOMP_SRC} is not the file site_seccomp.source records; nothing was changed"
+    [[ -n "$seccomp_src_sha" && "$(sha256sum "$SITE_SECCOMP_DOCKER" 2>/dev/null | awk '{print $1}')" == "$seccomp_src_sha" ]] \
+        || die "${SITE_SECCOMP_DOCKER} is not the file site_seccomp.source records; nothing was changed"
+    # And the profile is the one make_site_profile.php made from that file, as
+    # its record says: a hand edit that put a refused call back stops here.
+    local made_from made_sha
+    made_from="$(sed -n 's/^FROM_SHA256="\(.*\)"$/\1/p' "${SCRIPT_DIR}/site_engine/joinery_site_seccomp.source" 2>/dev/null)"
+    made_sha="$(sed -n 's/^SHA256="\(.*\)"$/\1/p' "${SCRIPT_DIR}/site_engine/joinery_site_seccomp.source" 2>/dev/null)"
+    [[ -n "$made_from" && "$made_from" == "$seccomp_src_sha" && -n "$made_sha" \
+        && "$(sha256sum "$SITE_SECCOMP_SRC" | awk '{print $1}')" == "$made_sha" ]] \
+        || die "${SITE_SECCOMP_SRC} is not the profile joinery_site_seccomp.source records as made from Docker's default; nothing was changed"
+    grep -q '"defaultAction": "SCMP_ACT_ERRNO"' "$SITE_SECCOMP_SRC" \
+        || die "${SITE_SECCOMP_SRC} is not a filter that refuses what it does not name; nothing was changed"
     write_if_changed "$SITE_SECCOMP" 644 < "$SITE_SECCOMP_SRC" && say "wrote ${SITE_SECCOMP#"$ROOT"}"
     if [[ -n "$ROOT" && -d "$DATA_ROOT_MNT" ]] || mountpoint -q "$DATA_ROOT_MNT" 2>/dev/null; then
         mkdir -p "${DATA_ROOT_MNT}/containers/storage"
         storage_text | write_if_changed "$STORAGE_CONF" 644 && say "wrote ${STORAGE_CONF#"$ROOT"}"
     fi
     return 0
+}
+
+# The Ubuntu release an engine was built on, as its BUILDINFO names it
+# (built_on=Ubuntu 26.04.1 LTS -> 26.04), and this machine's.
+built_release() { sed -n 's/^built_on=Ubuntu \([0-9][0-9]\.[0-9][0-9]\)\([. ].*\)\{0,1\}$/\1/p' | head -n 1; }
+host_release() { ( . "$OS_RELEASE" 2>/dev/null && [[ "${ID:-}" == ubuntu ]] && printf '%s' "${VERSION_ID:-}" ) || true; }
+host_release_name() { ( . "$OS_RELEASE" 2>/dev/null && printf '%s' "${PRETTY_NAME:-}" ) || true; }
+
+# Whether this machine runs the release an engine's BUILDINFO (on stdin) was
+# built on; prints why not. The engine links against that release's libraries.
+release_matches() {
+    local want have
+    want="$(built_release)"
+    have="$(host_release)"
+    [[ -n "$want" ]] || { echo "its BUILDINFO names no Ubuntu release it was built on"; return 1; }
+    [[ "$have" == "$want" ]] && return 0
+    have="$(host_release_name)"
+    echo "it is built on Ubuntu ${want} and links against that release's libraries, and this machine is ${have:-a release its /etc/os-release does not name}; the site container engine runs on Ubuntu ${want}, so build the host on it"
+    return 1
 }
 
 status() {
@@ -243,6 +285,9 @@ install_engine() {  # ARCHIVE SHA256
     have_sha="$(sha256sum "$archive" | awk '{print $1}')"
     [[ "$have_sha" == "$want_sha" ]] || die "${base} has SHA-256 ${have_sha}, not the release's ${want_sha}; nothing was changed"
     slot="${version}-${have_sha:0:12}"
+    local why_release
+    why_release="$(tar -xJOf "$archive" "${name}/BUILDINFO" 2>/dev/null | release_matches)" \
+        || die "${base} cannot run here: ${why_release//$'\n'/ }. Nothing was changed"
 
     mkdir -p "$LIB"
     if [[ ! -d "$LIB/$slot" ]]; then

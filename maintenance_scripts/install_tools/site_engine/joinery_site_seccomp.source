@@ -1,0 +1,5 @@
+# Written by make_site_profile.php (specs/multi_tenant_host_hardening.md D2); do not edit.
+# joinery_site_seccomp.json is the profile it made from site_seccomp.json. install_site_engine.sh
+# installs it only when both hashes match: a host has no PHP to make it again.
+FROM_SHA256="785b2429264afba4d594320337cb17f144f3c7d51585f9805eef72e28f4f9334"
+SHA256="7500502749c30178d51bd9ddfe2e760d7c6e7db85c0ecab7343ebeb45a9ca07b"

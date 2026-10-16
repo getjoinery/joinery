@@ -3,6 +3,13 @@
 # proxy_default_site.sh - the site a multi-tenant Docker host's proxy answers
 # with for a name it does not serve (specs/multi_tenant_docker_hosts.md WP8).
 #
+# Version: 1.1 - the host's Apache runs in a systemd sandbox (apache2.service.d/joinery-sandbox.conf,
+#               specs/multi_tenant_host_hardening.md D5): written here, so host housekeeping converges
+#               it; Apache is started in it from nothing, as at a boot, and must answer both ports, or the sandbox comes back out.
+#               Its write paths take in every folder Apache's configuration logs to (a vhost from
+#               manage_domain.sh before 2.0 logs under its site's folder), and a sandbox Apache would
+#               not serve in is remembered for a day, so a host where it cannot stick is not restarted
+#               twice on every run (reviewer2 H1, H2).
 # Version: 1.0
 #
 #   proxy_default_site.sh install   Root. Installs Apache when it is missing,
@@ -12,7 +19,12 @@
 #                                   changed, and fails unless Apache then names
 #                                   it as the default on :80 and :443. A
 #                                   configuration Apache refuses is taken back
-#                                   out, and Apache is not reloaded.
+#                                   out, and Apache is not reloaded. Then the
+#                                   sandbox: when it is new or changed, Apache
+#                                   is started in it from nothing (stopped, then started, as at a boot) and must answer a
+#                                   request on both ports; if it does not, the
+#                                   sandbox is removed and Apache restarted
+#                                   without it, and the install fails saying so.
 #   proxy_default_site.sh check     Says whether the default site answers both
 #                                   ports; exit 1 if not.
 #   proxy_default_site.sh conf      Prints the default site's vhost.
@@ -46,6 +58,10 @@ CERT_DIR="${CERT_ROOT}/${NAME}"
 EMPTY_ROOT="${ROOT}/var/www/joinery-no-site"
 HTTP_PORT="${JOINERY_PDS_HTTP_PORT:-80}"
 HTTPS_PORT="${JOINERY_PDS_HTTPS_PORT:-443}"
+SANDBOX_PATH="${ROOT}/etc/systemd/system/apache2.service.d/joinery-sandbox.conf"
+# The sandbox Apache would not serve in: its hash and when, one line.
+REFUSED_PATH="${ROOT}/var/lib/joinery/apache-sandbox-refused"
+REFUSED_FOR=86400
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'proxy_default_site: %s\n' "$*" >&2; exit 1; }
@@ -82,6 +98,127 @@ conf_text() {
 </VirtualHost>
 </IfFile>
 EOF
+}
+
+# The sandbox the host's Apache runs in (specs/multi_tenant_host_hardening.md
+# D5). This Apache serves no PHP: it terminates TLS and proxies to the site
+# containers. Its parent stays root to bind 80 and 443, read the certificates
+# (root's own files), switch its children to www-data and signal them on a
+# reload; at a start from nothing (a boot) Apache's start script hands its
+# socket folder to www-data, which takes CAP_CHOWN: without it Apache did not
+# start after a boot (se1, 2026-10-15). CAP_DAC_READ_SEARCH and netlink are not
+# needed (reviewer2 H3). @privileged is not refused, since it holds setuid,
+# setgroups and chown. /run is read-only here
+# and empty after a boot, so systemd makes Apache's run and lock directories
+# (the start script makes them only where they are missing); a write path that
+# may not exist is marked '-', since a missing one would stop Apache starting.
+# Apache's own logs may be anywhere its configuration names: every folder it
+# logs to is a write path, or Apache cannot open the log and does not start.
+sandbox_text() {
+    local extra="" d
+    while IFS= read -r d; do
+        [[ -n "$d" ]] && extra="${extra} -${d}"
+    done < <(log_dirs)
+    printf '%s\n' "# Written by proxy_default_site.sh (specs/multi_tenant_host_hardening.md D5)." \
+        "# Edits are replaced at the next host housekeeping run." \
+        "[Service]" \
+        "NoNewPrivileges=yes" \
+        "ProtectSystem=strict" \
+        "RuntimeDirectory=apache2 lock/apache2" \
+        "RuntimeDirectoryPreserve=restart" \
+        "ReadWritePaths=/var/log/apache2 -/var/cache/apache2 -/var/lib/apache2${extra}"
+    cat <<'EOF'
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_CHOWN CAP_KILL
+EOF
+}
+
+# Every folder outside /var/log/apache2 that Apache's configuration writes a
+# log in (ErrorLog, CustomLog, TransferLog), one a line, sorted. A piped or
+# syslog log is not a folder; a path in a shape the sandbox line cannot carry
+# is left out, and Apache then says so when it does not start.
+log_dirs() {
+    local f path
+    for f in "${APACHE_DIR}/apache2.conf" "${APACHE_DIR}"/sites-enabled/* "${APACHE_DIR}"/conf-enabled/*; do
+        [[ -f "$f" ]] || continue
+        while IFS= read -r path; do
+            path="${path#\"}"; path="${path%\"}"
+            path="${path//\$\{APACHE_LOG_DIR\}//var/log/apache2}"
+            [[ "$path" == /* ]] || continue
+            path="$(dirname "$path")"
+            [[ "$path" =~ ^/[A-Za-z0-9._/-]+$ && "$path" != *..* ]] || continue
+            [[ "$path" == /var/log/apache2 || "$path" == /var/log/apache2/* ]] && continue
+            printf '%s\n' "$path"
+        done < <(awk 'tolower($1) ~ /^(errorlog|customlog|transferlog)$/ { print $2 }' "$f")
+    done | sort -u
+}
+
+# Whether Apache serves: a request for a name no site claims, on each port,
+# gets the default site's 404. A configuration test says nothing about a
+# sandbox; only a running Apache answering does.
+serves_both_ports() {
+    local code ok=0
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Host: ${NAME}" "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null || true)"
+    [[ "$code" == 404 ]] || { say "Apache on :${HTTP_PORT}: answered ${code:-nothing}, not the default site's 404"; ok=1; }
+    code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${NAME}:${HTTPS_PORT}:127.0.0.1" "https://${NAME}:${HTTPS_PORT}/" 2>/dev/null || true)"
+    [[ "$code" == 404 ]] || { say "Apache on :${HTTPS_PORT}: answered ${code:-nothing}, not the default site's 404"; ok=1; }
+    return "$ok"
+}
+
+# Writes the sandbox when it is missing or differs, starts Apache in it anew
+# (a reload does not change a unit's sandbox; a stop, unlike a restart, removes
+# the run directories, so the start is a boot's), and takes it back out when
+# Apache then does not serve: a sandbox Apache cannot run under takes every
+# site on the host down, at the latest at the next boot.
+converge_sandbox() {
+    local tmp sha r_sha="" r_at=""
+    [[ -n "$ROOT" || -d /run/systemd/system ]] || { say "sandbox: no systemd here; not written"; return 0; }
+    tmp="$(mktemp)"
+    sandbox_text > "$tmp"
+    if [[ -f "$SANDBOX_PATH" ]] && cmp -s "$tmp" "$SANDBOX_PATH"; then
+        rm -f "$tmp" "$REFUSED_PATH"
+        say "sandbox: unchanged"
+        return 0
+    fi
+    sha="$(sha256sum "$tmp" | cut -c1-64)"
+    # The same sandbox Apache would not serve in, less than a day ago: not
+    # tried again, so Apache is not restarted twice on every run. The run still
+    # fails, so the host's converger shows as failed until it is put right.
+    [[ -f "$REFUSED_PATH" ]] && read -r r_sha r_at < "$REFUSED_PATH" || true
+    if [[ "$r_sha" == "$sha" && "$r_at" =~ ^[0-9]{1,12}$ ]] && (( $(date +%s) - r_at < REFUSED_FOR )); then
+        rm -f "$tmp"
+        die "Apache did not serve in its sandbox at $(date -u -d "@${r_at}" +%FT%TZ), and that sandbox is not tried again for a day or until it changes; journalctl -u apache2 from then says why"
+    fi
+    mkdir -p "$(dirname "$SANDBOX_PATH")"
+    install -m 0644 "$tmp" "$SANDBOX_PATH"
+    rm -f "$tmp"
+    systemctl daemon-reload || true
+    systemctl stop apache2 || true
+    if systemctl start apache2 && systemctl is-active --quiet apache2 && serves_both_ports; then
+        rm -f "$REFUSED_PATH"
+        say "sandbox: written; Apache started in it from nothing, as at a boot, and serves"
+        return 0
+    fi
+    rm -f "$SANDBOX_PATH"
+    systemctl daemon-reload || true
+    systemctl stop apache2 || true
+    systemctl start apache2 || true
+    mkdir -p "$(dirname "$REFUSED_PATH")"
+    printf '%s %s\n' "$sha" "$(date +%s)" > "$REFUSED_PATH"
+    die "Apache did not serve in the sandbox, so it was taken back out and Apache restarted without it; it is not tried again for a day or until it changes; see journalctl -u apache2"
 }
 
 # The server Apache picks for a request no site name matches, on one port, as
@@ -160,6 +297,7 @@ do_install() {
         say "default site: unchanged (${CONF_NAME})"
     fi
     answers_both_ports || die "Apache does not answer an unknown name with the default site; see apache2ctl -S"
+    converge_sandbox
 }
 
 case "${1:-}" in

@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.127 - the old machine of a switch-over is removed only through a host agent from 1.80.0, the first whose
+ *                  proof covers a container held stopped (site_container_engine B29); an older one is named, to update
  * @version 1.126 - copy_stage takes vouched_seq: that run's own manifest is sent (a version-3 chain keeps one per
  *                  run), not the newest, which names runs nobody vouched for to the copy (B20)
  * @version 1.125 - build_repair_release_files: every deployment file that differs from the signed release put
@@ -500,6 +502,14 @@ class JobCommandBuilder {
 	 * the parameter; it is refused here, naming the update.
 	 */
 	const COPY_TAKE_KEY_MIN_AGENT_VERSION = '1.68.0';
+
+	/**
+	 * The first agent whose decommission_moved_site proves a container held
+	 * stopped has left its host (site_container_engine B29). A switch-over
+	 * holds the old container stopped, and an older agent's proof needs the
+	 * container to serve a token, so it refuses every such removal.
+	 */
+	const MOVED_SITE_HELD_MIN_AGENT_VERSION = '1.80.0';
 
 	/**
 	 * The oldest release a site can be copied from (specs/site_copy.md WP8). A
@@ -4428,6 +4438,14 @@ class JobCommandBuilder {
 
 		$core = trim((string)$node->get('mgn_joinery_version'));
 		if ($moved) {
+			$hv = AgentVocabulary::version($host_node);
+			if ($hv === '' || version_compare($hv, self::MOVED_SITE_HELD_MIN_AGENT_VERSION, '<')) {
+				throw new Exception(
+					"The host agent '{$host_node->get('mgn_slug')}' runs agent " . ($hv ?: 'of an unknown version')
+					. ", which cannot prove that a switch-over's old container, held stopped, has left its host. Update its agent to "
+					. self::MOVED_SITE_HELD_MIN_AGENT_VERSION . " or newer."
+				);
+			}
 			// The host's proof asks the container for a token through the
 			// site's own routing-probe view.
 			if ($core === '' || version_compare($core, ProvisionPendingSsl::PROBE_MIN_CORE_VERSION, '<')) {

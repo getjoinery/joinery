@@ -10,15 +10,16 @@
 # The quiet state (specs/site_copy.md WP5): a site that runs nothing and sends
 # nothing, enforced by the machine. Driven unprivileged against a fixture /etc
 # (JOINERY_SITE_STATE_ROOT) with nft, systemctl, apache2ctl, postconf, postfix
-# and pgrep stubbed on PATH, each recording what it was asked. What the real
-# kernel and Apache do with the files is the live check's (needs root).
+# and pgrep stubbed on PATH, each recording what it was asked. A real Apache on
+# a spare port answers a copy's drop-in (the look paths, the 503); what the
+# kernel does with the table is the live check's (needs root).
 
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 TOOLS="$ROOT/maintenance_scripts/install_tools"
 SYSTOOLS="$ROOT/maintenance_scripts/sysadmin_tools"
 T=$(mktemp -d)
-trap 'rm -rf "${T:?}"' EXIT
+trap '[ -s "$T/apache/logs/pid" ] && /usr/sbin/apache2 -k stop -f "$T/apache/main.conf" >/dev/null 2>&1; rm -rf "${T:?}"' EXIT
 passed=0; failed=0
 chk() {
     if [ "$2" = "$3" ]; then echo "  PASS: $1"; passed=$((passed+1))
@@ -162,14 +163,83 @@ chk "and its source's agent key (WP4)" "$(cat "$SD/copy_of_key")" "$QKEY"
 secret="$(cat "$SD/look_secret")"
 chk "a copy has a look secret, 32 hex, 0600" "$([[ "$secret" =~ ^[0-9a-f]{32}$ ]] && echo ok):$(stat -c %a "$SD/look_secret")" "ok:600"
 CONF="$R/etc/apache2/conf-available/joinery-quiet-qsite.conf"
-chk "the look path sets the cookie and lands on the home page" "$(grep -A3 -F "<LocationMatch \"^/\\.joinery-look/${secret}\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Location "/"$' -e 'Redirect 303 /$')" "3"
-chk "the key look path sets the cookie and lands on the key page" "$(grep -A3 -F "<LocationMatch \"^/\\.joinery-look/${secret}/key\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Location "/copy-key"$' -e 'Redirect 303 /copy-key$')" "3"
-# B19: a relative Location keeps the browser on the https address it came in on;
-# a container's Apache is reached over http behind its host's proxy, and a key
-# page served over http has no WebCrypto.
-chk "both look paths answer with a relative Location, never a scheme" "$(grep -c -E 'Header always set Location "/(copy-key)?"$' "$CONF"):$(grep -c -E 'Redirect 303 "?https?:' "$CONF")" "2:0"
+chk "the look path sets the cookie and lands on the home page" "$(grep -A8 -F "<LocationMatch \"^/\\.joinery-look/${secret}\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Redirect 303 "https://%{HTTP_HOST}/"$' -e 'Redirect 303 /$')" "3"
+chk "the key look path sets the cookie and lands on the key page" "$(grep -A8 -F "<LocationMatch \"^/\\.joinery-look/${secret}/key\$\">" "$CONF" | grep -c -e "Set-Cookie \"joinery_look=${secret};" -e 'Redirect 303 "https://%{HTTP_HOST}/copy-key"$' -e 'Redirect 303 /copy-key$')" "3"
+# B19: Redirect alone names the scheme Apache was reached on, http in a container
+# behind its host's proxy, and a key page served over http has no WebCrypto. A
+# Location set beside Redirect goes out as a second one, which a browser refuses.
+chk "the look paths set no Location of their own" "$(grep -c 'Header always set Location' "$CONF")" "0"
 chk "both look paths, and nothing else, pass without the cookie" "$(grep -c -F "<LocationMatch \"^/(?!\\.joinery-look/${secret}(?:/key)?\$)\">" "$CONF")" "1"
 chk "without the cookie, 503" "$(grep -c "HTTP_COOKIE} =~ /(?:^|;\\\\s\*)joinery_look=${secret}(?:;|\\$)/" "$CONF"):$(grep -c 'Redirect 503' "$CONF")" "1:1"
+
+echo "=== a real Apache answers the copy's drop-in ==="
+# What a browser gets, read from the wire: a text check cannot see two Location
+# headers, and curl stops at the second without saying so under -s (B19).
+AP="$T/apache"; mkdir -p "$AP/logs" "$AP/docroot"
+AMODS=""
+for m in mpm_event authz_core headers alias; do
+    AMODS+="LoadModule ${m}_module /usr/lib/apache2/modules/mod_${m}.so"$'\n'
+done
+if [ ! -x /usr/sbin/apache2 ] || ! command -v python3 >/dev/null || [ ! -f /usr/lib/apache2/modules/mod_headers.so ]; then
+    chk "this section needs Apache with mod_headers and mod_alias, and python3" "missing" "present"
+else
+    APORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+    cat > "$AP/main.conf" <<EOF
+ServerRoot "$AP"
+ServerName localhost
+PidFile $AP/logs/pid
+ErrorLog $AP/logs/error.log
+Mutex file:$AP/logs
+${AMODS}Listen 127.0.0.1:$APORT
+Include $CONF
+<VirtualHost 127.0.0.1:$APORT>
+    ServerName qsite.example
+    DocumentRoot $AP/docroot
+    <Directory $AP/docroot>
+        Require all granted
+    </Directory>
+</VirtualHost>
+EOF
+    chk "Apache takes the drop-in" "$(/usr/sbin/apache2 -t -f "$AP/main.conf" >/dev/null 2>&1; echo $?)" "0"
+    /usr/sbin/apache2 -k start -f "$AP/main.conf" 2>"$AP/start.err"
+    for _ in $(seq 50); do [ -s "$AP/logs/pid" ] && python3 -c "import socket; socket.create_connection(('127.0.0.1',$APORT),1)" 2>/dev/null && break; sleep 0.1; done
+    # STATUS|every Location, joined by a space|cookie set or not
+    answer() {  # HOST PATH [COOKIE]
+        python3 - "$APORT" "$1" "$2" "${3:-}" <<'PY'
+import socket, sys
+port, host, path, cookie = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+s = socket.create_connection(("127.0.0.1", port), 5)
+req = "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n" % (path, host)
+if cookie:
+    req += "Cookie: %s\r\n" % cookie
+s.sendall((req + "\r\n").encode())
+raw = b""
+while True:
+    b = s.recv(65536)
+    if not b:
+        break
+    raw += b
+head = raw.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+status = head[0].split(" ")[1]
+locs = [h.split(":", 1)[1].strip() for h in head[1:] if h.lower().startswith("location:")]
+setc = any(h.lower().startswith("set-cookie: joinery_look=") for h in head[1:])
+print("%s|%s|%s" % (status, " ".join(locs), "cookie" if setc else "-"))
+PY
+    }
+    K="/.joinery-look/${secret}/key"
+    chk "the key look path, by name: one https Location, the cookie set" "$(answer qsite.example "$K")" "303|https://qsite.example/copy-key|cookie"
+    chk "the look path, by name: lands on the home page" "$(answer qsite.example "/.joinery-look/${secret}")" "303|https://qsite.example/|cookie"
+    chk "a name with a port keeps its port" "$(answer qsite.example:8443 "$K")" "303|https://qsite.example:8443/copy-key|cookie"
+    chk "an IPv4 address" "$(answer 192.0.2.10 "$K")" "303|https://192.0.2.10/copy-key|cookie"
+    v6="$(answer '[2001:db8::1]' "$K")"
+    chk "an IPv6 address: one Location, its brackets kept" "$(echo "$v6" | grep -c -E '^303\|https?://\[2001:db8::1\](:[0-9]+)?/copy-key\|cookie$')" "1"
+    chk "a query string goes along" "$(answer qsite.example "$K?x=1")" "303|https://qsite.example/copy-key?x=1|cookie"
+    chk "anything else without the cookie: 503, no Location" "$(answer qsite.example /copy-key)" "503||-"
+    chk "a wrong secret: 503" "$(answer qsite.example "/.joinery-look/$(printf '0%.0s' $(seq 32))/key" | cut -d'|' -f1)" "503"
+    chk "with the cookie, the site answers (404 here: no page)" "$(answer qsite.example /copy-key "joinery_look=${secret}" | cut -d'|' -f1)" "404"
+    /usr/sbin/apache2 -k stop -f "$AP/main.conf" >/dev/null 2>&1
+    for _ in $(seq 50); do [ -e "$AP/logs/pid" ] || break; sleep 0.1; done
+fi
 chk "on --copy-promoted is refused" "$(bash "$Q" on --copy-promoted >/dev/null 2>&1; echo $?)" "2"
 # The runs its source vouched for (WP2), and the last export it took (WP4), go
 # with the copy's other records: a promoted copy trusts its source's key no more.

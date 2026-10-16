@@ -499,6 +499,12 @@ check(($held_c[0]['held'] ?? null) === true && !array_key_exists('held', $held_c
 	'a container held stopped keeps its mark; false or anything but true leaves none', var_export($held_c, true));
 check(JobResultProcessor::sanitise_host_report(array('containers' => 'none'))['containers'] === 'none',
 	'a machine with no docker says none');
+// A container its host records as quiet (host_report 1.27: a dormant copy, a frozen source).
+$quiet_c = JobResultProcessor::sanitise_host_report(array('containers' => array(
+	array('name' => 'copy1', 'state' => 'running', 'health' => 'healthy', 'answers' => 'quiet'),
+	array('name' => 'site4', 'state' => 'running', 'health' => 'none', 'answers' => 'maybe'))))['containers'];
+check(($quiet_c[0]['answers'] ?? null) === 'quiet' && ($quiet_c[1]['answers'] ?? null) === 'unknown',
+	'a quiet container stays quiet; an answer outside the set reads unknown', var_export($quiet_c, true));
 // A site's code check and the host's restrictions (host_report 1.21, specs/host_restrictions.md D8).
 $cc = JobResultProcessor::sanitise_host_report(array('host_restrictions' => array('unsigned_packages' => 'refuse', 'Bad Name' => 'x', 'other' => '<b>'),
 	'containers' => array(

@@ -3563,7 +3563,7 @@ check(substr_count($install_b56, "seed_agent_volume \"\$SITENAME\"\n            
 check(strpos($install_b56, 'MOUNTPOINT}"/*/main/PG_VERSION') !== false,
     'the database volume\'s version is read off the volume itself, per cluster');
 $guard_at = strpos($template_b56, 'FATAL: the database on this volume is PostgreSQL');
-$pg_start_at = strpos($template_b56, "    service postgresql start && \\\n");
+$pg_start_at = strpos($template_b56, '    install -d -o postgres -g postgres -m 2775 /var/run/postgresql && \\');
 check($guard_at !== false && $pg_start_at !== false && $guard_at < $pg_start_at,
     'the start command refuses a foreign-major database before it starts PostgreSQL');
 
@@ -3718,7 +3718,7 @@ section('PostgreSQL starts on volumes another image\'s postgres user owns (specs
 
 $tpl_b15 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/Dockerfile.template') . (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
 $owner_at_b15 = strpos($tpl_b15, 'PG_OWNER="$(id -u postgres):$(id -g postgres)"');
-$start_at_b15 = strpos($tpl_b15, "    service postgresql start && \\\n");
+$start_at_b15 = strpos($tpl_b15, '    install -d -o postgres -g postgres -m 2775 /var/run/postgresql && \\');
 $guard_at_b15 = strpos($tpl_b15, 'FATAL: the database on this volume is PostgreSQL');
 check($owner_at_b15 !== false && $start_at_b15 !== false && $owner_at_b15 < $start_at_b15,
 	'the start command hands PostgreSQL its directories before starting it',
@@ -3728,6 +3728,33 @@ check($guard_at_b15 !== false && $owner_at_b15 !== false && $guard_at_b15 < $own
 check(strpos($tpl_b15, 'chown -R postgres:postgres /var/lib/postgresql') !== false
 	&& strpos($tpl_b15, 'chown root:postgres /var/log/postgresql && chmod 1775 /var/log/postgresql') !== false,
 	'both the data volume and the log directory are covered');
+
+section('A container start waits on PostgreSQL itself, not on fixed pauses (specs/multi_tenant_host_hardening.md D9)');
+
+$start_d9 = (string)file_get_contents($site_root . '/maintenance_scripts/install_tools/_site_start.sh');
+$start_d9_code = preg_replace('/^#.*$/m', '', $start_d9);
+check(strpos($start_d9_code, 'pg_ctl" start -w -t ') !== false
+	&& strpos($start_d9_code, '-o "-c config_file=/etc/postgresql/${PG_IMAGE_MAJOR}/main/postgresql.conf"') !== false
+	&& strpos($start_d9_code, '-l "/var/log/postgresql/postgresql-${PG_IMAGE_MAJOR}-main.log"') !== false,
+	'PostgreSQL is started by pg_ctl -w, with the cluster\'s own config file and log, as pg_ctlcluster starts it',
+	'pg_ctlcluster probes with psql, which a password-only cluster refuses ten times half a second apart');
+check(strpos($start_d9_code, 'service postgresql start') === false && !preg_match('/^\s*sleep [0-9]+ && \\\\$/m', $start_d9_code),
+	'and no fixed sleep follows it, nor any other step of the start command (a wait polls only while PostgreSQL is not ready)');
+check(strpos($start_d9_code, 'install -d -o postgres -g postgres -m 2775 /var/run/postgresql') !== false,
+	'its socket directory is made first, as pg_ctlcluster makes it');
+// reviewer2 H5: pg_ctl -w gives up while a long crash recovery runs on. A start
+// that failed then would end the container mid-recovery, and the next start
+// would begin the recovery again: it waits on while PostgreSQL lives.
+$wait_at = strpos($start_d9_code, 'until pg_isready -q; do');
+$alive_at = strpos($start_d9_code, 'pg_ctl" status -D "${PG_DATA}"');
+$fatal_at = strpos($start_d9_code, 'FATAL: PostgreSQL stopped while starting');
+check($wait_at !== false && $alive_at !== false && $fatal_at !== false && $wait_at < $alive_at && $alive_at < $fatal_at,
+	'when pg_ctl stops waiting, the start waits on for PostgreSQL with no limit, and fails only once it has stopped');
+check(strpos($start_d9_code, 'pg_ctl" start -w -t 60 ') !== false,
+	'so pg_ctl\'s own wait is short');
+check(strpos($start_d9_code, '[ ! -f "${PG_ENV_FILE}" ] || . "${PG_ENV_FILE}"') !== false
+	&& strpos($start_d9_code, 'PG_ENV_FILE="/etc/postgresql/${PG_IMAGE_MAJOR}/main/environment"') !== false,
+	'the cluster\'s environment file reaches PostgreSQL, as pg_ctlcluster passes it (reviewer2 H6)');
 
 section('The move script keeps its way back (specs/fleet_ubuntu_2604_postgres_upgrade.md B16)');
 
