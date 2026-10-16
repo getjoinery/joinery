@@ -372,13 +372,20 @@
   function renderIssues(s) {
     var list = $('issues-list');
     var issues = s.issues || [];
-    var key = issues.map(function (i) { return i.id; }).join(',');
+    // Deletes the guard is holding come first, and come even when the capped
+    // list left their issue out: nothing more is deleted until somebody
+    // answers, and this is where they answer.
+    var held = s.held_deletes && s.held_deletes.held_set ? s.held_deletes : null;
+    var rest = held ? issues.filter(function (i) { return i.id !== held.issue_id; }) : issues;
+    var key = (held ? held.issue_id + ':' + held.held_set + '|' : '') +
+      rest.map(function (i) { return i.id; }).join(',');
     // Redrawn only when the list changed, so a button somebody is about to
     // press does not move out from under them every two seconds.
     if (list.dataset.key !== key) {
       list.dataset.key = key;
       clear(list);
-      issues.forEach(function (issue) {
+      if (held) list.appendChild(heldItem(held));
+      rest.forEach(function (issue) {
         var item = make('li');
         var body = make('div');
         body.appendChild(make('span', null, issue.summary));
@@ -398,9 +405,36 @@
     // fifty, and saying fifty when there are three hundred is understating.
     var total = s.issues_total != null ? s.issues_total : issues.length;
     show($('issues-none'), total === 0);
-    var more = total - issues.length;
+    var more = total - rest.length - (held ? 1 : 0);
     show($('issues-more'), more > 0);
     if (more > 0) text($('issues-more'), 'And ' + more + ' more. Dealing with these will show the rest.');
+  }
+
+  // The held deletes, in the engine's words, with one button that approves
+  // exactly the set those words name. Pressed once it asks again, as
+  // unlinking does: deletes carried out are carried out. If what is held has
+  // changed by then, the daemon refuses and the redrawn item shows the new
+  // set.
+  function heldItem(held) {
+    var item = make('li');
+    var body = make('div');
+    body.appendChild(make('span', null, held.detail || held.summary));
+    var approve = make('button', 'small danger', 'Approve these deletes');
+    approve.type = 'button';
+    approve.addEventListener('click', function () {
+      if (approve.dataset.armed !== 'yes') {
+        approve.dataset.armed = 'yes';
+        text(approve, 'Yes, delete them');
+        return;
+      }
+      approve.disabled = true;
+      act('/approve-deletes', { fingerprint: held.held_set }).catch(function () {
+        approve.disabled = false;
+      });
+    });
+    item.appendChild(body);
+    item.appendChild(approve);
+    return item;
   }
 
   function loadFolders() {

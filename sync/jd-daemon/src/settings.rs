@@ -69,13 +69,24 @@ mod tests {
                 indicator: Indicator::Attention,
                 entries: [("synced".to_string(), 3usize)].into_iter().collect(),
                 pending_ops: 0,
-                issues: vec![crate::health::Issue {
-                    id: 9,
-                    kind: "unsyncable".into(),
-                    detail: "NameTooLong".into(),
-                    summary: "<img src=x onerror=alert(1)>.txt".into(),
-                    created_at: 0,
-                }],
+                issues: vec![
+                    crate::health::Issue {
+                        id: 9,
+                        kind: "unsyncable".into(),
+                        detail: "NameTooLong".into(),
+                        summary: "<img src=x onerror=alert(1)>.txt".into(),
+                        created_at: 0,
+                    },
+                    crate::health::Issue {
+                        id: 10,
+                        kind: jd_core::pass::DELETES_HELD.into(),
+                        detail: "61 items deleted on this computer have not been deleted on the server. \
+                                 To go ahead, approve these deletes (held set 0123456789abcdef)."
+                            .into(),
+                        summary: "61 items deleted on this computer have not been deleted on the server.".into(),
+                        created_at: 0,
+                    },
+                ],
                 blocker: None,
                 last_pass_ms: Some(1),
                 cursor: 0,
@@ -221,6 +232,33 @@ mod tests {
         let (status, _) = from_page(port, "GET", "/pause", &session, "");
         assert_eq!(status, 405);
         assert!(rx.try_recv().is_err(), "neither reached the sync thread");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_page_approves_exactly_the_held_deletes_it_was_shown() {
+        let (endpoint, rx, dir) = daemon("approve");
+        let port = endpoint.port;
+        let session = session_for(&endpoint);
+
+        let (status, body) = from_page(port, "GET", "/status", &session, "");
+        assert_eq!(status, 200);
+        assert_eq!(body["held_deletes"]["held_set"], "0123456789abcdef");
+        assert_eq!(body["held_deletes"]["issue_id"], 10);
+
+        let (status, _) = from_page(port, "POST", "/approve-deletes", &session, r#"{"fingerprint":"fedcba9876543210"}"#);
+        assert_eq!(status, 409, "a set nobody was shown");
+        assert!(rx.try_recv().is_err());
+
+        let (status, body) = from_page(port, "POST", "/approve-deletes", &session, r#"{"fingerprint":"0123456789abcdef"}"#);
+        assert_eq!((status, body["ok"].as_bool()), (200, Some(true)), "{body}");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            Command::ApproveDeletes("0123456789abcdef".into())
+        );
+        // And the page's button is what asks it, with the set from the answer.
+        let js = page("/settings/app.js");
+        assert!(js.contains("act('/approve-deletes', { fingerprint: held.held_set })"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

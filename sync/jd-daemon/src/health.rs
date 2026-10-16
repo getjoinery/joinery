@@ -256,6 +256,13 @@ fn describe(raw: StoredIssue) -> Issue {
             "Waiting for the owner to grant this device a key for an encrypted folder.".into()
         }
         "vault_relink" => "The key for encrypted folders was replaced, and this computer holds the old one. Link it again (joinery-drive login, from the desktop session) to open encrypted files saved since; everything else keeps syncing.".into(),
+        // The engine's words end by asking for an approval of the set they
+        // name; from a terminal that is one command, which shows the set
+        // again and asks.
+        "deletes_held" => format!(
+            "{} From a terminal: joinery-drive approve-deletes",
+            raw.detail
+        ),
         _ => plain_enough(&raw.detail),
     };
     Issue {
@@ -695,6 +702,22 @@ mod tests {
             dismissed: false,
         });
         assert!(issue.summary.contains("already exists here"));
+    }
+
+    #[test]
+    fn deletes_held_for_a_person_need_attention_and_say_how_to_answer() {
+        // The guard holding a mass delete is the client stopping part of its
+        // work on purpose; a green tray beside it is the silence the whole
+        // model is against.
+        let store = Store::open_in_memory().unwrap();
+        let detail = "61 items deleted on this computer have not been deleted on the server. \
+                      To go ahead, approve these deletes (held set 0123456789abcdef).";
+        store.raise_issue(None, "deletes_held", detail, 0).unwrap();
+        let health = read(&store, None, None).unwrap();
+        assert_eq!(health.indicator, Indicator::Attention);
+        let summary = &health.issues[0].summary;
+        assert!(summary.starts_with(detail), "{summary}");
+        assert!(summary.ends_with("joinery-drive approve-deletes"), "{summary}");
     }
 
     #[test]

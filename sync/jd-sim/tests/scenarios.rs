@@ -17731,6 +17731,7 @@ fn a_folder_kept_for_an_edit_leaves_the_mass_delete_guard_holding_the_rest() {
     }
     let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
     assert_eq!(live.len(), 61, "the guard did not hold the untouched files: {} live", live.len());
+    assert!(issues_of(mac, "deletes_held").first().is_some_and(|said| said.starts_with("60 items deleted on this computer")), "{:?}", issues_of(mac, "deletes_held"));
     assert!(live.iter().any(|f| f.name == "shot.psd" && f.sha256 == jd_sim::sha256_hex(edit)));
     assert_eq!(disk_tree(mac).get("Art/shot.psd").cloned().flatten(), Some(jd_sim::sha256_hex(edit)), "the edit is not back on mac");
 }
@@ -23899,6 +23900,220 @@ fn work_that_keeps_failing_is_said_in_one_issue_as_it_changes() {
     assert!(seen.iter().any(|s| s.starts_with("A change") && s.contains("Empty")), "{seen:?}");
     assert!(world.settle().is_some(), "never settled once the server answered");
     assert!(issues_of(laptop, "keeps_failing").is_empty(), "{:?}", issues_of(laptop, "keeps_failing"));
+}
+
+/// A folder of sixty files and one file beside it, settled on the laptop.
+fn sixty_files_in_art(world: &World) {
+    let laptop = world.device("laptop");
+    for n in 0..60 {
+        laptop.fs.user_write(&format!("Art/f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    laptop.fs.user_write("keep.txt", b"kept");
+    laptop.fs.user_write("extra.txt", b"extra");
+    assert!(world.settle().is_some(), "never settled");
+}
+
+/// The files the server holds live, by name.
+fn live_on_the_server(world: &World) -> Vec<String> {
+    let mut live: Vec<String> = world.server.files().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    live.sort();
+    live
+}
+
+/// The set a held-deletes issue names, which is what an approval of it quotes.
+fn held_set(detail: &str) -> String {
+    jd_core::pass::held_deletes_fingerprint(detail).unwrap_or_else(|| panic!("no held set named in: {detail}")).to_string()
+}
+
+/// A person approving the held set they were shown.
+fn approve_held(device: &jd_sim::engine::Device, fingerprint: &str) {
+    jd_core::pass::approve_deletes(&device.store, fingerprint).unwrap();
+}
+
+/// More than a quarter of everything deleted here is held for a person, and
+/// one issue says so: how many, on which side, the folder by name, what to do,
+/// and the set an approval names. RED before: held, and nothing said -- the
+/// deletes never reached the server, the tray green, for ever.
+#[test]
+fn a_mass_delete_here_is_held_and_said() {
+    let world = World::new(9_830, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    laptop.fs.user_remove("Art");
+    for _ in 0..3 {
+        world.clock.advance_secs(60);
+        world.pass(laptop);
+    }
+    assert_eq!(live_on_the_server(&world).len(), 62, "a delete went through unasked");
+    let said = issues_of(laptop, "deletes_held");
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].starts_with("61 items deleted on this computer have not been deleted on the server, among them the folder \u{201c}Art\u{201d}."),
+        "{}",
+        said[0]
+    );
+    assert!(said[0].contains("put them back"), "{}", said[0]);
+    held_set(&said[0]);
+}
+
+/// Approved by the set it showed, the held deletes are carried out -- those,
+/// and nothing else -- the issue goes, and the approval is spent. RED before:
+/// nothing said, so no set to approve.
+#[test]
+fn approving_the_held_set_carries_out_exactly_those_deletes() {
+    let world = World::new(9_831, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    laptop.fs.user_remove("Art");
+    world.pass(laptop);
+    let said = issues_of(laptop, "deletes_held");
+    assert_eq!(said.len(), 1, "{said:?}");
+    approve_held(laptop, &held_set(&said[0]));
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(live_on_the_server(&world), vec!["extra.txt".to_string(), "keep.txt".to_string()]);
+    assert!(world.server.folders().iter().any(|f| f.name == "Art" && f.trashed), "{:?}", world.server.folders());
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_eq!(laptop.store.get_meta("deletes_approved").unwrap(), None, "the approval was not spent");
+    assert_converged(&world);
+}
+
+/// One more file deleted after the person looked: the approval names a set
+/// that is no longer what is held, so nothing goes, and the issue asks again
+/// about all of it, under a new set. Approving that one carries it out. RED
+/// before: nothing said, so no set to approve.
+#[test]
+fn an_approval_of_a_set_that_has_changed_carries_out_nothing_and_asks_again() {
+    let world = World::new(9_832, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    laptop.fs.user_remove("Art");
+    world.pass(laptop);
+    let said = issues_of(laptop, "deletes_held");
+    assert_eq!(said.len(), 1, "{said:?}");
+    let shown = held_set(&said[0]);
+    approve_held(laptop, &shown);
+    laptop.fs.user_remove("extra.txt");
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+    assert_eq!(live_on_the_server(&world).len(), 62, "a delete went through on an approval of another set");
+    assert_eq!(laptop.store.get_meta("deletes_approved").unwrap(), None, "a stale approval was kept");
+    let asked = issues_of(laptop, "deletes_held");
+    assert_eq!(asked.len(), 1, "{asked:?}");
+    assert!(asked[0].starts_with("62 items deleted on this computer"), "{}", asked[0]);
+    assert_ne!(held_set(&asked[0]), shown);
+    approve_held(laptop, &held_set(&asked[0]));
+    assert!(world.settle().is_some(), "never settled");
+    assert_eq!(live_on_the_server(&world), vec!["keep.txt".to_string()]);
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_converged(&world);
+}
+
+/// Files trashed on the web, more than a quarter of everything, are held
+/// on this computer and said; restored from the trash, they stay where they
+/// are and the issue goes. RED before: never said.
+#[test]
+fn held_deletes_are_unsaid_when_the_files_come_back() {
+    let world = World::new(9_833, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    let gone: Vec<i64> = world.server.files().into_iter().filter(|f| f.name != "keep.txt").map(|f| f.id).collect();
+    assert_eq!(gone.len(), 61);
+    for id in &gone {
+        world.server.action("drive_trash", &serde_json::json!({ "entity_type": "file", "entity_id": id })).expect("trash");
+    }
+    for _ in 0..3 {
+        world.clock.advance_secs(60);
+        world.pass(laptop);
+    }
+    assert_eq!(disk_tree(laptop).keys().filter(|p| p.ends_with(".txt")).count(), 62, "a removal went through unasked");
+    let said = issues_of(laptop, "deletes_held");
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].starts_with("61 items deleted on the server or on another device have not been removed from this computer, among them \u{201c}Art/f0.txt\u{201d}"),
+        "{}",
+        said[0]
+    );
+    assert!(said[0].contains("restore them from the trash on the web"), "{}", said[0]);
+    for id in &gone {
+        world.server.action("drive_restore", &serde_json::json!({ "entity_type": "file", "entity_id": id })).expect("restore");
+    }
+    assert!(world.settle().is_some(), "never settled");
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_eq!(disk_tree(laptop).keys().filter(|p| p.ends_with(".txt")).count(), 62);
+    assert_converged(&world);
+}
+
+/// Put back on this computer, files whose delete was held are files again,
+/// and the issue goes. RED before: never said.
+#[test]
+fn held_deletes_are_unsaid_when_the_files_are_put_back() {
+    let world = World::new(9_834, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    laptop.fs.user_remove("Art");
+    world.pass(laptop);
+    assert_eq!(issues_of(laptop, "deletes_held").len(), 1, "{:?}", issues_of(laptop, "deletes_held"));
+    for n in 0..60 {
+        laptop.fs.user_write(&format!("Art/f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    assert!(world.settle().is_some(), "never settled");
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_eq!(live_on_the_server(&world).len(), 62, "{:?}", live_on_the_server(&world));
+    assert_converged(&world);
+}
+
+/// A folder trashed on the web is weighed by everything in it, not as one
+/// delete: sixty files leaving this computer are held and said, the folder
+/// by name, and approving the set it showed removes exactly them. RED before:
+/// the feed carries the folder as one change, the guard counted one delete,
+/// and the whole folder left this computer unasked (B1).
+#[test]
+fn a_folder_trashed_on_the_web_is_held_for_everything_in_it() {
+    let world = World::new(9_835, &["laptop"]);
+    let laptop = world.device("laptop");
+    sixty_files_in_art(&world);
+    let art = world.server.folder_id_at("Art").expect("Art on the server");
+    world.server.action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": art })).expect("trash");
+    for _ in 0..3 {
+        world.clock.advance_secs(60);
+        world.pass(laptop);
+    }
+    assert_eq!(disk_tree(laptop).keys().filter(|p| p.ends_with(".txt")).count(), 62, "the folder left this computer unasked");
+    let said = issues_of(laptop, "deletes_held");
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].starts_with("61 items deleted on the server or on another device have not been removed from this computer, among them the folder \u{201c}Art\u{201d}."),
+        "{}",
+        said[0]
+    );
+    approve_held(laptop, &held_set(&said[0]));
+    assert!(world.settle().is_some(), "never settled");
+    let left: Vec<String> = disk_tree(laptop).keys().filter(|p| p.ends_with(".txt")).cloned().collect();
+    assert_eq!(left, vec!["extra.txt".to_string(), "keep.txt".to_string()]);
+    assert!(!laptop.fs.exists("Art"), "{:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_eq!(laptop.store.get_meta("deletes_approved").unwrap(), None, "the approval was not spent");
+    assert_converged(&world);
+}
+
+/// A folder trashed on the web holding less than the guard's threshold
+/// leaves this computer as it always did, unasked and unsaid.
+#[test]
+fn a_small_folder_trashed_on_the_web_still_goes_unasked() {
+    let world = World::new(9_836, &["laptop"]);
+    let laptop = world.device("laptop");
+    for n in 0..30 {
+        laptop.fs.user_write(&format!("Art/f{n}.txt"), format!("file {n}").as_bytes());
+    }
+    laptop.fs.user_write("keep.txt", b"kept");
+    assert!(world.settle().is_some(), "never settled");
+    let art = world.server.folder_id_at("Art").expect("Art on the server");
+    world.server.action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": art })).expect("trash");
+    assert!(world.settle().is_some(), "never settled");
+    assert!(!laptop.fs.exists("Art"), "{:?}", disk_tree(laptop).keys().collect::<Vec<_>>());
+    assert!(laptop.fs.exists("keep.txt"));
+    assert!(issues_of(laptop, "deletes_held").is_empty(), "{:?}", issues_of(laptop, "deletes_held"));
+    assert_converged(&world);
 }
 
 /// The server's file at `path`, if it holds one live: its content hash.

@@ -6,6 +6,7 @@
 //!   joinery-drive status        what it is doing, and whether that is fine
 //!   joinery-drive issues        things needing a person, with what to do
 //!   joinery-drive dismiss <id>
+//!   joinery-drive approve-deletes [held-set]  carry out deletes the guard holds
 //!   joinery-drive pause | resume | sync-now | stop
 //!   joinery-drive autostart on|off
 //!   joinery-drive check-update  look for a newer version now
@@ -57,6 +58,7 @@ fn main() -> ExitCode {
         "stop" => simple_command("/stop", "Stopping."),
         "autostart" => cmd_autostart(&rest),
         "check-update" => simple_command("/check-update", "Checking for updates."),
+        "approve-deletes" => cmd_approve_deletes(&rest),
         "unlink" => cmd_unlink(),
         // What an installer, a bug report, or the upgrade gate's minimum is
         // compared against: the same number the server sees in client-version.
@@ -88,6 +90,7 @@ usage: joinery-drive login <instance-url> [--device NAME] [--root PATH]
        joinery-drive daemon
        joinery-drive settings
        joinery-drive status | issues | dismiss <id>
+       joinery-drive approve-deletes [held-set]
        joinery-drive pause | resume | sync-now | stop
        joinery-drive autostart on|off
        joinery-drive check-update
@@ -535,6 +538,90 @@ fn cmd_dismiss(rest: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Carry out the deletes the mass-delete guard holds, once a person has seen
+/// them.
+///
+/// With no argument it shows what is held and asks. Given the held set, as the
+/// issue names it, it approves that set without asking -- for a script, or a
+/// person who has already read the issue -- and only that set: if what is held
+/// has changed since, nothing is approved and the new set is shown. Either
+/// way the daemon's next round carries the deletes out only if it would still
+/// hold exactly that set.
+fn cmd_approve_deletes(rest: &[String]) -> Result<(), String> {
+    let endpoint = endpoint()?;
+    let status = ask(&endpoint, "GET", "/status", Value::Null)
+        .ok_or("the sync daemon did not answer".to_string())?;
+    let set = match approval_for(&status, rest.first().map(String::as_str)) {
+        Approval::NothingHeld => {
+            println!("No deletes are being held.");
+            return Ok(());
+        }
+        Approval::NotWhatIsHeld { said } => {
+            return Err(format!(
+                "that is not the set being held now, so nothing was approved. What is held:\n\n{said}\n\n\
+                 Look again with: joinery-drive approve-deletes"
+            ))
+        }
+        Approval::Send(set) => set,
+        Approval::Ask { said, set } => {
+            println!("{said}\n");
+            print!("Carry out these deletes? Type yes to go ahead: ");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| format!("cannot read the answer: {e}"))?;
+            if line.trim() != "yes" {
+                println!("Nothing was deleted.");
+                return Ok(());
+            }
+            set
+        }
+    };
+    let answer = ask(&endpoint, "POST", "/approve-deletes", json!({ "fingerprint": set }))
+        .ok_or("the sync daemon did not answer".to_string())?;
+    if answer.get("ok").and_then(Value::as_bool) == Some(true) {
+        println!(
+            "Approved. The next pass carries out exactly these deletes; if what is held changes first, \
+             nothing is deleted and you are asked again."
+        );
+        Ok(())
+    } else {
+        Err(answer
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("the daemon refused")
+            .to_string())
+    }
+}
+
+/// What `approve-deletes` does, read off the status answer and the set it
+/// was given, if any.
+#[derive(Debug, PartialEq, Eq)]
+enum Approval {
+    NothingHeld,
+    /// Show the person what is held, in the engine's own words (the summary
+    /// adds the command this is), and ask.
+    Ask { said: String, set: String },
+    /// Given the set held now: approve it.
+    Send(String),
+    /// Given a set that is not what is held now.
+    NotWhatIsHeld { said: String },
+}
+
+fn approval_for(status: &Value, given: Option<&str>) -> Approval {
+    let Some(held) = status.get("held_deletes").filter(|h| !h.is_null()) else {
+        return Approval::NothingHeld;
+    };
+    let said = held.get("detail").and_then(Value::as_str).unwrap_or("").to_string();
+    let set = held.get("held_set").and_then(Value::as_str).unwrap_or("").to_string();
+    match given {
+        None => Approval::Ask { said, set },
+        Some(given) if given == set => Approval::Send(set),
+        Some(_) => Approval::NotWhatIsHeld { said },
+    }
+}
+
 /// Open the settings page in the browser.
 ///
 /// The address carries a ticket that is spent when the page loads, so it is
@@ -646,5 +733,37 @@ impl Args {
 
     fn flag(&self, name: &str) -> Option<String> {
         self.flags.get(name).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status_holding(set: &str) -> Value {
+        json!({
+            "indicator": "attention",
+            "held_deletes": { "issue_id": 4, "summary": "61 items ... From a terminal: joinery-drive approve-deletes", "detail": "61 items ...", "held_set": set },
+        })
+    }
+
+    /// Asked with no set, it shows what is held and asks; given the set held
+    /// now, it sends that; given any other, it sends nothing and shows what
+    /// is held instead.
+    #[test]
+    fn approve_deletes_sends_only_the_set_held_now() {
+        let status = status_holding("0123456789abcdef");
+        assert_eq!(
+            approval_for(&status, None),
+            Approval::Ask { said: "61 items ...".into(), set: "0123456789abcdef".into() }
+        );
+        assert_eq!(approval_for(&status, Some("0123456789abcdef")), Approval::Send("0123456789abcdef".into()));
+        assert_eq!(
+            approval_for(&status, Some("fedcba9876543210")),
+            Approval::NotWhatIsHeld { said: "61 items ...".into() }
+        );
+        let quiet = json!({ "indicator": "green", "held_deletes": null });
+        assert_eq!(approval_for(&quiet, Some("0123456789abcdef")), Approval::NothingHeld);
+        assert_eq!(approval_for(&json!({ "summary": "Starting up" }), None), Approval::NothingHeld);
     }
 }

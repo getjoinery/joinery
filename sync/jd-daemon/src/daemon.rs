@@ -52,6 +52,9 @@ pub enum Command {
     Resume,
     SyncNow,
     DismissIssue(i64),
+    /// A person approved the deletes the mass-delete guard holds, by the
+    /// fingerprint of the set they were shown (`route_approve_deletes`).
+    ApproveDeletes(String),
     Stop,
     /// Stop syncing and hand back to the caller to take this computer off its
     /// account. The sync thread does not do the unlinking itself: it would be
@@ -238,6 +241,8 @@ pub struct Daemon {
     /// Where each pass's trace goes, on a soak device that asked
     /// (`crate::passlog`). None on every user's client.
     pass_journal: Option<crate::passlog::PassJournal>,
+    /// The held set of deletes last said in the log (`held_deletes_line`).
+    held_logged: Option<String>,
     /// The vault probe refusal this process last wrote to its log
     /// (`say_a_refused_vault_probe`).
     probe_refusal_said: Option<String>,
@@ -289,6 +294,7 @@ impl Daemon {
             custody,
             vault,
             pass_journal,
+            held_logged: None,
             probe_refusal_said: None,
         }
     }
@@ -332,6 +338,13 @@ impl Daemon {
                 Command::SyncNow => self.last_poll_ms = 0,
                 Command::DismissIssue(id) => {
                     let _ = self.store.dismiss_issue(id);
+                }
+                // Written down, not acted on: the next round reads it, and
+                // carries the deletes out only if what it would hold is still
+                // that set. Now, so the answer is not left waiting a poll.
+                Command::ApproveDeletes(fingerprint) => {
+                    let _ = jd_core::pass::approve_deletes(&self.store, &fingerprint);
+                    self.last_poll_ms = 0;
                 }
                 Command::Stop => return Some(Exit::Stopped),
                 Command::Unlink => return Some(Exit::Unlinked),
@@ -439,6 +452,13 @@ impl Daemon {
                     }
                 }
                 self.last_pass_ms = Some(now_ms());
+                if !outcome.root_unavailable {
+                    let (held, line) = held_deletes_line(self.held_logged.as_deref(), &outcome.round);
+                    if let Some(line) = line {
+                        eprintln!("{line}");
+                    }
+                    self.held_logged = held;
+                }
                 self.blocker = if outcome.root_unavailable {
                     Some(Blocker::RootUnavailable {
                         path: self.config.sync_root.display().to_string(),
@@ -592,6 +612,44 @@ pub fn open_store(path: &std::path::Path, config: &Config) -> Result<Store, Stri
     Ok(store)
 }
 
+/// What the log says about deletes the mass-delete guard holds: a held set
+/// once, when it is new, with its counts on each side; that an approved set
+/// is being carried out; and that nothing is held any more. A box with no
+/// tray and nobody reading `status` says so here. Returns the held set now
+/// said, and the line to write, if there is one.
+fn held_deletes_line(logged: Option<&str>, round: &jd_core::RoundOutcome) -> (Option<String>, Option<String>) {
+    use jd_core::round::{held_fingerprint, DeleteDirection};
+    let count = |pauses: &[jd_core::MassDeletePause], direction| -> usize {
+        pauses.iter().filter(|p| p.direction == direction).map(|p| p.held.len()).sum()
+    };
+    if !round.paused.is_empty() {
+        let set = held_fingerprint(&round.paused);
+        if logged == Some(set.as_str()) {
+            return (Some(set), None);
+        }
+        let line = format!(
+            "joinery-drive: holding deletes until a person approves them (held set {set}): \
+             {} to remove from this computer, {} to trash on the server; see: joinery-drive approve-deletes",
+            count(&round.paused, DeleteDirection::Local),
+            count(&round.paused, DeleteDirection::Remote),
+        );
+        return (Some(set), Some(line));
+    }
+    if !round.approved.is_empty() {
+        let line = format!(
+            "joinery-drive: carrying out approved deletes (held set {}): {} from this computer, {} on the server",
+            held_fingerprint(&round.approved),
+            count(&round.approved, DeleteDirection::Local),
+            count(&round.approved, DeleteDirection::Remote),
+        );
+        return (None, Some(line));
+    }
+    match logged {
+        Some(set) => (None, Some(format!("joinery-drive: deletes no longer held (held set {set} is gone)"))),
+        None => (None, None),
+    }
+}
+
 /// The log line for a vault probe refusal, once per refusal: `None` while the
 /// refusal is the one already said, or there is none.
 fn vault_probe_refusal_line(said: &mut Option<String>, now: Option<String>) -> Option<String> {
@@ -686,6 +744,7 @@ pub const ROUTES: &[Route] = &[
     Route { method: "POST", path: "/resume", when: When::Linked, page: true, handle: route_resume },
     Route { method: "POST", path: "/sync-now", when: When::Linked, page: true, handle: route_sync_now },
     Route { method: "POST", path: "/dismiss", when: When::Linked, page: true, handle: route_dismiss },
+    Route { method: "POST", path: "/approve-deletes", when: When::Linked, page: true, handle: route_approve_deletes },
     Route { method: "POST", path: "/autostart", when: When::Linked, page: true, handle: route_autostart },
     Route { method: "POST", path: "/unlink", when: When::Linked, page: true, handle: route_unlink },
     Route { method: "POST", path: "/check-update", when: When::Always, page: true, handle: route_check_update },
@@ -814,6 +873,39 @@ fn route_dismiss(shared: &Shared, request: &Request) -> (u16, Value) {
         Some(id) => ok(shared.send(Command::DismissIssue(id))),
         None => (400, json!({ "error": "dismiss needs an issue_id" })),
     }
+}
+
+/// Approve the deletes the mass-delete guard holds, by the fingerprint of the
+/// set the person was shown (`held_set` in the status answer).
+///
+/// Refused here when that is not the set the daemon last said it holds, so a
+/// person answering an old question hears so at once rather than finding
+/// nothing deleted. The round that reads the approval checks again, against
+/// what it would hold by then, which is the check that decides; before the
+/// first pass there is nothing here to check against, and that one alone
+/// does.
+fn route_approve_deletes(shared: &Shared, request: &Request) -> (u16, Value) {
+    let Some(fingerprint) = request
+        .body
+        .get("fingerprint")
+        .and_then(Value::as_str)
+        .filter(|f| jd_core::pass::is_a_held_set(f))
+    else {
+        return (400, json!({ "error": "approve-deletes needs the fingerprint of the held set" }));
+    };
+    if let Some(s) = shared.snapshot() {
+        match held_deletes(&s) {
+            None => return (409, json!({ "error": "no deletes are being held" })),
+            Some((_, held)) if held != fingerprint => {
+                return (
+                    409,
+                    json!({ "error": "the deletes being held have changed since that was shown; look again", "held_set": held }),
+                )
+            }
+            Some(_) => {}
+        }
+    }
+    ok(shared.send(Command::ApproveDeletes(fingerprint.to_string())))
 }
 
 fn route_autostart(_: &Shared, request: &Request) -> (u16, Value) {
@@ -987,6 +1079,15 @@ pub fn folders_json(mut rows: Vec<FolderRow>) -> Value {
     })
 }
 
+/// The held-deletes issue, if one is open, and the set it names.
+fn held_deletes(s: &Snapshot) -> Option<(&crate::health::Issue, &str)> {
+    s.health
+        .issues
+        .iter()
+        .find(|i| i.kind == jd_core::pass::DELETES_HELD)
+        .and_then(|i| jd_core::pass::held_deletes_fingerprint(&i.detail).map(|set| (i, set)))
+}
+
 /// How many issues one answer carries.
 ///
 /// The list is what a person is going to read, and nobody reads three hundred
@@ -1028,6 +1129,9 @@ pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         // making the same understatement the whole health model exists to
         // prevent.
         "issues_total": s.health.issues.len(),
+        // On its own, outside the capped list below: the one question a shell
+        // has to put to a person before anything more is deleted.
+        "held_deletes": held_deletes(s).map(|(i, set)| json!({ "issue_id": i.id, "summary": i.summary, "detail": i.detail, "held_set": set })),
         "issues": s.health.issues.iter().take(MAX_REPORTED_ISSUES).map(|i| json!({
             "id": i.id,
             "kind": i.kind,
@@ -1126,6 +1230,136 @@ mod tests {
             bytes < 64 * 1024,
             "a status answer grew to {bytes} bytes with 400 issues open"
         );
+    }
+
+    /// A snapshot holding these issues, published as the sync thread does.
+    fn publish_issues(shared: &Shared, issues: Vec<crate::health::Issue>) {
+        *shared.snapshot.lock().unwrap() = Some(Snapshot {
+            health: Health {
+                indicator: Indicator::Attention,
+                entries: Default::default(),
+                pending_ops: 0,
+                issues,
+                blocker: None,
+                last_pass_ms: None,
+                cursor: 0,
+            },
+            paused: false,
+            device_name: "device-a".into(),
+            base_url: "https://example.com".into(),
+            sync_root: "/home/u/Joinery Drive".into(),
+            custody: "in a file".into(),
+            vault: false,
+        });
+    }
+
+    fn issue(id: i64, kind: &str, detail: &str) -> crate::health::Issue {
+        crate::health::Issue {
+            id,
+            kind: kind.into(),
+            detail: detail.into(),
+            summary: detail.into(),
+            created_at: 0,
+        }
+    }
+
+    fn held(id: i64, set: &str) -> crate::health::Issue {
+        issue(
+            id,
+            jd_core::pass::DELETES_HELD,
+            &format!("61 items deleted on this computer have not been deleted on the server. To go ahead, approve these deletes (held set {set})."),
+        )
+    }
+
+    fn approve(shared: &Shared, body: serde_json::Value) -> (u16, serde_json::Value) {
+        handle_control(shared, &req("POST", "/approve-deletes", body))
+    }
+
+    #[test]
+    fn approving_the_held_deletes_reaches_the_sync_thread_with_the_set_shown() {
+        let (shared, rx) = shared();
+        publish_issues(&shared, vec![held(7, "0123456789abcdef")]);
+        let (status, body) = approve(&shared, serde_json::json!({ "fingerprint": "0123456789abcdef" }));
+        assert_eq!((status, body["ok"].as_bool()), (200, Some(true)), "{body}");
+        assert_eq!(rx.recv().unwrap(), Command::ApproveDeletes("0123456789abcdef".into()));
+    }
+
+    #[test]
+    fn approving_a_set_that_is_not_the_one_held_is_refused_and_sends_nothing() {
+        // The person is answering an old question: one more file has gone
+        // since, or the files came back. Told at once, with what is held now.
+        let (shared, rx) = shared();
+        publish_issues(&shared, vec![held(7, "fedcba9876543210")]);
+        let (status, body) = approve(&shared, serde_json::json!({ "fingerprint": "0123456789abcdef" }));
+        assert_eq!(status, 409, "{body}");
+        assert_eq!(body["held_set"], "fedcba9876543210");
+        publish_issues(&shared, vec![]);
+        let (status, _) = approve(&shared, serde_json::json!({ "fingerprint": "fedcba9876543210" }));
+        assert_eq!(status, 409, "nothing is held");
+        assert!(rx.try_recv().is_err(), "an approval of a set nobody holds was sent");
+    }
+
+    #[test]
+    fn approving_without_saying_which_set_is_a_bad_request() {
+        let (shared, rx) = shared();
+        publish_issues(&shared, vec![held(7, "0123456789abcdef")]);
+        for body in [serde_json::json!({}), serde_json::json!({ "fingerprint": "everything" })] {
+            let (status, _) = approve(&shared, body);
+            assert_eq!(status, 400);
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn the_held_deletes_are_in_the_status_answer_however_many_issues_are_open() {
+        // The issue list is capped; the one question a shell has to put to a
+        // person before anything more is deleted is not left to fall past it.
+        let (shared, _rx) = shared();
+        let mut issues: Vec<crate::health::Issue> =
+            (0..MAX_REPORTED_ISSUES as i64 + 5).map(|i| issue(i, "unsyncable", "CaseClash { with: \"a\" }")).collect();
+        issues.push(held(900, "0123456789abcdef"));
+        publish_issues(&shared, issues);
+        let json = snapshot_json(&shared.snapshot().unwrap());
+        assert_eq!(json["held_deletes"]["held_set"], "0123456789abcdef");
+        assert_eq!(json["held_deletes"]["issue_id"], 900);
+        publish_issues(&shared, vec![]);
+        assert!(snapshot_json(&shared.snapshot().unwrap())["held_deletes"].is_null());
+    }
+
+    #[test]
+    fn a_held_set_is_logged_once_when_it_is_new_and_again_when_it_goes() {
+        // A headless box: nothing reads the tray, so the log is where a hold
+        // shows. Once per held set, not once per pass.
+        let pause = |ids: &[i64]| jd_core::MassDeletePause {
+            direction: jd_core::round::DeleteDirection::Remote,
+            would_delete: ids.len(),
+            synced_total: 400,
+            held: ids.iter().copied().map(jd_core::EntityId::file).collect(),
+        };
+        let held = jd_core::RoundOutcome { paused: vec![pause(&[1, 2, 3])], ..Default::default() };
+        let set = jd_core::round::held_fingerprint(&held.paused);
+
+        let (now, line) = held_deletes_line(None, &held);
+        assert_eq!(now.as_deref(), Some(set.as_str()));
+        let line = line.expect("a new hold is logged");
+        assert!(line.contains(&set) && line.contains("0 to remove from this computer, 3 to trash on the server"), "{line}");
+
+        assert_eq!(held_deletes_line(Some(&set), &held), (Some(set.clone()), None), "logged again on the next pass");
+
+        let grown = jd_core::RoundOutcome { paused: vec![pause(&[1, 2, 3, 4])], ..Default::default() };
+        let (now, line) = held_deletes_line(Some(&set), &grown);
+        assert_ne!(now.as_deref(), Some(set.as_str()));
+        assert!(line.is_some(), "a changed set is a new one");
+
+        let approved = jd_core::RoundOutcome { approved: vec![pause(&[1, 2, 3])], ..Default::default() };
+        let (now, line) = held_deletes_line(Some(&set), &approved);
+        assert_eq!(now, None);
+        assert!(line.unwrap().contains("carrying out approved deletes"));
+
+        let (now, line) = held_deletes_line(Some(&set), &jd_core::RoundOutcome::default());
+        assert_eq!(now, None);
+        assert!(line.unwrap().contains("no longer held"));
+        assert_eq!(held_deletes_line(None, &jd_core::RoundOutcome::default()), (None, None));
     }
 
     #[test]

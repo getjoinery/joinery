@@ -318,9 +318,52 @@ Ransomware, a volume that mounted empty, and a legitimate cleanup are
 byte-for-byte identical from here, and there is no clever test that separates
 them.
 
+What a round would delete is counted in records, not in operations: a folder's
+delete counts every synced record under it on both sides as well, which is
+what it removes. A folder deleted here reaches the round as a delete of each
+record in it; a folder trashed on the server arrives as one change in the feed
+and one local trash, and counts the same. A record under it on only one side —
+moved out here, or by the server — is moved out before the trash runs, and is
+not counted. The records it would remove are held with it, and named with it.
+
 Only deletes are withheld, and only in the blocked direction; ordinary transfers
 in the same round still run. An unavailable sync root is a separate case: it
-hard-pauses rather than reading as a mass local delete.
+hard-pauses rather than reading as a mass local delete. Each device's guard
+answers for its own side, so a large delete approved on one device is asked
+about again on every other device that would remove it.
+
+The person is asked through one `deletes_held` issue for the device, so the
+tray shows Attention for as long as anything is held. It says how many items
+are held on each side (deleted here and not on the server, or deleted on the
+server or another device and not here), names up to three of them by the path
+both sides last agreed (a held folder stands for the held items inside it),
+says how to keep them — put them back on this computer, or restore them from
+the trash on the web — and names the held set: a fingerprint, sixteen hex
+digits of a SHA-256 over the sorted list of side and entity. The same items
+held the same way give the same fingerprint on every pass. The issue is a
+state, re-derived each pass and withdrawn the pass nothing is held; when the
+held set changes, its words and fingerprint change with it.
+
+Going ahead is an approval of exactly the set the person was shown: the
+settings page's **Approve these deletes** button, or
+`joinery-drive approve-deletes`, which shows what is held and asks; given the
+fingerprint (`joinery-drive approve-deletes <held-set>`) it approves without
+asking, and only if that is still the set held. Either way the daemon is sent
+a control request, `POST /approve-deletes` with `{"fingerprint": …}`, which it
+refuses (409) when the fingerprint is not the one its last snapshot holds; the
+status answer carries the open question on its own as `held_deletes` (the
+issue's id, its words and `held_set`), outside the capped issue list. The
+approval is written to the store's `meta` table (`deletes_approved`), so a
+restart keeps it, and the next round reads it: if what that round would hold
+has exactly that fingerprint, its deletes go into the journal like any others;
+if anything was added, taken away or turned the other way since, nothing is
+let through, and the issue asks again under the new fingerprint. The approval
+is spent by the round that reads it, whether or not it matched.
+
+A machine with no tray says so in the daemon's log, on stderr: one line when a
+new held set appears (its fingerprint, how many to remove here and how many to
+trash on the server), one when an approved set is carried out, and one when
+nothing is held any more.
 
 ---
 
@@ -1057,18 +1100,44 @@ than shown; the original stays in the issue's detail for diagnosis.
 **An issue about a state is withdrawn when the state ends.** Most issues report
 an *event* — something was moved aside, something was rescued, a piece of work
 was given up on — and those stand until the user waves them away, because they
-happened and no later state makes them untrue. Four report a *state* instead:
-`unsyncable` (this disk cannot hold that name), `store_inconsistent` (these
-items have no way back to the root), `name_refused` (the disk itself turned
-away the name the server gives an entry; its detail is that name) and
-`rename_held` (an entry with no key on this device was renamed elsewhere to a
-name this disk cannot give it, so it keeps its old name here; its detail is
-the server's name). All four are checked every pass and withdrawn the moment
-they stop being true: a refused name is spent once the server no longer gives
-the entry that name, and a held rename once the entry is no longer held at that
-name. Otherwise the user carries a permanent warning about a file that is now
+happened and no later state makes them untrue. The rest report a *state*, and
+each is checked every pass and withdrawn the moment it stops being true.
+Otherwise the user carries a permanent warning about a file that is now
 perfectly fine, clearable only by hand, and it inflates the attention count the
 tray reads from.
+
+| Issue | Says | Withdrawn when |
+|---|---|---|
+| `unsyncable` | this disk cannot hold that name | the entry is no longer unsyncable for that reason |
+| `name_refused` | the disk itself turned away the name the server gives an entry; its detail is that name | the server no longer gives the entry that name |
+| `rename_held` | an entry with no key on this device was renamed elsewhere to a name this disk cannot give it, so it keeps its old name here; its detail is the server's name | the entry is no longer held at that name |
+| `store_inconsistent` | items have no way back to the root, and the server's index does not have their folder either | nothing is left stranded |
+| `reserved_prefix` | files here have names beginning `.jd-`, which the client keeps for its own working files | no such file is left; the list in it follows the disk |
+| `renames_untracked_on_this_drive` | the standing notice on a FAT or exFAT drive | the sync folder is on a drive that keeps file identities |
+| `trash_waits` | a folder's trash here waits for a child that cannot move yet | the trash goes through, or the folder stops being trashable |
+| `park_waits`, `park_unfinished` | a park waits on something inside the folder; a park's finish was overtaken | the park gets past the wait; the park no longer stands |
+| `directory_disagrees` | a folder's directory stands apart from its files | the directory is back at the record's path, gone, or proven the folder's own |
+| `held_outside_the_vault` | a sealed file stands outside its vault on this disk | it is gone, or back where the server keeps it |
+| `waits_for_a_held_file` | a file from the server waits for a name a held file stands at | the refusal or the hold ends |
+| `name_of_a_sealed_file_held` | a plain file is not sent: its name is a sealed file's, on a drive that keeps no file identities | it no longer holds that name |
+| `name_held_by_a_parked_vault` | a folder's rename waits for a name a parked vault holds on the server | the name is free, or the folder is back at its agreed name |
+| `vault_on_a_weak_drive` | a vault is parked on a drive that cannot keep a file's identity | the drive reads as one that can |
+| `vault_deleted_upstream` | a vault was deleted on the server while this device, which cannot open it, holds files in its directory | the directory is empty or gone, or the vault is restored |
+| `private_not_synced` | a Private folder stays off this computer | the folder is Standard again |
+| `metadata_unreadable` | this device holds a file's key but cannot read its name and content id | they open |
+| `vault_relink` | the vault key was replaced in the browser and this computer holds the old one, so it needs linking again ([Encrypted files and folders](#encrypted-files-and-folders)) | the probe's key is the one this device holds again, the account has no vault set up, or this device holds no vault key |
+| `keeps_failing` | work that keeps failing (below) | nothing is left at the backoff cap |
+| `deletes_held` | deletes the mass-delete guard holds ([The mass-delete guard](#the-mass-delete-guard)) | nothing is held |
+
+Two event issues are withdrawn too, when what they describe is undone:
+`parked` (a copy was moved aside over a name clash) once the clash is resolved
+and the entry released, and `withdrawn` (the server refused an operation) once
+the operation is carried out.
+
+What decides `unsyncable` is the entry's own `LocalStatus`, not the naming
+pass's report of what it just did: an entry already settled as unsyncable is not
+re-reported each pass, so reading that report as the full set withdraws a
+complaint that is still true.
 
 Work that keeps failing is a state too. Once an operation's backoff reaches its
 fifteen-minute cap it is tried every quarter of an hour for as long as it
@@ -1077,11 +1146,6 @@ the first of them fails; it is withdrawn on the first pass that leaves nothing
 at the cap. It is one issue for the device, not one per operation: an outage on
 the server fails every queued operation at once, and a thousand identical
 issues would hide the one that matters.
-
-What decides is the entry's own `LocalStatus`, not the naming pass's report of
-what it just did: an entry already settled as unsyncable is not re-reported each
-pass, so reading that report as the full set withdraws a complaint that is still
-true.
 
 **A record of something the server has deleted is never a fault.** An entry with
 no way back to the root normally means this device has lost its record of a
@@ -1293,6 +1357,7 @@ joinery-drive login <instance-url> [--device NAME] [--root PATH]
 joinery-drive daemon
 joinery-drive settings
 joinery-drive status | issues | dismiss <id>
+joinery-drive approve-deletes [held-set]
 joinery-drive pause | resume | sync-now | stop
 joinery-drive autostart on|off
 joinery-drive check-update
@@ -1451,7 +1516,10 @@ Linked, it shows:
   settled, transfers waiting, and when the last pass ran; pause or resume, and
   check now (hidden while paused);
 - the issues list, each with a Dismiss button, and the full count when the list
-  is capped at fifty;
+  is capped at fifty. Deletes the mass-delete guard holds come first, from the
+  status answer's `held_deletes` even when the capped list leaves their issue
+  out, with an **Approve these deletes** button that asks once more and then
+  posts the `held_set` it was shown to `/approve-deletes`;
 - the sync folder, and the folder tree read-only. Every folder syncs; a folder
   the engine keeps off the computer (a Private folder, a vault on a volume
   without file identity) is marked "not on this computer". The tree is
