@@ -4,6 +4,10 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.21 - On a host with the site container engine, every run converges it onto this release's
+#                engine and site system call filter (install_site_engine.sh converge): only install.sh
+#                ran it, so a host kept the engine and filter it was installed with
+#                (specs/site_container_engine.md B32).
 # Version: 1.20 - On a machine that runs site containers, every run installs this release's
 #                site_quiet_host.sh (the copy the site container engine's hook runs) and asserts
 #                every quiet site's table in its own network namespace, so one removed by hand
@@ -924,6 +928,27 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${FS_ROOT}/etc/syste
         printf '%s\n' "${OBL_OUT}" | grep -v 'installed copy current$' | sed '/^$/d; s/^/housekeeping: /'
     else
         warn "the outbound limits: $(printf '%s' "${OBL_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
+    fi
+fi
+
+# --- 10a. The site container engine is this release's ----------------------
+# install.sh installs the site container engine on a new host. Every run after
+# that converges it: ENGINE in this tree names the engine, which is fetched and
+# installed only when it is not the current one (hash-checked against ENGINE),
+# and the engine's configuration and the filter every site runs under are
+# written where they differ. Replacing the engine restarts no container, and a
+# new filter applies to each site the next time its container is made. A
+# machine without the engine is left alone: installing it is install.sh's.
+# A new engine is fetched from the management node this host's agent joined,
+# then getjoinery.com (install_site_engine.sh converge names no server).
+SIE="${SCRIPT_DIR}/install_site_engine.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SIE}" ]] \
+        && [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]]; then
+    if SIE_OUT="$(bash "${SIE}" converge 2>&1)"; then
+        printf '%s\n' "${SIE_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
+    else
+        warn "the site container engine: $(printf '%s' "${SIE_OUT}" | tail -3 | tr '\n' ' ')"
         FAILED=1
     fi
 fi

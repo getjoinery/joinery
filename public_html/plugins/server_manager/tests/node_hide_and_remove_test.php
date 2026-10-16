@@ -367,6 +367,36 @@ check(NodeRemoval::refusal($b76_site, ' 198.51.100.81 ', null, $no_dns, 'tok') =
 $b76_id = (int)$b76_site->key;
 NodeRemoval::remove($b76_site, '198.51.100.81', (int)$buyer->key, null, $no_dns, 'tok');
 check(!nhr_exists('mgn_managed_nodes', 'mgn_managed_node_id', $b76_id), 'and the site is removed for good');
+$b76_host->load();
+check((bool)$b76_host->get('mgh_delete_time'), 'and its host record, with no site and no agent left, goes with it (B34)');
+
+// B34: a host's agent is linked from the host's side. Removing that node for
+// good retires the host record once nothing is placed on it; one that still
+// holds a site, or provisions new ones, stays.
+$b34_hosts = array();
+foreach (array('empty' => array(), 'site' => array(), 'prov' => array('mgh_provisioning_enabled' => true, 'mgh_max_sites' => 4)) as $b34_kind => $b34_set) {
+	$b34_node = nhr_node('b34' . $b34_kind, array('mgn_cloud_account' => $ours));
+	$b34_host = new ManagedHost(NULL);
+	$b34_host->set('mgh_name', 'HarnessTest NHR B34 ' . $b34_kind . ' ' . $suffix);
+	$b34_host->set('mgh_slug', 'harnesstest-nhr-b34-' . $b34_kind . '-' . $suffix);
+	$b34_host->set('mgh_host', '198.51.100.9' . count($b34_hosts));
+	$b34_host->set('mgh_mgn_managed_node_id', (int)$b34_node->key);
+	foreach ($b34_set as $k => $v) { $b34_host->set($k, $v); }
+	$b34_host->prepare();
+	$b34_host->save();
+	$b34_host->load();
+	harness_register_row('mgh_managed_hosts', 'mgh_managed_host_id', $b34_host->key);
+	if ($b34_kind === 'site') {
+		nhr_node('b34placed', array('mgn_cloud_account' => $ours, 'mgn_container_name' => 'nhrb34', 'mgn_mgh_managed_host_id' => (int)$b34_host->key));
+	}
+	$b34_notes = $b34_node->remove_permanently();
+	$b34_host->load();
+	$b34_hosts[$b34_kind] = array((bool)$b34_host->get('mgh_delete_time'), implode(' ', $b34_notes));
+}
+check($b34_hosts['empty'][0] === true && strpos($b34_hosts['empty'][1], 'host record had nothing left') !== false,
+	'a host whose agent node is removed for good, with nothing on it, is retired and says so', json_encode($b34_hosts));
+check($b34_hosts['site'][0] === false, 'one that still holds a site is kept');
+check($b34_hosts['prov'][0] === false, 'and so is one that provisions new sites');
 
 $m = nhr_node('machine', array('mgn_cloud_account' => $ours));
 nhr_provision($buyer, $m, array('cvp_instance_id' => '424242'));

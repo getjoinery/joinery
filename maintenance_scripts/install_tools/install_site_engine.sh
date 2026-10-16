@@ -3,6 +3,10 @@
 # install_site_engine.sh - install or converge the site container engine on a
 # container host (specs/site_container_engine.md D2, D3).
 #
+# Version: 1.6 - converge with no server named fetches a new engine from the management node this host's
+#               agent joined (node_identity.json's plane_url) first, then UPGRADE_SERVER or getjoinery.com:
+#               host housekeeping runs it on every engine host, and getjoinery.com may not have a
+#               plane's newest release yet (site_container_engine B32, reviewer2 F1).
 # Version: 1.5 - the system call filter every site runs under is site_engine/joinery_site_seccomp.json,
 #               generated from Docker's default (site_seccomp.json, still checked against its record)
 #               by make_site_profile.php with the narrowing of specs/multi_tenant_host_hardening.md D2.
@@ -344,8 +348,26 @@ install_engine() {  # ARCHIVE SHA256
     say "engine ${slot} in place"
 }
 
-converge() {  # [UPGRADE_SERVER]
-    local server="${1:-${UPGRADE_SERVER:-https://getjoinery.com}}" archive sha slot dl
+# Where a new engine is fetched from, in order, one per line. A server named
+# on the command line is the only one. Otherwise the management node this
+# host's agent joined comes first (node_identity.json's plane_url): it
+# publishes the engine beside each release, and getjoinery.com may not have
+# that release yet, or not be reachable from here. Then UPGRADE_SERVER, or
+# getjoinery.com. Whichever answers, the archive is checked against ENGINE.
+engine_servers() {  # [SERVER]
+    if [[ -n "${1:-}" ]]; then
+        printf '%s\n' "$1"
+        return 0
+    fi
+    local plane fallback="${UPGRADE_SERVER:-https://getjoinery.com}"
+    plane="$(sed -n 's|^[[:space:]]*"plane_url":[[:space:]]*"\(https://[^"/[:space:]]*\)/\{0,1\}"[[:space:]]*,\{0,1\}[[:space:]]*$|\1|p' \
+        "${ROOT}/etc/joinery-agent/node_identity.json" 2>/dev/null | head -1)"
+    [[ -n "$plane" && "$plane" != "${fallback%/}" ]] && printf '%s\n' "$plane"
+    printf '%s\n' "$fallback"
+}
+
+converge() {  # [SERVER]
+    local archive sha slot dl server fetched=""
     if [[ ! -f "$STAMP" ]]; then
         say "this tree names no engine (no ${STAMP}); nothing to do"
         return 0
@@ -372,9 +394,15 @@ converge() {  # [UPGRADE_SERVER]
     # The path itself, not the variable: an exit errexit makes runs this after
     # the function's locals are gone.
     trap "rm -rf $(printf '%q' "$dl")" EXIT
-    say "fetching ${archive} from ${server}"
-    curl -sfL --max-time 900 -o "$dl/$archive" "${server%/}/static_files/site_engine/${archive}" \
-        || die "could not fetch ${server%/}/static_files/site_engine/${archive}"
+    while IFS= read -r server; do
+        say "fetching ${archive} from ${server}"
+        if curl -sfL --max-time 900 -o "$dl/$archive" "${server%/}/static_files/site_engine/${archive}"; then
+            fetched="$server"
+            break
+        fi
+        say "  ${server%/} did not serve it"
+    done < <(engine_servers "${1:-}")
+    [[ -n "$fetched" ]] || die "could not fetch ${archive} from $(engine_servers "${1:-}" | paste -sd ' ' | sed 's/ / or /g')"
     # In a subshell, so a refusal (install_engine exits) comes back here and the
     # EXIT trap removes the download. A plain statement, never a condition: bash
     # turns errexit off for everything run inside an if or a || list, so any

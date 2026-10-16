@@ -248,6 +248,25 @@ A8b=$(make_archive 6.1.8 6.1.8 "" "" "rebuilt with a newer Go"); cp "$A8b" "$SRV
 chk "the same version rebuilt is another engine" "$([ "$FIRST8" != "$(slot 6.1.8 "$A8b")" ] && echo differs)" "differs"
 chk "  and converge makes it current" "$(conv) $(readlink "$LIB/current")" "0 $(slot 6.1.8 "$A8b")"
 
+echo "Where converge fetches from when no server is named (B32, reviewer2 F1)"
+# Host housekeeping names no server: the management node this host's agent
+# joined is asked first, then UPGRADE_SERVER (getjoinery.com by default).
+conv_auto() { JOINERY_SITE_ENGINE_ROOT="$FR" JOINERY_SITE_ENGINE_STAMP="$STAMPF" UPGRADE_SERVER="file://$T/server" bash "$INST" converge > "$T/out" 2>&1; echo $?; }
+mkdir -p "$FR/etc/joinery-agent"
+printf '{\n  "node_id": 7,\n  "plane_url": "https://127.0.0.1:9/",\n  "agent": "x"\n}\n' > "$FR/etc/joinery-agent/node_identity.json"
+A10=$(make_archive 6.1.10); cp "$A10" "$SRV/"; stamp_for "$A10"
+chk "a plane that does not serve the engine: the next server does, and it is installed" "$(conv_auto) $(readlink "$LIB/current")" "0 $(slot 6.1.10 "$A10")"
+chk "  the plane was asked first, then the fallback" "$(grep -o 'fetching [^ ]* from [^ ]*' "$T/out" | awk '{print $4}' | paste -sd ' ')" "https://127.0.0.1:9 file://$T/server"
+A11=$(make_archive 6.1.11); stamp_for "$A11"
+chk "neither serving it: refused, naming both, and nothing changes" "$(conv_auto) $(grep -c "from https://127.0.0.1:9 or file://$T/server" "$T/out") $(readlink "$LIB/current")" "1 1 $(slot 6.1.10 "$A10")"
+printf '{\n  "plane_url": "http://127.0.0.1:9",\n}\n' > "$FR/etc/joinery-agent/node_identity.json"
+cp "$A11" "$SRV/"
+chk "a plane address that is not https is never asked" "$(conv_auto) $(grep -c '127.0.0.1:9' "$T/out")" "0 0"
+printf '{\n  "plane_url": "https://127.0.0.1:9"\n}\n' > "$FR/etc/joinery-agent/node_identity.json"
+A12=$(make_archive 6.1.12); cp "$A12" "$SRV/"; stamp_for "$A12"
+chk "a server named on the command line is the only one asked" "$(conv) $(grep -o 'fetching [^ ]* from [^ ]*' "$T/out" | awk '{print $4}' | paste -sd ' ') $(readlink "$LIB/current")" "0 file://$T/server $(slot 6.1.12 "$A12")"
+rm -f "$FR/etc/joinery-agent/node_identity.json"
+
 echo "Failures stop the run"
 chk "converge runs the install as a plain statement, never as a condition (errexit would be off inside it)" "$(grep -c -E '^\s*( if !|.*\|\|).*\( install_engine' "$INST") $(grep -c -E '^    \( install_engine "\$dl/\$archive" "\$sha" \)$' "$INST")" "0 1"
 chk "the package lists are fetched before runc and conmon are installed" "$(grep -c 'apt-get update -qq || die' "$INST")" "1"

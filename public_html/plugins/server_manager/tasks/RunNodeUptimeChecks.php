@@ -21,6 +21,9 @@
  * expiry is near, and when www reaches the origin uncovered, as the
  * certificate incident's evidence (mgn_cert_problem). See check_cert_expiry().
  *
+ * @version 2.16 - a node in an install state is not asked for its status facts either (ManagedNode::is_operational()):
+ *                 a switch-over's old container is held stopped, so its check_status and host_report jobs never
+ *                 ran, and a pending job refused Permanently Delete Site on it (site_container_engine B31)
  * @version 2.15 - a machine that told this escrow holder it opened its data root after its last host report is
  *                 asked every REBOOT_REFRESH_SECONDS too (DataRootEscrowSync::opened_since_report): a boot not asked
  *                 from here left its node page saying 'opened by' the boot before for up to the hour (B74)
@@ -226,10 +229,10 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * check_status job, and until now nothing queued one on its own: a node
 	 * was measured when a person pressed the button or a deploy ran, then
 	 * never again, and the fleet page showed the version a node had answered
-	 * weeks earlier. Every enabled node whose agent offers the primitive and
-	 * with no check_status completed inside STATUS_REFRESH_SECONDS gets one
-	 * queued here, whatever its uptime setting — the up/down probe and the
-	 * facts measure different things. A queued or running job, or one
+	 * weeks earlier. Every enabled working node (no install state) whose agent
+	 * offers the primitive and with no check_status completed inside
+	 * STATUS_REFRESH_SECONDS gets one queued here, whatever its uptime setting —
+	 * the up/down probe and the facts measure different things. A queued or running job, or one
 	 * completed inside the window, is cover, so one stale node yields one job
 	 * per window. The job table decides, not mgn_last_status_check: the probe
 	 * stamps that too when it reads a site's health document, and a site
@@ -269,6 +272,12 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		];
 		foreach ($nodes as $node) {
 			if (!$node->get('mgn_enabled') || $node->get('mgn_delete_time')) {
+				continue;
+			}
+			// A node in an install state is left alone, as by the probe: a held
+			// or retired container is stopped and never answers, and a job left
+			// pending on it refuses its removal (B31).
+			if (!$node->is_operational()) {
 				continue;
 			}
 			foreach ($words as $word => $stamp_column) {

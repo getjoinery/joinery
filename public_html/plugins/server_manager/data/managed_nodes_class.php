@@ -2,6 +2,10 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.58 - removing a node for good also retires the host records it was the agent of, and its own
+ *                placement, once nothing is left on them (ManagedHost::retire_if_empty): a host's agent is linked
+ *                from the host's side, so its record stayed with no agent and was offered in every Copy tab's
+ *                host list (site_container_engine B34)
  * @version 1.57 - hiding keeps the node's cloud server recorded: the order's provisioning record still goes, and an
  *                 adopted record of the same server is left in its place (keep_server_link()), so Restore to Dashboard
  *                 finds escrow Tier 2, reverse DNS and an address swap as they were; an adopted record is kept as it
@@ -1139,7 +1143,22 @@ class ManagedNode extends SystemBase {
 			if (DataRootEscrowSync::let_go($this) > 0) {
 				$notes[] = 'This management node no longer holds its encrypted data root\'s key: if the machine still runs, it opens only with its recovery key after a reboot.';
 			}
+			// The host records this node leaves: its placement, and any host it
+			// is the agent of (linked from the host's side, and unlinked by the
+			// delete). Read before the delete clears those links.
+			$host_ids = array();
+			if ((int)$this->get('mgn_mgh_managed_host_id') > 0) {
+				$host_ids[] = (int)$this->get('mgn_mgh_managed_host_id');
+			}
+			foreach (new MultiManagedHost(array('mgh_mgn_managed_node_id' => (int)$this->key, 'deleted' => false)) as $agent_of) {
+				$host_ids[] = (int)$agent_of->key;
+			}
 			$this->permanent_delete();
+			foreach (array_unique($host_ids) as $host_id) {
+				if (ManagedHost::retire_if_empty($host_id)) {
+					$notes[] = 'Its host record had nothing left on it and was removed from the dashboard too.';
+				}
+			}
 			if ($own) {
 				$db->commit();
 			}

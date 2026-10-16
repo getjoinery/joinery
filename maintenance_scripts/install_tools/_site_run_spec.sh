@@ -3,6 +3,8 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.15 - a site whose swap is set apart from its memory is told to fix it with its own engine's
+#                update command (podman on the site container engine), not always docker's (B33)
 # Version: 1.14 - a site its host holds quiet (site_quiet_host.sh's record: a dormant copy, or a source
 #                 frozen for a switch-over) is never rebuilt: run_spec_quiet_refusal, which run_spec_args
 #                 asks first and each rebuild asks before it changes anything. On the site container
@@ -902,7 +904,7 @@ run_spec_adopt() {  # SITE
     [[ -z "$cpuset" ]] || problems="${problems}; a CPU set (${cpuset})"
     [[ "${retries:-0}" == 0 ]] || problems="${problems}; restart retries ${retries}"
     case "$mem" in ''|0) mem="" ;; *)
-        [[ "$swap" == "$mem" ]] || problems="${problems}; swap (${swap}) set apart from memory (${mem}): run docker update --memory-swap=${mem} ${site}, then run this again"
+        [[ "$swap" == "$mem" ]] || problems="${problems}; swap (${swap}) set apart from memory (${mem}): run $(site_engine_bin 2>/dev/null || echo docker) update --memory-swap=${mem} ${site}, then run this again"
         if [[ $((mem % 1048576)) -eq 0 ]]; then mem="$((mem / 1048576))m"; else mem="${mem}b"; fi ;;
     esac
     cpus=""
