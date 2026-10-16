@@ -2216,6 +2216,7 @@ pub fn run_pass(
         None => run_queued(env)?,
     };
     env.store.stamp_refusals(next_cursor)?;
+    say_what_keeps_failing(env)?;
 
     // The cursor moves only now, once everything the batch implied is durably
     // in the journal. A cursor advanced any earlier is a change the server will
@@ -3615,6 +3616,70 @@ const FILE_RENAMES_UNTRACKED_TEXT: &str = "This drive is formatted FAT or exFAT,
 
 /// Raised per pair when it happens (`say_where_two_files_may_have_swapped`).
 pub(crate) const NAMES_MAY_HAVE_SWAPPED: &str = "names_may_have_swapped";
+
+/// The one issue for work that keeps failing (`say_what_keeps_failing`).
+pub(crate) const KEEPS_FAILING: &str = "keeps_failing";
+
+/// Work the executor keeps retrying is said, in one issue for the device:
+/// how much there is, and why the first of it fails. An op whose backoff has
+/// reached its cap (`round::RETRY_CAP_MS`) is tried every quarter of an hour
+/// for as long as it fails, and the health line said only "Syncing -- 1 to
+/// go" (B-RT). One issue, not one per op: an hour's outage on the server
+/// fails every queued op at once, and a panel of a thousand identical issues
+/// hides the one that matters. The first op stuck is the one named, so the
+/// words change only when what is stuck changes. Lifted on the pass nothing
+/// is left at the cap.
+fn say_what_keeps_failing(env: &ExecEnv) -> Result<(), ExecError> {
+    let stuck: Vec<crate::store::Op> = env
+        .store
+        .queued_ops()?
+        .into_iter()
+        .filter(|op| crate::round::retry_delay_ms(op.attempts) >= crate::round::RETRY_CAP_MS)
+        .collect();
+    let text = match stuck.iter().min_by_key(|op| op.op_id) {
+        None => None,
+        Some(first) => {
+            let name = env
+                .store
+                .get_entry(first.entity)?
+                .map(|e| e.remote.name)
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| "an item".to_string());
+            // Ten kills with never a completed failure count attempts and
+            // record no error (`requeue_interrupted_op`).
+            let why = first
+                .last_error
+                .clone()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| "no reason was recorded".to_string());
+            Some(if stuck.len() == 1 {
+                format!(
+                    "A change here keeps failing and is tried again every 15 minutes, \
+                     for as long as it fails: {} for {name}: {why}",
+                    first.kind
+                )
+            } else {
+                format!(
+                    "{} changes here keep failing and are tried again every 15 minutes, \
+                     for as long as they fail. The first: {} for {name}: {why}",
+                    stuck.len(),
+                    first.kind
+                )
+            })
+        }
+    };
+    let open: Vec<_> = env.store.open_issues()?.into_iter().filter(|i| i.kind == KEEPS_FAILING).collect();
+    let current = text.as_ref().is_some_and(|t| open.iter().any(|i| &i.detail == t));
+    for issue in &open {
+        if text.as_ref() != Some(&issue.detail) {
+            env.store.dismiss_issue(issue.issue_id)?;
+        }
+    }
+    if let Some(t) = text.filter(|_| !current) {
+        env.store.raise_issue(None, KEEPS_FAILING, &t, (env.now_ms)() as i64)?;
+    }
+    Ok(())
+}
 
 fn say_whether_renames_can_be_tracked(env: &ExecEnv) -> Result<(), ExecError> {
     let personality = env.vfs.personality();
