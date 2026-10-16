@@ -1,8 +1,8 @@
 //! How the tray, the CLI, and the settings page reach the running daemon.
 //!
 //! One HTTP server bound to loopback on a port the operating system picks, plus
-//! a token file only the user's account can read. Every request must carry the
-//! token; every request without one is refused before it is parsed.
+//! a token file only the user's account can read. Every request must carry a
+//! credential; every request without one is refused before it is parsed.
 //!
 //! **Why loopback HTTP rather than a Unix socket.** The tray is one client, the
 //! CLI is a second, and the settings page — a local page opened in the default
@@ -18,6 +18,30 @@
 //! **Why port zero.** A fixed port is a fight with whatever else wanted it, and
 //! a second instance silently failing to bind is a daemon nothing can talk to.
 //! The kernel picks, and the port is written down beside the token.
+//!
+//! **How the settings page gets in without the token.** A browser cannot add a
+//! header to a page it is told to open, and the token must never travel in a
+//! URL: addresses end up in history, in sync'd browser profiles and in
+//! extensions' hands, and this one is good for the life of the daemon. So the
+//! page is let in by a chain of three things, each worth less than the last:
+//!
+//! 1. Whoever holds the token (the tray, `joinery-drive settings`) asks for a
+//!    **ticket**: single-use, two minutes long, and good for nothing but step 2.
+//! 2. The page is opened with the ticket in the URL's *fragment*, which a
+//!    browser never sends to any server and never puts in a `Referer`. The
+//!    page's script trades it for a **session** and takes it out of the
+//!    address bar.
+//! 3. Every request the page makes carries the session in a header. Not a
+//!    cookie: a browser attaches cookies to requests other sites make, which is
+//!    what lets one site drive another, and it attaches custom headers to
+//!    nothing it was not told to.
+//!
+//! Around that: the page's own files are the only thing served without a
+//! credential, and they hold no data; every browser-reachable request must name
+//! the daemon by its loopback address (`Host`), which is what defeats a site
+//! that points its own hostname at 127.0.0.1; anything carrying a session must
+//! come from the page's own origin; nothing ever answers with a CORS header, so
+//! no other site can read an answer; and the page refuses to be framed.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
@@ -136,12 +160,236 @@ impl Endpoint {
     }
 }
 
+/// Who a request came from, as the channel established it.
+///
+/// Decided here, before the handler is reached, so the handler never has to
+/// work out for itself whether to believe a caller — it only has to decide what
+/// each kind of caller is allowed to ask for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Caller {
+    /// The user's own tools — the tray and the CLI — holding the token file.
+    Owner,
+    /// The settings page in the user's browser, holding a session it was given
+    /// in exchange for a ticket.
+    Page,
+}
+
 /// One request a client made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
     pub method: String,
     pub path: String,
     pub body: Value,
+    pub caller: Caller,
+}
+
+/// One file the settings page is made of.
+///
+/// These are the only thing the channel serves without a credential, so what
+/// goes in one is fixed at compile time and holds no data: the page asks for
+/// everything it shows, over requests that carry its session.
+#[derive(Debug)]
+pub struct Page {
+    pub path: &'static str,
+    pub content_type: &'static str,
+    pub body: &'static str,
+}
+
+/// Where the settings page lives.
+pub const PAGE_PATH: &str = "/settings";
+/// Where a token holder asks for a ticket to open the page with.
+pub const TICKET_PATH: &str = "/settings/ticket";
+/// Where the page trades its ticket for a session.
+pub const SESSION_PATH: &str = "/settings/session";
+
+/// How long a ticket lasts. Long enough for a browser that was not running to
+/// start; short enough that one found in a history file has long gone off.
+const TICKET_TTL: Duration = Duration::from_secs(120);
+
+/// How long a page session lasts without being used. The open page asks for
+/// status every couple of seconds, and even a tab the browser has throttled in
+/// the background asks once a minute, so this only ends sessions nobody is
+/// looking at — a laptop shut overnight comes back to "open Settings again".
+const SESSION_IDLE: Duration = Duration::from_secs(60 * 60);
+
+/// How many tickets and sessions are held at once. A person has a page or two
+/// open; a local process asking for tickets in a loop must not grow the
+/// daemon's memory without bound, so the oldest goes.
+const MAX_GRANTS: usize = 8;
+
+/// How many connections are served at the same time.
+///
+/// More than one because of browsers. Chrome in particular opens a spare
+/// connection it may never use, and with one connection served at a time that
+/// spare holds the control thread for the whole serve timeout — the page hangs
+/// half-drawn, and the tray and the CLI find the daemon unreachable for the
+/// same fifteen seconds. A few at once, and a quiet socket only ties up its own
+/// thread. Bounded, because a thread per connection without a ceiling is a
+/// thread per connection any local process cares to open.
+const MAX_CONNECTIONS: usize = 4;
+
+/// The policy every answer carries.
+///
+/// Written for the page and harmless on JSON: scripts and styles only from the
+/// page's own files (so an issue's file name, which another device chose,
+/// cannot become a script even if it slipped past the page's escaping), fetches
+/// only back to this daemon, nothing loaded from anywhere else, and no framing —
+/// a page that can be framed can be clicked through by a site laid over it.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'none'; script-src 'self'; \
+     style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; \
+     form-action 'none'; frame-ancestors 'none'";
+
+/// Tickets and sessions handed out so far.
+///
+/// Held in memory only. A daemon restart ends every session, which is right:
+/// the restarted daemon is on a different port, so the page's origin — and the
+/// browser storage its session sat in — is a different one anyway.
+#[derive(Default)]
+struct Grants {
+    /// Ticket and when it was minted.
+    tickets: Vec<(String, std::time::Instant)>,
+    /// Session and when it was last used.
+    sessions: Vec<(String, std::time::Instant)>,
+}
+
+impl Grants {
+    fn mint_ticket(&mut self, now: std::time::Instant) -> String {
+        self.tickets
+            .retain(|(_, at)| now.duration_since(*at) < TICKET_TTL);
+        if self.tickets.len() >= MAX_GRANTS {
+            self.tickets.remove(0);
+        }
+        let ticket = new_token();
+        self.tickets.push((ticket.clone(), now));
+        ticket
+    }
+
+    /// Spend a ticket. Spent whether or not it was still good, so it cannot be
+    /// tried twice; a session comes back only for one that was.
+    fn redeem(&mut self, presented: &str, now: std::time::Instant) -> Option<String> {
+        let at = self
+            .tickets
+            .iter()
+            .position(|(t, _)| constant_time_eq(t, presented))?;
+        let (_, minted) = self.tickets.remove(at);
+        if now.duration_since(minted) >= TICKET_TTL {
+            return None;
+        }
+        self.sessions
+            .retain(|(_, used)| now.duration_since(*used) < SESSION_IDLE);
+        if self.sessions.len() >= MAX_GRANTS {
+            // The least recently used, which is the page somebody closed.
+            let oldest = self
+                .sessions
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.sessions.remove(oldest);
+        }
+        let session = new_token();
+        self.sessions.push((session.clone(), now));
+        Some(session)
+    }
+
+    /// Is this a live session? Using one keeps it alive.
+    fn admit(&mut self, presented: &str, now: std::time::Instant) -> bool {
+        self.sessions
+            .retain(|(_, used)| now.duration_since(*used) < SESSION_IDLE);
+        match self
+            .sessions
+            .iter_mut()
+            .find(|(s, _)| constant_time_eq(s, presented))
+        {
+            Some((_, used)) => {
+                *used = now;
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// Does this `Host` header name the daemon by its loopback address?
+///
+/// The defence against DNS rebinding: a site can point its own hostname at
+/// 127.0.0.1, and the browser will then let its pages talk to this port as if
+/// they were the site's own. What it cannot do is make the browser send a Host
+/// it did not navigate to, so a request naming anything but loopback came from
+/// a page that is not ours. The port, when given, must be this one — another
+/// local web server's pages are not ours either.
+pub fn host_is_loopback(host: &str, port: u16) -> bool {
+    let host = host.trim();
+    let (name, given) = match host.rsplit_once(':') {
+        Some((name, port)) => (name, Some(port)),
+        None => (host, None),
+    };
+    let named = name.eq_ignore_ascii_case("127.0.0.1") || name.eq_ignore_ascii_case("localhost");
+    named && given.is_none_or(|p| p == port.to_string())
+}
+
+/// Is this `Origin` the settings page's own?
+pub fn origin_is_ours(origin: &str, port: u16) -> bool {
+    let origin = origin.trim();
+    origin == format!("http://127.0.0.1:{port}") || origin == format!("http://localhost:{port}")
+}
+
+/// What one request's head said, before anything is believed.
+#[derive(Default)]
+struct Head {
+    method: String,
+    path: String,
+    token: Option<String>,
+    ticket: Option<String>,
+    session: Option<String>,
+    host: Option<String>,
+    hosts: usize,
+    origin: Option<String>,
+    fetch_site: Option<String>,
+    content_length: usize,
+}
+
+impl Head {
+    /// The path without its query string. A query is never a credential here:
+    /// nothing reads one, so a token or a session in a URL is simply absent.
+    fn route(&self) -> &str {
+        self.path.split('?').next().unwrap_or("/")
+    }
+
+    /// Did this come from the page's own origin, as far as the browser says?
+    ///
+    /// Browsers send `Origin` on every request that can change something and
+    /// `Sec-Fetch-Site` on everything; when either is there it must say "us".
+    /// Absent is not a refusal, because the tray and the CLI send neither —
+    /// but nothing reaches here without a ticket or a session, which no other
+    /// site can have, so this is the second lock on the door, not the first.
+    fn is_from_our_origin(&self, port: u16) -> bool {
+        if let Some(origin) = &self.origin {
+            if !origin_is_ours(origin, port) {
+                return false;
+            }
+        }
+        match self.fetch_site.as_deref() {
+            None | Some("same-origin") | Some("none") => true,
+            Some(_) => false,
+        }
+    }
+}
+
+/// What the channel decided to do with a request.
+enum Incoming {
+    /// A request for the handler.
+    Request(Request),
+    /// Answered by the channel itself: the page's own files, and the
+    /// ticket-and-session exchange that is part of deciding who is asking.
+    Reply(Reply, usize),
+}
+
+/// An answer on its way out.
+enum Reply {
+    Json(u16, Value),
+    Page(&'static Page),
 }
 
 /// The listening side.
@@ -149,6 +397,9 @@ pub struct ControlServer {
     listener: TcpListener,
     token: String,
     endpoint_path: PathBuf,
+    port: u16,
+    pages: &'static [Page],
+    grants: std::sync::Mutex<Grants>,
 }
 
 impl ControlServer {
@@ -168,11 +419,21 @@ impl ControlServer {
             listener,
             token,
             endpoint_path: endpoint_path.to_path_buf(),
+            port,
+            pages: &[],
+            grants: std::sync::Mutex::new(Grants::default()),
         })
     }
 
+    /// Serve the settings page's files. Without this the channel answers the
+    /// tray and the CLI only.
+    pub fn with_pages(mut self, pages: &'static [Page]) -> ControlServer {
+        self.pages = pages;
+        self
+    }
+
     pub fn port(&self) -> u16 {
-        self.listener.local_addr().map(|a| a.port()).unwrap_or(0)
+        self.port
     }
 
     /// Accept one connection and hand the request to `handle`.
@@ -188,6 +449,55 @@ impl ControlServer {
         self.serve_stream(stream, handle)
     }
 
+    /// Serve forever, a few connections at a time (see [`MAX_CONNECTIONS`]).
+    ///
+    /// The handler is shared between the connections, so it must be safe to
+    /// call from several at once — the daemon's is, because all it does is
+    /// read a snapshot and post to a queue.
+    pub fn serve<F>(self: std::sync::Arc<Self>, handle: F)
+    where
+        F: Fn(&Request) -> (u16, Value) + Send + Sync + 'static,
+    {
+        use std::sync::{Arc, Condvar, Mutex};
+        let handle = Arc::new(handle);
+        let busy = Arc::new((Mutex::new(0usize), Condvar::new()));
+        loop {
+            {
+                let (count, freed) = &*busy;
+                let mut n = count.lock().unwrap_or_else(|e| e.into_inner());
+                while *n >= MAX_CONNECTIONS {
+                    n = freed.wait(n).unwrap_or_else(|e| e.into_inner());
+                }
+            }
+            let stream = match self.listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(_) => {
+                    // Out of file descriptors, most likely. One failed accept
+                    // is not a reason to stop answering, but looping on it
+                    // flat out would spin a core until it clears.
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+            };
+            *busy.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
+            let (server, handle, done) =
+                (Arc::clone(&self), Arc::clone(&handle), Arc::clone(&busy));
+            let spawned = std::thread::Builder::new()
+                .name("jd-control".into())
+                .spawn(move || {
+                    let _ = server.serve_stream(stream, &mut |req| handle(req));
+                    let (count, freed) = &*done;
+                    *count.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+                    freed.notify_one();
+                });
+            if spawned.is_err() {
+                // The stream went with the closure and is closed; the caller
+                // sees a dropped connection and retries.
+                *busy.0.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+            }
+        }
+    }
+
     fn serve_stream(
         &self,
         stream: TcpStream,
@@ -195,7 +505,7 @@ impl ControlServer {
     ) -> std::io::Result<()> {
         // Without these, one connection can hold the control thread forever:
         // open a socket and send nothing, or declare a large body and send two
-        // bytes of it. Connections are served one at a time, so that is every
+        // bytes of it. Connections are served a few at a time, so that is every
         // local process's ability to make the daemon unreachable to the user's
         // own tray and CLI — while sync itself carries on, invisibly.
         let _ = stream.set_read_timeout(Some(SERVE_TIMEOUT));
@@ -207,18 +517,19 @@ impl ControlServer {
         // shorter timeout set on the original would leave the duplicate waiting
         // out the full serve timeout for bytes nobody is sending.
         let mut reader = BufReader::new(stream);
-        let (status, body, undrained) = match read_request(&mut reader, &self.token) {
-            Ok(request) => {
+        let (reply, undrained) = match self.read_request(&mut reader) {
+            Ok(Incoming::Request(request)) => {
                 let (status, body) = handle(&request);
-                (status, body, 0)
+                (Reply::Json(status, body), 0)
             }
-            Err(refused) => (refused.status, refused.body, refused.undrained),
+            Ok(Incoming::Reply(reply, undrained)) => (reply, undrained),
+            Err(refused) => (Reply::Json(refused.status, refused.body), refused.undrained),
         };
 
         // Answer first. The refusal was decided before the body was looked at,
         // so making the caller wait for bytes we are going to throw away would
         // be delaying an answer we already have.
-        write_response(reader.get_mut(), status, &body)?;
+        write_response(reader.get_mut(), &reply)?;
 
         // Then drain, purely so the close is clean. Closing a socket with unread
         // data in its receive buffer sends RST instead of FIN, and on macOS and
@@ -238,6 +549,136 @@ impl ControlServer {
     pub fn shutdown(&self) {
         let _ = std::fs::remove_file(&self.endpoint_path);
     }
+
+    /// Read one request and decide who is asking.
+    ///
+    /// Every refusal is decided from the head alone, before the body is
+    /// *kept*, so an unauthorized caller cannot make the daemon allocate a
+    /// buffer of whatever size they claimed. What is left on the wire rides
+    /// along on the refusal, to be drained after the answer has gone out rather
+    /// than before.
+    fn read_request(&self, reader: &mut BufReader<TcpStream>) -> Result<Incoming, Refused> {
+        let head = read_head(reader)?;
+        let undrained = head.content_length;
+        let now = std::time::Instant::now();
+
+        // The user's own tools. The token is the whole of their credential, so
+        // a wrong one is refused outright rather than tried as anything else.
+        if let Some(token) = &head.token {
+            if !constant_time_eq(token, &self.token) {
+                return Err(refusal(
+                    401,
+                    "this request did not carry the daemon token",
+                    undrained,
+                ));
+            }
+            // Not required — a holder of the token is not a page that was
+            // tricked into calling — but when one is given it must be ours.
+            if head.hosts > 1
+                || head
+                    .host
+                    .as_deref()
+                    .is_some_and(|h| !host_is_loopback(h, self.port))
+            {
+                return Err(refusal(
+                    403,
+                    "this request named a host other than this daemon",
+                    undrained,
+                ));
+            }
+            if head.method == "POST" && head.route() == TICKET_PATH {
+                let ticket = self.grants().mint_ticket(now);
+                return Ok(Incoming::Reply(
+                    Reply::Json(200, serde_json::json!({ "ticket": ticket })),
+                    undrained,
+                ));
+            }
+            let body = read_body(reader, head.content_length)?;
+            return Ok(Incoming::Request(Request {
+                method: head.method,
+                path: head.path,
+                body,
+                caller: Caller::Owner,
+            }));
+        }
+
+        // Everything below is reachable from a browser, so first: is this a
+        // page that reached us under our own name? One `Host`, and it must be
+        // loopback; a browser always sends exactly one.
+        let host_ok = head.hosts == 1
+            && head
+                .host
+                .as_deref()
+                .is_some_and(|h| host_is_loopback(h, self.port));
+        if !host_ok {
+            return Err(refusal(
+                if head.hosts == 0 { 400 } else { 403 },
+                "this request did not name the daemon by its loopback address",
+                undrained,
+            ));
+        }
+
+        // The page's own files: no credential, no data, nothing to protect.
+        if head.method == "GET" {
+            if let Some(page) = self.pages.iter().find(|p| p.path == head.route()) {
+                return Ok(Incoming::Reply(Reply::Page(page), undrained));
+            }
+        }
+
+        // Anything past this point acts or reads the user's state, and must
+        // come from the page itself, not from another site or another local
+        // web server's page.
+        if !head.is_from_our_origin(self.port) {
+            return Err(refusal(
+                403,
+                "this request came from a page that is not this daemon's",
+                undrained,
+            ));
+        }
+
+        if head.method == "POST" && head.route() == SESSION_PATH {
+            let session = head
+                .ticket
+                .as_deref()
+                .and_then(|t| self.grants().redeem(t, now));
+            return match session {
+                Some(session) => Ok(Incoming::Reply(
+                    Reply::Json(200, serde_json::json!({ "session": session })),
+                    undrained,
+                )),
+                None => Err(refusal(
+                    401,
+                    "this ticket is not one the daemon gave out, or it has been used or has run out — open Settings again from Joinery Drive",
+                    undrained,
+                )),
+            };
+        }
+
+        let admitted = head
+            .session
+            .as_deref()
+            .is_some_and(|s| self.grants().admit(s, now));
+        if !admitted {
+            return Err(refusal(
+                401,
+                "this request did not carry the daemon token or a settings session",
+                undrained,
+            ));
+        }
+        let body = read_body(reader, head.content_length)?;
+        Ok(Incoming::Request(Request {
+            method: head.method,
+            path: head.path,
+            body,
+            caller: Caller::Page,
+        }))
+    }
+
+    fn grants(&self) -> std::sync::MutexGuard<'_, Grants> {
+        // A panic while holding this cannot leave the grants half-written in a
+        // way that matters: the worst case is a ticket that did not get spent.
+        self.grants.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// A request that will not be served, and how much of its body is still on the
@@ -248,18 +689,19 @@ struct Refused {
     undrained: usize,
 }
 
-/// Read and authorize one HTTP request.
-fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Request, Refused> {
+/// Read the request line and headers.
+fn read_head(reader: &mut BufReader<TcpStream>) -> Result<Head, Refused> {
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
         return Err(refusal(400, "empty request", 0));
     }
     let mut parts = line.split_whitespace();
-    let method = parts.next().unwrap_or("").to_string();
-    let path = parts.next().unwrap_or("/").to_string();
+    let mut head = Head {
+        method: parts.next().unwrap_or("").to_string(),
+        path: parts.next().unwrap_or("/").to_string(),
+        ..Head::default()
+    };
 
-    let mut presented: Option<String> = None;
-    let mut content_length = 0usize;
     loop {
         let mut header = String::new();
         if reader.read_line(&mut header).is_err() {
@@ -270,47 +712,38 @@ fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Reques
             break;
         }
         if let Some((name, value)) = header.split_once(':') {
-            let value = value.trim();
-            match name.to_ascii_lowercase().as_str() {
-                "x-joinery-token" => presented = Some(value.to_string()),
-                "content-length" => content_length = value.parse().unwrap_or(0),
+            let value = value.trim().to_string();
+            match name.trim().to_ascii_lowercase().as_str() {
+                "x-joinery-token" => head.token = Some(value),
+                "x-joinery-ticket" => head.ticket = Some(value),
+                "x-joinery-session" => head.session = Some(value),
+                "host" => {
+                    head.hosts += 1;
+                    head.host = Some(value);
+                }
+                "origin" => head.origin = Some(value),
+                "sec-fetch-site" => head.fetch_site = Some(value.to_ascii_lowercase()),
+                "content-length" => head.content_length = value.parse().unwrap_or(0),
                 _ => {}
             }
         }
     }
+    Ok(head)
+}
 
-    // Checked before the body is *kept*, so an unauthorized caller cannot make
-    // the daemon allocate a buffer of whatever size they claimed. What is left
-    // on the wire rides along on the refusal, to be drained after the answer has
-    // gone out rather than before.
-    if !presented
-        .map(|p| constant_time_eq(&p, token))
-        .unwrap_or(false)
-    {
-        return Err(refusal(
-            401,
-            "this request did not carry the daemon token",
-            content_length,
-        ));
+/// Read a body the caller has been allowed to send.
+fn read_body(reader: &mut BufReader<TcpStream>, length: usize) -> Result<Value, Refused> {
+    if length > MAX_REQUEST_BODY {
+        return Err(refusal(413, "request body too large", length));
     }
-    if content_length > MAX_REQUEST_BODY {
-        return Err(refusal(413, "request body too large", content_length));
-    }
-
-    let mut raw = vec![0u8; content_length];
-    if content_length > 0 && reader.read_exact(&mut raw).is_err() {
+    let mut raw = vec![0u8; length];
+    if length > 0 && reader.read_exact(&mut raw).is_err() {
         return Err(refusal(400, "truncated body", 0));
     }
-    let body = if raw.is_empty() {
-        Value::Null
-    } else {
-        match serde_json::from_slice(&raw) {
-            Ok(v) => v,
-            Err(_) => return Err(refusal(400, "body is not JSON", 0)),
-        }
-    };
-
-    Ok(Request { method, path, body })
+    if raw.is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_slice(&raw).map_err(|_| refusal(400, "body is not JSON", 0))
 }
 
 /// Read and throw away a request body we are not going to use.
@@ -344,22 +777,40 @@ fn discard_body(reader: &mut BufReader<TcpStream>, declared: usize) {
     }
 }
 
-fn write_response(stream: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
-    let text = serde_json::to_string(body).unwrap_or_else(|_| "{}".into());
+fn write_response(stream: &mut TcpStream, reply: &Reply) -> std::io::Result<()> {
+    let (status, content_type, text) = match reply {
+        Reply::Json(status, body) => (
+            *status,
+            "application/json",
+            serde_json::to_string(body).unwrap_or_else(|_| "{}".into()),
+        ),
+        Reply::Page(page) => (200, page.content_type, page.body.to_string()),
+    };
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",
         401 => "Unauthorized",
+        403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
         413 => "Payload Too Large",
         _ => "Error",
     };
+    // No `Access-Control-Allow-*`, on anything, ever: without one a browser
+    // will not let any other site read an answer, nor send it the preflighted
+    // requests that carry a session header.
     write!(
         stream,
         "HTTP/1.1 {status} {reason}\r\n\
-         Content-Type: application/json\r\n\
+         Content-Type: {content_type}\r\n\
          Content-Length: {}\r\n\
          Cache-Control: no-store\r\n\
+         Content-Security-Policy: {CONTENT_SECURITY_POLICY}\r\n\
+         X-Frame-Options: DENY\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Referrer-Policy: no-referrer\r\n\
+         Cross-Origin-Resource-Policy: same-origin\r\n\
          Connection: close\r\n\
          \r\n{text}",
         text.len()
@@ -467,6 +918,26 @@ pub fn ask(endpoint: &Endpoint, method: &str, path: &str, body: Value) -> Option
     }
     let (_, answer) = raw.split_once("\r\n\r\n")?;
     serde_json::from_str(answer).ok()
+}
+
+/// The address that opens the settings page, with a fresh ticket in it.
+///
+/// For the tray and `joinery-drive settings`, which hold the token and hand the
+/// browser something worth far less: a ticket that is spent the moment the page
+/// loads and is gone in two minutes either way. It rides in the fragment, which
+/// the browser never sends anywhere. `section` picks the part of the page to
+/// show first (`issues`), and is only ever one of the page's own words.
+pub fn settings_url(endpoint: &Endpoint, section: Option<&str>) -> Option<String> {
+    let answer = ask(endpoint, "POST", TICKET_PATH, Value::Null)?;
+    let ticket = answer.get("ticket")?.as_str()?;
+    let mut fragment = format!("t={ticket}");
+    if let Some(section) =
+        section.filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_lowercase() || b == b'-'))
+    {
+        fragment.push_str("&s=");
+        fragment.push_str(section);
+    }
+    Some(endpoint.url(&format!("{PAGE_PATH}#{fragment}")))
 }
 
 #[cfg(test)]
@@ -722,6 +1193,421 @@ mod tests {
         let token = new_token();
         assert_eq!(token.len(), 64);
         assert_ne!(token, new_token());
+    }
+
+    // -----------------------------------------------------------------------
+    // The settings page: who gets in, and who does not
+    // -----------------------------------------------------------------------
+
+    static TEST_PAGES: &[Page] = &[Page {
+        path: "/settings",
+        content_type: "text/html; charset=utf-8",
+        body: "<!doctype html><title>t</title>",
+    }];
+
+    /// A server serving the test page, forever, with a handler that echoes who
+    /// it was asked by — and counts, so a test can prove a refused request
+    /// never reached it.
+    fn page_server(
+        tag: &str,
+    ) -> (
+        Endpoint,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        PathBuf,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = temp(tag);
+        let path = dir.join("control.json");
+        let server = std::sync::Arc::new(
+            ControlServer::bind(&path, new_token())
+                .unwrap()
+                .with_pages(TEST_PAGES),
+        );
+        let endpoint = Endpoint::load(&path).unwrap();
+        let reached = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&reached);
+        std::thread::spawn(move || {
+            server.serve(move |req| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                (
+                    200,
+                    json!({ "path": req.path, "caller": format!("{:?}", req.caller) }),
+                )
+            })
+        });
+        (endpoint, reached, dir)
+    }
+
+    /// Send exactly these bytes and return (status, headers, body).
+    fn raw(port: u16, request: &str) -> (u16, String, String) {
+        let mut stream = TcpStream::connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut answer = String::new();
+        let _ = stream.read_to_string(&mut answer);
+        let (head, body) = answer
+            .split_once("\r\n\r\n")
+            .unwrap_or((answer.as_str(), ""));
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        (status, head.to_string(), body.to_string())
+    }
+
+    fn get(port: u16, path: &str, extra: &str) -> (u16, String, String) {
+        raw(
+            port,
+            &format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n{extra}Connection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    fn post(port: u16, path: &str, extra: &str) -> (u16, String, String) {
+        raw(
+            port,
+            &format!(
+                "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    /// A session the way the page gets one: a ticket from the token holder,
+    /// traded at the session path.
+    fn session(endpoint: &Endpoint) -> String {
+        let url = settings_url(endpoint, None).unwrap();
+        let ticket = url.split("#t=").nth(1).unwrap().to_string();
+        let (status, _, body) = post(
+            endpoint.port,
+            SESSION_PATH,
+            &format!("X-Joinery-Ticket: {ticket}\r\n"),
+        );
+        assert_eq!(status, 200, "{body}");
+        serde_json::from_str::<Value>(&body).unwrap()["session"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn no_cors(headers: &str) {
+        assert!(
+            !headers
+                .to_ascii_lowercase()
+                .contains("access-control-allow"),
+            "an answer carried a CORS header, which would let another site read it:\n{headers}"
+        );
+    }
+
+    #[test]
+    fn the_page_is_served_without_a_credential_and_refuses_to_be_framed() {
+        let (endpoint, reached, dir) = page_server("page");
+        let (status, headers, body) = get(endpoint.port, "/settings", "");
+        assert_eq!(status, 200);
+        assert!(body.contains("<title>"));
+        let lower = headers.to_ascii_lowercase();
+        assert!(lower.contains("content-type: text/html"));
+        assert!(lower.contains("frame-ancestors 'none'"), "{headers}");
+        assert!(lower.contains("x-frame-options: deny"));
+        assert!(lower.contains("x-content-type-options: nosniff"));
+        assert!(lower.contains("script-src 'self'"));
+        no_cors(&headers);
+        // Served by the channel; the handler, which holds the user's state,
+        // never saw it.
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_page_reached_under_any_other_name_is_refused() {
+        // DNS rebinding: a site points its own hostname at 127.0.0.1 and its
+        // pages can then reach this port as if it were their own. The Host the
+        // browser sends still names the site.
+        let (endpoint, reached, dir) = page_server("rebind");
+        let port = endpoint.port;
+        let (status, headers, _) = raw(
+            port,
+            &format!("GET /settings HTTP/1.1\r\nHost: attacker.example:{port}\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(status, 403);
+        no_cors(&headers);
+        // Another local web server's port is not ours either.
+        let (status, _, _) = raw(
+            port,
+            &format!(
+                "GET /settings HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+                port.wrapping_add(1)
+            ),
+        );
+        assert_eq!(status, 403);
+        // No Host at all is not a browser.
+        let (status, _, _) = raw(port, "GET /settings HTTP/1.1\r\nConnection: close\r\n\r\n");
+        assert_eq!(status, 400);
+        // Two of them is somebody hoping one check reads the first and another
+        // the second.
+        let (status, _, _) = raw(
+            port,
+            &format!("GET /settings HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nHost: attacker.example\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(status, 403);
+        // And a rebinding page holding a stolen session still gets nowhere.
+        let s = session(&endpoint);
+        let (status, _, _) = raw(
+            port,
+            &format!("GET /status HTTP/1.1\r\nHost: attacker.example:{port}\r\nX-Joinery-Session: {s}\r\nConnection: close\r\n\r\n"),
+        );
+        assert_eq!(status, 403);
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_request_with_no_credential_never_reaches_the_handler() {
+        let (endpoint, reached, dir) = page_server("anon");
+        let (status, headers, _) = get(endpoint.port, "/status", "");
+        assert_eq!(status, 401);
+        no_cors(&headers);
+        let (status, _, _) = post(endpoint.port, "/pause", "");
+        assert_eq!(status, 401);
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_the_token_holder_is_given_a_ticket() {
+        let (endpoint, _reached, dir) = page_server("ticket");
+        let (status, _, body) = post(endpoint.port, TICKET_PATH, "");
+        assert_eq!(status, 401, "{body}");
+        assert!(!body.contains("ticket\":"));
+        // A page session is not the token either: its request goes to the
+        // handler as an ordinary page request and mints nothing.
+        let s = session(&endpoint);
+        let (_, _, body) = post(
+            endpoint.port,
+            TICKET_PATH,
+            &format!("X-Joinery-Session: {s}\r\n"),
+        );
+        let answer: Value = serde_json::from_str(&body).unwrap();
+        assert!(answer.get("ticket").is_none());
+        assert_eq!(answer["caller"], "Page");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ticket_buys_one_session_once() {
+        let (endpoint, reached, dir) = page_server("redeem");
+        let port = endpoint.port;
+        let url = settings_url(&endpoint, Some("issues")).unwrap();
+        assert!(
+            url.starts_with(&format!("http://127.0.0.1:{port}/settings#t=")),
+            "{url}"
+        );
+        assert!(url.ends_with("&s=issues"));
+        let ticket = url
+            .split("#t=")
+            .nth(1)
+            .unwrap()
+            .split('&')
+            .next()
+            .unwrap()
+            .to_string();
+
+        let (status, _, body) = post(
+            port,
+            SESSION_PATH,
+            &format!("X-Joinery-Ticket: {ticket}\r\n"),
+        );
+        assert_eq!(status, 200);
+        let s = serde_json::from_str::<Value>(&body).unwrap()["session"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_ne!(s, ticket);
+
+        // Spent. A ticket that turns up again — in a history file, a synced
+        // browser profile — buys nothing.
+        let (status, _, _) = post(
+            port,
+            SESSION_PATH,
+            &format!("X-Joinery-Ticket: {ticket}\r\n"),
+        );
+        assert_eq!(status, 401);
+
+        // The session works, and the handler knows it is the page asking.
+        let (status, _, body) = get(port, "/status", &format!("X-Joinery-Session: {s}\r\n"));
+        assert_eq!(status, 200);
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["caller"],
+            "Page"
+        );
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // A made-up session does not.
+        let (status, _, _) = get(port, "/status", "X-Joinery-Session: 00\r\n");
+        assert_eq!(status, 401);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_credential_counts_only_in_its_own_header() {
+        // Not in a cookie, which a browser attaches to requests other sites
+        // make; not in a query string, which ends up in history and logs.
+        let (endpoint, reached, dir) = page_server("where");
+        let port = endpoint.port;
+        let s = session(&endpoint);
+        for (path, extra) in [
+            (format!("/status?session={s}"), String::new()),
+            (
+                "/status".to_string(),
+                format!("Cookie: x-joinery-session={s}\r\n"),
+            ),
+            (format!("/status?token={}", endpoint.token), String::new()),
+            (
+                "/status".to_string(),
+                format!("Cookie: x-joinery-token={}\r\n", endpoint.token),
+            ),
+        ] {
+            let (status, _, _) = get(port, &path, &extra);
+            assert_eq!(status, 401, "{path} {extra}");
+        }
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_session_or_ticket_from_another_origin_is_refused() {
+        let (endpoint, reached, dir) = page_server("origin");
+        let port = endpoint.port;
+        let s = session(&endpoint);
+        for extra in [
+            "Origin: https://attacker.example\r\n".to_string(),
+            format!("Origin: http://127.0.0.1:{}\r\n", port.wrapping_add(1)),
+            "Origin: null\r\n".to_string(),
+            "Sec-Fetch-Site: cross-site\r\n".to_string(),
+            "Sec-Fetch-Site: same-site\r\n".to_string(),
+        ] {
+            let (status, headers, _) = raw(
+                port,
+                &format!(
+                    "POST /pause HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Joinery-Session: {s}\r\n{extra}Content-Length: 0\r\nConnection: close\r\n\r\n"
+                ),
+            );
+            assert_eq!(status, 403, "{extra}");
+            no_cors(&headers);
+        }
+        // The exchange itself is held to the same rule, and a refused exchange
+        // does not spend the ticket for the real page.
+        let url = settings_url(&endpoint, None).unwrap();
+        let ticket = url.split("#t=").nth(1).unwrap().to_string();
+        let (status, _, _) = raw(
+            port,
+            &format!("POST {SESSION_PATH} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: https://attacker.example\r\nX-Joinery-Ticket: {ticket}\r\nContent-Length: 0\r\n\r\n"),
+        );
+        assert_eq!(status, 403);
+        let (status, _, _) = post(
+            port,
+            SESSION_PATH,
+            &format!("X-Joinery-Ticket: {ticket}\r\n"),
+        );
+        assert_eq!(status, 200);
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nothing_ever_answers_a_preflight_with_permission() {
+        // The request a browser sends before letting another site attach a
+        // custom header. Without an Access-Control-Allow answer it stops there.
+        let (endpoint, reached, dir) = page_server("preflight");
+        let port = endpoint.port;
+        let (status, headers, _) = raw(
+            port,
+            &format!(
+                "OPTIONS /pause HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: https://attacker.example\r\nAccess-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: x-joinery-session\r\nAccess-Control-Request-Private-Network: true\r\nConnection: close\r\n\r\n"
+            ),
+        );
+        assert_ne!(status, 200);
+        no_cors(&headers);
+        assert_eq!(reached.load(std::sync::atomic::Ordering::SeqCst), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_quiet_connection_does_not_hold_up_everybody_else() {
+        // Chrome opens a spare connection it may never use. Served one at a
+        // time, that spare held the daemon for the whole serve timeout and the
+        // page hung half-drawn.
+        let (endpoint, _reached, dir) = page_server("quiet");
+        let _idle =
+            TcpStream::connect(SocketAddr::from((Ipv4Addr::LOCALHOST, endpoint.port))).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        let asked = std::time::Instant::now();
+        let answer = ask(&endpoint, "GET", "/status", Value::Null).expect("answered");
+        assert_eq!(answer["caller"], "Owner");
+        assert!(
+            asked.elapsed() < Duration::from_secs(5),
+            "a silent socket held the daemon for {:?}",
+            asked.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ticket_runs_out_and_a_session_left_alone_ends() {
+        let t0 = std::time::Instant::now();
+        let mut grants = Grants::default();
+        let late = grants.mint_ticket(t0);
+        assert!(grants
+            .redeem(&late, t0 + TICKET_TTL + Duration::from_secs(1))
+            .is_none());
+
+        let ticket = grants.mint_ticket(t0);
+        let session = grants.redeem(&ticket, t0 + Duration::from_secs(5)).unwrap();
+        // Used, it stays alive past the idle limit measured from its birth...
+        assert!(grants.admit(&session, t0 + SESSION_IDLE / 2));
+        assert!(grants.admit(&session, t0 + SESSION_IDLE));
+        // ...and left alone, it ends.
+        assert!(!grants.admit(&session, t0 + SESSION_IDLE * 2 + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn handing_out_tickets_in_a_loop_does_not_grow_without_bound() {
+        let t0 = std::time::Instant::now();
+        let mut grants = Grants::default();
+        let first = grants.mint_ticket(t0);
+        for _ in 0..100 {
+            grants.mint_ticket(t0);
+        }
+        assert!(grants.tickets.len() <= MAX_GRANTS);
+        assert!(grants.redeem(&first, t0).is_none(), "the oldest went first");
+        for _ in 0..100 {
+            let t = grants.mint_ticket(t0);
+            grants.redeem(&t, t0).unwrap();
+        }
+        assert!(grants.sessions.len() <= MAX_GRANTS);
+    }
+
+    #[test]
+    fn only_loopback_names_this_daemon() {
+        assert!(host_is_loopback("127.0.0.1:4000", 4000));
+        assert!(host_is_loopback("localhost:4000", 4000));
+        assert!(host_is_loopback("LOCALHOST:4000", 4000));
+        assert!(host_is_loopback("127.0.0.1", 4000));
+        assert!(!host_is_loopback("127.0.0.1:4001", 4000));
+        assert!(!host_is_loopback("attacker.example:4000", 4000));
+        assert!(!host_is_loopback("127.0.0.1.attacker.example:4000", 4000));
+        assert!(!host_is_loopback("localhost.:4000", 4000));
+        assert!(!host_is_loopback("[::1]:4000", 4000));
+        assert!(!host_is_loopback("", 4000));
+
+        assert!(origin_is_ours("http://127.0.0.1:4000", 4000));
+        assert!(origin_is_ours("http://localhost:4000", 4000));
+        assert!(!origin_is_ours("https://127.0.0.1:4000", 4000));
+        assert!(!origin_is_ours("http://127.0.0.1:4001", 4000));
+        assert!(!origin_is_ours("null", 4000));
     }
 
     #[test]

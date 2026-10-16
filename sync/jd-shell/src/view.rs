@@ -112,6 +112,13 @@ pub fn present(status: Option<&Value>) -> Presentation {
         };
     };
 
+    // A daemon with nothing to sync yet. Not an error and not "stopped": the
+    // one useful thing to offer is finishing the setup, which happens in the
+    // settings page, so that is what the menu leads with.
+    if status.get("linked").and_then(Value::as_bool) == Some(false) {
+        return unlinked(status.get("setup"));
+    }
+
     let field = |k: &str| status.get(k).and_then(Value::as_str).unwrap_or("");
     let indicator = field("indicator");
     let paused = status.get("paused").and_then(Value::as_bool) == Some(true);
@@ -184,6 +191,44 @@ pub fn present(status: Option<&Value>) -> Presentation {
         tooltip,
         menu,
         sync_root: Some(field("sync_root").to_string()).filter(|s| !s.is_empty()),
+    }
+}
+
+/// The menu while this computer is not linked to an account.
+///
+/// The state line follows the setup's stage, so a person who wandered off
+/// halfway through can see where they left it without opening anything. The
+/// action is always the same item, because the settings page resumes wherever
+/// the setup is.
+fn unlinked(setup: Option<&Value>) -> Presentation {
+    let field = |k: &str| {
+        setup
+            .and_then(|s| s.get(k))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+    };
+    let state = match field("stage") {
+        "starting" => "Setting up \u{2014} contacting your site".to_string(),
+        "approve" if !field("link_code").is_empty() => {
+            format!("Waiting for approval \u{2014} code {}", field("link_code"))
+        }
+        "approve" => "Waiting for approval in your browser".to_string(),
+        "folder" => "Approved \u{2014} choose a folder to finish".to_string(),
+        "unlinking" => "Unlinking\u{2026}".to_string(),
+        _ => "Not set up yet".to_string(),
+    };
+    Presentation {
+        // Something needs a person, and it is not a failure.
+        icon: Icon::Attention,
+        tooltip: format!(
+            "Joinery Drive \u{2014} {state}\nChoose \u{201c}Set up Joinery Drive\u{2026}\u{201d} to link this computer to your account."
+        ),
+        menu: vec![
+            MenuItem::off("state", state),
+            MenuItem::on("setup", "Set up Joinery Drive\u{2026}"),
+            MenuItem::on("quit", "Quit"),
+        ],
+        sync_root: None,
     }
 }
 
@@ -309,6 +354,7 @@ mod tests {
             Some(
                 json!({"indicator": "attention", "summary": "x", "paused": false, "issues": [{"id":1}]}),
             ),
+            Some(json!({"linked": false, "setup": {"stage": "instance"}})),
         ] {
             let p = present(status.as_ref());
             assert!(ids(&p).contains(&"quit"), "{p:?} cannot be quit");
@@ -323,6 +369,55 @@ mod tests {
             "indicator": "something-new", "summary": "?", "paused": false, "issues": []
         })));
         assert_eq!(p.icon, Icon::Stopped);
+    }
+
+    #[test]
+    fn an_unlinked_daemon_offers_setting_up_and_nothing_that_needs_an_account() {
+        // There is nothing to pause, nothing to check, no folder to open and no
+        // issues: the whole menu is the way into the setup.
+        let p = present(Some(&json!({
+            "linked": false,
+            "indicator": "stopped",
+            "summary": "Not set up yet",
+            "setup": { "stage": "instance" },
+        })));
+        assert_eq!(ids(&p), vec!["state", "setup", "quit"]);
+        let setup = p.menu.iter().find(|m| m.id == "setup").unwrap();
+        assert_eq!(setup.label, "Set up Joinery Drive\u{2026}");
+        assert!(setup.enabled);
+        assert!(p.sync_root.is_none());
+        assert_eq!(p.icon, Icon::Attention, "needs a person; is not broken");
+        assert!(p.tooltip.contains("Not set up yet"));
+    }
+
+    #[test]
+    fn a_setup_left_halfway_says_where_it_was_left() {
+        let p = present(Some(&json!({
+            "linked": false,
+            "setup": { "stage": "approve", "link_code": "ABCD-EFGH" },
+        })));
+        assert_eq!(
+            p.menu[0].label,
+            "Waiting for approval \u{2014} code ABCD-EFGH"
+        );
+        assert!(!p.menu[0].enabled, "the state line is not a button");
+
+        let p = present(Some(
+            &json!({ "linked": false, "setup": { "stage": "folder" } }),
+        ));
+        assert!(p.menu[0].label.contains("choose a folder"));
+        assert!(ids(&p).contains(&"setup"));
+    }
+
+    #[test]
+    fn a_daemon_that_does_not_say_whether_it_is_linked_is_read_as_linked() {
+        // Every daemon that predates setup was linked or not running, so an
+        // answer without the field is drawn the way it always was.
+        let p = present(Some(&json!({
+            "indicator": "green", "summary": "Up to date", "paused": false, "issues": []
+        })));
+        assert!(!ids(&p).contains(&"setup"));
+        assert!(ids(&p).contains(&"settings"));
     }
 
     #[test]

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Joinery Drive</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/settings/app.css">
+<script src="/settings/app.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark" aria-hidden="true"></span>Joinery Drive</div>
+  <div class="version" id="version"></div>
+</header>
+
+<main>
+  <div class="banner" id="unreachable" role="status" hidden>
+    Joinery Drive is not answering. It may have stopped; this page will pick up again when it is back.
+  </div>
+
+  <section class="card" id="connecting">
+    <p class="muted">Connecting to Joinery Drive&hellip;</p>
+  </section>
+
+  <section class="card" id="no-session" hidden>
+    <h1>Open this from Joinery Drive</h1>
+    <p>For your safety, this page only works when Joinery Drive opens it for you, and only for a while after that.</p>
+    <p>Choose <strong>Settings&hellip;</strong> in the Joinery Drive menu, or run <code>joinery-drive settings</code> in a terminal.</p>
+  </section>
+
+  <!-- First run: not linked to an account yet -->
+  <div id="setup" hidden>
+    <ol class="steps" aria-label="Setup steps">
+      <li id="step-1">Your site</li>
+      <li id="step-2">Approve</li>
+      <li id="step-3">Folder</li>
+    </ol>
+
+    <div class="callout note" id="setup-notice" role="status" hidden></div>
+    <div class="callout error" id="setup-error" role="alert" hidden></div>
+
+    <section class="card" id="stage-instance" hidden>
+      <h1>Set up Joinery Drive</h1>
+      <p>Joinery Drive keeps a folder on this computer in step with your Drive. Start with the address of the Joinery site you sign in to.</p>
+      <form id="instance-form" novalidate>
+        <label for="base-url">Site address</label>
+        <input id="base-url" name="base_url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://drive.example.org" required>
+        <label for="device-name">Name for this computer</label>
+        <input id="device-name" name="device_name" type="text" spellcheck="false" maxlength="64">
+        <p class="hint">Shown in your account's list of devices, so you can tell this computer apart from the others.</p>
+        <div class="actions">
+          <button type="submit" class="primary" id="begin">Continue</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" id="stage-starting" hidden>
+      <h1>Contacting your site&hellip;</h1>
+      <p class="muted" id="starting-url"></p>
+    </section>
+
+    <section class="card" id="stage-approve" hidden>
+      <h1>Approve this computer</h1>
+      <p id="approve-lead"></p>
+      <p class="code" id="link-code"></p>
+      <p><a id="verify-link" target="_blank" rel="noopener noreferrer">Open the approval page</a></p>
+      <p class="muted waiting"><span class="spinner" aria-hidden="true"></span>Waiting for approval&hellip;</p>
+      <div class="actions">
+        <button type="button" id="cancel-approve">Cancel</button>
+      </div>
+    </section>
+
+    <section class="card" id="stage-folder" hidden>
+      <h1>Choose where your files go</h1>
+      <p>This computer is approved for <span id="folder-site"></span>. Your Drive will be kept in this folder:</p>
+      <form id="folder-form" novalidate>
+        <label for="sync-root">Folder</label>
+        <input id="sync-root" name="sync_root" type="text" spellcheck="false" autocomplete="off">
+        <p class="hint">Give the full path. A folder that does not exist yet is made for you.</p>
+        <label class="check"><input type="checkbox" id="autostart-setup" checked> Start Joinery Drive when I log in</label>
+        <p class="hint" id="folder-vault"></p>
+        <div class="callout warn" id="folder-confirm" role="alert" hidden>
+          <p id="folder-confirm-text"></p>
+          <div class="actions">
+            <button type="button" class="primary" id="folder-confirm-yes">Use this folder</button>
+            <button type="button" id="folder-confirm-no">Choose another</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="submit" class="primary" id="finish">Start syncing</button>
+          <button type="button" id="cancel-folder">Cancel setup</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" id="stage-unlinking" hidden>
+      <h1>Unlinking this computer&hellip;</h1>
+      <p class="muted">Taking this computer's key back from your site.</p>
+    </section>
+  </div>
+
+  <!-- Linked: the settings themselves -->
+  <div id="linked" hidden>
+    <div class="callout error" id="action-error" role="alert" hidden></div>
+    <section class="card status" id="status-card">
+      <div class="status-head">
+        <span class="dot" id="status-dot" aria-hidden="true"></span>
+        <div>
+          <h1 id="status-title"></h1>
+          <p class="muted" id="status-summary"></p>
+        </div>
+      </div>
+      <div class="callout error" id="status-blocker" role="alert" hidden></div>
+      <dl class="facts" id="status-facts"></dl>
+      <div class="actions">
+        <button type="button" id="pause-toggle"></button>
+        <button type="button" id="sync-now">Check now</button>
+      </div>
+    </section>
+
+    <section class="card" id="issues">
+      <h2>Needs your attention</h2>
+      <p class="muted" id="issues-none">Nothing needs your attention.</p>
+      <ul class="issues" id="issues-list"></ul>
+      <p class="muted" id="issues-more" hidden></p>
+    </section>
+
+    <section class="card" id="folder">
+      <h2>Your folder</h2>
+      <p class="path" id="sync-root-shown"></p>
+      <p class="hint">To keep your Drive in a different folder, unlink this computer below and set it up again.</p>
+      <h3>Folders in your Drive</h3>
+      <p class="hint">Every folder in your Drive is kept on this computer, except ones that cannot be (such as Private folders). Choosing folders to leave off this computer is not available in this version.</p>
+      <p class="muted" id="tree-empty">No folders yet.</p>
+      <ul class="tree" id="tree"></ul>
+      <p class="muted" id="tree-more" hidden></p>
+    </section>
+
+    <section class="card" id="account">
+      <h2>Account</h2>
+      <dl class="facts" id="account-facts"></dl>
+      <label class="check"><input type="checkbox" id="autostart"> Start Joinery Drive when I log in</label>
+    </section>
+
+    <section class="card" id="updates" hidden>
+      <h2>Updates</h2>
+      <p id="update-summary"></p>
+      <div class="actions">
+        <button type="button" id="check-update">Check for updates</button>
+      </div>
+    </section>
+
+    <section class="card danger" id="unlink-card">
+      <h2>Unlink this computer</h2>
+      <p>Stops syncing and takes this computer's key back from your site. Your files in the folder stay where they are.</p>
+      <div class="actions" id="unlink-ask">
+        <button type="button" class="danger" id="unlink">Unlink this computer&hellip;</button>
+      </div>
+      <div class="callout warn" id="unlink-confirm" hidden>
+        <p>Unlink this computer from <strong id="unlink-site"></strong>? Changes you make in the folder afterwards will not reach your Drive, and changes in your Drive will not reach this computer.</p>
+        <div class="actions">
+          <button type="button" class="danger" id="unlink-yes">Unlink</button>
+          <button type="button" id="unlink-no">Keep syncing</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

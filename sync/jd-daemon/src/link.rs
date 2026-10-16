@@ -24,10 +24,17 @@
 //! both are ordinary outcomes rather than errors — a user who clicks "not me" is
 //! doing exactly what that button is for.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
+use jd_platform::{Paths, Secret, SecretStore};
 use jd_proto::{Client, Credentials, ProtoError};
 use serde_json::Value;
+
+use crate::config::Config;
+
+/// The name this client's secrets are kept under in the credential store.
+pub const SERVICE: &str = "com.joinery.drive";
 
 /// How often to ask whether the user has approved yet.
 ///
@@ -148,6 +155,30 @@ pub fn poll(client: &Client, pending: &Pending) -> Result<Outcome, LinkError> {
     }
 }
 
+/// What `joinery-drive login` tells the person while it waits.
+///
+/// The code and the address are printed whether or not a browser opened,
+/// because the ceremony works perfectly well with a person reading them off one
+/// screen and typing them into another — which is the only way it works on a
+/// headless box. "Opened in your browser" is said only when a browser was in
+/// fact asked to open it; otherwise the person is told to open it themselves,
+/// rather than left looking for a window that never appeared.
+pub fn instructions(base_url: &str, pending: &Pending, opened: bool) -> String {
+    let then = if opened {
+        "(opened in your browser)".to_string()
+    } else {
+        format!(
+            "Open that address in a browser where you are signed in to {base_url} — on this \
+             computer or any other — and approve this computer there."
+        )
+    };
+    format!(
+        "To link this computer, approve it while signed in to {base_url}:\n\n    {}\n\n    \
+         or enter the code: {}\n\n{then}\n\nWaiting for approval\u{2026}\n",
+        pending.verify_url, pending.link_code
+    )
+}
+
 /// Open the sealed vault key with this device's secret key.
 ///
 /// The recipient public key is required by the sealing scheme itself — it is
@@ -161,6 +192,94 @@ pub fn open_vault_key(pending: &Pending, sealed: &str) -> Result<Vec<u8>, LinkEr
         &pending.device_public_key,
     )
     .map_err(|e| LinkError::Crypto(e.to_string()))
+}
+
+/// Keep what an approval handed over. Returns whether encrypted folders are on
+/// for this device.
+///
+/// Called the moment the approval arrives, before anything that could fail:
+/// the server hands the credential over exactly once and scrubs it, so anything
+/// done first that fails loses it for good. The CLI's `login` and the settings
+/// page's first run both come through here, so they cannot disagree about what
+/// a linked device holds.
+///
+/// Keys are stored base64 through `jd_crypto::b64`, the same implementation the
+/// daemon reads them back with: two hand-rolled halves agree until one of them
+/// is edited, and the symptom of disagreement is a key that stored fine and
+/// cannot be read back.
+pub fn store_approved(
+    secrets: &SecretStore,
+    pending: &Pending,
+    approved: &Approved,
+) -> Result<bool, String> {
+    secrets
+        .set(Secret::ApiSecret, &approved.credentials.secret_key)
+        .map_err(|e| format!("cannot store the device credential: {e}"))?;
+    secrets
+        .set(
+            Secret::DeviceKey,
+            &jd_crypto::b64::encode(&pending.device_secret_pkcs8),
+        )
+        .map_err(|e| format!("cannot store the device key: {e}"))?;
+
+    let Some(sealed) = &approved.sealed_vault_key else {
+        return Ok(false);
+    };
+    match open_vault_key(pending, sealed) {
+        Ok(vault_key) => {
+            secrets
+                .set(Secret::VaultKey, &jd_crypto::b64::encode(&vault_key))
+                .map_err(|e| format!("cannot store the vault key: {e}"))?;
+            Ok(true)
+        }
+        // Not fatal. Everything outside encrypted folders syncs perfectly
+        // well without it, and refusing to link over this would be refusing
+        // the whole account over one feature.
+        Err(e) => {
+            eprintln!(
+                "warning: encrypted folders could not be enabled on this device ({e}). \
+                 Everything else will sync; link again to retry."
+            );
+            Ok(false)
+        }
+    }
+}
+
+/// What unlinking did, for whoever is telling the user about it.
+pub struct Unlinked {
+    pub base_url: String,
+    pub sync_root: PathBuf,
+    /// Whether the server took the key back. `None` when this device held no
+    /// credential to revoke.
+    pub revoked: Option<Result<(), String>>,
+}
+
+/// Take this computer off its account and forget its keys.
+///
+/// Revokes server-side **before** forgetting locally. The other order leaves a
+/// live credential on the server that nothing on this machine can name any
+/// more, which is exactly the key a lost laptop is carrying. The synced files
+/// are left exactly where they are: unlinking is "stop syncing this", never
+/// "delete the user's documents".
+pub fn unlink(paths: &Paths, config: &Config, secrets: &SecretStore) -> Result<Unlinked, String> {
+    let revoked = secrets.get(Secret::ApiSecret).ok().map(|secret_key| {
+        let mut client = Client::with_credentials(
+            &config.base_url,
+            Credentials {
+                public_key: config.public_key.clone(),
+                secret_key,
+            },
+        );
+        client.logout().map(|_| ()).map_err(|e| e.to_string())
+    });
+    secrets.clear().map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(paths.config_file());
+    let _ = jd_platform::autostart::disable(&jd_platform::home_dir());
+    Ok(Unlinked {
+        base_url: config.base_url.clone(),
+        sync_root: config.sync_root.clone(),
+        revoked,
+    })
 }
 
 fn string_field(data: &Value, name: &'static str) -> Result<String, LinkError> {
@@ -208,6 +327,21 @@ mod tests {
         let sealed =
             jd_crypto::vault::seal_to_public_key(b"not for me", &theirs.device_public_key).unwrap();
         assert!(open_vault_key(&mine, &sealed).is_err());
+    }
+
+    #[test]
+    fn login_says_the_browser_opened_only_when_it_did() {
+        let p = pending();
+        let opened = instructions("https://drive.example.org", &p, true);
+        assert!(opened.contains("(opened in your browser)"));
+        assert!(opened.contains(&p.verify_url) && opened.contains(&p.link_code));
+
+        // Nothing opened: say so by telling the person what to do, and still
+        // give them both ways in.
+        let not = instructions("https://drive.example.org", &p, false);
+        assert!(!not.contains("opened in your browser"), "{not}");
+        assert!(not.contains("Open that address in a browser"), "{not}");
+        assert!(not.contains(&p.verify_url) && not.contains(&p.link_code));
     }
 
     #[test]
