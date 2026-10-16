@@ -57,13 +57,15 @@ if (!$has_table) {
 
 $cleanup_svt = array();
 $cleanup_bkt = array();
-harness_defer(function () use (&$cleanup_svt, &$cleanup_bkt, $db) {
+// Registered after the fixture users (below): teardown runs last-first, and an
+// account is never removed while its tenants hold anything at a provider.
+$tenant_cleanup = function () use (&$cleanup_svt, &$cleanup_bkt, $db) {
 	foreach ($cleanup_svt as $id) {
 		$db->exec("DELETE FROM sps_storage_spaces WHERE sps_svt_service_tenant_id = " . (int)$id);
 		$db->exec("DELETE FROM svt_service_tenants WHERE svt_service_tenant_id = " . (int)$id);
 	}
 	foreach ($cleanup_bkt as $id) { $db->exec("DELETE FROM bkt_backup_targets WHERE bkt_backup_target_id = " . (int)$id); }
-});
+};
 $track = function (ServiceTenant $row) use (&$cleanup_svt) {
 	if (!in_array((int)$row->key, $cleanup_svt, true)) { $cleanup_svt[] = (int)$row->key; }
 	return $row;
@@ -113,6 +115,7 @@ harness_set_setting_mem('server_manager_storage_referral_url', '');
 // ── Fixtures ────────────────────────────────────────────────────────────────
 $owner = make_user('SvcOwner');
 $other = make_user('SvcOther');
+harness_defer($tenant_cleanup);
 $key = make_machine_key($owner->key, 'Joinery services', 3);
 $key_id = (int)$key['api_key']->key;
 $host = 'svc-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';

@@ -62,11 +62,13 @@ if (!$db->query("SELECT 1 FROM information_schema.columns WHERE table_name = 'sv
 }
 
 $cleanup = array();
-harness_defer(function () use (&$cleanup, $db) {
+// Registered after the fixture users (below): teardown runs last-first, and an
+// account is never removed while its tenants hold anything at a provider.
+$tenant_cleanup = function () use (&$cleanup, $db) {
 	foreach (array_reverse($cleanup) as $row) {
 		$db->exec("DELETE FROM {$row[0]} WHERE {$row[1]} = " . (int)$row[2]);
 	}
-});
+};
 
 // ── Mail provider, mocked ───────────────────────────────────────────────────
 $history = array();
@@ -126,6 +128,7 @@ function tempnam_with(string $bytes): string {
 }
 
 $owner = make_user('WatchOwner');
+harness_defer($tenant_cleanup);
 $key = make_machine_key($owner->key, 'Joinery services', 3);
 $key_id = (int)$key['api_key']->key;
 $host = 'watch-' . substr(md5(uniqid('', true)), 0, 6) . '.example.com';

@@ -53,6 +53,10 @@ $manifest_link = 'https://s3.us-west-004.backblazeb2.com/harness/x/manager/' . $
 // $grown: the manifest as storage holds it once the source has run again after
 // the copy's key step was built (B20); null while it has not.
 $grown = null;
+// Its run 1, fixed once: the take-key step is visited on more than one pass, and a
+// time read on each pass moves when a pass crosses a second, so the run the key
+// step recorded would vanish from the manifest it reads back.
+$grown_run_time = gmdate('Y-m-d\TH:i:s\Z', time() - 3600);
 SiteCopyRunner::$manifest_reader = function ($source, $chain) use (&$manifest, &$grown, $manifest_link) {
 	return array('body' => $grown ?? $manifest, 'url' => $manifest_link);
 };
@@ -163,7 +167,7 @@ $copy->save();
 section('The run: no step on the source, and the key from the owner');
 
 $take_key_params = null;
-$drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, $src, &$take_key_params, &$manifest, &$grown) {
+$drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, $src, &$take_key_params, &$manifest, &$grown, $grown_run_time) {
 	$ops = array();
 	for ($guard = 0; $guard < 40 && in_array($copy->status(), $statuses, true); $guard++) {
 		SiteCopyRunner::advance($copy);
@@ -186,7 +190,7 @@ $drive = function (SiteCopy $copy, array $statuses, array $by_op) use ($finish, 
 			// The source's own schedule runs again while the copy waits for its
 			// key: storage now holds a newer manifest, with run 1 in it.
 			$grow = json_decode($manifest, true);
-			$grow['runs'][] = array('seq' => 1, 'time' => gmdate('Y-m-d\TH:i:s\Z', time() - 3600));
+			$grow['runs'][] = array('seq' => 1, 'time' => $grown_run_time);
 			$grown = json_encode($grow);
 			$p = $job->get('mjb_parameters');
 			$p = is_string($p) ? json_decode($p, true) : $p;

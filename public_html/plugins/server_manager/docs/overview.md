@@ -1609,6 +1609,17 @@ carries **Disconnect**, which deactivates the site's key and then releases
 every service it holds; a provider refusal on one release is surfaced after
 the rest have run, with the key already off.
 
+**Removing an account waits for its services.** An account is removed for good
+only once none of its tenant rows holds anything at a provider
+(`ServiceTenant::provider_holding()`): a mail row whose subaccount is still open,
+or a backup storage row whose copies are not yet pruned (copies in its storage
+spaces, or a moved site's fleet backups while its node is still there),
+refuses the removal whole, and the dry run names the site and what it holds.
+Release the row first (the account's **Disconnect**, or **Release** on Service
+Tenants); a backup storage row then waits out its 90 days, the prune empties its
+spaces, and the removal goes through, taking the rows and their spaces with it.
+The removal itself calls no provider.
+
 **The webhook** (`ajax/smtp2go_webhook`) maps a delivery to a Managed site by
 its SMTP username first; one it cannot map is tried against the tenant rows'
 usernames and moves that tenant's figure.
@@ -1696,7 +1707,7 @@ Every restore form asks one thing and decides the rest.
 
 **It asks for the domain**, pre-filled from the node's recorded URL. This is the one value a restore cannot work out for itself: a rebuild keeps the site's own domain and cuts DNS afterwards, while a rehearsal must not claim it, and the same backup on the same node wants opposite answers. A node provisioned during an incident carries whatever hostname somebody typed in a hurry, so adopting it silently is a mistake that surfaces only after DNS moves.
 
-**It decides the serving config.** There is no Apache choice on the form. The restore regenerates the virtualhost for this machine from the platform's own templates and never installs the one the backup carries; a differing capture is preserved as `{site}.conf.from-backup` and named in the job output. On a container node a further step publishes the domain on the **host** with `manage_domain.sh`, because the host's proxy virtualhost is outside the container and therefore in no backup.
+**It decides the serving config.** There is no Apache choice on the form. The restore regenerates the virtualhost for this machine from the platform's own templates and never installs the one the backup carries; a differing capture is preserved as `{site}.conf.from-backup` and named in the job output. On a container node the public name is the **host's** proxy virtualhost, which is outside the container and therefore in no backup; the restore keeps the node's own domain, so the host's proxy stays as it is. A different domain is set on the host with `manage_domain.sh`.
 
 Every restore job ends with two gates: the site's identity must match the machine (domain, deployment shape, and a database that opens with this machine's credentials) and the site must actually be served — over **HTTPS** when the domain already resolves here, or reported as certificate-deferred when it does not. The HTTPS gate is explicit because an HTTP-only check passes comfortably while a site serves under a container's internal virtualhost with a valid certificate sitting unused on disk.
 

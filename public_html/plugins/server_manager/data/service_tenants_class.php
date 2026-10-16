@@ -44,6 +44,9 @@
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.3 - permanent_delete() refuses while the row holds anything at a provider (provider_holding()):
+ *               an open mail subaccount, or backup copies not yet pruned; so an account is removed only after
+ *               its services are released and their retention has run
  * @version 1.2 - an account removed for good removes its tenants through their own permanent_delete(), so
  *               their storage spaces, ledger rows and runs go too: a flat cascade left them naming
  *               a tenant that no longer existed
@@ -83,11 +86,11 @@ class ServiceTenant extends SystemBase {
 	const RETENTION_DAYS = 90;
 
 	protected static $foreign_key_actions = array(
-		// A tenant row without its account is a row nobody can act for; the
-		// key going is the account holder cutting the site off, which the
-		// Disconnect path handles by releasing first. Through each tenant's own
-		// permanent_delete(): a tenant has storage spaces, ledger rows and runs
-		// of its own, which a flat delete would leave naming nothing.
+		// A tenant row without its account is a row nobody can act for. Through
+		// each tenant's own permanent_delete(): a tenant has storage spaces,
+		// ledger rows and runs of its own, which a flat delete would leave naming
+		// nothing, and it refuses while it holds anything at a provider, so the
+		// account's removal waits for the release and the retention.
 		'svt_usr_user_id'     => array('action' => 'permanent_delete'),
 		'svt_apk_api_key_id'  => array('action' => 'null'),
 		'svt_mgn_managed_node_id' => array('action' => 'null'),
@@ -171,6 +174,55 @@ class ServiceTenant extends SystemBase {
 		}
 		$this->set('svt_update_time', gmdate('Y-m-d H:i:s'));
 		return parent::save($debug);
+	}
+
+	/**
+	 * What this row still holds at a provider, as a sentence, or null when it
+	 * holds nothing: an open mail subaccount, or backup copies not yet pruned.
+	 * Removing the row would leave those running with nothing pointing at
+	 * them, so permanent_delete() refuses while this answers.
+	 */
+	public function provider_holding(): ?string {
+		$site = trim((string)$this->get('svt_host')) ?: 'service tenant #' . (int)$this->key;
+		if ((string)$this->get('svt_service') === self::SERVICE_MAIL) {
+			if (trim((string)$this->get('svt_provider_subaccount_id')) !== '' && $this->get('svt_revoked_time') === null) {
+				return "{$site} still has an open mail subaccount at the provider. Release it on Service Tenants first.";
+			}
+			return null;
+		}
+		if ($this->get('svt_pruned_time') !== null) {
+			return null;
+		}
+		$holds = $this->is_node_linked()
+			? $this->linked_node() !== null
+			: (bool)StorageSpace::of_owner(StorageSpace::OWNER_TENANT, (int)$this->key);
+		if (!$holds) {
+			return null;
+		}
+		return trim((string)$this->get('svt_prune_after_time')) !== ''
+			? "{$site} still has backup copies in backup storage, kept until " . $this->get_local('svt_prune_after_time', 'M j, Y')
+				. ' and pruned then.'
+			: "{$site} still has backup copies in backup storage. Release it on Service Tenants first; its copies are pruned "
+				. self::RETENTION_DAYS . ' days later.';
+	}
+
+	/** Refuses while the row holds anything at a provider (provider_holding()). */
+	function permanent_delete($debug = false) {
+		$holding = $this->provider_holding();
+		if ($holding !== null) {
+			throw new SystemDisplayableError('Cannot delete: ' . $holding);
+		}
+		return parent::permanent_delete($debug);
+	}
+
+	function permanent_delete_dry_run() {
+		$result = parent::permanent_delete_dry_run();
+		$holding = $this->provider_holding();
+		if ($holding !== null) {
+			$result['can_delete'] = false;
+			$result['blocking_reasons'][] = $holding;
+		}
+		return $result;
 	}
 
 	/** A Managed site moved to its customer's own account: reached through its node, not a key. */
