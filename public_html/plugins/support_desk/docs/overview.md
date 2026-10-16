@@ -16,9 +16,8 @@ as "support is not offered here".
 **The index.** `SupportDocIndex` splits a release's documents by heading into
 `sds_doc_sections` rows (release, path, heading chain, body), searched with
 Postgres full text through `FullTextSearch`. A release's documents are
-`docs/**/*.md`, the `docs/**/*.md` of every plugin that goes out with releases
-(`included_in_publish` not false) and the root files in
-`SupportDocIndex::ROOT_FILES`. A release is indexed once and never edited;
+`docs/**/*.md` and the `docs/**/*.md` of every plugin that goes out with
+releases (`included_in_publish` not false). A release is indexed once and never edited;
 `sdr_doc_releases` holds one row per indexed release with its docs map and its
 shipped FAQ.
 

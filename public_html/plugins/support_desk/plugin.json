@@ -7,7 +7,7 @@
     "status": "experimental",
     "depends": { "joinery_ai": ">=0.26.0" },
     "receives_upgrades": true,
-    "included_in_publish": false,
+    "included_in_publish": true,
     "bootstrap": "includes/bootstrap.php",
     "styles": [
         "assets/css/support_desk.css"

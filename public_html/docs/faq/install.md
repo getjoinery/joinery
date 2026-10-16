@@ -66,20 +66,22 @@ You do not need to do anything. The install leaves a timer, `joinery-ssl-retry@{
 sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com
 ```
 
-This needs the domain's DNS pointing at the server and port 80 reachable from the internet.
+This needs requests for the domain to reach the server on port 80, directly or through an edge such as Cloudflare.
 
-See: docs/installation.md > SSL Certificates
+Behind Cloudflare, set SSL/TLS to **Full**, not Full (Strict), until the first certificate lands. Strict refuses the temporary certificate the site answers with until then, so the certificate cannot be fetched through it. Once the certificate is in place, Full (Strict) works.
+
+See: docs/installation.md > SSL Certificates; docs/installation.md > Cloudflare Proxy Support
 
 ## How do I add or change a site's domain after the install?
 
-Use `manage_domain.sh` in `maintenance_scripts/sysadmin_tools/`. It works for Docker and bare-metal sites.
+Use `manage_domain.sh` in `maintenance_scripts/sysadmin_tools/`, as root. It works for Docker and bare-metal sites; for a Docker site, run it on the host. It sets the site's vhost and its own address, and fetches the certificate the way the install does.
 
 ```bash
 sudo ./manage_domain.sh status mysite                # what is set today
 sudo ./manage_domain.sh set mysite example.com       # assign a domain, with SSL
 sudo ./manage_domain.sh set mysite example.com --no-ssl
 sudo ./manage_domain.sh rollback mysite              # restore the previous configuration
-sudo ./manage_domain.sh clear mysite                 # back to IP-only access
+sudo ./manage_domain.sh clear mysite                 # remove the domain
 ```
 
 See: docs/installation.md > Domain Management

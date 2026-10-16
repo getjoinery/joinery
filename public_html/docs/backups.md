@@ -454,10 +454,11 @@ The fix for a refusal is on the source: remove what is named (or upgrade it to
 a current release), take a new backup, and restore that.
 
 **The serving config is always regenerated** from the platform's own templates,
-in every case. On bare metal that is `virtualhost_update_script.sh` for the site
-and domain; in a container the internal virtualhost written at install time is
-already correct and the public name is served by the **host's** proxy, which
-`manage_domain.sh` writes. A container backup is missing the piece that
+in every case. On bare metal the site's vhost is rendered from the template for
+the domain, as a converge renders it, and recorded so later converges keep it
+current; in a container the internal virtualhost written at install time is
+already correct and the public name is served by the **host's** proxy, which the
+restore leaves as it is (`manage_domain.sh` on the host changes it). A container backup is missing the piece that
 terminates TLS, and a bare-metal backup carries a piece a container must never
 use, so neither direction can be handled by copying files.
 
@@ -1748,8 +1749,9 @@ The **Backup** scheduled task (`tasks/BackupRun.php`) runs this site's own
 backups — it is pinned to the site profile, so a management node's copies can never
 be started by editing a row in this site's task table. It is not active
 on install: a site with no target configured runs nothing and warns about
-nothing. Activate it on **Scheduled Tasks**, where its frequency and time are
-also set. It supports a dry run, which reports exactly what a real run would do
+nothing. It switches itself on once a scheduled target and a proven recovery
+key both exist (see [Recovery key setup](#recovery-key-setup)); **Scheduled
+Tasks** sets its frequency and time, and switches it off or back on. It supports a dry run, which reports exactly what a real run would do
 without producing or deleting anything. The **Backup verification** task
 (`tasks/BackupVerify.php`) is switched on with it and proves the newest backup
 restorable on its own interval — see [Verifying backups](#verifying-backups).

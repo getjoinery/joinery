@@ -12,7 +12,7 @@ Five complementary tools provide deployment and upgrade capabilities:
 
 Tools 1, 4, and 5 use **DeploymentHelper** (`/includes/DeploymentHelper.php`) for shared validation, rollback, and theme/plugin preservation. Tools 2 and 3 require the **Server Manager** plugin to be active.
 
-For Docker and bare-metal deployments, see **[Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)**.
+For Docker and bare-metal deployments, see **[Installation Guide](installation.md)**.
 
 ### Docker Shared Base Image
 
@@ -43,15 +43,15 @@ Existing containers keep running on their old base image until they are rebuilt 
 
 #### Two-tier Apache: real client IP
 
-A docker-prod request crosses two Apache instances: **host Apache** terminates TLS and reverse-proxies to `127.0.0.1:{container_port}`; **container Apache** runs PHP. Without help, `$_SERVER['REMOTE_ADDR']` inside the container is always `172.17.0.1` (the docker bridge gateway), which silently breaks IP-based features (rate limiting, API key IP restriction, analytics, audit logs).
+A container site's request crosses two Apache instances: **host Apache** terminates TLS and reverse-proxies to `127.0.0.1:{container_port}`; **container Apache** runs PHP. Without help, `$_SERVER['REMOTE_ADDR']` inside the container is always the gateway of the site's network, which silently breaks IP-based features (rate limiting, API key IP restriction, analytics, audit logs, fail2ban).
 
 The contract:
 
-1. **Host proxy** (written by `install.sh` and `manage_domain.sh`) sets `RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s` — explicit `set` (not append) so the container receives a single trustworthy value.
-2. **Container Apache** loads `mod_remoteip` with `RemoteIPInternalProxy 172.17.0.0/16`, rewriting `REMOTE_ADDR` from the `X-Forwarded-For` header before PHP runs. This is baked into `Dockerfile.template` (since v3.5).
-3. **Access logs** use `%a` instead of `%h` so they show the rewritten address, not the bridge gateway.
+1. **Host proxy** (`default_proxy_vhost.conf`, written by `install.sh`) **appends** its peer to `X-Forwarded-For` (`RequestHeader append`). Appending keeps the chain an edge such as Cloudflare started, so the container can follow it back to the client.
+2. **Container Apache** loads `mod_remoteip` and walks `X-Forwarded-For` right to left, trusting only proxies it knows. The image's baseline (`Dockerfile.template`) trusts the host-internal site networks (`10.250.0.0/16`, `fd00:250::/32`), Docker's default bridge and `127.0.0.1` as internal proxies. At every container start `host_housekeeping.sh` writes `conf-available/joinery-remoteip.conf`, adding the container's exact gateways and Cloudflare's published edge ranges (`includes/cloudflare_ip_ranges.txt`, the same list `SessionControl` trusts a `CF-Connecting-IP` from). A forwarding header on a direct connection stops at the untrusted peer.
+3. **Access logs** use `%a` instead of `%h`, so they show the resolved client, not the gateway.
 
-Cloudflare-fronted sites are partial: the container sees Cloudflare's edge IP, not the original client. A future spec will trust Cloudflare's IP ranges at the host and read `CF-Connecting-IP`.
+Behind Cloudflare the container resolves the original client the same way: Cloudflare's edge is a trusted hop in the chain.
 
 #### Upgrade-flow split (important)
 
@@ -408,7 +408,7 @@ This allows:
 
 Universal installer for Docker and bare-metal deployments. Supports `--themes` flag to download published themes/plugins from the upgrade server after site creation (extensions whose manifests have `included_in_publish: true`).
 
-**Full documentation:** [Installation Guide](../../maintenance_scripts/install_tools/INSTALL_README.md)
+**Full documentation:** [Installation Guide](installation.md)
 
 ---
 

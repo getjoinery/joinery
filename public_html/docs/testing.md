@@ -715,7 +715,10 @@ data. Rebuild it from `/admin/admin_test_database`.
 of the live database — every table, column, index and foreign key — and seeds
 only the handful of tables the site cannot boot without
 (`TestDatabaseHelper::referenceTables()`: settings, the plugin registry, admin
-menus, and small reference data like zone names and email templates). Every
+menus, the deletion rules `permanent_delete()` reads, and small reference data
+like zone names and email templates). The seeded tables are as live had them at
+the rebuild, so a suite that pins a new deletion rule or setting rebuilds the
+copy after `update_database` has written it. Every
 other table arrives empty with its constraints intact. Against a 1.3 GB live
 database the copy is about 16 MB, nearly all of which is the floor cost of
 ~200 empty tables and their indexes.

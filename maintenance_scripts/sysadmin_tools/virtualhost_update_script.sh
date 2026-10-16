@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Script to create Apache site configuration from template
+# Version: 2.4.0 - renders through _vhost_install.sh (the render a converge makes, recorded as the
+#                 site's last), so render_vhost.sh keeps converging the file afterwards instead of
+#                 reading it as an operator's edit; reloads instead of restarting (B7)
 # Version: 2.3.0 - No server address: the template answers on any address (default_virtualhost.conf
 #                 2.08, specs/site_copy.md B25). A fourth argument is accepted and ignored
 # Version: 2.2.1 - VERSION is read from this header rather than restated below,
@@ -141,36 +144,11 @@ if [ -f "$CONFIG_FILE" ]; then
     fi
 fi
 
-# Create a backup of the original file if it exists
-if [ -f "$CONFIG_FILE" ]; then
-    BACKUP_FILE="${CONFIG_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
-    echo "Creating backup: $BACKUP_FILE"
-    cp "$CONFIG_FILE" "$BACKUP_FILE"
-else
-    echo "Creating new configuration file"
-fi
-
-# Create the new configuration by substituting template variables
-echo "Generating configuration from template..."
-sed -e "s/{{SITE_NAME}}/$SITE_NAME/g" \
-    -e "s/{{DOMAIN_NAME}}/$DOMAIN_NAME/g" \
-    "$TEMPLATE_FILE" > "$CONFIG_FILE"
-
-# Check if the file was created successfully
-if [ ! -s "$CONFIG_FILE" ]; then
-    echo "Error: Failed to create the configuration file"
-    if [ -n "$BACKUP_FILE" ]; then
-        echo "Restoring backup..."
-        cp "$BACKUP_FILE" "$CONFIG_FILE"
-    fi
+if [ "$FILENAME" != "${SITE_NAME}.conf" ]; then
+    echo "Error: a site's vhost is /etc/apache2/sites-available/${SITE_NAME}.conf, the file install.sh"
+    echo "writes and render_vhost.sh keeps current; $FILENAME is not it."
     exit 1
 fi
-
-# Set proper permissions
-chmod 644 "$CONFIG_FILE"
-chown root:root "$CONFIG_FILE"
-
-echo "Configuration file generated successfully"
 
 # Create necessary directories if they don't exist
 echo "Checking/creating required directories..."
@@ -202,49 +180,25 @@ if [ ! -d "$TEST_LOGS_DIR" ]; then
     chown www-data:www-data "$TEST_LOGS_DIR"
 fi
 
-# Show what was generated (first 30 lines)
-echo ""
-echo "Generated configuration (first 30 lines):"
-echo "=========================================="
-head -30 "$CONFIG_FILE"
-echo "=========================================="
-echo ""
+# Render the template over the site's vhost the way a converge renders it,
+# keeping the previous file beside it and recording the render, so
+# render_vhost.sh goes on keeping it current. A render Apache cannot parse is
+# refused and the previous file put back.
+echo "Generating configuration from template..."
+# shellcheck source=../install_tools/_vhost_install.sh
+. "$(dirname "$0")/../install_tools/_vhost_install.sh"
+if ! vhost_install "$TEMPLATE_FILE" "/var/www/html/${SITE_NAME}" "$DOMAIN_NAME"; then
+    echo "Error: the configuration was not changed"
+    exit 1
+fi
 
-# Test Apache configuration
-echo "Testing Apache configuration..."
-CONFIG_TEST_OUTPUT=$(apache2ctl configtest 2>&1)
-echo "Apache config test output: $CONFIG_TEST_OUTPUT"
-if echo "$CONFIG_TEST_OUTPUT" | grep -q "Syntax OK"; then
-    echo "Configuration test passed"
-    
-    # Restart Apache (use service command for Docker compatibility)
-    echo "Restarting Apache..."
-    service apache2 restart
-
-    if [ $? -eq 0 ]; then
-        echo "Apache restarted successfully"
-        echo "Update completed successfully!"
-        echo ""
-        echo "Your site should now be available at: http://$DOMAIN_NAME"
-        echo "Test site should be available at: http://test.$DOMAIN_NAME"
-        echo "Static files should be available at: http://$DOMAIN_NAME/static_files/"
-    else
-        echo "Error: Failed to restart Apache"
-        if [ -n "$BACKUP_FILE" ]; then
-            echo "Restoring backup..."
-            cp "$BACKUP_FILE" "$CONFIG_FILE"
-            service apache2 restart
-        fi
-        exit 1
-    fi
+# Reload, never restart: in a container, Apache is the main process.
+if apache2ctl graceful > /dev/null 2>&1 || service apache2 reload > /dev/null 2>&1; then
+    echo "Apache reloaded"
+    echo "Update completed successfully!"
+    echo ""
+    echo "Your site should now be available at: http://$DOMAIN_NAME"
 else
-    echo "Error: Apache configuration test failed"
-    if [ -n "$BACKUP_FILE" ]; then
-        echo "Restoring backup..."
-        cp "$BACKUP_FILE" "$CONFIG_FILE"
-    else
-        rm -f "$CONFIG_FILE"
-    fi
-    echo "Configuration restored/removed due to errors"
+    echo "Error: Apache could not be reloaded; the new configuration applies at its next start"
     exit 1
 fi

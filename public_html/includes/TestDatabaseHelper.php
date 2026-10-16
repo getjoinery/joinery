@@ -9,6 +9,9 @@
  *   TestDatabaseHelper::checkAndWarn();          // Warn if the copy has drifted
  *   TestDatabaseHelper::copy('structure');       // Rebuild (schema + reference data)
  *
+ * Version: 2.03 - del_deletion_rules is reference data the copy carries: permanent_delete() reads it
+ *   through the test connection, and without it every test-db deletion ran no rule at all, so a
+ *   test proved nothing about what a removal takes with it and left its dependents behind
  * Version: 2.02 - a structure copy seeds the two placeholder users (User::USER_SYSTEM,
  *   User::USER_DELETED) and moves the users sequence past them, as the installer does;
  *   without them the third fixture user a run minted after a rebuild took id 3 and became
@@ -268,6 +271,7 @@ class TestDatabaseHelper {
             'zone',                // IANA zone names (users_addrs_class.php)
             'cco_country_codes',   // reference data
             'emt_email_templates', // reference data; the send path reads it
+            'del_deletion_rules',  // permanent_delete() reads its rules through the test connection
         );
     }
 

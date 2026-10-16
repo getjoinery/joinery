@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.3.0 - a bare-metal restore's virtualhost is vhost_install's render (_vhost_install.sh),
+#                  recorded as the site's last, so render_vhost.sh keeps converging it after a
+#                  domain change; virtualhost_update_script.sh's copy was read as an operator's
+#                  edit by every later converge (manage_domain.sh 2.0, B7)
 # Version: 1.2.4 - the no-config message says a restore keeps the machine's own config, not that a
 #                  backup never carries one (it does)
 # Version: 1.2.3 - the --print-shape database probe reads stdin from /dev/null and skips a config
@@ -417,35 +421,36 @@ elif [ "$TARGET_ENV" = "docker" ]; then
     # The container's internal virtualhost was written by _site_init.sh at
     # install time and is already correct: ServerName {site}.site, port 80, no
     # certificate. The public face is the HOST's proxy virtualhost, which is
-    # outside this filesystem — the restore job sets that with manage_domain.sh
-    # on the host, and a restore run by hand from inside the container cannot.
+    # outside this filesystem: a restore keeps the host's as it is, and a
+    # different domain is set there with manage_domain.sh, which this
+    # container cannot run.
     echo "RECONCILE_WEB_CONFIG container_internal_left_alone"
     print_info "This is a container: its internal virtualhost is correct as installed."
     print_info "The public name is served by the HOST's proxy — set it there with:"
     print_info "  manage_domain.sh set ${SITENAME} ${DOMAIN}"
 else
     VHOST_PATH="/etc/apache2/sites-available/${SITENAME}.conf"
-    GEN="${SCRIPT_DIR}/virtualhost_update_script.sh"
-    if [ ! -f "$GEN" ]; then
-        print_warning "virtualhost_update_script.sh is not beside this script — leaving Apache alone."
+    RENDERER="${SCRIPT_DIR}/../install_tools/_vhost_install.sh"
+    if [ ! -f "$RENDERER" ]; then
+        print_warning "install_tools/_vhost_install.sh is not beside this script's tree — leaving Apache alone."
         echo "RECONCILE_WEB_CONFIG generator_missing"
     else
-        # Keep the captured one for comparison BEFORE the generator overwrites
-        # whatever is live.
-        PREV_LIVE=""
-        if [ -f "$VHOST_PATH" ]; then
-            PREV_LIVE="$(mktemp)"
-            $SUDO cat "$VHOST_PATH" > "$PREV_LIVE" 2>/dev/null || PREV_LIVE=""
-        fi
-
+        # The render a converge makes, recorded as this site's last, so
+        # render_vhost.sh keeps the file current afterwards rather than reading
+        # the new domain as an operator's edit.
+        # shellcheck source=../install_tools/_vhost_install.sh
+        . "$RENDERER"
         print_info "Regenerating the virtualhost for ${SITENAME} at ${DOMAIN}..."
-        if echo y | $SUDO bash "$GEN" "${SITENAME}.conf" "$SITENAME" "$DOMAIN" > /dev/null 2>&1; then
+        if [ -z "$SUDO" ] && vhost_install "${SCRIPT_DIR}/../install_tools/default_virtualhost.conf" "$SITE_DIR" "$DOMAIN" >&2; then
+            note_change "virtualhost regenerated for ${DOMAIN}"
+            echo "RECONCILE_WEB_CONFIG regenerated"
+        elif [ -n "$SUDO" ] && $SUDO bash -c '. "$1" && vhost_install "$2" "$3" "$4"' _ "$RENDERER" \
+                "${SCRIPT_DIR}/../install_tools/default_virtualhost.conf" "$SITE_DIR" "$DOMAIN" >&2; then
             note_change "virtualhost regenerated for ${DOMAIN}"
             echo "RECONCILE_WEB_CONFIG regenerated"
         else
             print_error "Could not regenerate the virtualhost — the site may not be served correctly."
             echo "RECONCILE_FAILED virtualhost"
-            [ -n "$PREV_LIVE" ] && rm -f "$PREV_LIVE"
             exit 1
         fi
 
@@ -472,10 +477,8 @@ else
         else
             print_error "Apache rejected the regenerated configuration — not reloading."
             echo "RECONCILE_FAILED apache_configtest"
-            [ -n "$PREV_LIVE" ] && rm -f "$PREV_LIVE"
             exit 1
         fi
-        [ -n "$PREV_LIVE" ] && rm -f "$PREV_LIVE"
     fi
 fi
 

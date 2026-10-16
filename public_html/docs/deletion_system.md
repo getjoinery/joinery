@@ -110,6 +110,9 @@ Two traps worth naming:
   `cascade` is a flat SQL `DELETE` — none of the child's own deletion rules
   run. If the target table appears as a source table anywhere in
   `del_deletion_rules`, the action must be `permanent_delete`, not `cascade`.
+  Where the grandchild has a database foreign key, the flat `DELETE` is
+  refused instead and the whole removal fails. `tests/schema/deletion_cascade_leaf_test.php`
+  fails on either.
 - **`null` on an access gate silently opens the gate.** A group that gates
   events, files, or products must `prevent`, not `null` — clearing the FK
   would make the content public.

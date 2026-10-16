@@ -1663,10 +1663,11 @@ name_reaches_here() {
 #   2. Otherwise, or when HTTP-01 fails -> DNS-01 via the auto-detected
 #      provider plugin, if credentials are present at /etc/letsencrypt/<provider>.ini.
 #
-# If neither path issues a cert, the function exits silently. The vhost
-# template's <IfFile> guard means the :443 vhost simply doesn't activate, the
-# site serves HTTP, and the retry timer armed by the install asks again every
-# five minutes at no cost until the name reaches here. Re-run
+# If neither path issues a cert, the function exits silently. The :443 host
+# answers with the placeholder certificate, the :80 redirect (guarded on the
+# Let's Encrypt lineage) stays off so the site serves HTTP, and the retry timer
+# armed by the install asks again every five minutes at no cost until the name
+# reaches here. Re-run
 # `sysadmin_tools/setup_ssl.sh <domain>` by hand whenever you want it.
 provision_origin_cert() {
     local domain="$1"
@@ -4661,8 +4662,8 @@ do_site_create() {
 
     # Early DNS check. Informational only: "no cert yet" is handled gracefully all
     # the way down (provision_origin_cert tries HTTP-01, then DNS-01, then returns
-    # without issuing; the vhost guards its :443 block with <IfFile>, so a missing
-    # cert means the site serves HTTP rather than Apache refusing to start).
+    # without issuing; the :443 host answers with the placeholder and the :80
+    # redirect waits for a real certificate, so the site serves HTTP).
     if should_setup_ssl "$DOMAIN_NAME" "$NO_SSL"; then
         print_step "Checking DNS configuration for SSL..."
         # Capture return code without set -e killing the script
@@ -4853,13 +4854,13 @@ code_volume_is_populated() {
     [ -n "$MOUNTPOINT" ] && [ -f "${MOUNTPOINT}/VERSION" ]
 }
 
-# A site's PHP code lives in the container's writable layer, not on a volume.
-# In-place upgrades (utils/upgrade.php) write code there and nowhere else, so a
-# long-lived site runs code the image knows nothing about, against a database
-# that migrated forward alongside it. Removing and rebuilding the container
-# therefore replaces the running code with whatever the archive root holds —
-# which is destructive whenever that archive is older, however loudly the
-# rebuild says data volumes are preserved.
+# A site's PHP code lives on its code volumes, which the image fills only when
+# they are empty: in-place upgrades (utils/upgrade.php) write there, and a
+# rebuild leaves them alone. A container whose code is not on a populated
+# volume (a bare-metal site, or a container from before the code volumes) would
+# have its running code replaced by whatever the archive root holds, which is
+# destructive whenever that archive is older than the database that migrated
+# forward alongside the running code.
 #
 # So a rebuild has to prove it moves the code forward, or refuse. This runs
 # before anything stops or removes the container, so refusing costs the site
