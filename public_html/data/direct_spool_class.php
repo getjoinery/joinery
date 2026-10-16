@@ -19,6 +19,9 @@
  * sender in either case — the sender was answered `accept` at receive, and the
  * no-bounce rule holds for every kind.
  *
+ * @version 1.2 - an account removed for good removes its spool rows through their own
+ *               permanent_delete(), which takes their parts first: a flat delete was refused by the
+ *               parts' foreign key, so a user with a spooled message could not be removed
  * @version 1.1.1 - comment wording: the sealed tier is Private; relay-fronted is a topology
  * @version 1.1
  * @changelog 1.1 - bytesForSenderDomain(): the per-sending-domain counter
@@ -58,7 +61,9 @@ class DirectSpool extends SystemBase {
 	const STATE_DONE  = 'done';
 
 	protected static $foreign_key_actions = array(
-		'jdp_usr_user_id' => array('action' => 'cascade'),
+		// Through each row's own permanent_delete(): its parts
+		// (jda_direct_spool_parts) hold a foreign key to it.
+		'jdp_usr_user_id' => array('action' => 'permanent_delete'),
 	);
 
 	public static $field_specifications = array(

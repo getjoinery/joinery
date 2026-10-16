@@ -405,8 +405,12 @@ The next container start clears it. `rebase_site_container.sh` holds the supervi
 
 | Volume                 | Container path                | Purpose                |
 |------------------------|-------------------------------|------------------------|
+| `{site}_code`          | `.../public_html`             | Application code (what `upgrade.php` replaces) |
+| `{site}_vendor`        | `.../vendor`                  | Composer packages      |
+| `{site}_scripts`       | `.../maintenance_scripts`     | Maintenance scripts    |
 | `{site}_postgres`      | `/var/lib/postgresql`         | Database files         |
 | `{site}_uploads`       | `.../uploads`                 | User uploads           |
+| `{site}_storage`       | `.../storage`                 | Stored files           |
 | `{site}_config`        | `.../config`                  | Site configuration     |
 | `{site}_backups`       | `.../backups`                 | Database backups       |
 | `{site}_static`        | `.../static_files`            | Generated files        |
@@ -415,6 +419,10 @@ The next container start clears it. `rebase_site_container.sh` holds the supervi
 | `{site}_sessions`      | `/var/lib/php/sessions`       | PHP sessions           |
 | `{site}_apache_logs`   | `/var/log/apache2`            | Apache logs            |
 | `{site}_pg_logs`       | `/var/log/postgresql`         | PostgreSQL logs        |
+| `{site}_agent`         | `/etc/joinery-agent`          | The site's agent configuration |
+| `{site}_deploy`        | `.../deploy`                  | An upgrade's staging and the previous code |
+
+The image fills the three code volumes only the first time; after that they hold whatever release the site last upgraded to.
 
 ## Bare-Metal Deployment
 
@@ -630,21 +638,24 @@ Every drop counts against the site that sent it. The host report carries each si
 
 ## SSL Certificates
 
-SSL is configured automatically when a domain (not localhost or an IP) is provided.
+SSL is configured automatically when a domain (not localhost or an IP) is provided. The full decision tree, the vhost shape and renewal are in [Deploy and Upgrade § Apache Vhost](deploy_and_upgrade.md#apache-vhost).
 
 ### How it works
 
-1. The installer checks whether the domain's DNS points to this server.
-2. If it does, Certbot runs to fetch a Let's Encrypt certificate.
-3. If it doesn't, the install goes ahead anyway and no certificate is issued. The vhost guards its `:443` block with `<IfFile>`, so a missing certificate means the site serves HTTP rather than Apache refusing to start.
+1. The installer writes the site's vhost from the template (`default_virtualhost.conf` for bare-metal, `default_proxy_vhost.conf` for a Docker site's proxy on the host). Its `:443` host answers from the first minute with a self-signed placeholder certificate.
+2. It checks whether a request for the domain **reaches this box**, directly or through an edge such as Cloudflare. If it does, Certbot fetches a Let's Encrypt certificate for the domain (and `www` when that reaches here too) over HTTP-01. Certbot only issues; it never edits the vhost.
+3. If the name does not reach here, or HTTP-01 fails, a DNS-01 challenge is tried when the domain's nameservers are a provider the installer knows (Cloudflare, Route 53, Linode, DigitalOcean) and that provider's credential file exists at `/etc/letsencrypt/<provider>.ini`.
+4. If neither works, the install goes ahead anyway and no certificate is issued. The site serves HTTP: the HTTP→HTTPS redirect waits for the real certificate.
 
 DNS not being ready never stops an install, and it does not leave you anything to remember either.
 
+The same steps run for both modes. A Docker site's certificate lives on the host, where its reverse proxy terminates TLS.
+
 #### The retry timer
 
-An install that could not issue a certificate leaves behind a systemd timer, `joinery-ssl-retry@{domain}`, that finishes the job whenever DNS lands — minutes later or a week later. Nothing needs to be run by hand.
+An install that could not issue a certificate leaves behind a systemd timer, `joinery-ssl-retry@{domain}`, that finishes the job whenever the name reaches the box — minutes later or a week later. Nothing needs to be run by hand.
 
-Each run resolves the domain first and only invokes Certbot when the A record actually points at this server. That is what makes an open-ended retry safe: Let's Encrypt allows five *failed validations* per hostname per hour, and a DNS lookup that comes back empty costs nothing against that budget. On a CA-issued certificate the timer disables itself and removes its config.
+Each run fetches a one-time value through the domain first and only invokes Certbot when that request landed here. That is what makes an open-ended retry safe: Let's Encrypt allows five *failed validations* per hostname per hour, and a probe that does not reach here costs nothing against that budget. On a CA-issued certificate the timer disables itself and removes its config.
 
 ```bash
 sudo systemctl list-timers 'joinery-ssl-retry@*'      # is one pending
@@ -653,62 +664,31 @@ sudo journalctl -fu joinery-ssl-retry@mysite.example.com   # what it is seeing
 
 Its state is a single file per domain at `/etc/joinery/ssl-retry/{domain}.conf`. Delete it to stop the retries.
 
-To issue immediately rather than wait for the next check:
-
-```bash
-sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com
-```
-
-Requirements: domain DNS pointing here, port 80 reachable from the internet, Certbot installed (included in `install.sh server`).
-
-### Bare-metal
-
-Certbot configures Apache directly:
-
-```bash
-sudo ./install.sh site mysite mysite.example.com
-```
-
-### Docker
-
-The installer adds Apache on the host (if not present), creates a reverse proxy `mysite.example.com → localhost:8080`, then runs Certbot against the proxy:
-
-```bash
-sudo ./install.sh site mysite mysite.example.com 8080
-```
-
 ### Skip SSL
 
 ```bash
 sudo ./install.sh site mysite mysite.example.com --no-ssl
 ```
 
-What `--no-ssl` gives you: a site that answers on plain HTTP for its domain. No HTTP→HTTPS redirect exists until a certificate does — the vhost's redirect is gated on the certificate file, so requests carrying the real domain load over HTTP rather than bouncing into a `:443` vhost that isn't there.
+What `--no-ssl` gives you: a site that answers on plain HTTP for its domain. No HTTP→HTTPS redirect exists until a Let's Encrypt certificate does: the redirect is gated on that certificate, so a visitor is never sent to the placeholder certificate their browser would warn about.
 
-### Manual SSL later
+### Issuing by hand
+
+To issue now rather than wait for the timer, or after adding a DNS provider credential file:
 
 ```bash
 sudo /var/www/html/{sitename}/maintenance_scripts/sysadmin_tools/setup_ssl.sh mysite.example.com
 ```
 
-Works for both modes — Docker sites terminate TLS at the host's reverse proxy, which is the same Apache the script reloads. It tries an HTTP-01 challenge, falls back to DNS-01 when a provider credential file is present at `/etc/letsencrypt/<provider>.ini`, and leaves the site on HTTP if neither succeeds.
+It runs the same steps as the installer, for both modes, and leaves the site on HTTP if none succeeds.
 
 ## Cloudflare Proxy Support
 
-The installer detects domains behind Cloudflare's proxy (orange cloud) by matching the resolved IP against Cloudflare's IP ranges, and adapts:
+A domain behind Cloudflare's proxy (orange cloud) gets an origin certificate the same way as one pointed straight at the box: the HTTP-01 challenge arrives through the edge. The installer says when it sees Cloudflare in front.
 
-1. Skips Let's Encrypt — Cloudflare provides edge SSL.
-2. Creates an HTTP proxy for Docker sites so Cloudflare can reach the origin.
+Set Cloudflare → SSL/TLS to **Full** (or Flexible), not Full (Strict), until the first certificate lands. Full (Strict) refuses the placeholder certificate, so the challenge cannot get through; the installer, the retry timer's journal and the node's health panel all say so when they see it. Once the Let's Encrypt certificate is in place, Full (Strict) works with no further step, and renewals keep working in any mode. No Cloudflare Origin Certificate is needed.
 
-Set the SSL mode in Cloudflare → SSL/TLS:
-
-| Mode             | Browser ↔ Cloudflare | Cloudflare ↔ Origin     | Origin cert        |
-|------------------|----------------------|--------------------------|--------------------|
-| Flexible         | HTTPS                | HTTP                     | None required      |
-| Full             | HTTPS                | HTTPS (any cert)         | Self-signed OK     |
-| Full (Strict)    | HTTPS                | HTTPS (valid cert)       | Cloudflare Origin Certificate |
-
-For Full (Strict), generate an Origin Certificate in Cloudflare → SSL/TLS → Origin Server and install it on Apache.
+The challenge has to get past the edge: Under Attack mode, or a firewall rule that challenges every request, stops Let's Encrypt's validator there.
 
 ## Themes and Plugins
 
@@ -732,31 +712,34 @@ The `--themes` flag uses the same distribution system as `upgrade.php`. See [Dep
 
 ## Domain Management
 
-Use `manage_domain.sh` (in `maintenance_scripts/sysadmin_tools/`) to add, change, or remove domains on existing sites. Works for both Docker and bare-metal.
+Use `manage_domain.sh` (in `maintenance_scripts/sysadmin_tools/`) to give a site a domain, change it, or take it away after the install. It works for container and bare-metal sites. For a bare-metal site, run the site's own copy (`/var/www/html/{site}/maintenance_scripts/sysadmin_tools/`). For a container site, run it on the host: from the host agent's tree (`/opt/joinery-agent/tree/maintenance_scripts/sysadmin_tools/`) when the host runs the agent, otherwise from the extracted release the site was installed from.
 
 ```bash
 cd maintenance_scripts/sysadmin_tools
 
-# Current state
+# Current state: domain, certificate, whether the retry timer is waiting
 sudo ./manage_domain.sh status mysite
 
-# Assign a domain (with SSL via Let's Encrypt unless Cloudflare detected)
+# Assign or change the domain, with a certificate
 sudo ./manage_domain.sh set mysite example.com
 
-# Without SSL (e.g. Cloudflare-proxied or testing)
+# Without a certificate for now (it serves HTTP; setup_ssl.sh issues one later)
 sudo ./manage_domain.sh set mysite example.com --no-ssl
 
-# Revert to IP-only access
+# Remove the domain (the site answers at the machine's address, like an install with no domain)
 sudo ./manage_domain.sh clear mysite
 
-# Restore the previous configuration
+# Put back the configuration from before the last set or clear
 sudo ./manage_domain.sh rollback mysite
-
-# Remove SSL only, keep the domain
-sudo ./manage_domain.sh remove-ssl mysite
 ```
 
-For Docker sites, `set` creates an Apache reverse proxy on the host and disables `000-default.conf` so bare-IP requests don't fall through to Ubuntu's welcome page.
+`set` does what the installer does for a domain:
+
+- The site's vhost, `/etc/apache2/sites-available/{site}.conf`, is rendered from the same template (the host's reverse proxy for a container site, the site's own vhost on bare metal) and recorded as the converger's render, so later converges keep it current. A bare-metal vhost carrying hand edits is refused rather than overwritten.
+- The certificate is issued as in [SSL Certificates](#ssl-certificates), through Cloudflare too. When none can be issued yet, the retry timer waits for the new name, and the old name's timer stops.
+- The site's own address (`webDir`, in its config and its settings) changes to match.
+
+Every `set` and `clear` saves the files it replaces under `{site}/backups/domain/`, which is what `rollback` restores. For a container site, `set` also disables `000-default.conf`, so bare-IP requests reach the site rather than Ubuntu's welcome page. The old name's certificate stays on the machine; `remove_site_certificate.sh` removes it once nothing uses it.
 
 ## Site Management
 
@@ -852,24 +835,17 @@ database that is some site's live `dbname` is never skipped, so a separate test
 
 ### Update application code
 
-**Docker** — stop and re-create the container; volumes persist:
+Both modes upgrade with `upgrade.php`, run where the site runs:
 
 ```bash
-docker stop mysite && docker rm mysite
-tar -xzf joinery-NEW-VERSION.tar.gz
-cd maintenance_scripts/install_tools
-sudo ./install.sh site mysite mysite.com 8080
-```
+# Docker
+docker exec mysite php /var/www/html/mysite/public_html/utils/upgrade.php
 
-The container detects this isn't a fresh install and skips initial setup.
-
-**Bare-metal** — use `upgrade.php`:
-
-```bash
+# Bare-metal
 php /var/www/html/mysite/public_html/utils/upgrade.php
 ```
 
-For more detail on the upgrade pipeline, see [Deploy and Upgrade](deploy_and_upgrade.md).
+Re-creating a container does not change its code: the code lives in the site's own volumes, which the image fills only the first time. A container rebuild is for a change to the system underneath (a new base image), not for a release. For more detail on the upgrade pipeline and on rebuilds, see [Deploy and Upgrade](deploy_and_upgrade.md).
 
 ### Run database migrations
 
@@ -1015,7 +991,7 @@ Located in `maintenance_scripts/sysadmin_tools/`:
 
 | Script                  | Purpose                                                  |
 |-------------------------|----------------------------------------------------------|
-| `manage_domain.sh`      | Domain management: `set`, `clear`, `status`, `rollback`, `remove-ssl` |
+| `manage_domain.sh`      | Domain management: `set`, `clear`, `status`, `rollback` |
 | `backup_database.sh`    | Backup PostgreSQL database                               |
 | `restore_database.sh`   | Restore PostgreSQL database                              |
 | `backup_project.sh`     | Full site backup (files + database)                      |
@@ -1025,40 +1001,7 @@ Located in `maintenance_scripts/sysadmin_tools/`:
 
 ### Reverse proxy for production (multiple Docker sites on 80/443)
 
-For multiple Docker sites sharing standard ports, install Apache on the host:
-
-```bash
-apt-get install -y apache2
-a2enmod proxy proxy_http headers ssl rewrite
-systemctl restart apache2
-```
-
-Create `/etc/apache2/sites-available/yoursite.conf`:
-
-```apache
-<VirtualHost *:80>
-    ServerName yoursite.com
-    ServerAlias www.yoursite.com
-
-    ProxyPreserveHost On
-    ProxyRequests Off
-    ProxyPass / http://127.0.0.1:8080/
-    ProxyPassReverse / http://127.0.0.1:8080/
-
-    RequestHeader set X-Real-IP %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-For %{REMOTE_ADDR}s
-    RequestHeader set X-Forwarded-Proto "http"
-</VirtualHost>
-```
-
-Enable and add SSL:
-
-```bash
-a2ensite yoursite
-systemctl reload apache2
-apt-get install -y certbot python3-certbot-apache
-certbot --apache -d yoursite.com -d www.yoursite.com
-```
+Several Docker sites share ports 80 and 443 through Apache on the host, which `install.sh site` installs and configures: each site with a domain gets `/etc/apache2/sites-available/{site}.conf`, rendered from `default_proxy_vhost.conf`, forwarding to the container's port on `127.0.0.1`. The proxy appends the caller's address to `X-Forwarded-For` and the container resolves the real client from it (see [Deploy and Upgrade § Two-tier Apache](deploy_and_upgrade.md#two-tier-apache-real-client-ip)). The certificate is issued as described under [SSL Certificates](#ssl-certificates). Write no vhost of your own for a site: the installer's carries the forwarding, the placeholder certificate and the `www` redirect that a hand-written one misses.
 
 ## Related Documentation
 

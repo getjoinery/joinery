@@ -1,7 +1,7 @@
 <?php
 /**
  * SupportDocIndex — what the support desk knows, and how a turn finds it
- * (specs/support_chatbot.md, The knowledge index).
+ * (support_chatbot.md, The knowledge index).
  *
  * One function builds a release's index from whatever this node holds of it:
  * buildFromArchive() reads a release archive this node serves (it published
@@ -13,8 +13,8 @@
  * edited.
  *
  * What a release's index holds: every Markdown file under docs/ (the shipped
- * FAQ in docs/faq/ among them), every plugin's docs/, and the root files named
- * in ROOT_FILES, split by heading into rows of sds_doc_sections. A section
+ * FAQ in docs/faq/ among them) and every published plugin's docs/, split by
+ * heading into rows of sds_doc_sections. A section
  * longer than SECTION_CAP is split at paragraph boundaries with its heading
  * chain repeated. Beside the rows, a SupportDocRelease row carries the
  * release's docs map and its shipped FAQ, which the fixed prefix of every
@@ -28,17 +28,13 @@
  * The documents are this platform's own, read from its own archives; nothing
  * here reads a path a request named.
  *
+ * @version 0.2.0 - documents come from docs/ alone: the root-file list (INSTALL_README.md) is gone with that file's guide
  * @version 0.1.0
  */
 class SupportDocIndex {
 
 	/** Longest section body kept as one row, in characters. */
 	const SECTION_CAP = 6000;
-
-	/** Root files beside docs/ that read as documentation, by path in a release. */
-	const ROOT_FILES = array(
-		'maintenance_scripts/install_tools/INSTALL_README.md',
-	);
 
 	/** How many of the newest held release archives a sweep indexes. */
 	const ARCHIVES_KEPT = 5;
@@ -71,12 +67,8 @@ class SupportDocIndex {
 		}
 		$work = self::scratchDir();
 		try {
-			$members = array('./public_html/docs');
-			foreach (self::ROOT_FILES as $file) {
-				$members[] = './' . $file;
-			}
-			self::extract($archive, $work . '/core', $members);
-			$files = self::collect($work . '/core/public_html', $work . '/core');
+			self::extract($archive, $work . '/core', array('./public_html/docs'));
+			$files = self::collect($work . '/core/public_html');
 			// Plugin documentation ships in each plugin's own archive; the ones
 			// this node serves are the set that goes with its releases.
 			foreach (self::heldPluginArchives() as $name => $plugin_archive) {
@@ -100,7 +92,7 @@ class SupportDocIndex {
 			return array('built' => false, 'sections' => 0, 'message' => "Release $version is already indexed.");
 		}
 		$public_html = rtrim($public_html ?? PathHelper::getRootDir(), '/');
-		$files = self::collect($public_html, dirname($public_html));
+		$files = self::collect($public_html);
 		foreach (glob($public_html . '/plugins/*', GLOB_ONLYDIR) ?: array() as $plugin_dir) {
 			$name = basename($plugin_dir);
 			if (!preg_match('/^[a-z0-9_]+$/', $name) || !self::published($plugin_dir)) {
@@ -351,16 +343,11 @@ class SupportDocIndex {
 		return is_array($manifest) && ($manifest['included_in_publish'] ?? true) !== false;
 	}
 
-	/** The documentation files under a release's public_html, plus the root files. */
-	private static function collect(string $public_html, string $release_root): array {
+	/** The documentation files under a release's public_html. */
+	private static function collect(string $public_html): array {
 		$files = array();
 		foreach (self::markdownUnder($public_html . '/docs') as $rel => $abs) {
 			$files['docs/' . $rel] = $abs;
-		}
-		foreach (self::ROOT_FILES as $rel) {
-			if (is_file($release_root . '/' . $rel)) {
-				$files[$rel] = $release_root . '/' . $rel;
-			}
 		}
 		return $files;
 	}

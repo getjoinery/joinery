@@ -37,6 +37,8 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
+ * @version 1.10 - a filter removed with its mailbox or domain goes through its own permanent_delete(),
+ *                so its per-device progress rows go with it rather than naming a filter that is gone
  * @version 1.9 - a filter's label is applied only to messages of the label's own mailbox
  * @version 1.8 - never_spam does not lift a message its sender's domain disowns (InboundEmailMessage::senderDomainDisowns)
  * @version 1.7 - a rule that sets the spam verdict records iem_spam_reason = rule
@@ -78,8 +80,10 @@ class InboundEmailFilter extends SystemBase {
 		// (ief_action_ilb_inbound_email_label_id) guards for a since-deleted label at
 		// apply time, so it is intentionally not a cascade FK — deleting a label leaves
 		// stale filter actions that simply no-op rather than cascading the filter away.
-		'ief_iea_inbound_email_alias_id'  => array('action' => 'cascade'),
-		'ief_ied_inbound_email_domain_id' => array('action' => 'cascade'),
+		// Through each filter's own permanent_delete(), which takes its per-device
+		// progress rows (ifp_inbound_email_filter_device_progress) with it.
+		'ief_iea_inbound_email_alias_id'  => array('action' => 'permanent_delete'),
+		'ief_ied_inbound_email_domain_id' => array('action' => 'permanent_delete'),
 	);
 
 	public static $field_specifications = array(

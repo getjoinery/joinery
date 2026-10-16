@@ -44,6 +44,9 @@
  * the ledger's completed objects, which the broker keeps exact; the broker
  * refuses a run that would cross the allowance.
  *
+ * @version 1.2 - an account removed for good removes its tenants through their own permanent_delete(), so
+ *               their storage spaces, ledger rows and runs go too: a flat cascade left them naming
+ *               a tenant that no longer existed
  * @version 1.1 - svt_mgn_managed_node_id: the node-linked row of a site moved off Managed
  * @version 1.0
  */
@@ -82,8 +85,10 @@ class ServiceTenant extends SystemBase {
 	protected static $foreign_key_actions = array(
 		// A tenant row without its account is a row nobody can act for; the
 		// key going is the account holder cutting the site off, which the
-		// Disconnect path handles by releasing first.
-		'svt_usr_user_id'     => array('action' => 'cascade'),
+		// Disconnect path handles by releasing first. Through each tenant's own
+		// permanent_delete(): a tenant has storage spaces, ledger rows and runs
+		// of its own, which a flat delete would leave naming nothing.
+		'svt_usr_user_id'     => array('action' => 'permanent_delete'),
 		'svt_apk_api_key_id'  => array('action' => 'null'),
 		'svt_mgn_managed_node_id' => array('action' => 'null'),
 	);
