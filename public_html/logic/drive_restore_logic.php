@@ -43,6 +43,11 @@ function drive_restore_logic(array $input): LogicResult {
 			// it doesn't come back inside a folder that remains in the trash (which
 			// would make it unreachable in every view). Root sibling-name collisions
 			// are resolved with a suffix.
+			//
+			// Re-rooted, it leaves every share that reached it through the folder
+			// it was in, and the `restored` row below reaches only those who see
+			// it where it lands: the members it left are told as a move tells
+			// them (DriveHelper::reparent_and_tell).
 			$parent_id = (int)$entity->get('fol_parent_folder_id');
 			if ($parent_id > 0) {
 				$parent = DriveHelper::load_folder($parent_id);
@@ -57,8 +62,12 @@ function drive_restore_logic(array $input): LogicResult {
 						}
 						$entity->set('fol_name', substr($name, 0, 255));
 					}
-					$entity->set('fol_parent_folder_id', null);
-					if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+					$saved = DriveHelper::reparent_and_tell(DriveHelper::ENTITY_FOLDER, (int)$entity->key, $parent_id, 0,
+						$entity_owner, $user_id, function () use ($entity) {
+							$entity->set('fol_parent_folder_id', null);
+							return DriveHelper::save_folder_unless_name_taken($entity);
+						});
+					if (!$saved) {
 						// Something else claimed the free name between the search
 						// above and here. The folder is still safely in the trash.
 						return LogicResult::error('That name was taken while restoring. Try again.');
@@ -77,8 +86,11 @@ function drive_restore_logic(array $input): LogicResult {
 			}
 		} else {
 			// If the file's folder is itself trashed, restore it to the root so it
-			// doesn't reappear inside a folder that is still in the trash.
-			$folder_id = (int)$entity->get('fil_fol_folder_id');
+			// doesn't reappear inside a folder that is still in the trash -- and
+			// out of the shares that reached it there, whose members are told as
+			// for a folder above.
+			$from_folder_id = (int)$entity->get('fil_fol_folder_id');
+			$folder_id = $from_folder_id;
 			if ($folder_id > 0) {
 				$folder = DriveHelper::load_folder($folder_id);
 				if ($folder && $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '') {
@@ -103,8 +115,15 @@ function drive_restore_logic(array $input): LogicResult {
 			}
 			$entity->set('fil_delete_time', null);
 			try {
-				$saved = DriveHelper::place_into($folder_id, function () use ($entity) {
-					return DriveHelper::save_file_unless_name_taken($entity);
+				$saved = DriveHelper::place_into($folder_id, function () use ($entity, $from_folder_id, $folder_id, $entity_owner, $user_id) {
+					$save = function () use ($entity) {
+						return DriveHelper::save_file_unless_name_taken($entity);
+					};
+					if ($folder_id === $from_folder_id) {
+						return $save();
+					}
+					return DriveHelper::reparent_and_tell(DriveHelper::ENTITY_FILE, (int)$entity->key, $from_folder_id, $folder_id,
+						$entity_owner, $user_id, $save);
 				});
 			} catch (DriveDestinationTrashedException $e) {
 				// The folder was live when it was chosen above and is not now. The

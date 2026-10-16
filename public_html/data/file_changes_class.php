@@ -10,6 +10,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * never updated or soft-deleted; a purge task trims rows past the retention
  * window.
  *
+ * @version 1.3.0 - inside the caller's transaction a row that cannot be written fails the write it belongs to
  * @version 1.2.0 - KIND_LEVEL_CHANGED: a folder tree's protection level changed
  * @version 1.1.0
  */
@@ -55,11 +56,12 @@ class FileChange extends SystemBase {
 		'fch_usr_user_id'        => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fch_source_usr_user_id' => array('type' => 'int4', 'is_nullable' => true),
 		// Who this row has to reach, when owning the entity is not what earns
-		// them the right to hear about it. Set only where the ordinary
-		// visibility rules would hide the row from the one person it is for:
-		// a share revoked, where the grant is gone by the time this is written
-		// and the loser matches no clause in the feed. Null on every other row,
-		// which is nearly all of them.
+		// them the right to hear about it, and where the entity is now may not
+		// either: a share revoked, where the grant is gone by the time this is
+		// written and the loser matches no clause in the feed; an item moved or
+		// restored out of a member's share; a file key given to or taken from
+		// one member. The feed hands the row to that member whatever else it
+		// lets them see. Null on every other row, which is nearly all of them.
 		'fch_audience_usr_user_id' => array('type' => 'int4', 'is_nullable' => true, 'index' => true),
 		'fch_change_kind'        => array('type' => 'varchar(24)', 'is_nullable' => false, 'required' => true),
 		'fch_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()', 'index' => true),
@@ -67,14 +69,22 @@ class FileChange extends SystemBase {
 
 	/**
 	 * Append one change row. The single write helper every drive mutation calls.
-	 * Best-effort by design: a failure to record a change never fails the
-	 * mutation that already succeeded, so it swallows and logs.
+	 * Best-effort for a mutation that has already committed: a failure to record
+	 * its change never fails it, so it swallows and logs.
+	 *
+	 * Not inside the caller's transaction. There the row is part of the write
+	 * (a move and the rows that tell who lost it, a key and the row that says
+	 * it arrived), and a failed INSERT has already aborted the transaction:
+	 * swallowed, the caller would carry on and its COMMIT would quietly roll
+	 * back the mutation it then reports as done. So it is rethrown, and the
+	 * write fails whole -- a mutation no sync client is ever told about is the
+	 * hole this feed exists to close.
 	 *
 	 * `$audience_id` addresses the row to one user who would not otherwise see
 	 * it. The owner stays in fch_usr_user_id either way, so a row never lies
 	 * about who the entity belongs to.
 	 *
-	 * @return FileChange|null the recorded row (null on failure)
+	 * @return FileChange|null the recorded row (null on failure outside a transaction)
 	 */
 	public static function record($kind, $entity_type, $entity_id, $owner_id, $actor_id = null, $audience_id = null) {
 		try {
@@ -93,6 +103,9 @@ class FileChange extends SystemBase {
 			return $change;
 		} catch (Exception $e) {
 			error_log('FileChange::record failed (' . $kind . ' ' . $entity_type . ':' . $entity_id . '): ' . $e->getMessage());
+			if (DbConnector::get_instance()->get_db_link()->inTransaction()) {
+				throw $e;
+			}
 			return null;
 		}
 	}

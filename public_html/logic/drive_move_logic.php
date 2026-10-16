@@ -201,17 +201,13 @@ function drive_move_logic(array $input): LogicResult {
 		DriveHelper::owner_write_lock($owner_id);
 		try {
 			try {
-				$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
-					$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
-					return DriveHelper::save_folder_unless_name_taken($entity);
-				});
+				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id);
 			} catch (DriveDestinationTrashedException $e) {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 			}
 			if (!$saved) {
 				return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
 			}
-			FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner_id, $user_id);
 		} finally {
 			DriveHelper::owner_write_unlock($owner_id);
 		}
@@ -246,17 +242,13 @@ function drive_move_logic(array $input): LogicResult {
 		DriveHelper::owner_write_lock($owner_id);
 		try {
 			try {
-				$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
-					$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
-					return DriveHelper::save_file_unless_name_taken($entity);
-				});
+				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id);
 			} catch (DriveDestinationTrashedException $e) {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 			}
 			if (!$saved) {
 				return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
 			}
-			FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner_id, $user_id);
 		} finally {
 			DriveHelper::owner_write_unlock($owner_id);
 		}
@@ -268,6 +260,32 @@ function drive_move_logic(array $input): LogicResult {
 			? DriveHelper::folder_export($entity)
 			: DriveHelper::file_export($entity),
 	));
+}
+
+/**
+ * Land a move: the item's new parent, its `moved` row, and a `moved` row
+ * addressed to each user whose share it leaves (DriveHelper::reparent_and_tell),
+ * as one write, inside the destination's placement lock. The caller holds the
+ * owner's write lock around it, so a trash that checks what changed since a
+ * cursor never reads the item placed and its rows not yet there.
+ *
+ * Returns false, with nothing written, when the destination already holds the
+ * name; throws DriveDestinationTrashedException as place_into() does.
+ */
+function _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $actor_id) {
+	$parent_column = ($entity_type === DriveHelper::ENTITY_FOLDER) ? 'fol_parent_folder_id' : 'fil_fol_folder_id';
+	$entity_id = (int)$entity->key;
+	$from_id = (int)$entity->get($parent_column);
+	return DriveHelper::place_into($parent_id, function () use ($entity_type, $entity, $entity_id, $parent_id, $owner_id, $actor_id, $parent_column, $from_id) {
+		return DriveHelper::reparent_and_tell($entity_type, $entity_id, $from_id, $parent_id, $owner_id, $actor_id,
+			function () use ($entity_type, $entity, $parent_id, $parent_column) {
+				$entity->set($parent_column, $parent_id > 0 ? $parent_id : null);
+				return ($entity_type === DriveHelper::ENTITY_FOLDER)
+					? DriveHelper::save_folder_unless_name_taken($entity)
+					: DriveHelper::save_file_unless_name_taken($entity);
+			},
+			FileChange::KIND_MOVED);
+	});
 }
 
 function drive_move_logic_descriptor(): array {
