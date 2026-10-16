@@ -2283,18 +2283,18 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
         .and_then(Value::as_i64)
         .unwrap_or(cursor);
 
-    // A store written before the own-Drive scope may hold what a folder shared
-    // in to the account brought down: walked once, in full, so the walk's
-    // second half finds every such record (`walk_index_and_the_rest`). A store
-    // this client starts, at no feed position and holding nothing, has
-    // nothing from before, and is marked so without a walk.
+    // A store not yet walked in full under the own-Drive scope is walked
+    // (`walk_index_and_the_rest`), and marked once the walk is absorbed. One
+    // written before the scope may hold what a folder shared in to the account
+    // brought down, which the walk's second half finds. One this client
+    // starts, at no feed position and holding nothing, is walked too: the
+    // feed keeps only what changed within its retention window, and the
+    // server answers a cold start from the window's first row, not with a
+    // reset, so a file untouched for longer has no row left to read and a
+    // cold start that trusted the feed never downloaded it (B-CS).
     let mut walk = feed.get("reset").and_then(Value::as_bool) == Some(true);
     if env.store.get_meta(OWN_DRIVE_ONLY)?.as_deref() != Some("1") {
-        if cursor == 0 && env.store.every_entry()?.is_empty() {
-            env.store.set_meta(OWN_DRIVE_ONLY, "1")?;
-        } else {
-            walk = true;
-        }
+        walk = true;
     }
     if walk {
         return Ok((walk_index_and_the_rest(env)?, next, true));

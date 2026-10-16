@@ -599,10 +599,17 @@ and returns the changes after it that the caller may see — their own entities 
 entities shared to them — with `next_cursor`. With `scope: 'mine'`, a sync
 client's scope, it returns only the changes to entities the caller owns: an
 editor's change to them included, since that row is recorded against the owner,
-and nothing shared in to the caller. A nonzero cursor that cannot be
-proven contiguous with the retained window — it points before the earliest
-retained row, **or the log is empty after a purge** — returns `{reset: true}`
-so the client re-lists from scratch rather than silently missing changes.
+and nothing shared in to the caller. A cursor that cannot be proven
+contiguous with the retained window returns `{reset: true}`, with the feed's
+head as `next_cursor`, so the client re-lists from scratch rather than silently
+missing changes: a **cold start** (cursor 0) on a site that has recorded any
+change, because the log keeps only its retention window and a file untouched
+for longer has no row left; a cursor before the earliest retained row; a
+cursor ahead of the head, which this server never issued (a site restored from
+an older backup, or a copy of it); and, when the log is empty after a purge, a
+cursor short of the head. The head is the change-id sequence's, which outlives
+the trimmed rows, so a client reset once on a quiet site parks there and is not
+reset again on every poll.
 The daily retention sweep trims rows past `drive_change_feed_retention_days`
 (default 30).
 

@@ -1412,10 +1412,28 @@ impl MockServer {
         let limit = body.get("limit").and_then(Value::as_i64).unwrap_or(500);
         let st = self.state.lock().unwrap();
 
-        // The cursor points into history we no longer have. Anything but a
-        // reset here hands the client a feed with a hole in it, and a hole in
-        // a change feed is a file that silently never syncs again.
-        if cursor > 0 && cursor < st.retained_from {
+        // The cursor cannot be proven contiguous with what the feed still
+        // holds, as the platform judges it (`_drive_changes_must_reset`): a
+        // cold start on a server with history, which no row vouches for (the
+        // feed keeps only its retention window, so a file untouched for
+        // longer has no row left: B-CS); a cursor into history we no longer
+        // have; a feed trimmed empty and a cursor short of its head; or a
+        // cursor ahead of the head, one this server never issued (a restore
+        // from an older backup, a copy of the site). A cursor at the head of
+        // an empty feed missed nothing, so a client reset once parks there.
+        // Anything but a reset here hands the client
+        // a feed with a hole in it, and a hole in a change feed is a file that
+        // silently never syncs again.
+        let head = st.next_change_id;
+        let reset = cursor > head
+            || head > 0
+                && (cursor == 0
+                || if st.changes.is_empty() {
+                    cursor < head
+                } else {
+                    cursor < st.retained_from
+                });
+        if reset {
             return Ok(json!({
                 "ok": true,
                 "reset": true,
@@ -2801,13 +2819,53 @@ mod tests {
     }
 
     #[test]
-    fn a_cold_client_is_handed_the_whole_feed() {
+    fn a_cold_client_is_told_to_walk() {
+        // As the platform answers: a cold start reads nothing from the feed,
+        // which may already have trimmed the rows of files older than its
+        // window, and is sent to the index at the feed's head.
         let s = server();
         s.seed_file(None, "a.txt", b"one");
         s.seed_file(None, "b.txt", b"two");
         let out = s.action("drive_changes", &json!({ "cursor": 0 })).unwrap();
-        assert_eq!(out["changes"].as_array().unwrap().len(), 2);
-        assert_eq!(out["next_cursor"], json!(2));
+        assert_eq!(out["reset"], json!(true));
+        assert_eq!(out["changes"].as_array().unwrap().len(), 0);
+        assert_eq!(out["next_cursor"], json!(s.latest_change_id()));
+    }
+
+    #[test]
+    fn a_client_at_the_head_of_a_trimmed_feed_is_not_reset_again() {
+        // A quiet server whose every row was trimmed: reset once, then parked
+        // at the head, never reset -- and so sent to walk the index -- on
+        // every poll.
+        let s = server();
+        s.seed_file(None, "a.txt", b"one");
+        let head = s.latest_change_id();
+        s.prune_feed_before(head + 1);
+        let out = s.action("drive_changes", &json!({ "cursor": 0 })).unwrap();
+        assert_eq!(out["reset"], json!(true));
+        assert_eq!(out["next_cursor"], json!(head));
+        let out = s.action("drive_changes", &json!({ "cursor": head })).unwrap();
+        assert_ne!(out["reset"], json!(true), "{out}");
+        assert_eq!(out["changes"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_cursor_this_server_never_issued_is_told_to_walk() {
+        // A site restored from an older backup: the devices' cursors are
+        // ahead of every id the server now has.
+        let s = server();
+        s.seed_file(None, "a.txt", b"one");
+        let head = s.latest_change_id();
+        let out = s.action("drive_changes", &json!({ "cursor": head + 50 })).unwrap();
+        assert_eq!(out["reset"], json!(true), "{out}");
+        assert_eq!(out["next_cursor"], json!(head));
+    }
+
+    #[test]
+    fn a_server_that_never_recorded_a_change_resets_nothing() {
+        let s = server();
+        let out = s.action("drive_changes", &json!({ "cursor": 0 })).unwrap();
+        assert_ne!(out["reset"], json!(true), "{out}");
     }
 
     #[test]
@@ -3257,10 +3315,12 @@ mod tests {
         // A device that cannot recognize its own echo either loops forever or
         // guesses, and guessing wrong means missing somebody else's edit.
         let s = server();
+        s.seed_file(None, "before.txt", b"x");
+        let at = s.latest_change_id();
         s.acting_as(Some("laptop"));
         s.action("drive_folder_create", &json!({ "name": "Docs" }))
             .unwrap();
-        let out = s.action("drive_changes", &json!({ "cursor": 0 })).unwrap();
+        let out = s.action("drive_changes", &json!({ "cursor": at })).unwrap();
         assert_eq!(out["changes"][0]["actor"], json!("laptop"));
     }
 }

@@ -197,7 +197,11 @@ follows takes that directory as the vault's own.
 The client is this loop, run over and over:
 
 1. **Read the change feed** from the stored cursor (`drive_changes`), or walk
-   the whole index (`drive_index`) when the server answers `{reset: true}`.
+   the whole index (`drive_index`) when the server answers `{reset: true}` and
+   on a store's first pass. The feed keeps only what changed within its
+   retention window, and a cold start is answered from the window's first row
+   rather than with a reset, so a store this client starts walks the index: a
+   file untouched for longer has no feed row left to read.
    Every request asks for `scope: mine`: the client syncs the account's own
    Drive, never what another member shares with it. After any full walk the
    client asks `drive_stat`, by id, about every live record the walk did not
