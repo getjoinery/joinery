@@ -2504,6 +2504,18 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
     }
 
+    // The date its content was last changed, as the device that wrote it said,
+    // so the file shows the same date here as everywhere else rather than the
+    // moment it arrived. It goes on the spool, never on the path afterwards,
+    // so the fingerprint the commit returns -- what the agreement below
+    // records -- is the file with its date. One taken before the date went on
+    // describes a file that is no longer there, and the next scan reads every
+    // download as an edit (`SpoolFile::set_modified`).
+    let modified = content_time(&item, file_key.as_ref());
+    if let Some(at) = modified.as_deref().and_then(jd_proto::mtime::parse) {
+        spool.set_modified(at);
+    }
+
     // The guard: if the local file changed while this was in flight, the
     // decision that produced this download was made against something that no
     // longer exists, and overwriting would discard an edit nobody has seen.
@@ -2692,8 +2704,26 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     entry.synced_remote_content = entry.is_encrypted.then(|| arrived.cipher.clone());
     agree(&mut entry, Some(arrived.plain), Some(fingerprint));
     entry.synced_placement = Some(written_at);
+    entry.remote_modified_time = modified;
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
+}
+
+/// When the content a download fetched was last changed, as the device that
+/// uploaded it said: the export's `modified_time` for a plaintext file, and
+/// the `mtime` sealed into the metadata for an encrypted one, whose time the
+/// server is never told. Read from the same answer the bytes were fetched by,
+/// so the date is the one that came with these bytes. `None` when nobody
+/// said -- the browser's uploader declares none -- and the file keeps the
+/// time it landed.
+fn content_time(item: &Value, file_key: Option<&jd_crypto::drive::FileKey>) -> Option<String> {
+    match file_key {
+        None => item.get("modified_time").and_then(Value::as_str).map(str::to_string),
+        Some(key) => {
+            let blob = item.get("encrypted_metadata").and_then(Value::as_str)?;
+            jd_crypto::drive::decrypt_metadata(blob, key).ok()?.mtime
+        }
+    }
 }
 
 fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome, ExecError> {
@@ -3026,6 +3056,11 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     } else {
         Some(op.entity.server_id)
     };
+    // When the content being sent was last changed, as this disk says: the
+    // date every other device puts on its copy. Read off the handle the bytes
+    // are sent from, so it is those bytes' date. A rename or a move sends no
+    // content and so never comes here: it keeps the date the content had.
+    let modified = jd_proto::mtime::declared(fingerprint.mtime_ns, (env.now_ms)().saturating_mul(1_000_000));
 
     let mut params = UploadParams {
         name: placement.name.clone(),
@@ -3042,7 +3077,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         idempotency_key: Some(key_base(op)),
         encrypted_metadata: None,
         wrapped_file_keys: Vec::new(),
-        modified_time: None,
+        modified_time: modified.clone(),
     };
 
     // Encrypted uploads send ciphertext from a scratch file rather than the
@@ -3050,7 +3085,9 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // becomes a placeholder, the size becomes the ciphertext's, and the hash
     // goes away entirely — a plaintext hash would let the server's dedup
     // short-circuit match this file against somebody else's, and it never
-    // matches anyway.
+    // matches anyway. The date goes inside the metadata with the real name: a
+    // plaintext time beside ciphertext tells the server when the file was
+    // last worked on, and the server refuses one.
     let mut ciphertext = None;
     if entry.is_encrypted {
         match encrypt_for_upload(
@@ -3060,13 +3097,17 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             &placement.name,
             fingerprint.size,
             file_id,
+            modified.clone(),
         )? {
             Ok(packed) => {
                 params.name = format!("enc-{}", packed.content_id);
                 params.size_bytes = packed.cipher_size;
                 // The CIPHERTEXT's hash, not the plaintext's. See `Packed`.
                 params.sha256 = packed.cipher_sha256.clone();
+                // What the server holds is ciphertext, and so is its type;
+                // the real one is in the metadata.
                 params.mime_type = Some("application/octet-stream".into());
+                params.modified_time = None;
                 params.encrypted_metadata = Some(packed.metadata);
                 params.wrapped_file_keys = packed.wrapped_file_keys;
                 ciphertext = Some(packed.bytes);
@@ -3430,6 +3471,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         entry.remote.name = placement.name.clone();
         entry.content_id = entry.content_id.clone().or(content_id);
         entry.synced_remote_content = entry.remote_content.clone();
+        entry.remote_modified_time = modified;
     }
     let content = ContentId {
         sha256: sha.clone(),
@@ -3591,8 +3633,13 @@ impl<W: Write> Write for Tallied<W> {
 /// so re-encrypting the same file yields a different stream. Encrypting into a
 /// file the transfer can seek within is what makes resume possible at all.
 ///
-/// **The metadata blob**, carrying the name, the size and the modification time
-/// the server is never told. Everything in it is under the file key.
+/// **The metadata blob**, carrying the name, the type, the size and the
+/// modification time the server is never told. Everything in it is under the
+/// file key. The type is the one a browser gives a file of this name
+/// (`crate::mime`): the server cannot read it from ciphertext, and the browser
+/// shows the file by it. The time is the content's, `mtime` (when this disk
+/// says the bytes being sent were last changed), so a new version carries its
+/// own date rather than the one before it.
 ///
 /// **The wrapped keys** — but only for a file the server does not have yet. A
 /// new *version* reuses the existing key and content id, and the server refuses
@@ -3605,6 +3652,7 @@ fn encrypt_for_upload(
     name: &str,
     plain_size: u64,
     file_id: Option<i64>,
+    mtime: Option<String>,
 ) -> Result<Result<Packed, OpOutcome>, ExecError> {
     let Some(vault) = env.vault else {
         return Ok(Err(OpOutcome::Retry(
@@ -3690,11 +3738,11 @@ fn encrypt_for_upload(
 
     let mut meta = jd_crypto::drive::FileMetadata::new(
         name,
-        "application/octet-stream",
+        crate::mime::for_name(name),
         plain_size,
         &content_id,
     );
-    meta.mtime = entry.remote_modified_time.clone();
+    meta.mtime = mtime;
     let metadata = jd_crypto::drive::encrypt_metadata(&meta, &file_key)
         .map_err(|e| ExecError::Contract(format!("sealing file metadata: {e}")))?;
 
@@ -7892,8 +7940,14 @@ fn apply_export(entry: &mut Entry, file: &Value) {
             size: file.get("size").and_then(Value::as_u64).unwrap_or(0),
         });
     }
-    if let Some(t) = file.get("modified_time").and_then(Value::as_str) {
-        entry.remote_modified_time = Some(t.to_string());
+    // A plaintext file's date is the server's to state, and a null states that
+    // none is known for this content. An encrypted file's is never exported
+    // (it lives in the metadata), so its null says nothing.
+    if file.get("encrypted").and_then(Value::as_bool) != Some(true) {
+        entry.remote_modified_time = file
+            .get("modified_time")
+            .and_then(Value::as_str)
+            .map(str::to_string);
     }
     if let Some(c) = file.get("head_change_id").and_then(Value::as_i64) {
         entry.head_change_id = c;

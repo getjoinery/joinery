@@ -1410,9 +1410,14 @@ impl MemFs {
     const FAT_MTIME_NS: u64 = 2_000_000_000;
 
     fn truncated_now(&self, st: &MemFsState) -> u64 {
+        self.truncated(st, self.clock.now_ns())
+    }
+
+    /// A time as this volume stores it: floored to its step.
+    fn truncated(&self, st: &MemFsState, at_ns: u64) -> u64 {
         let fat = st.file_id_model != FileIds::Stable;
         let g = if fat { Self::FAT_MTIME_NS } else { self.personality.mtime_granularity_ns.max(1) };
-        (self.clock.now_ns() / g) * g
+        (at_ns / g) * g
     }
 
     /// A file's birth: never handed out twice.
@@ -2121,6 +2126,7 @@ impl Vfs for MemFs {
             name,
             buf: Vec::new(),
             folder_at_open,
+            modified: None,
         }))
     }
 
@@ -2218,6 +2224,9 @@ struct MemSpool {
     /// The directory standing where the target lands when the spool was
     /// opened, as `OsSpoolFile` keeps it. A spool never opens without one.
     folder_at_open: jd_vfs::FileIdentity,
+    /// The time the file carries once visible (`SpoolFile::set_modified`),
+    /// or none: the moment it landed.
+    modified: Option<u64>,
 }
 
 /// The handle owns its spool, as `OsSpoolFile` does: a download that stands
@@ -2243,6 +2252,10 @@ impl Write for MemSpool {
 }
 
 impl SpoolFile for MemSpool {
+    fn set_modified(&mut self, mtime_ns: u64) {
+        self.modified = Some(mtime_ns);
+    }
+
     fn commit(
         mut self: Box<Self>,
         target: &Path,
@@ -2271,7 +2284,15 @@ impl SpoolFile for MemSpool {
             self.fs.state.lock().unwrap().spools.remove(&self.name);
             return Err(e);
         }
-        let mtime = { let st = self.fs.state.lock().unwrap(); self.fs.truncated_now(&st) };
+        // The time it was asked to carry, kept to what this volume can store,
+        // or the moment it landed.
+        let mtime = {
+            let st = self.fs.state.lock().unwrap();
+            match self.modified {
+                Some(at) => self.fs.truncated(&st, at),
+                None => self.fs.truncated_now(&st),
+            }
+        };
         let mut st = self.fs.state.lock().unwrap();
         st.spools.remove(&self.name);
 

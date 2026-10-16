@@ -9,6 +9,7 @@
 //! `jd-sim` injection stays trivially mockable.
 
 pub mod api;
+pub mod mtime;
 
 use std::io::{Read, Seek, SeekFrom, Write};
 

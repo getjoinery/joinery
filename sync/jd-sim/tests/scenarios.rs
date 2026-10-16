@@ -1197,6 +1197,276 @@ fn a_name_swap_does_not_lose_either_file() {
 }
 
 // ---------------------------------------------------------------------------
+// Dates: a file shows the date its content was last changed, on every device
+// ---------------------------------------------------------------------------
+
+const NS: u64 = 1_000_000_000;
+/// 2020-09-13T12:26:40.123456789Z: well before the simulated clock, and with
+/// a fraction no layer keeps whole.
+const WRITTEN: u64 = 1_600_000_000 * NS + 123_456_789;
+/// 2022-04-15T05:20:00.987654321Z: a later edit.
+const EDITED: u64 = 1_650_000_000 * NS + 987_654_321;
+
+fn mtime_at(device: &jd_sim::Device, path: &str) -> u64 {
+    device
+        .fs
+        .fingerprint_at(path)
+        .unwrap_or_else(|| panic!("{path} is not on {}", device.name))
+        .mtime_ns
+}
+
+fn record_named(device: &jd_sim::Device, name: &str) -> jd_core::model::Entry {
+    device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == name)
+        .unwrap_or_else(|| panic!("no record for {name} on {}", device.name))
+}
+
+/// A file keeps the date it was last changed on every computer it reaches,
+/// whatever each one runs, rather than the moment it arrived there. The
+/// server keeps the date to the second, as the platform does, and that is the
+/// date the others get.
+#[test]
+fn a_files_date_reaches_every_other_computer() {
+    let world = World::of(
+        9_980,
+        &[
+            ("laptop", jd_sim::Platform::Linux),
+            ("desktop", jd_sim::Platform::Windows),
+            ("mac", jd_sim::Platform::MacOs),
+        ],
+    );
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("report.txt", b"the quarterly numbers");
+    laptop.fs.set_mtime_ns("report.txt", WRITTEN);
+    assert!(world.settle().is_some());
+
+    assert_eq!(
+        server_file_named(&world, "report.txt").modified_time.as_deref(),
+        Some("2020-09-13 12:26:40"),
+        "the date the upload declared, as the server keeps it"
+    );
+    for name in ["desktop", "mac"] {
+        assert_eq!(
+            mtime_at(world.device(name), "report.txt"),
+            1_600_000_000 * NS,
+            "{name} shows the date it was written, not the moment it arrived"
+        );
+    }
+    assert_eq!(mtime_at(laptop, "report.txt"), WRITTEN, "the computer that wrote it keeps its own");
+}
+
+/// A download's date is on the file before its agreement is written, so the
+/// fingerprint the agreement keeps is the file as it stands. Recorded before
+/// the date went on, it describes a file that is no longer there, and the
+/// next scan reads every downloaded file again as though somebody had edited
+/// it.
+#[test]
+fn a_downloaded_file_is_not_read_again_as_an_edit() {
+    let world = World::new(9_981, &["desktop"]);
+    let desktop = world.device("desktop");
+    let body = b"put up by a computer that said when it was written";
+    let id = world.server.seed_file(None, "report.txt", body);
+    world.server.seed_modified_time(id, Some("2021-03-04 05:06:07"));
+
+    world.pass(desktop);
+    assert_eq!(desktop.fs.peek("report.txt").as_deref(), Some(&body[..]), "construction: it arrived");
+    let here = desktop.fs.fingerprint_at("report.txt").unwrap();
+    assert_eq!(here.mtime_ns, 1_614_834_367 * NS, "the server's date, not the moment it landed");
+    let record = desktop
+        .store
+        .get_entry(jd_core::model::EntityId::file(id))
+        .unwrap()
+        .expect("a record for it");
+    assert_eq!(record.synced_fingerprint, Some(here), "the agreement records the file as it stands, date and all");
+    assert_eq!(record.remote_modified_time.as_deref(), Some("2021-03-04 05:06:07"));
+
+    world.clock.advance_secs(5);
+    let reads = desktop.fs.reads();
+    let inits = world.server.upload_inits();
+    world.pass(desktop);
+    assert_eq!(desktop.fs.reads(), reads, "the next scan read the file again: it took the download for an edit");
+    assert_eq!(world.server.upload_inits(), inits, "and nothing went back up");
+}
+
+/// An edit carries its own date to the other computers, and a rename or a
+/// move carries none: the date stays the content's, on every device and on
+/// the server.
+#[test]
+fn an_edit_carries_its_date_and_a_rename_keeps_it() {
+    let world = World::new(9_982, &["laptop", "desktop"]);
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+    laptop.fs.user_write("draft.txt", b"first draft");
+    laptop.fs.set_mtime_ns("draft.txt", WRITTEN);
+    assert!(world.settle().is_some());
+    assert_eq!(mtime_at(desktop, "draft.txt"), 1_600_000_000 * NS);
+
+    laptop.fs.user_write("draft.txt", b"second draft, much better");
+    laptop.fs.set_mtime_ns("draft.txt", EDITED);
+    assert!(world.settle().is_some());
+    assert_eq!(desktop.fs.peek("draft.txt").as_deref(), Some(&b"second draft, much better"[..]));
+    assert_eq!(mtime_at(desktop, "draft.txt"), 1_650_000_000 * NS, "the edit's date, not the first draft's");
+
+    // Renamed on one computer, then moved into a folder on the other.
+    let versions = world.server.all_versions().len();
+    laptop.fs.user_rename("draft.txt", "final.txt");
+    assert!(world.settle().is_some());
+    desktop.fs.user_mkdir("Done");
+    desktop.fs.user_rename("final.txt", "Done/final.txt");
+    assert!(world.settle().is_some());
+    assert_eq!(world.server.all_versions().len(), versions, "construction: no content moved");
+    assert_eq!(mtime_at(desktop, "Done/final.txt"), 1_650_000_000 * NS);
+    assert_eq!(mtime_at(laptop, "Done/final.txt"), EDITED, "the computer that wrote it keeps its own, to the nanosecond");
+    assert_eq!(
+        server_file_named(&world, "final.txt").modified_time.as_deref(),
+        Some("2022-04-15 05:20:00"),
+        "no rename or move touched the server's date"
+    );
+}
+
+/// A file put up with no date -- the browser's uploader declares none --
+/// lands with the time it arrived: there is no other date to give it.
+#[test]
+fn a_file_with_no_date_lands_with_the_time_it_arrived() {
+    let world = World::new(9_983, &["desktop"]);
+    let desktop = world.device("desktop");
+    world.server.seed_file(None, "from-the-browser.txt", b"dropped into a web page");
+    let before = world.clock.now_ns();
+    world.pass(desktop);
+    let landed = mtime_at(desktop, "from-the-browser.txt");
+    assert!(landed >= before && landed <= world.clock.now_ns(), "{landed} is not the time it arrived");
+}
+
+/// On a FAT stick the date lands in the stick's two-second steps, and the
+/// agreement records the date the stick kept, so nothing is sent back because
+/// the stick could not store the odd second. Both ways a FAT volume numbers
+/// its files: per mount (Linux, macOS exFAT) and by directory slot (Windows).
+#[test]
+fn a_date_lands_on_a_fat_stick_in_its_own_steps_and_is_not_sent_back() {
+    for (seed, model) in [(9_984, jd_sim::FileIds::MountSession), (9_986, jd_sim::FileIds::DirectorySlot)] {
+        let world = World::new(seed, &["desk", "stick"]);
+        let (desk, stick) = (world.device("desk"), world.device("stick"));
+        stick.fs.file_ids(model);
+        desk.fs.user_write("photo.raw", b"saved at an odd second");
+        desk.fs.set_mtime_ns("photo.raw", 1_600_000_001 * NS + 500_000_000);
+        world.pass(desk);
+        world.pass(stick);
+        let here = stick.fs.fingerprint_at("photo.raw").expect("construction: it arrived");
+        assert_eq!(here.mtime_ns, 1_600_000_000 * NS, "{model:?}: the server's 12:26:41, in the stick's two-second steps");
+        assert_eq!(record_named(stick, "photo.raw").synced_fingerprint, Some(here), "{model:?}");
+
+        assert!(world.settle().is_some());
+        assert_eq!(world.server.upload_inits(), 1, "{model:?}: the stick sent the file back up");
+        assert_eq!(world.server.all_versions().len(), 1, "{model:?}");
+        world.clock.advance_secs(5);
+        let reads = stick.fs.reads();
+        world.pass(stick);
+        assert_eq!(stick.fs.reads(), reads, "{model:?}: a settled stick reads the file again every pass");
+    }
+}
+
+/// A Windows install upgraded from a build whose fingerprints counted from
+/// 1601 holds agreements whose time no file on its disk will show again: the
+/// same file, the same bytes, a date 11644473600 s ahead (`jd-vfs` real.rs,
+/// `modified_ns`). The first download over such a file meets the commit guard
+/// with that stale fingerprint. The guard refuses, the download finds the
+/// agreed bytes still there, records the fingerprint the disk has and tries
+/// again. Silent: the peer's edit lands, nothing goes back up, no conflict
+/// copy, no issue.
+#[test]
+fn an_agreement_from_the_old_windows_time_count_is_recorded_again_silently() {
+    const FROM_1601_NS: u64 = 11_644_473_600 * NS;
+    let world = World::of(9_987, &[("pc", jd_sim::Platform::Windows), ("peer", jd_sim::Platform::Linux)]);
+    let (pc, peer) = (world.device("pc"), world.device("peer"));
+    peer.fs.user_write("notes.txt", b"the bytes both computers agreed on");
+    assert!(world.settle().is_some());
+
+    // The pc's agreement as the older build wrote it: only the time differs.
+    let mut record = record_named(pc, "notes.txt");
+    let here = pc.fs.fingerprint_at("notes.txt").expect("construction: it arrived");
+    assert_eq!(record.synced_fingerprint, Some(here), "construction: agreed as it stands");
+    let stale = jd_vfs::Fingerprint { mtime_ns: here.mtime_ns + FROM_1601_NS, ..here };
+    record.synced_fingerprint = Some(stale);
+    pc.store.put_entry(&record).unwrap();
+    let inits = world.server.upload_inits();
+
+    let edit = b"a peer's edit, made after the upgrade";
+    peer.fs.user_write("notes.txt", edit);
+    assert!(world.settle().is_some());
+    assert_eq!(pc.fs.peek("notes.txt").as_deref(), Some(&edit[..]), "the peer's edit landed");
+    assert_eq!(world.server.upload_inits(), inits + 1, "only the peer's edit went up");
+    assert_eq!(pc.fs.all_paths(), vec!["notes.txt".to_string()], "no conflict copy beside it");
+    assert_eq!(world.server.live_counts(), (0, 1), "and none on the server");
+    assert!(pc.store.open_issues().unwrap().is_empty(), "{:?}", pc.store.open_issues().unwrap());
+    let now = pc.fs.fingerprint_at("notes.txt").unwrap();
+    assert_eq!(record_named(pc, "notes.txt").synced_fingerprint, Some(now), "agreed as it now stands");
+}
+
+/// A vault file's date and type travel inside its encrypted metadata, where
+/// the browser reads them: the server is told neither. The date reaches the
+/// other computer, an edit carries its own, and a rename -- which seals the
+/// metadata again under the new name -- keeps it.
+#[test]
+fn a_vault_files_date_and_type_travel_sealed() {
+    let vault = SimVault::new(9_985);
+    let mut world = World::new(9_985, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+    let (laptop, desktop) = (world.device("laptop"), world.device("desktop"));
+
+    laptop.fs.user_write("Private/beach.jpg", b"\xff\xd8\xff a photo");
+    laptop.fs.set_mtime_ns("Private/beach.jpg", WRITTEN);
+    assert!(world.settle().is_some());
+    let meta = sealed_metadata(&world, &vault);
+    assert_eq!(meta.name, "beach.jpg");
+    assert_eq!(meta.mime, "image/jpeg", "the browser shows it as the photo it is");
+    assert_eq!(meta.mtime.as_deref(), Some("2020-09-13T12:26:40.123Z"), "in the browser's own spelling");
+    assert!(
+        world.server.files().iter().filter(|f| f.encrypted).all(|f| f.modified_time.is_none()),
+        "the server is never told when a vault file was written"
+    );
+    assert_eq!(mtime_at(desktop, "Private/beach.jpg"), 1_600_000_000 * NS + 123_000_000, "to the millisecond the metadata keeps");
+
+    laptop.fs.user_write("Private/beach.jpg", b"\xff\xd8\xff the photo, retouched");
+    laptop.fs.set_mtime_ns("Private/beach.jpg", EDITED);
+    assert!(world.settle().is_some());
+    assert_eq!(
+        sealed_metadata(&world, &vault).mtime.as_deref(),
+        Some("2022-04-15T05:20:00.987Z"),
+        "a new version carries its own date, not the one before it"
+    );
+    assert_eq!(mtime_at(desktop, "Private/beach.jpg"), 1_650_000_000 * NS + 987_000_000);
+
+    laptop.fs.user_rename("Private/beach.jpg", "Private/beach-2026.jpg");
+    assert!(world.settle().is_some());
+    let meta = sealed_metadata(&world, &vault);
+    assert_eq!(meta.name, "beach-2026.jpg");
+    assert_eq!(meta.mtime.as_deref(), Some("2022-04-15T05:20:00.987Z"), "a rename seals the date it found");
+    assert_eq!(mtime_at(desktop, "Private/beach-2026.jpg"), 1_650_000_000 * NS + 987_000_000);
+}
+
+/// The one vault file's metadata, opened as its owner opens it.
+fn sealed_metadata(world: &World, vault: &SimVault) -> jd_crypto::drive::FileMetadata {
+    let files = world.server.vault_files();
+    assert_eq!(files.len(), 1, "one vault file: {files:?}");
+    let f = &files[0];
+    let key = jd_crypto::drive::open_wrapped_file_key(
+        f.wrapped_file_key.as_deref().expect("a grant"),
+        &vault.secret_key_pkcs8,
+        &vault.public_key_b64,
+    )
+    .expect("the vault opens its key");
+    jd_crypto::drive::decrypt_metadata(f.encrypted_metadata.as_deref().expect("its metadata"), &key)
+        .expect("the metadata opens")
+}
+
+// ---------------------------------------------------------------------------
 // The world misbehaving
 // ---------------------------------------------------------------------------
 

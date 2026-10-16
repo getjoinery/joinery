@@ -325,7 +325,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 					_drive_store_encrypted_thumbnail($fresh_target, $enc_thumb_b64);
 				}
 			}
-			if (!$encrypted && $modified_time !== null) {
+			// The date is this upload's, or none: a new version sent without
+			// one (a browser) must not keep the previous version's, or every
+			// computer gets the edit stamped with the old time. An encrypted
+			// file's date lives in its encrypted metadata.
+			if (!$encrypted) {
 				$fresh_target = DriveHelper::load_file($target_file->key);
 				if ($fresh_target) {
 					$fresh_target->set('fil_content_modified_time', $modified_time);

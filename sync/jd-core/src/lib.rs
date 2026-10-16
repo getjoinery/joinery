@@ -32,6 +32,8 @@
 //!   recoverable rather than a guess.
 //! - [`store`] — the last-agreed state, kept transactionally so a crash at any
 //!   instruction is recoverable.
+//! - [`mime`] — the content type an encrypted file's metadata names, read from
+//!   its name as a browser reads it, because the server cannot see its bytes.
 //! - [`vault`] — the key this device holds for encrypted folders. Optional, and
 //!   its absence is an ordinary state rather than a failure: an account without
 //!   encrypted folders, or a laptop linked without them, syncs everything else.
@@ -42,6 +44,7 @@
 //! the real engine.
 
 pub mod execute;
+pub mod mime;
 pub mod model;
 pub mod naming;
 pub mod order;
