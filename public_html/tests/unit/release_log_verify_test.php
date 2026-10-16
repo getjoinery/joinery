@@ -311,11 +311,17 @@ section('Keys a release proves are kept, or nothing is installed (WP7 review B4)
 // The agent refuses its own update when it cannot record the keys a release
 // proved; every PHP install path does the same. Persisting runs only as root,
 // so the rule is read from each caller: the catch around persistProvenKeys
-// stops the install, never warns and carries on.
+// stops the install, never warns and carries on. A write of the trusted set
+// alone (trustOf(), after the code is in place) warns by design and is not
+// this rule (specs/release_key_rotation.md F15).
 foreach (array('utils/upgrade.php' => 'upgrade_abort(', 'utils/install_extension.php' => 'exit(1)',
 		'includes/AbstractExtensionManager.php' => 'throw new Exception(', 'utils/verify_package.php' => 'exit(1)') as $rel => $stop) {
 	$src = (string)file_get_contents(PathHelper::getIncludePath($rel));
 	$at = strpos($src, 'persistProvenKeys(');
+	while ($at !== false && (strpos($src, 'persistProvenKeys(PackageSignature::trustOf(', $at) === $at
+			|| strpos($src, 'persistProvenKeys($trust)', $at) === $at)) {
+		$at = strpos($src, 'persistProvenKeys(', $at + 1);
+	}
 	$catch = $at === false ? false : strpos($src, 'catch (Throwable $e)', $at);
 	$block = $catch === false ? '' : substr($src, $catch, (int)strpos($src, "\n\t}", $catch + 1) - $catch + 200);
 	$block = substr($block, 0, (int)strpos($block, '}', (int)strpos($block, $stop)) + 1);

@@ -627,8 +627,20 @@
 		// manifest gives nodes: one source (release_keys/), checked here while
 		// nothing else has been written.
 		$keys_installed = null;
+		$keys_authority = null;
 		if ($logs_release) {
 			$keys_installed = AgentDistPublisher::repoKeyLists($full_site_dir);
+			// The keys allowed to change the trusted set next, and whether this
+			// release may change it (specs/release_key_rotation.md R1): refused
+			// here, before the log, since every node would refuse it after.
+			try {
+				$keys_authority = AgentDistPublisher::repoAuthority($full_site_dir);
+				ReleaseStatementPublisher::assertMayChangeSet($previous_statement, $keys_installed, $keys_authority,
+					AgentDistPublisher::ensureKeys($full_site_dir . '/config')['public_b64'], $statement_key['der']);
+			} catch (Exception $e) {
+				publish_output("\nRefusing to publish {$version} — " . $e->getMessage() . '. Nothing has been written.');
+				exit(1);
+			}
 			$bundle_manifest = AgentDistPublisher::readManifest($full_site_dir . '/public_html/agent_dist');
 			foreach ($keys_installed as $list => $keys) {
 				if (($bundle_manifest[$list] ?? null) !== $keys) {
@@ -1373,6 +1385,7 @@
 					'compressors'    => ReleaseStatementPublisher::compressors(),
 					'artifacts'      => $statement_subjects + ReleaseStatementPublisher::binaryArtifacts($full_site_dir),
 					'keys_installed' => $keys_installed,
+					'authority'      => $keys_authority,
 				));
 				publish_output("\nLogging the release statement on {$log_shard['origin']}...");
 				$statement_bytes = ReleaseStatementPublisher::log($log_client, $log_shard, $payload, $statement_key['pem'], $previous_statement);
@@ -1443,7 +1456,7 @@
 						}
 					}
 				}
-				ReleaseStatementPublisher::verifyDocument($statement_bytes, $keys_installed, $statement_subjects);
+				ReleaseStatementPublisher::verifyDocument($statement_bytes, $keys_installed, $statement_subjects, $keys_authority);
 			} catch (Exception $e) {
 				publish_output("\nERROR: the logged statement could not be placed in the release: " . $e->getMessage());
 				publish_output("{$logged['log_origin']} index {$logged['log_index']} holds a statement for {$version} that was never shipped; this line is its record.");

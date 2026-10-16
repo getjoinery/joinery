@@ -26,6 +26,8 @@
  * trusts its own tree) is the converger's decision, not this tool's: this
  * answers the question about bytes and nothing else.
  *
+ * @version 1.5 - --tree, run by root against the node's own keys, writes the trusted set the live core's verdict
+ *                leaves (specs/release_key_rotation.md F15)
  * @version 1.4 - --tree names each sandboxed plugin it passes over (`sandboxed plugin:`, TSV `sandboxed\tplugin`)
  * @version 1.3 - --tree: every package in a site root, core included (specs/host_restrictions.md D5, D8)
  * @version 1.2 - keys a package proves that cannot be recorded exit 1, so the host installer waits for the next converge
@@ -67,12 +69,27 @@ if ($tree) {
 	// `fail: <what>: <verdict line>` per failure, one `style theme: <name>`
 	// per unsigned style theme and one `sandboxed plugin: <name>` per
 	// sandboxed plugin passed over, `tree: ok` when nothing failed.
-	// Persists no keys: this reports, it installs nothing. --tsv prints each
-	// failure as `fail<TAB>kind<TAB>name<TAB>verdict<TAB>file` instead, for
-	// config/code_check (site_housekeeping.sh), which the host report reads.
+	// --tsv prints each failure as `fail<TAB>kind<TAB>name<TAB>verdict<TAB>file`
+	// instead, for config/code_check (site_housekeeping.sh), which the host
+	// report reads. Run by root against the node's own keys, it writes the
+	// trusted set the live core's verdict leaves, where an installer that
+	// put the code in place did not (specs/release_key_rotation.md F15);
+	// nothing else, and what it writes goes to stderr, out of the report.
 	$style = array();
 	$sandboxed = array();
-	$failures = PackageSignature::verifyTree($dir, $keys_file, $style, $sandboxed);
+	$core_verdict = null;
+	$failures = PackageSignature::verifyTree($dir, $keys_file, $style, $sandboxed, $core_verdict);
+	if ($core_verdict !== null && $core_verdict->signed() && $core_verdict->keys_proven && $keys_file === null
+			&& method_exists('PackageSignature', 'trustOf') && PackageSignature::trustOf($core_verdict->keys_proven)
+			&& function_exists('posix_geteuid') && posix_geteuid() === 0) {
+		try {
+			foreach (PackageSignature::persistProvenKeys(PackageSignature::trustOf($core_verdict->keys_proven)) as $line) {
+				fwrite(STDERR, 'release keys the live core sets: ' . $line . "\n");
+			}
+		} catch (Throwable $e) {
+			fwrite(STDERR, 'release keys the live core sets could not be recorded: ' . $e->getMessage() . "\n");
+		}
+	}
 	foreach ($style as $name) {
 		echo ($tsv ? "style\ttheme\t" . $name : 'style theme: ' . $name . ' (unsigned; nothing in it runs)') . "\n";
 	}

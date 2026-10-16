@@ -241,6 +241,18 @@ check($res['status'] === AgentDistPublisher::STATUS_SKIPPED
 	&& file_get_contents($dist_b . '/manifest.json') === $stamped_b,
 	'a second skip leaves agent_dist byte-identical');
 
+// -- a release key added at the same agent version: refused (specs/release_key_rotation.md F12)
+// The binaries carry the release keys they were built with; a manifest naming
+// a new list over them would hand nodes keys the agent does not hold.
+$second_pub = base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()));
+file_put_contents($site_b . '/maintenance_scripts/install_tools/release_keys/release/next.pub', $second_pub . "\n");
+$res = AgentDistPublisher::publish($site_b, null);
+check($res['status'] === AgentDistPublisher::STATUS_FAILED && strpos((string)$res['message'], 'Raise the version') !== false
+	&& file_get_contents($dist_b . '/manifest.json') === $stamped_b,
+	'a release key added at the same agent version is refused until the version moves, the bundle untouched (F12)',
+	(string)$res['message']);
+unlink($site_b . '/maintenance_scripts/install_tools/release_keys/release/next.pub');
+
 // -- rebuild owed but the build breaks: failed, and nothing is disturbed -----
 // main.go declares a newer version and does not compile, which is the shape of
 // the real incident: the publisher knew it owed a rebuild and could not deliver.

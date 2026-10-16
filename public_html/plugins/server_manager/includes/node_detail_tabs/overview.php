@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.71 - Release keys: the keys the site and the agent trust, beside the ones this management node expects
+ *                (the status check's release_trust, specs/release_key_rotation.md R6)
  * @version 1.70 - a retired source that is a container says what it is: held stopped on its host, removed from it by
  *                Permanently Delete Site, then from here by Remove Permanently (site_container_engine B28)
  * @version 1.69 - Remove Permanently of a container site whose host has no node here asks for its host machine's
@@ -1956,6 +1958,28 @@
 			echo '<div class="small text-muted mt-2">Its scripts verify against their signed release.</div>';
 		}
 		echo '</div></div>';
+
+		// Release keys: what the site and the agent trust, beside what this
+		// management node expects (specs/release_key_rotation.md R6).
+		$trust_rows = ReleaseTrustView::reported($node->get('mgn_last_status_data'));
+		if ($trust_rows) {
+			$expected_trust = ReleaseTrustView::expected();
+			echo '<div><div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase mb-2">Release keys</div>';
+			foreach ($trust_rows as list($trust_label, $trust_set)) {
+				$badge = array('ours' => '<span class="badge bg-success">as expected</span>',
+					'differs' => '<span class="badge bg-danger">differs</span>',
+					'unknown' => '')[ReleaseTrustView::standing($trust_set)];
+				echo '<div class="small mb-1"><strong>' . htmlspecialchars($trust_label) . '</strong> ' . $badge
+					. '<div class="text-muted"><code>' . htmlspecialchars(ReleaseTrustView::line($trust_set)) . '</code></div>'
+					. '</div>';
+			}
+			if ($expected_trust !== null) {
+				echo '<div class="small text-muted mt-2">Expected: <code>' . htmlspecialchars(ReleaseTrustView::line($expected_trust + array('recorded' => true, 'set_by' => null)))
+					. '</code>, ' . htmlspecialchars($expected_trust['source']) . '.</div>';
+			}
+			echo '</div></div>';
+		}
 
 		// Recipes: what the agent checks and repairs on its own clock.
 		$verdicts = AgentChannelEndpoint::recipe_verdicts_of($node);

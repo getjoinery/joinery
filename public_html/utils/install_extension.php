@@ -61,6 +61,8 @@
  * Allow upgrade is pressed. The by-name form writes no mark: the catalog's
  * copy is ours and keeps receiving upgrades.
  *
+ * @version 1.11 - the trusted set a package's release leaves is written once the package is in place, the log
+ *                keys before (specs/release_key_rotation.md R1)
  * @version 1.10 - a sandboxed plugin (exactly manifest.json and one .wasm, SandboxPlugins) is its own kind:
  *                like a style theme it installs without the warning, on any host; its manifest is
  *                validated on root's copy; it is recorded plg_trust = 'sandboxed' with a
@@ -183,14 +185,16 @@ function install_extension_restricted_trust(PackageVerdict $verdict): string {
 
 /**
  * Keys a verified package's key chain proved, written to the node's key files
- * by root (B9: the verifier only reads). Not root, nothing written.
+ * by root (B9: the verifier only reads). Not root, nothing written. The log
+ * keys before the install; the trusted set after it, by
+ * install_extension_persist_trust() (PackageSignature::persistProvenKeys()).
  */
 function install_extension_persist_keys(PackageVerdict $verdict): void {
 	if (!$verdict->keys_proven || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
 		return;
 	}
 	try {
-		foreach (PackageSignature::persistProvenKeys($verdict->keys_proven) as $line) {
+		foreach (PackageSignature::persistProvenKeys(PackageSignature::withoutTrust($verdict->keys_proven)) as $line) {
 			echo "key proven by the release log chain: $line\n";
 		}
 	} catch (Throwable $e) {
@@ -199,6 +203,27 @@ function install_extension_persist_keys(PackageVerdict $verdict): void {
 		// bar the next release is checked against.
 		fwrite(STDERR, 'not installed: the release-log keys this package proved could not be recorded: ' . $e->getMessage() . "\n");
 		exit(1);
+	}
+}
+
+/**
+ * The trusted set a verified package's release leaves, written once the
+ * package is in place. Not written, the package stays, and root's next
+ * verify of the live tree records the same set (the code check on a host
+ * that refuses unsigned code, else the plugin installers' run, at least
+ * daily).
+ */
+function install_extension_persist_trust(?PackageVerdict $verdict): void {
+	if ($verdict === null || !$verdict->signed() || !$verdict->keys_proven || !PackageSignature::trustOf($verdict->keys_proven)
+			|| !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+		return;
+	}
+	try {
+		foreach (PackageSignature::persistProvenKeys(PackageSignature::trustOf($verdict->keys_proven)) as $line) {
+			echo "release keys this package's release sets: $line\n";
+		}
+	} catch (Throwable $e) {
+		fwrite(STDERR, 'the release keys this package\'s release sets could not be recorded: ' . $e->getMessage() . "\n");
 	}
 }
 
@@ -756,6 +781,7 @@ try {
 		@rmdir(dirname($staging_dir));
 		install_extension_own($target);
 		echo "installed $type files: $staged_name\n";
+		install_extension_persist_trust($verdict);
 		$name = $staged_name;
 
 		// Uploaded, so a local fork: the mark goes into the live manifest

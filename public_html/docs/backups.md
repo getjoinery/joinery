@@ -410,7 +410,7 @@ list, `MACHINE_CONFIG_FILES` in `install_tools/_restore_guard.sh`:
   archives. `backup_envelope.php` mints a fresh one on first use, so absent is
   the correct state.
 - The files that decide what the machine trusts, or that its host writes:
-  `release_verify_keys`, `release_statement_keys`, `transparency_log_keys`,
+  `release_verify_keys`, `release_statement_keys`, `release_trust`, `transparency_log_keys`,
   `release_log_required`, `release_log_optional`, `tree_owner`,
   `agent_signing_key`, `release_statement_key`, `disk_allowance` and
   `code_check`. A backup's copy would make its maker's signature count as ours,

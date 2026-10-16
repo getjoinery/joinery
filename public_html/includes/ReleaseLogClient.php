@@ -56,6 +56,7 @@
  * could not be reached or read, ReleaseLogShardAheadException when a listed
  * future shard is the problem, plain ReleaseLogException for every other rule.
  *
+ * @version 1.4 - repoRetiredStatementKeys(): the statement keys a rotation retired, for the watch (specs/release_key_rotation.md F9)
  * @version 1.3 - several pinned and held keys per log (repoLogKeys() reads one per line, keySets(), holdsKey()),
  *                and a key Sigstore names for the live log ahead of its start is pinned and shipped first, as a
  *                new log's is (WP7 review B7)
@@ -448,6 +449,23 @@ class ReleaseLogClient {
 	public static function repoStatementKeys($full_site_dir) {
 		$keys = array();
 		foreach (glob(rtrim($full_site_dir, '/') . '/' . self::KEYS_DIR . '/statement/*.pub') ?: array() as $file) {
+			$der = base64_decode(trim((string)file_get_contents($file)), true);
+			if ($der !== false && TransparencyProof::isP256($der)) {
+				$keys[] = $der;
+			}
+		}
+		return $keys;
+	}
+
+	/**
+	 * The statement keys a rotation retired (release_keys/retired/statement/,
+	 * specs/release_key_rotation.md R5, F9), as DER. Nothing verifies against
+	 * them: they are what the release log watch keeps looking under, since a
+	 * stolen retired key is the one a thief would log with.
+	 */
+	public static function repoRetiredStatementKeys($full_site_dir) {
+		$keys = array();
+		foreach (glob(rtrim($full_site_dir, '/') . '/' . self::KEYS_DIR . '/retired/statement/*.pub') ?: array() as $file) {
 			$der = base64_decode(trim((string)file_get_contents($file)), true);
 			if ($der !== false && TransparencyProof::isP256($der)) {
 				$keys[] = $der;

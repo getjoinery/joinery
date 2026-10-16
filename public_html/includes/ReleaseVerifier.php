@@ -47,6 +47,8 @@
  * name (ClassAutoloader::restrictToCore()); the four plugin classes it reuses
  * are loaded by path.
  *
+ * @version 1.6 - an agent is rebuilt with the release keys it was built with (AgentDistPublisher::bakedReleaseKeys,
+ *                specs/release_key_rotation.md R3)
  * @version 1.5 - the support bundle may carry every plugin's prebuilt Go binary the statement records, not only
  *                the relay sealer: 0.8.489's carried the mail gateway and failed (B57)
  * @version 1.4 - the working directory is removed after a rebuild too (Go's module cache is read-only)
@@ -600,7 +602,7 @@ class ReleaseVerifier {
 		} elseif (($go = $official($this->a_dir, 'The agent')) !== null) {
 			$baked = AgentDistPublisher::bakedKeyFlags((array)($agent_manifest['baked_keys'] ?? array()));
 			$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s -X main.releaseStatementKeysB64=%s -X main.releaseLogKeysB64=%s',
-				$agent_manifest['version'] ?? '', $agent_manifest['signing_public_key'] ?? '', $baked['statement'], $baked['log']);
+				$agent_manifest['version'] ?? '', implode(',', AgentDistPublisher::bakedReleaseKeys($agent_manifest)), $baked['statement'], $baked['log']);
 			foreach (array_keys($agent_manifest['binaries'] ?? array()) as $platform) {
 				$goarch = substr($platform, strlen('linux-'));
 				$this->compareBuild($go['go'], $this->a_dir, $goarch, $ldflags, $this->payload['artifacts']['agent/' . $platform] ?? '',

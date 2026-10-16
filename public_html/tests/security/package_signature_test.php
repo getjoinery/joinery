@@ -25,6 +25,7 @@
  *                an edit (reviewer2 F1, F4)
  * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
  *                and a stranger's key are not; one answer per request (specs/local_edits_detected.md)
+ * @version 1.3 - verifyTree() hands back the core package's verdict
  * @version 1.2 - verifyTree() passes over a sandboxed plugin, and judges one with PHP beside its module as native
  * @version 1.1 - verifyTree(): a whole site root, every failure listed, style themes passed over, data
  *                folders never walked, the machine's keys and never the tree's (specs/host_restrictions.md)
@@ -268,7 +269,10 @@ $put($tree, array('uploads/x.php' => "<?php evil();\n", 'config/anything.php' =>
 $put($tree . '/public_html/plugins/notify', array('manifest.json' => '{"name":"notify"}', 'notify.wasm' => "\0asm\x01\0\0\0"));
 $style = null;
 $sandboxed = null;
-$f = PackageSignature::verifyTree($tree, $keys_file, $style, $sandboxed);
+$core_verdict = null;
+$f = PackageSignature::verifyTree($tree, $keys_file, $style, $sandboxed, $core_verdict);
+check($core_verdict instanceof PackageVerdict && $core_verdict->signed() && $core_verdict->root === '',
+	'the core package\'s verdict is handed back, for the code check to write the set it leaves');
 check($f === array(), 'a node-shaped tree of signed packages verifies, data folders and config/ never walked',
 	json_encode(array_map(function ($x) { return $x['what'] . ': ' . $x['verdict']->line(); }, $f)));
 check($style === array('looks'), 'an unsigned style theme is not a failure, and is named as passed over', json_encode($style));

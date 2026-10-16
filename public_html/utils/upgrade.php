@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.23 - serve-verify-key on the publishing box serves release_keys/release/, the current set, never a
+	 *                key a rotation retired (specs/release_key_rotation.md R8, F11)
 	 * @version 1.22 - the previous release's maintenance_scripts and RELEASE_MANIFEST(.sig) are kept under
 	 *                public_html_last/.release_last before the deploy replaces them, and every rollback puts them back
 	 *                with the code (DeploymentHelper 1.10); fix_permissions.sh runs again after the composer step, so
@@ -599,9 +601,21 @@
 					: 'if that is the right place, the archive there is not one our release key signed.'));
 		}
 		// Keys the release's chain proved, written by root (the verifier only reads).
+		// The log keys now; the trusted set once the deployed code has passed its
+		// deploy tier (upgrade_persist_trust()), so a deploy that rolls back is
+		// not left under a set that retired the key its code is signed by
+		// (specs/release_key_rotation.md R1). method_exists: on a self-update's
+		// re-run this file runs against the site's old includes/.
 		if ($verdict->keys_proven && function_exists('posix_geteuid') && posix_geteuid() === 0) {
+			$log_keys = $verdict->keys_proven;
+			if (method_exists('PackageSignature', 'withoutTrust')) {
+				$log_keys = PackageSignature::withoutTrust($verdict->keys_proven);
+				if (PackageSignature::trustOf($verdict->keys_proven)) {
+					$GLOBALS['UPGRADE_PENDING_TRUST'] = PackageSignature::trustOf($verdict->keys_proven);
+				}
+			}
 			try {
-				foreach (PackageSignature::persistProvenKeys($verdict->keys_proven) as $line) {
+				foreach (PackageSignature::persistProvenKeys($log_keys) as $line) {
 					upgrade_echo('Key proven by the release log chain: ' . htmlspecialchars($line) . '<br>');
 				}
 			} catch (Throwable $e) {
@@ -614,6 +628,27 @@
 		}
 		upgrade_echo(htmlspecialchars($label) . ' verified: ' . (int)$verdict->files . ' files signed'
 			. ($verdict->log ? ', logged at ' . htmlspecialchars($verdict->log['origin']) . ' index ' . (int)$verdict->log['index'] : '') . '<br>');
+	}
+
+	// The trusted set the verified release leaves (upgrade_verify_staged()),
+	// written once its code is deployed and has passed its deploy tier. A
+	// failure here leaves the code in place, and root's next verify of the
+	// live tree writes the same set: the code check each housekeeping tick on
+	// a host that refuses unsigned code, else the plugin installers' run, at
+	// least daily (utils/verify_package.php).
+	function upgrade_persist_trust() {
+		$trust = $GLOBALS['UPGRADE_PENDING_TRUST'] ?? null;
+		if (!$trust || !function_exists('posix_geteuid') || posix_geteuid() !== 0) {
+			return;
+		}
+		try {
+			foreach (PackageSignature::persistProvenKeys($trust) as $line) {
+				upgrade_echo('Release keys this release sets: ' . htmlspecialchars($line) . '<br>');
+			}
+		} catch (Throwable $e) {
+			upgrade_echo('⚠ The release keys this release sets could not be recorded (' . htmlspecialchars($e->getMessage())
+				. '); the next verify of the live tree records them<br>');
+		}
 	}
 
 	// Permissions for the deployed tree come from fix_permissions.sh and from
@@ -729,8 +764,22 @@
 				$verify_key_lines[] = base64_encode($own_raw);
 			}
 		}
-		foreach (PackageSignature::readKeys($full_site_dir . '/config/release_verify_keys') as $verify_key) {
-			$verify_key_lines[] = base64_encode($verify_key);
+		// The publisher serves the release keys its repository lists now
+		// (release_keys/release/), never its own key file, which no verdict
+		// replaces there and so still holds a retired key after a rotation
+		// (specs/release_key_rotation.md R8, F11). Any other site serves the
+		// set it holds, which a verdict replaces (R1).
+		if (is_file($full_site_dir . '/config/agent_signing_key')) {
+			foreach (glob($full_site_dir . '/maintenance_scripts/install_tools/release_keys/release/*.pub') ?: array() as $listed_key) {
+				$listed_raw = base64_decode(trim((string)@file_get_contents($listed_key)), true);
+				if ($listed_raw !== false && strlen($listed_raw) === SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+					$verify_key_lines[] = base64_encode($listed_raw);
+				}
+			}
+		} else {
+			foreach (PackageSignature::readKeys($full_site_dir . '/config/release_verify_keys') as $verify_key) {
+				$verify_key_lines[] = base64_encode($verify_key);
+			}
 		}
 		$verify_key_lines = array_values(array_unique($verify_key_lines));
 		header('Content-Type: text/plain; charset=utf-8');
@@ -2266,6 +2315,8 @@
 		} else if (!file_exists($test_runner)) {
 			upgrade_echo('⚠ tests/run.php not found in the deployed tree — deployed code was not verified<br>');
 		}
+
+		upgrade_persist_trust();
 
 		// In a container the site root is the container's own layer, so a
 		// container recreated from its image gets back the manifest the image

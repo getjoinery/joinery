@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.86 - a status check's release_trust (agent 1.81.0): the release and statement keys the site and the
+ *                agent trust, with the authority over them, by 12-hex name, kept only in that shape; a code
+ *                check may name unauthorized_keys (specs/release_key_rotation.md R6)
  * @version 1.85 - a host report's site container answers quiet where its host records the site quiet (host_report
  *                1.27: a dormant copy, a frozen source) and is kept as quiet, not unknown (specs/site_container_engine.md B27)
  * @version 1.84 - a host report's site_engine (host_report 1.26) is kept: podman, docker, none or unknown, null
@@ -509,6 +512,11 @@ class JobResultProcessor {
 			$result = $api_data;
 		} else {
 			$result = self::parse_check_status_ssh_output($output);
+		}
+		// The release keys the site and the agent trust: kept only in its own
+		// shape, as the dashboard reads it (specs/release_key_rotation.md R6).
+		if (array_key_exists('release_trust', $result)) {
+			$result['release_trust'] = self::status_release_trust($result['release_trust']);
 		}
 		$version     = $result['joinery_version'] ?? null;
 		$is_api_path = ($api_data !== null);
@@ -4025,7 +4033,46 @@ HTML;
 	/** The kinds of package a code check names, and the verdicts it can give (PackageSignature). */
 	const HOST_REPORT_CODE_KINDS = ['core', 'plugin', 'theme', 'check'];
 	const HOST_REPORT_CODE_VERDICTS = ['unsigned', 'unknown_key', 'no_keys', 'tampered', 'extra_file',
-		'missing_file', 'unreadable', 'unlogged'];
+		'missing_file', 'unreadable', 'unlogged', 'unauthorized_keys'];
+
+	/**
+	 * The release keys a status check says the site and the agent trust (agent 1.81.0,
+	 * specs/release_key_rotation.md R6): {site, agent}, each null or {recorded: bool,
+	 * release: [name], statement: [name], authority: null | {release: [name], statement:
+	 * [name]}, set_by: version | null}, each name the first 12 hex characters of the key's
+	 * sha256 (PackageSignature::keyId()). recorded false is a set from the compiled-in keys
+	 * or the site's key files, before any release recorded one: its authority is the whole set.
+	 * null where the check carries nothing of the shape.
+	 */
+	public static function status_release_trust($v) {
+		if (!is_array($v)) { return null; }
+		return ['site' => self::reported_trust($v['site'] ?? null), 'agent' => self::reported_trust($v['agent'] ?? null)];
+	}
+
+	/** One side of status_release_trust(). */
+	public static function reported_trust($v) {
+		if (!is_array($v)) { return null; }
+		$names = function ($list) {
+			$out = [];
+			foreach (array_slice(is_array($list) ? array_values($list) : [], 0, self::HOST_REPORT_MAX_LIST) as $n) {
+				if (is_string($n) && preg_match('/^[0-9a-f]{12}$/', $n) && !in_array($n, $out, true)) { $out[] = $n; }
+			}
+			sort($out);
+			return $out;
+		};
+		$authority = null;
+		if (($v['recorded'] ?? null) === true && is_array($v['authority'] ?? null)) {
+			$authority = ['release' => $names($v['authority']['release'] ?? null), 'statement' => $names($v['authority']['statement'] ?? null)];
+		}
+		$set_by = (is_string($v['set_by'] ?? null) && preg_match('/^[0-9]+\.[0-9]+\.[0-9]+$/', $v['set_by'])) ? $v['set_by'] : null;
+		return [
+			'recorded'  => ($v['recorded'] ?? null) === true,
+			'release'   => $names($v['release'] ?? null),
+			'statement' => $names($v['statement'] ?? null),
+			'authority' => $authority,
+			'set_by'    => $set_by,
+		];
+	}
 
 	/**
 	 * A site's code check (site_housekeeping.sh's config/code_check, specs/host_restrictions.md D8):

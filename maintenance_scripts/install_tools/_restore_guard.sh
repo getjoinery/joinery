@@ -5,6 +5,7 @@
 # (specs/host_restrictions.md D5). Sourced by restore_project.sh and
 # restore_chain.sh, which is what a site copy runs.
 #
+# Version: 1.2 - config/release_trust is the machine's (specs/release_key_rotation.md R1)
 # Version: 1.1 - the refusal names the site the backup was taken of, which is this
 #                site itself for a restore of its own backup, not only a copy's source
 # Version: 1.0
@@ -35,6 +36,7 @@ MACHINE_CONFIG_FILES=(
     config/backup_site_key
     config/release_verify_keys
     config/release_statement_keys
+    config/release_trust
     config/transparency_log_keys
     config/release_log_required
     config/release_log_optional
