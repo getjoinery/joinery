@@ -96,6 +96,9 @@ pub struct Shared {
     /// second and read by every tray poll: the tree can be thousands of rows
     /// and only the settings page wants it.
     pub folders: Mutex<Option<Value>>,
+    /// What the update thread knows, for the status answer (`crate::update`).
+    /// Set once, when the thread starts.
+    pub update: std::sync::OnceLock<Arc<crate::update::Handle>>,
 }
 
 impl Default for Shared {
@@ -114,6 +117,7 @@ impl Shared {
             commands: Mutex::new(tx),
             setup: Mutex::new(None),
             folders: Mutex::new(None),
+            update: std::sync::OnceLock::new(),
         }
     }
 
@@ -645,6 +649,7 @@ pub const ROUTES: &[Route] = &[
     Route { method: "POST", path: "/dismiss", when: When::Linked, page: true, handle: route_dismiss },
     Route { method: "POST", path: "/autostart", when: When::Linked, page: true, handle: route_autostart },
     Route { method: "POST", path: "/unlink", when: When::Linked, page: true, handle: route_unlink },
+    Route { method: "POST", path: "/check-update", when: When::Always, page: true, handle: route_check_update },
     Route { method: "POST", path: "/setup/begin", when: When::Unlinked, page: true, handle: route_setup_begin },
     Route { method: "POST", path: "/setup/cancel", when: When::Unlinked, page: true, handle: route_setup_cancel },
     Route { method: "POST", path: "/setup/finish", when: When::Unlinked, page: true, handle: route_setup_finish },
@@ -719,7 +724,23 @@ fn route_status(shared: &Shared, _: &Request) -> (u16, Value) {
         }),
     };
     body["autostart"] = json!(jd_platform::autostart::is_enabled(&jd_platform::home_dir()));
+    if let Some(update) = shared.update.get() {
+        body["update"] = update.json();
+    }
     (200, body)
+}
+
+fn route_check_update(shared: &Shared, _: &Request) -> (u16, Value) {
+    match shared.update.get().map(|u| u.check_now()) {
+        Some(Ok(())) => ok(true),
+        // A 409 with the reason, so the page shows why rather than a
+        // generic failure: no key in this build, most often.
+        Some(Err(why)) => (409, json!({ "ok": false, "error": why })),
+        None => (
+            409,
+            json!({ "ok": false, "error": "updates are not running" }),
+        ),
+    }
 }
 
 fn route_folders(shared: &Shared, _: &Request) -> (u16, Value) {

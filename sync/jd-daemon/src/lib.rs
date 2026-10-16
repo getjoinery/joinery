@@ -17,6 +17,8 @@
 //! - [`setup`] — the first run, for a daemon started before it was linked: the
 //!   same ceremony as `login`, driven from the settings page.
 //! - [`settings`] — the settings page itself, served from the binary.
+//! - [`update`] — the signed update feed, and an update that installs itself
+//!   and undoes itself if the new copy does not start.
 
 pub mod config;
 pub mod daemon;
@@ -25,6 +27,7 @@ pub mod link;
 pub mod passlog;
 pub mod settings;
 pub mod setup;
+pub mod update;
 
 /// This build's version, as the settings page and the status answer report it.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

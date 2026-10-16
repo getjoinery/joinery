@@ -1369,11 +1369,13 @@ dependencies = [
 name = "jd-daemon"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "jd-core",
  "jd-crypto",
  "jd-platform",
  "jd-proto",
  "jd-vfs",
+ "ring",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

@@ -3,9 +3,10 @@
 //! `jd-vfs` owns the differences between filesystems. This crate owns the rest
 //! of them: where a credential is safe, where a config file belongs, how a
 //! background program gets started at login, how a URL reaches the user's
-//! browser, and how one of the user's own processes reaches another. Five small
-//! problems that have three answers each, kept together so that the daemon reads
-//! the same on every platform.
+//! browser, how one of the user's own processes reaches another, and how a newer
+//! copy of the program takes the place of the running one. Six small problems
+//! that have three answers each, kept together so that the daemon reads the same
+//! on every platform.
 //!
 //! It also deliberately depends on nothing of the engine. That is what lets the
 //! tray — which needs the control channel and none of the rest — be compiled for
@@ -22,6 +23,7 @@ pub mod autostart;
 pub mod browser;
 pub mod control;
 pub mod dirs;
+pub mod install;
 pub mod secret;
 
 pub use autostart::{launch_agent_plist, systemd_user_unit, AutostartError};

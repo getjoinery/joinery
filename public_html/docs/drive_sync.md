@@ -1131,6 +1131,10 @@ State is `LOCALAPPDATA` on Windows on purpose: a roaming profile that copied one
 machine's record of what it had agreed to onto another machine would have the
 second act on the first one's memory.
 
+Updates keep their own two things: `update.json` in the config directory (which
+channel this computer follows; see [Updates](#updates)) and an `updates` folder in
+the state directory (downloads, the start marker, what the updater remembers).
+
 `JOINERY_DRIVE_HOME` overrides all three at once. One variable rather than three,
 because three would allow a config pointing at one account and a state store
 holding another — which reads as mass corruption on the very next pass.
@@ -1192,7 +1196,9 @@ joinery-drive settings
 joinery-drive status | issues | dismiss <id>
 joinery-drive pause | resume | sync-now | stop
 joinery-drive autostart on|off
+joinery-drive check-update
 joinery-drive unlink
+joinery-drive --version
 ```
 
 Everything except `login` and `daemon` is a request to the running daemon, so
@@ -1240,6 +1246,10 @@ The **control thread** answers the tray, the CLI, and the settings page, and
 holds no database handle at all. It reads a snapshot the sync thread refreshes,
 and posts commands into a queue the sync thread drains. A hung tray can slow
 nothing down and corrupt nothing.
+
+The **update thread** ([Updates](#updates)) holds no database handle either. It
+reads the same snapshot, and posts one command: `Stop`, when an update is ready
+to install (to the setup loop instead, on a computer not linked yet).
 
 ### The control channel
 
@@ -1387,6 +1397,251 @@ install touches no keychain before the user has asked to link anything.
 
 ---
 
+## Updates
+
+The client keeps itself current from one signed feed that every installation
+reads, whatever instance it is linked to (spec D19): instances stay
+zero-config, and only one place has to sign anything. The code is
+`jd-daemon/src/update/` and, for everything that differs by operating system,
+`jd-platform/src/install.rs`.
+
+### The feed
+
+One JSON manifest per channel, at `https://getjoinery.com/drive/updates/<channel>.json`,
+with a detached signature beside it at the same address plus `.sig`:
+
+```json
+{
+  "format": "joinery-drive-update/1",
+  "channel": "beta",
+  "version": "0.3.0",
+  "minimum_supported_version": "0.2.0",
+  "release_notes_url": "https://getjoinery.com/drive/releases/0.3.0",
+  "artifacts": [
+    { "os": "macos", "arch": "universal", "kind": "update",
+      "url": "https://…/joinery-drive-0.3.0-macos-universal.update.tar.gz",
+      "size": 9123456, "sha256": "…" },
+    { "os": "linux", "arch": "x86_64", "kind": "deb", "url": "…", "size": …, "sha256": "…" }
+  ]
+}
+```
+
+The `.sig` file is base64 Ed25519 signatures over the manifest's exact bytes,
+one per line. Exact bytes, because a signature checked against a
+re-serialization is a signature over something else; more than one line,
+because that is how a key is rotated (below).
+
+Only `kind: "update"` is ever installed: the payload this client knows how to
+put in place, which is the app bundle on a Mac and the program's files
+elsewhere. The other kinds (`dmg`, `installer`, `deb`, `rpm`, `tarball`) are
+there for the download page and are never fetched by the client. A Mac matches
+its own architecture or `universal`; everywhere else the architecture must
+match exactly, so a native ARM install is never replaced by an emulated x86 one.
+
+`update.json` in the config directory chooses the channel (default `beta`),
+can name another feed address (`feed_url`), and can turn off automatic
+installing (`automatic: false` still checks and reports). Off means off, a
+required update included — one the feed's `minimum_supported_version` says
+this copy is below: the status leads with "A required update is waiting", and
+it installs when somebody asks (`check-update`, or the settings page's button). It is apart from
+`config.json` because it belongs to the installed program, not to the link:
+unlinking forgets the account, not the channel. It is read when the daemon
+starts. A damaged file is reported in the status and the defaults are used.
+
+**When it looks:** 30 seconds to 5 minutes after the daemon starts, then every
+six hours, each time at a random point an hour either side, so a fleet waking
+at the same moment does not arrive at the feed together. After a failed check,
+again in 30 to 60 minutes. `joinery-drive check-update` (control `POST
+/check-update`) checks at once.
+
+**What it believes, in order:**
+
+1. The signature, against the keys compiled into the build. Nothing in an
+   unsigned document is read, not even its version.
+2. The channel inside the document must be the configured one. Every channel
+   is signed by the same key, so without this a stable client served the beta
+   document would accept it.
+3. The version must be higher than the running one. It never installs a lower
+   or equal version, so an old manifest replayed by anybody is inert. Versions
+   are `MAJOR.MINOR.PATCH` with an optional `-alpha.N`, `-beta.N` or `-rc.N`,
+   ordered as the server's upgrade gate orders them: a pre-release before its
+   release, alpha before beta before rc.
+4. The download's size and SHA-256 against the manifest, while it downloads,
+   into a `.part` file renamed only once both match.
+5. The payload's format (below), unpacked beside what it replaces.
+6. The new program itself: the staged daemon is run once with `--version` and
+   must print the version the manifest promised, before anything is swapped.
+   The first line of `--version` is therefore a contract: its last word is the
+   version (`joinery-drive 0.3.0`), and the wording changes only together with
+   the check that reads it (`update::preflight`).
+   This is what catches a program that cannot run here at all — the wrong
+   architecture, a signature the system refuses, a missing library — which
+   never reaches the code that would count a failed start.
+
+### Keys
+
+`jd-daemon/src/update/trusted_keys.txt` lists the Ed25519 public keys the
+client accepts a feed from, one base64 key per line. It is in the repository so
+that adding or retiring a key is a commit anybody can read, and so that nothing
+a local process writes can teach the client to trust somebody new. A feed
+signed by any listed key is accepted. A build whose list is empty checks no
+feed, says so in its status, and installs nothing.
+
+A rotation: add the new key to the list and ship a release; sign every feed
+with both keys (`joinery-drive-release sign --append`) while clients move; then
+remove the old line and stop signing with it.
+
+### What each kind of install does
+
+| Installed as | Judged from | Does |
+|---|---|---|
+| Mac app (`/Applications/Joinery Drive.app`) | the executable is `<X>.app/Contents/MacOS/…` and the bundle's folder is writable | replaces the whole bundle in one atomic exchange (`renamex_np` with `RENAME_SWAP`) |
+| Windows program folder | the executable's folder is writable | renames the running `.exe` aside (Windows allows that, never overwriting it) and the new one into its name |
+| Linux tarball | anywhere writable outside `/usr` (`~/.local/bin`, `/usr/local/bin`, `/opt/…`) | keeps the old file as a second hard link, then renames the new one over the live name |
+| `.deb` / `.rpm` | under `/usr` (not `/usr/local`), `/bin`, `/sbin` | reports "Version X is available. Install it with the system package manager" and touches nothing |
+| Microsoft Store, snap, Nix | `WindowsApps`, `/snap`, `/nix/store` | reports, touches nothing |
+| A folder this account cannot write | the write probe fails | reports who has to install it |
+| A cargo build directory | `target/debug`, `target/release` | not checked unless asked, never replaced, never restarted when rebuilt |
+
+Writability is asked by creating a file, not read from permission bits, because
+an ACL, a read-only mount or macOS's app protection can each refuse a folder
+whose mode allows it. A Mac update replaces the bundle and never one file
+inside it: a signed bundle with one file changed is a bundle whose signature no
+longer holds. Each top-level entry in a Windows or Linux payload replaces the
+file of the same name. A payload naming a file the install does not have is
+refused, and so is one that leaves out a program the install has — the daemon,
+and the tray where there is one — so the programs in one folder always come
+from one release; the status says which file was missing.
+
+### Installing is a restart
+
+The update thread is a third thread beside the sync and control threads. It
+holds no database handle. To install, it hands the staged update to `main` and
+posts `Stop`; the sync loop stops between passes, never in the middle of one,
+and `main` swaps the files once the store is closed.
+
+Then the daemon starts again from its live path:
+
+- **Under the LaunchAgent or a systemd unit**, it exits with status 75, which
+  both bring back (`KeepAlive` on an unsuccessful exit, `Restart=on-failure`).
+  Supervision is judged precisely, because a daemon started by hand that exited
+  expecting a restart would simply be gone: the LaunchAgent sets
+  `XPC_SERVICE_NAME` to the bundle id, and a systemd unit's own process is the
+  one `SYSTEMD_EXEC_PID` names (on systemd older than 248, a process in the
+  `joinery-drive.service` control group). Any unit's own process exits to be
+  restarted, even in a unit an administrator wrote: systemd stops everything in
+  a unit when its own process exits, so a replacement it started itself would
+  be stopped with it.
+- **Otherwise** (Windows, whose `Run` value only runs at login, or a daemon
+  started by hand) it starts `<exe> daemon` — the command autostart runs —
+  detached, and stays to watch it come up.
+
+A paused client is still paused after the update, from the first pass.
+
+The tray watches its own executable and, once the file at its path is a
+different file and has looked the same twice in a row, starts the new copy and
+exits. The daemon does the same when its file is replaced underneath it — by a
+package manager, or a new app dragged over the old one — once the new file has
+answered `--version`. The second look keeps a half-written file from being
+started.
+
+### When the new copy does not start
+
+Before the first file moves, the old daemon writes `updates/pending.json`:
+the two versions, every swap, and whether syncing was paused. The new daemon
+reads it before anything else it does and counts the start. It clears the
+marker, and the old copy is deleted, once its sync loop has run the startup
+recovery and published its first status — or, on a computer not linked yet,
+once the first-run setup is answering.
+
+- Under a supervisor, every start is an attempt. Past three, the new copy puts
+  the old one back itself and exits to be restarted as the old one.
+- Watched by the old process, a new copy that exits, or is not up within two
+  minutes, is put back by the old process, which then starts itself again.
+- A marker found mid-swap (the installing process died) is put back on the next
+  start, from wherever the swap stopped; each platform's swap can be undone from
+  any point. Windows has one gap: between renaming the old `.exe` aside and the
+  new one into place, two system calls apart, there is no program at the live
+  path.
+
+The old copy that comes back says so in its status ("The update to X was
+undone…") and does not install that version again until a newer one is
+published or somebody asks with `check-update`.
+
+### In the status answer
+
+`GET /status` carries an `update` object once the computer is linked, which
+`joinery-drive status` prints as one line and the settings page shows in its
+Updates section, beside a **Check for updates** button (`POST /check-update`;
+a check that cannot run, in a build with no key, answers 409 with the reason):
+
+| Field | Meaning |
+|---|---|
+| `state` | `disabled` (no key, or an unreadable version), `idle`, `checking`, `downloading`, `installing`, `available` (newer, not being installed here), `failed` |
+| `summary` | one sentence for a person |
+| `current`, `channel`, `automatic` | this copy and its settings |
+| `install`, `can_install` | how this copy was installed, and whether it replaces itself |
+| `available`, `required`, `release_notes_url` | the newer version; `required` when this one is below the feed's `minimum_supported_version` |
+| `detail` | why an available version is not being installed here |
+| `last_check_ms`, `last_error` | the last check, and what went wrong |
+| `updated_from` | the version this process replaced, once it is up |
+
+### Publishing a release
+
+`joinery-drive-release` (in `jd-daemon`, never shipped) does the publisher's
+half:
+
+```
+joinery-drive-release keygen --out PATH                      # once per key
+joinery-drive-release pack --out macos.update.tar.gz "Joinery Drive.app"
+joinery-drive-release pack --out linux-x86_64.update.tar.gz joinery-drive joinery-drive-tray
+joinery-drive-release manifest --channel beta --version 0.3.0 \
+    --base-url https://getjoinery.com/drive/updates/files \
+    --artifact macos:universal:update:macos.update.tar.gz \
+    --artifact linux:x86_64:update:linux-x86_64.update.tar.gz \
+    --artifact linux:x86_64:deb:joinery-drive_0.3.0_amd64.deb --out beta.json
+joinery-drive-release sign --manifest beta.json --key PATH    # or JOINERY_DRIVE_UPDATE_KEY=PATH
+joinery-drive-release verify --manifest beta.json --trust <public key>
+```
+
+The signing key comes only from `--key` or the file `JOINERY_DRIVE_UPDATE_KEY`
+names; there is no default location. A key file other accounts can read is
+refused, and so is one inside a git working tree that git would track. The
+file is base64 of the 64-byte libsodium form (seed, then public key), the same
+form as the platform's release key, so one file works here and with PHP's
+`sodium_crypto_sign_detached`. `sign` checks its signature against the public
+half before writing it, and refuses a manifest no client would accept;
+`manifest` refuses to write one.
+
+The payload is a gzipped tar in a subset this tool writes and the client
+reads: plain ustar headers, folders, regular files, and Unix symlinks, with
+sorted entries, zero times and owners, normalised modes, and a gzip header
+with no name or time — so one build always packs to the same bytes. The
+client refuses anything else by name, any path that leaves the folder it is
+unpacked into, anything written through a link the archive made, and more than
+2 GiB unpacked.
+
+### Tests
+
+The update modules carry unit tests in `cargo test -p jd-daemon` and
+`-p jd-platform` (and so in `sync_engine_gate.sh`): manifest parsing; good,
+bad, stranger's and tampered signatures; rotation with either key; the channel
+check; downgrades; an unknown platform; the decision for each kind of install, including a required update waiting
+while automatic updates are off; a folder update that leaves out the tray; the
+built-in key list parsing;
+the payload round trip, determinism, and every escape; each platform's swap
+undone from every point; the start marker's count, rollback and confirmation.
+`jd-daemon/tests/update_e2e.rs` serves a feed from 127.0.0.1 signed with a key
+made for the test, carrying the real `joinery-drive` the build produced, and
+checks that it is found, downloaded, run once, and swapped in over a stand-in
+install (a program folder, or an app bundle on a Mac); that the real new binary,
+started the way autostart starts it and unable to finish starting, puts the
+stand-in back after three attempts; and that a tampered payload, a stranger's
+signature, an older version, a package-managed install, and a binary that is
+not the promised version all leave the install untouched.
+
+---
+
 ## Testing
 
 The edge-case space is combinatorial, so the client is built around a
@@ -1410,7 +1665,7 @@ Two invariants are asserted around **every pass**, not at the end of a run:
 
 | Gate | Tier / env | Covers |
 |---|---|---|
-| `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation; the control channel's refusals and the settings page's routes, over HTTP on 127.0.0.1. |
+| `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation; the control channel's refusals and the settings page's routes, over HTTP on 127.0.0.1; and updates, end to end against a feed on 127.0.0.1 ([Updates](#updates)). |
 | `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | Both harnesses themselves — a harness with a bug in it reports a clean run rather than a problem. |
 | `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
 | `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |
