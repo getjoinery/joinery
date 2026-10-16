@@ -4,6 +4,7 @@
  * tier: safe
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/_host_files.sh, public_html/plugins/server_manager/includes/ReleaseLogTail.php, public_html/utils/upgrade.php, public_html/utils/install_extension.php, public_html/utils/verify_package.php, public_html/includes/AbstractExtensionManager.php]
  */
 /**
  * The trusted set and its authority (specs/release_key_rotation.md R1, R2,
