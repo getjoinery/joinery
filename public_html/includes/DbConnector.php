@@ -1,5 +1,6 @@
 <?php
 /**
+ * @version 1.2 - in_test_mode(): whether the links point at the test or the live database now, for work queued to run later
  * @version 1.1 - reconnect(): rebuild the current mode's link, for a long-running CLI process
  *                whose connection died under it
  */
@@ -165,6 +166,15 @@ class DbConnector {
 	 */
 	public function test_mode_was_used() {
 		return $this->test_mode_was_used;
+	}
+
+	/**
+	 * Whether the link points at the test database right now. Work queued to run
+	 * later (a deferred blob reclaim) records it, so it never runs on the other
+	 * database once test mode has closed.
+	 */
+	public function in_test_mode() {
+		return (bool)$this->test_mode;
 	}
 
 	public function close_test_mode() {

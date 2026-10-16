@@ -28,6 +28,9 @@ class FileBlobException extends SystemBaseException {}
  * pointing at a blob is in the same visibility class. Dedup scoping and the
  * flip / copy-on-write split in File::move_to_correct_directory() maintain it.
  *
+ * @version 1.4.1 - a deferred reclaim runs only on the database that queued it: one queued in
+ *                  test mode and flushed at shutdown, after test mode closed, ran against the
+ *                  live database with the test database's blob ids
  * @version 1.4.0 - an offloaded blob records its file store target and the full key of its original
  *                  (fbb_bkt_backup_target_id, fbb_remote_key); every cloud read, write and delete follows
  *                  the row, and a variant's key sits beside the original's (specs/storage_targets.md WP6)
@@ -436,7 +439,11 @@ class FileBlob extends SystemBase {
 		}
 	}
 
-	/** @var int[] blob ids whose at-zero physical reclaim waits for a foreign transaction to commit. */
+	/**
+	 * Blobs whose at-zero physical reclaim waits for a foreign transaction to
+	 * commit, each with the database that queued it: [blob id, test mode?].
+	 * @var array<int,array{0:int,1:bool}>
+	 */
 	private static $deferred_reclaims = array();
 	private static $deferred_hook_registered = false;
 
@@ -493,10 +500,10 @@ class FileBlob extends SystemBase {
 
 	/** Queue an at-zero reclaim to run once the caller's transaction has committed. */
 	private static function _defer_reclaim($blob_id) {
-		self::$deferred_reclaims[] = (int)$blob_id;
+		self::$deferred_reclaims[] = array((int)$blob_id, DbConnector::get_instance()->in_test_mode());
 		if (!self::$deferred_hook_registered) {
 			self::$deferred_hook_registered = true;
-			register_shutdown_function(array(__CLASS__, 'flushDeferredReclaims'));
+			register_shutdown_function(array(__CLASS__, 'flushDeferredReclaimsAtShutdown'));
 		}
 	}
 
@@ -505,20 +512,53 @@ class FileBlob extends SystemBase {
 	 * at any time (and it runs at request shutdown): _reclaim re-reads the
 	 * committed refcount under the advisory lock, so a blob whose decrement was
 	 * rolled back (refcount back above zero) is left untouched.
+	 *
+	 * A blob is reclaimed only on the database that queued it. One queued in test
+	 * mode and still queued when test mode has closed would otherwise run at
+	 * shutdown against the live database with the test database's id, guarded
+	 * only by that id's refcount there; it is held for a flush back in test mode
+	 * (the harness flushes before it closes test mode), and at shutdown it is
+	 * dropped with a log line instead.
+	 *
+	 * @return array{reclaimed:int,held:int} what this flush did, for the tests
 	 */
 	public static function flushDeferredReclaims() {
 		if (empty(self::$deferred_reclaims)) {
-			return;
+			return array('reclaimed' => 0, 'held' => 0);
 		}
-		$ids = array_unique(self::$deferred_reclaims);
-		self::$deferred_reclaims = array();
-		foreach ($ids as $id) {
+		$test_mode = DbConnector::get_instance()->in_test_mode();
+		$now = array();
+		$held = array();
+		foreach (self::$deferred_reclaims as $entry) {
+			if ($entry[1] === $test_mode) {
+				$now[$entry[0]] = $entry;
+			} else {
+				$held[$entry[0]] = $entry;
+			}
+		}
+		self::$deferred_reclaims = array_values($held);
+		foreach (array_keys($now) as $id) {
 			try {
 				self::_reclaim($id);
 			} catch (Throwable $e) {
 				error_log('FileBlob deferred reclaim failed for fbb=' . $id . ': ' . $e->getMessage());
 			}
 		}
+		return array('reclaimed' => count($now), 'held' => count($held));
+	}
+
+	/**
+	 * At request shutdown: reclaim what the open database queued, and say what
+	 * waited for another one rather than run it on the wrong database.
+	 */
+	public static function flushDeferredReclaimsAtShutdown() {
+		$done = self::flushDeferredReclaims();
+		foreach (self::$deferred_reclaims as $entry) {
+			error_log('FileBlob deferred reclaim not run for fbb=' . $entry[0] . ': it was queued on the '
+				. ($entry[1] ? 'test' : 'live') . ' database, and that is not the one open at shutdown');
+		}
+		self::$deferred_reclaims = array();
+		return $done;
 	}
 
 	/**

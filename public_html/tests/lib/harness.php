@@ -1279,7 +1279,20 @@ function harness_set_setting_mem($key, $value) {
 function harness_test_mode() {
 	$db = DbConnector::get_instance();
 	$db->set_test_mode();
-	harness_defer(function () use ($db) { $db->close_test_mode(); });
+	harness_defer(function () use ($db) {
+		// What the suite queued on the test database is reclaimed there, before
+		// the link goes back to the live one (FileBlob::flushDeferredReclaims).
+		if (class_exists('FileBlob', false)) {
+			FileBlob::flushDeferredReclaims();
+		}
+		// A push queued on the test database is never sent: its member id
+		// names someone else on the live one (PushSender::flush). A suite that
+		// means to send calls flush() itself.
+		if (class_exists('PushSender', false)) {
+			PushSender::clear_queue();
+		}
+		$db->close_test_mode();
+	});
 
 	if (!harness_wants_json() && php_sapi_name() === 'cli') {
 		$name = $db->get_db_link()->query('SELECT current_database()')->fetchColumn();
