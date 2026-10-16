@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.70 - a retired source that is a container says what it is: held stopped on its host, removed from it by
+ *                Permanently Delete Site, then from here by Remove Permanently (site_container_engine B28)
  * @version 1.69 - Remove Permanently of a container site whose host has no node here asks for its host machine's
  *                 address (NodeRemoval::host_attest_text); it was refused for ever, so the site could only be hidden (B76)
  * @version 1.68 - the Hide confirmation says the node's cloud server stays recorded (B71)
@@ -828,8 +830,12 @@
 			. 'This site is frozen while it moves to its copy. Visitors see a maintenance page until the switch-over finishes or is undone.</div></div>';
 	} elseif ($install_state === 'retired') {
 		echo '<div class="alert alert-secondary"><div><strong>' . htmlspecialchars($node->install_state_label()) . '.</strong> '
-			. 'This is the old server of a site that has moved. It is kept, quiet, for the way back. Removing it from the dashboard '
-			. 'does not delete the server; delete that at its provider.</div></div>';
+			. (trim((string)$node->get('mgn_container_name')) !== ''
+				? 'This is the old container of a site that has moved. Its host keeps it stopped, with its data, for the way back. '
+					. 'Permanently Delete Site removes the container and its data from its host; Remove Permanently then takes it off the dashboard.'
+				: 'This is the old server of a site that has moved. It is kept, quiet, for the way back. Removing it from the dashboard '
+					. 'does not delete the server; delete that at its provider.')
+			. '</div></div>';
 	} elseif ($install_state === 'held') {
 		// Stopped on purpose on its host (multi_tenant_docker_hosts WP7). Who,
 		// when and why come from the job that asked; it is started again from

@@ -12,7 +12,8 @@
 # stand-in engine archives whose podman is a script that prints a version:
 #
 #   - an archive is refused, nothing written, when its hash is not the one given,
-#     its name is not an engine's, it unpacks to another name, or a part is missing
+#     its name is not an engine's, it unpacks to another name, a part is missing,
+#     or it was built on another Ubuntu release than the machine's (B30)
 #   - installed: the version's directory, current naming it, podman COPIED to
 #     /usr/local/bin (podman records its resolved path in every container), the
 #     containers.conf drop-in (runc, the helpers, netavark), the apt pin keeping
@@ -46,11 +47,18 @@ chk() {
 
 FR="$T/root"
 LIB="$FR/usr/local/lib/joinery-site-engine"
+# The machine's release: a file outside the fixture root, so 'nothing written'
+# still means nothing.
+export JOINERY_SITE_ENGINE_OS_RELEASE="$T/os-release"
+host_is() {  # VERSION_ID PRETTY_NAME
+    printf 'NAME="Ubuntu"\nID=ubuntu\nVERSION_ID="%s"\nPRETTY_NAME="%s"\n' "$1" "$2" > "$T/os-release"
+}
+host_is 26.04 "Ubuntu 26.04.1 LTS"
 run() { JOINERY_SITE_ENGINE_ROOT="$FR" bash "$INST" "$@" > "$T/out" 2>&1; echo $?; }
 
-# make_archive VERSION [REPORTED_VERSION] [TOP_NAME] [SKIP_FILE] [BUILD_NOTE] -> path of the archive
+# make_archive VERSION [REPORTED_VERSION] [TOP_NAME] [SKIP_FILE] [BUILD_NOTE] [BUILT_ON, - for none] -> path of the archive
 make_archive() {
-    local v="$1" reported="${2:-$1}" top="${3:-joinery-site-engine-$1-amd64}" skip="${4:-}" note="${5:-}" d
+    local v="$1" reported="${2:-$1}" top="${3:-joinery-site-engine-$1-amd64}" skip="${4:-}" note="${5:-}" built="${6:-Ubuntu 26.04.1 LTS}" d
     d="$T/build-$v-$RANDOM"
     mkdir -p "$d/$top/bin" "$d/$top/helpers" "$d/$top/systemd"
     printf '#!/bin/sh\necho "podman version %s"\n' "$reported" > "$d/$top/bin/podman"
@@ -60,6 +68,7 @@ make_archive() {
     printf '[Service]\nExecStart=/usr/local/bin/podman start --all --filter should-start-on-boot=true\n' > "$d/$top/systemd/podman-restart.service"
     printf 'engine=%s\npodman=v%s\n' "joinery-site-engine-$v-amd64" "$v" > "$d/$top/BUILDINFO"
     [ -n "$note" ] && echo "note=$note" >> "$d/$top/BUILDINFO"
+    [ "$built" != "-" ] && echo "built_on=$built" >> "$d/$top/BUILDINFO"
     [ -n "$skip" ] && rm -f "$d/$top/$skip"
     tar -C "$d" -cJf "$T/joinery-site-engine-$v-amd64.tar.xz" "$top"
     echo "$T/joinery-site-engine-$v-amd64.tar.xz"
@@ -81,6 +90,19 @@ chk "  and leaves no engine directory" "$(ls "$LIB" 2>/dev/null | grep -c -E '^6
 C=$(make_archive 6.1.4 6.1.4 "" helpers/netavark)
 chk "an archive missing a part is refused" "$(run install "$C" "$(sha "$C")")" "1"
 chk "  naming the part" "$(grep -c 'has no helpers/netavark' "$T/out")" "1"
+# The engine links against the libraries of the release it was built on: on
+# 24.04 the 26.04 build's podman could not load libgpgme.so.45 and failed only
+# after the switch (B30).
+host_is 24.04 "Ubuntu 24.04.4 LTS"
+A=$(make_archive 6.1.4)
+chk "an engine built on 26.04, on a 24.04 machine, is refused" "$(run install "$A" "$(sha "$A")")" "1"
+chk "  saying which release it needs and which this is" "$(grep -c 'built on Ubuntu 26.04 and links against that release.s libraries, and this machine is Ubuntu 24.04.4 LTS' "$T/out")" "1"
+nothing_installed() { echo "$(ls "$LIB" 2>/dev/null | grep -c -E '^6\.1\.4-'):$([ -e "$LIB/current" ] && echo current || echo none):$([ -e "$FR/usr/local/bin/podman" ] && echo podman || echo none)"; }
+chk "  and no engine is unpacked, made current or installed" "$(nothing_installed)" "0:none:none"
+host_is 26.04 "Ubuntu 26.04.1 LTS"
+N=$(make_archive 6.1.4 6.1.4 "" "" "" -)
+chk "an engine whose BUILDINFO names no release it was built on is refused" "$(run install "$N" "$(sha "$N")"):$(grep -c 'names no Ubuntu release' "$T/out")" "1:1"
+chk "  and no engine is unpacked, made current or installed" "$(nothing_installed)" "0:none:none"
 
 echo "Installed"
 A=$(make_archive 6.1.4)
@@ -101,11 +123,81 @@ chk "  and never installs them" "$(grep -c '^Pin-Priority: -1$' "$PREF")" "1"
 chk "the boot unit starts podman from its one path" "$(grep -c 'ExecStart=/usr/local/bin/podman ' "$FR/etc/systemd/system/podman-restart.service")" "1"
 chk "the image policy is written" "$(grep -c 'insecureAcceptAnything' "$FR/etc/containers/policy.json")" "2"
 chk "short image names are looked for on docker.io alone" "$(grep -c '^unqualified-search-registries = \["docker.io"\]$' "$FR/etc/containers/registries.conf")" "1"
-chk "the site filter is the tree's, byte for byte" "$(cmp -s "$FR/etc/containers/joinery-site-seccomp.json" "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.json" && echo same)" "same"
-chk "  and that file is the one its source record names" "$(sha256sum "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.json" | cut -c1-64)" "$(sed -n 's/^SHA256="\(.*\)"$/\1/p' "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.source")"
-chk "  which refuses user namespaces to a process without CAP_SYS_ADMIN, as Docker does" "$(python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['defaultAction'], any('unshare' in r['names'] and r.get('includes',{}).get('caps')==['CAP_SYS_ADMIN'] for r in d['syscalls']))" "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.json")" "SCMP_ACT_ERRNO True"
+chk "the site filter is the tree's generated one, byte for byte" "$(cmp -s "$FR/etc/containers/joinery-site-seccomp.json" "$ROOT/maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.json" && echo same)" "same"
+# specs/multi_tenant_host_hardening.md D2: the filter is Docker's default with
+# our narrowing, generated, never edited; it differs from Docker's nowhere else.
+SE="$ROOT/maintenance_scripts/install_tools/site_engine"
+chk "  and it is what make_site_profile.php makes from Docker's default" "$(php "$SE/make_site_profile.php" --check 2>&1)" "joinery_site_seccomp.json is current"
+chk "  differing from Docker's only by D2's changes" "$(python3 -I - "$SE/site_seccomp.json" "$SE/joinery_site_seccomp.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); g = json.load(open(sys.argv[2]))
+refused = {'ptrace','process_vm_readv','process_vm_writev','kcmp','userfaultfd','io_uring_setup','io_uring_enter',
+    'io_uring_register','bpf','perf_event_open','keyctl','add_key','request_key','unshare','setns','mount','umount2',
+    'pivot_root','open_by_handle_at','init_module','finit_module','kexec_load','kexec_file_load','socketcall'}
+bad = []
+# The arch map: Docker's, with 32-bit x86 out of x86_64's subarchitectures and nothing else.
+want_map = [dict(e, subArchitectures=[a for a in e.get('subArchitectures', []) if a != 'SCMP_ARCH_X86'])
+            if e.get('architecture') == 'SCMP_ARCH_X86_64' else e for e in d.get('archMap', [])]
+if g.get('archMap') != want_map:
+    bad.append('archMap')
+for k in d:
+    if k not in ('syscalls', 'archMap') and d[k] != g.get(k):
+        bad.append('top-level ' + k)
+want = []
+for r in d['syscalls']:
+    if r['names'] == ['socket']:
+        continue
+    if r['names'] == ['personality'] and r.get('args') not in ([{'index': 0, 'value': 0, 'op': 'SCMP_CMP_EQ'}], [{'index': 0, 'value': 4294967295, 'op': 'SCMP_CMP_EQ'}]):
+        continue
+    kept = [n for n in r['names'] if n not in refused]
+    if kept:
+        want.append(dict(r, names=kept))
+got = [r for r in g['syscalls'] if r['names'] != ['socket']]
+if got != want:
+    bad.append('a rule other than socket differs from Docker\'s with the refusals taken out')
+sock = [r for r in g['syscalls'] if r['names'] == ['socket']]
+key = lambda r: tuple((a['index'], a['value'], a['op']) for a in r.get('args', []))
+allow = sorted(key(r) for r in sock if r['action'] == 'SCMP_ACT_ALLOW')
+if allow != sorted([((0, 1, 'SCMP_CMP_EQ'),), ((0, 2, 'SCMP_CMP_EQ'),), ((0, 10, 'SCMP_CMP_EQ'),), ((0, 16, 'SCMP_CMP_EQ'), (2, 0, 'SCMP_CMP_EQ'))]):
+    bad.append('socket allows')
+errs = [r for r in sock if r['action'] != 'SCMP_ACT_ALLOW']
+if any(r['action'] != 'SCMP_ACT_ERRNO' for r in errs):
+    bad.append('a socket rule neither allows nor answers an errno')
+# Every refused netlink protocol answers EPROTONOSUPPORT as a (16, N) pair, every
+# other refused domain EAFNOSUPPORT on the domain alone; no refusal names a bare 16.
+for r in errs:
+    a = r.get('args', [])
+    if a and a[0]['value'] == 16 and a[0]['op'] == 'SCMP_CMP_EQ':
+        if len(a) != 2 or r.get('errnoRet') != 93:
+            bad.append('a netlink refusal')
+    elif len(a) != 1 or r.get('errnoRet') != 97:
+        bad.append('a domain refusal')
+domains = {r['args'][0]['value'] for r in errs if len(r['args']) == 1 and r['args'][0]['op'] == 'SCMP_CMP_EQ'}
+if domains != set(range(64)) - {1, 2, 10, 16}:
+    bad.append('the refused domains are not every one below 64 but the four')
+for r in g['syscalls']:
+    if r['action'] == 'SCMP_ACT_ALLOW' and refused & set(r['names']):
+        bad.append('allows ' + ','.join(sorted(refused & set(r['names']))))
+print('; '.join(sorted(set(bad))) or 'only D2')
+PY
+)" "only D2"
+chk "  Docker's default it is made from is the file its source record names" "$(sha256sum "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.json" | cut -c1-64)" "$(sed -n 's/^SHA256="\(.*\)"$/\1/p' "$ROOT/maintenance_scripts/install_tools/site_engine/site_seccomp.source")"
+chk "  which refuses user namespaces to every process, with or without CAP_SYS_ADMIN" "$(python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['defaultAction'], any('unshare' in r['names'] for r in d['syscalls'] if r['action']=='SCMP_ACT_ALLOW'))" "$ROOT/maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.json")" "SCMP_ACT_ERRNO False"
 chk "no data root in the fixture: storage is left to the engine's default" "$([ -f "$FR/etc/containers/storage.conf" ] && echo written || echo left)" "left"
 chk "status prints the engine" "$(JOINERY_SITE_ENGINE_ROOT="$FR" bash "$INST" status | head -n1)" "engine=joinery-site-engine-6.1.4-amd64"
+
+echo "A profile edited by hand is refused (reviewer2 K2)"
+# A host has no PHP to make the profile again, so it checks the record
+# make_site_profile.php writes: the profile's hash and the Docker file's.
+HT="$T/handtree"; mkdir -p "$HT"; cp -r "$ROOT/maintenance_scripts/install_tools" "$HT/"
+python3 -I - "$HT/install_tools/site_engine/joinery_site_seccomp.json" <<'PY'
+import json, sys
+p = sys.argv[1]; g = json.load(open(p)); g['syscalls'][0]['names'].append('ptrace'); json.dump(g, open(p, 'w'), indent=4)
+PY
+HR="$T/handroot"
+chk "the install stops, naming the record, and writes no filter" \
+    "$(JOINERY_SITE_ENGINE_ROOT="$HR" bash "$HT/install_tools/install_site_engine.sh" install "$A" "$(sha "$A")" > "$T/out" 2>&1; echo $?):$(grep -c 'is not the profile joinery_site_seccomp.source records' "$T/out"):$([ -f "$HR/etc/containers/joinery-site-seccomp.json" ] && echo written || echo none)" "1:1:none"
+rm -rf "$HT" "$HR"
 
 echo "Converge keeps the host's configuration"
 mkdir -p "$FR/srv/joinery"

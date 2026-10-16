@@ -128,10 +128,24 @@ case "\$1" in
     -S)         exec /usr/sbin/apache2 -S -f "$T/main.conf" ;;
 esac
 STUB
+# stop and start stand in for systemd stopping and starting Apache in its
+# unit: with STUB_SANDBOX_BREAKS set and the sandbox in place, Apache does not
+# come up, as when a sandbox takes something Apache needs.
 cat > "$T/bin/systemctl" <<STUB
 #!/bin/bash
 echo "systemctl \$*" >> "$T/calls"
 [ "\$1" = reload-or-restart ] && { [ -f "$T/logs/pid" ] && exec /usr/sbin/apache2 -k graceful -f "$T/main.conf"; exec /usr/sbin/apache2 -k start -f "$T/main.conf"; }
+if [ "\$1" = stop ] || [ "\$1" = restart ]; then
+    [ -f "$T/logs/pid" ] && { /usr/sbin/apache2 -k stop -f "$T/main.conf"; for _ in \$(seq 50); do [ -f "$T/logs/pid" ] || break; sleep 0.1; done; }
+    [ "\$1" = stop ] && exit 0
+fi
+if [ "\$1" = start ] || [ "\$1" = restart ]; then
+    [ -n "\${STUB_SANDBOX_BREAKS:-}" ] && [ -f "$R/etc/systemd/system/apache2.service.d/joinery-sandbox.conf" ] && exit 1
+    /usr/sbin/apache2 -k start -f "$T/main.conf" || exit 1
+    for _ in \$(seq 50); do [ -f "$T/logs/pid" ] && break; sleep 0.1; done
+    exit 0
+fi
+[ "\$1" = is-active ] && { [ -f "$T/logs/pid" ] && kill -0 "\$(cat "$T/logs/pid")" 2>/dev/null; exit; }
 exit 0
 STUB
 printf '#!/bin/bash\necho "a2enmod $*" >> "%s/calls"\n' "$T" > "$T/bin/a2enmod"
@@ -171,7 +185,8 @@ echo "=== install ==="
 : > "$T/calls"
 out="$(bash "$PDS" install 2>&1)"; rc=$?
 chk "exit 0" "$rc" "0"
-chk "Apache's modules, a configuration test, one reload" "$(calls)" "a2enmod ssl|apache2ctl configtest|systemctl reload-or-restart|apache2ctl -S|"
+chk "Apache's modules, a configuration test, one reload; then the sandbox, and Apache stopped and started in it as at a boot" "$(calls)" \
+    "a2enmod ssl|apache2ctl configtest|systemctl reload-or-restart|apache2ctl -S|systemctl daemon-reload|systemctl stop|systemctl start|systemctl is-active|"
 chk "says it answers both ports" "$(printf '%s\n' "$out" | grep -c ': answers$')" "2"
 chk "Ubuntu's default site is off" "$([ -e "$R/etc/apache2/sites-enabled/000-default.conf" ] && echo on || echo off)" "off"
 chk "the default site is enabled, and sorts first" "$(ls "$R/etc/apache2/sites-enabled" | head -1)" "000-joinery-no-site.conf"
@@ -192,8 +207,83 @@ chk "www.b.test over TLS: b's certificate, redirected to the apex" "$(cert_of ww
 echo "=== install again: nothing changes, nothing reloads ==="
 : > "$T/calls"
 out="$(bash "$PDS" install 2>&1)"; rc=$?
-chk "exit 0, unchanged, no reload" "$rc:$(calls)" "0:a2enmod ssl|apache2ctl -S|"
+chk "exit 0, unchanged, no reload, no restart" "$rc:$(calls)" "0:a2enmod ssl|apache2ctl -S|"
+chk "  and says the sandbox is unchanged" "$(printf '%s\n' "$out" | grep -c '^sandbox: unchanged$')" "1"
 chk "check: exit 0" "$(bash "$PDS" check >/dev/null; echo $?)" "0"
+
+echo "=== the sandbox the proxy runs in (specs/multi_tenant_host_hardening.md D5) ==="
+SBX="$R/etc/systemd/system/apache2.service.d/joinery-sandbox.conf"
+chk "written beside the unit, 0644" "$([ -f "$SBX" ] && stat -c %a "$SBX")" "644"
+for line in "NoNewPrivileges=yes" "ProtectSystem=strict" "RuntimeDirectory=apache2 lock/apache2" "RuntimeDirectoryPreserve=restart" \
+            "ReadWritePaths=/var/log/apache2 -/var/cache/apache2 -/var/lib/apache2" "ProtectHome=yes" "PrivateDevices=yes" \
+            "RestrictNamespaces=yes" "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX" "SystemCallFilter=@system-service" \
+            "CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_CHOWN CAP_KILL"; do
+    chk "  $line" "$(grep -cxF "$line" "$SBX")" "1"
+done
+# /run is read-only in the sandbox and empty after a boot: a ReadWritePaths
+# entry for Apache's run or lock directory would stop it starting at boot.
+# A start from nothing hands Apache's socket folder to www-data (se1, 2026-10-15:
+# without CAP_CHOWN Apache did not start after a boot).
+chk "  CAP_CHOWN is kept: a start from nothing hands Apache's socket folder to www-data" "$(grep -c '^CapabilityBoundingSet=.*CAP_CHOWN' "$SBX")" "1"
+chk "  Apache's run and lock directories are systemd's to make, never write paths" "$(grep '^ReadWritePaths=' "$SBX" | grep -c '/run')" "0"
+# Apache's regular expressions are compiled to executable memory (PCRE's JIT).
+chk "  writable-and-executable memory is not refused" "$(grep -c '^MemoryDenyWriteExecute' "$SBX")" "0"
+if command -v systemd-analyze >/dev/null 2>&1 && UNIT="$(systemctl --version >/dev/null 2>&1; ls /usr/lib/systemd/system/apache2.service /lib/systemd/system/apache2.service 2>/dev/null | head -1)" && [ -n "$UNIT" ]; then
+    mkdir -p "$T/units/apache2.service.d"; cp "$UNIT" "$T/units/apache2.service"; cp "$SBX" "$T/units/apache2.service.d/"
+    chk "  systemd reads every line of it (no unknown key, no bad value)" \
+        "$(systemd-analyze verify "$T/units/apache2.service" 2>&1 | grep -F 'joinery-sandbox.conf' | head -3)" ""
+else
+    echo "  NOTE: no systemd-analyze or no apache2.service here; the drop-in's keys are checked on a box"
+fi
+chk "Apache serves after the restart into it" "$(ask evil.example):$(ask a.test https)" "404 none:200 SITE_A"
+
+echo "=== a changed sandbox is written again, and Apache started in it anew ==="
+printf '# an edit\n' >> "$SBX"
+: > "$T/calls"
+out="$(bash "$PDS" install 2>&1)"; rc=$?
+chk "exit 0, rewritten, one restart" "$rc:$(grep -c '^# an edit' "$SBX"):$(calls | tr '|' '\n' | grep -c '^systemctl start$')" "0:0:1"
+
+echo "=== a sandbox Apache cannot run under comes back out ==="
+printf '# an edit\n' >> "$SBX"
+: > "$T/calls"
+out="$(STUB_SANDBOX_BREAKS=1 bash "$PDS" install 2>&1)"; rc=$?
+chk "install fails, saying the sandbox was taken back out" "$rc:$(printf '%s\n' "$out" | grep -c 'taken back out')" "1:1"
+chk "the sandbox is gone, and Apache was restarted without it" "$([ -e "$SBX" ] && echo present || echo gone):$(calls | tr '|' '\n' | grep -c '^systemctl start$')" "gone:2"
+sleep 0.5
+chk "Apache serves again" "$(ask evil.example):$(ask a.test https)" "404 none:200 SITE_A"
+REF="$R/var/lib/joinery/apache-sandbox-refused"
+chk "and the refused sandbox is remembered: its hash and when" "$(grep -cE '^[0-9a-f]{64} [0-9]+$' "$REF" 2>/dev/null)" "1"
+
+echo "=== the same sandbox is not tried again for a day (reviewer2 H1) ==="
+: > "$T/calls"
+out="$(bash "$PDS" install 2>&1)"; rc=$?
+chk "the next run fails, saying it is not tried again, and restarts nothing" \
+    "$rc:$(printf '%s\n' "$out" | grep -c 'not tried again for a day'):$(calls | tr '|' '\n' | grep -c '^systemctl start$'):$([ -e "$SBX" ] && echo present || echo gone)" "1:1:0:gone"
+sed -i -E 's/^([0-9a-f]{64}) [0-9]+$/\1 1/' "$REF"
+out="$(STUB_SANDBOX_BREAKS=1 bash "$PDS" install 2>&1)"; rc=$?
+chk "a day on, it is tried again (here it still fails)" "$rc:$(printf '%s\n' "$out" | grep -c 'taken back out')" "1:1"
+
+echo "=== Apache's own logs outside /var/log/apache2 are write paths (reviewer2 H2) ==="
+# manage_domain.sh before 2.0 wrote a proxy vhost that logs under its site's
+# folder, and certbot's -le-ssl copy carries the same lines.
+mkdir -p "$T/legacy/logs"
+cat > "$R/etc/apache2/sites-enabled/legacy.conf" <<EOF
+<VirtualHost *:$P80>
+    ServerName legacy.test
+    ErrorLog $T/legacy/logs/proxy_error.log
+    CustomLog "$T/legacy/logs/proxy_access.log" combined
+    CustomLog "|/usr/bin/logger -t apache" combined
+</VirtualHost>
+EOF
+: > "$T/calls"
+out="$(bash "$PDS" install 2>&1)"; rc=$?
+chk "a changed sandbox is tried at once, the refusal notwithstanding, and serves" "$rc:$(printf '%s\n' "$out" | grep -c 'started in it from nothing, as at a boot, and serves')" "0:1"
+chk "  its write paths take in the folder the vhost logs to, and not a piped log" \
+    "$(grep -cxF "ReadWritePaths=/var/log/apache2 -/var/cache/apache2 -/var/lib/apache2 -$T/legacy/logs" "$SBX")" "1"
+chk "  and the refusal is forgotten" "$([ -e "$REF" ] && echo kept || echo gone)" "gone"
+rm -f "$R/etc/apache2/sites-enabled/legacy.conf"
+out="$(bash "$PDS" install 2>&1)"; rc=$?
+chk "the vhost gone, its folder leaves the sandbox at the next run" "$rc:$(grep -c 'legacy/logs' "$SBX")" "0:0"
 
 echo "=== a site that sorts ahead of the default site is caught ==="
 render_site 000-a ahead.test "$B1"

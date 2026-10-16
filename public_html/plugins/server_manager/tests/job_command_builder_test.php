@@ -1466,7 +1466,7 @@ function jcb_moved_new_server($victim, $reach_state = 'reached', $age = 0, array
 	return $new;
 }
 
-list($host_m) = jcb_host_with_agent(array(
+list($host_m) = jcb_host_with_agent(array('mgn_agent_version' => JobCommandBuilder::MOVED_SITE_HELD_MIN_AGENT_VERSION,
 	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site'));
 $decom_retired = jcb_decom_victim($host_m, array('mgn_container_name' => 'decomsite10',
 	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
@@ -1490,6 +1490,17 @@ $probe_msg = '';
 try { JobCommandBuilder::build_decommission_node($decom_retired3); } catch (Exception $e) { $probe_msg = $e->getMessage(); }
 check(strpos($probe_msg, 'routing-probe') !== false,
 	'an old machine below the routing-probe release refuses: its host could not prove anything', $probe_msg);
+// A switch-over holds the old container stopped; only an agent from 1.80.0 can
+// prove such a container's domain left (site_container_engine B29).
+list($host_old) = jcb_host_with_agent(array('mgn_agent_version' => '1.79.0',
+	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site'));
+$decom_retired4 = jcb_decom_victim($host_old, array('mgn_container_name' => 'decomsite19',
+	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));
+jcb_moved_new_server($decom_retired4);
+$held_msg = '';
+try { JobCommandBuilder::build_decommission_node($decom_retired4); } catch (Exception $e) { $held_msg = $e->getMessage(); }
+check(strpos($held_msg, 'runs agent 1.79.0') !== false && strpos($held_msg, 'Update its agent to 1.80.0') !== false,
+	'a host agent below 1.80.0 refuses the old machine of a switch-over, naming the update', $held_msg);
 
 // The host's proof passes for ANY other server answering. The removal also
 // needs this plane's fresh proof that the domain reaches the NEW server.
@@ -1536,7 +1547,7 @@ check(strpos($r_msg, 'ssl_probe_place') !== false, 'a new server whose agent can
 // remove_site_certificate: the certificate a removed old container left on
 // its host. Only once the container is gone, only a name the host reports for
 // the row's domain, never one a live site on the same host serves.
-list($host_cert, $host_cert_node) = jcb_host_with_agent(array(
+list($host_cert, $host_cert_node) = jcb_host_with_agent(array('mgn_agent_version' => JobCommandBuilder::MOVED_SITE_HELD_MIN_AGENT_VERSION,
 	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site,remove_site_certificate'));
 $host_cert_node->set('mgn_last_status_data', json_encode(array('ssl_certificates' => array(
 	array('name' => 'gone.example.com'), array('name' => 'gone.example.com-0001'),
@@ -1752,7 +1763,7 @@ foreach (array('server_manager_outbound_ceiling_mbit', 'server_manager_outbound_
 
 // moved_site_check: the same proof, removing nothing, addressed to the host
 // like the removal. Only for the old machine of a switch-over.
-list($host_mc, $host_mc_node) = jcb_host_with_agent(array(
+list($host_mc, $host_mc_node) = jcb_host_with_agent(array('mgn_agent_version' => JobCommandBuilder::MOVED_SITE_HELD_MIN_AGENT_VERSION,
 	'mgn_agent_primitives' => 'check_status,decommission_site,decommission_moved_site,moved_site_check'));
 $mc_victim = jcb_decom_victim($host_mc, array('mgn_container_name' => 'decomsite14',
 	'mgn_install_state' => 'retired', 'mgn_joinery_version' => ProvisionPendingSsl::PROBE_MIN_CORE_VERSION));

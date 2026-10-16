@@ -2,6 +2,16 @@
 #
 # _site_start.sh - a site container's start command (specs/site_container_engine.md D6).
 #
+# Version: 1.2 - PostgreSQL is started by pg_ctl -w as postgres, with pg_ctlcluster's options and the
+#               cluster's environment file, and the fixed three-second sleep after it goes (specs/
+#               multi_tenant_host_hardening.md D9): pg_ctlcluster probes readiness with psql, which a
+#               password-only cluster refuses, and gives up only after ten refusals half a second apart,
+#               so a cluster ready in 0.3 s took 6.3 s to start. pg_ctl -w waits for the server's own
+#               ready mark. The cluster's postgresql.conf names its data directory, hba, ident and pid
+#               files, which pg_ctlcluster adds only when it does not. When pg_ctl stops waiting while
+#               PostgreSQL is still recovering, the start waits on with no limit, and fails only once
+#               PostgreSQL has stopped: a start that gave up would end the container mid-recovery, and
+#               the next start would begin the recovery again (reviewer2 H5).
 # Version: 1.1 - a quiet site (its state file, _site_state.sh) starts quiet: before cron and Apache
 #                start, the quiet measures are asserted, which holds the scheduled-task cron file
 #                just written and puts the web drop-in in place; a cron file still there stops the
@@ -44,8 +54,21 @@ set +H && \
         find /var/log/postgresql -maxdepth 1 -type f -name '*.log' -exec chown postgres:adm {} +; \
     fi && \
     (bash "/var/www/html/${SITENAME}/maintenance_scripts/sysadmin_tools/tune_postgres_memory.sh" --no-restart --container || true) && \
-    service postgresql start && \
-    sleep 3 && \
+    install -d -o postgres -g postgres -m 2775 /var/run/postgresql && \
+    PG_BIN="/usr/lib/postgresql/${PG_IMAGE_MAJOR}/bin" && PG_DATA="/var/lib/postgresql/${PG_IMAGE_MAJOR}/main" && \
+    PG_ENV_FILE="/etc/postgresql/${PG_IMAGE_MAJOR}/main/environment" && \
+    { ( set -a; [ ! -f "${PG_ENV_FILE}" ] || . "${PG_ENV_FILE}"; set +a; \
+        exec runuser -u postgres -- setsid --wait "${PG_BIN}/pg_ctl" start -w -t 60 -s \
+            -D "${PG_DATA}" -l "/var/log/postgresql/postgresql-${PG_IMAGE_MAJOR}-main.log" \
+            -o "-c config_file=/etc/postgresql/${PG_IMAGE_MAJOR}/main/postgresql.conf" ) || \
+      { PG_WAITED=0; \
+        until pg_isready -q; do \
+            if ! runuser -u postgres -- "${PG_BIN}/pg_ctl" status -D "${PG_DATA}" > /dev/null 2>&1; then \
+                echo "FATAL: PostgreSQL stopped while starting; see /var/log/postgresql"; exit 1; \
+            fi; \
+            [ $((PG_WAITED % 30)) -ne 0 ] || echo "PostgreSQL is still recovering (${PG_WAITED} s past pg_ctl's wait); waiting"; \
+            sleep 5; PG_WAITED=$((PG_WAITED + 5)); \
+        done; }; } && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
     PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | sort -V | tail -1)" && \
     if [ -z "${PG_CONF}" ]; then echo "FATAL: no pg_hba.conf under /etc/postgresql"; exit 1; fi && \

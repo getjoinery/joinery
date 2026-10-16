@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.85 - a host report's site container answers quiet where its host records the site quiet (host_report
+ *                1.27: a dormant copy, a frozen source) and is kept as quiet, not unknown (specs/site_container_engine.md B27)
  * @version 1.84 - a host report's site_engine (host_report 1.26) is kept: podman, docker, none or unknown, null
  *                from an older node, for a copy onto a host to be placed by (specs/site_container_engine.md D9)
  * @version 1.83 - container_inventory keeps 32 mounts a container (a site has 16 volumes), as container_inventory.sh
@@ -3950,7 +3952,8 @@ HTML;
 			if (!is_array($c)) { continue; }
 			$name = self::host_report_name($c['name'] ?? '');
 			if ($name === '') { continue; }
-			$answers = (isset($c['answers']) && in_array($c['answers'], ['yes', 'no', 'unknown'], true)) ? $c['answers'] : 'unknown';
+			// quiet: the site's pages are the quiet state's own (host_report 1.27).
+			$answers = (isset($c['answers']) && in_array($c['answers'], ['yes', 'no', 'unknown', 'quiet'], true)) ? $c['answers'] : 'unknown';
 			$entry = [
 				'name'    => $name,
 				'state'   => self::unit_journal_word($c['state'] ?? ''),

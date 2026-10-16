@@ -3,6 +3,12 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.8 - the look paths answer with one Location, https://HOST/...: 1.7's relative one went out
+#               beside the absolute http one Redirect adds, and a browser refuses a response with
+#               two (net::ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION, found by WP5d's run 2). A Host that
+#               is an IPv6 address, which Apache would escape there, gets Redirect's own URL: an
+#               address reaches only a bare-metal copy's Apache, and that one speaks https itself.
+#               Redirect's expression form needs Apache 2.4.19 or newer (every node runs 2.4.52+).
 # Version: 1.7 - the look paths answer with a relative Location, so the browser stays on the https
 #               address it came in on. Redirect alone names the scheme Apache was reached on,
 #               which in a site container behind its host's proxy is http, and a key page
@@ -232,13 +238,21 @@ ss_render_apache() {
         cat <<EOF
 <LocationMatch "^/\\.joinery-look/${secret}\$">
     Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
-    Header always set Location "/"
-    Redirect 303 /
+    <If "-n %{HTTP_HOST} && ! %{HTTP_HOST} =~ /^\\[/">
+        Redirect 303 "https://%{HTTP_HOST}/"
+    </If>
+    <Else>
+        Redirect 303 /
+    </Else>
 </LocationMatch>
 <LocationMatch "^/\\.joinery-look/${secret}/key\$">
     Header always set Set-Cookie "${SS_COOKIE}=${secret}; Path=/; HttpOnly; SameSite=Lax"
-    Header always set Location "/copy-key"
-    Redirect 303 /copy-key
+    <If "-n %{HTTP_HOST} && ! %{HTTP_HOST} =~ /^\\[/">
+        Redirect 303 "https://%{HTTP_HOST}/copy-key"
+    </If>
+    <Else>
+        Redirect 303 /copy-key
+    </Else>
 </LocationMatch>
 <LocationMatch "^/(?!\\.joinery-look/${secret}(?:/key)?\$)">
     <If "! %{HTTP_COOKIE} =~ /(?:^|;\\s*)${SS_COOKIE}=${secret}(?:;|\$)/">

@@ -216,6 +216,7 @@ esac
 STUB
 cat > "$T/bin/curl" <<'STUB'
 #!/bin/bash
+[ -n "${GATE_CURL_LOG:-}" ] && echo "curl $*" >> "$GATE_CURL_LOG"
 # The site answers through PHP on https: serve.php's header is present.
 case "$*" in
     *https://*) printf 'HTTP/1.1 200 OK\r\nX-Joinery-Version: 0.8.410\r\n\r\n' ;;
@@ -337,6 +338,14 @@ done
 chk "served certificates: whole days left per name, a failed handshake left out" "$sc_ok" "0"
 chk "containers: only the two whose name is their SITENAME" "$(jv "$T/root.json" containers count)/$(jv "$T/root.json" containers.0.name)/$(jv "$T/root.json" containers.1.name)" "2/siteone/sitetwo"
 chk "containers: one answering through PHP, one not" "$(jv "$T/root.json" containers.0.answers)/$(jv "$T/root.json" containers.1.answers)" "yes/no"
+# A copy waiting for its key, or a frozen source, is quiet on its host
+# (site_quiet_host.sh's record): every page is the quiet state's 503, so it is
+# not asked, and container_health must never restart it for not answering (B27).
+mkdir -p "$T/etc/joinery/sites/siteone"; printf 'copy\n' > "$T/etc/joinery/sites/siteone/quiet"
+GATE_CURL_LOG="$T/curl.log" PATH="$T/bin:$PATH" HOST_REPORT_ETC="$T/etc" HOST_REPORT_ROOT_SSH_DIR="$T/rootssh" bash "$SCRIPT" > "$T/quiet.json" 2>/dev/null
+rm -f "$T/etc/joinery/sites/siteone/quiet"
+chk "a container quiet on its host answers quiet, and is not asked; the others are" \
+    "$(jv "$T/quiet.json" containers.0.answers)/$(grep -c '127.0.0.1:8081' "$T/curl.log")/$(jv "$T/quiet.json" containers.1.answers)/$(grep -c '127.0.0.1:8082' "$T/curl.log")" "quiet/0/no/1"
 chk "containers: state and health" "$(jv "$T/root.json" containers.0.state)/$(jv "$T/root.json" containers.0.health)" "running/none"
 # On the site container engine: the same list through podman, whose names carry
 # no slash and whose start time is asked for in RFC 3339 (specs/site_container_engine.md WP3).

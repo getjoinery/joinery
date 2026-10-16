@@ -8,6 +8,10 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.27 - a site container this host records as quiet (/etc/joinery/sites/<site>/quiet, a dormant
+#                copy or a frozen source) answers "quiet", not "no": its pages are the quiet state's 503,
+#                and container_health restarted a copy waiting for its key for not answering through PHP
+#                (specs/site_container_engine.md B27).
 # Version: 1.26 - site_engine: which engine this host's sites run on (podman, docker, none or unknown), for
 #                the management node to choose a host for a copy by (specs/site_container_engine.md D9).
 # Version: 1.25 - the site container engine is installed where anything is at its current path, as
@@ -1151,7 +1155,7 @@ emit_site_engine() {
 emit_containers() {
     local names c site state health pid started port vols answers n=0 i src sum bytes path engine fmt="$INSPECT_FORMAT"
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
-    local -A src_site=() disk=() missing=() reply=() ports=() cfg=()
+    local -A src_site=() disk=() missing=() reply=() ports=() cfg=() quiet=()
     local engine_pair engine_kind
     engine_pair="$(host_engine)" || { printf '"unknown"'; return; }
     read -r engine_kind engine <<< "$engine_pair"
@@ -1176,7 +1180,12 @@ emit_containers() {
         c="${c#/}"
         [[ "$c" =~ ^[a-z0-9_-]{1,50}$ && "$site" == "SITENAME=$c" ]] || continue
         sites+=("$c"); states+=("${state:-unknown}"); healths+=("${health:-unknown}")
-        [[ "$state" == "running" && "$port" =~ ^[0-9]{1,5}$ ]] && ports[$c]="$port"
+        # Quiet on this host (site_quiet_host.sh's record: a dormant copy, a
+        # frozen source): every page is the quiet state's 503, so it is not
+        # asked, and the look cookie that gets past it would write request rows
+        # into a copy whose rows must match its source's.
+        [[ -f "${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/quiet" ]] && quiet[$c]=1
+        [[ "$state" == "running" && "$port" =~ ^[0-9]{1,5}$ && -z "${quiet[$c]:-}" ]] && ports[$c]="$port"
         # Held stopped by hold_container (a switch-over's old container): not
         # running is what it should be, and container_health leaves it alone.
         if [[ -f "${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/held" ]]; then helds+=(true); else helds+=(false); fi
@@ -1202,6 +1211,7 @@ emit_containers() {
         # Stopped: it does not answer. Running with no published web port:
         # there is nothing to ask, so unknown.
         if [[ "${states[$i]}" != "running" ]]; then answers=no
+        elif [[ -n "${quiet[$c]:-}" ]]; then answers=quiet
         elif [[ -n "${ports[$c]:-}" ]]; then answers="${reply[$c]:-no}"
         else answers=unknown
         fi
