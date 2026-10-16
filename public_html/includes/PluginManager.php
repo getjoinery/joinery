@@ -13,6 +13,7 @@ require_once(PathHelper::getIncludePath('data/settings_class.php'));
  * This consolidated class replaces the previous multi-class structure with
  * a single cohesive manager that extends AbstractExtensionManager
  *
+ * @version 1.14 - sync() takes every plugin that is not active out of the menus (pruneInactivePluginMenus): the slugs it recorded and the slugs its manifest declares
  * @version 1.13 - uninstall() deletes the app credentials of the purposes the plugin declares (appAccess)
  * @version 1.12 - RESERVED_NAMES (adds 'core'), shared with the sandboxed manifest; liveManifest() reads a sandboxed plugin's manifest.json; install() over an active sandboxed plugin reconciles what it owns with its new manifest
  * @version 1.11 - a sandboxed plugin (SandboxPlugins) is validated, described, activated, deactivated,
@@ -1771,6 +1772,10 @@ class PluginManager extends AbstractExtensionManager {
         foreach ($active_plugins as $plugin) {
             $this->syncMenus($plugin->get('plg_name'));
         }
+        $menu_messages = $this->pruneInactivePluginMenus($active_plugins);
+        if (!empty($menu_messages)) {
+            $result['menu_messages'] = $menu_messages;
+        }
 
         // Sync declarative settings for all active plugins — seeds any that
         // were added in a newer manifest version
@@ -2322,6 +2327,98 @@ class PluginManager extends AbstractExtensionManager {
         if ($source_name !== 'core') {
             $this->saveMenuSlugsToMetadata($source_name, $declared_slugs);
         }
+    }
+
+    /**
+     * Take every plugin that is not active out of the menus. Its pages do not
+     * load, so an entry left behind is a link to a 404. A deactivation removes
+     * the slugs the plugin's last sync recorded; a node whose record was lost
+     * (before keepStoredMetadata) kept the entries, so this also removes the
+     * slugs the plugin's manifest declares. A slug core or an active plugin
+     * declares is never touched.
+     *
+     * @param iterable $active_plugins the active Plugin rows
+     * @return string[] one line per plugin whose entries were removed
+     */
+    private function pruneInactivePluginMenus($active_plugins): array {
+        $core = json_decode((string)@file_get_contents(PathHelper::getIncludePath('admin_menus.json')), true);
+        if (!is_array($core)) {
+            // Without core's list nothing can be proven safe to remove.
+            return array();
+        }
+        $keep = $this->menuSlugsOf(array(
+            'admin'    => $core['adminMenu'] ?? array(),
+            'profile'  => $core['profileMenu'] ?? array(),
+            'settings' => $core['settingsMenu'] ?? array(),
+        ));
+        foreach ($active_plugins as $plugin) {
+            $keep = array_merge($keep, $this->menuSlugsOf($this->declaredMenus($plugin->get('plg_name'))));
+        }
+        $keep = array_flip($keep);
+
+        $messages = array();
+        $dblink = DbConnector::get_instance()->get_db_link();
+        // Not active is anything but 1: a row registered and never switched on holds NULL.
+        $inactive = $dblink->query("SELECT plg_name FROM plg_plugins WHERE plg_active IS DISTINCT FROM 1")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($inactive as $name) {
+            $recorded = $this->getMenuSlugsFromMetadata($name);
+            $slugs = array_values(array_filter(
+                array_unique(array_merge($recorded, $this->menuSlugsOf($this->declaredMenus($name)))),
+                function ($slug) use ($keep) { return !isset($keep[$slug]); }
+            ));
+            if (!empty($slugs)) {
+                $placeholders = implode(',', array_fill(0, count($slugs), '?'));
+                // Children first, so no row is left pointing at a removed parent.
+                $q = $dblink->prepare("DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders}) AND amu_parent_menu_id IS NOT NULL");
+                $q->execute($slugs);
+                $removed = $q->rowCount();
+                $q = $dblink->prepare("DELETE FROM amu_admin_menus WHERE amu_slug IN ({$placeholders})");
+                $q->execute($slugs);
+                $removed += $q->rowCount();
+                if ($removed > 0) {
+                    $messages[] = "{$name}: removed {$removed} menu entr" . ($removed === 1 ? 'y' : 'ies') . " of a plugin that is not active";
+                }
+            }
+            if (!empty($recorded)) {
+                $this->saveMenuSlugsToMetadata($name, array());
+            }
+        }
+        return $messages;
+    }
+
+    /** A plugin's menus as its manifest declares them; none when it cannot be read. */
+    private function declaredMenus(string $name): array {
+        if (SandboxPlugins::isSandboxed($name)) {
+            return SandboxPluginManager::menus($name);
+        }
+        try {
+            $helper = PluginHelper::getInstance($name);
+            return array(
+                'admin'    => $helper->getAdminMenuItems(),
+                'profile'  => $helper->getProfileMenuItems(),
+                'settings' => $helper->getSettingsMenuItems(),
+            );
+        } catch (Exception $e) {
+            return array();
+        }
+    }
+
+    /** Every slug in a declared menu set, an admin section's items included. */
+    private function menuSlugsOf(array $declared): array {
+        $slugs = array();
+        foreach (array('admin', 'profile', 'settings') as $kind) {
+            foreach (($declared[$kind] ?? array()) as $item) {
+                if (!empty($item['slug']) && is_string($item['slug'])) {
+                    $slugs[] = $item['slug'];
+                }
+                foreach ((is_array($item['items'] ?? null) ? $item['items'] : array()) as $child) {
+                    if (!empty($child['slug']) && is_string($child['slug'])) {
+                        $slugs[] = $child['slug'];
+                    }
+                }
+            }
+        }
+        return $slugs;
     }
 
     /**
