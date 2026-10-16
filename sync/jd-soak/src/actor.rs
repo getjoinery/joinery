@@ -480,7 +480,17 @@ fn dir_identity(dir: &Path) -> Folder {
     }
 }
 
-#[cfg(not(unix))]
+/// On Windows the inode is the directory's file index (see
+/// `win::file_index`), and the birth its creation time.
+#[cfg(windows)]
+fn dir_identity(dir: &Path) -> Folder {
+    match (crate::win::file_index(dir), std::fs::metadata(dir)) {
+        (Some(index), Ok(m)) => Folder { inode: Some(index), birth_ns: birth_ns(&m) },
+        _ => Folder::default(),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn dir_identity(_dir: &Path) -> Folder {
     Folder::default()
 }
@@ -590,14 +600,25 @@ mod tests {
         assert_eq!(oracle["a/b.txt"].size, 1234);
     }
 
-    #[test]
+    /// A directory's identity as this platform's custody check reads it.
     #[cfg(unix)]
-    fn a_write_journals_the_directory_it_landed_in() {
+    fn inode_of(dir: &Path) -> u64 {
         use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(dir).unwrap().ino()
+    }
+
+    #[cfg(windows)]
+    fn inode_of(dir: &Path) -> u64 {
+        crate::win::file_index(dir).unwrap()
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn a_write_journals_the_directory_it_landed_in() {
         let bed = Bed::new("parent-inode");
         let mut actor = bed.actor(vec![FsOp::Write { path: "notes.txt".into(), seed: 1, size: 10 }]);
         actor.step().unwrap();
-        let workspace = std::fs::metadata(&bed.root).unwrap().ino();
+        let workspace = inode_of(&bed.root);
         let commit = bed.records().into_iter().find_map(|r| match r {
             Record::ActorCommit { parent_inode, .. } => Some(parent_inode),
             _ => None,
@@ -641,12 +662,11 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn every_commit_journals_the_directory_it_happened_in() {
         // The custody check keys every placement and every withdrawal by the
         // directory it happened in, so a delete, a mkdir and both halves of a
         // rename carry one as a write does (soak run 1572).
-        use std::os::unix::fs::MetadataExt;
         let bed = Bed::new("every-folder");
         let mut actor = bed.actor(vec![
             FsOp::Mkdir { path: "d".into() },
@@ -660,7 +680,7 @@ mod tests {
             actor.step().unwrap();
         }
         let m = std::fs::metadata(&bed.root).unwrap();
-        let workspace = (Some(m.ino()), birth_ns(&m));
+        let workspace = (Some(inode_of(&bed.root)), birth_ns(&m));
         let at: Vec<(String, (Option<u64>, Option<u64>))> = bed
             .records()
             .into_iter()

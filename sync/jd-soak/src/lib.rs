@@ -39,6 +39,8 @@ pub mod rng;
 pub mod server;
 pub mod tree;
 pub mod verify;
+#[cfg(windows)]
+pub mod win;
 
 pub use actor::Actor;
 pub use fleet::{Device, Fleet};

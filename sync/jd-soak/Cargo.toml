@@ -31,6 +31,18 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 # the default 022 would strip group write off everything an actor creates.
 libc = "0.2"
 
+# Finding, signalling and measuring a device's daemon, and reading a
+# directory's identity: on Windows each is an API call, not a /proc read or a
+# command (src/win.rs).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
 [[bin]]
 name = "jd-soak"
 path = "src/main.rs"

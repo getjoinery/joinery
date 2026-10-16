@@ -1,0 +1,24 @@
+{
+  "server": "https://drivetest.getjoinery.com",
+  "devices": [
+    {
+      "name": "device-a",
+      "home": "C:\\soak-win\\run\\device-a\\home",
+      "root": "C:\\soak-win\\run\\device-a\\root",
+      "service": "SoakWin-device-a",
+      "program": "C:\\soak-win\\bin\\device-a\\joinery-drive.exe"
+    },
+    {
+      "name": "device-b",
+      "home": "C:\\soak-win\\run\\device-b\\home",
+      "root": "C:\\soak-win\\run\\device-b\\root",
+      "service": "SoakWin-device-b",
+      "program": "C:\\soak-win\\bin\\device-b\\joinery-drive.exe"
+    }
+  ],
+  "journal_dir": "C:\\soak-win\\run\\journal",
+  "bundle_dir": "C:\\soak-win\\run\\bundles",
+  "storm_seconds": 120,
+  "settle_deadline_seconds": 900,
+  "poll_seconds": 30
+}

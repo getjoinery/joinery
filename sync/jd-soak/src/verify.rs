@@ -941,7 +941,38 @@ pub fn placement_on_disk(root: &Path, tree: &LocalTree) -> Placement {
     out
 }
 
-#[cfg(not(unix))]
+/// The same on Windows, with a directory's file index for its inode (see
+/// `win::file_index`).
+#[cfg(windows)]
+pub fn placement_on_disk(root: &Path, tree: &LocalTree) -> Placement {
+    let mut out = Placement::default();
+    let directory = |path: &Path| -> Option<(u64, Option<u64>)> {
+        let index = crate::win::file_index(path)?;
+        let birth = std::fs::metadata(path).ok().and_then(|m| crate::actor::birth_ns(&m));
+        Some((index, birth))
+    };
+    for entry in tree.entries.values() {
+        let full = root.join(&entry.path);
+        if entry.is_dir {
+            if let Some((index, birth)) = directory(&full) {
+                out.dirs.insert(index, birth);
+            }
+            continue;
+        }
+        let (Some(sha), Some(parent)) = (entry.sha256.as_ref(), full.parent()) else {
+            continue;
+        };
+        if let Some((index, _)) = directory(parent) {
+            out.files.push((entry.path.clone(), sha.clone(), index));
+        }
+    }
+    if let Some((index, birth)) = directory(root) {
+        out.dirs.insert(index, birth);
+    }
+    out
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn placement_on_disk(_root: &Path, _tree: &LocalTree) -> Placement {
     Placement::default()
 }
@@ -1707,7 +1738,7 @@ fn daemon_fd_count(device: &Device) -> Option<u64> {
 
 /// Off Linux the same two readings come from `ps` (kilobytes, as `/proc`
 /// reports them) and `lsof`.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn daemon_rss_kb(device: &Device) -> Option<u64> {
     let pid = device.daemon_pid()?.to_string();
     let out = std::process::Command::new("ps")
@@ -1717,7 +1748,7 @@ fn daemon_rss_kb(device: &Device) -> Option<u64> {
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", windows)))]
 fn daemon_fd_count(device: &Device) -> Option<u64> {
     let pid = device.daemon_pid()?.to_string();
     let out = std::process::Command::new("lsof")
@@ -1730,6 +1761,17 @@ fn daemon_fd_count(device: &Device) -> Option<u64> {
         .filter(|l| l.strip_prefix('f').is_some_and(|n| n.parse::<u64>().is_ok()))
         .count();
     Some(count as u64)
+}
+
+/// On Windows, the working set and the handle count, asked of the system.
+#[cfg(windows)]
+fn daemon_rss_kb(device: &Device) -> Option<u64> {
+    crate::win::working_set_kb(device.daemon_pid()?)
+}
+
+#[cfg(windows)]
+fn daemon_fd_count(device: &Device) -> Option<u64> {
+    crate::win::handle_count(device.daemon_pid()?)
 }
 
 // ---------------------------------------------------------------------------

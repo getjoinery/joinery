@@ -316,6 +316,14 @@ pub fn trash_contents(home: &Path, roots: &[&Path]) -> BTreeSet<String> {
             }
         }
         places.push(root.join(".Trash"));
+        // Windows keeps one Recycle Bin per volume, at its root, with a folder
+        // per account inside; another account's folder cannot be read and is
+        // passed over. Its `$I` files hold where each item came from, not the
+        // item, and their hashes match nothing anybody wrote.
+        #[cfg(windows)]
+        if let Some(volume) = root.ancestors().last() {
+            places.push(volume.join("$Recycle.Bin"));
+        }
     }
 
     let mut out = BTreeSet::new();
@@ -620,7 +628,44 @@ mod tests {
             unix_home: Some(bed.0.join("account-home")),
             unix_user: Some("soak-b".into()),
             service: None,
+            program: None,
         };
         assert!(device_trash_contents(&device).contains(&sha_of("the last copy")));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_file_the_engine_recycles_on_windows_is_findable() {
+        // Windows recycles into a bin at the root of the file's volume, not
+        // under any home, so a search of the homes alone finds nothing there
+        // and reports every recycled file as lost for good.
+        use jd_vfs::Vfs;
+        let bed = Bed::new("recycle");
+        bed.mkdir("root");
+        bed.mkdir("spool");
+        let body = format!("recycled by {} at {:?}", std::process::id(), std::time::SystemTime::now());
+        bed.write("root/gone.txt", &body);
+        let root = bed.0.join("root");
+        // Trashed the way the daemon trashes, by the engine's own code.
+        let vfs = jd_vfs::OsVfs::new(root.clone(), bed.0.join("spool")).unwrap();
+        vfs.trash(&root.join("gone.txt")).unwrap();
+        assert!(!root.join("gone.txt").exists());
+
+        let sha = sha_of(&body);
+        let found = trash_contents(&bed.0.join("home"), &[root.as_path()]);
+
+        // The bin is left as it was found: the item and its `$I` record.
+        let bin = root.ancestors().last().unwrap().join("$Recycle.Bin");
+        for account in std::fs::read_dir(&bin).into_iter().flatten().flatten() {
+            for item in std::fs::read_dir(account.path()).into_iter().flatten().flatten() {
+                let path = item.path();
+                if path.is_file() && hash_file(&path).is_ok_and(|(h, _)| h == sha) {
+                    let name = item.file_name().to_string_lossy().replacen("$R", "$I", 1);
+                    let _ = std::fs::remove_file(&path);
+                    let _ = std::fs::remove_file(account.path().join(name));
+                }
+            }
+        }
+        assert!(found.contains(&sha));
     }
 }
