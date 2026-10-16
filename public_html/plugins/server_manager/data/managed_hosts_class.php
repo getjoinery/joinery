@@ -6,6 +6,9 @@
  * bare machine is only a node — its box identity IS its node — and has no
  * record here.
  *
+ * @version 1.7 - retire_if_empty($id, true): a host whose own agent node was removed for good is retired even
+ *                with Enable automated provisioning checked: with no agent, no site can be installed on it
+ *                (site_container_engine B34, owner 2026-10-16)
  * @version 1.6 - retire_if_empty(): a record with no live site and no live host node is retired when the last one is removed
  * @version 1.5 - mgh_cloud_account: which cloud account the box is in (main or test); stamped when first saved
  * @version 1.4 - place_node(): the posture rule for the add/join writers — link an existing
@@ -123,16 +126,22 @@ class ManagedHost extends SystemBase {
 	 * live node of its own. A box this plane no longer manages is not a group
 	 * the dashboard should keep listing, and the host page's own delete refuses
 	 * only while something is still placed. A record that provisions new sites
-	 * stays: an empty box is what it is for. Restoring a node places it again
-	 * (ManagedNode::undelete). Returns true when the record was retired.
+	 * stays when a site leaves it: an empty box is what it is for. It goes too
+	 * when its own agent node was removed for good ($agent_removed): with no
+	 * agent, a site the provisioning task placed on it could never be
+	 * installed. Restoring a node places it again (ManagedNode::undelete).
+	 * Returns true when the record was retired.
 	 */
-	public static function retire_if_empty($host_id): bool {
+	public static function retire_if_empty($host_id, bool $agent_removed = false): bool {
 		$host_id = (int)$host_id;
 		if ($host_id <= 0) {
 			return false;
 		}
 		$host = new ManagedHost($host_id, TRUE);
-		if (!$host->key || $host->get('mgh_delete_time') || $host->get('mgh_provisioning_enabled')) {
+		if (!$host->key || $host->get('mgh_delete_time')) {
+			return false;
+		}
+		if ($host->get('mgh_provisioning_enabled') && !$agent_removed) {
 			return false;
 		}
 		if ($host->count_sites() > 0 || $host->host_node()) {

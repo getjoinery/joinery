@@ -5,6 +5,7 @@
  * parallel: true
  * env: any
  * needs: []
+ * covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/install_site_engine.sh]
  */
 /**
  * Every script a host word runs ships in the support bundle.

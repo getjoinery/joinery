@@ -371,8 +371,8 @@ $b76_host->load();
 check((bool)$b76_host->get('mgh_delete_time'), 'and its host record, with no site and no agent left, goes with it (B34)');
 
 // B34: a host's agent is linked from the host's side. Removing that node for
-// good retires the host record once nothing is placed on it; one that still
-// holds a site, or provisions new ones, stays.
+// good retires the host record once nothing is placed on it, provisioning
+// new sites or not; one that still holds a site stays.
 $b34_hosts = array();
 foreach (array('empty' => array(), 'site' => array(), 'prov' => array('mgh_provisioning_enabled' => true, 'mgh_max_sites' => 4)) as $b34_kind => $b34_set) {
 	$b34_node = nhr_node('b34' . $b34_kind, array('mgn_cloud_account' => $ours));
@@ -396,7 +396,7 @@ foreach (array('empty' => array(), 'site' => array(), 'prov' => array('mgh_provi
 check($b34_hosts['empty'][0] === true && strpos($b34_hosts['empty'][1], 'host record had nothing left') !== false,
 	'a host whose agent node is removed for good, with nothing on it, is retired and says so', json_encode($b34_hosts));
 check($b34_hosts['site'][0] === false, 'one that still holds a site is kept');
-check($b34_hosts['prov'][0] === false, 'and so is one that provisions new sites');
+check($b34_hosts['prov'][0] === true, 'one that provisions new sites goes too: with no agent no site can be installed on it (owner 2026-10-16)');
 
 $m = nhr_node('machine', array('mgn_cloud_account' => $ours));
 nhr_provision($buyer, $m, array('cvp_instance_id' => '424242'));
