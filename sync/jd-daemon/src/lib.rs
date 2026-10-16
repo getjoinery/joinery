@@ -14,14 +14,22 @@
 //!   cross-compiler — along with it.
 //! - [`health`] — every entry's state reduced to one honest indicator, which is
 //!   the whole "never silently stop" promise made visible.
+//! - [`setup`] — the first run, for a daemon started before it was linked: the
+//!   same ceremony as `login`, driven from the settings page.
+//! - [`settings`] — the settings page itself, served from the binary.
 
 pub mod config;
 pub mod daemon;
 pub mod health;
 pub mod link;
 pub mod passlog;
+pub mod settings;
+pub mod setup;
+
+/// This build's version, as the settings page and the status answer report it.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub use config::{Config, ConfigError};
-pub use daemon::{Command, Daemon, Shared, Snapshot};
+pub use daemon::{Command, Daemon, Exit, Shared, Snapshot};
 pub use health::{Blocker, Health, Indicator};
 pub use jd_platform::control::{self, ControlServer, Endpoint};

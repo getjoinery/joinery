@@ -1105,6 +1105,13 @@ the vault key can only be unlocked where WebAuthn works.
 A denial or an expiry is an ordinary outcome, not an error — a user clicking
 "not me" is doing what that button is for.
 
+The ceremony is started one of two ways, and both store the approval through
+the same code. `joinery-drive login <url>` runs it in a terminal. A daemon
+started before the computer is linked runs it from the settings page instead:
+the site's address, the approval in a signed-in browser (the page shows the code
+and opens the approval page), then the folder to sync, then syncing starts in
+the same process — see [The settings page](#the-settings-page).
+
 ---
 
 ## Where things live
@@ -1177,6 +1184,7 @@ when their files are a week stale.
 ```
 joinery-drive login <instance-url> [--device NAME] [--root PATH]
 joinery-drive daemon
+joinery-drive settings
 joinery-drive status | issues | dismiss <id>
 joinery-drive pause | resume | sync-now | stop
 joinery-drive autostart on|off
@@ -1185,12 +1193,38 @@ joinery-drive unlink
 
 Everything except `login` and `daemon` is a request to the running daemon, so
 every answer is what the daemon actually believes rather than a second opinion.
-`status` exits non-zero when the client is stopped, so a monitoring script does
-not have to parse prose.
+`status` exits non-zero when the client is stopped or not linked, so a
+monitoring script does not have to parse prose.
+
+`login` takes the same addresses the settings page does, checked by the same
+code before anything is sent: a missing scheme is read as `https://`, and plain
+`http://` is refused except to this machine itself (`localhost`, `127.0.0.1`,
+`[::1]`), saying why — the credential the link hands over would cross the
+network unencrypted. While it waits, it prints the approval address and the
+code either way, and says "opened in your browser" only where there is a
+desktop and a browser was asked to open it; otherwise it tells the person to
+open the address themselves, on this computer or any other. `settings` opens the settings
+page in the browser, and prints its address when there is no desktop to open
+it on.
+
+`daemon` runs whether or not the computer is linked. With no config it serves
+the settings page's first-run setup instead of syncing, and starts syncing as
+soon as the setup finishes — or as soon as `login`, run in a terminal, writes a
+config. A config that exists but cannot be read is still refused at startup:
+falling back to defaults would point a client that had been syncing one folder
+at another, and the first pass would read that as everything having been
+deleted.
 
 `unlink` revokes the device's key on the server *before* forgetting it locally —
 the other order leaves a live credential nothing on this machine can name, which
 is exactly the key a lost laptop carries. It leaves the synced files alone.
+
+Unlinking also leaves the state store, so relinking to the same folder resumes
+without reading everything again. The store records which site and folder it is
+the record of, and a daemon whose config names a different one moves it aside
+(`state.db.before-<ms>`) and starts fresh. Read against another folder, the old
+record would say every file it had agreed on was deleted here, and the engine
+would send those deletes to the server.
 
 ### Two threads
 
@@ -1208,12 +1242,65 @@ nothing down and corrupt nothing.
 An HTTP server on `127.0.0.1`, on a port the kernel picks, plus a token in a
 0600 file beside it (`control.json` in the state directory). Loopback is not a
 permission boundary — any local process can connect — so the token is what
-carries the permission. Requests without it are refused before the body is read.
+carries the permission. Requests without a credential are refused before the
+body is read, and never reach the daemon's handler.
 
 The port is kernel-chosen because a fixed one is a fight with whatever else
 wanted it, and a second instance silently failing to bind is a daemon nothing can
 talk to. Shutting down removes the endpoint file: a stale one sends a client to
 whatever now holds that port.
+
+Connections are served a few at a time (four), each with a fifteen-second
+deadline. More than one because browsers open spare connections they may never
+use, and one served at a time held the whole channel for the deadline; a ceiling
+because a thread per connection without one is a thread per connection any
+local process cares to open.
+
+**The browser's way in.** The settings page is the one client that cannot send
+the token — a browser adds no header to a page it is told to open — and the
+token must never travel in a URL, where it would land in history and in browser
+extensions' hands while staying good for the life of the daemon. So the page is
+let in by a chain of things each worth less than the last:
+
+1. A token holder (the tray, `joinery-drive settings`) asks `POST
+   /settings/ticket` for a **ticket**: single-use, two minutes long, good only
+   for the next step. At most eight are outstanding.
+2. The browser opens `http://127.0.0.1:<port>/settings#t=<ticket>`. The ticket
+   is in the fragment, which a browser never sends to a server or puts in a
+   `Referer`. The page's script trades it at `POST /settings/session` (ticket in
+   an `X-Joinery-Ticket` header) for a **session**, and takes it out of the
+   address bar.
+3. Every request the page makes carries `X-Joinery-Session`. A session ends
+   after an hour unused, and with the daemon. It is never a cookie: a browser
+   attaches cookies to requests other sites make, and attaches a custom header
+   only where a page of this origin told it to.
+
+The rest of the browser-facing rules:
+
+- The page's three files (`/settings`, `/settings/app.css`, `/settings/app.js`)
+  are the only thing served without a credential. They are compiled into the
+  binary and hold no data; everything the page shows it asks for.
+- Every request without the token must carry exactly one `Host` naming
+  `127.0.0.1` or `localhost` on this port. That defeats DNS rebinding — a site
+  pointing its own hostname at 127.0.0.1 still makes the browser send its own
+  name.
+- A request carrying a ticket or a session must come from the page's own
+  origin: an `Origin` header, when present, must be `http://127.0.0.1:<port>` or
+  `http://localhost:<port>`, and `Sec-Fetch-Site`, when present, `same-origin`
+  or `none`. Another site's page, or another local web server's on a different
+  port, is refused.
+- No answer ever carries an `Access-Control-Allow-*` header, so no other site
+  can read one or get a preflight approved. Every answer carries a content
+  security policy (scripts, styles and fetches from the page's own origin only,
+  no framing), `X-Frame-Options: DENY`, `nosniff`, and `no-store`.
+- A query string is never a credential: a token or session in a URL is simply
+  absent.
+
+What each caller may ask is the daemon's routing table (`daemon::ROUTES`): one
+line per request, with its method, whether it needs a linked computer, and
+whether the settings page may ask it. Anything that changes something is a
+`POST`. The tray and the CLI may ask everything; the page may ask what it has a
+button for, and not `/stop`, which would take the page down with the daemon.
 
 ### The tray
 
@@ -1231,6 +1318,68 @@ macOS and Windows use the native tray APIs.
 The daemon is a separate process on purpose: sync has to keep running when the
 desktop session restarts and on machines with no desktop at all. Quitting the
 tray stops the tray, not the sync.
+
+While the computer is not linked the menu is the way into the setup: a state
+line that follows the setup's stage ("Waiting for approval — code ABCD-EFGH"),
+**Set up Joinery Drive…**, and Quit. **Settings…** and the issues item open the
+settings page with a fresh ticket (`jd_platform::control::settings_url`), the
+issues item scrolled to the issues list.
+
+### The settings page
+
+A local page served by the daemon (`jd-daemon/src/settings/`: plain HTML, CSS
+and JavaScript, no framework, nothing fetched from anywhere else) and opened in
+the default browser. Everything shown is set as text, never parsed as markup:
+issue summaries and folder names carry names another device chose.
+
+Linked, it shows:
+
+- the health indicator in its four states, the summary and any blocker, items
+  settled, transfers waiting, and when the last pass ran; pause or resume, and
+  check now (hidden while paused);
+- the issues list, each with a Dismiss button, and the full count when the list
+  is capped at fifty;
+- the sync folder, and the folder tree read-only. Every folder syncs; a folder
+  the engine keeps off the computer (a Private folder, a vault on a volume
+  without file identity) is marked "not on this computer". The tree is
+  published by the sync thread after a pass that changed something and capped
+  at 2000 folders, saying so when it is cut short;
+- the site, the computer's name, where its keys are kept, whether encrypted
+  folders open here, and whether it starts at login (a toggle);
+- an **Updates** section, when the status answer carries an `update` field;
+- **Unlink this computer**, behind a confirmation. It revokes the key on the
+  server, forgets it locally, and leaves the files where they are; the daemon
+  then goes back to the first-run setup on the same page.
+
+Not linked, it walks through the setup in the spec's order, driven by a setup
+loop that stands where the sync thread would (`jd-daemon/src/setup.rs`), so the
+control thread never waits on the network:
+
+1. **Your site** — the address (a missing scheme is taken as `https://`; plain
+   `http://` is refused except to this machine itself) and a name for the
+   computer, which ends up in conflict-copy names and so keeps to characters
+   every disk accepts.
+2. **Approve** — the link code, the approval page opened in the browser (and a
+   link to it), and polling every 3 s. A network failure while waiting is said
+   and retried; a denial or expiry returns to step 1 saying which.
+3. **Folder** — prefilled with the default sync root. Refused: the whole home
+   folder, a disk's root, and anywhere that holds or sits inside the client's
+   own config, state or logs — checked both as typed and as the path resolves
+   through symlinks, so a link to the home folder is the home folder. A folder that already has things in it asks for
+   confirmation first, because they will be uploaded. "Start Joinery Drive when
+   I log in" is on by default.
+
+The credential is stored the moment the approval arrives, because the server
+hands it over once. What the folder step still needs (no secret) is kept in
+`pending_link.json` in the state directory, so a daemon restarted before the
+folder is chosen resumes at the folder. Cancelling after an approval revokes the
+new key rather than leaving it live on the account. The same happens when
+`joinery-drive login`, run in a terminal, links the computer while the page's
+approved link is still waiting for a folder: login's credential replaces the
+page's in the store, so the page's device is revoked with its own secret (held
+in memory for this) instead of being left on the account with no key anywhere.
+The credential store is opened only when the setup first needs it, so a fresh
+install touches no keychain before the user has asked to link anything.
 
 ---
 
@@ -1257,7 +1406,7 @@ Two invariants are asserted around **every pass**, not at the end of a run:
 
 | Gate | Tier / env | Covers |
 |---|---|---|
-| `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation. |
+| `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation; the control channel's refusals and the settings page's routes, over HTTP on 127.0.0.1. |
 | `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | Both harnesses themselves — a harness with a bug in it reports a clean run rather than a problem. |
 | `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
 | `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |

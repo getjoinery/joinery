@@ -2,6 +2,7 @@
 //!
 //!   joinery-drive login <instance-url> [--device NAME] [--root PATH]
 //!   joinery-drive daemon        run the sync loop (what autostart runs)
+//!   joinery-drive settings      open the settings page in the browser
 //!   joinery-drive status        what it is doing, and whether that is fine
 //!   joinery-drive issues        things needing a person, with what to do
 //!   joinery-drive dismiss <id>
@@ -13,22 +14,26 @@
 //! the answer to every one of them is whatever the daemon actually believes
 //! rather than a second opinion computed here. Two programs reading the same
 //! state store and disagreeing about it is not a bug worth being able to have.
+//!
+//! `daemon` runs whether or not this computer is linked yet. Unlinked, it
+//! serves the settings page's first-run setup instead of syncing, and starts
+//! syncing the moment the setup finishes — or the moment `login`, run in a
+//! terminal, writes a config.
 
 use std::process::ExitCode;
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use jd_core::store::Store;
-use jd_daemon::config::Config;
+use jd_daemon::config::{Config, ConfigError};
 use jd_daemon::control::{ask, ControlServer, Endpoint};
-use jd_daemon::daemon::{handle_control, Daemon, Shared};
+use jd_daemon::daemon::{handle_control, Daemon, Exit, Shared};
 use jd_daemon::link;
 use jd_platform::{Paths, Secret, SecretStore};
 use jd_proto::{Client, Credentials};
 use jd_vfs::OsVfs;
 use serde_json::{json, Value};
 
-const SERVICE: &str = "com.joinery.drive";
+const SERVICE: &str = link::SERVICE;
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -40,6 +45,7 @@ fn main() -> ExitCode {
     let outcome = match cmd {
         "login" => cmd_login(&rest),
         "daemon" => cmd_daemon(),
+        "settings" => cmd_settings(),
         "status" => cmd_status(),
         "issues" => cmd_issues(),
         "dismiss" => cmd_dismiss(&rest),
@@ -67,6 +73,7 @@ fn main() -> ExitCode {
 const USAGE: &str = "\
 usage: joinery-drive login <instance-url> [--device NAME] [--root PATH]
        joinery-drive daemon
+       joinery-drive settings
        joinery-drive status | issues | dismiss <id>
        joinery-drive pause | resume | sync-now | stop
        joinery-drive autostart on|off
@@ -78,12 +85,12 @@ usage: joinery-drive login <instance-url> [--device NAME] [--root PATH]
 
 fn cmd_login(rest: &[String]) -> Result<(), String> {
     let args = Args::parse(rest)?;
-    let base_url = args
-        .positional
-        .first()
-        .ok_or("login needs the address of your Joinery instance, e.g. https://drive.example.com")?
-        .trim_end_matches('/')
-        .to_string();
+    let typed = args.positional.first().ok_or(
+        "login needs the address of your Joinery instance, e.g. https://drive.example.com",
+    )?;
+    // The same rule, in the same words, as the settings page's first run —
+    // checked before anything is sent, so a refused address never sees a request.
+    let base_url = jd_daemon::setup::instance_url(typed)?;
 
     let paths = Paths::discover();
     paths.create().map_err(|e| e.to_string())?;
@@ -100,16 +107,8 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
     let pending = link::begin(&client, &device_name, jd_platform::platform_name())
         .map_err(|e| e.to_string())?;
 
-    // The code is printed whether or not a browser opened, because the ceremony
-    // works perfectly well with a person reading it off one screen and typing it
-    // into another — which is the only way it works on a headless box.
-    println!("To link this computer, approve it while signed in to {base_url}:");
-    println!("\n    {}\n", pending.verify_url);
-    println!("    or enter the code: {}", pending.link_code);
-    if jd_platform::browser::open_url(&pending.verify_url) {
-        println!("\n(opened in your browser)");
-    }
-    println!("\nWaiting for approval…");
+    let opened = jd_platform::browser::show_url(&pending.verify_url);
+    print!("{}", link::instructions(&base_url, &pending, opened));
 
     let approved = loop {
         std::thread::sleep(link::POLL_INTERVAL);
@@ -128,34 +127,7 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
     // secret was stored would leave a client that believes it is linked and
     // holds nothing to prove it.
     let secrets = SecretStore::open(SERVICE, &paths.state);
-    secrets
-        .set(Secret::ApiSecret, &approved.credentials.secret_key)
-        .map_err(|e| format!("cannot store the device credential: {e}"))?;
-    secrets
-        .set(
-            Secret::DeviceKey,
-            &encode_base64(&pending.device_secret_pkcs8),
-        )
-        .map_err(|e| format!("cannot store the device key: {e}"))?;
-
-    let mut vault_enabled = false;
-    if let Some(sealed) = &approved.sealed_vault_key {
-        match link::open_vault_key(&pending, sealed) {
-            Ok(vault_key) => {
-                secrets
-                    .set(Secret::VaultKey, &encode_base64(&vault_key))
-                    .map_err(|e| format!("cannot store the vault key: {e}"))?;
-                vault_enabled = true;
-            }
-            // Not fatal. Everything outside encrypted folders syncs perfectly
-            // well without it, and refusing to link over this would be refusing
-            // the whole account over one feature.
-            Err(e) => eprintln!(
-                "warning: encrypted folders could not be enabled on this device ({e}). \
-                 Everything else will sync; link again to retry."
-            ),
-        }
-    }
+    let vault_enabled = link::store_approved(&secrets, &pending, &approved)?;
 
     std::fs::create_dir_all(&sync_root)
         .map_err(|e| format!("cannot create {}: {e}", sync_root.display()))?;
@@ -191,8 +163,94 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
 fn cmd_daemon() -> Result<(), String> {
     let paths = Paths::discover();
     paths.create().map_err(|e| e.to_string())?;
-    let config = Config::load(&paths.config_file()).map_err(|e| e.to_string())?;
 
+    // A config that is there but unreadable is refused before anything opens,
+    // as it always was: carrying on would point a client that had been syncing
+    // one folder at whatever a default says, and the first pass would read that
+    // as everything having been deleted. Only "no config at all" means setup.
+    match Config::load(&paths.config_file()) {
+        Ok(_) | Err(ConfigError::NotLinked) => {}
+        Err(e) => return Err(e.to_string()),
+    }
+
+    let shared = Arc::new(Shared::new());
+    // The channel opens first, linked or not, and stays the same one for the
+    // life of the process: the settings page that walks a user through setup
+    // is still talking to the same port, with the same session, when syncing
+    // starts — and again if they unlink from it.
+    let server = Arc::new(
+        ControlServer::bind(&paths.state.join("control.json"), control_token())
+            .map_err(|e| format!("cannot open the control channel: {e}"))?
+            .with_pages(jd_daemon::settings::PAGES),
+    );
+    let port = server.port();
+
+    // The control thread holds no database handle at all, so a hung tray or
+    // twenty CLI calls at once can slow nothing down and corrupt nothing.
+    let control_shared = Arc::clone(&shared);
+    let serving = Arc::clone(&server);
+    std::thread::spawn(move || serving.serve(move |req| handle_control(&control_shared, req)));
+
+    let outcome = run_daemon(&paths, &shared, port);
+    // A stale endpoint file sends the tray and the CLI to whatever holds that
+    // port next, so it goes with the process.
+    server.shutdown();
+    outcome
+}
+
+/// Set up when there is nothing to sync yet, sync when there is, and go back
+/// to setup when the user unlinks from the settings page.
+fn run_daemon(paths: &Paths, shared: &Arc<Shared>, port: u16) -> Result<(), String> {
+    let mut notice = None;
+    loop {
+        let config = match Config::load(&paths.config_file()) {
+            Ok(config) => config,
+            Err(ConfigError::NotLinked) => {
+                println!(
+                    "joinery-drive: not linked yet — open Settings from the Joinery Drive menu, \
+                     or run: joinery-drive settings (control on 127.0.0.1:{port})"
+                );
+                match jd_daemon::setup::run(paths, shared, notice.take()) {
+                    Some(config) => config,
+                    None => return Ok(()),
+                }
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        match sync(paths, shared, config.clone(), port)? {
+            Exit::Stopped => return Ok(()),
+            Exit::Unlinked => {
+                shared.show_setup(jd_daemon::setup::View::unlinking(), paths);
+                notice = Some(unlink_from_page(paths, &config));
+            }
+        }
+    }
+}
+
+/// Unlink at the settings page's request, and say what happened in words the
+/// page can show.
+fn unlink_from_page(paths: &Paths, config: &Config) -> String {
+    let secrets = SecretStore::open(SERVICE, &paths.state);
+    match link::unlink(paths, config, &secrets) {
+        Ok(done) => {
+            let revoked = match done.revoked {
+                Some(Err(e)) => format!(
+                    " The site could not be told ({e}); remove this computer from Security in your account on the web."
+                ),
+                _ => String::new(),
+            };
+            format!(
+                "Unlinked from {}. Your files in {} were left where they are.{revoked}",
+                done.base_url,
+                done.sync_root.display()
+            )
+        }
+        Err(e) => format!("Unlinking did not finish: {e}. Run joinery-drive unlink to try again."),
+    }
+}
+
+/// Run the sync loop for one linked configuration.
+fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Result<Exit, String> {
     let secrets = SecretStore::open(SERVICE, &paths.state);
     let secret_key = secrets.get(Secret::ApiSecret).map_err(|e| match e {
         // Not "your credential is missing". It is very probably right where it
@@ -213,37 +271,16 @@ fn cmd_daemon() -> Result<(), String> {
     // a thing to do to somebody.
     let vault = load_vault(&secrets, config.vault_enabled);
 
-    let store = Store::open(&paths.state_db()).map_err(|e| e.to_string())?;
+    let store = jd_daemon::daemon::open_store(&paths.state_db(), &config)?;
     let vfs = OsVfs::new(config.sync_root.clone(), paths.spool()).map_err(|e| e.to_string())?;
 
     let (tx, rx) = channel();
-    let shared = Arc::new(Shared {
-        snapshot: Mutex::new(None),
-        commands: Mutex::new(tx),
-    });
-
-    let server = ControlServer::bind(&paths.state.join("control.json"), control_token())
-        .map_err(|e| format!("cannot open the control channel: {e}"))?;
+    shared.attach(tx);
     println!(
-        "joinery-drive: syncing {} with {} (control on 127.0.0.1:{})",
+        "joinery-drive: syncing {} with {} (control on 127.0.0.1:{port})",
         config.sync_root.display(),
         config.base_url,
-        server.port()
     );
-
-    // The control thread holds no database handle at all, so a hung tray or
-    // twenty CLI calls at once can slow nothing down and corrupt nothing.
-    let control_shared = Arc::clone(&shared);
-    std::thread::spawn(move || loop {
-        if server
-            .serve_one(&mut |req| handle_control(&control_shared, req))
-            .is_err()
-        {
-            // One failed connection is not a reason to stop answering; the
-            // listener is still good.
-            continue;
-        }
-    });
 
     let custody = secrets.custody().describe().to_string();
     // Said either way, so an archive with no journal in it is provably off.
@@ -252,8 +289,18 @@ fn cmd_daemon() -> Result<(), String> {
         Some(j) => eprintln!("pass journal: on -> {}", j.path().display()),
         None => eprintln!("pass journal: off"),
     }
-    Daemon::new(config, store, vfs, credentials, shared, rx, custody, vault, pass_journal).run();
-    Ok(())
+    let mut daemon = Daemon::new(
+        config,
+        store,
+        vfs,
+        credentials,
+        Arc::clone(shared),
+        rx,
+        custody,
+        vault,
+        pass_journal,
+    );
+    Ok(daemon.run())
 }
 
 /// Pick up the key for encrypted folders, if this device has one.
@@ -333,6 +380,20 @@ fn simple_command(path: &str, said: &str) -> Result<(), String> {
 fn cmd_status() -> Result<(), String> {
     let answer = ask(&endpoint()?, "GET", "/status", Value::Null)
         .ok_or("the sync daemon did not answer".to_string())?;
+
+    if answer.get("linked").and_then(Value::as_bool) == Some(false) {
+        println!(
+            "{}",
+            answer
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("Not set up yet")
+        );
+        println!("\n  Finish setting up in: joinery-drive settings");
+        println!("  or link from here:    joinery-drive login <instance-url>");
+        // Not syncing, so not a success to a monitoring script.
+        return Err("this computer is not linked to an account".into());
+    }
 
     let get = |k: &str| {
         answer
@@ -439,6 +500,22 @@ fn cmd_dismiss(rest: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open the settings page in the browser.
+///
+/// The address carries a ticket that is spent when the page loads, so it is
+/// printed as well as opened: on a machine with no desktop, a person can paste
+/// it into a browser on the same machine within the two minutes it lasts.
+fn cmd_settings() -> Result<(), String> {
+    let url = jd_daemon::control::settings_url(&endpoint()?, None)
+        .ok_or("the sync daemon did not answer".to_string())?;
+    if jd_platform::browser::show_url(&url) {
+        println!("Opened Joinery Drive settings in your browser.");
+    } else {
+        println!("Open this in a browser on this computer within two minutes:\n\n    {url}");
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Installation
 // ---------------------------------------------------------------------------
@@ -475,37 +552,20 @@ fn cmd_unlink() -> Result<(), String> {
 
     let config = Config::load(&paths.config_file()).map_err(|e| e.to_string())?;
     let secrets = SecretStore::open(SERVICE, &paths.state);
-
-    // Revoke server-side before forgetting locally. The other order leaves a
-    // live credential on the server that nothing on this machine can name any
-    // more, which is exactly the key a lost laptop is carrying.
-    if let Ok(secret_key) = secrets.get(Secret::ApiSecret) {
-        let mut client = Client::with_credentials(
-            &config.base_url,
-            Credentials {
-                public_key: config.public_key.clone(),
-                secret_key,
-            },
-        );
-        match client.logout() {
-            Ok(_) => println!("Revoked this device's access on {}.", config.base_url),
-            Err(e) => eprintln!(
-                "warning: could not revoke on the server ({e}). \
-                 Remove the device from Security settings in your browser."
-            ),
-        }
+    let done = link::unlink(&paths, &config, &secrets)?;
+    match &done.revoked {
+        Some(Ok(())) => println!("Revoked this device's access on {}.", done.base_url),
+        Some(Err(e)) => eprintln!(
+            "warning: could not revoke on the server ({e}). \
+             Remove the device from Security settings in your browser."
+        ),
+        None => {}
     }
-
-    secrets.clear().map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(paths.config_file());
     let _ = std::fs::remove_file(paths.state.join("control.json"));
-    let _ = jd_platform::autostart::disable(&jd_platform::home_dir());
 
-    // The synced files themselves are left exactly where they are. Unlinking is
-    // "stop syncing this", never "delete the user's documents".
     println!(
         "Unlinked. Your files in {} were left alone.",
-        config.sync_root.display()
+        done.sync_root.display()
     );
     println!(
         "The sync record in {} can be deleted if you are not relinking.",
@@ -520,15 +580,6 @@ fn cmd_unlink() -> Result<(), String> {
 
 fn control_token() -> String {
     jd_daemon::control::new_token()
-}
-
-/// Secrets are stored base64 and read back base64, so the two halves have to be
-/// the same implementation. They are the shared one, rather than a local encoder
-/// paired with a local decoder: two hand-rolled halves agree until one of them
-/// is edited, and the symptom of disagreement is a key that stored fine and
-/// cannot be read back.
-fn encode_base64(bytes: &[u8]) -> String {
-    jd_crypto::b64::encode(bytes)
 }
 
 /// Positionals plus `--flag value` pairs.

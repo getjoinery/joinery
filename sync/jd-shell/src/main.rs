@@ -63,16 +63,13 @@ fn act(id: &str, presentation: &Presentation) -> bool {
                 open_folder(&PathBuf::from(root));
             }
         }
-        "settings" => {
-            if let Some(endpoint) = endpoint() {
-                jd_platform::open_url(&endpoint.url("/settings"));
-            }
-        }
-        "issues" => {
-            if let Some(endpoint) = endpoint() {
-                jd_platform::open_url(&endpoint.url("/settings#issues"));
-            }
-        }
+        // All three open the settings page, which shows the setup while the
+        // computer is not linked. The address carries a ticket the page trades
+        // for a session as it loads, never the daemon's own token: a URL lands
+        // in browser history, and the token is good for as long as the daemon
+        // runs.
+        "settings" | "setup" => open_settings(None),
+        "issues" => open_settings(Some("issues")),
         "start" => start_daemon(),
         "pause" | "resume" | "sync-now" => {
             if let Some(endpoint) = endpoint() {
@@ -83,6 +80,12 @@ fn act(id: &str, presentation: &Presentation) -> bool {
         _ => {}
     }
     true
+}
+
+fn open_settings(section: Option<&str>) {
+    if let Some(url) = endpoint().and_then(|e| jd_platform::control::settings_url(&e, section)) {
+        jd_platform::open_url(&url);
+    }
 }
 
 fn endpoint() -> Option<jd_platform::Endpoint> {
