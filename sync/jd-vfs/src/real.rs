@@ -1189,8 +1189,17 @@ impl OsSpoolFile {
                 return Err(VfsError::FolderMoved(parent.to_path_buf()));
             }
         }
-        match (self.rename)(&self.path, &as_written(target, &self.personality)) {
-            Ok(()) => {}
+        // The file this commit lands, read off the spool before it moves: a
+        // rename on one volume keeps a file's id, birth, size and time, so
+        // this is the file at the target once it lands. Read at the target
+        // afterwards, it was whatever stood there by then -- the user's other
+        // file, swapped onto the name the moment the download landed -- and
+        // the record took that file as its own (soak run 2456, device-a). The
+        // spool's own folder is the engine's; nothing else renames in it.
+        let spooled = fs::symlink_metadata(&self.path).map_err(|e| io_err(&self.path, e))?;
+        let landed = fingerprint_of(&self.path, &spooled);
+        let landed = match (self.rename)(&self.path, &as_written(target, &self.personality)) {
+            Ok(()) => landed,
             // The spool is on the state store's volume and the sync root is
             // not: an external disk, a second partition, a mount point inside
             // the root. A rename cannot cross; the bytes are copied over and
@@ -1199,10 +1208,8 @@ impl OsSpoolFile {
                 self.land_across(target, expect)?
             }
             Err(e) => return Err(io_err(&self.path, e)),
-        }
-
-        let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
-        Ok(as_seen(fingerprint_of(target, &md), &self.personality))
+        };
+        Ok(as_seen(landed, &self.personality))
     }
 
     /// The commit onto another volume: copy the spool beside the target under
@@ -1213,7 +1220,7 @@ impl OsSpoolFile {
     /// asking and acting from a few instructions to as long as the copy takes,
     /// and a user editing the target or moving its folder in that time is the
     /// very thing they exist for. Any failure leaves neither copy behind.
-    fn land_across(&mut self, target: &Path, expect: Option<Fingerprint>) -> VfsResult<()> {
+    fn land_across(&mut self, target: &Path, expect: Option<Fingerprint>) -> VfsResult<Fingerprint> {
         let dir = target
             .parent()
             .ok_or_else(|| io_err(target, std::io::Error::other("a download target with no folder")))?;
@@ -1236,7 +1243,7 @@ impl OsSpoolFile {
         // is not this commit's, so it is not this commit's to replace.
         let out = File::create_new(&land).map_err(|e| io_err(&land, e))?;
         let landed = (|| {
-            {
+            let copied = {
                 let mut out = out;
                 let mut from = File::open(&self.path).map_err(|e| io_err(&self.path, e))?;
                 std::io::copy(&mut from, &mut out).map_err(|e| io_err(&land, e))?;
@@ -1244,7 +1251,12 @@ impl OsSpoolFile {
                 // put on it again.
                 stamp(&out, self.modified);
                 out.sync_all().map_err(|e| io_err(&land, e))?;
-            } // Closed before anything renames or removes it: Windows refuses both on an open file.
+                // The copy is the file that lands, read off its own handle:
+                // the target's name may hold another file by the time the
+                // rename below is done (`try_commit`).
+                let md = out.metadata().map_err(|e| io_err(&land, e))?;
+                fingerprint_of_handle(&out, &md)
+            }; // Closed before anything renames or removes it: Windows refuses both on an open file.
             (self.after_copy)(target);
             self.guard_target(target, expect)?;
             if directory_identity_at(dir, &self.personality)? != folder {
@@ -1258,14 +1270,14 @@ impl OsSpoolFile {
             {
                 let _ = File::open(dir).and_then(|d| d.sync_all());
             }
-            Ok(())
+            Ok(copied)
         })();
         if landed.is_err() {
             let _ = fs::remove_file(&land);
         }
-        landed?;
+        let copied = landed?;
         let _ = fs::remove_file(&self.path);
-        Ok(())
+        Ok(copied)
     }
 
     /// The gates on the file at the target, asked before it is replaced.
@@ -1810,6 +1822,53 @@ mod tests {
             assert_eq!(saves_as_saves, n, "a backup save showed a newcomer older than the rename");
             assert_eq!(swaps_as_swaps, n, "a swap showed a newcomer no older than the rename");
         }
+    }
+
+    /// The rename a commit makes, and then the user's swap of the name it
+    /// landed on with `slot-3.dat` beside it, before the commit has asked
+    /// what stands there.
+    fn rename_then_swap(from: &Path, to: &Path) -> std::io::Result<()> {
+        fs::rename(from, to)?;
+        let other = to.with_file_name("slot-3.dat");
+        let aside = to.with_file_name(".swap-tmp");
+        fs::rename(to, &aside)?;
+        fs::rename(&other, to)?;
+        fs::rename(&aside, &other)
+    }
+
+    /// The file a commit hands back is the one it wrote, whatever stands at
+    /// its name by the time it asks. Read by the name, a swap the user made
+    /// in that moment handed back their other file: the record took it as
+    /// its own, the next scan read it at home with other bytes, and those
+    /// went up as a version of a file they were never part of (soak run
+    /// 2456, device-a, swaps-apart).
+    #[test]
+    fn a_commit_hands_back_its_own_file_when_its_name_is_swapped_at_once() {
+        let d = TempDir::new("commit-swap");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("slot-1.dat");
+        let other = v.root().unwrap().join("slot-3.dat");
+        fs::write(&other, b"the user's other file").unwrap();
+        let theirs = identity_at(&other).unwrap();
+
+        let path = v.spool_dir.join(format!(".jd-tmp-{}", (v.next_token)()));
+        let mut spool = Box::new(OsSpoolFile {
+            file: Some(File::create(&path).unwrap()),
+            path,
+            personality: v.personality,
+            target: target.clone(),
+            folder_at_open: directory_identity_at(target.parent().unwrap(), &v.personality).unwrap().unwrap(),
+            op: 9,
+            modified: None,
+            rename: rename_then_swap,
+            after_copy: |_| {},
+        });
+        spool.write_all(b"what the server sent").unwrap();
+        let fp = spool.commit(&target, None).unwrap();
+
+        assert_eq!(fs::read(&other).unwrap(), b"what the server sent", "the swap put the download beside");
+        assert_ne!(fp.identity(), theirs, "the commit handed back the user's other file");
+        assert_eq!(Some(fp), v.fingerprint(&other).unwrap(), "the commit's file is the one it wrote, in full");
     }
 
     /// 2020-09-13T12:26:40.1234567Z: a whole number of 100 ns ticks, which
