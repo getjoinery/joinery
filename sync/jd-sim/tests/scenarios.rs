@@ -24325,3 +24325,148 @@ fn a_file_seen_private_comes_down_once_its_tree_is_standard_again() {
     assert!(issues_of(laptop, "private_not_synced").is_empty(), "{:?}", issues_of(laptop, "private_not_synced"));
     assert_converged(&world);
 }
+
+/// Each server file's history, as its versions' hashes.
+fn version_chains(world: &World) -> std::collections::BTreeMap<i64, Vec<String>> {
+    let mut chains: std::collections::BTreeMap<i64, Vec<String>> = Default::default();
+    for v in world.server.all_versions() {
+        chains.entry(v.file_id).or_default().push(v.sha256);
+    }
+    chains
+}
+
+/// A synced file at `Swaps/slot-3.dat`, a new file written at
+/// `Swaps/slot-2.dat` that no pass has seen, and the user trading the two
+/// names; then everything settles. Returns the two contents' hashes.
+fn swap_a_synced_file_with_a_newcomer(world: &World, device: &str) -> (String, String) {
+    const SYNCED: &[u8] = b"the synced file, at slot-3";
+    const FRESH: &[u8] = b"a new file at slot-2, never scanned";
+    let dev = world.device(device);
+    dev.fs.user_mkdir("Swaps");
+    dev.fs.user_write("Swaps/slot-3.dat", SYNCED);
+    assert!(world.settle().is_some());
+    dev.fs.user_write("Swaps/slot-2.dat", FRESH);
+    dev.fs.user_rename("Swaps/slot-2.dat", "Swaps/swap.tmp");
+    dev.fs.user_rename("Swaps/slot-3.dat", "Swaps/slot-2.dat");
+    dev.fs.user_rename("Swaps/swap.tmp", "Swaps/slot-3.dat");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(world);
+    (jd_sim::sha256_hex(SYNCED), jd_sim::sha256_hex(FRESH))
+}
+
+/// The user trades the names of a synced file and a new one no pass has seen
+/// (the soak's name-swapper, runs 2456 and 2475). From one scan that is the
+/// disk a save leaves when it renames the original aside and writes the new
+/// file in its place -- except that the newcomer was born before the rename,
+/// which the volume shows. So the synced file follows its file to the other
+/// name, the newcomer is a new file, and no history holds both.
+#[test]
+fn a_swap_with_a_file_the_scan_never_saw_keeps_each_history_its_own() {
+    let world = World::new(9_864, &["laptop", "desktop"]);
+    let (synced, fresh) = swap_a_synced_file_with_a_newcomer(&world, "laptop");
+    for (id, chain) in &version_chains(&world) {
+        assert!(!(chain.contains(&synced) && chain.contains(&fresh)), "file {id} holds both sides: {:?}", version_chains(&world));
+    }
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Swaps/slot-2.dat").cloned().flatten(), Some(synced.clone()), "{tree:?}");
+    assert_eq!(tree.get("Swaps/slot-3.dat").cloned().flatten(), Some(fresh.clone()), "{tree:?}");
+}
+
+/// Where the volume cannot tell the two apart -- a rename does not move the
+/// change time it shows -- the swap reads as the save it looks like: the
+/// synced file's history takes the newcomer's bytes. The limit, pinned.
+#[test]
+fn where_a_rename_moves_no_change_time_a_swap_with_a_newcomer_reads_as_a_save() {
+    let world = World::new(9_865, &["laptop", "desktop"]);
+    world.device("laptop").fs.ctime_follows_renames(false);
+    let (synced, fresh) = swap_a_synced_file_with_a_newcomer(&world, "laptop");
+    assert!(
+        version_chains(&world).values().any(|c| c.contains(&synced) && c.contains(&fresh)),
+        "the limit no longer holds: {:?}",
+        version_chains(&world)
+    );
+}
+
+/// On Windows a file arriving at a name another just left takes that file's
+/// creation time, so births tell nothing there and the swap reads as a save.
+/// The limit, pinned.
+#[test]
+fn on_windows_a_swap_with_a_newcomer_reads_as_a_save() {
+    let world = World::of(9_866, &[("pc", jd_sim::Platform::Windows), ("peer", jd_sim::Platform::Linux)]);
+    let (synced, fresh) = swap_a_synced_file_with_a_newcomer(&world, "pc");
+    assert!(
+        version_chains(&world).values().any(|c| c.contains(&synced) && c.contains(&fresh)),
+        "the limit no longer holds: {:?}",
+        version_chains(&world)
+    );
+}
+
+/// A newcomer made within the same coarse tick as the swap shows the same
+/// time as the rename, and a tie is a save: the residual the rule states.
+#[test]
+fn a_swap_with_a_newcomer_made_in_the_same_tick_reads_as_a_save() {
+    let world = World::new(9_867, &["laptop", "desktop"]);
+    world.device("laptop").fs.stamp_tick(1_000_000);
+    let (synced, fresh) = swap_a_synced_file_with_a_newcomer(&world, "laptop");
+    assert!(
+        version_chains(&world).values().any(|c| c.contains(&synced) && c.contains(&fresh)),
+        "the same-tick residual no longer reads as a save: {:?}",
+        version_chains(&world)
+    );
+}
+
+/// A save that renames the original aside and writes the new file at its
+/// name -- an editor keeping a backup -- is the file's next version, with
+/// every step on its own tick and with all of it on one coarse tick.
+fn a_backup_save_by_renaming_aside_is_the_next_version(seed: u64, tick: u64) {
+    let world = World::new(seed, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.fs.stamp_tick(tick);
+    const OLD: &[u8] = b"the document as synced";
+    const NEW: &[u8] = b"the document as saved";
+    laptop.fs.user_write("doc.txt", OLD);
+    assert!(world.settle().is_some());
+    let doc = world.server.files().into_iter().find(|f| f.name == "doc.txt").expect("on the server").id;
+    laptop.fs.user_rename("doc.txt", "doc.txt~");
+    laptop.fs.user_write("doc.txt", NEW);
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    let chain = version_chains(&world).get(&doc).cloned().unwrap_or_default();
+    assert!(chain.contains(&jd_sim::sha256_hex(OLD)) && chain.contains(&jd_sim::sha256_hex(NEW)), "the save is not the file's next version: {chain:?}");
+    assert_eq!(world.server.tree().get("doc.txt").cloned().flatten(), Some(jd_sim::sha256_hex(NEW)));
+}
+
+#[test]
+fn a_backup_save_by_renaming_aside_is_the_next_version_of_the_file() {
+    a_backup_save_by_renaming_aside_is_the_next_version(9_868, 1);
+}
+
+#[test]
+fn a_backup_save_by_renaming_aside_on_one_coarse_tick_is_the_next_version_of_the_file() {
+    a_backup_save_by_renaming_aside_is_the_next_version(9_869, 1_000_000);
+}
+
+/// A save that writes its temporary file first and only then renames the
+/// original aside (Word's dance, GLib's backups) leaves a newcomer born before
+/// the rename. It reads as a swap, by design: the record follows the original
+/// to its backup name and the saved file is a new file -- a version chain
+/// lost, no bytes lost, and no history holding two files.
+#[test]
+fn a_save_that_writes_its_temporary_first_and_keeps_a_backup_follows_the_original() {
+    let world = World::new(9_870, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const OLD: &[u8] = b"the document as synced";
+    const NEW: &[u8] = b"the document as saved";
+    laptop.fs.user_write("doc.txt", OLD);
+    assert!(world.settle().is_some());
+    let doc = world.server.files().into_iter().find(|f| f.name == "doc.txt").expect("on the server").id;
+    laptop.fs.user_write("~doc.tmp", NEW);
+    laptop.fs.user_rename("doc.txt", "doc.bak");
+    laptop.fs.user_rename("~doc.tmp", "doc.txt");
+    assert!(world.settle().is_some(), "never settled");
+    assert_converged(&world);
+    let original = world.server.files().into_iter().find(|f| f.id == doc).expect("still the server's");
+    assert_eq!(original.name, "doc.bak", "the original did not follow its file: {original:?}");
+    assert_eq!(version_chains(&world).get(&doc).cloned().unwrap_or_default(), vec![jd_sim::sha256_hex(OLD)]);
+    assert_eq!(world.server.tree().get("doc.txt").cloned().flatten(), Some(jd_sim::sha256_hex(NEW)));
+}

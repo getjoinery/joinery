@@ -754,14 +754,15 @@ pub fn check_no_loss_coverage(coverage: Coverage) -> Verdict {
 /// device, as `standing_key` and `orchestrate::run` place it.
 pub const SWAP_WORKSPACE: &str = "Shared-name-swapper";
 
-/// The two bodies of every swap an actor committed.
+/// The two bodies of every swap an actor committed, and the device it was
+/// committed on.
 ///
 /// A swap journals the two names it exchanged as two consecutive commits of
 /// one actor's own stream, each with the content now standing at that name.
 /// Every body the persona writes is its own (`content_bytes` from a fresh
 /// seed) and it never rewrites a name, so two bodies of one swap are two
 /// files, always.
-pub fn swap_pairs(records: &[Record]) -> Vec<(String, String)> {
+pub fn swap_pairs(records: &[Record]) -> Vec<(String, String, String)> {
     let mut open: BTreeMap<String, (u64, String)> = BTreeMap::new();
     let mut pairs = Vec::new();
     for record in records {
@@ -774,7 +775,8 @@ pub fn swap_pairs(records: &[Record]) -> Vec<(String, String)> {
         };
         match open.remove(actor) {
             Some((first_seq, first)) if first_seq + 1 == *seq && first != *sha => {
-                pairs.push((first, sha.clone()));
+                let device = actor.split('/').next().unwrap_or_default().to_string();
+                pairs.push((first, sha.clone(), device));
             }
             _ => {
                 open.insert(actor.clone(), (*seq, sha.clone()));
@@ -784,33 +786,96 @@ pub fn swap_pairs(records: &[Record]) -> Vec<(String, String)> {
     pairs
 }
 
+/// Whether a device's volume tells a save that renames the original aside
+/// from a swap with a file that was already there (`swaps-apart`'s gate).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SwapGate {
+    /// It tells them apart: every swap is judged.
+    On,
+    /// It cannot, for a reason the volume is known for: the documented limit.
+    OffByDesign(&'static str),
+    /// It cannot, and nothing about the volume says why: a probe that failed,
+    /// a root that was not there, a clock that changed. Where the oracle
+    /// matters most, so the run fails rather than excuse it.
+    OffUnexpectedly,
+}
+
+/// The gate a device's volume has, from its personality as its daemon reads it.
+pub fn swap_gate(p: &jd_vfs::Personality) -> SwapGate {
+    if p.tells_saves_from_swaps() {
+        SwapGate::On
+    } else if p.births_are_names {
+        SwapGate::OffByDesign("births follow the names")
+    } else if p.positional_file_ids {
+        SwapGate::OffByDesign("file ids are positions")
+    } else {
+        SwapGate::OffUnexpectedly
+    }
+}
+
 /// No file's history holds both bodies of one swap.
 ///
 /// `histories` is each file's saved version hashes, by file id, with its path
 /// for the report. A file holding both is a trade read as two edits: each
 /// record took the other file's bytes as a new version of itself (Defects AH
 /// and AI), and the trees can agree perfectly while it happens.
+///
+/// `cannot_tell` names the devices whose volume cannot tell a save that
+/// renames the original aside from a swap with a file that was already there,
+/// for a reason the volume is known for (`SwapGate::OffByDesign`: births that
+/// follow the names, ids that are positions). There a swap with a newcomer no
+/// pass has seen reads as the save it looks like, by design
+/// (docs/drive_sync.md), so a history mixed by a swap made on such a device is
+/// the documented limit: counted and named, not failed. Every such device is
+/// named on the verdict either way, so a green run says what it could not
+/// check. `gate_off` names the devices whose volume should tell them apart and
+/// did not say so (`SwapGate::OffUnexpectedly`): the run fails.
 pub fn check_swap_histories(
     histories: &BTreeMap<i64, (String, Vec<String>)>,
-    pairs: &[(String, String)],
+    pairs: &[(String, String, String)],
     unread: usize,
+    cannot_tell: &std::collections::BTreeSet<String>,
+    gate_off: &std::collections::BTreeSet<String>,
 ) -> Verdict {
+    if !gate_off.is_empty() {
+        return Verdict::fail(
+            "swaps-apart",
+            format!(
+                "gate expected on, off: {} cannot tell a save from a swap and nothing about the volume says why (its probe failed or saw no change time move)",
+                gate_off.iter().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        );
+    }
     if pairs.is_empty() {
         return Verdict::pass("swaps-apart", "vacuous — no swap was committed this run");
     }
     let mut mixed = Vec::new();
+    let mut limit = Vec::new();
     for (id, (path, hashes)) in histories {
-        for (a, b) in pairs {
+        for (a, b, device) in pairs {
             if hashes.iter().any(|h| h == a) && hashes.iter().any(|h| h == b) {
-                mixed.push(format!("file {id} ({path}) holds {} and {}", &a[..a.len().min(12)], &b[..b.len().min(12)]));
+                let line = format!("file {id} ({path}) holds {} and {}", &a[..a.len().min(12)], &b[..b.len().min(12)]);
+                if cannot_tell.contains(device) {
+                    limit.push(format!("{line}, swapped on {device}"));
+                } else {
+                    mixed.push(line);
+                }
             }
         }
     }
-    let note = if unread > 0 {
+    let mut note = if unread > 0 {
         format!("; {unread} history(ies) the server would not identify were not judged")
     } else {
         String::new()
     };
+    if !cannot_tell.is_empty() {
+        note.push_str(&format!(
+            "; {} cannot tell a save from a swap with a newcomer (the documented limit), {} such history(ies){}",
+            cannot_tell.iter().cloned().collect::<Vec<_>>().join(", "),
+            limit.len(),
+            if limit.is_empty() { String::new() } else { format!(": {}", limit.iter().take(10).cloned().collect::<Vec<_>>().join("; ")) }
+        ));
+    }
     if mixed.is_empty() {
         Verdict::pass(
             "swaps-apart",
@@ -1947,7 +2012,21 @@ pub fn settle(
     } else {
         swap_workspace_histories(api, &server_tree, VERSION_LOOKUP_BUDGET)
     };
-    verdicts.push(check_swap_histories(&histories, &pairs, unread));
+    // Asked of each device's own sync root, as its daemon asks at start.
+    let mut cannot_tell = std::collections::BTreeSet::new();
+    let mut gate_off = std::collections::BTreeSet::new();
+    for d in &fleet.devices {
+        match swap_gate(&jd_vfs::Personality::probe(&d.root)) {
+            SwapGate::On => {}
+            SwapGate::OffByDesign(_) => {
+                cannot_tell.insert(d.name.clone());
+            }
+            SwapGate::OffUnexpectedly => {
+                gate_off.insert(d.name.clone());
+            }
+        }
+    }
+    verdicts.push(check_swap_histories(&histories, &pairs, unread, &cannot_tell, &gate_off));
     let placements: BTreeMap<String, Placement> = fleet
         .devices
         .iter()
@@ -2749,15 +2828,51 @@ mod tests {
             placed(8, "device-a/name-swapper", "swap", "slot-2.dat", Some("bodyA"), Some(5)),
         ];
         let pairs = swap_pairs(&records);
-        assert_eq!(pairs, vec![("bodyB".to_string(), "bodyA".to_string())]);
+        assert_eq!(pairs, vec![("bodyB".to_string(), "bodyA".to_string(), "device-a".to_string())]);
         // One file took the other's bytes as a version of itself.
         let mixed = histories(&[(901, "Shared-name-swapper/slot-1.dat", &["bodyA", "bodyB"]), (902, "Shared-name-swapper/slot-2.dat", &["bodyB"])]);
-        let verdict = check_swap_histories(&mixed, &pairs, 0);
+        let verdict = check_swap_histories(&mixed, &pairs, 0, &Default::default(), &Default::default());
         assert!(!verdict.ok, "{}", verdict.detail);
         assert!(verdict.detail.contains("file 901"), "{}", verdict.detail);
+        // Made on a device that cannot tell a save from a swap: the
+        // documented limit, counted and named, and the run is not failed.
+        let blind: std::collections::BTreeSet<String> = ["device-a".to_string()].into();
+        let limit = check_swap_histories(&mixed, &pairs, 0, &blind, &Default::default());
+        assert!(limit.ok, "{}", limit.detail);
+        assert!(limit.detail.contains("device-a cannot tell") && limit.detail.contains("1 such history") && limit.detail.contains("file 901"), "{}", limit.detail);
+        // Made on another device, it still fails.
+        let other: std::collections::BTreeSet<String> = ["device-b".to_string()].into();
+        assert!(!check_swap_histories(&mixed, &pairs, 0, &other, &Default::default()).ok);
         // Each file kept its own body: the trade moved names, not bytes.
         let apart = histories(&[(901, "Shared-name-swapper/slot-1.dat", &["bodyA"]), (902, "Shared-name-swapper/slot-2.dat", &["bodyB"])]);
-        assert!(check_swap_histories(&apart, &pairs, 0).ok);
+        assert!(check_swap_histories(&apart, &pairs, 0, &Default::default(), &Default::default()).ok);
+    }
+
+    /// Only a volume known to be blind is the limit: births that follow the
+    /// names (NTFS under Windows) or ids that are positions (FAT). A Linux or
+    /// Mac volume whose probe failed -- the root unwritable, missing, a clock
+    /// that stopped showing renames -- fails the run, swaps or no swaps.
+    #[test]
+    fn a_device_blind_for_no_known_reason_fails_the_swap_check() {
+        use jd_vfs::Personality;
+        assert_eq!(swap_gate(&Personality::linux()), SwapGate::On);
+        assert_eq!(swap_gate(&Personality::macos()), SwapGate::On);
+        assert!(matches!(swap_gate(&Personality::windows()), SwapGate::OffByDesign(_)));
+        assert!(matches!(swap_gate(&Personality::fat32()), SwapGate::OffByDesign(_)));
+        let failed_probe = Personality { stable_file_identity: false, ctime_follows_renames: false, ..Personality::linux() };
+        assert_eq!(swap_gate(&failed_probe), SwapGate::OffUnexpectedly);
+        let no_ctime = Personality { ctime_follows_renames: false, ..Personality::linux() };
+        assert_eq!(swap_gate(&no_ctime), SwapGate::OffUnexpectedly);
+        let off: std::collections::BTreeSet<String> = ["device-a".to_string()].into();
+        let verdict = check_swap_histories(&BTreeMap::new(), &[], 0, &Default::default(), &off);
+        assert!(!verdict.ok && verdict.detail.contains("gate expected on, off: device-a"), "{}", verdict.detail);
+        // And the probe of a root that is not there reads as that.
+        let missing = std::env::temp_dir().join("jd-soak-no-such-root-at-all");
+        let _ = std::fs::remove_dir_all(&missing);
+        let probed = Personality::probe(&missing);
+        if !probed.births_are_names && !probed.positional_file_ids {
+            assert_eq!(swap_gate(&probed), SwapGate::OffUnexpectedly);
+        }
     }
 
     #[test]
@@ -2768,8 +2883,8 @@ mod tests {
             placed(8, "device-a/name-swapper", "swap", "slot-2.dat", Some("z"), Some(5)),
             placed(9, "device-a/name-swapper", "swap", "slot-3.dat", Some("w"), Some(5)),
         ];
-        assert_eq!(swap_pairs(&records), vec![("x".to_string(), "z".to_string())]);
-        assert!(check_swap_histories(&BTreeMap::new(), &[], 0).detail.starts_with("vacuous"));
+        assert_eq!(swap_pairs(&records), vec![("x".to_string(), "z".to_string(), "device-a".to_string())]);
+        assert!(check_swap_histories(&BTreeMap::new(), &[], 0, &Default::default(), &Default::default()).detail.starts_with("vacuous"));
     }
 
     fn disk(files: &[(&str, &str, u64)], dirs: &[u64]) -> Placement {

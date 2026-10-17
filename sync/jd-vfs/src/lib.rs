@@ -180,6 +180,11 @@ pub struct DirEntry {
     /// (`Personality::id_tie_break`), and 0 everywhere else. Never identity:
     /// nothing that reads a fingerprint's id reads this.
     pub tie_break_id: u64,
+    /// A file's change time, in ns since the epoch, where the volume tells a
+    /// save from a swap by it (`Personality::tells_saves_from_swaps`), and 0
+    /// everywhere else. Beside the fingerprint, never in it: a rename or a
+    /// change of permissions moves it, and neither is an edit.
+    pub change_ns: u64,
 }
 
 impl Fingerprint {

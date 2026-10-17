@@ -48,6 +48,41 @@ pub struct ObservedFile {
     pub tie_break_id: u64,
     /// Listed inside a vault folder.
     pub in_a_vault: bool,
+    /// The file's change time where the volume tells a save from a swap by it
+    /// (`jd_vfs::Personality::tells_saves_from_swaps`), and 0 everywhere else.
+    /// Read beside the fingerprint and never kept: a rename moves it, so a
+    /// record's own file standing elsewhere shows when it was moved there
+    /// (`newcomer_was_already_there`).
+    pub change_ns: u64,
+}
+
+/// Was the file standing at a record's path already on the disk when the
+/// record's own file was renamed away from there?
+///
+/// A save that renames the original aside and writes the new file in its
+/// place makes the new file after the rename: its birth is no earlier than
+/// the change time the rename left on the original. A swap with a file that
+/// was already there leaves at the path a file born before the rename. Both
+/// stamps are known only where the volume tells the two apart
+/// (`ObservedFile::change_ns`); with either unknown this answers no, and the
+/// reading stays the save. Measured, 10 000 of each on ext4 (kernels 6.8 and
+/// 7.0) and APFS: every save no earlier, every swap earlier.
+///
+/// Equal stamps are a save. A save's create and its rename land on one
+/// coarse tick (ext4's is a jiffy), so a tie is the save's normal case. What
+/// that leaves, stated: a swap whose newcomer was made within the same tick
+/// as the swap reads as the save. And what flips by design: a save that
+/// writes its temporary file first and only then renames the original aside
+/// (Word's temporary dance, GLib's backups) leaves a newcomer older than the
+/// rename, and so does anything that touches the aside file after the save
+/// (an extended attribute, a permission change, an indexer): the record
+/// follows its original to the backup name and the saved file is a new file.
+/// That costs a version chain and no bytes; read the other way, a swap put
+/// two files' bytes in one history.
+pub fn newcomer_was_already_there(newcomer: &ObservedFile, own_file_now: &ObservedFile) -> bool {
+    let born = newcomer.fingerprint.birth_ns;
+    let moved = own_file_now.change_ns;
+    newcomer.change_ns != 0 && born != 0 && moved != 0 && born < moved
 }
 
 /// What the engine last recorded about a file it is tracking.
@@ -295,15 +330,19 @@ fn pair_with_given(
     //
     // What a trade read this way costs, stated: a file edited and then traded
     // has no agreed bytes left to be recognised by, and reads as deleted plus
-    // a creation -- the version chain lost, no bytes lost. What the careful
-    // form leaves: a trade whose file at this path the store cannot name
-    // still reads as an edit, because from one scan it is the same disk as a
-    // backup-by-rename save. So does a file renamed away with a NEW file
-    // saved at its old name, unless the leaver's own file stands at another
-    // record's path whose record is not at home -- then it is a move (a
-    // rotation whose member at this path is new), and the server may refuse
-    // the name while that record still holds it: the move then lands beside
-    // under a conflict name, never dropped (the reset's C12, frozen 111120).
+    // a creation -- the version chain lost, no bytes lost. Where the volume
+    // tells a save from a swap (`newcomer_was_already_there`), a file at this
+    // path that was already on the disk when the record's own file was
+    // renamed away is a trade. Where it cannot -- births that are names,
+    // change times a rename does not move, no identities -- a trade whose
+    // file at this path the store cannot name reads as an edit, because from
+    // one scan it is the same disk as a backup-by-rename save. So does a file
+    // renamed away with a NEW file saved at its old name, unless the leaver's
+    // own file stands at another record's path whose record is not at home --
+    // then it is a move (a rotation whose member at this path is new), and the
+    // server may refuse the name while that record still holds it: the move
+    // then lands beside under a conflict name, never dropped (the reset's
+    // C12, frozen 111120).
     // A hardlinked twin at home anywhere keeps the reading an edit (p8).
     //
     // A path held by a live record whose bytes have not landed here yet
@@ -395,7 +434,16 @@ fn pair_with_given(
             && k.server_home
                 .as_deref()
                 .is_some_and(|home| mine_elsewhere.iter().any(|o| o.path == home));
-        by_inode || by_content || mine_on_anothers_path || home_again
+        // The file at this path was already on the disk when this record's
+        // own file -- the one with its own identity, standing elsewhere --
+        // was renamed away: a swap, whatever the store can name
+        // (`newcomer_was_already_there`).
+        let own = k.fingerprint.map(|fp| fp.identity()).filter(|i| i.is_strong());
+        let already_there = !twin_at_home
+            && own.is_some_and(|own| {
+                mine_elsewhere.iter().any(|o| o.fingerprint.identity() == own && newcomer_was_already_there(obs, o))
+            });
+        by_inode || by_content || mine_on_anothers_path || home_again || already_there
     };
 
     let mut settled: Vec<bool> = given.to_vec();
@@ -1027,7 +1075,14 @@ fn pair_by<K: Clone + Eq + std::hash::Hash>(
                     r != n && !rec.server_deleted && rec.path == observed[o].path && rec.sha256.as_deref() == Some(observed[o].sha256.as_str())
                 })
             };
-            if let Some(&o) = at_path.get(k.path.as_str()).filter(|o| !claimed[**o] && !owned(**o) && !at_home_there(**o)) {
+            // And not a file that was already on the disk when this record's
+            // own file was renamed away: that is a swap, not a save, and the
+            // record follows its file (`newcomer_was_already_there`).
+            if let Some(&o) = at_path
+                .get(k.path.as_str())
+                .filter(|o| !claimed[**o] && !owned(**o) && !at_home_there(**o))
+                .filter(|o| !newcomer_was_already_there(&observed[**o], &observed[c]))
+            {
                 claimed[o] = true;
                 settled[n] = true;
                 out.bound.extend(bind(&observed[o]).map(|id| (k.id, id)));
@@ -1219,6 +1274,7 @@ mod tests {
             sha256: sha.into(),
             tie_break_id: 0,
             in_a_vault: false,
+            change_ns: 0,
         }
     }
 
@@ -1254,7 +1310,7 @@ mod tests {
             seen_at: Some("Private/Report 8.docx".into()),
             ..known(-5, "Private/Report 8 (2).docx", 1010, "")
         };
-        let here = ObservedFile { path: "Private/Report 8.docx".into(), fingerprint: strong(1010), sha256: "sha-other".into(), tie_break_id: 0, in_a_vault: false };
+        let here = ObservedFile { path: "Private/Report 8.docx".into(), fingerprint: strong(1010), sha256: "sha-other".into(), tie_break_id: 0, in_a_vault: false, change_ns: 0 };
         let out = pair_files(&[sealed, never_sent], &[here], &HashSet::new(), true);
         assert_eq!(out.change_for(EntityId::file(904)), Some(&LocalChange::Deleted), "the sealed file took the other file as its save: {:?}", out.changes);
         assert!(!out.superseded.contains(&EntityId::file(-5)), "{:?}", out.superseded);
@@ -1266,7 +1322,7 @@ mod tests {
     fn a_never_sent_file_seen_beside_a_gone_file_and_renamed_onto_it_is_its_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false, change_ns: 0 };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
         assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1279,7 +1335,7 @@ mod tests {
     fn a_save_whose_temporary_file_naming_renamed_on_paper_is_still_a_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: Some("Art/shot.psd.tmp1453".into()), ..known(-2, "Art/shot.psd (2).tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false, change_ns: 0 };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert!(matches!(out.change_for(EntityId::file(1)), Some(LocalChange::Edited { .. })), "{:?}", out.changes);
         assert!(out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1291,7 +1347,7 @@ mod tests {
     fn a_never_sent_file_whose_place_is_not_known_is_not_read_as_a_save() {
         let file = KnownLocal { own_file: Some(strong(11).identity()), fingerprint: Some(strong(11)), ..known(1, "Art/shot.psd", 11, "sha-old") };
         let temp = KnownLocal { fingerprint: None, sha256: None, own_file: Some(strong(10).identity()), seen_at: None, ..known(-2, "Art/shot.psd.tmp1453", 10, "") };
-        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false };
+        let here = ObservedFile { path: "Art/shot.psd".into(), fingerprint: strong(10), sha256: "sha-new".into(), tie_break_id: 0, in_a_vault: false, change_ns: 0 };
         let out = pair_files(&[file, temp], &[here], &HashSet::new(), true);
         assert_eq!(out.change_for(EntityId::file(1)), Some(&LocalChange::Deleted), "{:?}", out.changes);
         assert!(!out.superseded.contains(&EntityId::file(-2)), "{:?}", out.superseded);
@@ -1799,7 +1855,7 @@ mod tests {
     }
 
     fn seen(path: &str, file_id: u64, birth: u64, sha: &str) -> ObservedFile {
-        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into(), tie_break_id: 0, in_a_vault: false }
+        ObservedFile { path: path.into(), fingerprint: sfp(file_id, birth), sha256: sha.into(), tie_break_id: 0, in_a_vault: false, change_ns: 0 }
     }
 
     fn by_identity(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
@@ -2344,6 +2400,83 @@ mod tests {
         let out = pair(&[], &[]);
         assert!(out.changes.is_empty() && out.created.is_empty());
     }
+
+    /// A file as a volume that tells saves from swaps shows it: identity,
+    /// birth and change time (`newcomer_was_already_there`).
+    fn stamped(path: &str, file_id: u64, birth: u64, change: u64, sha: &str) -> ObservedFile {
+        ObservedFile {
+            path: path.into(),
+            fingerprint: jd_vfs::Fingerprint { size: 10, mtime_ns: 100, file_id, birth_ns: birth },
+            sha256: sha.into(),
+            tie_break_id: 0,
+            in_a_vault: false,
+            change_ns: change,
+        }
+    }
+
+    /// The synced record at slot-3, its own file (id 1, born 10) renamed to
+    /// slot-2 at `moved`, and a newcomer (id 2) born at `born` standing at
+    /// slot-3; `strong` reads it as `pair_files` does on a volume whose
+    /// identities hold, else as `pair_with` does.
+    fn read_a_trade(born: u64, moved: u64, strong: bool) -> ScanOutcome {
+        let own = jd_vfs::Fingerprint { size: 10, mtime_ns: 100, file_id: 1, birth_ns: 10 };
+        let record = KnownLocal {
+            fingerprint: Some(own),
+            own_file: strong.then(|| own.identity()),
+            ..known(901, "Swaps/slot-3.dat", 1, "sha-synced")
+        };
+        let disk = vec![
+            stamped("Swaps/slot-2.dat", 1, 10, moved, "sha-synced"),
+            stamped("Swaps/slot-3.dat", 2, born, born.max(1), "sha-fresh"),
+        ];
+        if strong {
+            pair_files(&[record], &disk, &HashSet::new(), true)
+        } else {
+            pair_with(&[record], &disk, &HashSet::new())
+        }
+    }
+
+    fn follows_to_slot_2(out: &ScanOutcome) -> bool {
+        matches!(out.change_for(EntityId::file(901)), Some(LocalChange::Moved { to_path, .. }) if to_path == "Swaps/slot-2.dat")
+            && out.created.iter().any(|o| o.path == "Swaps/slot-3.dat")
+    }
+
+    fn takes_the_newcomer(out: &ScanOutcome) -> bool {
+        matches!(out.change_for(EntityId::file(901)), Some(LocalChange::Edited { sha256, .. }) if sha256 == "sha-fresh")
+    }
+
+    /// A newcomer born before the record's own file was renamed away was
+    /// already there: a swap, so the record follows its file (soak runs 2456,
+    /// 2475), by its identity and by path alike.
+    #[test]
+    fn a_newcomer_older_than_the_rename_is_a_swap_and_the_record_follows_its_file() {
+        for strong in [true, false] {
+            let out = read_a_trade(5, 20, strong);
+            assert!(follows_to_slot_2(&out), "strong={strong}: {:?} created {:?}", out.changes, out.created);
+        }
+    }
+
+    /// Born on the tick of the rename, or after it: the save it looks like.
+    #[test]
+    fn a_newcomer_no_older_than_the_rename_is_a_save() {
+        for strong in [true, false] {
+            for born in [20, 25] {
+                let out = read_a_trade(born, 20, strong);
+                assert!(takes_the_newcomer(&out), "strong={strong} born={born}: {:?}", out.changes);
+            }
+        }
+    }
+
+    /// Where the volume shows no change time, nothing is read from births:
+    /// the save it looks like.
+    #[test]
+    fn with_no_change_time_shown_a_trade_reads_as_a_save() {
+        for strong in [true, false] {
+            let out = read_a_trade(5, 0, strong);
+            assert!(takes_the_newcomer(&out), "strong={strong}: {:?}", out.changes);
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -2373,7 +2506,7 @@ mod tie_break_tests {
     }
 
     fn file(path: &str, sha: &str, tie_break_id: u64) -> ObservedFile {
-        ObservedFile { path: path.into(), fingerprint: fp0(), sha256: sha.into(), tie_break_id, in_a_vault: false }
+        ObservedFile { path: path.into(), fingerprint: fp0(), sha256: sha.into(), tie_break_id, in_a_vault: false, change_ns: 0 }
     }
 
     /// Two files whose bytes each also stand as another record's copy, and
