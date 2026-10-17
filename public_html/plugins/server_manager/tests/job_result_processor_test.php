@@ -1268,6 +1268,33 @@ JobResultProcessor::process(jrp_job($site_node, 'check_status', $machine_status)
 check(count(jrp_pending_jobs($site_node->key, 'recovery_key_report')) === 1,
 	'the same status check on a node with a site queues one recovery_key_report');
 
+section('A status check that finds the database down asks for no recovery-key report');
+
+// The report reads the key from the site's database. drs1, its data root
+// stopped by hand: the status check measured postgres 'not accepting
+// connections', the report it queued failed on a refused connection
+// (2026-10-17).
+$pg_status = function ($pg) {
+	return "=== [Step 1/1] check_status ===\n" . json_encode(array('api_version' => '1.0', 'data' => array(
+		'load_1m' => 0.1, 'postgres_status' => $pg, 'uptime' => 'up 2 hours'))) . "\n[Step 1/1 OK]";
+};
+$pg_node = jrp_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x1d", 32)),
+	'mgn_agent_version'    => AgentVocabulary::FLOOR,
+	'mgn_agent_primitives' => 'check_status,host_report,host_converge,recovery_key_report',
+	'mgn_web_root'         => '/var/www/html/pgdown/public_html',
+));
+JobResultProcessor::process(jrp_job($pg_node, 'check_status', $pg_status('not accepting connections')));
+check(jrp_pending_jobs($pg_node->key, 'recovery_key_report') === array(),
+	'a check that finds the database not accepting connections queues no report');
+JobResultProcessor::process(jrp_job($pg_node, 'check_status', $pg_status('accepting connections')));
+check(count(jrp_pending_jobs($pg_node->key, 'recovery_key_report')) === 1,
+	'the first check that finds it answering again asks, the state still unmeasured');
+check(!JobResultProcessor::database_answering(array('postgres_status' => 'not responding')),
+	'the SSH transport\'s \'not responding\' is down too');
+check(JobResultProcessor::database_answering(array('load_1m' => 0.1)),
+	'a check that did not measure the database does not hold the report back');
+
 section('A status check fills an empty web root, and leaves a set one alone');
 
 // B20: a node made from a join before agent 1.44.0 has no web root, and so no
