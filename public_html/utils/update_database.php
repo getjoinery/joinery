@@ -138,10 +138,14 @@
 			return false;
 		}
 		
-		// Display table operation results (always show schema changes, not just in verbose mode)
+		// Display table operation results (always show schema changes, not just in verbose mode).
+		// Notes say what was left as it was; shown when verbose, never recorded as a change.
 		if (!empty($table_result['messages'])) {
 			echo implode('<br>', $table_result['messages']) . "<br>\n";
 			update_database_schema_facts($table_result['messages']);
+		}
+		if ($verbose && !empty($table_result['notes'])) {
+			echo implode('<br>', $table_result['notes']) . "<br>\n";
 		}
 		
 		// Display warnings from column validation (always show warnings)
@@ -193,6 +197,9 @@
 			if (!empty($advanced_result['messages'])) {
 				echo implode('<br>', $advanced_result['messages']) . "<br>\n";
 				update_database_schema_facts($advanced_result['messages']);
+			}
+			if ($verbose && !empty($advanced_result['notes'])) {
+				echo implode('<br>', $advanced_result['notes']) . "<br>\n";
 			}
 			
 			if (!empty($advanced_result['warnings'])) {

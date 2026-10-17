@@ -5,6 +5,11 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.89 - data_root_stopped reads its own stored shape too ('YYYY-MM-DD HH:MM:SS'), so the stored report
+ *                read back (IncidentSourceDataRootStopped) names the stop instead of reading as not stopped
+ * @version 1.88 - a host report's hardening (host_report 1.29): whether the kernel holds every pinned setting, and
+ *                each one it does not; kernel_events_24h keeps kernel_warning (specs/multi_tenant_host_hardening.md
+ *                WP1, D7)
  * @version 1.87 - a host report's data_root_stopped (host_report 1.28): when a data root was stopped by hand, and
  *                which services stopped with it; null while it is not (reviewer2 B17 D2)
  * @version 1.86 - a status check's release_trust (agent 1.81.0): the release and statement keys the site and the
@@ -3845,6 +3850,9 @@ HTML;
 			// Which engine the machine's sites run on (host_report 1.26); null from an older node.
 			'site_engine'                  => array_key_exists('site_engine', $in)
 				? (in_array($in['site_engine'], array('podman', 'docker', 'none'), true) ? $in['site_engine'] : 'unknown') : null,
+			// The pinned kernel and network settings against the running kernel (host_report 1.29); null from an older node.
+			// A stored report from an older node holds null here, kept null when it is read back (reviewer2 R5).
+			'hardening'                    => (array_key_exists('hardening', $in) && $in['hardening'] !== null) ? self::host_report_hardening($in['hardening']) : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
@@ -4296,10 +4304,41 @@ HTML;
 	private static function host_report_kernel_events($in) {
 		if (!is_array($in)) { return 'unknown'; }
 		$out = [];
-		foreach (['oom', 'enospc', 'io_error'] as $k) {
+		foreach (['oom', 'enospc', 'io_error', 'kernel_warning'] as $k) {
 			$out[$k] = self::host_report_count($in[$k] ?? null);
 		}
 		return $out;
+	}
+
+	/**
+	 * The kernel and network settings the machine pins, against its running
+	 * kernel (host_report 1.29; specs/multi_tenant_host_hardening.md D1):
+	 * {state ok|drift, pinned, unread, drift: [{key, live, want}]}, or unknown
+	 * (a container, whose kernel is its host's, or a report that could not
+	 * read them). A key is a dotted sysctl name, a value a short word; anything
+	 * else is dropped, and a drift list the node sent empty or unreadable while
+	 * saying drift is still drift.
+	 */
+	public static function host_report_hardening($in) {
+		if (!is_array($in) || !in_array($in['state'] ?? null, array('ok', 'drift'), true)) {
+			return 'unknown';
+		}
+		$drift = array();
+		foreach (array_slice(is_array($in['drift'] ?? null) ? $in['drift'] : array(), 0, self::HOST_REPORT_MAX_LIST) as $d) {
+			if (is_array($d) && is_string($d['key'] ?? null) && preg_match('/^[a-z0-9_]+(\.[a-z0-9_]+){1,8}$/', $d['key'])
+					&& strlen($d['key']) <= 80) {
+				$word = function ($v) {
+					return (is_string($v) && preg_match('/^[A-Za-z0-9_.:-]{1,40}$/', $v)) ? $v : 'unknown';
+				};
+				$drift[] = array('key' => $d['key'], 'live' => $word($d['live'] ?? null), 'want' => $word($d['want'] ?? null));
+			}
+		}
+		return array(
+			'state'  => $in['state'],
+			'pinned' => self::host_report_count($in['pinned'] ?? null),
+			'unread' => self::host_report_count($in['unread'] ?? null),
+			'drift'  => $drift,
+		);
 	}
 
 	/**
@@ -4383,11 +4422,13 @@ HTML;
 	 * A data root stopped by hand (host_report 1.28, joinery_data_root.sh
 	 * stop): {at: 'YYYY-MM-DD HH:MM:SS' UTC, services: [unit]}, or null while
 	 * it is not stopped, the host declares no data root, or the report is
-	 * older than the field.
+	 * older than the field. 'at' arrives from the agent as ISO 8601 UTC
+	 * ('...T...Z') and is stored as 'YYYY-MM-DD HH:MM:SS'; both are read, so a
+	 * stored report read back through here keeps its stop.
 	 */
 	public static function host_report_data_root_stopped($v) {
 		if (!is_array($v) || !is_string($v['at'] ?? null)
-				|| !preg_match('/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})Z$/', $v['at'], $m)) {
+				|| !preg_match('/^(\d{4}-\d{2}-\d{2})(?:T(\d{2}:\d{2}:\d{2})Z| (\d{2}:\d{2}:\d{2}))$/', $v['at'], $m)) {
 			return null;
 		}
 		$services = array();
@@ -4396,7 +4437,7 @@ HTML;
 				$services[] = $u;
 			}
 		}
-		return array('at' => $m[1] . ' ' . $m[2], 'services' => $services);
+		return array('at' => $m[1] . ' ' . ($m[2] !== '' ? $m[2] : $m[3]), 'services' => $services);
 	}
 
 	/**

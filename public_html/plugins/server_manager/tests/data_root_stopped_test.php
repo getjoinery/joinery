@@ -25,6 +25,7 @@
  *
  * Run: php plugins/server_manager/tests/data_root_stopped_test.php
  *
+ * @version 1.1 - reports are stored sanitised, as JobResultProcessor stores them
  * @version 1.0
  */
 
@@ -42,6 +43,8 @@ $clean = JobResultProcessor::host_report_data_root_stopped(array(
 ));
 check($clean === array('at' => '2026-10-16 17:02:03', 'services' => array('postgresql.service', 'syslog.socket')),
 	'a stop keeps its time, as UTC, and the units it names; nothing else', json_encode($clean));
+check(JobResultProcessor::host_report_data_root_stopped($clean) === $clean,
+	'the stored shape reads back the same: read twice, a stop is still a stop (found live on drs1, 2026-10-17)', json_encode(JobResultProcessor::host_report_data_root_stopped($clean)));
 check(JobResultProcessor::host_report_data_root_stopped(null) === null
 	&& JobResultProcessor::host_report_data_root_stopped(array('at' => 'yesterday')) === null
 	&& JobResultProcessor::host_report_data_root_stopped('stopped') === null,
@@ -67,8 +70,10 @@ $mk_node = function (string $tag, array $fields = array()) use ($suffix): Manage
 	harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $n->key);
 	return $n;
 };
+// Stored the way JobResultProcessor stores a host report: sanitised first, so
+// the readers see the stored shape ('YYYY-MM-DD HH:MM:SS'), not the agent's.
 $report = function (ManagedNode $n, $stopped, int $age_seconds = 60) {
-	$n->set('mgn_last_host_report', json_encode(array('data_root_stopped' => $stopped)));
+	$n->set('mgn_last_host_report', json_encode(JobResultProcessor::sanitise_host_report(array('data_root_stopped' => $stopped))));
 	$n->set('mgn_last_host_report_time', gmdate('Y-m-d H:i:s', time() - $age_seconds));
 	$n->save();
 };

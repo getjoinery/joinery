@@ -6,6 +6,9 @@
  * This class extracts the core functionality from update_database.php to make it
  * reusable for plugin installations and system repairs.
  *
+ * @version 1.5 - a note that changes nothing (a table that already exists, a primary key's
+ *   nullability left alone, the count of classes loaded) goes in `notes`, not `messages`:
+ *   `messages` is what changed, and update_database records each one as a schema change.
  * @version 1.4 - `inet` is a declarable column type (an address compared as an address, IPv4 or
  *   IPv6 alike).
  * @version 1.3 - carryRenamedRows(): a migration that renames a table copies its rows with
@@ -128,7 +131,7 @@ class DatabaseUpdater {
             }
             
             if ($this->verbose) {
-                $results['messages'][] = 'Loaded ' . count($classes) . ' model classes';
+                $results['notes'][] = 'Loaded ' . count($classes) . ' model classes';
             }
             
             $dblink = $this->dbconnector->get_db_link();
@@ -180,7 +183,7 @@ class DatabaseUpdater {
         // Check if table exists
         if (isset($tables_and_columns[$table_name])) {
             if ($this->verbose) {
-                $results['messages'][] = "Table {$table_name} already exists";
+                $results['notes'][] = "Table {$table_name} already exists";
             }
             return $results;
         }
@@ -495,7 +498,7 @@ class DatabaseUpdater {
         // Primary keys must always be NOT NULL and cannot be modified
         if ($this->isPrimaryKeyColumn($table_name, $field_name, $dblink)) {
             if ($this->verbose) {
-                $results['messages'][] = "Skipping nullable constraint change for primary key column: {$table_name}.{$field_name}";
+                $results['notes'][] = "Skipping nullable constraint change for primary key column: {$table_name}.{$field_name}";
             }
         } elseif ($spec_nullable != $live_nullable) {
             if ($spec_nullable) {
@@ -934,7 +937,7 @@ class DatabaseUpdater {
      * @return array Merged results
      */
     private function mergeResults($target, $source) {
-        foreach (['tables_created', 'columns_added', 'sequences_created', 'warnings', 'errors', 'messages'] as $key) {
+        foreach (['tables_created', 'columns_added', 'sequences_created', 'warnings', 'errors', 'messages', 'notes'] as $key) {
             if (isset($source[$key])) {
                 $target[$key] = array_merge($target[$key] ?? [], $source[$key]);
             }

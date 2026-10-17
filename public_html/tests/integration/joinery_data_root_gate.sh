@@ -276,7 +276,9 @@ esac
 exit 0'
 SF="$T/root/run/joinery/data-root.stopped"
 touch "$T/mounted"; rm -f "$SF"; : > "$LOG"
+printf 'mail/postfix /var/spool/postfix\n' > "$T/root/etc/joinery/data_binds"
 out="$(run stop 2>&1)"; rc=$?
+rm -f "$T/root/etc/joinery/data_binds"
 chk "stop: the socket that would start a consumer goes first, then the mount" \
     "$rc|$(grep -n -e '^systemctl stop docker.socket$' -e '^systemctl stop srv-joinery.mount$' "$LOG" | cut -d: -f2 | paste -sd,)" \
     "0|systemctl stop docker.socket,systemctl stop srv-joinery.mount"
@@ -285,6 +287,8 @@ chk "and what it stopped is recorded, with when, and said" \
     "1|apache2.service,docker.socket,postgresql@16-main.service|1"
 chk "the status file the site and the host report read says when, at once (reviewer2 B17 D2)" \
     "$(grep -c '^stopped_by_hand=[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\} [0-9:]\{8\} UTC$' "$T/root/run/joinery/data-root.status")" "1"
+chk "a stop that worked clears its mounts' failed results: a folder mount found busy on the first unmount stays 'failed' otherwise (drs1, 2026-10-17)" \
+    "$(grep -c '^systemctl reset-failed srv-joinery.mount var-spool-postfix.mount$' "$LOG")" "1"
 : > "$LOG"
 out="$(run tick 2>&1)"; rc=$?
 chk "the tick leaves a stopped data root stopped: exit 1, nothing started, nothing said" \
@@ -313,11 +317,14 @@ echo 'reencrypt=encrypt' >> "$T/root/etc/joinery/data_root"; touch "$T/mounted";
 out="$(run stop 2>&1)"; rc=$?
 chk "stop while a run is recorded: refused, nothing stopped" "$rc|$(grep -c 'is running' <<< "$out")|$(grep -c '^systemctl stop' "$LOG")" "1|1|0"
 sed -i '/^reencrypt=/d' "$T/root/etc/joinery/data_root"
-# Started some other way (systemctl): the next tick drops the stop's record.
-echo 'stopped by hand at then' > "$SF"; touch "$T/mounted"
+# Started some other way (systemctl, or a repair restarting a service that
+# requires it): the next tick drops the stop's record and starts what the
+# stop stopped, as start does (drs1, 2026-10-17: they stayed down).
+printf 'stopped by hand at then\napache2.service\npostfix.service\n' > "$SF"; touch "$T/mounted"; : > "$LOG"
 figs data 20*G 4*G 16*G
 run tick >/dev/null 2>&1
 chk "a running data root's stale stop record is dropped by the tick" "$( [ -e "$SF" ] && echo kept || echo gone)" "gone"
+chk "and what the stop stopped is started again" "$(grep -c '^systemctl start --no-block apache2.service postfix.service$' "$LOG")" "1"
 cp "$T/systemctl.b17" "$T/bin/systemctl"; : > "$LOG"
 unmount; : > "$LOG"
 ( exec 8>>"$T/root/run/joinery/data-root.lock"; flock 8; run tick >/dev/null 2>&1 )

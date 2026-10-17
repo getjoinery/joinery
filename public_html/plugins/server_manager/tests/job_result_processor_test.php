@@ -450,11 +450,12 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 28 && array_key_exists('data_root_encryption', $capped)
+check(!isset($capped['surprise']) && count($capped) === 29 && array_key_exists('data_root_encryption', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
-	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine among them)', var_export(array_keys($capped), true));
+	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
+	&& array_key_exists('hardening', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -579,11 +580,33 @@ check($capped['disk']['avail_bytes'] === 'unknown' && $capped['disk']['inodes_us
 check($capped['kernel_events_24h'] === 'unknown',
 	'kernel events that are not an object are unknown for the whole object, not three zeros');
 $ke = JobResultProcessor::sanitise_host_report(array(
-	'kernel_events_24h' => array('oom' => 2, 'enospc' => '1', 'io_error' => 'lots', 'extra' => 9),
+	'kernel_events_24h' => array('oom' => 2, 'enospc' => '1', 'io_error' => 'lots', 'kernel_warning' => 3, 'extra' => 9),
 	'disk' => array('avail_bytes' => 5, 'inodes_used_pct' => 120),
 ));
-check($ke['kernel_events_24h'] === array('oom' => 2, 'enospc' => 1, 'io_error' => 'unknown'),
-	'each kernel count is a number or unknown, and an extra key is dropped', var_export($ke['kernel_events_24h'], true));
+check($ke['kernel_events_24h'] === array('oom' => 2, 'enospc' => 1, 'io_error' => 'unknown', 'kernel_warning' => 3),
+	'each kernel count is a number or unknown, kernel_warning kept, and an extra key is dropped', var_export($ke['kernel_events_24h'], true));
+$ke_old = JobResultProcessor::sanitise_host_report(array('kernel_events_24h' => array('oom' => 0, 'enospc' => 0, 'io_error' => 0)));
+check($ke_old['kernel_events_24h']['kernel_warning'] === 'unknown',
+	'a report from before kernel_warning reads it as unknown, never 0');
+
+// The pinned kernel settings (host_report 1.29, multi_tenant_host_hardening D1).
+$hd = function ($h) { return JobResultProcessor::sanitise_host_report(array('hardening' => $h))['hardening']; };
+check($hd(array('state' => 'drift', 'pinned' => '38', 'unread' => 1, 'drift' => array(array('key' => 'kernel.yama.ptrace_scope', 'live' => '0', 'want' => '1'))))
+		=== array('state' => 'drift', 'pinned' => 38, 'unread' => 1, 'drift' => array(array('key' => 'kernel.yama.ptrace_scope', 'live' => '0', 'want' => '1'))),
+	'hardening keeps its state, counts and each setting not held');
+check($hd(array('state' => 'loose')) === 'unknown' && $hd('ok') === 'unknown' && $hd('unknown') === 'unknown',
+	'a state that is not ok or drift, or no object, is unknown');
+$many = array();
+for ($i = 0; $i < 30; $i++) { $many[] = array('key' => 'net.ipv4.k' . $i, 'live' => '1', 'want' => '0'); }
+$many[] = array('key' => 'Kernel.X', 'live' => '1', 'want' => '0');
+check(count($hd(array('state' => 'drift', 'pinned' => 38, 'unread' => 0, 'drift' => $many))['drift']) === JobResultProcessor::HOST_REPORT_MAX_LIST,
+	'the drift list is capped');
+check($hd(array('state' => 'drift', 'pinned' => 38, 'unread' => 0, 'drift' => array(array('key' => 'Kernel.X', 'live' => '1', 'want' => '0'),
+		array('key' => 'fs.protected_fifos', 'live' => '$(id)', 'want' => '2'))))['drift'] === array(array('key' => 'fs.protected_fifos', 'live' => 'unknown', 'want' => '2')),
+	'a key that is not a lowercase dotted name is dropped; a value that is not a word is unknown');
+check(JobResultProcessor::sanitise_host_report(array())['hardening'] === null
+		&& JobResultProcessor::sanitise_host_report(JobResultProcessor::sanitise_host_report(array()))['hardening'] === null,
+	'a report from before hardening keeps it null, read back too (reviewer2 R5)');
 check($ke['disk']['avail_bytes'] === 5 && $ke['disk']['inodes_used_pct'] === 'unknown',
 	'a percentage outside 0..100 is unknown');
 check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown') && $capped['swap'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown'),

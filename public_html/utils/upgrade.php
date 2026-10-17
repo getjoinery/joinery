@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.24 - update_database runs without --verbose: its debug output overran the transcript the
+	 *                agent keeps, and its no-change notes were counted as schema changes
 	 * @version 1.23 - serve-verify-key on the publishing box serves release_keys/release/, the current set, never a
 	 *                key a rotation retired (specs/release_key_rotation.md R8, F11)
 	 * @version 1.22 - the previous release's maintenance_scripts and RELEASE_MANIFEST(.sig) are kept under
@@ -2065,8 +2067,11 @@
 			// by require_once and cannot be refreshed. Running in a subprocess guarantees
 			// the schema updater reads the NEW class files from disk.
 			$update_db_script = $live_directory . '/utils/update_database.php';
+			// Never --verbose, whatever this run's own mode: the schema updater's verbose
+			// mode is class-loading debug output (about 250 KB a run), which pushed the
+			// rest of this transcript past the agent's output cap. Its changes, warnings
+			// and errors print either way.
 			$update_cmd = '/usr/bin/php ' . escapeshellarg($update_db_script) . ' --upgrade';
-			if ($verbose) $update_cmd .= ' --verbose';
 
 			$update_output = [];
 			$update_return = 0;
