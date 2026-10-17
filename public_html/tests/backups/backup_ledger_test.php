@@ -310,4 +310,25 @@ check($go_src === '' || strpos($go_src, '0o022') !== false,
 	'the agent tests the same bits (group or other write), so the two sides cannot disagree',
 	$go_src === '' ? 'agent source not present on this machine' : '');
 
+// ── A root run leaves the ledger readable to the site's own backup ─────────
+section('A file a root run writes belongs to the directory\'s owner');
+
+// The agent's manager backup records as root; the site's scheduled backup runs
+// as the web user and archives config/. A root-owned 0600 file in the web
+// user's 0700 directory failed that backup's tar (dev, 2026-10-17 06:00).
+$www = array('uid' => 33, 'gid' => 33);
+check(BackupLedger::owner_to_hand_to(0, $www) === array('uid' => 33, 'gid' => 33),
+	'root writing into the web user\'s directory hands the file to the web user');
+check(BackupLedger::owner_to_hand_to(1000, $www) === null,
+	'any other account leaves its own file as it is (it cannot hand it on anyway)');
+check(BackupLedger::owner_to_hand_to(0, array('uid' => 0, 'gid' => 0)) === null
+	&& BackupLedger::owner_to_hand_to(0, false) === null,
+	'a directory root owns, or none: nothing to hand on');
+$ledger_src = (string)file_get_contents(PathHelper::getIncludePath('includes/BackupLedger.php'));
+$w = strpos($ledger_src, 'private static function write(');
+$h = $w === false ? false : strpos($ledger_src, 'owner_to_hand_to(', $w);
+$r = $w === false ? false : strpos($ledger_src, '@rename($tmp, $path)', $w);
+check($h !== false && $r !== false && $h < $r,
+	'write() hands the file on before it is renamed into place, so no reader ever sees it root-owned');
+
 harness_finish();

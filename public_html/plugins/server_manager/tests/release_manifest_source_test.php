@@ -232,22 +232,39 @@ if ($core_version === '' || !is_array($pair ?? null) || empty($listed)) {
 	$want  = $listed['public_html/utils/upgrade.php'];
 	$older = array_values(array_filter($versions, function ($v) use ($core_version) { return version_compare($v, $core_version, '<'); }));
 	usort($older, 'version_compare');
-	$hint  = $older ? end($older) : '';
+	// What each published release's manifest lists for upgrade.php. A release
+	// that did not change the file lists the same hash as the one before it, and
+	// finding the file THERE is correct: the bytes are the bytes. So the hint for
+	// the "not the hint" proof is the newest older release whose listed hash
+	// differs; when every older release lists the same hash, that proof is not
+	// available on this box and only the by-hash proof runs.
+	$lists_for_upgrade = function (string $v): string {
+		$p = ReleaseManifestSource::read('', $v);
+		if (!is_array($p)) {
+			return '';
+		}
+		foreach (explode("\n", $p['manifest']) as $line) {
+			if (strlen($line) > 66 && $line[64] === ' ' && $line[65] === ' ' && substr($line, 66) === 'public_html/utils/upgrade.php') {
+				return substr($line, 0, 64);
+			}
+		}
+		return '';
+	};
+	$differing = array_values(array_filter($older, function ($v) use ($lists_for_upgrade, $want) { return $lists_for_upgrade($v) !== $want; }));
+	$hint = $differing ? end($differing) : ($older ? end($older) : '');
 	$found = ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $want, $hint);
 	check(is_array($found) && hash('sha256', $found['body']) === $want,
 		'found by hash: the bytes hash to what the manifest lists (hint ' . ($hint ?: 'none') . ')');
-	check(is_array($found) && $found['version'] === $core_version,
-		'and the release it was found in is the one that signed that hash, not the hint', json_encode($found['version'] ?? null));
-	$again = ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $want);
-	check(is_array($again) && $again['version'] === $core_version, 'with no hint at all the same release is found');
-	if ($hint !== '') {
-		// The hint's own file differs from the newest (a release that did not change
-		// upgrade.php is possible; only assert when it did).
-		$hinted = ReleaseManifestSource::read_file($hint, 'public_html/utils/upgrade.php');
-		if (is_string($hinted) && hash('sha256', $hinted) !== $want) {
-			check(true, 'the hint release carries a different upgrade.php, so the hash is what chose');
-		}
+	check(is_array($found) && $lists_for_upgrade((string)$found['version']) === $want,
+		'and the release it was found in lists that hash for the file', json_encode($found['version'] ?? null));
+	if ($differing) {
+		check(is_array($found) && $found['version'] !== $hint,
+			'the hint release lists another hash for upgrade.php, so the hash, not the hint, chose the release', json_encode($found['version'] ?? null));
+	} else {
+		check(true, 'every older release lists the same upgrade.php as the newest; the hint-is-wrong proof is not available on this box (skipped)');
 	}
+	$again = ReleaseManifestSource::read_file_by_hash('public_html/utils/upgrade.php', $want);
+	check(is_array($again) && $lists_for_upgrade((string)$again['version']) === $want, 'with no hint at all a release listing that hash is found');
 }
 
 harness_finish();

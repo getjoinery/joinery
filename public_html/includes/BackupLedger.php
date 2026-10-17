@@ -63,6 +63,8 @@
  * backups that matter are taken by the root agent (the backup_run primitive), so
  * they are ledgered as a matter of course.
  *
+ * @version 1.5 - a root run hands each file it writes to the directory's owner, so the site's
+ *                own scheduled backup, run as that user, can still read the ledger
  * @version 1.4 - a ledger directory this account cannot read is named as such, not as a missing ledger
  * @version 1.3 - record_hash(): an artifact streamed to the bucket is recorded from the hash and
  *                count taken as it went, sharing record()'s entry, history and eviction code
@@ -422,11 +424,32 @@ class BackupLedger {
 			return false;
 		}
 		@chmod($tmp, self::FILE_MODE);
+		$hand_to = static::owner_to_hand_to(function_exists('posix_geteuid') ? posix_geteuid() : -1, @stat(static::dir()));
+		if ($hand_to !== null) {
+			@chown($tmp, $hand_to['uid']);
+			@chgrp($tmp, $hand_to['gid']);
+		}
 		if (!@rename($tmp, $path)) {
 			@unlink($tmp);
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Who a file written here should belong to: the directory's owner, when a
+	 * root run (the agent's manager backup) writes it. The directory is the
+	 * web user's, 0700 (fix_permissions.sh pins it), and the site's own
+	 * scheduled backup runs as that user and archives config/ — a 0600 root
+	 * file in it fails that backup's tar. Same mode, so the agent's mode check
+	 * is unchanged. null when nothing is to change: not root, no directory, or
+	 * a directory root owns.
+	 */
+	public static function owner_to_hand_to($euid, $dir_stat) {
+		if ((int)$euid !== 0 || !is_array($dir_stat) || (int)$dir_stat['uid'] === 0) {
+			return null;
+		}
+		return array('uid' => (int)$dir_stat['uid'], 'gid' => (int)$dir_stat['gid']);
 	}
 
 	/** site | manager, and nothing else can name a file here. */

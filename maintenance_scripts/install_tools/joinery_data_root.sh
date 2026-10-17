@@ -4,6 +4,10 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.30 - stop clears the failed result of a data-root mount whose first unmount found it busy and the
+#                 second pass unmounted, so a stop that worked leaves no failed unit for the host report;
+#                 the tick that finds a stop's record with the data root running again starts what the
+#                 stop stopped, as start does, instead of dropping the record and leaving them down
 # Version: 1.29 - The status file says when the data root was stopped by hand (stopped_by_hand=, empty when it
 #                 was not), written as stop and start finish as well as each tick, so the site's pages and
 #                 the host report tell a deliberate stop from a fault (reviewer2 B17 D2).
@@ -3627,8 +3631,19 @@ do_tick() {
     need_root
     # Another tick, or a hand's grow, has it: this tick has nothing to add.
     take_lock nowait || return 0
-    # Running, so a stop's record is over (started some way other than start).
-    rm -f "$STOPPED_FLAG"
+    # Running, so a stop's record is over (started some way other than start:
+    # a service that requires the data root started by hand or by a repair).
+    # What the stop stopped is started again, as start does, or it stays down
+    # with no record left to say so.
+    if [[ -f "$STOPPED_FLAG" ]]; then
+        local -a again=()
+        mapfile -t again < <(tail -n +2 "$STOPPED_FLAG" | grep -v '^$')
+        rm -f "$STOPPED_FLAG"
+        if (( ${#again[@]} > 0 )); then
+            systemctl start --no-block "${again[@]}" 2>/dev/null || true
+            say "data root: running again, though not by start; started what the stop by hand stopped: ${again[*]}"
+        fi
+    fi
     if ! ( tick_upkeep ); then
         say "data root: this tick's upkeep did not finish (see above); the data root is mounted, so the run goes on and the next tick tries again"
     fi
@@ -3688,6 +3703,14 @@ do_stop() {
         (( ${#running[@]} == 0 )) || systemctl start --no-block "${running[@]}" 2>/dev/null || true
         die "the data root did not stop: $( [[ -n "$held" ]] && printf 'its filesystem is still mounted at %s, and something there would not let go (fuser -vm shows what)' "$held" || printf 'see: systemctl status %s %s' "$MOUNT_UNIT" "$UNLOCK_UNIT"). It is started again, with its services."
     fi
+    # A folder mount whose first unmount found it busy (a service still letting
+    # go of it, as postfix's spool did) is unmounted by the second pass above,
+    # but systemd keeps its failed result, and the host report lists it as a
+    # failed unit. The stop worked: clear that result.
+    local rel target
+    local -a mount_units=("$MOUNT_UNIT")
+    while read -r rel target; do mount_units+=("$(bind_unit "$target")"); done < <(binds)
+    systemctl reset-failed "${mount_units[@]}" 2>/dev/null || true
     say "data root: stopped$( is_luks && printf ', its volume closed')$( (( ${#running[@]} > 0 )) && printf ', with %s' "${running[*]}"). It stays stopped until joinery_data_root.sh start, or the next boot."
 }
 
