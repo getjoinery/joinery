@@ -242,6 +242,54 @@ The last two conditions are what make the client work when the first two fail. A
 watcher that dies degrades this into a thirty-second polling client, not into a
 client that has stopped.
 
+### Standing down
+
+A stop, a pause or an unlink reaches the pass in progress the moment it is
+posted, not when the pass ends. The engine asks whether to carry on
+(`ExecEnv::stand_down`) before each operation and before each chunk of a
+transfer: an upload reads its file just before it sends each chunk, and a
+download asks as each piece of its bytes arrives. Asked to stand down, the pass
+stops there:
+
+- Operations it has not started stay queued, untouched: no attempt is counted
+  and nothing is sent.
+- An operation stopped part-way through a transfer goes straight back on the
+  queue under its own idempotency key, as it was before it ran: its attempt
+  count, retry time and last error are untouched, and it runs again from its
+  start. A stand-down only ever comes before a transfer's completion call, so
+  the server holds nothing of the stopped attempt but, for an upload, a
+  half-sent session that is abandoned as a crash abandons it; the next run
+  opens a new one. A download's partial bytes go with its spool. Nothing is
+  counted against it, so pausing one large upload over and over never makes it
+  read as work that keeps failing, and never lengthens its backoff.
+- The pass still finishes its bookkeeping and advances the cursor: everything
+  the batch implied is already in the journal. Its outcome says it stood down
+  (`ExecReport::stood_down`), and a pass that stood down is never a quiet one.
+
+The daemon reads its command queue the moment a pass stands down, so a stop or
+a pause lands within one chunk of an upload, or one piece of a download. A
+chunk already on the wire is let finish. These are not interrupted, and a stop
+or a pause posted while one runs lands at the first operation after it, or at
+the transfer's first chunk:
+
+- reading the change feed, or walking the index;
+- the scan, including hashing what changed on disk (the whole folder, on a
+  first pass over one that already holds files);
+- deciding and ordering what to do;
+- the whole-file hash an upload takes before it starts;
+- writing the encrypted copy of a file in an encrypted folder, before its
+  upload starts.
+
+A download whose connection has gone quiet asks only when bytes arrive, so its
+stop waits for the next bytes or for the client's 60-second silence limit to
+drop the connection.
+
+The daemon's control thread says it (`Shared::send`), for the tray, the CLI,
+the settings page, and the update thread installing an update alike; the
+command still waits in the queue, and the loop acts on it once the pass is out.
+A resume lifts a pause and never a stop. The simulator never asks a pass to
+stand down: its devices are stopped by being killed, which is the harder case.
+
 ---
 
 ## Deciding what happens
@@ -1056,7 +1104,9 @@ arrived, the server did the work, and the answer never came back. That is
 indistinguishable from "never arrived" and demands the opposite response.
 
 **Recovery on start** re-derives interrupted operations by re-checking both
-sides rather than blindly re-running them.
+sides rather than blindly re-running them. An operation a pass
+[stood down](#standing-down) from mid-transfer needs none: it is already back
+on the queue as it was.
 
 **Losing the state store is survivable by design**: a fresh index walk plus a
 full local scan, pairing by path and hash. Identical bytes are never
@@ -1409,7 +1459,9 @@ first, is how two answers to that question come to exist.
 The **control thread** answers the tray, the CLI, and the settings page, and
 holds no database handle at all. It reads a snapshot the sync thread refreshes,
 and posts commands into a queue the sync thread drains. A hung tray can slow
-nothing down and corrupt nothing.
+nothing down and corrupt nothing. The queue is drained between passes, so a
+stop, a pause or an unlink is also said to the pass in progress at once, and it
+[stands down](#standing-down) at its next safe point.
 
 The **update thread** ([Updates](#updates)) holds no database handle either. It
 reads the same snapshot, and posts one command: `Stop`, when an update is ready
@@ -1684,8 +1736,8 @@ from one release; the status says which file was missing.
 
 The update thread is a third thread beside the sync and control threads. It
 holds no database handle. To install, it hands the staged update to `main` and
-posts `Stop`; the sync loop stops between passes, never in the middle of one,
-and `main` swaps the files once the store is closed.
+posts `Stop`; the pass in progress [stands down](#standing-down) at its next
+safe point, and `main` swaps the files once the store is closed.
 
 Then the daemon starts again from its live path:
 

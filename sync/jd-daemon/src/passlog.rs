@@ -71,7 +71,7 @@ impl PassJournal {
         if t.is_quiet() && dirs.is_empty() {
             return json!({ "pass": self.passes, "t": timing, "quiet": true });
         }
-        json!({
+        let mut line = json!({
             "pass": self.passes,
             "t": timing,
             "reset": t.reset,
@@ -87,7 +87,13 @@ impl PassJournal {
             "skips": t.skips,
             "plan": t.plan,
             "ops": t.ops,
-        })
+        });
+        // Only on the pass it happened to: a stop or a pause cut it short, and
+        // the op it was part-way through is not in `ops` (it is queued again).
+        if t.stood_down {
+            line["stood_down"] = json!(true);
+        }
+        line
     }
 
     /// Append one pass. A journal that cannot be written is not a reason to
@@ -169,6 +175,23 @@ mod tests {
         j.opens_a_file = true;
         assert_eq!(j.line(&t)["dirs_full"], true);
         assert_eq!(j.line(&t)["quiet"], true);
+    }
+
+    #[test]
+    fn a_pass_cut_short_says_so_and_no_other_does() {
+        let mut j = journal();
+        let mut t = PassTrace::started(1);
+        j.line(&t);
+        // Nothing else happened in it, and it is still not a quiet pass: an op
+        // it was part-way through is queued again.
+        t.stood_down = true;
+        let cut = j.line(&t);
+        assert_eq!(cut["stood_down"], true, "{cut}");
+        assert!(cut.get("quiet").is_none(), "{cut}");
+        t.stood_down = false;
+        t.skips = vec![("file:2".into(), "pass.rs:1".into())];
+        let ordinary = j.line(&t);
+        assert!(ordinary.get("stood_down").is_none(), "{ordinary}");
     }
 
     #[test]

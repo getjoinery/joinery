@@ -24,6 +24,11 @@ ring = "0.17"
 # The update payload is a gzipped tar; already in the tree under the tray icons.
 flate2 = "1"
 
+[dev-dependencies]
+# The engine's mock server, spoken to over loopback HTTP so a test can run a
+# real daemon's passes against it (`daemon::tests`). Never in a build.
+jd-sim = { path = "../jd-sim" }
+
 [[bin]]
 name = "joinery-drive"
 path = "src/main.rs"

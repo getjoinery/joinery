@@ -159,6 +159,11 @@ impl Device {
 /// A free function rather than a method because `ExecEnv` borrows the clock
 /// closure, and the caller has to own that for as long as the environment
 /// lives.
+///
+/// Never asked to stand down: a simulated device is stopped by being killed
+/// (`World::power_cycle`, or a death part-way through a pass), which is
+/// the harder case. A test that stops a pass on purpose sets `stand_down` on
+/// what this returns.
 pub fn env<'a>(device: &'a Device, now: &'a dyn Fn() -> u64) -> ExecEnv<'a> {
     ExecEnv {
         store: &device.store,
@@ -167,5 +172,6 @@ pub fn env<'a>(device: &'a Device, now: &'a dyn Fn() -> u64) -> ExecEnv<'a> {
         now_ms: now,
         conflict_name: &device.namer,
         vault: device.vault.as_ref(),
+        stand_down: &|| false,
     }
 }

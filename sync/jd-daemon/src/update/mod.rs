@@ -20,8 +20,9 @@
 //! build directory is left alone and is not even checked unless asked.
 //!
 //! **Installing is a restart.** The update thread asks the sync loop to stop —
-//! between passes, never in the middle of one — and `main` does the swap once
-//! the store is closed. The new daemon is on trial until it is up
+//! the pass in progress stands down at its next safe point, between two
+//! operations or two chunks of a transfer — and `main` does the swap once the
+//! store is closed. The new daemon is on trial until it is up
 //! ([`pending`]); one that does not come up is replaced by the old one again.
 //! The same restart follows when the program file is replaced underneath the
 //! daemon by something else — a package manager, a new app dragged over the
@@ -1185,9 +1186,11 @@ fn request_restart(handle: &Handle, shared: &Shared, restart: Restart) {
     if let Ok(mut slot) = handle.restart.lock() {
         *slot = Some(restart);
     }
-    // Between passes, never in the middle of one: the sync loop only reads
-    // its command queue when a pass is done. A computer not linked yet is
-    // running the first-run setup instead, which stops the same way.
+    // The pass in progress hears it at once and stands down at its next safe
+    // point, between two operations or two chunks of a transfer
+    // (`Shared::send`); the loop then reads the stop from its queue and the
+    // store closes. A computer not linked yet is running the first-run setup
+    // instead, which stops the same way.
     if shared.setup_view().is_some() {
         shared.send_setup(crate::setup::SetupCommand::Stop);
     } else {

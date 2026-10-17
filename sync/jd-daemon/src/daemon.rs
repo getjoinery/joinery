@@ -14,6 +14,13 @@
 //! corrupt nothing. Before the device is linked there is no sync thread; the
 //! setup loop (`crate::setup`) stands in its place on the same terms.
 //!
+//! The queue is drained between passes, and a pass can be minutes into a large
+//! transfer. So a stop or a pause is also said to the pass in progress the
+//! moment it is posted (`Shared::send`), and the pass stands down at its next
+//! safe point: between two operations, or between two chunks of a transfer
+//! (`ExecEnv::stand_down`). The command still waits in the queue, and the loop
+//! reads it the moment the pass is out.
+//!
 //! **When a pass runs**, in the order the conditions are checked: something on
 //! disk changed and has gone quiet; the watcher admitted it lost events; the
 //! poll interval elapsed; somebody asked for one. The last two are what make the
@@ -21,6 +28,7 @@
 //! degrades this into a thirty-second polling client rather than into a client
 //! that has stopped.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -102,7 +110,21 @@ pub struct Shared {
     /// What the update thread knows, for the status answer (`crate::update`).
     /// Set once, when the thread starts.
     pub update: std::sync::OnceLock<Arc<crate::update::Handle>>,
+    /// What the pass in progress has been asked to do: carry on, stand down
+    /// for a pause, or stand down for a stop (`PASS_*`). Written by whoever
+    /// posts the command, the moment it is posted (`send`), and read by the
+    /// pass at each safe point (`standing_down`). Kept as which, not whether,
+    /// so a resume lifts a pause and never a stop.
+    stand_down: AtomicU8,
 }
+
+/// The pass in progress carries on.
+const PASS_WANTED: u8 = 0;
+/// It stands down for a pause, which a resume lifts.
+const PASS_PAUSING: u8 = 1;
+/// It stands down for a stop or an unlink, which nothing lifts: the sync
+/// thread is ending, and the next one starts afresh (`attach`).
+const PASS_STOPPING: u8 = 2;
 
 impl Default for Shared {
     fn default() -> Shared {
@@ -121,6 +143,7 @@ impl Shared {
             setup: Mutex::new(None),
             folders: Mutex::new(None),
             update: std::sync::OnceLock::new(),
+            stand_down: AtomicU8::new(PASS_WANTED),
         }
     }
 
@@ -129,11 +152,12 @@ impl Shared {
     }
 
     /// Point the command queue at a new sync thread, forgetting what the last
-    /// one published.
+    /// one published, and what the last one's pass was asked to do.
     pub fn attach(&self, commands: Sender<Command>) {
         if let Ok(mut slot) = self.commands.lock() {
             *slot = commands;
         }
+        self.stand_down.store(PASS_WANTED, Ordering::SeqCst);
         if let Ok(mut slot) = self.snapshot.lock() {
             *slot = None;
         }
@@ -205,11 +229,35 @@ impl Shared {
     /// Post a command. Returns whether the sync thread is still there to take
     /// it — a queued command nobody will ever run should not be reported as
     /// done.
+    ///
+    /// A stop, an unlink or a pause is said to the pass in progress first, so
+    /// it stands down at its next safe point rather than when its transfers
+    /// end (`standing_down`); the loop still acts on the command once the pass
+    /// is out. Whoever posts one is heard at once: the tray, the CLI, the
+    /// settings page, and the update thread installing an update.
     pub fn send(&self, command: Command) -> bool {
+        match command {
+            Command::Stop | Command::Unlink => self.stand_down.store(PASS_STOPPING, Ordering::SeqCst),
+            Command::Pause => {
+                let _ = self.stand_down.compare_exchange(PASS_WANTED, PASS_PAUSING, Ordering::SeqCst, Ordering::SeqCst);
+            }
+            // Lifts a pause and never a stop: a resume posted just after a
+            // stop would otherwise leave the stop to wait out the transfer.
+            Command::Resume => {
+                let _ = self.stand_down.compare_exchange(PASS_PAUSING, PASS_WANTED, Ordering::SeqCst, Ordering::SeqCst);
+            }
+            Command::SyncNow | Command::DismissIssue(_) | Command::ApproveDeletes(_) => {}
+        }
         self.commands
             .lock()
             .map(|tx| tx.send(command).is_ok())
             .unwrap_or(false)
+    }
+
+    /// Should the pass in progress stand down now? The engine asks at each
+    /// safe point (`ExecEnv::stand_down`).
+    pub fn standing_down(&self) -> bool {
+        self.stand_down.load(Ordering::SeqCst) != PASS_WANTED
     }
 }
 
@@ -311,8 +359,13 @@ impl Daemon {
             if let Some(exit) = self.drain_commands() {
                 return exit;
             }
-            if self.should_pass() {
-                self.one_pass();
+            // A pass that stood down did so for a command posted to the queue
+            // (`Shared::send`): read now, not a tick from now, so a stop or a
+            // pause lands the moment the pass is out.
+            if self.should_pass() && self.one_pass() {
+                if let Some(exit) = self.drain_commands() {
+                    return exit;
+                }
             }
             self.publish();
             std::thread::sleep(TICK);
@@ -371,7 +424,8 @@ impl Daemon {
         }
     }
 
-    fn one_pass(&mut self) {
+    /// Run one pass. True when it stood down (`ExecEnv::stand_down`).
+    fn one_pass(&mut self) -> bool {
         // Taken and cleared together with the pass, because the pass walks the
         // whole tree: anything the watcher noticed before it started is covered
         // by it, and carrying those paths forward would mean walking again for
@@ -431,6 +485,10 @@ impl Daemon {
             move |name: &str, suffix: u32| jd_vfs::conflict_copy_name(name, &date, &device, suffix)
         };
         let now = now_ms;
+        let stand_down = {
+            let shared = Arc::clone(&self.shared);
+            move || shared.standing_down()
+        };
         let env = ExecEnv {
             store: &self.store,
             vfs: &self.vfs,
@@ -438,6 +496,7 @@ impl Daemon {
             now_ms: &now,
             conflict_name: &namer,
             vault: self.vault.as_ref(),
+            stand_down: &stand_down,
         };
         let mut keys = jd_proto::Client::new_idempotency_key;
 
@@ -474,8 +533,12 @@ impl Daemon {
                     self.publish_folders();
                 }
                 self.say_a_refused_vault_probe();
+                outcome.exec.stood_down
             }
-            Err(e) => self.blocker = Some(blocker_for(&e)),
+            Err(e) => {
+                self.blocker = Some(blocker_for(&e));
+                false
+            }
         }
     }
 
@@ -498,6 +561,7 @@ impl Daemon {
     fn recover(&mut self) {
         let namer = |name: &str, _suffix: u32| name.to_string();
         let now = now_ms;
+        // Recovery moves no bytes and runs no op: nothing here to stand down.
         let env = ExecEnv {
             store: &self.store,
             vfs: &self.vfs,
@@ -505,6 +569,7 @@ impl Daemon {
             now_ms: &now,
             conflict_name: &namer,
             vault: self.vault.as_ref(),
+            stand_down: &|| false,
         };
         if let Err(e) = jd_core::recover(&env) {
             self.blocker = Some(blocker_for(&e));
@@ -1426,6 +1491,278 @@ mod tests {
             assert_eq!(body["ok"], true);
             assert_eq!(rx.recv().unwrap(), expect);
         }
+    }
+
+    #[test]
+    fn a_stop_or_a_pause_reaches_the_pass_at_once_and_a_resume_lifts_only_a_pause() {
+        let (shared, rx) = shared();
+        let post = |path: &str, body: Value| handle_control(&shared, &req("POST", path, body)).0;
+        assert!(!shared.standing_down());
+        assert_eq!(post("/pause", Value::Null), 200);
+        assert!(shared.standing_down(), "a pause stands the pass down");
+        assert_eq!(post("/resume", Value::Null), 200);
+        assert!(!shared.standing_down(), "a resume lifts the pause");
+        assert_eq!(post("/sync-now", Value::Null), 200);
+        assert!(!shared.standing_down());
+        assert_eq!(post("/stop", Value::Null), 200);
+        assert!(shared.standing_down(), "a stop stands the pass down");
+        assert_eq!(post("/resume", Value::Null), 200);
+        assert!(shared.standing_down(), "a resume never lifts a stop");
+        // Each is still queued: the loop acts on it once the pass is out.
+        let queued: Vec<Command> = rx.try_iter().collect();
+        assert_eq!(
+            queued,
+            [Command::Pause, Command::Resume, Command::SyncNow, Command::Stop, Command::Resume]
+        );
+
+        // A new sync thread starts with a pass that is wanted, and unlinking
+        // stops it as a stop does.
+        let (tx, _rx) = channel();
+        shared.attach(tx);
+        assert!(!shared.standing_down());
+        assert_eq!(post("/unlink", json!({ "confirm": true })), 200);
+        assert!(shared.standing_down(), "an unlink stands the pass down");
+    }
+
+    /// The engine's mock server (`jd_sim::MockServer`) over HTTP on 127.0.0.1,
+    /// so a real daemon, with its real client, runs real passes against it.
+    /// While `slow` is set a download goes out 4 KiB every 25 ms, as over a
+    /// slow link: a stop that waited for it would be seen waiting. `sent`
+    /// counts the download bytes written.
+    struct Drive {
+        base_url: String,
+        server: jd_sim::MockServer,
+        slow: Arc<std::sync::atomic::AtomicBool>,
+        sent: Arc<std::sync::atomic::AtomicU64>,
+    }
+
+    impl Drive {
+        fn start() -> Drive {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let drive = Drive {
+                base_url,
+                server: jd_sim::MockServer::new(jd_sim::SimClock::new()),
+                slow: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+                sent: Arc::default(),
+            };
+            let (server, slow, sent) = (drive.server.clone(), Arc::clone(&drive.slow), Arc::clone(&drive.sent));
+            std::thread::spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    let (server, slow, sent) = (server.clone(), Arc::clone(&slow), Arc::clone(&sent));
+                    std::thread::spawn(move || answer_as_the_server(stream, &server, &slow, &sent));
+                }
+            });
+            drive
+        }
+
+        fn sent(&self) -> u64 {
+            self.sent.load(Ordering::SeqCst)
+        }
+    }
+
+    /// One request: an action, as the platform's `/api/v1/action/{name}`
+    /// envelope, or a signed download link, honouring a `Range`.
+    fn answer_as_the_server(
+        stream: std::net::TcpStream,
+        server: &jd_sim::MockServer,
+        slow: &std::sync::atomic::AtomicBool,
+        sent: &std::sync::atomic::AtomicU64,
+    ) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let mut out = match stream.try_clone() {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        if reader.read_line(&mut line).is_err() {
+            return;
+        }
+        let (mut length, mut key, mut from) = (0usize, None, 0u64);
+        loop {
+            let mut header = String::new();
+            if reader.read_line(&mut header).unwrap_or(0) == 0 || header == "\r\n" {
+                break;
+            }
+            let (name, value) = header.split_once(':').unwrap_or(("", ""));
+            let value = value.trim();
+            match name.to_ascii_lowercase().as_str() {
+                "content-length" => length = value.parse().unwrap_or(0),
+                "idempotency-key" => key = Some(value.to_string()),
+                "range" => from = value.trim_start_matches("bytes=").trim_end_matches('-').parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+        let mut body = vec![0u8; length];
+        if reader.read_exact(&mut body).is_err() {
+            return;
+        }
+        let path = line.split_whitespace().nth(1).unwrap_or("/").to_string();
+        let refused = |r: jd_sim::server::ApiRefusal| {
+            (r.status, json!({ "errortype": r.errortype, "error": r.message, "data": r.data }).to_string())
+        };
+        if let Some(name) = path.strip_prefix("/api/v1/action/") {
+            let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            let answer = match &key {
+                Some(k) => server.action_idempotent(name, &body, k),
+                None => server.action(name, &body),
+            };
+            let (status, text) = match answer {
+                Ok(data) => (200, json!({ "data": data }).to_string()),
+                Err(r) => refused(r),
+            };
+            let _ = write!(
+                out,
+                "HTTP/1.1 {status} Answer\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                text.len()
+            );
+            return;
+        }
+        match server.download(&path, from) {
+            Ok(bytes) => {
+                let status = if from > 0 { 206 } else { 200 };
+                let _ = write!(
+                    out,
+                    "HTTP/1.1 {status} Bytes\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    bytes.len()
+                );
+                for piece in bytes.chunks(4096) {
+                    if out.write_all(piece).is_err() {
+                        return;
+                    }
+                    sent.fetch_add(piece.len() as u64, Ordering::SeqCst);
+                    if slow.load(Ordering::SeqCst) {
+                        std::thread::sleep(Duration::from_millis(25));
+                    }
+                }
+            }
+            Err(r) => {
+                let (status, text) = refused(r);
+                let _ = write!(
+                    out,
+                    "HTTP/1.1 {status} Refused\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{text}",
+                    text.len()
+                );
+            }
+        }
+    }
+
+    /// A linked daemon syncing an empty folder with a `Drive`, running on a
+    /// thread of its own.
+    struct Running {
+        shared: Arc<Shared>,
+        root: std::path::PathBuf,
+        /// Its exit, when it comes, with every op it left open, as
+        /// `kind State attempts=N`.
+        exited: Receiver<(Exit, Vec<String>)>,
+    }
+
+    fn a_daemon_syncing_with(drive: &Drive, tag: &str) -> Running {
+        let dir = std::env::temp_dir().join(format!("jd-daemon-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Drive")).unwrap();
+        // Canonical: on a Mac the temporary directory is a symlink.
+        let dir = std::fs::canonicalize(&dir).unwrap();
+        let root = dir.join("Drive");
+        let config = Config {
+            base_url: drive.base_url.clone(),
+            sync_root: root.clone(),
+            device_name: "Laptop".into(),
+            device_id: Some(1),
+            public_key: "pk".into(),
+            poll_seconds: 30,
+            excluded: Vec::new(),
+            vault_enabled: false,
+            autostart: false,
+        };
+        let (shared, rx) = shared();
+        let (done, exited) = channel();
+        let theirs = Arc::clone(&shared);
+        std::thread::spawn(move || {
+            let store = Store::open_in_memory().unwrap();
+            let vfs = OsVfs::new(config.sync_root.clone(), dir.join("spool")).unwrap();
+            let credentials = Credentials { public_key: "pk".into(), secret_key: "sk".into() };
+            let mut daemon = Daemon::new(config, store, vfs, credentials, theirs, rx, "test".into(), None, None);
+            let exit = daemon.run();
+            let open = daemon
+                .store
+                .queued_ops()
+                .unwrap()
+                .into_iter()
+                .chain(daemon.store.interrupted_ops().unwrap())
+                .map(|op| format!("{} {:?} attempts={}", op.kind, op.state, op.attempts))
+                .collect();
+            let _ = done.send((exit, open));
+        });
+        Running { shared, root, exited }
+    }
+
+    fn wait_for(what: &str, within: Duration, done: impl Fn() -> bool) {
+        let started = std::time::Instant::now();
+        while !done() {
+            assert!(started.elapsed() < within, "{what}: not within {within:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn a_stop_lands_in_the_middle_of_a_transfer_not_when_it_ends() {
+        // Eight MiB at 160 KiB a second: fifty seconds of transfer, against a
+        // stop that is to land at once. The installer and an update's restart
+        // both wait for the daemon to exit, and before a stop reached the pass
+        // in progress, they waited out whatever it was moving. Within one tick
+        // of the loop: the stop is read the moment the pass stands down, with
+        // no sleep between.
+        let drive = Drive::start();
+        let body = vec![7u8; 8 << 20];
+        drive.server.seed_file(None, "big.bin", &body);
+        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "stop");
+        wait_for("the download starting", Duration::from_secs(30), || drive.sent() > 0);
+
+        let asked = std::time::Instant::now();
+        let (status, answer) = handle_control(&shared, &req("POST", "/stop", Value::Null));
+        assert_eq!((status, &answer["ok"]), (200, &json!(true)));
+        let (exit, open) = exited
+            .recv_timeout(Duration::from_secs(15))
+            .expect("the daemon was still running fifteen seconds after a stop: it waited for the transfer");
+        let took = asked.elapsed();
+        assert_eq!(exit, Exit::Stopped);
+        assert!(took < TICK, "the stop took {took:?}");
+        assert!(drive.sent() < body.len() as u64, "construction: the download had not finished");
+        assert_eq!(open, ["download Queued attempts=0"], "back on the queue as it was, for the next start");
+        assert!(!root.join("big.bin").exists(), "no partial file");
+    }
+
+    #[test]
+    fn a_pause_stands_a_transfer_down_and_a_resume_finishes_it() {
+        let drive = Drive::start();
+        let body: Vec<u8> = (0..4u32 << 20).map(|i| (i % 251) as u8).collect();
+        drive.server.seed_file(None, "big.bin", &body);
+        let Running { shared, root, exited } = a_daemon_syncing_with(&drive, "pause");
+        wait_for("the download starting", Duration::from_secs(30), || drive.sent() > 0);
+
+        // Paused is published only once the pass is out and the loop has read
+        // the pause, which it does the moment the pass stands down: within one
+        // tick. Twenty-five seconds of transfer were left.
+        assert_eq!(handle_control(&shared, &req("POST", "/pause", Value::Null)).0, 200);
+        wait_for("the pause landing", TICK, || shared.snapshot().is_some_and(|s| s.paused));
+        assert!(drive.sent() < body.len() as u64, "construction: the download had not finished");
+        assert!(!root.join("big.bin").exists(), "no partial file");
+
+        // Resumed, the op the pause put back on the queue runs again, and the
+        // file lands whole.
+        drive.slow.store(false, Ordering::SeqCst);
+        assert_eq!(handle_control(&shared, &req("POST", "/resume", Value::Null)).0, 200);
+        wait_for("the file landing after the resume", Duration::from_secs(30), || {
+            std::fs::metadata(root.join("big.bin")).is_ok_and(|m| m.len() == body.len() as u64)
+        });
+        assert_eq!(std::fs::read(root.join("big.bin")).unwrap(), body);
+
+        assert_eq!(handle_control(&shared, &req("POST", "/stop", Value::Null)).0, 200);
+        let (exit, open) = exited.recv_timeout(Duration::from_secs(15)).expect("the daemon stopped");
+        assert_eq!(exit, Exit::Stopped);
+        assert!(open.is_empty(), "{open:?}");
     }
 
     #[test]

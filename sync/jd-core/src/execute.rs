@@ -76,6 +76,12 @@ pub enum ExecError {
     /// disk is a thing that stops being full or busy.
     #[error("could not write a working file: {0}")]
     Io(#[from] std::io::Error),
+    /// The pass was asked to stand down (`ExecEnv::stand_down`) while this op
+    /// was in flight, between two chunks of its transfer. Not a failure, and
+    /// never classified as one: `run_one` puts the op straight back on the
+    /// queue as it was, nothing counted and nothing said.
+    #[error("asked to stand down mid-transfer")]
+    StoodDown,
 }
 
 /// How one operation ended.
@@ -141,6 +147,10 @@ pub struct ExecReport {
     /// (`OpOutcome::Waits`). Pending, like `deferred`, and counted apart from
     /// it and from `retrying`: a wait is not a failure.
     pub waiting: usize,
+    /// The run stopped early because it was asked to (`ExecEnv::stand_down`).
+    /// What it did not reach, and an op it stopped in the middle of, are still
+    /// queued: work is left, whatever the counts say.
+    pub stood_down: bool,
 }
 
 impl ExecReport {
@@ -179,6 +189,17 @@ pub struct ExecEnv<'a> {
     /// look identical to one that never had it, and the two need opposite
     /// advice.
     pub vault: Option<&'a crate::vault::Vault>,
+    /// Should the pass stop now? Asked between two operations and between two
+    /// chunks of a transfer, so a person who stops or pauses the client is not
+    /// left waiting out a transfer of a large file before anything happens.
+    ///
+    /// Answered by whoever runs the engine: the daemon says yes the moment a
+    /// stop or a pause is posted to it. The ops not reached stay queued,
+    /// untouched. An op stopped in its transfer goes back on the queue as it
+    /// was, under its own key, and runs again from its start, which the engine
+    /// already does safely for an op a kill interrupted. A caller that never
+    /// stops a pass passes `&|| false`.
+    pub stand_down: &'a dyn Fn() -> bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -389,11 +410,21 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
 }
 
 /// `run_queued`, telling `seen` how each op it ran ended (a pass's trace).
+///
+/// Stops early, with `stood_down` set, when it is asked to
+/// (`ExecEnv::stand_down`): before the next op, or in the middle of one's
+/// transfer. Nothing it did not finish is recorded as having ended.
 pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> Result<ExecReport, ExecError> {
     let now = (env.now_ms)() as i64;
     let mut report = ExecReport::default();
 
     for queued in env.store.queued_ops()? {
+        // Asked to stand down: what is not started yet stays queued, untouched,
+        // for the next pass.
+        if (env.stand_down)() {
+            report.stood_down = true;
+            break;
+        }
         // Read again, not run from the copy: an op earlier in this run can
         // have rewritten this one's parameters (`redirect_queued_parent`),
         // or dropped it.
@@ -407,7 +438,15 @@ pub fn run_queued_with(env: &ExecEnv, seen: &mut dyn FnMut(&Op, &OpOutcome)) -> 
             report.deferred += 1;
             continue;
         }
-        let outcome = run_one(env, &op)?;
+        let outcome = match run_one(env, &op) {
+            // Stopped in its transfer and put back on the queue (`run_one`):
+            // it has not ended, so nothing is told it did.
+            Err(ExecError::StoodDown) => {
+                report.stood_down = true;
+                break;
+            }
+            other => other?,
+        };
         seen(&op, &outcome);
         match outcome {
             OpOutcome::Done => report.done += 1,
@@ -439,6 +478,19 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             env.store.set_op_state(op.op_id, OpState::InFlight)?;
             match perform(env, op) {
                 Ok(o) => o,
+                // Asked to stand down between two chunks of its transfer.
+                // Straight back on the queue under its own key, as it was:
+                // attempts, retry time and last error untouched, and it runs
+                // again from its start. Not counted as a kill's attempt is: a
+                // stand-down fires only before a transfer's completion call,
+                // so the server holds nothing of it but an abandoned upload
+                // session. Counted, ten pauses of one large upload read as an
+                // op that keeps failing, with no reason, and put its next real
+                // failure at the longest backoff.
+                Err(ExecError::StoodDown) => {
+                    env.store.set_op_state(op.op_id, OpState::Queued)?;
+                    return Err(ExecError::StoodDown);
+                }
                 Err(e) => {
                     note_the_parent_is_in_the_trash(env, &e)?;
                     note_a_refused_name(env, op, &e)?;
@@ -738,6 +790,10 @@ fn classify(e: &ExecError) -> OpOutcome {
         // A failing state store is not something the next attempt escapes.
         ExecError::Store(m) => OpOutcome::Retry(m.to_string()),
         ExecError::Io(m) => OpOutcome::Retry(m.to_string()),
+        // Never an outcome: `run_one` puts a stood-down op back on the queue
+        // before anything classifies it. Read as the retry it amounts to,
+        // should a path ever reach here with one.
+        ExecError::StoodDown => OpOutcome::Retry("asked to stand down mid-transfer".into()),
     }
 }
 
@@ -1433,6 +1489,73 @@ impl std::io::Seek for Source<'_> {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         self.0.seek(pos)
     }
+}
+
+/// A transfer's bytes, moved only while the pass is still wanted.
+///
+/// Wraps an upload's source and a download's sink, and asks
+/// `ExecEnv::stand_down` before every read and every write. An upload reads
+/// its source just before it sends each chunk, and a download writes as the
+/// bytes arrive, so a stop or a pause lands within a chunk instead of when
+/// the file is done. Once the answer is yes the read or write fails with
+/// `StandDownAsked`, which the transport hands back as its own error and the
+/// op turns into `ExecError::StoodDown` (`stood_down`). A chunk already on the
+/// wire is let finish; nothing after it is sent or kept.
+struct Heeding<'a, T: ?Sized> {
+    inner: &'a mut T,
+    stand_down: &'a dyn Fn() -> bool,
+}
+
+impl<T: ?Sized> Heeding<'_, T> {
+    fn still_wanted(&self) -> std::io::Result<()> {
+        if (self.stand_down)() {
+            return Err(std::io::Error::other(StandDownAsked));
+        }
+        Ok(())
+    }
+}
+
+impl<T: std::io::Read + ?Sized> std::io::Read for Heeding<'_, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.still_wanted()?;
+        self.inner.read(buf)
+    }
+}
+
+impl<T: std::io::Seek + ?Sized> std::io::Seek for Heeding<'_, T> {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+impl<T: Write + ?Sized> Write for Heeding<'_, T> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.still_wanted()?;
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// What a heeded transfer fails with once a stand-down is asked (`Heeding`).
+/// A type of its own, so the failure is told apart from every real one by
+/// what it is, never by its words.
+#[derive(Debug)]
+struct StandDownAsked;
+
+impl std::fmt::Display for StandDownAsked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the pass was asked to stand down")
+    }
+}
+
+impl std::error::Error for StandDownAsked {}
+
+/// Did this transfer stop because the pass was asked to stand down
+/// (`Heeding`), rather than fail?
+fn stood_down(e: &ProtoError) -> bool {
+    matches!(e, ProtoError::Io(io) if io.get_ref().is_some_and(|inner| inner.is::<StandDownAsked>()))
 }
 
 /// Clear a path for something that has to go there, without destroying what is
@@ -2387,13 +2510,25 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let mut remints = 0u32;
     while landing.cipher_written < want_size {
         let from = landing.cipher_written;
-        match env.api.download(&url, from, &mut landing) {
+        let mut heeded = Heeding {
+            inner: &mut landing,
+            stand_down: env.stand_down,
+        };
+        match env.api.download(&url, from, &mut heeded) {
             Ok(0) => {
                 // The server had nothing more to give at an offset it accepted.
                 // Continuing would spin, so let the backoff have it.
                 break;
             }
             Ok(_) => {}
+            // Asked to stand down while the bytes were arriving. What landed
+            // goes with the spool, as it does for any download that does not
+            // finish, and the op goes back on the queue (`run_one`): the next
+            // run fetches the file again from its start.
+            Err(e) if stood_down(&e) => {
+                spool.discard();
+                return Err(ExecError::StoodDown);
+            }
             Err(ProtoError::Api { status: 403, .. }) if remints < URL_REMINTS => {
                 // The link expired mid-transfer. The file is fine; the link is
                 // not. Re-mint and carry on from where the bytes stopped —
@@ -3181,16 +3316,22 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         let sent = match &mut ciphertext {
             Some(reader) => {
                 let mut source = Source(&mut **reader);
-                env.api.upload(&params, &mut source)
+                env.api.upload(&params, &mut Heeding { inner: &mut source, stand_down: env.stand_down })
             }
             None => {
                 reader.seek(std::io::SeekFrom::Start(0))?;
                 let mut source = Source(&mut *reader);
-                env.api.upload(&params, &mut source)
+                env.api.upload(&params, &mut Heeding { inner: &mut source, stand_down: env.stand_down })
             }
         };
         match sent {
             Ok(out) => break out,
+            // Asked to stand down between two chunks. The upload the server
+            // opened for this attempt is abandoned with it, as a kill there
+            // would abandon it, and the op goes back on the queue (`run_one`):
+            // an upload never resumes across attempts, so the next run starts
+            // again at init and finishes under its own key.
+            Err(e) if stood_down(&e) => return Err(ExecError::StoodDown),
             // A name this device can account for is not a name to step around:
             // the holder is on its way somewhere else and the refusal lifts by
             // itself. Renaming around it would hand the user a conflict name,
