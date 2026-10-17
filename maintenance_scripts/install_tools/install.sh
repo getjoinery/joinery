@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 3.25 - docker --site-engine refuses a machine that is not the engine's Ubuntu release before it
+#               makes the data root (install_site_engine.sh preflight; site_container_engine B30). A build
+#               on the engine names both OCI hook folders (--hooks-dir), which podman build does not read
+#               from the engine's containers.conf: it loaded them from the implicit folders, warning on
+#               every step, and a Podman that drops those would build without the walls check (B25).
 #VERSION 3.24 - server and docker take --no-tpm2 with --encrypted-data-root: the TPM2 chip never opens the
 #               data root, and every boot asks for its key, so a machine taken whole stays locked (B43).
 #               site refuses <name>_test beside a site <name>: that name is the site's test site, and a
@@ -722,8 +727,15 @@ else
 fi
 # A build on the site engine never trusts the layer cache (a second site's build
 # reused the first site's layers, build arguments and all) and keeps the health
-# check, which only the Docker image format carries (D6).
-site_engine_build_flags() { if site_engine_is_podman; then printf '%s\n' --format docker --no-cache; fi; }
+# check, which only the Docker image format carries (D6). It names the hook
+# folders the engine's containers.conf lists (install_site_engine.sh), which
+# podman build does not read from there (B25).
+site_engine_build_flags() {
+    if site_engine_is_podman; then
+        printf '%s\n' --format docker --no-cache \
+            --hooks-dir /usr/share/containers/oci/hooks.d --hooks-dir /etc/containers/oci/hooks.d
+    fi
+}
 
 #==============================================================================
 # GLOBAL CONSTANTS
@@ -2588,6 +2600,8 @@ do_site_engine_host() {  # MGMT_NODE_URL NODE_NAME MULTI_TENANT DATA_ROOT NO_OUT
         print_error "Docker is installed on this host. The site container engine is for a new host: build one with install.sh docker --site-engine and move the sites onto it."
         exit 1
     fi
+    # Before anything is made: the engine runs only on the release it is built on (B30).
+    bash "$SCRIPT_DIR/install_site_engine.sh" preflight || exit 1
 
     print_step "Making the data root (/srv/joinery) for the engine's storage..."
     bash "$SCRIPT_DIR/joinery_data_root.sh" check > /dev/null 2>&1 || rc=$?

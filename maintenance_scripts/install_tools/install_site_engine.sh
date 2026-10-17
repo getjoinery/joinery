@@ -3,6 +3,9 @@
 # install_site_engine.sh - install or converge the site container engine on a
 # container host (specs/site_container_engine.md D2, D3).
 #
+# Version: 1.7 - preflight: refuses, before install.sh changes anything, a machine that is not the Ubuntu
+#               release every engine is built on (ENGINE_UBUNTU, which build.sh enforces); on 24.04 the
+#               data root was made before the archive's own check refused (B30).
 # Version: 1.6 - converge with no server named fetches a new engine from the management node this host's
 #               agent joined (node_identity.json's plane_url) first, then UPGRADE_SERVER or getjoinery.com:
 #               host housekeeping runs it on every engine host, and getjoinery.com may not have a
@@ -52,6 +55,10 @@
 #         nothing.
 #   install_site_engine.sh status
 #         Prints the current engine's BUILDINFO; exit 1 when there is none.
+#   install_site_engine.sh preflight
+#         Exit 1, saying why, when this tree names an engine and this machine is
+#         not the release engines are built on. install.sh asks it before it
+#         makes anything; an install still checks the archive's own BUILDINFO.
 #
 # What install leaves behind:
 #   /usr/local/lib/joinery-site-engine/<version>-<sha12>/  bin/podman, helpers/, systemd/, BUILDINFO
@@ -107,6 +114,9 @@ DATA_ROOT_MNT="${ROOT}/srv/joinery"
 OS_RELEASE="${JOINERY_SITE_ENGINE_OS_RELEASE:-${ROOT}/etc/os-release}"  # tests only: another file
 UBUNTU_ENGINE_PACKAGES="podman podman-docker netavark aardvark-dns crun golang-github-containers-common golang-github-containers-image containers-storage containernetworking-plugins"
 UBUNTU_KEPT_PACKAGES="runc conmon"
+# The Ubuntu release every engine is built on: build.sh refuses any other
+# (site_engine_gate holds the two together).
+ENGINE_UBUNTU="26.04"
 ARCHIVE_RE='^(joinery-site-engine-([0-9]+\.[0-9]+\.[0-9]+)-([a-z0-9]+))\.tar\.xz$'
 SLOT_RE='^[0-9]+\.[0-9]+\.[0-9]+-[0-9a-f]{12}$'
 
@@ -214,6 +224,13 @@ release_matches() {
     have="$(host_release_name)"
     echo "it is built on Ubuntu ${want} and links against that release's libraries, and this machine is ${have:-a release its /etc/os-release does not name}; the site container engine runs on Ubuntu ${want}, so build the host on it"
     return 1
+}
+
+preflight() {
+    [[ -f "$STAMP" ]] || return 0
+    local why
+    why="$(printf 'built_on=Ubuntu %s\n' "$ENGINE_UBUNTU" | release_matches)" \
+        || die "this release's engine cannot run here: ${why}. Nothing was changed"
 }
 
 status() {
@@ -415,5 +432,6 @@ case "${1:-}" in
     converge) [[ $# -le 2 ]] || die "usage: install_site_engine.sh converge [UPGRADE_SERVER]"; converge "${2:-}" ;;
     install)  [[ $# -eq 3 ]] || die "usage: install_site_engine.sh install ARCHIVE SHA256"; install_engine "$2" "$3" ;;
     status)   status ;;
-    *)        die "usage: install_site_engine.sh converge [UPGRADE_SERVER] | install ARCHIVE SHA256 | status" ;;
+    preflight) preflight ;;
+    *)        die "usage: install_site_engine.sh converge [UPGRADE_SERVER] | install ARCHIVE SHA256 | status | preflight" ;;
 esac

@@ -202,6 +202,19 @@ chk "and a copy that could not start quiet is removed whole" \
 chk "  and so is one whose container could not be made (R2c)" \
     "$(grep -A6 'if ! site_engine create "\${RUN_ARGS\[@\]}"' "$I" | grep -c 'remove_account.sh" "\$SITENAME" -y')" "1"
 
+echo "A host on the engine (B25, B30)"
+# A build names the hook folders the engine's containers.conf lists, which
+# podman build does not read from there.
+conf_hooks="$(sed -n 's/^hooks_dir = \[\(.*\)\]$/\1/p' "$TOOLS/install_site_engine.sh" | tr -d '"' | sed 's/, */ /g')"
+flags_on() { (unset JOINERY_SITE_ENGINE_KIND; SITE_ENGINE_ROOT="$1" bash -c ". '$I'; site_engine_build_flags" 2>/dev/null | paste -sd ' '); }
+chk "a build on the engine names both of its containers.conf's hook folders" \
+    "$(flags_on "$FX")" "--format docker --no-cache --hooks-dir ${conf_hooks% *} --hooks-dir ${conf_hooks#* }"
+chk "  and a Docker build names no flag" "$(flags_on "$T/none")" ""
+# The release refusal comes before the data root is made.
+eh="$(awk '/^do_site_engine_host\(\) \{/,/^}/' "$I")"
+chk "docker --site-engine asks the engine installer's preflight before it makes the data root" \
+    "$(( $(grep -n 'install_site_engine.sh" preflight || exit 1' <<< "$eh" | cut -d: -f1) < $(grep -n 'joinery_data_root.sh" check' <<< "$eh" | head -1 | cut -d: -f1) ))" "1"
+
 echo "install.sh speaks to the site's engine"
 # Every docker command outside Docker's own host install, by function (B10: the
 # reach probe's docker exec failed on every site engine host).
