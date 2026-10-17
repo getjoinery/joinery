@@ -4,6 +4,7 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.6 - (comment) the converger also runs this alone hourly for the code check (_plugin_installers_start.sh 2.39).
 # Version: 1.5 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3); a Podman site took its own cron entry and dropped
 #                the held manifest an image rebuild puts back.
 # Version: 1.4 - On a host that refuses unsigned code, every run checks the whole code tree against what
@@ -194,8 +195,9 @@ fi
 # --- the code check (a host that refuses unsigned code) -------------------------
 # Signing checks code when it is installed, not afterwards: a file edited in
 # place by someone with root, or a plugin directory copied in, goes through no
-# install. On a host that refuses unsigned code every converge (daily, and after
-# an upgrade, a plugin change or a root request) checks the whole tree against
+# install. On a host that refuses unsigned code every run (each converge: daily,
+# and after an upgrade, a plugin change or a root request; and the converger's
+# hourly tick once this file is an hour old) checks the whole tree against
 # what was shipped - core, every plugin, every theme - and writes the answer to
 # config/code_check, which the host report carries to the management node, where
 # a failure is an incident (specs/host_restrictions.md D8). It reports; nothing

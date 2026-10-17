@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.25 - carries _kernel_settings.sh, the pinned kernel and network settings host_housekeeping.sh
+ *                 writes and host_report.sh reports on (specs/multi_tenant_host_hardening.md WP1)
  * @version 1.24 - carries install_site_engine.sh and the five site_engine/ files it reads (ENGINE and the site
  *                system call filter with their records): host housekeeping converges an engine host onto its
  *                release's engine and filter, which only install.sh did before (specs/site_container_engine.md B32)
@@ -241,6 +243,10 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/_plugin_installers_start.sh',
 		'maintenance_scripts/install_tools/_tree_trust.sh',
 		'maintenance_scripts/install_tools/host_housekeeping.sh',
+		// The kernel and network settings every machine pins, one list:
+		// host_housekeeping.sh writes them and host_report.sh reports
+		// whether the kernel holds them (hardening). Sources nothing.
+		'maintenance_scripts/install_tools/_kernel_settings.sh',
 		// The machine's swap: compressed memory, never a disk (B32).
 		'maintenance_scripts/install_tools/host_swap.sh',
 		'maintenance_scripts/install_tools/install_host_converger.sh',

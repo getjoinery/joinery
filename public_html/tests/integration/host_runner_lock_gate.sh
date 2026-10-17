@@ -354,6 +354,30 @@ wait "$holder"
 out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
 chk "once the upgrade lets go, the next tick runs" "$(printf '%s\n' "$out" | grep -c 'is upgrading')" "0"
 
+echo "== the code check runs hourly on a tick with nothing to converge (WP7) =="
+cat > "$FT/site_housekeeping.sh" <<STUB
+#!/usr/bin/env bash
+echo "stub-site-housekeeping \$1"
+date +%s >> "$T/shk.runs"
+STUB
+chmod 755 "$FT/site_housekeeping.sh"
+# The fixture has no database: name the active plugins (none of them here), or
+# every tick drops its stamp and converges again.
+export JOINERY_ACTIVE_PLUGINS="gate_no_such_plugin"
+bash "$RUNNER" --when-changed --site-root="$T" > /dev/null 2>&1    # the stub changed the installers: one converge
+rm -f "$T/shk.runs"; agent_before="$(wc -l < "$T/agent.starts")"; last_before="$(cat "$LAST")"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"; rc=$?
+chk "no code check on the site (a host that does not refuse): the tick runs nothing" "$rc:$(test -e "$T/shk.runs" && echo ran)" "0:"
+: > "$T/config/code_check"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
+chk "a code check under an hour old: nothing" "$(test -e "$T/shk.runs" && echo ran)" ""
+touch -d '61 minutes ago' "$T/config/code_check"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"; rc=$?
+chk "one over an hour old: site housekeeping alone runs, and says why" \
+    "$rc:$(wc -l < "$T/shk.runs" 2>/dev/null):$(printf '%s\n' "$out" | grep -c "checking ${SITENAME}'s code (hourly)")" "0:1:1"
+chk "  no converge: no other installer, and neither the stamp's record nor its last run changed" \
+    "$(wc -l < "$T/agent.starts"):$(printf '%s\n' "$out" | grep -c 'converging'):$( [ "$(cat "$LAST")" = "$last_before" ] && echo same)" "$agent_before:0:same"
+
 echo
 echo "host_runner_lock gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]

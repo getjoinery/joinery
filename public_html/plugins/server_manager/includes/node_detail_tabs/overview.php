@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.73 - the kernel line counts kernel warnings, and a line says whether the kernel holds every pinned
+ *                setting (specs/multi_tenant_host_hardening.md WP1, D7)
  * @version 1.72 - a data root stopped by hand says so, when and with what, instead of not mounted (reviewer2 B17 D2)
  * @version 1.71 - Release keys: the keys the site and the agent trust, beside the ones this management node expects
  *                (the status check's release_trust, specs/release_key_rotation.md R6)
@@ -1569,15 +1571,32 @@
 					echo '<small class="text-muted">first ' . (int)JobResultProcessor::HOST_REPORT_MAX_LIST . ' only</small>';
 				}
 			}
-			// The three kernel events that explain a write that failed: counts only.
+			// The kernel events that explain a write that failed, and the kernel's own
+			// warnings (a shared host's raise plane:kernel_warning): counts only.
 			if (is_array($hr['kernel_events_24h'])) {
 				$bits = array();
-				foreach (array('oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors') as $k => $word) {
-					if (is_int($hr['kernel_events_24h'][$k]) && $hr['kernel_events_24h'][$k] > 0) { $bits[] = $hr['kernel_events_24h'][$k] . ' ' . $word; }
+				foreach (array('oom' => 'out of memory', 'enospc' => 'disk full', 'io_error' => 'I/O errors', 'kernel_warning' => 'kernel warnings') as $k => $word) {
+					if (is_int($hr['kernel_events_24h'][$k] ?? null) && $hr['kernel_events_24h'][$k] > 0) { $bits[] = $hr['kernel_events_24h'][$k] . ' ' . $word; }
 				}
 				echo $bits
 					? '<div class="mt-2 text-danger small">Kernel, last 24h: ' . $hr_str(implode(', ', $bits)) . '</div>'
 					: '<div class="mt-2 text-muted small">Kernel, last 24h: nothing to report</div>';
+			}
+			// The kernel and network settings every machine pins, as the running kernel
+			// holds them (a setting that does not raises plane:kernel_settings).
+			$hd = $hr['hardening'] ?? null;
+			if (is_array($hd)) {
+				if ($hd['state'] === 'ok') {
+					// A setting this kernel lacks, or the report could not read, is said, not held (reviewer2 R4).
+					$hd_unread = is_int($hd['unread']) && $hd['unread'] > 0 ? ', ' . (int)$hd['unread'] . ' unread' : '';
+					echo '<div class="mt-1 text-muted small">Kernel settings: all held'
+						. (is_int($hd['pinned']) ? ' (' . (int)$hd['pinned'] . ' pinned' . $hd_unread . ')' : '') . '</div>';
+				} else {
+					$loose = array();
+					foreach ($hd['drift'] as $d) { $loose[] = $d['key'] . ' is ' . $d['live'] . ', not ' . $d['want']; }
+					echo '<div class="mt-1 text-danger small">Kernel settings not held: '
+						. $hr_str($loose ? implode('; ', $loose) : 'the report did not name them') . '</div>';
+				}
 			}
 			// What the machine's sites may open toward the outside, and how fast they send (host_report
 			// 1.11). A container site's own report says none: its host's says.

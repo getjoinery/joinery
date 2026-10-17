@@ -6,6 +6,9 @@
 # reboot that follows a kernel update
 # (multi_tenant_docker_hosts WP5 items 1, 4, 5, 6 and 7).
 #
+# Version: 1.5 - check says whether the running kernel holds every kernel and network setting host
+#                housekeeping pins (_kernel_settings.sh), naming each one it does not, and exits 1 on any
+#                (specs/multi_tenant_host_hardening.md WP1).
 # Version: 1.4 - On the site container engine every container start checks the walls (an OCI hook,
 #                /etc/containers/oci/hooks.d/joinery-site-walls.json, at createRuntime), as dockerd's own
 #                start did on Docker: a restart, a hold's start, a rebuild or the restart policy no longer
@@ -359,6 +362,26 @@ do_check() {
         fi
     else
         say "reboot after updates: NOT set"; bad=1
+    fi
+    # The kernel and network settings every machine pins, as the running kernel
+    # holds them (host housekeeping writes them; _kernel_settings.sh, D1).
+    local helper lines pinned drifted unread note=""
+    helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_kernel_settings.sh"
+    if [[ -f "$helper" ]] && lines="$(bash -c '. "$1" && kernel_settings_state' _ "$helper")" && [[ -n "$lines" ]]; then
+        pinned="$(grep -c . <<< "$lines")"
+        unread="$(grep -c '^unread ' <<< "$lines" || true)"
+        drifted="$(grep '^drift ' <<< "$lines" || true)"
+        if [[ -z "$drifted" ]]; then
+            [[ "$unread" == 0 ]] || note=", ${unread} of them unread (this kernel lacks it, or this run cannot read it)"
+            say "kernel settings: held (${pinned} pinned${note})"
+        else
+            while read -r _ key live want; do
+                say "kernel settings: ${key} is ${live}, NOT ${want} (this kernel refuses it, or something else on the machine keeps setting it)"
+            done <<< "$drifted"
+            bad=1
+        fi
+    else
+        say "kernel settings: NOT checked (no _kernel_settings.sh beside this script)"; bad=1
     fi
     return "$bad"
 }

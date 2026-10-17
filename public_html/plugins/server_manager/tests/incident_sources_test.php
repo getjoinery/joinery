@@ -19,6 +19,8 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
+ * @version 1.7 - plane:kernel_warning (a warning on a host that refuses unsigned code, never elsewhere) and
+ *                plane:kernel_settings (a warning naming each setting not held), multi_tenant_host_hardening D7, D1
  * @version 1.6 - plane:cloud_account_key is registered (its conditions: escrow_tier2_test, B77)
  * @version 1.5 - the node's alerts are on: a hand-made node on dev is a test cloud box, which is quiet by default
  * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
@@ -73,7 +75,7 @@ foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped'
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
 	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified',
-	'plane:cloud_account_key') as $want) {
+	'plane:cloud_account_key', 'plane:kernel_warning', 'plane:kernel_settings') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
@@ -97,6 +99,59 @@ $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(ar
 check($units->evaluate($node) === null, 'A report that could not list units does not');
 $set(array('mgn_last_host_report' => null));
 check($units->evaluate($node) === null, 'No report does not');
+
+// ---------------------------------------------------------------------------
+section('Kernel warnings on a host that runs strangers\' sites');
+
+$kw = new IncidentSourceKernelWarning();
+$kr = function ($warnings, $restrictions) {
+	return JobResultProcessor::sanitise_host_report(array(
+		'kernel_events_24h' => array('oom' => 0, 'enospc' => 0, 'io_error' => 0, 'kernel_warning' => $warnings),
+		'host_restrictions' => $restrictions));
+};
+$set(array('mgn_last_host_report' => $kr(3, array('unsigned_packages' => 'refuse'))));
+$v = $kw->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'The kernel logged 3 warnings'
+	&& strpos($v['detail']['Look'], "_TRANSPORT=kernel") !== false, 'Three on a host that refuses unsigned code: a warning, saying where to look', json_encode($v));
+$set(array('mgn_last_host_report' => $kr(1, array('unsigned_packages' => 'refuse'))));
+check(($kw->evaluate($node)['title'] ?? '') === 'The kernel logged a warning', 'One: said as one');
+$set(array('mgn_last_host_report' => $kr(0, array('unsigned_packages' => 'refuse'))));
+check($kw->evaluate($node) === null, 'None in the last day: nothing');
+$set(array('mgn_last_host_report' => $kr(5, 'none')));
+check($kw->evaluate($node) === null && strpos($kw->cleared_text($node), 'no longer runs other people') !== false,
+	'Five on a machine that refuses nothing (one owner\'s): noted on the node page, not an alarm');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array(
+	'kernel_events_24h' => array('oom' => 0, 'enospc' => 0, 'io_error' => 0), 'host_restrictions' => array('unsigned_packages' => 'refuse')))));
+check($kw->evaluate($node) === null, 'A report too old to count them: nothing');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array(
+	'kernel_events_24h' => 'unknown', 'host_restrictions' => array('unsigned_packages' => 'refuse')))));
+check($kw->evaluate($node) === null, 'A journal the report could not read: nothing');
+
+// ---------------------------------------------------------------------------
+section('Kernel settings not held');
+
+$ks = new IncidentSourceKernelSettings();
+$hk = function ($h) { return JobResultProcessor::sanitise_host_report(array('hardening' => $h)); };
+$set(array('mgn_last_host_report' => $hk(array('state' => 'drift', 'pinned' => 38, 'unread' => 0, 'drift' => array(
+	array('key' => 'kernel.yama.ptrace_scope', 'live' => '0', 'want' => '1'),
+	array('key' => 'net.ipv4.conf.all.accept_redirects', 'live' => '1', 'want' => '0'))))));
+$v = $ks->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === '2 kernel settings are looser than pinned'
+	&& $v['detail']['Settings'] === 'kernel.yama.ptrace_scope is 0, not 1; net.ipv4.conf.all.accept_redirects is 1, not 0',
+	'Two loosened: a warning naming each, its live value and the pinned one', json_encode($v));
+$set(array('mgn_last_host_report' => $hk(array('state' => 'drift', 'pinned' => 38, 'unread' => 0, 'drift' => array(
+	array('key' => 'kernel.x; rm -rf /', 'live' => '0', 'want' => '1'),
+	array('key' => 'kernel.kptr_restrict', 'live' => '<b>', 'want' => '2'))))));
+$v = $ks->evaluate($node);
+check($v !== null && $v['detail']['Settings'] === 'kernel.kptr_restrict is unknown, not 2',
+	'A key that is not a sysctl name is dropped, and a value that is not a word reads unknown', json_encode($v));
+$set(array('mgn_last_host_report' => $hk(array('state' => 'ok', 'pinned' => 38, 'unread' => 1, 'drift' => array()))));
+check($ks->evaluate($node) === null, 'Every setting held: nothing');
+$set(array('mgn_last_host_report' => $hk('unknown')));
+check($ks->evaluate($node) === null, 'A container, or a report that could not read them: nothing');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
+check($ks->evaluate($node) === null && JobResultProcessor::sanitise_host_report(array())['hardening'] === null,
+	'A report from before the field: nothing');
 
 // ---------------------------------------------------------------------------
 section('Mail apps gateway');
