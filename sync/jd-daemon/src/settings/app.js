@@ -222,9 +222,11 @@
     }
     if (stage === 'folder') {
       text($('folder-site'), setup.base_url);
+      // The daemon says why when it is more than an unticked box: a session
+      // that cannot open the credential store keeps no key to encrypted folders.
       text($('folder-vault'), setup.vault
         ? 'Encrypted folders are enabled on this computer.'
-        : 'Encrypted folders are not enabled on this computer. To have them, tick that box on the approval page the next time you link it.');
+        : (setup.vault_note || 'Encrypted folders are not enabled on this computer. To have them, tick that box on the approval page the next time you link it.'));
     }
   }
 

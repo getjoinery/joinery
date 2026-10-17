@@ -14,6 +14,11 @@
 //! be the thing that waits. It posts a [`SetupCommand`] and reads back a
 //! [`View`], exactly as it does with the sync thread once the device is linked.
 //!
+//! A session that cannot open the computer's credential store (a Mac reached
+//! over SSH) links plain folders only: no key is offered for the vault to be
+//! sealed to, and the folder step says how to have encrypted folders
+//! (`link::VaultHandoff`).
+//!
 //! **The credential is stored the moment it arrives**, before the user has
 //! picked a folder, because the server hands it over once and scrubs it. What
 //! the folder step still needs is written beside it in `pending_link.json` (no
@@ -89,6 +94,9 @@ pub struct View {
     pub suggested_root: String,
     /// Whether encrypted folders were enabled when the link was approved.
     pub vault: bool,
+    /// Why they were not, when there is more to say than that the box was
+    /// not ticked (`link::VaultHandoff::sentence`).
+    pub vault_note: Option<String>,
 }
 
 impl View {
@@ -105,6 +113,7 @@ impl View {
             browser_opened: false,
             suggested_root: jd_platform::default_sync_root().display().to_string(),
             vault: false,
+            vault_note: None,
         }
     }
 
@@ -171,6 +180,7 @@ pub fn status_json(view: &View) -> Value {
             "browser_opened": view.browser_opened,
             "suggested_root": view.suggested_root,
             "vault": view.vault,
+            "vault_note": view.vault_note,
         },
     })
 }
@@ -384,6 +394,9 @@ pub struct PendingLink {
     pub base_url: String,
     pub device_name: String,
     pub device_id: Option<i64>,
+    /// The account it was approved for (`Config::account_id`).
+    #[serde(default)]
+    pub account_id: Option<i64>,
     pub public_key: String,
     pub vault_enabled: bool,
 }
@@ -430,21 +443,23 @@ fn restore_pending(paths: &Paths, secrets: &mut Secrets) -> Option<Approval> {
     }
 }
 
-/// The credential store, opened the first time something needs it.
+/// The credential store, opened the first time something needs it: when the
+/// user starts linking, which is when whether this session can keep a vault
+/// key decides what the device offers (`link::begin`).
 ///
 /// Not at startup: opening it on macOS probes the login keychain, and a fresh
 /// install that has not been asked to link anything yet has no business
 /// touching the user's keychain — or showing them a keychain prompt before they
 /// have done anything at all.
 pub struct Secrets {
-    state: PathBuf,
+    paths: Paths,
     store: Option<SecretStore>,
 }
 
 impl Secrets {
     pub fn new(paths: &Paths) -> Secrets {
         Secrets {
-            state: paths.state.clone(),
+            paths: paths.clone(),
             store: None,
         }
     }
@@ -452,15 +467,18 @@ impl Secrets {
     #[cfg(test)]
     fn with(store: SecretStore) -> Secrets {
         Secrets {
-            state: PathBuf::new(),
+            paths: Paths {
+                config: PathBuf::new(),
+                state: PathBuf::new(),
+                logs: PathBuf::new(),
+            },
             store: Some(store),
         }
     }
 
     pub fn get(&mut self) -> &SecretStore {
-        let state = &self.state;
-        self.store
-            .get_or_insert_with(|| SecretStore::open(link::SERVICE, state))
+        let paths = &self.paths;
+        self.store.get_or_insert_with(|| link::secrets(paths))
     }
 }
 
@@ -561,7 +579,8 @@ fn step(
                 if view.stage != Stage::Instance {
                     continue;
                 }
-                begin(view, ceremony, base_url, device_name, publish);
+                let offer_vault = secrets.get().can_keep(Secret::VaultKey);
+                begin(view, ceremony, base_url, device_name, offer_vault, publish);
             }
             SetupCommand::Cancel => {
                 *ceremony = None;
@@ -613,13 +632,14 @@ fn step(
         Ok(link::Outcome::Approved(a)) => {
             let c = ceremony.take().expect("in flight");
             match link::store_approved(secrets.get(), &c.pending, &a) {
-                Ok(vault_enabled) => {
+                Ok(handoff) => {
                     let pending = PendingLink {
                         base_url: c.base_url.clone(),
                         device_name: c.device_name.clone(),
                         device_id: a.device_id,
+                        account_id: link::account_of(&c.base_url, &a.credentials),
                         public_key: a.credentials.public_key.clone(),
-                        vault_enabled,
+                        vault_enabled: handoff.enabled(),
                     };
                     // Not fatal if it fails: the folder step still has
                     // everything in memory. Only a restart before it would lose
@@ -627,7 +647,8 @@ fn step(
                     let _ = save_pending(paths, &pending);
                     view.stage = Stage::Folder;
                     view.error = None;
-                    view.vault = vault_enabled;
+                    view.vault = handoff.enabled();
+                    view.vault_note = handoff.sentence();
                     *approved = Some(Approval {
                         link: pending,
                         secret_key: a.credentials.secret_key.clone(),
@@ -681,6 +702,7 @@ fn begin(
     ceremony: &mut Option<Ceremony>,
     base_url: String,
     device_name: String,
+    offer_vault: bool,
     publish: &dyn Fn(&View),
 ) {
     view.stage = Stage::Starting;
@@ -691,7 +713,12 @@ fn begin(
     publish(view);
 
     let client = Client::new(&base_url);
-    match link::begin(&client, &device_name, jd_platform::platform_name()) {
+    match link::begin(
+        &client,
+        &device_name,
+        jd_platform::platform_name(),
+        offer_vault,
+    ) {
         Ok(pending) => {
             view.stage = Stage::Approve;
             view.link_code = pending.link_code.clone();
@@ -739,6 +766,7 @@ fn finish(
         sync_root: checked.path,
         device_name: pending.device_name.clone(),
         device_id: pending.device_id,
+        account_id: pending.account_id,
         public_key: pending.public_key.clone(),
         poll_seconds: DEFAULT_POLL_SECONDS,
         excluded: Vec::new(),
@@ -1002,6 +1030,7 @@ mod tests {
             base_url: "https://drive.example.org".into(),
             device_name: "Laptop".into(),
             device_id: Some(7),
+            account_id: Some(41),
             public_key: "pk".into(),
             vault_enabled: false,
         };
@@ -1077,6 +1106,7 @@ mod tests {
                 base_url: base_url.into(),
                 device_name: "Laptop".into(),
                 device_id: Some(7),
+                account_id: None,
                 public_key: "page-public-key".into(),
                 vault_enabled: false,
             },
@@ -1090,6 +1120,7 @@ mod tests {
             sync_root: "/r".into(),
             device_name: "Laptop".into(),
             device_id: Some(8),
+            account_id: None,
             public_key: public_key.into(),
             poll_seconds: DEFAULT_POLL_SECONDS,
             excluded: Vec::new(),

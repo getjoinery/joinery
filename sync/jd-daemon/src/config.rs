@@ -32,6 +32,13 @@ pub struct Config {
     /// The `SyncDevice` row id, for the management surface.
     #[serde(default)]
     pub device_id: Option<i64>,
+    /// The account this device was linked to, as the server named it at link
+    /// time. What the state store is bound to beside the site and the folder
+    /// (`daemon::open_store`): the record of one account's drive, read against
+    /// another's, would take every file it had agreed on as deleted there.
+    /// None for a link made before it was recorded.
+    #[serde(default)]
+    pub account_id: Option<i64>,
     /// The public half of the session key. The secret half is in the credential
     /// store; this is here so `status` can say which key is in use without
     /// reading a secret to do it.
@@ -135,6 +142,7 @@ mod tests {
             sync_root: PathBuf::from("/home/u/Joinery Drive"),
             device_name: "Laptop".into(),
             device_id: Some(7),
+            account_id: Some(41),
             public_key: "pk-public-half".into(),
             poll_seconds: DEFAULT_POLL_SECONDS,
             excluded: vec!["Photos".into()],
@@ -215,6 +223,7 @@ mod tests {
         .unwrap();
         let cfg = Config::load(&path).unwrap();
         assert_eq!(cfg.poll_seconds, DEFAULT_POLL_SECONDS);
+        assert_eq!(cfg.account_id, None);
         assert!(cfg.excluded.is_empty());
         assert!(!cfg.autostart);
         let _ = std::fs::remove_dir_all(&dir);

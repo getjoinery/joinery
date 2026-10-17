@@ -276,8 +276,8 @@ A desktop client that only ever received ciphertext could sync encrypted
 folders but never open one. So the vault key is handed to a named device, once,
 during the device-link ceremony (`docs/drive.md` § Device linking).
 
-The device generates an X25519 keypair at first launch and sends only the public
-half. In the approving browser — the one place the vault can be unlocked — the
+When it starts linking, the device generates an X25519 keypair and sends only
+the public half. In the approving browser — the one place the vault can be unlocked — the
 drive session (`JoinerySealed.session('drive')`, through the core unlock
 ceremony) seals the vault **secret** key to that public key
 (`session.sealSecretKeyTo(devicePublicKey)`, the standard sealed-box primitive)
@@ -290,9 +290,20 @@ once, and scrubs it. The device row records the scopes it holds
 
 The sealing lives inside the session closure deliberately: a consumer can hand
 the vault key to a device it names, and cannot read the raw bytes itself. On the
-device the private half lives in the OS keychain (macOS Keychain, Windows DPAPI
-+ Credential Manager, libsecret), and so does the vault secret key once
-unsealed — nothing lands on disk in plaintext.
+device, the vault secret key and the device's own private half live in the
+operating system's credential store — the login Keychain on macOS, the
+Credential Manager on Windows, the Secret Service on a Linux desktop built with
+it — each installation under a name of its own (`drive_sync.md` § Credentials).
+
+A device is offered the vault key only where it can keep it there. A session
+that cannot open the computer's credential store (a Mac reached over SSH, where
+the login Keychain stays locked) generates no keypair and sends no public key,
+so the approval page does not offer encrypted folders: the computer links for
+plain folders, and the client says to run `joinery-drive login` from the desktop
+session to enable them. A computer with no credential store the client can use —
+Linux in the default build, a headless server above all — keeps the vault key in
+a mode-0600 file in its state directory beside its other secrets: as safe as the
+user's account on that machine, and no safer.
 
 Consequences worth stating plainly: a linked device with the vault key can read
 every encrypted file the user can, without a further ceremony, for as long as it
@@ -303,6 +314,13 @@ synced to that computer are already on that computer.
 Sharing the key is per device and opt-in — the checkbox on the approval page.
 Decline it and the device syncs everything else and simply skips encrypted
 folders. A device that never offered a public key is not offered the choice.
+Linking a computer again replaces its device: the client takes the old device
+off the account with the old device's own key once the new link is stored.
+A vault key comes only from the computer's own link: a link that hands none
+over removes the one it held, and at start the daemon uses a stored key only if
+its link handed one over and the server's answer (`vault_client_probe`) allows
+it to be the account's (`drive_sync.md` § The vault key). Unlinking removes the
+vault key from the computer wherever it was kept.
 
 Rotating the drive vault key (`docs/sealed_vault.md` § Rotating a
 client-custody key) takes `drive` off every linked device: each holds the

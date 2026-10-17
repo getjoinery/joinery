@@ -25,8 +25,12 @@ ring = "0.17"
 flate2 = "1"
 
 [dev-dependencies]
+# The tests of what a locked or an open credential store means for linking and
+# unlinking run against jd-platform's in-memory stand-in, on every platform.
+jd-platform = { path = "../jd-platform", features = ["stand-in-keychain"] }
 # The engine's mock server, spoken to over loopback HTTP so a test can run a
-# real daemon's passes against it (`daemon::tests`). Never in a build.
+# real daemon's passes against it (`daemon::tests`); the startup vault check's
+# tests ask it too (`link::load_vault`). Never in a build.
 jd-sim = { path = "../jd-sim" }
 
 [[bin]]

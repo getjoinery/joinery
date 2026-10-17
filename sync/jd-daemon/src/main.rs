@@ -31,12 +31,10 @@ use jd_daemon::config::{Config, ConfigError};
 use jd_daemon::control::{ask, ControlServer, Endpoint};
 use jd_daemon::daemon::{handle_control, Daemon, Exit, Shared};
 use jd_daemon::link;
-use jd_platform::{Paths, Secret, SecretStore};
+use jd_platform::{Paths, Secret};
 use jd_proto::{Client, Credentials};
 use jd_vfs::OsVfs;
 use serde_json::{json, Value};
-
-const SERVICE: &str = link::SERVICE;
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -121,9 +119,28 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(jd_platform::default_sync_root);
 
+    // Opened before the ceremony, for two answers needed first: what the link
+    // this one replaces holds, read while its key is still the one stored, and
+    // whether this session can keep a vault key at all.
+    let secrets = link::secrets(&paths);
+    let previous = link::Previous::find(&paths, &secrets)?;
+    let offer_vault = secrets.can_keep(Secret::VaultKey);
+    if !offer_vault {
+        println!(
+            "This session cannot open this computer's credential store, so encrypted folders \
+             will not be offered; plain folders link and sync as usual. To enable encrypted \
+             folders, run joinery-drive login from your desktop session.\n"
+        );
+    }
+
     let client = Client::new(&base_url);
-    let pending = link::begin(&client, &device_name, jd_platform::platform_name())
-        .map_err(|e| e.to_string())?;
+    let pending = link::begin(
+        &client,
+        &device_name,
+        jd_platform::platform_name(),
+        offer_vault,
+    )
+    .map_err(|e| e.to_string())?;
 
     let opened = jd_platform::browser::show_url(&pending.verify_url);
     print!("{}", link::instructions(&base_url, &pending, opened));
@@ -144,34 +161,138 @@ fn cmd_login(rest: &[String]) -> Result<(), String> {
     // credential over exactly once and scrubs it; a config written before the
     // secret was stored would leave a client that believes it is linked and
     // holds nothing to prove it.
-    let secrets = SecretStore::open(SERVICE, &paths.state);
-    let vault_enabled = link::store_approved(&secrets, &pending, &approved)?;
+    let handoff = match link::store_approved(&secrets, &pending, &approved) {
+        Ok(handoff) => handoff,
+        Err(e) => {
+            // The new device cannot be kept, so it comes straight back off the
+            // account rather than staying live with nothing here to name it,
+            // and the link it was to replace is left as it was.
+            let _ = Client::with_credentials(&base_url, approved.credentials.clone()).logout();
+            if let Some(old) = &previous {
+                old.restore(&secrets);
+            }
+            return Err(format!("{e}. Nothing was linked."));
+        }
+    };
+    let account_id = link::account_of(&base_url, &approved.credentials);
+
+    // A daemon syncing the link this replaces would carry on with a key about
+    // to be revoked, against a state store that may be about to be set aside.
+    let stopped = previous.is_some() && stop_a_syncing_daemon();
 
     std::fs::create_dir_all(&sync_root)
         .map_err(|e| format!("cannot create {}: {e}", sync_root.display()))?;
 
+    // Whose drive the link being replaced synced, written into the state store
+    // if it does not say yet, so a store of another account is set aside when
+    // syncing starts rather than read against this one.
+    let previous_account = previous.as_ref().and_then(link::Previous::account);
+    if let Some(account) = previous_account {
+        let _ = jd_daemon::daemon::note_store_account(&paths.state_db(), account);
+    }
+    // Re-linking the same drive into the same folder (to turn on encrypted
+    // folders, say) keeps what this computer was set to for it.
+    let kept = previous.as_ref().map(|p| &p.config).filter(|old| {
+        old.base_url == base_url
+            && old.sync_root == sync_root
+            && match (previous_account, account_id) {
+                (Some(old), Some(new)) => old == new,
+                _ => true,
+            }
+    });
     Config {
         base_url: base_url.clone(),
         sync_root: sync_root.clone(),
         device_name: device_name.clone(),
         device_id: approved.device_id,
+        account_id,
         public_key: approved.credentials.public_key.clone(),
-        poll_seconds: jd_daemon::config::DEFAULT_POLL_SECONDS,
-        excluded: Vec::new(),
-        vault_enabled,
-        autostart: false,
+        poll_seconds: kept.map_or(jd_daemon::config::DEFAULT_POLL_SECONDS, |c| c.poll_seconds),
+        excluded: kept.map(|c| c.excluded.clone()).unwrap_or_default(),
+        vault_enabled: handoff.enabled(),
+        autostart: kept.is_some_and(|c| c.autostart),
     }
     .save(&paths.config_file())
     .map_err(|e| e.to_string())?;
 
+    // The old device comes off the account only now that the new one is
+    // linked: a ceremony that failed part way must not have cost the user the
+    // link they had.
+    let revoked = previous.as_ref().map(|p| (p, p.revoke()));
+
     println!("\nLinked as \u{201c}{device_name}\u{201d}.");
     println!("Syncing {} \u{2194} {base_url}", sync_root.display());
-    println!("Keys are stored {}.", secrets.custody().describe());
-    if vault_enabled {
+    println!("Keys are stored {}.", secrets.describe(secrets.custody()));
+    if handoff.enabled() {
         println!("Encrypted folders are enabled on this device.");
     }
-    println!("\nStart syncing with:  joinery-drive daemon");
+    if let Some(said) = handoff.sentence() {
+        println!("{said}");
+    }
+    match revoked {
+        Some((old, Some(Ok(())))) => println!(
+            "The link it replaces (\u{201c}{}\u{201d} on {}) was taken off the account.",
+            old.config.device_name, old.config.base_url
+        ),
+        Some((old, Some(Err(e)))) => eprintln!(
+            "warning: the link it replaces could not be taken off the account ({e}). Remove \
+             \u{201c}{}\u{201d} from Security in your account on {}.",
+            old.config.device_name, old.config.base_url
+        ),
+        Some((old, None)) => eprintln!(
+            "warning: the key of the link it replaces is not on this computer, so that link \
+             could not be taken off the account from here. Remove \u{201c}{}\u{201d} from \
+             Security in your account on {}.",
+            old.config.device_name, old.config.base_url
+        ),
+        None => {}
+    }
+    if let (Some(old), Some(new)) = (previous_account, account_id) {
+        if old != new
+            && previous
+                .as_ref()
+                .is_some_and(|p| p.config.sync_root == sync_root)
+        {
+            println!(
+                "This folder was synced with another account. Its sync record is set aside, and \
+                 what is in {} is merged into this account's drive when syncing starts.",
+                sync_root.display()
+            );
+        }
+    }
+    if stopped {
+        println!(
+            "\nThe sync that was running was stopped. Start it again with:  joinery-drive daemon"
+        );
+    } else {
+        println!("\nStart syncing with:  joinery-drive daemon");
+    }
     Ok(())
+}
+
+/// Stop a daemon that is syncing, so a `login` that replaces its link does not
+/// leave it running on a revoked key. A daemon still in first-run setup is left
+/// alone: it notices the new config and starts syncing with it. Returns whether
+/// one was stopped.
+///
+/// Waits, for a while, for it to be gone — its endpoint file goes with it —
+/// so the state store it held is closed before `login` writes into it. A pass
+/// in the middle of a long transfer can outlast the wait; `login` then carries
+/// on, and the store is only written if it is free.
+fn stop_a_syncing_daemon() -> bool {
+    let Ok(running) = endpoint() else {
+        return false;
+    };
+    let syncing = ask(&running, "GET", "/status", Value::Null)
+        .is_some_and(|status| status.get("linked").and_then(Value::as_bool) == Some(true));
+    if !syncing || ask(&running, "POST", "/stop", Value::Null).is_none() {
+        return false;
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline && endpoint().is_ok() {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +378,7 @@ fn run_daemon(paths: &Paths, shared: &Arc<Shared>, port: u16) -> Result<(), Stri
 /// Unlink at the settings page's request, and say what happened in words the
 /// page can show.
 fn unlink_from_page(paths: &Paths, config: &Config) -> String {
-    let secrets = SecretStore::open(SERVICE, &paths.state);
+    let secrets = link::secrets(paths);
     match link::unlink(paths, config, &secrets) {
         Ok(done) => {
             let revoked = match done.revoked {
@@ -278,8 +399,8 @@ fn unlink_from_page(paths: &Paths, config: &Config) -> String {
 
 /// Run the sync loop for one linked configuration.
 fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Result<Exit, String> {
-    let secrets = SecretStore::open(SERVICE, &paths.state);
-    let secret_key = secrets.get(Secret::ApiSecret).map_err(|e| match e {
+    let secrets = link::secrets(paths);
+    let (secret_key, held) = secrets.get_held(Secret::ApiSecret).map_err(|e| match e {
         // Not "your credential is missing". It is very probably right where it
         // was put, in a keychain this session cannot open — which is what
         // happens to a daemon started over SSH, or at boot before anyone has
@@ -296,7 +417,11 @@ fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Resul
     // Read once, at startup, and held for the life of the process: on macOS
     // every read of the keychain is a potential prompt, and one per file is not
     // a thing to do to somebody.
-    let vault = load_vault(&secrets, config.vault_enabled);
+    let probe = Client::with_credentials(&config.base_url, credentials.clone());
+    let (vault, said) = link::load_vault(&secrets, &config, &probe);
+    if let Some(said) = said {
+        eprintln!("warning: {said}");
+    }
 
     let store = jd_daemon::daemon::open_store(&paths.state_db(), &config)?;
     let vfs = OsVfs::new(config.sync_root.clone(), paths.spool()).map_err(|e| e.to_string())?;
@@ -311,7 +436,10 @@ fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Resul
         config.base_url,
     );
 
-    let custody = secrets.custody().describe().to_string();
+    // Where the key actually is, which is not always where a key written now
+    // would go: one linked while the credential store was locked is a file
+    // even when the daemon runs where the store is open.
+    let custody = secrets.describe(held).to_string();
     // Said either way, so an archive with no journal in it is provably off.
     let pass_journal = jd_daemon::passlog::PassJournal::from_env(&paths.logs);
     match &pass_journal {
@@ -330,52 +458,6 @@ fn sync(paths: &Paths, shared: &Arc<Shared>, config: Config, port: u16) -> Resul
         pass_journal,
     );
     Ok(daemon.run())
-}
-
-/// Pick up the key for encrypted folders, if this device has one.
-///
-/// Never fatal, in any of its failure modes, and that is the whole design of
-/// this function. Everything outside encrypted folders syncs perfectly well
-/// without a vault key, so refusing to start over a missing or unreadable one
-/// would take an entire account offline over one feature. What it does instead
-/// is say which of the three situations it is in, because they need different
-/// things from the user: nothing at all, link again, or look at the keychain.
-fn load_vault(secrets: &SecretStore, expected: bool) -> Option<jd_core::vault::Vault> {
-    let stored = match secrets.get(Secret::VaultKey) {
-        Ok(s) => s,
-        Err(e) => {
-            // Silent when the config never claimed to have one: a user who has
-            // not turned on encrypted folders does not want to be told about
-            // them every time the daemon starts.
-            if expected {
-                eprintln!(
-                    "warning: encrypted folders are enabled for this device but its key could not \
-                     be read ({e}). Everything else will sync; link again to restore it."
-                );
-            }
-            return None;
-        }
-    };
-    let raw = match jd_crypto::b64::decode(&stored) {
-        Ok(r) => r,
-        Err(_) => {
-            eprintln!(
-                "warning: this device's stored vault key is not readable. Everything outside \
-                 encrypted folders will sync; link again to restore it."
-            );
-            return None;
-        }
-    };
-    match jd_core::vault::Vault::from_secret_key(&raw) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            eprintln!(
-                "warning: {e}. Everything outside encrypted folders will sync; link again to \
-                 restore it."
-            );
-            None
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -664,6 +746,12 @@ fn cmd_autostart(rest: &[String]) -> Result<(), String> {
 
 fn cmd_unlink() -> Result<(), String> {
     let paths = Paths::discover();
+    let config = Config::load(&paths.config_file()).map_err(|e| e.to_string())?;
+    let secrets = link::secrets(&paths);
+    // Before the daemon is stopped: an unlink that is going to be refused (its
+    // key is in a credential store this session cannot open) must not take the
+    // sync down on its way to saying so.
+    link::check_unlink(&config, &secrets)?;
 
     // Stop first. A daemon still running against a credential we are about to
     // revoke would spend the next minute failing every request and reporting
@@ -672,8 +760,6 @@ fn cmd_unlink() -> Result<(), String> {
         let _ = ask(&endpoint, "POST", "/stop", Value::Null);
     }
 
-    let config = Config::load(&paths.config_file()).map_err(|e| e.to_string())?;
-    let secrets = SecretStore::open(SERVICE, &paths.state);
     let done = link::unlink(&paths, &config, &secrets)?;
     match &done.revoked {
         Some(Ok(())) => println!("Revoked this device's access on {}.", done.base_url),

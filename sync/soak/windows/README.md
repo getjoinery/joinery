@@ -52,11 +52,13 @@ Each device runs as its own Windows account, `soak-a` and `soak-b`, as each
 ext4 rig device runs as its own unix account, and is linked as that account
 (`provision.ps1`). Its daemon keeps its credential in its account's
 Credential Manager, the custody a person's computer gives it, and recycles
-into its account's own Recycle Bin. Under one account the two devices would
-share one Credential Manager entry, and the second link would overwrite the
-first. The loop, the actors, the fault agent and the verifier run as the VM's
-own account, elevated; the device accounts are administrators, so their
-daemons can be ended, frozen and measured from it.
+into its account's own Recycle Bin. Each installation keeps its keys under a
+name of its own (`com.joinery.drive.<16 hex digits>`), so the accounts are not
+what keeps the two links apart: they give each device that custody and that
+Recycle Bin to itself, as two computers have. The loop, the actors, the
+fault agent and the verifier run as the VM's own account, elevated; the device
+accounts are administrators, so their daemons can be ended, frozen and
+measured from it.
 
 Each device runs its own copy of the program. Windows will not show one
 process another's environment, so the home a daemon was started with cannot
