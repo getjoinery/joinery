@@ -4102,3 +4102,246 @@ fn a_rename_of_a_file_never_placed_here_agrees_on_nothing() {
     let after = device.store.get_entry(id).unwrap().unwrap();
     assert_eq!(after.synced_placement, None, "a record never placed here agrees on a placement");
 }
+
+// ---------------------------------------------------------------------------
+// Standing down
+// ---------------------------------------------------------------------------
+
+/// The network, with a download handed over three bytes at a time, as a real
+/// one streams it, counting what it has written so far. The simulated network
+/// writes a download in one piece, which leaves no "between two pieces" for a
+/// stand-down to land in.
+struct Trickle<'a> {
+    net: &'a jd_sim::SimNet,
+    written: std::sync::atomic::AtomicU64,
+}
+
+impl jd_proto::DriveApi for Trickle<'_> {
+    fn action(&self, name: &str, body: serde_json::Value) -> jd_proto::Result<serde_json::Value> {
+        self.net.action(name, body)
+    }
+
+    fn action_idempotent(&self, name: &str, body: serde_json::Value, key: &str) -> jd_proto::Result<serde_json::Value> {
+        self.net.action_idempotent(name, body, key)
+    }
+
+    fn upload(
+        &self,
+        params: &jd_proto::UploadParams,
+        reader: &mut dyn jd_proto::ReadSeek,
+    ) -> jd_proto::Result<jd_proto::UploadOutcome> {
+        self.net.upload(params, reader)
+    }
+
+    fn download(&self, url: &str, from: u64, out: &mut dyn std::io::Write) -> jd_proto::Result<u64> {
+        let mut whole = Vec::new();
+        self.net.download(url, from, &mut whole)?;
+        for piece in whole.chunks(3) {
+            out.write_all(piece)?;
+            self.written.fetch_add(piece.len() as u64, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(whole.len() as u64)
+    }
+}
+
+/// Journal these actions as one plan; their op ids, in journal order.
+fn journal_all(device: &Device, items: Vec<PlanItem>) -> Vec<i64> {
+    let p = plan(items, &jd_vfs::Personality::linux(), &jd_core::order::FolderParents::default());
+    let mut keys = device.key_source();
+    journal(&device.store, &p, &mut keys).expect("journal")
+}
+
+/// Was this op put back on the queue as it was before it ran: no attempt
+/// counted, no retry time, nothing said? Not failed, not retried.
+fn back_in_the_queue_as_it_was(device: &Device, op_id: i64) {
+    let op = device.store.get_op(op_id).unwrap().expect("the op is still journaled");
+    assert_eq!(op.state, OpState::Queued, "{op:?}");
+    assert_eq!(op.attempts, 0, "a stand-down is not an attempt: {op:?}");
+    assert_eq!(op.last_error, None, "{op:?}");
+    assert_eq!(op.next_retry_time, None, "{op:?}");
+}
+
+/// A pass asked to stand down stops at the next op: what it had not started
+/// stays queued, untouched -- no attempt counted, nothing sent -- and the next
+/// pass carries all of it out, each thing once.
+#[test]
+fn a_pass_asked_to_stand_down_leaves_the_rest_of_its_queue_for_the_next() {
+    let (clock, server, device) = world();
+    for (name, body) in [("a.txt", "the first file"), ("b.txt", "the second file"), ("c.txt", "the third file")] {
+        device.fs.user_write(name, body.as_bytes());
+    }
+    let ctx = jd_core::reconcile::Context {
+        date: "2026-07-31".into(),
+        device_name: "laptop".into(),
+        conflict_suffix: 1,
+        personality: jd_vfs::Personality::linux(),
+        trace: true,
+    };
+
+    // Asked once the first file is up: the person pressed stop while it went.
+    let one_is_up = || server.live_counts().1 >= 1;
+    let now = device.now();
+    let e = ExecEnv { stand_down: &one_is_up, ..env(&device, &now) };
+    let mut keys = device.key_source();
+    let cut = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    assert!(cut.exec.stood_down, "{:?}", cut.exec);
+    assert_eq!(cut.exec.done, 1, "{:?}", cut.exec);
+    assert!(!cut.quiet(), "a pass that left work behind is not a quiet one");
+    assert!(cut.trace.as_ref().is_some_and(|t| t.stood_down), "the trace says it was cut short");
+    assert_eq!(server.live_counts(), (0, 1));
+    assert_eq!(server.upload_inits(), 1, "nothing after the stand-down reached the server");
+    assert!(device.store.interrupted_ops().unwrap().is_empty(), "nothing was left part-way");
+    let left = device.store.queued_ops().unwrap();
+    assert_eq!(left.len(), 2, "{left:?}");
+    for op in &left {
+        assert_eq!((op.attempts, op.last_error.as_deref(), op.next_retry_time), (0, None, None), "{op:?}");
+    }
+
+    // Asked again before it starts anything: nothing is planned, the journal
+    // already holds the work, and nothing runs. Still not a quiet pass: a
+    // device that read it as one would be called settled with two files
+    // never sent.
+    let at_once = || true;
+    let e = ExecEnv { stand_down: &at_once, ..env(&device, &now) };
+    let mut keys = device.key_source();
+    let again = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    assert!(again.round.plan.is_empty(), "{:?}", again.round.plan);
+    assert_eq!((again.exec.attempted(), again.exec.stood_down), (0, true), "{:?}", again.exec);
+    assert!(!again.quiet(), "a pass that stood down with work queued read as quiet");
+    assert_eq!(device.store.queued_ops().unwrap().len(), 2);
+
+    let mut quiet = false;
+    for _ in 0..10 {
+        clock.advance_secs(60);
+        let now = device.now();
+        let e = env(&device, &now);
+        let mut keys = device.key_source();
+        if jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap().quiet() {
+            quiet = true;
+            break;
+        }
+    }
+    assert!(quiet, "the device never went quiet after the stand-down");
+    let mut names: Vec<String> = server.files().into_iter().filter(|f| !f.trashed).map(|f| f.name).collect();
+    names.sort();
+    assert_eq!(names, ["a.txt", "b.txt", "c.txt"], "each file once on the server");
+    assert_eq!(server.upload_inits(), 3, "no file was sent twice");
+    assert_eq!(server.key_conflicts(), 0);
+}
+
+/// Stopped between two chunks of an upload, the op goes straight back on the
+/// queue as it was -- not failed, not retried, no attempt counted -- and the
+/// next run sends it again from the start, landing once.
+#[test]
+fn an_upload_stood_down_between_chunks_is_queued_again_and_lands_once_after() {
+    let (_clock, server, device) = world();
+    let body: Vec<u8> = (0..30u8).collect(); // ten chunks of three
+    device.fs.user_write("big.bin", &body);
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device.store.put_entry(&fresh(id, None, "big.bin", LocalStatus::PendingUpload)).unwrap();
+    let ops = journal_all(
+        &device,
+        vec![PlanItem::new(id, Action::UploadAsNew { placement: Placement { parent: None, name: "big.bin".into() } }, 0)],
+    );
+
+    // Asked once the server holds the upload's init and two of its chunks.
+    let start = device.net.stats().calls;
+    let two_chunks_in = || device.net.stats().calls >= start + 3;
+    let now = device.now();
+    let e = ExecEnv { stand_down: &two_chunks_in, ..env(&device, &now) };
+    let report = run_queued(&e).unwrap();
+    assert!(report.stood_down, "{report:?}");
+    assert_eq!(report.attempted(), 0, "nothing ended: {report:?}");
+    back_in_the_queue_as_it_was(&device, ops[0]);
+    assert_eq!(server.upload_inits(), 1);
+    assert!(device.net.stats().calls < start + 11, "it stopped before the last chunk");
+    assert_eq!(server.live_counts(), (0, 0), "nothing was completed");
+    assert_eq!(device.store.get_entry(id).unwrap().unwrap().status, LocalStatus::PendingUpload);
+
+    let e = env(&device, &now);
+    assert_eq!(recover(&e).unwrap().retrying, 0, "nothing was left in flight");
+    assert_eq!(run_queued(&e).unwrap().done, 1);
+    assert_eq!(server.live_counts(), (0, 1), "one file");
+    assert_eq!(server.blob(&sha256_hex(&body)).unwrap(), body);
+    assert_eq!(server.upload_inits(), 2, "sent again from its start: an upload never resumes across attempts");
+    assert_eq!(server.key_conflicts(), 0);
+}
+
+/// Stopped while a download's bytes are arriving, nothing of it is kept --
+/// no partial file, no spool -- and the op goes back on the queue as it was;
+/// the next run fetches it whole.
+#[test]
+fn a_download_stood_down_mid_stream_keeps_nothing_and_lands_whole_after() {
+    let (_clock, server, device) = world();
+    let body: Vec<u8> = (0..40u8).collect();
+    let id = EntityId::file(server.seed_file(None, "report.bin", &body));
+    let mut entry = fresh(id, None, "report.bin", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId { sha256: sha256_hex(&body), size: body.len() as u64 });
+    device.store.put_entry(&entry).unwrap();
+    let ops = journal_all(&device, vec![PlanItem::new(id, Action::Download, 0)]);
+
+    let trickle = Trickle { net: &device.net, written: Default::default() };
+    let partway = || trickle.written.load(std::sync::atomic::Ordering::SeqCst) >= 9;
+    let now = device.now();
+    let e = ExecEnv { api: &trickle, stand_down: &partway, ..env(&device, &now) };
+    let report = run_queued(&e).unwrap();
+    assert!(report.stood_down, "{report:?}");
+    assert_eq!(report.attempted(), 0, "nothing ended: {report:?}");
+    back_in_the_queue_as_it_was(&device, ops[0]);
+    let got = trickle.written.load(std::sync::atomic::Ordering::SeqCst);
+    assert!((9..40).contains(&got), "construction: it stopped part-way ({got} bytes)");
+    assert!(device.fs.peek("report.bin").is_none(), "no partial file where the whole one belongs");
+    assert_eq!(device.fs.spool_count(), 0, "what arrived went with the spool");
+    let after = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!((after.status, after.synced_content), (LocalStatus::PendingDownload, None));
+
+    let e = env(&device, &now);
+    assert_eq!(run_queued(&e).unwrap().done, 1);
+    assert_eq!(device.fs.peek("report.bin").unwrap(), body);
+    assert_eq!(device.fs.spool_count(), 0);
+}
+
+/// One large upload paused again and again is not an op that keeps failing.
+/// Each stand-down puts it back on the queue as it was, so after a dozen of
+/// them it has no attempts, no backoff and no error, the device raises no
+/// "keeps failing" issue, and the next pass sends it at once. Counted as a
+/// kill's attempt is, ten would have reached the longest backoff, raised the
+/// issue with no reason to give, and held its next real failure there.
+#[test]
+fn an_upload_paused_a_dozen_times_is_not_said_to_keep_failing() {
+    let (clock, server, device) = world();
+    let body: Vec<u8> = (0..30u8).collect();
+    device.fs.user_write("big.bin", &body);
+    let ctx = jd_core::reconcile::Context {
+        date: "2026-07-31".into(),
+        device_name: "laptop".into(),
+        conflict_suffix: 1,
+        personality: jd_vfs::Personality::linux(),
+        trace: false,
+    };
+    for round in 0..12 {
+        // Asked once this pass's upload has begun on the server: mid-transfer.
+        let inits = server.upload_inits();
+        let begun = || server.upload_inits() > inits;
+        let now = device.now();
+        let e = ExecEnv { stand_down: &begun, ..env(&device, &now) };
+        let mut keys = device.key_source();
+        let out = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+        assert!(out.exec.stood_down, "round {round}: {:?}", out.exec);
+        clock.advance_secs(20 * 60);
+    }
+    assert_eq!(server.upload_inits(), 12, "construction: twelve uploads begun, each stood down");
+    let left = device.store.queued_ops().unwrap();
+    assert_eq!(left.len(), 1, "{left:?}");
+    assert_eq!((left[0].attempts, left[0].next_retry_time, left[0].last_error.as_deref()), (0, None, None), "{:?}", left[0]);
+    let said: Vec<_> = device.store.open_issues().unwrap().into_iter().map(|i| (i.kind, i.detail)).collect();
+    assert!(!said.iter().any(|(kind, _)| kind == "keeps_failing"), "{said:?}");
+
+    let now = device.now();
+    let e = env(&device, &now);
+    let mut keys = device.key_source();
+    let out = jd_core::pass::run_pass(&e, &ctx, jd_core::round::DeletePolicy::Guard, &mut keys).unwrap();
+    assert_eq!(out.exec.done, 1, "{:?}", out.exec);
+    assert_eq!(server.blob(&sha256_hex(&body)).unwrap(), body);
+    assert_eq!(server.live_counts(), (0, 1));
+}

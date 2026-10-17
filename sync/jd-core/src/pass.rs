@@ -65,8 +65,15 @@ impl PassOutcome {
     /// Work waiting on a backoff counts as work. A pass that quietly reports
     /// nothing while four uploads sit in the journal waiting to be retried is
     /// telling the user their files are safely synced when they are not.
+    ///
+    /// So does work a pass stood down from (`ExecEnv::stand_down`): it left
+    /// ops queued, whatever its counts say.
     pub fn quiet(&self) -> bool {
-        self.round.plan.is_empty() && self.exec.attempted() == 0 && self.exec.deferred == 0 && self.exec.waiting == 0
+        self.round.plan.is_empty()
+            && self.exec.attempted() == 0
+            && self.exec.deferred == 0
+            && self.exec.waiting == 0
+            && !self.exec.stood_down
     }
 }
 
@@ -2257,6 +2264,7 @@ pub fn run_pass(
             t.unsyncable.push((crate::trace::name(*id), format!("{why:?}")));
         }
         t.recovered = out.naming.recovered.iter().map(|id| crate::trace::name(*id)).collect();
+        t.stood_down = out.exec.stood_down;
         t.ended_ms = (env.now_ms)();
         out.trace = Some(t);
     }

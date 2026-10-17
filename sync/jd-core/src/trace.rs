@@ -57,6 +57,10 @@ pub struct PassTrace {
     pub plan: Vec<(String, String)>,
     /// Every operation run: op id, kind, entity, outcome.
     pub ops: Vec<(i64, String, String, String)>,
+    /// The pass was asked to stand down and stopped before its queue was
+    /// done (`ExecEnv::stand_down`): an op it was part-way through is not in
+    /// `ops`, and is back on the queue.
+    pub stood_down: bool,
 }
 
 /// An entity as the trace names it: `file:123`, `folder:-4`.
@@ -92,6 +96,7 @@ impl PassTrace {
             && self.plan.is_empty()
             && self.ops.is_empty()
             && !self.reset
+            && !self.stood_down
     }
 }
 
@@ -119,6 +124,7 @@ mod tests {
             PassTrace { recovered: vec!["file:3".into()], ..PassTrace::default() },
             PassTrace { folders: vec![("folder:4".into(), "moved".into())], ..PassTrace::default() },
             PassTrace { stranded: 1, ..PassTrace::default() },
+            PassTrace { stood_down: true, ..PassTrace::default() },
         ] {
             assert!(!news.is_quiet(), "{news:?}");
         }

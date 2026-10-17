@@ -1401,6 +1401,7 @@ mod tests {
             now_ms: &|| 0,
             conflict_name: &|n: &str, _s: u32| n.to_string(),
             vault: None,
+            stand_down: &|| false,
         }
     }
 
