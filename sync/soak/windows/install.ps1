@@ -6,13 +6,14 @@
 # process a session started when the session closes.
 #
 # Each device runs as its own Windows account (soak-a, soak-b), as each ext4
-# rig device runs as its own unix account. A daemon keeps its credential in
-# its account's Credential Manager; two devices under one account would share
-# one entry (com.joinery.drive / api-secret), and the second device's link
-# would overwrite the first's. Each account also has its own Recycle Bin, as
-# two computers do. The device accounts are administrators: an
-# administrator's elevated processes can be ended, frozen and measured by the
-# fault agent's account, which runs elevated as this one.
+# rig device runs as its own unix account. Each installation keeps its keys
+# under a name of its own (com.joinery.drive.<16 hex digits>), so two devices
+# under one account would not overwrite each other's link; the accounts are
+# there so that each device has what a person's computer gives it: a
+# Credential Manager of its own, where its daemon keeps its credential, and a
+# Recycle Bin of its own, as two computers do. The device accounts are
+# administrators: an administrator's elevated processes can be ended, frozen
+# and measured by the fault agent's account, which runs elevated as this one.
 #
 # This account's tasks log on S4U, with no password. A device account's tasks
 # log on with a password: registering an S4U task for another account is

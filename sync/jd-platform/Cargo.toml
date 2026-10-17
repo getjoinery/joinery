@@ -27,6 +27,11 @@ default = []
 # Desktop Linux builds, where libsecret is present and a session bus exists.
 # Off by default so the daemon builds on a server with nothing installed.
 secret-service = ["keyring/sync-secret-service", "keyring/crypto-rust"]
+# An in-memory credential store a test can lock and unlock
+# (`secret::StandInKeychain`), for other crates' tests of what a locked or open
+# store means. Only ever enabled as a dev-dependency: in a real build it would
+# be the forgets-everything-at-exit store the module refuses to fall back to.
+stand-in-keychain = []
 
 # Registering the daemon to start at login is a registry write on Windows.
 [target.'cfg(windows)'.dependencies]

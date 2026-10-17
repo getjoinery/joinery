@@ -969,9 +969,12 @@ Not yet built: encrypted thumbnails.
 The key that opens encrypted content is the Drive vault's X25519 secret key. It
 reaches the device once, during the browser link ceremony, sealed to a keypair
 the device generated for that purpose, and goes straight into the operating
-system's credential store. The daemon reads it back once at startup and holds it
-for the life of the process — reading it per file would mean a keychain prompt
-per file on macOS.
+system's credential store — or, on a computer with no store the client can use
+(Linux in the default build), a mode-0600 file in the state directory. A session
+that cannot open a credential store the computer has is not given it at all
+([Credentials](#credentials)). The daemon reads it back once at startup and
+holds it for the life of the process — reading it per file would mean a
+keychain prompt per file on macOS.
 
 Only the secret half is stored. The public half — which is what file-key grants
 are sealed to, because the sealing scheme mixes it into its key derivation — is
@@ -984,6 +987,27 @@ an account with no encrypted folders never needs one. So none of its failure
 modes are fatal. A key that is missing, unreadable, or not a vault key at all
 produces a warning naming which of the three it is, and the daemon starts and
 syncs everything else.
+
+**A vault key comes only from the computer's own link.** A link that hands no
+vault key over — the box not ticked, a session that cannot keep one, a key that
+would not open — removes any vault key the computer held from an earlier link,
+so a key of another account, or of another installation, is never carried into
+this one. At start the daemon uses a stored key only when its config says the
+link handed one over (`vault_enabled`), and asks the server once
+(`vault_client_probe`) whether the key can be the account's:
+
+- the account has no vault: the key is not its, and is not used;
+- the device row says this computer holds the account's key, and the one here
+  has another public half: it is not the key this computer was handed, and is
+  not used;
+- the account's key is another one and this computer is no longer listed: that
+  is a rotation, the retired key still opens what it opened before, and it is
+  used (**A rotated vault key is noticed**, above);
+- the server cannot be asked or will not say: the key is used, and the log says
+  so.
+
+A key that is not used is said in the log, with the way to fix it: link again
+from the desktop session. Encrypted folders then read as not enabled here.
 
 ### Unicode normalization
 
@@ -1307,7 +1331,9 @@ has no password to type, a step-up challenge cannot be answered at a prompt, and
 the vault key can only be unlocked where WebAuthn works.
 
 1. The client generates an X25519 keypair — **before** the request, because its
-   public half is what an enabled vault key comes back sealed to.
+   public half is what an enabled vault key comes back sealed to. A session that
+   cannot keep a vault key ([Credentials](#credentials)) generates none and
+   sends no public key, so the approval page does not offer encrypted folders.
 2. `POST /api/v1/auth/device_link` returns a code, a poll token, and a URL. The
    client opens the URL and prints both, because the ceremony works just as well
    with a person reading the code off one screen and typing it into another,
@@ -1363,19 +1389,66 @@ Drive vault key.
   daemon explicitly supports headless servers. Build with the `secret-service`
   feature on a desktop to use the keyring instead.
 
+**Each installation keeps its secrets under a name of its own.** The credential
+store is shared by everything one OS account runs, and two installations — a
+personal drive and a work one, each with its own `JOINERY_DRIVE_HOME` — hold the
+same three kinds of secret. So the service name an installation's items are kept
+under is the client's name followed by a hash of where its state directory really
+is (symlinks resolved): `com.joinery.drive.<16 hex digits>`. The prefix is a
+fixed name, not the bundle id. Linking one never
+touches the other's keys, and unlinking one leaves the other linked. The hash is
+FNV-1a, spelled out in the code rather than borrowed from the standard library,
+so it cannot change with the compiler. Moving an installation's state directory
+by hand gives it a new name: keys it kept in a file move with the directory, and
+keys it kept in the credential store are not found under the new name, so it is
+linked again.
+
+The shared name `com.joinery.drive` holds the items of an installation linked
+under it. An installation with a config or a state store of its own and no API
+secret under its own name or in its file looks there when a secret is not
+found, and moves all three items it finds to its own name, deleting them from
+the shared name, so nothing is left there for a second installation to read as
+its own. A new installation (no config, no state store) and one with a secret of
+its own both leave the shared name alone: what is there belongs to another
+installation. The shared name holds one installation's items; of several that
+look there, the first started takes them, and the others are linked again.
+
 **A keychain is only available in a session somebody has logged in to.** Over
 SSH, or at boot before a graphical login, the login keychain is locked and no
 prompt can be shown to unlock it — macOS answers "user interaction is not
-allowed". The client falls back to a file there, which is correct, and says so.
+allowed". In such a session:
 
-What it must never do is confuse that with a missing credential. A user who links
-from their desktop puts the secret in the Keychain; a daemon that later starts
-where the Keychain is locked would find nothing in the file and report the
-credential as gone — sending them to replace something that is sitting right
-there. So a locked store is a distinct answer with its own advice: *start Joinery
-Drive from your desktop session after signing in*. Autostart uses a LaunchAgent
-precisely because it runs inside the user's session, where the Keychain is
-open.
+- The API secret and the device key go to a mode-0600 file, as on a machine
+  with no store, so plain folders link and sync.
+- **The vault key is not kept at all.** On a computer that has a credential
+  store, the key to encrypted folders lives in it or nowhere. `login` (and the
+  settings page's first run) offers no public key for the vault to be sealed
+  to, so the approval page does not offer encrypted folders, and says to run
+  `joinery-drive login` from the desktop session to enable them. A computer
+  with no credential store at all keeps the vault key in a file like the rest:
+  there is nowhere else for it to be.
+
+**A secret is read from wherever it was written.** The client looks in the
+credential store (when this session can open it), then the file, then under the
+shared name. A daemon started from the desktop finds a key that `login` wrote
+to a file over SSH. Writing a secret into the credential store removes any copy
+of it in a file, so each secret has one copy: where it was last written.
+`joinery-drive status` and the settings page say where the API secret actually
+is, which is not always where a key written now would go — "in a file only your
+account can read (this computer's credential store was locked when it was
+linked)". Linking again from the desktop session moves it into the store.
+
+What the client must never do is confuse a locked store with a missing
+credential. A user who links from their desktop puts the secret in the Keychain;
+a daemon that later starts where the Keychain is locked finds nothing in the file
+and would report the credential as gone — sending them to replace something that
+is sitting right there. So a locked store is a distinct answer with its own
+advice: *start Joinery Drive from your desktop session after signing in*.
+Autostart uses a LaunchAgent precisely because it runs inside the user's session,
+where the Keychain is open. For the same reason `login` and `unlink` refuse,
+before changing anything, when this computer's key is in a store the session
+cannot open: neither could take the old key off the account or out of the store,
+so each says to run it from the desktop session instead.
 
 The file fallback's custody class is exactly that of `~/.ssh/id_ed25519`: safe
 against another user on the box, worthless against someone who already has the
@@ -1441,14 +1514,35 @@ deleted.
 
 `unlink` revokes the device's key on the server *before* forgetting it locally —
 the other order leaves a live credential nothing on this machine can name, which
-is exactly the key a lost laptop carries. It leaves the synced files alone.
+is exactly the key a lost laptop carries. It then removes every copy of the three
+secrets: the file and this installation's credential-store items — items this
+installation finds under the shared name are moved onto those when `unlink`
+reads its key ([Credentials](#credentials)). It leaves the synced files alone.
+
+`login` on a computer that is already linked replaces the link. The old key is
+read before the ceremony starts and, once the new link is stored, used to take
+the old device off the account (`auth/logout` with its own credential, which
+removes its device row) — only then, so a ceremony that fails part way does not
+cost the user the link they had. If the old key is not on the computer any more,
+`login` says to remove the old device from Security on the web. A daemon that is
+syncing is stopped first, rather than left running on a key about to be revoked;
+one still in first-run setup picks up the new config by itself. Linking the same
+drive into the same folder again (to turn on encrypted folders, say) keeps that
+folder's settings: the excluded subfolders, the poll interval, and whether it
+starts at login.
 
 Unlinking also leaves the state store, so relinking to the same folder resumes
-without reading everything again. The store records which site and folder it is
-the record of, and a daemon whose config names a different one moves it aside
-(`state.db.before-<ms>`) and starts fresh. Read against another folder, the old
-record would say every file it had agreed on was deleted here, and the engine
-would send those deletes to the server.
+without reading everything again. The store records which site, folder and
+account it is the record of, and a daemon whose config names a different one
+moves it aside (`state.db.before-<ms>`) and starts fresh. Read against another
+folder, the old record would say every file it had agreed on was deleted here,
+and the engine would send those deletes to the server; read against another
+account's drive, it would take every file it had agreed on as deleted there. The
+account is the one the server names (`auth/session`) when the link is approved,
+kept in the config as `account_id`. A link made before the account was recorded
+is judged on the site and folder alone — except that `login` replacing it and
+`unlink` ask the server with its key whose account it is, and write that into
+the store, so the next link of another account still sets the old record aside.
 
 ### Two threads
 
@@ -1611,8 +1705,11 @@ new key rather than leaving it live on the account. The same happens when
 approved link is still waiting for a folder: login's credential replaces the
 page's in the store, so the page's device is revoked with its own secret (held
 in memory for this) instead of being left on the account with no key anywhere.
-The credential store is opened only when the setup first needs it, so a fresh
-install touches no keychain before the user has asked to link anything.
+The credential store is opened when the user starts linking, so a fresh install
+touches no keychain before the user has asked to link anything. In a session
+that cannot open it, the page links plain folders and the folder step says why
+encrypted folders are not enabled, and how to enable them
+([Credentials](#credentials)).
 
 ---
 
@@ -1890,7 +1987,7 @@ Two invariants are asserted around **every pass**, not at the end of a run:
 | `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
 | `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |
 | `tests/functional/drive/sync_contract_test.php` | db, dev-only | The server surface the client depends on. |
-| `tests/functional/sync/sync_macos_gate.sh` | live, needs `[macmini, rust]` | Built and green on a real Mac; the volume probe, NFD round trip, and Keychain persistence across processes. |
+| `tests/functional/sync/sync_macos_gate.sh` | live, needs `[macmini, rust]` | Built and green on a real Mac; the volume probe, NFD round trip, and Keychain persistence across processes. Run over SSH, where the login Keychain is locked, it checks that the vault key is refused rather than written to a file; the checks that two installations keep separate items and that items under the shared name move over need an open Keychain (a desktop session), and say so when they have nothing to check. |
 | `tests/functional/sync/sync_soak_gate.sh` | live, dev-only, needs `[rust]` | One bounded storm-and-settle cycle on the soak rig: two real daemons, real persona actors, real kills, then the six settle assertions. |
 | `tests/functional/drive/ranged_download_gate.sh` | live, dev-only | Range semantics over HTTP. |
 

@@ -202,7 +202,7 @@ fn cmd_provision(rest: &[String]) -> Result<bool, String> {
         // Secrets first, and before anything that could fail. A config written
         // before the credential was stored leaves a device that believes it is
         // linked and holds nothing to prove it.
-        let secrets = jd_platform::SecretStore::open("com.joinery.drive", &paths.state);
+        let secrets = jd_platform::SecretStore::for_installation(&paths);
         secrets
             .set(jd_platform::Secret::ApiSecret, &credentials.secret_key)
             .map_err(|e| format!("{} could not store its credential: {e}", device.name))?;
@@ -212,6 +212,7 @@ fn cmd_provision(rest: &[String]) -> Result<bool, String> {
             sync_root: device.root.clone(),
             device_name: device.name.clone(),
             device_id: data.get("device_id").and_then(|v| v.as_i64()),
+            account_id: None,
             public_key: credentials.public_key.clone(),
             poll_seconds: fleet.poll_seconds,
             excluded: Vec::new(),
@@ -225,7 +226,7 @@ fn cmd_provision(rest: &[String]) -> Result<bool, String> {
             "{} linked — root {}, keys {}",
             device.name,
             device.root.display(),
-            secrets.custody().describe()
+            secrets.describe(secrets.custody())
         );
     }
 

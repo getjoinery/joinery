@@ -30,7 +30,9 @@ pub use autostart::{launch_agent_plist, systemd_user_unit, AutostartError};
 pub use browser::{open_url, show_url};
 pub use control::{ControlServer, Endpoint};
 pub use dirs::{default_sync_root, home_dir, Paths, APP_NAME, BINARY_NAME, BUNDLE_ID};
-pub use secret::{Custody, Secret, SecretError, SecretStore};
+#[cfg(feature = "stand-in-keychain")]
+pub use secret::StandInKeychain;
+pub use secret::{installation_service, Custody, Secret, SecretError, SecretStore, LEGACY_SERVICE};
 
 /// What this build calls itself to the server, for the `client_app` identifier
 /// and the upgrade gate.

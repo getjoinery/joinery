@@ -247,10 +247,8 @@ impl Reach for RealReach {
         }
         if cfg!(target_os = "macos") {
             // The Mac device's supervisor is a loop in this account's own
-            // session, not launchd: a daemon launchd starts in the GUI session
-            // reaches the login keychain, and two devices under one account
-            // would then share one credential. Stopping the daemon cleanly is
-            // the stop half; the loop is the start half.
+            // session, not launchd. Stopping the daemon cleanly is the stop
+            // half; the loop is the start half.
             let pid = device
                 .daemon_pid()
                 .ok_or_else(|| format!("no daemon found for {} under {service}", device.name))?;

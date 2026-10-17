@@ -1814,7 +1814,9 @@ no named flaw is a reason to name one.
     `.Trash-<uid>` at the volume's top and makes one; on a read-only or odd
     volume it fails with an error that is already surfaced.
   - Scratch files never leave the spool directory; unaffected.
-- **B15, open (2026-10-02, read; found by the Mac mini soak): two drives
+- **B15, fixed 2026-10-17 by WS-L (each installation keeps its items under
+  `com.joinery.drive.` and a hash of its state directory; see docs/drive_sync.md,
+  Credentials) (2026-10-02, read; found by the Mac mini soak): two drives
   under one OS account share one stored credential.** `jd-daemon` opens
   `SecretStore::open("com.joinery.drive", ...)` with fixed account names
   (`api-secret`, `device-key`, `vault-key`), although `secret.rs` says the

@@ -624,9 +624,10 @@ impl Daemon {
 /// What a state store says it is the record of.
 const STORE_SITE: &str = "linked_base_url";
 const STORE_ROOT: &str = "linked_sync_root";
+const STORE_ACCOUNT: &str = "linked_account";
 
 /// Open the state store for this configuration, starting a fresh one when the
-/// store there is the record of a different site or folder.
+/// store there is the record of a different site, folder or account.
 ///
 /// The store is the last agreement between one folder and one site, and the
 /// engine acts on it: an entry agreed as synced and missing from the folder is
@@ -639,16 +640,27 @@ const STORE_ROOT: &str = "linked_sync_root";
 /// anything went wrong) for a fresh one, whose first pass merges the folder and
 /// the server without deleting anything. A store from before it said so is kept
 /// as it always was, and stamped.
+///
+/// The account is part of it. The same site and the same folder, linked again
+/// to another account, is a different drive: its files are not the ones the
+/// record agreed on. A store or a config from before the account was recorded
+/// leaves that part unknown, and is judged on the site and folder alone.
 pub fn open_store(path: &std::path::Path, config: &Config) -> Result<Store, String> {
     let root = config.sync_root.display().to_string();
     let store = Store::open(path).map_err(|e| e.to_string())?;
     let site = store.get_meta(STORE_SITE).map_err(|e| e.to_string())?;
     let folder = store.get_meta(STORE_ROOT).map_err(|e| e.to_string())?;
-    let same = match (site.as_deref(), folder.as_deref()) {
+    let account = store.get_meta(STORE_ACCOUNT).map_err(|e| e.to_string())?;
+    let same_place = match (site.as_deref(), folder.as_deref()) {
         (None, None) => true,
         (Some(s), Some(f)) => s == config.base_url && f == root,
         _ => false,
     };
+    let same_account = match (account.as_deref(), config.account_id) {
+        (Some(recorded), Some(linked)) => recorded == linked.to_string(),
+        _ => true,
+    };
+    let same = same_place && same_account;
     let store = if same {
         store
     } else {
@@ -662,8 +674,12 @@ pub fn open_store(path: &std::path::Path, config: &Config) -> Result<Store, Stri
                     .map_err(|e| format!("cannot move the old sync record aside: {e}"))?;
             }
         }
+        let whose = match (&account, same_account) {
+            (Some(account), false) => format!(" for account {account}"),
+            _ => String::new(),
+        };
         eprintln!(
-            "the sync record was of {} in {}; kept it as {}.{aside} and started a fresh one",
+            "the sync record was of {} in {}{whose}; kept it as {}.{aside} and started a fresh one",
             site.unwrap_or_default(),
             folder.unwrap_or_default(),
             path.display()
@@ -674,7 +690,37 @@ pub fn open_store(path: &std::path::Path, config: &Config) -> Result<Store, Stri
         .set_meta(STORE_SITE, &config.base_url)
         .and_then(|_| store.set_meta(STORE_ROOT, &root))
         .map_err(|e| e.to_string())?;
+    if let Some(account) = config.account_id {
+        store
+            .set_meta(STORE_ACCOUNT, &account.to_string())
+            .map_err(|e| e.to_string())?;
+    }
     Ok(store)
+}
+
+/// Say whose drive an existing state store is the record of, when it does not
+/// say yet.
+///
+/// For a link made before the account was recorded, while its key can still
+/// ask the server (`login` replacing it, `unlink`): without this, linking the
+/// same folder to another account would carry the old record on as the new
+/// one's. A store that already names an account is left as it is, and where
+/// there is no store nothing is made.
+pub fn note_store_account(path: &std::path::Path, account_id: i64) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let store = Store::open(path).map_err(|e| e.to_string())?;
+    if store
+        .get_meta(STORE_ACCOUNT)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        store
+            .set_meta(STORE_ACCOUNT, &account_id.to_string())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// What the log says about deletes the mass-delete guard holds: a held set
@@ -1670,6 +1716,7 @@ mod tests {
             sync_root: root.clone(),
             device_name: "Laptop".into(),
             device_id: Some(1),
+            account_id: None,
             public_key: "pk".into(),
             poll_seconds: 30,
             excluded: Vec::new(),
@@ -2116,6 +2163,7 @@ mod tests {
             sync_root: root.into(),
             device_name: "d".into(),
             device_id: None,
+            account_id: None,
             public_key: "pk".into(),
             poll_seconds: 30,
             excluded: Vec::new(),
@@ -2176,6 +2224,7 @@ mod tests {
             sync_root: "/r".into(),
             device_name: "d".into(),
             device_id: None,
+            account_id: Some(41),
             public_key: "pk".into(),
             poll_seconds: 30,
             excluded: Vec::new(),
@@ -2190,6 +2239,119 @@ mod tests {
         assert_eq!(
             store.get_meta(STORE_SITE).unwrap().as_deref(),
             Some("https://one.example")
+        );
+        assert_eq!(
+            store.get_meta(STORE_ACCOUNT).unwrap().as_deref(),
+            Some("41")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn linked_to(account_id: Option<i64>) -> Config {
+        Config {
+            base_url: "https://one.example".into(),
+            sync_root: "/home/u/Joinery Drive".into(),
+            device_name: "d".into(),
+            device_id: None,
+            account_id,
+            public_key: "pk".into(),
+            poll_seconds: 30,
+            excluded: Vec::new(),
+            vault_enabled: false,
+            autostart: false,
+        }
+    }
+
+    /// The records moved aside in `dir` (not their `-wal` and `-shm` files).
+    fn records_set_aside(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                let name = p.file_name().unwrap().to_string_lossy().to_string();
+                name.starts_with("state.db.before-")
+                    && !name.ends_with("-wal")
+                    && !name.ends_with("-shm")
+            })
+            .collect()
+    }
+
+    fn set_aside_in(dir: &std::path::Path) -> usize {
+        records_set_aside(dir).len()
+    }
+
+    #[test]
+    fn the_same_folder_linked_to_another_account_starts_a_fresh_record() {
+        // Same site, same folder, another person's drive: the old record says
+        // which files were agreed with an account this link cannot see, and read
+        // against the new one it would take every one of them as deleted there.
+        let dir = std::env::temp_dir().join(format!("jd-daemon-account-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+
+        let store = open_store(&db, &linked_to(Some(41))).unwrap();
+        store.set_meta("marker", "account 41").unwrap();
+        drop(store);
+
+        // The same account linked again (a new device row, a new key): the
+        // record carries on.
+        let store = open_store(&db, &linked_to(Some(41))).unwrap();
+        assert_eq!(
+            store.get_meta("marker").unwrap().as_deref(),
+            Some("account 41")
+        );
+        drop(store);
+        assert_eq!(set_aside_in(&dir), 0);
+
+        let store = open_store(&db, &linked_to(Some(42))).unwrap();
+        assert_eq!(store.get_meta("marker").unwrap(), None, "a fresh record");
+        assert_eq!(
+            store.get_meta(STORE_ACCOUNT).unwrap().as_deref(),
+            Some("42")
+        );
+        drop(store);
+        assert_eq!(set_aside_in(&dir), 1, "the old one kept beside it");
+
+        // A config from before the account was recorded is judged on the site
+        // and folder alone.
+        let store = open_store(&db, &linked_to(None)).unwrap();
+        assert_eq!(
+            store.get_meta(STORE_ACCOUNT).unwrap().as_deref(),
+            Some("42")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_record_from_before_accounts_is_told_whose_it_was_before_another_account_links() {
+        // A store from a link that never recorded its account. `login` and
+        // `unlink` ask the server with the old key and write the answer in, so
+        // the next link of another account sets it aside.
+        let dir = std::env::temp_dir().join(format!("jd-daemon-note-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.db");
+
+        note_store_account(&db, 41).unwrap();
+        assert!(!db.exists(), "no store is made where there was none");
+
+        let store = open_store(&db, &linked_to(None)).unwrap();
+        store.set_meta("marker", "older link").unwrap();
+        drop(store);
+        note_store_account(&db, 41).unwrap();
+        note_store_account(&db, 99).unwrap();
+        let store = open_store(&db, &linked_to(Some(42))).unwrap();
+        assert_eq!(store.get_meta("marker").unwrap(), None);
+        drop(store);
+        let aside = records_set_aside(&dir);
+        assert_eq!(aside.len(), 1);
+        let old = Store::open(&aside[0]).unwrap();
+        assert_eq!(
+            old.get_meta(STORE_ACCOUNT).unwrap().as_deref(),
+            Some("41"),
+            "the first answer stands"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
