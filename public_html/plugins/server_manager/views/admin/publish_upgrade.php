@@ -11,6 +11,7 @@
  * There is no plane-local queue and no other transport — the signing key is
  * root-only, and the root agent is its one reader.
  *
+ * @version 1.13 - Auto-notes: a button drafts the release notes with joinery_ai (ReleaseNotesDrafter)
  * @version 1.12 - the form is not offered while the core or agent repository has uncommitted work, with the files named;
  *                a post that gets past it is refused the same way
  * @version 1.11 - "Deploy to all managed nodes": the publish job carries deploy_all, and once it completes a
@@ -521,6 +522,38 @@ $formwriter->textarea('release_notes', 'Release notes', [
 	'rows'        => 4,
 	'placeholder' => 'Describe what changed in this release...',
 ]);
+if (ReleaseNotesDrafter::available()) {
+	$auto_notes_from = $may_mint ? 'the commits since the last release' : 'the release notes of the upstream releases this one carries';
+	?>
+	<div class="mb-3">
+		<button type="button" class="btn btn-sm btn-outline-secondary" id="auto_notes_btn">Auto-notes</button>
+		<small class="text-muted" id="auto_notes_status">Drafts short notes for a general audience from <?php echo htmlspecialchars($auto_notes_from); ?>. Replaces what is in the box.</small>
+	</div>
+	<script>
+	(function () {
+		var btn = document.getElementById('auto_notes_btn');
+		var status = document.getElementById('auto_notes_status');
+		var box = document.querySelector('textarea[name="release_notes"]');
+		btn.addEventListener('click', function () {
+			btn.disabled = true;
+			status.textContent = 'Writing a draft…';
+			window.joineryApi.post('server_manager/release_notes_draft', {}).then(function (data) {
+				if (data && data.ok) {
+					box.value = data.notes;
+					status.textContent = 'Drafted from ' + data.source + ' by ' + data.model + '. Read it over before publishing.';
+				} else {
+					status.textContent = (data && data.message) || 'No draft came back.';
+				}
+			}).catch(function (err) {
+				status.textContent = 'The draft failed: ' + err.message;
+			}).then(function () {
+				btn.disabled = false;
+			});
+		});
+	})();
+	</script>
+	<?php
+}
 $deploy_plan = StagedRolloutRunner::deploy_all_plan();
 $deploy_names = array_map(function ($n) { return (string)$n->get('mgn_name'); }, $deploy_plan['nodes']);
 $deploy_help = $deploy_names

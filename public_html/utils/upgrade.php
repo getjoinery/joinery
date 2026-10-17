@@ -34,6 +34,8 @@
 	 * could have changed in between. The origin
 	 * (root_node) upgrades from nothing and aborts before any of this.
 	 *
+	 * @version 1.25 - serve-release-notes: the notes of every release in a version range, for a republishing
+	 *                site's auto-notes
 	 * @version 1.24 - update_database runs without --verbose: its debug output overran the transcript the
 	 *                agent keeps, and its no-change notes were counted as schema changes
 	 * @version 1.23 - serve-verify-key on the publishing box serves release_keys/release/, the current set, never a
@@ -840,6 +842,49 @@
 
 		$response = json_encode($response);
 		echo $response . PHP_EOL;
+		exit;
+	}
+
+	// The release notes of every release after one version, through another,
+	// oldest first: what a site that republishes the release it received
+	// summarizes into its own notes. Notes are already public (serve-upgrade
+	// carries the newest), so no session is asked for. Without `after`, only
+	// the `through` release's own notes.
+	if (!$is_cli && isset($_GET['serve-release-notes']) && $_GET['serve-release-notes'] && $is_upgrade_server) {
+		$parse_version = function ($v) {
+			return preg_match('/^(\d+)\.(\d+)\.(\d+)$/', trim((string)$v), $m) ? array((int)$m[1], (int)$m[2], (int)$m[3]) : null;
+		};
+		$through = $parse_version($_GET['through'] ?? '');
+		$after = isset($_GET['after']) && $_GET['after'] !== '' ? $parse_version($_GET['after']) : null;
+		header('Content-Type: application/json');
+		if ($through === null || (isset($_GET['after']) && $_GET['after'] !== '' && $after === null)) {
+			http_response_code(400);
+			echo json_encode(array('error' => 'through (and after, when given) must be versions like 1.2.3')) . PHP_EOL;
+			exit;
+		}
+		$sql = 'SELECT upg_major_version, upg_minor_version, upg_patch_version, upg_release_notes, upg_create_time
+			FROM upg_upgrades WHERE (upg_major_version, upg_minor_version, upg_patch_version) <= (?, ?, ?)';
+		$args = $through;
+		if ($after !== null) {
+			$sql .= ' AND (upg_major_version, upg_minor_version, upg_patch_version) > (?, ?, ?)';
+			$args = array_merge($args, $after);
+		} else {
+			$sql .= ' AND (upg_major_version, upg_minor_version, upg_patch_version) = (?, ?, ?)';
+			$args = array_merge($args, $through);
+		}
+		$sql .= ' ORDER BY upg_major_version, upg_minor_version, upg_patch_version, upg_upgrade_id LIMIT 200';
+		$q = DbConnector::get_instance()->get_db_link()->prepare($sql);
+		$q->execute($args);
+		$releases = array();
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			$releases[] = array(
+				'version'       => $row['upg_major_version'] . '.' . $row['upg_minor_version'] . '.' . $row['upg_patch_version'],
+				'release_date'  => $row['upg_create_time'],
+				'release_notes' => (string)$row['upg_release_notes'],
+			);
+		}
+		http_response_code(200);
+		echo json_encode(array('releases' => $releases)) . PHP_EOL;
 		exit;
 	}
 
