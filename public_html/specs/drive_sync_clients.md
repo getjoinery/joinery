@@ -1,12 +1,13 @@
 # Drive Sync Clients — Full Specification
 
-**Status: PARTIALLY BUILT — Phases 0–3 done, Phase 4 in progress.** All decisions
-are resolved (walked through with the owner 2026-07-16); deliberately-deferred
-items are collected in [§ Deferred items](#deferred-items).
+**Status: PARTIALLY BUILT — Phases 0–4 done, Phase 6 built except signing and
+the download page, Phase 5 unbuilt.** All decisions are resolved (walked through
+with the owner 2026-07-16); deliberately-deferred items are collected in
+[§ Deferred items](#deferred-items).
 
 The client lives at `{repo root}/sync/` as a nine-crate Rust workspace —
 `jd-proto`, `jd-crypto`, `jd-core`, `jd-vfs`, `jd-platform`, `jd-daemon`,
-`jd-shell`, `jd-sim`, `jd-soak` — carrying roughly 630 test functions.
+`jd-shell`, `jd-sim`, `jd-soak` — carrying about 1,750 tests (2026-10-17).
 
 - **Phase 0 (server work, §I.1–I.8)** — BUILT and verified.
 - **Phase 1 (contract crates)** — BUILT, committed `03c0179f`.
@@ -15,10 +16,25 @@ The client lives at `{repo root}/sync/` as a nine-crate Rust workspace —
   rather than here.
 - **Phase 3 (macOS and Windows)** — BUILT 2026-07-31, macOS gate green on the
   mini. APFS does **not** decompose, contrary to the assumption in §II.8.
-- **Phase 4 (encrypted vault sync)** — STARTED 2026-08-06, in progress. Two
-  known gaps: the fork handling, and the vault key not being present in
-  `ExecEnv`.
-- **Phases 5 and 6** — unbuilt.
+- **Phase 4 (encrypted vault sync)** — BUILT. The vault key reaches the engine
+  (`ExecEnv::vault`); vault sync is proven end to end in the simulator, a key
+  granted or withdrawn on the feed is followed, and a rotated vault key is
+  noticed (WS-K, committed 2026-10-16). Each installation keeps its keys under
+  its own credential-store name, and linking and unlinking handle them (WS-L,
+  committed 2026-10-17). The 2026-08-13 note named a second gap, "the fork
+  handling", without saying what it meant; the nearest built behaviour is
+  `two_computers_editing_one_vault_file_keep_both_versions_sealed` (WS-K).
+- **Phase 5 (shared-with-me + multi-device hardening)** — shared-with-me is
+  unbuilt; its design is `specs/drive_sync_shares.md`. The soak rig's
+  multi-device runs (`specs/drive_sync_soak.md`) carry the hardening.
+- **Phase 6 (packaging, signing, auto-update)** — installers for Windows, macOS
+  and Linux (WS-A, committed 2026-10-17); auto-update from a signed feed, off
+  until the release keys are set (WS-B, committed 2026-10-16). Not built: code
+  signing and notarization (the scripts run them once the owner's certificates
+  are configured) and the download page. Also landed in the same stretch: the
+  settings page and first-run setup (WS-C), file dates both ways (WS-G), held
+  mass deletes said and approvable (WS-F), and a stop or pause reaching the
+  pass in progress (B-ST).
 
 The soak and chaos rig that exercises this engine is its own spec,
 `specs/drive_sync_soak.md` (Phase A live, B and C unbuilt). Engine defects the
@@ -531,7 +547,8 @@ no telemetry leaves the machine.
   misclassification is structurally impossible because `out_of_scope` is a
   distinct entry state, not an absence. Files inside a descoped subtree are
   tracked (id + remote hash) via the change feed but hold no local presence.
-- **Shared-with-me** (Phase 5): grant roots mount under `~/Joinery
+- **Shared-with-me** (Phase 5; the design that supersedes this bullet, on the
+  owner's decisions of 2026-10-15, is `specs/drive_sync_shares.md`): grant roots mount under `~/Joinery
   Drive/Shared/<owner> — <root name>/`, opt-in per root. Viewer-role subtrees
   materialize read-only (best-effort chmod); a local edit to a viewer file is
   restored from the server and the edit preserved as
@@ -816,7 +833,8 @@ contracts, skip-if-toolchain-missing like `drive_crypto_gate.sh`):
   both directions; unavailable sync root hard-pauses instead of reading as
   deletion.
 - **D12 — Sync scope v1 = own drive; shared-with-me is Phase 5 opt-in per
-  grant root.**
+  grant root.** Designed in `specs/drive_sync_shares.md` (each share its own
+  engine, under `Shared with me/`, offered per computer).
 - **D13 — Simulator boundary:** in-process Rust mock server implementing the
   documented contract, kept honest by a live parity gate against dev — not an
   embedded PHP server.
