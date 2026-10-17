@@ -89,6 +89,22 @@ class AnthropicProvider implements LlmProviderInterface {
             $directive = $params['thinking'];
             unset($params['thinking']);
             $effort = (string)($directive['effort'] ?? '');
+            // A model that decides its own reasoning refuses a budget: turned
+            // on it is asked for adaptive thinking at the directive's effort
+            // (output_config.effort, which also sets how much the whole answer
+            // spends), and left alone it does what it does by default (the
+            // Claude 5 models think adaptively anyway, at their own default
+            // effort: high on Sonnet 5.5 and Fable 5.1, medium on Opus 5.5 and
+            // Haiku 5.5).
+            if (($directive['style'] ?? 'budget') === 'adaptive') {
+                if (!empty($directive['enabled'])) {
+                    $params['thinking'] = ['type' => 'adaptive'];
+                    if (in_array($effort, ['low', 'medium', 'high'], true)) {
+                        $params['output_config'] = ['effort' => $effort];
+                    }
+                }
+                $directive = ['enabled' => false];
+            }
             $budget = empty($directive['enabled'])
                 ? 0 : (['low' => 1024, 'medium' => 4096, 'high' => 12000][$effort] ?? 1024);
             if ($budget > 0) {
@@ -205,6 +221,9 @@ class AnthropicProvider implements LlmProviderInterface {
         }
 
         // Finalize: decode accumulated tool_use input, order by block index.
+        // Thinking blocks are kept whole, signature included: in a tool loop
+        // the API wants them back unchanged ahead of the tool_use they led to.
+        // An empty text block is dropped; the API refuses one sent back.
         ksort($blocks);
         $content = [];
         foreach ($blocks as $b) {
@@ -212,7 +231,11 @@ class AnthropicProvider implements LlmProviderInterface {
                 $input = json_decode($b['_json'] === '' ? '{}' : $b['_json'], true);
                 if (!is_array($input)) $input = [];
                 $content[] = ['type' => 'tool_use', 'id' => $b['id'], 'name' => $b['name'], 'input' => $input];
-            } else {
+            } elseif ($b['type'] === 'thinking') {
+                $content[] = ['type' => 'thinking', 'thinking' => $b['thinking'], 'signature' => $b['signature']];
+            } elseif ($b['type'] === 'redacted_thinking') {
+                $content[] = ['type' => 'redacted_thinking', 'data' => $b['data']];
+            } elseif ($b['text'] !== '') {
                 $content[] = ['type' => 'text', 'text' => $b['text']];
             }
         }
@@ -253,6 +276,11 @@ class AnthropicProvider implements LlmProviderInterface {
                 if (($cb['type'] ?? '') === 'tool_use') {
                     $blocks[$i] = ['type' => 'tool_use', 'id' => (string)($cb['id'] ?? ''),
                                    'name' => (string)($cb['name'] ?? ''), '_json' => ''];
+                } elseif (($cb['type'] ?? '') === 'thinking') {
+                    $blocks[$i] = ['type' => 'thinking', 'thinking' => (string)($cb['thinking'] ?? ''),
+                                   'signature' => (string)($cb['signature'] ?? '')];
+                } elseif (($cb['type'] ?? '') === 'redacted_thinking') {
+                    $blocks[$i] = ['type' => 'redacted_thinking', 'data' => (string)($cb['data'] ?? '')];
                 } else {
                     $blocks[$i] = ['type' => 'text', 'text' => (string)($cb['text'] ?? '')];
                 }
@@ -267,6 +295,10 @@ class AnthropicProvider implements LlmProviderInterface {
                     if (!isset($blocks[$i])) $blocks[$i] = ['type' => 'text', 'text' => ''];
                     $blocks[$i]['text'] .= $piece;
                     if ($piece !== '') $onTextDelta($piece);
+                } elseif ($dt === 'thinking_delta' && ($blocks[$i]['type'] ?? '') === 'thinking') {
+                    $blocks[$i]['thinking'] .= (string)($delta['thinking'] ?? '');
+                } elseif ($dt === 'signature_delta' && ($blocks[$i]['type'] ?? '') === 'thinking') {
+                    $blocks[$i]['signature'] .= (string)($delta['signature'] ?? '');
                 } elseif ($dt === 'input_json_delta') {
                     if (!isset($blocks[$i])) $blocks[$i] = ['type' => 'tool_use', 'id' => '', 'name' => '', '_json' => ''];
                     $blocks[$i]['_json'] .= (string)($delta['partial_json'] ?? '');

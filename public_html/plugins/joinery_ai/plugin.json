@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.26.5",
+    "version": "0.26.6",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -91,7 +91,7 @@
     "settingsGroups": {
         "provider": "LLM provider",
         "keys": "API keys",
-        "caps": "Runtime caps and behavior",
+        "caps": "Limits",
         "chat": "Chat"
     },
     "settings": [
@@ -210,37 +210,37 @@
             "name": "joinery_ai_failure_email_throttle_seconds",
             "default": "86400",
             "group": "caps",
-            "label": "Failure Email Throttle (s)",
+            "label": "Seconds between failure emails for one recipe",
             "type": "number",
             "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
-            "helptext": "Minimum seconds between failure-notification emails per recipe."
+            "helptext": "When a recipe keeps failing, you get one email about it, then no more about that recipe until this many seconds have passed. 86400 is one day. Blank means 86400."
         },
         {
             "name": "joinery_ai_workspace_max_chars",
             "default": "8000",
             "group": "caps",
-            "label": "Workspace Size Cap (chars)",
+            "label": "Recipe notes size (characters)",
             "type": "number",
             "validation": {"number": true, "min": 1000, "messages": {"min": "Must be 1000 or more."}},
-            "helptext": "Hard cap on the per-recipe workspace blob; set_workspace rejects oversize writes."
+            "helptext": "Each recipe keeps notes between runs (its workspace). A recipe that tries to save more than this many characters is told to shorten them. Blank means 8000."
         },
         {
             "name": "joinery_ai_max_concurrent_workers",
             "default": "3",
             "group": "caps",
-            "label": "Max Concurrent Workers",
+            "label": "Recipes running at once",
             "type": "number",
             "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
-            "helptext": "Limits how many recipe runs can be in flight simultaneously."
+            "helptext": "How many recipes may run at the same time. More finish sooner but load the server and the AI provider together. Blank means 3."
         },
         {
             "name": "joinery_ai_global_monthly_token_cap",
             "default": "25000000",
             "group": "caps",
-            "label": "Global Monthly Token Cap",
+            "label": "Monthly token limit",
             "type": "number",
             "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}},
-            "helptext": "Hard ceiling across all recipes per calendar month."
+            "helptext": "The most tokens (the units AI providers bill by) everything here may use in a calendar month: recipes, chat and the support desk together, counting only models that cost money. At the limit they stop until the month turns. 0 means no limit; blank means 25000000."
         },
         {
             "name": "joinery_ai_chat_enabled",

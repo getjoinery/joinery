@@ -6,6 +6,8 @@ class Globalvars {
 	private $settings;
 	/** True while a sealed secret setting is being opened (no re-entry). */
 	private static $opening = false;
+	/** True while a declared default is being looked up (no re-entry). */
+	private static $resolving_default = false;
 
 	private function __construct() {
 		require_once(dirname(__DIR__, 2).'/config/Globalvars_site.php');
@@ -34,6 +36,31 @@ class Globalvars {
 	 */
 	public function forget_setting(string $setting): void {
 		unset($this->settings[$setting]);
+	}
+
+	/**
+	 * The declared default of a number setting (settings.json or a plugin's
+	 * manifest), or null when the setting is not a declared number or its
+	 * default is blank. Reading the declarations can read settings, so a
+	 * nested call answers null rather than recurse.
+	 */
+	private static function declaredNumberDefault(string $setting): ?string {
+		if (self::$resolving_default || !class_exists('SettingsDeclarations')) {
+			return null;
+		}
+		self::$resolving_default = true;
+		try {
+			$declaration = SettingsDeclarations::get($setting);
+		} catch (\Throwable $e) {
+			return null;
+		} finally {
+			self::$resolving_default = false;
+		}
+		if ($declaration === null || ($declaration['type'] ?? '') !== 'number') {
+			return null;
+		}
+		$default = trim((string)($declaration['default'] ?? ''));
+		return $default === '' ? null : $default;
 	}
 
 	public function get_setting($setting, $calculated_values=true, $fail_silently=false){
@@ -122,6 +149,14 @@ class Globalvars {
 			}
 		}	
 		
+		// A declared number setting holds a number: blank or missing reads as
+		// its declared default ('Blank means 14'), never as the 0 that (int)''
+		// makes of it. Not memoized, so a later write is read at once.
+		$declared_default = self::declaredNumberDefault((string)$setting);
+		if ($declared_default !== null) {
+			return $declared_default;
+		}
+
 		if(!$found){
 			if(!$fail_silently){
 				// Log this for monitoring/debugging

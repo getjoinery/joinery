@@ -85,6 +85,16 @@ class ChatRender {
         }
     }
 
+    /** A reply's cost: what the turn recorded, or an estimate from its tokens
+     *  for a row written before the cost was recorded. */
+    public static function rowCost(AiConversationMessage $msg, string $model): float {
+        $recorded = $msg->get('aim_cost_estimate');
+        if ($recorded !== null && $recorded !== '') {
+            return (float)$recorded;
+        }
+        return self::estimateCost($model, (int)$msg->get('aim_input_tokens'), (int)$msg->get('aim_output_tokens'));
+    }
+
     /** Compact dollar label: blank for $0 (free/local), else ~$0.0123 — the
      *  leading ~ signals it is an estimate (cache tiers aren't broken out). */
     public static function formatCost(float $usd): string {
@@ -147,7 +157,8 @@ class ChatRender {
      *  dropped on every turn from here on, and only a new conversation resets it.
      *  Deliberately NOT the turn's billed input total, which re-counts the system
      *  prompt and history once per tool-loop step and so jumps around with tool use. */
-    public static function turnUsageParts(int $used, float $usd, ?int $window = null): array {
+    public static function turnUsageParts(int $used, float $usd, ?int $window = null,
+            int $input_total = 0, int $cache_read = 0): array {
         $parts = [];
         if ($used > 0) {
             $title = ($window !== null && $window > 0)
@@ -160,6 +171,15 @@ class ChatRender {
             $parts[] = '<span class="joai-ctx ' . self::contextBand($used, $window) . '" title="'
                 . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '">'
                 . self::compactTokens($used) . ' ctx</span>';
+        }
+        // How much of the input the provider served from its prompt cache: the
+        // fixed opening of every turn should come back from it at a fraction of
+        // the input price.
+        if ($cache_read > 0 && $input_total > 0) {
+            $title = number_format($cache_read) . ' of the ' . number_format($input_total)
+                . ' input tokens came from the provider\'s cache.';
+            $parts[] = '<span class="joai-chat-usage-cache" title="' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '">'
+                . (int)round($cache_read / $input_total * 100) . '% cached</span>';
         }
         $cost = self::formatCost($usd);
         if ($cost !== '') {
@@ -208,8 +228,11 @@ class ChatRender {
         // value — fall back to $in so they still show something, knowing that on a
         // tool-heavy turn it reads high.
         $used_raw = $msg->get('aim_context_used');
-        $used = ($used_raw === null || $used_raw === '' || (int)$used_raw <= 0) ? $in : (int)$used_raw;
-        $meta_extra = self::turnUsageParts($used, self::estimateCost($model, $in, $out), $window);
+        $used = ($used_raw === null || $used_raw === '' || (int)$used_raw <= 0)
+            ? $in + (int)$msg->get('aim_cache_read_tokens') + (int)$msg->get('aim_cache_write_tokens') : (int)$used_raw;
+        $meta_extra = self::turnUsageParts($used, self::rowCost($msg, $model), $window,
+            $in + (int)$msg->get('aim_cache_read_tokens') + (int)$msg->get('aim_cache_write_tokens'),
+            (int)$msg->get('aim_cache_read_tokens'));
 
         // A turn the user stopped mid-flight keeps its partial answer and carries
         // a small "Cancelled" marker — persistent across reloads (keyed on the

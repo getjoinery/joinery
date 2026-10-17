@@ -320,6 +320,11 @@ class AiEndpointRegistry {
             'trust'       => (string)($e['trust'] ?? 'cloud'),
             'tier'        => (string)($m['tier'] ?? AiModelRequirement::TIER_BASIC),
             'thinking'    => (string)($m['thinking'] ?? 'optional'),
+            // How the wire asks for reasoning: 'budget' (a token budget) or
+            // 'adaptive' (the model decides; a budget is refused).
+            'thinking_style' => (string)($m['thinking_style'] ?? 'budget'),
+            // False for a model that refuses any non-default temperature/top_p.
+            'sampling'    => (bool)($m['sampling'] ?? true),
             'tools'       => (bool)($m['tools'] ?? true),
             'context'     => isset($m['context']) ? (int)$m['context'] : null,
             'attachments' => [

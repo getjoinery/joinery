@@ -291,8 +291,10 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         return [
             'stop_reason' => $aborted ? 'aborted' : $this->mapStopReason($finish, $content),
             'content'     => $content,
+            // Usage in the interface's one shape: cached tokens outside
+            // input_tokens. An OpenAI-style host counts them inside prompt_tokens.
             'usage'       => [
-                'input_tokens'                => $usage['prompt_tokens'],
+                'input_tokens'                => max(0, $usage['prompt_tokens'] - $usage['cached_tokens']),
                 'output_tokens'               => $usage['completion_tokens'],
                 'cache_creation_input_tokens' => 0,
                 'cache_read_input_tokens'     => $usage['cached_tokens'],

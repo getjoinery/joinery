@@ -10,6 +10,9 @@
  * A provider's HTTP failure carries the status as the exception code and reads
  * "<Provider> 4xx: <error type>: <the provider's message>" (or 5xx).
  *
+ * @version 1.2 - memberMessage(): a member's row never quotes the provider and names
+ *   no settings page; 'model ... does not exist' is read from the provider's words,
+ *   not the provider's label; the 404 and rate-limit texts fit a local host too
  * @version 1.1 - classify() reads the HTTP status and the provider's error type,
  *   with codes for a key without permission, an unknown model, an account out of
  *   credit and a request too large; operatorMessage() adds the provider's own
@@ -86,8 +89,12 @@ class LlmProviderException extends Exception {
             if ($status === 403 || $has(['permission_error', 'forbidden'])) {
                 return 'api_permission_denied';
             }
+            // 'model ... does not exist' only in the provider's own words: the
+            // label in front ('Local model 4xx') names a model on every message.
+            $said = self::providerWords($e->getMessage());
+            $words = strtolower($said['words'] ?? '');
             if ($status === 404 || $has(['not_found_error', 'model not found', 'model_not_found'])
-                    || ($has(['model']) && $has(['does not exist']))) {
+                    || preg_match('/\bmodel\b.{0,80}\bdoes not exist\b/s', $words)) {
                 return 'api_model_not_found';
             }
             if ($status === 413 || $has(['request_too_large', 'prompt is too long', 'context length', 'context_length',
@@ -136,6 +143,35 @@ class LlmProviderException extends Exception {
     }
 
     /**
+     * The codes a member can do nothing about: the fix is a setting, a key or the
+     * provider account, all the site administrator's. Not api_request_invalid:
+     * that refusal can be the member's own input (an attachment the provider
+     * will not take), and its friendly sentence blames no one.
+     */
+    const CODES_FOR_THE_ADMINISTRATOR = [
+        'api_not_configured', 'api_network_error', 'api_auth_failed', 'api_permission_denied',
+        'api_model_not_found', 'api_billing',
+    ];
+
+    /**
+     * The message for a failed row a member reads. Never the provider's words:
+     * a provider, or whatever answers in front of it, can put a key fragment, an
+     * internal address or a proxy's error page in its message. A failure only
+     * the administrator can fix says so instead of naming their settings page.
+     */
+    public static function memberMessage(Throwable $e): string {
+        return self::memberMessageFor(self::classify($e));
+    }
+
+    /** memberMessage() for a classify() code. */
+    public static function memberMessageFor(string $code): string {
+        if (in_array($code, self::CODES_FOR_THE_ADMINISTRATOR, true)) {
+            return 'The assistant cannot answer right now because of a problem with how this site reaches its AI provider. Let the site administrator know.';
+        }
+        return self::friendlyMessage($code);
+    }
+
+    /**
      * The provider's name and its own sentence from a "<Provider> 4xx: ..." message,
      * without the error-type prefix ("invalid_request_error: "); null when the
      * message has no such shape.
@@ -168,11 +204,11 @@ class LlmProviderException extends Exception {
             case 'api_permission_denied':
                 return 'The AI provider accepted the API key but does not allow it to do this; the model may not be enabled for the key’s account or workspace.';
             case 'api_model_not_found':
-                return 'The AI provider does not offer this model; it may be retired or misspelled. Pick a different model.';
+                return 'The AI provider did not find this model, or the address the request went to. Check the model name, and for a local host its base URL.';
             case 'api_billing':
                 return 'The AI provider account is out of credit or over its spending limit. Add credit or raise the limit with the provider.';
             case 'api_quota_exceeded':
-                return 'The AI provider is rate-limiting this key. Wait a moment and try again.';
+                return 'The AI provider is limiting how fast requests can be sent. Wait a moment and try again.';
             case 'api_request_too_large':
                 return 'This conversation is too long for the model. Start a new chat, attach less, or pick a model with a larger context.';
             case 'api_request_invalid':

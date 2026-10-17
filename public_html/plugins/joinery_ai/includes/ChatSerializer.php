@@ -128,11 +128,13 @@ class ChatSerializer {
             'usage'          => [
                 'input_tokens'   => $in,
                 'output_tokens'  => $out,
+                'cache_read_tokens'  => (int)$msg->get('aim_cache_read_tokens'),
+                'cache_write_tokens' => (int)$msg->get('aim_cache_write_tokens'),
                 'context_used'   => $used,
                 'context_window' => $window,
                 'context_band'   => ChatRender::contextBand($used, $window),
                 'cost_label'     => ($in || $out)
-                    ? ChatRender::formatCost(ChatRender::estimateCost($model, $in, $out)) : '',
+                    ? ChatRender::formatCost(ChatRender::rowCost($msg, $model)) : '',
             ],
         ] + self::runningExtras($msg);
     }

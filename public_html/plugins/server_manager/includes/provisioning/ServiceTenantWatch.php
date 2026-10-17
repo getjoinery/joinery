@@ -51,6 +51,7 @@
  * and a prune empties the node's prefix — so the broker's ledger, its stale
  * runs and its chain retention do not apply.
  *
+ * @version 1.8 - a released mail row whose domain or SMTP user is still at the provider is released again until both are gone
  * @version 1.7 - object lock (specs/storage_targets.md F8): retention keeps a chain the lock still holds whole, for a
  *                pass after its date; the lapse prune is finished (rows marked, tenant told) only once nothing
  *                the lock holds is left
@@ -183,6 +184,12 @@ class ServiceTenantWatch {
 			$acted++;
 		} elseif ($state === ServiceTenant::STATE_ACTIVE && $row->get('svt_revoked_time') !== null) {
 			JoineryServices::reactivate($row, $client);
+			$acted++;
+		} elseif ($state === ServiceTenant::STATE_RELEASED && $service === ServiceTenant::SERVICE_MAIL && $client !== null
+				&& (trim((string)$row->get('svt_provider_user_id')) !== '' || trim((string)$row->get('svt_provider_domain')) !== '')) {
+			// A release whose domain or user removal did not land, or a row
+			// released before releases removed them.
+			JoineryServices::finishMailRelease($row, $client);
 			$acted++;
 		}
 

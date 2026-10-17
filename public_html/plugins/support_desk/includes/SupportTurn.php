@@ -10,6 +10,7 @@
  * FAILED with a sentence the asking person can read, never a provider's error
  * text (that goes to the worker log).
  *
+ * @version 0.1.1 - cached tokens on their own columns, and the turn's cost
  * @version 0.1.0
  */
 class SupportTurn {
@@ -77,13 +78,18 @@ class SupportTurn {
 			$text = rtrim($text) . "\n\n" . self::ESCALATED_SENTENCE;
 		}
 
-		$in = (int)$result['input_tokens'] + (int)($result['cache_write_tokens'] ?? 0) + (int)($result['cache_read_tokens'] ?? 0);
+		$cache_read = (int)($result['cache_read_tokens'] ?? 0);
+		$cache_write = (int)($result['cache_write_tokens'] ?? 0);
+		$in = (int)$result['input_tokens'] + $cache_write + $cache_read;
 		$out = (int)$result['output_tokens'];
 		AiConversationMessage::updateColumns((int)$assistant->key, array(
-			'aim_content'          => $text,
-			'aim_tool_calls'       => json_encode($ctx->toolCalls(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-			'aim_input_tokens'     => min(2147483647, $in),
-			'aim_output_tokens'    => $out,
+			'aim_content'            => $text,
+			'aim_tool_calls'         => json_encode($ctx->toolCalls(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+			'aim_input_tokens'       => min(2147483647, (int)$result['input_tokens']),
+			'aim_cache_read_tokens'  => min(2147483647, $cache_read),
+			'aim_cache_write_tokens' => min(2147483647, $cache_write),
+			'aim_cost_estimate'      => ChatTurn::costOf($result),
+			'aim_output_tokens'      => $out,
 			'aim_context_used'     => (int)($result['context_tokens'] ?? 0),
 			'aim_status'           => (($result['stop_reason'] ?? '') === 'cancelled')
 				? AiConversationMessage::STATUS_CANCELLED : AiConversationMessage::STATUS_COMPLETE,
