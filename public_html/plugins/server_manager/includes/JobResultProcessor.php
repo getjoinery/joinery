@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.91 - a status check that finds the site's database not answering asks for no recovery_key_report: the
+ *                report reads the key from that database and could only fail (drs1, data root stopped by hand)
  * @version 1.90 - a served certificate keeps self_signed (host_report 1.30)
  * @version 1.89 - data_root_stopped reads its own stored shape too ('YYYY-MM-DD HH:MM:SS'), so the stored report
  *                read back (IncidentSourceDataRootStopped) names the stop instead of reading as not stopped
@@ -712,7 +714,14 @@ class JobResultProcessor {
 			// release, and the host showed as tampered with (2026-09-15). The
 			// recovery-key page already reports such a node as not applicable;
 			// this is the same test.
+			//
+			// Nor while this check found the site's database not answering. The
+			// report reads the key from that database, so it could only fail;
+			// the first check after the database is back asks, since the state
+			// is still unmeasured then (a data root stopped by hand, drs1
+			// 2026-10-17).
 			if ($node->hosts_site()
+					&& self::database_answering($result)
 					&& self::wants_recovery_key_report($folded)
 					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
 					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report',
@@ -823,6 +832,15 @@ class JobResultProcessor {
 		$carried = $folded[self::STATUS_CARRIED_KEY] ?? [];
 		return in_array('backup_recovery_state', is_array($carried) ? $carried : [], true)
 			|| !array_key_exists('backup_recovery_state', $folded);
+	}
+
+	/**
+	 * Did a status check find the site's database answering? Only a check that
+	 * measured it and found it down says no: one that did not measure it leaves
+	 * the answer to whoever asks the database next.
+	 */
+	public static function database_answering(array $measured): bool {
+		return !isset($measured['postgres_status']) || $measured['postgres_status'] === 'accepting connections';
 	}
 
 	/** How long a proven key's answer stands: a recovery key changes at a human's pace. */
