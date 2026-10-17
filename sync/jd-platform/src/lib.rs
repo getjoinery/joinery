@@ -21,6 +21,7 @@
 
 pub mod autostart;
 pub mod browser;
+pub mod console;
 pub mod control;
 pub mod dirs;
 pub mod install;
@@ -29,27 +30,12 @@ pub mod secret;
 pub use autostart::{launch_agent_plist, systemd_user_unit, AutostartError};
 pub use browser::{open_url, show_url};
 pub use control::{ControlServer, Endpoint};
-pub use dirs::{default_sync_root, home_dir, Paths, APP_NAME, BINARY_NAME, BUNDLE_ID};
+pub use dirs::{
+    default_sync_root, home_dir, Paths, APP_NAME, BINARY_NAME, BUNDLE_ID, TRAY_BINARY_NAME,
+};
 #[cfg(feature = "stand-in-keychain")]
 pub use secret::StandInKeychain;
 pub use secret::{installation_service, Custody, Secret, SecretError, SecretStore, LEGACY_SERVICE};
-
-/// What this build calls itself to the server, for the `client_app` identifier
-/// and the upgrade gate.
-pub const fn client_app() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "joinery-sync-macos"
-    }
-    #[cfg(target_os = "windows")]
-    {
-        "joinery-sync-windows"
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        "joinery-sync-linux"
-    }
-}
 
 /// The platform name the server records on the device row.
 pub const fn platform_name() -> &'static str {
@@ -95,12 +81,6 @@ pub fn suggested_device_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_client_identifier_matches_the_platform_it_was_built_for() {
-        assert!(client_app().starts_with("joinery-sync-"));
-        assert!(client_app().ends_with(platform_name()));
-    }
 
     /// The two tests below both set and unset one process-wide environment
     /// variable, and `cargo test` runs them on parallel threads in one process:

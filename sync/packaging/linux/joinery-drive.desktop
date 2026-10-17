@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Joinery Drive
+GenericName=File sync
+Comment=Keep a folder on this computer in sync with your Joinery Drive
+Exec=joinery-drive-tray
+Icon=joinery-drive
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=sync;drive;files;cloud;
+StartupNotify=false

@@ -20,6 +20,22 @@ ksni = { version = "0.3", default-features = false, features = ["tokio", "blocki
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = "0.19"
 
+# The application object and the event pump the native tray needs. The same
+# versions tray-icon itself builds on, so these add no new crates.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSObjCRuntime", "NSRunLoop", "NSString"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+# Draws the tray's state icons, and on Windows the app icon and the version
+# resource, from the SVGs in sync/packaging/icons at build time (build.rs), so
+# the art has one source and no binary file is committed. Build time only.
+[build-dependencies]
+resvg = { version = "0.45", default-features = false }
+
 [[bin]]
 name = "joinery-drive-tray"
 path = "src/main.rs"
