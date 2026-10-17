@@ -168,10 +168,21 @@ include_internal: bool,
                 _ => 0,
             }
         };
+        // Read only where it decides something, and from the metadata just
+        // taken: no second look at the file.
+        #[cfg(unix)]
+        let change_ns = if kind == EntryKind::File && personality.tells_saves_from_swaps() {
+            change_time_of(&md).unwrap_or(0)
+        } else {
+            0
+        };
+        #[cfg(not(unix))]
+        let change_ns = 0;
         out.push(DirEntry {
             name,
             kind,
             tie_break_id,
+            change_ns,
             fingerprint: match kind {
                 EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
                 EntryKind::Directory => {
@@ -255,6 +266,58 @@ fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
             .saturating_add(md.mtime_nsec() as u64),
         file_id: md.ino(),
         birth_ns: birth_of(md),
+    }
+}
+
+/// The change time a file shows, in ns since the epoch: ctime on Unix, the
+/// `ChangeTime` Windows keeps beside its other three. `None` where it cannot
+/// be read. Never part of a fingerprint -- a rename or a chmod moves it, and
+/// neither is an edit -- and read only beside one (`DirEntry::change_ns`).
+#[cfg(unix)]
+pub(crate) fn change_time_of(md: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let secs = u64::try_from(md.ctime()).ok()?;
+    let nanos = u64::try_from(md.ctime_nsec()).ok()?;
+    Some(secs.saturating_mul(1_000_000_000).saturating_add(nanos))
+}
+
+#[cfg(windows)]
+pub(crate) fn change_time_of_handle(file: &File) -> Option<u64> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO};
+    let mut info: FILE_BASIC_INFO = unsafe { std::mem::zeroed() };
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle() as _,
+            FileBasicInfo,
+            &mut info as *mut _ as *mut _,
+            std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if ok == 0 {
+        return None;
+    }
+    // 100 ns ticks since 1601.
+    const EPOCH_DIFF_TICKS: i64 = 116_444_736_000_000_000;
+    let ticks = info.ChangeTime.checked_sub(EPOCH_DIFF_TICKS)?;
+    u64::try_from(ticks).ok().map(|t| t.saturating_mul(100))
+}
+
+/// The change time at a path, not following a link put there.
+pub(crate) fn change_time_at(path: &Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        change_time_of(&fs::symlink_metadata(path).ok()?)
+    }
+    #[cfg(windows)]
+    {
+        let file = open_not_following(path).ok().flatten()?;
+        change_time_of_handle(&file)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
     }
 }
 
@@ -1685,6 +1748,68 @@ mod tests {
         spool.commit(&target, Some(seen)).unwrap();
 
         assert_eq!(fs::read(&target).unwrap(), b"new content");
+    }
+
+    /// What one listing shows, read as the scan reads it: each entry's birth
+    /// and change time, by name.
+    fn stamps_listed(v: &OsVfs, dir: &Path) -> std::collections::HashMap<String, (u64, u64)> {
+        v.read_dir(dir)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name.clone(), (e.fingerprint.map(|f| f.birth_ns).unwrap_or(0), e.change_ns)))
+            .collect()
+    }
+
+    /// On a volume that tells a save from a swap (`tells_saves_from_swaps`,
+    /// probed here), a save that renames the original aside and writes the
+    /// new file at its name shows the new file born no earlier than the
+    /// original's change time, and a swap with a file made before shows the
+    /// newcomer born earlier -- every time, as the listing hands both to the
+    /// scan. Where the probe says no, the listing shows no change time at all.
+    /// `JD_STAMPS_N` pairs of each (default 2 000).
+    #[test]
+    fn a_listing_tells_a_backup_save_from_a_swap_where_the_volume_can() {
+        let n: usize = std::env::var("JD_STAMPS_N").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000);
+        let d = TempDir::new("stamps-pin");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let tells = v.personality().tells_saves_from_swaps();
+        for i in 0..n {
+            fs::write(root.join(format!("save-{i}.txt")), b"the original").unwrap();
+            fs::write(root.join(format!("slot-a-{i}.dat")), b"the synced file").unwrap();
+            fs::write(root.join(format!("slot-b-{i}.dat")), b"a newcomer").unwrap();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        for i in 0..n {
+            let (own, aside) = (root.join(format!("save-{i}.txt")), root.join(format!("save-{i}.txt~")));
+            fs::rename(&own, &aside).unwrap();
+            fs::write(&own, b"the save").unwrap();
+            let (a, b) = (root.join(format!("slot-a-{i}.dat")), root.join(format!("slot-b-{i}.dat")));
+            let tmp = root.join(format!("swap-{i}.tmp"));
+            fs::rename(&a, &tmp).unwrap();
+            fs::rename(&b, &a).unwrap();
+            fs::rename(&tmp, &b).unwrap();
+        }
+        let listed = stamps_listed(&v, &root);
+        let at = |name: String| listed.get(&name).copied().expect("listed");
+        println!("tells_saves_from_swaps={tells} ({:?})", v.personality());
+        let (mut saves_as_saves, mut swaps_as_swaps) = (0, 0);
+        for i in 0..n {
+            let (born, _) = at(format!("save-{i}.txt"));
+            let (_, moved) = at(format!("save-{i}.txt~"));
+            if !tells {
+                assert_eq!(moved, 0, "a change time shown where the volume cannot use it");
+                continue;
+            }
+            saves_as_saves += usize::from(born >= moved);
+            let (born, _) = at(format!("slot-a-{i}.dat"));
+            let (_, moved) = at(format!("slot-b-{i}.dat"));
+            swaps_as_swaps += usize::from(born < moved);
+        }
+        if tells {
+            assert_eq!(saves_as_saves, n, "a backup save showed a newcomer older than the rename");
+            assert_eq!(swaps_as_swaps, n, "a swap showed a newcomer no older than the rename");
+        }
     }
 
     /// 2020-09-13T12:26:40.1234567Z: a whole number of 100 ns ticks, which

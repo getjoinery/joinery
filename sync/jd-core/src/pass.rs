@@ -3047,6 +3047,7 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                         sha256: sha,
                         tie_break_id: child.tie_break_id,
                         in_a_vault,
+                        change_ns: child.change_ns,
                     });
                 }
                 // Symlinks are flagged and never followed: following one walks

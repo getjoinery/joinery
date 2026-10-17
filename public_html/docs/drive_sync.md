@@ -124,6 +124,27 @@ the file to another record.
   in their own right: a delete plus a creation. So is a save whose temporary
   file is kept in another folder. A weak volume reads a save by rename, as
   any file moved and edited between two scans, as a delete plus a creation.
+- **A file renamed aside with another at its name** is a save that kept a
+  backup — the original renamed aside, the new file written at its name — or a
+  swap with a file that was already there, and one scan cannot see which by
+  the files alone. Where the volume tells them apart
+  (`Personality::tells_saves_from_swaps`: identities hold, a file's birth is
+  its own and not its name's, and the probe in the sync root sees a rename move
+  the change time), the newcomer's birth decides. No earlier than the change
+  time the rename left on the original, it is the save, and the record takes
+  it as its next version. Earlier, it was already there: the record follows
+  its own file to the other name, and the newcomer is a new file. Equal times
+  are a save, which is a save's normal case on a volume with a coarse clock,
+  so a swap whose newcomer was made within the same tick as the swap reads as
+  one. A save that writes its temporary file first and keeps the original
+  under a backup name reads as the swap, and so does a save whose backup is
+  touched after it — an extended attribute, a permission change, an indexer —
+  since that moves the backup's change time past the new file's birth: the
+  record follows the backup, and the saved file starts a history of its own.
+  Where the volume cannot tell — volumes whose births follow the names (NTFS
+  under Windows); FAT and exFAT; a volume that shows no birth, or whose change
+  time a rename does not move — such a swap reads as the save, and the
+  record's history takes the newcomer's bytes.
 - **The executor acts only on the file it planned for.** On a strong volume a
   move, a park, a trash or a conflict copy of a file stands down
   (`Overtaken`) when the file at the path is not the record's own, and the

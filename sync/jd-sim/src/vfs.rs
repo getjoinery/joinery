@@ -150,6 +150,17 @@ struct MemFsState {
     /// is the same with or without files beside it.
     file_births: BTreeMap<String, u64>,
     next_file_birth: u64,
+    /// Each file's change time, on the births' own clock: set when the file
+    /// is made, moved on by a rename of it and by a write over it, as a
+    /// disk's ctime is (`DirEntry::change_ns`).
+    file_changes: BTreeMap<String, u64>,
+    /// How many of the clock's steps one shown time spans: 1 shows every
+    /// step apart; more puts several on one coarse tick, as ext4's does, so
+    /// a create and a rename can show the same time (`MemFs::stamp_tick`).
+    stamp_tick: u64,
+    /// Whether a rename shows in the change time, as the rename probe asks
+    /// (`Personality::ctime_follows_renames`); on by default.
+    ctime_follows_renames: bool,
     /// Report every file's birth as 0: the volume with no birth time, where
     /// every file's identity is weak.
     births_hidden: bool,
@@ -427,6 +438,9 @@ impl MemFs {
                 next_birth: 1,
                 file_births: BTreeMap::new(),
                 next_file_birth: 0,
+                file_changes: BTreeMap::new(),
+                stamp_tick: 1,
+                ctime_follows_renames: true,
                 births_hidden: false,
                 landed: Vec::new(),
                 freed_ids: Vec::new(),
@@ -546,6 +560,19 @@ impl MemFs {
     /// before the rename has looked at either side. Use it to have the user
     /// move the folder a move is going into, after the engine planned the
     /// move and before it lands.
+    /// Show times on a coarse tick of `steps` of the disk's clock, as ext4
+    /// shows them a jiffy apart: a file made and another renamed within one
+    /// tick show the same time. 1 (the default) shows every step apart.
+    pub fn stamp_tick(&self, steps: u64) {
+        self.state.lock().unwrap().stamp_tick = steps.max(1);
+    }
+
+    /// Whether the rename probe finds that a rename moves a file's change
+    /// time (`Personality::ctime_follows_renames`).
+    pub fn ctime_follows_renames(&self, yes: bool) {
+        self.state.lock().unwrap().ctime_follows_renames = yes;
+    }
+
     pub fn while_renaming(&self, f: impl FnMut(&Path, &Path) + Send + 'static) {
         *self.renaming.lock().unwrap() = Some(Box::new(f));
     }
@@ -691,6 +718,7 @@ impl MemFs {
             if st.file_births.contains_key(&k) {
                 let birth = Self::new_file_birth(&mut st);
                 st.file_births.insert(k.clone(), birth);
+                Self::born(&mut st, &k, birth);
             }
             st.file_ids.insert(k, id);
         }
@@ -770,12 +798,16 @@ impl MemFs {
             st.file_ids.insert(key.clone(), id);
             let birth = Self::new_file_birth(&mut st);
             st.file_births.insert(key.clone(), birth);
+            Self::born(&mut st, &key, birth);
             Self::tunnel(&mut st, &key, now);
             Self::new_soul(&mut st, &key);
         } else if st.file_id_model == FileIds::DataCluster {
             // Rewritten in place: the content goes to new clusters.
             let id = Self::cluster_id(&mut st, bytes.len());
             st.file_ids.insert(key.clone(), id);
+        }
+        if !created {
+            Self::changed(&mut st, &key);
         }
         Self::watch_loss(&st, &key, "the user saving over it");
         st.touched.insert(key.clone());
@@ -982,6 +1014,7 @@ impl MemFs {
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
             st.file_births.remove(&v);
+            st.file_changes.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 Self::release_id(&mut st, &v, id);
             }
@@ -1426,6 +1459,29 @@ impl MemFs {
         st.next_file_birth
     }
 
+    /// A file made now: its change time is its birth.
+    fn born(st: &mut MemFsState, key: &str, birth: u64) {
+        st.file_changes.insert(key.to_string(), birth);
+    }
+
+    /// A file renamed or written over now: its change time moves on, on the
+    /// clock its birth was read from.
+    fn changed(st: &mut MemFsState, key: &str) {
+        st.next_file_birth += 1;
+        let at = st.next_file_birth;
+        st.file_changes.insert(key.to_string(), at);
+    }
+
+    /// A time on the births' clock as the disk shows it: every step apart,
+    /// or rounded to the coarse tick (`MemFs::stamp_tick`). Zero stays zero.
+    fn shown_stamp(st: &MemFsState, at: u64) -> u64 {
+        if at == 0 || st.stamp_tick <= 1 {
+            at
+        } else {
+            (at / st.stamp_tick + 1) * st.stamp_tick
+        }
+    }
+
     fn alloc_id(st: &mut MemFsState) -> u64 {
         if st.reuse_file_ids {
             if let Some(id) = st.freed_ids.pop() {
@@ -1662,6 +1718,8 @@ impl MemFs {
             }
             if let Some(birth) = st.file_births.remove(&old) {
                 st.file_births.insert(new.clone(), birth);
+                st.file_changes.remove(&old);
+                Self::changed(st, &new);
             }
             if let Some(soul) = st.souls.remove(&old) {
                 st.souls.insert(new.clone(), soul);
@@ -1765,7 +1823,7 @@ impl MemFs {
                 birth_ns: if st.births_hidden || positional {
                     0
                 } else {
-                    jd_vfs::birth_as_seen(st.file_births.get(key).copied().unwrap_or(0), st.births_shown_as_names)
+                    jd_vfs::birth_as_seen(Self::shown_stamp(st, st.file_births.get(key).copied().unwrap_or(0)), st.births_shown_as_names)
                 },
             }),
             _ => None,
@@ -1775,6 +1833,7 @@ impl MemFs {
 
 impl MemFs {
     fn list(&self, path: &Path, include_internal: bool) -> VfsResult<Vec<DirEntry>> {
+        let tells = jd_vfs::Vfs::personality(self).tells_saves_from_swaps();
         let key = self.key_for(path)?;
         self.check_failure(FsOp::ReadDir, &key, path)?;
         let st = self.state.lock().unwrap();
@@ -1826,6 +1885,10 @@ impl MemFs {
                     Node::File { .. } => Self::fingerprint_of(&st, k),
                 },
                 tie_break_id: Self::tie_break_of(&st, k),
+                change_ns: match node {
+                    Node::File { .. } if tells => Self::shown_stamp(&st, st.file_changes.get(k).copied().unwrap_or(0)),
+                    _ => 0,
+                },
             });
             if let Node::File { bytes, .. } = node {
                 if Self::under_a_sealed_dir(&st, k) {
@@ -1867,6 +1930,7 @@ impl Vfs for MemFs {
         let mut p = self.personality;
         let st = self.state.lock().unwrap();
         p.births_are_names = st.births_shown_as_names;
+        p.ctime_follows_renames = p.ctime_follows_renames && st.ctime_follows_renames;
         if st.births_hidden || st.network_share {
             p.stable_file_identity = false;
         }
@@ -2094,6 +2158,7 @@ impl Vfs for MemFs {
             st.sealed_dirs.remove(&v);
             st.births.remove(&v);
             st.file_births.remove(&v);
+            st.file_changes.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 Self::release_id(&mut st, &v, id);
             }
@@ -2384,6 +2449,7 @@ impl SpoolFile for MemSpool {
         if !st.file_births.contains_key(&key) {
             let birth = MemFs::new_file_birth(&mut st);
             st.file_births.insert(key.clone(), birth);
+            MemFs::born(&mut st, &key, birth);
             let now = self.fs.clock.now_ns();
             MemFs::tunnel(&mut st, &key, now);
         }
@@ -2391,10 +2457,11 @@ impl SpoolFile for MemSpool {
         let birth_ns = if st.births_hidden || positional {
             0
         } else {
-            jd_vfs::birth_as_seen(st.file_births[&key], st.births_shown_as_names)
+            jd_vfs::birth_as_seen(MemFs::shown_stamp(&st, st.file_births[&key]), st.births_shown_as_names)
         };
         let true_birth = st.file_births[&key];
         st.landed.push((id, true_birth));
+        MemFs::changed(&mut st, &key);
         if !st.souls.contains_key(&key) {
             MemFs::new_soul(&mut st, &key);
         }

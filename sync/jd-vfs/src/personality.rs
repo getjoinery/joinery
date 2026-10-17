@@ -114,6 +114,13 @@ pub struct Personality {
     /// (`birth_as_seen`). The rename probe cannot see tunnelling -- it
     /// renames to a name nothing left -- so this is named, never probed.
     pub births_are_names: bool,
+    /// Does renaming a file move its change time (ctime; `ChangeTime` on
+    /// Windows) to the moment of the rename? Probed in the sync root
+    /// (`Personality::probe`). With births shown and not names, it is what
+    /// tells a save that renames the original aside from a swap with a file
+    /// that was already there (`ObservedFile::change_ns`): the save's new
+    /// file is made after the rename, the swap's newcomer before it.
+    pub ctime_follows_renames: bool,
 }
 
 /// The birth every file and directory reports on a volume whose births are
@@ -162,6 +169,16 @@ const WINDOWS_RESERVED: &[&str] = &[
 ];
 
 impl Personality {
+    /// Can this volume tell a save that renames the original aside from a
+    /// swap with a file that was already there? Only where a file's identity
+    /// holds, its birth is its own (not its name's), and a rename moves its
+    /// change time: then the save's new file is born no earlier than the
+    /// rename, and the swap's newcomer was born before it
+    /// (`ObservedFile::change_ns`).
+    pub fn tells_saves_from_swaps(&self) -> bool {
+        self.stable_file_identity && !self.positional_file_ids && !self.births_are_names && self.ctime_follows_renames
+    }
+
     /// ext4 and friends: bytes are bytes, only `/` and NUL are off limits.
     pub const fn linux() -> Self {
         Personality {
@@ -179,6 +196,7 @@ impl Personality {
             fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: false,
+            ctime_follows_renames: true,
         }
     }
 
@@ -214,6 +232,7 @@ impl Personality {
             fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: false,
+            ctime_follows_renames: true,
         }
     }
 
@@ -254,6 +273,7 @@ impl Personality {
             fat_directories_hold: false,
             id_tie_break: IdTieBreak::None,
             births_are_names: true,
+            ctime_follows_renames: true,
         }
     }
 
@@ -265,6 +285,7 @@ impl Personality {
             stable_file_identity: false,
             positional_file_ids: true,
             births_are_names: false,
+            ctime_follows_renames: false,
             ..Personality::windows()
         }
     }
@@ -303,6 +324,7 @@ impl Personality {
             // The platform's names are its safe guess; for identity the safe
             // guess is none, which costs only the older rules.
             p.stable_file_identity = false;
+            p.ctime_follows_renames = false;
             p.positional_file_ids = crate::real::ids_are_positions_on_this_volume(dir);
             p.fat_directories_hold = p.positional_file_ids && crate::real::fat_directories_hold_on_this_volume(dir);
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
@@ -353,7 +375,17 @@ impl Personality {
             "{base}-renamed-under-a-much-longer-name-so-its-entry-has-to-move"
         ));
         let before = crate::real::identity_at(&path);
-        p.stable_file_identity = match std::fs::rename(&path, &renamed) {
+        // And does the rename move the file's change time? Asked across a
+        // pause a fine-grained volume's clock always shows (ext4's coarse
+        // tick is about 4 ms, APFS and NTFS keep finer): a volume whose
+        // change time cannot show a 20 ms pause has ties for nearly every
+        // save, which is the reading without it, so it reads as no.
+        let changed_before = crate::real::change_time_at(&path);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let renamed_ok = std::fs::rename(&path, &renamed);
+        let changed_after = renamed_ok.as_ref().ok().and_then(|_| crate::real::change_time_at(&renamed));
+        p.ctime_follows_renames = matches!((changed_before, changed_after), (Some(b), Some(a)) if b != 0 && a > b);
+        p.stable_file_identity = match renamed_ok {
             Ok(()) => {
                 let after = crate::real::identity_at(&renamed);
                 let _ = std::fs::remove_file(&renamed);
@@ -379,6 +411,7 @@ impl Personality {
         if crate::real::ids_are_positions_on_this_volume(dir) {
             p.positional_file_ids = true;
             p.stable_file_identity = false;
+            p.ctime_follows_renames = false;
             p.id_tie_break = crate::real::id_tie_break_on_this_volume(dir);
             p.fat_directories_hold = crate::real::fat_directories_hold_on_this_volume(dir);
         }
@@ -485,13 +518,15 @@ mod tests {
         // refuse to sync; for names the compile-time default is the
         // conservative answer. For file identity it is not: ids nobody tried
         // are ids nobody trusts, and distrusting them costs only the older
-        // rules.
+        // rules. Nor for change times: a rename nobody watched move one tells
+        // no save from a swap, and the reading without it is the save.
         let missing = std::env::temp_dir().join("jd-probe-does-not-exist-at-all");
         let _ = std::fs::remove_dir_all(&missing);
         assert_eq!(
             Personality::probe(&missing),
             Personality {
                 stable_file_identity: false,
+                ctime_follows_renames: false,
                 ..Personality::native()
             }
         );
