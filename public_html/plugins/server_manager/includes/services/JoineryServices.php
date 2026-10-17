@@ -32,6 +32,7 @@
  * node's fleet backups, so its suspend and reactivate switch those, and its
  * figure is what the node's backups occupy.
  *
+ * @version 1.5 - releasing mail removes the sender domain and the SMTP user before closing the subaccount
  * @version 1.4 - releasing backup storage drains the customer's space; reactivating gives it one again
  * @version 1.3 - backup storage for a customer lives in its storage space: enrol opens one on the target
  *                Where new backups go names, and the coordinates a site writes are that space's
@@ -506,6 +507,9 @@ class JoineryServices {
 				if ($client === null) {
 					throw new JoineryServicesException('Outbound mail cannot be stopped: no mail provider is configured on this plane.');
 				}
+				if ($state === ServiceTenant::STATE_RELEASED) {
+					self::releaseMailIdentity($row, $client);
+				}
 				$client->closeSubaccount($subaccount);
 			}
 		} elseif ($row->is_node_linked()) {
@@ -528,6 +532,63 @@ class JoineryServices {
 			? self::releasedNotice($service)
 			: self::suspendedNotice($service));
 		$row->save();
+	}
+
+	/**
+	 * A release takes the sender domain and the SMTP user out of the
+	 * subaccount, so a closed subaccount names nothing that still works and
+	 * nothing is left at the provider once the account is gone. A suspension
+	 * keeps both: it comes back as it was. Each removal that lands clears its
+	 * column; one that fails keeps the name, and the reconcile tries again
+	 * (ServiceTenantWatch). One the provider no longer has counts as removed.
+	 *
+	 * @return bool true when the row names neither any more
+	 */
+	public static function releaseMailIdentity(ServiceTenant $row, Smtp2GoClient $client): bool {
+		$subaccount = trim((string)$row->get('svt_provider_subaccount_id'));
+		$cleared = true;
+		foreach (array('svt_provider_user_id' => 'removeSmtpUser', 'svt_provider_domain' => 'removeDomain') as $column => $method) {
+			$name = trim((string)$row->get($column));
+			if ($name === '') {
+				continue;
+			}
+			try {
+				$client->$method($subaccount, $name);
+			} catch (\Throwable $e) {
+				if (!preg_match('/not found|does not exist|no such|unknown (domain|user)/i', $e->getMessage())) {
+					error_log('JoineryServices: release could not remove ' . $name . ' (' . $column . '): ' . $e->getMessage());
+					$cleared = false;
+					continue;
+				}
+			}
+			$row->set($column, null);
+			// svt_mail_records stays: the release answer lists those records
+			// as the ones the site can take out of its DNS.
+			if ($column === 'svt_provider_domain') {
+				$row->set('svt_mail_state', null);
+			}
+		}
+		$row->save();
+		return $cleared;
+	}
+
+	/**
+	 * The reconcile's retry of releaseMailIdentity() on a released row: the
+	 * subaccount is closed by then, and a provider may refuse changes to a
+	 * closed one, so it is reopened for the removals and closed again whatever
+	 * they did.
+	 */
+	public static function finishMailRelease(ServiceTenant $row, Smtp2GoClient $client): bool {
+		$subaccount = trim((string)$row->get('svt_provider_subaccount_id'));
+		if ($subaccount === '') {
+			return self::releaseMailIdentity($row, $client);
+		}
+		$client->reopenSubaccount($subaccount);
+		try {
+			return self::releaseMailIdentity($row, $client);
+		} finally {
+			$client->closeSubaccount($subaccount);
+		}
 	}
 
 	/**
@@ -586,7 +647,14 @@ class JoineryServices {
 		$row->set('svt_allowance', self::allowance((string)$row->get('svt_service')));
 		$row->save();
 		$state = (string)$row->get('svt_state');
-		if ($row->entitled() && ($state === ServiceTenant::STATE_SUSPENDED || $state === ServiceTenant::STATE_RELEASED)) {
+		// Released mail comes back through the site's next enrol, which adds the
+		// sender domain and mints the user, rather than as an open subaccount
+		// missing one or both (a release whose removals only partly landed is
+		// finished by the reconcile meanwhile).
+		$released_mail = $state === ServiceTenant::STATE_RELEASED
+			&& (string)$row->get('svt_service') === ServiceTenant::SERVICE_MAIL;
+		if ($row->entitled() && !$released_mail
+				&& ($state === ServiceTenant::STATE_SUSPENDED || $state === ServiceTenant::STATE_RELEASED)) {
 			self::reactivate($row, $client);
 		}
 	}

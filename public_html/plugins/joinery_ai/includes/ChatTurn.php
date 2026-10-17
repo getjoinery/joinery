@@ -31,7 +31,9 @@ class ChatTurn {
         $unreachable = self::reachabilityError($conversation);
         if ($unreachable !== null) {
             ChatAsync::log('[chat] preflight unreachable: ' . $unreachable);
-            self::markFailed($assistant_msg, LlmProviderException::friendlyMessage('api_network_error'));
+            self::markFailed($assistant_msg, self::isOperator($conversation)
+                ? LlmProviderException::friendlyMessage('api_network_error')
+                : LlmProviderException::memberMessageFor('api_network_error'));
             return;
         }
         try {
@@ -41,7 +43,9 @@ class ChatTurn {
         } catch (LlmProviderException $e) {
             ChatAsync::log('[chat] provider error (' . LlmProviderException::classify($e)
                 . ') on message #' . (int)$assistant_msg->key . ': ' . $e->getMessage());
-            self::markFailed($assistant_msg, LlmProviderException::operatorMessage($e));
+            self::markFailed($assistant_msg, self::isOperator($conversation)
+                ? LlmProviderException::operatorMessage($e)
+                : LlmProviderException::memberMessage($e));
             return;
         } catch (Throwable $e) {
             ChatAsync::log('[chat] turn failed on message #' . (int)$assistant_msg->key . ': '
@@ -69,8 +73,11 @@ class ChatTurn {
         // Operational columns, written with the content by ChatSeal::finalizeTurn()
         // (which seals the content on a protected chat, window open or not).
         $cols = [];
-        $cols['aim_input_tokens']  = (int)$result['input_tokens'];
-        $cols['aim_output_tokens'] = (int)$result['output_tokens'];
+        $cols['aim_input_tokens']       = (int)$result['input_tokens'];
+        $cols['aim_output_tokens']      = (int)$result['output_tokens'];
+        $cols['aim_cache_read_tokens']  = (int)($result['cache_read_tokens'] ?? 0);
+        $cols['aim_cache_write_tokens'] = (int)($result['cache_write_tokens'] ?? 0);
+        $cols['aim_cost_estimate']      = self::costOf($result);
         $cols['aim_context_used']  = (int)($result['context_tokens'] ?? 0);
         if (isset($result['context_window']) && $result['context_window'] !== null) {
             $cols['aim_context_window'] = (int)$result['context_window'];
@@ -99,7 +106,28 @@ class ChatTurn {
         }
         ChatAsync::clearScratch((int)$assistant_msg->key);   // the sealed content now lives in aim_content
 
-        self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
+        self::rollupUsage($conversation, (int)$result['input_tokens'] + (int)($result['cache_read_tokens'] ?? 0)
+            + (int)($result['cache_write_tokens'] ?? 0), (int)$result['output_tokens']);
+    }
+
+    /** A loop result's price at the catalog rates of the model that answered:
+     *  0 for a catalog model that declares no cost (it is free), null for a model
+     *  the catalog does not know, so the monthly cap counts it rather than
+     *  reading an unknown price as free. */
+    public static function costOf(array $result): ?float {
+        try {
+            if (AiEndpointRegistry::model((string)($result['model'] ?? '')) === null) {
+                return null;
+            }
+            return AiModelResolution::costFor((string)($result['model'] ?? ''), [
+                'input_tokens'                => (int)($result['input_tokens'] ?? 0),
+                'output_tokens'               => (int)($result['output_tokens'] ?? 0),
+                'cache_creation_input_tokens' => (int)($result['cache_write_tokens'] ?? 0),
+                'cache_read_input_tokens'     => (int)($result['cache_read_tokens'] ?? 0),
+            ]);
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 
     /** Add a turn's tokens to the conversation totals and bump its update time.
@@ -132,6 +160,22 @@ class ChatTurn {
             return $resolution === null ? null : $resolution->provider()->reachabilityProbe();
         } catch (Throwable $e) {
             return null;
+        }
+    }
+
+    /**
+     * Whether the conversation's owner administers this site: an administrator's
+     * failed row names the fix, with the provider's own words; a member's does not.
+     */
+    private static function isOperator(AiConversation $conversation): bool {
+        $owner = (int)$conversation->get('aic_owner_user_id');
+        if ($owner <= 0) {
+            return false;
+        }
+        try {
+            return (int)(new User($owner, TRUE))->get('usr_permission') >= 5;
+        } catch (Throwable $e) {
+            return false;
         }
     }
 

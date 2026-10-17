@@ -715,6 +715,8 @@ class RecipeRunner {
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_input_tokens', $in);
         $run->set('rcr_output_tokens', $out);
+        $run->set('rcr_cache_write_tokens', $cw);
+        $run->set('rcr_cache_read_tokens', $cr);
 
         // Cost the model that ACTUALLY served the run, from the catalog's own
         // rates. Costing the recipe's pin instead is how every unpinned recipe

@@ -110,6 +110,7 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.12 - remember-me tokens are written as one column, so an unrelated invalid field cannot fail a sign-in
  * @version 1.11 - a real password change signs out the account's other sessions and forgets its other
  *                 remembered devices (end_other_sessions(), usr_session_generation)
  * @version 1.10 - a signed-in session whose account is deleted or disabled is signed out at its next
@@ -360,8 +361,10 @@ class SessionControl{
 			'created' => time(),
 		];
 
+		// Only the token list is written: a full save() would validate every
+		// field, and an unrelated bad one (no timezone) would fail the sign-in.
+		User::updateColumns((int)$user->key, array('usr_remember_tokens' => json_encode($tokens)));
 		$user->set('usr_remember_tokens', json_encode($tokens));
-		$user->save();
 
 		$this->set_secure_cookie('tt', $raw_token, $expires);
 	}
@@ -827,8 +830,7 @@ class SessionControl{
 					if (is_string($tokens)) $tokens = json_decode($tokens, true);
 					if (is_array($tokens)) {
 						$tokens = array_values(array_filter($tokens, fn($t) => ($t['hash'] ?? '') !== $token_hash));
-						$user->set('usr_remember_tokens', json_encode($tokens));
-						$user->save();
+						User::updateColumns((int)$user->key, array('usr_remember_tokens' => json_encode($tokens)));
 					}
 				} catch (Exception $e) {
 					// Non-fatal — session is being destroyed anyway

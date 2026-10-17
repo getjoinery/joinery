@@ -19,6 +19,7 @@
  *
  * The whole docs are deliberately not loaded: retrieval keeps a turn at cents.
  *
+ * @version 0.1.2 - a log read names the errors that stopped a request first
  * @version 0.1.1 - the tool rules keep every answer to Joinery and decline the rest
  */
 class SupportPrompt {
@@ -33,6 +34,8 @@ class SupportPrompt {
 		. "- A read of the person's site is bounded and redacted on their server before it reaches you. One read answers one question: "
 		. "do not read the same thing twice in a turn. Say which reads you made.\n"
 		. "- A read the site refuses is reported in the site's own words; repeat them and say what the person can do.\n"
+		. "- When you read a log, name first every error that stopped a request (an exception, a fatal error, a 500), each with when it happened, "
+		. "then warnings. Leave out scanners probing for files and routine notices unless the person asks about them.\n"
 		. "- You cannot change anything on a site, run a command, or restart anything. Tell the person what to do and where.\n"
 		. "- Hand the thread to a person with escalate when the documents and the reads do not settle it, or when they ask for a person.\n"
 		. "- When what they describe is a defect in Joinery itself, offer to file it with file_bug_report.";

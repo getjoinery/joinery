@@ -107,6 +107,18 @@ check((int)($result['usage']['input_tokens'] ?? 0) === 5 && (int)($result['usage
     'usage tokens parsed from the stream',
     'in=' . ($result['usage']['input_tokens'] ?? '?') . ' out=' . ($result['usage']['output_tokens'] ?? '?'));
 
+// An OpenAI-style host counts cached tokens inside prompt_tokens; the provider
+// reports them outside input_tokens, as every provider does.
+$cached_sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"},\"finish_reason\":\"stop\"}]}\n\n"
+     . "data: {\"choices\":[{\"delta\":{}}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":800}}}\n\n"
+     . "data: [DONE]\n\n";
+$cached_provider = new OpenAiCompatibleProvider('http://mock/v1', 'test-model', '', 300,
+    jai_mock_client(new Response(200, ['Content-Type' => 'text/event-stream'], Utils::streamFor($cached_sse))));
+$cached = $cached_provider->createMessage(jai_min_params());
+check((int)($cached['usage']['input_tokens'] ?? -1) === 200 && (int)($cached['usage']['cache_read_input_tokens'] ?? -1) === 800,
+    'cached tokens are reported beside the uncached input, not inside it',
+    'in=' . ($cached['usage']['input_tokens'] ?? '?') . ' cached=' . ($cached['usage']['cache_read_input_tokens'] ?? '?'));
+
 // ---------------------------------------------------------------------------
 section('Unconfigured provider is reported in its own words');
 
@@ -202,6 +214,108 @@ check($caught !== null && (int)$caught->getCode() === 400, 'a 400 from Anthropic
     $caught ? 'code=' . $caught->getCode() : 'no throw');
 check($caught !== null && strpos(LlmProviderException::operatorMessage($caught), 'Anthropic said: “This API key is not scoped to a workspace') !== false,
     'the chat row names the workspace problem', $caught ? LlmProviderException::operatorMessage($caught) : '');
+
+// ---------------------------------------------------------------------------
+section('A model that thinks adaptively: no budget, no sampling, thinking kept');
+
+/** An Anthropic provider whose one streamed answer is $sse; records what it was sent. */
+function jai_recording_anthropic(string $sse, array &$sent): AnthropicProvider {
+    $stack = HandlerStack::create(new MockHandler([
+        new Response(200, ['Content-Type' => 'text/event-stream'], Utils::streamFor($sse)),
+    ]));
+    $stack->push(GuzzleHttp\Middleware::history($sent));
+    return new AnthropicProvider('test-key', AnthropicProvider::API_URL, new Client(['handler' => $stack]));
+}
+$event = function (array $d): string { return 'event: ' . $d['type'] . "\ndata: " . json_encode($d) . "\n\n"; };
+$thinking_sse = $event(['type' => 'message_start', 'message' => ['usage' => ['input_tokens' => 10]]])
+    . $event(['type' => 'content_block_start', 'index' => 0, 'content_block' => ['type' => 'thinking', 'thinking' => '', 'signature' => '']])
+    . $event(['type' => 'content_block_delta', 'index' => 0, 'delta' => ['type' => 'thinking_delta', 'thinking' => '']])
+    . $event(['type' => 'content_block_delta', 'index' => 0, 'delta' => ['type' => 'signature_delta', 'signature' => 'SIG-abc']])
+    . $event(['type' => 'content_block_stop', 'index' => 0])
+    . $event(['type' => 'content_block_start', 'index' => 1, 'content_block' => ['type' => 'text', 'text' => '']])
+    . $event(['type' => 'content_block_stop', 'index' => 1])
+    . $event(['type' => 'content_block_start', 'index' => 2, 'content_block' => ['type' => 'tool_use', 'id' => 'toolu_1', 'name' => 'search_docs']])
+    . $event(['type' => 'content_block_delta', 'index' => 2, 'delta' => ['type' => 'input_json_delta', 'partial_json' => '{"q":"x"}']])
+    . $event(['type' => 'content_block_stop', 'index' => 2])
+    . $event(['type' => 'message_delta', 'delta' => ['stop_reason' => 'tool_use'], 'usage' => ['output_tokens' => 7]])
+    . $event(['type' => 'message_stop']);
+
+$sent = [];
+$adaptive = AiModelResolution::forProvider(jai_recording_anthropic($thinking_sse, $sent), 'claude-sonnet-5-5',
+    ['thinking' => 'always', 'thinking_style' => 'adaptive', 'sampling' => false]);
+$params = jai_min_params();
+$params['temperature'] = 0.3;
+$params['top_p'] = 0.9;
+$params['thinking'] = $adaptive->thinkingDirective();
+$answer = $adaptive->send($params, static function (string $d): void {});
+$body = json_decode((string)$sent[0]['request']->getBody(), true);
+check(!array_key_exists('temperature', $body) && !array_key_exists('top_p', $body),
+    'a model that refuses sampling settings is sent none', json_encode(array_intersect_key($body, ['temperature' => 1, 'top_p' => 1])));
+check(($body['thinking'] ?? null) === ['type' => 'adaptive'], 'it is asked for adaptive thinking, with no budget', json_encode($body['thinking'] ?? null));
+check(($body['output_config'] ?? null) === ['effort' => (string)$adaptive->thinkingDirective()['effort']],
+    'at the thinking level the request asked for, as its effort', json_encode($body['output_config'] ?? null));
+$types = array_map(fn($b) => $b['type'], $answer['content']);
+check($types === ['thinking', 'tool_use'], 'the thinking block comes back ahead of the tool call, and no empty text block', json_encode($types));
+check(($answer['content'][0]['signature'] ?? '') === 'SIG-abc', 'with its signature, to be sent back unchanged');
+
+// A level of 'high' reaches the model as high effort, not the model's own default.
+$sent = [];
+$high = AiModelResolution::forProvider(jai_recording_anthropic($thinking_sse, $sent), 'claude-opus-5-5',
+    ['thinking' => 'always', 'thinking_style' => 'adaptive', 'sampling' => false]);
+$params = jai_min_params();
+$params['thinking'] = ['enabled' => true, 'effort' => 'high', 'level' => 'high'];
+$high->send($params, static function (string $d): void {});
+$body = json_decode((string)$sent[0]['request']->getBody(), true);
+check(($body['output_config']['effort'] ?? '') === 'high', 'a level of high runs an adaptive model at high effort', json_encode($body['output_config'] ?? null));
+
+$sent = [];
+$budgeted = AiModelResolution::forProvider(jai_recording_anthropic($thinking_sse, $sent), 'claude-sonnet-4-6', []);
+$params = jai_min_params();
+$params['temperature'] = 0.3;
+$params['thinking'] = ['enabled' => true, 'effort' => 'medium', 'level' => 'medium'];
+$budgeted->send($params, static function (string $d): void {});
+$body = json_decode((string)$sent[0]['request']->getBody(), true);
+check(($body['thinking']['type'] ?? '') === 'enabled' && (int)($body['thinking']['budget_tokens'] ?? 0) === 4096,
+    'a model that takes a budget still gets one', json_encode($body['thinking'] ?? null));
+
+// ---------------------------------------------------------------------------
+section('A member\'s failed row never quotes the provider');
+
+// The member chat shows aim_error to whoever owns the conversation. What a
+// provider (or a proxy in front of it) says can carry a key fragment or an
+// internal address, and the fix is the administrator's in any case.
+$admin_sentence = LlmProviderException::memberMessageFor('api_auth_failed');
+foreach ($worded_failures as [$expected_code, $status, $message, $provider, $words]) {
+    $member = LlmProviderException::memberMessage(new LlmProviderException($message, $status));
+    check(strpos($member, 'said:') === false && strpos($member, $words) === false,
+        "$expected_code: a member's row carries none of $provider's words", $member);
+}
+check(LlmProviderException::memberMessage(new LlmProviderException('Anthropic 4xx: authentication_error: invalid x-api-key', 401)) === $admin_sentence
+    && strpos($admin_sentence, 'settings page') === false && strpos($admin_sentence, 'administrator') !== false,
+    'a failure only the administrator can fix says so, naming no settings page', $admin_sentence);
+check(LlmProviderException::memberMessage(new LlmProviderException('Anthropic 4xx: invalid_request_error: prompt is too long: 250000 tokens > 200000 maximum', 400))
+    === LlmProviderException::friendlyMessage('api_request_too_large'),
+    'a failure the member can act on keeps its friendly sentence');
+check(LlmProviderException::memberMessage(new LlmProviderException('Anthropic 4xx: invalid_request_error: messages.0.content.1.image: unsupported image format', 400))
+    === LlmProviderException::friendlyMessage('api_request_invalid'),
+    'a refusal that can be the member\'s own input keeps the neutral sentence, blaming no one');
+check(ChatTurn::costOf(['model' => 'no-such-model-' . mt_rand(), 'input_tokens' => 1000, 'output_tokens' => 10]) === null,
+    'a turn on a model the catalog does not know has no cost, so the cap counts it');
+$known = array_key_first(AiEndpointRegistry::catalog());
+if ($known === null) {
+    harness_skip('a model this install serves is priced', 'no endpoint is configured here');
+} else {
+    check(is_float(ChatTurn::costOf(['model' => $known, 'input_tokens' => 1000, 'output_tokens' => 10])),
+        'a model this install serves is priced (0 when it declares no cost)', $known);
+}
+check(LlmProviderException::memberMessage(new LlmProviderException('Local model API 5xx (502): upstream at http://10.0.0.5:8080 failed', 502))
+    === LlmProviderException::friendlyMessage('api_server_error'), 'a server failure reads the same for everyone');
+
+// 'model ... does not exist' is read from the provider's words: the label in
+// front of a local host's message names a model on every failure.
+check(LlmProviderException::classify(new LlmProviderException('Local model 4xx: not_found: file does not exist', 400)) === 'api_request_invalid',
+    'the label\'s word model does not make a missing file a missing model',
+    LlmProviderException::classify(new LlmProviderException('Local model 4xx: not_found: file does not exist', 400)));
 
 // ---------------------------------------------------------------------------
 section('Turn diagnostics survive the detached path');

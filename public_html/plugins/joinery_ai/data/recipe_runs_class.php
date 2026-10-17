@@ -40,6 +40,10 @@ class RecipeRun extends SystemBase {
         'rcr_trigger'           => array('type'=>'varchar(20)', 'default'=>'schedule'),
         'rcr_input_tokens'      => array('type'=>'int4', 'default'=>0),
         'rcr_output_tokens'     => array('type'=>'int4', 'default'=>0),
+        // Served from and written to the provider's prompt cache, apart from
+        // rcr_input_tokens (the uncached input).
+        'rcr_cache_read_tokens'  => array('type'=>'int4', 'default'=>0),
+        'rcr_cache_write_tokens' => array('type'=>'int4', 'default'=>0),
         'rcr_cost_estimate'     => array('type'=>'numeric(10,4)', 'default'=>0),
         // What actually ran this. Before a resolver picked the model, the model
         // was typed on the recipe and sat there in front of you; now the choice

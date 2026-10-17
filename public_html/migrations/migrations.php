@@ -1788,3 +1788,14 @@
 	$migration['migration_sql'] = "UPDATE fil_files SET fil_announced_time = COALESCE(fil_create_time, now()) WHERE fil_announced_time IS NULL";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// usr_timezone is required. User::CreateNew used to write an explicit NULL
+	// when no timezone was given, which skips the column default, and such an
+	// account could not sign in with 'remember me' (or save its profile). They
+	// take the site's default timezone.
+	$migration = array();
+	$migration['database_version'] = '219';
+	$migration['test'] = "SELECT CASE WHEN EXISTS(SELECT 1 FROM usr_users WHERE usr_timezone IS NULL OR usr_timezone = '') THEN 0 ELSE 1 END as count";
+	$migration['migration_sql'] = "UPDATE usr_users SET usr_timezone = COALESCE(NULLIF((SELECT stg_value FROM stg_settings WHERE stg_name = 'default_timezone'), ''), 'America/New_York') WHERE usr_timezone IS NULL OR usr_timezone = ''";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

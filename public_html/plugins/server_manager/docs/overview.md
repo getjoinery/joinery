@@ -1499,9 +1499,12 @@ broker actions below. `JoineryServices` is the operator side of all of them.
   and `server_manager_storage_referral_url`, `''` when unset), `manage_url`
   (the account's Connected sites page), plus the ready-made banner row
   (`label`, `used_label`, `allowance_label`, `percent`).
-- *Release* closes mail's subaccount now, or marks backup storage tenant released
-  so the broker refuses it; backup storage is kept 90 days from that day
-  (`svt_prune_after_time`) and then pruned. Idempotent.
+- *Release* removes mail's SMTP user and sender domain from its subaccount and closes
+  it now (a removal that fails keeps its name on the row, and `ServiceTenantWatch` reopens the
+  subaccount, removes what is left and closes it again until both are gone), or marks backup storage tenant released so the broker
+  refuses it; backup storage is kept 90 days from that day (`svt_prune_after_time`) and
+  then pruned. Idempotent. A new paid-through date on released mail waits for the site's
+  next enrol, which reopens the subaccount, adds the domain and mints a user.
 
 **The backup storage broker** (`ShelfBroker`, signing with `S3Signer::presign()`): no box ever holds a
 storage credential. For every object it writes or reads a site asks the plane

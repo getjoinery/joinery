@@ -83,6 +83,15 @@ class AiConversationMessage extends SystemBase {
         'aim_level_attempt_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
         'aim_input_tokens'        => array('type'=>'int4', 'default'=>0),
         'aim_output_tokens'       => array('type'=>'int4', 'default'=>0),
+        // What the provider served from its prompt cache and wrote into it, kept
+        // apart from aim_input_tokens (the uncached input), so a reply shows its
+        // cache hits and the four together are everything the turn processed.
+        'aim_cache_read_tokens'   => array('type'=>'int4', 'default'=>0),
+        'aim_cache_write_tokens'  => array('type'=>'int4', 'default'=>0),
+        // The turn's price at the catalog rates of the model that answered it;
+        // 0 for a model that costs nothing, so the monthly cap skips it. NULL
+        // on rows written before it was recorded.
+        'aim_cost_estimate'       => array('type'=>'numeric(12,6)', 'is_nullable'=>true),
         // The model's real context window (tokens) when this turn ran, read from
         // the local host's /api/ps. Colors the per-reply context number by how close
         // it is to the limit. NULL for remote models or an unreachable host.

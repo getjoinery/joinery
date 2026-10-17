@@ -6,10 +6,7 @@ This document provides step-by-step instructions for integrating HTML/CSS templa
 
 **CRITICAL:** The active visual theme is controlled by a **database setting**, not by any config file.
 
-- **To switch themes:** Update `theme_template` in `stg_settings` via Admin > Settings, or directly:
-  ```sql
-  UPDATE stg_settings SET stg_value = 'my-theme-name' WHERE stg_name = 'theme_template';
-  ```
+- **To switch themes:** click **Activate** on System > Themes (`/admin/admin_themes`), or set **Active theme** on Admin > Settings. Both write `theme_template` through the settings writer, which validates the name and applies the vault gate; an `UPDATE` on `stg_settings` skips both.
 - Theme directories live in `public_html/theme/{theme-name}/`
 - The `site_template` setting in `config/Globalvars_site.php` is **not the visual theme** — it is the site installation directory identifier (e.g., `phillyzouk`, `joinerytest`). Almost never needs changing.
 

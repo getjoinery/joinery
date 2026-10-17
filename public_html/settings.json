@@ -1006,7 +1006,11 @@
       "group": "problem_reports",
       "label": "Support desk",
       "type": "text",
-      "helptext": "The management node the Help button asks, as https://host. Blank asks the upgrade source, where problem reports go."
+      "helptext": "The management node the Help button asks, as https://host. Blank asks the upgrade source, where problem reports go.",
+      "validation": {
+        "pattern": "/^https:\\/\\/([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:.]+\\])(:[0-9]+)?\\/?$/",
+        "messages": { "pattern": "An https URL with a host name or address and optional port, and nothing after it (https://example.com or https://[2001:db8::1]), or blank to ask the upgrade source." }
+      }
     },
     {
       "name": "support_chat_consent",

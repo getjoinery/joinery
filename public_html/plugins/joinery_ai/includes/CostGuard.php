@@ -148,9 +148,14 @@ class CostGuard {
         $chat_used = 0;
         try {
             $q = $db->prepare(
-                "SELECT COALESCE(SUM(aim_input_tokens) + SUM(aim_output_tokens), 0)
+                // Every token a turn processed, cached ones included; like the
+                // recipe sum, a turn on a model that costs nothing does not
+                // count (rows from before the cost was recorded still do).
+                "SELECT COALESCE(SUM(aim_input_tokens + aim_output_tokens
+                                     + aim_cache_read_tokens + aim_cache_write_tokens), 0)
                  FROM aim_conversation_messages
                  WHERE aim_create_time >= ?
+                   AND COALESCE(aim_cost_estimate, 1) > 0
                    AND aim_delete_time IS NULL"
             );
             $q->execute([$month_start]);
@@ -190,7 +195,8 @@ class CostGuard {
         // free work). Cost is the right signal rather than the trust class,
         // which is about where content may travel: Fireworks is trusted AND
         // paid, and must keep counting.
-        $sql = "SELECT COALESCE(SUM(rcr_input_tokens) + SUM(rcr_output_tokens), 0)
+        $sql = "SELECT COALESCE(SUM(rcr_input_tokens + rcr_output_tokens
+                                    + rcr_cache_read_tokens + rcr_cache_write_tokens), 0)
                 FROM rcr_recipe_runs
                 WHERE rcr_started_time >= ?
                   AND rcr_status IN (?, ?, ?, ?)

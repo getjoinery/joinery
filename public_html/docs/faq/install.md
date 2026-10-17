@@ -106,6 +106,14 @@ Everything else (events, commerce, bookings, the password vault, DNS filtering, 
 
 See: docs/installation.md > What a new site comes with
 
+## How do I change which theme my site uses?
+
+Go to **System > Themes** (`/admin/admin_themes`). A page theme is the whole site, its pages and their styling: click **Activate** on the one you want. A style theme only changes colors, fonts and images on top of the page theme: **Apply** puts it on and **Remove** takes it off. The same two choices are on the settings page (`/admin/admin_settings`), under the theme settings.
+
+If your account has a vault, a theme change asks you to unlock it first. To get a theme your site does not have yet, use **Add New** on the Themes page.
+
+See: docs/settings.md > System-managed settings
+
 ## Can I set up email and backups during the install?
 
 Yes. Pass these to `install.sh site` in the environment:

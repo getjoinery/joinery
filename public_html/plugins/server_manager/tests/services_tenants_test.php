@@ -21,9 +21,11 @@
  *     target, and no credential anywhere in the answer.
  *   - Status is contract C2 per service; the webhook nudges the mail figure and
  *     a figure from an earlier month reads as 0.
- *   - Release closes the subaccount, starts the retention clock (shelf only),
- *     and is idempotent; a new date reactivates a stopped row in place; the
- *     ladder's two acts close and reopen the subaccount.
+ *   - Mail release removes the SMTP user and sender domain (a failed removal
+ *     stays named and the retry finishes it), closes the subaccount, starts
+ *     the retention clock (shelf only), and is idempotent; a new date brings
+ *     backup storage back in place and leaves released mail to the site's
+ *     next enrol; the ladder's two acts close and reopen the subaccount.
  *   - The three actions run as the key's user and refuse without a key.
  *
  * The mail provider is a Guzzle MockHandler with history: every call is
@@ -323,12 +325,29 @@ try {
 harness_set_setting_mem('server_manager_backup_target_id', (string)$target->key);
 
 // ---------------------------------------------------------------------------
-section('release: the subaccount closes, the retention clock starts');
-$reply(array(array()));                                   // subaccount/close
+section('release: the SMTP user and sender domain go, the subaccount closes, the retention clock starts');
+$released_user = (string)ServiceTenant::forKey($key_id, 'mail')->get('svt_provider_user_id');
+$released_domain = (string)ServiceTenant::forKey($key_id, 'mail')->get('svt_provider_domain');
+$reply(array(
+	array(),                                        // users/smtp/remove
+	array('error' => 'Temporary failure'),          // domain/remove fails this time
+	array(),                                        // subaccount/close
+));
 $rel = JoineryServices::release($owner->key, $key_id, 'mail', $client);
 $calls = $drain();
-check($paths($calls) === array('subaccount/close') && ($calls[0]['body']['subaccount_id'] ?? '') === 'sub-' . $host,
-	'mail release closes the tenant\'s subaccount');
+check($paths($calls) === array('users/smtp/remove', 'domain/remove', 'subaccount/close'),
+	'mail release removes the SMTP user and the sender domain, then closes the subaccount', json_encode($paths($calls)));
+check(($calls[0]['body']['username'] ?? '') === $released_user && ($calls[1]['body']['domain'] ?? '') === $released_domain
+	&& ($calls[2]['body']['subaccount_id'] ?? '') === 'sub-' . $host, 'each names the tenant\'s own');
+$row = ServiceTenant::forKey($key_id, 'mail');
+check(trim((string)$row->get('svt_provider_user_id')) === '' && (string)$row->get('svt_provider_domain') === $released_domain,
+	'the removed user leaves the row; the domain whose removal failed stays named');
+$reply(array(array(), array(), array()));                 // the retry: subaccount/reopen, domain/remove, subaccount/close
+check(JoineryServices::finishMailRelease($row, $client) === true
+	&& trim((string)ServiceTenant::forKey($key_id, 'mail')->get('svt_provider_domain')) === '',
+	'the reconcile\'s retry removes it and clears the row');
+check($paths($drain()) === array('subaccount/reopen', 'domain/remove', 'subaccount/close'),
+	'on a subaccount it reopens for the removal and closes again');
 $row = ServiceTenant::forKey($key_id, 'mail');
 check((string)$row->get('svt_state') === 'released' && $row->get('svt_revoked_time') !== null
 	&& $row->get('svt_prune_after_time') === null, 'released; revoked stamped; mail has nothing to prune');
@@ -351,14 +370,26 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-section('a new date reactivates a stopped row in place');
-$reply(array(array()));                                   // subaccount/reopen
+section('a new date: released mail waits for the site, backup storage comes back in place');
 JoineryServices::grant($row, '2031-01-01', $client);
+$row = ServiceTenant::forKey($key_id, 'mail');
+check(count($drain()) === 0 && (string)$row->get('svt_state') === 'released',
+	'released mail is not reopened with no sender domain or SMTP user to send through');
+$reply(array(
+	array(),                                        // subaccount/reopen
+	array(),                                        // subaccount/edit
+	$domain_entry('mail.' . $host2, false),         // domain/add
+	array('username' => 'x'),                       // users/smtp/add
+	$domain_entry('mail.' . $host2, false),         // domain/verify
+));
+$back = JoineryServices::enrol($owner->key, $key_id, 'mail', $host2, $client);
 $calls = $drain();
 $row = ServiceTenant::forKey($key_id, 'mail');
-check($paths($calls) === array('subaccount/reopen'), 'mail reopens the subaccount');
+check($paths($calls) === array('subaccount/reopen', 'subaccount/edit', 'domain/add', 'users/smtp/add', 'domain/verify'),
+	'the site\'s next enrol reopens the subaccount, adds the domain and mints a user', json_encode($paths($calls)));
 check((string)$row->get('svt_state') === 'active' && $row->get('svt_revoked_time') === null
-	&& $row->get('svt_lapse_time') === null && $row->get('svt_notice') === null, 'active again, clocks cleared');
+	&& $row->get('svt_lapse_time') === null && $row->get('svt_notice') === null
+	&& ($back['mail']['username'] ?? '') !== '', 'active again with a credential, clocks cleared');
 JoineryServices::grant($shelf_row, '2031-01-01', $client);
 $shelf_row = ServiceTenant::forKey($key_id, 'shelf');
 check((string)$shelf_row->get('svt_state') === 'active' && $shelf_row->get('svt_prune_after_time') === null,

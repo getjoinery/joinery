@@ -14,6 +14,7 @@
  * Tokens are input (fresh, cache-written and cache-read) plus output, as the
  * turn recorded them on its assistant row.
  *
+ * @version 0.1.1 - the daily budgets count cached tokens from their own columns
  * @version 0.1.0
  */
 class SupportBudget {
@@ -54,7 +55,7 @@ class SupportBudget {
 
 	/** Tokens spent today by support turns: all, one host's, or one widget address's. */
 	public static function spentToday(?string $host, ?string $widget_ip): int {
-		$sql = "SELECT COALESCE(SUM(m.aim_input_tokens + m.aim_output_tokens), 0)
+		$sql = "SELECT COALESCE(SUM(m.aim_input_tokens + m.aim_output_tokens + m.aim_cache_read_tokens + m.aim_cache_write_tokens), 0)
 			FROM aim_conversation_messages m
 			JOIN aic_conversations c ON c.aic_conversation_id = m.aim_aic_conversation_id
 			JOIN sth_support_threads t ON t.sth_support_thread_id = c.aic_support_thread_id

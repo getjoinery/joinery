@@ -298,9 +298,17 @@ through `ProvisioningSetup::writeSecret()` and shows the
 account-eligibility and IP-allowlist constraints beside the field they apply
 to.
 
+### Blank number settings
+
+A declared `number` setting that is stored blank, or missing, reads as its declared
+default: `Globalvars::get_setting()` answers the default rather than the `''` that
+`(int)` turns into 0. A stored `0` is a value and is read as stored. Clearing a number
+field on a settings page therefore puts it back to its default.
+
 ### Missing settings
 
-`Globalvars::get_setting('name')` for a row that does not exist:
+`Globalvars::get_setting('name')` for a row that does not exist (and is not a declared
+number with a default):
 
 - returns an empty string (`''`)
 - logs `Settings: Returning empty default for missing setting 'name'`
@@ -594,8 +602,8 @@ pages, because changing them has consequences the settings form cannot check.
 
 | Setting | What it controls | Where to change |
 |---|---|---|
-| `theme_template` | Active page theme: the pages, their logic and styling | Admin → Settings, or Activate on the Themes page |
-| `theme_look` | The style theme applied over the page theme (stylesheets, fonts, images), or none | Admin → Settings, or Apply and Remove on the Themes page |
+| `theme_template` | Active page theme: the pages, their logic and styling | Admin → Settings, or Activate on System → Themes (`/admin/admin_themes`) |
+| `theme_look` | The style theme applied over the page theme (stylesheets, fonts, images), or none | Admin → Settings, or Apply and Remove on System → Themes (`/admin/admin_themes`) |
 | `active_theme_plugin` | Plugin that provides the theme | Admin → Settings |
 
 Both theme slots are vault-gated, and the Themes page writes them through the

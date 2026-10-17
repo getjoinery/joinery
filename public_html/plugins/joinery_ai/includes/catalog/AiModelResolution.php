@@ -78,6 +78,8 @@ class AiModelResolution {
             'trust'       => 'cloud',
             'tier'        => AiModelRequirement::TIER_BASIC,
             'thinking'    => 'optional',
+            'thinking_style' => 'budget',
+            'sampling'    => true,
             'tools'       => true,
             'context'     => null,
             'attachments' => ['vision' => false, 'document' => false],
@@ -215,20 +217,19 @@ class AiModelResolution {
         $write  = (int)($usage['cache_creation_input_tokens'] ?? 0);
         $read   = (int)($usage['cache_read_input_tokens'] ?? 0);
 
+        // Every provider reports cached tokens OUTSIDE input_tokens
+        // (LlmProviderInterface). Anthropic prices each cache tier; an
+        // OpenAI-style host bills a cached token at half the input rate.
         if ((string)($entry['dialect'] ?? 'openai') === 'anthropic') {
-            // Anthropic-style usage: cached tokens are reported OUTSIDE
-            // input_tokens, each with its own rate.
             return ($input * (float)$rates['input']
                   + $output * (float)$rates['output']
                   + $write  * (float)($rates['cache_write'] ?? $rates['input'])
                   + $read   * (float)($rates['cache_read'] ?? $rates['input'])) / 1000000.0;
         }
-        // OpenAI-style usage: cached tokens are counted INSIDE input_tokens and
-        // bill at half the input rate.
-        $uncached = max(0, $input - $read);
-        return ($uncached * (float)$rates['input']
-              + $read     * (float)$rates['input'] * 0.5
-              + $output   * (float)$rates['output']) / 1000000.0;
+        return ($input  * (float)$rates['input']
+              + $write  * (float)$rates['input']
+              + $read   * (float)$rates['input'] * 0.5
+              + $output * (float)$rates['output']) / 1000000.0;
     }
 
     /** Does this resolution cost money to run? Used to keep a failover from
@@ -288,7 +289,7 @@ class AiModelResolution {
             };
             $params['model'] = $this->modelId();
             try {
-                $response = $this->provider()->createMessageStreamed($params, $sink, $shouldAbort);
+                $response = $this->provider()->createMessageStreamed($this->shapeFor($params), $sink, $shouldAbort);
                 $this->served_by = $this->modelId();
                 return $response;
             } catch (LlmProviderException $e) {
@@ -301,6 +302,23 @@ class AiModelResolution {
                     . '); falling over to an approved candidate.');
             }
         }
+    }
+
+    /**
+     * The request as the model that will answer it accepts it, decided from
+     * its catalog entry at the moment of the call, so a failover to a sibling
+     * gets the sibling's rules: no temperature or top_p for a model that
+     * refuses them, and the reasoning directive carrying the wire style
+     * ('adaptive' or 'budget') the provider translates.
+     */
+    private function shapeFor(array $params): array {
+        if (empty($this->model['sampling'] ?? true)) {
+            unset($params['temperature'], $params['top_p']);
+        }
+        if (isset($params['thinking']) && is_array($params['thinking'])) {
+            $params['thinking']['style'] = (string)($this->model['thinking_style'] ?? 'budget');
+        }
+        return $params;
     }
 
     /**

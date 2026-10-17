@@ -32,6 +32,9 @@ interface LlmProviderInterface {
      * would, assembled from the stream:
      *   { stop_reason, content: [...blocks], usage: {input_tokens,
      *     output_tokens, cache_creation_input_tokens, cache_read_input_tokens} }
+     * Every provider reports usage the Anthropic way: input_tokens is the input
+     * NOT served from or written to the cache, and the two cache counts sit
+     * beside it, so the four add up to everything the call processed.
      * Throws LlmProviderException on failure.
      *
      * $shouldAbort, when supplied, is polled (throttled) as the stream is read;

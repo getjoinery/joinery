@@ -783,9 +783,16 @@ An **endpoint** carries a key, a wire dialect (`anthropic` | `openai`), a base U
 holding whatever the operator's own host serves.
 
 A **catalog model** carries its wire `id`, a label, a capability `tier`, whether it
-can reason (`thinking`: `none` | `optional` | `always`), whether it can drive
+can reason (`thinking`: `none` | `optional` | `always`), how the wire asks for it
+(`thinking_style`: `budget`, a token budget, the default; or `adaptive`, the model decides
+and refuses a budget), whether it accepts `temperature`/`top_p` (`sampling`, default true;
+false for a model that refuses any non-default value), whether it can drive
 tools, its nominal `context` window, its attachment support, its per-Mtok `cost`
 (absent means free), per-model sampling `defaults`, and an optional `retired` flag.
+The Claude 5 models (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) are `always` /
+`adaptive` / no sampling, as is Claude Opus 4.7 apart from thinking `optional`.
+`AiModelResolution::send()` applies the answering model's rules to each call
+(`shapeFor()`), so a failover to a sibling gets the sibling's.
 
 A model id appears in exactly one endpoint, so routing and classification are the
 same lookup and cannot disagree — the property the sealed-mail gate rests on.
@@ -1083,9 +1090,24 @@ provider call path — `createMessage()` is a blocking convenience over it with 
 sink. The runner never branches on provider.
 
 `$params['thinking']` is a concrete **directive** from the resolver —
-`['enabled' => bool, 'effort' => 'low'|'medium'|'high'|null]` — not a level to
-interpret. A provider translates it into its own wire field (`budget_tokens`,
-`reasoning_effort`) and never consults a table of model names.
+`['enabled' => bool, 'effort' => 'low'|'medium'|'high'|null, 'style' => 'budget'|'adaptive']` —
+not a level to interpret. A provider translates it into its own wire field
+(`budget_tokens`, `thinking: {type: adaptive}` with `output_config: {effort}`,
+`reasoning_effort`) and never consults a table of model names. On an adaptive model the
+directive's effort (low, medium, high) is sent as `output_config.effort`; a model that
+always reasons treats a level of off as low.
+
+**Usage** comes back in one shape from every provider: `input_tokens` is the input not
+served from or written to the cache, beside `cache_creation_input_tokens` and
+`cache_read_input_tokens`, so the four add up to everything the call processed (an
+OpenAI-style host counts cached tokens inside `prompt_tokens`; its provider subtracts
+them). Chat replies keep them as `aim_input_tokens`, `aim_cache_write_tokens`,
+`aim_cache_read_tokens` and `aim_output_tokens`, with `aim_cost_estimate` at the
+answering model's rates (0 for a catalog model that declares no cost, NULL for a model
+the catalog does not know, which the cap counts); recipe runs as `rcr_*` likewise. A reply shows **N% cached**
+beside its cost, and the support desk's thread page shows each answer's input with how
+much came from the cache. The monthly token cap counts all four, and only turns and runs
+whose cost is above zero.
 
 **Providers:**
 
@@ -1093,8 +1115,11 @@ interpret. A provider translates it into its own wire field (`budget_tokens`,
   a near-passthrough: it posts the request body and assembles the canonical response
   from the Anthropic SSE stream (`message_start` / `content_block_delta` /
   `message_delta`), emitting `text_delta` fragments to the sink and accumulating
-  `input_json_delta` into tool-use input. Extended thinking requires default sampling,
-  so `temperature`/`top_p` are dropped when the directive enables reasoning.
+  `input_json_delta` into tool-use input. Thinking blocks (`thinking` with its
+  `signature`, `redacted_thinking`) are kept whole in the returned content, so a tool loop
+  sends them back unchanged ahead of the tool call they led to, as the API requires; an
+  empty text block is dropped. Extended (budget) thinking requires default sampling,
+  so `temperature`/`top_p` are dropped when the directive enables it.
   `AnthropicException` is kept as a subclass of `LlmProviderException` for backward
   compatibility, and `AnthropicClient` remains a class alias.
 - **`OpenAiCompatibleProvider`** — one provider for every OpenAI-compatible runtime
@@ -1178,7 +1203,8 @@ Recipes record `[code] <raw message>` in Run History. Only `api_network_error`,
 `api_server_error` and `api_no_response` earn a failover — an auth or quota error would
 fail identically on the sibling.
 
-Chat puts `LlmProviderException::operatorMessage()` on the failed row. `api_not_configured`
+Chat puts `LlmProviderException::operatorMessage()` on the failed row of a conversation an
+administrator owns (permission 5 and up). `api_not_configured`
 passes the exception's own message through verbatim: those strings are written in this
 plugin, name the empty setting rather than any value, and tell the operator exactly what
 to fill in. A refusal about the key, account, model or request (`api_auth_failed`,
@@ -1188,6 +1214,15 @@ to fill in. A refusal about the key, account, model or request (`api_auth_failed
 because that sentence names the fix. Network, timeout, rate-limit and server failures show
 `friendlyMessage()` alone. The `is empty` check stays ahead of the `4xx` branch — a
 configuration failure has no HTTP status to key on.
+
+A member's conversation gets `memberMessage()` instead: never the provider's words (a
+provider, or a proxy in front of it, can put a key fragment, an internal address or an
+error page in its message), and for a failure only the administrator can fix
+(`CODES_FOR_THE_ADMINISTRATOR`: not configured, unreachable, key, permission, model,
+billing) one sentence asking the member to tell the administrator; any other refusal keeps
+its neutral friendly sentence, since the member's own input can be the cause.
+`api_model_not_found` matches "model … does not exist" only in the provider's own words,
+since the label in front of every local-host message names a model.
 
 **Turn diagnostics.** `ChatTurn` logs through `ChatAsync::log()`, which appends to
 `{site root}/logs/joinery_ai_worker.log` — the same file the spawned CLI worker redirects

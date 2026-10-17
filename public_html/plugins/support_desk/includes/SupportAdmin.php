@@ -6,6 +6,7 @@
  * write a FAQ entry from a thread, which both answers that thread as a person
  * and puts the entry in the index.
  *
+ * @version 0.1.1 - a reply's input shows how much came from the provider's cache
  * @version 0.1.0
  */
 class SupportAdmin {
@@ -107,7 +108,10 @@ class SupportAdmin {
 			$by_person = (int)$m->get('aim_author') > 0;
 			$meta = array();
 			if (!$by_person) {
-				$meta[] = '<span>' . number_format((int)$m->get('aim_input_tokens')) . ' in / ' . number_format((int)$m->get('aim_output_tokens')) . ' out</span>';
+				$cached = (int)$m->get('aim_cache_read_tokens');
+				$meta[] = '<span>' . number_format((int)$m->get('aim_input_tokens') + $cached + (int)$m->get('aim_cache_write_tokens')) . ' in'
+					. ($cached > 0 ? ' (' . number_format($cached) . ' from cache)' : '')
+					. ' / ' . number_format((int)$m->get('aim_output_tokens')) . ' out</span>';
 			} else {
 				$author = new User((int)$m->get('aim_author'), TRUE);
 				$meta[] = '<span>' . htmlspecialchars($author->key ? $author->display_name() : 'a person', ENT_QUOTES, 'UTF-8') . '</span>';

@@ -282,8 +282,12 @@ $names = array_column($trace, 'name');
 check($names === array('search_docs', 'fetch_url', 'read_doc_section'), 'the trace keeps every call', json_encode($names));
 check(!empty($trace[1]['is_error']) && $trace[1]['output'] === 'refused: not offered in this run', 'a tool the turn was not offered is refused by the loop');
 check(strpos((string)$trace[0]['output'], 'docs/backups.md') !== false, 'the search found the section');
-check((int)$assistant->get('aim_input_tokens') === 3 * 100 + 50 + 10 + 400 && (int)$assistant->get('aim_output_tokens') === 3 * 20 + 30,
-	'tokens are recorded, cached ones included');
+check((int)$assistant->get('aim_input_tokens') === 3 * 100 + 50 && (int)$assistant->get('aim_output_tokens') === 3 * 20 + 30,
+	'tokens are recorded', (int)$assistant->get('aim_input_tokens') . ' in');
+check((int)$assistant->get('aim_cache_read_tokens') === 400 && (int)$assistant->get('aim_cache_write_tokens') === 10,
+	'cache reads and writes are recorded on their own columns');
+check(SupportBudget::spentToday(null, null) >= 3 * 100 + 50 + 10 + 400 + 3 * 20 + 30,
+	'the daily budget counts the cached tokens too');
 $sent = $provider->sent[0];
 check(count($sent['system']) === 2 && $sent['tools'][0]['name'] === 'search_docs', 'the model got both layers and the docs tools');
 $last = end($sent['messages']);
