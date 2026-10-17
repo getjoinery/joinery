@@ -406,5 +406,22 @@ try {
 ob_end_clean();
 check($ordinary_ok, 'a field that is not a setting is drawn as before', $message);
 
+// A setting's rule is checked in the browser only once its value changes, so a
+// value stored before its rule existed cannot block saving the rest of the
+// page; a field that is not a setting keeps the ordinary check.
+$cform = new FormWriterV2HTML5('changed_only_probe');
+ob_start();
+$cform->begin_form();
+SettingsFieldRenderer::renderGroup($cform, 'files', array('source' => 'core', 'only' => array('allowed_upload_extensions')));
+$cform->textinput('probe_required', 'Probe', array('validation' => array('required' => true)));
+$cform->end_form();
+$chtml = ob_get_clean();
+preg_match('/changedOnly:\s*(\[[^\]]*\])/', $chtml, $cm);
+$changed_only = isset($cm[1]) ? json_decode($cm[1], true) : null;
+check(is_array($changed_only) && in_array('allowed_upload_extensions', $changed_only, true),
+	'a setting with a rule is checked in the browser only once its value changes', $cm[1] ?? 'no changedOnly');
+check(is_array($changed_only) && !in_array('probe_required', $changed_only, true),
+	'a field that is not a setting is checked as always');
+
 
 harness_finish();

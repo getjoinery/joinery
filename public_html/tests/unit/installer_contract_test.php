@@ -607,7 +607,18 @@ preg_match('/subject=(.*)/', $x, $sub); preg_match('/issuer=(.*)/', $x, $iss);
 check(isset($sub[1], $iss[1]) && $sub[1] === $iss[1], 'and is self-signed, which is what the retry timer refuses to count as done');
 preg_match('/notAfter=(.*)/', $x, $na);
 check(isset($na[1]) && strtotime($na[1]) > time() + 9 * 365 * 86400, 'and lives ten years');
+$ext = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($vt . '/ph/example.test/fullchain.pem') . ' -noout -ext basicConstraints,extendedKeyUsage 2>/dev/null'));
+check(strpos($ext, 'CA:FALSE') !== false && strpos($ext, 'TLS Web Server Authentication') !== false,
+    'and is a leaf for serving TLS, not a CA (Apache logs AH01906 for a CA)', $ext);
 check($mint($vt . '/no-le') === '', 'a second run is silent and changes nothing');
+// One minted as a CA (before _placeholder_cert.sh 1.1) is minted again as a leaf.
+shell_exec('openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj /CN=example.test'
+    . ' -keyout ' . escapeshellarg($vt . '/ph/example.test/privkey.pem') . ' -out ' . escapeshellarg($vt . '/ph/example.test/fullchain.pem') . ' 2>/dev/null');
+$was = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($vt . '/ph/example.test/fullchain.pem') . ' -noout -ext basicConstraints 2>/dev/null'));
+$out = $mint($vt . '/no-le');
+$now = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($vt . '/ph/example.test/fullchain.pem') . ' -noout -ext basicConstraints 2>/dev/null'));
+check(strpos($was, 'CA:TRUE') !== false && strpos($out, 'minted') !== false && strpos($now, 'CA:FALSE') !== false,
+    'a placeholder minted as a CA is minted again as a leaf', $was . ' -> ' . $now);
 copy($vt . '/ph/example.test/fullchain.pem', $le_live . '/fullchain.pem');
 unlink($vt . '/ph/example.test/fullchain.pem');
 check($mint($vt . '/le') === '' && !is_file($vt . '/ph/example.test/fullchain.pem'), 'with a Let\'s Encrypt lineage present nothing is minted');

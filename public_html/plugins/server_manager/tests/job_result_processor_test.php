@@ -488,8 +488,13 @@ check($widened['sshd']['pubkey_authentication'] === 'yes' && $widened['sshd']['m
 	'sshd\'s widened settings are kept, sanitised, a non-list list read as unknown', var_export($widened['sshd'], true));
 check($widened['answers'] === array('apache2' => 'yes', 'php-fpm' => 'unknown', 'postgresql' => 'unknown'),
 	'answers keep the three services only, each yes, no or unknown', var_export($widened['answers'], true));
-check($widened['served_certificates'] === array(array('domain' => 'a.exampleb', 'days_left' => 12, 'primary' => false)),
+check($widened['served_certificates'] === array(array('domain' => 'a.exampleb', 'days_left' => 12, 'primary' => false, 'self_signed' => false)),
 	'a served certificate needs a name and whole days', var_export($widened['served_certificates'], true));
+$self_signed = JobResultProcessor::sanitise_host_report(array('served_certificates' => array(
+	array('domain' => 'c.example', 'days_left' => 3600, 'self_signed' => true),
+	array('domain' => 'd.example', 'days_left' => 3600, 'self_signed' => 'yes'))))['served_certificates'];
+check($self_signed[0]['self_signed'] === true && $self_signed[1]['self_signed'] === false,
+	'self_signed is kept when it is true and nothing else', var_export($self_signed, true));
 check($widened['containers'] === array(array('name' => 'site1', 'state' => 'running', 'health' => 'none', 'answers' => 'no')),
 	'a container keeps its four facts; anything else in the list is dropped', var_export($widened['containers'], true));
 $held_c = JobResultProcessor::sanitise_host_report(array('containers' => array(

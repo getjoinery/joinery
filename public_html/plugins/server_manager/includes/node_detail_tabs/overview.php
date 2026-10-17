@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.74 - a self-signed served certificate reads self-signed in amber, not its days left in green
  * @version 1.73 - the kernel line counts kernel warnings, and a line says whether the kernel holds every pinned
  *                setting (specs/multi_tenant_host_hardening.md WP1, D7)
  * @version 1.72 - a data root stopped by hand says so, when and with what, instead of not mounted (reviewer2 B17 D2)
@@ -1422,7 +1423,7 @@
 		$cert_rows = array();
 		if ($hr && is_array($hr['served_certificates'] ?? null)) {
 			foreach ($hr['served_certificates'] as $c) {
-				$cert_rows[] = array($c['domain'], (int)$c['days_left']);
+				$cert_rows[] = array($c['domain'], (int)$c['days_left'], !empty($c['self_signed']));
 			}
 		}
 		$cert_expiry = $node->get('mgn_cert_expiry_ts');
@@ -1438,11 +1439,23 @@
 		if ($cert_rows || $ssl_state !== null) {
 			echo '<div><div class="border rounded p-3 h-100">';
 			echo '<div class="text-muted small text-uppercase mb-2">Certificates</div>';
+			$any_self_signed = false;
 			foreach ($cert_rows as $row) {
 				$days = $row[1];
 				$cls = $days < 14 ? 'danger' : ($days <= 30 ? 'warning' : 'success');
+				$label = $days < 0 ? 'expired' : $days . ' days';
+				// A certificate that signs itself (the install placeholder) is no
+				// browser's, however long it has left.
+				if (!empty($row[2])) {
+					$any_self_signed = true;
+					$cls = 'warning';
+					$label = 'self-signed';
+				}
 				echo '<div class="d-flex flex-wrap justify-content-between align-items-center gap-1 mb-1"><span class="small">' . htmlspecialchars($row[0]) . '</span>'
-					. '<span class="badge bg-' . $cls . '" style="white-space:nowrap">' . ($days < 0 ? 'expired' : $days . ' days') . '</span></div>';
+					. '<span class="badge bg-' . $cls . '" style="white-space:nowrap">' . htmlspecialchars($label) . '</span></div>';
+			}
+			if ($any_self_signed) {
+				echo '<div class="small text-muted mt-2">Self-signed: the placeholder this site answers with until a real certificate lands. A visitor who reaches this machine directly gets a browser warning; one who comes through a proxy that serves its own certificate (Cloudflare, or the host in front of a container site) does not.</div>';
 			}
 			if (!$cert_rows) {
 				$ssl_words = array('pending' => array('Waiting for DNS and certbot', 'warning'), 'failed' => array('Failed: see SSL Setup below', 'danger'),

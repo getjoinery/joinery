@@ -7,6 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
+ * @version 2.30.0 - validateWhenChanged(): the browser checks a field only once its value changes
  * @version 2.29.0 - the upload row shows a file's `warning` (saved, but its sizes could not be made)
  * @version 2.28.0 - checkboxinput() takes `switch` (drawn as an on/off switch,
  *   role="switch") for the protection picker's add-ons
@@ -66,6 +67,7 @@ abstract class FormWriterV2Base {
     protected $use_deferred_output = false;  // Deferred output mode flag
     protected $deferred_output = [];  // Collected field HTML when in deferred mode
     protected $error_summary_emitted = false;  // The summary container is emitted once, before the first submit button
+    protected $validate_when_changed = array();  // Field names the browser checks only once their value changes (validateWhenChanged())
     protected $edit_primary_key_value = null;  // Store edit key for automatic hidden field
 
     // Static property for custom validators
@@ -239,6 +241,17 @@ abstract class FormWriterV2Base {
             'error_summary_title' => null,  // Overrides the summary title; '{n}' is replaced with the failing-field count
             'debug' => false  // Debug mode - outputs validation details to console
         ];
+    }
+
+    /**
+     * The browser checks this field's rules only once its value differs from
+     * the one the page was drawn with. For a field that shows a stored value
+     * (a setting): one stored before its rule existed must not block saving
+     * every other field on the page. The server applies the same rule to
+     * what it writes (SettingsWriter validates changed values only).
+     */
+    public function validateWhenChanged(string $name): void {
+        $this->validate_when_changed[$name] = true;
     }
 
     /**
@@ -3160,6 +3173,9 @@ abstract class FormWriterV2Base {
         echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
         echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
         echo '            errorSummary: ' . ($this->errorSummaryEnabled() ? 'true' : 'false') . ',';
+        if (!empty($this->validate_when_changed)) {
+            echo '            changedOnly: ' . json_encode(array_keys($this->validate_when_changed), JSON_UNESCAPED_SLASHES) . ',';
+        }
         if (!empty($this->options['error_summary_title'])) {
             echo '            errorSummaryTitle: ' . json_encode($this->options['error_summary_title'], JSON_UNESCAPED_SLASHES) . ',';
         }

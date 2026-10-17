@@ -129,9 +129,12 @@ written, not from the fields the page happened to draw — so a page that never
 rendered a field still cannot write past its rule. A `pattern` rule needs regex
 delimiters (`"#^[a-z]+$#i"`), the same as anywhere else.
 
-Only *changed* values are validated. A settings form posts every field on the
-page, so validating unchanged re-submissions would let one stored value that
-predates its rule veto every save on that page — an invisible failure.
+Only *changed* values are validated, on both sides. A settings form posts every
+field on the page, so validating unchanged re-submissions would let one stored
+value that predates its rule veto every save on that page. The writer skips
+unchanged values, and the renderer marks each field with a rule
+(`FormWriterV2Base::validateWhenChanged()`) so the browser checks it only once its
+value differs from the one the page was drawn with.
 
 Rules about a *combination* of settings (a plugin theme requires an active theme
 plugin) and *side effects* of a change (a changed preview image bumps the

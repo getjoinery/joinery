@@ -5,6 +5,7 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.90 - a served certificate keeps self_signed (host_report 1.30)
  * @version 1.89 - data_root_stopped reads its own stored shape too ('YYYY-MM-DD HH:MM:SS'), so the stored report
  *                read back (IncidentSourceDataRootStopped) names the stop instead of reading as not stopped
  * @version 1.88 - a host report's hardening (host_report 1.29): whether the kernel holds every pinned setting, and
@@ -3921,7 +3922,7 @@ HTML;
 			$domain = self::host_report_name($c['domain'] ?? '');
 			if ($domain === '' || !is_int($c['days_left'] ?? null)) { continue; }
 			$out[] = ['domain' => $domain, 'days_left' => max(-100000, min(100000, $c['days_left'])),
-				'primary' => ($c['primary'] ?? false) === true];
+				'primary' => ($c['primary'] ?? false) === true, 'self_signed' => ($c['self_signed'] ?? false) === true];
 		}
 		return $out;
 	}
