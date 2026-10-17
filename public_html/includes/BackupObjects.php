@@ -23,7 +23,8 @@
  * On the node, beside the profile's chain directories:
  *
  *   {profile output dir}/objects/epoch.json   the current epoch id and its envelope
- *   {profile output dir}/objects/held.json    what this profile's backup storage held as of its last run
+ *   {profile output dir}/objects/held.json    what this profile's backup storage held as of its last run,
+ *                                             and which destination that was
  *   {profile output dir}/objects/enabled      manager profile only — a manager run carrying
  *                                             the object store has been here
  *   {profile output dir}/objects/tmp/         one object's ciphertext during an upload
@@ -40,11 +41,21 @@
  * the site profile lists its `objects/` prefix; the manager profile is handed
  * the newest index in its backup storage by link. held.json is a cache of that picture
  * plus what the tick stored since, rewritten whole by every run, and losing it
- * costs at most one run's worth of re-stores.
+ * costs at most one run's worth of re-stores. It is a picture of one
+ * destination and says which: a profile whose destination changed does not
+ * read the old one's picture as the new one's.
  *
  * Nothing here prints a key or a credential; the index and every result carry
  * names, sizes and hashes of ciphertext only.
  *
+ * @version 1.7.0 - an object backup storage was proven not to hold is not held: the manager profile by the
+ *                  locations its request carries from the management node's complete listing of the same space,
+ *                  the site profile by its previous index against its own listing. The run stores it again
+ *                  from the site's copy, never to the lost key: an epoch that lost an object is retired
+ *                  (epoch_decision 'objects_missing'), so no backup set's recorded hash is ever contradicted
+ * @version 1.6.0 - held.json names the destination it describes (BackupRunner::destination_of_plan()); a run
+ *                  or the tick reads it only on that destination, and a file naming another or none is no
+ *                  picture at all, so a profile that moved storage stores every object again where it now writes
  * @version 1.5.2 - cloud_objects() walks StorageProfileRegistry::present(): a plugin that was never installed
  *                  (no table) no longer fails the backup
  * @version 1.5.1 - written through the target's write credential (object lock, F8); a delete prune_site() could not
@@ -100,7 +111,7 @@ class BackupObjects {
 	const NAMESPACE_PATTERN = '/^[a-z][a-z0-9_-]*$/';
 	const EPOCH_PREFIX = 'epoch-';
 	const INDEX_VERSION = 1;
-	const HELD_VERSION = 1;
+	const HELD_VERSION = 2;
 
 	/** Stock openssl `enc -salt -pbkdf2` format: header, salt length, iteration count. */
 	const SALT_MAGIC = 'Salted__';
@@ -363,8 +374,15 @@ class BackupObjects {
 	 *                        chain applies (BackupChain::should_start_new)
 	 *   envelope_unopenable  the site key cannot open it (lost or re-minted) —
 	 *                        degrade to a new epoch, never fail every run
+	 *   objects_missing      backup storage was proven not to hold an object
+	 *                        stored under it; what is stored again goes under a
+	 *                        new epoch, since a fresh encryption written to the
+	 *                        lost key would not be the ciphertext the backup sets
+	 *                        naming it recorded, and they would read as whole
+	 *
+	 * @param array $lost_epochs epoch ids backup storage was proven to have lost an object from
 	 */
-	public static function epoch_decision(?array $stored, $current_fpr, $opens) {
+	public static function epoch_decision(?array $stored, $current_fpr, $opens, array $lost_epochs = array()) {
 		if (!$stored || empty($stored['id']) || empty($stored['envelope']['recipients'])) {
 			return 'none';
 		}
@@ -381,6 +399,9 @@ class BackupObjects {
 		}
 		if (!$opens) {
 			return 'envelope_unopenable';
+		}
+		if (in_array((string)$stored['id'], array_map('strval', $lost_epochs), true)) {
+			return 'objects_missing';
 		}
 		return '';
 	}
@@ -402,8 +423,10 @@ class BackupObjects {
 	 *
 	 * Returns ['id', 'data_key', 'envelope', 'reason'] — reason is '' when the
 	 * epoch was kept.
+	 *
+	 * @param array $lost_epochs epoch ids backup storage lost an object from (held()'s 'lost_epochs')
 	 */
-	public static function epoch(array $plan) {
+	public static function epoch(array $plan, array $lost_epochs = array()) {
 		$stored = self::read_epoch($plan);
 		$data_key = null;
 		$opens = false;
@@ -415,12 +438,15 @@ class BackupObjects {
 				error_log('BackupObjects: the epoch envelope did not open with the site key (' . $e->getMessage() . '); starting a new epoch.');
 			}
 		}
-		$reason = self::epoch_decision($stored, (string)($plan['recovery_fpr'] ?? ''), $opens);
+		$reason = self::epoch_decision($stored, (string)($plan['recovery_fpr'] ?? ''), $opens, $lost_epochs);
 		if ($reason === '') {
 			return array('id' => $stored['id'], 'data_key' => $data_key, 'envelope' => $stored['envelope'], 'reason' => '');
 		}
 		if ($reason === 'recovery_rotated') {
 			error_log('BackupObjects: the recovery key changed since epoch ' . $stored['id'] . ' started; starting a new epoch sealed to the current key.');
+		}
+		if ($reason === 'objects_missing') {
+			error_log('BackupObjects: backup storage lost objects stored under epoch ' . $stored['id'] . '; storing them again under a new epoch.');
 		}
 
 		$id   = self::epoch_id();
@@ -688,11 +714,21 @@ class BackupObjects {
 	 * Manager profile: the newest manager index, by link, union held.json.
 	 * No link means nothing is held.
 	 *
+	 * Either way, an object backup storage was proven not to hold is not held,
+	 * so the run stores it again: the site profile proves it itself, an object
+	 * its previous index names that its listing lacks; the manager profile is
+	 * told, by the locations its request carries from the management node's
+	 * complete listing of this same destination (missing_locations()). Those
+	 * epochs come back as 'lost_epochs', for epoch().
+	 *
 	 * @param string $previous_index_key full bucket key of the newest index this
 	 *                                   profile committed, or '' when none is known
 	 * @return array ['held' => name => entry, 'shelf' => listing picture|null,
 	 *                'unhashed' => [names], 'index_read' => bool,
-	 *                'file' => name => entry, held.json as it was read]
+	 *                'file' => name => entry, held.json as it was read,
+	 *                'lost' => [epoch/name], 'lost_epochs' => [epoch ids],
+	 *                'lost_entries' => name => the held entry a proven-missing
+	 *                location took out of 'held' (manager profile)]
 	 */
 	public static function held(array $plan, $previous_index_key = '') {
 		$held_file = self::read_held($plan) ?: array();
@@ -710,7 +746,18 @@ class BackupObjects {
 				}
 			}
 			$held = $from_index + $held_file;
-			return array('held' => $held, 'shelf' => null, 'unhashed' => array(), 'index_read' => $index_read, 'file' => $held_file);
+			$lost = array();
+			$lost_entries = array();
+			foreach (self::missing_locations($plan) as $loc) {
+				list($epoch, $name) = explode('/', $loc, 2);
+				if (isset($held[$name]) && $held[$name]['epoch'] === $epoch) {
+					$lost_entries[$name] = $held[$name];
+					unset($held[$name]);
+				}
+				$lost[] = $loc;
+			}
+			return array('held' => $held, 'shelf' => null, 'unhashed' => array(), 'index_read' => $index_read, 'file' => $held_file,
+				'lost_entries' => $lost_entries) + self::lost_answer($lost);
 		}
 
 		$shelf = self::listing_site($plan);
@@ -724,6 +771,13 @@ class BackupObjects {
 		$known = $held_file + $from_index;
 		$held = array();
 		$unhashed = array();
+		// What the previous index recorded stored that the listing lacks: lost.
+		$lost = array();
+		foreach ($from_index as $name => $entry) {
+			if (!isset($shelf['objects'][$name]) || $shelf['objects'][$name]['epoch'] !== $entry['epoch']) {
+				$lost[] = $entry['epoch'] . '/' . $name;
+			}
+		}
 		foreach ($shelf['objects'] as $name => $seen) {
 			$entry = $known[$name] ?? null;
 			if ($entry && $entry['object_sha256'] !== '' && (int)$entry['object_bytes'] === (int)$seen['object_bytes']
@@ -737,15 +791,90 @@ class BackupObjects {
 			$held[$name] = array('epoch' => $seen['epoch'], 'object_bytes' => (int)$seen['object_bytes'], 'object_sha256' => '');
 			$unhashed[] = $name;
 		}
-		return array('held' => $held, 'shelf' => $shelf, 'unhashed' => $unhashed, 'index_read' => $index_read, 'file' => $held_file);
+		return array('held' => $held, 'shelf' => $shelf, 'unhashed' => $unhashed, 'index_read' => $index_read, 'file' => $held_file,
+			'lost_entries' => array()) + self::lost_answer($lost);
 	}
 
-	/** held.json, or null when the profile has none. */
+	/** held()'s 'lost' and 'lost_epochs' from a list of epoch/name locations. Pure. */
+	private static function lost_answer(array $lost) {
+		$lost = array_values(array_unique($lost));
+		sort($lost);
+		$epochs = array();
+		foreach ($lost as $loc) {
+			$epochs[strstr($loc, '/', true)] = true;
+		}
+		return array('lost' => $lost, 'lost_epochs' => array_keys($epochs));
+	}
+
+	/**
+	 * The locations (epoch/name) a manager request says backup storage was
+	 * proven not to hold, as the plan carries them (missing_from_request()),
+	 * when they were proven for the destination this run writes to; array()
+	 * otherwise. A listing of another destination proves nothing here.
+	 */
+	public static function missing_locations(array $plan) {
+		$m = $plan['objects_missing'] ?? null;
+		if (!is_array($m) || ($m['destination'] ?? '') === '' || $m['destination'] !== self::held_destination($plan)) {
+			return array();
+		}
+		return (array)($m['locations'] ?? array());
+	}
+
+	/** Most locations a request may name; a request naming more is not read at all. */
+	const MISSING_MAX = 20000;
+
+	/**
+	 * A manager request's objects_missing — {space: id, locations: [epoch/name]},
+	 * what the management node's complete listing of that space proved absent —
+	 * as the plan carries it: ['destination' => 'space:{id}', 'locations' => [...]],
+	 * or null when there is none or any part of it is not readable. Each
+	 * location is one the layout allows (location_of()). Pure.
+	 */
+	public static function missing_from_request($raw) {
+		if (!is_array($raw) || !is_array($raw['locations'] ?? null) || (int)($raw['space'] ?? 0) <= 0
+			|| count($raw['locations']) > self::MISSING_MAX) {
+			return null;
+		}
+		$out = array();
+		foreach ($raw['locations'] as $loc) {
+			if (!is_string($loc)) { return null; }
+			$at = self::location_of($loc . self::OBJECT_SUFFIX);
+			if ($at === null || $at['envelope'] || $at['epoch'] . '/' . $at['name'] !== $loc) { return null; }
+			$out[$loc] = true;
+		}
+		return array('destination' => 'space:' . (int)$raw['space'], 'locations' => array_keys($out));
+	}
+
+	/**
+	 * held.json, or null when the profile has none for the destination this
+	 * plan writes to. A file that names another destination, or none (written
+	 * before files named one), describes storage this run does not write to:
+	 * trusting it would skip objects the new destination never received.
+	 */
 	public static function read_held(array $plan) {
-		return self::read_held_file(self::dir($plan) . '/' . self::HELD_FILE);
+		$record = self::read_held_record(self::dir($plan) . '/' . self::HELD_FILE);
+		if ($record === null || $record['destination'] === null || $record['destination'] !== self::held_destination($plan)) {
+			return null;
+		}
+		return $record['objects'];
 	}
 
+	/** The destination a plan's held.json describes, as the chain rule names it; '' when the plan has no target. */
+	public static function held_destination(array $plan) {
+		return (string)BackupRunner::destination_of_plan($plan);
+	}
+
+	/** A held.json's objects, whichever destination it describes, or null when there is none. */
 	public static function read_held_file($path) {
+		$record = self::read_held_record($path);
+		return $record === null ? null : $record['objects'];
+	}
+
+	/**
+	 * A held.json whole: ['destination' => string|null, 'objects' => name => entry],
+	 * or null when there is none. destination is null for a file that names none.
+	 */
+	private static function read_held_record($path) {
 		if (!is_file($path)) {
 			return null;
 		}
@@ -761,7 +890,14 @@ class BackupObjects {
 				'object_sha256' => (string)($e['object_sha256'] ?? ''),
 			);
 		}
-		return $out;
+		$destination = (isset($data['destination']) && is_string($data['destination'])) ? $data['destination'] : null;
+		return array('destination' => $destination, 'objects' => $out);
+	}
+
+	/** The objects a held.json on disk holds for this destination, or array() when it describes another. */
+	private static function held_on_disk($path, $destination) {
+		$record = self::read_held_record($path);
+		return ($record !== null && $record['destination'] === $destination) ? $record['objects'] : array();
 	}
 
 	/**
@@ -771,39 +907,42 @@ class BackupObjects {
 	 * entries are kept. $seen_names is what the file named when the run read
 	 * it: an entry the file has now that was not there then is the tick's,
 	 * and goes in; anything the run's set lacks that WAS there then is
-	 * dropped, which is what a rewrite is for.
+	 * dropped, which is what a rewrite is for. Entries of a file that describes
+	 * another destination are nobody's here, and are dropped.
 	 */
 	public static function write_held(array $plan, array $held, array $seen_names = array()) {
 		$path = self::dir($plan) . '/' . self::HELD_FILE;
+		$destination = self::held_destination($plan);
 		$seen = array_fill_keys(array_map('strval', $seen_names), true);
-		self::with_held_lock($path, function () use ($path, $held, $seen) {
-			foreach ((self::read_held_file($path) ?: array()) as $name => $entry) {
+		self::with_held_lock($path, function () use ($path, $held, $seen, $destination) {
+			foreach (self::held_on_disk($path, $destination) as $name => $entry) {
 				if (!isset($held[$name]) && !isset($seen[$name])) {
 					$held[$name] = $entry;
 				}
 			}
-			self::write_held_file($path, $held);
+			self::write_held_file($path, $held, $destination);
 		});
 	}
 
 	/** Add one entry — what the tick does after a store, under the same lock the run writes under. */
 	public static function held_add(array $plan, $name, array $entry) {
 		$path = self::dir($plan) . '/' . self::HELD_FILE;
-		self::with_held_lock($path, function () use ($path, $name, $entry) {
-			$held = self::read_held_file($path) ?: array();
+		$destination = self::held_destination($plan);
+		self::with_held_lock($path, function () use ($path, $name, $entry, $destination) {
+			$held = self::held_on_disk($path, $destination);
 			$held[(string)$name] = array(
 				'epoch'         => (string)$entry['epoch'],
 				'object_bytes'  => (int)$entry['bytes'],
 				'object_sha256' => (string)$entry['sha256'],
 			);
-			self::write_held_file($path, $held);
+			self::write_held_file($path, $held, $destination);
 		});
 	}
 
-	private static function write_held_file($path, array $held) {
+	private static function write_held_file($path, array $held, $destination) {
 		ksort($held);
-		$json = json_encode(array('version' => self::HELD_VERSION, 'updated' => gmdate('Y-m-d\TH:i:s\Z'), 'objects' => $held),
-			JSON_UNESCAPED_SLASHES);
+		$json = json_encode(array('version' => self::HELD_VERSION, 'updated' => gmdate('Y-m-d\TH:i:s\Z'),
+			'destination' => (string)$destination, 'objects' => $held), JSON_UNESCAPED_SLASHES);
 		$tmp = $path . '.' . getmypid() . '.tmp';
 		if (@file_put_contents($tmp, $json . "\n") === false || !@rename($tmp, $path)) {
 			@unlink($tmp);

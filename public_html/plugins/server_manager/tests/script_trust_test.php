@@ -81,6 +81,9 @@ $MANIFEST_BAD_KEY = 'Refused by the node: primitive "apply_update" refused: no s
 	. 'compiled-in release key';
 $MANIFEST_NONE = 'Refused by the node: primitive "backup_run" refused: this release carries no signed '
 	. 'per-file tree manifest, so no script can be verified before running as root';
+// An agent built by hand without the release key (agent 1.82.0).
+$MANIFEST_NO_KEY = 'Refused by the node: primitive "host_report" refused: this agent build has no release key, '
+	. 'so no script can be verified before running as root; rebuild the agent with the release key';
 $FILE_MODIFIED = 'Refused by the node: primitive "apply_update" refused: file does not match its '
 	. 'signed hash — it has been modified since release: public_html/utils/upgrade.php';
 $FILE_UNLISTED = 'Refused by the node: primitive "backup_run" refused: file is not in the signed '
@@ -93,6 +96,12 @@ check(NodeMonitorHealth::classify_script_trust($MANIFEST_BAD_KEY) === 'untrusted
 	'a manifest signed by the wrong key is a manifest problem');
 check(NodeMonitorHealth::classify_script_trust($MANIFEST_NONE) === 'untrusted_manifest',
 	'no manifest at all is a manifest problem');
+check(NodeMonitorHealth::classify_script_trust($MANIFEST_NO_KEY) === 'untrusted_manifest',
+	'an agent with no release key cannot verify anything either');
+check(NodeMonitorHealth::agent_lacks_release_key($MANIFEST_NO_KEY),
+	'and is told apart as the agent build, not the release');
+check(!NodeMonitorHealth::agent_lacks_release_key($MANIFEST_NONE) && !NodeMonitorHealth::agent_lacks_release_key($MANIFEST_BAD_KEY),
+	'a manifest problem is not read as a missing build key');
 
 // The distinction that matters. These must NEVER read as a manifest problem:
 // the remedy for a manifest problem is to deliver a manifest, and doing that
@@ -543,6 +552,21 @@ check($raised !== null && $raised['severity'] === IncidentRecord::SEVERITY_CRITI
 check($raised !== null && $raised['detail']['What it means'] === NodeMonitorHealth::script_trust_health($bad)['detail'],
 	'carrying the same words the node page shows');
 check($source->evaluate($ok) === null, 'a healthy node does not');
+
+// An agent built without the release key is told as that: the release is fine,
+// and the remedy is a released agent, not a manifest or an upgrade.
+$nokey = st_node();
+NodeMonitorHealth::note_script_trust($nokey, st_job($nokey, 'host_report', 'refused', $MANIFEST_NO_KEY));
+$nokey->load();
+$health = NodeMonitorHealth::script_trust_health($nokey);
+check($health['is_problem'] === true && stripos($health['label'], 'without the release key') !== false,
+	'an agent with no release key is named as that', $health['label']);
+check(stripos($health['detail'], 'install a released agent') !== false
+	&& stripos($health['detail'], 'refused by the same check') === false,
+	'and is told to install a released agent, not that the node cannot repair itself', $health['detail']);
+$raised = $source->evaluate($nokey);
+check($raised !== null && stripos($raised['title'], 'without the release key') !== false,
+	'and its incident is titled the same way', json_encode($raised));
 check($source->evaluate($node) === null, 'and neither does one that has recovered');
 
 harness_finish();

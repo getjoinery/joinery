@@ -10,6 +10,7 @@
  * upgrades and backups included), or a file does not match its signed release
  * (find out why before anything else). Clears when a later job verifies.
  *
+ * @version 1.4 - an agent built without the release key is titled as that (agent 1.82.0)
  * @version 1.3 - lists the deployment files the node reported as differing (agent 1.71.0)
  * @version 1.2 - cleared_text() covers an edit in this site's own checkout as well as a commit
  * @version 1.1 - cleared_text() says when the file turned out to be this site's own unpublished commit
@@ -39,7 +40,9 @@ class IncidentSourceUnmanageable implements IncidentSource {
 			$detail['Since'] = $since . ' UTC';
 		}
 		return array(
-			'title'    => $state === 'untrusted_file' ? 'A file on this node does not match its release' : 'This node can no longer be managed',
+			'title'    => $state === 'untrusted_file' ? 'A file on this node does not match its release'
+				: (NodeMonitorHealth::agent_lacks_release_key((string)$node->get('mgn_script_trust_reason'))
+					? 'This node\'s agent was built without the release key' : 'This node can no longer be managed'),
 			'severity' => IncidentRecord::SEVERITY_CRITICAL,
 			'detail'   => $detail,
 		);

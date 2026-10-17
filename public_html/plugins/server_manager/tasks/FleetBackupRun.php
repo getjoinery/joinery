@@ -34,6 +34,8 @@
  * A node whose agent is not checking in is skipped and named: a job sent to it
  * would wait unclaimed and run whenever the agent came back, not in its slot.
  *
+ * @version 1.14 - the run is told what the backup storage check proved missing from its space (objects_missing),
+ *                 so it stores those offloaded files again
  * @version 1.13 - busy_machines names failStaleClaims and markLost, which free a lost claim (no requeue)
  * @version 1.12 - the pass finishes what earlier deletes only hid in each backup target's folder
  *                 (HiddenVersionSweep; specs/storage_targets.md S28)
@@ -214,6 +216,7 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				// confirmed present in the bucket, so a run that failed part-way
 				// can never be counted as a restore point.
 				$pruned = null;   // this node's listing, never a previous node's
+				$missing = null;  // what that listing proved absent, for this run
 				if (StorageSpace::of_owner(StorageSpace::OWNER_NODE, (int)$node->key)) {
 					$pruned = FleetBackupRetention::prune($node,
 						FleetBackupPolicy::retention_days($policy, $node));
@@ -253,6 +256,13 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 							} else {
 								$node->set('mgn_backup_shelf_problem', $shelf['problem']);
 							}
+							// Every object an index marks stored that this complete
+							// listing lacks: the run stores those again from the
+							// site's copy. Proven for this space only, and the run
+							// applies it only when it writes to the same space.
+							if (!empty($shelf['missing'])) {
+								$missing = array('space' => (int)$pruned['space']->key, 'locations' => $shelf['missing']);
+							}
 							$node->save();
 						} catch (Throwable $e) {
 							error_log('FleetBackupRun: could not stamp the backup storage check for node '
@@ -272,6 +282,9 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				if (is_array($pruned) && !empty($pruned['listed'])) {
 					$params['objects_links'] = FleetBackupRetention::index_links(
 						(array)($pruned['objects'] ?? array()), (string)($pruned['base'] ?? ''));
+					if ($missing !== null) {
+						$params['objects_missing'] = $missing;
+					}
 				}
 				// createFromBuild, not createJob: build_backup_run() returns a
 				// primitive envelope, and only this entry point stores one

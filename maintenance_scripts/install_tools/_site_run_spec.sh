@@ -3,6 +3,8 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.16 - run_spec_code_manifest: the folder in a running site holding the release manifest its
+#                code matches, the site root's or the kept copy, for a rebuild to carry (incident 7608, B6)
 # Version: 1.15 - a site whose swap is set apart from its memory is told to fix it with its own engine's
 #                update command (podman on the site container engine), not always docker's (B33)
 # Version: 1.14 - a site its host holds quiet (site_quiet_host.sh's record: a dormant copy, or a source
@@ -999,4 +1001,20 @@ run_spec_limits_refresh() {
     systemctl start joinery-limits.service > /dev/null 2>&1 \
         || echo "run spec: WARNING - the outbound limits did not follow this change (its timer tries again within five minutes); see: sudo joinery-limits status" >&2
     return 0
+}
+
+# The folder, inside SITE's running container, holding the signed release
+# manifest its code matches: the site root, else the copy upgrade.php keeps on
+# the config volume (config/release_manifest). Prints nothing when the code
+# matches neither. The manifest sits in the container's own layer while the
+# code is on volumes, so a rebuild that carries the site root's copy as found
+# can carry an older release's manifest beside upgraded code, and every script
+# the agent runs is refused against it.
+run_spec_code_manifest() {  # SITE
+    site_engine exec "$1" bash -c 'r="/var/www/html/$1"
+        for d in "$r" "$r/config/release_manifest"; do
+            [ -f "$d/RELEASE_MANIFEST" ] && [ ! -L "$d/RELEASE_MANIFEST" ] \
+                && [ -f "$d/RELEASE_MANIFEST.sig" ] && [ ! -L "$d/RELEASE_MANIFEST.sig" ] || continue
+            (cd "$r" && sha256sum -c --status "$d/RELEASE_MANIFEST") 2> /dev/null && { printf "%s\n" "$d"; exit 0; }
+        done' _ "$1" 2> /dev/null
 }

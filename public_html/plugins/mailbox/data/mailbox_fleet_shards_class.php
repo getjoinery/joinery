@@ -12,6 +12,7 @@
  * Capacity is the blast-radius dial: a compromise is bounded to a shard's
  * tenant list, so shard size is policy, not architecture.
  *
+ * @version 1.2 - retire(): the shard and its managed node leave together
  * @version 1.1 - mfs_provisioned_version (the operator's view of shard code age)
  */
 
@@ -28,8 +29,8 @@ class MailboxFleetShard extends SystemBase {
 		'mfs_mgn_managed_node_id' => ['action' => 'null'],
 	];
 
-	// Slots reference the shard; deleting a shard with live slots is refused at
-	// the logic layer (tenants must be migrated first), so no cascade here.
+	// Slots reference the shard; retire() refuses a shard with live slots
+	// (tenants must be migrated first), so no cascade here.
 
 	public static $field_specifications = array(
 		'mfs_mailbox_fleet_shard_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -86,6 +87,51 @@ class MailboxFleetShard extends SystemBase {
 		);
 		$stmt->execute(array($this->key));
 		return intval($stmt->fetchColumn());
+	}
+
+	/**
+	 * Retire this shard: its managed node is hidden from the dashboard (so
+	 * nothing goes on probing or reporting on a server that is going away)
+	 * and the shard row is soft-deleted, together. The server itself is the
+	 * operator's to destroy; the node is hidden, not removed, so it can be
+	 * restored from the dashboard.
+	 *
+	 * Refused while a tenant still holds a slot here (tenants move to another
+	 * shard first) or while the shard's birth run is still in flight.
+	 * Re-runnable: a node already hidden is left as it is.
+	 *
+	 * @return string[] what retiring it also did, in plain words
+	 * @throws MailboxFleetShardException when it may not be retired
+	 */
+	public function retire(): array {
+		if (!$this->key || $this->get('mfs_delete_time')) {
+			throw new MailboxFleetShardException('This shard is already retired.');
+		}
+		$slots = $this->slotCount();
+		if ($slots > 0) {
+			throw new MailboxFleetShardException($slots . ' tenant' . ($slots === 1 ? ' still has a slot' : 's still have slots')
+				. ' on this shard. Move them to another shard before retiring it.');
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provisions_class.php'));
+		$runs = new MultiRelayCloudProvision(array('live' => true, 'deleted' => false,
+			'rcl_mfs_mailbox_fleet_shard_id' => intval($this->key)));
+		if ($runs->count() > 0) {
+			throw new MailboxFleetShardException('This shard is still being born. Let the run finish, or cancel it in the Relay section, before retiring it.');
+		}
+
+		$notes = array();
+		$node_id = intval($this->get('mfs_mgn_managed_node_id'));
+		if ($node_id > 0 && class_exists('ManagedNode')) {
+			$node = new ManagedNode($node_id, TRUE);
+			if ($node->key && !$node->get('mgn_delete_time')) {
+				$node->hide();
+				$notes[] = 'Its node "' . $node->get('mgn_name') . '" was hidden from the dashboard, so it is no longer monitored.';
+				$notes = array_merge($notes, $node->removal_notes());
+			}
+		}
+		$this->soft_delete();
+		$notes[] = 'Its server was not touched: destroy it in the cloud account, and remove its DNS records, when you are done with it.';
+		return $notes;
 	}
 }
 

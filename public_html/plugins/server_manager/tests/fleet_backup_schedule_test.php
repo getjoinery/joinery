@@ -752,14 +752,48 @@ $by_key = function (array $answers) {
 		throw new Exception('unexpected key ' . $key);
 	};
 };
-$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx)));
-check($r['problem'] === '' && $r['unread'] === '', 'manifest whole, newest index whole: nothing to say', json_encode($r));
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx, 'objects-0000.json.gz' => $idx)));
+check($r['problem'] === '' && $r['unread'] === '' && $r['missing'] === array(), 'manifest whole, newest index whole: nothing to say, nothing missing', json_encode($r));
 $r = FleetBackupRetention::check_shelf(array_values(array_filter($shelf_o, function ($o) { return basename($o['key']) !== 'dune.png.enc'; })), $base, $creds, 'bucket',
-	$by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx)));
+	$by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => $idx, 'objects-0000.json.gz' => $idx)));
 check(strpos($r['problem'], 'names 1 offloaded file its backup storage does not hold (dune.png)') !== false, 'an object missing from backup storage is the backup set\'s problem', json_encode($r));
-$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => new Exception('HTTP 503'))));
+check($r['missing'] === array('epoch-20260901_000000/dune.png'), 'and its location is handed on, for the next run to store again', json_encode($r['missing']));
+$lost = null;
+FleetBackupRetention::compare_index($idx, $gone, $store['envelopes'], $set, $lost);
+check($lost === array('epoch-20260801_000000/beach.jpg' => true), 'compare_index() collects each location an index marks stored that the store lacks, never one not stored', json_encode($lost));
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket', $by_key(array('manifest.json' => $manifest_o, 'objects-0001.json.gz' => new Exception('HTTP 503'), 'objects-0000.json.gz' => $idx)));
 check($r['problem'] === '' && strpos($r['unread'], 'offloaded-files index of the backup set begun 2026-09-01 03:00 UTC could not be read (HTTP 503)') !== false,
 	'an index that could not be read is this pass\'s problem, never stamped', json_encode($r));
+check($r['missing'] === array(), 'and proves nothing missing');
+
+section('Every restore point a chain holds is checked, not only the newest');
+// Run 0 named old.gif; run 1 no longer does. old.gif is gone from backup
+// storage, so restoring run 0 cannot bring it back, whatever run 1 says.
+$manifest_t = $manifest_o;
+$manifest_t['runs'][0]['time'] = '2026-09-01T03:05:00Z';
+$manifest_t['runs'][1]['time'] = '2026-09-02T03:05:00Z';
+$idx_run0 = $idx;
+$idx_run0['objects'][] = array('name' => 'old.gif', 'epoch' => 'epoch-20260801_000000', 'object_bytes' => 77, 'object_sha256' => 'd', 'stored' => true);
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket',
+	$by_key(array('manifest.json' => $manifest_t, 'objects-0001.json.gz' => $idx, 'objects-0000.json.gz' => $idx_run0)));
+check($r['problem'] === 'the backup set begun 2026-09-01 03:00 UTC names 1 offloaded file its backup storage does not hold (old.gif) in its restore point of 2026-09-01 03:05 UTC',
+	'an object only an older restore point names, and backup storage lacks, is reported with that restore point', $r['problem']);
+check($r['missing'] === array('epoch-20260801_000000/old.gif'), 'and its location is handed on', json_encode($r['missing']));
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket',
+	$by_key(array('manifest.json' => $manifest_t, 'objects-0001.json.gz' => $idx_run0, 'objects-0000.json.gz' => $idx_run0)));
+check(strpos($r['problem'], 'does not hold (old.gif) in all 2 of its restore points, 2026-09-01 03:05 to 2026-09-02 03:05 UTC') !== false,
+	'every restore point that lacks it is named, as a range', $r['problem']);
+$r = FleetBackupRetention::check_shelf($shelf_o, $base, $creds, 'bucket',
+	$by_key(array('manifest.json' => $manifest_t, 'objects-0001.json.gz' => $idx, 'objects-0000.json.gz' => new Exception('HTTP 503'))));
+check($r['problem'] === '' && $r['unread'] === 'the offloaded-files index of the backup set begun 2026-09-01 03:00 UTC could not be read (HTTP 503), for its restore point of 2026-09-01 03:05 UTC',
+	'an older restore point\'s index that could not be read is named by its time, and is this pass\'s problem', json_encode($r));
+
+// Retention keeps or deletes a chain whole: once it removes the chain, its
+// restore points go with it, and nothing names old.gif any more.
+$pruned_shelf = array_values(array_filter($shelf_o, function ($o) { return strpos($o['key'], '/chain-20260901_030000/') === false; }));
+$r = FleetBackupRetention::check_shelf($pruned_shelf, $base, $creds, 'bucket',
+	$by_key(array('manifest.json' => $manifest_t, 'objects-0001.json.gz' => $idx, 'objects-0000.json.gz' => $idx_run0)));
+check($r['problem'] === '' && $r['missing'] === array(), 'once retention removes that restore point, the check clears', json_encode($r));
 
 // A standalone full's index joins the check by the same rule.
 $idx_full = array('version' => 1, 'created' => '2026-08-25T12:00:00Z', 'epochs' => array('epoch-20260810_000000'), 'objects' => array(

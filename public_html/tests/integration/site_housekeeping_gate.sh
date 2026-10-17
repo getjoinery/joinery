@@ -15,7 +15,8 @@
 # that ran every 15 or every 5 minutes is rewritten to every minute
 # (specs/agent_recipes_and_vocabulary.md, Host files). In a container it keeps
 # the release manifest at the site root the one the code matches, with a copy on
-# the config volume (B21). Driven unprivileged against a fixture /etc through
+# the config volume (B21). It gives each log the site and its test site write back
+# to www-data, the user rotation runs as. Driven unprivileged against a fixture /etc through
 # JOINERY_SITE_HOUSEKEEPING_ROOT.
 
 set -u
@@ -181,6 +182,24 @@ chk "on bare metal the manifest is left alone and no copy is kept" "$([ -e "$S6/
 kept_at="$(grep -n "held_manifest_dir = " "$UPG" | head -1 | cut -d: -f1)"
 tier_at="$(grep -n "apply_result_rolled_back('deploy_tier'" "$UPG" | head -1 | cut -d: -f1)"
 chk "upgrade.php keeps its copy only after the deploy tier passed" "$([ -n "$kept_at" ] && [ -n "$tier_at" ] && [ "$kept_at" -gt "$tier_at" ] && echo after || echo "kept:${kept_at:-none} tier:${tier_at:-none}")" "after"
+
+echo "=== Logs another user owns go back to www-data (Apache recreates a missing one as root) ==="
+# Unprivileged, the gate cannot hand a file to www-data, so the chown is a
+# recorder; the selection is what is under test.
+RL="$T/fslog"; mkdir -p "$RL/etc/logrotate.d" "$RL/etc/cron.d"
+LS="$T/htmllog/mysite"; mkdir -p "$LS/logs" "$T/htmllog/mysite_test/logs" "$T/elsewhere"
+echo a > "$LS/logs/error.log"; echo b > "$LS/logs/access.log.1"
+echo c > "$T/htmllog/mysite_test/logs/access.log"
+echo d > "$T/elsewhere/secret.log"; ln -s "$T/elsewhere/secret.log" "$LS/logs/link.log"
+echo e > "$T/elsewhere/hard.log"; ln "$T/elsewhere/hard.log" "$LS/logs/hard.log"
+CHOWNED="$T/chowned"; : > "$CHOWNED"
+REC="$T/rec_chown.sh"; printf '#!/bin/bash\nprintf "%%s\\n" "$1" >> "%s"\n' "$CHOWNED" > "$REC"; chmod +x "$REC"
+out="$(JOINERY_SITE_HOUSEKEEPING_ROOT="$RL" JOINERY_SITE_HOUSEKEEPING_CHOWN="$REC" bash "$SCRIPT" mysite "$LS" 2>&1)"; rc=$?
+chk "exit 0" "$rc" "0"
+chk "the site's log and the test site's log, nothing else" "$(sort "$CHOWNED" | paste -sd,)" "$(printf '%s\n' "$LS/logs/error.log" "$T/htmllog/mysite_test/logs/access.log" | sort | paste -sd,)"
+chk "it says so for each" "$(grep -c 'was not www-data.s - rotation could not open it' <<<"$out")" "2"
+chk "_site_init.sh's test site folder is the one it looks in" "$(grep -c 'mkdir -p "/var/www/html/${SITENAME}_test/logs"' "$INIT")" "1"
+chk "on the box: chown -h, a link never followed" "$(grep -c '^LOG_CHOWN=(chown -h www-data:www-data)$' "$SCRIPT")" "1"
 
 echo "=== Refusals ==="
 out="$(bash "$SCRIPT" mysite "$SITE" 2>&1)"; rc=$?

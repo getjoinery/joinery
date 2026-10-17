@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.93 - a code check's wrong_release verdict (PackageSignature 1.9) is kept: a manifest of another
+ *                release than the code, which IncidentSourceSiteCodeUnverified reports as a mismatch, not tampering
  * @version 1.91 - a status check that finds the site's database not answering asks for no recovery_key_report: the
  *                report reads the key from that database and could only fail (drs1, data root stopped by hand)
  * @version 1.90 - a served certificate keeps self_signed (host_report 1.30)
@@ -4064,7 +4066,7 @@ HTML;
 	/** The kinds of package a code check names, and the verdicts it can give (PackageSignature). */
 	const HOST_REPORT_CODE_KINDS = ['core', 'plugin', 'theme', 'check'];
 	const HOST_REPORT_CODE_VERDICTS = ['unsigned', 'unknown_key', 'no_keys', 'tampered', 'extra_file',
-		'missing_file', 'unreadable', 'unlogged', 'unauthorized_keys'];
+		'missing_file', 'unreadable', 'unlogged', 'unauthorized_keys', 'wrong_release'];
 
 	/**
 	 * The release keys a status check says the site and the agent trust (agent 1.81.0,

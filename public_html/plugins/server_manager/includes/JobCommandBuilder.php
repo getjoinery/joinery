@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.129 - a backup run carries objects_missing from the scheduler: the locations its space's listing proved
+ *                 absent, for the node to store again (FleetBackupRetention::check_shelf())
  * @version 1.127 - the old machine of a switch-over is removed only through a host agent from 1.80.0, the first whose
  *                  proof covers a container held stopped (site_container_engine B29); an older one is named, to update
  * @version 1.126 - copy_stage takes vouched_seq: that run's own manifest is sent (a version-3 chain keeps one per
@@ -1263,6 +1265,19 @@ class JobCommandBuilder {
 			}
 		}
 
+			// What the scheduler's listing of this same space proved absent
+			// (FleetBackupRetention::check_shelf()). The node applies it only
+			// to a run in that space; a run started by hand carries none.
+			$missing = $params['objects_missing'] ?? null;
+			if (is_array($missing) && (int)($missing['space'] ?? 0) === (int)$space->key
+				&& is_array($missing['locations'] ?? null) && $missing['locations']) {
+				$config['objects_missing'] = array(
+					'space'     => (int)$space->key,
+					'locations' => array_values(array_filter(array_map('strval', $missing['locations']), function ($loc) {
+						return (bool)preg_match('#^epoch-\d{8}_\d{6}/[^/]+(/[^/]+)?$#', $loc);
+					})),
+				);
+			}
 		return $config;
 	}
 

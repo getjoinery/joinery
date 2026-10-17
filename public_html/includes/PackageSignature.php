@@ -37,6 +37,9 @@
  * The rule lives in core because the reader runs on nodes where the publisher
  * plugin is not active.
  *
+ * @version 1.9 - verifyTree(): a core manifest that lists another release's VERSION than the code's is
+ *                `wrong_release`, the release mismatch a container recreated from an older image shows,
+ *                not `tampered` on whichever file the walk reached first
  * @version 1.8 - the trusted set (specs/release_key_rotation.md R1, R2, F3, F5): verify() walks the
  *                statement's key chain before the signature, learning release keys too, and changes the
  *                set only as its authority allows; a release whose set change is not authorised is
@@ -120,6 +123,10 @@ class PackageSignature {
 	const UNREADABLE   = 'unreadable';    // the manifest or signature is not the format we write
 	const UNLOGGED     = 'unlogged';      // signed by a key we trust, but not shown to be in the public log
 	const UNAUTHORIZED_KEYS = 'unauthorized_keys'; // changes the keys this node trusts without the authority to
+	const WRONG_RELEASE = 'wrong_release'; // the signed core manifest is another release's than the code (verifyTree())
+
+	/** Where a release's version is written, relative to the site root; the core manifest lists it. */
+	const VERSION_FILE = 'public_html/VERSION';
 
 	/**
 	 * Paths never listed, matched against the site-root-relative path.
@@ -795,6 +802,9 @@ class PackageSignature {
 		// carries a config/ of its own, and its keys are the archive's word.
 		$core = self::verify($site_root, $keys_file,
 			array('walk' => self::TREE_CODE_DIRS, 'skip' => array_values(self::TREE_PACKAGE_DIRS), 'name' => ''));
+		if (in_array($core->verdict, self::EDIT_VERDICTS, true)) {
+			$core = self::releaseMismatch($site_root, $core) ?? $core;
+		}
 		$core_verdict = $core;
 		if (!$core->signed()) {
 			$failures[] = array('what' => 'core', 'kind' => 'core', 'name' => '', 'verdict' => $core);
@@ -839,6 +849,40 @@ class PackageSignature {
 			}
 		}
 		return $failures;
+	}
+
+	/**
+	 * The core verdict for a site root whose signed manifest is another
+	 * release's than its code, or null when the manifest is this release's.
+	 *
+	 * A container's manifest sits in its own layer while its code is on
+	 * volumes, so a container recreated from an older image carries the older
+	 * release's manifest beside upgraded code. Every file that changed between
+	 * the two releases then fails, and the walk names whichever it reached
+	 * first: read as tampering, it sends a person looking for an intruder when
+	 * an upgrade realigns the two. The manifest's signature has already
+	 * verified when this is asked ($edited is an edit verdict), so its listing
+	 * of the VERSION file is the release's own word.
+	 *
+	 * It says the files cannot be checked until the two agree, never that they
+	 * are what was shipped: the result is still a failure.
+	 */
+	private static function releaseMismatch(string $site_root, PackageVerdict $edited): ?PackageVerdict {
+		$listed = self::parse((string)@file_get_contents($site_root . '/' . self::MANIFEST_NAME));
+		$version_path = $site_root . '/' . self::VERSION_FILE;
+		if (!is_array($listed) || !isset($listed[self::VERSION_FILE]) || !is_file($version_path) || is_link($version_path)) {
+			return null;
+		}
+		$hash = @hash_file('sha256', $version_path);
+		if ($hash === false || hash_equals($listed[self::VERSION_FILE], $hash)) {
+			return null;
+		}
+		$code = trim((string)@file_get_contents($version_path, false, null, 0, 64));
+		$code = preg_match('/^[0-9A-Za-z.+-]{1,40}$/', $code) ? $code : 'unknown';
+		return new PackageVerdict(self::WRONG_RELEASE,
+			'the release manifest at the site root is another release\'s than the code (release ' . $code
+			. '), so the code cannot be checked against it; an upgrade to the current release puts back a matching pair',
+			$edited->root, $edited->key, self::VERSION_FILE, $edited->files);
 	}
 
 	/**

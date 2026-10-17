@@ -22,6 +22,10 @@
  * incrementals whose full is gone, which is not a smaller backup — it is no
  * backup, and it looks like a restore point right up until someone needs it.
  *
+ * @version 1.15 - check_shelf() reads every restore point's index in each held chain, not only the newest, and
+ *                 names the restore points that cannot bring back what backup storage lacks (compare_chain_indexes)
+ * @version 1.14 - check_shelf() also answers 'missing': every location an index it read marks stored that the
+ *                 listing lacks, which the next run is told so it stores those objects again
  * @version 1.13 - object lock (specs/storage_targets.md F8): a surplus point any of whose objects the lock still holds
  *                 is kept whole, for a pass after its date; an object or envelope still held is left, not counted
  * @version 1.12 - a deleted object's ledger row is kept, marked pruned by retention; a chain's newest manifest is
@@ -551,10 +555,12 @@ class FleetBackupRetention {
 	 * artifacts were pruned — three ways a backup can look present on the
 	 * dashboard and be nothing when it is needed.
 	 *
-	 * Offloaded files are checked the same way for both families: the newest
-	 * run's index of each chain, and the index beside each standalone full,
-	 * is read, and every object it marks stored must be in backup storage at its
-	 * recorded size under an epoch whose envelope is there.
+	 * Offloaded files are checked the same way for both families: every run's
+	 * index of each chain — each one a restore point backup storage still
+	 * holds — and the index beside each standalone full, is read, and every
+	 * object it marks stored must be in backup storage at its recorded size
+	 * under an epoch whose envelope is there. A problem names the restore
+	 * points that cannot bring the object back.
 	 *
 	 * Two answers, kept apart because they mean different things:
 	 *
@@ -566,6 +572,10 @@ class FleetBackupRetention {
 	 *            were read. A fact about this pass, not backup storage: reported in
 	 *            the pass and never stamped, so a network blip is not shown as
 	 *            an incomplete backup.
+	 *   missing  every object location (epoch/name) an index that WAS read
+	 *            marks stored and the listing does not hold, sorted. Proven
+	 *            absent only as far as the listing is complete: the caller
+	 *            hands it on only from a listing that completed.
 	 *
 	 * Nothing here deletes or retries.
 	 *
@@ -573,7 +583,7 @@ class FleetBackupRetention {
 	 * @param string $base    The manager-profile prefix the listing was taken under
 	 * @param callable|null $read fn(string $key): array — the decoded manifest,
 	 *                      or throws; defaults to a signed GET from the bucket
-	 * @return array{problem:string, unread:string}
+	 * @return array{problem:string, unread:string, missing:string[]}
 	 */
 	public static function check_shelf(array $objects, $base, array $creds, $bucket, $read = null, $space_id = 0) {
 		$base = rtrim((string)$base, '/') . '/';
@@ -610,6 +620,7 @@ class FleetBackupRetention {
 
 		$problems = array();
 		$unread = array();
+		$missing = array();
 		ksort($manifests);
 		foreach ($manifests as $dir => $key) {
 			try {
@@ -627,25 +638,28 @@ class FleetBackupRetention {
 				$problems[] = $problem;
 				continue;
 			}
-			// The newest run's objects index: every object it marks stored must
-			// be in backup storage at its recorded size, under an epoch whose
-			// envelope is there. One more small GET per chain; no per-object
-			// request, the listing already carries key and size.
-			$runs = $manifest['runs'] ?? array();
-			$last = $runs ? $runs[count($runs) - 1] : array();
-			$index_name = (string)($last['artifacts']['objects']['name'] ?? '');
-			if ($index_name === '') { continue; }
-			try {
-				$index = $read($base . $dir . '/' . $index_name);
-				if (!is_array($index)) {
-					throw new Exception('not an objects index');
+			// Every run's objects index: each is a restore point backup storage
+			// holds, and every object it marks stored must be there at its
+			// recorded size, under an epoch whose envelope is there. One small
+			// GET per run; no per-object request, the listing already carries
+			// key and size.
+			$read_runs = array();
+			foreach (($manifest['runs'] ?? array()) as $run) {
+				$index_name = (string)($run['artifacts']['objects']['name'] ?? '');
+				if ($index_name === '') { continue; }
+				try {
+					$index = $read($base . $dir . '/' . $index_name);
+					if (!is_array($index)) {
+						throw new Exception('not an objects index');
+					}
+				} catch (Throwable $e) {
+					$unread[] = 'the offloaded-files index of the backup set ' . self::set_words($dir, $manifest)
+						. ' could not be read (' . $e->getMessage() . ')' . str_replace(' in its', ', for its', self::point_words(array((string)($run['time'] ?? ''))));
+					continue;
 				}
-			} catch (Throwable $e) {
-				$unread[] = 'the offloaded-files index of the backup set ' . self::set_words($dir, $manifest)
-					. ' could not be read (' . $e->getMessage() . ')';
-				continue;
+				$read_runs[] = array('time' => (string)($run['time'] ?? ''), 'index' => $index);
 			}
-			$problem = self::compare_index($index, $store['objects'], $store['envelopes'], self::set_words($dir, $manifest));
+			$problem = self::compare_chain_indexes($read_runs, $store['objects'], $store['envelopes'], self::set_words($dir, $manifest), $missing);
 			if ($problem !== '') {
 				$problems[] = $problem;
 			}
@@ -664,12 +678,14 @@ class FleetBackupRetention {
 					. ' could not be read (' . $e->getMessage() . ')';
 				continue;
 			}
-			$problem = self::compare_index($index, $store['objects'], $store['envelopes'], self::set_words($stem, null));
+			$problem = self::compare_index($index, $store['objects'], $store['envelopes'], self::set_words($stem, null), $missing);
 			if ($problem !== '') {
 				$problems[] = $problem;
 			}
 		}
-		return array('problem' => implode('; ', $problems), 'unread' => implode('; ', $unread));
+		$missing = array_keys($missing);
+		sort($missing);
+		return array('problem' => implode('; ', $problems), 'unread' => implode('; ', $unread), 'missing' => $missing);
 	}
 
 	/** The default reader: a signed GET, decoded as a manifest or as a gzipped objects index by name. */
@@ -726,15 +742,81 @@ class FleetBackupRetention {
 	}
 
 	/**
-	 * The pure rule behind the object half of the backup storage check: one index
-	 * against the store the listing shows. '' when whole.
+	 * The object half of the backup storage check for one chain: every restore
+	 * point's index against the store the listing shows. A missing object is
+	 * named with the restore points that cannot bring it back — every one of
+	 * them, not only the newest, since each is a point someone may restore.
+	 * Otherwise the newest restore point's other problem (a wrong size, a
+	 * missing envelope). '' when every restore point is whole. Pure.
+	 *
+	 * @param array $runs [['time' => ISO run time, 'index' => decoded index]], oldest first
 	 */
-	public static function compare_index(array $index, array $store_objects, array $envelopes, $set) {
+	public static function compare_chain_indexes(array $runs, array $store_objects, array $envelopes, $set, &$lost = null) {
+		if (!is_array($lost)) { $lost = array(); }
+		$names = array();
+		$affected = array();
+		$other = '';
+		foreach ($runs as $run) {
+			$here = array();
+			$problem = self::compare_index((array)$run['index'], $store_objects, $envelopes, $set, $here);
+			if ($here) {
+				$lost += $here;
+				foreach (array_keys($here) as $loc) {
+					$names[substr($loc, strpos($loc, '/') + 1)] = true;
+				}
+				$affected[] = (string)$run['time'];
+			} elseif ($problem !== '') {
+				$other = $problem;
+			}
+		}
+		if (!$names) {
+			return $other;
+		}
+		$n = count($names);
+		$first = array_key_first($names);
+		return 'the backup set ' . $set . ' names ' . $n . ' offloaded file' . ($n === 1 ? '' : 's')
+			. ' its backup storage does not hold (' . $first . ($n > 1 ? ', …' : '') . ')'
+			. self::point_words($affected, count($runs));
+	}
+
+	/**
+	 * Restore points, by run time, as a clause: ' in its restore point of
+	 * 2026-10-10 04:36 UTC', ' in 2 of its 7 restore points, 2026-10-10 04:36
+	 * to 2026-10-11 04:37 UTC', ' in all 7 of its restore points, …'. '' when
+	 * no time is known.
+	 */
+	private static function point_words(array $times, $of = 0) {
+		$ts = array();
+		foreach ($times as $t) {
+			$u = ($t !== '') ? strtotime($t) : false;
+			if ($u !== false) { $ts[] = $u; }
+		}
+		if (!$ts) {
+			return '';
+		}
+		sort($ts);
+		$fmt = function ($u) { return gmdate('Y-m-d H:i', $u); };
+		$m = count($times);
+		if ($m === 1) {
+			return ' in its restore point of ' . $fmt($ts[0]) . ' UTC';
+		}
+		$which = ($of > 0 && $of === $m) ? 'all ' . $m . ' of its restore points' : $m . ($of > 0 ? ' of its ' . (int)$of : '') . ' restore points';
+		return ' in ' . $which . ', ' . $fmt($ts[0]) . ' to ' . $fmt(end($ts)) . ' UTC';
+	}
+
+	/**
+	 * The pure rule behind the object half of the backup storage check: one index
+	 * against the store the listing shows. '' when whole. Each location the
+	 * index marks stored that the store lacks is added to $lost (location => true).
+	 */
+	public static function compare_index(array $index, array $store_objects, array $envelopes, $set, &$lost = null) {
+		if (!is_array($lost)) { $lost = array(); }
 		$missing = 0; $first_missing = ''; $wrong = '';
 		foreach (($index['objects'] ?? array()) as $e) {
 			if (empty($e['stored'])) { continue; }
 			$loc = (string)($e['epoch'] ?? '') . '/' . (string)($e['name'] ?? '');
 			if (!isset($store_objects[$loc])) {
+				$lost[$loc] = true;
 				$missing++;
 				if ($first_missing === '') { $first_missing = (string)$e['name']; }
 				continue;

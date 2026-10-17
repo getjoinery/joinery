@@ -21,6 +21,8 @@
  *
  * @version 1.7 - plane:kernel_warning (a warning on a host that refuses unsigned code, never elsewhere) and
  *                plane:kernel_settings (a warning naming each setting not held), multi_tenant_host_hardening D7, D1
+ * @version 1.8 - plane:site_code_unverified: a site whose only failure is wrong_release is a warning to upgrade;
+ *                beside any other failure it stays critical
  * @version 1.6 - plane:cloud_account_key is registered (its conditions: escrow_tier2_test, B77)
  * @version 1.5 - the node's alerts are on: a hand-made node on dev is a test cloud box, which is quiet by default
  * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
@@ -295,6 +297,24 @@ $refused = new IncidentSourceAgentUpdateRefused();
 $set(array('mgn_agent_update_state' => 'unlogged', 'mgn_agent_update_offered' => '1.66.0', 'mgn_agent_version' => '1.65.0'));
 check($refused->evaluate($node) === null, 'An unpaired node: nothing, whatever it last said');
 $set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
+$mismatch = array('kind' => 'core', 'name' => '', 'verdict' => 'wrong_release', 'file' => 'public_html/VERSION');
+$set(array('mgn_last_host_report' => $hr(array($site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch)))))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'Site sb\'s release manifest does not match its code'
+	&& $v['detail']['Site sb'] === 'core: its release manifest is another release\'s than its code'
+	&& strpos($v['detail']['Release mismatch'] ?? '', 'Upgrade the site') !== false
+	&& strpos($v['detail']['What to do'] ?? '', 'Find out how') === false,
+	'A site whose only failure is a manifest of another release: a warning that says to upgrade, not tampering', json_encode($v));
+$set(array('mgn_last_host_report' => $hr(array(
+	$site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch))),
+	$site_c('sc', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch,
+		array('kind' => 'plugin', 'name' => 'x', 'verdict' => 'tampered', 'file' => 'a.php')))),
+))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'Code on site sc is not what was shipped'
+	&& isset($v['detail']['Site sb'], $v['detail']['Release mismatch'])
+	&& $v['detail']['Site sc'] === 'core: its release manifest is another release\'s than its code; plugin x: a file was changed: a.php',
+	'A mismatch beside a changed file is still critical, and the mismatched site is named too', json_encode($v));
 $v = $refused->evaluate($node);
 check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'not in the public log') !== false
 	&& $v['detail']['Version refused'] === '1.66.0' && $v['detail']['Running'] === '1.65.0',

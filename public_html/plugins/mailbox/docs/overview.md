@@ -3322,6 +3322,15 @@ into `mfs_provisioned_version`; a shard that has not reported in reads as
 unknown, never as up to date. A shard holds every tenant's undrained mail, so
 nothing re-images one: a new shard is born and tenants move to it.
 
+**Retiring a shard** (the console's per-shard Retire, `MailboxFleetShard::retire()`)
+takes the shard and its managed node off together: the shard row is
+soft-deleted and its node is hidden from the Server Manager dashboard
+(`ManagedNode::hide()`, restorable), which clears the node's incidents and ends
+its uptime monitoring. It is refused while any tenant holds a live slot on the
+shard (an evicted or released slot does not count) and while the shard's birth
+run is still in flight. The platform never destroys the server: the operator
+deletes the instance in the cloud account and removes its DNS records.
+
 ### The shrunken main box
 
 With every domain fronted, the relay is the sole mail listener: the main box's
@@ -3434,8 +3443,8 @@ moving on the verdict. The operator's control panel is the
 from the Server Manager dashboard — operator infrastructure, so it never
 appears in the tenant mailbox tabs): the service switch + MX zone, shard
 registration (a skeleton-only birth in the operator's cloud account: the
-operator's box is not a tenant of its own shards), and the DNS-to-publish
-table. Each tenant's MX hostname
+operator's box is not a tenant of its own shards), shard retirement, and the
+DNS-to-publish table. Each tenant's MX hostname
 (`<slug>.<mailbox_fleet_mx_zone>`, slug format `t<id>` — deliberately
 anonymous so DNS names no tenant) is an operator-controlled A record, so
 re-sharding a tenant or replacing a burned shard is an A-record change —

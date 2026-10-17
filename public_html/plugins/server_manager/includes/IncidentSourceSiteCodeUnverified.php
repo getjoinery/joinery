@@ -12,13 +12,20 @@
  * host_restrictions). Read through the same sanitiser the Host card uses.
  *
  * Critical when any site's check failed: it names each site and each package
- * that is not what was shipped. A warning when the host refuses unsigned code
+ * that is not what was shipped. A warning when a site's only failure is a
+ * release manifest of another release than its code (wrong_release): a
+ * container recreated from an image built on an older release carries that
+ * release's manifest beside upgraded code, and an upgrade realigns the two;
+ * it is no sign of an intruder, and saying so sends nobody looking for one.
+ * Also a warning when the host refuses unsigned code
  * and a running site's check is missing, unreadable or more than STALE_SECONDS
  * old: a check that stopped running is how a failure would go unseen. It
  * reports and nothing more; nothing is turned off, because an edited core file
  * cannot be, and a miss means a gate to fix, not a customer's site to break.
  * Clears when a later report shows every running site's code checked and ok.
  *
+ * @version 1.1 - a site whose only failure is wrong_release (PackageSignature 1.9) is a release mismatch, a
+ *                warning that says to upgrade, not code that was changed
  * @version 1.0
  */
 class IncidentSourceSiteCodeUnverified implements IncidentSource {
@@ -37,14 +44,20 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 		if ($report === null) {
 			return null;
 		}
-		list($failed, $unchecked) = self::findings($report);
-		if (!$failed && !$unchecked) {
+		list($failed, $unchecked, $mismatched) = self::findings($report);
+		if (!$failed && !$unchecked && !$mismatched) {
 			return null;
 		}
 
 		$detail = array();
-		foreach ($failed as $site => $lines) {
+		foreach ($failed + $mismatched as $site => $lines) {
 			$detail['Site ' . $site] = implode('; ', $lines);
+		}
+		if ($mismatched) {
+			$detail['Release mismatch'] = 'The signed release manifest at the root of ' . implode(', ', array_keys($mismatched))
+				. ' is another release\'s than its code, so the code cannot be checked against it. A container recreated '
+				. 'from an image built on an older release does this. Upgrade the site to the current release: that puts '
+				. 'back a matching manifest and keeps a copy on its config volume for the next recreate.';
 		}
 		if ($unchecked) {
 			$detail['Not checked'] = implode('; ', $unchecked);
@@ -57,6 +70,11 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 				? 'Code on site ' . array_key_first($failed) . ' is not what was shipped'
 				: 'Code on ' . count($failed) . ' sites is not what was shipped';
 			$severity = IncidentRecord::SEVERITY_CRITICAL;
+		} elseif ($mismatched) {
+			$title = count($mismatched) === 1
+				? 'Site ' . array_key_first($mismatched) . '\'s release manifest does not match its code'
+				: count($mismatched) . ' sites\' release manifests do not match their code';
+			$severity = IncidentRecord::SEVERITY_WARNING;
 		} else {
 			$detail['What to do'] = 'Each site checks its code on every converge (site_housekeeping.sh) and writes config/code_check. '
 				. 'Converge the site from its node page and look at the result; a site on a release older than the check '
@@ -76,12 +94,16 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 	}
 
 	/**
-	 * [site => [plain sentence per failed package]] and [site: why it is not checked].
-	 * The second is filled only on a host that refuses unsigned code.
+	 * [site => [plain sentence per failed package]], [site: why it is not checked] and
+	 * [site => [plain sentence]] for a site whose every failure is wrong_release.
+	 * The second is filled only on a host that refuses unsigned code. A site is
+	 * in the first or the third, never both: one with any other failure is
+	 * in the first, its mismatch named beside the rest.
 	 */
 	public static function findings(array $report): array {
 		$failed = array();
 		$unchecked = array();
+		$mismatched = array();
 		$containers = is_array($report['containers'] ?? null) ? $report['containers'] : array();
 		$restrictions = $report['host_restrictions'] ?? null;
 		// unknown is a file the sites read as every restriction on.
@@ -96,10 +118,16 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 			$check = $c['code_check'] ?? null;
 			if (is_array($check) && $check['state'] === 'failed') {
 				$lines = array();
+				$only_release = (bool)$check['failures'];
 				foreach ($check['failures'] as $f) {
 					$lines[] = self::sentence($f);
+					$only_release = $only_release && $f['verdict'] === PackageSignature::WRONG_RELEASE;
 				}
-				$failed[$site] = $lines ?: array('the check failed without naming a package');
+				if ($only_release) {
+					$mismatched[$site] = $lines;
+				} else {
+					$failed[$site] = $lines ?: array('the check failed without naming a package');
+				}
 				continue;
 			}
 			if (!$restricted || ($c['state'] ?? '') !== 'running' || !empty($c['held'])) {
@@ -114,7 +142,7 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 				$unchecked[] = $site . ': last checked ' . ($at === false ? 'at an unknown time' : gmdate('Y-m-d H:i', $at) . ' UTC');
 			}
 		}
-		return array($failed, $unchecked);
+		return array($failed, $unchecked, $mismatched);
 	}
 
 	/** One failed package in plain words. */
@@ -130,6 +158,7 @@ class IncidentSourceSiteCodeUnverified implements IncidentSource {
 			case 'unknown_key':  $why = 'signed by a key this host does not trust'; break;
 			case 'unlogged':     $why = 'signed, but not in the public release log'; break;
 			case 'no_keys':      $why = 'the site has no release keys to check with'; break;
+			case 'wrong_release': $why = 'its release manifest is another release\'s than its code'; break;
 			case 'unreadable':   $why = $f['kind'] === 'check' ? 'the check did not run' : 'its signature could not be read'; break;
 			default:             $why = 'not what was shipped'; break;
 		}

@@ -8,6 +8,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
+ * @version 1.6 - per-shard Retire: the shard and its managed node leave together
  * @version 1.5 - the shard region defaults to us-east
  * @version 1.4 - the fleet product box is Relay Hosting
  * @version 1.3 - shard relay version column + per-shard Rebuild
@@ -66,7 +67,7 @@ if (!empty($fleet_service_on)) {
 		$shipped = RelayVersion::shipped();
 		echo '<table class="table"><thead><tr>'
 			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Identity pin</th><th>Tenants</th><th>Active</th>'
-			. '<th>Relay version</th>'
+			. '<th>Relay version</th><th></th>'
 			. '</tr></thead><tbody>';
 		foreach ($fleet_shards as $row) {
 			$shard = $row['model'];
@@ -95,6 +96,16 @@ if (!empty($fleet_service_on)) {
 					$version_cell = '<span class="text-muted">Unknown</span>';
 			}
 			echo '<td>' . $version_cell . '</td>';
+			// Retiring is refused while tenants hold slots here; the button
+			// stays, and the refusal says what to do first.
+			echo '<td>' . AdminPage::action_button('Retire', '/plugins/mailbox/admin/admin_mailbox_fleet', array(
+				'hidden'        => array('action' => 'retire_shard', 'mfs_mailbox_fleet_shard_id' => intval($shard->key)),
+				'confirm'       => 'Retire shard ' . (string)$shard->get('mfs_name') . '? It leaves this list and its node is hidden '
+					. 'from the dashboard, so nothing monitors it any more. Its server is not touched: destroy it in the cloud account yourself.',
+				'confirm_label' => 'Retire',
+				'confirm_style' => 'danger',
+				'class'         => 'btn btn-sm btn-outline-danger',
+			)) . '</td>';
 			echo '</tr>';
 		}
 		echo '</tbody></table>';

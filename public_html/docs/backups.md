@@ -275,8 +275,10 @@ recipients as every chain — encrypts every object stored while the epoch is
 current, in the same `aes-256-cbc-pbkdf2` form as an archive, so the
 *Opening a backup with no Joinery anywhere* procedure opens an object
 unchanged. A new epoch starts when there is none, when the recovery recipient
-changed, or when the site key cannot open the current envelope (degrade, never
-fail every run). On recovery-key rotation the older epochs are **re-sealed**,
+changed, when the site key cannot open the current envelope (degrade, never
+fail every run), or when backup storage is proven to have lost an object
+stored under the current epoch: a fresh encryption is never the ciphertext
+the backup sets naming the lost key recorded, so it is never written there. On recovery-key rotation the older epochs are **re-sealed**,
 not re-encrypted: each envelope the site key opens is rebuilt for the current
 recipients and uploaded **beside** it as `envelope-{fpr}.json`, named by the
 first 16 hex of the new recovery key's fingerprint — nothing in backup storage
@@ -305,7 +307,30 @@ store alone serves the file.
 **The run.** Before the archive: the epoch; what backup storage holds (the site
 profile lists its `objects/` prefix; the manager profile reads the newest
 manager index through the presigned `objects_index_url` in its request, union
-`held.json`); the exclude list; then the store — every `cloud` blob not held,
+`held.json`). `held.json` names the destination it describes — the target
+for the site profile, the management node's space for the manager profile —
+and a run reads it only on that destination: a profile that moved storage, or
+a file that names no destination, starts from the new destination's own
+index, and the run stores every object that index lacks.
+
+**Objects backup storage lost.** An object a backup set records as stored and
+backup storage does not hold is not held, and the run stores it again from
+the site's copy — its local original, else the file bucket — under the current
+epoch, a new one when the lost object was under the current one. The site
+profile proves it itself: an object its previous index names that its own
+listing lacks. The manager profile is told: the management node's backup
+storage check lists every location an index it read marks stored that the
+listing lacks, and the next run's request carries them as `objects_missing`
+(`{space, locations: [epoch/name]}`), taken only from a listing that completed
+for that space; the node applies it only when its run writes to the same space.
+The run's index names the object where it now is, so the newest restore point
+is whole again. Earlier restore points still name the lost key and cannot
+bring the object back; the check keeps naming them until retention removes
+their backup set. An object the
+site no longer has a copy of cannot be stored again: the run says so, its index
+keeps naming the lost location, and the check keeps reporting it.
+
+Then the exclude list; then the store — every `cloud` blob not held,
 one at a time under the offload engine's per-row lock, local originals first,
 then **catch-up**: a blob with no local bytes is fetched from the file bucket,
 encrypted and uploaded, both temporaries deleted. One budget covers the whole
@@ -317,11 +342,12 @@ after the run is offsite — `held.json` and the release. A run whose request
 did not ask for objects (a management node not running the object store, a
 database-only backup) stores nothing and holds nothing.
 
-**The manager run request** carries three fields from a management node
+**The manager run request** carries these fields from a management node
 running the object store: `objects: true`, `objects_index_url` (a presigned
-GET for the newest manager index, or absent when there is none) and
+GET for the newest manager index, or absent when there is none),
 `epoch_envelope_urls` (`{epoch id: presigned GET}` for each epoch's newest
-envelope in the listing, what the re-seal reads). A node whose management node sends none of
+envelope in the listing, what the re-seal reads) and, when its backup storage
+check found any, `objects_missing` (above). A node whose management node sends none of
 them behaves as if the object store did not exist.
 
 **Node disk.** Every step is bounded:
@@ -336,8 +362,9 @@ them behaves as if the object store did not exist.
 
 On the node, per profile, beside the chain directories: `objects/epoch.json`
 (the current epoch and its envelope), `objects/held.json` (what this
-profile's backup storage held as of its last run — a cache, rewritten whole by every
-run, consulted only by the release rule), `objects/retired-epochs.json`,
+profile's backup storage held as of its last run, and which destination that
+was — a cache, rewritten whole by every run, read by the release rule and,
+for the manager profile, unioned with the index), `objects/retired-epochs.json`,
 `objects/enabled` (manager profile) and `objects/tmp/`.
 
 **Retention.** Objects are a third family beside chains and standalone
@@ -1446,7 +1473,7 @@ a date, and the level it was proven at:
 
 | Level | Where it runs | What it does | What it proves | Cost |
 |---|---|---|---|---|
-| **Checked in backup storage** | The management node, on every retention listing | Every artifact each backup's manifest names is in the bucket listing at the recorded size, and the manifest carries its envelope. Every offloaded file the newest run's index (and each standalone full's index) marks stored is in the listing under `objects/` at its recorded encrypted size, and its epoch's envelope is there | Present and complete | The listing the pass already takes, plus one small read per backup and one per index. Seconds, no disk |
+| **Checked in backup storage** | The management node, on every retention listing | Every artifact each backup's manifest names is in the bucket listing at the recorded size, and the manifest carries its envelope. Every offloaded file each restore point's index (every run of every chain still held, and each standalone full's index) marks stored is in the listing under `objects/` at its recorded encrypted size, and its epoch's envelope is there; a problem names the restore points that cannot bring a file back, by time | Present and complete | The listing the pass already takes, plus one small read per backup and one per restore point's index. Seconds, no disk |
 | **Opened and read** | The node (or the site itself), on a schedule | The set a restore of the run needs — the full, every incremental up to it, that run's database dump, metadata and offloaded-files index — is downloaded, checked against the manifest's sizes and hashes, decrypted with the machine's own key and read to the end: `tar -tz` for the archives, a full decompression and a header check for the dump. Every epoch envelope the index names is fetched and opened with the machine's own key; no request is made per offloaded file, because backup storage listing already proved each one present at its size | Decryptable and structurally sound with the key this machine holds, offloaded files included | Downloads the whole set once; disk equal to the set, freed at the end; a minute or three |
 | **Rehearsed** | The node (or the site itself), only when a person asks | Opened and read, then the files are replayed into a scratch directory under the backup working area and the dump is loaded into a throwaway database on the machine's own PostgreSQL; what came back is counted (files, bytes, tables, rows in `usr_users` and the three largest tables) and both are deleted. A sample of the offloaded files — the 5 largest and 15 drawn at random — is downloaded, checked against the index's hash, decrypted with its epoch key and compared to the rehearsed database's row for it: `fbb_sha256` where the row records one, `fbb_size_bytes` otherwise | Recoverable | The set plus the sample plus roughly twice the site plus the database, freed at the end; a few minutes |
 
