@@ -279,6 +279,54 @@ check(($body['thinking']['type'] ?? '') === 'enabled' && (int)($body['thinking']
     'a model that takes a budget still gets one', json_encode($body['thinking'] ?? null));
 
 // ---------------------------------------------------------------------------
+section('Extra high and Max: sent where the model takes them, capped where it does not');
+
+$five = ['low', 'medium', 'high', 'xhigh', 'max'];
+$req_at = fn(string $l) => AiModelRequirement::make()->withThinkingLevel($l);
+check($req_at('xhigh')->thinkingLevel() === 'xhigh' && $req_at('max')->thinkingLevel() === 'max',
+    'a requirement keeps Extra high and Max');
+check(AgentLoop::resolveThinkingLevel('', 'max') === 'max', 'the site default may be Max');
+
+$claude5 = ['thinking' => 'always', 'thinking_style' => 'adaptive', 'effort_levels' => $five];
+$d = AiModelResolver::thinkingDirectiveFor($claude5, $req_at('max'));
+check($d['effort'] === 'max' && $d['enabled'], 'a model that takes Max runs at max', json_encode($d));
+$three = ['thinking' => 'optional'];
+$d = AiModelResolver::thinkingDirectiveFor($three, $req_at('max'));
+check($d['effort'] === 'high' && $d['level'] === 'high', 'a model that tops out at High runs Max at high', json_encode($d));
+$d = AiModelResolver::thinkingDirectiveFor(['thinking' => 'optional', 'effort_levels' => ['low', 'medium', 'high', 'max']], $req_at('xhigh'));
+check($d['effort'] === 'high', 'a model with Max but no Extra high runs Extra high at high', json_encode($d));
+$d = AiModelResolver::thinkingDirectiveFor($three, $req_at('medium'));
+check($d['effort'] === 'medium', 'a level the model takes is unchanged', json_encode($d));
+
+$entry = ['id' => 'some-model', 'label' => 'Some Model', 'thinking' => 'optional', 'context' => null];
+$capped = new AiModelResolution($entry, [], $req_at('max'), AiModelResolver::thinkingDirectiveFor($entry, $req_at('max')));
+$notes = implode(' | ', $capped->advisories());
+check(strpos($notes, 'tops out at High') !== false && strpos($notes, '"Max" runs it at High') !== false,
+    'the edit page says a capped level runs lower', $notes);
+
+$shipped = AiEndpointRegistry::modelsFor('anthropic')['claude-sonnet-5-5'] ?? null;
+check($shipped !== null && $shipped['effort_levels'] === $five, 'the shipped catalog gives Sonnet 5.5 all five levels',
+    json_encode($shipped['effort_levels'] ?? null));
+
+$sent = [];
+$xh = AiModelResolution::forProvider(jai_recording_anthropic($thinking_sse, $sent), 'claude-sonnet-5-5',
+    $claude5 + ['sampling' => false]);
+$params = jai_min_params();
+$params['thinking'] = AiModelResolver::thinkingDirectiveFor($claude5, $req_at('xhigh'));
+$xh->send($params, static function (string $d): void {});
+$body = json_decode((string)$sent[0]['request']->getBody(), true);
+check(($body['output_config']['effort'] ?? '') === 'xhigh', 'Extra high reaches an adaptive model as xhigh', json_encode($body['output_config'] ?? null));
+
+$sent = [];
+$bmax = AiModelResolution::forProvider(jai_recording_anthropic($thinking_sse, $sent), 'claude-sonnet-4-6', []);
+$params = jai_min_params();
+$params['thinking'] = ['enabled' => true, 'effort' => 'max', 'level' => 'max'];
+$bmax->send($params, static function (string $d): void {});
+$body = json_decode((string)$sent[0]['request']->getBody(), true);
+check((int)($body['thinking']['budget_tokens'] ?? 0) === 32000 && (int)($body['max_tokens'] ?? 0) > 32000,
+    'Max on a budget model is a 32,000-token budget with room to answer', json_encode([$body['thinking'] ?? null, $body['max_tokens'] ?? null]));
+
+// ---------------------------------------------------------------------------
 section('A member\'s failed row never quotes the provider');
 
 // The member chat shows aim_error to whoever owns the conversation. What a

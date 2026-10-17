@@ -45,7 +45,9 @@ is an ordinary page.
 `SupportTurn::runAndFinalize()` runs `AgentLoop` with a `SupportTurnContext`:
 the reserved user (`support_desk_system_user_id`, made by the sync, disabled)
 owns the transcript, which is an `AiConversation` with `aic_support_thread_id`
-set; the thread's own nonce wraps everything from another machine.
+set; the thread's own nonce wraps everything from another machine. The model
+is `support_desk_model`, asked to reason at medium (`SupportTurn::THINKING_LEVEL`)
+whatever Joinery AI's chat default is.
 
 The system prompt has three layers (`SupportPrompt`):
 

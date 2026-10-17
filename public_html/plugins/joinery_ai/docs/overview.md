@@ -785,12 +785,15 @@ holding whatever the operator's own host serves.
 A **catalog model** carries its wire `id`, a label, a capability `tier`, whether it
 can reason (`thinking`: `none` | `optional` | `always`), how the wire asks for it
 (`thinking_style`: `budget`, a token budget, the default; or `adaptive`, the model decides
-and refuses a budget), whether it accepts `temperature`/`top_p` (`sampling`, default true;
+and refuses a budget), the effort levels it accepts (`effort_levels`, least first, default
+`low`, `medium`, `high`; a level above its highest runs at its highest, and the edit page
+says so), whether it accepts `temperature`/`top_p` (`sampling`, default true;
 false for a model that refuses any non-default value), whether it can drive
 tools, its nominal `context` window, its attachment support, its per-Mtok `cost`
 (absent means free), per-model sampling `defaults`, and an optional `retired` flag.
 The Claude 5 models (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5) are `always` /
-`adaptive` / no sampling, as is Claude Opus 4.7 apart from thinking `optional`.
+`adaptive` / no sampling, as is Claude Opus 4.7 apart from thinking `optional`. Every
+Claude entry accepts all five effort levels.
 `AiModelResolution::send()` applies the answering model's rules to each call
 (`shapeFor()`), so a failover to a sibling gets the sibling's.
 
@@ -1090,12 +1093,14 @@ provider call path — `createMessage()` is a blocking convenience over it with 
 sink. The runner never branches on provider.
 
 `$params['thinking']` is a concrete **directive** from the resolver —
-`['enabled' => bool, 'effort' => 'low'|'medium'|'high'|null, 'style' => 'budget'|'adaptive']` —
+`['enabled' => bool, 'effort' => 'low'|'medium'|'high'|'xhigh'|'max'|null, 'style' => 'budget'|'adaptive']` —
 not a level to interpret. A provider translates it into its own wire field
 (`budget_tokens`, `thinking: {type: adaptive}` with `output_config: {effort}`,
 `reasoning_effort`) and never consults a table of model names. On an adaptive model the
-directive's effort (low, medium, high) is sent as `output_config.effort`; a model that
-always reasons treats a level of off as low.
+directive's effort is sent as `output_config.effort`; a budget model gets 1,024, 4,096,
+12,000, 24,000 or 32,000 thinking tokens for low through max; a model that always
+reasons treats a level of off as low. The effort is already one the model accepts
+(`AiModelResolver::effortFor()`).
 
 **Usage** comes back in one shape from every provider: `input_tokens` is the input not
 served from or written to the cache, beside `cache_creation_input_tokens` and
@@ -1322,11 +1327,11 @@ Three AJAX endpoints back the page: `chat_send.php` (append the user message + a
 - **Temperature** (`aic_temperature`) and **Top-p** (`aic_top_p`) — sampling, forwarded to the provider only when set. The factory default `joinery_ai_default_temperature` ships at **0.3** (the diffuse provider default of 0.8 was the cause of vague replies); `joinery_ai_default_top_p` ships empty (provider default).
 - **Max tokens** (`aic_max_tokens`) — overrides `joinery_ai_chat_max_tokens` as the per-turn output budget.
 - **Instructions** (`aic_instructions`) — the per-chat voice-block override described above.
-- **Thinking level** (`aic_thinking_level`, off/low/medium/high) — how hard the model reasons; `off` is the snappy default. The local provider maps the level to the request's `reasoning_effort` field (`off → none`, otherwise the level) — the reasoning control Ollama's OpenAI-compatible endpoint reads; note a reasoning-first local model (qwen3) may still reason at `off`, so the runner sizes the local per-call token cap for reasoning plus answer; Fireworks maps the level to `reasoning_effort` (`off → none`, or `low` on always-on models like gpt-oss that reject `none`; `low`/`medium`/`high` otherwise); Anthropic maps levels to an extended-thinking `budget_tokens` and raises `max_tokens` for headroom. Reasoning tokens are output tokens, metered by the turn budget and `CostGuard`. Recipes carry the same `rcp_temperature` / `rcp_top_p` / `rcp_thinking_level` knobs on the recipe-edit form.
+- **Thinking level** (`aic_thinking_level`, off/low/medium/high/xhigh/max, shown as Extra high and Max; the list is `AiModelRequirement::THINKING_LEVELS`) — how hard the model reasons; the site default is `joinery_ai_default_thinking_level`, medium. Extra high and Max think longest and cost the most; a model whose catalog `effort_levels` tops out lower runs at its highest. The local provider maps the level to the request's `reasoning_effort` field (`off → none`, otherwise the level) — the reasoning control Ollama's OpenAI-compatible endpoint reads; note a reasoning-first local model (qwen3) may still reason at `off`, so the runner sizes the local per-call token cap for reasoning plus answer; Fireworks maps the level to `reasoning_effort` (`off → none`, or `low` on always-on models like gpt-oss that reject `none`; `low`/`medium`/`high` otherwise); Anthropic sends the level as `output_config.effort` on an adaptive model, and as an extended-thinking `budget_tokens` (raising `max_tokens` for headroom) on a budget model. Reasoning tokens are output tokens, metered by the turn budget and `CostGuard`. Recipes carry the same `rcp_temperature` / `rcp_top_p` / `rcp_thinking_level` knobs on the recipe-edit form.
 
 **Sensitivity warning.** A passive, real-time banner in the composer (`#joai-sensitive-notice`). As the user types, client-side JS re-evaluates on every keystroke and on model change: if the message text matches a small personal-data heuristic (SSN, credit-card-with-Luhn, pasted email headers as strong signals; email / phone / street address as weak signals needing two) **and** the selected model's `data-private` is not `1`, the banner shows. It is advisory only — it never blocks sending, has no confirmation step, and clears itself when the text stops matching or a private model is selected. Chat-only: recipes, which are configured deliberately, have no equivalent.
 
-**Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn), `joinery_ai_chat_system_prompt` (editable voice block; blank = built-in default), `joinery_ai_default_temperature` (0.3), `joinery_ai_default_top_p` (blank = provider default), `joinery_ai_default_thinking_level` (off).
+**Settings:** `joinery_ai_chat_enabled`, `joinery_ai_chat_max_iterations` (loop cap per turn), `joinery_ai_chat_max_tokens` (output budget per turn), `joinery_ai_chat_system_prompt` (editable voice block; blank = built-in default), `joinery_ai_default_temperature` (0.3), `joinery_ai_default_top_p` (blank = provider default), `joinery_ai_default_thinking_level` (medium).
 
 ### Asynchronous turns
 
@@ -1369,7 +1374,7 @@ Native app clients speak the same chat over `/api/v1` actions (owner-scoped, mem
 - `joinery_ai/chat_poll` `{message_id}` → `{status}` plus `partial_text`, `activity`, and `running_seconds` while running (the stage label and elapsed seconds of the live turn — the runner stamps the label onto the row's `aim_activity` at each stage transition and nulls it at finalize), `{message, usage_label}` on complete (and on `cancelled`, with the kept partial), or `error` on failed. A `running` message serialized by `ChatSerializer::message()` (e.g. a thread loaded mid-turn) carries the same two fields.
 - `joinery_ai/chat_cancel` `{message_id}` → sets `aim_cancel_requested` on the running row (a no-op `{already_settled: true}` if the turn already finished); the worker stops cooperatively and the poll settles to `cancelled`.
 - `joinery_ai/chat_turn_action` `{message_id, action: "delete"}` → `{deleted_ids}`; `joinery_ai/chat_thread_action` `{conversation_id, action: "pin" | "rename" | "delete", value?}`.
-- `joinery_ai/chat_controls` → `{models: [{id, label, private}], web_search_available, defaults: {model, thinking_level, temperature, top_p, max_tokens, web_search}}` — the catalog and defaults for the native settings sheet. `chat_thread`'s `conversation.controls` carries the per-chat stored values.
+- `joinery_ai/chat_controls` → `{models: [{id, label, private}], thinking_levels: [{id, label}], web_search_available, defaults: {model, thinking_level, temperature, top_p, max_tokens, web_search}}` — the catalog and defaults for the native settings sheet. `chat_thread`'s `conversation.controls` carries the per-chat stored values.
 - `joinery_ai/chat_set_capabilities` `{conversation_id, field, value}` (or the legacy `{conversation_id, capability, enabled}`) → sets one control through `ChatControls::validate`; a bad value is a 422. New chats seed their controls on the first `chat_send` instead. `field: "security_level"` changes the encryption level through `ChatLevel::changeLevel` (converging the stored content — see **Chat encryption**); `field: "local_models_only"` switches on the Local models only add-on through `ChatLevel::setLocalModelsOnly` (one-way — switching it off is refused); a local-only chat refuses a cloud `model`.
 
 **Async via a detached worker.** An API action returns a value the framework serializes and flushes; it cannot hold the request open the way the web page's in-process `fastcgi_finish_request` detach does. So `chat_send` persists the placeholder, return the poll handle, and spawn a CLI worker (`ChatWorkerSpawner` → `cli/run_chat_turn.php`) that runs the turn to completion — the same detached-worker model recipe runs use, decoupled from the fpm request lifecycle. The client polls `chat_poll` for the result exactly as the web page polls its endpoint. `ChatWorkerSpawner` resolves an absolute CLI-php path: php-fpm's `clear_env` defaults on, leaving the request environment without a `PATH`, so a bare `php` can't be found.

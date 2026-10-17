@@ -80,6 +80,7 @@ class AiModelResolution {
             'thinking'    => 'optional',
             'thinking_style' => 'budget',
             'sampling'    => true,
+            'effort_levels' => AiModelRequirement::DEFAULT_EFFORT_LEVELS,
             'tools'       => true,
             'context'     => null,
             'attachments' => ['vision' => false, 'document' => false],
@@ -139,6 +140,15 @@ class AiModelResolution {
         if ((string)$this->model['thinking'] === 'always'
                 && $this->requirement->thinkingLevel() === 'off') {
             $out[] = $this->label() . ' always reasons — "off" runs it at its lowest effort.';
+        }
+        $asked = $this->requirement->thinkingLevel();
+        $runs = (string)($this->thinking['level'] ?? $asked);
+        $ladder = array_keys(AiModelRequirement::THINKING_LEVELS);
+        if ((string)$this->model['thinking'] !== 'none' && $asked !== 'off'
+                && array_search($runs, $ladder, true) < array_search($asked, $ladder, true)) {
+            $out[] = $this->label() . ' tops out at ' . AiModelRequirement::THINKING_LEVELS[$runs]
+                   . ' — "' . AiModelRequirement::THINKING_LEVELS[$asked] . '" runs it at '
+                   . AiModelRequirement::THINKING_LEVELS[$runs] . '.';
         }
         $usable = $this->usableContext();
         $nominal = $this->model['context'] === null ? null : (int)$this->model['context'];

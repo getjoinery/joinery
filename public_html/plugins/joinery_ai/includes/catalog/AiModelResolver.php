@@ -303,7 +303,9 @@ class AiModelResolver {
      * A model that cannot reason gets reasoning off, whatever the level says —
      * the mismatch is surfaced on the edit page rather than legislated. A model
      * that always reasons treats "off" as its lowest effort, because refusing
-     * it would be refusing a perfectly good model over a knob.
+     * it would be refusing a perfectly good model over a knob. A level above
+     * the highest the model accepts (its catalog `effort_levels`) runs at that
+     * highest, for the same reason.
      */
     public static function thinkingDirectiveFor(array $entry, AiModelRequirement $req): array {
         $level = $req->thinkingLevel();
@@ -313,13 +315,32 @@ class AiModelResolver {
             return ['enabled' => false, 'effort' => null, 'level' => 'off'];
         }
         if ($capability === 'always') {
-            $effort = ($level === 'off' || $level === '') ? 'low' : $level;
+            $effort = self::effortFor($entry, ($level === 'off' || $level === '') ? 'low' : $level);
             return ['enabled' => true, 'effort' => $effort, 'level' => $effort];
         }
         if ($level === 'off' || $level === '') {
             return ['enabled' => false, 'effort' => null, 'level' => 'off'];
         }
-        return ['enabled' => true, 'effort' => $level, 'level' => $level];
+        $effort = self::effortFor($entry, $level);
+        return ['enabled' => true, 'effort' => $effort, 'level' => $effort];
+    }
+
+    /** The level asked for if the model accepts it, else the highest it
+     *  accepts below that, else its lowest. */
+    public static function effortFor(array $entry, string $level): string {
+        $accepted = (array)($entry['effort_levels'] ?? AiModelRequirement::DEFAULT_EFFORT_LEVELS);
+        $ladder = array_keys(AiModelRequirement::THINKING_LEVELS);
+        $want = array_search($level, $ladder, true);
+        $best = null;
+        foreach ($ladder as $rank => $l) {
+            if ($rank > $want) break;
+            if (in_array($l, $accepted, true)) $best = $l;
+        }
+        if ($best !== null) return $best;
+        foreach ($ladder as $l) {
+            if (in_array($l, $accepted, true)) return $l;
+        }
+        return 'low';
     }
 
     // ================= refusals =================

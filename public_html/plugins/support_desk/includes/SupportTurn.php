@@ -10,6 +10,7 @@
  * FAILED with a sentence the asking person can read, never a provider's error
  * text (that goes to the worker log).
  *
+ * @version 0.1.2 - answers reason at medium, not the chat default
  * @version 0.1.1 - cached tokens on their own columns, and the turn's cost
  * @version 0.1.0
  */
@@ -121,17 +122,27 @@ class SupportTurn {
 		);
 	}
 
+	/** The thinking level every desk answer runs at, whatever the site's
+	 *  chat default says. */
+	const THINKING_LEVEL = 'medium';
+
 	/** The model the desk answers with. */
 	public static function resolve(): AiModelResolution {
+		return AiModelResolver::resolve(self::requirement());
+	}
+
+	/** What the desk asks of its model: the pinned support_desk_model, tools,
+	 *  and reasoning at THINKING_LEVEL. */
+	public static function requirement(): AiModelRequirement {
 		$pin = trim((string)Globalvars::get_instance()->get_setting('support_desk_model', true, true));
-		$req = AiModelRequirement::make()
+		return AiModelRequirement::make()
 			->withMinTier(AiModelRequirement::TIER_BASIC)
 			->withTrustFloor(AiModelRequirement::TRUST_ANY)
 			->withTools(true)
 			->withPin($pin)
+			->withThinkingLevel(self::THINKING_LEVEL)
 			->withPolicy(AiModelRequirementBuilder::sitePolicy())
 			->withPurpose('the support desk');
-		return AiModelResolver::resolve($req);
 	}
 
 	/** The release a thread reads: the site's own (or nearest) release; for the widget, the newest. */

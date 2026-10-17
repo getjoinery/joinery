@@ -53,7 +53,7 @@ public struct ChatControlValues: Equatable, Sendable {
     public var model: String
     public var dataAccess: Bool
     public var webSearch: Bool
-    public var thinkingLevel: String   // off | low | medium | high
+    public var thinkingLevel: String   // a ChatThinkingLevel id
     public var temperature: String
     public var topP: String
     public var maxTokens: String
@@ -138,15 +138,38 @@ public struct ChatControlDefaults: Equatable, Sendable {
     }
 }
 
+/// One thinking level the site accepts, with the words its pickers show.
+public struct ChatThinkingLevel: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let label: String
+
+    init(id: String, label: String) {
+        self.id = id
+        self.label = label
+    }
+
+    init?(data: JSONValue) {
+        guard let id = data["id"]?.stringValue, !id.isEmpty else { return nil }
+        self.id = id
+        label = data["label"]?.stringValue ?? id.capitalized
+    }
+
+    static let fallback = ["off", "low", "medium", "high"].map { ChatThinkingLevel(id: $0, label: $0.capitalized) }
+}
+
 /// Chat control metadata: the model catalog plus the defaults.
 public struct ChatControlsMeta: Sendable {
     public let models: [ChatModelOption]
+    public let thinkingLevels: [ChatThinkingLevel]
     public let webSearchAvailable: Bool
     public let defaults: ChatControlDefaults
 
     init?(data: JSONValue?) {
         guard let data else { return nil }
         models = (data["models"]?.arrayValue ?? []).compactMap { ChatModelOption(data: $0) }
+        // A site that does not send its levels takes these four.
+        let levels = (data["thinking_levels"]?.arrayValue ?? []).compactMap { ChatThinkingLevel(data: $0) }
+        thinkingLevels = levels.isEmpty ? ChatThinkingLevel.fallback : levels
         webSearchAvailable = data["web_search_available"]?.boolValue ?? false
         defaults = ChatControlDefaults(data: data["defaults"])
     }

@@ -44,6 +44,21 @@ class AiModelRequirement {
         self::TRUST_ANY     => [self::TRUST_LOCAL, self::TRUST_TRUSTED, 'cloud'],
     ];
 
+    /** The thinking levels, least effort first, with the words every picker
+     *  shows. A model that tops out lower runs at its highest level below the
+     *  one asked for (its catalog `effort_levels`). */
+    const THINKING_LEVELS = [
+        'off'    => 'Off',
+        'low'    => 'Low',
+        'medium' => 'Medium',
+        'high'   => 'High',
+        'xhigh'  => 'Extra high',
+        'max'    => 'Max',
+    ];
+
+    /** The levels a catalog entry accepts when it declares none. */
+    const DEFAULT_EFFORT_LEVELS = ['low', 'medium', 'high'];
+
     /** @var string one of TIERS */
     private $min_tier = self::TIER_STANDARD;
 
@@ -73,7 +88,7 @@ class AiModelRequirement {
     /** @var string an exact catalog model id the operator pinned, or '' */
     private $pin = '';
 
-    /** @var string 'off'|'low'|'medium'|'high' — how hard to reason, not whether it can */
+    /** @var string a key of THINKING_LEVELS — how hard to reason, not whether it can */
     private $thinking_level = 'off';
 
     /** @var string one of AiModelResolver::POLICY_* — how to choose among survivors */
@@ -198,7 +213,7 @@ class AiModelRequirement {
     public function withThinkingLevel(?string $level): self {
         $level = strtolower(trim((string)$level));
         $c = $this->copy();
-        $c->thinking_level = in_array($level, ['off', 'low', 'medium', 'high'], true) ? $level : 'off';
+        $c->thinking_level = isset(self::THINKING_LEVELS[$level]) ? $level : 'off';
         return $c;
     }
 
