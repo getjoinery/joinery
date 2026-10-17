@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.34 - a manager request's objects_missing (what the management node's listing of the same space proved
+ *                absent) reaches the plan; the run's epoch is retired when backup storage lost an object under it
+ * @version 1.33 - destination_of_plan() is public: held.json records the destination it describes (BackupObjects)
  * @version 1.32 - a site target that locks is written through its write credential; retention leaves a run or chain object
  *                lock still holds whole, for the first pass after its date (specs/storage_targets.md F8); a pruned
  *                chain takes everything in its folder, a failed run's leftovers included
@@ -657,6 +660,10 @@ class BackupRunner {
 			'objects_source'      => 'index',
 			'objects_index_url'   => ($objects && BackupFetch::is_signed_url($m['objects_index_url'] ?? '')) ? (string)$m['objects_index_url'] : '',
 			'epoch_envelope_urls' => $objects ? self::epoch_envelope_urls($m['epoch_envelope_urls'] ?? null) : array(),
+			// What the management node's complete listing of this run's space
+			// proved absent, by location: not held, so stored again
+			// (BackupObjects::missing_locations()).
+			'objects_missing'     => $objects ? BackupObjects::missing_from_request($m['objects_missing'] ?? null) : null,
 		);
 	}
 
@@ -840,10 +847,13 @@ class BackupRunner {
 
 	/**
 	 * Where a run goes, as the chain rule compares it: 'target:{id}' for one of
-	 * this site's own targets. Null for the manager profile, whose storage is the
-	 * management node's to tell apart (specs/storage_targets.md WP5).
+	 * this site's own targets; for the manager profile, 'space:{id}' for the
+	 * management node's space its broker took the run in, or 'service:{name}'.
+	 * Null when the plan has no target (specs/storage_targets.md WP5). Also what
+	 * a profile's held.json is tied to: a picture of one destination is never
+	 * read as another's (BackupObjects::read_held()).
 	 */
-	private static function destination_of_plan(array $plan) {
+	public static function destination_of_plan(array $plan) {
 		if (empty($plan['target'])) {
 			return null;
 		}
@@ -2397,8 +2407,9 @@ class BackupRunner {
 		$exclude = BackupObjects::write_exclude_file($plan, $objects, $project_dir);
 
 		$epoch = null;
-		$epoch_fn = function () use ($plan, &$epoch) {
-			if ($epoch === null) { $epoch = BackupObjects::epoch($plan); }
+		$lost_epochs = $picture['lost_epochs'];
+		$epoch_fn = function () use ($plan, &$epoch, $lost_epochs) {
+			if ($epoch === null) { $epoch = BackupObjects::epoch($plan, $lost_epochs); }
 			return $epoch;
 		};
 		$store = BackupObjects::store_missing($plan, $epoch_fn, $objects, $held,
@@ -2448,10 +2459,18 @@ class BackupRunner {
 			BackupObjects::mark_enabled($plan);
 		}
 
+		// A proven-missing object this run could not store again (the site
+		// has no copy left, or the budget ran out) keeps its entry in the
+		// index, at the location backup storage lost: the set still names
+		// what it lacks, and the backup storage check keeps saying so. It is
+		// not held — held.json never names it, so its local bytes are kept.
+		$still_lost = array_diff_key($picture['lost_entries'], $store['stored']);
+
 		return array(
 			'label'     => (string)$run_label,
 			'objects'   => $objects,
 			'held'      => $held,
+			'still_lost' => $still_lost,
 			'held_file' => $picture['file'],
 			'stored'    => $store['stored'],
 			'store'     => $store,
@@ -2464,7 +2483,7 @@ class BackupRunner {
 
 	/** Step 6: the index, from the enumeration, what was held and what this run stored. */
 	private static function write_index_artifact(array $plan, array &$ctx, $path) {
-		$index = BackupObjects::build_index($plan, $ctx['label'], $ctx['objects'], $ctx['held'], $ctx['stored']);
+		$index = BackupObjects::build_index($plan, $ctx['label'], $ctx['objects'], $ctx['held'] + $ctx['still_lost'], $ctx['stored']);
 		$ctx['index'] = $index;
 		return BackupObjects::write_index($index, $path);
 	}

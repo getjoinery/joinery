@@ -635,5 +635,35 @@ ra_spec="$(sed -n 's/^SITES_STATE="\$FS\(.*\)"$/\1/p' "$REMOVE")/SITEX/run_spec"
 chk "remove_account removes the file run_spec_path names" \
     "$([ "$ra_spec" = "$(run_spec_path SITEX)" ] && grep -c '^    for mark in held quiet suspended run_spec disk_allowance; do$' "$REMOVE")" "1"
 
+# The release manifest a rebuild carries is the one the site's code matches:
+# the site root's, else the copy its config keeps (incident 7608, B6). The
+# stub runs the in-container script here, its /var/www/html under $T.
+CM="$T/cm"
+mkdir -p "$CM/s1/public_html" "$CM/s1/config/release_manifest"
+printf '0.8.494\n' > "$CM/s1/public_html/VERSION"
+cm_write() {  # DIR VERSION: a manifest of a tree whose VERSION reads VERSION, and a signature beside it
+    printf '%s  public_html/VERSION\n' "$(printf '%s\n' "$2" | sha256sum | cut -c1-64)" > "$1/RELEASE_MANIFEST"
+    printf 'sig\n' > "$1/RELEASE_MANIFEST.sig"
+}
+cm_run() { ( site_engine() { [ "$1" = exec ] || return 1; bash -c "${5//\/var\/www\/html/$CM}" "${@:6}"; }; run_spec_code_manifest s1 ) | sed "s|^$CM|/var/www/html|"; }
+cm_write "$CM/s1" 0.8.494
+chk "code manifest: the site root's, when the code matches it" "$(cm_run)" "/var/www/html/s1"
+cm_write "$CM/s1" 0.8.492; cm_write "$CM/s1/config/release_manifest" 0.8.494
+chk "code manifest: the kept copy, when the site root holds another release's" "$(cm_run)" "/var/www/html/s1/config/release_manifest"
+cm_write "$CM/s1/config/release_manifest" 0.8.490
+chk "code manifest: nothing, when the code matches neither" "$(cm_run)" ""
+cm_write "$CM/s1/config/release_manifest" 0.8.494
+mv "$CM/s1/config/release_manifest/RELEASE_MANIFEST" "$CM/s1/config/rm_real"
+ln -s ../rm_real "$CM/s1/config/release_manifest/RELEASE_MANIFEST"
+chk "code manifest: a linked manifest is never taken" "$(cm_run)" ""
+REBASE_F="$ROOT/maintenance_scripts/sysadmin_tools/rebase_site_container.sh"
+chk "rebase keeps the manifest the code matches" \
+    "$(grep -c 'MF_DIR="$(run_spec_code_manifest "$SITE")"' "$REBASE_F")|$(grep -c 'site_engine cp "${SITE}:${MF_DIR}/${f}" "${WORK}/${f}"' "$REBASE_F")" "1|1"
+RECREATE_F="$ROOT/maintenance_scripts/sysadmin_tools/recreate_site.sh"
+if [ -f "$RECREATE_F" ]; then
+    chk "recreate carries the manifest the code matches" \
+        "$(grep -c 'MF_DIR="$(run_spec_code_manifest "$SITE")"' "$RECREATE_F")|$(grep -c 'from_container "${MF_DIR}/RELEASE_MANIFEST" ' "$RECREATE_F")" "1|1"
+fi
+
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

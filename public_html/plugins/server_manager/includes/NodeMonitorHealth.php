@@ -13,6 +13,7 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.27 - an agent built without the release key is named as that, not as a node that cannot be managed (agent 1.82.0)
  * @version 1.26 - the untrusted_file health names the one-step repair and the node's own recipe (agent 1.79.0)
  * @version 1.25 - a refusal and the poll's file report are two findings, and each clears only itself: a completed
  *                job no longer clears deployment files the poll still names, and the poll's "none differ" no
@@ -741,6 +742,16 @@ class NodeMonitorHealth {
 		return false;
 	}
 
+	/**
+	 * Is this refusal an agent built by hand without the release key (agent
+	 * 1.82.0 says so in its refusal)? The release on the node is fine and a
+	 * manifest would change nothing; the agent itself has to be replaced.
+	 */
+	public static function agent_lacks_release_key(string $reason): bool {
+		return stripos($reason, 'agent build has no release key') !== false
+			|| stripos($reason, "agent build's release key is malformed") !== false;
+	}
+
 	/** Where one node's script trust stands, phrased for someone who has to act. */
 	public static function script_trust_health($node): array {
 		$state = (string)$node->get('mgn_script_trust');
@@ -779,6 +790,16 @@ class NodeMonitorHealth {
 					. 'or a rollback under a newer release\'s manifest, leaves them so. Put them all back (or Restore signed copy, one at a time) '
 					. 'writes the release\'s own bytes and keeps what it replaced, and an agent from 1.79.0 does the same on its own '
 					. 'within about twenty minutes (recipe release_files).' : '')
+				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
+				. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
+		}
+
+		if (self::agent_lacks_release_key($reason)) {
+			return self::result('script_trust', 'This node\'s agent was built without the release key' . $for,
+				'With no release key it cannot check any signature, so it refuses every script '
+				. 'primitive — upgrades and backups included. The release on the node is not the problem, '
+				. 'and delivering a manifest changes nothing: install a released agent on the machine, '
+				. 'which carries the key.'
 				. ($type !== '' ? ' First seen refusing: ' . $type . '.' : '')
 				. ($reason !== '' ? ' The node said: ' . $reason : ''), true);
 		}

@@ -3853,9 +3853,10 @@ check(strpos($rebase_b21, '[ "${#HOST_NAMES[@]}" -eq 0 ] || DOMAIN="${HOST_NAMES
 	'prepare takes the host\'s name over DOMAIN_NAME and refuses several');
 check(substr_count($rebase_b21, 'manifest_failures)"') >= 3,
 	'prepare, swap and the swap\'s last check all count files against the manifest');
-check(preg_match('/site_engine cp "\$\{SITE\}:\/var\/www\/html\/\$\{SITE\}\/\$\{f\}" "\$\{WORK\}\/\$\{f\}"/', $rebase_b21) === 1
+check(preg_match('/site_engine cp "\$\{SITE\}:\$\{MF_DIR\}\/\$\{f\}" "\$\{WORK\}\/\$\{f\}"/', $rebase_b21) === 1
+	&& strpos($rebase_b21, 'MF_DIR="$(run_spec_code_manifest "$SITE")"') !== false
 	&& strpos($rebase_b21, 'put_manifest || die') !== false,
-	'swap keeps the old container\'s manifest and puts it in the new one, or stops',
+	'swap keeps the old container\'s manifest the code matches and puts it in the new one, or stops',
 	'the manifest is in the container\'s own layer; the rebuild lays in whatever release install.sh downloaded');
 check(strpos($rebase_b21, 'save_host_vhosts') !== false && strpos($rebase_b21, 'restore_host_vhosts ||') !== false,
 	'swap keeps the site\'s host vhost files and rollback puts them back');

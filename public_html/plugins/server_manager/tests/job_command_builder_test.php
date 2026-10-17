@@ -1101,6 +1101,15 @@ check(array_keys((array)($obj_config['epoch_envelope_urls'] ?? array())) === arr
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_links' => array('index' => '', 'envelopes' => array())))['params'];
 check(($obj_config['objects'] ?? null) === true && !isset($obj_config['objects_index_url']) && !isset($obj_config['epoch_envelope_urls']),
 	'links the scheduler hands over are used as they are: an empty backup storage sends the flag and no link');
+$obj_space = (int)JobCommandBuilder::write_space($obj_node)->key;
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_missing' => array('space' => $obj_space,
+	'locations' => array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml', '../etc/passwd', 'epoch-x/y'))))['params'];
+check(($obj_config['objects_missing'] ?? null) === array('space' => $obj_space,
+	'locations' => array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml')),
+	'what the scheduler\'s listing proved missing rides along for the same space, a location that is not one dropped', json_encode($obj_config['objects_missing'] ?? null));
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_missing' => array('space' => $obj_space + 1000,
+	'locations' => array('epoch-20260801_000000/beach.jpg'))))['params'];
+check(!isset($obj_config['objects_missing']), 'a listing of another space proves nothing for this run, and is not sent');
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('type' => 'database'))['params'];
 check(!isset($obj_config['objects']), 'a database-only run carries no object store');
 JobCommandBuilder::set_shelf_listing_for_tests(array());

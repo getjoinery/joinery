@@ -527,7 +527,7 @@ An incident **needs you** when it is new, or snoozed and its time has come (`Inc
 | `plane:customer_backups` | this node only: a customer of backup storage has had no run finish here for two nights, or no run it reported verified for eight days (`IncidentSourceCustomerBackups`, the rule a site's Backups page applies to itself); one incident names every such customer | warning |
 | `plane:failed_units` | the latest host report names failed systemd units | warning |
 | `plane:mail_gateway` | a site on the node has mail apps on and the latest host report's `mail_gateway` shows the gateway not running, not greeting on 993 or 465 for that site, restarted three or more times and up under an hour, or a site's certificate under 14 days; a gateway unit systemd has given up on is `plane:failed_units`' alone | critical when mail programs cannot connect or a certificate is under seven days; warning otherwise |
-| `plane:site_code_unverified` | the latest host report shows a site whose `code_check` failed: its code is not what was shipped (each package named in plain words: a file changed, added or missing, not built by Joinery, signed by a key the host does not trust, not in the public log); or, on a host whose `host_restrictions` refuse unsigned code (or cannot be read), a running site whose check is missing, unreadable or more than two days old. One incident per node, naming every site. It reports only: nothing is turned off (specs/host_restrictions.md D8) | critical for a failed check; warning for a site not checked |
+| `plane:site_code_unverified` | the latest host report shows a site whose `code_check` failed: its code is not what was shipped (each package named in plain words: a file changed, added or missing, not built by Joinery, signed by a key the host does not trust, not in the public log, or a release manifest of another release than the code — `wrong_release`, which a container recreated from an image built on an older release shows, and which an upgrade realigns); or, on a host whose `host_restrictions` refuse unsigned code (or cannot be read), a running site whose check is missing, unreadable or more than two days old. One incident per node, naming every site. It reports only: nothing is turned off (specs/host_restrictions.md D8) | critical for a failed check; warning for a site whose only failure is `wrong_release`, and for a site not checked |
 | `plane:certificate` | the served certificate has a problem (`mgn_cert_problem`, see *Certificate monitoring*) | warning; critical under seven days |
 | `plane:agent_silent` | a paired agent has not checked in for two hours, and its owner did not switch it off | critical |
 | `plane:unmanageable` | the agent cannot verify the scripts it would run as root (`mgn_script_trust`) | critical |
@@ -2095,7 +2095,14 @@ in [Verifying backups](../../../docs/backups.md#verifying-backups):
   is named in the pass's report and the stamp is left as it was, so a network
   blip is neither shown as an incomplete backup nor clears a real one found
   last time. The check runs on every retention listing, which is once per
-  backup cycle for each node, not on every tick.
+  backup cycle for each node, not on every tick. Every offloaded file an index
+  it read marks stored and the listing lacks goes to that node's run in the
+  same pass as `objects_missing`, and the run stores those files again from the
+  site's copy ([Backups § Objects backup storage lost](../../../docs/backups.md)). The
+  object half reads every restore point's index in each chain it holds, not
+  only the newest, and names the restore points that cannot bring a file back
+  by their times (`compare_chain_indexes`); earlier restore points that name a
+  lost location stay reported until retention removes their chain.
 - **Opened and read** is dispatched as a `verify_backup` job (level 2, of the
   newest backup in backup storage) when `FleetBackupPolicy::is_verify_due()` says
   so: the policy's `verify_every_days` is above zero (fleet default

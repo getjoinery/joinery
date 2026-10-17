@@ -2,6 +2,8 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.17 - keeps the release manifest the code matches (run_spec_code_manifest), the site root's or
+#                the copy its config keeps, not the site root's as found (B6)
 # Version: 1.16 - a site its host holds quiet (a dormant copy, a frozen source) is refused before
 #                anything changes: its own state is in its container (run_spec_quiet_refusal,
 #                specs/site_container_engine.md D9).
@@ -675,8 +677,12 @@ if [ "$STAGE" = "swap" ]; then
     [ -s "${WORK}/${DB}.dump" ] || die "the dump is empty; the site's writes are stopped — restart it with: ${ENGINE} restart ${SITE}"
     site_engine exec "$SITE" bash -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dumpall -U postgres --roles-only' \
         | grep -vE '^(CREATE|ALTER) ROLE postgres[ ;]' > "${WORK}/roles.sql"
+    # The manifest the code matches: the site root's, else the copy its config
+    # keeps; the site root's as found when the code matches neither.
+    MF_DIR="$(run_spec_code_manifest "$SITE")"
+    MF_DIR="${MF_DIR:-/var/www/html/${SITE}}"
     for f in RELEASE_MANIFEST RELEASE_MANIFEST.sig; do
-        site_engine cp "${SITE}:/var/www/html/${SITE}/${f}" "${WORK}/${f}" \
+        site_engine cp "${SITE}:${MF_DIR}/${f}" "${WORK}/${f}" \
             || die "could not keep ${SITE}'s ${f}; nothing was moved. Restart it with: ${ENGINE} restart ${SITE}"
     done
     save_host_vhosts

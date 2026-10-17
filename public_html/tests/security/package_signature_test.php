@@ -25,6 +25,8 @@
  *                an edit (reviewer2 F1, F4)
  * @version 1.2 - editedSinceInstall(): a changed, added or removed file is an edit and is named; unsigned
  *                and a stranger's key are not; one answer per request (specs/local_edits_detected.md)
+ * @version 1.4 - verifyTree(): a core manifest of another release than the code is wrong_release; a changed
+ *                file beside this release's manifest stays tampered
  * @version 1.3 - verifyTree() hands back the core package's verdict
  * @version 1.2 - verifyTree() passes over a sandboxed plugin, and judges one with PHP beside its module as native
  * @version 1.1 - verifyTree(): a whole site root, every failure listed, style themes passed over, data
@@ -298,6 +300,27 @@ check($got === array(
 		'theme pagey' => 'unsigned',
 	), 'every failure is listed, one per package: an added core file, an unsigned plugin and page theme, a module folder with PHP in it, an edited plugin, a loose file',
 	json_encode($got));
+
+// A container recreated from an older image: upgraded code beside the older
+// release's signed manifest. Every file the upgrade changed fails; the answer
+// is the release mismatch, not whichever changed file the walk reached first.
+$older = $work . '/older';
+$put($older, array('public_html/VERSION' => "0.8.492\n", 'public_html/RELEASE_STATEMENT' => "{\"old\":1}\n",
+	'public_html/index.php' => "<?php echo 1;\n", 'maintenance_scripts/install_tools/x.sh' => "#!/bin/bash\n"));
+TreeManifestPublisher::write($older, $older, $keys);
+$put($older, array('public_html/VERSION' => "0.8.494\n", 'public_html/RELEASE_STATEMENT' => "{\"new\":1}\n"));
+$core_verdict = null;
+$f = PackageSignature::verifyTree($older, $keys_file, $style, $sandboxed, $core_verdict);
+check(count($f) === 1 && $f[0]['kind'] === 'core' && $f[0]['verdict']->verdict === PackageSignature::WRONG_RELEASE
+	&& $f[0]['verdict']->file === 'public_html/VERSION' && strpos($f[0]['verdict']->detail, 'release 0.8.494') !== false
+	&& $core_verdict->verdict === PackageSignature::WRONG_RELEASE && !$core_verdict->signed(),
+	'a manifest listing another release\'s VERSION is wrong_release, naming the code\'s release; still a failure',
+	$f ? $f[0]['verdict']->line() : 'no failure');
+$put($older, array('public_html/VERSION' => "0.8.492\n", 'public_html/RELEASE_STATEMENT' => "{\"old\":1}\n",
+	'public_html/index.php' => "<?php echo 2;\n"));
+$f = PackageSignature::verifyTree($older, $keys_file);
+check(count($f) === 1 && $f[0]['verdict']->verdict === PackageSignature::TAMPERED && $f[0]['verdict']->file === 'public_html/index.php',
+	'a changed file beside a manifest of this release is still tampered', $f ? $f[0]['verdict']->line() : 'no failure');
 
 // The keys are the machine's, never the tree's: a tree carrying a key file of
 // its own (an archive being restored) is not checked against it.

@@ -4,6 +4,8 @@
 # rotation, on bare metal its scheduled-task cron entry, and in a container
 # its signed release manifest.
 #
+# Version: 1.7 - Each log the site and its test site write is kept www-data's: Apache recreates a missing
+#                log as root, and rotation, which runs as www-data, then failed logrotate.service.
 # Version: 1.6 - (comment) the converger also runs this alone hourly for the code check (_plugin_installers_start.sh 2.39).
 # Version: 1.5 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3); a Podman site took its own cron entry and dropped
 #                the held manifest an image rebuild puts back.
@@ -42,6 +44,8 @@
 #   - in a container, {site}/RELEASE_MANIFEST(.sig) and its kept copy in
 #     {site}/config/release_manifest/ agree, and are the release the code
 #     matches. Neither is ever replaced by one the code does not match.
+#   - the site's and its test site's logs/*.log owned by www-data, the user
+#     their rotation runs as;
 #   - on a host that refuses unsigned code, {site}/config/code_check: whether the
 #     code is what was shipped, rewritten on every run.
 #
@@ -129,6 +133,29 @@ elif [[ -d "$(dirname "${LOGROTATE}")" ]]; then
         || { warn "could not write ${LOGROTATE}"; FAILED=1; }
 else
     say "no logrotate on this machine - rotation skipped"
+fi
+
+# --- who owns the logs ----------------------------------------------------------
+# Apache opens its logs as root, so a log that went missing comes back owned by
+# root. Rotation runs as www-data (copytruncate opens the log to write it), and
+# one log it cannot open fails the whole logrotate.service, every site's
+# rotation with it. Each log the site and its test site write goes back to
+# www-data. A regular file with one link only, and the link itself never
+# followed: the folder is www-data's, and nothing it puts there may turn this
+# into a chown of a file somewhere else.
+LOG_CHOWN=(chown -h www-data:www-data)
+[[ "$(id -u)" != "0" && -n "${JOINERY_SITE_HOUSEKEEPING_CHOWN:-}" ]] && LOG_CHOWN=("${JOINERY_SITE_HOUSEKEEPING_CHOWN}")
+if [[ "$(id -u)" == "0" ]] && ! getent passwd www-data > /dev/null 2>&1; then
+    :   # no www-data on this machine: nothing rotates as it
+else
+    for LOG_DIR in "${SITE_ROOT}/logs" "$(dirname "${SITE_ROOT}")/${SITENAME}_test/logs"; do
+        [[ -d "${LOG_DIR}" && ! -L "${LOG_DIR}" ]] || continue
+        while IFS= read -r -d '' LOG_FILE; do
+            "${LOG_CHOWN[@]}" "${LOG_FILE}" \
+                && say "${LOG_FILE} was not www-data's - rotation could not open it; it is again" \
+                || { warn "could not give ${LOG_FILE} back to www-data"; FAILED=1; }
+        done < <(find -P "${LOG_DIR}" -maxdepth 1 -type f -name '*.log' -links 1 ! -user www-data -print0 2>/dev/null)
+    done
 fi
 
 # --- scheduled tasks ----------------------------------------------------------

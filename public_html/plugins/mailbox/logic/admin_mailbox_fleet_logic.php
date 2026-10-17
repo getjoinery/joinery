@@ -9,6 +9,7 @@
  * never show it. The console's own functions live here; what it shares with
  * the tenant surfaces (flash, settings writes) stays in includes/relay_admin.php.
  *
+ * @version 1.2 - retire_shard: a shard and its managed node leave together
  * @version 1.1 - the console's functions moved here from relay_admin.php
  * @version 1.0
  */
@@ -68,6 +69,23 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 	if ($action === 'provision_shard') {
 		$result = admin_mailbox_relay_provision_shard($input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	if ($action === 'retire_shard') {
+		$shard = new MailboxFleetShard(intval($input['mfs_mailbox_fleet_shard_id'] ?? 0), TRUE);
+		if (!$shard->key) {
+			admin_mailbox_relay_flash($session, 'There is no such shard.', 'Cannot retire shard');
+			return LogicResult::redirect($self_url);
+		}
+		try {
+			$shard->assert_can_write($session);
+			$notes = $shard->retire();
+			admin_mailbox_relay_flash($session,
+				'Shard ' . $shard->get('mfs_name') . ' is retired. ' . implode(' ', $notes), 'Shard retired');
+		} catch (MailboxFleetShardException $e) {
+			admin_mailbox_relay_flash($session, $e->getMessage(), 'Cannot retire shard');
+		}
 		return LogicResult::redirect($self_url);
 	}
 
