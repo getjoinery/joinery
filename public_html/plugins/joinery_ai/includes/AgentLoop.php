@@ -68,7 +68,7 @@ class AgentLoop {
     public static function resolveThinkingLevel($row_value, $setting_value): string {
         $v = ($row_value === null || $row_value === '') ? $setting_value : $row_value;
         $v = strtolower((string)$v);
-        return in_array($v, ['off', 'low', 'medium', 'high'], true) ? $v : 'off';
+        return isset(AiModelRequirement::THINKING_LEVELS[$v]) ? $v : 'off';
     }
 
     /** Short display label for a model id, sized for a one-line status

@@ -310,6 +310,15 @@ class AiEndpointRegistry {
         return $out;
     }
 
+    /** A declared `effort_levels` list kept to known levels in ladder order;
+     *  none declared (or none known) is the three every reasoning model takes. */
+    private static function effortLevels($declared): array {
+        $declared = is_array($declared) ? array_map('strval', $declared) : [];
+        $out = array_values(array_filter(array_keys(AiModelRequirement::THINKING_LEVELS),
+            function ($l) use ($declared) { return $l !== 'off' && in_array($l, $declared, true); }));
+        return $out ?: AiModelRequirement::DEFAULT_EFFORT_LEVELS;
+    }
+
     /** A declared catalog entry, filled out with its endpoint's facts. */
     private static function normalizeDeclared(array $m, array $e): array {
         return [
@@ -325,6 +334,9 @@ class AiEndpointRegistry {
             'thinking_style' => (string)($m['thinking_style'] ?? 'budget'),
             // False for a model that refuses any non-default temperature/top_p.
             'sampling'    => (bool)($m['sampling'] ?? true),
+            // The effort levels the model accepts, least first; a level above
+            // its highest runs at its highest (AiModelResolver::thinkingDirectiveFor).
+            'effort_levels' => self::effortLevels($m['effort_levels'] ?? null),
             'tools'       => (bool)($m['tools'] ?? true),
             'context'     => isset($m['context']) ? (int)$m['context'] : null,
             'attachments' => [

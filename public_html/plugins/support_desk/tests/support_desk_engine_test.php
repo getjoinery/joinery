@@ -294,6 +294,7 @@ $last = end($sent['messages']);
 check(is_array($last['content']) && ($last['content'][0]['cache_control'] ?? null) === array('type' => 'ephemeral')
 	&& strpos($last['content'][0]['text'], '(Asked from the page /admin/admin_backups)') === 0,
 	'the question carries its page and the conversation breakpoint');
+check(SupportTurn::requirement()->thinkingLevel() === 'medium', 'the desk asks its model to reason at medium');
 $thread->load();
 check((int)$thread->get('sth_input_tokens') === 760 && (int)$thread->get('sth_output_tokens') === 90, 'the thread totals the turn');
 

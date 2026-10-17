@@ -43,8 +43,14 @@ function chat_controls_logic(array $input): LogicResult {
 
     $brave_key_set = (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '';
 
+    $thinking_levels = [];
+    foreach (AiModelRequirement::THINKING_LEVELS as $id => $label) {
+        $thinking_levels[] = ['id' => $id, 'label' => $label];
+    }
+
     return LogicResult::render([
         'models'               => $models,
+        'thinking_levels'      => $thinking_levels,
         'web_search_available' => $brave_key_set,
         'defaults'             => [
             'model'          => ChatRunner::defaultModel(),

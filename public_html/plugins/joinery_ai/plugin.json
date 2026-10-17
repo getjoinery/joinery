@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.26.6",
+    "version": "0.26.7",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -316,7 +316,8 @@
                 "group": "chat",
                 "label": "Default thinking level",
                 "type": "select",
-                "options": {"low": "Low", "medium": "Medium", "high": "High"}
+                "options": {"low": "Low", "medium": "Medium", "high": "High", "xhigh": "Extra high", "max": "Max"},
+                "helptext": "Extra high and Max think longest and cost the most. A model that tops out lower runs at its highest level."
         },
         {
             "name": "joinery_ai_default_web_search",

@@ -204,7 +204,7 @@ if (!function_exists('joai_pin_svg')) {
 
                     <label>Thinking
                         <select id="joai-thinking-level" class="joai-chat-control" data-field="thinking_level">
-                            <?php foreach (['off'=>'Off','low'=>'Low','medium'=>'Medium','high'=>'High'] as $lv => $lbl): ?>
+                            <?php foreach (AiModelRequirement::THINKING_LEVELS as $lv => $lbl): ?>
                                 <option value="<?php echo $lv; ?>" <?php echo $lv === $thinking_level ? 'selected' : ''; ?>><?php echo $lbl; ?></option>
                             <?php endforeach; ?>
                         </select>

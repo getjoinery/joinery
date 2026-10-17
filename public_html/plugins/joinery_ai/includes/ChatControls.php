@@ -70,7 +70,7 @@ class ChatControls {
 
             case 'thinking_level':
                 $v = strtolower(trim((string)$value));
-                if (!in_array($v, ['off', 'low', 'medium', 'high'], true)) {
+                if (!isset(AiModelRequirement::THINKING_LEVELS[$v])) {
                     throw new InvalidArgumentException('Invalid thinking level.');
                 }
                 return [$col, $v];

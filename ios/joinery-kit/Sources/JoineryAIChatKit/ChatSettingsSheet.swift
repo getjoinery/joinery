@@ -15,8 +15,6 @@ struct ChatSettingsSheet: View {
     @State private var maxTokens = ""
     @State private var instructions = ""
 
-    private let thinkingLevels = ["off", "low", "medium", "high"]
-
     var body: some View {
         NavigationStack {
             Group {
@@ -77,8 +75,8 @@ struct ChatSettingsSheet: View {
 
             Section("Reasoning") {
                 Picker("Thinking", selection: thinkingBinding) {
-                    ForEach(thinkingLevels, id: \.self) { level in
-                        Text(level.capitalized).tag(level)
+                    ForEach(meta.thinkingLevels) { level in
+                        Text(level.label).tag(level.id)
                     }
                 }
                 .accessibilityIdentifier("chat_set_thinking")

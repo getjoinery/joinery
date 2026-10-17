@@ -99,14 +99,15 @@ class AnthropicProvider implements LlmProviderInterface {
             if (($directive['style'] ?? 'budget') === 'adaptive') {
                 if (!empty($directive['enabled'])) {
                     $params['thinking'] = ['type' => 'adaptive'];
-                    if (in_array($effort, ['low', 'medium', 'high'], true)) {
+                    if (in_array($effort, ['low', 'medium', 'high', 'xhigh', 'max'], true)) {
                         $params['output_config'] = ['effort' => $effort];
                     }
                 }
                 $directive = ['enabled' => false];
             }
             $budget = empty($directive['enabled'])
-                ? 0 : (['low' => 1024, 'medium' => 4096, 'high' => 12000][$effort] ?? 1024);
+                ? 0 : (['low' => 1024, 'medium' => 4096, 'high' => 12000,
+                        'xhigh' => 24000, 'max' => 32000][$effort] ?? 1024);
             if ($budget > 0) {
                 $params['thinking'] = ['type' => 'enabled', 'budget_tokens' => $budget];
                 // Anthropic requires max_tokens > budget_tokens; leave room for the

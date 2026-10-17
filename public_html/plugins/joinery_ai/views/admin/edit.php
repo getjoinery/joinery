@@ -430,8 +430,8 @@ $advanced_model_html = ob_get_clean();
 
 $formwriter->dropinput('rcp_thinking_level', 'Thinking Level', [
     'value' => (string)$recipe->get('rcp_thinking_level') ?: 'off',
-    'options' => ['off' => 'Off', 'low' => 'Low', 'medium' => 'Medium', 'high' => 'High'],
-    'helptext' => 'How hard the model reasons before answering. Off skips the reasoning pass (fastest).',
+    'options' => AiModelRequirement::THINKING_LEVELS,
+    'helptext' => 'How hard the model reasons before answering. Off skips the reasoning pass (fastest); Extra high and Max cost the most. A model that tops out lower runs at its highest level.',
 ]);
 
 // --- Agent-mode fields (tools/models/actions/workspace) ---
