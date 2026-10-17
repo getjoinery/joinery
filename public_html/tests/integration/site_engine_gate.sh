@@ -279,6 +279,16 @@ chk "build.sh checks every checkout against its commit" "$(grep -c '^fetch [a-z-
 chk "build.sh reads the tags back from the binary" "$(grep -c 'go version -m "\$PODMAN_BIN"' "$BUILD")" "1"
 chk "build.sh refuses a binary from another commit" "$(grep -c 'not ${PODMAN_COMMIT}' "$BUILD")" "1"
 chk "build.sh builds only on the hosts' release" "$(grep -c 'VERSION_CODENAME:-}" == "resolute"' "$BUILD")" "1"
+# install.sh asks before it makes the data root (B30's early half); the release
+# it names is the one build.sh builds on (resolute is 26.04).
+chk "preflight names the release build.sh builds on" "$(grep -c '^ENGINE_UBUNTU="26.04"$' "$INST")" "1"
+chk "preflight on the engine's release: passes" "$(run preflight)" "0"
+host_is 24.04 "Ubuntu 24.04.4 LTS"
+chk "preflight on 24.04: refused" "$(JOINERY_SITE_ENGINE_ROOT="$T/pre" bash "$INST" preflight > "$T/out" 2>&1; echo $?)" "1"
+chk "  saying which release it needs and which this is" "$(grep -c 'engine cannot run here: it is built on Ubuntu 26.04 and links against that release.s libraries, and this machine is Ubuntu 24.04.4 LTS' "$T/out")" "1"
+chk "  and nothing written" "$([ -e "$T/pre" ] && echo written || echo nothing)" "nothing"
+chk "preflight on 24.04, in a tree that names no engine: nothing to refuse" "$(JOINERY_SITE_ENGINE_STAMP="$T/no-engine" run preflight)" "0"
+host_is 26.04 "Ubuntu 26.04.1 LTS"
 
 echo
 echo "site_engine gate: $passed passed, $failed failed"
