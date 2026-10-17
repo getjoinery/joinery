@@ -4,6 +4,11 @@
 # a real one. Sourced by install.sh (write_universal_vhost) and render_vhost.sh
 # (every converge); never run on its own.
 #
+# Version: 1.1 - The placeholder is a leaf: basicConstraints CA:FALSE, keyUsage
+#                digitalSignature, extendedKeyUsage serverAuth. openssl req -x509
+#                takes its config's v3_ca section otherwise, and Apache logged
+#                'server certificate is a CA certificate' (AH01906) on every start.
+#                A placeholder minted as a CA is replaced on the next run.
 # Version: 1.0 - specs/implemented/tls_and_origin_trust.md WP12 (B10). A fresh box behind
 #                an edge can never get its first certificate otherwise: the
 #                edge redirects the HTTP-01 challenge to https, and a box with
@@ -18,7 +23,7 @@
 #                refuses to count it as done.
 #
 # Contract: idempotent; root; writes only when neither the Let's Encrypt
-# lineage nor the placeholder exists for the name. issue_origin_cert.sh and
+# lineage nor a leaf placeholder exists for the name. issue_origin_cert.sh and
 # certbot never touch it, so a lineage that is deleted by hand falls back to
 # it rather than to no TLS at all.
 #
@@ -35,7 +40,11 @@ mint_placeholder_cert() {
     local dir="${root}/${domain}"
 
     [ -f "${le_dir}/live/${domain}/fullchain.pem" ] && return 0
-    [ -f "${dir}/fullchain.pem" ] && [ -f "${dir}/privkey.pem" ] && return 0
+    if [ -f "${dir}/fullchain.pem" ] && [ -f "${dir}/privkey.pem" ]; then
+        # One minted before 1.1 says it is a CA; mint it again as a leaf.
+        command -v openssl >/dev/null 2>&1 || return 0
+        openssl x509 -in "${dir}/fullchain.pem" -noout -ext basicConstraints 2>/dev/null | grep -q 'CA:TRUE' || return 0
+    fi
     command -v openssl >/dev/null 2>&1 || { echo "placeholder: openssl is not installed; ${domain} has no TLS listener until a certificate is issued" >&2; return 1; }
 
     mkdir -p "${dir}" 2>/dev/null || return 1
@@ -45,6 +54,8 @@ mint_placeholder_cert() {
     # sees the names it expects while refusing the issuer, which is right.
     if ! openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
             -subj "/CN=${domain}" -addext "subjectAltName=DNS:${domain},DNS:www.${domain}" \
+            -addext "basicConstraints=critical,CA:FALSE" -addext "keyUsage=critical,digitalSignature" \
+            -addext "extendedKeyUsage=serverAuth" \
             -keyout "${dir}/privkey.pem.tmp" -out "${dir}/fullchain.pem.tmp" >/dev/null 2>&1; then
         rm -f "${dir}/privkey.pem.tmp" "${dir}/fullchain.pem.tmp"
         echo "placeholder: openssl could not mint a certificate for ${domain}" >&2

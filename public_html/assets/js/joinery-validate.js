@@ -1,6 +1,9 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.4 - options.changedOnly: fields checked only once their value
+ *   differs from the one the page was drawn with (a stored setting whose value
+ *   predates its rule must not block saving the rest of the page)
  * @version 1.2.3 - the pattern rule accepts {source, flags} so a PHP rule's delimiter
  *   and flags survive the trip to the browser
  * @version 1.2.2
@@ -26,7 +29,7 @@
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.2.4 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -71,6 +74,14 @@ console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bo
 
             // Track which fields have been touched by user
             this.touchedFields = new Set();
+
+            // Fields checked only once their value changes, and the value each
+            // was drawn with.
+            this.changedOnly = new Set(options.changedOnly || []);
+            this.initialValues = {};
+            for (const name of this.changedOnly) {
+                this.initialValues[name] = this.valueKey(name);
+            }
 
             // Flag to prevent double-submission during validation
             this.isValidating = false;
@@ -430,9 +441,24 @@ console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bo
             return isValid;
         }
 
+        /** One string for a field's current value, to compare with the value it was drawn with. */
+        valueKey(name) {
+            return Array.from(this.findFields(name)).map(el => {
+                if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? 'on:' + el.value : '';
+                if (el.multiple && el.options) return Array.from(el.options).filter(o => o.selected).map(o => o.value).join(',');
+                return el.value;
+            }).join('\u0001');
+        }
+
         async validateField(fieldName) {
             const cleanName = fieldName.replace(/['"]/g, '');
             const rules = this.rules[fieldName];
+
+            if (this.changedOnly.has(cleanName) && this.valueKey(cleanName) === this.initialValues[cleanName]) {
+                const unchanged = this.findFields(cleanName);
+                if (unchanged.length) this.clearError(unchanged[0]);
+                return true;
+            }
 
             // Get field(s) using findFields method
             let fields = this.findFields(cleanName);

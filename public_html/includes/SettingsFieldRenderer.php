@@ -12,6 +12,7 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
+ * @version 1.7 - a setting's rule is checked in the browser only once its value changes
  * @version 1.6
  * @changelog 1.6 - a credential is one passwordinput() with `stored`: FormWriter
  *   draws it locked with a Reset button; the Clear checkbox, CLEAR_PREFIX and
@@ -301,7 +302,12 @@ class SettingsFieldRenderer {
 
 		$field = array();
 		if (!empty($declaration['helptext']))   $field['helptext']   = $declaration['helptext'];
-		if (!empty($declaration['validation'])) $field['validation'] = $declaration['validation'];
+		if (!empty($declaration['validation'])) {
+			$field['validation'] = $declaration['validation'];
+			// A value stored before its rule existed must not block every
+			// other field on the page; the writer checks changes only too.
+			if (method_exists($form, 'validateWhenChanged')) $form->validateWhenChanged($name);
+		}
 		if (!empty($declaration['help_modal'])) $field['help_modal'] = $declaration['help_modal'];
 		if (in_array($name, $options['disabled'] ?? array(), true)) $field['disabled'] = true;
 		if (isset($triggers[$name])) $field['visibility_rules'] = $triggers[$name];

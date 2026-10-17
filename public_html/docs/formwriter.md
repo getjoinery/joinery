@@ -1571,6 +1571,14 @@ if (!$is_logged_in) {
 
 **Skip for logged-in users:** These protections are unnecessary for authenticated users — wrap them in a `!$is_logged_in` check.
 
+### Checking a Field Only Once It Changes
+
+`$formwriter->validateWhenChanged('name')` makes the browser check that field's rules
+only once its value differs from the one the page was drawn with. It is for a field
+that shows a stored value whose rule may be newer than the value (the settings
+renderer marks every setting with a rule). Never use it on a field a new record must
+fill in: a blank required field is unchanged, and would pass.
+
 ### Server-Side Validation
 
 **Always validate on the server - never trust client-side validation alone!**

@@ -245,7 +245,8 @@ STUB
 cat > "$T/bin/openssl" <<'STUB'
 #!/bin/bash
 # s_client hands the name it was asked for down the pipe; x509 answers an
-# expiry for it: one name nearly expired, one far off, one whose handshake
+# expiry, subject and issuer for it: one name nearly expired and signing
+# itself (a placeholder), one far off from a real issuer, one whose handshake
 # fails and prints nothing.
 case "$1" in
     s_client)
@@ -255,9 +256,9 @@ case "$1" in
     x509)
         read -r _ name
         case "$name" in
-            www.*) echo "notAfter=$(date -u -d '+5 days +1 hour' '+%b %d %H:%M:%S %Y GMT')" ;;
+            www.*) echo "notAfter=$(date -u -d '+5 days +1 hour' '+%b %d %H:%M:%S %Y GMT')"; echo "subject=CN=$name"; echo "issuer=CN=$name" ;;
             "") exit 1 ;;
-            *) echo "notAfter=$(date -u -d '+80 days +1 hour' '+%b %d %H:%M:%S %Y GMT')" ;;
+            *) echo "notAfter=$(date -u -d '+80 days +1 hour' '+%b %d %H:%M:%S %Y GMT')"; echo "subject=CN=$name"; echo "issuer=CN=R11,O=Let's Encrypt,C=US" ;;
         esac ;;
 esac
 STUB
@@ -353,6 +354,12 @@ for i in $(seq 0 $(( ${sc_n:-0} - 1 ))); do
     case "$d" in *fail*) sc_ok=1 ;; www.*) [ "$l" = 5 ] || sc_ok=1 ;; *) [ "$l" = 80 ] || sc_ok=1 ;; esac
 done
 chk "served certificates: whole days left per name, a failed handshake left out" "$sc_ok" "0"
+ss_ok=0
+for i in $(seq 0 $(( ${sc_n:-0} - 1 ))); do
+    d="$(jv "$T/root.json" served_certificates.$i.domain)"; s="$(jv "$T/root.json" served_certificates.$i.self_signed)"
+    case "$d" in www.*) [ "$s" = true ] || ss_ok=1 ;; *) [ "$s" = false ] || ss_ok=1 ;; esac
+done
+chk "served certificates: self_signed where the issuer is the subject, not for a real issuer" "$ss_ok" "0"
 chk "containers: only the two whose name is their SITENAME" "$(jv "$T/root.json" containers count)/$(jv "$T/root.json" containers.0.name)/$(jv "$T/root.json" containers.1.name)" "2/siteone/sitetwo"
 chk "containers: one answering through PHP, one not" "$(jv "$T/root.json" containers.0.answers)/$(jv "$T/root.json" containers.1.answers)" "yes/no"
 # A copy waiting for its key, or a frozen source, is quiet on its host

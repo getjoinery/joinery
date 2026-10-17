@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.30 - served_certificates: self_signed, true where the certificate's issuer is its own
+#                subject (the install placeholder, or anything else no browser trusts).
 # Version: 1.29 - hardening: whether the running kernel holds every setting host housekeeping pins
 #                (install_tools/_kernel_settings.sh; specs/multi_tenant_host_hardening.md WP1), and each one it
 #                does not. kernel_events_24h counts kernel_warning, the kernel's own WARNING/BUG/oops lines (D7),
@@ -944,7 +946,7 @@ site_names() {
 }
 
 emit_served_certificates() {
-    local addr name end end_s now days n=0 first=1 primary
+    local addr name cert end subj iss self end_s now days n=0 first=1 primary
     command -v openssl >/dev/null 2>&1 || { printf '"unknown"'; return; }
     addr="$(site_vhost_address)"
     now="$(date -u +%s)"
@@ -952,15 +954,19 @@ emit_served_certificates() {
     printf '['
     while read -r name; do
         [[ -n "$name" ]] || continue
-        end="$(run openssl s_client -connect "${addr}:443" -servername "$name" < /dev/null | run openssl x509 -noout -enddate)"
-        end="${end#notAfter=}"
+        cert="$(run openssl s_client -connect "${addr}:443" -servername "$name" < /dev/null | run openssl x509 -noout -enddate -subject -issuer -nameopt RFC2253)"
+        end="$(printf '%s\n' "$cert" | sed -n 's/^notAfter=//p' | head -n 1)"
+        subj="$(printf '%s\n' "$cert" | sed -n 's/^subject=//p' | head -n 1)"
+        iss="$(printf '%s\n' "$cert" | sed -n 's/^issuer=//p' | head -n 1)"
         [[ -n "$end" ]] || continue
+        self=false
+        [[ -n "$subj" && "$subj" == "$iss" ]] && self=true
         end_s="$(date -u -d "$end" +%s 2>/dev/null)" || continue
         [[ "$end_s" =~ ^[0-9]+$ ]] || continue
         days=$(( (end_s - now) / 86400 ))
         (( first )) || printf ','
         first=0
-        printf '{"domain":%s,"days_left":%s,"primary":%s}' "$(json_str "$name")" "$days" "$([[ "$name" == "$primary" ]] && echo true || echo false)"
+        printf '{"domain":%s,"days_left":%s,"primary":%s,"self_signed":%s}' "$(json_str "$name")" "$days" "$([[ "$name" == "$primary" ]] && echo true || echo false)" "$self"
         n=$((n+1))
     done < <(site_names)
     printf ']'
