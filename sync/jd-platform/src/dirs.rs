@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 pub const BUNDLE_ID: &str = "com.joinery.drive";
 pub const APP_NAME: &str = "Joinery Drive";
 pub const BINARY_NAME: &str = "joinery-drive";
+/// The tray, installed beside the daemon in every packaging layout.
+pub const TRAY_BINARY_NAME: &str = "joinery-drive-tray";
 
 /// Everything the client needs a path for.
 #[derive(Debug, Clone, PartialEq, Eq)]

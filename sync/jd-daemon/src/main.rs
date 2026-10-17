@@ -45,7 +45,13 @@ fn main() -> ExitCode {
 
     let outcome = match cmd {
         "login" => cmd_login(&rest),
-        "daemon" => cmd_daemon(),
+        "daemon" => {
+            // On Windows, a console made for this process alone (double-click,
+            // or a logon entry naming the daemon itself) is a window whose
+            // close button stops sync. Let go of it; a terminal's is kept.
+            jd_platform::console::release_own_console();
+            cmd_daemon()
+        }
         "settings" => cmd_settings(),
         "status" => cmd_status(),
         "issues" => cmd_issues(),

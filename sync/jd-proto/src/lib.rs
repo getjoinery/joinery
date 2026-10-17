@@ -21,9 +21,22 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 /// Client identity for the 426 upgrade-gate handshake (docs/api.md
-/// § Client Versioning). One id per OS at packaging time; plumbing builds
-/// report the workspace version.
+/// § Client Versioning).
+///
+/// One id per operating system, decided by what the binary was compiled for.
+/// The gate's minimums are keyed by this string, so an instance can hold back a
+/// release that is broken on one platform without locking out the other two —
+/// which only works if a Mac never introduces itself as a Linux box.
+#[cfg(target_os = "macos")]
+pub const CLIENT_APP: &str = "joinery-sync-macos";
+#[cfg(target_os = "windows")]
+pub const CLIENT_APP: &str = "joinery-sync-windows";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub const CLIENT_APP: &str = "joinery-sync-linux";
+
+/// The workspace version (`sync/Cargo.toml`), which is also the version every
+/// installer is stamped with — so the number the gate compares is the number
+/// the user installed.
 pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, thiserror::Error)]

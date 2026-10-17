@@ -33,9 +33,11 @@ secret-service = ["keyring/sync-secret-service", "keyring/crypto-rust"]
 # be the forgets-everything-at-exit store the module refuses to fall back to.
 stand-in-keychain = []
 
-# Registering the daemon to start at login is a registry write on Windows.
+# Registering the daemon to start at login is a registry write on Windows, and a
+# daemon given a console window of its own lets go of it (console.rs).
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_System_Console",
     "Win32_System_Registry",
 ] }

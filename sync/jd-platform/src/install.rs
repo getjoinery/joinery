@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::dirs::{APP_NAME, BINARY_NAME};
+use crate::dirs::{APP_NAME, BINARY_NAME, TRAY_BINARY_NAME};
 
 /// The operating systems a build can be for, as the update feed spells them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +72,8 @@ impl Os {
     /// every packaging layout.
     pub fn tray_file_name(&self) -> String {
         match self {
-            Os::Windows => format!("{BINARY_NAME}-tray.exe"),
-            _ => format!("{BINARY_NAME}-tray"),
+            Os::Windows => format!("{TRAY_BINARY_NAME}.exe"),
+            _ => TRAY_BINARY_NAME.to_string(),
         }
     }
 }
