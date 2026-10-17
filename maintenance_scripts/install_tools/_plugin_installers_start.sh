@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.39 - A --when-changed tick with nothing to converge runs site housekeeping alone once the
+#                site's code check (config/code_check) is an hour old: on a host that refuses unsigned code
+#                the check runs hourly, not only daily and after a change (multi_tenant_host_hardening WP7, D8).
 # Version: 2.38 - Root request data_root_tpm2_off: the TPM2 chip no longer opens this server's data root (B43).
 # Version: 2.37 - a container is one with /.dockerenv (Docker) or /run/.containerenv (the site container engine, specs/site_container_engine.md WP3).
 # Version: 2.36 - install_sandbox_host.sh joins CORE_INSTALLERS: a site with a sandboxed plugin gets its plugin
@@ -582,6 +585,22 @@ fi
 STAMP_FILE="${STATE_DIR}/host_converger.stamp"
 LAST_FILE="${STATE_DIR}/host_converger.last"
 CONVERGE_MAX_AGE=86400
+# The code check's own cadence (specs/multi_tenant_host_hardening.md D8, WP7). On
+# a host that refuses unsigned code, site housekeeping checks the whole tree
+# against what was shipped and writes config/code_check; a tick that finds it an
+# hour old runs site housekeeping alone, not a converge. Measured on se1: about
+# 1 s warm and 3 s cold for a 256 MB site, so fifty sites cost under a minute of
+# CPU an hour; every minute would cost near a core. A site with no such file is
+# on a host that does not refuse (site housekeeping removes it there) or has not
+# converged yet, and neither is this tick's to start, so the tick reads one file
+# date and runs no PHP.
+CODE_CHECK_MAX_AGE=3600
+code_check_due() {
+    local f="${SITE_ROOT}/config/code_check" at
+    [[ "${MACHINE}" == "0" && -f "${f}" ]] || return 1
+    at="$(stat -c %Y "${f}" 2>/dev/null)" || return 1
+    (( $(date -u +%s) - at >= CODE_CHECK_MAX_AGE ))
+}
 
 record_last() {
     mkdir -p "${STATE_DIR}" 2>/dev/null || true
@@ -1259,7 +1278,11 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
        && [[ "${last_hash}" == "${CONVERGE_NOW_HASH}" ]] \
        && (( now - ${last_time:-0} < CONVERGE_MAX_AGE )); then
         # Nothing changed, nothing queued, the last run is fresh: this tick
-        # costs a hash and one directory read.
+        # costs a hash and one directory read, and the code check once an hour.
+        if code_check_due; then
+            echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') checking ${SITENAME}'s code (hourly)"
+            run_core_installer site_housekeeping.sh
+        fi
         exit 0
     fi
     if [[ "${REQUESTS_WAITING}" == "1" ]]; then

@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 120
-# covers: [maintenance_scripts/sysadmin_tools/host_report.sh]
+# covers: [maintenance_scripts/sysadmin_tools/host_report.sh, maintenance_scripts/install_tools/_kernel_settings.sh]
 #
 # host_report.sh is what the agent's host_report observe word runs as root
 # (specs/agent_tier1_recipes.md). This gate pins its contract, driven as an
@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -78,7 +78,7 @@ chk "disk figures are integers" "$(jv "$T/real.json" disk.used_bytes type)/$(jv 
 chk "disk reports what a writer can use, not total minus used" "$(jv "$T/real.json" disk.avail_bytes type)" "integer"
 chk "avail is below total minus used (the root reserve is not free space)" "$( a=$(jv "$T/real.json" disk.avail_bytes); u=$(jv "$T/real.json" disk.used_bytes); t=$(jv "$T/real.json" disk.total_bytes); [ "$a" -le $((t-u)) ]; echo $? )" "0"
 chk "inode use is a percentage or unknown" "$( v=$(jv "$T/real.json" disk.inodes_used_pct); [ "$v" = unknown ] || { [ "$v" -ge 0 ] && [ "$v" -le 100 ]; }; echo $? )" "0"
-chk "kernel events are three counts or unknown" "$( t=$(jv "$T/real.json" kernel_events_24h type); [ "$t" = object ] && [ "$(jv "$T/real.json" kernel_events_24h keys)" = "oom,enospc,io_error" ] || [ "$(jv "$T/real.json" kernel_events_24h)" = unknown ]; echo $? )" "0"
+chk "kernel events are four counts or unknown" "$( t=$(jv "$T/real.json" kernel_events_24h type); [ "$t" = object ] && [ "$(jv "$T/real.json" kernel_events_24h keys)" = "oom,enospc,io_error,kernel_warning" ] || [ "$(jv "$T/real.json" kernel_events_24h)" = unknown ]; echo $? )" "0"
 chk "memory figures are integers" "$(jv "$T/real.json" memory.used_bytes type)/$(jv "$T/real.json" memory.total_bytes type)" "integer/integer"
 chk "swap figures are integers" "$(jv "$T/real.json" swap.used_bytes type)/$(jv "$T/real.json" swap.total_bytes type)" "integer/integer"
 chk "reboot_required is a boolean" "$(jv "$T/real.json" reboot_required type)" "boolean"
@@ -191,8 +191,25 @@ STUB
 cat > "$T/bin/journalctl" <<'STUB'
 #!/bin/bash
 # The SSH read is unit-filtered; the event reads pass a pattern to -g. Answering
-# each the way the real journalctl would is what makes the counts meaningful.
+# each the way the real journalctl would is what makes the counts meaningful:
+# -g exits 1 when nothing matched, as it does when the journal cannot be read
+# (systemd 255 and 259; B35), and -n 0 tells the two apart. With -o cat and -q
+# a no-match prints nothing; a journalctl that cannot run the pattern says so on
+# stderr, with the same exit 1 (reviewer2 R2).
+if [ -n "${GATE_JOURNAL_GREP_BROKEN:-}" ] && [[ "$*" == *" -g "* ]]; then
+    echo "Compiled without pattern matching support" >&2
+    exit 1
+fi
 case "$*" in
+    *"-n 0"*)
+        [ -n "${GATE_JOURNAL_UNREADABLE:-}" ] && exit 1
+        exit 0
+        ;;
+    *"_TRANSPORT=kernel"*)
+        echo "WARNING: CPU: 1 PID: 77 at net/core/dev.c:123 thing+0x1/0x2"
+        echo "BUG: kernel NULL pointer dereference, address: 0000000000000008"
+        echo "kernel BUG at mm/slub.c:451!"
+        ;;
     *"-u ssh"*)
         echo "Failed password for invalid user eve from 203.0.113.9 port 4444 ssh2"
         echo "Invalid user eve from 203.0.113.9 port 4444"
@@ -210,7 +227,7 @@ case "$*" in
         echo "Out of memory: Killed process 1234 (postgres) total-vm:900000kB"
         ;;
     *"I/O error"*)
-        echo "-- No entries --"
+        exit 1
         ;;
 esac
 STUB
@@ -414,7 +431,47 @@ chk "sshd ports are every port line" "$(jv "$T/root.json" sshd.ports)" '["22","2
 chk "sshd allowed users and groups are lists" "$(jv "$T/root.json" sshd.allow_users)/$(jv "$T/root.json" sshd.allow_groups)" '["admin","deploy"]/["sshusers"]'
 chk "no host key or authorized-keys path from sshd -T reaches the object" "$(grep -c -E 'ssh_host_|authorized_keys' "$T/root.json")" "0"
 chk "the three events are counted from the system journal" "$(jv "$T/root.json" kernel_events_24h.oom)/$(jv "$T/root.json" kernel_events_24h.enospc)/$(jv "$T/root.json" kernel_events_24h.io_error)" "1/2/0"
-chk "journalctl's own no-entries line is not counted as an event" "$(jv "$T/root.json" kernel_events_24h.io_error)" "0"
+chk "a pattern nothing matched counts 0" "$(jv "$T/root.json" kernel_events_24h.io_error)" "0"
+chk "a pattern nothing matched (journalctl exits 1) is zero, not unknown (B35)" "$(jv "$T/root.json" kernel_events_24h type)" "object"
+chk "the kernel's own warnings are counted from its messages alone, a BUG() with no colon among them (D7, R1)" \
+    "$(jv "$T/root.json" kernel_events_24h.kernel_warning)|$(grep -c 'journal_event_count "\$KERNEL_EVENT_WARNING" _TRANSPORT=kernel' "$SCRIPT")" "3|1"
+# The rest by the functions alone, in a subshell each: a whole run per case
+# would double this gate's time.
+fn_src() { sed -n -e '/^safe_name() {/,/^}/p' -e '/^json_str() {.*}$/p' -e '/^json_num_or_unknown() {/,/^}/p' \
+    -e '/^run() {/,/^}/p' -e '/^in_container() {/p' -e '/^CMD_TIMEOUT=/p' -e '/^MAX_LIST=/p' -e '/^MAX_NAME=/p' \
+    -e '/^KERNEL_EVENT_[A-Z]*=/p' -e '/^journal_readable() {/p' -e '/^journal_event_count() {/,/^}/p' \
+    -e '/^emit_kernel_events() {/,/^}/p' -e '/^emit_hardening() {/,/^}/p' "$SCRIPT"; }
+fn_src > "$T/fns.sh"
+fn() { (PATH="$T/bin:$PATH"; . "$T/fns.sh"; "$@") 2>/dev/null; }
+chk "the functions under test were each found once, and what they read" \
+    "$(grep -c -E '^(journal_readable|journal_event_count|emit_kernel_events|emit_hardening|run|json_str|json_num_or_unknown|safe_name|in_container)\(\)' "$T/fns.sh")|$(grep -c -E '^(CMD_TIMEOUT|MAX_LIST|MAX_NAME|KERNEL_EVENT_[A-Z]+)=' "$T/fns.sh")|$(bash -n "$T/fns.sh" && echo parses)" "9|7|parses"
+chk "  and they count from a readable journal" "$(fn emit_kernel_events)" '{"oom":1,"enospc":2,"io_error":0,"kernel_warning":3}'
+chk "a journal this run cannot read: unknown" "$(GATE_JOURNAL_UNREADABLE=1 fn emit_kernel_events)" '"unknown"'
+chk "a journalctl that says it cannot run the pattern (exit 1, a complaint): unknown, never 0 (R2)" "$(GATE_JOURNAL_GREP_BROKEN=1 fn emit_kernel_events)" '"unknown"'
+mkdir -p "$T/badgrep"; printf '#!/bin/sh\nexit 2\n' > "$T/badgrep/grep"; chmod 755 "$T/badgrep/grep"
+chk "a grep that fails while counting: unknown, never its exit code as a count" \
+    "$( (PATH="$T/badgrep:$T/bin:$PATH"; . "$T/fns.sh"; journal_event_count "$KERNEL_EVENT_OOM") 2>/dev/null; echo "rc=$?")" "rc=1"
+
+echo "=== The pinned kernel settings (hardening, D1) ==="
+# A /proc/sys of the helper's own values, then one setting loosened and one
+# this kernel lacks.
+KP="$T/procsys"
+( . "$ROOT/maintenance_scripts/install_tools/_kernel_settings.sh"
+  for s in "${KERNEL_SETTINGS[@]}" "${NETWORK_SETTINGS[@]}"; do
+      k="${s%% =*}"; mkdir -p "$KP/$(dirname "${k//.//}")"; echo "${s##*= }" > "$KP/${k//.//}"
+  done )
+KS="$ROOT/maintenance_scripts/install_tools/_kernel_settings.sh"
+hard() { printf '{"hardening":%s}' "$(KERNEL_SETTINGS_PROC="$KP" HOST_REPORT_KERNEL_SETTINGS="${1:-$KS}" fn emit_hardening)" > "$T/hard.json"; }
+hard
+chk "every pinned setting held: ok, all 38 read" "$(jv "$T/hard.json" hardening.state)|$(jv "$T/hard.json" hardening.pinned)|$(jv "$T/hard.json" hardening.unread)|$(jv "$T/hard.json" hardening.drift count)" "ok|38|0|0"
+echo 0 > "$KP/kernel/yama/ptrace_scope"; rm "$KP/net/core/bpf_jit_harden"
+hard
+chk "a loosened setting is drift, naming it, its live value and the pinned one" \
+    "$(jv "$T/hard.json" hardening.state)|$(jv "$T/hard.json" hardening.drift.0.key)|$(jv "$T/hard.json" hardening.drift.0.live)|$(jv "$T/hard.json" hardening.drift.0.want)" "drift|kernel.yama.ptrace_scope|0|1"
+chk "  and one this run cannot read is unread, not drift" "$(jv "$T/hard.json" hardening.unread)|$(jv "$T/hard.json" hardening.drift count)" "1|1"
+hard "$T/no/_kernel_settings.sh"
+chk "without _kernel_settings.sh beside it: unknown" "$(jv "$T/hard.json" hardening)" "unknown"
+chk "  where it is looked for beside the script, by default" "$(grep -c 'pwd)/../install_tools/_kernel_settings.sh}"' "$SCRIPT")" "1"
 chk "with no limits on the machine, a site's drops are none" "$(jv "$T/root.json" containers.0.outbound_dropped)" "none"
 
 echo "=== Outbound limits (outbound_limits.sh) ==="
@@ -663,11 +720,12 @@ chk "every command runs under the per-command timeout" "$(grep -c '^run() { time
 # which every event pattern goes through. A journal read that is not piped into
 # grep -c is a journal read whose text could reach the object.
 chk "the journal is only ever counted (grep -c), never printed" "$(grep -c 'grep -c -E' "$SCRIPT")" "2"
-chk "journalctl appears twice, under run both times" "$(grep -c 'run journalctl --system' "$SCRIPT")" "2"
+chk "journalctl appears three times, each under the command timeout: the SSH read, the readability probe, which reads no line, and the event read" \
+    "$(grep -c 'run journalctl --system' "$SCRIPT")|$(grep -c 'run journalctl --system -n 0 --no-pager -q >/dev/null' "$SCRIPT")|$(grep -c 'timeout "\$CMD_TIMEOUT" journalctl --system' "$SCRIPT")|$(grep -c 'journalctl' <<< "$(grep -v '^[[:space:]]*#' "$SCRIPT")")" "2|1|1|3"
 # journalctl does the matching itself, so a day of log is never handed to the
 # shell; and the read is the SYSTEM journal, because an ENOSPC line comes from
 # the program that hit it and never from the kernel ring.
-chk "the event read filters in journalctl (-g) over the system journal" "$(grep -c 'run journalctl --system --since "24 hours ago" --no-pager -o cat -g' "$SCRIPT")" "1"
+chk "the event read filters in journalctl (-g) over the system journal" "$(grep -c 'journalctl --system "\$@" --since "24 hours ago" --no-pager -o cat -q -g "\$pattern" 2>&3' "$SCRIPT")" "1"
 chk "no kernel-ring read is left" "$(grep -c 'journalctl --system -k' "$SCRIPT")" "0"
 chk "the list cap is 20" "$(grep -c '^MAX_LIST=20' "$SCRIPT")" "1"
 chk "the site cap is 100" "$(grep -c '^MAX_SITES=100' "$SCRIPT")" "1"

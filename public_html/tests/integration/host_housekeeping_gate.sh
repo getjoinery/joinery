@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/_host_files.sh, public_html/includes/cloudflare_ip_ranges.txt]
+# covers: [maintenance_scripts/install_tools/host_housekeeping.sh, maintenance_scripts/install_tools/_host_files.sh, maintenance_scripts/install_tools/_kernel_settings.sh, public_html/includes/cloudflare_ip_ranges.txt]
 #
 # host_housekeeping.sh (specs/post_release_fleet_defects.md B2) run in its
 # override mode against a temporary /etc as an unprivileged user: it writes
@@ -362,6 +362,21 @@ chk "the network settings are written on every machine: spoofing, redirects, sou
 chk "each setting once, in one file or the other" \
     "$(cat "$SC" "$SN" | grep -v '^#' | awk -F' = ' '{print $1}' | sort | uniq -d | wc -l)" "0"
 chk "kmod's own file is not made where there is none" "$([ -e "$KM" ] && echo made || echo none)" "none"
+# The two files hold the one list the host report and multi_tenant_host.sh
+# check read (_kernel_settings.sh), line for line (WP1).
+( . "$SITE_ROOT/maintenance_scripts/install_tools/_kernel_settings.sh"
+  printf '%s\n' "${KERNEL_SETTINGS[@]}" > "$T/ks.kernel"; printf '%s\n' "${NETWORK_SETTINGS[@]}" > "$T/ks.network" )
+chk "the kernel file is the helper's kernel list, the network file its network list" \
+    "$(grep -v '^#' "$SC" | cmp -s - "$T/ks.kernel" && echo same)|$(grep -v '^#' "$SN" | cmp -s - "$T/ks.network" && echo same)|$(wc -l < "$T/ks.kernel")" "same|same|16"
+# A tree without the helper (a bundle missing it) writes no settings file and
+# fails the run, rather than writing empty ones.
+NH="$T/nohelper"; mkdir -p "$NH/maintenance_scripts" "$NH/public_html/includes" "$T/kernel_nh/etc/sysctl.d" "$T/kernel_nh/etc/modprobe.d"
+cp -r "$SITE_ROOT/maintenance_scripts/install_tools" "$NH/maintenance_scripts/"
+cp "$SITE_ROOT/public_html/includes/cloudflare_ip_ranges.txt" "$NH/public_html/includes/"
+rm "$NH/maintenance_scripts/install_tools/_kernel_settings.sh"
+out="$(JOINERY_HOUSEKEEPING_ROOT="$T/kernel_nh" bash "$NH/maintenance_scripts/install_tools/host_housekeeping.sh" 2>&1)"; rc=$?
+chk "without _kernel_settings.sh: the run fails, says so, and writes neither settings file" \
+    "$rc|$(grep -c '_kernel_settings.sh: the kernel and network settings were not written' <<< "$out")|$(ls "$T/kernel_nh/etc/sysctl.d" | wc -l)" "1|1|0"
 # A server's 99-security.conf as install.sh wrote it: the run writes it whole.
 printf '# IP Spoofing protection\nnet.ipv4.conf.all.rp_filter = 1\n\n# Control Buffer Overflow attacks\nkernel.randomize_va_space = 2\n' > "$SN"
 JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" >/dev/null 2>&1

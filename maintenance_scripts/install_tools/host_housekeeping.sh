@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.22 - The kernel and network settings come from _kernel_settings.sh, the one list the host
+#                report and multi_tenant_host.sh check read too (specs/multi_tenant_host_hardening.md WP1); a
+#                bundle without it fails the run and writes no settings file.
 # Version: 1.21 - On a host with the site container engine, every run converges it onto this release's
 #                engine and site system call filter (install_site_engine.sh converge): only install.sh
 #                ran it, so a host kept the engine and filter it was installed with
@@ -1015,48 +1018,15 @@ RARE_MODULES=(
     # Line disciplines a root process could still load.
     n_gsm n_hdlc
 )
-KERNEL_SETTINGS=(
-    "dev.tty.ldisc_autoload = 0"
-    "kernel.unprivileged_bpf_disabled = 1"
-    "kernel.dmesg_restrict = 1"
-    "vm.unprivileged_userfaultfd = 0"
-    "kernel.kptr_restrict = 2"
-    "net.core.bpf_jit_harden = 2"
-    "kernel.perf_event_paranoid = 4"
-    "kernel.yama.ptrace_scope = 1"
-    "kernel.kexec_load_disabled = 1"
-    "kernel.apparmor_restrict_unprivileged_userns = 1"
-    "kernel.randomize_va_space = 2"
-    "fs.protected_symlinks = 1"
-    "fs.protected_hardlinks = 1"
-    "fs.protected_regular = 2"
-    "fs.protected_fifos = 2"
-    "fs.inotify.max_user_instances = 2048"
-)
-NETWORK_SETTINGS=(
-    "net.ipv4.conf.default.rp_filter = 1"
-    "net.ipv4.conf.all.rp_filter = 1"
-    "net.ipv4.conf.all.accept_redirects = 0"
-    "net.ipv6.conf.all.accept_redirects = 0"
-    "net.ipv4.conf.default.accept_redirects = 0"
-    "net.ipv6.conf.default.accept_redirects = 0"
-    "net.ipv4.conf.all.send_redirects = 0"
-    "net.ipv4.conf.default.send_redirects = 0"
-    "net.ipv4.conf.all.accept_source_route = 0"
-    "net.ipv6.conf.all.accept_source_route = 0"
-    "net.ipv4.conf.default.accept_source_route = 0"
-    "net.ipv6.conf.default.accept_source_route = 0"
-    "net.ipv4.conf.all.log_martians = 1"
-    "net.ipv4.conf.default.log_martians = 1"
-    "net.ipv4.icmp_echo_ignore_all = 0"
-    "net.ipv4.icmp_echo_ignore_broadcasts = 1"
-    "net.ipv6.conf.all.disable_ipv6 = 0"
-    "net.ipv6.conf.default.disable_ipv6 = 0"
-    "net.ipv4.tcp_syncookies = 1"
-    "net.ipv4.tcp_max_syn_backlog = 2048"
-    "net.ipv4.tcp_synack_retries = 2"
-    "net.ipv4.tcp_syn_retries = 5"
-)
+# The kernel and network settings, one list for this, the host report and
+# multi_tenant_host.sh check (_kernel_settings.sh beside this script).
+KERNEL_SETTINGS_HELPER="${SCRIPT_DIR}/_kernel_settings.sh"
+if [[ -f "${KERNEL_SETTINGS_HELPER}" ]]; then
+    # shellcheck source=_kernel_settings.sh
+    . "${KERNEL_SETTINGS_HELPER}"
+else
+    KERNEL_SETTINGS=(); NETWORK_SETTINGS=()
+fi
 MODPROBE_CONF="${FS_ROOT}/etc/modprobe.d/joinery-rare-modules.conf"
 KMOD_CONF="${FS_ROOT}/etc/modprobe.d/blacklist-rare-network.conf"
 KERNEL_SYSCTL_CONF="${FS_ROOT}/etc/sysctl.d/90-joinery-kernel.conf"
@@ -1130,11 +1100,10 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/modprobe.d" ]]; then
         done
     fi
 fi
-# One sysctl file: written whole, applied, and each value read back from the
-# running kernel. $1 the file, $2 one comment line saying what it holds, the rest
-# its settings.
+# One sysctl file: written whole and applied. $1 the file, $2 one comment line
+# saying what it holds, the rest its settings.
 write_sysctl_file() {
-    local file="$1" what="$2" setting key want proc got candidate
+    local file="$1" what="$2" candidate
     shift 2
     candidate="$(mktemp)"
     {
@@ -1149,17 +1118,23 @@ write_sysctl_file() {
     [[ "${RUN_SYSTEM}" == 1 ]] || return 0
     # -e: a setting this kernel does not have is passed over, not an error.
     sysctl -e -q -p "${file}" >/dev/null 2>&1 || true
-    for setting in "$@"; do
-        key="${setting%% =*}"; want="${setting##*= }"
-        proc="/proc/sys/${key//.//}"
-        [[ -r "${proc}" ]] || continue
-        got="$(cat "${proc}")"
-        [[ "${got}" == "${want}" ]] || warn "${key} is ${got}, not ${want}: a later file in /etc/sysctl.d or /etc/sysctl.conf sets it, or the kernel refused it"
-    done
 }
 if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
-    write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
-    write_sysctl_file "${NETWORK_SYSCTL_CONF}" "No spoofed source, redirect or source route accepted; SYN floods met with cookies." "${NETWORK_SETTINGS[@]}"
+    if [[ ${#KERNEL_SETTINGS[@]} -eq 0 ]]; then
+        # Never an empty file in place of the settings.
+        warn "no ${KERNEL_SETTINGS_HELPER}: the kernel and network settings were not written; this machine's support bundle is incomplete"
+        FAILED=1
+    else
+        write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
+        write_sysctl_file "${NETWORK_SYSCTL_CONF}" "No spoofed source, redirect or source route accepted; SYN floods met with cookies." "${NETWORK_SETTINGS[@]}"
+        # Each value read back from the running kernel.
+        if [[ "${RUN_SYSTEM}" == 1 ]]; then
+            while read -r state key got want; do
+                [[ "${state}" == drift ]] || continue
+                warn "${key} is ${got}, not ${want} just after this run applied it: this kernel refuses it, or something else on the machine keeps setting it"
+            done < <(kernel_settings_state)
+        fi
+    fi
 fi
 
 if [[ "${FAILED}" == 1 ]]; then

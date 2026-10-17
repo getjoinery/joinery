@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 60
-# covers: [maintenance_scripts/install_tools/multi_tenant_host.sh]
+# covers: [maintenance_scripts/install_tools/multi_tenant_host.sh, maintenance_scripts/install_tools/_kernel_settings.sh]
 #
 # multi_tenant_host.sh walls a multi-tenant host's sites off from the host,
 # from each other and from the outside services nothing on a site should use,
@@ -124,6 +124,14 @@ STUB
 printf '#!/bin/bash\n' > "$T/bin/unattended-upgrade"
 chmod +x "$T/bin/nft" "$T/bin/systemctl" "$T/bin/apt-config" "$T/bin/apt-get" "$T/bin/unattended-upgrade"
 export PATH="$T/bin:$PATH" STUB_T="$T" JOINERY_MT_ROOT="$T/root"
+# The running kernel's settings: a /proc/sys holding the pinned values, so check
+# reads this gate's kernel, not the box's.
+KP="$T/procsys"
+( . "$ROOT/maintenance_scripts/install_tools/_kernel_settings.sh"
+  for s in "${KERNEL_SETTINGS[@]}" "${NETWORK_SETTINGS[@]}"; do
+      k="${s%% =*}"; mkdir -p "$KP/$(dirname "${k//.//}")"; echo "${s##*= }" > "$KP/${k//.//}"
+  done )
+export KERNEL_SETTINGS_PROC="$KP"
 calls() { cat "$T/calls" 2>/dev/null | tr '\n' '|'; }
 
 echo "=== install on a fresh host ==="
@@ -252,6 +260,19 @@ rm -f "$T/root/etc/apt/apt.conf.d/52joinery-multi-tenant-reboot"
 out="$(bash "$MTH" check)"; rc=$?
 chk "reboot policy missing: exit 1" "$rc" "1"
 has "names it" "$out" '^reboot after updates: NOT set$'
+bash "$MTH" install > /dev/null 2>&1
+out="$(bash "$MTH" check)"; rc=$?
+has "the pinned kernel settings held: said, with how many" "$out" '^kernel settings: held \(38 pinned\)$'
+echo 0 > "$KP/kernel/yama/ptrace_scope"; echo 1 > "$KP/net/ipv4/conf/all/accept_redirects"
+out="$(bash "$MTH" check)"; rc=$?
+chk "two loosened: exit 1, a line naming each, its live value and the pinned one" \
+    "$rc:$(printf '%s\n' "$out" | grep -c -e '^kernel settings: kernel.yama.ptrace_scope is 0, NOT 1 ' -e '^kernel settings: net.ipv4.conf.all.accept_redirects is 1, NOT 0 ')" "1:2"
+echo 1 > "$KP/kernel/yama/ptrace_scope"; echo 0 > "$KP/net/ipv4/conf/all/accept_redirects"; rm "$KP/net/core/bpf_jit_harden"
+out="$(bash "$MTH" check)"; rc=$?
+chk "one this run cannot read is said, not a failure" "$rc:$(printf '%s\n' "$out" | grep -c '^kernel settings: held (38 pinned, 1 of them unread')" "0:1"
+cp "$MTH" "$T/mth_alone.sh"
+out="$(bash "$T/mth_alone.sh" check)"; rc=$?
+chk "without _kernel_settings.sh beside it: not checked, exit 1" "$rc:$(printf '%s\n' "$out" | grep -c '^kernel settings: NOT checked')" "1:1"
 
 echo "=== anything else is refused ==="
 out="$(bash "$MTH" frobnicate 2>&1)"; rc=$?

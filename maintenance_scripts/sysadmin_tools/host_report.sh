@@ -8,6 +8,12 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.29 - hardening: whether the running kernel holds every setting host housekeeping pins
+#                (install_tools/_kernel_settings.sh; specs/multi_tenant_host_hardening.md WP1), and each one it
+#                does not. kernel_events_24h counts kernel_warning, the kernel's own WARNING/BUG/oops lines (D7),
+#                and a quiet machine's counts read 0, not unknown: journalctl -g exits 1 when nothing
+#                matches, which read as an unreadable journal on every machine (B35); one that complains is
+#                still unknown (reviewer2 R2). A BUG() is matched by 'kernel BUG at' too (R1).
 # Version: 1.28 - data_root_stopped: a data root stopped by hand (joinery_data_root.sh stop) says when, and
 #                which services stopped with it, so the management node tells a deliberate stop from a
 #                fault (reviewer2 B17 D2); null while it is not stopped, or there is no data root
@@ -695,23 +701,58 @@ emit_cpus() {
 KERNEL_EVENT_OOM='Out of memory: Kill|oom-kill:|oom_reaper:'
 KERNEL_EVENT_ENOSPC='No space left on device'
 KERNEL_EVENT_IO='I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem read-only'
+# The kernel's own warnings, read from its messages alone (a program's
+# "WARNING:" is not one): a WARN(), a BUG, an oops, a protection fault. A
+# shared host's kernel saying so while strangers run code on it is worth a look
+# every time (specs/multi_tenant_host_hardening.md D7). Not "Call Trace:", which
+# every OOM kill report and hung-task notice prints. A BUG() prints "kernel BUG
+# at FILE:LINE!" with no colon, and on a 6.8 kernel the die header that follows
+# names no Oops ("invalid opcode: 0000 [#1]"), so it is matched by its own words
+# (reviewer2 R1).
+KERNEL_EVENT_WARNING='WARNING:|BUG:|[Kk]ernel BUG at|Oops:|general protection fault|kernel NULL pointer'
 
-# One pattern's count over the last day, or nothing at all when the journal
-# could not be read (which the caller turns into unknown for all three).
-journal_event_count() {
-    local out
-    out="$(run journalctl --system --since "24 hours ago" --no-pager -o cat -g "$1")" || return 1
-    printf '%s' "$(printf '%s\n' "$out" | grep -c -E "$1")"
+# Whether the system journal can be read here. journalctl -g exits 1 both when
+# it cannot read the journal and when nothing matched (systemd 255 and 259),
+# so a quiet machine read as unknown until the two were told apart first (B35).
+journal_readable() { run journalctl --system -n 0 --no-pager -q >/dev/null; }
+
+# One pattern's count over the last day, from a journal journal_readable()
+# found readable; any further arguments are journalctl matches. The lines go
+# straight into grep -c, and journalctl's own complaints come back beside the
+# count: exit 1 with nothing said is "nothing matched", exit 1 with a complaint
+# (a journalctl built without pattern support, an argument it refuses) or any
+# other exit (a timeout) is nothing at all, which the caller turns into unknown
+# for the whole object; read as 0, a broken read would say what a healthy
+# machine says, for good (reviewer2 R2).
+journal_event_count() {  # PATTERN [MATCH...]
+    local pattern="$1" res rc grep_rc count said
+    shift
+    res="$( { timeout "$CMD_TIMEOUT" journalctl --system "$@" --since "24 hours ago" --no-pager -o cat -q -g "$pattern" 2>&3 \
+              | grep -c -E "$pattern"; echo "${PIPESTATUS[0]} ${PIPESTATUS[1]}"; } 3>&1 )"
+    read -r rc grep_rc <<< "$(tail -n 1 <<< "$res")"
+    count="$(tail -n 2 <<< "$res" | head -n 1)"
+    said="$(head -n -2 <<< "$res")"
+    # grep -c exits 1 for a count of 0; anything above is grep itself failing.
+    [[ "${grep_rc:-2}" -le 1 && "$count" =~ ^[0-9]+$ ]] || return 1
+    case "$rc" in
+        0) ;;
+        1) [[ -z "$said" ]] || return 1 ;;
+        *) return 1 ;;
+    esac
+    printf '%s' "$count"
 }
 
 emit_kernel_events() {
-    local oom enospc io
+    local oom enospc io warning
     run systemctl show -p Version --value >/dev/null || { printf '"unknown"'; return; }
+    journal_readable || { printf '"unknown"'; return; }
     oom="$(journal_event_count "$KERNEL_EVENT_OOM")"       || { printf '"unknown"'; return; }
     enospc="$(journal_event_count "$KERNEL_EVENT_ENOSPC")" || { printf '"unknown"'; return; }
     io="$(journal_event_count "$KERNEL_EVENT_IO")"         || { printf '"unknown"'; return; }
-    printf '{"oom":%s,"enospc":%s,"io_error":%s}' \
-        "$(json_num_or_unknown "$oom")" "$(json_num_or_unknown "$enospc")" "$(json_num_or_unknown "$io")"
+    warning="$(journal_event_count "$KERNEL_EVENT_WARNING" _TRANSPORT=kernel)" || { printf '"unknown"'; return; }
+    printf '{"oom":%s,"enospc":%s,"io_error":%s,"kernel_warning":%s}' \
+        "$(json_num_or_unknown "$oom")" "$(json_num_or_unknown "$enospc")" "$(json_num_or_unknown "$io")" \
+        "$(json_num_or_unknown "$warning")"
 }
 
 # ---------------------------------------------------------------------------
@@ -1162,6 +1203,34 @@ host_engine() {
     echo "docker docker"
 }
 
+# The kernel and network settings every machine pins (install_tools/
+# _kernel_settings.sh beside this script's tree, which host housekeeping
+# writes and applies; specs/multi_tenant_host_hardening.md D1), against the
+# running kernel: {"state":"ok"|"drift","pinned":N,"unread":N,"drift":[{"key",
+# "live","want"}]}. unread counts a setting this kernel lacks or this run cannot
+# read (one is root's alone). "unknown" in a container, whose kernel is its
+# host's, or where the helper is not beside this script.
+emit_hardening() {
+    local helper lines state key live want pinned=0 unread=0 n=0 sep="" drift=""
+    in_container && { printf '"unknown"'; return; }
+    helper="${HOST_REPORT_KERNEL_SETTINGS:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../install_tools/_kernel_settings.sh}"  # tests only: another file
+    [[ -f "$helper" ]] || { printf '"unknown"'; return; }
+    lines="$(bash -c '. "$1" && kernel_settings_state' _ "$helper" 2>/dev/null)" || { printf '"unknown"'; return; }
+    [[ -n "$lines" ]] || { printf '"unknown"'; return; }
+    while read -r state key live want; do
+        pinned=$((pinned+1))
+        case "$state" in
+            unread) unread=$((unread+1)) ;;
+            drift)
+                n=$((n+1))
+                [[ $n -le $MAX_LIST ]] || continue
+                drift+="${sep}{\"key\":$(json_str "$key"),\"live\":$(json_str "$live"),\"want\":$(json_str "$want")}"
+                sep="," ;;
+        esac
+    done <<< "$lines"
+    printf '{"state":"%s","pinned":%d,"unread":%d,"drift":[%s]}' "$([[ $n -eq 0 ]] && echo ok || echo drift)" "$pinned" "$unread" "$drift"
+}
+
 # Which engine this host's sites run on, for the management node to choose a
 # host by: "podman" (the site container engine), "docker", "none" (no engine
 # here to run a site), or "unknown" (named, but the helper refused).
@@ -1361,6 +1430,7 @@ printf '"answers":%s,' "$(emit_answers)"
 printf '"served_certificates":%s,' "$(emit_served_certificates)"
 printf '"host_restrictions":%s,' "$(emit_host_restrictions)"
 printf '"site_engine":%s,' "$(emit_site_engine)"
+printf '"hardening":%s,' "$(emit_hardening)"
 printf '"containers":%s,' "$(emit_containers)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"
