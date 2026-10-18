@@ -680,6 +680,18 @@ class User extends SystemBase {	public static $prefix = 'usr';
 		return array();
 	}
 
+	/**
+	 * Spend the time a password check takes, for a sign-in naming no account:
+	 * without it an unknown email is answered faster than a known one with a
+	 * wrong password, which says which emails have accounts. The hash is of a
+	 * random string nobody knows, made with the production Argon2id
+	 * parameters, so the work matches a real check and never succeeds.
+	 */
+	public static function spend_password_check($password): void {
+		password_verify(trim((string)$password),
+			'$argon2id$v=19$m=65536,t=4,p=1$TU1xTDgvU3U4cktERjVvVQ$GpdtAY06bygnogDhbfbjplUHJ3XD0E/OAck099I7eVk');
+	}
+
 	public static function GeneratePassword($password) {
 		$password = trim($password);
 		if (strlen($password) < 8) {
@@ -939,8 +951,10 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	}
 
 	/**
-	 * Check if the given IP address is allowed to login for this user
-	 * Supports exact IPs, CIDR notation (e.g., 104.23.253.0/24), and wildcards (e.g., 104.23.*)
+	 * Check if the given IP address is allowed to login for this user.
+	 * Each entry is an address in any spelling, a prefix of either family
+	 * (104.23.253.0/24, 2001:db8:abcd::/48) or an IPv4 wildcard (104.23.*);
+	 * IpAddress::matchesEntry() reads them.
 	 *
 	 * @param string $ip The IP address to check
 	 * @return bool True if allowed (empty whitelist = allow all), false if blocked
@@ -963,70 +977,15 @@ class User extends SystemBase {	public static $prefix = 'usr';
 			return true;
 		}
 
-		// Check each allowed entry
 		foreach ($allowed_ips as $allowed) {
-			// Exact match
-			if ($ip === $allowed) {
+			if (IpAddress::matchesEntry((string)$ip, (string)$allowed)) {
 				return true;
 			}
-
-			// CIDR notation (e.g., 192.168.1.0/24)
-			if (strpos($allowed, '/') !== false) {
-				if (self::ip_in_cidr($ip, $allowed)) {
-					return true;
-				}
-			}
-
-			// Wildcard match (e.g., 104.23.* or 104.23.253.*)
-			if (strpos($allowed, '*') !== false) {
-				$pattern = '/^' . str_replace(['.', '*'], ['\.', '.*'], $allowed) . '$/';
-				if (preg_match($pattern, $ip)) {
-					return true;
-				}
-			}
 		}
-
 		return false;
 	}
 
-	/**
-	 * Check if an IP is within a CIDR range
-	 *
-	 * @param string $ip The IP to check
-	 * @param string $cidr The CIDR range (e.g., 192.168.1.0/24)
-	 * @return bool True if IP is in range
-	 */
-	private static function ip_in_cidr($ip, $cidr) {
-		list($subnet, $mask) = explode('/', $cidr);
-
-		// Handle IPv6
-		if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-			// Simple prefix match for IPv6
-			$ip_bin = inet_pton($ip);
-			$subnet_bin = inet_pton($subnet);
-			if ($ip_bin === false || $subnet_bin === false) {
-				return false;
-			}
-			$mask = intval($mask);
-			for ($i = 0; $i < $mask / 8; $i++) {
-				if ($ip_bin[$i] !== $subnet_bin[$i]) {
-					return false;
-				}
-			}
-			return true;
-		}
-
-		// IPv4
-		$ip_long = ip2long($ip);
-		$subnet_long = ip2long($subnet);
-		if ($ip_long === false || $subnet_long === false) {
-			return false;
-		}
-		$mask = ~((1 << (32 - intval($mask))) - 1);
-		return ($ip_long & $mask) === ($subnet_long & $mask);
-	}
-	
-	function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
+		function email_verify_user($use_transaction=TRUE, $and_save=TRUE) {
 		if ($use_transaction) {
 			DbConnector::BeginTransaction();
 		}

@@ -29,6 +29,8 @@
  * The issuing section runs only where no DNS server key exists yet, so it
  * never replaces a real one.
  *
+ * @version 1.2 - a server's IPv6 address beside its IPv4: the key works from either, each
+ *                setting is checked for its family, drift compares as addresses
  * @version 1.1 - keys belong to the issuing admin; the service account is gone
  * @version 1.0
  */
@@ -219,13 +221,14 @@ try {
 		$other_admin = make_user($suffix . 'IS2', 10);
 
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '');
 		$refused = false;
 		try {
 			DnsResolverAccess::issueKey('primary', $issuer);
 		} catch (SystemDisplayableError $e) {
 			$refused = true;
 		}
-		check($refused, 'A server with no IPv4 address set gets no key');
+		check($refused, 'A server with no address set gets no key');
 
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
 		$issued = DnsResolverAccess::issueKey('primary', $issuer);
@@ -245,6 +248,50 @@ try {
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.11');
 		check(DnsResolverAccess::panelState()[0]['drift'] === true, 'The panel flags a key whose address no longer matches the setting');
 		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
+
+		section('A server\'s IPv6 address beside its IPv4');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '2001:db8:53::10');
+		check(DnsResolverAccess::panelState()[0]['drift'] === true, 'Adding an IPv6 address flags the IPv4-only key for re-issuing');
+		$both = DnsResolverAccess::issueKey('primary', $issuer);
+		harness_register_key_id($both['api_key']->key);
+		$restriction = (string)$both['api_key']->get('apk_ip_restriction');
+		check($restriction === '192.0.2.10,2001:db8:53::10', 'The key holds both addresses', $restriction);
+		check(ApiAuth::restrictionAllows($restriction, '2001:db8:53:0::10') && ApiAuth::restrictionAllows($restriction, '192.0.2.10')
+			&& !ApiAuth::restrictionAllows($restriction, '2001:db8:53::11'),
+			'It works from either address, in any spelling, and from nowhere else');
+		check(DnsResolverAccess::panelState()[0]['drift'] === false, 'The re-issued key shows no drift');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '2001:DB8:53:0:0::10');
+		check(DnsResolverAccess::panelState()[0]['drift'] === false, 'The same address in another spelling is no drift');
+
+		harness_set_setting_mem('dns_filtering_dns_server_ip', '2001:db8:53::10');
+		$refused = '';
+		try {
+			DnsResolverAccess::issueKey('primary', $issuer);
+		} catch (SystemDisplayableError $e) {
+			$refused = $e->getMessage();
+		}
+		check(strpos($refused, 'IPv4') !== false && strpos($refused, '2001:db8:53::10') !== false,
+			'An IPv6 address in the IPv4 setting is refused, naming it', $refused);
+		check(DnsResolverAccess::panelState()[0]['problem'] !== null, 'and the panel says so');
+
+		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '::ffff:192.0.2.10');
+		$refused = '';
+		try {
+			DnsResolverAccess::issueKey('primary', $issuer);
+		} catch (SystemDisplayableError $e) {
+			$refused = $e->getMessage();
+		}
+		check(strpos($refused, 'IPv6') !== false, 'An IPv4 address written IPv6-style is refused in the IPv6 setting', $refused);
+
+		harness_set_setting_mem('dns_filtering_dns_server_ip', '');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '2001:db8:53::10');
+		$v6_only = DnsResolverAccess::issueKey('primary', $issuer);
+		harness_register_key_id($v6_only['api_key']->key);
+		check((string)$v6_only['api_key']->get('apk_ip_restriction') === '2001:db8:53::10', 'A server with only an IPv6 address gets a key for it');
+
+		harness_set_setting_mem('dns_filtering_dns_server_ip', '192.0.2.10');
+		harness_set_setting_mem('dns_filtering_dns_server_ipv6', '');
 
 		section('The issuing admin cannot be deleted while their key is live');
 		foreach (array('soft_delete', 'permanent_delete') as $method) {

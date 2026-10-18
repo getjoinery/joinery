@@ -28,9 +28,13 @@
  * followed by the answers that mean "listed", and a box Spamhaus is not
  * answering has to say so, because with the filter nothing else would.
  *
+ * Sending family. Mail a box sends leaves over IPv4, on a site box as on the
+ * relay: a box's IPv6 address has no reverse DNS and no SPF entry, and
+ * receivers refuse mail from it. The setup check reads the setting back.
+ *
  * Run:  php plugins/mailbox/tests/postfix_acceptance_limits_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -124,5 +128,12 @@ check(preg_match('/^postconf_set "recipient_delimiter" ""$/m', $relay) === 1,
 	'a relay turns address-extension stripping off');
 check(preg_match('/^RELAY_VERSION="(\d+\.\d+)"/m', $relay, $m) === 1 && version_compare($m[1], '3.10', '>='),
 	'and the relay that does so is 3.10 or later', $m[1] ?? '');
+
+section('Mail leaves every machine over IPv4');
+check(preg_match('/^postconf -e "smtp_address_preference = ipv4"/m', $site) === 1, 'a site box tells Postfix to send over IPv4');
+check(preg_match('/^postconf_set "smtp_address_preference" "ipv4"/m', $relay) === 1, 'and so does a relay');
+$check_src = (string)@file_get_contents($dir . 'includes/InboundEmailSetupCheck.php');
+check(strpos($check_src, "'host.outbound_ipv4'") !== false && strpos($check_src, "postconf -h smtp_address_preference") !== false,
+	'the setup check reads the preference back and names a box that would send over IPv6');
 
 harness_finish();

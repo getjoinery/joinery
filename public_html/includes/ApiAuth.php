@@ -62,7 +62,11 @@
  * the purpose and the key's id, never to the kind
  * (specs/mail_apps_plugin.md § Core: app access).
  *
- * @version 1.8.0
+ * @version 1.9.0
+ * @changelog 1.9.0 - A key's address restriction compares as addresses and accepts prefixes of
+ *   either family (restrictionAllows); app sign-in counts by IpAddress::network() and keys its
+ *   per-account count with RequestLogger::username_key(), as web sign-in does; auth/login spends a
+ *   password check's time on a missing or deleted account (User::spend_password_check).
  * @changelog 1.8.0 - A scope refusal names what the key lacked ('Event:read', the action) beside
  *   what it is limited to, and for a sandboxed plugin's key where its manifest asks for it.
  * @changelog 1.7.1 - A deleted owner is reported only after the secret verifies, like a disabled one.
@@ -127,6 +131,28 @@ class ApiAuth {
 	 * is the same answer for the same reason — no key was presented.
 	 */
 	private static $current_api_key = null;
+
+	/**
+	 * Does a key's address restriction (apk_ip_restriction: comma-separated
+	 * addresses in any spelling, prefixes of either family, or IPv4
+	 * wildcards) admit $ip? A restriction with no entries admits everyone.
+	 */
+	public static function restrictionAllows(string $restriction, string $ip): bool {
+		// Empty escape (RFC 4180) rather than the deprecated default. An IP
+		// allowlist holds neither backslashes nor quotes, so this parses the
+		// same either way; it is here so no CSV call in the tree relies on a
+		// default PHP 8.4 deprecates.
+		$entries = array_filter(array_map('trim', str_getcsv($restriction, ',', '"', '')), 'strlen');
+		if (!$entries) {
+			return true;
+		}
+		foreach ($entries as $entry) {
+			if (IpAddress::matchesEntry($ip, $entry)) {
+				return true;
+			}
+		}
+		return false;
+	}
 
 	/** The key this request authenticated with, or null for a browser session. */
 	public static function currentApiKey() {
@@ -218,12 +244,7 @@ class ApiAuth {
 		}
 
 		if ($authorized_ips = $api_entry->get('apk_ip_restriction')) {
-			// Empty escape (RFC 4180) rather than the deprecated default. An IP
-			// allowlist holds neither backslashes nor quotes, so this parses the
-			// same either way; it is here so no CSV call in the tree relies on a
-			// default PHP 8.4 deprecates.
-			$ip_list = array_map('trim', str_getcsv($authorized_ips, ',', '"', ''));
-			if (count($ip_list) && !in_array($source_ip, $ip_list)) {
+			if (!self::restrictionAllows((string)$authorized_ips, (string)$source_ip)) {
 				self::auth_failure(401, 'Unauthorized IP: ' . $source_ip, 'Unauthorized IP');
 			}
 		}
@@ -453,10 +474,9 @@ class ApiAuth {
 	 * @return string[]
 	 */
 	private static function appAccessBucketKeys(string $username): array {
-		$keys = array('net:' . self::sourceNetwork(self::$app_client_ip ?? ($_SERVER['REMOTE_ADDR'] ?? '')));
-		$username = strtolower(trim($username));
-		if ($username !== '') {
-			$keys[] = 'user:' . substr(hash('sha256', $username), 0, 32);
+		$keys = array('net:' . IpAddress::network(self::$app_client_ip ?? ($_SERVER['REMOTE_ADDR'] ?? '')));
+		if (trim($username) !== '') {
+			$keys[] = RequestLogger::username_key($username);
 		}
 		return $keys;
 	}
@@ -485,18 +505,6 @@ class ApiAuth {
 			return inet_ntop(inet_pton($claimed));
 		}
 		return $remote;
-	}
-
-	/** An address's limiting unit: itself for IPv4, its /64 for IPv6. */
-	private static function sourceNetwork(string $ip): string {
-		$packed = @inet_pton(trim($ip));
-		if ($packed === false) {
-			return 'unknown';
-		}
-		if (strlen($packed) === 16) {
-			return inet_ntop(substr($packed, 0, 8) . str_repeat("\0", 8)) . '/64';
-		}
-		return inet_ntop($packed);
 	}
 
 	/** Refuse an app sign-in once its network or its username is over the limit. Exits when over. */
@@ -806,6 +814,11 @@ class ApiAuth {
 	public static function attemptLogin($email, $password, $device_label = NULL) {
 		require_once(PathHelper::getIncludePath('data/users_class.php'));
 		$user = User::GetByEmail($email);
+		// A missing or deleted account still pays for a password check, so the
+		// answer's speed says nothing about which emails have accounts.
+		if (!$user || $user->get('usr_delete_time')) {
+			User::spend_password_check($password);
+		}
 
 		if (!$user || $user->get('usr_delete_time') || !$user->check_password($password)) {
 			return array('ok' => false, 'user' => $user ?: null);

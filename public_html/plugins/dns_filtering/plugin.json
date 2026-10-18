@@ -1,6 +1,6 @@
 {
     "name": "DNS Filtering",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "depends": { "store": ">=1.0.0" },
     "description": "Self-hosted DNS filtering service with per-device filtering profiles",
     "author": "System Developer",
@@ -50,7 +50,23 @@
             "group": "primary",
             "label": "Server Public IP",
             "type": "text",
-            "helptext": "e.g. 45.56.103.84 — shown in the Windows and router setup instructions."
+            "helptext": "e.g. 45.56.103.84 — shown in the Windows and router setup instructions.",
+            "validation": {
+                "pattern": "/^(25[0-5]|2[0-4]\\d|1?\\d?\\d)(\\.(25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}$/",
+                "messages": { "pattern": "An IPv4 address, like 45.56.103.84. An IPv6 address goes in the IPv6 box." }
+            }
+        },
+        {
+            "name": "dns_filtering_dns_server_ipv6",
+            "default": "",
+            "group": "primary",
+            "label": "Server Public IPv6",
+            "type": "text",
+            "helptext": "e.g. 2600:3c03::f03c:91ff:fe24:1 — optional. The server's access key works from this address as well as its IPv4 one.",
+            "validation": {
+                "pattern": "/^(?=(?:[^:]*:){2})[0-9A-Fa-f:.]+$/",
+                "messages": { "pattern": "An IPv6 address, like 2600:3c03::1. An IPv4 address goes in the IPv4 box." }
+            }
         },
         {
             "name": "dns_filtering_dns_secondary_internal_url",
@@ -74,7 +90,23 @@
             "group": "secondary",
             "label": "Secondary Server Public IP",
             "type": "text",
-            "helptext": "e.g. 172.16.0.2 — shown in the setup instructions when configured."
+            "helptext": "e.g. 172.16.0.2 — shown in the setup instructions when configured.",
+            "validation": {
+                "pattern": "/^(25[0-5]|2[0-4]\\d|1?\\d?\\d)(\\.(25[0-5]|2[0-4]\\d|1?\\d?\\d)){3}$/",
+                "messages": { "pattern": "An IPv4 address, like 172.16.0.2. An IPv6 address goes in the IPv6 box." }
+            }
+        },
+        {
+            "name": "dns_filtering_dns_secondary_server_ipv6",
+            "default": "",
+            "group": "secondary",
+            "label": "Secondary Server Public IPv6",
+            "type": "text",
+            "helptext": "Optional. The secondary server's access key works from this address as well as its IPv4 one.",
+            "validation": {
+                "pattern": "/^(?=(?:[^:]*:){2})[0-9A-Fa-f:.]+$/",
+                "messages": { "pattern": "An IPv6 address, like 2600:3c03::1. An IPv4 address goes in the IPv4 box." }
+            }
         },
         {
             "name": "dns_filtering_resolver_key_primary",

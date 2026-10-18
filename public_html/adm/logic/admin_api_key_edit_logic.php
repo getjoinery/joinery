@@ -57,6 +57,18 @@ function admin_api_key_edit_logic(array $input): LogicResult {
 		$is_new = !$api_key->key;
 		$scoped = $is_new && ($input['reach'] ?? 'all') === 'scoped';
 
+		// A typo in the address restriction is a key that silently stops
+		// working, so a bad entry refuses the save and names itself.
+		if (array_key_exists('apk_ip_restriction', $input)) {
+			$entries = array_values(array_filter(array_map('trim', explode(',', (string)$input['apk_ip_restriction'])), 'strlen'));
+			foreach ($entries as $entry) {
+				if ($problem = IpAddress::entryProblem($entry)) {
+					return LogicResult::error('Allowed IP addresses: ' . $problem . '. Nothing was saved.', $page_vars);
+				}
+			}
+			$input['apk_ip_restriction'] = $entries ? implode(',', $entries) : null;
+		}
+
 		$editable_fields = array('apk_name', 'apk_is_active', 'apk_ip_restriction');
 		if (!$scoped) {
 			$editable_fields[] = 'apk_permission';

@@ -17,11 +17,15 @@
  *  - a scoped key made here is a machine key owned by the admin who made it,
  *    Active, with its permission derived from its scope;
  *  - saving an edit leaves the key's owner alone (it used to become whoever
- *    saved), and a scoped key cannot be opened for editing.
+ *    saved), and a scoped key cannot be opened for editing;
+ *  - the address restriction refuses a malformed entry at save, naming it,
+ *    and matches as addresses and prefixes of either family
+ *    (ApiAuth::restrictionAllows);
+ *  - a user's allowed sign-in addresses refuse a malformed entry the same way.
  *
  * Run: php tests/run.php db --filter=api_key_admin
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../lib/harness.php');
@@ -119,6 +123,73 @@ try {
 		'apk_ip_restriction'     => '',
 	), 'POST');
 	check((bool)$result->error, 'A permission outside 1-4 is refused with a message', (string)$result->error);
+
+	section('The address restriction');
+	foreach (array('2001:db8::/129', 'fe80::1%eth0', '[2001:db8::1]', '10.0.0.300') as $bad) {
+		$result = harness_call_logic('adm/logic/admin_api_key_edit_logic.php', 'admin_api_key_edit_logic', array(
+			'edit_primary_key_value' => (int)$plain['api_key']->key,
+			'apk_name'               => 'HarnessTest renamed',
+			'apk_is_active'          => 1,
+			'apk_permission'         => 3,
+			'apk_ip_restriction'     => '198.51.100.7, ' . $bad,
+		), 'POST');
+		$reloaded = new ApiKey((int)$plain['api_key']->key, TRUE);
+		check((bool)$result->error && strpos((string)$result->error, $bad) !== false && !$reloaded->get('apk_ip_restriction'),
+			"a restriction holding '$bad' is refused, naming it, and nothing is saved", (string)$result->error);
+	}
+	$result = harness_call_logic('adm/logic/admin_api_key_edit_logic.php', 'admin_api_key_edit_logic', array(
+		'edit_primary_key_value' => (int)$plain['api_key']->key,
+		'apk_name'               => 'HarnessTest renamed',
+		'apk_is_active'          => 1,
+		'apk_permission'         => 3,
+		'apk_ip_restriction'     => ' 198.51.100.7 ,, 2001:db8:abcd:1::/64, ',
+	), 'POST');
+	$reloaded = new ApiKey((int)$plain['api_key']->key, TRUE);
+	check(!$result->error && $reloaded->get('apk_ip_restriction') === '198.51.100.7,2001:db8:abcd:1::/64',
+		'a good restriction saves, tidied', (string)$result->error . ' / ' . (string)$reloaded->get('apk_ip_restriction'));
+
+	$restriction = (string)$reloaded->get('apk_ip_restriction');
+	check(ApiAuth::restrictionAllows($restriction, '2001:db8:abcd:1:aaaa::9'), 'an IPv6 caller anywhere in its /64 is accepted');
+	check(!ApiAuth::restrictionAllows($restriction, '2001:db8:abcd:2::9'), 'a caller outside the /64 is refused');
+	check(ApiAuth::restrictionAllows($restriction, '::ffff:198.51.100.7') && !ApiAuth::restrictionAllows($restriction, '198.51.100.8'),
+		'an IPv4 entry matches its address in any spelling, and only it');
+	check(ApiAuth::restrictionAllows('2001:DB8::1', '2001:db8:0:0::1'), 'an address entry compares as an address, not as text');
+	check(ApiAuth::restrictionAllows('', '203.0.113.9') && ApiAuth::restrictionAllows(' , ', '203.0.113.9'),
+		'a restriction with no entries admits everyone');
+	check(ApiAuth::restrictionAllows('127.0.0.1,::1', '::1') && !ApiAuth::restrictionAllows('127.0.0.1,::1', '203.0.113.9'),
+		'the sandbox restriction (loopback, both families) still works');
+
+	section('A user\'s allowed sign-in addresses');
+	$member = make_user('KeyAllowlist');
+	$result = harness_call_logic('adm/logic/admin_users_edit_logic.php', 'admin_users_edit_logic', array(
+		'usr_user_id'     => (int)$member->key,
+		'usr_first_name'  => $member->get('usr_first_name'),
+		'usr_last_name'   => $member->get('usr_last_name'),
+		'usr_password_recovery_disabled' => 0,
+		'usr_timezone'    => $member->get('usr_timezone') ?: 'America/New_York',
+		'usr_nickname'    => '',
+		'usr_organization_name' => '',
+		'usr_permission'  => (int)$member->get('usr_permission'),
+		'usr_allowed_ips' => "198.51.100.7\n2001:db8::/129",
+	), 'POST');
+	$member_reloaded = new User((int)$member->key, TRUE);
+	check((bool)$result->error && strpos((string)$result->error, '2001:db8::/129') !== false && !$member_reloaded->get('usr_allowed_ips'),
+		'a malformed entry is refused, naming it, and nothing is saved', (string)$result->error);
+	$result = harness_call_logic('adm/logic/admin_users_edit_logic.php', 'admin_users_edit_logic', array(
+		'usr_user_id'     => (int)$member->key,
+		'usr_first_name'  => $member->get('usr_first_name'),
+		'usr_last_name'   => $member->get('usr_last_name'),
+		'usr_password_recovery_disabled' => 0,
+		'usr_timezone'    => $member->get('usr_timezone') ?: 'America/New_York',
+		'usr_nickname'    => '',
+		'usr_organization_name' => '',
+		'usr_permission'  => (int)$member->get('usr_permission'),
+		'usr_allowed_ips' => "198.51.100.7\n2001:db8:abcd::/48\n104.23.*",
+	), 'POST');
+	$member_reloaded = new User((int)$member->key, TRUE);
+	check(!$result->error && $member_reloaded->is_ip_allowed('2001:db8:abcd:9::1') && $member_reloaded->is_ip_allowed('104.23.1.1')
+		&& !$member_reloaded->is_ip_allowed('2001:db8:abce::1'),
+		'good entries of both families and a wildcard save and match', (string)$result->error);
 
 } catch (\Throwable $e) {
 	check(false, 'suite ran to completion', get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());

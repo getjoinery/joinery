@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.59 - a box with its own Postfix says whether its mail leaves over IPv4 (host.outbound_ipv4)
  * @version 1.58 - a site container has no mail server (specs/multi_tenant_docker_hosts.md WP9): one
  *   whose mail arrives by SMTP and has no relay is 'relay_needed' (no MX, no box records); its host
  *   layer is one row (host.mail_server); a container's SPF is its providers' and never the box's, and
@@ -1079,6 +1080,25 @@ class InboundEmailSetupCheck {
 				'Found: ' . ($vmdLine !== '' ? $vmdLine : '(empty)'), $this->installerFix());
 
 		$out[] = $this->checkerResult($decommissioned);
+
+		// Mail this box sends (a bounce, a forward) leaves over IPv4: its IPv6
+		// address has no reverse DNS and no SPF entry, and receivers refuse
+		// mail from such an address. The installer sets the preference. Asked
+		// only of a Postfix that is installed and in use: the row above
+		// already says when it is missing or decommissioned.
+		if ($installed && !$decommissioned) {
+			$pref = array();
+			exec('postconf -h smtp_address_preference 2>/dev/null', $pref);
+			$pref = strtolower(trim(implode('', $pref)));
+			$out[] = $pref === 'ipv4'
+				? $this->r('host.outbound_ipv4', '', 'host', 'Mail leaves over IPv4', self::RECOMMENDED, self::PASS,
+					'Postfix sends over IPv4, the address with reverse DNS and an SPF entry.')
+				: $this->r('host.outbound_ipv4', '', 'host', 'Mail leaves over IPv4', self::RECOMMENDED, self::WARN,
+					'Postfix may send over IPv6 (smtp_address_preference is ' . ($pref !== '' ? $pref : 'unset') . ').',
+					'This box\'s IPv6 address has no reverse DNS and no SPF entry, so receivers such as Gmail refuse '
+					. 'mail sent from it. Run the installer, which sets smtp_address_preference = ipv4.',
+					$this->installerFix());
+		}
 
 		// Only a box whose own Postfix takes mail from the internet asks Spamhaus.
 		if (!$decommissioned && !$this->fronted()) {

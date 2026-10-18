@@ -232,7 +232,7 @@ Mechanics worth knowing: the API *reads* the session and releases the session lo
 | `last_used_time` | Updated by the auth path at most once per hour, or when the address changes |
 | `last_used_ip` | The address the key was last used from (`inet`, IPv4 or IPv6), stamped beside `last_used_time` |
 | `purpose` | An app credential's purpose (see [App credentials](#app-credentials)); null for machine and session keys |
-| `ip_restriction` | Comma-separated list of allowed IPs (optional, machine keys) |
+| `ip_restriction` | Comma-separated allowed callers (optional, machine keys): addresses in any spelling, prefixes of either family (`198.51.100.0/24`, `2001:db8:abcd:1::/64`) or IPv4 wildcards (`104.23.*`), compared as addresses. An IPv6 caller moves inside its /64, so give it its /64; a dual-stack caller needs both families listed. The admin page refuses a malformed entry |
 | `permission` | Access level (see Permission Levels below) |
 | `scope` | Comma-separated entries (machine keys only; empty = unscoped): action names, and `Model:verb` record entries. A scoped key can do only what they name — see [Scoped machine keys](#scoped-machine-keys) |
 
@@ -834,6 +834,8 @@ Who is counted depends on the credential:
 
 An app password is 256 random bits, so the app sign-in limits bound load, not guessing. The per-username limit sits far above the per-network one so that a stranger who knows an address — or the person's own device retrying a revoked password — cannot lock the person's other devices out. Only an action request is app-shaped: the app-access headers switch no limiter off on any other route, and a sessionless action refuses them.
 | Agent channel, device link, Drive upload | IP address | own buckets | Per hour | `api_agent_*`, `api_device_link_*`, `api_upload_*` |
+
+The general, failed-auth, agent, device-link and upload limits count each address separately, IPv6 included: servers in one data center share an IPv6 /64, and counting them as one caller would let one busy server use up the others' allowance. The limits that guard an account on the website (sign-in, second factor, password reset, sign-up and the like) count by network instead: an IPv4 address, or an IPv6 /64 (see [Account Security § Sign-in limits](account_security.md#sign-in-limits)), as the app sign-in limit does.
 
 A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. Key-based and keyless traffic is metered by address before authentication.
 

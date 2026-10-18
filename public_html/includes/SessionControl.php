@@ -110,6 +110,10 @@ class DisplayMessage {
 }
 
 /**
+ * @version 1.13 - the session's network check covers IPv6 (a /32) beside IPv4 (a /16), keeping one
+ *                 address per family (the first use of the other family is let through), and the address it reads is the auth-grade one, so a
+ *                 forged forwarding header cannot pass it; the Cloudflare edge check uses
+ *                 IpAddress::inPrefix
  * @version 1.12 - remember-me tokens are written as one column, so an unrelated invalid field cannot fail a sign-in
  * @version 1.11 - a real password change signs out the account's other sessions and forgets its other
  *                 remembered devices (end_other_sessions(), usr_session_generation)
@@ -1532,14 +1536,15 @@ class SessionControl{
 			return 0;
 		}
 
-		// Check for major IP change (different /16 subnet) as a session hijack indicator
+		// A session used from another network (_is_major_ip_change) is a hijack indicator
 		$client_ip = $this->_get_client_ip();
-		if (isset($_SESSION['ip_address']) && $client_ip) {
-			if ($this->_is_major_ip_change($_SESSION['ip_address'], $client_ip)) {
+		$stored_ip = $client_ip ? $this->_stored_address_for($client_ip) : null;
+		if ($stored_ip !== null) {
+			if ($this->_is_major_ip_change($stored_ip, $client_ip)) {
 				error_log(sprintf(
 					'IP_VIOLATION get_permission: user_id=%s stored_ip=%s current_ip=%s page=%s',
 					$_SESSION['usr_user_id'] ?? 'unknown',
-					$_SESSION['ip_address'],
+					$stored_ip,
 					$client_ip,
 					$_SERVER['REQUEST_URI'] ?? ''
 				));
@@ -1563,7 +1568,7 @@ class SessionControl{
 	 * Get the real client IP address, accounting for Cloudflare and reverse proxies.
 	 *
 	 * Default mode prefers CF-Connecting-IP, falls back to X-Forwarded-For, then
-	 * REMOTE_ADDR — right for heuristics (hijack detection, logging) where a
+	 * REMOTE_ADDR — right only for a record nothing is decided on, where a
 	 * spoofed header costs nothing.
 	 *
 	 * $for_auth mode is for security decisions (e.g. API-key IP restrictions):
@@ -1585,8 +1590,15 @@ class SessionControl{
 		return $remote;
 	}
 
+	/**
+	 * The address the session check stores at sign-in and compares on every
+	 * request: the auth-grade one, so a cookie thief cannot pass the check by
+	 * sending the victim's address in a forwarding header. Behind Cloudflare
+	 * or a host's proxy this is still the visitor, because mod_remoteip has
+	 * already put the visitor in REMOTE_ADDR (host_housekeeping.sh).
+	 */
 	private function _get_client_ip() {
-		return self::get_client_ip();
+		return self::get_client_ip(true);
 	}
 
 	/** Where the edge range list lives, relative to public_html. */
@@ -1623,52 +1635,62 @@ class SessionControl{
 
 	/** True when $ip is inside Cloudflare's published edge ranges (cloudflare_edge_ranges()). */
 	public static function ip_is_cloudflare_edge(string $ip): bool {
-		$ranges = self::cloudflare_edge_ranges();
-		$packed = @inet_pton($ip);
-		if ($packed === false) {
-			return false;
-		}
-		foreach ($ranges as $range) {
-			list($net, $bits) = explode('/', $range);
-			$net_packed = @inet_pton($net);
-			if ($net_packed === false || strlen($net_packed) !== strlen($packed)) {
-				continue;
+		foreach (self::cloudflare_edge_ranges() as $range) {
+			if (IpAddress::inPrefix($ip, $range)) {
+				return true;
 			}
-			$bits = (int)$bits;
-			$bytes = intdiv($bits, 8);
-			$remainder = $bits % 8;
-			if ($bytes > 0 && strncmp($packed, $net_packed, $bytes) !== 0) {
-				continue;
-			}
-			if ($remainder > 0) {
-				$mask = 0xFF << (8 - $remainder) & 0xFF;
-				if ((ord($packed[$bytes]) & $mask) !== (ord($net_packed[$bytes]) & $mask)) {
-					continue;
-				}
-			}
-			return true;
 		}
 		return false;
 	}
 
 	/**
-	 * Detect a major IP change (different /16 subnet) that may indicate session hijacking.
-	 * Allows minor changes within the same ISP (e.g., mobile carrier, load balancer).
-	 * Only checks IPv4; IPv6 addresses are not compared (returns false).
-	 *
-	 * TODO (security): Consider tightening to /24 for IPv4 and adding IPv6 prefix
-	 * comparison (first 64 bits). Current /16 tolerance and no IPv6 check reduces
-	 * false positives for roaming users but leaves headroom for session hijacking
-	 * within the same ISP or data center range.
+	 * How much of an address the session check compares: an IPv4 /16 and an
+	 * IPv6 /32, each roughly one ISP's allocation, so a phone or a home
+	 * connection handed a new address (or a new /64) inside its ISP stays
+	 * signed in. Both are a judgement; some home ISPs hold IPv6 allocations
+	 * wider than a /32, and if their customers show up in IP_VIOLATION lines
+	 * the IPv6 length is the one to widen.
+	 */
+	const SESSION_NETWORK_BITS_IPV4 = 16;
+	const SESSION_NETWORK_BITS_IPV6 = 32;
+
+	/**
+	 * The address this session's request is compared with: one per family.
+	 * The session keeps the address it signed in from (ip_address); the
+	 * first time it is used from the other family, that address is kept
+	 * beside it (ip_address_other_family) and the request passes, because
+	 * nothing relates a machine's IPv4 address to its IPv6 one. After that,
+	 * each family is compared with its own address, so a session that has
+	 * seen IPv6 cannot then move between IPv6 networks unchallenged. Null
+	 * when there is nothing to compare (no stored address).
+	 */
+	private function _stored_address_for(string $client_ip): ?string {
+		$stored = isset($_SESSION['ip_address']) ? (string)$_SESSION['ip_address'] : '';
+		if ($stored === '') {
+			return null;
+		}
+		$family = IpAddress::family($client_ip);
+		if ($family === 0 || IpAddress::family($stored) === $family) {
+			return $stored;
+		}
+		$other = isset($_SESSION['ip_address_other_family']) ? (string)$_SESSION['ip_address_other_family'] : '';
+		if ($other !== '' && IpAddress::family($other) === $family) {
+			return $other;
+		}
+		$_SESSION['ip_address_other_family'] = $client_ip;
+		return $client_ip;
+	}
+
+	/**
+	 * Is the session being used from another network than the one it was
+	 * signed in from? Both addresses are compared as binary prefixes of their
+	 * family. Two addresses of different families are not compared (callers
+	 * pass the stored address of the request's own family,
+	 * _stored_address_for()).
 	 */
 	private function _is_major_ip_change($stored_ip, $current_ip) {
-		if (!filter_var($stored_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)
-			|| !filter_var($current_ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-			return false;
-		}
-		$stored_octets = explode('.', $stored_ip);
-		$current_octets = explode('.', $current_ip);
-		return ($stored_octets[0] != $current_octets[0] || $stored_octets[1] != $current_octets[1]);
+		return IpAddress::sharePrefix((string)$stored_ip, (string)$current_ip,
+			self::SESSION_NETWORK_BITS_IPV4, self::SESSION_NETWORK_BITS_IPV6) === false;
 	}
 
 	function check_permission($level, $msgtext=NULL){
@@ -1677,8 +1699,9 @@ class SessionControl{
 		//IF NOT LOGGED IN OR IF IP ADDRESS HAS CHANGED FOR LOGGED IN USER, REDIRECT TO LOGIN SCREEN
 		$ipchange = FALSE;
 		$client_ip = $this->_get_client_ip();
-		if(isset($_SESSION['loggedin']) && isset($_SESSION['ip_address']) && $client_ip) {
-			$ipchange = $this->_is_major_ip_change($_SESSION['ip_address'], $client_ip);
+		$stored_ip = (isset($_SESSION['loggedin']) && $client_ip) ? $this->_stored_address_for($client_ip) : null;
+		if ($stored_ip !== null) {
+			$ipchange = $this->_is_major_ip_change($stored_ip, $client_ip);
 		}
 
 		if(!isset($_SESSION['loggedin']) || ($ipchange && ($_SESSION['permission'] ?? 0) >= 5)){
@@ -1687,7 +1710,7 @@ class SessionControl{
 					'IP_VIOLATION logout: user_id=%s permission=%s stored_ip=%s current_ip=%s page=%s',
 					$_SESSION['usr_user_id'] ?? 'unknown',
 					$_SESSION['permission'] ?? 'unknown',
-					$_SESSION['ip_address'] ?? 'unknown',
+					$stored_ip ?? 'unknown',
 					$client_ip,
 					$_SERVER['REQUEST_URI'] ?? ''
 				));
@@ -1976,6 +1999,7 @@ class SessionControl{
 		$_SESSION['usr_user_id'] = $user->key;
 		$_SESSION['session_generation'] = (int)$user->get('usr_session_generation');
 		$_SESSION['ip_address'] = $this->_get_client_ip();
+		unset($_SESSION['ip_address_other_family']);
 		$_SESSION['timezone'] = $user->get('usr_timezone');
 		$_SESSION['terms_accepted'] = !empty($user->get('usr_terms_accepted_time'));
 

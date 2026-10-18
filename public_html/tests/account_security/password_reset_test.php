@@ -273,14 +273,14 @@ section('Reset request throttling');
 // password_reset_1 counts ALL attempts, not just failures, so a flood of reset
 // emails at one address is capped whether or not the addresses exist.
 $_SERVER['REMOTE_ADDR'] = '192.0.2.61';
-check(RequestLogger::check_rate_limit('password_reset', 5, 900, null),
+check(RequestLogger::check_attempt_limit('password_reset', 5, 900, null),
 	'a fresh address starts inside the reset-request budget');
 
 for ($i = 0; $i < 5; $i++) {
 	harness_call_logic('logic/password_reset_1_logic.php', 'password_reset_1_logic',
 		array('usr_email' => $user->get('usr_email')), 'POST');
 }
-check(!RequestLogger::check_rate_limit('password_reset', 5, 900, null),
+check(!RequestLogger::check_attempt_limit('password_reset', 5, 900, null),
 	'five reset requests exhaust the budget for that address');
 
 $res = harness_call_logic('logic/password_reset_1_logic.php', 'password_reset_1_logic',

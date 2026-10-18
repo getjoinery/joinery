@@ -90,7 +90,9 @@
 		}
 	}
 
-	$formwriter->textinput('apk_ip_restriction', 'Allowed IP addresses (comma separated) (optional)');
+	$formwriter->textinput('apk_ip_restriction', 'Allowed IP addresses (comma separated) (optional)', array(
+		'helptext' => 'Addresses (203.0.113.7, 2001:db8::7), prefixes (198.51.100.0/24, 2001:db8:abcd:1::/64) or IPv4 wildcards (104.23.*). A caller on IPv6 changes address inside its /64, so give an IPv6 caller its /64. A machine with both IPv4 and IPv6 needs both listed. Leave blank to allow any address.',
+	));
 
 	$formwriter->datetimeinput('apk_start_time', 'Key start time (optional)');
 

@@ -16,7 +16,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 	$session->check_permission(0);
 	$user = new User($session->get_user_id(), TRUE);
 
-	if (!RequestLogger::check_rate_limit('vault_unlock_passphrase', 10, 900, false)) {
+	if (!RequestLogger::check_attempt_limit('vault_unlock_passphrase', 10, 900, false)) {
 		return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
 	}
 

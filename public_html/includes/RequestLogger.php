@@ -5,7 +5,21 @@
  * General-purpose: works for API calls, login attempts, registration,
  * password resets, or any site feature that needs logging or throttling.
  *
- * @version 1.5
+ * Two kinds of limit share the log, and they count different units
+ * (specs/ipv6_address_handling.md D3). An attempt limit stops a stranger
+ * from guessing a secret, making accounts or having mail sent to someone, so
+ * it counts by network (check_attempt_limit, attempt_limit_state): an IPv6
+ * caller rotating through its /64 gets no fresh allowance per address. A
+ * capacity limit stops one caller from using up the server, so it counts by
+ * address (check_rate_limit, rate_limit_state): servers in one data center
+ * share a /64, and counting them as one would let one busy node use up every
+ * other node's allowance. The call site's choice of method says which kind
+ * of limit it is.
+ *
+ * @version 1.6
+ * @changelog 1.6 - every row records its network (rql_ip_network); attempt limits count by it
+ *   (check_attempt_limit, attempt_limit_state); username_key() is the one key a sign-in's
+ *   per-account count uses
  * @changelog 1.5 - a limit can be keyed to any caller (rql_key, log option 'key'): the agent
  *   channel counts each node's requests by its node, since a multi-tenant host's sites share
  *   one address (specs/multi_tenant_docker_hosts.md S23)
@@ -44,7 +58,9 @@ class RequestLogger {
 		$log = new RequestLog(NULL);
 		$log->set('rql_feature', $feature);
 		$log->set('rql_action', substr($action, 0, 100));
-		$log->set('rql_ip_address', isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
+		$address = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
+		$log->set('rql_ip_address', $address);
+		$log->set('rql_ip_network', IpAddress::network($address));
 		$log->set('rql_was_success', $success);
 
 		if (isset($options['user_id']))     $log->set('rql_usr_user_id', $options['user_id']);
@@ -89,8 +105,9 @@ class RequestLogger {
 	}
 
 	/**
-	 * Check if a rate limit has been exceeded.
-	 * Counts rows matching feature + IP within the given time window.
+	 * Check if a capacity limit has been exceeded.
+	 * Counts rows matching feature + address within the given time window.
+	 * A limit that guards an account is an attempt limit: check_attempt_limit().
 	 *
 	 * @param string    $feature        Feature name (e.g. 'api', 'login')
 	 * @param int       $max_requests   Maximum allowed requests in the window
@@ -119,20 +136,66 @@ class RequestLogger {
 	 * @return array{allowed:bool,count:int,retry_after:int}
 	 */
 	public static function rate_limit_state($feature, $max_requests, $window_seconds, $success_filter = null, $user_id = null, $key = null) {
+		if ($key !== null) {
+			return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
+				'rql_key = ?', substr((string)$key, 0, 64));
+		}
+		if ($user_id !== null) {
+			return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
+				'rql_usr_user_id = ?', intval($user_id));
+		}
+		return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
+			'rql_ip_address = ?', isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0');
+	}
+
+	/**
+	 * Check if an attempt limit has been exceeded: the rows for this feature
+	 * from the caller's network (IpAddress::network()) within the window.
+	 * For limits that stop a stranger guessing a secret, making accounts or
+	 * having mail sent to someone; see the class comment.
+	 *
+	 * @return bool True if within limit, false if exceeded
+	 */
+	public static function check_attempt_limit($feature, $max_requests, $window_seconds, $success_filter = null) {
+		return self::attempt_limit_state($feature, $max_requests, $window_seconds, $success_filter)['allowed'];
+	}
+
+	/**
+	 * rate_limit_state() for an attempt limit: counted by the caller's
+	 * network instead of its address.
+	 *
+	 * @return array{allowed:bool,count:int,retry_after:int}
+	 */
+	public static function attempt_limit_state($feature, $max_requests, $window_seconds, $success_filter = null) {
+		return self::count_state($feature, $max_requests, $window_seconds, $success_filter,
+			'rql_ip_network = ?', IpAddress::network(isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0'));
+	}
+
+	/**
+	 * Who an attempt limit counted, in words for a refusal: "This address"
+	 * for an IPv4 caller, "This network (2001:db8:1:2::/64)" for an IPv6 one,
+	 * whose allowance it shares with the rest of its /64.
+	 */
+	public static function attempt_unit_label(): string {
+		$network = IpAddress::network(isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '');
+		return strpos($network, '/') !== false ? 'This network (' . $network . ')' : 'This address';
+	}
+
+	/**
+	 * The key a sign-in's per-account count is logged and counted under, for
+	 * the username as typed (whether or not an account has it): the web
+	 * sign-in and the app sign-in use this one key, so they count alike.
+	 */
+	public static function username_key(string $username): string {
+		return 'user:' . substr(hash('sha256', strtolower(trim($username))), 0, 32);
+	}
+
+	/** The count behind every limit: rows for $feature matching $key_sql within the window. */
+	private static function count_state($feature, $max_requests, $window_seconds, $success_filter, string $key_sql, $key): array {
 		$db = DbConnector::get_instance()->get_db_link();
 		$window_seconds = max(1, intval($window_seconds));
 		$max_requests = max(1, intval($max_requests));
 
-		if ($key !== null) {
-			$key_sql = 'rql_key = ?';
-			$key = substr((string)$key, 0, 64);
-		} elseif ($user_id !== null) {
-			$key_sql = 'rql_usr_user_id = ?';
-			$key = intval($user_id);
-		} else {
-			$key_sql = 'rql_ip_address = ?';
-			$key = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
-		}
 		$where = "rql_feature = ? AND " . $key_sql
 			. " AND rql_create_time > NOW() - INTERVAL '" . $window_seconds . " seconds'";
 		$params = [$feature, $key];

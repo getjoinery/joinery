@@ -4,6 +4,7 @@
  * work: the plugin's rate buckets per address, the request headers, and a
  * refusal turned into the API's answer (specs/support_chatbot.md, Intake).
  *
+ * @version 0.2.0 - new threads are counted by network (an IPv6 /64), and the refusal says which unit
  * @version 0.1.0
  */
 class SupportApi {
@@ -26,24 +27,25 @@ class SupportApi {
 	public static function limit(string $action, bool $opens = false): ?LogicResult {
 		$state = RequestLogger::rate_limit_state('support_desk', self::REFUSALS_PER_HOUR, 3600, false);
 		if (!$state['allowed']) {
-			return self::limited($state, self::REFUSALS_PER_HOUR, 'refused support desk requests');
+			return self::limited($state, self::REFUSALS_PER_HOUR, 'refused support desk requests', 'This address');
 		}
 		if ($opens) {
 			$max = max(1, SupportDesk::intSetting('support_desk_new_threads_per_hour', 20));
-			$state = RequestLogger::rate_limit_state('support_desk_open', $max, 3600);
+			$state = RequestLogger::attempt_limit_state('support_desk_open', $max, 3600);
 			if (!$state['allowed']) {
-				return self::limited($state, $max, 'new support threads');
+				return self::limited($state, $max, 'new support threads', RequestLogger::attempt_unit_label());
 			}
 			RequestLogger::log('support_desk_open', $action, true);
 		}
 		return null;
 	}
 
-	private static function limited(array $state, int $max, string $what): LogicResult {
+	/** $who: what the limit counted ("This address", or RequestLogger::attempt_unit_label()). */
+	private static function limited(array $state, int $max, string $what, string $who): LogicResult {
 		if (function_exists('api_rate_limited')) {
-			api_rate_limited($state, 'This address', $max, 3600, $what);
+			api_rate_limited($state, $who, $max, 3600, $what);
 		}
-		return LogicResult::error('Too many requests to the support desk from this address. Try again later.', array('reason' => 'rate_limited'));
+		return LogicResult::error('Too many requests to the support desk from ' . lcfirst($who) . '. Try again later.', array('reason' => 'rate_limited'));
 	}
 
 	/** The request headers, as sent. */

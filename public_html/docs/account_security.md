@@ -324,8 +324,9 @@ One unlocker ceremony opens the vault for a bounded window
   background-tab throttling) ends the window — checked at read time, no cron.
   So navigating anywhere on the site keeps the window alive; only a browser
   that is genuinely gone (closed, asleep, machine off) goes stale.
-- **Network identity change.** The existing IP-change guard that zeroes elevated
-  permissions on a major address jump also ends that session's window.
+- **Network identity change.** The session address check (see
+  [Where a session is used from](#where-a-session-is-used-from)) also ends that
+  session's window.
 - **Mail caps.** Beyond the idle timeout, a window carries caps from what the
   user's mail holds (`VaultUnlock::capsForUser()`, recorded with the window and
   checked at read time): a user with a **hardened** domain (relay sealing or the
@@ -562,6 +563,77 @@ setting a plugin declares in its `vaultGatedSettings` manifest list
 window, saving the rest and prompting the user to unlock and save again. The
 list is plugin-declared, so the closed set of reroute settings never becomes a
 core dependency on any one plugin.
+
+## Where a session is used from
+
+A signed-in session remembers the address it signed in from, and every request
+is compared with it (`SessionControl::_is_major_ip_change`). The comparison is
+of networks, not addresses, so a phone or a home connection handed a new
+address by its ISP stays signed in:
+
+- **IPv4:** the first 16 bits (a /16).
+- **IPv6:** the first 32 bits (a /32), roughly one ISP's allocation; a phone or
+  home router may be handed a new /64 inside it at any time.
+
+Both lengths are a judgement, kept as two constants on `SessionControl`. Some
+home ISPs hold IPv6 allocations wider than a /32, so a re-issued prefix can
+cross a /32 boundary; the `IP_VIOLATION` lines in the error log are where that
+would show, and the IPv6 constant is the one to widen.
+
+The session keeps one address per family. A browser on a dual-stack
+connection may reach the site over IPv4 on one request and IPv6 on the next,
+and nothing relates a machine's IPv4 address to its IPv6 one, so the first
+request from the other family is let through and its address is kept beside the
+sign-in address. After that each family is compared with its own address. The
+sign-in address is never replaced. The first address seen in the other family
+is kept whoever sent it, so if someone else reaches a session over IPv6 before
+its owner does, the owner's first IPv6 request is the one challenged, and the
+`IP_VIOLATION` line names the owner's own address as the current one; signing
+in again regenerates the session id, which ends the other copy. An IPv4 address
+written in IPv6 form (`::ffff:192.0.2.1`) is IPv4.
+
+The address the check reads is the auth-grade one (`get_client_ip(true)`):
+`CF-Connecting-IP` is believed only from a Cloudflare edge and
+`X-Forwarded-For` never, so a forwarding header cannot carry a victim's address
+past the check. Behind Cloudflare or a host's proxy it is still the visitor,
+because mod_remoteip has already put the visitor in `REMOTE_ADDR`.
+
+When the check fires, `get_permission()` answers 0 and the session's vault
+window closes, for every user; `check_permission()` sends a user of permission 5
+or more to the sign-in page. A member is not signed out: they are treated as
+signed out for as long as that session lasts.
+
+### Sign-in limits
+
+Failed web sign-ins are counted two ways, each 10 in 15 minutes, and either
+refuses: from the caller's network (an IPv4 address, or an IPv6 /64, which one
+subscriber holds whole), and for the email typed, so a caller with many
+networks cannot aim them all at one account. The email's count is kept whether
+or not an account has that email, and both refusals read the same, so the
+limit says nothing about which emails have accounts. Nor does the time a
+refusal takes: a sign-in naming no account still spends a password check's time
+(`User::spend_password_check()`), on the website and on `auth/login`. Someone who knows an
+account's email can hold its password sign-in refused by failing on purpose;
+passkey sign-in keeps its own count and still works.
+
+Every other limit that guards an account — second factor, step-up, password
+reset, sign-up, passkey sign-in, vault unlock, recovery checks, device-link
+codes — counts by network too (`RequestLogger::check_attempt_limit`).
+
+### Allowed sign-in addresses
+
+An admin can limit an account to some addresses (Allowed Login IPs on the user
+edit page). Each entry is an address in any spelling (`2001:DB8::1` matches a
+request from `2001:db8:0:0::1`), a prefix of either family (`104.23.0.0/16`,
+`2001:db8:abcd::/48`, bit-exact at any length) or an IPv4 wildcard
+(`104.23.*`, `104.2*`). An entry of the other family matches nothing (except
+an entry of stars alone, which admits everyone), so a computer on a
+dual-stack connection needs both of its families listed or it is refused
+whenever its browser picks the missing one. A malformed entry — a bad address,
+a prefix length out of range, a zone id, brackets, an IPv4 prefix written in
+IPv6 form — is refused when the page is
+saved, naming the entry. `IpAddress::matchesEntry()` and
+`IpAddress::entryProblem()` are the one reading of an entry.
 
 ## What each action requires
 

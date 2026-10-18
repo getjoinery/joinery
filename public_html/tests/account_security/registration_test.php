@@ -295,7 +295,7 @@ $flood_ip = '192.0.2.90';
 $_SERVER['REMOTE_ADDR'] = $flood_ip;
 require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 
-check(RequestLogger::check_rate_limit('register', 5, 900, NULL),
+check(RequestLogger::check_attempt_limit('register', 5, 900, NULL),
 	'a fresh address starts inside the sign-up budget');
 
 $flood_emails = array();
@@ -309,7 +309,7 @@ for ($i = 0; $i < 5; $i++) {
 	$_SESSION = array();
 }
 
-check(!RequestLogger::check_rate_limit('register', 5, 900, NULL),
+check(!RequestLogger::check_attempt_limit('register', 5, 900, NULL),
 	'five sign-ups exhaust the budget for that address');
 
 $blocked_email = strtolower(reg_email('blocked'));
@@ -328,7 +328,7 @@ check(!User::GetByEmail($blocked_email),
 // Per-IP, like every other throttle on the platform: a different source is
 // unaffected. There is no global signup cap.
 $_SERVER['REMOTE_ADDR'] = '192.0.2.91';
-check(RequestLogger::check_rate_limit('register', 5, 900, NULL),
+check(RequestLogger::check_attempt_limit('register', 5, 900, NULL),
 	'a different address is unaffected by the first exhausting its budget');
 
 // ---------------------------------------------------------------------------
