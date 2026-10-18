@@ -31,6 +31,8 @@
  * owner's own records, changed on their press with a token they gave for it,
  * so nothing is recorded in the platform's DNS ownership table.
  *
+ * @version 1.3 - prove() can ask the copy's own address under the site's name ($at), for a switch whose records
+ *                have not moved yet (specs/site_copy_anything_to_anything.md D1)
  * @version 1.2 - a container site moves only its own names (the domain and www.): its server's address is
  *                 shared with other sites, whose records stay
  * @version 1.1 - prove() takes how long to keep asking, so a step that is called again can ask briefly each time, and
@@ -282,11 +284,13 @@ class ProxiedOriginMove {
 	 * only the copy can give; $verify_tls false asks without checking the
 	 * certificate, for a copy made from backups, which has none until it is
 	 * the site. Each ask carries a fresh
-	 * query string, so no cache answers in the copy's place.
+	 * query string, so no cache answers in the copy's place. $at asks the
+	 * copy's own address under the site's name instead of whatever the name
+	 * resolves to: the copy answers before any record names it.
 	 *
 	 * @return array{proven:bool, asks:int, seconds:int, last:string}
 	 */
-	public static function prove(string $domain, string $look_path, ?int $seconds = null, bool $verify_tls = true): array {
+	public static function prove(string $domain, string $look_path, ?int $seconds = null, bool $verify_tls = true, string $at = ''): array {
 		$seconds = $seconds ?? self::PROVE_SECONDS;
 		$start = time();
 		$asks = 0;
@@ -299,7 +303,7 @@ class ProxiedOriginMove {
 		while ($asks < 100) {
 			$asks++;
 			$url = 'https://' . $domain . $look_path . '?switch_probe=' . bin2hex(random_bytes(6));
-			$got = self::$asker ? (self::$asker)($url) : self::ask($url, $verify_tls);
+			$got = self::$asker ? (self::$asker)($url, $at) : self::ask($url, $verify_tls, $at !== '' ? $domain : '', $at);
 			if ((int)$got['status'] === 303 && strpos((string)$got['set_cookie'], 'joinery_look=' . $secret) !== false) {
 				return array('proven' => true, 'asks' => $asks, 'seconds' => time() - $start, 'last' => '303 from the copy');
 			}
@@ -312,10 +316,13 @@ class ProxiedOriginMove {
 		return array('proven' => false, 'asks' => $asks, 'seconds' => time() - $start, 'last' => $last);
 	}
 
-	/** One HTTPS ask, no redirect followed, the certificate checked unless told not to. */
-	private static function ask(string $url, bool $verify_tls = true): array {
+	/** One HTTPS ask, no redirect followed, the certificate checked unless told not to, the name pinned to $at when given. */
+	private static function ask(string $url, bool $verify_tls = true, string $name = '', string $at = ''): array {
 		$cookie = '';
 		$ch = curl_init($url);
+		if ($name !== '' && $at !== '') {
+			curl_setopt($ch, CURLOPT_RESOLVE, array($name . ':443:' . (strpos($at, ':') !== false ? '[' . $at . ']' : $at)));
+		}
 		curl_setopt_array($ch, array(
 			CURLOPT_RETURNTRANSFER => true,
 			CURLOPT_FOLLOWLOCATION => false,

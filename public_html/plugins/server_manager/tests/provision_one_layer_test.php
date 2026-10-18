@@ -33,6 +33,8 @@
  *
  * Run: php plugins/server_manager/tests/provision_one_layer_test.php
  *
+ * @version 1.1 - a copy's layer is decided by SiteCopyRunner::copy_encryption(), never ticked, and a copy into its
+ *               owner's account with a proven site key is born sealed to it (specs/site_copy_final_test.md E1)
  * @version 1.0
  */
 
@@ -264,8 +266,8 @@ if (!$key_ready) {
 	$body = pol_create_body($h);
 	check(count($h) === 1 && is_array($body) && !array_key_exists('disk_encryption', $body) && !array_key_exists('swap_size', $body),
 		'an unencrypted provision sends neither, and asks nothing of the region', json_encode(pol_requests($h)));
-	check($p->get('cvp_status') === 'booting' && $p->get('cvp_provider_disk_encryption') === null,
-		'and records nothing about the provider\'s layer: exactly as before');
+	check($p->get('cvp_status') === 'booting' && $p->get('cvp_provider_disk_encryption') === 'enabled',
+		'and records the provider\'s layer as it answered, for the node page\'s count of layers (E4)');
 
 	// -----------------------------------------------------------------------
 	section('The provider\'s layer reported on fails the provision before install');
@@ -482,19 +484,25 @@ section('Nothing is marked encrypted while data_root_encryption_offered is off')
 harness_set_setting_mem('data_root_encryption_offered', '0');
 check(!CustomerCloudProvision::data_root_encryption_offered(), 'off: not offered');
 check(!CustomerCloudProvision::born_encrypted_by_default('operator'), 'off: a server in our account is not born encrypted');
-check(!SiteCopyRunner::copy_born_encrypted(array(), 'operator') && !SiteCopyRunner::copy_born_encrypted(array('data_root_encrypted' => true), 'operator'),
-	'off: a copy is not born encrypted, even if a tick were posted');
+// A site whose recovery key is proven, with its public half on record, and one without.
+$e1_keyed = new ManagedNode(NULL);
+$e1_keyed->set('mgn_backup_recovery_public_key', base64_encode(str_repeat("\x07", 32)));
+$e1_bare = new ManagedNode(NULL);
+check(!SiteCopyRunner::copy_encryption($e1_keyed, 'operator')['ours'] && !SiteCopyRunner::copy_encryption($e1_keyed, 'customer')['ours'],
+	'off: a copy is not born encrypted by us, in any account');
 
 harness_set_setting_mem('data_root_encryption_offered', '1');
 check(CustomerCloudProvision::born_encrypted_by_default('operator'), 'on: a server in our account is born encrypted');
 check(!CustomerCloudProvision::born_encrypted_by_default('customer'), 'on: a server in a customer\'s account is born unencrypted (self-hosted)');
-check(SiteCopyRunner::copy_born_encrypted(array(), 'operator') && !SiteCopyRunner::copy_born_encrypted(array(), 'customer'),
-	'on: a copy with no tick posted follows the same default');
-check(!SiteCopyRunner::copy_born_encrypted(array('data_root_encrypted' => false), 'operator')
-	&& SiteCopyRunner::copy_born_encrypted(array('data_root_encrypted' => true), 'operator'),
-	'on: the copy form\'s tick decides when it is posted, for our account');
-check(!SiteCopyRunner::copy_born_encrypted(array('data_root_encrypted' => true), 'customer'),
-	'on: a copy into its owner\'s account is born plain even ticked: it would be sealed to our key, and D2 seals it to its owner\'s');
+$e1 = SiteCopyRunner::copy_encryption($e1_bare, 'operator');
+check($e1['ours'] && $e1['recipient'] === '' && strpos($e1['says'], 'one layer') !== false,
+	'on: a copy into one of our accounts is born with ours, sealed to this management node\'s key: decided, never ticked');
+$e1 = SiteCopyRunner::copy_encryption($e1_keyed, 'customer');
+check($e1['ours'] && $e1['recipient'] === base64_encode(str_repeat("\x07", 32)),
+	'on: into its owner\'s account, a site with a proven key is born with ours, sealed to that key (E1, D2)');
+$e1 = SiteCopyRunner::copy_encryption($e1_bare, 'customer');
+check(!$e1['ours'] && strpos($e1['says'], 'Prove') !== false,
+	'on: into its owner\'s account without a proven key: the provider\'s default, and the tab says how to get ours');
 harness_set_setting_mem('data_root_encryption_offered', '0');
 
 // Each creating path takes its answer from the one rule above. The order path
@@ -505,7 +513,7 @@ foreach (array(
 	'plugins/server_manager/includes/provisioning/PollHostingOrders.php' => 'born_encrypted_by_default(',
 	'plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php' => 'born_encrypted_by_default(',
 	'plugins/server_manager/views/admin/install_node_form.php' => 'born_encrypted_by_default(',
-	'plugins/server_manager/includes/SiteCopyRunner.php' => 'self::copy_born_encrypted(',
+	'plugins/server_manager/includes/SiteCopyRunner.php' => 'self::copy_encryption(',
 ) as $file => $call) {
 	$src = (string)file_get_contents(PathHelper::getIncludePath($file));
 	check(strpos($src, $call) !== false && strpos($src, "'cvp_data_root_encrypted', true") !== false,

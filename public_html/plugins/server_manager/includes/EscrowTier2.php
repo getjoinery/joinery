@@ -34,6 +34,8 @@
  * thing a stolen hosting login can do. A 401 from the provider marks the
  * account refused, so the Hosting tab of Provisioning Setup says so (B77).
  *
+ * @version 1.3 - Hetzner's own command names for a password reset, a rescue, a rebuild, an image, an ISO and an
+ *                address taken away refuse as Linode's do (specs/site_copy_anything_to_anything.md D3)
  * @version 1.2 - A key whose scopes were never read is not Tier 1 either: unread is not "chosen without the
  *               events scope", it is the dead-key shape, so the boot is refused until a check reads them
  *               (reviewer1 F1); machines_in_account() names what removing an account drops to Tier 1 (N1).
@@ -64,6 +66,13 @@ class EscrowTier2 {
 		'disk_duplicate'  => 'its disk was duplicated',
 		'backups_restore' => 'a backup was restored onto it',
 		'linode_deleteip' => 'one of its addresses was taken away',
+		// Hetzner's own command names for the same things.
+		'reset_password'  => 'its root password was reset',
+		'enable_rescue'   => 'it was set to boot into rescue mode',
+		'rebuild_server'  => 'it was rebuilt',
+		'create_image'    => 'an image was made of its disk',
+		'attach_iso'      => 'an ISO was attached to boot it from',
+		'unassign_primary_ip' => 'one of its addresses was taken away',
 	);
 
 	/**

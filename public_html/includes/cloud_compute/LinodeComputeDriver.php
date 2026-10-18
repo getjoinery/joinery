@@ -6,6 +6,8 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
+ * @version 1.19 - CloudInstanceTypes (its plans; us-east, g6-nanode-1 and Ubuntu 26.04 as the defaults) and CloudTokenScopes
+ *                (specs/site_copy_anything_to_anything.md D2)
  * @version 1.18 - CloudKeyExpiry: the key's own expiry from profile/tokens, matched by its first 16 characters,
  *                which any scoped key may read (B77)
  * @version 1.17 - CloudVolumeFacts: a Block Storage volume's own encryption, by the path Linode gives it on the
@@ -58,9 +60,14 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents, CloudVolumeFacts, CloudKeyExpiry {
+class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfers, CloudAddressSwap, CloudAccountIdentity, CloudMachineTransfer, CloudAccountCleanup, CloudRegionFacts, CloudProviderEvents, CloudVolumeFacts, CloudKeyExpiry, CloudInstanceTypes, CloudTokenScopes {
 
 	const API_BASE = 'https://api.linode.com/v4/';
+
+	/** Where and at what size a form starts. */
+	const DEFAULT_REGION = 'us-east';
+	const DEFAULT_TYPE = 'g6-nanode-1';
+	const DEFAULT_IMAGE = 'linode/ubuntu26.04';
 
 	/** The region capability under which Linode offers (and can turn off) its own disk encryption. */
 	const DISK_ENCRYPTION_CAPABILITY = 'Disk Encryption';
@@ -677,6 +684,18 @@ class LinodeComputeDriver implements CloudComputeProvider, CloudInstanceTransfer
 		}
 		usort($out, function ($a, $b) { return $a['memory_mb'] <=> $b['memory_mb'] ?: $a['disk_mb'] <=> $b['disk_mb']; });
 		return $out;
+	}
+
+	public function defaultRegion(): string {
+		return self::DEFAULT_REGION;
+	}
+
+	public function defaultInstanceType(): string {
+		return self::DEFAULT_TYPE;
+	}
+
+	public function defaultImage(): string {
+		return self::DEFAULT_IMAGE;
 	}
 
 	/** An instance type's list price a month, in US dollars, or null when Linode does not say. */

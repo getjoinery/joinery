@@ -4,6 +4,11 @@
 # made it, its image, its state, its mounts and whether its run spec exists,
 # as ONE JSON object on stdout.
 #
+# Version: 1.3 - security: for each container install.sh made, the system call filter it was made under (its
+#                joinery.seccomp label), the capabilities it adds, whether it drops every other, and the
+#                setuid-root files in its image, read from the host through the running container's root
+#                (/proc/PID/root) once per image and kept under /run; what a site copy is checked against from
+#                the management node (site_copy_final_test.md, the rig)
 # Version: 1.2 - every mount of a site is listed (32 a container, a site has 16 volumes), and a container
 #                with more says so in truncated, as a cut list does (B65: ten were kept, truncated false).
 # Version: 1.1 - the engine is run by its command (site_engine_bin: /usr/local/bin/podman by path), its name
@@ -37,6 +42,11 @@
 #     tmpfs's source path on the server is never read.
 #   - run_spec says whether /etc/joinery/sites/{name}/run_spec exists: the
 #     record install.sh keeps of how it ran the container.
+#   - security, for a container install.sh made: filter (the sha256 its
+#     joinery.seccomp label names, or null), caps (what it adds, as X, never
+#     CAP_X), drop_all, and setuid (the count of setuid-root files on its own
+#     filesystem, found through /proc/PID/root while it runs, kept per image
+#     under /run; unknown while it has never run). Nothing runs inside it.
 #   - A name that is not a plain word is listed, reduced to safe characters,
 #     and never inspected: its image, state and mounts are unknown.
 #   - Bounded: at most MAX_CONTAINERS entries and MAX_MOUNTS mounts each, every
@@ -78,7 +88,36 @@ json_image() { local drop='[^A-Za-z0-9._@:/-]' s; s="${1//$drop/}"; printf '"%s"
 # state, its image, and each mount's type and name ("type:name ", a bind's
 # name empty). Every part reads the engine's typed container; Docker names it
 # with a leading slash, Podman without.
-INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{.Config.Image}}|{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}'
+INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{.Config.Image}}|{{range .Mounts}}{{.Type}}:{{.Name}} {{end}}|{{index .Config.Labels "joinery.seccomp"}}|{{range .HostConfig.CapAdd}}{{.}} {{end}}|{{range .HostConfig.CapDrop}}{{.}} {{end}}|{{.State.Pid}}|{{.Image}}'
+
+# The setuid-root files on a running container's own filesystem, read from the
+# host through its root (/proc/PID/root), counted once per image and kept.
+SETUID_CACHE="${CONTAINER_INVENTORY_RUN:-/run/joinery}/inventory_setuid"
+setuid_count() {  # IMAGE_ID PID
+    local f count
+    [[ "$1" =~ ^[A-Za-z0-9:._-]{1,128}$ ]] || { printf '"unknown"'; return; }
+    f="${SETUID_CACHE}/${1//:/_}"
+    count="$(head -c 16 "$f" 2>/dev/null)"
+    if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+        [[ "$2" =~ ^[1-9][0-9]*$ && -d "/proc/$2/root/" ]] || { printf '"unknown"'; return; }
+        count="$(run find "/proc/$2/root/" -xdev -perm -4000 -type f | wc -l)"
+        [[ "$count" =~ ^[0-9]+$ ]] || { printf '"unknown"'; return; }
+        mkdir -p "$SETUID_CACHE" 2>/dev/null && printf '%s' "$count" > "$f" 2>/dev/null
+    fi
+    printf '%s' "$count"
+}
+
+security_json() {  # LABEL CAPADD CAPDROP PID IMAGE_ID
+    local cap caps="" sep="" drop=false
+    for cap in $2; do
+        cap="${cap#CAP_}"; cap="${cap^^}"
+        [[ "$cap" =~ ^[A-Z_]{2,40}$ ]] || continue
+        caps+="${sep}\"${cap}\""; sep=","
+    done
+    [[ " ${3^^} " == *" ALL "* || " ${3^^} " == *" CAP_ALL "* ]] && drop=true
+    printf '{"filter":%s,"caps":[%s],"drop_all":%s,"setuid":%s}' \
+        "$([[ "$1" =~ ^[0-9a-f]{64}$ ]] && printf '"%s"' "$1" || printf 'null')" "$caps" "$drop" "$(setuid_count "$5" "$4")"
+}
 
 mounts_json() {
     local m t nm sep="" k=0
@@ -111,14 +150,15 @@ emit_containers() {
     # A name that is not a plain word: named, reduced, never inspected.
     while IFS= read -r c; do
         [[ -n "$c" ]] || continue
-        add "$(printf '{"name":%s,"install_sh":false,"image":"unknown","state":"unknown","mounts":"unknown","run_spec":false}' "$(json_str "$c")")" || break
+        add "$(printf '{"name":%s,"install_sh":false,"image":"unknown","state":"unknown","mounts":"unknown","run_spec":false,"security":null}' "$(json_str "$c")")" || break
     done <<< "$(grep -v -E '^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$' <<< "$all")"
     if [[ -n "$names" ]]; then
         local inspected
         # shellcheck disable=SC2086  # the names are checked above: one word each
         inspected="$(run "$ENGINE" inspect -f "$INSPECT_FORMAT" $names)"
         [[ -n "$inspected" ]] || { printf '"unknown"'; return; }
-        while IFS='|' read -r c site state image mounts; do
+        local label capadd capdrop pid image_id
+        while IFS='|' read -r c site state image mounts label capadd capdrop pid image_id; do
             c="${c#/}"
             [[ -n "$c" ]] || continue
             if [[ "$c" =~ ^[a-z0-9_-]{1,50}$ && "$site" == "SITENAME=$c" ]]; then own=true; else own=false; fi
@@ -126,9 +166,10 @@ emit_containers() {
             # A container with more mounts than are listed cuts the list as surely as a missing entry.
             read -r -a all_mounts <<< "$mounts"
             (( ${#all_mounts[@]} <= MAX_MOUNTS )) || TRUNCATED=true
-            entry="$(printf '{"name":%s,"install_sh":%s,"image":%s,"state":%s,"mounts":%s,"run_spec":%s}' \
+            entry="$(printf '{"name":%s,"install_sh":%s,"image":%s,"state":%s,"mounts":%s,"run_spec":%s,"security":%s}' \
                 "$(json_str "$c")" "$own" "$(json_image "$image")" "$(json_str "${state:-unknown}")" \
-                "$(mounts_json "$mounts")" "$(has_run_spec "$c")")"
+                "$(mounts_json "$mounts")" "$(has_run_spec "$c")" \
+                "$([[ "$own" == true ]] && security_json "$label" "$capadd" "$capdrop" "$pid" "$image_id" || printf 'null')")"
             add "$entry" || break
         done <<< "$inspected"
     fi

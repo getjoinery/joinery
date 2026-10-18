@@ -16,6 +16,8 @@
  * passed. One node speaks for each machine, so a server of twelve sites raises
  * one incident.
  *
+ * @version 1.6 - a machine's record names its account's provider, not Linode always (site_copy_anything_to_anything D2);
+ *               the provider's own disk encryption is kept on its provisions, for the layer count (final test E4)
  * @version 1.5 - each held API key is checked first (OperatorCloudAccount::check): a refused or expired key, and
  *               its expiry, are on record every day, for the Hosting tab and IncidentSourceCloudAccountKey; and
  *               revoke_rejected() is public: EscrowTier2 marks an account refused by the same rule (B77)
@@ -120,8 +122,9 @@ class MachineTransferWatch {
 		foreach ($chosen as $instance_id => $on) {
 			$c = $candidates[$instance_id];
 			$instance = $c['instance'];
-			$row = MachineTransfer::for_instance('linode', (string)$instance_id) ?? new MachineTransfer(NULL);
-			$row->set('mtr_provider', 'linode');
+			$provider = HeldCloudAccounts::provider_of_key((string)$c['key']) ?: 'linode';
+			$row = MachineTransfer::for_instance($provider, (string)$instance_id) ?? new MachineTransfer(NULL);
+			$row->set('mtr_provider', $provider);
 			$row->set('mtr_instance_id', (string)$instance_id);
 			$row->set('mtr_account', $c['key']);
 			$row->set('mtr_label', (string)($instance['label'] ?? ''));
@@ -139,6 +142,8 @@ class MachineTransferWatch {
 			}
 			$row->save();
 			$machines++;
+			// The provider's own disk encryption, kept for the layer count (E4).
+			DataRootLayers::record_provider_layer($provider, (string)$instance_id, $instance['disk_encryption'] ?? null);
 			foreach (array_keys($on) as $node_id) {
 				$linked[(int)$node_id] = (int)$row->key;
 			}

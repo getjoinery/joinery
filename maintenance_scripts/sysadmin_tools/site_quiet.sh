@@ -3,10 +3,17 @@
 # site_quiet.sh - freeze this site for a switch-over, or let it run again
 # (specs/site_copy.md WP5). The agent's site_quiet word runs this file.
 #
+# Version: 1.1 - forward ADDRESS: a frozen site forwards its visitors to its copy while a DNS switch settles
+#               (specs/site_copy_anything_to_anything.md D1); on stops forwarding
 # Version: 1.0
 #
 #   site_quiet.sh on                    set `quiet switchover`, then wait until the
-#                                       web user runs no command-line PHP
+#                                       web user runs no command-line PHP; a site
+#                                       that was forwarding stops
+#   site_quiet.sh forward ADDRESS       a site already frozen (`quiet switchover`)
+#                                       forwards every visitor to its copy at
+#                                       ADDRESS instead of showing the
+#                                       maintenance page (_site_state.sh)
 #   site_quiet.sh off                   clear `quiet switchover`
 #   site_quiet.sh off --copy-promoted   clear `quiet copy` too: the agent passes
 #                                       it only once this machine holds the
@@ -38,9 +45,11 @@ WAIT_SECONDS=300
 ACTION="${1:-}"
 PROMOTED=0
 [[ "${2:-}" == "--copy-promoted" ]] && PROMOTED=1
+FORWARD_TO=""
+[[ "${ACTION}" == "forward" ]] && FORWARD_TO="${2:-}"
 case "${ACTION}" in
-    on|off) : ;;
-    *) echo "usage: site_quiet.sh on | off [--copy-promoted]" >&2; exit 2 ;;
+    on|off|forward) : ;;
+    *) echo "usage: site_quiet.sh on | forward ADDRESS | off [--copy-promoted]" >&2; exit 2 ;;
 esac
 if [[ "${ACTION}" == "on" && "${PROMOTED}" == "1" ]]; then
     echo "site_quiet: --copy-promoted goes with off - refused" >&2
@@ -67,12 +76,28 @@ hold_host_runner_lock "${SITENAME}" "${SITE_ROOT}" "Nothing was changed." || exi
 
 REASON="$(site_state_read)"
 
+if [[ "${ACTION}" == "forward" ]]; then
+    if ! ss_addr_ok "${FORWARD_TO}"; then
+        echo "site_quiet: '${FORWARD_TO:0:64}' is not an address - refused" >&2
+        exit 2
+    fi
+    if [[ "${REASON}" != "switchover" ]]; then
+        echo "site_quiet: ${SITENAME} is not frozen for a switch-over; only a frozen site forwards - refused" >&2
+        exit 2
+    fi
+    site_state_set_forward "${FORWARD_TO}" || { echo "site_quiet: cannot write ${SS_FORWARD_FILE}" >&2; exit 1; }
+    echo "site_quiet: ${SITENAME} forwards its visitors to ${FORWARD_TO}"
+    site_state_assert switchover || exit 1
+    exit 0
+fi
+
 if [[ "${ACTION}" == "on" ]]; then
     if [[ "${REASON}" == "copy" ]]; then
         echo "site_quiet: ${SITENAME} is a copy (quiet copy); only the installer sets that state, and on does not replace it - refused" >&2
         exit 2
     fi
     site_state_write switchover || { echo "site_quiet: cannot write ${SS_STATE}" >&2; exit 1; }
+    site_state_set_forward ""
     echo "site_quiet: ${SITENAME} is quiet (switchover)"
     rc=0
     site_state_assert switchover || rc=1

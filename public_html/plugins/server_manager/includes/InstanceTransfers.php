@@ -29,6 +29,7 @@
  * row at once. Both take the row's lock (SELECT … FOR UPDATE) and re-read it
  * before they decide, so neither saves over the other's state.
  *
+ * @version 1.4 - the driver is the account's provider's (ComputeDriverRegistry)
  * @version 1.3 - the driver is the provision's own account's (cloud_accounts_list)
  * @version 1.2 - the open-incidents check counts every still-happening incident not ignored (a fix awaiting its proof too)
  * @version 1.1 - poll and cancel act on the row under its lock; a code that cannot be read is said for
@@ -79,7 +80,7 @@ class InstanceTransfers {
 		if ($held['token'] === '') {
 			return array('driver' => null, 'reason' => $held['reason']);
 		}
-		$driver = OperatorCloudAccount::driver_for($held['token']);
+		$driver = OperatorCloudAccount::driver_for($held['token'], $held['provider']);
 		if (!($driver instanceof CloudInstanceTransfers)) {
 			return array('driver' => null, 'reason' => 'This provider cannot hand an instance to another account. '
 				. 'Move the site with a site copy to a new server instead.');

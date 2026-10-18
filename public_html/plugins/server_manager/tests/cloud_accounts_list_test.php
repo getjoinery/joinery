@@ -29,6 +29,8 @@
  *
  * Run: php tests/run.php --only=plugins/server_manager/tests/cloud_accounts_list_test.php
  *
+ * @version 1.1 - the fake provider declares the capabilities it answers (CloudTokenScopes, CloudAccountIdentity,
+ *               CloudAccountCleanup): an account asks a driver by capability
  * @version 1.0
  */
 
@@ -39,7 +41,7 @@ harness_boot();
 harness_test_mode();
 
 /** A provider account: what it says about itself, or a refusal. */
-class FakeCloudAccountDriver {
+class FakeCloudAccountDriver implements CloudTokenScopes, CloudAccountIdentity, CloudAccountCleanup {
 	public $token;
 	public $scopes;
 	public $name;
@@ -62,6 +64,11 @@ class FakeCloudAccountDriver {
 	public function accountCompany(): string {
 		return $this->company;
 	}
+	public static function missingScopes(array $granted, array $needed): array {
+		return LinodeComputeDriver::missingScopes($granted, $needed);
+	}
+	public function listVolumes(): array { return array(); }
+	public function deleteVolume(string $volume_id): void {}
 }
 
 $fakes = array();

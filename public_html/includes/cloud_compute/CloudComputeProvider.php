@@ -17,6 +17,9 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.12 - CloudInstanceTypes: a provider's plans and its default region and plan; CloudTokenScopes: what a
+ *                credential may do, for a provider whose tokens carry scopes. A driver is chosen by its account's
+ *                provider through ComputeDriverRegistry (specs/site_copy_anything_to_anything.md D2)
  * @version 1.11 - CloudKeyExpiry: when the credential itself stops working, where the provider says (B77)
  * @version 1.10 - CloudVolumeFacts: the provider's own encryption of a storage volume at a device path
  * @version 1.9 - CloudProviderEvents: an instance's activity log, and the instance an address belongs to
@@ -433,4 +436,51 @@ interface CloudAccountCleanup {
 
 	/** Delete a volume that is attached to nothing. @throws CloudComputeException */
 	public function deleteVolume(string $volume_id): void;
+}
+
+/**
+ * Optional capability: the plans a server can be created with, and where and
+ * at what size the provider's smallest sensible server is, for a form that
+ * offers them (specs/site_copy_anything_to_anything.md D2). The caller asks
+ * `instanceof CloudInstanceTypes`, and says "not offered here" when a driver
+ * does not.
+ */
+interface CloudInstanceTypes {
+
+	/**
+	 * The plans, smallest first, each:
+	 *   id         string  the provider's plan id
+	 *   memory_mb  int
+	 *   disk_mb    int
+	 *
+	 * @throws CloudComputeException
+	 */
+	public function instanceTypes(): array;
+
+	/** The region a form offers first. */
+	public function defaultRegion(): string;
+
+	/** The plan a form offers first: the provider's smallest a site runs on. */
+	public function defaultInstanceType(): string;
+
+	/** The Ubuntu image a Joinery server is installed on, by the provider's id. */
+	public function defaultImage(): string;
+}
+
+/**
+ * Optional capability: what a credential may do, for a provider whose tokens
+ * carry scopes. A provider whose tokens carry none does not implement it, and
+ * every scope is then held (specs/site_copy_anything_to_anything.md D2).
+ */
+interface CloudTokenScopes {
+
+	/**
+	 * The scopes the credential holds, as the provider names them.
+	 *
+	 * @throws CloudComputeException when the token cannot be read
+	 */
+	public function tokenScopes(): array;
+
+	/** The scopes of $needed that $granted does not cover. */
+	public static function missingScopes(array $granted, array $needed): array;
 }

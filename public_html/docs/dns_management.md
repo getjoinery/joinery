@@ -383,6 +383,25 @@ proxied, or a site name pointing somewhere else, stops it before anything is
 written. Nothing is recorded in `dnr_managed_dns_records`: the records stay the
 owner's. Cloudflare is the driver that implements it.
 
+### Moving a site's own records
+
+A site copy's switch-over can also move the site's own records, at any DNS host
+with a driver here (`DnsRecordMove`, in Server Manager): every unproxied A and
+AAAA record in the zone naming the old server's address is pointed at the new
+server's address of its family, through each driver's ordinary
+`listRecords()` and `updateRecord()`. At the switch's start each such record's
+TTL goes to 60 seconds and its old TTL is kept; once the change has settled the
+old TTLs go back, and going back puts the values and TTLs back. A record someone
+has since pointed elsewhere is left alone and named. As with the proxied move,
+the owner presses for each step with a token typed for that press, nothing is
+kept, and nothing is recorded in `dnr_managed_dns_records`.
+
+Whether the change has settled is read from three public resolvers over
+DNS-over-HTTPS (`PublicResolvers`: Cloudflare, Google, Quad9), each its own
+cache: settled when every one answers the new address alone and one old TTL has
+passed since the change. A resolver that cannot be asked never counts as
+agreeing.
+
 ## Cutovers
 
 Creating a TXT record breaks nothing. Replacing MX moves live mail. Records whose

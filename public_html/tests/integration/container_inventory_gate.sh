@@ -53,7 +53,7 @@ case "$1 $2" in
         shift 3
         for c in "$@"; do
             case "$c" in
-                siteone)  echo "/siteone|SITENAME=siteone|running|joinery/site:0.8.494|volume:siteone_data volume:siteone_config bind: " ;;
+                siteone)  echo "/siteone|SITENAME=siteone|running|joinery/site:0.8.494|volume:siteone_data volume:siteone_config bind: |$(printf 'a%.0s' $(seq 1 64))|CAP_CHOWN CAP_SETUID |CAP_ALL |0|sha256:abc" ;;
                 sitetwo)  echo "/sitetwo|SITENAME=sitetwo|exited|joinery/site:0.8.490|volume:sitetwo_data " ;;
                 impostor) echo "/impostor|SITENAME=siteone|running|evil/image:latest|bind: tmpfs: " ;;
                 *)        echo "/$c||running|postgres:16|volume:pgdata " ;;
@@ -76,7 +76,11 @@ chk "a name that is not a word: listed reduced, never inspected" \
 chk "install.sh's sites say so; the impostor and postgres do not" \
     "$(jv "$T/out.json" containers.1.install_sh)/$(jv "$T/out.json" containers.2.install_sh)/$(jv "$T/out.json" containers.3.install_sh)/$(jv "$T/out.json" containers.4.install_sh)" \
     "true/true/false/false"
-chk "each entry's keys" "$(jv "$T/out.json" containers.1 keys)" "name,install_sh,image,state,mounts,run_spec"
+chk "each entry's keys" "$(jv "$T/out.json" containers.1 keys)" "name,install_sh,image,state,mounts,run_spec,security"
+chk "a site of install.sh's: the filter it was made under, the capabilities it adds as X, and that it drops every other" \
+    "$(python3 -c "import json,sys; d=[c for c in json.load(open(sys.argv[1]))['containers'] if c['name']=='siteone'][0]['security']; print(d['filter'][:4], ','.join(d['caps']), d['drop_all'], d['setuid'])" "$T/out.json")" "aaaa CHOWN,SETUID True unknown"
+chk "anything install.sh did not make carries no security" \
+    "$(python3 -c "import json,sys; print([c['security'] for c in json.load(open(sys.argv[1]))['containers'] if c['name']=='impostor'][0])" "$T/out.json")" "None"
 chk "image and state" "$(jv "$T/out.json" containers.1.image)/$(jv "$T/out.json" containers.2.state)" "joinery/site:0.8.494/exited"
 chk "mounts: type and volume name, a bind with no name" \
     "$(jv "$T/out.json" containers.1.mounts count)/$(jv "$T/out.json" containers.1.mounts.0.type):$(jv "$T/out.json" containers.1.mounts.0.name)/$(jv "$T/out.json" containers.1.mounts.2.type):$(jv "$T/out.json" containers.1.mounts.2.name)" \

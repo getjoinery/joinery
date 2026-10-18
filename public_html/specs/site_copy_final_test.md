@@ -1,9 +1,10 @@
 # Site Copy — The Final Test
 
-**Status:** Draft, 2026-10-18. Written by one-data-root with multi-tenant-security
+**Status:** Building, 2026-10-18. Written by one-data-root with multi-tenant-security
 (the security checks, the record of what copies today); reviewed by
-multi-tenant-security (R1–R6) and reviewer2 (F1–F22), all applied. Nothing in it has
-run. When every run below has passed, copy is declared complete, and this spec,
+multi-tenant-security (R1–R6) and reviewer2 (F1–F22), all applied. E1, E2 and E4 are
+built and gated, uncommitted (`data_root_layers_test.php`, `provision_one_layer_test.php`);
+E3 is this spec's Part P. The rig's scripts are written but unproven (see the build spec's status); the runs are not built; nothing has run live. When every run below has passed, copy is declared complete, and this spec,
 `site_copy.md` and `site_copy_anything_to_anything.md` move to implemented together.
 
 ## The owner's goal in plain terms
@@ -200,7 +201,7 @@ layer" run. The encryption column says what the copy must end with.
 | C4 | own server, alive, zone not held here | brought server (Ubuntu 26.04) | manual, with forwarding and the watch | ours: none; provider: unknown; no incident | after take-over, then a second copy | Keep |
 | C4b | own server, alive | brought server | proxy | as C4 | mid-switch | Keep |
 | C5 | own server, alive | Hetzner made here | DNS | ours, and the provider's off or none, as the driver reports it | after take-over | back |
-| C6 | own server, alive, Hetzner | Hetzner made here, same location | Hetzner IP swap, IPv6 kept | ours | after take-over, then a second copy | Keep |
+| C6 | own server, alive, Hetzner | Hetzner made here, same location | Hetzner IP swap (IPv4 moves; the AAAA note for IPv6) | ours | after take-over, then a second copy | Keep |
 | C7 | container on docker-prod, alive | Linode made here | DNS or proxy | ours, Linode's off | after take-over, then a second copy | Keep |
 | C8 | container on docker-prod, alive | container on an engine host born with our layer, its container storage on the data root | proxy or DNS | the host's: ours, Linode's off | mid-switch | Keep |
 | C9 | container on an engine host, alive | container on another engine host | proxy or DNS | the host's | after take-over | back |
@@ -387,7 +388,6 @@ as no longer true, before the first run:
 - Older, status unknown: a5 review W5, H1, H2, R7 (Postfix queue); the check that the
   quiet network rule blocks www-data and survives a reboot.
 - Rows 83209 and 92150 still named '(copy)'; row 92150's permanent delete.
-- `docs/installation.md` names `copy_database.sh`, which does not exist.
 
 ## Done when
 

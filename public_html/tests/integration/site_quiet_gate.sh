@@ -148,6 +148,36 @@ bash "$Q" on >/dev/null 2>&1; bash "$Q" off >/dev/null 2>&1
 chk "certbot's timer was never turned on" "$([ -f "$ST/on.certbot.timer" ] && echo on || echo off)" "off"
 touch "$ST/on.certbot.timer"
 
+echo "=== forward: a frozen site forwards its visitors to its copy while a DNS switch settles ==="
+cat > "$B/a2enmod" <<EOF2
+#!/bin/bash
+echo "a2enmod \$*" >> "$ST/calls"; exit 0
+EOF2
+chmod +x "$B/a2enmod"
+CONF="$R/etc/apache2/conf-available/joinery-quiet-qsite.conf"
+out="$(bash "$Q" forward 198.51.100.9 2>&1)"; rc=$?
+chk "a live site does not forward: refused" "$rc:$([ -e "$SD/forward" ] && echo file || echo none)" "2:none"
+bash "$Q" on >/dev/null 2>&1
+: > "$ST/calls"
+out="$(bash "$Q" forward 198.51.100.9 2>&1)"; rc=$?
+chk "a frozen site forwards: exit 0, the address recorded" "$rc:$(cat "$SD/forward")" "0:198.51.100.9"
+chk "the web user may reach that one address on 80 and 443, before the reject" "$(grep -c 'ip daddr 198.51.100.9 tcp dport { 80, 443 } accept' "$ST/nft_loaded"):$(( $(grep -n -m1 'ip daddr 198.51.100.9' "$ST/nft_loaded" | cut -d: -f1) < $(grep -n -m1 'reject' "$ST/nft_loaded" | cut -d: -f1) ))" "1:1"
+chk "every request is proxied to the copy over https" "$(grep -c 'ProxyPass "https://198.51.100.9/"' "$CONF"):$(grep -c 'ProxyPreserveHost On' "$CONF")" "1:2"
+chk "only to a server holding the site's own certificate" "$(grep -c -e '^SSLProxyVerify require$' -e '^SSLProxyCheckPeerName on$' -e '^SSLProxyCheckPeerExpire on$' "$CONF")" "3"
+chk "the ACME challenge goes over http, so the copy can be issued one" "$(grep -c 'ProxyPass "http://198.51.100.9/.well-known/acme-challenge/"' "$CONF")" "1"
+chk "no maintenance page while forwarding" "$(grep -c 'Redirect 503' "$CONF")" "0"
+chk "the proxy modules are enabled, and Apache reloaded" "$(grep -c -e 'a2enmod -q proxy$' -e 'a2enmod -q proxy_http$' -e 'a2enmod -q ssl$' "$ST/calls"):$(grep -c 'systemctl reload apache2' "$ST/calls")" "3:1"
+out="$(bash "$Q" forward '198.51.100.9;reboot' 2>&1)"; rc=$?
+chk "anything but an address is refused, the forward unchanged" "$rc:$(cat "$SD/forward")" "2:198.51.100.9"
+bash "$Q" forward 2001:db8::9 >/dev/null 2>&1
+chk "an IPv6 copy: ip6 in the rule, brackets in the URL" "$(grep -c 'ip6 daddr 2001:db8::9 tcp dport' "$ST/nft_loaded"):$(grep -c 'ProxyPass "https://\[2001:db8::9\]/"' "$CONF")" "1:1"
+bash "$Q" on >/dev/null 2>&1
+chk "on again: the forward stops, the maintenance page is back" "$([ -e "$SD/forward" ] && echo file || echo none):$(grep -c 'Redirect 503' "$CONF"):$(grep -c 'daddr' "$ST/nft_loaded")" "none:1:0"
+bash "$Q" forward 198.51.100.9 >/dev/null 2>&1
+bash "$Q" off >/dev/null 2>&1
+chk "off: the forward goes with everything else" "$([ -e "$SD/forward" ] && echo file || echo none):$([ -e "$SD" ] && echo dir || echo nodir)" "none:nodir"
+rm -f "$B/a2enmod"
+
 echo "=== quiet copy: set by the installer, never by on, never cleared by a bare off ==="
 . "$TOOLS/_site_state.sh"
 site_state_init qsite

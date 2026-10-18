@@ -9,6 +9,8 @@
  *
  * The page is tabs (TABS): Setup, Hosting, Hosted tier, Shop, Domains, Cleanup.
  *
+ * @version 2.3 - an account is added for its provider (Linode or Hetzner), with the name a provider that names none
+ *               needs; a replacement key is checked against the same account by the account itself
  * @version 2.2 - each of our accounts carries the encrypted machines it opens at Tier 2, for Remove's question (B77 N1)
  * @version 2.1 - an account added, or a key replaced, is said as done, and a scope its token lacks (or a check
  *   that failed) beside it as a warning, not the whole as an error (B25)
@@ -100,7 +102,8 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				throw new OperatorCloudAccountException('The form expired. Reload the page and try again.');
 			}
 			if ($action === 'add_account_key') {
-				$account = OperatorCloudAccount::add_key((string)($input['cloud_api_token'] ?? ''), (int)$session->get_user_id());
+				$account = OperatorCloudAccount::add_key((string)($input['cloud_api_token'] ?? ''), (int)$session->get_user_id(), null,
+					(string)($input['cloud_provider'] ?? 'linode'), (string)($input['cloud_account_name'] ?? ''));
 				$message = 'Added ' . $account->label() . '.';
 				if (OperatorCloudAccount::default_account() === null && $account->default_refusal() === '') {
 					$account->make_default();
@@ -142,15 +145,9 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 					throw new OperatorCloudAccountException('Paste the new API token.');
 				}
 				// The same account, never another: every server that names this entry would follow it.
-				try {
-					$name = OperatorCloudAccount::driver_for($token)->accountName();
-				} catch (CloudComputeException $e) {
-					throw new OperatorCloudAccountException('The provider did not accept that token (' . $e->getMessage() . '). Nothing was changed.');
-				}
-				$was = trim((string)$account->get('oca_account_name'));
-				if ($was !== '' && trim($name) !== $was) {
-					throw new OperatorCloudAccountException('That token is for ' . $name . ', not ' . $was
-						. '. A replacement key must be for the same account; add a different account as its own entry.');
+				$why = $account->replacement_refusal($token);
+				if ($why !== '') {
+					throw new OperatorCloudAccountException($why);
 				}
 				$account->store_credential($token);
 				$account->set('oca_status', OperatorCloudAccount::STATUS_ACTIVE);

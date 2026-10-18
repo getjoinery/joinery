@@ -13,6 +13,7 @@
  * Discovered by interface from this plugin's includes/oauth_consumers/;
  * no registration call is needed.
  *
+ * @version 1.2 - the account's name is read by any provider driver that can name one (ComputeDriverRegistry)
  * @version 1.1 - records the provider's own name for the account it connects
  * @version 1.0
  */
@@ -74,11 +75,11 @@ class CustomerCloudConsumer implements OAuth2Consumer {
 	 * cannot be read (the connection works without it).
 	 */
 	private static function account_name(string $provider, string $access_token): string {
-		if ($provider !== 'linode') {
+		if (!ComputeDriverRegistry::supports($provider, 'CloudAccountIdentity')) {
 			return '';
 		}
 		try {
-			return mb_substr((new LinodeComputeDriver($access_token))->accountName(), 0, 255);
+			return mb_substr(ComputeDriverRegistry::driver($provider, $access_token)->accountName(), 0, 255);
 		} catch (Exception $e) {
 			return '';
 		}

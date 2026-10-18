@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the management node.
  *
+ * @version 1.60 - mgn_backup_recovery_public_key: a proven recovery key's public half (specs/site_copy_final_test.md E1)
  * @version 1.59 - a host whose agent this node was is retired even with Enable automated provisioning checked
  *                (ManagedHost 1.7; owner 2026-10-16)
  * @version 1.58 - removing a node for good also retires the host records it was the agent of, and its own
@@ -177,6 +178,9 @@ class ManagedNode extends SystemBase {
 		// on page load — and so a node holding a key the management node did not
 		// put there is visible rather than silently left behind.
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
+		// The public half of that key, when the node reports it proven
+		// (base64): what a copy into its owner's own account is born sealed to.
+		'mgn_backup_recovery_public_key' => array('type'=>'varchar(64)'),
 		'mgn_backup_verify_recovery_fpr' => array('type'=>'varchar(64)'),
 
 		// The old machine of a switch-over (state retired): whether its domain

@@ -1,6 +1,57 @@
 # Site Copy — Anything to Anything, and Done
 
-**Status:** Draft, 2026-10-17. Nothing here is built.
+**Status:** Building, 2026-10-18 (one-data-root). WP0–WP5 built and gated, prepared as copy-final; no live proof yet.
+WP6's rig is written but unproven: `seed_copy_source.php`, `check_copy_target.php` and `check_copy_probes.sh`
+(plugins/server_manager/tests/lib), and `CopySecurityCheck` with `utils/copy_security_check.php`. The seed leaves
+out the vault (the live test's browser makes it, with the passkey) and the custom theme (not yet seeded).
+The live test per run is not written.
+
+- **WP0:** the agentless host rows are named once, together, on the Copy tab; the quiet-state
+  paragraph carries the forward; `site_copy.md`'s IP swap and from-backups packages say they passed
+  live. `copy_database.sh` exists (`sysadmin_tools/`): its row stays. B31–B33 were committed.
+- **WP1:** `ComputeDriverRegistry` (includes/cloud_compute); `CloudInstanceTypes` and
+  `CloudTokenScopes` join the interface; every B5 site asks the registry. The relay keeps its own
+  Linode driver (born on Linode by design). Gate: `compute_driver_registry_test.php`.
+- **WP2:** alive or dead is `scp_from` for every target (`runs_from_backups()` is how a run gets
+  its data); `SiteCopyMethods` (D6); a running site's agent must have polled within two hours;
+  `machine_wide_refusals()` (D8, with a `sites` list added to `host_report` 1.32); a distributed
+  region refused before the copy's server is made. Gate: `site_copy_matrix_test.php`.
+- **WP3:** `DnsRecordMove`, `PublicResolvers` (DNS-over-HTTPS), the watch and the settle phase
+  (`settling`); the forward (`site_quiet forward`, `site_quiet_host forward`) and `trust_forwarder`
+  (agent 1.84.0). Gates: `site_copy_dns_switch_test.php`, `site_quiet_gate.sh`,
+  `site_quiet_host_gate.sh`, `trust_forwarder_gate.sh`.
+- **WP4:** a running container copies anywhere, frozen through its host; the way back after
+  take-over on a host (B7). Gates: the site copy suites, updated.
+- **WP5:** `HetznerComputeDriver`; a Hetzner account on the Hosting tab. Gate:
+  `hetzner_compute_driver_test.php`. Needs Q1 for its live proof.
+- **Not built:** WP6 (the rig and live proofs, now in `site_copy_final_test.md`), WP7 (the move to
+  implemented).
+
+**Where the build differs from the design, decided while building (2026-10-18):**
+
+- **The forward is a reverse proxy, not a redirect** (D1). A redirect cannot name the copy under
+  the site's name; the frozen source proxies every request to the copy's address over https, the
+  copy's certificate checked against the site's own name, so a visitor's request and cookies reach
+  only a server holding the site's certificate (the ACME challenge path goes over http, so a copy
+  without one can be issued one). The agent takes only a public unicast address.
+- **TTLs are lowered at the switch's start, not the copy's** (D1): a DNS token is never kept, and
+  the switch's first press is the first to have one. The watch waits one old TTL anyway, and the
+  forward covers every cache meanwhile. Keep asks the token once more to put the TTLs back.
+- **A machine whose agent cannot forward** (older than 1.84.0) does not stop the switch: it goes
+  ahead without the forward, and says so.
+- **The watch** runs only where something is let go once it settles (a forward, or the old
+  server's power); Keep waits for it.
+- **The Hetzner swap moves IPv4 only** (D3, D9): Hetzner writes a server's IPv6 into its network
+  configuration at its first boot, so a moved IPv6 would not be taken up without a change on the
+  machine. The AAAA note covers it as at Linode.
+- **No project name, no cleanup at Hetzner** (D3): Hetzner's API names no project, so an account
+  is added under the name typed (and a replaced key must reach the same servers), and with no
+  company there is no test-account flag, so `CloudAccountCleanup` is not implemented.
+- **An old container is held stopped** at the end of the start, or once a DNS move settles while it
+  forwards (D4); a dead container's host is asked for `hold_container` at the switch, not at
+  preflight (its host may be gone with it).
+- **Going back from a copy onto a host after it took the site** holds the copy's container
+  stopped on its host for its owner to remove, with what was written on it (D7).
 
 **Owner's goal (2026-10-17):** finish copy for good. Any site copies to any
 server, the whole thing is tested thoroughly, and then it is checked off and
@@ -366,8 +417,6 @@ A cell the table refuses is proven by the matrix test, not live.
   the way back for every switch; the provider registry and the Hetzner account.
 - `docs/dns_management.md`: the switch's TTL lowering, record change and resolver
   watch, as one more user of the DNS drivers.
-- `docs/installation.md`: the script table names `copy_database.sh`, which does not
-  exist (the last trace of B43); the row goes.
 - `docs/deploy_and_upgrade.md`: the quiet-state paragraph owed since 2026-10-14.
 - `docs/testing.md`: the live proofs' rig under `needs:`.
 - The Provisioning Setup → Hosting page's own help: adding a Hetzner account.

@@ -692,4 +692,18 @@ return [
 			error_log('sm_021: ' . CustomerCloudProvision::stamp_unstamped_default() . ' order(s) with no server yet now name the default cloud account.');
 		},
 	],
+	[
+		// Alive or dead is the source's, whatever the target
+		// (site_copy_anything_to_anything D5): scp_from says whether the source
+		// is alive. A copy onto a host was recorded as from backups, and its
+		// source was frozen as a running one; a live one says so now.
+		'id' => 'sm_022_copy_onto_a_host_of_a_running_site',
+		'version' => '1.30.84',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$n = $dblink->exec("UPDATE scp_site_copies SET scp_from = 'source' WHERE scp_mgh_managed_host_id IS NOT NULL
+				AND scp_from = 'backups' AND scp_delete_time IS NULL AND scp_status NOT IN ('discarded', 'finished')");
+			error_log('sm_022: ' . (int)$n . ' copy(ies) onto a host now say their source is a running site.');
+		},
+	],
 ];

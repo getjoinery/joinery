@@ -289,7 +289,7 @@
     agent `go test ./...` (`copy_vouch_test.go`: the vouch moves the copy to the final run with no
     secret, and each refusal); `db --changed` 357/365, the eight failures all in the
     mailbox spam-learning work another session has in progress, none in this work's files.
-- **WP12 built (2026-10-03): the switch-over by IP swap; unit- and db-tested, not yet live.**
+- **WP12 built (2026-10-03): the switch-over by IP swap; unit- and db-tested, passed live 2026-10-14.**
   `IpSwapMove` 1.0 (the plan and the local steps), `CloudAddressSwap` on the provider interface
   (`CloudComputeProvider.php` 1.4) with `LinodeComputeDriver` 1.9 (`addressReport`, `ipAddress`,
   `assignIpv4` on `POST networking/ips/assign`, `instanceFirewalls`, `rebootInstance`),
@@ -327,7 +327,7 @@
     refusal with nothing frozen, the switch end to end with the records and reverse DNS, the way
     back after the swap, an unproven copy undone and then the way back).
 - **WP10 built (2026-10-03, ahead of the Phase 1 live proofs, owner's order): a copy from
-  backups when the source is dead; unit- and db-tested, not yet live.** On M: `SiteCopy` `scp_from`
+  backups when the source is dead; unit- and db-tested, passed live 2026-10-15.** On M: `SiteCopy` `scp_from`
   (`backups`), the Copy tab's second kind of copy, `SiteCopyRunner::key_request()`, the run
   `host_report`, `copy_look`, `copy_take_key`, `copy_stage`, `copy_restore`, `site_census` on the
   copy alone, `SiteCensus::check()` (1.1), `JobCommandBuilder` 1.90, `JobResultProcessor` 1.52,

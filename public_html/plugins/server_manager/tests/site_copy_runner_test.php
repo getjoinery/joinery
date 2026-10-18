@@ -248,7 +248,8 @@ sm_test_node_space($src);
 check(SiteCopyRunner::source_refusals($src) === array(), 'a bare-metal site on a current release with the words, a proven key and backups can be copied',
 	implode(' | ', SiteCopyRunner::source_refusals($src)));
 foreach (array(
-	'a container site'   => array('mgn_container_name', 'scpsite', 'container site'),
+	// A running container site copies too (D4); its host, which freezes it, must be known.
+	'a container site with no host on record' => array('mgn_container_name', 'scpsite', 'placement record'),
 	'an old release'     => array('mgn_joinery_version', '0.8.471', 'needs ' . JobCommandBuilder::COPY_SOURCE_MIN_VERSION),
 	'an older agent'     => array('mgn_agent_primitives', 'check_status', 'update'),
 	'an unproven key'    => array('mgn_last_status_data', json_encode(array('backup_recovery_state' => 'unproven')), 'cannot run'),
@@ -278,18 +279,18 @@ $plans = function () {
 		array('id' => 'g6-standard-2', 'memory_mb' => 4096, 'disk_mb' => 81920),
 	);
 };
-check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans) === 'g6-nanode-1',
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-nanode-1',
 	'a 1 GB server (it reports a little less) is copied onto the 1 GB plan');
 $n = new ManagedNode($src->key, TRUE);
 $n->set('mgn_last_host_report', json_encode(array('memory' => array('total_bytes' => 4106113024))));
-check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-2', 'a 4 GB server onto the 4 GB plan');
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-standard-2', 'a 4 GB server onto the 4 GB plan');
 $n->set('mgn_last_host_report', null);
 $n->set('mgn_last_status_data', json_encode(array('memory_total_mb' => 1900)));
-check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-1',
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-standard-1',
 	'with no host report, the memory its status reports');
 $n->set('mgn_last_status_data', null);
 $threw = '';
-try { SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans); } catch (Exception $e) { $threw = $e->getMessage(); }
+try { SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans, 'linode'); } catch (Exception $e) { $threw = $e->getMessage(); }
 check(strpos($threw, 'not reported its memory') !== false, 'with no memory reported, the size is not guessed', $threw);
 $own = new CustomerCloudProvision(NULL);
 foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 'scpsize.example.org', 'cvp_slug' => 'harnessscr-size-' . bin2hex(random_bytes(3)),
@@ -299,11 +300,13 @@ foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => 
 }
 $own->save();
 harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $own->key);
-check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans) === 'g6-standard-1',
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-standard-1',
 	'a server this management node created is copied onto its own plan');
+check(SiteCopyRunner::same_size_type($src, SiteCopy::FROM_SOURCE, $plans, 'hetzner') === 'g6-nanode-1',
+	'onto another provider its plan means nothing: sized by memory instead');
 $n = new ManagedNode($src->key, TRUE);
 $n->set('mgn_container_name', 'scpsite');
-check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans) === 'g6-nanode-1',
+check(SiteCopyRunner::same_size_type($n, SiteCopy::FROM_SOURCE, $plans, 'linode') === 'g6-nanode-1',
 	'a container\'s plan is its shared server\'s: sized by memory instead');
 $own->permanent_delete();
 $stale = $listing;

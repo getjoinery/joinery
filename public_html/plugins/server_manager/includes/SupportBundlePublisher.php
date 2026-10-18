@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.27 - carries host_runner_lock.sh, which remove_account.sh and install.sh source to hold the host
+ *                 converger off a site they change: without it a bundle-run removal went unheld (B3); and
+ *                 trust_forwarder.sh, the trust_forwarder word on a host fronting a copy in a container
  * @version 1.26 - carries site_refresh.sh and recreate_site.sh, the nightly and on-the-word replacement of a
  *                 site container (specs/multi_tenant_host_hardening.md D9), and what they build from: both
  *                 Dockerfiles, the site start command and the vhost template
@@ -156,8 +159,16 @@ class SupportBundlePublisher {
 		// sites run on (Docker, or the site container engine) and call every
 		// container command through it. Sources nothing.
 		'maintenance_scripts/install_tools/_site_engine.sh',
-		// decommission_site (self-verifying; sources nothing).
+		// decommission_site (self-verifying). Sources the next file.
 		'maintenance_scripts/sysadmin_tools/remove_account.sh',
+		// remove_account.sh and install.sh hold the host converger's lock
+		// through this while they change a site (B3: a converger run during a
+		// removal wrote the removed site's cache back). Sources nothing.
+		'maintenance_scripts/sysadmin_tools/host_runner_lock.sh',
+		// trust_forwarder: the host whose Apache fronts a copy in a container
+		// believes the site's old server's X-Forwarded-For while its DNS moves
+		// (specs/site_copy_anything_to_anything.md D1). Sources nothing.
+		'maintenance_scripts/sysadmin_tools/trust_forwarder.sh',
 		// remove_site_certificate, and what remove_account.sh runs as its
 		// sibling for each certificate the removed site's vhost named.
 		// Sources nothing.

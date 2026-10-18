@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.94 - a container inventory's security (container_inventory 1.3); the host report's sites (host_report 1.32), and its sites' filter and capabilities
+ *                (host_report 1.33, site_security) are kept; a proven recovery key's public half, when a report carries it and it matches the fingerprint, is
+ *                kept on the node (mgn_backup_recovery_public_key): a copy into its owner's account is born sealed to it
  * @version 1.93 - a code check's wrong_release verdict (PackageSignature 1.9) is kept: a manifest of another
  *                release than the code, which IncidentSourceSiteCodeUnverified reports as a mismatch, not tampering
  * @version 1.92 - a host report's site_refresh (host_report 1.31): the nightly replacement of the host's site
@@ -654,6 +657,7 @@ class JobResultProcessor {
 			// is the one case the push deliberately walks away from.
 			if (isset($folded['backup_recovery_state'])) {
 				$node->set('mgn_backup_recovery_fpr', (string)($folded['backup_recovery_fpr'] ?? ''));
+				$node->set('mgn_backup_recovery_public_key', self::recovery_public_key_of($folded));
 			}
 
 			// What the node says about MY backups of it. The node's history is the
@@ -798,17 +802,17 @@ class JobResultProcessor {
 	}
 
 	/**
-	 * Read the RECOVERY_KEY=<outcome> [fpr=<sha256>] [proven=0|1] line that
+	 * Read the RECOVERY_KEY=<outcome> [fpr=<sha256>] [proven=0|1] [pub=<base64>] line that
 	 * set_recovery_key.php prints, in either of its modes.
 	 *
 	 * The keys it returns are the ones the management API's stats endpoint
 	 * returns for the same facts, so a node reached over SSH and a node reached
 	 * over the API leave mgn_last_status_data looking identical.
 	 *
-	 * @return array{backup_recovery_state:string, backup_recovery_fpr?:string}|null
+	 * @return array{backup_recovery_state:string, backup_recovery_fpr?:string, backup_recovery_public_key?:string}|null
 	 */
 	private static function parse_recovery_key_token($output) {
-		if (!preg_match('/^RECOVERY_KEY=(\w+)(?:\s+fpr=([0-9a-f]{64}))?(?:\s+proven=([01]))?/m',
+		if (!preg_match('/^RECOVERY_KEY=(\w+)(?:\s+fpr=([0-9a-f]{64}))?(?:\s+proven=([01]))?(?:\s+pub=([A-Za-z0-9+\/]{43}=))?/m',
 				(string)$output, $m)) {
 			return null;
 		}
@@ -821,10 +825,25 @@ class JobResultProcessor {
 		}
 		if ($fpr === '') return null;
 
-		return [
+		$out = [
 			'backup_recovery_state' => $proven ? 'proven' : 'unproven',
 			'backup_recovery_fpr'   => $fpr,
 		];
+		if ($proven && ($m[4] ?? '') !== '') {
+			$out['backup_recovery_public_key'] = $m[4];
+		}
+		return $out;
+	}
+
+	/**
+	 * A proven recovery key's public half from a report, or null: kept only
+	 * when the report says proven and the key is the one its fingerprint names.
+	 */
+	private static function recovery_public_key_of(array $report): ?string {
+		$pub = (string)($report['backup_recovery_public_key'] ?? '');
+		$raw = $pub !== '' ? base64_decode($pub, true) : false;
+		return (($report['backup_recovery_state'] ?? '') === 'proven' && $raw !== false && strlen($raw) === 32
+			&& hash_equals((string)($report['backup_recovery_fpr'] ?? ''), hash('sha256', $raw))) ? $pub : null;
 	}
 
 	/**
@@ -2433,6 +2452,7 @@ HTML;
 				$node->set('mgn_last_status_data', json_encode($status));
 				if (isset($recovery['backup_recovery_fpr'])) {
 					$node->set('mgn_backup_recovery_fpr', $recovery['backup_recovery_fpr']);
+					$node->set('mgn_backup_recovery_public_key', self::recovery_public_key_of($recovery));
 				}
 				$node->save();
 			} catch (Exception $e) {
@@ -3390,9 +3410,27 @@ HTML;
 				'state'      => self::unit_journal_word($c['state'] ?? ''),
 				'mounts'     => $mounts,
 				'run_spec'   => ($c['run_spec'] ?? null) === true,
+				// The security a site of install.sh's was made under (container_inventory 1.3): null for anything else.
+				'security'   => self::inventory_security($c['security'] ?? null),
 			];
 		}
 		return ['read' => true, 'engine' => $engine, 'containers' => $out, 'truncated' => $truncated];
+	}
+
+	/** A container's filter (sha256 or null), the capabilities it adds, drop_all, and its image's setuid count. */
+	private static function inventory_security($v) {
+		if (!is_array($v)) { return null; }
+		$caps = [];
+		foreach (array_slice(is_array($v['caps'] ?? null) ? array_values($v['caps']) : [], 0, 64) as $cap) {
+			if (is_string($cap) && preg_match('/^[A-Z_]{2,40}$/', $cap)) { $caps[] = $cap; }
+		}
+		$filter = $v['filter'] ?? null;
+		return [
+			'filter'   => (is_string($filter) && preg_match('/^[0-9a-f]{64}$/', $filter)) ? $filter : null,
+			'caps'     => $caps,
+			'drop_all' => ($v['drop_all'] ?? null) === true,
+			'setuid'   => self::host_report_count($v['setuid'] ?? null),
+		];
 	}
 
 	private static function process_container_inventory($job) {
@@ -3878,6 +3916,10 @@ HTML;
 			// A stored report from an older node holds null here, kept null when it is read back (reviewer2 R5).
 			'hardening'                    => (array_key_exists('hardening', $in) && $in['hardening'] !== null) ? self::host_report_hardening($in['hardening']) : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
+			// The sites in /var/www/html on the machine (host_report 1.32); null from an older node.
+			'sites'                        => array_key_exists('sites', $in) ? self::host_report_names($in['sites']) : null,
+			// The filter its sites are made under, by its sha256, and the capabilities a site adds (host_report 1.33).
+			'site_security'                => array_key_exists('site_security', $in) ? self::host_report_site_security($in['site_security']) : null,
 			// The nightly replacement of the host's site containers (host_report 1.31); null from an older node.
 			'site_refresh'                 => (array_key_exists('site_refresh', $in) && $in['site_refresh'] !== null) ? self::host_report_site_refresh($in['site_refresh']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
@@ -3914,6 +3956,17 @@ HTML;
 			];
 		}
 		return ['keys' => $keys];
+	}
+
+	/** The filter a host's sites are made under (sha256, none or unknown) and the capabilities a site adds. */
+	private static function host_report_site_security($v) {
+		if (!is_array($v)) { return 'unknown'; }
+		$filter = (string)($v['filter'] ?? '');
+		$caps = [];
+		foreach (array_slice(is_array($v['caps'] ?? null) ? array_values($v['caps']) : [], 0, 64) as $cap) {
+			if (is_string($cap) && preg_match('/^[A-Z_]{2,40}$/', $cap)) { $caps[] = $cap; }
+		}
+		return ['filter' => (preg_match('/^[0-9a-f]{64}$/', $filter) || $filter === 'none') ? $filter : 'unknown', 'caps' => $caps];
 	}
 
 	/** A list of names, capped and sanitised, or the string unknown. */

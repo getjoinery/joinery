@@ -58,6 +58,13 @@
  *   server_manager_customer_cloud_type    default instance type
  *   server_manager_customer_cloud_image   default OS image
  *
+ * @version 2.18 - the provider's own layer is recorded for every server it creates, not only one we encrypt
+ *                (specs/site_copy_final_test.md E4)
+ * @version 2.17 - an encrypted data root in its owner's account is sealed to the key on its provision
+ *                (cvp_recovery_public_key), its site's own, not this management node's
+ * @version 2.16 - the driver is the account's provider's (ComputeDriverRegistry), ours and customers' alike; the
+ *                Hosting tab's region, plan and image are Linode's, and any other provider starts from its driver's
+ *                defaults (create_choices)
  * @version 2.15 - one layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a): a provision with
  *                 cvp_data_root_encrypted is refused before create without a proven recovery key or in a distributed
  *                 region, is created with disk_encryption disabled and swap_size 0, saves its instance id before
@@ -210,10 +217,7 @@ class ProvisionCustomerCloud {
 		$driver = $this->get_driver($provision);
 		if ($driver === null) return 0;
 
-		$settings = Globalvars::get_instance();
-		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-east');
-		$type   = $provision->get('cvp_instance_type') ?: ($settings->get_setting('server_manager_customer_cloud_type')   ?: 'g6-nanode-1');
-		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu26.04';
+		list($region, $type, $image) = self::create_choices($provision, $driver);
 
 		// One layer of encryption, never two (specs/hosted_data_promise_disk_encryption.md D1a):
 		// a data root we encrypt asks the provider's own disk encryption off at
@@ -223,7 +227,7 @@ class ProvisionCustomerCloud {
 		// a region where the provider's layer cannot be turned off.
 		$encrypted = (bool)$provision->get('cvp_data_root_encrypted');
 		if ($encrypted) {
-			$refusal = self::recovery_key_refusal();
+			$refusal = trim((string)$provision->get('cvp_recovery_public_key')) !== '' ? '' : self::recovery_key_refusal();
 			if ($refusal !== '') {
 				$this->alert_and_fail($provision, $refusal);
 				return 1;
@@ -283,12 +287,14 @@ class ProvisionCustomerCloud {
 		$provision->set('cvp_instance_ipv6', (string)($instance['ipv6'] ?? ''));
 		$provision->set('cvp_region',        $region);
 		$provision->set('cvp_instance_type', $type);
+		// The provider's own layer, recorded for every server: the node page
+		// counts the layers its data sits under (one is the rule).
+		$layer = CustomerCloudProvision::provider_layer_reported($instance);
+		$provision->set('cvp_provider_disk_encryption', $layer);
 		if ($encrypted) {
 			// The machine is named on the row before the check below can fail
 			// it: a failed provision is found and cleaned up by its instance.
 			$provision->save();
-			$layer = CustomerCloudProvision::provider_layer_reported($instance);
-			$provision->set('cvp_provider_disk_encryption', $layer);
 			if ($layer === 'enabled') {
 				$this->alert_and_fail($provision, CustomerCloudProvision::two_layers_reason((string)$instance['id']));
 				return 1;
@@ -298,6 +304,32 @@ class ProvisionCustomerCloud {
 		$provision->set('cvp_error',         null);
 		$provision->save();
 		return 1;
+	}
+
+	/** The provider the Hosting tab's region, plan and image settings are for. */
+	const CLOUD_SETTINGS_PROVIDER = 'linode';
+
+	/**
+	 * Where, at what size and from which image the instance is created: what
+	 * the provision chose, else the Hosting tab's settings where they are for
+	 * its provider (a hosted order, a customer's own account), else the
+	 * driver's own defaults (specs/site_copy_anything_to_anything.md D2).
+	 *
+	 * @return array{0: string, 1: string, 2: string} region, type, image
+	 */
+	public static function create_choices($provision, $driver): array {
+		$settings = Globalvars::get_instance();
+		$ours = (string)$provision->get('cvp_provider') === self::CLOUD_SETTINGS_PROVIDER;
+		$setting = function (string $name) use ($settings, $ours): string {
+			return $ours ? trim((string)$settings->get_setting($name)) : '';
+		};
+		$defaults = $driver instanceof CloudInstanceTypes ? $driver : null;
+		$region = trim((string)$provision->get('cvp_region')) ?: ($setting('server_manager_customer_cloud_region')
+			?: ($defaults ? $defaults->defaultRegion() : ''));
+		$type = trim((string)$provision->get('cvp_instance_type')) ?: ($setting('server_manager_customer_cloud_type')
+			?: ($defaults ? $defaults->defaultInstanceType() : ''));
+		$image = $setting('server_manager_customer_cloud_image') ?: ($defaults ? $defaults->defaultImage() : '');
+		return array($region, $type, $image);
 	}
 
 	/**
@@ -522,7 +554,9 @@ class ProvisionCustomerCloud {
 				// to this management node's own proven recovery key (D2). The
 				// key is public; it rides the job's parameters.
 				$job_params['encrypted_data_root'] = true;
-				$job_params['recovery_public_key'] = base64_encode(BackupRecoveryKey::public_key());
+				// In its owner's account: its site's own proven key (E1, D2).
+				$own = trim((string)$provision->get('cvp_recovery_public_key'));
+				$job_params['recovery_public_key'] = $own !== '' ? $own : base64_encode(BackupRecoveryKey::public_key());
 			}
 			$steps = JobCommandBuilder::build_install_node($node, $job_params);
 		} catch (Exception $e) {
@@ -789,7 +823,11 @@ class ProvisionCustomerCloud {
 					. ($held['account'] === null ? ' Add a cloud account and make it the default on the Hosting tab of '
 						. 'Provisioning Setup.' : '') . ' The pipeline resumes on its own once it is fixed.'];
 			}
-			return ['driver' => OperatorCloudAccount::driver_for($held['token']), 'reason' => '', 'park' => false];
+			try {
+				return ['driver' => OperatorCloudAccount::driver_for($held['token'], $held['provider']), 'reason' => '', 'park' => false];
+			} catch (CloudComputeException $e) {
+				return ['driver' => null, 'park' => false, 'reason' => $e->getMessage()];
+			}
 		}
 
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
@@ -837,7 +875,8 @@ class ProvisionCustomerCloud {
 			$account->save();
 		}
 
-		return ['driver' => new LinodeComputeDriver($fresh->getAccessToken()), 'reason' => '', 'park' => false];
+		return ['driver' => ComputeDriverRegistry::driver((string)$account->get('cca_provider'), $fresh->getAccessToken()),
+			'reason' => '', 'park' => false];
 	}
 
 	// ── Retiring the install password (specs/keyless_provisioning.md WP2/WP3) ──

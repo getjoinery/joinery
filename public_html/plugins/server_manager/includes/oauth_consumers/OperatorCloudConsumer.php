@@ -17,6 +17,7 @@
  *
  * Discovered by interface from this plugin's includes/oauth_consumers/.
  *
+ * @version 1.1 - names its provider (a sign-in is Linode's) when it asks for a driver
  * @version 1.0
  */
 
@@ -69,7 +70,7 @@ class OperatorCloudConsumer implements OAuth2Consumer {
 	/** The provider's own name for the account a grant is for, or '' when it cannot be read. */
 	private static function account_name(string $access_token): string {
 		try {
-			return OperatorCloudAccount::driver_for($access_token)->accountName();
+			return OperatorCloudAccount::driver_for($access_token, 'linode')->accountName();
 		} catch (Exception $e) {
 			return '';
 		}

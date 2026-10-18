@@ -36,6 +36,9 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.7 - any provider whose driver swaps addresses (CloudAddressSwap), both servers at the same one; the plan
+ *                names the provider; powering a machine on or off needs only its driver, so a dead source at any
+ *                provider is powered off (specs/site_copy_anything_to_anything.md D2)
  * @version 1.6 - swapping back records the AAAA record still at the copy as aaaa_left (its domain and both IPv6
  *                addresses), and aaaa_note() asks DNS each time it is shown, so one the owner has pointed back is
  *                no longer named (B66)
@@ -122,13 +125,19 @@ class IpSwapMove {
 		$s = self::provision_of($source);
 		$c = self::provision_of($copy);
 		if (!$s || !$c) {
-			$why[] = 'An address swap needs both servers to have been created by this management node, at Linode; '
+			$why[] = 'An address swap needs both servers to have been created by this management node, at a provider that swaps addresses; '
 				. (!$s ? 'the site\'s server was not.' : 'the copy\'s server was not.');
 			return $why;
 		}
+		if ((string)$s->get('cvp_provider') !== (string)$c->get('cvp_provider')) {
+			$why[] = 'The site\'s server is at ' . ComputeDriverRegistry::label((string)$s->get('cvp_provider')) . ' and the copy\'s at '
+				. ComputeDriverRegistry::label((string)$c->get('cvp_provider')) . '; an address moves only within one provider.';
+		}
 		foreach (array('site\'s' => $s, 'copy\'s' => $c) as $whose => $p) {
-			if ((string)$p->get('cvp_provider') !== 'linode') {
-				$why[] = "The {$whose} server is at " . $p->get('cvp_provider') . '; an address swap is built for Linode.';
+			$provider = (string)$p->get('cvp_provider');
+			if (!ComputeDriverRegistry::supports($provider, 'CloudAddressSwap')) {
+				$why[] = "The {$whose} server is at " . ComputeDriverRegistry::label($provider) . ', where this management node '
+					. 'does not swap addresses.';
 			}
 			if ($p->is_transferred()) {
 				$why[] = "The {$whose} server was handed to its customer's own account.";
@@ -178,7 +187,7 @@ class IpSwapMove {
 	}
 
 	/** Which account a provision's instance lives on: 'oca:<id>' for one of ours, 'cca:<id>' for a connected one. */
-	private static function account_of(CustomerCloudProvision $p): string {
+	public static function account_of(CustomerCloudProvision $p): string {
 		return $p->is_operator_hosted() ? 'oca:' . (int)$p->get('cvp_oca_operator_cloud_account_id')
 			: 'cca:' . (int)$p->get('cvp_cca_customer_cloud_account_id');
 	}
@@ -264,7 +273,7 @@ class IpSwapMove {
 			throw new IpSwapMoveException(implode(' ', $why));
 		}
 		return array(
-			'provider' => 'linode',
+			'provider' => (string)$sp->get('cvp_provider'),
 			'region'   => (string)$s['region'],
 			'domain'   => $domain,
 			'source'   => array('provision_id' => (int)$sp->key, 'instance_id' => (string)$sp->get('cvp_instance_id'),
@@ -286,7 +295,10 @@ class IpSwapMove {
 	 * done. $state is the step's own memory between calls.
 	 */
 	public static function step(string $op, string $arg, array $plan, array &$state): string {
-		$driver = self::driver(self::plan_provision($plan, 'source'));
+		// Powering a machine needs only its driver; a reboot and the swap
+		// need the swap's capability.
+		$p = self::plan_provision($plan, $op === 'ip_swap' ? 'source' : $arg);
+		$driver = in_array($op, array('power_off', 'power_on'), true) ? self::power_driver($p) : self::driver($p);
 		switch ($op) {
 			case 'power_off':
 			case 'power_on':
@@ -472,6 +484,15 @@ class IpSwapMove {
 		$driver = self::$driver_for ? (self::$driver_for)($p) : NodeReverseDns::driverForProvision($p);
 		if (!($driver instanceof CloudAddressSwap) || !($driver instanceof CloudComputeProvider)) {
 			throw new IpSwapMoveException('This provider cannot swap addresses.');
+		}
+		return $driver;
+	}
+
+	/** The driver that powers a provision's machine on and off. */
+	private static function power_driver(CustomerCloudProvision $p): CloudComputeProvider {
+		$driver = self::$driver_for ? (self::$driver_for)($p) : NodeReverseDns::driverForProvision($p);
+		if (!($driver instanceof CloudComputeProvider)) {
+			throw new IpSwapMoveException('This provider\'s machines cannot be powered from here.');
 		}
 		return $driver;
 	}

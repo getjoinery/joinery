@@ -113,6 +113,21 @@ echo "=== status ==="
 chk "each recorded site, its container, its table" "$(q status | tr '\n' '|')" "sa quiet=copy running=yes table=yes|sb quiet=copy running=no table=no|sd quiet=switchover running=yes table=yes|"
 chk "one site" "$(q status sb)" "sb quiet=copy running=no table=no"
 
+echo "=== forward: a frozen site may reach its copy, and nothing else ==="
+out="$(q forward sa 198.51.100.9 2>&1)"; rc=$?
+chk "a dormant copy does not forward: refused" "$rc:$([ -e "$E/joinery/sites/sa/forward" ] && echo file || echo none)" "2:none"
+: > "$ST/calls"
+out="$(q forward sd 198.51.100.9 2>&1)"; rc=$?
+chk "a site frozen for a switch-over forwards: exit 0, recorded" "$rc:$(cat "$E/joinery/sites/sd/forward")" "0:198.51.100.9"
+chk "its table lets every account reach that one address on 80 and 443, before the refusal" "$(grep -c 'ip daddr 198.51.100.9 tcp dport { 80, 443 } accept' "$ST/table.4102"):$(( $(grep -n -m1 'daddr' "$ST/table.4102" | cut -d: -f1) < $(grep -n -m1 'reject' "$ST/table.4102" | cut -d: -f1) ))" "1:1"
+chk "status names the forward" "$(q status sd)" "sd quiet=switchover running=yes table=yes forward=198.51.100.9"
+q forward sd '198.51.100.9 tcp dport 22' >/dev/null 2>&1
+chk "anything but an address: 2, the forward unchanged" "$?:$(cat "$E/joinery/sites/sd/forward")" "2:198.51.100.9"
+rm -f "$ST/table.4102"; q assert >/dev/null 2>&1
+chk "a table loaded again keeps the forward" "$(grep -c 'ip daddr 198.51.100.9' "$ST/table.4102")" "1"
+q forward sd 2001:db8::9 >/dev/null 2>&1
+chk "an IPv6 copy" "$(grep -c 'ip6 daddr 2001:db8::9 tcp dport' "$ST/table.4102")" "1"
+
 echo "=== assert: a table removed by hand is back, a loaded one is left ==="
 rm -f "$ST/table.4101"; : > "$ST/calls"
 out="$(q assert 2>&1)"; rc=$?
@@ -173,8 +188,10 @@ rm -f "$E/joinery/sites/sa/quiet"
 
 echo "=== off: a switch-over's lifts first, without asking the site ==="
 echo 4101 > "$ST/run.sa"; echo switchover > "$E/joinery/sites/sa/quiet"; echo 0 > "$ST/exec.sa"
+echo 198.51.100.9 > "$E/joinery/sites/sa/forward"
 q assert >/dev/null 2>&1; : > "$ST/calls"
 q off sa >/dev/null 2>&1; rc=$?
+chk "  its forward goes with it" "$([ -e "$E/joinery/sites/sa/forward" ] && echo kept || echo gone)" "gone"
 chk "lifted while the site still shows its 503 (its state file there)" "$rc:$([ -e "$E/joinery/sites/sa/quiet" ] && echo kept || echo gone):$([ -f "$ST/table.4101" ] && echo t || echo none)" "0:gone:none"
 chk "  and the site was not asked" "$(grep -c 'podman exec' "$ST/calls")" "0"
 echo 1 > "$ST/exec.sa"
