@@ -2097,7 +2097,8 @@ in [Verifying backups](../../../docs/backups.md#verifying-backups):
   last time. The check runs on every retention listing, which is once per
   backup cycle for each node, not on every tick. Every offloaded file an index
   it read marks stored and the listing lacks goes to that node's run in the
-  same pass as `objects_missing`, and the run stores those files again from the
+  same pass as `objects_missing` (to an agent at 1.83.0 or newer, a page that
+  fits in the job), and the run stores those files again from the
   site's copy ([Backups § Objects backup storage lost](../../../docs/backups.md)). The
   object half reads every restore point's index in each chain it holds, not
   only the newest, and names the restore points that cannot bring a file back

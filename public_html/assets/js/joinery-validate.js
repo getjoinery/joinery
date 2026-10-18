@@ -1,6 +1,10 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
+ * @version 1.2.5 - one validator per form: a second set-up of the same form adds
+ *   its rules to the first (addRules) instead of attaching a second submit
+ *   listener, which cancelled every validated re-dispatch, so every product
+ *   page that asks the buyer something never sent Add to Cart
  * @version 1.2.4 - options.changedOnly: fields checked only once their value
  *   differs from the one the page was drawn with (a stored setting whose value
  *   predates its rule must not block saving the rest of the page)
@@ -29,7 +33,7 @@
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.2.4 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.2.5 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -42,6 +46,18 @@ console.log('%c=== JOINERY VALIDATION v1.2.4 ===', 'color: blue; font-weight: bo
                 console.error('JoineryValidator: Form not found');
                 return;
             }
+
+            // One validator per form. A second set-up of the same form (a
+            // page that emits its own beside FormWriter's) adds its rules to
+            // the first. Two submit listeners would share the one-shot
+            // re-dispatch flag: the one that did not set it cancels every
+            // re-dispatch, and the form is never sent.
+            const existing = this.form.joineryValidator;
+            if (existing instanceof JoineryValidator) {
+                existing.addRules(options);
+                return existing;
+            }
+            this.form.joineryValidator = this;
 
             this.options = options;
             this.rules = options.rules || {};
@@ -285,17 +301,6 @@ console.log('%c=== JOINERY VALIDATION v1.2.4 ===', 'color: blue; font-weight: bo
                 });
             }
 
-            // 5. Multiple validators on same form (WARNING - may conflict)
-            if (this.form.hasAttribute('data-joinery-validator')) {
-                issues.push({
-                    severity: 'warning',
-                    type: 'duplicate_validator',
-                    message: 'Multiple JoineryValidator instances detected on the same form. This may cause conflicts.',
-                    solution: 'Only create one JoineryValidator instance per form.'
-                });
-            }
-            this.form.setAttribute('data-joinery-validator', 'true');
-
             // Handle issues
             for (const issue of issues) {
                 const msg = `╔════════════════════════════════════════════════════════════════\n` +
@@ -368,8 +373,31 @@ console.log('%c=== JOINERY VALIDATION v1.2.4 ===', 'color: blue; font-weight: bo
             return detected;
         }
 
-        setupFieldValidation() {
-            Object.keys(this.rules).forEach(fieldName => {
+        /**
+         * Rules from a second set-up of this form (see the constructor). A
+         * field's rules and messages merge into what it has; a field new to
+         * this validator gets its listeners.
+         */
+        addRules(options = {}) {
+            const added = [];
+            for (const [field, rules] of Object.entries(options.rules || {})) {
+                if (!this.rules[field]) added.push(field);
+                this.rules[field] = Object.assign({}, this.rules[field] || {}, rules);
+            }
+            for (const [field, messages] of Object.entries(options.messages || {})) {
+                this.messages[field] = Object.assign({}, this.messages[field] || {}, messages);
+            }
+            for (const name of options.changedOnly || []) {
+                if (!this.changedOnly.has(name)) {
+                    this.changedOnly.add(name);
+                    this.initialValues[name] = this.valueKey(name);
+                }
+            }
+            this.setupFieldValidation(added);
+        }
+
+        setupFieldValidation(fieldNames = Object.keys(this.rules)) {
+            fieldNames.forEach(fieldName => {
                 // Clean quotes from field name for searching
                 const cleanName = fieldName.replace(/['"]/g, '');
 

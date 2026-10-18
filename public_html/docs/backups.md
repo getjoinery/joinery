@@ -323,6 +323,12 @@ storage check lists every location an index it read marks stored that the
 listing lacks, and the next run's request carries them as `objects_missing`
 (`{space, locations: [epoch/name]}`), taken only from a listing that completed
 for that space; the node applies it only when its run writes to the same space.
+The job carries it as two parameters the agent declares, `objects_missing_space`
+and the list `objects_missing`, and only to an agent at 1.83.0 or newer (an older
+agent refuses a run that names them, so it is not told and the check keeps
+naming the objects until it is updated). One run names as many as fit in a job,
+at most 2,000; the rest are still missing at the next check and go with a later
+run.
 The run's index names the object where it now is, so the newest restore point
 is whole again. Earlier restore points still name the lost key and cannot
 bring the object back; the check keeps naming them until retention removes
