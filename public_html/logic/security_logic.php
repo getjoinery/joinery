@@ -69,7 +69,7 @@ function security_logic(array $input): LogicResult{
 		}
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 		require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
-		if (!RequestLogger::check_rate_limit('recovery_readiness_verify', 10, 900, false)) {
+		if (!RequestLogger::check_attempt_limit('recovery_readiness_verify', 10, 900, false)) {
 			$outcome = array('ok' => false, 'message' => 'Too many verification attempts. Wait a few minutes and try again.');
 		} elseif ($action === 'vault_code_check') {
 			$outcome = RecoveryReadiness::verifyMemberVaultCode($session,
@@ -156,7 +156,7 @@ function security_logic(array $input): LogicResult{
 		// Throttle sends — the confirmation email goes to an arbitrary external
 		// address, so an authenticated account must not become a spam cannon.
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
-		if (!RequestLogger::check_rate_limit('recovery_verify_send', 5, 3600)) {
+		if (!RequestLogger::check_attempt_limit('recovery_verify_send', 5, 3600)) {
 			$msgtxt = 'Too many confirmation emails sent recently. Please wait an hour and try again.';
 			$message = new DisplayMessage($msgtxt, 'Please wait', '/\/profile\/security.*/',
 				DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);

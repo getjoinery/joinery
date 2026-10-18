@@ -23,7 +23,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		// Rate limiting: block after too many password reset requests from this IP
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
-		if (!RequestLogger::check_rate_limit('password_reset', 5, 900)) {
+		if (!RequestLogger::check_attempt_limit('password_reset', 5, 900)) {
 			return LogicResult::error('Too many password reset requests. Please try again in 15 minutes.');
 		}
 

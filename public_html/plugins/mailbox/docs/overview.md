@@ -603,6 +603,10 @@ virtual_mailbox_domains = pgsql:/etc/postfix/joinery-domains.cf
 inet_interfaces = all
 mydestination = localhost, localhost.localdomain
 
+# Mail this box sends leaves over IPv4 (as from the relay): the box's IPv6
+# address has no reverse DNS and no SPF entry, and receivers refuse it.
+smtp_address_preference = ipv4
+
 # rspamd is the only milter; a stopped rspamd never blocks mail.
 milter_default_action = accept
 smtpd_milters = inet:localhost:11332
@@ -670,6 +674,12 @@ joinery   unix  -  n  n  -  5  pipe
 
 (Use the PHP CLI path for your system — `install_email.sh` resolves it
 automatically; the official `php` Docker images ship it at `/usr/local/bin/php`.)
+
+Mail leaves every machine over IPv4. `install_email.sh` and
+`provision_relay.sh` both set `smtp_address_preference = ipv4`, and the Setup
+tab's "Mail leaves over IPv4" row reads it back (`host.outbound_ipv4`). It is a
+preference: a receiver that publishes only IPv6 mail servers is still reached
+over IPv6.
 
 ### DKIM signing
 

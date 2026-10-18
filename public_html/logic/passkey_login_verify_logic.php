@@ -12,7 +12,7 @@ function passkey_login_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Passkey sign-in is not enabled.');
 	}
 
-	if (!RequestLogger::check_rate_limit('passkey_login', 20, 900, false)) {
+	if (!RequestLogger::check_attempt_limit('passkey_login', 20, 900, false)) {
 		return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
 	}
 

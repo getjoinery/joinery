@@ -212,13 +212,13 @@ class UrlSafetyValidator {
         // authoritative range tables are $blocked_ipv4_cidrs and $blocked_ipv6_cidrs.
         if (strpos($ip, ':') === false) {
             foreach (self::$blocked_ipv4_cidrs as $cidr) {
-                if (self::ipInCidr($ip, $cidr)) {
+                if (IpAddress::inPrefix($ip, $cidr)) {
                     throw new UnsafeUrlException("IP '$ip' falls in blocked range $cidr.");
                 }
             }
         } else {
             foreach (self::$blocked_ipv6_cidrs as $cidr) {
-                if (self::ipv6InCidr($ip, $cidr)) {
+                if (IpAddress::inPrefix($ip, $cidr)) {
                     throw new UnsafeUrlException("IP '$ip' falls in blocked range $cidr.");
                 }
             }
@@ -273,35 +273,6 @@ class UrlSafetyValidator {
             return $v4(2);
         }
         return null;
-    }
-
-    private static function ipv6InCidr(string $ip, string $cidr): bool {
-        list($subnet, $bits) = explode('/', $cidr);
-        $ip_bin = @inet_pton($ip);
-        $subnet_bin = @inet_pton($subnet);
-        if ($ip_bin === false || $subnet_bin === false || strlen($ip_bin) !== 16 || strlen($subnet_bin) !== 16) {
-            return false;
-        }
-        $bits = (int)$bits;
-        $whole = intdiv($bits, 8);
-        if (substr($ip_bin, 0, $whole) !== substr($subnet_bin, 0, $whole)) {
-            return false;
-        }
-        $rest = $bits % 8;
-        if ($rest === 0) {
-            return true;
-        }
-        $mask = (0xff << (8 - $rest)) & 0xff;
-        return (ord($ip_bin[$whole]) & $mask) === (ord($subnet_bin[$whole]) & $mask);
-    }
-
-    private static function ipInCidr(string $ip, string $cidr): bool {
-        list($subnet, $bits) = explode('/', $cidr);
-        $ip_long = ip2long($ip);
-        $subnet_long = ip2long($subnet);
-        if ($ip_long === false || $subnet_long === false) return false;
-        $mask = $bits == 0 ? 0 : (-1 << (32 - (int)$bits));
-        return ($ip_long & $mask) === ($subnet_long & $mask);
     }
 
 }

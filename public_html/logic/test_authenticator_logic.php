@@ -48,7 +48,7 @@ function test_authenticator_logic(array $input): LogicResult {
 		// Its own rate-limit bucket. Sharing the sign-in bucket would let a
 		// person testing their app lock themselves out of the thing they were
 		// checking they could still do.
-		if (!RequestLogger::check_rate_limit('totp_test', 10, 300, false)) {
+		if (!RequestLogger::check_attempt_limit('totp_test', 10, 300, false)) {
 			return LogicResult::error('Too many attempts. Wait five minutes and try again.');
 		}
 

@@ -14,13 +14,17 @@
  *    whole window has passed.
  *  - A count keyed to a user sees that user's rows from any address and no
  *    other user's rows from the same address.
+ *  - An attempt limit (attempt_limit_state) counts by network: an IPv4
+ *    address, or an IPv6 /64. A capacity limit (rate_limit_state) keeps
+ *    counting by address, so servers sharing one /64 are separate callers.
+ *    Every row log() writes records its network.
  *  - apiv1.php meters a browser-shaped request per user after authentication,
  *    not per address before it, and every 429 carries Retry-After and the
  *    numbers.
  *
  * Run: php tests/run.php db --filter=rate_limit_state
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -34,11 +38,11 @@ $ip = '203.0.113.' . random_int(1, 254);
 $other_ip = '203.0.113.' . random_int(1, 254);
 $_SERVER['REMOTE_ADDR'] = $ip;
 
-/** One log row, $age seconds old, for $feature. */
-$row = function (string $addr, int $age, ?int $user_id = null) use ($db, $feature) {
-	$stmt = $db->prepare('INSERT INTO rql_request_logs (rql_feature, rql_action, rql_ip_address, rql_usr_user_id, rql_was_success, rql_create_time)
-		VALUES (?, ?, ?, ?, true, NOW() - (? || \' seconds\')::interval) RETURNING rql_request_log_id');
-	$stmt->execute(array($feature, 'test', $addr, $user_id, $age));
+/** One log row, $age seconds old, for $feature, carrying its network as log() writes it. */
+$row = function (string $addr, int $age, ?int $user_id = null, ?string $row_feature = null) use ($db, $feature) {
+	$stmt = $db->prepare('INSERT INTO rql_request_logs (rql_feature, rql_action, rql_ip_address, rql_ip_network, rql_usr_user_id, rql_was_success, rql_create_time)
+		VALUES (?, ?, ?, ?, ?, true, NOW() - (? || \' seconds\')::interval) RETURNING rql_request_log_id');
+	$stmt->execute(array($row_feature ?? $feature, 'test', $addr, IpAddress::network($addr), $user_id, $age));
 	harness_register_row('rql_request_logs', 'rql_request_log_id', (int)$stmt->fetchColumn());
 };
 
@@ -85,6 +89,55 @@ $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u1);
 check(!$s['allowed'] && $s['count'] === 2, "a user's count spans addresses and excludes other users", json_encode($s));
 $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u2);
 check($s['allowed'] && $s['count'] === 1, 'the other user has their own count', json_encode($s));
+
+// ---------------------------------------------------------------------------
+section('Attempt limits count by network; capacity limits by address');
+// ---------------------------------------------------------------------------
+
+$v6_feature = $feature . '_v6';
+for ($i = 1; $i <= 10; $i++) {
+	$row('2001:db8:77:1::' . dechex($i), 10, null, $v6_feature);
+}
+$_SERVER['REMOTE_ADDR'] = '2001:db8:77:1:ffff::1';
+$s = RequestLogger::attempt_limit_state($v6_feature, 10, 600);
+check(!$s['allowed'] && $s['count'] === 10,
+	'ten rows from ten addresses in one IPv6 /64 fill one attempt budget, seen from an eleventh address in it', json_encode($s));
+check(RequestLogger::check_attempt_limit($v6_feature, 10, 600) === false, 'check_attempt_limit() is the allowed flag of the same state');
+$s = RequestLogger::rate_limit_state($v6_feature, 10, 600);
+check($s['allowed'] && $s['count'] === 0,
+	'the same rows are ten callers to a capacity limit: the eleventh address is accepted (servers sharing a /64 stay apart)', json_encode($s));
+$_SERVER['REMOTE_ADDR'] = '2001:db8:77:2::1';
+check(RequestLogger::attempt_limit_state($v6_feature, 10, 600)['count'] === 0, 'the next /64 is another network');
+$_SERVER['REMOTE_ADDR'] = '2001:db8:77:1::1';
+check(RequestLogger::rate_limit_state($v6_feature, 10, 600)['count'] === 1, 'a capacity count sees only its own address');
+
+$_SERVER['REMOTE_ADDR'] = $ip;
+check(RequestLogger::attempt_limit_state($feature, 10, 600)['count'] === RequestLogger::rate_limit_state($feature, 10, 600)['count'],
+	'for an IPv4 caller the network is the address, so both counts agree');
+
+$log_feature = $feature . '_log';
+foreach (array('198.51.100.9' => '198.51.100.9', '2001:db8:77:3::5' => '2001:db8:77:3::/64') as $addr => $network) {
+	$_SERVER['REMOTE_ADDR'] = $addr;
+	RequestLogger::log($log_feature, 'test', false, array('key' => 'k'));
+	$stmt = $db->prepare('SELECT rql_request_log_id, rql_ip_network FROM rql_request_logs WHERE rql_feature = ? AND rql_ip_address = ? ORDER BY rql_request_log_id DESC LIMIT 1');
+	$stmt->execute(array($log_feature, $addr));
+	$logged = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+	if (!empty($logged['rql_request_log_id'])) {
+		harness_register_row('rql_request_logs', 'rql_request_log_id', (int)$logged['rql_request_log_id']);
+	}
+	check(($logged['rql_ip_network'] ?? null) === $network, "log() records the network of $addr as $network", json_encode($logged));
+}
+$_SERVER['REMOTE_ADDR'] = $ip;
+
+check(RequestLogger::username_key(' Someone@Example.COM ') === RequestLogger::username_key('someone@example.com')
+	&& strpos(RequestLogger::username_key('someone@example.com'), 'user:') === 0
+	&& strlen(RequestLogger::username_key('someone@example.com')) === 37,
+	'the per-account key ignores case and surrounding space, and fits rql_key');
+$apiauth = file_get_contents(PathHelper::getIncludePath('includes/ApiAuth.php'));
+$login = file_get_contents(PathHelper::getIncludePath('logic/login_logic.php'));
+check(strpos($apiauth, 'RequestLogger::username_key($username)') !== false
+	&& strpos($login, 'RequestLogger::username_key(') !== false,
+	'app sign-in and web sign-in key their per-account count the same way');
 
 // ---------------------------------------------------------------------------
 section('apiv1.php meters browser sessions per user, and every 429 says when');

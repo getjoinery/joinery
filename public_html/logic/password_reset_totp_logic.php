@@ -34,7 +34,7 @@ function password_reset_totp_logic(array $input): LogicResult {
 		return LogicResult::render($page_vars);
 	}
 
-	if (!RequestLogger::check_rate_limit('password_reset', 5, 900, false)) {
+	if (!RequestLogger::check_attempt_limit('password_reset', 5, 900, false)) {
 		return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
 	}
 

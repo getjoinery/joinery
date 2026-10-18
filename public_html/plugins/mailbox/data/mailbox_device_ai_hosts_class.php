@@ -18,6 +18,8 @@
  * a path; https, or http only to this computer or a private or tailnet
  * address.
  *
+ * @version 1.1 - a link-local address (fe80::/10, 169.254.0.0/16) is the owner's own network, in
+ *                both families; the ranges are matched by IpAddress::inPrefix
  * @version 1.0
  */
 
@@ -92,29 +94,25 @@ class MailboxDeviceAiHost extends SystemBase {
 		return $origin;
 	}
 
-	/** True for this computer, or an IP address on a private or tailnet range. */
+	/**
+	 * True for this computer, or an IP address on a private, link-local or
+	 * tailnet range, in either family (IpAddress::inPrefix).
+	 */
 	public static function hostIsPrivate(string $host): bool {
 		$host = strtolower(trim($host, '[]'));
 		if ($host === 'localhost') {
 			return true;
 		}
-		if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-			$ip = ip2long($host);
-			foreach (array('127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10') as $cidr) {
-				list($net, $bits) = explode('/', $cidr);
-				$mask = -1 << (32 - (int)$bits);
-				if (($ip & $mask) === (ip2long($net) & $mask)) {
-					return true;
-				}
-			}
+		if (IpAddress::family($host) === 0) {
 			return false;
 		}
-		if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-			if ($host === '::1') {
+		foreach (array(
+			'127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '169.254.0.0/16',
+			'::1/128', 'fc00::/7', 'fe80::/10',
+		) as $cidr) {
+			if (IpAddress::inPrefix($host, $cidr)) {
 				return true;
 			}
-			$first = hexdec(substr(bin2hex(inet_pton($host)), 0, 2));
-			return ($first & 0xfe) === 0xfc; // fc00::/7, unique local
 		}
 		return false;
 	}

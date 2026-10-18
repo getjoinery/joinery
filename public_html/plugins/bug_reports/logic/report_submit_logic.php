@@ -13,6 +13,7 @@
  *
  * See specs/implemented/bug_reports.md and plugins/bug_reports/docs/overview.md.
  *
+ * @version 1.2.0 - reports are counted by network (an IPv6 /64), and the refusal says so
  * @version 1.1.0 - comment optional here: an automatic report has none
  * @version 1.0.0
  */
@@ -20,12 +21,12 @@
 function report_submit_logic(array $input): LogicResult {
 	$ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
 	$limit = max(1, (int)Globalvars::get_instance()->get_setting('bug_reports_rate_limit_requests', true, true) ?: 20);
-	$state = RequestLogger::rate_limit_state('bug_reports', $limit, 3600);
+	$state = RequestLogger::attempt_limit_state('bug_reports', $limit, 3600);
 	if (!$state['allowed']) {
 		if (function_exists('api_rate_limited')) {
-			api_rate_limited($state, 'This address', $limit, 3600, 'problem reports');
+			api_rate_limited($state, RequestLogger::attempt_unit_label(), $limit, 3600, 'problem reports');
 		}
-		return LogicResult::error('Too many problem reports from this address. Try again later.');
+		return LogicResult::error('Too many problem reports from ' . lcfirst(RequestLogger::attempt_unit_label()) . '. Try again later.');
 	}
 
 	$image = null;

@@ -77,15 +77,22 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// AJAX requests will be handled by the new ErrorManager system
 
 	if (!empty($_POST)) {
-		// Rate limiting: block after too many failed login attempts from this IP
-		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
-		if (!RequestLogger::check_rate_limit('login', 10, 900, false)) {
+		// Too many failed sign-ins, counted two ways, each 10 in 15 minutes:
+		// from the caller's network (an IPv6 caller's whole /64), and for the
+		// email typed, so a caller with many networks cannot aim them all at
+		// one account. The email's count is kept whether or not an account
+		// has that email, and both refusals read the same, so the limit says
+		// nothing about which emails have accounts. Passkey sign-in keeps its
+		// own count (passkey_login).
+		$too_many_attempts = function () use ($ajax) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
 				throw new AuthenticationException('Too many failed login attempts. Please try again in 15 minutes.');
-			} else {
-				return LogicResult::redirect('/login?msgtext=too_many_attempts');
 			}
+			return LogicResult::redirect('/login?msgtext=too_many_attempts');
+		};
+		if (!RequestLogger::check_attempt_limit('login', 10, 900, false)) {
+			return $too_many_attempts();
 		}
 
 		if ((empty($input['email']) && empty($input['lbx_email'])) ||
@@ -103,12 +110,20 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 		$email = empty($input['email']) ? $input['lbx_email'] : $input['email'];
 		$password = empty($input['password']) ? $input['lbx_password'] : $input['password'];
+		$account_key = RequestLogger::username_key((string)$email);
+		if (!RequestLogger::rate_limit_state('login', 10, 900, false, null, $account_key)['allowed']) {
+			return $too_many_attempts();
+		}
 		$user = User::GetByEmail($email);
+		if (!$user) {
+			User::spend_password_check($password);
+		}
 
 		if (!$user || !$user->check_password($password)) {
 			// Email or password was incorrect
 			RequestLogger::log('login', 'login_attempt', false, [
 				'note' => 'Failed login for: ' . $email,
+				'key'  => $account_key,
 			]);
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');
@@ -118,8 +133,9 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 		}
 
-		// Check IP restriction (if configured for this user)
-		$client_ip = $_SERVER['REMOTE_ADDR'];
+		// Check IP restriction (if configured for this user): the same
+		// auth-grade address the API key restriction reads.
+		$client_ip = (string)SessionControl::get_client_ip(true);
 		if (!$user->is_ip_allowed($client_ip)) {
 			if ($ajax) {
 				require_once(__DIR__ . '/../includes/Exceptions/AuthenticationException.php');

@@ -85,7 +85,7 @@ if (!empty($allowed_ips_raw)) {
 $formwriter->textarea('usr_allowed_ips', 'Allowed Login IPs', [
 	'value' => $allowed_ips_display,
 	'rows' => 4,
-	'helptext' => 'One per line. Supports exact IPs, CIDR (104.23.0.0/16), or wildcards (104.23.*). Leave blank to allow any IP.'
+	'helptext' => 'One per line: an address (203.0.113.7, 2001:db8::7), a prefix (104.23.0.0/16, 2001:db8:abcd::/48) or an IPv4 wildcard (104.23.*). A computer on a connection with both IPv4 and IPv6 needs both listed, or it is refused whenever its browser uses the missing one. Leave blank to allow any IP.'
 ]);
 
 $formwriter->hiddeninput('usr_user_id', '', ['value' => $user->key]);

@@ -10,7 +10,8 @@
  * API actions (resolver_key_issue, resolver_key_revoke) posted with the
  * browser-session credential.
  *
- * @version 1.0
+ * @version 1.1 - a server's addresses in both families; a setting holding the wrong family is
+ *                named in the row
  */
 
 $dns_access_rows = DnsResolverAccess::panelState();
@@ -19,7 +20,8 @@ $dns_access_rows = DnsResolverAccess::panelState();
 	<h4>DNS server access</h4>
 	<p class="jy-muted">
 		Each DNS server reads this site's devices, blocks and blocklist sources with its own key.
-		A key can call that one read-only action and nothing else, and only from the server's address above.
+		A key can call that one read-only action and nothing else, and only from the server's addresses above
+		(its IPv4, and its IPv6 when one is set).
 		Issuing a key replaces the server's old one, so the server stops updating until its
 		<code>SCD_JOINERY_SITES</code> entry is changed to the new one. Until then it keeps filtering from its cached copy.
 	</p>
@@ -32,7 +34,12 @@ $dns_access_rows = DnsResolverAccess::panelState();
 			$key = $row['key']; ?>
 			<tr>
 				<td><?php echo htmlspecialchars($row['label']); ?></td>
-				<td><?php echo $row['ip'] !== '' ? htmlspecialchars($row['ip']) : '<em class="jy-muted">not set</em>'; ?></td>
+				<td><?php
+					if ($row['problem'] !== null) {
+						echo '<strong>' . htmlspecialchars($row['problem']) . '</strong>';
+					} else {
+						echo $row['ip'] !== '' ? htmlspecialchars($row['ip']) : '<em class="jy-muted">not set</em>';
+					} ?></td>
 				<td>
 					<?php if ($key) { ?>
 						<code><?php echo htmlspecialchars($key->get('apk_public_key')); ?></code><br>
@@ -40,7 +47,7 @@ $dns_access_rows = DnsResolverAccess::panelState();
 							<?php echo $key->get('apk_last_used_time') ? htmlspecialchars($key->get_local('apk_last_used_time')) : 'never'; ?></span>
 						<?php if ($row['drift']) { ?>
 							<br><strong>This key works only from <?php echo htmlspecialchars($row['restricted_to']); ?>,
-							not the address set above. Issue a new key for this server.</strong>
+							not the addresses set above. Issue a new key for this server.</strong>
 						<?php } ?>
 					<?php } else { ?>
 						<em class="jy-muted">none</em>

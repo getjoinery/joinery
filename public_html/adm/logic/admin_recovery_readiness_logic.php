@@ -34,7 +34,7 @@ function admin_recovery_readiness_logic(array $input): LogicResult {
 		if ($stepup) {
 			return $stepup;
 		}
-		if (!RequestLogger::check_rate_limit('recovery_readiness_verify', 10, 900, false)) {
+		if (!RequestLogger::check_attempt_limit('recovery_readiness_verify', 10, 900, false)) {
 			return LogicResult::error('Too many verification attempts. Wait a few minutes and try again.', $page_vars);
 		}
 

@@ -17,6 +17,7 @@
  *     the same origin again and a removal need none, and one member's row
  *     never touches another's.
  *
+ * @version 1.2 - link-local addresses are the person's own network in both families
  * @version 1.1 - the site's own model is offered only where a browser could call it
  * @version 1.0
  */
@@ -41,10 +42,12 @@ check($norm('https://me:pw@api.fireworks.ai') === null, 'credentials in the addr
 check($norm('ftp://api.fireworks.ai') === null && $norm('api.fireworks.ai') === null && $norm('') === null,
 	'another scheme, no scheme, or nothing is refused');
 foreach (array('http://localhost:11434', 'http://127.0.0.1:11434', 'http://[::1]:11434', 'http://192.168.1.20:11434',
-	'http://10.0.0.5', 'http://172.16.4.4', 'http://100.69.133.69:11434', 'http://[fd7a:115c:a1e0::1]:11434') as $local) {
+	'http://10.0.0.5', 'http://172.16.4.4', 'http://100.69.133.69:11434', 'http://[fd7a:115c:a1e0::1]:11434',
+	'http://[fe80::1]:11434', 'http://169.254.10.20:11434') as $local) {
 	check($norm($local) === strtolower($local), 'plain http to this computer or the person\'s own network: ' . $local);
 }
-foreach (array('http://api.fireworks.ai', 'http://8.8.8.8', 'http://172.32.0.1', 'http://100.128.0.1', 'http://studio.tail1.ts.net') as $public) {
+foreach (array('http://api.fireworks.ai', 'http://8.8.8.8', 'http://172.32.0.1', 'http://100.128.0.1', 'http://studio.tail1.ts.net',
+	'http://[2600:3c03::1]', 'http://[fec0::1]') as $public) {
 	check($norm($public) === null, 'plain http to anything else is refused: ' . $public);
 }
 

@@ -43,7 +43,7 @@ function verify_totp_logic(array $input): LogicResult{
 	$page_vars['trust_days'] = (int)$page_vars['settings']->get_setting('totp_remember_device_days');
 
 	if (!empty($_POST) && $page_vars['has_totp']) {
-		if (!RequestLogger::check_rate_limit('totp', 5, 300, false)) {
+		if (!RequestLogger::check_attempt_limit('totp', 5, 300, false)) {
 			return LogicResult::error('Too many verification attempts. Please wait 5 minutes and try again.');
 		}
 

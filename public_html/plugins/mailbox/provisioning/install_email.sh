@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.28 - Mail this box sends leaves over IPv4 (smtp_address_preference = ipv4), as
+#                from the relay: its IPv6 address has no reverse DNS and no SPF entry
+#                (specs/ipv6_address_handling.md D6).
 # Version: 2.27 - In a site container this installs and starts nothing: a container has no mail
 #                server of its own and receives mail through a relay
 #                (specs/multi_tenant_docker_hosts.md WP9). It says so and exits 0.
@@ -375,6 +378,13 @@ fi
 # conversation, never accepted and then bounced.
 postconf -e "message_size_limit = 26214400"
 echo "main.cf: message_size_limit = 26214400"
+
+# Mail this box sends (a bounce, a forward) leaves over IPv4, as it does from the
+# relay (provision_relay.sh). A box's IPv6 address has no reverse DNS and no SPF
+# entry, and big receivers (Gmail) refuse IPv6 mail without them. It is a
+# preference: a receiver that publishes only IPv6 mail servers is still reached.
+postconf -e "smtp_address_preference = ipv4"
+echo "main.cf: smtp_address_preference = ipv4"
 
 # SMTP smuggling (CVE-2023-51764): a line ending in a bare line feed must never
 # end a message, or one message can carry a second with a forged sender. "yes"

@@ -243,7 +243,7 @@ class DeviceLink extends SystemBase {
 	 */
 	public static function guessing_too_much() {
 		require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
-		return !RequestLogger::check_rate_limit('device_link_code', self::CODE_GUESS_LIMIT, self::CODE_GUESS_WINDOW, false);
+		return !RequestLogger::check_attempt_limit('device_link_code', self::CODE_GUESS_LIMIT, self::CODE_GUESS_WINDOW, false);
 	}
 
 	/** Record one wrong code from this address. */

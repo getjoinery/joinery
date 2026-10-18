@@ -39,13 +39,17 @@ class RequestLog extends SystemBase {
 	/**
 	 * Field specifications define database column properties and validation rules
 	 *
-	 * @version 1.0
+	 * @version 1.1 - rql_ip_network
 	 */
 	public static $field_specifications = array(
 		'rql_request_log_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'rql_feature'        => array('type'=>'varchar(50)', 'is_nullable'=>false),
 		'rql_action'         => array('type'=>'varchar(100)'),
 		'rql_ip_address'     => array('type'=>'varchar(45)', 'is_nullable'=>false),
+		// The unit an attempt limit counts (IpAddress::network()): the IPv4
+		// address itself, or an IPv6 address's /64, which one subscriber holds
+		// whole and can move through at will.
+		'rql_ip_network'     => array('type'=>'varchar(45)'),
 		'rql_usr_user_id'    => array('type'=>'int4'),
 		'rql_was_success'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
 		'rql_status_code'    => array('type'=>'int2'),
@@ -69,6 +73,7 @@ class RequestLog extends SystemBase {
 	 */
 	public static $index_specifications = array(
 		array('columns' => array('rql_feature', 'rql_ip_address', 'rql_create_time')),
+		array('columns' => array('rql_feature', 'rql_ip_network', 'rql_create_time')),
 		array('columns' => array('rql_feature', 'rql_usr_user_id', 'rql_create_time')),
 		array('columns' => array('rql_feature', 'rql_key', 'rql_create_time')),
 	);

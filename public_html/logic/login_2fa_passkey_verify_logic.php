@@ -31,7 +31,7 @@ function login_2fa_passkey_verify_logic(array $input): LogicResult {
 		return LogicResult::error('Your sign-in request has expired. Please sign in again.');
 	}
 
-	if (!RequestLogger::check_rate_limit('totp', 10, 300, false)) {
+	if (!RequestLogger::check_attempt_limit('totp', 10, 300, false)) {
 		return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
 	}
 

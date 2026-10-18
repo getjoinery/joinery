@@ -58,7 +58,7 @@ function password_reset_2fa_logic(array $input): LogicResult {
 		// Throttle against the 'password_reset' bucket — the one every failure in
 		// these flows is logged under. This is the brute-force guard on the
 		// independent second factor, so it must count real attempts.
-		if (!RequestLogger::check_rate_limit('password_reset', 10, 900, false)) {
+		if (!RequestLogger::check_attempt_limit('password_reset', 10, 900, false)) {
 			return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
 		}
 		$submitted = isset($input['totp_code']) ? trim($input['totp_code']) : '';

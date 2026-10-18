@@ -10,26 +10,26 @@
  * correct password and a session.
  *
  * login_logic refuses in five distinct ways, each a single branch no other test
- * covers: the per-IP failure throttle, missing credentials, a bad email or
+ * covers: the failure throttle (per network and per account), missing credentials, a bad email or
  * password, an IP outside the account's allowlist, and an unactivated account
  * when the site demands activation. Past all of those, an account holding a
  * second factor is diverted to /verify-totp with a pending state rather than
  * being signed in.
  *
- * Throttle isolation: RequestLogger keys the counter on $_SERVER['REMOTE_ADDR'],
- * which the CLI leaves unset. Each throttle section pins a distinct synthetic
- * address from TEST-NET-1 (192.0.2.0/24, reserved for documentation), so the
- * suite can never consume — or be blocked by — a real client's budget, and the
- * rows it writes are unambiguously its own at teardown.
+ * Throttle isolation: RequestLogger keys the network counter on
+ * $_SERVER['REMOTE_ADDR'], which the CLI leaves unset. Each throttle section
+ * pins distinct synthetic addresses from the documentation ranges (192.0.2.0/24,
+ * 2001:db8::/32), so the suite can never consume — or be blocked by — a real
+ * client's budget, and the rows it writes are unambiguously its own at
+ * teardown. Each throttle check uses its own fresh account, so one section's
+ * failures never count against another's.
  *
- * Worth naming because the tests below pin it: throttling is per-IP and
- * per-feature ONLY. There is no per-account failure counter and no lockout
- * column anywhere on usr_users. An attacker rotating source addresses is not
- * slowed at all, and conversely every user behind one NAT shares a single
- * budget. That is the current design, so it is what these checks assert; the
- * gap is recorded in specs/test_estate_audit.md rather than failed here.
+ * The throttle counts failures two ways, 10 in 15 minutes each
+ * (specs/ipv6_address_handling.md D3): from the caller's network (an IPv4
+ * address, an IPv6 /64), and for the email typed, so a caller with many
+ * networks cannot aim them all at one account.
  *
- * Sections: credentials; the per-IP throttle; the IP allowlist; the activation
+ * Sections: credentials; the failure throttle; the IP allowlist; the activation
  * gate; and the second-factor divert.
  *
  * Run: php tests/account_security/login_test.php
@@ -113,6 +113,21 @@ check($strip($bad_pass->redirect) === $strip($bad_user->redirect),
 	'a wrong password and an unknown email are refused identically (no enumeration oracle)',
 	'password: ' . $strip($bad_pass->redirect) . ' / unknown: ' . $strip($bad_user->redirect));
 
+// The same refusal must also take the same time: an unknown email still pays
+// for a password check, or the answer's speed says which emails exist.
+$t0 = microtime(true);
+User::spend_password_check('anything');
+$spent = microtime(true) - $t0;
+$known = new User($user->key, TRUE);
+$t0 = microtime(true);
+$known->check_password('wrong password');
+$real = microtime(true) - $t0;
+check($spent > 0.25 * $real, 'an unknown email spends a password check\'s time',
+	sprintf('dummy %.0f ms vs real %.0f ms', $spent * 1000, $real * 1000));
+$login_src = file_get_contents(PathHelper::getIncludePath('logic/login_logic.php'));
+check(preg_match('/if \(!\$user\) \{\s*User::spend_password_check\(\$password\);/', $login_src) === 1,
+	'sign-in spends it whenever no account has the email');
+
 $res = login_call(array('email' => $email));
 check($res->redirect === '/login?retry=1', 'a missing password is refused',
 	'redirect: ' . var_export($res->redirect, true));
@@ -128,27 +143,32 @@ check($res->error === null && !login_is_retry($res),
 	'redirect: ' . var_export($res->redirect, true));
 
 // ---------------------------------------------------------------------------
-section('Per-IP failure throttle');
+section('Failure throttle: per network');
+
+/** A fresh email no account has, so a failure counts against no real account. */
+function login_unknown_email() {
+	return 'nobody_' . bin2hex(random_bytes(6)) . '@example.com';
+}
 
 // A fresh address, so the budget starts full regardless of run order.
 $throttle_ip = '192.0.2.20';
 login_set_ip($throttle_ip);
 login_cleanup_ip($throttle_ip);
 
-check(RequestLogger::check_rate_limit('login', 10, 900, false),
+check(RequestLogger::check_attempt_limit('login', 10, 900, false),
 	'a fresh address starts inside the login budget');
 
-// Ten failures is the documented limit; the tenth must still be a credential
-// refusal rather than a throttle refusal.
+// Ten failures is the documented limit, each for a different email so only
+// the network count fills; the tenth must still be a credential refusal.
 for ($i = 0; $i < 10; $i++) {
-	$res = login_call(array('email' => $email, 'password' => 'wrong_' . $i));
+	$res = login_call(array('email' => login_unknown_email(), 'password' => 'wrong_' . $i));
 }
 check(login_is_retry($res), 'the tenth failure is still a credential refusal, not a throttle refusal',
 	'redirect: ' . var_export($res->redirect, true));
 
 // Every refusal is a redirect back to the form carrying its message: an error
 // result with no page data would land on the exception page instead.
-$res = login_call(array('email' => $email, 'password' => 'wrong_11'));
+$res = login_call(array('email' => login_unknown_email(), 'password' => 'wrong_11'));
 check($res->redirect === '/login?msgtext=too_many_attempts',
 	'the eleventh failure from one address is throttled',
 	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
@@ -160,17 +180,36 @@ check($res->redirect === '/login?msgtext=too_many_attempts',
 	'a throttled address is refused even with the correct password',
 	'redirect: ' . var_export($res->redirect, true) . ' error: ' . var_export($res->error, true));
 
-// Per-IP keying, asserted both ways.
 $clean_ip = '192.0.2.21';
 login_set_ip($clean_ip);
 login_cleanup_ip($clean_ip);
-check(RequestLogger::check_rate_limit('login', 10, 900, false),
+check(RequestLogger::check_attempt_limit('login', 10, 900, false),
 	'a different address is unaffected by the first address exhausting its budget');
 
 $res = login_call(array('email' => $email, 'password' => $password));
 check($res->error === null && !login_is_retry($res),
-	'the same account still signs in from an unthrottled address (no per-account lockout)',
+	'the same account still signs in from an unthrottled address',
 	'redirect: ' . var_export($res->redirect, true));
+
+// An IPv6 caller's network is its /64: ten addresses inside one /64 share one
+// budget, so rotating through it buys nothing.
+for ($i = 1; $i <= 10; $i++) {
+	$v6 = '2001:db8:4e:1::' . dechex(0x100 + $i);
+	login_set_ip($v6);
+	login_cleanup_ip($v6);
+	$res = login_call(array('email' => login_unknown_email(), 'password' => 'wrong_v6_' . $i));
+}
+$v6_next = '2001:db8:4e:1:ffff::1';
+login_set_ip($v6_next);
+login_cleanup_ip($v6_next);
+$res = login_call(array('email' => login_unknown_email(), 'password' => 'wrong_v6_11'));
+check($res->redirect === '/login?msgtext=too_many_attempts',
+	'ten failures from ten addresses in one IPv6 /64: the eleventh, from an eleventh address in it, is throttled',
+	'redirect: ' . var_export($res->redirect, true));
+$v6_other = '2001:db8:4e:2::1';
+login_set_ip($v6_other);
+login_cleanup_ip($v6_other);
+check(RequestLogger::check_attempt_limit('login', 10, 900, false), 'the next /64 is another network, with its own budget');
 
 // Successes are excluded from the counter, so ordinary use cannot self-throttle.
 $success_ip = '192.0.2.22';
@@ -179,7 +218,7 @@ login_cleanup_ip($success_ip);
 for ($i = 0; $i < 12; $i++) {
 	login_call(array('email' => $email, 'password' => $password));
 }
-check(RequestLogger::check_rate_limit('login', 10, 900, false),
+check(RequestLogger::check_attempt_limit('login', 10, 900, false),
 	'twelve successful sign-ins do not consume the failure budget');
 
 // The window is scoped: rows older than it stop counting.
@@ -188,11 +227,61 @@ login_set_ip($window_ip);
 login_cleanup_ip($window_ip);
 $db = DbConnector::get_instance()->get_db_link();
 $q = $db->prepare("INSERT INTO rql_request_logs
-	(rql_feature, rql_action, rql_ip_address, rql_was_success, rql_create_time)
-	VALUES ('login', 'login_attempt', ?, false, NOW() - INTERVAL '16 minutes')");
-for ($i = 0; $i < 15; $i++) { $q->execute(array($window_ip)); }
-check(RequestLogger::check_rate_limit('login', 10, 900, false),
+	(rql_feature, rql_action, rql_ip_address, rql_ip_network, rql_was_success, rql_create_time)
+	VALUES ('login', 'login_attempt', ?, ?, false, NOW() - INTERVAL '16 minutes')");
+for ($i = 0; $i < 15; $i++) { $q->execute(array($window_ip, $window_ip)); }
+check(RequestLogger::check_attempt_limit('login', 10, 900, false),
 	'failures older than the 900-second window no longer count');
+
+// ---------------------------------------------------------------------------
+section('Failure throttle: per account');
+
+$target_pass = 'TestPassword_LoginTarget';
+$target = make_user('LoginTarget');
+$target_email = $target->get('usr_email');
+
+// Ten failures for one account, each from a different network.
+for ($i = 1; $i <= 10; $i++) {
+	$ip = '192.0.2.' . (100 + $i);
+	login_set_ip($ip);
+	login_cleanup_ip($ip);
+	$res = login_call(array('email' => $target_email, 'password' => 'wrong_' . $i));
+}
+check(login_is_retry($res), 'the tenth failure for the account is still a credential refusal',
+	'redirect: ' . var_export($res->redirect, true));
+
+$fresh_ip = '192.0.2.120';
+login_set_ip($fresh_ip);
+login_cleanup_ip($fresh_ip);
+$res = login_call(array('email' => strtoupper($target_email), 'password' => $target_pass));
+check($res->redirect === '/login?msgtext=too_many_attempts',
+	'from an eleventh network, the account is refused even with the correct password (and the email in another case)',
+	'redirect: ' . var_export($res->redirect, true));
+
+$res = login_call(array('email' => $email, 'password' => $password));
+check($res->error === null && !login_is_retry($res),
+	'another account signs in from that same network',
+	'redirect: ' . var_export($res->redirect, true));
+
+check(RequestLogger::check_attempt_limit('passkey_login', 20, 900, false),
+	'passkey sign-in keeps its own count, untouched by the password failures');
+
+// An email no account has is counted and refused the same way, so the limit
+// says nothing about which emails have accounts.
+$ghost = login_unknown_email();
+for ($i = 1; $i <= 10; $i++) {
+	$ip = '192.0.2.' . (130 + $i);
+	login_set_ip($ip);
+	login_cleanup_ip($ip);
+	login_call(array('email' => $ghost, 'password' => 'wrong_' . $i));
+}
+$ghost_ip = '192.0.2.150';
+login_set_ip($ghost_ip);
+login_cleanup_ip($ghost_ip);
+$res = login_call(array('email' => $ghost, 'password' => 'wrong_11'));
+check($res->redirect === '/login?msgtext=too_many_attempts',
+	'an email with no account is throttled with the same refusal',
+	'redirect: ' . var_export($res->redirect, true));
 
 // ---------------------------------------------------------------------------
 section('IP allowlist');
@@ -236,6 +325,23 @@ $res = login_call(array('email' => $restricted_email, 'password' => $restricted_
 check($res->redirect !== null && strpos((string)$res->redirect, 'ip_blocked=1') !== false,
 	'a CIDR allowlist entry refuses an address outside the range',
 	'redirect: ' . var_export($res->redirect, true));
+
+// IPv6 entries compare as addresses, and a prefix admits exactly its bits.
+$restricted->set('usr_allowed_ips', json_encode(array('2001:DB8::1', '2001:db8:abcd:1230::/60')));
+$restricted->save();
+foreach (array(
+	'2001:db8:0:0::1'       => true,   // the address entry, spelled another way
+	'2001:db8:abcd:123f::1' => true,   // inside the /60
+	'2001:db8:abcd:1240::1' => false,  // just past it
+	'203.0.113.55'          => false,  // the other family matches no IPv6 entry
+) as $v6_ip => $admitted) {
+	login_set_ip($v6_ip);
+	login_cleanup_ip($v6_ip);
+	$res = login_call(array('email' => $restricted_email, 'password' => $restricted_pass));
+	$blocked = $res->redirect !== null && strpos((string)$res->redirect, 'ip_blocked=1') !== false;
+	check($admitted ? ($res->error === null && !login_is_retry($res) && !$blocked) : $blocked,
+		($admitted ? 'admitted: ' : 'refused: ') . $v6_ip, 'redirect: ' . var_export($res->redirect, true));
+}
 
 // An empty allowlist means unrestricted, not locked out.
 $restricted->set('usr_allowed_ips', null);

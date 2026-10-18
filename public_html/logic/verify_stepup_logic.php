@@ -38,7 +38,7 @@ function verify_stepup_logic(array $input): LogicResult {
 
 	// TOTP step-up submission.
 	if (!empty($_POST) && $has_totp) {
-		if (!RequestLogger::check_rate_limit('stepup', 5, 300, false)) {
+		if (!RequestLogger::check_attempt_limit('stepup', 5, 300, false)) {
 			return LogicResult::error('Too many attempts. Please wait 5 minutes and try again.');
 		}
 		$submitted = isset($input['totp_code']) ? trim($input['totp_code']) : '';

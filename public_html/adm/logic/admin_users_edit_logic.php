@@ -93,6 +93,13 @@ function admin_users_edit_logic(array $input): LogicResult {
 				$ips = array_map('trim', $ips);
 				$ips = array_filter($ips); // Remove empty entries
 				$ips = array_values($ips); // Re-index array
+				// A typo here is a silent lockout at the next sign-in, so a bad
+				// entry refuses the whole save and names itself.
+				foreach ($ips as $entry) {
+					if ($problem = IpAddress::entryProblem($entry)) {
+						return LogicResult::error('Allowed Login IPs: ' . $problem . '. Nothing was saved.');
+					}
+				}
 				$user->set('usr_allowed_ips', json_encode($ips));
 			}
 		}

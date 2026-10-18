@@ -39,7 +39,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if (!empty($_POST)) {
 
-		if (!RequestLogger::check_rate_limit('password_reset_complete', 5, 900, false)) {
+		if (!RequestLogger::check_attempt_limit('password_reset_complete', 5, 900, false)) {
 			return LogicResult::error('Too many reset attempts. Please wait a few minutes and try again.');
 		}
 
