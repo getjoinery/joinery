@@ -1118,7 +1118,7 @@ The copy can stay dormant as long as the owner likes.
      - Failure here is cheap too: M changes the record back and unfreezes S. T stays dormant.
      - Needs a DNS token for the zone on M, through the existing DNS credential flow.
    - **DNS (deferred):** the switch between any two providers, with S forwarding visitors to T
-     until DNS settles, is its own spec, *Site Copy — Switch by DNS, and a Hetzner Server Driver*.
+     until DNS settles, is its own spec, `site_copy_anything_to_anything.md`.
 10. **Start T.**
     1. T's agent is told to take S's node id, keeping its own key (D4).
     2. **M swaps the two rows (no new record type).**
@@ -1434,7 +1434,7 @@ the final copy's `copy_vouch` (S) and `copy_take_vouch` (T) (B44), and Phase 2's
   - The Linode token request widened to `ips:read_write` (and `firewall:read_only` for the
     customer grant), with a re-grant for existing tokens; the relay's grant is unchanged.
 - **WP7 (the switch by DNS) and WP13 (a Hetzner compute driver) are deferred** to their own
-  spec, *Site Copy — Switch by DNS, and a Hetzner Server Driver* (owner, 2026-10-03), with L1.
+  spec, `site_copy_anything_to_anything.md` (owner, 2026-10-03), with L1.
 - **WP10 — Phase 2. Built 2026-10-03; see the status above.** The recovery-key ceremony on T's own
   page, T opening the chain's data key from the browser's one-box value, and the owner's statement
   standing in for `copy_export`'s signed list.
