@@ -2300,6 +2300,7 @@ impl Vfs for MemFs {
         st.next_spool += 1;
         let name = format!(".jd-spool-{}", st.next_spool);
         st.spools.insert(name.clone(), Vec::new());
+        let birth = MemFs::new_file_birth(&mut st);
         drop(st);
         Ok(Box::new(MemSpool {
             fs: self.clone(),
@@ -2307,6 +2308,7 @@ impl Vfs for MemFs {
             buf: Vec::new(),
             folder_at_open,
             modified: None,
+            birth,
         }))
     }
 
@@ -2407,6 +2409,10 @@ struct MemSpool {
     /// The time the file carries once visible (`SpoolFile::set_modified`),
     /// or none: the moment it landed.
     modified: Option<u64>,
+    /// The spool's own birth, taken when it was made, as a real spool file
+    /// is born when it is created: the file that lands is this file, so a
+    /// download's file shows when its spool was opened (`MemSpool::commit`).
+    birth: u64,
 }
 
 /// The handle owns its spool, as `OsSpoolFile` does: a download that stands
@@ -2538,35 +2544,32 @@ impl SpoolFile for MemSpool {
 
         MemFs::watch_loss(&st, &key, "a download committing on top of it");
         st.touched.insert(key.clone());
-        // Replacing a file keeps its id — the rename lands on top of it, which
-        // is what a real filesystem does and what makes "same inode, new
-        // content" a case the engine has to handle.
+        // The spool is renamed over whatever stands at the target, so the
+        // file at the name is the spool's own: a new id on every volume, the
+        // old file's freed once the new one has its own, as `OsSpoolFile`'s
+        // rename leaves the spool's inode at the name. Kept, the simulator
+        // never saw a download change the file at a name, which every
+        // replacing download does on a real disk (B3; M2 was invisible here
+        // for that reason).
         let len = self.buf.len();
-        let id = match (st.file_ids.get(&key).copied(), st.file_id_model) {
-            (Some(id), FileIds::Stable) => id,
-            // A FAT volume has no "same inode, new content": the spool is a
-            // new entry renamed over the old one, and the id is the new
-            // entry's (a new slot, new clusters, a new number this mount).
-            (Some(old), _) => {
-                let id = MemFs::new_file_id(&mut st, &key, len);
-                MemFs::release_id(&mut st, &key, old);
-                st.file_ids.insert(key.clone(), id);
-                id
+        let replaced = st.file_ids.get(&key).copied();
+        let id = MemFs::new_file_id(&mut st, &key, len);
+        if let Some(old) = replaced {
+            MemFs::release_id(&mut st, &key, old);
+        }
+        st.file_ids.insert(key.clone(), id);
+        // The birth is the spool's, made when it was opened -- except where
+        // a file arriving at a name another just left takes that one's
+        // creation time (tunnelling): there a replaced file's birth stays,
+        // and a file landing on a vacated name takes the vacated birth.
+        let tunnels = st.file_id_model == FileIds::DirectorySlot || st.births_are_names;
+        if !(replaced.is_some() && tunnels && st.file_births.contains_key(&key)) {
+            st.file_births.insert(key.clone(), self.birth);
+            MemFs::born(&mut st, &key, self.birth);
+            if replaced.is_none() {
+                let now = self.fs.clock.now_ns();
+                MemFs::tunnel(&mut st, &key, now);
             }
-            (None, _) => {
-                let id = MemFs::new_file_id(&mut st, &key, len);
-                st.file_ids.insert(key.clone(), id);
-                id
-            }
-        };
-        // The birth goes with the id: kept where the id is kept, new where
-        // the id is new.
-        if !st.file_births.contains_key(&key) {
-            let birth = MemFs::new_file_birth(&mut st);
-            st.file_births.insert(key.clone(), birth);
-            MemFs::born(&mut st, &key, birth);
-            let now = self.fs.clock.now_ns();
-            MemFs::tunnel(&mut st, &key, now);
         }
         let positional = st.file_id_model != FileIds::Stable;
         let birth_ns = if st.births_hidden || positional {
@@ -2978,6 +2981,23 @@ mod tests {
         s.write_all(b"from the server").unwrap();
         s.commit(&p("doc.txt"), Some(before)).unwrap();
         assert_eq!(f.peek("doc.txt").unwrap(), b"from the server");
+    }
+
+    /// A download that replaces a file leaves its spool's file at the name,
+    /// as a rename over the old file does on a real disk (`OsVfs`'s twin of
+    /// this, `a_download_that_replaces_a_file_leaves_its_own_file_at_the_name`):
+    /// a new id and the spool's birth, and the commit hands back that file.
+    #[test]
+    fn a_download_that_replaces_a_file_leaves_its_own_file_at_the_name() {
+        let f = fs();
+        f.user_write("doc.txt", b"original");
+        let before = f.fingerprint(&p("doc.txt")).unwrap().unwrap();
+        let mut s = f.spool(&p("doc.txt"), 0).unwrap();
+        s.write_all(b"from the server").unwrap();
+        let landed = s.commit(&p("doc.txt"), Some(before)).unwrap();
+        assert_ne!(landed.file_id, before.file_id, "the old file's id stayed at the name");
+        assert!(landed.birth_ns > before.birth_ns, "the old file's birth stayed at the name");
+        assert_eq!(Some(landed), f.fingerprint(&p("doc.txt")).unwrap(), "the commit handed back another file");
     }
 
     #[test]
