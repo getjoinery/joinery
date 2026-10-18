@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.40 - claim budget for recreate_site, one site's container replaced on its host (the agent's 32 minutes:
+ *                 every call into the site, the build, two stops and two waits bounded; multi_tenant_host_hardening D9)
  * @version 1.39 - claim budgets for site_install and discard_copy, a copy onto a host's install and removal
  * @version 1.38 - claim budgets for data_root_encrypt, data_root_decrypt and data_root_rekey (their starts)
  * @version 1.37 - a claim that never reports is LOST, never requeued: failStaleClaims() (was requeueStaleClaims)
@@ -292,6 +294,11 @@ class ManagementJob extends SystemBase {
 		'data_root_encrypt'     => 1020,
 		'data_root_decrypt'     => 1020,
 		'data_root_rekey'       => 1020,
+		// 32m + slack: one site's container replaced (recreate_site.sh), every
+		// part bounded: the busy wait, each call into the site, a 600 s build,
+		// two stops and two waits for the site to answer. Failing one still
+		// running would free the host for a second replacement mid-swap.
+		'recreate_site'         => 2040,
 		// The three restores, budgeted before they are dispatchable
 		// (specs/restore_over_agent_primitives.md). Deliberately generous:
 		// the safety property is one-directional — a plane budget longer than

@@ -4,6 +4,9 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.23 - On a host with the site container engine, every run installs the nightly replacement of
+#                its site containers (site_refresh.sh install: joinery-site-refresh.timer), which replaces
+#                them when Ubuntu ships a security fix (specs/multi_tenant_host_hardening.md D9).
 # Version: 1.22 - The kernel and network settings come from _kernel_settings.sh, the one list the host
 #                report and multi_tenant_host.sh check read too (specs/multi_tenant_host_hardening.md WP1); a
 #                bundle without it fails the run and writes no settings file.
@@ -972,6 +975,24 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SQH}" ]] \
         FAILED=1
     else
         printf '%s\n' "${SQH_OUT}" | sed '/^$/d; s/^/housekeeping: /'
+    fi
+fi
+
+# --- 10c. Site containers are replaced when Ubuntu ships a fix -------------
+# A site container's OS is its image's, and nothing inside it installs a fix.
+# On a host with the site container engine a nightly timer asks a throwaway
+# container of the base whether Ubuntu has a security fix for it, builds the
+# base fresh when it has, and replaces each site's container one at a time
+# (site_refresh.sh). Every run writes the timer where it differs; a tree that is
+# not root's alone is refused, since the timer runs it as root.
+SRF="${SCRIPT_DIR}/site_refresh.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SRF}" ]] \
+        && [[ -L /usr/local/lib/joinery-site-engine/current || -e /usr/local/lib/joinery-site-engine/current ]]; then
+    if SRF_OUT="$(bash "${SRF}" install 2>&1)"; then
+        printf '%s\n' "${SRF_OUT}" | grep -v ' is current$' | sed '/^$/d; s/^/housekeeping: /'
+    else
+        warn "the nightly replacement of site containers: $(printf '%s' "${SRF_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
     fi
 fi
 

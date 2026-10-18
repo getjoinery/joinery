@@ -662,7 +662,7 @@ chk "rebase keeps the manifest the code matches" \
 RECREATE_F="$ROOT/maintenance_scripts/sysadmin_tools/recreate_site.sh"
 if [ -f "$RECREATE_F" ]; then
     chk "recreate carries the manifest the code matches" \
-        "$(grep -c 'MF_DIR="$(run_spec_code_manifest "$SITE")"' "$RECREATE_F")|$(grep -c 'from_container "${MF_DIR}/RELEASE_MANIFEST" ' "$RECREATE_F")" "1|1"
+        "$(grep -c 'MF_DIR="$(bounded 120 run_spec_code_manifest "$SITE")"' "$RECREATE_F")|$(grep -c 'from_container "${MF_DIR}/RELEASE_MANIFEST" ' "$RECREATE_F")" "1|1"
 fi
 
 echo "RESULT: ${passed} passed, ${failed} failed"

@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+#VERSION 3.26 - build-base --memory=SIZE bounds the build's steps (the nightly replacement passes it on a
+#               host whose memory is the sites'). site on a site recreate_site.sh is replacing (its lock
+#               held, or its mark under an hour old) is refused before anything stops, and site holds
+#               that lock itself for its run (closed for every container it starts), so a replacement
+#               cannot begin during it (reviewer2 G5); a rebuilt site's nightly-replacement hold is
+#               lifted, as a successful replacement lifts it.
+#               build-base --fresh pulls Ubuntu's image again and uses no cached layer, so the server setup's
+#               apt upgrade really runs (multi_tenant_host_hardening B7, D9). Every site image is labelled
+#               with the id of the base it was built on (joinery.base_id), which the nightly replacement
+#               (site_refresh.sh) reads to tell which sites still run on an older base; the build is one
+#               function (build_site_image) the install and recreate_site.sh both call.
 #VERSION 3.25 - docker --site-engine refuses a machine that is not the engine's Ubuntu release before it
 #               makes the data root (install_site_engine.sh preflight; site_container_engine B30). A build
 #               on the engine names both OCI hook folders (--hooks-dir), which podman build does not read
@@ -3051,10 +3062,29 @@ compute_install_sh_hash() {
 }
 
 do_build_base() {
-    local arg
+    local arg FRESH=0 MEM_FLAGS=()
     for arg in "$@"; do
+        if [ "$arg" = "--fresh" ]; then FRESH=1; continue; fi
+        if [[ "$arg" == --memory=* ]]; then
+            [[ "${arg#--memory=}" =~ ^[1-9][0-9]{0,5}[kmg]$ ]] || { print_error "${arg} is not a memory size (1536m, 2g)"; exit 1; }
+            MEM_FLAGS=(--memory "${arg#--memory=}"); continue
+        fi
         consume_global_flag "$arg" || { print_error "Unknown option for build-base: $arg"; exit 1; }
     done
+    # --fresh: Ubuntu's image pulled again and no layer taken from the cache.
+    # Without both, an unchanged install.sh gets back the cached layer whose
+    # apt upgrade ran when it was first built, as stale as before (B7).
+    # (The site container engine never uses the cache: site_engine_build_flags.)
+    local FRESH_FLAGS=()
+    if [ "$FRESH" -eq 1 ]; then
+        if site_engine_is_podman; then
+            FRESH_FLAGS=(--pull=always)
+        else
+            FRESH_FLAGS=(--pull --no-cache)
+        fi
+    fi
+    local BUILD_FLAGS=()
+    mapfile -t BUILD_FLAGS < <(site_engine_build_flags)
 
     print_header "Building Joinery Base Image"
 
@@ -3084,14 +3114,14 @@ do_build_base() {
 
     local BUILD_STATUS=0
     if [ "$QUIET_MODE" -eq 1 ]; then
-        site_engine build -q $(site_engine_build_flags) \
+        site_engine build -q "${BUILD_FLAGS[@]}" "${FRESH_FLAGS[@]}" "${MEM_FLAGS[@]}" \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
             -t "joinery-base:latest" \
             "$BUILD_DIR/install_tools" > /dev/null || BUILD_STATUS=$?
     else
-        site_engine build $(site_engine_build_flags) \
+        site_engine build "${BUILD_FLAGS[@]}" "${FRESH_FLAGS[@]}" "${MEM_FLAGS[@]}" \
             -f "$BUILD_DIR/install_tools/Dockerfile.base" \
             --build-arg "INSTALL_SH_HASH=${INSTALL_SH_HASH}" \
             -t "joinery-base:${BASE_IMAGE_VERSION}" \
@@ -3108,6 +3138,40 @@ do_build_base() {
     else
         print_error "Base image build failed"
         exit 1
+    fi
+}
+
+# The id of this host's joinery-base:${BASE_IMAGE_VERSION}, without Docker's
+# sha256: prefix (Podman's ids have none). Empty, and 1, when there is none.
+base_image_id() {
+    local id
+    id="$(site_engine image inspect -f '{{.Id}}' "joinery-base:${BASE_IMAGE_VERSION}" 2>/dev/null)" || return 1
+    id="${id#sha256:}"
+    [[ "$id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$id"
+}
+
+# build_site_image SITENAME DOMAIN_NAME CONTEXT TAG [BUILD_OPTION...]: a site's
+# image from CONTEXT (its Dockerfile at the root), FROM this host's
+# joinery-base:${BASE_IMAGE_VERSION}, labelled with that base's id
+# (joinery.base_id): site_refresh.sh replaces a site whose image does not carry
+# the current base's. Quiet mode keeps the build's own output back. The
+# install's build and recreate_site.sh's are this one call.
+build_site_image() {
+    local site="$1" domain="$2" context="$3" tag="$4" base_id
+    shift 4
+    base_id="$(base_image_id)" || { print_error "There is no joinery-base:${BASE_IMAGE_VERSION} on this host to build ${site}'s image from"; return 1; }
+    local args=()
+    mapfile -t args < <(site_engine_build_flags)
+    args+=(--build-arg "BASE_IMAGE_VERSION=${BASE_IMAGE_VERSION}"
+        --build-arg "SITENAME=${site}"
+        --build-arg "DOMAIN_NAME=${domain}"
+        --label "joinery.base_id=${base_id}"
+        "$@" -t "$tag" "$context")
+    if [ "$QUIET_MODE" -eq 1 ]; then
+        site_engine build -q "${args[@]}" > /dev/null
+    else
+        site_engine build "${args[@]}"
     fi
 }
 
@@ -5161,6 +5225,23 @@ do_site_docker() {
             || { print_error "Could not give ${SITENAME} a block of ids of its own; nothing was changed"; exit 1; }
     fi
 
+    # A site recreate_site.sh is replacing is its: the two would remove and run
+    # each other's containers. Its lock is taken and held for this run
+    # (descriptor 5, closed for every container started below: a container's
+    # monitor would inherit it and hold it for good), and a mark under an
+    # hour old refuses too.
+    local RLOCK="/run/joinery/recreate.${SITENAME}.lock" RMARK="/etc/joinery/sites/${SITENAME}/replacing"
+    mkdir -p /run/joinery && chmod 755 /run/joinery
+    exec 5>>"$RLOCK" || { print_error "The lock ${RLOCK} could not be opened. Nothing was changed."; exit 1; }
+    if ! flock -n 5; then
+        print_error "${SITENAME}'s container is being replaced (recreate_site.sh holds ${RLOCK}). Nothing was changed."
+        exit 1
+    fi
+    if [ -f "$RMARK" ] && [ -n "$(find "$RMARK" -mmin -60 2> /dev/null)" ]; then
+        print_error "${SITENAME}'s container is being replaced (${RMARK}). Nothing was changed."
+        exit 1
+    fi
+
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
     # docker-proxy listener and treats $PORT as "taken by something else,"
@@ -5445,23 +5526,8 @@ EOF
 
     cd "$BUILD_DIR"
 
-    # Build with -q flag in quiet mode to suppress build output
     # BASE_IMAGE_VERSION is consumed by Dockerfile.template's `ARG` before FROM.
-    if [ "$QUIET_MODE" -eq 1 ]; then
-        site_engine build -q $(site_engine_build_flags) \
-            --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
-            --build-arg SITENAME="$SITENAME" \
-            --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
-            -t "joinery-$SITENAME" . > /dev/null
-    else
-        site_engine build $(site_engine_build_flags) \
-            --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
-            --build-arg SITENAME="$SITENAME" \
-            --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
-            -t "joinery-$SITENAME" .
-    fi
-
-    if [ $? -eq 0 ]; then
+    if build_site_image "$SITENAME" "$DOMAIN_NAME" . "joinery-$SITENAME"; then
         print_success "Docker image built successfully"
     else
         print_error "Docker image build failed"
@@ -5557,7 +5623,7 @@ EOF
         # A dormant copy is quiet from its first process: made, given its
         # state, recorded quiet on the host, and only then started.
         LOOK_SECRET="$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
-        if ! site_engine create "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null; then
+        if ! site_engine create "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null 5>&-; then
             # As below: all of it is this install's (its run spec, volumes and
             # image), and left it would hold the name with nothing that can
             # discard it (reviewer2 WP5 R2c).
@@ -5578,9 +5644,9 @@ EOF
         print_success "Container started, quiet (a copy of node ${JOINERY_DORMANT_COPY_OF})"
     else
         if [ "$QUIET_MODE" -eq 1 ]; then
-            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null
+            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" > /dev/null 5>&-
         else
-            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME"
+            site_engine run -d "${RUN_ARGS[@]}" --env-file "$ENV_FILE" "joinery-$SITENAME" 5>&-
         fi
 
         if [ $? -eq 0 ]; then
@@ -5592,6 +5658,9 @@ EOF
     fi
     # The host's outbound limits take in the site's network (WP3).
     run_spec_limits_refresh
+    # A rebuilt site's hold from the nightly replacement is lifted, as a
+    # successful replacement lifts it: it runs on this host's base now.
+    rm -f "/var/lib/joinery/site-refresh/held/${SITENAME}"
     # The site's disk allowance, now its volumes exist (docker_disk_pool.sh,
     # WP4); none takes a former one away.
     if [ -n "$CONTAINER_DISK" ]; then
@@ -5822,7 +5891,7 @@ start_dormant_container() {
     rm -rf "$stage"
     [ "$rc" -eq 0 ] || return 1
     bash "$quiet_host" on "$site" copy || return 1
-    if ! site_engine start "$site" > /dev/null; then
+    if ! site_engine start "$site" > /dev/null 5>&-; then
         print_error "Failed to start the container"
         bash "$quiet_host" status "$site"
         return 1

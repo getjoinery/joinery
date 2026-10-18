@@ -1,4 +1,8 @@
 # Joinery Base Image
+# VERSION 1.6 - PostgreSQL is stopped before the build step ends, so the image carries a cluster shut
+#               down cleanly and a new site's first start is not a crash recovery (multi_tenant_host_hardening
+#               B8; with D9 a base is built whenever Ubuntu ships a fix, so every new site would be born
+#               from one).
 # VERSION 1.5 - FROM names the image in full (docker.io/library/ubuntu), so the site container
 #               engine pulls it with no short-name lookup; Docker reads it the same. The image is
 #               the same image.
@@ -40,6 +44,7 @@ COPY install.sh _host_files.sh _site_engine.sh /tmp/
 # (not even a placeholder) into the shared base image.
 RUN chmod +x /tmp/install.sh && \
     /tmp/install.sh server --skip-postgres-password && \
+    service postgresql stop && \
     rm /tmp/install.sh /tmp/_host_files.sh /tmp/_site_engine.sh
 
 # Label the image with a hash of the install.sh server code path so

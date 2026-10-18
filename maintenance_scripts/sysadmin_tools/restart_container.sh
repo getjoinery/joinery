@@ -3,6 +3,9 @@
 # restart_container.sh - restart one of this host's Joinery containers, and say
 # what its state was before and after, as ONE JSON object on stdout.
 #
+# Version: 1.3 - a container being replaced (recreate_site.sh's mark, /etc/joinery/sites/{site}/replacing,
+#                under an hour old) is refused: a restart in the middle of the swap would start the old
+#                container again (specs/multi_tenant_host_hardening.md D9).
 # Version: 1.2 - the engine is the one this host's sites run on (_site_engine.sh): Docker, or the
 #                site container engine (specs/site_container_engine.md WP3).
 # Version: 1.1 - a container held stopped by hold_container (/etc/joinery/sites/{site}/held) is
@@ -70,6 +73,15 @@ own_container() {
     done
     return 1
 }
+
+# A container recreate_site.sh is replacing: between its stop and its new
+# container's first answer it is down on purpose. A mark over an hour old is a
+# replacement that was killed, and is not obeyed.
+REPLACING="${RESTART_CONTAINER_ETC:-/etc}/joinery/sites/${NAME}/replacing"
+if [[ -f "$REPLACING" && -n "$(find "$REPLACING" -mmin -60 2>/dev/null)" ]]; then
+    printf 'restart_container: %s is being replaced (recreate_site); it comes back on its own\n' "$NAME" >&2
+    exit 2
+fi
 
 if ! own_container "$NAME"; then
     printf 'restart_container: %s is not a container this node will restart\n' "$NAME" >&2

@@ -19,10 +19,12 @@
  *
  * Run: php plugins/server_manager/tests/incident_sources_test.php
  *
- * @version 1.7 - plane:kernel_warning (a warning on a host that refuses unsigned code, never elsewhere) and
- *                plane:kernel_settings (a warning naming each setting not held), multi_tenant_host_hardening D7, D1
+ * @version 1.9 - plane:site_refresh: a site left down by a container replacement (critical), one rolled back, a
+ *                base that did not build, or an engine host with no passing check for two days (multi_tenant_host_hardening D9)
  * @version 1.8 - plane:site_code_unverified: a site whose only failure is wrong_release is a warning to upgrade;
  *                beside any other failure it stays critical
+ * @version 1.7 - plane:kernel_warning (a warning on a host that refuses unsigned code, never elsewhere) and
+ *                plane:kernel_settings (a warning naming each setting not held), multi_tenant_host_hardening D7, D1
  * @version 1.6 - plane:cloud_account_key is registered (its conditions: escrow_tier2_test, B77)
  * @version 1.5 - the node's alerts are on: a hand-made node on dev is a test cloud box, which is quiet by default
  * @version 1.4 - plane:site_code_unverified: critical for a failed code check, naming each package; a warning
@@ -77,7 +79,7 @@ foreach (array('plane:site_down', 'plane:backup_failed', 'plane:backups_stopped'
 	'plane:certificate', 'plane:agent_silent', 'plane:unmanageable', 'plane:monitoring_broken', 'plane:machine_transfer',
 	'plane:release_log', 'plane:release_log_blind', 'plane:agent_update_refused',
 	'plane:release_log_entry', 'plane:release_log_tail_blind', 'plane:mail_gateway', 'plane:site_code_unverified',
-	'plane:cloud_account_key', 'plane:kernel_warning', 'plane:kernel_settings') as $want) {
+	'plane:cloud_account_key', 'plane:kernel_warning', 'plane:kernel_settings', 'plane:site_refresh') as $want) {
 	check(in_array($want, $names, true), $want . ' is registered');
 }
 
@@ -154,6 +156,64 @@ check($ks->evaluate($node) === null, 'A container, or a report that could not re
 $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
 check($ks->evaluate($node) === null && JobResultProcessor::sanitise_host_report(array())['hardening'] === null,
 	'A report from before the field: nothing');
+
+// ---------------------------------------------------------------------------
+section('The nightly replacement of a host\'s site containers');
+
+$srs = new IncidentSourceSiteRefresh();
+$now = strtotime('2026-10-17T12:00:00Z');
+$rf = function (array $over = array()) {
+	return JobResultProcessor::sanitise_host_report(array('site_refresh' => array_merge(array(
+		'installed_at' => '2026-10-10T01:00:00Z', 'checked_at' => '2026-10-17T01:40:00Z', 'checked_ok_at' => '2026-10-17T01:40:00Z',
+		'check' => 'ok', 'check_error' => '', 'base_version' => '2.2', 'base_id' => '88bf90ef691d', 'base_built_at' => '2026-10-17T01:42:00Z',
+		'base_due' => 'no', 'ran_at' => '2026-10-17T01:40:00Z', 'run' => 'nothing_due', 'run_error' => '', 'pending' => 0, 'pending_security' => 0,
+		'sites' => 3, 'sites_due' => 0, 'security_packages' => array(), 'replaced' => array(), 'passed_over' => array(), 'holds' => array(),
+		'scheduled' => true), $over)));
+};
+$set(array('mgn_last_host_report' => $rf()));
+check($srs->evaluate($node, $now) === null, 'Checked last night, nothing held: nothing');
+$hold = function ($site, $outcome = 'rolled_back', $base = '88bf90ef691d') {
+	return array('site' => $site, 'outcome' => $outcome, 'reason' => 'the new container stopped (exited) before it was healthy and answering',
+		'at' => '2026-10-17T01:52:00Z', 'base' => $base);
+};
+$set(array('mgn_last_host_report' => $rf(array('run' => 'incomplete', 'holds' => array($hold('wd5'))))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'wd5\'s container replacement was rolled back'
+	&& strpos($v['detail']['Sites'], 'wd5 rolled back at 2026-10-17T01:52:00Z: the new container stopped') === 0
+	&& strpos($v['detail']['Effect'], 'goes on replacing its other sites') !== false,
+	'One site rolled back: a warning naming it and why; the host goes on with the others', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('run' => 'held', 'holds' => array($hold('wd5'), $hold('sb'))))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === '2 sites\' container replacements were rolled back on the same base'
+	&& strpos($v['detail']['Effect'], 'stopped replacing') !== false, 'Two rolled back on the same base: the host has stopped', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('run' => 'held', 'holds' => array($hold('wd5', 'down'))))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'wd5 is down') === 0, 'A site left down: critical', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('holds' => array($hold('wd5', 'rolled_back', '111111111111'))))));
+check($srs->evaluate($node, $now) === null, 'A hold on an older base (lifted at the next run): nothing');
+$set(array('mgn_last_host_report' => $rf(array('holds' => array($hold('wd5', 'down', '111111111111'))))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'critical', 'A site left down on an older base is still down: still critical', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('run' => 'base_failed', 'run_error' => 'only 100 bytes free', 'pending_security' => 9,
+	'security_packages' => array('apache2', 'curl')))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && $v['detail']['What'] === 'only 100 bytes free' && strpos($v['detail']['Pending'], '9 security fixes wait (apache2, curl)') === 0,
+	'A base that did not build: a warning with why and what waits', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('checked_ok_at' => '2026-10-14T01:40:00Z', 'check' => 'failed', 'check_error' => 'apt-get update failed in the check container'))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && $v['severity'] === 'warning' && strpos($v['title'], 'since 2026-10-14T01:40:00Z') !== false
+	&& strpos($v['detail']['What'], 'apt-get update failed') !== false, 'No check passed for three days: a warning with the last failure', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('checked_ok_at' => '2026-10-16T13:00:00Z', 'check' => 'failed'))));
+check($srs->evaluate($node, $now) === null, 'One night\'s failed check, the last good one under two days old: nothing');
+$set(array('mgn_last_host_report' => $rf(array('checked_at' => '', 'checked_ok_at' => '', 'installed_at' => '2026-10-13T00:00:00Z', 'ran_at' => '', 'run' => ''))));
+$v = $srs->evaluate($node, $now);
+check($v !== null && strpos($v['title'], 'since 2026-10-13T00:00:00Z') !== false, 'A timer installed four days ago that never checked: a warning', json_encode($v));
+$set(array('mgn_last_host_report' => $rf(array('checked_ok_at' => '2026-10-01T00:00:00Z', 'scheduled' => false))));
+check($srs->evaluate($node, $now) === null, 'Not scheduled on this host: an old check alone is not an alarm');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array('site_refresh' => 'none'))));
+check($srs->evaluate($node, $now) === null, 'Never ran (not an engine host): nothing');
+$set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
+check($srs->evaluate($node, $now) === null, 'A report from before the field: nothing');
 
 // ---------------------------------------------------------------------------
 section('Mail apps gateway');
@@ -250,6 +310,24 @@ check(($code->evaluate($node)['severity'] ?? '') === 'warning', 'A host whose re
 $set(array('mgn_last_host_report' => $hr(array($site_c('acme', array('state' => 'failed', 'at' => $ok_at,
 	'failures' => array(array('kind' => 'plugin', 'name' => 'x', 'verdict' => 'tampered', 'file' => 'a.php'))))), 'none')));
 check(($code->evaluate($node)['severity'] ?? '') === 'critical', 'A failed check is critical whatever the host says of its restrictions');
+$mismatch = array('kind' => 'core', 'name' => '', 'verdict' => 'wrong_release', 'file' => 'public_html/VERSION');
+$set(array('mgn_last_host_report' => $hr(array($site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch)))))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'Site sb\'s release manifest does not match its code'
+	&& $v['detail']['Site sb'] === 'core: its release manifest is another release\'s than its code'
+	&& strpos($v['detail']['Release mismatch'] ?? '', 'Upgrade the site') !== false
+	&& strpos($v['detail']['What to do'] ?? '', 'Find out how') === false,
+	'A site whose only failure is a manifest of another release: a warning that says to upgrade, not tampering', json_encode($v));
+$set(array('mgn_last_host_report' => $hr(array(
+	$site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch))),
+	$site_c('sc', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch,
+		array('kind' => 'plugin', 'name' => 'x', 'verdict' => 'tampered', 'file' => 'a.php')))),
+))));
+$v = $code->evaluate($node);
+check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'Code on site sc is not what was shipped'
+	&& isset($v['detail']['Site sb'], $v['detail']['Release mismatch'])
+	&& $v['detail']['Site sc'] === 'core: its release manifest is another release\'s than its code; plugin x: a file was changed: a.php',
+	'A mismatch beside a changed file is still critical, and the mismatched site is named too', json_encode($v));
 $set(array('mgn_last_host_report' => JobResultProcessor::sanitise_host_report(array())));
 check($code->evaluate($node) === null, 'A report with no containers: nothing');
 $set(array('mgn_last_host_report' => null));
@@ -297,24 +375,6 @@ $refused = new IncidentSourceAgentUpdateRefused();
 $set(array('mgn_agent_update_state' => 'unlogged', 'mgn_agent_update_offered' => '1.66.0', 'mgn_agent_version' => '1.65.0'));
 check($refused->evaluate($node) === null, 'An unpaired node: nothing, whatever it last said');
 $set(array('mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32))));
-$mismatch = array('kind' => 'core', 'name' => '', 'verdict' => 'wrong_release', 'file' => 'public_html/VERSION');
-$set(array('mgn_last_host_report' => $hr(array($site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch)))))));
-$v = $code->evaluate($node);
-check($v !== null && $v['severity'] === 'warning' && $v['title'] === 'Site sb\'s release manifest does not match its code'
-	&& $v['detail']['Site sb'] === 'core: its release manifest is another release\'s than its code'
-	&& strpos($v['detail']['Release mismatch'] ?? '', 'Upgrade the site') !== false
-	&& strpos($v['detail']['What to do'] ?? '', 'Find out how') === false,
-	'A site whose only failure is a manifest of another release: a warning that says to upgrade, not tampering', json_encode($v));
-$set(array('mgn_last_host_report' => $hr(array(
-	$site_c('sb', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch))),
-	$site_c('sc', array('state' => 'failed', 'at' => $ok_at, 'failures' => array($mismatch,
-		array('kind' => 'plugin', 'name' => 'x', 'verdict' => 'tampered', 'file' => 'a.php')))),
-))));
-$v = $code->evaluate($node);
-check($v !== null && $v['severity'] === 'critical' && $v['title'] === 'Code on site sc is not what was shipped'
-	&& isset($v['detail']['Site sb'], $v['detail']['Release mismatch'])
-	&& $v['detail']['Site sc'] === 'core: its release manifest is another release\'s than its code; plugin x: a file was changed: a.php',
-	'A mismatch beside a changed file is still critical, and the mismatched site is named too', json_encode($v));
 $v = $refused->evaluate($node);
 check($v !== null && $v['severity'] === 'critical' && strpos($v['title'], 'not in the public log') !== false
 	&& $v['detail']['Version refused'] === '1.66.0' && $v['detail']['Running'] === '1.65.0',
@@ -398,6 +458,14 @@ $set(array('mgn_web_root' => '/var/www/html/sources/public_html', 'mgn_create_ti
 	'mgn_last_status_data' => array('backup_recovery_state' => 'missing'), 'mgn_backup_recovery_fpr' => ''));
 check($holding() === array('stopped') && IncidentBackupVerdict::for_node($node)['kind'] === 'stopped',
 	'No recovery key on the node: backups cannot run, so backups have stopped', json_encode($holding()));
+// A new site has had no chance to set one up, and only its own administrator
+// can: the panel says so at once, the incident waits a week (seen on every
+// new test box, 2026-10-17).
+$set(array('mgn_create_time' => gmdate('Y-m-d H:i:s', time() - 86400)));
+check($holding() === array() && IncidentBackupVerdict::for_node($node)['label'] === 'Cannot be backed up: no verified recovery key on the node',
+	'A day-old node with no recovery key: the dashboard says so, no incident yet', json_encode($holding()));
+$set(array('mgn_create_time' => gmdate('Y-m-d H:i:s', time() - 8 * 86400)));
+check($holding() === array('stopped'), 'Past its first week, the same node opens it', json_encode($holding()));
 // From here on the node holds a proven key, so each case is judged on its runs.
 $set(array('mgn_last_status_data' => array('backup_recovery_state' => 'proven'), 'mgn_backup_recovery_fpr' => str_repeat('ab', 16)));
 $kinds_seen = array();

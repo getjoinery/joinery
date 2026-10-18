@@ -2,6 +2,8 @@
 # rebase_site_container.sh — move a Docker site onto a newer base image whose
 # PostgreSQL is a newer major version, carrying its database across.
 #
+# Version: 1.18 - a site recreate_site.sh is replacing (its lock held, or its mark under an hour old) is refused
+#                (reviewer2 WP8 re-check (4)).
 # Version: 1.17 - keeps the release manifest the code matches (run_spec_code_manifest), the site root's or
 #                the copy its config keeps, not the site root's as found (B6)
 # Version: 1.16 - a site its host holds quiet (a dormant copy, a frozen source) is refused before
@@ -170,6 +172,13 @@ die() { echo "FATAL: $*" >&2; exit 1; }
 ENGINE="$(site_engine_bin)" || die "this machine's container engine could not be named"
 command -v "$ENGINE" > /dev/null || die "${ENGINE} is not installed here"
 run_spec_quiet_refusal "$SITE" && die "${SITE} is quiet on this host and is not rebuilt"
+# A site recreate_site.sh is replacing is its until it ends: its lock tried
+# (never held: install.sh, which swap runs, takes it), and a mark under an hour old.
+if [ -e "/run/joinery/recreate.${SITE}.lock" ] && ! flock -n "/run/joinery/recreate.${SITE}.lock" true 2> /dev/null; then
+    die "${SITE}'s container is being replaced (recreate_site.sh); nothing was changed"
+fi
+[ -f "/etc/joinery/sites/${SITE}/replacing" ] && [ -n "$(find "/etc/joinery/sites/${SITE}/replacing" -mmin -60 2> /dev/null)" ] \
+    && die "${SITE}'s container is being replaced (/etc/joinery/sites/${SITE}/replacing); nothing was changed"
 
 # An image id, short: Docker's carry a sha256: prefix, Podman's do not.
 short_id() { local i="${1#sha256:}"; echo "${i:0:12}"; }

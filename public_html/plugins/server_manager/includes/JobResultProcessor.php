@@ -7,6 +7,9 @@
  *
  * @version 1.93 - a code check's wrong_release verdict (PackageSignature 1.9) is kept: a manifest of another
  *                release than the code, which IncidentSourceSiteCodeUnverified reports as a mismatch, not tampering
+ * @version 1.92 - a host report's site_refresh (host_report 1.31): the nightly replacement of the host's site
+ *                containers, its last check and run and each site's hold; a container being replaced keeps replacing
+ *                (specs/multi_tenant_host_hardening.md D9)
  * @version 1.91 - a status check that finds the site's database not answering asks for no recovery_key_report: the
  *                report reads the key from that database and could only fail (drs1, data root stopped by hand)
  * @version 1.90 - a served certificate keeps self_signed (host_report 1.30)
@@ -3875,6 +3878,8 @@ HTML;
 			// A stored report from an older node holds null here, kept null when it is read back (reviewer2 R5).
 			'hardening'                    => (array_key_exists('hardening', $in) && $in['hardening'] !== null) ? self::host_report_hardening($in['hardening']) : null,
 			'containers'                   => array_key_exists('containers', $in) ? self::host_report_containers($in['containers']) : null,
+			// The nightly replacement of the host's site containers (host_report 1.31); null from an older node.
+			'site_refresh'                 => (array_key_exists('site_refresh', $in) && $in['site_refresh'] !== null) ? self::host_report_site_refresh($in['site_refresh']) : null,
 			// The machine's outbound connection limits (host_report 1.11).
 			'outbound_limits'              => array_key_exists('outbound_limits', $in) ? self::host_report_outbound_limits($in['outbound_limits']) : null,
 			// The mail apps gateway (host_report 1.20): none where it is not installed.
@@ -4005,6 +4010,11 @@ HTML;
 			// old container, stopped on purpose until it is removed.
 			if (($c['held'] ?? false) === true) {
 				$entry['held'] = true;
+			}
+			// Being replaced by recreate_site (host_report 1.31): down on
+			// purpose until its new container answers.
+			if (($c['replacing'] ?? false) === true) {
+				$entry['replacing'] = true;
 			}
 			// The site's own figures (host_report 1.7). Absent from an older
 			// node's report: kept absent, which the card reads as "not
@@ -4359,6 +4369,89 @@ HTML;
 			'pinned' => self::host_report_count($in['pinned'] ?? null),
 			'unread' => self::host_report_count($in['unread'] ?? null),
 			'drift'  => $drift,
+		);
+	}
+
+	/**
+	 * The nightly replacement of the host's site containers (host_report 1.31;
+	 * specs/multi_tenant_host_hardening.md D9): none where it has never run,
+	 * unknown for anything that is not its shape, else its last check (what
+	 * Ubuntu had pending for the base, the base's id and build time, whether
+	 * the base was due) and last run (its outcome, the sites replaced with
+	 * their seconds down, those passed over), each site's hold (a replacement
+	 * rolled back, or one that left the site down) and whether its timer is on. Every
+	 * value is a word from its own list, a time, a count or plain text; a
+	 * stored report reads back the same.
+	 */
+	public static function host_report_site_refresh($in) {
+		if ($in === 'none') { return 'none'; }
+		if (!is_array($in)) { return 'unknown'; }
+		$time = function ($v) {
+			return (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/', $v)) ? $v : '';
+		};
+		$one_of = function ($v, array $words) {
+			return (is_string($v) && in_array($v, $words, true)) ? $v : '';
+		};
+		$text = function ($v) {
+			return is_string($v) ? substr(preg_replace("#[^A-Za-z0-9 ,.:;/()_'=+@-]#", '', $v), 0, 300) : '';
+		};
+		$hex = function ($v) {
+			return (is_string($v) && preg_match('/^[0-9a-f]{12}$/', $v)) ? $v : '';
+		};
+		// A site's name exactly, as recreate_site.sh takes it; anything else is not one.
+		$site = function ($v) {
+			return (is_string($v) && preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $v)) ? $v : '';
+		};
+		$packages = array();
+		foreach (array_slice(is_array($in['security_packages'] ?? null) ? $in['security_packages'] : array(), 0, 20) as $p) {
+			if (is_string($p) && preg_match('/^[a-z0-9][a-z0-9.+-]{0,62}$/', $p)) { $packages[] = $p; }
+		}
+		$replaced = array();
+		foreach (array_slice(is_array($in['replaced'] ?? null) ? $in['replaced'] : array(), 0, self::HOST_REPORT_MAX_SITES) as $r) {
+			$name = is_array($r) ? $site($r['site'] ?? null) : '';
+			if ($name === '') { continue; }
+			$down = $r['down_seconds'] ?? null;
+			$replaced[] = array('site' => $name, 'down_seconds' => (is_int($down) || is_float($down)) && $down >= 0 && $down < 100000 ? round((float)$down, 1) : null);
+		}
+		$passed = array();
+		foreach (array_slice(is_array($in['passed_over'] ?? null) ? $in['passed_over'] : array(), 0, self::HOST_REPORT_MAX_SITES) as $r) {
+			$name = is_array($r) ? $site($r['site'] ?? null) : '';
+			if ($name === '') { continue; }
+			$passed[] = array('site' => $name, 'why' => $one_of($r['why'] ?? null, array('busy', 'refused', 'timed_out')) ?: 'refused');
+		}
+		$holds = array();
+		foreach (array_slice(is_array($in['holds'] ?? null) ? $in['holds'] : array(), 0, self::HOST_REPORT_MAX_SITES) as $h) {
+			if (!is_array($h) || $site($h['site'] ?? null) === '') { continue; }
+			$holds[] = array(
+				'site'    => $site($h['site']),
+				'outcome' => $one_of($h['outcome'] ?? null, array('rolled_back', 'down')) ?: 'rolled_back',
+				'reason'  => $text($h['reason'] ?? null),
+				'at'      => $time($h['at'] ?? null),
+				'base'    => $hex($h['base'] ?? null),
+			);
+		}
+		return array(
+			'installed_at'      => $time($in['installed_at'] ?? null),
+			'checked_at'        => $time($in['checked_at'] ?? null),
+			'checked_ok_at'     => $time($in['checked_ok_at'] ?? null),
+			'check'             => $one_of($in['check'] ?? null, array('ok', 'failed')),
+			'check_error'       => $text($in['check_error'] ?? null),
+			'pending'           => self::host_report_count($in['pending'] ?? null),
+			'pending_security'  => self::host_report_count($in['pending_security'] ?? null),
+			'security_packages' => $packages,
+			'base_version'      => (is_string($in['base_version'] ?? null) && preg_match('/^[0-9]{1,3}(\.[0-9]{1,3}){0,2}$/', $in['base_version'])) ? $in['base_version'] : '',
+			'base_id'           => $hex($in['base_id'] ?? null),
+			'base_built_at'     => $time($in['base_built_at'] ?? null),
+			'base_due'          => $one_of($in['base_due'] ?? null, array('no', 'fix', 'setup_changed', 'missing')),
+			'ran_at'            => $time($in['ran_at'] ?? null),
+			'run'               => $one_of($in['run'] ?? null, array('nothing_due', 'replaced', 'held', 'incomplete', 'base_failed')),
+			'run_error'         => $text($in['run_error'] ?? null),
+			'replaced'          => $replaced,
+			'passed_over'       => $passed,
+			'sites'             => self::host_report_count($in['sites'] ?? null),
+			'sites_due'         => self::host_report_count($in['sites_due'] ?? null),
+			'holds'             => $holds,
+			'scheduled'         => ($in['scheduled'] ?? false) === true,
 		);
 	}
 

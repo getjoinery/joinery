@@ -4,6 +4,10 @@
 # /srv/joinery, on a filesystem of its own (specs/one_data_root.md), and on an
 # encrypted volume where it was made so (specs/hosted_data_promise_disk_encryption.md).
 #
+# Version: 1.31 - the log move never restarts podman-restart.service or docker.service: the site container
+#                engine keeps the monitor of every site it started at boot in podman-restart.service, and
+#                that unit's stop stops every site (as Docker's restart does), so a monitor holding a
+#                moved log would have taken every site down (reviewer2, WP8 review G8).
 # Version: 1.30 - stop clears the failed result of a data-root mount whose first unmount found it busy and the
 #                 second pass unmounted, so a stop that worked leaves no failed unit for the host report;
 #                 the tick that finds a stop's record with the data root running again starts what the
@@ -1555,7 +1559,10 @@ luks_log_sweep() {
 # The services whose processes still hold a file under /var/log that the
 # move deleted: reloaded, which reopens its logs where that is what a reload
 # does (rsyslog, Apache), and restarted where it does not (PostgreSQL's log is
-# its stderr). Not the unlock, the agent or this run.
+# its stderr). Not the unlock, the agent or this run, and never the units whose
+# restart stops every site: podman-restart.service (the site container engine
+# keeps the monitors of the sites it started at boot in it, and its stop is
+# podman stop --all) and docker.service.
 reopen_logs() {
     [[ -z "$ROOT" ]] || return 0
     local unit pass
@@ -1563,6 +1570,9 @@ reopen_logs() {
         for unit in $(log_holders); do
             case "$unit" in
                 "$UNLOCK_UNIT"|joinery-agent.service|"$ENCRYPT_UNIT"|systemd-journald.service) continue ;;
+                podman-restart.service|docker.service)
+                    [[ "$pass" == restart ]] && say "data root: WARNING: ${unit} still writes a log it had open on the root disk, and is not restarted (that would stop every site); it moves at the unit's next restart, which frees the space"
+                    continue ;;
             esac
             if [[ "$pass" == reload ]]; then
                 systemctl try-reload-or-restart "$unit" >/dev/null 2>&1 || true

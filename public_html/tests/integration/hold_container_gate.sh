@@ -152,6 +152,16 @@ chk "start: done, running, the policy back" "$(jv "$T/out.json" done):$(jv "$T/o
 chk "podman was asked update, stop, update, start" "$(grep -vE '^(ps|inspect)' "$T/calls" | cut -d' ' -f1 | tr '\n' ' ')" "update stop update start "
 chk "nothing reached docker" "$([ -s "$T/direct" ] && cat "$T/direct" || echo none)" "none"
 echo stopped > "$T/state"
+echo "=== Neither touches a container recreate_site is replacing ==="
+REPL="$ETC/joinery/sites/siteone/replacing"
+mkdir -p "$(dirname "$REPL")"; date -u > "$REPL"; : > "$T/calls"
+PATH="$T/bin:$PATH" RESTART_CONTAINER_ETC="$ETC" bash "$RESTART" siteone > "$T/rout" 2> "$T/rerr"; rc=$?
+chk "restart_container: exit 2, saying it is being replaced, nothing restarted" "$rc|$(grep -c 'is being replaced' "$T/rerr")|$(grep -c '^restart' "$T/calls")" "2|1|0"
+PATH="$T/bin:$PATH" HOLD_CONTAINER_ETC="$ETC" bash "$SCRIPT" stop siteone > "$T/out.json" 2> "$T/err"; rc=$?
+chk "hold_container: exit 2, saying it is being replaced, nothing stopped" "$rc|$(grep -c 'is being replaced' "$T/err")|$(grep -cE '^(stop|update)' "$T/calls")" "2|1|0"
+touch -d '2 hours ago' "$REPL"
+chk "a mark two hours old (a replacement that was killed) is not obeyed" "$(PATH="$T/bin:$PATH" RESTART_CONTAINER_ETC="$ETC" bash "$RESTART" siteone 2>&1 >/dev/null | grep -c "being replaced")" "0"
+rm -f "$REPL"
 chk "a container podman calls stopped counts as stopped" "$(grep -c 'exited|created|stopped) DONE=true' "$SCRIPT")" "1"
 
 echo

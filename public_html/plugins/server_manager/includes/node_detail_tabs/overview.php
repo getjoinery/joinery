@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.75 - a site container being replaced says so; a Replace button replaces one on a fresh image now
+ *                (recreate_site); a line says when the host last checked for fixes to its sites' OS, what was
+ *                pending, what its last run replaced and any hold (specs/multi_tenant_host_hardening.md D9)
  * @version 1.74 - a self-signed served certificate reads self-signed in amber, not its days left in green
  * @version 1.73 - the kernel line counts kernel warnings, and a line says whether the kernel holds every pinned
  *                setting (specs/multi_tenant_host_hardening.md WP1, D7)
@@ -1311,6 +1314,7 @@
 			if (is_array($containers) && $containers) {
 				$can_restart_c = JobCommandBuilder::has_primitive($node, 'restart_container');
 				$can_hold_c = JobCommandBuilder::has_primitive($node, 'hold_container');
+				$can_recreate_c = JobCommandBuilder::has_primitive($node, 'recreate_site');
 				echo '<div class="text-muted small text-uppercase mt-3 mb-1">Site containers</div>';
 				echo '<table class="table table-sm mb-0 align-middle"><tbody>';
 				// A small posted form for one container, behind the system modal.
@@ -1332,6 +1336,9 @@
 						$held_words = ManagementJob::hold_words((int)$node->key, (string)$c['name']);
 						$held_words = '<div class="small text-muted">'
 							. htmlspecialchars($held_words !== '' ? $held_words : 'Held on the server itself; no hold from here is on record.') . '</div>';
+					} elseif (!empty($c['replacing'])) {
+						// Down on purpose until its new container answers (recreate_site).
+						$ctext = 'Being replaced'; $ccls = 'info';
 					} elseif ($c['state'] !== 'running') {
 						$ctext = 'Not running'; $ccls = 'danger';
 					} else {
@@ -1353,6 +1360,17 @@
 							. ' onclick="' . $hr_str('JoineryModal.prompt(' . json_encode($ask) . ', function(why){ var f = document.getElementById('
 								. json_encode($form_id) . '); f.elements.reason.value = why; f.submit(); }, {required: true, confirmLabel: ' . json_encode('Hold stopped') . ', confirmStyle: ' . json_encode('danger') . '})') . '">Hold stopped</button>';
 						echo $container_form($form_id, ['action' => 'hold_container', 'op' => 'stop', 'name' => $c['name'], 'reason' => '']);
+					}
+					if ($can_recreate_c && !$c_held && empty($c['replacing']) && $c['state'] === 'running') {
+						$form_id = 'nodeActionRecreateSite_' . $c['name'];
+						$confirm = 'Replace the container ' . $c['name'] . ' with a new one on this host\'s current base image? '
+							. 'The image is built first while the site serves; the site is then down for the swap, about ten seconds. '
+							. 'Its code, data and volumes are kept. If the new container does not come up, the old image is put back.';
+						echo '<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2 svm-fs-075 me-1"'
+							. ' title="Build a new container for this site from the host\'s current base image (its OS, with Ubuntu\'s fixes) and swap it in"'
+							. ' onclick="' . $hr_str('JoineryModal.confirm(' . json_encode($confirm) . ', function(){ document.getElementById('
+								. json_encode($form_id) . ').submit(); })') . '">Replace</button>';
+						echo $container_form($form_id, ['action' => 'recreate_site', 'name' => $c['name']]);
 					}
 					if ($can_restart_c && !$c_held) {
 						$form_id = 'nodeActionRestartContainer_' . $c['name'];
@@ -1609,6 +1627,40 @@
 					foreach ($hd['drift'] as $d) { $loose[] = $d['key'] . ' is ' . $d['live'] . ', not ' . $d['want']; }
 					echo '<div class="mt-1 text-danger small">Kernel settings not held: '
 						. $hr_str($loose ? implode('; ', $loose) : 'the report did not name them') . '</div>';
+				}
+			}
+			// The nightly replacement of the host's site containers (host_report 1.31): when it last
+			// checked Ubuntu for fixes to their OS, what its last run did, and a hold (plane:site_refresh).
+			$sr = $hr['site_refresh'] ?? null;
+			if (is_array($sr)) {
+				$sr_bits = array();
+				if ($sr['checked_at'] !== '') {
+					$sr_bits[] = $sr['check'] === 'failed'
+						? 'the check on ' . $sr['checked_at'] . ' failed (' . $sr['check_error'] . ')'
+						: 'checked ' . $sr['checked_at'] . ': ' . (is_int($sr['pending_security']) ? $sr['pending_security'] : '?') . ' security fixes pending'
+							. ($sr['security_packages'] ? ' (' . implode(', ', array_slice($sr['security_packages'], 0, 6)) . (count($sr['security_packages']) > 6 ? ', ...' : '') . ')' : '');
+				} else {
+					$sr_bits[] = 'not checked yet';
+				}
+				if ($sr['base_built_at'] !== '') { $sr_bits[] = 'base built ' . $sr['base_built_at']; }
+				if ($sr['ran_at'] !== '') {
+					$sr_run = array('nothing_due' => 'nothing to replace', 'replaced' => 'replaced', 'held' => 'held', 'incomplete' => 'some sites passed over or held',
+						'base_failed' => 'the base did not build')[$sr['run']] ?? $sr['run'];
+					$sr_done = array();
+					foreach ($sr['replaced'] as $x) { $sr_done[] = $x['site'] . ($x['down_seconds'] !== null ? ' (' . $x['down_seconds'] . ' s down)' : ''); }
+					foreach ($sr['passed_over'] as $x) { $sr_done[] = $x['site'] . ' passed over, ' . str_replace('_', ' ', $x['why']); }
+					$sr_bits[] = 'last run ' . $sr['ran_at'] . ': ' . $sr_run . ($sr_done ? ' - ' . implode(', ', $sr_done) : '');
+				}
+				if (is_int($sr['sites_due']) && $sr['sites_due'] > 0) { $sr_bits[] = $sr['sites_due'] . ' of ' . (is_int($sr['sites']) ? $sr['sites'] : '?') . ' sites due'; }
+				if (!$sr['scheduled']) { $sr_bits[] = 'the nightly timer is off'; }
+				echo '<div class="mt-1 text-muted small">Site containers\' OS: ' . $hr_str(implode('; ', $sr_bits)) . '</div>';
+				foreach ($sr['holds'] as $h) {
+					echo '<div class="mt-1 text-danger small">Held: ' . $hr_str($h['site'] . ($h['outcome'] === 'down' ? ' was left down' : '\'s replacement was rolled back')
+						. ($h['at'] !== '' ? ' at ' . $h['at'] : '') . ($h['reason'] !== '' ? ': ' . $h['reason'] : '')
+						. '. It is not replaced again on this base until a Replace of it succeeds or the hold is cleared on the host.') . '</div>';
+				}
+				if ($sr['run'] === 'held') {
+					echo '<div class="mt-1 text-danger small">The host has stopped replacing site containers on this base (two sites rolled back, or one left down).</div>';
 				}
 			}
 			// What the machine's sites may open toward the outside, and how fast they send (host_report

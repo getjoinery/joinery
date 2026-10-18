@@ -13,6 +13,8 @@
  * sources (IncidentSources), which the Reconcile Incidents task turns into
  * incidents (incident_triage.md). All read stored facts and never probe.
  *
+ * @version 1.20 - plane:site_refresh: a host's nightly replacement of its site containers left a site down, was
+ *                rolled back, could not build its base, or has not checked for fixes in two days (IncidentSourceSiteRefresh)
  * @version 1.19 - plane:kernel_warning (a shared host's kernel logged a warning) and plane:kernel_settings (a pinned
  *                kernel setting does not hold), specs/multi_tenant_host_hardening.md D7, D1
  * @version 1.18 - plane:data_root_stopped: a data root stopped by hand (reviewer2 B17 D2)
@@ -47,7 +49,7 @@ foreach (array('IncidentSourceSiteDown', 'IncidentSourceBackupFailed', 'Incident
 	'IncidentSourceReleaseLogEntry', 'IncidentSourceReleaseLogTailBlind', 'IncidentSourceCustomerBackups',
 	'IncidentSourceDataRootLocked', 'IncidentSourceMailGateway', 'IncidentSourceSiteCodeUnverified',
 	'IncidentSourceCloudAccountKey', 'IncidentSourceDataRootStopped', 'IncidentSourceKernelWarning',
-	'IncidentSourceKernelSettings') as $incident_source) {
+	'IncidentSourceKernelSettings', 'IncidentSourceSiteRefresh') as $incident_source) {
 	IncidentSources::register(new $incident_source());
 }
 // Incident analysis spends model tokens through joinery_ai; they count toward

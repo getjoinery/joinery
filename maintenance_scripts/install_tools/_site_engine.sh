@@ -4,6 +4,12 @@
 # way the install tools call it (specs/site_container_engine.md D7). Sourced,
 # not run.
 #
+# Version: 1.4 - INVOCATION_ID is taken out of the environment when this is loaded. Podman reads it as
+#                "a systemd unit runs me" and keeps a container's monitor (conmon) in that unit, so the
+#                unit's end stopped every site container it had started or restarted: se1, 2026-10-17, a
+#                site replaced by the nightly service was stopped when the service finished, and one the
+#                host agent starts would be stopped by the agent's next restart
+#                (specs/multi_tenant_host_hardening.md D9).
 # Version: 1.3 - anything at the engine's current path makes the host the engine's, and a non-link there is
 #                refused (reviewer2 T4); site_engine_bin, and site_engine through it, run the engine by
 #                its path, never whatever podman a caller's PATH finds (T3).
@@ -33,6 +39,14 @@
 #
 # JOINERY_SITE_ENGINE_KIND (podman or docker) names the engine instead, for
 # tests running against a stand-in on PATH.
+
+# A site container outlives whatever started it. Podman, seeing INVOCATION_ID
+# (set by systemd for every unit's processes), keeps the container's monitor
+# in the calling unit's cgroup for a container with a restart policy, and the
+# unit's end then kills it: the nightly replacement service, the host agent
+# and the converger are all units. Without it, the monitor gets a scope of its
+# own (machine.slice/libpod-conmon-ID.scope), as from a login shell.
+unset INVOCATION_ID
 
 SITE_ENGINE_ROOT="${SITE_ENGINE_ROOT:-${JOINERY_SITE_ENGINE_ROOT:-}}"
 SITE_ENGINE_CURRENT="${SITE_ENGINE_ROOT}/usr/local/lib/joinery-site-engine/current"

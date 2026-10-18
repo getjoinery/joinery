@@ -51,7 +51,7 @@ jv() {
     ' "$1" "$2" "${3:-value}"
 }
 
-KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,outbound_limits,mail_gateway,generated_at"
+KEYS="failed_units,expected_units,fail2ban_jails,ssh_auth_failures_24h,kernel_events_24h,sshd,root_ssh,disk,disk_pool,data_root_encryption,data_root_script,data_root_stopped,memory,swap,cpus,reboot_required,reboot_required_since,boot_id,unattended_upgrades_last_run,os,answers,served_certificates,host_restrictions,site_engine,hardening,containers,site_refresh,outbound_limits,mail_gateway,generated_at"
 
 echo "=== The real run on this box, unprivileged ==="
 if [ "$(id -u)" = "0" ]; then
@@ -299,6 +299,10 @@ printf 'failed 2026-10-13T01:40:00Z\nfail\tcore\t\ttampered\tpublic_html/include
 export GATE_PID=$$ GATE_VOL="$T/vol"
 # sitetwo is held stopped by hold_container (a switch-over's old container).
 mkdir -p "$T/etc/joinery/sites/sitetwo"; printf 'restart=unless-stopped\n' > "$T/etc/joinery/sites/sitetwo/held"
+# sitetwo is being replaced (recreate_site.sh's mark, fresh); siteone carries a
+# mark two hours old: a replacement that was killed, not obeyed.
+date -u > "$T/etc/joinery/sites/sitetwo/replacing"
+mkdir -p "$T/etc/joinery/sites/siteone"; date -u > "$T/etc/joinery/sites/siteone/replacing"; touch -d '2 hours ago' "$T/etc/joinery/sites/siteone/replacing"
 # Root's authorized keys (host_report 1.16): a bare key, the same key with options, junk, and a comment line.
 mkdir -p "$T/rootssh"
 ssh-keygen -q -t ed25519 -N '' -C 'gate@key' -f "$T/rootssh/k1"
@@ -391,6 +395,9 @@ chk "a code_check that is a link is not followed: unknown" "$(jv "$T/link.json" 
 int_or_none() { case "$1" in none|[0-9]*) echo ok ;; *) echo "$1" ;; esac; }
 chk "containers: a held container says so, and only it" "$(jv "$T/root.json" containers.0.held)/$(jv "$T/root.json" containers.1.held)" "false/true"
 chk "a site carries every figure key" "$(jv "$T/root.json" containers.0 keys)" "name,state,health,answers,held,started_at,memory,cpu,pids,net_tx_bytes,outbound_dropped,disk_bytes,code_check"
+chk "containers: one being replaced says so; a mark two hours old is not obeyed and adds no key" \
+    "$(jv "$T/root.json" containers.1.replacing)/$(jv "$T/root.json" containers.0.replacing)" "true/ABSENT"
+rm -f "$T/etc/joinery/sites/sitetwo/replacing" "$T/etc/joinery/sites/siteone/replacing"
 chk "code_check: the state and when, from the site's config volume" \
     "$(jv "$T/root.json" containers.0.code_check.state)/$(jv "$T/root.json" containers.0.code_check.at)" "failed/2026-10-13T01:40:00Z"
 chk "code_check: each failure, and nothing that is not one" "$(jv "$T/root.json" containers.0.code_check.failures count)" "2"
@@ -646,6 +653,56 @@ STUB
 chmod 755 "$T/poolbin/docker"
 PATH="$T/poolbin:$T/bin:$PATH" bash "$SCRIPT" > "$T/noinspect.json" 2>/dev/null
 chk "an inspect that answers nothing: containers unknown, not an empty list (N5)" "$(jv "$T/noinspect.json" containers)" "unknown"
+
+echo "=== The nightly replacement of the site containers (host_report 1.31) ==="
+eval "$(sed -n -e '/^safe_name() {/,/^}/p' -e '/^json_str() /p' -e '/^json_num_or_unknown() {/,/^}/p' -e '/^run() /p' \
+    -e '/^json_text() {/,/^}/p' -e '/^emit_site_refresh() {/,/^}/p' "$SCRIPT")"
+MAX_NAME=64; CMD_TIMEOUT=5
+mkdir -p "$T/sr/bin" "$T/sr/state"
+printf '#!/bin/bash\n[ "$1 $2 $3" = "show -p UnitFileState" ] && echo "${GATE_TIMER:-disabled}"\nexit 0\n' > "$T/sr/bin/systemctl"; chmod 755 "$T/sr/bin/systemctl"
+sr() { PATH="$T/sr/bin:$PATH" HOST_REPORT_SITE_REFRESH_DIR="$1" emit_site_refresh; }
+srv() { sr "$1" > "$T/sr.json"; jv "$T/sr.json" "$2" "${3:-value}"; }
+chk "never run (no state): none" "$(sr "$T/sr/nothing")" '"none"'
+cat > "$T/sr/state/state" <<'STATE'
+installed_at=2026-10-10T01:00:00Z
+checked_at=2026-10-17T01:40:00Z
+checked_ok_at=2026-10-17T01:40:00Z
+check=ok
+check_error=
+pending=10
+pending_security=9
+security_packages=apache2 curl Bad\Name openssh-client
+base_version=2.2
+base_id=88bf90ef691d
+base_built_at=2026-10-17T01:42:00Z
+base_due=fix
+ran_at=2026-10-17T01:40:00Z
+run=held
+run_error=
+replaced=sa:10.4 sb:junk
+passed_over=wd5:busy
+sites=3
+sites_due=1
+STATE
+mkdir -p "$T/sr/state/held"
+printf 'outcome=rolled_back\nreason=not "healthy" \\ in 180 s","x":"y\nat=2026-10-17T01:50:00Z\nbase=88bf90ef691d\n' > "$T/sr/state/held/wd5"
+printf 'outcome=down\n' > "$T/sr/state/held/Bad;Name"
+ln -s /etc/passwd "$T/sr/state/held/linked"
+chk "a state: one JSON object, every key in order" "$(srv "$T/sr/state" "" keys)" \
+    "installed_at,checked_at,checked_ok_at,check,check_error,base_version,base_id,base_built_at,base_due,ran_at,run,run_error,pending,pending_security,sites,sites_due,security_packages,replaced,passed_over,holds,scheduled"
+chk "counts are numbers, the pending packages names only (a hostile one reduced to a name)" \
+    "$(srv "$T/sr/state" pending)/$(srv "$T/sr/state" pending_security)/$(srv "$T/sr/state" security_packages)" '10/9/["apache2","curl","BadName","openssh-client"]'
+chk "each replaced site with its seconds down; one not a figure is null" "$(srv "$T/sr/state" replaced)" '[{"site":"sa","down_seconds":10.4},{"site":"sb","down_seconds":null}]'
+chk "a site passed over, and why" "$(srv "$T/sr/state" passed_over)" '[{"site":"wd5","why":"busy"}]'
+chk "the holds come from held/ itself: one per site file; a name that is not a site's, and a link, are not read" \
+    "$(srv "$T/sr/state" holds count)|$(srv "$T/sr/state" holds.0.site)" "1|wd5"
+chk "a hold: a reason with quotes and a backslash stays text and cannot add a key" \
+    "$(srv "$T/sr/state" holds.0 keys)|$(srv "$T/sr/state" holds.0.reason)" "site,outcome,reason,at,base|not healthy  in 180 s,x:y"
+chk "the timer: scheduled only when systemd says enabled" "$(srv "$T/sr/state" scheduled)/$(GATE_TIMER=enabled srv "$T/sr/state" scheduled)" "false/true"
+rm -f "$T/sr/state/held/wd5"
+chk "a hold lifted (its file removed, the state not yet rewritten) is gone at once" "$(srv "$T/sr/state" holds)" "[]"
+ln -s "$T/sr/state/state" "$T/sr/nothing/state" 2>/dev/null || { mkdir -p "$T/sr/nothing"; ln -s "$T/sr/state/state" "$T/sr/nothing/state"; }
+chk "a state file that is a link is not read: none" "$(sr "$T/sr/nothing")" '"none"'
 
 echo "=== The data root's own script, and the boot id (host_report 1.23) ==="
 eval "$(sed -n -e '/^script_version() {/,/^}/p' -e '/^emit_data_root_script() {/,/^}/p' -e '/^emit_boot_id() {/,/^}/p' "$SCRIPT")"
