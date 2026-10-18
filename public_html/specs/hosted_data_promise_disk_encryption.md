@@ -1,5 +1,21 @@
 # Encrypted data root: data encrypted at rest, with the key held off the machine
 
+**Status, 2026-10-17:** built, released and live-tested; every open item is
+settled. The rehearsal (D7 step 2: T-M1/T-M1b, T-R2, T-E9, T-E12, T-E13, T-K2,
+T-K5, T-P5) passed on throwaway management nodes on 2026-10-13, and the fixes
+it found are released by 0.8.503 (B86, committed after it, is not). What is
+left is D7 steps 3-8 on the real machines, timed by the owner: dev encrypts in
+place (step 3), then `release_key_rotation`'s ceremony (step 4), getjoinery
+(5), the mutual escrow (6), the other three (7), and the launch release (8).
+T-P1 passed on 2026-10-17: a Managed order paid on dev with a test card was
+born on a 1 GB Nanode with the provider's layer reported disabled, its data
+root encrypted and sealed to dev's recovery key, escrow enrolled with dev, and
+a reboot opened by escrow in 3 seconds; it found B87 (every Managed order
+stalled before create) and B88 (a subscription cancel answered 500). Not run
+anywhere: T-V5 (no Lish access from here) and T-V8 (needs a filesystem that
+refuses direct I/O). The 2026-10-12 notes below are the record of how it got
+here.
+
 **Build status, 2026-10-12:** every work package is BUILT (WP1-WP10, each
 marked in its entry), shipped dormant behind `data_root_encryption_offered`;
 committed 2026-10-12 (3fcf7b8f, agent d84bf16) and released in 0.8.484. The

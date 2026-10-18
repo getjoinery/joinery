@@ -128,6 +128,11 @@ $site_values = array_map('strval', array_values($op_bundle['site']));
 foreach ($op_bundle['plugins'] as $plugin) {
 	$site_values[] = (string)$plugin['name'];
 }
+// The site's own address is stated in its own right (site.host), and its
+// error log lines carry it; a setting that names the site itself, as dev's
+// support_url does, is not a leak.
+$site_values[] = 'https://' . $op_bundle['site']['host'];
+$site_values[] = 'http://' . $op_bundle['site']['host'];
 foreach ($op_bundle['settings']['changed_from_default'] as $name) {
 	$value = (string)$db->query('SELECT stg_value FROM stg_settings WHERE stg_name = ' . $db->quote($name))->fetchColumn();
 	// Short or generic values ("1", "default") and values the bundle states in

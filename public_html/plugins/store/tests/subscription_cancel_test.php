@@ -47,6 +47,8 @@ class ScOrderItem extends OrderItem {
 	public static $paypal;
 	protected function stripe_helper() { return self::$stripe; }
 	protected function paypal_helper() { return self::$paypal; }
+	public static $notices = array();
+	protected function send_notice($to, array $values) { self::$notices[] = array($to, $values); }
 }
 
 $suffix = getmypid() . '-' . random_int(1000, 9999);
@@ -99,6 +101,26 @@ check(ScOrderItem::$stripe->cancels === array(array('sub_sc_' . $suffix, 'period
 	json_encode(ScOrderItem::$stripe->cancels));
 check(ScOrderItem::$stripe->refreshed === 1, 'and the row is read back from Stripe');
 check(ScOrderItem::$paypal->cancels === array(), 'PayPal is not asked');
+
+// ---------------------------------------------------------------------------
+section('The cancel notice reaches an address that is no user\'s');
+
+// dev's notify list held one address with no account: the notice step called
+// a method on the missing user, and the cancel page answered 500 after Stripe
+// had cancelled (T-P1 cleanup, 2026-10-17).
+$stranger = 'sc-nobody-' . $suffix . '@example.com';
+harness_set_setting_mem('subscription_notification_emails', $stranger . ', ' . $buyer->get('usr_email'));
+ScOrderItem::$stripe = new ScFakeStripe();
+ScOrderItem::$notices = array();
+$notify_item = sc_item($order, $buyer, array('odi_stripe_subscription_id' => 'sub_scn_' . $suffix));
+$said = sc_throws(function () use ($notify_item) { $notify_item->cancel_subscription_order_item(true, 'period_end'); });
+check($said === '', 'a cancel with notices on finishes', $said);
+$to = array_map(function ($n) { return $n[0]; }, ScOrderItem::$notices);
+check($to === array($stranger, $buyer->get('usr_email')), 'each address on the list is told, trimmed, the stranger too', json_encode($to));
+check((ScOrderItem::$notices[0][1]['recipient']['usr_email'] ?? '') === $stranger
+	&& (int)(ScOrderItem::$notices[1][1]['recipient']['usr_user_id'] ?? 0) === (int)$buyer->key,
+	'a user\'s notice carries their record; a stranger\'s carries the address');
+harness_set_setting_mem('subscription_notification_emails', '');
 
 // ---------------------------------------------------------------------------
 section('A PayPal subscription is cancelled at PayPal, never at Stripe');

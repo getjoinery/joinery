@@ -680,4 +680,16 @@ return [
 			$dblink->exec('DROP INDEX IF EXISTS mgn_slug_unique');
 		},
 	],
+	[
+		// A Managed order paid since our cloud accounts became a list names no
+		// account: its draft was saved before payment made it ours, and only a
+		// new row was given the default (customer_cloud_provisions 1.23). Such
+		// an order is refused before its server is created, every tick. Each
+		// one whose server does not exist yet goes to the default account.
+		'id' => 'sm_021_paid_drafts_name_the_default_account',
+		'version' => '1.30.83',
+		'up' => function($dbconnector) {
+			error_log('sm_021: ' . CustomerCloudProvision::stamp_unstamped_default() . ' order(s) with no server yet now name the default cloud account.');
+		},
+	],
 ];
