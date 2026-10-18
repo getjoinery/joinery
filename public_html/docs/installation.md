@@ -893,12 +893,15 @@ sudo ./maintenance_scripts/sysadmin_tools/remove_account.sh mysite
 sudo ./maintenance_scripts/sysadmin_tools/remove_account.sh mysite -y   # No prompt
 ```
 
-| Docker sites                                  | Bare-metal sites           |
-|-----------------------------------------------|----------------------------|
-| Docker container                              | Website directories        |
-| All Docker volumes (postgres, uploads, etc.)  | Test site directories      |
-| Docker image                                  | Apache VirtualHost         |
-| Build directory                               | PostgreSQL database        |
+| Docker sites                                  | Bare-metal sites                                        |
+|-----------------------------------------------|---------------------------------------------------------|
+| Docker container                              | Website directories, and their mounts on the data root  |
+| All Docker volumes (postgres, uploads, etc.)  | Its test site (`--with-test-site`): files, vhost, database |
+| Docker image                                  | Apache VirtualHosts and their certificates              |
+| Build directory                               | PostgreSQL databases (the site's, its test site's, and the test suite's `test_<site>`) |
+|                                               | The host converger, when it runs for this site          |
+
+On bare metal the databases are dropped with the password in the site's own config, read before its folder goes, so the script never stops at a password prompt; open connections to them are ended first. The script holds the host converger's lock while it runs, so the converger cannot write anything of the site back. When the machine's host converger ran for this site, it goes too, and the machine's own converger (no site) is installed from the agent's support bundle when that is on the machine; otherwise the agent installs it once it starts with no site. The script ends by checking that everything is gone, PostgreSQL included, and prints `DECOMMISSION_VERIFIED` or names what is left.
 
 ## Troubleshooting
 

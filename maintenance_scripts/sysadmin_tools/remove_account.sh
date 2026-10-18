@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+#VERSION 2.19 - A bare-metal site's databases are dropped without a prompt: the site's own config gives the
+#               password (read before its folder goes), dropdb never asks (-w) and ends the site's open
+#               connections (--force), a failure is said, and the verdict checks them gone. dropdb waited
+#               forever at 'Password for user postgres:' (B2). The host converger is held off for the
+#               removal (host_runner_lock.sh), so a tick cannot write the site's cache back (B3). A
+#               companion test site with its own vhost (_site_init.sh 3.16) is this site's and goes with
+#               it, vhost, certificates and databases too; it was kept as another site (B96). The
+#               machine's host converger, when its unit runs for this site, goes with it: it ticked
+#               every minute for a site that was gone, and held the unit's name, so the machine's own
+#               converger (--machine) refused to take over; the agent's support bundle installs that
+#               one at once when it is here (B97).
 #VERSION 2.18 - the site's state folder goes once nothing is left in it: an empty one kept the name looking
 #               like a site in its own right (another_site); one holding a kept id block stays (B24).
 #VERSION 2.17 - site_quiet_host.sh's record of a quiet site ('quiet') goes with the site's other marks.
@@ -318,18 +329,72 @@ if [ "$HOST_PROXY" = false ] && [ -f "$VIRTUALHOST_FILE" ] && grep -qE '^[[:spac
     HOST_PROXY=true
 fi
 
-# A bare-metal site's test twin (_site_init.sh) shares its vhost. Behind a
-# container's proxy there is none, and a <site>_test with its own vhost,
-# container, volumes or state is another site.
+# A bare-metal site's test twin (install.sh site --with-test-site). An older
+# one shares the site's vhost; one made since _site_init.sh 3.16 has its own,
+# <site>_test.conf, serving test.<this site's domain>. Behind a container's
+# proxy there is none, and a <site>_test with its own container, volumes or
+# state, or with a vhost serving anything else, is another site.
+first_server_name() {
+    sed -n -E 's/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr][Nn][Aa][Mm][Ee][[:space:]]+([^[:space:]]+).*/\1/p' "$1" 2>/dev/null \
+        | head -n 1 | tr 'A-Z' 'a-z'
+}
+TEST_VHOST_FILE="$APACHE_SITES/${SITE_NAME}_test.conf"
 OWN_TEST_SITE=false
-if [ "$HOST_PROXY" = false ] && ! another_site "${SITE_NAME}_test" && [ ! -f "$APACHE_SITES/${SITE_NAME}_test.conf" ]; then
-    OWN_TEST_SITE=true
+OWN_TEST_VHOST=false
+if [ "$HOST_PROXY" = false ] && ! another_site "${SITE_NAME}_test"; then
+    if [ ! -f "$TEST_VHOST_FILE" ]; then
+        OWN_TEST_SITE=true
+    else
+        MAIN_SERVER_NAME="$(first_server_name "$VIRTUALHOST_FILE")"
+        if [ -n "$MAIN_SERVER_NAME" ] && [ "$(first_server_name "$TEST_VHOST_FILE")" = "test.${MAIN_SERVER_NAME}" ]; then
+            OWN_TEST_SITE=true
+            OWN_TEST_VHOST=true
+        fi
+    fi
 fi
 
 # Check for bare-metal installation
 if [ -d "$SITE_ROOT" ] || [ -f "$VIRTUALHOST_FILE" ] || [ -f "$LE_SSL_FILE" ]; then
     IS_BAREMETAL=true
 fi
+
+# A bare-metal site's databases on this machine's PostgreSQL: its own, and the
+# test suite's (its config's dbname_test, test_<site>) when it names that; its
+# test twin's the same way. Names this script composes, never a name a config
+# supplies: a copied config may name another site's database.
+config_value() {  # FILE NAME
+    sed -n "s/^[[:space:]]*\$this->settings\['$2'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$1" 2>/dev/null | head -n 1
+}
+SITE_DATABASES=""
+DB_PASSWORD=""
+if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ]; then
+    for db_site in "$SITE_NAME" $( [ "$OWN_TEST_SITE" = true ] && echo "${SITE_NAME}_test" ); do
+        db_config="$WEB_DIR/$db_site/config/Globalvars_site.php"
+        SITE_DATABASES="$SITE_DATABASES $db_site"
+        [ "$(config_value "$db_config" dbname_test)" = "test_${db_site}" ] && SITE_DATABASES="$SITE_DATABASES test_${db_site}"
+        # The role's password, read now: the config goes with the site's folder.
+        # Local connections need it (install.sh's pg_hba), and without it
+        # dropdb asks on a terminal nobody is at.
+        [ -n "$DB_PASSWORD" ] || DB_PASSWORD="$(config_value "$db_config" dbpassword)"
+    done
+fi
+
+# The machine's host converger unit, when it runs for this site: its service
+# or cron line is install_host_converger.sh's '--when-changed SITE ROOT'.
+CONVERGER_UNITS=("$FS/etc/systemd/system/joinery-host-converger.service" "$FS/etc/systemd/system/joinery-host-converger.timer" "$FS/etc/systemd/system/joinery-host-converger.path")
+CONVERGER_CRON="$FS/etc/cron.d/joinery-host-converger"
+converger_names_site() {  # FILE
+    grep -qE -- " --when-changed ${SITE_NAME} /var/www/html/${SITE_NAME}( |\$)" "$1" 2>/dev/null
+}
+converger_runs_for_site() {
+    converger_names_site "${CONVERGER_UNITS[0]}" || converger_names_site "$CONVERGER_CRON"
+}
+
+# The databases present, one per line; non-zero with PostgreSQL's words when
+# it cannot be asked. Never prompts: -w, and no terminal to read from.
+pg_databases() {
+    PGPASSWORD="$DB_PASSWORD" timeout 60 psql -w -U postgres -d postgres -AtXc 'SELECT datname FROM pg_database' < /dev/null 2>&1
+}
 
 # The marks other scripts leave for this site by exact path: hold_container.sh's
 # 'held' (a switch-over's old container held stopped), site_quiet_host.sh's
@@ -371,8 +436,10 @@ clear_site_marks() {
 # Let's Encrypt lineage (/etc/letsencrypt/live/<name>/) and placeholder
 # directory (/etc/ssl/joinery/<domain>) it names. Names only; the sibling
 # script re-validates each and refuses one another enabled site still uses.
+SITE_VHOSTS="$VIRTUALHOST_FILE $LE_SSL_FILE"
+[ "$OWN_TEST_VHOST" = true ] && SITE_VHOSTS="$SITE_VHOSTS $TEST_VHOST_FILE"
 CERT_NAMES=""
-for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+for vh in $SITE_VHOSTS; do
     [ -f "$vh" ] || continue
     CERT_NAMES="$CERT_NAMES"$'\n'$( { grep -oE '/etc/letsencrypt/live/[a-z0-9.-]+/' "$vh" | cut -d/ -f5
                     grep -oE '/etc/ssl/joinery/[a-z0-9.-]+' "$vh" | cut -d/ -f5; } 2>/dev/null )
@@ -380,7 +447,7 @@ done
 CERT_NAMES=$(printf '%s\n' "$CERT_NAMES" | grep -v '^$' | sort -u)
 # Every name the vhost served, for the certificate retry each may have armed.
 SERVED_NAMES=""
-for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+for vh in $SITE_VHOSTS; do
     [ -f "$vh" ] || continue
     SERVED_NAMES="$SERVED_NAMES"$'\n'$(grep -iE '^[[:space:]]*Server(Name|Alias)[[:space:]]' "$vh" 2>/dev/null \
         | sed -E 's/^[[:space:]]*[Ss][Ee][Rr][Vv][Ee][Rr]([Nn][Aa][Mm][Ee]|[Aa][Ll][Ii][Aa][Ss])[[:space:]]+//' | tr ' \t' '\n\n' | tr 'A-Z' 'a-z')
@@ -433,11 +500,16 @@ if [ "$IS_BAREMETAL" = true ]; then
         if [ "$OWN_TEST_SITE" = true ]; then
             echo "  - Test site files: $TEST_SITE_ROOT"
         fi
-        echo "  - PostgreSQL database: $SITE_NAME"
+        for db in $SITE_DATABASES; do
+            echo "  - PostgreSQL database: $db"
+        done
     fi
     echo "  - Apache virtual host: $VIRTUALHOST_FILE"
     if [ -f "$LE_SSL_FILE" ]; then
         echo "  - Apache SSL virtual host: $LE_SSL_FILE"
+    fi
+    if [ "$OWN_TEST_VHOST" = true ]; then
+        echo "  - Test site's Apache virtual host: $TEST_VHOST_FILE"
     fi
     for cert in $CERT_NAMES; do
         echo "  - HTTPS certificate: $cert"
@@ -454,6 +526,19 @@ if [ "$ASSUME_YES" = false ]; then
         echo "Operation cancelled."
         exit 0
     fi
+fi
+
+# The host converger runs the installers against this site every minute
+# (_plugin_installers_start.sh). One that ran during the removal wrote the
+# site's cache back after its folder went, a stray directory named like a site
+# (B3). The removal holds the converger's own lock, as a restore does, until
+# it exits.
+if [ -f "$HERE/host_runner_lock.sh" ]; then
+    # shellcheck source=host_runner_lock.sh
+    . "$HERE/host_runner_lock.sh"
+    hold_host_runner_lock "$SITE_NAME" "$SITE_ROOT" "Nothing was removed." || exit 1
+else
+    echo "WARNING: host_runner_lock.sh is not beside this script, so the host converger is not held off while ${SITE_NAME} is removed."
 fi
 
 # The site's id block is claimed before anything of it goes, so no run that
@@ -574,6 +659,9 @@ if [ "$IS_BAREMETAL" = true ]; then
     if [ -f "$LE_SSL_FILE" ]; then
         a2dissite "$SITE_NAME-le-ssl.conf" 2>/dev/null || echo "SSL site was not enabled or already disabled"
     fi
+    if [ "$OWN_TEST_VHOST" = true ]; then
+        a2dissite "${SITE_NAME}_test.conf" 2>/dev/null || echo "Test site was not enabled or already disabled"
+    fi
 
     # Test Apache configuration
     echo "Testing Apache configuration..."
@@ -632,8 +720,12 @@ if [ "$IS_BAREMETAL" = true ]; then
         rm -f "${LE_SSL_FILE:?}"
         echo "Removed: $LE_SSL_FILE"
     fi
+    if [ "$OWN_TEST_VHOST" = true ]; then
+        rm -f "${TEST_VHOST_FILE:?}"
+        echo "Removed: $TEST_VHOST_FILE"
+    fi
     # The vhost's backups (render_vhost.sh's .before-render.<time>, .bak, .new).
-    for backup in "$VIRTUALHOST_FILE".*; do
+    for backup in "$VIRTUALHOST_FILE".* $( [ "$OWN_TEST_VHOST" = true ] && printf '%s ' "$TEST_VHOST_FILE".* ); do
         [ -f "$backup" ] || continue
         rm -f "${backup:?}"
         echo "Removed: $backup"
@@ -670,16 +762,53 @@ if [ "$IS_BAREMETAL" = true ]; then
 
     # The site's databases live on the machine only for a bare-metal site; a
     # container's are in its volumes.
+    # Each is dropped by name, its open connections ended (--force: the site
+    # is going, and a cron run still holding one would refuse the drop). A
+    # failure is said here and named again by the verdict below.
     if [ "$HOST_PROXY" = false ]; then
-        echo "Removing PostgreSQL database..."
-        if dropdb -U postgres "$SITE_NAME" 2>/dev/null; then
-            echo "Removed database: $SITE_NAME"
-        else
-            echo "Database '$SITE_NAME' does not exist or already removed"
+        echo "Removing PostgreSQL databases..."
+        if ! PRESENT_DATABASES="$(pg_databases)"; then
+            echo "WARNING: PostgreSQL could not be asked which databases are here: $(printf '%s' "$PRESENT_DATABASES" | head -n 1)"
+            PRESENT_DATABASES="$SITE_DATABASES"
         fi
+        for db in $SITE_DATABASES; do
+            if ! printf '%s\n' $PRESENT_DATABASES | grep -qxF "$db"; then
+                echo "Database '$db' does not exist or already removed"
+            elif DROP_ERR="$(PGPASSWORD="$DB_PASSWORD" timeout 120 dropdb -w --force --if-exists -U postgres "$db" < /dev/null 2>&1)"; then
+                echo "Removed database: $db"
+            else
+                echo "WARNING: database '$db' was not removed: $(printf '%s' "${DROP_ERR:-dropdb failed}" | head -n 1)"
+            fi
+        done
+    fi
 
-        if [ "$OWN_TEST_SITE" = true ] && dropdb -U postgres "${SITE_NAME}_test" 2>/dev/null; then
-            echo "Removed test database: ${SITE_NAME}_test"
+    # The machine's host converger, when its unit runs for this site
+    # (install_host_converger.sh writes one unit per machine, naming the site).
+    # Left, it ticks every minute for a site that is gone, and it holds the
+    # unit's name, so the machine's own converger (install_host_converger.sh
+    # --machine, from the agent's support bundle) refuses to take it over and
+    # the host is never converged again (B97). A run waiting on the lock this
+    # removal holds is stopped with it.
+    if [ "$HOST_PROXY" = false ] && converger_runs_for_site; then
+        if converger_names_site "${CONVERGER_UNITS[0]}"; then
+            systemctl stop joinery-host-converger.timer joinery-host-converger.path joinery-host-converger.service > /dev/null 2>&1 || true
+            systemctl disable joinery-host-converger.timer joinery-host-converger.path > /dev/null 2>&1 || true
+            rm -f "${CONVERGER_UNITS[@]}"
+            systemctl daemon-reload > /dev/null 2>&1 || true
+        fi
+        if converger_names_site "$CONVERGER_CRON"; then
+            rm -f "$CONVERGER_CRON"
+        fi
+        echo "Removed the host converger, which ran for ${SITE_NAME}"
+        MACHINE_TREE="$FS/opt/joinery-agent/tree"
+        if [ -f "$MACHINE_TREE/maintenance_scripts/install_tools/install_host_converger.sh" ]; then
+            if bash "$MACHINE_TREE/maintenance_scripts/install_tools/install_host_converger.sh" --machine "$MACHINE_TREE"; then
+                echo "The host converger runs for the machine (no site), from the agent's support bundle"
+            else
+                echo "WARNING: the host converger for the machine (no site) could not be installed from the agent's support bundle (above)"
+            fi
+        else
+            echo "NOTE: the host converger for the machine (no site) comes with the agent's support bundle, which the agent fetches once it starts with no site here (systemctl restart joinery-agent)."
         fi
     fi
 
@@ -737,7 +866,7 @@ fi
 # still holding a kept id block or anything else stays (B24).
 rmdir "$SITES_STATE/$SITE_NAME" 2>/dev/null || true
 
-for vh in "$VIRTUALHOST_FILE" "$LE_SSL_FILE"; do
+for vh in $SITE_VHOSTS; do
     if [ -f "$vh" ]; then
         LEFTOVERS="${LEFTOVERS}  - Virtual host still present: $vh"$'\n'
     fi
@@ -745,6 +874,26 @@ done
 
 if [ -d "$SITE_ROOT" ]; then
     LEFTOVERS="${LEFTOVERS}  - Web root still present: $SITE_ROOT"$'\n'
+fi
+if [ "$OWN_TEST_SITE" = true ] && [ -d "$TEST_SITE_ROOT" ]; then
+    LEFTOVERS="${LEFTOVERS}  - Test site still present: $TEST_SITE_ROOT"$'\n'
+fi
+
+if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ] && converger_runs_for_site; then
+    LEFTOVERS="${LEFTOVERS}  - The host converger still runs for ${SITE_NAME}"$'\n'
+fi
+
+# A bare-metal site's databases, asked of PostgreSQL itself.
+if [ "$IS_BAREMETAL" = true ] && [ "$HOST_PROXY" = false ] && [ -n "$SITE_DATABASES" ]; then
+    if ! LEFT_DATABASES="$(pg_databases)"; then
+        LEFTOVERS="${LEFTOVERS}  - PostgreSQL could not be asked whether the databases are gone: $(printf '%s' "$LEFT_DATABASES" | head -n 1)"$'\n'
+    else
+        for db in $SITE_DATABASES; do
+            if printf '%s\n' "$LEFT_DATABASES" | grep -qxF "$db"; then
+                LEFTOVERS="${LEFTOVERS}  - Database still present: $db"$'\n'
+            fi
+        done
+    fi
 fi
 
 # =============================================================================

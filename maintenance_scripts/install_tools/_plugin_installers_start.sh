@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.41 - A run that waited for the lock checks the site is still there before it writes
+#                 anything: remove_account.sh holds the lock for a removal, and the run behind it
+#                 wrote the site's cache back as a stray directory (B3).
 # Version: 2.40 - A --when-changed tick with nothing to converge holds the pinned kernel settings: one the
 #                running kernel no longer holds is written back within the minute, not at the next daily
 #                housekeeping run (multi_tenant_host_hardening B37).
@@ -557,6 +560,18 @@ fi
 # is on this inode, and a rename would leave every later run locking a file
 # nobody holds. flock is independent of content, so truncating is safe.
 printf '%s\n%s\n' "$$" "$(date -u +%s)" > "${LOCK_FILE}" 2>/dev/null || true
+
+# --- Still a site ------------------------------------------------------------
+# A run that found the site and then waited for the lock may have waited out
+# its removal: remove_account.sh holds this lock while it takes the site away.
+# Converging what is left would write the site's cache back into a folder that
+# was just removed, a stray directory named like a site (B3). The code tree is
+# on the root disk, so its absence means the site is gone, not that a data
+# root is closed.
+if [[ "${MACHINE}" == "0" && ! -d "${PUBLIC_HTML}/plugins" ]]; then
+    echo "host installers: ${SITENAME} was removed while this run waited - nothing to converge"
+    exit 0
+fi
 
 # --- Not while the site upgrades ---------------------------------------------
 # upgrade.php holds uploads/.upgrade.lock from before it swaps the new tree in

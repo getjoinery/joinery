@@ -211,11 +211,12 @@ names=$( { grep -oE '/etc/letsencrypt/live/[a-z0-9.-]+/' "$T/site.conf" | cut -d
 chk "the template's certificate names, once" "$names" "site.example.com"
 grep -q "grep -oE '/etc/letsencrypt/live/\[a-z0-9.-\]+/' \"\$vh\"" "$ACCOUNT" && same=yes || same=no
 chk "remove_account.sh runs that same extraction on each vhost" "$same" "yes"
-grep -q 'for vh in "\$VIRTUALHOST_FILE" "\$LE_SSL_FILE"; do' "$ACCOUNT" && both=yes || both=no
+grep -q '^SITE_VHOSTS="\$VIRTUALHOST_FILE \$LE_SSL_FILE"$' "$ACCOUNT" \
+    && [ "$(grep -c '^for vh in \$SITE_VHOSTS; do$' "$ACCOUNT")" -ge 2 ] && both=yes || both=no
 chk "on the site's vhost and its certbot-made SSL vhost" "$both" "yes"
 read_line=$(grep -n 'CERT_NAMES="\$CERT_NAMES"' "$ACCOUNT" | head -1 | cut -d: -f1)
 rm_line=$(grep -n 'rm -f "\${VIRTUALHOST_FILE:?}"' "$ACCOUNT" | head -1 | cut -d: -f1)
-bak_line=$(grep -n 'for backup in "\$VIRTUALHOST_FILE"\.\*; do' "$ACCOUNT" | head -1 | cut -d: -f1)
+bak_line=$(grep -n 'for backup in "\$VIRTUALHOST_FILE"\.\* ' "$ACCOUNT" | head -1 | cut -d: -f1)
 call_line=$(grep -n 'bash "\$CERT_SCRIPT" "\$cert"' "$ACCOUNT" | head -1 | cut -d: -f1)
 chk "it reads the names before the vhost is removed" "$([ "$read_line" -lt "$rm_line" ] && echo yes || echo no)" "yes"
 chk "it removes the vhost's backups" "$([ -n "$bak_line" ] && echo yes || echo no)" "yes"

@@ -408,6 +408,25 @@ out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
 chk "not root and no fixture named: the tick leaves the kernel to root" \
     "$(cat "$PROC/kernel/yama/ptrace_scope"):$(printf '%s\n' "$out" | grep -c 'put back to')" "0:0"
 
+echo "== a run that waited out the site's removal writes nothing (B3) =="
+# remove_account.sh holds this lock while it takes a site away. A tick that
+# found the site before the removal began waits on it, then must not write the
+# site's cache back into the folder that was removed.
+G="$T/gone"
+mkdir -p "$G/public_html/plugins" "$G/config" "$G/cache" "$G/maintenance_scripts/install_tools"
+cp "$FT"/*.sh "$G/maintenance_scripts/install_tools/"
+echo 0.8.391 > "$G/public_html/VERSION"
+echo '<?php' > "$G/config/Globalvars_site.php"
+rm -f "$T/remover.holds"
+( exec 9>>"$G/cache/host_installers.lock"; flock 9; touch "$T/remover.holds"; sleep 1.5; rm -rf "${G:?}" ) &
+REMOVER=$!
+for _ in $(seq 1 40); do [ -e "$T/remover.holds" ] && break; sleep 0.05; done
+out="$(JOINERY_LOCK_WAIT_SECONDS=30 bash "$RUNNER" --when-changed --site-root="$G" 2>&1)"; rc=$?
+wait "$REMOVER"
+chk "the run says the site went while it waited, and exits 0" \
+    "$rc:$(printf '%s\n' "$out" | grep -c 'was removed while this run waited')" "0:1"
+chk "  and nothing of the site is written back" "$( [ -e "$G" ] && echo "$(find "$G" | head -5 | tr '\n' ' ')" || echo none)" "none"
+
 echo
 echo "host_runner_lock gate: $passed passed, $failed failed"
 [ "$failed" -eq 0 ]
