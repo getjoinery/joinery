@@ -40,6 +40,9 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.26 - carries site_refresh.sh and recreate_site.sh, the nightly and on-the-word replacement of a
+ *                 site container (specs/multi_tenant_host_hardening.md D9), and what they build from: both
+ *                 Dockerfiles, the site start command and the vhost template
  * @version 1.25 - carries _kernel_settings.sh, the pinned kernel and network settings host_housekeeping.sh
  *                 writes and host_report.sh reports on (specs/multi_tenant_host_hardening.md WP1)
  * @version 1.24 - carries install_site_engine.sh and the five site_engine/ files it reads (ENGINE and the site
@@ -198,6 +201,19 @@ class SupportBundlePublisher {
 		'maintenance_scripts/install_tools/site_engine/site_seccomp.source',
 		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.json',
 		'maintenance_scripts/install_tools/site_engine/joinery_site_seccomp.source',
+		// The site containers replaced when Ubuntu ships a fix
+		// (specs/multi_tenant_host_hardening.md D9): site_refresh.sh, run by
+		// the timer host_housekeeping.sh installs on an engine host, builds the
+		// base from install.sh and Dockerfile.base; recreate_site.sh, run by
+		// it and by the recreate_site word, builds a site's image from
+		// Dockerfile.template, the start command and the vhost template. Both
+		// source install.sh and the run spec helper (listed here).
+		'maintenance_scripts/install_tools/site_refresh.sh',
+		'maintenance_scripts/sysadmin_tools/recreate_site.sh',
+		'maintenance_scripts/install_tools/Dockerfile.base',
+		'maintenance_scripts/install_tools/Dockerfile.template',
+		'maintenance_scripts/install_tools/_site_start.sh',
+		'maintenance_scripts/install_tools/default_virtualhost.conf',
 		// site_quiet_host: the host's half of a site container's quiet state
 		// (specs/site_container_engine.md D9), run by the word of that name,
 		// by host_housekeeping.sh (install and assert) and, as its installed

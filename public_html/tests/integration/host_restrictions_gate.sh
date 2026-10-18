@@ -194,7 +194,7 @@ chk "install.sh docker --multi-tenant writes the restrictions, and a failure sto
 
 DSD="$(sed -n '/^do_site_docker() {/,/^}/p' "$IN")"
 chk "install.sh site asks for the restrictions in its limits check, before any image, network or spec is made" \
-    "$(printf '%s\n' "$DSD" | awk '/run_spec_restrictions_present \|\| \{ print_error "Nothing was changed."; exit 1; \}/ { r = NR } /# \(end of the limits check\)/ { e = NR } /site_engine build/ && !b { b = NR } /run_spec_network_lines "\$SITENAME"/ && !n { n = NR } END { print (r && r < e && r < b && r < n) ? "yes" : "no" }')" "yes"
+    "$(printf '%s\n' "$DSD" | awk '/run_spec_restrictions_present \|\| \{ print_error "Nothing was changed."; exit 1; \}/ { r = NR } /# \(end of the limits check\)/ { e = NR } /build_site_image "\$SITENAME"/ && !b { b = NR } /run_spec_network_lines "\$SITENAME"/ && !n { n = NR } END { print (r && r < e && r < b && r < n) ? "yes" : "no" }')" "yes"
 
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

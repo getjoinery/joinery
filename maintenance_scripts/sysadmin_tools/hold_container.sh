@@ -4,6 +4,9 @@
 # stopped, or start it again, and say what became of it, as ONE JSON object on
 # stdout.
 #
+# Version: 1.2 - a container being replaced (recreate_site.sh's mark, /etc/joinery/sites/{site}/replacing,
+#                under an hour old) is refused: the swap would start it again under the hold
+#                (specs/multi_tenant_host_hardening.md D9).
 # Version: 1.1 - the engine is the one this host's sites run on (_site_engine.sh): Docker, or the
 #                site container engine (specs/site_container_engine.md WP3); its stopped states
 #                are exited, created and stopped.
@@ -72,6 +75,9 @@ own_container() {
     done
     return 1
 }
+REPLACING="${ETC}/joinery/sites/${NAME}/replacing"
+[[ -f "$REPLACING" && -n "$(find "$REPLACING" -mmin -60 2>/dev/null)" ]] \
+    && refuse "$NAME is being replaced (recreate_site); hold it once that is done"
 own_container "$NAME" || refuse "$NAME is not a container this node will hold"
 
 HELD="${ETC}/joinery/sites/${NAME}/held"

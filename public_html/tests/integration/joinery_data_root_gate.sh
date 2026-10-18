@@ -1436,5 +1436,8 @@ rm -f "$R/dev/tpmrm0"
 cp "$T/systemctl.plain" "$T/bin/systemctl"
 
 echo
+chk "the log move never restarts a unit whose restart stops every site (podman-restart.service, docker.service; WP8 review G8)" \
+    "$(sed -n '/^reopen_logs() {/,/^}/p' "$SCRIPT" | grep -c '^ *podman-restart.service|docker.service)$')|$(sed -n '/^reopen_logs() {/,/^}/p' "$SCRIPT" | grep -c 'and is not restarted (that would stop every site)')" "1|1"
+
 echo "RESULT: ${passed} passed, ${failed} failed"
 [ "$failed" -eq 0 ]

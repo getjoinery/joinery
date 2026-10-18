@@ -8,6 +8,12 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.31 - site_refresh: the nightly replacement of this host's site containers (site_refresh.sh's
+#                state: the last check, what Ubuntu had pending, the base, the last run, the sites replaced
+#                with their seconds down, the holds failed replacements placed (read from held/ itself, so
+#                a hold lifted shows lifted at once), and whether the timer is on);
+#                a container recreate_site.sh is replacing says so (replacing: true, absent otherwise),
+#                which container_health leaves alone (specs/multi_tenant_host_hardening.md D9).
 # Version: 1.30 - served_certificates: self_signed, true where the certificate's issuer is its own
 #                subject (the install placeholder, or anything else no browser trusts).
 # Version: 1.29 - hardening: whether the running kernel holds every setting host housekeeping pins
@@ -1237,6 +1243,67 @@ emit_hardening() {
     printf '{"state":"%s","pinned":%d,"unread":%d,"drift":[%s]}' "$([[ $n -eq 0 ]] && echo ok || echo drift)" "$pinned" "$unread" "$drift"
 }
 
+# The nightly replacement of this host's site containers (site_refresh.sh,
+# specs/multi_tenant_host_hardening.md D9), from its state file: "none" where it
+# has never run. Every value is read again here as text or a number; the file
+# is root's, but a report is never built from what it has not checked.
+json_text() {
+    local s
+    s="$(printf '%s' "$1" | tr -cd "A-Za-z0-9 ,.:;/()_'=+@-" | cut -c1-300)"
+    printf '"%s"' "$s"
+}
+emit_site_refresh() {
+    local dir f k v item sep list
+    dir="${HOST_REPORT_SITE_REFRESH_DIR:-/var/lib/joinery/site-refresh}"  # tests only: another folder
+    f="${dir}/state"
+    [[ -f "$f" && ! -L "$f" ]] || { printf '"none"'; return; }
+    local -A st=()
+    while IFS='=' read -r k v; do
+        [[ "$k" =~ ^[a-z_]{1,30}$ ]] && st[$k]="$v"
+    done < <(head -n 40 "$f" 2>/dev/null)
+    printf '{'
+    for k in installed_at checked_at checked_ok_at check check_error base_version base_id base_built_at base_due ran_at run run_error; do
+        printf '"%s":%s,' "$k" "$(json_text "${st[$k]:-}")"
+    done
+    for k in pending pending_security sites sites_due; do
+        printf '"%s":%s,' "$k" "$(json_num_or_unknown "${st[$k]:-}")"
+    done
+    list=""; sep=""
+    for item in ${st[security_packages]:-}; do
+        list+="${sep}$(json_str "$item")"; sep=","
+    done
+    printf '"security_packages":[%s],' "$list"
+    list=""; sep=""
+    for item in ${st[replaced]:-}; do
+        v="${item#*:}"; [[ "$v" =~ ^[0-9]{1,5}(\.[0-9])?$ ]] || v=null
+        list+="${sep}{\"site\":$(json_str "${item%%:*}"),\"down_seconds\":${v}}"; sep=","
+    done
+    printf '"replaced":[%s],' "$list"
+    list=""; sep=""
+    for item in ${st[passed_over]:-}; do
+        list+="${sep}{\"site\":$(json_str "${item%%:*}"),\"why\":$(json_str "${item#*:}")}"; sep=","
+    done
+    printf '"passed_over":[%s],' "$list"
+    # Each site's hold, from its own file: clear and a successful replacement
+    # remove the file and write no state.
+    local hf site n=0
+    local -A h=()
+    list=""; sep=""
+    for hf in "${dir}"/held/*; do
+        [[ -f "$hf" && ! -L "$hf" ]] || continue
+        site="${hf##*/}"
+        [[ "$site" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || continue
+        (( n < MAX_SITES )) || break
+        n=$((n+1))
+        h=()
+        while IFS='=' read -r k v; do [[ "$k" =~ ^[a-z]{1,10}$ ]] && h[$k]="$v"; done < <(head -n 8 "$hf" 2>/dev/null)
+        list+="${sep}{\"site\":$(json_str "$site"),\"outcome\":$(json_str "${h[outcome]:-}"),\"reason\":$(json_text "${h[reason]:-}"),\"at\":$(json_text "${h[at]:-}"),\"base\":$(json_str "${h[base]:-}")}"
+        sep=","
+    done
+    printf '"holds":[%s],' "$list"
+    if [[ "$(run systemctl show -p UnitFileState --value joinery-site-refresh.timer)" == enabled ]]; then printf '"scheduled":true}'; else printf '"scheduled":false}'; fi
+}
+
 # Which engine this host's sites run on, for the management node to choose a
 # host by: "podman" (the site container engine), "docker", "none" (no engine
 # here to run a site), or "unknown" (named, but the helper refused).
@@ -1253,7 +1320,7 @@ emit_site_engine() {
 emit_containers() {
     local names c site state health pid started port vols answers n=0 i src sum bytes path engine fmt="$INSPECT_FORMAT"
     local -a sites=() states=() healths=() answered=() figures=() srcs=() helds=()
-    local -A src_site=() disk=() missing=() reply=() ports=() cfg=() quiet=()
+    local -A src_site=() disk=() missing=() reply=() ports=() cfg=() quiet=() replacing=()
     local engine_pair engine_kind
     engine_pair="$(host_engine)" || { printf '"unknown"'; return; }
     read -r engine_kind engine <<< "$engine_pair"
@@ -1287,6 +1354,10 @@ emit_containers() {
         # Held stopped by hold_container (a switch-over's old container): not
         # running is what it should be, and container_health leaves it alone.
         if [[ -f "${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/held" ]]; then helds+=(true); else helds+=(false); fi
+        # Being replaced by recreate_site.sh: down on purpose until its new
+        # container answers. A mark over an hour old is a killed replacement.
+        local rmark="${HOST_REPORT_ETC:-/etc}/joinery/sites/${c}/replacing"
+        [[ -f "$rmark" && -n "$(find "$rmark" -mmin -60 2>/dev/null)" ]] && replacing[$c]=1
         figures+=("$(container_figures "$c" "${state:-unknown}" "$pid" "$started")")
         # The site's data is its named volumes; a bind mount can name any
         # path on the server, and is never walked.
@@ -1334,9 +1405,10 @@ emit_containers() {
         sum=""
         (( ${missing[$c]:-1} == 0 )) && sum="${disk[$c]:-}"
         (( i == 0 )) || printf ','
-        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s","held":%s,%s,"disk_bytes":%s,"code_check":%s}' \
+        # replacing only when true: a hundred sites' report keeps its room.
+        printf '{"name":%s,"state":%s,"health":%s,"answers":"%s","held":%s,%s%s,"disk_bytes":%s,"code_check":%s}' \
             "$(json_str "$c")" "$(json_str "${states[$i]}")" "$(json_str "${healths[$i]}")" "${answered[$i]}" \
-            "${helds[$i]}" "${figures[$i]}" "$(json_num_or_unknown "$sum")" "$(code_check_json "${cfg[$c]:-}")"
+            "${helds[$i]}" "$([[ -n "${replacing[$c]:-}" ]] && printf '"replacing":true,')" "${figures[$i]}" "$(json_num_or_unknown "$sum")" "$(code_check_json "${cfg[$c]:-}")"
     done
     printf ']'
 }
@@ -1438,6 +1510,7 @@ printf '"host_restrictions":%s,' "$(emit_host_restrictions)"
 printf '"site_engine":%s,' "$(emit_site_engine)"
 printf '"hardening":%s,' "$(emit_hardening)"
 printf '"containers":%s,' "$(emit_containers)"
+printf '"site_refresh":%s,' "$(emit_site_refresh)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"
 printf '"generated_at":%s' "$(date -u +%s)"

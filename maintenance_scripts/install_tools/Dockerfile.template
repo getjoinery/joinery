@@ -1,4 +1,9 @@
 # Joinery Docker Template
+# VERSION 6.3 - The PHP extensions can come from a build argument, JOINERY_DECLARED_APT, when the context
+#               carries no code to ask (recreate_site.sh, specs/multi_tenant_host_hardening.md D9): the
+#               running site's own list_dependencies.php answers inside its container, and the build
+#               runs nothing of the site's. A name that does not begin with a letter or digit, or that
+#               ends in - (apt reads "NAME-" as remove NAME), is skipped.
 # VERSION 6.2 - The start command is _site_start.sh, copied into the image and run in exec form
 #               (specs/site_container_engine.md D6): Podman's builder ignores SHELL for a
 #               shell-form CMD. The command itself is unchanged; SHELL is gone with it.
@@ -227,15 +232,26 @@ RUN chmod +x /var/www/html/${SITENAME}/maintenance_scripts/install_tools/*.sh
 # Install every PHP extension the source declares (root composer.json ext-*
 # plus plugin requires.extensions). The resolver emits "primary|fallback" apt
 # package pairs; a missing package is a warning, not a build failure - the
-# plugin activation gate is the runtime backstop.
-RUN if [ -f "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" ]; then \
+# plugin activation gate is the runtime backstop. A context without the code
+# (a running site's image made again) names them in JOINERY_DECLARED_APT,
+# which its own resolver gave inside the running site.
+ARG JOINERY_DECLARED_APT=
+RUN SPECS=""; \
+    if [ -f "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" ]; then \
+        SPECS="$(php "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" --apt)"; \
+    else \
+        SPECS="${JOINERY_DECLARED_APT}"; \
+    fi; \
+    if [ -n "$SPECS" ]; then \
         for attempt in 1 2 3 4; do \
             apt-get update -qq && break; \
             [ "$attempt" -lt 4 ] || exit 1; \
             echo "apt-get update failed (attempt $attempt of 4); retrying in 30 seconds"; sleep 30; \
         done && \
-        for spec in $(php "/var/www/html/${SITENAME}/public_html/utils/list_dependencies.php" --apt); do \
+        for spec in $SPECS; do \
             primary="${spec%%|*}"; fallback="${spec##*|}"; \
+            case "$primary" in *-) echo "WARNING: skipped $spec, not a package name"; continue ;; [a-z0-9]*) ;; *) echo "WARNING: skipped $spec, not a package name"; continue ;; esac; \
+            case "$fallback" in *-) echo "WARNING: skipped $spec, not a package name"; continue ;; [a-z0-9]*) ;; *) echo "WARNING: skipped $spec, not a package name"; continue ;; esac; \
             apt-get install -y "$primary" 2>/dev/null || apt-get install -y "$fallback" || \
                 echo "WARNING: could not install $primary (or $fallback)"; \
         done && \

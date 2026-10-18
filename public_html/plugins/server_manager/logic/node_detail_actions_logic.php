@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.64 - recreate_site: replace one site's container on its host with a new one on the host's current
+ *                base image (specs/multi_tenant_host_hardening.md D9)
  * @version 1.63 - repair_release_files: every differing deployment file put back in one job (agent 1.79.0)
  * @version 1.62 - Hide from Dashboard calls ManagedNode::hide(), which keeps the node's cloud server recorded (B71)
  * @version 1.61 - the settings form saves mgn_alerts (whether this node's incidents notify anyone)
@@ -181,6 +183,7 @@ class NodeDetailActions {
 		'move_to_plane'            => 'api_keys',
 		'restart_container'        => 'overview',
 		'hold_container'           => 'overview',
+		'recreate_site'            => 'overview',
 		'site_limits'              => 'overview',
 		'data_root_migrate'        => 'overview',
 		'data_root_enrol'          => 'overview',
@@ -342,6 +345,14 @@ class NodeDetailActions {
 			case 'restart_container': {
 				$built = JobCommandBuilder::build_restart_container($node, (string)($_POST['name'] ?? ''));
 				$job = ManagementJob::createFromBuild($node->key, 'restart_container', $built, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'recreate_site': {
+				// One site's container replaced now on a fresh image of the
+				// host's current base, building first (multi_tenant_host_hardening D9).
+				$built = JobCommandBuilder::build_recreate_site($node, (string)($_POST['name'] ?? ''));
+				$job = ManagementJob::createFromBuild($node->key, 'recreate_site', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

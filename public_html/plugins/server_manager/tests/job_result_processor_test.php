@@ -450,12 +450,12 @@ $hostile = array(
 	'surprise' => 'key',
 );
 $capped = JobResultProcessor::sanitise_host_report($hostile);
-check(!isset($capped['surprise']) && count($capped) === 29 && array_key_exists('data_root_encryption', $capped)
+check(!isset($capped['surprise']) && count($capped) === 30 && array_key_exists('data_root_encryption', $capped)
 	&& array_key_exists('mail_gateway', $capped) && array_key_exists('host_restrictions', $capped)
 	&& array_key_exists('data_root_script', $capped) && array_key_exists('boot_id', $capped)
 	&& array_key_exists('site_engine', $capped) && array_key_exists('data_root_stopped', $capped)
-	&& array_key_exists('hardening', $capped),
-	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening among them)', var_export(array_keys($capped), true));
+	&& array_key_exists('hardening', $capped) && array_key_exists('site_refresh', $capped),
+	'unknown keys are dropped and every known key is present (data_root_encryption, host_restrictions, data_root_script, data_root_stopped, boot_id, site_engine, hardening, site_refresh among them)', var_export(array_keys($capped), true));
 check($capped['data_root_encryption'] === null, 'a node that sends no data_root_encryption: not reported (null), never "none"');
 check($capped['mail_gateway'] === null, 'a node that sends no mail_gateway: not reported (null), never "none"');
 $mg = JobResultProcessor::sanitise_host_report(array('mail_gateway' => array('version' => '1.0.0<x>', 'state' => 'running', 'restarts' => '2',
@@ -612,6 +612,36 @@ check($hd(array('state' => 'drift', 'pinned' => 38, 'unread' => 0, 'drift' => ar
 check(JobResultProcessor::sanitise_host_report(array())['hardening'] === null
 		&& JobResultProcessor::sanitise_host_report(JobResultProcessor::sanitise_host_report(array()))['hardening'] === null,
 	'a report from before hardening keeps it null, read back too (reviewer2 R5)');
+// The nightly replacement of the site containers (host_report 1.31, multi_tenant_host_hardening D9).
+$srf = function ($r) { return JobResultProcessor::sanitise_host_report(array('site_refresh' => $r))['site_refresh']; };
+$sr_in = array('installed_at' => '2026-10-10T01:00:00Z', 'checked_at' => '2026-10-17T01:40:00Z', 'checked_ok_at' => '2026-10-17T01:40:00Z',
+	'check' => 'ok', 'check_error' => '', 'base_version' => '2.2', 'base_id' => '88bf90ef691d', 'base_built_at' => '2026-10-17T01:42:00Z',
+	'base_due' => 'fix', 'ran_at' => '2026-10-17T01:40:00Z', 'run' => 'held', 'run_error' => '', 'pending' => 10, 'pending_security' => 9,
+	'sites' => 3, 'sites_due' => 1, 'security_packages' => array('apache2', 'curl'),
+	'replaced' => array(array('site' => 'sa', 'down_seconds' => 10.4)), 'passed_over' => array(array('site' => 'wd5', 'why' => 'busy')),
+	'holds' => array(array('site' => 'sb', 'outcome' => 'rolled_back', 'reason' => 'not healthy within 180 s', 'at' => '2026-10-17T01:50:00Z', 'base' => '88bf90ef691d')),
+	'scheduled' => true);
+$sr = $srf($sr_in);
+check(is_array($sr) && $sr['pending_security'] === 9 && $sr['base_due'] === 'fix' && $sr['run'] === 'held'
+		&& $sr['replaced'] === array(array('site' => 'sa', 'down_seconds' => 10.4)) && $sr['passed_over'] === array(array('site' => 'wd5', 'why' => 'busy'))
+		&& $sr['holds'][0]['site'] === 'sb' && $sr['holds'][0]['outcome'] === 'rolled_back' && $sr['scheduled'] === true && $sr['checked_ok_at'] === '2026-10-17T01:40:00Z',
+	'site_refresh keeps its check, its run, each site replaced and passed over, the hold and the timer', json_encode($sr));
+check($srf($sr) === $sr, 'site_refresh reads back the same from a stored report');
+$bad = $srf(array_merge($sr_in, array('checked_at' => 'yesterday', 'base_due' => 'always', 'run' => 'rm -rf', 'base_id' => 'zz',
+	'security_packages' => array('curl', '-o evil', array('x')), 'replaced' => array(array('site' => '../x', 'down_seconds' => 1), array('site' => 'sa', 'down_seconds' => 'fast')),
+	'passed_over' => array(array('site' => 'sb', 'why' => 'tired'), array('site' => 'sc', 'why' => 'timed_out')),
+	'holds' => array(array('site' => 'sb', 'outcome' => 'kaput', 'reason' => '<script>x</script>"q"', 'at' => 'now', 'base' => 'x'), array('site' => '../x'), 'junk'), 'scheduled' => 'yes')));
+check($bad['checked_at'] === '' && $bad['base_due'] === '' && $bad['run'] === '' && $bad['base_id'] === ''
+		&& $bad['security_packages'] === array('curl') && $bad['replaced'] === array(array('site' => 'sa', 'down_seconds' => null))
+		&& $bad['passed_over'] === array(array('site' => 'sb', 'why' => 'refused'), array('site' => 'sc', 'why' => 'timed_out'))
+		&& $bad['holds'] === array(array('site' => 'sb', 'outcome' => 'rolled_back', 'reason' => 'scriptx/scriptq', 'at' => '', 'base' => '')) && $bad['scheduled'] === false,
+	'site_refresh: a word off its list, a time or id not its shape, a name that is not a site\'s, a reason with markup: each reduced or dropped', json_encode($bad));
+check($srf('none') === 'none' && $srf('x') === 'unknown' && JobResultProcessor::sanitise_host_report(array())['site_refresh'] === null,
+	'site_refresh: none where it never ran, unknown for anything not its shape, null from a report before the field');
+check(JobResultProcessor::sanitise_host_report(array('containers' => array(array('name' => 'sa', 'state' => 'running', 'replacing' => true),
+		array('name' => 'sb', 'state' => 'running', 'replacing' => 'yes'))))['containers'][0]['replacing'] === true
+	&& !isset(JobResultProcessor::sanitise_host_report(array('containers' => array(array('name' => 'sb', 'state' => 'running', 'replacing' => 'yes'))))['containers'][0]['replacing']),
+	'a container being replaced keeps replacing; anything but true is not kept');
 check($ke['disk']['avail_bytes'] === 5 && $ke['disk']['inodes_used_pct'] === 'unknown',
 	'a percentage outside 0..100 is unknown');
 check($capped['memory'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown') && $capped['swap'] === array('used_bytes' => 'unknown', 'total_bytes' => 'unknown'),

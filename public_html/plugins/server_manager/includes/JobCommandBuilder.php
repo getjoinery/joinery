@@ -10,6 +10,8 @@
  *
  * @version 1.129 - a backup run carries objects_missing from the scheduler: the locations its space's listing proved
  *                 absent, for the node to store again (FleetBackupRetention::check_shelf())
+ * @version 1.128 - build_recreate_site: a host replaces one site's container on a fresh image of its current base
+ *                 (agent word recreate_site; specs/multi_tenant_host_hardening.md D9)
  * @version 1.127 - the old machine of a switch-over is removed only through a host agent from 1.80.0, the first whose
  *                  proof covers a container held stopped (site_container_engine B29); an older one is named, to update
  * @version 1.126 - copy_stage takes vouched_seq: that run's own manifest is sent (a version-3 chain keeps one per
@@ -1263,8 +1265,6 @@ class JobCommandBuilder {
 			if ($envelopes) {
 				$config['epoch_envelope_urls'] = $envelopes;
 			}
-		}
-
 			// What the scheduler's listing of this same space proved absent
 			// (FleetBackupRetention::check_shelf()). The node applies it only
 			// to a run in that space; a run started by hand carries none.
@@ -1278,6 +1278,8 @@ class JobCommandBuilder {
 					})),
 				);
 			}
+		}
+
 		return $config;
 	}
 
@@ -2018,6 +2020,31 @@ class JobCommandBuilder {
 			throw new Exception("'" . $name . "' is not a container name the node will accept.");
 		}
 		return ['primitive' => 'restart_container', 'params' => ['name' => $name]];
+	}
+
+	/**
+	 * Replace one site's container on its host with a new one on the host's
+	 * current base image, building first, keeping its volumes, run spec,
+	 * environment and signed manifest; rolled back onto the previous image
+	 * when the new one does not come up (specs/multi_tenant_host_hardening.md
+	 * D9). Addressed to the HOST's own agent: the site's agent lives inside
+	 * the container being replaced.
+	 */
+	public static function build_recreate_site($host_node, $name) {
+		if (!self::has_primitive($host_node, 'recreate_site')) {
+			throw new Exception(
+				"The host agent '{$host_node->get('mgn_slug')}' cannot replace a site's container. "
+				. AgentVocabulary::needs_newer_agent_text($host_node, ['recreate_site']));
+		}
+		return self::build_recreate_site_primitive($name);
+	}
+
+	public static function build_recreate_site_primitive($name) {
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a site name the host will accept.");
+		}
+		return ['primitive' => 'recreate_site', 'params' => ['name' => $name]];
 	}
 
 	/**

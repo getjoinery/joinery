@@ -320,7 +320,7 @@ unsigned_packages=refuse
   - A site opens only local, IPv4, IPv6 and netlink-route sockets. Any other answers "not supported" (EAFNOSUPPORT or EPROTONOSUPPORT), which PAM's audit hook in cron, `su` and `runuser` reads as "no audit here" and carries on.
   - ptrace and `process_vm_*`, io_uring, bpf, perf events, the kernel keyring, `unshare`, `setns`, `mount`, `open_by_handle_at`, and module and kexec loading are refused whatever capability a process holds. `strace` and `gdb` do not work inside a site, and PostgreSQL runs its default `io_method=worker`; `io_uring` would be refused.
   - 64-bit programs only: a 32-bit program is killed (SIGSYS) at its first system call.
-  - A container runs under the filter it was made with; a changed filter reaches a site when it is rebuilt.
+  - A container runs under the filter it was made with; a changed filter reaches a site when its container is next replaced (see *When Ubuntu ships a fix*) or rebuilt.
 - A site network runs no DNS service of its own: a site asks the host resolver's upstream servers (systemd-resolved's), and the walls stay as they are. The outbound limits let UDP to port 53 of exactly those servers through, at the site's rate on new connections, and drop every other UDP.
 - Container storage is on the data root, at `/srv/joinery/containers/storage`. It is the disk pool, as Docker's data root is on a Docker host: the engine's layer folder (`storage/overlay`) carries project 2,000,000,000, so its layer caps are numbered above the sites' allowances, and `--disk` holds.
 - A site's database is published on loopback alone: a run spec that publishes port 5432 on any other address runs no site.
@@ -410,6 +410,22 @@ mkdir -p /run/joinery && echo "who and why" > /run/joinery/supervisor.hold
 ```
 
 The next container start clears it. `rebase_site_container.sh` holds the supervisor while it moves a database.
+
+### When Ubuntu ships a fix
+
+A site container's operating system (PHP, Apache, PostgreSQL, openssl and the libraries under them, all from Ubuntu's archive) is its image's, and nothing inside the container installs updates: the official Ubuntu image switches apt's daily run off. Everything a site keeps is on its volumes (code, vendor tree, scripts, database, uploads, config, the agent's identity), so its OS is patched by replacing its container with one made from a freshly built image.
+
+On a host on the site container engine this runs every night. Host housekeeping installs `joinery-site-refresh.timer` (01:30 UTC, spread over half an hour, finished before the 03:00 backup window; a missed night is not run at boot), which runs `install_tools/site_refresh.sh run`:
+
+1. **Check.** A throwaway container of the base image (`joinery-base:VERSION`, no volumes, 512 MB, only the three file capabilities apt's lists need) runs `apt-get update` and a simulated full upgrade. A replacement is due when anything would come from the release's `-security` pocket, or when this release's `install.sh` would build a different base (a new `BASE_IMAGE_VERSION`, or a changed server setup, which the base's `joinery.install_sh_hash` label records). Updates from `-updates` alone start nothing; the fresh build installs them too.
+2. **Build.** The base is built fresh (`install.sh build-base --fresh --memory=2g`: Ubuntu's image pulled again, no cached layer, its steps held to 2 GB) at low priority while the sites serve. It needs 3 GB free where the engine keeps its images. A night whose check fails (a mirror down) builds nothing, and still replaces the sites already due on the current base.
+3. **Replace.** Every running site whose image does not carry the current base's id (`joinery.base_id`, a label every site image gets) is replaced, one at a time, by `sysadmin_tools/recreate_site.sh`, each bounded to 45 minutes. A site that is quiet or held stopped is never due; one running an upgrade, a backup, a restore or a scheduled task that lasts past two minutes is passed over and stays due for the next night.
+
+`recreate_site.sh SITE` replaces one site's container now (root on the host, or the **Replace** button beside the site container on its host's node page, the agent's `recreate_site` word). It refuses a site that does not answer now (its health check, or a page below 500), since its new container could not then be judged. It builds first, while the site serves: the image is made from this release's `Dockerfile.template`, start command and vhost template, the site's own signed release manifest, and the PHP extension packages its code declares (asked of its `list_dependencies.php` inside the running site). Nothing from the site's volumes runs during the build. Every call into the site is bounded (a minute, 30 s for a health check) and so is the build (600 s). Then it stops, removes and runs the container from the site's run spec with its own environment, and waits up to three minutes for the container's health check to pass and its port to answer. A swap takes about ten seconds without an answer. The previous image is kept as `joinery-SITE:previous`; a new container that does not come up is removed and the site runs again on the previous image (exit 3, the failed image kept as `joinery-SITE:failed` and its last log lines in `/var/log/joinery/recreate/SITE.failed.log`). Exit 4 means neither came up and the site is down. While it works the site is marked as being replaced (`/etc/joinery/sites/SITE/replacing`): `restart_container`, `hold_container`, `install.sh site` and the agent's `container_health` leave it alone, and the host report says so. A mark over an hour old is not obeyed. A replacement killed or stopped part way (the agent's time limit, a stop, a reboot) leaves the mark and its environment file (`/etc/joinery/sites/SITE/recreate.env`, root's alone); run again on that site, `recreate_site.sh` puts it back on its previous image, with no build, when it does not answer (outcome `restored`), and clears the mark and replaces it as usual when it does. `install.sh site` holds the same lock for its run, and `rebase_site_container.sh` refuses a site being replaced.
+
+A replacement that is rolled back holds that site (`/var/lib/joinery/site-refresh/held/SITE`, naming the base), and the run goes on with the others: one failure says "that site". A second site rolled back on the same base, or a site left down, says "the base" or "the host", and the run stops; while that stands, later nights only check. A site's hold is lifted by a new base (a later fix; a site left down stays held until it is replaced or cleared), by a successful **Replace** or `install.sh site` rebuild of it, or by `site_refresh.sh clear [SITE]`. A replacement that rolls back, by hand or at night, writes the hold itself.
+
+The host report carries the last check and run (`site_refresh`): what was pending, the base's build time, the sites replaced with their seconds down, those passed over, and each hold (read from `held/` itself, so a lifted hold shows lifted at once). The node page shows it, and the management node raises `plane:site_refresh` for a site left down (critical), a replacement rolled back, a base that did not build, or an engine host whose check has not passed for two days. A timer that would run from a tree another account can write is not installed, and one already on is stopped. `site_refresh.sh status` prints the same on the host; the logs are in `/var/lib/joinery/site-refresh/logs`.
 
 ### Volume mounts
 
@@ -956,6 +972,7 @@ If the chosen port is in use, the installer shows existing Joinery containers an
 | `install.sh server`       | Set up bare-metal host (one-time)             |
 | `install.sh site …`       | Create a new Joinery site                     |
 | `install.sh list`         | List existing sites                           |
+| `install.sh build-base [--fresh]` | Build the base image; `--fresh` pulls Ubuntu's image again and uses no cached layer |
 
 Global flags:
 
@@ -989,7 +1006,8 @@ If no password is given (and no `--password-file`), the installer auto-generates
 |---------------------------------|----------------------------------------------------------------|----------------------------------------|
 | `_site_init.sh`                 | Internal site initialization (DB, config, Composer)             | `install.sh site`, Dockerfile CMD      |
 | `fix_permissions.sh`            | Sets ownership and permissions on site files                    | `_site_init.sh`, manual                |
-| `Dockerfile.template`           | Template for building Docker images                             | `install.sh site` (Docker)             |
+| `Dockerfile.template`           | Template for building Docker images                             | `install.sh site` (Docker), `recreate_site.sh` |
+| `site_refresh.sh`               | Nightly check for Ubuntu fixes; replaces the sites' containers  | `joinery-site-refresh.timer`           |
 | `default_Globalvars_site.php`   | Template for site configuration                                 | `_site_init.sh`                        |
 | `default_virtualhost.conf`      | Template for Apache VirtualHost                                 | `_site_init.sh`                        |
 
@@ -1008,6 +1026,7 @@ Located in `maintenance_scripts/sysadmin_tools/`:
 | `restore_project.sh`    | Full site restore                                        |
 | `copy_database.sh`      | Copy database between sites                              |
 | `remove_account.sh`     | Remove a site completely                                 |
+| `recreate_site.sh`      | Replace a site's container on the current base image     |
 
 ### Reverse proxy for production (multiple Docker sites on 80/443)
 
