@@ -19,9 +19,13 @@
  *   - a verified backup from here, newer than a day;
  *   - one layer (D1a): where the provider's disk encryption is on, or not
  *     known, the encryption runs only with "keep the provider's layer as well",
- *     the exception D-L makes for the machines that predate the rule.
+ *     and only on a management node, which never copies itself
+ *     (specs/site_copy_final_test.md E2): any other machine is copied onto a
+ *     new server born with one layer instead.
  * The 32 MiB past the end of the backing the script checks for itself.
  *
+ * @version 1.3 - "keep the provider's layer as well" only on a management node; anywhere else the refusal says to copy
+ *                the site onto a new server born with one layer (specs/site_copy_final_test.md E2)
  * @version 1.2 - provider_layer(): a data root on a storage volume is under the volume's encryption, which the
  *                provider is asked (B28), not the server's disk's
  * @version 1.1 - what it says names no spec ids, and the provider-layer refusal reads "on for this machine" (B26)
@@ -57,6 +61,11 @@ class DataRootEncryptionOffer {
 			self::$layer_seen[$key] = self::read_provider_layer($node);
 		}
 		return self::$layer_seen[$key];
+	}
+
+	/** Forget what provider_layer() has read: a layer was recorded since. */
+	public static function forget_layers(): void {
+		self::$layer_seen = array();
 	}
 
 	private static function read_provider_layer(ManagedNode $node): string {
@@ -125,6 +134,15 @@ class DataRootEncryptionOffer {
 		return $out;
 	}
 
+	/**
+	 * May this machine keep the provider's layer under ours? Only a management
+	 * node: it never copies itself onto a new server, so it is encrypted where
+	 * it stands, with two layers until it is replaced.
+	 */
+	public static function may_keep_provider_layer(ManagedNode $node): bool {
+		return $node->is_self() || $node->is_management_node();
+	}
+
 	public static function ready(ManagedNode $node): bool {
 		foreach (self::preconditions($node) as $p) {
 			if (!$p['ok']) {
@@ -148,10 +166,11 @@ class DataRootEncryptionOffer {
 				$why[] = $p['label'] . ($p['note'] !== '' ? ': ' . $p['note'] : '');
 			}
 		}
-		if (self::provider_layer($node) !== 'disabled' && !$keep_provider_layer) {
+		if (self::provider_layer($node) !== 'disabled' && (!$keep_provider_layer || !self::may_keep_provider_layer($node))) {
 			$why[] = 'The provider\'s disk encryption ' . (self::provider_layer($node) === 'enabled' ? 'is on for' : 'is not known to be off for')
-				. ' this machine: one layer only. A copy of the site onto a new server born encrypted gives one layer;'
-				. ' keeping the provider\'s layer as well is for the machines that predate that rule.';
+				. ' this machine: one layer only. Copy the site onto a new server from its Copy tab: it is born encrypted by us with'
+				. ' the provider\'s layer off.' . ($keep_provider_layer ? ' Keeping the provider\'s layer as well is only for a management'
+				. ' node, which never copies itself.' : '');
 		}
 		if ($why) {
 			throw new Exception('Not encrypted: ' . implode(' · ', $why));

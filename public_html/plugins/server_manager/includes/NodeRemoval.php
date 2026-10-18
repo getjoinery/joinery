@@ -27,6 +27,7 @@
  *
  * The platform never deletes an instance itself.
  *
+ * @version 1.3 - the provider is asked with the driver of the machine's own account's provider
  * @version 1.2 - a container site whose host has no node here (never paired, or removed for good) goes once the
  *                person confirms its host machine deleted by its address; it could only be hidden (B76)
  * @version 1.1 - the provider is asked with the machine's own account's credential, and only when that
@@ -333,7 +334,11 @@ class NodeRemoval {
 				}
 				return '';
 			case self::MACHINE_PROVIDER:
-				return self::provider_refusal($node, $driver ?? OperatorCloudAccount::driver_for($account_token), $resolve);
+				if ($driver === null) {
+					$account = HeldCloudAccounts::node_account($node);
+					$driver = OperatorCloudAccount::driver_for($account_token, $account ? $account->provider() : 'linode');
+				}
+				return self::provider_refusal($node, $driver, $resolve);
 			case self::MACHINE_ATTEST:
 				$account = self::account_label($node);
 				if (self::attest_text($node, $resolve) === '') {

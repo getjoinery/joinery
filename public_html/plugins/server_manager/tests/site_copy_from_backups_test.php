@@ -126,8 +126,12 @@ foreach (array(
 	check(SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS) === array(), $what . ' is copied from its backups',
 		implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_BACKUPS)));
 	$live = implode(' | ', SiteCopyRunner::source_refusals($n, true, SiteCopy::FROM_SOURCE));
-	check(strpos($live, $c[0] === 'mgn_container_name' ? 'container site' : 'management node') !== false,
-		'but not from the running site: ' . $what, $live);
+	if ($c[0] === 'mgn_container_name') {
+		// A running container site copies like any other (D4): nothing refuses it for being one.
+		check(strpos($live, 'container site') === false, 'and a running container site is not refused for being one', $live);
+	} else {
+		check(strpos($live, 'management node') !== false, 'but not from the running site: ' . $what, $live);
+	}
 }
 $n = new ManagedNode($src->key, TRUE);
 $n->set('mgn_site_url', rtrim((string)LibraryFunctions::get_absolute_url(), '/'));

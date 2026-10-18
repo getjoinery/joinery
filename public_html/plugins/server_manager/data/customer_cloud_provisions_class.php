@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.24 - cvp_recovery_public_key: an encrypted data root in its owner's account is sealed to its site's own
+ *                proven recovery key (specs/site_copy_final_test.md E1)
  * @version 1.23 - an operator-mode row that names no account is stamped with the default until its server exists,
  *                not only when the row is new: a Managed draft becomes operator-mode at payment, on a row saved
  *                long before, and was never stamped, so every Managed order stalled before create (T-P1, 2026-10-17);
@@ -228,6 +230,10 @@ class CustomerCloudProvision extends SystemBase {
 		// create and the install makes the encrypted volume. Never set on an
 		// adopted server, which was born elsewhere.
 		'cvp_data_root_encrypted'    => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Whose recovery key an encrypted data root is sealed to, when not this
+		// management node's own (base64 public key): a server in its owner's
+		// account is sealed to its site's proven key (D2).
+		'cvp_recovery_public_key'    => array('type'=>'varchar(64)'),
 		// What the provider says about its own disk encryption on the instance:
 		// enabled, disabled, or unknown when it did not say. NULL: never read.
 		'cvp_provider_disk_encryption' => array('type'=>'varchar(20)', 'allowed_values'=>array('enabled', 'disabled', 'unknown')),

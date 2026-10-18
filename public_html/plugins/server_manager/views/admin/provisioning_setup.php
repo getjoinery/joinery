@@ -15,6 +15,7 @@
  *   Domains      domain registration
  *   Cleanup      the test-account cleanup
  *
+ * @version 2.3 - Add an account asks its provider, and a Hetzner project's name (specs/site_copy_anything_to_anything.md D2)
  * @version 2.2 - Remove names the encrypted servers it drops to Tier 1 (B77 N1)
  * @version 2.1 - an API key's expiry on its account's row, and Expires soon within a week of it (B77)
  * @version 2.0 - tabs; the Hosting tab and its cloud accounts list, with both ways to add one; the hosted card names
@@ -312,9 +313,15 @@ every account, the default chosen.</p>
 		echo $fw_key->begin_form();
 		echo '<input type="hidden" name="action" value="add_account_key">';
 		echo SmAdminCsrf::field();
-		$fw_key->passwordinput('cloud_api_token', 'Linode API token', [
-			'helptext' => 'A Linode personal access token with ' . implode(', ', array_keys(OperatorCloudAccount::SCOPES))
-				. '. The provider is asked for the account\'s name and company and what the token may do before anything is saved.']);
+		$smps_providers = ComputeDriverRegistry::providers();
+		$fw_key->dropinput('cloud_provider', 'Provider', ['options' => $smps_providers, 'value' => 'linode',
+			'visibility_rules' => ['hetzner' => ['show' => ['cloud_account_name']], 'linode' => ['hide' => ['cloud_account_name']]]]);
+		$fw_key->textinput('cloud_account_name', 'Project name', [
+			'helptext' => 'Hetzner\'s API does not say which project a token is for: name it as you know it in the Hetzner Cloud Console.']);
+		$fw_key->passwordinput('cloud_api_token', 'API token', [
+			'helptext' => 'Linode: a personal access token with ' . implode(', ', array_keys(OperatorCloudAccount::SCOPES))
+				. '; the provider is asked for the account\'s name and company and what the token may do before anything is saved. '
+				. 'Hetzner: a Read & Write API token of one Hetzner Cloud project (Security, API tokens); it is tried before anything is saved.']);
 		$fw_key->submitbutton('btn_add_key', 'Add account');
 		echo $fw_key->end_form();
 		?>

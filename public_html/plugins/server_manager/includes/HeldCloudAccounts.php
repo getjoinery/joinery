@@ -17,6 +17,9 @@
  * that account's credential: provision_token(). A server whose account is no
  * longer held (removed, or a sign-in that expired) gets the reason instead.
  *
+ * @version 1.1 - each account's driver is its provider's (ComputeDriverRegistry); a server's credential names its
+ *               provider; the watch reads every account whose driver lists machines, of any provider
+ *               (specs/site_copy_anything_to_anything.md D2)
  * @version 1.0
  */
 
@@ -58,7 +61,7 @@ class HeldCloudAccounts {
 			$ca_user = new User($ca->get('cca_usr_user_id'), TRUE);
 			$who = $ca_user->key ? trim($ca_user->get('usr_first_name') . ' ' . $ca_user->get('usr_last_name'))
 				: ('user #' . $ca->get('cca_usr_user_id'));
-			$provider = ucfirst((string)$ca->get('cca_provider'));
+			$provider = ComputeDriverRegistry::label((string)$ca->get('cca_provider'));
 			$name = trim((string)$ca->get('cca_account_name'));
 			if (CustomerCloudAccount::grant_expired($ca)) {
 				$unusable[] = $provider . ' account connected by ' . $who . ' on ' . $ca->get_local('cca_create_time', 'M j, Y')
@@ -136,7 +139,7 @@ class HeldCloudAccounts {
 		$accounts = array();
 		$problems = array();
 		foreach (OperatorCloudAccount::held() as $oca) {
-			if ((string)$oca->get('oca_provider') !== 'linode') {
+			if (!ComputeDriverRegistry::supports($oca->provider(), 'CloudMachineTransfer')) {
 				continue;
 			}
 			// An expired sign-in did its one job; it is not a fault to report daily.
@@ -151,7 +154,8 @@ class HeldCloudAccounts {
 			$accounts[$oca->choice_key()] = $oca->driver();
 		}
 		foreach (new MultiCustomerCloudAccount(array('status' => 'active', 'deleted' => false)) as $account) {
-			if ((string)$account->get('cca_provider') !== 'linode' || CustomerCloudAccount::grant_expired($account)) {
+			if (!ComputeDriverRegistry::supports((string)$account->get('cca_provider'), 'CloudMachineTransfer')
+					|| CustomerCloudAccount::grant_expired($account)) {
 				continue;
 			}
 			// A read-only watch never parks an account: a failed refresh is a
@@ -180,20 +184,51 @@ class HeldCloudAccounts {
 
 	/**
 	 * The credential for a server in one of our accounts:
-	 * ['token' => string, 'reason' => why there is none, 'account' => ?OperatorCloudAccount].
+	 * ['token' => string, 'reason' => why there is none, 'account' => ?OperatorCloudAccount,
+	 *  'provider' => the provider its driver is built for].
 	 */
 	public static function provision_token($provision): array {
 		$oca = self::provision_account($provision);
+		$provider = $oca ? $oca->provider() : (string)($provision->get('cvp_provider') ?: 'linode');
 		if ($oca === null) {
-			return array('token' => '', 'account' => null, 'reason' =>
+			return array('token' => '', 'account' => null, 'provider' => $provider, 'reason' =>
 				'This server\'s record names none of our cloud accounts, so this management node holds no credential for it. '
 				. 'The cloud accounts are on the Hosting tab of Provisioning Setup.');
 		}
 		$why = $oca->unusable_reason();
 		if ($why !== '') {
-			return array('token' => '', 'account' => $oca, 'reason' => $why);
+			return array('token' => '', 'account' => $oca, 'provider' => $provider, 'reason' => $why);
 		}
-		return array('token' => $oca->token(), 'account' => $oca, 'reason' => '');
+		return array('token' => $oca->token(), 'account' => $oca, 'provider' => $provider, 'reason' => '');
+	}
+
+	/**
+	 * The driver for a server in one of our accounts, or null with the reason:
+	 * ['driver' => ?CloudComputeProvider, 'reason' => string].
+	 */
+	public static function provision_driver($provision): array {
+		$held = self::provision_token($provision);
+		if ($held['token'] === '') {
+			return array('driver' => null, 'reason' => $held['reason']);
+		}
+		try {
+			return array('driver' => OperatorCloudAccount::driver_for($held['token'], $held['provider']), 'reason' => '');
+		} catch (CloudComputeException $e) {
+			return array('driver' => null, 'reason' => $e->getMessage());
+		}
+	}
+
+	/** The provider of an account key ('oca:<id>' or 'cca:<id>'), or '' when it names none held. */
+	public static function provider_of_key(string $key): string {
+		if (preg_match('/^oca:(\d+)$/', $key, $m)) {
+			$oca = new OperatorCloudAccount((int)$m[1], TRUE);
+			return $oca->key ? $oca->provider() : '';
+		}
+		if (preg_match('/^cca:(\d+)$/', $key, $m)) {
+			$cca = new CustomerCloudAccount((int)$m[1], TRUE);
+			return $cca->key ? (string)$cca->get('cca_provider') : '';
+		}
+		return '';
 	}
 
 	/**

@@ -8,6 +8,11 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.132 - is_cloudflare_domain reads the one Cloudflare range list (SessionControl::cloudflare_edge_ranges)
+ *                over A and AAAA records, matched by IpAddress::inPrefix; its own fetched and baked list is gone
+ * @version 1.131 - build_site_quiet_forward, build_site_quiet_host_forward and build_trust_forwarder: a frozen site
+ *                 forwards its visitors to its copy while a DNS switch settles, and the copy's machine believes
+ *                 its X-Forwarded-For (specs/site_copy_anything_to_anything.md D1), from FORWARD_MIN_AGENT_VERSION
  * @version 1.130 - objects_missing goes as two flat parameters the agent declares (objects_missing_space and
  *                 the list objects_missing), only to an agent at BACKUP_RUN_MISSING_MIN_AGENT_VERSION or newer
  *                 (an older one refused the whole run), and a page of it that fits in the job
@@ -518,6 +523,13 @@ class JobCommandBuilder {
 	 * agent is updated.
 	 */
 	const BACKUP_RUN_MISSING_MIN_AGENT_VERSION = '1.83.0';
+
+	/**
+	 * The first agent whose site_quiet and site_quiet_host forward, and which
+	 * has trust_forwarder (specs/site_copy_anything_to_anything.md D1): an older
+	 * site_quiet refuses the forward action as a value it does not know.
+	 */
+	const FORWARD_MIN_AGENT_VERSION = '1.84.0';
 
 	/** The most missing objects one backup run names (the agent's own limit). */
 	const BACKUP_RUN_MISSING_MAX = 2000;
@@ -2618,6 +2630,66 @@ class JobCommandBuilder {
 				. AgentVocabulary::needs_newer_agent_text($node, ['site_quiet']));
 		}
 		return self::build_site_quiet_primitive($node, $action);
+	}
+
+	/**
+	 * A frozen site forwards every visitor to its copy at $to while its
+	 * address moves by DNS (specs/site_copy_anything_to_anything.md D1). The
+	 * machine forwards over https only, to a server holding the site's own
+	 * certificate.
+	 */
+	public static function build_site_quiet_forward($node, string $to) {
+		self::require_forward_agent($node, 'forward its visitors');
+		return ['primitive' => 'site_quiet', 'params' => ['action' => 'forward', 'to' => self::public_address($to)]];
+	}
+
+	/** The host's half of a forward: the frozen container's table reaches $to on 80 and 443. */
+	public static function build_site_quiet_host_forward($host_node, $name, string $to) {
+		self::require_forward_agent($host_node, 'let a frozen site forward to its copy');
+		$name = (string)$name;
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $name)) {
+			throw new Exception("'" . $name . "' is not a container name the host will accept.");
+		}
+		return ['primitive' => 'site_quiet_host', 'params' => ['action' => 'forward', 'name' => $name, 'to' => self::public_address($to)]];
+	}
+
+	/**
+	 * Believe X-Forwarded-For from $address for $hours (trust), or stop
+	 * (untrust), on the machine whose Apache answers a copy.
+	 */
+	public static function build_trust_forwarder($node, string $action, string $address, int $hours = 0) {
+		self::require_forward_agent($node, 'believe a forwarding server');
+		return self::build_trust_forwarder_primitive($action, $address, $hours);
+	}
+
+	public static function build_trust_forwarder_primitive(string $action = 'untrust', string $address = '', int $hours = 0) {
+		$params = ['action' => $action, 'address' => self::public_address($address)];
+		if ($action === 'trust') {
+			if ($hours < 1 || $hours > 168) {
+				throw new Exception('A forwarding server is believed for 1 to 168 hours.');
+			}
+			$params['hours'] = $hours;
+		} elseif ($action !== 'untrust') {
+			throw new Exception("trust_forwarder takes trust or untrust, not '" . $action . "'.");
+		}
+		return ['primitive' => 'trust_forwarder', 'params' => $params];
+	}
+
+	private static function require_forward_agent($node, string $what): void {
+		$agent = (string)AgentVocabulary::version($node);
+		if ($agent === '' || version_compare($agent, self::FORWARD_MIN_AGENT_VERSION, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot {$what}: its agent is " . ($agent !== '' ? $agent : 'of an unknown version')
+				. ', and this needs ' . self::FORWARD_MIN_AGENT_VERSION . ' or newer. Update its agent.');
+		}
+	}
+
+	/** A public address, as the agent takes it, or an exception. */
+	private static function public_address(string $address): string {
+		$address = trim($address);
+		if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+			throw new Exception("'" . $address . "' is not a public address.");
+		}
+		return inet_ntop(inet_pton($address));
 	}
 
 	public static function build_site_quiet_primitive($node, $action = 'on') {
@@ -5266,53 +5338,30 @@ class JobCommandBuilder {
 	 */
 	const HOSTED_PLAN_STATES = ['trial', 'subscribed', 'grace', 'shutdown', 'services', ''];
 
+	/**
+	 * Does $domain resolve to Cloudflare's edge, over either family? The
+	 * ranges are the one list the platform keeps
+	 * (SessionControl::cloudflare_edge_ranges(), the file Apache's
+	 * RemoteIPTrustedProxy lines are written from).
+	 */
 	public static function is_cloudflare_domain($domain) {
-		try {
-			$ips = DnsResolver::getA($domain);
-		} catch (DnsLookupException $e) {
-			return false; // DNS resolution failed
-		}
-		foreach ($ips as $ip) {
-			$ip_long = ip2long($ip);
-			if ($ip_long === false) {
-				continue;
+		$ips = array();
+		foreach (array('getA', 'getAaaa') as $lookup) {
+			try {
+				$ips = array_merge($ips, DnsResolver::$lookup($domain));
+			} catch (DnsLookupException $e) {
+				// One family failing to resolve says nothing about the other.
 			}
-			foreach (self::get_cloudflare_ip_ranges() as $cidr) {
-				[$subnet, $bits] = explode('/', $cidr);
-				$mask = -1 << (32 - (int)$bits);
-				if (($ip_long & $mask) === (ip2long($subnet) & $mask)) {
+		}
+		$ranges = SessionControl::cloudflare_edge_ranges();
+		foreach ($ips as $ip) {
+			foreach ($ranges as $cidr) {
+				if (IpAddress::inPrefix((string)$ip, $cidr)) {
 					return true;
 				}
 			}
 		}
 		return false;
-	}
-
-	private static function get_cloudflare_ip_ranges() {
-		static $ranges = null;
-		if ($ranges !== null) {
-			return $ranges;
-		}
-		// Short timeout (this runs inside a scheduled-task tick) and strict CIDR
-		// validation: a captive-portal/HTML response must fall through to the
-		// baked-in list, not silently reclassify every CF domain as non-CF.
-		$ctx = stream_context_create(['http' => ['timeout' => 5]]);
-		$fetched = @file_get_contents('https://www.cloudflare.com/ips-v4', false, $ctx);
-		if ($fetched !== false) {
-			$parsed = array_values(array_filter(array_map('trim', explode("\n", $fetched)), function ($line) {
-				return (bool)preg_match('/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/', $line);
-			}));
-			if (!empty($parsed)) {
-				return $ranges = $parsed;
-			}
-		}
-		return $ranges = [
-			'173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
-			'103.31.4.0/22',   '141.101.64.0/18', '108.162.192.0/18',
-			'190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
-			'198.41.128.0/17', '162.158.0.0/15',  '104.16.0.0/13',
-			'104.24.0.0/14',   '172.64.0.0/13',   '131.0.72.0/22',
-		];
 	}
 
 	/**

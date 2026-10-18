@@ -33,7 +33,9 @@
  *
  * Output is one machine-readable line on stdout, so a job step can record it:
  *
- *   RECOVERY_KEY=already fpr=<sha256> proven=0|1  the key this site holds
+ *   RECOVERY_KEY=already fpr=<sha256> proven=0|1 [pub=<base64>]
+ *                                                 the key this site holds, and a
+ *                                                 proven key's public half
  *   RECOVERY_KEY=none                             nothing configured
  *   RECOVERY_KEY=invalid                          a value that is not a key
  *
@@ -43,6 +45,8 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
+ * @version 2.1 - a proven key's public half rides the report (pub=): a copy of this site onto a server in its
+ *                owner's own account is born sealed to it (specs/site_copy_final_test.md E1). It is public.
  * @version 2.0 - reports only. Writing this site's recovery key from outside the site is gone:
  *                no key arrives from a management node, and no proof established elsewhere is
  *                accepted here
@@ -90,13 +94,16 @@ function srk_opts(array $argv) {
 }
 
 /** Emit the one status line and stop. */
-function srk_report($outcome, $fingerprint = '', $proven = null) {
+function srk_report($outcome, $fingerprint = '', $proven = null, $public = '') {
     $line = 'RECOVERY_KEY=' . $outcome;
     if ($fingerprint !== '') {
         $line .= ' fpr=' . $fingerprint;
     }
     if ($proven !== null) {
         $line .= ' proven=' . ($proven ? '1' : '0');
+    }
+    if ($public !== '') {
+        $line .= ' pub=' . $public;
     }
     fwrite(STDOUT, $line . "\n");
     exit(0);
@@ -128,5 +135,7 @@ $here = BackupRecoveryKey::key_report();
 switch ($here['state']) {
     case 'unconfigured': srk_report('none');
     case 'invalid':      srk_report('invalid');
-    default:             srk_report('already', $here['fingerprint'], $here['state'] === 'proven');
+    default:
+        srk_report('already', $here['fingerprint'], $here['state'] === 'proven',
+            $here['state'] === 'proven' ? base64_encode(BackupRecoveryKey::public_key()) : '');
 }

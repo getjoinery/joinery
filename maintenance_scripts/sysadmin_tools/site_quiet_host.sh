@@ -6,6 +6,9 @@
 # replies apart, so a dormant copy or a frozen source sends nothing while its
 # agent, as root, still reaches the management node and backup storage.
 #
+# Version: 1.1 - forward SITE ADDRESS: a frozen site forwards its visitors to its copy while a DNS switch
+#               settles (specs/site_copy_anything_to_anything.md D1), so its table lets the web user
+#               reach that one address on 80 and 443; off removes the forward with the record
 # Version: 1.0
 #
 #   site_quiet_host.sh on SITE copy|switchover
@@ -18,6 +21,13 @@
 #                         written only where no record is, and a copy is never
 #                         turned into a switch-over. The record is half of what
 #                         lets discard_copy.sh remove it.
+#   site_quiet_host.sh forward SITE ADDRESS
+#                         Root. A switch-over's only: the frozen site's Apache
+#                         forwards its visitors to its copy at ADDRESS (the
+#                         site's own drop-in, site_quiet.sh forward), so the
+#                         table lets every account reach ADDRESS on ports 80
+#                         and 443 and nothing else. Recorded beside the reason
+#                         (/etc/joinery/sites/SITE/forward), reloaded now.
 #   site_quiet_host.sh off SITE
 #                         Root. A copy's: refused while the site still says it
 #                         is quiet (its own state file, asked inside the running
@@ -104,6 +114,27 @@ engine_ready() {
 }
 
 record_of() { echo "${SITES_DIR}/$1/quiet"; }
+forward_of_file() { echo "${SITES_DIR}/$1/forward"; }
+
+# An address: dotted IPv4, or IPv6 in hex and colons. Nothing else is ever
+# written into a table.
+addr_ok() {
+    local a="$1" o
+    if [[ "$a" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        for o in "${BASH_REMATCH[@]:1}"; do (( 10#$o <= 255 )) || return 1; done
+        return 0
+    fi
+    [[ "$a" =~ ^[0-9a-fA-F:]{2,39}$ && "$a" == *:* ]]
+}
+
+# The address SITE forwards to while a switch settles, or nothing.
+forward_of() {
+    local f a
+    f="$(forward_of_file "$1")"
+    [[ -f "$f" && ! -L "$f" ]] || return 0
+    a="$(head -c 64 "$f" 2>/dev/null | head -1 | tr -d '\r[:space:]')"
+    addr_ok "$a" && echo "$a"
+}
 
 # The reason the host records for SITE, or nothing. A record that says
 # anything else is held as switchover, the stricter page.
@@ -149,14 +180,23 @@ base_of() {
     echo "$base"
 }
 
-render_table() {  # SITE REASON BASE
-    local ids="0"
+render_table() {  # SITE REASON BASE [FORWARD]
+    local ids="0" fwd=""
     [[ "$3" != "0" ]] && ids="0, $3"
+    if [[ -n "${4:-}" ]]; then
+        if [[ "$4" == *:* ]]; then
+            fwd="        ip6 daddr $4 tcp dport { 80, 443 } accept"$'\n'
+        else
+            fwd="        ip daddr $4 tcp dport { 80, 443 } accept"$'\n'
+        fi
+    fi
     cat <<EOF
 # The quiet state of $1: $2 (specs/site_container_engine.md D9), loaded into
 # the site's own network namespace by site_quiet_host.sh. Every account but the
 # container's root reaches nothing past loopback; replies to a connection
 # someone else opened pass, so a visitor sees the 503 and the owner the look.
+# A site forwarding its visitors to its copy reaches that one address on 80
+# and 443 as well.
 table inet ${TABLE}
 delete table inet ${TABLE}
 table inet ${TABLE} {
@@ -164,7 +204,7 @@ table inet ${TABLE} {
         type filter hook output priority 0; policy accept;
         oifname "lo" accept
         ct direction reply accept
-        meta skuid != { ${ids} } meta l4proto tcp reject with tcp reset
+${fwd}        meta skuid != { ${ids} } meta l4proto tcp reject with tcp reset
         meta skuid != { ${ids} } reject with icmpx type admin-prohibited
     }
 }
@@ -183,7 +223,7 @@ load() {
     local site="$1" reason="$2" pid="$3" base tmp rc
     base="$(base_of "$pid")" || { warn "${site}: cannot read its id map (${PROC}/${pid}/uid_map)"; return 1; }
     tmp="$(mktemp "${TMPDIR:-/tmp}/site_quiet_host.XXXXXX")" || return 1
-    render_table "$site" "$reason" "$base" > "$tmp"
+    render_table "$site" "$reason" "$base" "$(forward_of "$site")" > "$tmp"
     in_netns "$pid" nft -f "$tmp" 2>/dev/null
     rc=$?
     rm -f "$tmp"
@@ -221,6 +261,25 @@ cmd_on() {
     say "${site}: its web user reaches nothing past loopback"
 }
 
+cmd_forward() {
+    local site="${1:-}" addr="${2:-}" pid f
+    site_ok "$site" || refuse "${site:0:64} is not a site name"
+    addr_ok "$addr" || refuse "${addr:0:64} is not an address"
+    [[ "$(reason_of "$site")" == "switchover" ]] || refuse "${site} is not frozen for a switch-over on this host; only a frozen site forwards. Nothing was changed"
+    own_container "$site" || refuse "${site} is not a site container on this host; nothing was changed"
+    f="$(forward_of_file "$site")"
+    [[ -L "$f" ]] && rm -f "$f"
+    printf '%s\n' "$addr" > "${f}.tmp" && chmod 644 "${f}.tmp" && mv -f "${f}.tmp" "$f" || refuse "cannot write ${f}"
+    say "${site} forwards to ${addr} on this host"
+    pid="$(pid_of "$site")"
+    if [[ -z "$pid" ]]; then
+        say "${site}'s container is not running; it gets its table when it starts"
+        return 0
+    fi
+    load "$site" "switchover" "$pid" || return 1
+    say "${site}: its web user reaches ${addr} on 80 and 443, and nothing else past loopback"
+}
+
 cmd_off() {
     local site="${1:-}" pid
     site_ok "$site" || refuse "${site:0:64} is not a site name"
@@ -248,6 +307,7 @@ cmd_off() {
             return 1
         fi
     fi
+    rm -f "$(forward_of_file "$site")"
     rm -f "$(record_of "$site")" || { warn "cannot remove $(record_of "$site")"; return 1; }
     say "${site} is live on this host: its web user reaches the network"
 }
@@ -296,7 +356,7 @@ cmd_status() {
         pid="$(pid_of "$site")"
         loaded="no"
         [[ -n "$pid" ]] && table_loaded "$pid" && loaded="yes"
-        echo "${site} quiet=${reason} running=$([[ -n "$pid" ]] && echo yes || echo no) table=${loaded}"
+        echo "${site} quiet=${reason} running=$([[ -n "$pid" ]] && echo yes || echo no) table=${loaded}$([[ -n "$(forward_of "$site")" ]] && echo " forward=$(forward_of "$site")")"
     done
 }
 
@@ -343,9 +403,10 @@ cmd_install() {
 case "${1:-}" in
     on)      engine_ready || exit 2; cmd_on "${2:-}" "${3:-}" ;;
     off)     engine_ready || exit 2; cmd_off "${2:-}" ;;
+    forward) engine_ready || exit 2; cmd_forward "${2:-}" "${3:-}" ;;
     assert)  cmd_assert ;;
     hook)    cmd_hook ;;
     status)  cmd_status "${2:-}" ;;
     install) cmd_install ;;
-    *) echo "usage: site_quiet_host.sh on SITE copy|switchover | off SITE | assert | hook | status [SITE] | install" >&2; exit 2 ;;
+    *) echo "usage: site_quiet_host.sh on SITE copy|switchover | forward SITE ADDRESS | off SITE | assert | hook | status [SITE] | install" >&2; exit 2 ;;
 esac

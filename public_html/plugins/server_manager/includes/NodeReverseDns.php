@@ -25,6 +25,8 @@
  * their own Cloud Manager. That is said plainly, with no reconnect: there is
  * no grant to reconnect.
  *
+ * @version 1.4 - the driver is the provision's provider's (ComputeDriverRegistry), any provider with a driver
+ *               (site_copy_anything_to_anything D2)
  * @version 1.3 - a server in one of our accounts uses that account's credential (cloud_accounts_list)
  * @version 1.2 - a transferred instance's reverse DNS is the customer's, in their own Cloud Manager
  * @version 1.1 - a hosted instance is reached with the operator cloud token (it had been sent to the
@@ -171,9 +173,9 @@ class NodeReverseDns {
 		if ($provision->is_transferred()) {
 			throw new NodeReverseDnsException(self::TRANSFERRED_MESSAGE);
 		}
-		if ($provision->get('cvp_provider') !== 'linode') {
-			throw new NodeReverseDnsException(
-				"No reverse-DNS driver for provider '{$provision->get('cvp_provider')}'.");
+		$provider = (string)$provision->get('cvp_provider');
+		if (!ComputeDriverRegistry::known($provider)) {
+			throw new NodeReverseDnsException("No reverse-DNS driver for provider '{$provider}'.");
 		}
 
 		if ($provision->is_operator_hosted()) {
@@ -184,7 +186,7 @@ class NodeReverseDns {
 			if ($held['token'] === '') {
 				throw new NodeReverseDnsException($held['reason']);
 			}
-			return OperatorCloudAccount::driver_for($held['token']);
+			return OperatorCloudAccount::driver_for($held['token'], $held['provider'] ?? $provider);
 		}
 
 		$account_id = (int)$provision->get('cvp_cca_customer_cloud_account_id');
@@ -219,6 +221,6 @@ class NodeReverseDns {
 			$account->save();
 		}
 
-		return new LinodeComputeDriver($fresh->getAccessToken());
+		return ComputeDriverRegistry::driver((string)$account->get('cca_provider'), $fresh->getAccessToken());
 	}
 }

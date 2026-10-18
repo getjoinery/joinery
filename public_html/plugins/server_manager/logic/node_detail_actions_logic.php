@@ -47,6 +47,11 @@
  * @version 1.50 - a node is not newly pointed at a switched-off or deleted backup target; keeping its own is fine
  * @version 1.49 - adopt_cloud_server: record the running cloud server a joined node runs on
  *                 (test_cloud_account_and_prod_management WP9)
+ * @version 1.50 - the switch by DNS takes the token for the site's zone at its host (any DNS driver), when it moves,
+ *                goes back and is kept; a copy onto a host says whether its source is alive
+ *                (specs/site_copy_anything_to_anything.md D1, D5)
+ * @version 1.49 - copy_new_server reads the region and size fields of the chosen account's provider
+ *                (specs/site_copy_anything_to_anything.md D2)
  * @version 1.48 - copy_new_server passes the ticked root SSH keys and the fingerprints shown (specs/site_copy.md WP15)
  * @version 1.47 - site_limits: change a site's memory, CPU ceiling and disk allowance on this host
  *                 (multi_tenant_docker_hosts WP6)
@@ -1024,10 +1029,13 @@ class NodeDetailActions {
 				// alone (WP10).
 				$copy_from = (string)($_POST['copy_from'] ?? SiteCopy::FROM_SOURCE);
 				if ($action === 'copy_new_server') {
+					// The region and size fields are the chosen account's provider's.
+					$copy_account = (string)($_POST['copy_account'] ?? '');
+					$copy_provider = preg_replace('/[^a-z0-9]/', '', HeldCloudAccounts::provider_of_key($copy_account));
 					SiteCopyRunner::start_new_server($node, [
-						'account' => (string)($_POST['copy_account'] ?? ''),
-						'region'  => (string)($_POST['copy_region'] ?? ''),
-						'type'    => (string)($_POST['copy_type'] ?? ''),
+						'account' => $copy_account,
+						'region'  => (string)($_POST['copy_region_' . $copy_provider] ?? ''),
+						'type'    => (string)($_POST['copy_type_' . $copy_provider] ?? ''),
 						'carry_root_keys'  => !empty($_POST['copy_carry_root_keys']),
 						'key_fingerprints' => (string)($_POST['copy_key_fingerprints'] ?? ''),
 						'data_root_encrypted' => !empty($_POST['copy_data_root_encrypted']),
@@ -1041,7 +1049,7 @@ class NodeDetailActions {
 					return $copy_url;
 				}
 				if ($action === 'copy_on_host') {
-					SiteCopyRunner::start_on_host($node, (int)($_POST['copy_host'] ?? 0), $uid);
+					SiteCopyRunner::start_on_host($node, (int)($_POST['copy_host'] ?? 0), $uid, $copy_from);
 					self::ok($session, $page_regex, 'The host is installing the copy. It builds the copy\'s image, which takes a few '
 						. 'minutes; the copy starts once its agent has joined.');
 					return $copy_url;
@@ -1075,13 +1083,13 @@ class NodeDetailActions {
 						return $copy_url;
 					}
 					$method = (string)($_POST['copy_method'] ?? '');
-					$driver = $method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null;
+					$driver = self::takes_dns_token($method) ? self::copy_dns_driver($node, true, $method) : null;
 					SiteCopyRunner::begin_switch($site_copy, $method, $driver, $uid);
 					// A copy ready at once (from backups, nothing to power off)
 					// moves its address in this same request, with the token
 					// already typed: nothing waits between the check and the move.
 					$site_copy->load();
-					if ($driver !== null && $site_copy->status() === SiteCopy::STATUS_READY) {
+					if ($driver !== null && $method === SiteCopyRunner::METHOD_PROXIED && $site_copy->status() === SiteCopy::STATUS_READY) {
 						SiteCopyRunner::move_address($site_copy, $driver, $uid);
 						self::ok($session, $page_regex, 'The address points at the copy, and the proxy reaches it. The copy is taking over as the site.');
 						return $copy_url;
@@ -1094,10 +1102,13 @@ class NodeDetailActions {
 				if ($action === 'copy_move') {
 					$method = (string)($site_copy->switch_record()['method'] ?? SiteCopyRunner::METHOD_PROXIED);
 					SiteCopyRunner::move_address($site_copy,
-						$method === SiteCopyRunner::METHOD_PROXIED ? self::copy_dns_driver($node, true) : null, $uid);
+						self::takes_dns_token($method) ? self::copy_dns_driver($node, true, $method) : null, $uid);
 					self::ok($session, $page_regex, $method === SiteCopyRunner::METHOD_PROXIED
 						? 'The address points at the copy, and the proxy reaches it. The copy is taking over as the site.'
-						: 'The address is moving. This page follows it.');
+						: ($method === SiteCopyRunner::METHOD_DNS || $method === SiteCopyRunner::METHOD_MANUAL
+							? 'The records name the copy, which is taking over as the site. Visitors whose resolvers still name the old server '
+								. 'are forwarded to it until the move settles; this page follows it.'
+							: 'The address is moving. This page follows it.'));
 					return $copy_url;
 				}
 				if ($action === 'copy_retry_start') {
@@ -1111,12 +1122,15 @@ class NodeDetailActions {
 							. 'server since it started. Nothing was done.');
 						return $copy_url;
 					}
-					SiteCopyRunner::go_back($site_copy, self::copy_dns_driver($node, false));
+					$method = (string)($site_copy->switch_record()['method'] ?? SiteCopyRunner::METHOD_PROXIED);
+					SiteCopyRunner::go_back($site_copy, self::takes_dns_token($method) ? self::copy_dns_driver($node, false, $method) : null);
 					self::ok($session, $page_regex, 'Going back: the site starts again on its own server.');
 					return $copy_url;
 				}
 				if ($action === 'copy_finish') {
-					$server = SiteCopyRunner::finish($site_copy);
+					$method = (string)($site_copy->switch_record()['method'] ?? '');
+					$server = SiteCopyRunner::finish($site_copy,
+						$method === SiteCopyRunner::METHOD_DNS ? self::copy_dns_driver($node, true, $method) : null);
 					self::ok($session, $page_regex, 'The switch-over is kept, and the way back is closed.' . ($server !== ''
 						? ' Delete the old server at its provider: ' . $server . '.' : ''));
 					return $copy_url;
@@ -1426,15 +1440,29 @@ class NodeDetailActions {
 	}
 
 
+	/** Does this way of moving a copy's address take a DNS token? */
+	private static function takes_dns_token(string $method): bool {
+		return in_array($method, array(SiteCopyRunner::METHOD_PROXIED, SiteCopyRunner::METHOD_DNS), true);
+	}
+
 	/**
 	 * The DNS driver for a site copy's switch-over, built from the token the
 	 * owner typed into this form, for this request only. The host is the one
-	 * the site's domain is delegated to; only a host that proxies can move it.
-	 * Null when $required is false and no token was given.
+	 * the site's domain is delegated to: one that proxies for a move through
+	 * the proxy, any this management node has a driver for to change the
+	 * records. Null when $required is false and no token was given.
 	 */
-	private static function copy_dns_driver(ManagedNode $node, bool $required): ?DnsProvider {
+	private static function copy_dns_driver(ManagedNode $node, bool $required, string $method = SiteCopyRunner::METHOD_PROXIED): ?DnsProvider {
 		$domain = SiteCopyRunner::site_domain($node);
-		$class = $domain !== '' ? ProxiedOriginMove::driver_class_for($domain) : null;
+		if ($method === SiteCopyRunner::METHOD_DNS) {
+			$key = $domain !== '' ? SiteCopyMethods::dns_host_key($domain) : '';
+			$class = $key !== '' ? DnsDriverRegistry::get($key) : null;
+			if ($class && $class::credentialMode() !== DnsProvider::CREDENTIAL_API) {
+				$class = null;
+			}
+		} else {
+			$class = $domain !== '' ? ProxiedOriginMove::driver_class_for($domain) : null;
+		}
 		$credential = array();
 		$given = false;
 		$missing = array();
@@ -1450,8 +1478,9 @@ class NodeDetailActions {
 			return null;
 		}
 		if (!$class) {
-			throw new SiteCopyException('This site\'s DNS is not at a host that proxies (Cloudflare), so its address cannot '
-				. 'be moved through a proxy.');
+			throw new SiteCopyException($method === SiteCopyRunner::METHOD_DNS
+				? 'This site\'s DNS is at a host this management node has no driver for, so its records are changed by hand.'
+				: 'This site\'s DNS is not at a host that proxies (Cloudflare), so its address cannot be moved through a proxy.');
 		}
 		if ($missing) {
 			throw new SiteCopyException('Enter the ' . implode(', ', $missing) . '.');

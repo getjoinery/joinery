@@ -67,11 +67,14 @@ class Tier2FakeProvider implements CloudProviderEvents {
 	}
 }
 /** A provider that answers check(): its scopes, name, company and the key's own expiry. */
-class Tier2KeyFake implements CloudKeyExpiry {
+class Tier2KeyFake implements CloudKeyExpiry, CloudTokenScopes, CloudAccountIdentity, CloudAccountCleanup {
 	public $expiry = null;
 	public function tokenScopes(): array { return array('linodes:read_write', 'events:read_only'); }
+	public static function missingScopes(array $granted, array $needed): array { return LinodeComputeDriver::missingScopes($granted, $needed); }
 	public function accountName(): string { return 't2b77-acct'; }
 	public function accountCompany(): string { return ''; }
+	public function listVolumes(): array { return array(); }
+	public function deleteVolume(string $volume_id): void {}
 	public function keyExpiry(): ?string { return $this->expiry; }
 }
 function tier2_event(string $action, string $time, string $message = '', string $status = 'finished', ?string $via = null): array {

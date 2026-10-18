@@ -8,6 +8,11 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.33 - site_security: the sha256 of the system call filter this host's sites are made under and the
+#               capabilities a site adds (the run spec's), which each site's own (container_inventory) is checked
+#               against from the management node (site_copy_final_test.md, the rig)
+# Version: 1.32 - sites: the Joinery sites in /var/www/html on this machine (each directory with a public_html), so a
+#               site copy knows a server serves more than the site it moves (site_copy_anything_to_anything D8)
 # Version: 1.31 - site_refresh: the nightly replacement of this host's site containers (site_refresh.sh's
 #                state: the last check, what Ubuntu had pending, the base, the last run, the sites replaced
 #                with their seconds down, the holds failed replacements placed (read from held/ itself, so
@@ -633,6 +638,21 @@ json_limit() {
 # /proc/meminfo is the shared server's. Both are functions so the gate can
 # point them at a fixture.
 in_container() { [[ -f /.dockerenv || -f /run/.containerenv ]]; }
+
+# The sites in /var/www/html on this machine: each directory holding a
+# public_html, by name, at most 50. Inside a container, its one site.
+emit_sites() {
+    local d n=0 first=1
+    printf '['
+    for d in /var/www/html/*/public_html; do
+        [[ -d "$d" ]] || continue
+        (( n++ < 50 )) || break
+        [[ "$first" == 1 ]] || printf ','
+        first=0
+        json_str "$(basename "$(dirname "$d")")"
+    done
+    printf ']'
+}
 own_cgroup_dir() { printf '/sys/fs/cgroup'; }
 
 # The machine's memory. In a container it is the site's own: what its group
@@ -1127,6 +1147,42 @@ container_figures() {  # NAME STATE PID STARTED_AT, the last two as docker inspe
 # the string "80/tcp" fails on the typed map, whose keys are not strings.
 INSPECT_FORMAT='{{.Name}}|{{range .Config.Env}}{{if eq (index (split . "=") 0) "SITENAME"}}{{.}}{{end}}{{end}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.State.Pid}}|{{.State.StartedAt}}|{{range $p, $b := .NetworkSettings.Ports}}{{if eq (printf "%s" $p) "80/tcp"}}{{range $i, $x := $b}}{{if eq $i 0}}{{$x.HostPort}}{{end}}{{end}}{{end}}{{end}}|{{range .Mounts}}{{if eq .Type "volume"}}{{.Source}} {{end}}{{end}}'
 
+# A list of capability names as a JSON array, each checked as one.
+json_caps() {
+    local cap first=1
+    printf '['
+    for cap in $1; do
+        [[ "$cap" =~ ^[A-Za-z_]{2,40}$ ]] || continue
+        [[ "$first" == 1 ]] || printf ','
+        first=0
+        printf '"%s"' "$cap"
+    done
+    printf ']'
+}
+
+# The system call filter this host's sites are made under, by its sha256, or none.
+site_filter_sum() {
+    local f="${HOST_REPORT_ETC:-/etc}/containers/joinery-site-seccomp.json" sum
+    [[ -s "$f" ]] || { printf 'none'; return; }
+    sum="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
+    [[ "$sum" =~ ^[0-9a-f]{64}$ ]] && printf '%s' "$sum" || printf 'unknown'
+}
+
+# The capabilities a site adds, from the run spec (_site_run_spec.sh's
+# RUN_SPEC_CAPS, read, never sourced), space-separated, or nothing.
+run_spec_caps() {
+    local f line
+    f="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/../install_tools/_site_run_spec.sh"
+    line="$(sed -n 's/^RUN_SPEC_CAPS=(\(.*\))$/\1/p' "$f" 2>/dev/null | head -1)"
+    [[ "$line" =~ ^[A-Z_\ ]+$ ]] && printf '%s' "$line"
+}
+
+emit_site_security() {
+    local sum
+    sum="$(site_filter_sum)"
+    printf '{"filter":"%s","caps":%s}' "$sum" "$(json_caps "$(run_spec_caps)")"
+}
+
 # Whether each running site answers through PHP: serve.php's header on its
 # published port. Every site is asked at once, so a host's report costs its
 # slowest site (curl's --max-time bounds each), not the sum of them. Reads
@@ -1510,6 +1566,8 @@ printf '"host_restrictions":%s,' "$(emit_host_restrictions)"
 printf '"site_engine":%s,' "$(emit_site_engine)"
 printf '"hardening":%s,' "$(emit_hardening)"
 printf '"containers":%s,' "$(emit_containers)"
+printf '"sites":%s,' "$(emit_sites)"
+printf '"site_security":%s,' "$(emit_site_security)"
 printf '"site_refresh":%s,' "$(emit_site_refresh)"
 printf '"outbound_limits":%s,' "$(emit_outbound_limits)"
 printf '"mail_gateway":%s,' "$(emit_mail_gateway)"

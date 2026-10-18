@@ -492,6 +492,12 @@
 	if ($head_layers !== '') {
 		$addr_html .= '<div class="small fw-normal text-muted">' . htmlspecialchars($head_layers) . '</div>';
 	}
+	// How many layers, read from both sides: one is the rule (E4).
+	if (class_exists('DataRootLayers') && $node->hosts_site()) {
+		$head_count = DataRootLayers::of($node);
+		$addr_html .= '<div class="small fw-normal ' . ($head_count['count'] === 2 && !DataRootEncryptionOffer::may_keep_provider_layer($node)
+			? 'text-warning' : 'text-muted') . '">' . htmlspecialchars($head_count['line']) . '</div>';
+	}
 	$fact('Address', $addr_html);
 
 	if ($node->get('mgn_site_url')) {

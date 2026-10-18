@@ -3,6 +3,13 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.9 - forward: a frozen site whose address is moving by DNS forwards its visitors to its copy
+#               until resolvers let go of it (specs/site_copy_anything_to_anything.md D1). {state dir}/forward
+#               names the copy's address; the web drop-in proxies every request there over https, the
+#               certificate checked against the site's own name, so a visitor's request reaches only a
+#               server that holds the site's certificate, and the ACME challenge path over http, so the
+#               copy can be issued one; the firewall rule lets the web user reach that address on 80 and
+#               443. Apache adds X-Forwarded-For, which the copy is told to believe (trust_forwarder).
 # Version: 1.8 - the look paths answer with one Location, https://HOST/...: 1.7's relative one went out
 #               beside the absolute http one Redirect adds, and a browser refuses a response with
 #               two (net::ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION, found by WP5d's run 2). A Host that
@@ -105,6 +112,7 @@ site_state_init() {
     SS_HELD="${SS_DIR}/held"
     SS_NFT_FILE="${SS_DIR}/quiet.nft"
     SS_LOOK_FILE="${SS_DIR}/look_secret"
+    SS_FORWARD_FILE="${SS_DIR}/forward"
     SS_APACHE_AVAILABLE="${SS_ROOT}/etc/apache2/conf-available/joinery-quiet-${SS_SITE}.conf"
     SS_APACHE_ENABLED="${SS_ROOT}/etc/apache2/conf-enabled/joinery-quiet-${SS_SITE}.conf"
     SS_CRON_DIR="${SS_ROOT}/etc/cron.d"
@@ -157,7 +165,38 @@ site_state_write() {
 # Anything a quiet state left behind, with the state itself gone.
 site_state_leftovers() {
     [[ -e "${SS_HELD}" || -e "${SS_NFT_FILE}" || -e "${SS_APACHE_AVAILABLE}" \
-       || -L "${SS_APACHE_ENABLED}" || -e "${SS_APACHE_ENABLED}" || -e "${SS_LOOK_FILE}" ]]
+       || -L "${SS_APACHE_ENABLED}" || -e "${SS_APACHE_ENABLED}" || -e "${SS_LOOK_FILE}" || -e "${SS_FORWARD_FILE}" ]]
+}
+
+# An address: dotted IPv4, or IPv6 in hex and colons. Nothing else is ever
+# written into a rule or a drop-in.
+ss_addr_ok() {
+    local a="$1" o
+    if [[ "${a}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+        for o in "${BASH_REMATCH[@]:1}"; do (( 10#${o} <= 255 )) || return 1; done
+        return 0
+    fi
+    [[ "${a}" =~ ^[0-9a-fA-F:]{2,39}$ && "${a}" == *:* ]]
+}
+
+# The address a frozen site forwards to, or nothing.
+site_state_forward() {
+    local a
+    [[ -f "${SS_FORWARD_FILE}" && ! -L "${SS_FORWARD_FILE}" ]] || return 0
+    a="$(head -c 64 "${SS_FORWARD_FILE}" 2>/dev/null | head -1 | tr -d '\r[:space:]')"
+    ss_addr_ok "${a}" && echo "${a}"
+}
+
+# site_state_set_forward ADDRESS|"" - name the copy a frozen site forwards to,
+# or stop forwarding.
+site_state_set_forward() {
+    if [[ -z "${1:-}" ]]; then
+        rm -f "${SS_FORWARD_FILE}"
+        return 0
+    fi
+    ss_addr_ok "$1" || return 1
+    printf '%s\n' "$1" > "${SS_FORWARD_FILE}.tmp" && chmod 644 "${SS_FORWARD_FILE}.tmp" \
+        && mv -f "${SS_FORWARD_FILE}.tmp" "${SS_FORWARD_FILE}"
 }
 
 # --- The pieces ------------------------------------------------------------
@@ -171,9 +210,17 @@ ss_uids() {
 }
 
 ss_render_nft() {
-    local uids
+    local uids fwd="" addr
     uids="$(ss_uids)"
     [[ -n "${uids}" ]] || return 1
+    addr="$(site_state_forward)"
+    if [[ -n "${addr}" && "$(site_state_read)" == "switchover" ]]; then
+        if [[ "${addr}" == *:* ]]; then
+            fwd="        meta skuid { ${uids} } ip6 daddr ${addr} tcp dport { 80, 443 } accept"$'\n'
+        else
+            fwd="        meta skuid { ${uids} } ip daddr ${addr} tcp dport { 80, 443 } accept"$'\n'
+        fi
+    fi
     cat <<EOF
 # The quiet state of ${SS_SITE} (specs/site_copy.md WP5). Written by _site_state.sh;
 # loaded at boot by ${SS_UNIT_NAME} and every minute by the host converger.
@@ -189,7 +236,7 @@ table inet ${SS_NFT_TABLE} {
         type filter hook output priority 0; policy accept;
         oifname "lo" accept
         ct direction reply accept
-        meta skuid { ${uids} } meta l4proto tcp reject with tcp reset
+${fwd}        meta skuid { ${uids} } meta l4proto tcp reject with tcp reset
         meta skuid { ${uids} } reject with icmpx type admin-prohibited
     }
 }
@@ -262,6 +309,32 @@ ss_render_apache() {
 </LocationMatch>
 ErrorDocument 503 "<!doctype html><title>Not open</title><h1>Not open</h1><p>This server holds a copy of a site. It is not open to visitors.</p>"
 EOF
+    elif [[ -n "${3:-}" ]]; then
+        # Forwarding while a DNS switch settles. Over https, the copy's
+        # certificate checked against the name asked for, so a visitor's
+        # request and its cookies reach only a server holding the site's own
+        # certificate. The ACME challenge goes over http, so the copy can be
+        # issued one before it holds it.
+        local addr="$3" url
+        url="${addr}"
+        [[ "${addr}" == *:* ]] && url="[${addr}]"
+        cat <<EOF
+SSLProxyEngine on
+SSLProxyVerify require
+SSLProxyCheckPeerName on
+SSLProxyCheckPeerExpire on
+SSLProxyCACertificateFile /etc/ssl/certs/ca-certificates.crt
+<Location "/">
+    ProxyPreserveHost On
+    ProxyPass "https://${url}/"
+    ProxyPassReverse "https://${url}/"
+</Location>
+<Location "/.well-known/acme-challenge/">
+    ProxyPreserveHost On
+    ProxyPass "http://${url}/.well-known/acme-challenge/"
+</Location>
+ErrorDocument 502 "<!doctype html><title>Moving</title><h1>Back in a few minutes</h1><p>This site is moving to a new server. Please try again in a few minutes.</p>"
+EOF
     else
         cat <<EOF
 <Location "/">
@@ -312,7 +385,7 @@ ss_smtpd_services() {
 
 # site_state_assert REASON -> 0 every measure holds, 1 one did not (said why).
 site_state_assert() {
-    local reason="$1" rc=0 changed secret svc now name f
+    local reason="$1" rc=0 changed secret svc now name f forward mod
     mkdir -p "${SS_HELD}/cron.d" 2>/dev/null && chmod 700 "${SS_DIR}" "${SS_HELD}" 2>/dev/null
 
     # Outgoing traffic. First: it is the measure that makes the rest safe. In a
@@ -351,7 +424,22 @@ site_state_assert() {
         if [[ "${reason}" == "copy" ]]; then
             secret="$(ss_look_secret)" || { ss_warn "cannot write ${SS_LOOK_FILE}"; rc=1; }
         fi
-        ss_render_apache "${reason}" "${secret}" | ss_write_if_changed "${SS_APACHE_AVAILABLE}" 600
+        forward=""
+        if [[ "${reason}" == "switchover" ]]; then
+            forward="$(site_state_forward)"
+            if [[ -n "${forward}" ]]; then
+                for mod in proxy proxy_http ssl headers; do
+                    [[ -e "${SS_ROOT}/etc/apache2/mods-enabled/${mod}.load" ]] && continue
+                    if command -v a2enmod >/dev/null 2>&1 && a2enmod -q "${mod}" >/dev/null 2>&1; then
+                        ss_say "enabled mod_${mod} for forwarding"
+                    else
+                        ss_warn "mod_${mod} is not enabled and could not be - forwarding to ${forward} will not load"
+                        rc=1
+                    fi
+                done
+            fi
+        fi
+        ss_render_apache "${reason}" "${secret}" "${forward}" | ss_write_if_changed "${SS_APACHE_AVAILABLE}" 600
         changed=$?
         [[ "${changed}" == "2" ]] && { ss_warn "cannot write ${SS_APACHE_AVAILABLE}"; rc=1; }
         if [[ ! -L "${SS_APACHE_ENABLED}" ]]; then
@@ -497,7 +585,7 @@ site_state_clear() {
 
     if [[ "${rc}" == "0" ]]; then
         rm -rf "${SS_HELD:?}"
-        rm -f "${SS_LOOK_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/copy_of_key" "${SS_DIR}/vouched" \
+        rm -f "${SS_LOOK_FILE}" "${SS_FORWARD_FILE}" "${SS_DIR}/copy_of" "${SS_DIR}/copy_of_key" "${SS_DIR}/vouched" \
               "${SS_DIR}/copy_import_issued"
         rmdir "${SS_DIR}" 2>/dev/null
     fi

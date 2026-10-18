@@ -7,6 +7,8 @@
  * from SSH output, so the two transports populate mgn_last_status_data
  * identically.
  *
+ * @version 1.9 - backup_recovery_public_key: a proven key's public half, so a copy of this site onto a server in its
+ *               owner's own account is born encrypted to it (specs/site_copy_final_test.md E1)
  * @version 1.8 - the uptime line takes whole seconds (% on /proc/uptime's float was a deprecated conversion)
  * @version 1.7 - memory in a container counts the site container engine's too (/run/.containerenv beside
  *                Docker's /.dockerenv, specs/site_container_engine.md WP3)
@@ -126,15 +128,18 @@ function stats_handler($request) {
 
 	// Which backup recovery key this site is holding. A management node needs it
 	// to see whether the site can encrypt its own scheduled backups yet, and to
-	// tell its own key from one somebody else configured here. Only the
-	// fingerprint and the state travel — the public key is not secret, but
-	// nothing here needs it, and a hash is enough to compare.
+	// tell its own key from one somebody else configured here. A proven key's
+	// public half travels too: it is not secret, and a copy of this site onto a
+	// server in its owner's own account is born with its data sealed to it.
 	try {
 		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 		$recovery = BackupRecoveryKey::key_report();
 		$result['backup_recovery_state'] = $recovery['state'];
 		if ($recovery['fingerprint'] !== '') {
 			$result['backup_recovery_fpr'] = $recovery['fingerprint'];
+		}
+		if ($recovery['state'] === 'proven') {
+			$result['backup_recovery_public_key'] = base64_encode(BackupRecoveryKey::public_key());
 		}
 	} catch (Throwable $e) {
 		// A site too old to have the class answers the rest of the call normally.

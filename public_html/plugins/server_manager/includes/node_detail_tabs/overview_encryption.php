@@ -17,6 +17,8 @@
  *
  * Included by overview.php with $page, $node and $base_url in scope.
  *
+ * @version 1.8 - the "keep the provider's layer as well" tick only on a management node; any other machine whose
+ *                provider layer is on is pointed at its Copy tab (specs/site_copy_final_test.md E2)
  * @version 1.7 - Before it answers: a Tier 2 machine whose cloud account's key does not work is shown as Tier 2 that cannot
  *               read the activity log now, with what to do, not as Tier 1 (B77)
  * @version 1.6 - the Encrypt offer says the services stop again when it finishes, and its confirm says who stops (B59)
@@ -51,12 +53,14 @@ if ($dre_offer && !$dre_row) {
 	$layer = DataRootEncryptionOffer::provider_layer($node);
 	echo '<li>The provider\'s disk encryption: ' . ($layer === 'disabled' ? 'off, so this is the one layer'
 		: ($layer === 'enabled' ? '<strong>on</strong>' : '<strong>not known</strong>')
-		. ': one layer is the rule (a copy onto a new server born encrypted gives one); keeping both is for the machines that predate it') . '</li>';
+		. ': one layer is the rule. ' . (DataRootEncryptionOffer::may_keep_provider_layer($node)
+			? 'A management node never copies itself, so it may keep both until it is replaced.'
+			: 'Copy the site onto a new server from its <a href="' . $base_url . '&tab=copy">Copy tab</a>: it is born encrypted by us with the provider\'s layer off.')) . '</li>';
 	echo '</ul>';
 	$ready = DataRootEncryptionOffer::ready($node);
 	echo '<form id="data_root_encrypt_form" method="post" action="' . $base_url . '">'
 		. '<input type="hidden" name="action" value="data_root_encrypt">' . SmAdminCsrf::field();
-	if ($layer !== 'disabled') {
+	if ($layer !== 'disabled' && DataRootEncryptionOffer::may_keep_provider_layer($node)) {
 		echo '<div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="keep_provider_layer" value="1" id="keep_provider_layer">'
 			. '<label class="form-check-label small" for="keep_provider_layer">Keep the provider\'s layer as well (two layers; this node page will say so)</label></div>';
 	}

@@ -17,6 +17,8 @@
  * before the node is taken unfreezes the site; discarding removes the copy
  * from its host.
  *
+ * @version 1.1 - the way back after take-over (specs/site_copy_anything_to_anything.md D7); a copy onto a host of a running
+ *               site is alive, its runs from backups (D5)
  * @version 1.0
  */
 
@@ -149,8 +151,8 @@ $copy_host_agent->set('mgn_last_host_report', json_encode(array('site_engine' =>
 $copy_host_agent->save();
 $src_host_agent->set('mgn_agent_primitives', 'host_report,hold_container');
 $src_host_agent->save();
-$why = implode(' | ', SiteCopyRunner::host_refusals($src, $copy_host));
-check(strpos($why, 'own host') !== false && strpos($why, 'site_quiet_host') !== false,
+$why = implode(' | ', SiteCopyRunner::source_refusals($src, true, SiteCopy::FROM_SOURCE, true));
+check(strpos($why, 'Its host') !== false && strpos($why, 'site_quiet_host') !== false,
 	'the site\'s own host must be able to freeze it from outside', $why);
 $src_host_agent->set('mgn_agent_primitives', 'host_report,hold_container,site_quiet_host,provision_certificate');
 $src_host_agent->save();
@@ -170,8 +172,8 @@ $copy = SiteCopyRunner::start_on_host($src, (int)$copy_host->key, 1);
 harness_register_row('scp_site_copies', 'scp_site_copy_id', $copy->key);
 $cnode = SiteCopyRunner::copy_row($copy, true);
 harness_register_row('mgn_managed_nodes', 'mgn_managed_node_id', $cnode->key);
-check($copy->on_host() && $copy->from_backups() && $copy->status() === SiteCopy::STATUS_WAITING,
-	'a copy onto a host, from backups, waiting', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
+check($copy->on_host() && $copy->source_alive() && $copy->runs_from_backups() && $copy->status() === SiteCopy::STATUS_WAITING,
+	'a copy onto a host of a running site, its runs from backups, waiting', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
 check($cnode->get('mgn_container_name') === 'schsite' && (int)$cnode->get('mgn_mgh_managed_host_id') === (int)$copy_host->key
 	&& $cnode->get('mgn_host') === $H_COPY && $cnode->get('mgn_install_state') === 'copy'
 	&& (int)$cnode->get('mgn_copy_of_node_id') === (int)$src->key && (int)$cnode->get('mgn_port') >= 8080,
@@ -385,10 +387,14 @@ check($copy->status() === SiteCopy::STATUS_SWITCHED && $src->get('mgn_agent_publ
 	&& (int)$src->get('mgn_mgh_managed_host_id') === (int)$copy_host->key && (int)$src->get('mgn_port') === 9099,
 	'the site\'s row is the copy\'s container now: its host and its port moved with it',
 	$copy->status() . ' ' . $copy->get('scp_halt_reason') . ' ' . $src->get('mgn_mgh_managed_host_id') . ' ' . $src->get('mgn_port'));
-$threw = '';
-try { SiteCopyRunner::go_back($copy, null); } catch (Exception $e) { $threw = $e->getMessage(); }
-check(strpos($threw, 'way back closes') !== false, 'once it has taken the node, the way back is closed', $threw);
-SiteCopyRunner::finish($copy);
+// The way back stays open after it has taken the node (site_copy_anything_to_anything D7).
+SiteCopyRunner::go_back($copy, null);
+$copy->load();
+$back = array_map(function ($st) { return $st['op'] . (($st['arg'] ?? '') !== '' ? ':' . $st['arg'] : '') . '@' . $st['on']; }, $copy->steps());
+check($copy->status() === SiteCopy::STATUS_RETURNING && $back === array('site_quiet:on@source', 'site_quiet_host:on@copy_host',
+	'go_back@source', 'hold_container:start@host', 'site_quiet_host:off@source_host', 'site_quiet:off@source', 'hold_container:stop@copy_host'),
+	'once it has taken the node, the way back is still open: the copy quieted inside and out, the rows back, the old container '
+	. 'started, the site let go of its freeze, and the copy\'s container held stopped on its host', json_encode($back));
 
 // ---------------------------------------------------------------------------
 section('Discard: the copy removed from its host');

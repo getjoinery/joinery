@@ -32,7 +32,11 @@
  *                waiting for the owner to move the address
  *   starting   - the address points at the copy; it takes the source's node
  *                id and starts as the site
- *   switched   - the copy is the site; the way back is still open
+ *   switched   - the copy is the site; the way back is still open. A switch by
+ *                DNS (dns, manual) watches the public resolvers here until the
+ *                move has settled (scp_switch's watch)
+ *   settling   - a DNS move has settled: the old server stops forwarding and
+ *                the copy stops believing it
  *   undoing    - an address swap that did not prove itself is being undone;
  *                it ends ready again, with the source still frozen
  *   returning  - going back: the source is being started again
@@ -40,24 +44,29 @@
  *                delete
  *
  * scp_switch is the switch-over's record: the phase it is in or stopped in
- * (freeze, start, undo, return), how the address moves (proxied_origin,
- * ip_swap, manual), the zone and each record moved (id, type, name, from, to)
+ * (freeze, start, settle, undo, return), how the address moves (proxied_origin,
+ * ip_swap, dns, manual), the zone and each record moved (id, type, name, from, to)
  * or the swap's plan (each machine's instance, address and reverse DNS), and
  * when it was frozen, moved, proven and moved back.
  *
- * scp_from is where the copy comes from: 'source', the live site, which
- * exports to it and is frozen at the switch (Phase 1); or 'backups', the
- * site's backups alone, when its server is dead (Phase 2, WP10). A copy from
- * backups gets its chain's key from the owner's recovery key, typed on the
- * copy's own page, and its census is judged alone.
+ * scp_from is whether the source is alive, whatever the target
+ * (specs/site_copy_anything_to_anything.md D5): 'source', a running site,
+ * frozen at the switch and copied one last time; or 'backups', a site whose
+ * server is dead or will not come back, never asked anything. A copy of a dead
+ * site gets its chain's key from the owner's recovery key, typed on the copy's
+ * own page, and its census is judged alone.
  *
  * scp_mgh_managed_host_id is the host a copy is installed on as a container
  * (specs/site_container_engine.md D9), empty for a copy on a server of its
  * own; scp_install_job_id is the host's site_install job that made it, and
  * scp_expected_site_key the key its install printed for its agent. Such a
- * copy comes from backups, and its switch-over freezes the source and runs a
- * final copy before the address moves.
+ * copy's runs always take the chain's key from the owner's recovery key, alive
+ * source or dead (runs_from_backups()); a living source is still frozen and
+ * copied once more at the switch.
  *
+ * @version 1.5 - the settling status: a DNS move that has settled lets go of the old server's forward
+ * @version 1.4 - scp_from says whether the source is alive, for every target; runs_from_backups(): how a run gets
+ *                its data (specs/site_copy_anything_to_anything.md D5)
  * @version 1.3 - scp_mgh_managed_host_id and scp_install_job_id: a copy onto a host, as a container
  *                (specs/site_container_engine.md D9)
  * @version 1.2 - scp_from (a copy from backups, site_copy.md WP10) and the undoing status (an IP swap undone, WP12)
@@ -86,13 +95,14 @@ class SiteCopy extends SystemBase {
 	const STATUS_RETURNING = 'returning';
 	const STATUS_FINISHED  = 'finished';
 	const STATUS_UNDOING   = 'undoing';
+	const STATUS_SETTLING  = 'settling';
 
 	const FROM_SOURCE  = 'source';
 	const FROM_BACKUPS = 'backups';
 
 	/** The statuses in which a run of steps is moving. */
 	const MOVING_STATUSES = array(self::STATUS_COPYING, self::STATUS_FREEZING, self::STATUS_STARTING, self::STATUS_UNDOING,
-		self::STATUS_RETURNING);
+		self::STATUS_RETURNING, self::STATUS_SETTLING);
 
 	/** The words each status shows. */
 	const STATUS_LABELS = array(
@@ -108,6 +118,7 @@ class SiteCopy extends SystemBase {
 		self::STATUS_UNDOING   => 'Switching over: putting the address back',
 		self::STATUS_RETURNING => 'Going back',
 		self::STATUS_FINISHED  => 'Switch-over finished',
+		self::STATUS_SETTLING  => 'Switched over: letting go of the old address',
 	);
 
 	public static $field_specifications = array(
@@ -196,9 +207,23 @@ class SiteCopy extends SystemBase {
 		return (int)$this->get('scp_mgh_managed_host_id') > 0;
 	}
 
-	/** Is this a copy from the site's backups alone (its server is dead)? */
+	/** Is the source dead (or never coming back), so it is asked nothing? */
 	public function from_backups(): bool {
 		return (string)$this->get('scp_from') === self::FROM_BACKUPS;
+	}
+
+	/** Is the source a running site, frozen and copied once more at the switch? */
+	public function source_alive(): bool {
+		return !$this->from_backups();
+	}
+
+	/**
+	 * Do this copy's runs take their data from backups with the owner's
+	 * recovery key (a dead source, or any copy onto a host), rather than
+	 * from the source's own export?
+	 */
+	public function runs_from_backups(): bool {
+		return $this->from_backups() || $this->on_host();
 	}
 
 	public function status(): string {

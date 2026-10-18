@@ -39,6 +39,7 @@
  * unsigned events and would duplicate a decision the provider already makes
  * with better information.
  *
+ * @version 1.6 - the shutdown uses the driver of the account's own provider
  * @version 1.5 - a site is shut down with its own account's credential; the transfer pool watched is the default
  *                account's, where hosted orders go (cloud_accounts_list)
  * @version 1.4 - the keep-period prune empties what this operator took in each storage space, and a refused
@@ -487,7 +488,7 @@ class HostedTrialWatch {
 				if ($held['token'] === '') {
 					throw new Exception($held['reason']);
 				}
-				OperatorCloudAccount::driver_for($held['token'])->shutdownInstance($instance_id);
+				OperatorCloudAccount::driver_for($held['token'], $held['provider'])->shutdownInstance($instance_id);
 			} catch (Throwable $e) {
 				// The date has passed and the machine is still on. Say so and
 				// try again next tick — the deletion task below would be

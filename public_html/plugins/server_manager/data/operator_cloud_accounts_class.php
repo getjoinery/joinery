@@ -29,6 +29,9 @@
  * record (cvp_oca_operator_cloud_account_id), and everything done to it later
  * is done with that account's credential (HeldCloudAccounts).
  *
+ * @version 1.3 - The driver is its provider's (ComputeDriverRegistry): driver_for() takes the provider, add_key() records
+ *               the one chosen, scopes are checked only for a provider whose tokens carry them, and a provider whose API
+ *               names no account keeps the name typed when it was added (specs/site_copy_anything_to_anything.md D2)
  * @version 1.2 - An API key's own expiry, read at each check where the provider says (CloudKeyExpiry), into
  *               oca_token_expires: a key past it is not usable and says to replace it, and key_expires_within()
  *               warns before. expired() stays a Connect grant's (B77).
@@ -118,7 +121,7 @@ class OperatorCloudAccount extends SystemBase {
 		'oca_delete_time'          => array('type'=>'timestamp(6)'),
 	);
 
-	/** Tests stand in a driver factory here: function (string $token) => driver. */
+	/** Tests stand in a driver factory here: function (string $token, string $provider) => driver. */
 	public static $driver_factory = null;
 
 	function save($debug = false) {
@@ -219,14 +222,20 @@ class OperatorCloudAccount extends SystemBase {
 
 	/** A driver acting on this account. */
 	public function driver() {
-		return self::driver_for($this->token());
+		return self::driver_for($this->token(), $this->provider());
 	}
 
-	public static function driver_for(string $token) {
+	/** The provider's driver, acting with this credential. @throws CloudComputeException when no driver acts for it */
+	public static function driver_for(string $token, string $provider) {
 		if (self::$driver_factory !== null) {
-			return (self::$driver_factory)($token);
+			return (self::$driver_factory)($token, $provider);
 		}
-		return new LinodeComputeDriver($token);
+		return ComputeDriverRegistry::driver($provider, $token);
+	}
+
+	/** The provider's key: 'linode', 'hetzner'. */
+	public function provider(): string {
+		return (string)($this->get('oca_provider') ?: 'linode');
 	}
 
 	// ── What it is called ────────────────────────────────────────────────────
@@ -234,7 +243,7 @@ class OperatorCloudAccount extends SystemBase {
 	/** The account as people know it: the provider's name for it, and test when it is the test account. */
 	public function label(): string {
 		$name = trim((string)$this->get('oca_account_name'));
-		return ucfirst((string)$this->get('oca_provider')) . ' — ' . ($name !== '' ? $name : 'account #' . (int)$this->key)
+		return ComputeDriverRegistry::label($this->provider()) . ' — ' . ($name !== '' ? $name : 'account #' . (int)$this->key)
 			. ($this->get('oca_is_test') ? ' (test)' : '');
 	}
 
@@ -260,11 +269,15 @@ class OperatorCloudAccount extends SystemBase {
 	 */
 	public function missing_scopes(?array $wanted = null): ?array {
 		$wanted = $wanted ?? self::SCOPES;
+		// A provider whose tokens carry no scopes lacks none, checked or not.
+		if (!ComputeDriverRegistry::supports($this->provider(), 'CloudTokenScopes')) {
+			return array();
+		}
 		$granted = $this->granted_scopes();
 		if ($granted === null) {
 			return null;
 		}
-		$missing = LinodeComputeDriver::missingScopes($granted, array_keys($wanted));
+		$missing = ComputeDriverRegistry::missing_scopes($this->provider(), $granted, array_keys($wanted));
 		return array_intersect_key($wanted, array_flip($missing));
 	}
 
@@ -287,10 +300,15 @@ class OperatorCloudAccount extends SystemBase {
 			$this->save();
 			return 'There is no credential to check.';
 		}
-		$driver = $driver ?? self::driver_for($token);
+		$driver = $driver ?? self::driver_for($token, $this->provider());
 		try {
-			$scopes = $driver->tokenScopes();
-			$name = $driver->accountName();
+			// A provider whose tokens carry no scopes holds every one; one
+			// whose API names no account keeps the name it was added under.
+			$scopes = $driver instanceof CloudTokenScopes ? $driver->tokenScopes() : array('*');
+			$name = $driver instanceof CloudAccountIdentity ? $driver->accountName() : (string)$this->get('oca_account_name');
+			if (!($driver instanceof CloudTokenScopes) && !($driver instanceof CloudAccountIdentity)) {
+				$driver->getTransfer();   // the credential answers at all
+			}
 		} catch (CloudComputeException $e) {
 			if ((int)$e->getCode() === 401) {
 				$this->set('oca_status', self::STATUS_REFUSED);
@@ -302,10 +320,12 @@ class OperatorCloudAccount extends SystemBase {
 		}
 		// The company needs account:read_only; without it the account is not the test account.
 		$company = '';
-		try {
-			$company = $driver->accountCompany();
-		} catch (CloudComputeException $e) {
-			$company = '';
+		if ($driver instanceof CloudAccountCleanup) {
+			try {
+				$company = $driver->accountCompany();
+			} catch (CloudComputeException $e) {
+				$company = '';
+			}
 		}
 		// An API key's own expiry, where the provider says (B77). A failed read
 		// leaves what was known.
@@ -330,22 +350,35 @@ class OperatorCloudAccount extends SystemBase {
 
 	/**
 	 * Add an account by its API key: checked with the provider first, and
-	 * refused (nothing saved) when the provider will not answer to it.
+	 * refused (nothing saved) when the provider will not answer to it. A
+	 * provider whose API names no account (a Hetzner project) is held under
+	 * the name typed here, which it then needs.
 	 */
-	public static function add_key(string $token, int $user_id, $driver = null): OperatorCloudAccount {
+	public static function add_key(string $token, int $user_id, $driver = null, string $provider = 'linode', string $name = ''): OperatorCloudAccount {
 		$token = trim($token);
+		$name = trim($name);
 		if ($token === '') {
 			throw new OperatorCloudAccountException('Paste the account\'s API token.');
 		}
-		$driver = $driver ?? self::driver_for($token);
+		if (!ComputeDriverRegistry::known($provider)) {
+			throw new OperatorCloudAccountException('Choose the account\'s provider.');
+		}
+		$driver = $driver ?? self::driver_for($token, $provider);
+		if (!($driver instanceof CloudAccountIdentity) && $name === '') {
+			throw new OperatorCloudAccountException(ComputeDriverRegistry::label($provider) . '\'s API does not say which '
+				. 'account a token is for: name it, as you know it there.');
+		}
 		try {
-			$driver->tokenScopes();
+			$driver instanceof CloudTokenScopes ? $driver->tokenScopes() : $driver->getTransfer();
 		} catch (CloudComputeException $e) {
 			throw new OperatorCloudAccountException('The provider did not accept that token ('
 				. $e->getMessage() . '). Nothing was added.');
 		}
 		$account = new OperatorCloudAccount(NULL);
-		$account->set('oca_provider', 'linode');
+		$account->set('oca_provider', $provider);
+		if ($name !== '') {
+			$account->set('oca_account_name', mb_substr($name, 0, 255));
+		}
 		$account->set('oca_method', self::METHOD_KEY);
 		$account->set('oca_added_by_usr_user_id', $user_id ?: null);
 		$account->store_credential($token);
@@ -353,6 +386,43 @@ class OperatorCloudAccount extends SystemBase {
 		$account->load();
 		$account->check($driver);
 		return $account;
+	}
+
+	/**
+	 * Why $token cannot replace this entry's key, or '' when it can: it must
+	 * reach the same account, since every server naming this entry follows
+	 * it. Where the provider names the account, the names must match; where it
+	 * does not (a Hetzner project), the token must see every server on record
+	 * in this account.
+	 */
+	public function replacement_refusal(string $token, $driver = null): string {
+		try {
+			$driver = $driver ?? self::driver_for($token, $this->provider());
+			if ($driver instanceof CloudAccountIdentity) {
+				$name = trim($driver->accountName());
+				$was = trim((string)$this->get('oca_account_name'));
+				return ($was !== '' && $name !== $was) ? 'That token is for ' . $name . ', not ' . $was
+					. '. A replacement key must be for the same account; add a different account as its own entry.' : '';
+			}
+			if (!($driver instanceof CloudMachineTransfer)) {
+				return 'This provider cannot say which account a token reaches, so its key cannot be replaced here; add the account '
+					. 'again as its own entry.';
+			}
+			$seen = array();
+			foreach ($driver->listInstances() as $i) {
+				$seen[(string)$i['id']] = true;
+			}
+		} catch (CloudComputeException $e) {
+			return 'The provider did not accept that token (' . $e->getMessage() . '). Nothing was changed.';
+		}
+		foreach (new MultiCustomerCloudProvision(array('deleted' => false)) as $p) {
+			if ((int)$p->get('cvp_oca_operator_cloud_account_id') === (int)$this->key && trim((string)$p->get('cvp_instance_id')) !== ''
+					&& !isset($seen[(string)$p->get('cvp_instance_id')])) {
+				return 'That token does not reach server ' . $p->get('cvp_instance_id') . ', which is in this account. A replacement key '
+					. 'must be for the same account; add a different account as its own entry.';
+			}
+		}
+		return '';
 	}
 
 	/**

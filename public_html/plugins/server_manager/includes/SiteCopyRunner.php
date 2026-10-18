@@ -98,6 +98,12 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.27 - alive or dead is the source's, for every target (D5); the ways the address can move are
+ *                 SiteCopyMethods' (D6), the switch by DNS record with its forward and watch among them (D1); a
+ *                 bare-metal source whose machine serves anything else is refused (D8); the copy's encryption is
+ *                 decided by copy_encryption(), never ticked (specs/site_copy_final_test.md E1)
+ * @version 1.26 - the copy's plan and a dead source's power-off are its provider's (ComputeDriverRegistry), not
+ *                 Linode's by name (specs/site_copy_anything_to_anything.md D2)
  * @version 1.25 - a copy from backups stages the run whose key its owner opened (key_step_seq, vouched_seq):
  *                 a run the source made since is in a newer manifest the copy holds no vouch for, and staging
  *                 the newest halted every copy whose source backed up while it waited for its key (B20)
@@ -192,6 +198,12 @@ class SiteCopyRunner {
 	/** What the operating system and the installed release take on the copy's disk, beside what the copy needs. */
 	const OS_DISK = 6442450944;
 
+	/**
+	 * A running site's agent must have polled within this to be copied as a
+	 * running site (the agent-silent incident's threshold).
+	 */
+	const ALIVE_WITHIN_SECONDS = 7200;
+
 	/** How old the source's newest backup may be when a run starts. */
 	const BACKUP_MAX_AGE_HOURS = 24;
 
@@ -229,7 +241,12 @@ class SiteCopyRunner {
 		// host holding a site quiet from outside, or letting it go.
 		'site_install'    => 90,
 		'site_quiet_host' => 10,
+		// The copy's machine believing the old server's forwarded addresses.
+		'trust_forwarder' => 10,
 	);
+
+	/** How long the copy's machine believes the old server, in hours: past any watch's wait. */
+	const FORWARDER_TRUST_HOURS = 72;
 
 	/** Steps this management node does itself, with no agent job. */
 	const LOCAL_STEPS = array('go_back', 'power_off', 'power_on', 'power_cycle', 'ip_swap', 'probe');
@@ -267,6 +284,7 @@ class SiteCopyRunner {
 	const METHOD_PROXIED = 'proxied_origin';
 	const METHOD_IP_SWAP = 'ip_swap';
 	const METHOD_MANUAL  = 'manual';
+	const METHOD_DNS     = 'dns';
 
 	/** The words a switch-over asks of the source, beyond a copy's. */
 	const SWITCH_SOURCE_WORDS = array('site_quiet', 'backup_run', 'copy_vouch', 'site_census');
@@ -362,14 +380,19 @@ class SiteCopyRunner {
 	 * Why this node cannot be copied now: one line per reason, empty when it
 	 * can. Read-only; nothing here asks the node anything.
 	 *
-	 * A copy from backups asks nothing of the source's agent, so its words and
-	 * its reported recovery-key state are not required: the backups and the
-	 * owner's recovery key are.
+	 * Alive or dead is the source's, whatever the target
+	 * (specs/site_copy_anything_to_anything.md D5). A running site's agent
+	 * must answer, since it is frozen through it and copied once more at the
+	 * switch. A dead site is asked nothing, so its words and its reported
+	 * recovery-key state are not required: its backups, its agent's key (the
+	 * copy is installed as its copy) and the owner's recovery key are.
 	 *
 	 * @param bool $for_new_copy also refuse when the node already has a copy
-	 * @param string $from SiteCopy::FROM_SOURCE or FROM_BACKUPS
+	 * @param string $from SiteCopy::FROM_SOURCE (alive) or FROM_BACKUPS (dead)
+	 * @param bool $on_host the copy goes onto a host, whose runs take the chain's key from the recovery key
 	 */
-	public static function source_refusals(ManagedNode $source, bool $for_new_copy = true, string $from = SiteCopy::FROM_SOURCE): array {
+	public static function source_refusals(ManagedNode $source, bool $for_new_copy = true, string $from = SiteCopy::FROM_SOURCE,
+			bool $on_host = false): array {
 		$backups = $from === SiteCopy::FROM_BACKUPS;
 		$why = array();
 		if ($source->get('mgn_delete_time')) {
@@ -378,13 +401,34 @@ class SiteCopyRunner {
 		if (!$source->hosts_site()) {
 			return array('It hosts no Joinery site.');
 		}
-		// A copy from backups asks nothing of the source's machine, so a
-		// container site's backups restore onto bare metal as any site's do.
-		// A copy of the running site freezes its machine, which a container
-		// cannot do to itself.
+		if (!$backups) {
+			// Frozen through its agent, and copied once more: it must answer.
+			$heard = strtotime((string)$source->get('mgn_agent_last_poll') . ' UTC');
+			if (!$heard || time() - $heard > self::ALIVE_WITHIN_SECONDS) {
+				$why[] = 'Its agent has not been heard from ' . ($heard ? 'since ' . gmdate('M j, H:i', $heard) . ' UTC' : 'at all')
+					. ', and a copy of the running site freezes it through its agent. If the site is dead, copy it from its backups.';
+			}
+		} elseif (trim((string)$source->get('mgn_agent_public_key')) === '') {
+			$why[] = 'Its agent\'s key is not on record, and the copy is installed as the copy of that agent. Connect its agent '
+				. 'first.';
+		}
+		$why = array_merge($why, self::machine_wide_refusals($source));
+		// A running container site is frozen from outside by its host, and its
+		// old container held stopped there once the copy has the site, whatever
+		// the target (D4). A dead site's host is asked only at the switch-over,
+		// when its old container is to be held: it may be gone with the site.
 		if (!$backups && trim((string)$source->get('mgn_container_name')) !== '') {
-			$why[] = 'It is a container site. A copy of a running site is bare metal to bare metal, one site per '
-				. 'machine; a container site is copied from its backups.';
+			try {
+				$source_host = JobCommandBuilder::decommission_host_node_for($source);
+				$missing = array_values(array_filter(self::SOURCE_HOST_WORDS,
+					function ($w) use ($source_host) { return !JobCommandBuilder::has_primitive($source_host, $w); }));
+				if ($missing) {
+					$why[] = 'Its host, which freezes it from outside and holds its old container stopped once the copy has the '
+						. 'site: ' . AgentVocabulary::needs_newer_agent_text($source_host, $missing);
+				}
+			} catch (Exception $e) {
+				$why[] = $e->getMessage();
+			}
 		}
 		if (!$source->is_operational()) {
 			$why[] = 'It is not a working site (' . $source->install_state_label() . ').';
@@ -407,7 +451,7 @@ class SiteCopyRunner {
 			$why[] = "It runs release {$version}. A copy" . ($backups ? ' from backups' : '') . " needs {$floor}"
 				. ' or newer, because the copy installs the source\'s own release. Update it first.';
 		}
-		if (!$backups) {
+		if (!$backups && !$on_host) {
 			$missing = array();
 			foreach (self::SOURCE_WORDS as $word) {
 				if (!JobCommandBuilder::has_primitive($source, $word)) {
@@ -450,13 +494,60 @@ class SiteCopyRunner {
 		return $why;
 	}
 
-	/** The plan this management node created the source's server on, or ''. */
-	public static function source_instance_type(ManagedNode $source): string {
+	/**
+	 * A site on a server of its own, which the quiet state, the power-off and
+	 * an address swap act on whole (D8): refused when the machine serves
+	 * anything else. Its own test twin (<site>_test) is not another site.
+	 */
+	public static function machine_wide_refusals(ManagedNode $source): array {
+		if (trim((string)$source->get('mgn_container_name')) !== '') {
+			return array();
+		}
+		$why = array();
+		$report = json_decode((string)$source->get('mgn_last_host_report'), true);
+		$containers = (is_array($report) && is_array($report['containers'] ?? null)) ? $report['containers'] : array();
+		if ($containers) {
+			$why[] = 'Its server also runs ' . count($containers) . ' site container(s), and freezing the site, powering its server '
+				. 'off or moving its address acts on the whole machine. Copy those sites off it first.';
+		}
+		$name = self::site_name($source);
+		$others = array();
+		foreach ((is_array($report) && is_array($report['sites'] ?? null)) ? $report['sites'] : array() as $site) {
+			$site = (string)$site;
+			if ($site !== '' && $site !== $name && $site !== $name . '_test') {
+				$others[] = $site;
+			}
+		}
+		$host = trim((string)$source->get('mgn_host'));
+		if ($host !== '') {
+			foreach (new MultiManagedNode(array('host' => $host, 'deleted' => false)) as $n) {
+				if ((int)$n->key === (int)$source->key || trim((string)$n->get('mgn_container_name')) !== ''
+						|| in_array(trim((string)$n->get('mgn_install_state')), array('copy', 'retired'), true)) {
+					continue;
+				}
+				$other = self::site_name($n);
+				if ($other !== '' && $other !== $name . '_test' && !in_array($other, $others, true)) {
+					$others[] = $other;
+				}
+			}
+		}
+		if ($others) {
+			$why[] = 'Its server also serves ' . implode(', ', $others) . ', and freezing the site, powering its server off or '
+				. 'moving its address acts on the whole machine. One site per server is the only kind a copy moves whole.';
+		}
+		return $why;
+	}
+
+	/**
+	 * The plan this management node created the source's server on, when the
+	 * copy goes to the same provider (a plan id means nothing at another), or ''.
+	 */
+	public static function source_instance_type(ManagedNode $source, string $provider): string {
 		if (trim((string)$source->get('mgn_container_name')) !== '') {
 			return '';   // a container's plan is its shared server's, not its own
 		}
 		$p = CustomerCloudProvision::latest_for_node($source->key);
-		return ($p && (string)$p->get('cvp_provider') === 'linode') ? trim((string)$p->get('cvp_instance_type')) : '';
+		return ($p && (string)$p->get('cvp_provider') === $provider) ? trim((string)$p->get('cvp_instance_type')) : '';
 	}
 
 	/**
@@ -533,10 +624,11 @@ class SiteCopyRunner {
 	 * needs (a container reports its whole shared server's memory).
 	 *
 	 * @param callable $types returns the provider's plans, [id, memory_mb, disk_mb], smallest first
+	 * @param string $provider the copy's provider
 	 * @throws SiteCopyException when the source's size is not known
 	 */
-	public static function same_size_type(ManagedNode $source, string $from, callable $types): string {
-		$own = self::source_instance_type($source);
+	public static function same_size_type(ManagedNode $source, string $from, callable $types, string $provider): string {
+		$own = self::source_instance_type($source, $provider);
 		if ($own !== '') {
 			return $own;
 		}
@@ -622,8 +714,8 @@ class SiteCopyRunner {
 	 * of ours is our server, recorded against the admin who asked; one in a
 	 * customer's account belongs to that customer.
 	 *
-	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw),
-	 *                    data_root_encrypted (bool, the copy form's tick; absent = on for one of our accounts)
+	 * @param array $opts account, region, type, carry_root_keys (bool), key_fingerprints (comma list the operator saw);
+	 *                    its encryption is decided, never chosen (copy_encryption())
 	 */
 	public static function start_new_server(ManagedNode $source, array $opts, $user_id, string $from = SiteCopy::FROM_SOURCE): SiteCopy {
 		self::refuse_start($source, $from);
@@ -651,9 +743,14 @@ class SiteCopyRunner {
 		}
 		if ($type === '') {
 			$token = $target['token'];
-			$type = self::same_size_type($source, $from, function () use ($token) {
-				return OperatorCloudAccount::driver_for($token)->instanceTypes();
-			});
+			$provider = (string)$target['provider'];
+			$type = self::same_size_type($source, $from, function () use ($token, $provider) {
+				$driver = OperatorCloudAccount::driver_for($token, $provider);
+				if (!($driver instanceof CloudInstanceTypes)) {
+					throw new SiteCopyException(ComputeDriverRegistry::label($provider) . ' does not list its plans here: choose the new server\'s type.');
+				}
+				return $driver->instanceTypes();
+			}, $provider);
 		}
 		if (!preg_match('/^[a-z0-9-]{2,60}$/', $type)) {
 			throw new SiteCopyException('Choose the new server\'s type.');
@@ -673,8 +770,26 @@ class SiteCopyRunner {
 		if ($carried !== '') {
 			$provision->set('cvp_root_ssh_keys', $carried);
 		}
-		if (self::copy_born_encrypted($opts, $target['hosting_mode'])) {
+		$born = self::copy_encryption($source, (string)$target['hosting_mode']);
+		// One layer: where the provider's own encryption cannot be turned off
+		// (a distributed region), a server born with ours would have two.
+		// Refused before anything is made; the provision checks again.
+		if ($born['ours']) {
+			try {
+				$region_driver = OperatorCloudAccount::driver_for((string)$target['token'], (string)$target['provider']);
+				if ($region_driver instanceof CloudRegionFacts && $region_driver->regionInfo($region)['site_type'] === 'distributed') {
+					throw new SiteCopyException("Region {$region} is a distributed region, where the provider's own disk encryption is "
+						. 'always on, and the copy is encrypted by us: it would have two layers. Choose a core region.');
+				}
+			} catch (CloudComputeException $e) {
+				// Not known now: the provision asks again before it creates.
+			}
+		}
+		if ($born['ours']) {
 			$provision->set('cvp_data_root_encrypted', true);
+			if ($born['recipient'] !== '') {
+				$provision->set('cvp_recovery_public_key', $born['recipient']);
+			}
 		}
 		$provision->prepare();
 		$provision->save();
@@ -686,27 +801,38 @@ class SiteCopyRunner {
 	}
 
 	/**
-	 * Whether the copy's new server is born with its data root encrypted by us
-	 * (specs/hosted_data_promise_disk_encryption.md D1a, C-2 in D7): never while
-	 * this management node does not offer it; otherwise as the copy form's
-	 * "data root encrypted" tick says, and with no answer, on for a server in
-	 * one of our accounts.
+	 * Which layer of encryption the copy's new server is born with, decided
+	 * here and never ticked (specs/site_copy_final_test.md E1): one layer,
+	 * never two, never none where ours can be had.
+	 *
+	 *   - In one of our accounts: ours, sealed to this management node's
+	 *     recovery key, with the provider's own layer off.
+	 *   - In its owner's account, with the site's recovery key proven (and its
+	 *     public half on record): ours, sealed to that key, the provider's off.
+	 *   - In its owner's account without one: the provider's default, and none
+	 *     of ours.
+	 *
+	 * Nothing of ours while this management node does not offer it.
+	 *
+	 * @return array{ours: bool, recipient: string, says: string} recipient: the
+	 *         base64 key it is sealed to when not this management node's own
 	 */
-	public static function copy_born_encrypted(array $opts, string $hosting_mode): bool {
+	public static function copy_encryption(ManagedNode $source, string $hosting_mode): array {
 		if (!CustomerCloudProvision::data_root_encryption_offered()) {
-			return false;
+			return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s default, if it has '
+				. 'one: this management node does not encrypt data roots yet.');
 		}
-		// Born encrypted only in one of our accounts: its break-glass copy is
-		// sealed to our recovery key. A server in its owner's account is
-		// sealed to its owner's (D2), so it is born plain and encrypted from
-		// its own Backups page.
-		if ($hosting_mode !== 'operator') {
-			return false;
+		if ($hosting_mode === 'operator') {
+			return array('ours' => true, 'recipient' => '', 'says' => 'Its data is encrypted by us, sealed to this management node\'s '
+				. 'recovery key, and the provider\'s own disk encryption is off: one layer.');
 		}
-		if (array_key_exists('data_root_encrypted', $opts)) {
-			return (bool)$opts['data_root_encrypted'];
+		$pub = trim((string)$source->get('mgn_backup_recovery_public_key'));
+		if ($pub !== '') {
+			return array('ours' => true, 'recipient' => $pub, 'says' => 'Its data is encrypted by us, sealed to this site\'s own '
+				. 'recovery key, and the provider\'s own disk encryption is off: one layer.');
 		}
-		return CustomerCloudProvision::born_encrypted_by_default($hosting_mode);
+		return array('ours' => false, 'recipient' => '', 'says' => 'Its disks are encrypted by the provider\'s default only. Prove '
+			. 'this site\'s recovery key on its Backups page first, and a copy into its owner\'s account is encrypted by us instead.');
 	}
 
 	/** Record a copy onto a server the owner brings; the page shows them the command. */
@@ -722,15 +848,16 @@ class SiteCopyRunner {
 	 * D9): from its backups, installed by the host's own agent at the source's
 	 * release and quiet from its first process. The copy's row is made here,
 	 * placed on the host with a port of its own; its install is queued at once,
-	 * and the run starts once its agent has joined.
+	 * and the run starts once its agent has joined. A running site is frozen
+	 * and copied once more at the switch; a dead one is not (D5).
 	 */
-	public static function start_on_host(ManagedNode $source, int $host_id, $user_id): SiteCopy {
-		self::refuse_start($source, SiteCopy::FROM_BACKUPS);
+	public static function start_on_host(ManagedNode $source, int $host_id, $user_id, string $from = SiteCopy::FROM_SOURCE): SiteCopy {
+		self::refuse_start($source, $from, true);
 		$host = new ManagedHost($host_id > 0 ? $host_id : NULL, $host_id > 0);
 		if (!$host->key) {
 			throw new SiteCopyException('Choose the host the copy goes onto.');
 		}
-		$why = self::host_refusals($source, $host);
+		$why = self::host_refusals($source, $host, $from);
 		if ($why) {
 			throw new SiteCopyException('The site cannot be copied onto ' . $host->get('mgh_name') . ': ' . implode(' ', $why));
 		}
@@ -754,7 +881,7 @@ class SiteCopyRunner {
 		$node->set('mgn_port', JobCommandBuilder::next_container_port((int)$host->key, (int)$node->key));
 		$node->save();
 
-		$copy = self::new_record($source, $user_id, SiteCopy::FROM_BACKUPS);
+		$copy = self::new_record($source, $user_id, $from);
 		$copy->set('scp_copy_node_id', (int)$node->key);
 		$copy->set('scp_mgh_managed_host_id', (int)$host->key);
 		$copy->save();
@@ -769,7 +896,8 @@ class SiteCopyRunner {
 	 * when it can. Read-only, from this management node's records and the
 	 * host's last report.
 	 */
-	public static function host_refusals(ManagedNode $source, ManagedHost $host): array {
+	public static function host_refusals(ManagedNode $source, ManagedHost $host, string $from = SiteCopy::FROM_SOURCE): array {
+		$alive = $from !== SiteCopy::FROM_BACKUPS;
 		if ($host->get('mgh_delete_time')) {
 			return array('That host has been removed from the dashboard.');
 		}
@@ -812,20 +940,9 @@ class SiteCopyRunner {
 			$why[] = "The site runs release {$version}. A copy onto a host installs the site's own release, and needs one that "
 				. 'carries its host\'s half of the quiet state (and this management node must hold its archive). Update the site first.';
 		}
-		// A container source is frozen from outside, by its own host, for the
-		// final copy, and its old container held stopped there after.
-		if (trim((string)$source->get('mgn_container_name')) !== '') {
-			try {
-				$source_host = JobCommandBuilder::decommission_host_node_for($source);
-				$missing = array_values(array_filter(self::SOURCE_HOST_WORDS, function ($w) use ($source_host) {
-					return !JobCommandBuilder::has_primitive($source_host, $w);
-				}));
-				if ($missing) {
-					$why[] = 'The site\'s own host: ' . AgentVocabulary::needs_newer_agent_text($source_host, $missing);
-				}
-			} catch (Exception $e) {
-				$why[] = $e->getMessage();
-			}
+		// A container source's own host is source_refusals()'.
+		if (!$alive) {
+			return $why;
 		}
 		$missing = array_values(array_filter(self::SWITCH_SOURCE_WORDS, function ($w) use ($source) {
 			return !JobCommandBuilder::has_primitive($source, $w);
@@ -1047,12 +1164,12 @@ class SiteCopyRunner {
 		}
 	}
 
-	private static function refuse_start(ManagedNode $source, string $from): void {
+	private static function refuse_start(ManagedNode $source, string $from, bool $on_host = false): void {
 		if (!in_array($from, array(SiteCopy::FROM_SOURCE, SiteCopy::FROM_BACKUPS), true)) {
 			throw new SiteCopyException('Choose whether the copy comes from the running site or from its backups.');
 		}
 		self::confirm_source_release($source);
-		$why = self::source_refusals($source, true, $from);
+		$why = self::source_refusals($source, true, $from, $on_host);
 		if ($why) {
 			throw new SiteCopyException('This site cannot be copied: ' . implode(' ', $why));
 		}
@@ -1377,6 +1494,12 @@ class SiteCopyRunner {
 				$moved++;
 			}
 		}
+		foreach (new MultiSiteCopy(array('status' => SiteCopy::STATUS_SWITCHED, 'deleted' => false)) as $copy) {
+			if (($copy->switch_record()['watch']['state'] ?? '') === 'watching') {
+				self::advance_watch($copy);
+				$moved++;
+			}
+		}
 		return $moved;
 	}
 
@@ -1467,7 +1590,7 @@ class SiteCopyRunner {
 				|| trim((string)$node->get('mgn_install_state')) !== 'copy') {
 			return;
 		}
-		if (AgentVocabulary::missing_words($node, $copy->from_backups() ? self::BACKUPS_COPY_WORDS : self::COPY_WORDS)) {
+		if (AgentVocabulary::missing_words($node, $copy->runs_from_backups() ? self::BACKUPS_COPY_WORDS : self::COPY_WORDS)) {
 			return; // joined; its first poll reports what it can do
 		}
 		self::begin_run($copy);
@@ -1492,7 +1615,7 @@ class SiteCopyRunner {
 		try {
 			$source = self::source_row($copy);
 			self::confirm_source_release($source);
-			$why = self::source_refusals($source, false, (string)$copy->get('scp_from'));
+			$why = self::source_refusals($source, false, (string)$copy->get('scp_from'), $copy->on_host());
 			if ($why) {
 				throw new SiteCopyException('The source cannot be copied now: ' . implode(' ', $why));
 			}
@@ -1511,7 +1634,7 @@ class SiteCopyRunner {
 			return;
 		}
 		$steps = array();
-		foreach ($copy->from_backups() ? self::BACKUPS_RUN_STEPS : self::RUN_STEPS as $s) {
+		foreach ($copy->runs_from_backups() ? self::BACKUPS_RUN_STEPS : self::RUN_STEPS as $s) {
 			$steps[] = array('op' => $s['op'], 'on' => $s['on'], 'arg' => $s['arg'] ?? '', 'job_id' => null,
 				'verdict' => 'pending', 'reason' => '');
 		}
@@ -1657,7 +1780,16 @@ class SiteCopyRunner {
 			case 'site_census':
 				return JobCommandBuilder::build_site_census($step['on'] === 'source' ? $source : $node);
 			case 'site_quiet':
+				if (($step['arg'] ?? '') === 'forward') {
+					return JobCommandBuilder::build_site_quiet_forward($step['on'] === 'source' ? $source : $node,
+						(string)($copy->switch_record()['forward_to'] ?? ''));
+				}
 				return JobCommandBuilder::build_site_quiet($step['on'] === 'source' ? $source : $node, (string)($step['arg'] ?? ''));
+			case 'trust_forwarder':
+				$on = (string)$step['on'];
+				$machine = $on === 'copy_host' ? self::switch_host($copy, 'copy_host') : ($on === 'source' ? $source : $node);
+				return JobCommandBuilder::build_trust_forwarder($machine, (string)$step['arg'],
+					(string)($copy->switch_record()['forward_from'] ?? ''), self::FORWARDER_TRUST_HOURS);
 			case 'backup_run':
 				// A run's first backup takes the source's own chain policy; the
 				// final one of a switch-over must extend the chain the copy holds.
@@ -1684,12 +1816,21 @@ class SiteCopyRunner {
 			case 'provision_certificate':
 				return JobCommandBuilder::build_provision_certificate($source, array('domain' => self::site_domain($source)));
 			case 'hold_container':
+				if (($step['on'] ?? '') === 'copy_host') {
+					// A copy onto a host gone back from: its own container, held stopped there.
+					return JobCommandBuilder::build_hold_container(self::switch_host($copy, 'copy_host'),
+						(string)($copy->switch_record()['hosts']['copy']['name'] ?? self::site_name($source)), (string)($step['arg'] ?? ''));
+				}
 				return JobCommandBuilder::build_hold_container(self::hold_host($copy),
 					(string)($copy->switch_record()['hold']['name'] ?? ''), (string)($step['arg'] ?? ''));
 			case 'site_quiet_host':
 				$on = (string)$step['on'];
 				$entry = $copy->switch_record()['hosts'][$on === 'source_host' ? 'source' : 'copy'] ?? array();
 				$name = (string)($entry['name'] ?? self::site_name($source));
+				if (($step['arg'] ?? '') === 'forward') {
+					return JobCommandBuilder::build_site_quiet_host_forward(self::switch_host($copy, $on), $name,
+						(string)($copy->switch_record()['forward_to'] ?? ''));
+				}
 				return ($step['arg'] ?? '') === 'on'
 					? JobCommandBuilder::build_site_quiet_host(self::switch_host($copy, $on), $name, 'on', 'switchover')
 					: JobCommandBuilder::build_site_quiet_host(self::switch_host($copy, $on), $name, 'off');
@@ -1925,6 +2066,12 @@ class SiteCopyRunner {
 			case 'hold_container':
 				$r = json_decode((string)$job->get('mjb_result'), true);
 				if (is_array($r) && !empty($r['done']) && ($r['action'] ?? '') === ($step['arg'] ?? '')) {
+					// Whether the old container is held, for the way back.
+					if (($step['on'] ?? '') === 'host') {
+						$switch = $copy->switch_record();
+						$switch['held'] = ($step['arg'] ?? '') === 'stop';
+						$copy->set_switch_record($switch);
+					}
 					return null;
 				}
 				return 'the old container was not ' . (($step['arg'] ?? '') === 'start' ? 'started' : 'stopped')
@@ -1987,6 +2134,14 @@ class SiteCopyRunner {
 			$copy->save();
 			return;
 		}
+		if ($copy->status() === SiteCopy::STATUS_SETTLING) {
+			$switch = $copy->switch_record();
+			$switch['watch']['let_go_time'] = gmdate('Y-m-d H:i:s');
+			$copy->set_switch_record($switch);
+			$copy->set('scp_status', SiteCopy::STATUS_SWITCHED);
+			$copy->save();
+			return;
+		}
 		if ($copy->status() === SiteCopy::STATUS_RETURNING) {
 			self::finish_return($copy);
 			return;
@@ -2001,9 +2156,9 @@ class SiteCopyRunner {
 			return;
 		}
 		$final = $copy->status() === SiteCopy::STATUS_FREEZING;
-		// A copy onto a host comes from backups, and its final copy is of the
-		// frozen site: the two censuses must match, as a running site's do.
-		if ($copy->from_backups() && !($final && $copy->on_host())) {
+		// A run from backups is judged alone; a final copy is of the frozen
+		// site, whatever the run before it was, and the two censuses must match.
+		if ($copy->runs_from_backups() && !($final && $copy->source_alive())) {
 			// Nothing to compare with: the source is gone. A switch-over from
 			// backups has no final copy, only the source's server powered off.
 			if ($final) {
@@ -2085,7 +2240,9 @@ class SiteCopyRunner {
 	/**
 	 * The ways this copy's address could move, from this management node's
 	 * own records and the domain's DNS host: method => why it cannot (empty
-	 * when it can). The provider and the DNS host are asked on the press.
+	 * when it can), as SiteCopyMethods said before the copy was made, with
+	 * the two servers on record for the swap. The provider and the DNS host
+	 * are asked on the press.
 	 */
 	public static function switch_methods(SiteCopy $copy): array {
 		try {
@@ -2093,30 +2250,23 @@ class SiteCopyRunner {
 		} catch (Exception $e) {
 			return array();
 		}
+		$out = SiteCopyMethods::for_target($source, SiteCopyMethods::target_of($copy));
+		// The two servers exist: the swap is judged from their own records.
 		$node = self::copy_row($copy, true);
-		$domain = self::site_domain($source);
-		$out = array();
-		$out[self::METHOD_PROXIED] = ($domain !== '' && ProxiedOriginMove::driver_class_for($domain)) ? array()
-			: array($domain === '' ? 'The site has no https address on record.' : $domain . '\'s DNS is not at a host that proxies (Cloudflare).');
-		$out[self::METHOD_IP_SWAP] = $copy->on_host()
-			? array('The copy is a container on a shared host, whose address is every one of its sites\'; it is never swapped.')
-			: ($node ? IpSwapMove::record_refusals($source, $node) : array('The copy has no server.'));
-		if ($copy->from_backups()) {
-			$out[self::METHOD_MANUAL] = array();
+		if (!$copy->on_host()) {
+			$out[self::METHOD_IP_SWAP] = $node ? IpSwapMove::record_refusals($source, $node) : array('The copy has no server.');
 		}
 		return $out;
 	}
 
 	/** The words a switch-over asks of each side. */
 	private static function switch_words(SiteCopy $copy): array {
-		// A copy onto a host freezes its source for a final copy, as a copy of
-		// the running site does, and takes the site's node id as any copy does.
-		if ($copy->on_host()) {
-			return array('source' => self::SWITCH_SOURCE_WORDS, 'copy' => self::SWITCH_COPY_WORDS);
-		}
-		return $copy->from_backups()
-			? array('source' => array(), 'copy' => array('take_node_id', 'site_quiet', 'provision_certificate'))
-			: array('source' => self::SWITCH_SOURCE_WORDS, 'copy' => self::SWITCH_COPY_WORDS);
+		// A living source is frozen for a final copy whatever the target; a
+		// dead one is asked nothing, and the copy takes the site's node id as
+		// any copy does.
+		return $copy->source_alive()
+			? array('source' => self::SWITCH_SOURCE_WORDS, 'copy' => self::SWITCH_COPY_WORDS)
+			: array('source' => array(), 'copy' => array('take_node_id', 'site_quiet', 'provision_certificate'));
 	}
 
 	/**
@@ -2138,7 +2288,7 @@ class SiteCopyRunner {
 			return array('The copy\'s node record is gone or is no longer a dormant copy.');
 		}
 		$from = (string)$copy->get('scp_from');
-		$why = self::source_refusals($source, false, $from);
+		$why = self::source_refusals($source, false, $from, $copy->on_host());
 		$words = self::switch_words($copy);
 		$missing = array_values(array_filter($words['source'], function ($w) use ($source) {
 			return !JobCommandBuilder::has_primitive($source, $w);
@@ -2152,41 +2302,7 @@ class SiteCopyRunner {
 		if ($missing) {
 			$why[] = 'The copy: ' . AgentVocabulary::needs_newer_agent_text($node, $missing);
 		}
-		if ($copy->on_host()) {
-			try {
-				$host_node = self::copy_host_node($copy);
-				$missing = array_values(array_filter(self::HOST_COPY_WORDS, function ($w) use ($host_node) {
-					return !JobCommandBuilder::has_primitive($host_node, $w);
-				}));
-				if ($missing) {
-					$why[] = 'The copy\'s host: ' . AgentVocabulary::needs_newer_agent_text($host_node, $missing);
-				}
-				if (trim((string)$source->get('mgn_container_name')) !== '') {
-					$source_host = JobCommandBuilder::decommission_host_node_for($source);
-					$missing = array_values(array_filter(self::SOURCE_HOST_WORDS, function ($w) use ($source_host) {
-						return !JobCommandBuilder::has_primitive($source_host, $w);
-					}));
-					if ($missing) {
-						$why[] = 'The site\'s own host: ' . AgentVocabulary::needs_newer_agent_text($source_host, $missing);
-					}
-				}
-			} catch (Exception $e) {
-				$why[] = $e->getMessage();
-			}
-		} elseif ($copy->from_backups()) {
-			try {
-				$hold = self::old_container_hold($source);
-				if ($hold) {
-					$host = new ManagedNode($hold['host_node_id'], TRUE);
-					if (!JobCommandBuilder::has_primitive($host, 'hold_container')) {
-						$why[] = 'The old container\'s host, which stops it once the copy has taken over: '
-							. AgentVocabulary::needs_newer_agent_text($host, array('hold_container'));
-					}
-				}
-			} catch (Exception $e) {
-				$why[] = $e->getMessage();
-			}
-		}
+		$why = array_merge($why, self::host_word_refusals($copy, $source));
 		if ((string)$source->get('mgn_joinery_version') !== (string)$copy->get('scp_release')) {
 			$why[] = 'The site now runs release ' . $source->get('mgn_joinery_version') . ', and the copy was installed at '
 				. $copy->get('scp_release') . '. Discard the copy and copy again.';
@@ -2205,6 +2321,43 @@ class SiteCopyRunner {
 			} catch (Exception $e) {
 				$why[] = $e->getMessage();
 			}
+		}
+		return $why;
+	}
+
+	/**
+	 * What the hosts a switch-over acts through cannot yet do: the copy's host
+	 * (installs, lifts its quiet, issues its certificate) for a copy onto a
+	 * host, and a container source's own host, which freezes a running site
+	 * from outside (site_quiet_host) and holds its old container stopped once
+	 * the copy has the site (hold_container), whatever the target (D4).
+	 */
+	private static function host_word_refusals(SiteCopy $copy, ManagedNode $source): array {
+		$why = array();
+		try {
+			if ($copy->on_host()) {
+				$host_node = self::copy_host_node($copy);
+				$missing = array_values(array_filter(self::HOST_COPY_WORDS, function ($w) use ($host_node) {
+					return !JobCommandBuilder::has_primitive($host_node, $w);
+				}));
+				if ($missing) {
+					$why[] = 'The copy\'s host: ' . AgentVocabulary::needs_newer_agent_text($host_node, $missing);
+				}
+			}
+			$hold = self::old_container_hold($source);
+			if ($hold) {
+				$source_host = new ManagedNode($hold['host_node_id'], TRUE);
+				$words = $copy->source_alive() ? self::SOURCE_HOST_WORDS : array('hold_container');
+				$missing = array_values(array_filter($words, function ($w) use ($source_host) {
+					return !JobCommandBuilder::has_primitive($source_host, $w);
+				}));
+				if ($missing) {
+					$why[] = 'The old container\'s host, which ' . ($copy->source_alive() ? 'freezes the site from outside and ' : '')
+						. 'stops it once the copy has taken over: ' . AgentVocabulary::needs_newer_agent_text($source_host, $missing);
+				}
+			}
+		} catch (Exception $e) {
+			$why[] = $e->getMessage();
 		}
 		return $why;
 	}
@@ -2250,59 +2403,85 @@ class SiteCopyRunner {
 					$record['records'] = $plan['records'];
 				} elseif ($method === self::METHOD_IP_SWAP) {
 					$record['swap'] = IpSwapMove::plan($source, $node, $domain);
+				} elseif ($method === self::METHOD_DNS) {
+					if (!$driver) {
+						throw new SiteCopyException('Enter the DNS token.');
+					}
+					$plan = DnsRecordMove::plan($driver, $domain, $source, $node);
+					// Lowered now, before anything is frozen: a resolver that asks
+					// again after this waits a minute, and so does a move back.
+					DnsRecordMove::lower_ttl($driver, $plan);
+					$record['provider'] = $driver::getKey();
+					$record['zone'] = $plan['zone'];
+					$record['records'] = $plan['records'];
 				} else {
 					$addresses = ProxiedOriginMove::machine_addresses($node);
 					$record['to'] = array_merge($addresses[4], $addresses[6]);
+					$record['records'] = DnsRecordMove::manual_plan($domain, $source, $node)['records'];
 				}
 			} catch (SiteCopyException $e) {
 				throw $e;
 			} catch (Exception $e) {
 				throw new SiteCopyException('Nothing was ' . ($copy->from_backups() ? 'changed' : 'frozen') . ': ' . $e->getMessage());
 			}
-			if ($copy->on_host()) {
-				// A copy onto a host is of a site still running: it is frozen,
-				// from outside by its own host when it is a container, and the
-				// final copy brings the copy to it. The hosts are recorded now,
-				// before the rows swap: after, the site's row is the copy's.
-				try {
-					$hold = self::old_container_hold($source);
-					$record['hosts'] = array(
-						'copy'   => array('host_node_id' => (int)self::copy_host_node($copy)->key, 'name' => self::site_name($source)),
-						'source' => $hold,
-					);
-				} catch (Exception $e) {
-					throw new SiteCopyException('Nothing was frozen: ' . $e->getMessage());
+			// A container source's old container, and the hosts a freeze or a
+			// copy onto a host act through, are recorded now, before the rows
+			// swap: after, the site's row is the copy's.
+			try {
+				$hold = self::old_container_hold($source);
+			} catch (Exception $e) {
+				throw new SiteCopyException('Nothing was ' . ($copy->from_backups() ? 'changed' : 'frozen') . ': ' . $e->getMessage());
+			}
+			if ($hold) {
+				$record['hold'] = $hold;
+			}
+			if (in_array($method, array(self::METHOD_DNS, self::METHOD_MANUAL), true)) {
+				$record = array_merge($record, self::forward_plan($source, $node, $hold));
+				// A machine whose agent cannot forward: the move goes ahead
+				// without, and visitors whose resolvers still name the old server
+				// get its maintenance page until their caches let go.
+				$why = $copy->source_alive() ? self::forward_refusals($copy, $source, $node) : array();
+				if ($why) {
+					$record['forward_to'] = '';
+					$record['forward_from'] = '';
+					$record['no_forward'] = implode(' ', $why);
 				}
-				if ($hold) {
-					$record['hold'] = $hold;
+				// The old server is powered off once the move settles, when this
+				// management node created it.
+				$sp = IpSwapMove::provision_of($source);
+				if ($copy->source_alive() && $sp && ComputeDriverRegistry::known((string)$sp->get('cvp_provider')) && !$sp->is_transferred()) {
+					$record['power'] = array('source' => array('provision_id' => (int)$sp->key,
+						'instance_id' => (string)$sp->get('cvp_instance_id')));
+				}
+			}
+			if ($copy->source_alive()) {
+				// A living site is frozen, from outside by its own host too when
+				// it is a container, and the final copy brings the copy to it.
+				$record['hosts'] = array('source' => $hold);
+				if ($copy->on_host()) {
+					try {
+						$record['hosts']['copy'] = array('host_node_id' => (int)self::copy_host_node($copy)->key,
+							'name' => self::site_name($source));
+					} catch (Exception $e) {
+						throw new SiteCopyException('Nothing was frozen: ' . $e->getMessage());
+					}
 				}
 				$template = self::freeze_steps($source);
-			} elseif ($copy->from_backups()) {
-				// The source's server, when this management node created it, is
-				// powered off first: two machines must never run the site.
+			} else {
+				// A dead site's server, when this management node created it, is
+				// powered off first: two machines must never run the site. A
+				// container source's old container is stopped on its host, and
+				// kept stopped, once the copy has taken the site (start_steps()).
 				$sp = IpSwapMove::provision_of($source);
 				if (isset($record['swap'])) {
 					$record['power'] = $record['swap'];
-				} elseif ($sp && (string)$sp->get('cvp_provider') === 'linode' && !$sp->is_transferred()) {
+				} elseif ($sp && ComputeDriverRegistry::known((string)$sp->get('cvp_provider')) && !$sp->is_transferred()) {
 					$record['power'] = array('source' => array('provision_id' => (int)$sp->key,
 						'instance_id' => (string)$sp->get('cvp_instance_id')));
 				}
 				if (isset($record['power'])) {
 					$template[] = array('op' => 'power_off', 'on' => 'source', 'arg' => 'source');
 				}
-				// A container source shares its server: its old container is
-				// stopped on its host, and kept stopped, once the copy has
-				// taken the site (start_steps()).
-				try {
-					$hold = self::old_container_hold($source);
-				} catch (Exception $e) {
-					throw new SiteCopyException('Nothing was changed: ' . $e->getMessage());
-				}
-				if ($hold) {
-					$record['hold'] = $hold;
-				}
-			} else {
-				$template = self::FREEZE_STEPS;
 			}
 			$source->set('mgn_install_state', 'switching');
 			$source->save();
@@ -2331,6 +2510,169 @@ class SiteCopyRunner {
 	}
 
 	/**
+	 * Where a frozen site forwards while its address moves by DNS, and the
+	 * address its forwarded requests arrive from: forward_to, the copy's
+	 * machine's public address (IPv4 where it has one), and forward_from, the
+	 * old site's own machine's address of that family (its host's, for a
+	 * container). Empty strings where either is not known: nothing forwards.
+	 */
+	private static function forward_plan(ManagedNode $source, ManagedNode $node, ?array $hold): array {
+		$to = ProxiedOriginMove::machine_addresses($node);
+		$forward_to = (string)($to[4][0] ?? ($to[6][0] ?? ''));
+		$from_node = $source;
+		if ($hold) {
+			$host = new ManagedNode((int)$hold['host_node_id'], TRUE);
+			$from_node = $host->key ? $host : $source;
+		}
+		$from = ProxiedOriginMove::machine_addresses($from_node);
+		$family = strpos($forward_to, ':') !== false ? 6 : 4;
+		return array('forward_to' => $forward_to, 'forward_from' => $forward_to !== '' ? (string)($from[$family][0] ?? '') : '');
+	}
+
+	/**
+	 * What stops a running site forwarding to its copy while a DNS move
+	 * settles: the old site (and a container's host) forwards, and the
+	 * machine answering the copy (its own, or its host) believes it, each
+	 * needing an agent with the forward.
+	 */
+	private static function forward_refusals(SiteCopy $copy, ManagedNode $source, ?ManagedNode $node): array {
+		$machines = array('The site' => $source);
+		try {
+			$hold = self::old_container_hold($source);
+			if ($hold) {
+				$machines['The site\'s own host'] = new ManagedNode((int)$hold['host_node_id'], TRUE);
+			}
+			$machines[$copy->on_host() ? 'The copy\'s host' : 'The copy'] = $copy->on_host() ? self::copy_host_node($copy) : $node;
+		} catch (Exception $e) {
+			return array($e->getMessage());
+		}
+		$why = array();
+		foreach ($machines as $who => $m) {
+			if (!$m) {
+				$why[] = $who . ' has no record.';
+				continue;
+			}
+			$agent = (string)AgentVocabulary::version($m);
+			if ($agent === '' || version_compare($agent, JobCommandBuilder::FORWARD_MIN_AGENT_VERSION, '<')) {
+				$why[] = $who . ' runs agent ' . ($agent !== '' ? $agent : 'of an unknown version') . '; forwarding visitors while the '
+					. 'records move needs ' . JobCommandBuilder::FORWARD_MIN_AGENT_VERSION . ' or newer.';
+			}
+		}
+		return $why;
+	}
+
+	/** Does this switch-over forward the frozen site's visitors while its DNS moves? */
+	private static function forwards(SiteCopy $copy): bool {
+		$switch = $copy->switch_record();
+		return $copy->source_alive() && in_array((string)($switch['method'] ?? ''), array(self::METHOD_DNS, self::METHOD_MANUAL), true)
+			&& (string)($switch['forward_to'] ?? '') !== '' && (string)($switch['forward_from'] ?? '') !== '';
+	}
+
+	/**
+	 * The start of a switch by DNS (D1), once its records name the copy: the
+	 * copy takes the node and starts as the site, its machine believes the old
+	 * server's forwarded addresses, the old server forwards every visitor whose
+	 * resolver still names it, and then the copy is issued its certificate,
+	 * since the issuer's own resolver may still be one of those. After the
+	 * row swap the copy's machine is the node's row ('source') and the old
+	 * machine the retired one ('copy'). An old container is held stopped only
+	 * once the move settles: it forwards until then.
+	 */
+	private static function dns_start_steps(SiteCopy $copy, ?ManagedNode $node): array {
+		$steps = array();
+		if (!$node || trim((string)$node->get('mgn_install_state')) !== 'retired') {
+			$steps[] = array('op' => 'take_node_id', 'on' => 'copy');
+		}
+		$steps[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
+		if ($copy->on_host()) {
+			$steps[] = array('op' => 'site_quiet_host', 'on' => 'copy_host', 'arg' => 'off');
+		}
+		if (self::forwards($copy)) {
+			$steps[] = array('op' => 'trust_forwarder', 'on' => $copy->on_host() ? 'copy_host' : 'source', 'arg' => 'trust');
+			if (is_array($copy->switch_record()['hosts']['source'] ?? null)) {
+				$steps[] = array('op' => 'site_quiet_host', 'on' => 'source_host', 'arg' => 'forward');
+			}
+			$steps[] = array('op' => 'site_quiet', 'on' => 'copy', 'arg' => 'forward');
+		}
+		if (!self::copy_carries_certificate($copy)) {
+			$steps[] = array('op' => 'provision_certificate', 'on' => 'source');
+		}
+		// An old container that forwards nobody is held stopped now, as after
+		// any other move.
+		if (!self::forwards($copy) && is_array($copy->switch_record()['hold'] ?? null)) {
+			$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
+		}
+		return $steps;
+	}
+
+	/**
+	 * Once a DNS move has settled: the copy's machine stops believing the old
+	 * server, whose address goes back to its provider when it is deleted, and
+	 * the old server is powered off when this management node created it, or
+	 * an old container held stopped on its host.
+	 */
+	private static function settle_steps(SiteCopy $copy): array {
+		$switch = $copy->switch_record();
+		$steps = array();
+		if (self::forwards($copy)) {
+			$steps[] = array('op' => 'trust_forwarder', 'on' => $copy->on_host() ? 'copy_host' : 'source', 'arg' => 'untrust');
+		}
+		if (is_array($switch['hold'] ?? null)) {
+			if (self::forwards($copy)) {
+				$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
+			}
+		} elseif ($copy->source_alive() && is_array($switch['power'] ?? null)) {
+			$steps[] = array('op' => 'power_off', 'on' => 'copy', 'arg' => 'source');
+		}
+		return $steps;
+	}
+
+	/**
+	 * A switched copy whose address moved by DNS: ask the public resolvers,
+	 * and once they agree on the copy and one old TTL has passed, let go of
+	 * the old server (settle_steps()). Called every tick for a switched copy
+	 * still watching; never throws.
+	 */
+	public static function advance_watch(SiteCopy $copy): void {
+		if (!self::lock()) {
+			return;
+		}
+		$template = array();
+		try {
+			$copy->load();
+			$switch = $copy->switch_record();
+			if ($copy->status() !== SiteCopy::STATUS_SWITCHED || ($switch['watch']['state'] ?? '') !== 'watching') {
+				return;
+			}
+			$watch = $switch['watch'];
+			$r = DnsRecordMove::settled(array('records' => (array)($switch['records'] ?? array())), (string)$watch['moved_time']);
+			$watch['last_check'] = gmdate('Y-m-d H:i:s');
+			$watch['agree'] = $r['agree'];
+			$watch['waiting_on'] = $r['waiting_on'];
+			$watch['wait_until'] = gmdate('Y-m-d H:i:s', $r['wait_until']);
+			if ($r['settled']) {
+				$watch['state'] = 'settled';
+				$watch['settled_time'] = gmdate('Y-m-d H:i:s');
+			}
+			$switch['watch'] = $watch;
+			$copy->set_switch_record($switch);
+			$copy->save();
+			if ($r['settled']) {
+				$template = self::settle_steps($copy);
+				if ($template) {
+					self::lay_steps($copy, $template, SiteCopy::STATUS_SETTLING, 'settle');
+					self::advance_locked($copy);
+				}
+			}
+		} catch (Throwable $e) {
+			error_log('SiteCopyRunner: copy #' . (int)$copy->key . '\'s DNS watch failed: ' . $e->getMessage());
+		} finally {
+			self::unlock();
+		}
+		self::start_worker_for($copy, $template);
+	}
+
+	/**
 	 * Step 10's jobs: the node id, then the copy starts as the site. A copy
 	 * from backups then gets its certificate: none travelled (the source could
 	 * not export one), and its name points at it now.
@@ -2343,22 +2685,28 @@ class SiteCopyRunner {
 		$steps[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
 		if ($copy->on_host()) {
 			// The copy's host lets its network go (the copy has left its own
-			// quiet state), and issues its certificate now that its name
-			// points there; the source's old container is held stopped last.
+			// quiet state).
 			$steps[] = array('op' => 'site_quiet_host', 'on' => 'copy_host', 'arg' => 'off');
+		}
+		if (!self::copy_carries_certificate($copy)) {
+			// Issued now that its name points there.
 			$steps[] = array('op' => 'provision_certificate', 'on' => 'source');
-			if (is_array($copy->switch_record()['hold'] ?? null)) {
-				$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
-			}
-		} elseif ($copy->from_backups()) {
-			$steps[] = array('op' => 'provision_certificate', 'on' => 'source');
-			// Last, so an old container its host cannot stop never holds up
-			// the site, which already runs on the copy.
-			if (is_array($copy->switch_record()['hold'] ?? null)) {
-				$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
-			}
+		}
+		// Last, so an old container its host cannot stop never holds up the
+		// site, which already runs on the copy.
+		if (is_array($copy->switch_record()['hold'] ?? null)) {
+			$steps[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'stop');
 		}
 		return $steps;
+	}
+
+	/**
+	 * Did the site's certificate travel to the copy? Only in an export from a
+	 * site on a server of its own: a run from backups carries none, and a
+	 * container's certificate is on its host, not in the site.
+	 */
+	public static function copy_carries_certificate(SiteCopy $copy): bool {
+		return !$copy->runs_from_backups() && !is_array($copy->switch_record()['hold'] ?? null);
 	}
 
 	/**
@@ -2462,12 +2810,41 @@ class SiteCopyRunner {
 				self::advance_locked($copy);
 				return;
 			}
-			if ($method === self::METHOD_MANUAL) {
-				$template = array(array('op' => 'probe', 'on' => 'copy'));
+			if ($method === self::METHOD_DNS || $method === self::METHOD_MANUAL) {
+				// The copy answers at its own address under the site's name
+				// first: nothing moves toward a copy that does not.
+				$domain = self::site_domain($source);
+				$proof = ProxiedOriginMove::prove($domain, (string)$copy->get('scp_look_path'), null,
+					self::copy_carries_certificate($copy), (string)($switch['forward_to'] ?? ''));
+				$switch['proof'] = $proof;
+				if (!$proof['proven']) {
+					$copy->set_switch_record($switch);
+					$copy->save();
+					throw new SiteCopyException('The copy did not answer at its own address under the site\'s name within '
+						. $proof['seconds'] . ' seconds (last answer: ' . $proof['last'] . '), so nothing moved. The site is still frozen: '
+						. 'try again, or go back.');
+				}
+				if ($method === self::METHOD_DNS) {
+					if (!$driver) {
+						throw new SiteCopyException('Enter the DNS token.');
+					}
+					try {
+						DnsRecordMove::move($driver, array('zone' => $switch['zone'] ?? '', 'records' => $switch['records'] ?? array()));
+					} catch (Exception $e) {
+						throw new SiteCopyException('The address did not move. ' . $e->getMessage());
+					}
+				}
 				$switch['address_at'] = 'copy';
 				$switch['moved_time'] = gmdate('Y-m-d H:i:s');
 				$copy->set_switch_record($switch);
-				self::lay_steps($copy, array_merge($template, self::start_steps($copy, $node)), SiteCopy::STATUS_STARTING, 'start');
+				// Watched until the old server can be let go, when there is
+				// anything of it to let go: a forward, or its power.
+				if (self::settle_steps($copy)) {
+					$switch['watch'] = array('state' => 'watching', 'moved_time' => $switch['moved_time']);
+					$copy->set_switch_record($switch);
+				}
+				$template = self::dns_start_steps($copy, $node);
+				self::lay_steps($copy, $template, SiteCopy::STATUS_STARTING, 'start');
 				self::advance_locked($copy);
 				return;
 			}
@@ -2490,7 +2867,7 @@ class SiteCopyRunner {
 			$copy->set_switch_record($switch);
 			$copy->save();
 
-			$proof = ProxiedOriginMove::prove($domain, (string)$copy->get('scp_look_path'), null, !$copy->from_backups());
+			$proof = ProxiedOriginMove::prove($domain, (string)$copy->get('scp_look_path'), null, self::copy_carries_certificate($copy));
 			$switch['proof'] = $proof;
 			if (!$proof['proven']) {
 				try {
@@ -2531,7 +2908,10 @@ class SiteCopyRunner {
 					|| ($switch['address_at'] ?? '') !== 'copy') {
 				throw new SiteCopyException('Only a start that stopped, with the address at the copy, is tried again.');
 			}
-			self::lay_steps($copy, self::start_steps($copy, self::copy_row($copy, true)), SiteCopy::STATUS_STARTING, 'start');
+			$method = (string)($switch['method'] ?? '');
+			$steps = in_array($method, array(self::METHOD_DNS, self::METHOD_MANUAL), true)
+				? self::dns_start_steps($copy, self::copy_row($copy, true)) : self::start_steps($copy, self::copy_row($copy, true));
+			self::lay_steps($copy, $steps, SiteCopy::STATUS_STARTING, 'start');
 			self::advance_locked($copy);
 		} finally {
 			self::unlock();
@@ -2581,10 +2961,6 @@ class SiteCopyRunner {
 				throw new SiteCopyException('There is nothing to go back from: the site runs on its own server.');
 			}
 			$backups = $copy->from_backups();
-			if ($swapped && $copy->on_host()) {
-				throw new SiteCopyException('This copy has taken the site\'s node and runs as the site; the way back closes there. '
-					. 'Its old container is held stopped on its host. Keep the switch-over.');
-			}
 			if ($swapped && $backups) {
 				throw new SiteCopyException('This copy came from backups and has become the site; its old server is dead, '
 					. 'so there is nothing to go back to. Keep the switch-over.');
@@ -2604,29 +2980,70 @@ class SiteCopyRunner {
 				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
 				$switch['moved_back_notes'] = $left;
 			}
+			if ($method === self::METHOD_DNS && ($switch['address_at'] ?? 'source') === 'copy') {
+				if (!$driver) {
+					throw new SiteCopyException('The site\'s records name the copy, and going back changes them back: enter the DNS token.');
+				}
+				$plan = array('zone' => $switch['zone'] ?? '', 'records' => $switch['records'] ?? array());
+				try {
+					$left = DnsRecordMove::move_back($driver, $plan);
+					DnsRecordMove::restore_ttl($driver, $plan, 'from');
+				} catch (Exception $e) {
+					throw new SiteCopyException('The records did not move back, and nothing else was done. ' . $e->getMessage());
+				}
+				$switch['address_at'] = 'source';
+				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
+				$switch['moved_back_notes'] = $left;
+			} elseif ($method === self::METHOD_MANUAL && ($switch['address_at'] ?? 'source') === 'copy') {
+				// The owner changes the records back at their DNS host; the tab
+				// names them.
+				$switch['address_at'] = 'source';
+				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
+			}
+			if (isset($switch['watch'])) {
+				$switch['watch']['state'] = 'ended';
+			}
 			$copy->set_switch_record($switch);
 			self::cancel_open_steps($copy->steps());
 			if ($swapped) {
+				// The copy, still the node, is quieted (and held off the network
+				// by its host, for a copy onto a host), then the rows swap back.
 				$template[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'on');
+				if ($copy->on_host()) {
+					$template[] = array('op' => 'site_quiet_host', 'on' => 'copy_host', 'arg' => 'on');
+				}
 				$template[] = array('op' => 'go_back',    'on' => 'source');
 			}
 			if ($method === self::METHOD_IP_SWAP && (!empty($switch['moved_time']) || ($switch['address_at'] ?? '') === 'copy')) {
 				$template[] = array('op' => 'ip_swap',     'on' => 'source', 'arg' => 'back');
 				$template[] = array('op' => 'power_cycle', 'on' => 'copy',   'arg' => 'copy');
 			}
+			// The copy's machine stops believing the old server's forwarded
+			// addresses (after the swap back, the copy's row is the copy's).
+			if (self::forwards($copy)) {
+				$template[] = array('op' => 'trust_forwarder', 'on' => $copy->on_host() ? 'copy_host' : 'copy', 'arg' => 'untrust');
+			}
 			if (!$backups) {
-				if ($method === self::METHOD_IP_SWAP) {
+				// The frozen site runs again: its server is powered on when the
+				// swap or a settled DNS move powered it off, an old container
+				// held stopped starts; a container's host lets its network go
+				// while it still shows its maintenance page; then it leaves its
+				// own quiet, and stops forwarding.
+				if ($method === self::METHOD_IP_SWAP || !empty($switch['source_off'])) {
 					$template[] = array('op' => 'power_on', 'on' => 'source', 'arg' => 'source');
 				}
-				$template[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
-			} elseif ($copy->on_host()) {
-				// The frozen site runs again: a container's host lets its
-				// network go while it still shows its maintenance page, then
-				// it leaves its own quiet.
+				if (is_array($switch['hold'] ?? null) && !empty($switch['held'])) {
+					$template[] = array('op' => 'hold_container', 'on' => 'host', 'arg' => 'start');
+				}
 				if (is_array($switch['hosts']['source'] ?? null)) {
 					$template[] = array('op' => 'site_quiet_host', 'on' => 'source_host', 'arg' => 'off');
 				}
 				$template[] = array('op' => 'site_quiet', 'on' => 'source', 'arg' => 'off');
+			}
+			// A copy onto a host that had become the site is held stopped on
+			// its host, with what was written on it, for its owner to remove.
+			if ($swapped && $copy->on_host()) {
+				$template[] = array('op' => 'hold_container', 'on' => 'copy_host', 'arg' => 'stop');
 			}
 			self::lay_steps($copy, $template, SiteCopy::STATUS_RETURNING, 'return');
 			self::advance_locked($copy);
@@ -2652,6 +3069,16 @@ class SiteCopyRunner {
 		$switch['returned_time'] = gmdate('Y-m-d H:i:s');
 		$copy->set_switch_record($switch);
 		if (!empty($switch['swapped_back_time'])) {
+			if ($copy->on_host()) {
+				try {
+					$switch['moved_back_notes'] = array_merge((array)($switch['moved_back_notes'] ?? array()), array(
+						'The copy\'s container ' . self::site_name($source) . ' is held stopped on ' . self::switch_host($copy, 'copy_host')->get('mgn_name')
+						. ', with what was written on it while it was the site. Remove it there once nothing of it is wanted.'));
+					$copy->set_switch_record($switch);
+				} catch (Exception $e) {
+					// The note only names where it is.
+				}
+			}
 			// The copy's agent took the site's node id; its row holds its own
 			// key again, so it can no longer reach this management node.
 			$node = self::copy_row($copy, true);
@@ -2676,7 +3103,7 @@ class SiteCopyRunner {
 	 * dashboard and the way back closes. The old server is the owner's to
 	 * delete at its provider; this names it.
 	 */
-	public static function finish(SiteCopy $copy): string {
+	public static function finish(SiteCopy $copy, ?DnsProvider $driver = null): string {
 		if (!self::lock()) {
 			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
 		}
@@ -2684,6 +3111,23 @@ class SiteCopyRunner {
 			$copy->load();
 			if ($copy->status() !== SiteCopy::STATUS_SWITCHED) {
 				throw new SiteCopyException('Only a finished switch-over is kept; this copy is ' . strtolower($copy->status_label()) . '.');
+			}
+			$switch = $copy->switch_record();
+			$watch = (string)($switch['watch']['state'] ?? '');
+			if ($watch === 'watching') {
+				throw new SiteCopyException('The site\'s address is still moving: the old server forwards the visitors whose resolvers '
+					. 'still name it. Keep the switch-over once the move has settled.');
+			}
+			if ((string)($switch['method'] ?? '') === self::METHOD_DNS) {
+				// The records' TTLs go back to what they were.
+				if (!$driver) {
+					throw new SiteCopyException('Enter the DNS token: keeping the switch-over puts the records\' TTLs back.');
+				}
+				try {
+					DnsRecordMove::restore_ttl($driver, array('zone' => $switch['zone'] ?? '', 'records' => $switch['records'] ?? array()), 'to');
+				} catch (Exception $e) {
+					throw new SiteCopyException('The records\' TTLs could not be put back, so nothing was kept: ' . $e->getMessage());
+				}
 			}
 			$server = self::server_to_delete($copy);
 			$node = self::copy_row($copy, true);
@@ -2719,7 +3163,7 @@ class SiteCopyRunner {
 				$done = true;
 			} elseif ($op === 'probe') {
 				$proof = ProxiedOriginMove::prove(self::site_domain($source), (string)$copy->get('scp_look_path'), self::PROBE_CALL_SECONDS,
-					!$copy->from_backups());
+					self::copy_carries_certificate($copy));
 				$proof['seconds'] = time() - (int)$state['started'];
 				$switch['proof'] = $proof;
 				$done = !empty($proof['proven']);
