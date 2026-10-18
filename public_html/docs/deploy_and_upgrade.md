@@ -153,7 +153,9 @@ goes from a commit to a release:
      with `work NAME --commit` as the way to land it. The refusal ends with
      `work --owners <the files>`, which names every session that changed each
      one and how sure that is; a file no session claims was changed outside
-     Claude. The Publish form shows the same notes before it is offered. These are the paths a release reads from this
+     Claude. `work --held` lists the held files by session before a publish is
+     tried (see *Preparing a commit, and publishing without an agent session*
+     below). The Publish form shows the same notes before it is offered. These are the paths a release reads from this
      box rather than from the commit: data classes and migrations, core and
      plugin (the install SQL is dumped from this box's database, which
      `update_database` may already have changed); `settings.json`,
@@ -381,6 +383,73 @@ logged statements, spent versions, the unfinished-row guard) and
 `plugins/server_manager/tests/release_log_tail_test.php` (reading a log built
 in the test: where it starts, the settled checkpoint, our entry matched, a
 stranger and a changed entry unaccounted for, the budget, blind).
+
+### Preparing a commit, and publishing without an agent session
+
+Sessions share one working tree and one git index, so a commit is prepared in
+a private index per session (`.git/work-commits/NAME/`) and landed by the owner
+with `work NAME --commit`. `work` is the owner's session launcher on the dev
+box; its source is a local-only repository at `~/work-tool` and ships nowhere.
+It never types into a session, so preparing a commit does not depend on which
+assistant, if any, is at the other end.
+
+**Preparing.** Any assistant, or a person at a terminal, prepares a commit in
+four steps:
+
+1. Find the files for the task: `git status --porcelain` and `work --owners`.
+   Leave out files another running session owns.
+2. A finished spec moves with its work: set its `**Status:**` line to
+   `IMPLEMENTED <date>`, `mv` it from `public_html/specs/` to
+   `public_html/specs/implemented/`, and list both paths. A file already in
+   `implemented/` is not edited.
+3. Write the message to a file. The subject is imperative, has no trailing
+   period and is 72 characters or fewer; then a blank line; then plain `- `
+   bullets. No double quote or backtick anywhere (both break the shell
+   here-documents a release commits with), and no trailer such as
+   `Co-Authored-By`. New files and version bumps are named.
+4. Stage it: `work --prepare-commit --name NAME --message-file FILE -- PATH...`
+   stages the paths into NAME's private index, checks that they differ from
+   `HEAD`, and writes nothing to the shared index. It refuses a message that
+   breaks the rules above and drops an agent's attribution lines from the end.
+
+When no agent can run those steps, `work NAME --prepare [--all | PATH...]
+[--message-file FILE]` does all four from a terminal. Its files are the PATHs named, or those NAME edited directly;
+`--all` adds every file no other running session appears in. A shell command
+that merely mentioned a file is logged too, but it is a guess and never puts a
+file in the commit. It asks for the subject and bullets unless `--message-file`
+is given, offers to move a spec the commit holds or the message names, and
+stages. It never commits.
+
+**Landing.** `work NAME --status` shows what is prepared, laid out like
+`git status`; `work NAME --diff [PATH...]` shows the changes; `work NAME
+--commit` shows the commit, asks, commits, and offers to push. With nothing
+prepared, `--commit` exits at once and says how to prepare.
+
+**What blocks a release.** `work --held` lists the uncommitted files a publish
+would refuse (the held paths above), grouped by the session behind each, with
+the prepared commit that already holds one; `work NAME --held` lists one
+session's. It asks `ReleaseCommit::ownerBlockers()` through
+`maintenance_scripts/dev_tools/held_blockers.php`, which prints JSON, so the
+rule is the publisher's own. It exits 1 while anything is held, so a script can
+gate on it.
+
+**Emergency deploy.** A fix that must ship while no agent session can prepare
+it follows the same path with a person at the terminal:
+
+1. `work --held`. A held file that is part of the fix goes in the fix's
+   commit. One that is another session's finished work is prepared and
+   committed under that session's name (`work SESSION --prepare`, then
+   `work SESSION --commit`). One that is an unfinished draft from an idle
+   session is moved out of the tree or reverted before the publish; it is not
+   committed.
+2. Prepare and land the fix: `work NAME --prepare ...`, then
+   `work NAME --commit`, and confirm the push.
+3. `php tests/run.php db --changed`, and `work --held` exits 0.
+4. Publish: `php plugins/server_manager/includes/publish_upgrade.php
+   "release notes"`, or Publish Upgrade at `/admin/server_manager`.
+5. Roll out from the node's Updates tab at `/admin/server_manager`. A node that
+   does not come back healthy is diagnosed from its detail page and the
+   management agent first, and over SSH only after those.
 
 ### The site container engine
 
