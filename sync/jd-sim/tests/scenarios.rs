@@ -19620,7 +19620,6 @@ fn an_upload_learned_twice_is_one_file_not_two() {
     b.fs.user_rename("x.dat", "F/c.dat");
     world.pass(b);
     let root = jd_vfs::Vfs::root(&a.fs).unwrap();
-    let mine = jd_vfs::Vfs::fingerprint(&a.fs, &root.join("F/c.dat")).unwrap().expect("a's file").identity();
     a.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
     world.pass(a);
     a.fs.user_rename("x.dat", "x2.dat");
@@ -19633,7 +19632,17 @@ fn an_upload_learned_twice_is_one_file_not_two() {
         .map(|f| f.name)
         .collect();
     assert_eq!(copies.len(), 1, "the upload went up twice: {copies:?}");
-    let owner = a.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(mine));
+    // One copy on this disk too, owned by the server file's record. Which
+    // file that is depends on whether a download landed on it since: a
+    // download's spool is renamed over the file, so the name then holds the
+    // download's file (B3), and the record takes that file as its own.
+    let here: Vec<(String, jd_vfs::FileIdentity)> = disk_tree(a)
+        .into_iter()
+        .filter(|(_, h)| h.as_deref() == Some(jd_sim::sha256_hex(body).as_str()))
+        .filter_map(|(p, _)| jd_vfs::Vfs::fingerprint(&a.fs, &root.join(&p)).unwrap().map(|f| (p, f.identity())))
+        .collect();
+    assert_eq!(here.len(), 1, "the user's bytes stand twice on this disk: {here:?}");
+    let owner = a.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(here[0].1));
     assert!(owner.is_some_and(|e| !e.id.is_provisional()), "the user's file is not the server file's own");
 }
 

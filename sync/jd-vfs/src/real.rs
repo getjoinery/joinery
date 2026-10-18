@@ -1835,6 +1835,29 @@ mod tests {
         }
     }
 
+    /// A download that replaces a file leaves its spool's file at the name:
+    /// the rename puts the spool's inode there, so the name holds a new file
+    /// -- a new id and the spool's birth -- and the commit hands back that
+    /// file. The simulator's twin is
+    /// `a_download_that_replaces_a_file_leaves_its_own_file_at_the_name` in
+    /// jd-sim; kept apart, the simulator never saw a download change the
+    /// file at a name (B3).
+    #[test]
+    fn a_download_that_replaces_a_file_leaves_its_own_file_at_the_name() {
+        let d = TempDir::new("replace-id");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("doc.txt");
+        fs::write(&target, b"original").unwrap();
+        let before = v.fingerprint(&target).unwrap().unwrap();
+        let mut spool = v.spool(&target, 0).unwrap();
+        spool.write_all(b"from the server").unwrap();
+        let landed = spool.commit(&target, Some(before)).unwrap();
+        if v.personality().stable_file_identity {
+            assert_ne!(landed.file_id, before.file_id, "the old file's id stayed at the name");
+        }
+        assert_eq!(Some(landed), v.fingerprint(&target).unwrap(), "the commit handed back another file");
+    }
+
     /// The rename a commit makes, and then the user's swap of the name it
     /// landed on with `slot-3.dat` beside it, before the commit has asked
     /// what stands there.
