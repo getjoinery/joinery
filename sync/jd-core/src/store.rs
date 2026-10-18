@@ -46,6 +46,10 @@ use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placemen
 /// names a key of this table, so SQLite refuses every hold it makes.
 pub const SCHEMA_VERSION: i64 = 9;
 
+/// Meta key: every cached hash in this store was read through the handle
+/// that named its file (`Store::distrust_hashes_read_by_name`).
+const HASHES_READ_BY_HANDLE: &str = "hashes_read_by_handle";
+
 /// One refusal held (`Store::refusals`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
@@ -408,6 +412,7 @@ impl Store {
         }
         store.add_column_if_missing("local_index", "cached_at_ns", "INTEGER")?;
         store.key_refusals_by_action()?;
+        store.distrust_hashes_read_by_name()?;
         // Who holds this disk identity: asked by `make_room` for every file it
         // moves aside, so it is an index and not a table read.
         store.conn.execute_batch(
@@ -435,6 +440,24 @@ impl Store {
         // refused help by every later start.
         store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(store)
+    }
+
+    /// Hashes cached before the scan read a file's bytes through the handle
+    /// that named its file may be another file's: read by name after a rename
+    /// landed, they were cached under the file looked at, and every look after
+    /// read them back until that file next changed. Trusted no longer, once:
+    /// the rows keep which record each file is, and only lose the standing
+    /// that lets a scan skip the read (`cached_hash`). Marked in meta, not by
+    /// a schema version, so an older build still opens the store.
+    fn distrust_hashes_read_by_name(&self) -> StoreResult<()> {
+        if self.get_meta(HASHES_READ_BY_HANDLE)?.is_some() {
+            return Ok(());
+        }
+        self.conn.execute_batch(
+            "UPDATE local_index SET cached_at_ns = NULL;
+             DELETE FROM path_hashes;",
+        )?;
+        self.set_meta(HASHES_READ_BY_HANDLE, "1")
     }
 
     /// A store from before schema 9 holds one refusal per entity: its table
@@ -2533,6 +2556,34 @@ mod tests {
             own_file_seen_at: None,
             remote_unsyncable: false,
         }
+    }
+
+    /// A store whose hashes were cached by name is reopened: each hash loses
+    /// its standing once (the file is read again on the next look) and keeps
+    /// which record it is; one cached after that keeps its standing across a
+    /// reopen.
+    #[test]
+    fn hashes_cached_before_the_handle_rule_are_read_again_once() {
+        let dir = std::env::temp_dir().join(format!("jd-store-distrust-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("state.db");
+        let fp = jd_vfs::Fingerprint { size: 3, mtime_ns: 1_000, file_id: 7, birth_ns: 5 };
+        {
+            let s = Store::open(&path).unwrap();
+            s.cache_hash(fp, "abc", None, 10_000).unwrap();
+            // As a store from before the rule: unmarked.
+            s.conn.execute("DELETE FROM meta WHERE key = ?1", params![HASHES_READ_BY_HANDLE]).unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.cached_hash(fp, 1).unwrap(), None, "a hash cached by name kept its standing");
+        let rows: i64 = s.conn.query_row("SELECT COUNT(*) FROM local_index", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 1, "the row itself was dropped");
+        s.cache_hash(fp, "abc", None, 10_000).unwrap();
+        drop(s);
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.cached_hash(fp, 1).unwrap().as_deref(), Some("abc"), "a hash read by handle lost its standing");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

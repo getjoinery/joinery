@@ -50,7 +50,8 @@ pub struct ObservedFile {
     pub in_a_vault: bool,
     /// The file's change time where the volume tells a save from a swap by it
     /// (`jd_vfs::Personality::tells_saves_from_swaps`), and 0 everywhere else.
-    /// Read beside the fingerprint and never kept: a rename moves it, so a
+    /// Read in the same look as the fingerprint, so both are one file's
+    /// (`jd_vfs::Vfs::fingerprint_and_change_time`), and never kept: a rename moves it, so a
     /// record's own file standing elsewhere shows when it was moved there
     /// (`newcomer_was_already_there`).
     pub change_ns: u64,

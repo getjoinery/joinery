@@ -168,21 +168,10 @@ include_internal: bool,
                 _ => 0,
             }
         };
-        // Read only where it decides something, and from the metadata just
-        // taken: no second look at the file.
-        #[cfg(unix)]
-        let change_ns = if kind == EntryKind::File && personality.tells_saves_from_swaps() {
-            change_time_of(&md).unwrap_or(0)
-        } else {
-            0
-        };
-        #[cfg(not(unix))]
-        let change_ns = 0;
         out.push(DirEntry {
             name,
             kind,
             tie_break_id,
-            change_ns,
             fingerprint: match kind {
                 EntryKind::File => Some(as_seen(fingerprint_of(&entry.path(), &md), personality)),
                 EntryKind::Directory => {
@@ -272,7 +261,8 @@ fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
 /// The change time a file shows, in ns since the epoch: ctime on Unix, the
 /// `ChangeTime` Windows keeps beside its other three. `None` where it cannot
 /// be read. Never part of a fingerprint -- a rename or a chmod moves it, and
-/// neither is an edit -- and read only beside one (`DirEntry::change_ns`).
+/// neither is an edit -- and read only beside one, from the same metadata
+/// (`Vfs::fingerprint_and_change_time`).
 #[cfg(unix)]
 pub(crate) fn change_time_of(md: &fs::Metadata) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
@@ -746,6 +736,24 @@ impl Vfs for OsVfs {
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {
         match path.symlink_metadata() {
             Ok(md) if md.is_file() => Ok(Some(as_seen(fingerprint_of(path, &md), &self.personality))),
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io_err(path, e)),
+        }
+    }
+
+    fn fingerprint_and_change_time(&self, path: &Path) -> VfsResult<Option<(Fingerprint, u64)>> {
+        match path.symlink_metadata() {
+            Ok(md) if md.is_file() => {
+                // Read only where it decides something, and from the metadata
+                // the fingerprint is read from. Never on Windows: births are
+                // names on every volume there, which tells nothing by it.
+                #[cfg(unix)]
+                let change_ns = if self.personality.tells_saves_from_swaps() { change_time_of(&md).unwrap_or(0) } else { 0 };
+                #[cfg(not(unix))]
+                let change_ns = 0;
+                Ok(Some((as_seen(fingerprint_of(path, &md), &self.personality), change_ns)))
+            }
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err(path, e)),
@@ -1762,13 +1770,16 @@ mod tests {
         assert_eq!(fs::read(&target).unwrap(), b"new content");
     }
 
-    /// What one listing shows, read as the scan reads it: each entry's birth
-    /// and change time, by name.
+    /// What the scan reads of each file in a folder: its birth and change
+    /// time, from one look at it, by name.
     fn stamps_listed(v: &OsVfs, dir: &Path) -> std::collections::HashMap<String, (u64, u64)> {
         v.read_dir(dir)
             .unwrap()
             .into_iter()
-            .map(|e| (e.name.clone(), (e.fingerprint.map(|f| f.birth_ns).unwrap_or(0), e.change_ns)))
+            .filter_map(|e| {
+                let (fp, change) = v.fingerprint_and_change_time(&dir.join(&e.name)).unwrap()?;
+                Some((e.name, (fp.birth_ns, change)))
+            })
             .collect()
     }
 

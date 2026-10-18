@@ -7667,11 +7667,17 @@ fn a_kill_while_the_network_is_down_does_not_freeze_the_files_it_interrupted() {
         refuse_before: Some("drive_trash".into()),
         ..NetFaults::none()
     });
+    // The scan's open to hash it passes; the upload's fails.
     laptop
         .fs
-        .fail_next(FsOp::OpenRead, Some("Work/notes.txt"), FailureKind::Io, 1);
+        .fail_after(FsOp::OpenRead, Some("Work/notes.txt"), FailureKind::Io, 1, 1);
     world.pass(laptop);
     laptop.fs.clear_failures();
+    let outstanding: Vec<String> = laptop.store.queued_ops().unwrap().into_iter().map(|o| o.kind).collect();
+    assert!(
+        outstanding.iter().any(|k| k == "upload_new") && outstanding.iter().any(|k| k.starts_with("trash")),
+        "construction: both pieces of work are outstanding at the kill: {outstanding:?}"
+    );
 
     // The machine dies with both of them outstanding, and comes back to a
     // network that is not there.
@@ -16535,7 +16541,8 @@ fn a_new_file_traded_onto_a_shared_copys_name_on_a_windows_stick_settles() {
     stick.fs.file_ids(jd_sim::FileIds::DirectorySlot);
     assert!(world.settle().is_some());
     stick.fs.user_write("new.txt", A_NEW_FILE_ON_THE_STICK);
-    stick.fs.fail_next(FsOp::OpenRead, Some("new.txt"), FailureKind::Io, 1);
+    // The scan's open to hash it passes; the upload's fails.
+    stick.fs.fail_after(FsOp::OpenRead, Some("new.txt"), FailureKind::Io, 1, 1);
     world.pass(stick);
     assert!(
         stick.store.every_entry().unwrap().iter().any(|e| e.id.is_provisional()),
@@ -24469,4 +24476,522 @@ fn a_save_that_writes_its_temporary_first_and_keeps_a_backup_follows_the_origina
     assert_eq!(original.name, "doc.bak", "the original did not follow its file: {original:?}");
     assert_eq!(version_chains(&world).get(&doc).cloned().unwrap_or_default(), vec![jd_sim::sha256_hex(OLD)]);
     assert_eq!(world.server.tree().get("doc.txt").cloned().flatten(), Some(jd_sim::sha256_hex(NEW)));
+}
+
+/// The user swaps two files while the scan is listing their folder: a synced
+/// file and a new one the scan has never seen. The listing itself is torn --
+/// the name asked before the swap and the name asked after it both show the
+/// new file -- but the scan asks of each name again once the listing is done,
+/// so what it reads is the folder after the swap, whole: the synced file's own
+/// file renamed aside and a file nobody owns at its path. That is a save that
+/// keeps a backup unless the newcomer is older than the rename, which it is
+/// here, so each history keeps its own (soak runs 2456 and 2475, swaps-apart).
+#[test]
+fn a_swap_made_while_the_scan_lists_the_folder_keeps_each_history_its_own() {
+    let world = World::new(9_861, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const SYNCED: &[u8] = b"the synced file, at slot-3";
+    const FRESH: &[u8] = b"a new file at slot-2, never scanned";
+    laptop.fs.user_mkdir("Swaps");
+    laptop.fs.user_write("Swaps/slot-3.dat", SYNCED);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Swaps/slot-2.dat", FRESH);
+    // slot-2 is looked at first (names come in order): the new file. Then the
+    // user swaps the two, and slot-3 is looked at: the new file again.
+    laptop.fs.while_listing("Swaps", "slot-2.dat", |fs| {
+        fs.user_rename("Swaps/slot-2.dat", "Swaps/swap.tmp");
+        fs.user_rename("Swaps/slot-3.dat", "Swaps/slot-2.dat");
+        fs.user_rename("Swaps/swap.tmp", "Swaps/slot-3.dat");
+    });
+    let before = laptop.fs.listings_of("Swaps");
+    world.pass(laptop);
+    assert_eq!(laptop.fs.peek("Swaps/slot-2.dat").as_deref(), Some(SYNCED), "construction: the swap landed");
+    // One look (three listings: files, directories, the check): each name is
+    // asked again after the listing, so the files are seen after the swap,
+    // whole, and the look stands.
+    assert_eq!(laptop.fs.listings_of("Swaps") - before, 3, "looks at the disk");
+    assert!(issues_of(laptop, jd_core::pass::UNSETTLED).is_empty());
+    assert!(world.settle().is_some(), "never settled");
+    let (synced, fresh) = (jd_sim::sha256_hex(SYNCED), jd_sim::sha256_hex(FRESH));
+    let mut chains: std::collections::BTreeMap<i64, Vec<String>> = Default::default();
+    for v in world.server.all_versions() {
+        chains.entry(v.file_id).or_default().push(v.sha256);
+    }
+    for (id, chain) in &chains {
+        assert!(!(chain.contains(&synced) && chain.contains(&fresh)), "file {id} holds both sides: {chains:?}");
+    }
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Swaps/slot-2.dat").cloned().flatten(), Some(synced.clone()), "{tree:?}");
+    assert_eq!(tree.get("Swaps/slot-3.dat").cloned().flatten(), Some(fresh.clone()), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// The user moves a synced file from one folder into another while the scan
+/// is between them. Moved out of a folder not yet listed into one already
+/// listed, the file is at neither: a look the disk was never in, which the
+/// check finds, so the disk is read again (`looks`, 2). Moved the other way,
+/// it is seen where it was: stale but whole, and it stands (1). Either way it
+/// is not deleted, the server keeps it where the user put it, and it is not
+/// sent again as a new file.
+fn a_file_moved_between_folders_while_the_scan_walks_them(seed: u64, from: &str, to: &str, listing: &str, after: &str, looks: u32) {
+    let world = World::new(seed, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const KEPT: &[u8] = b"a synced file the user moves between folders";
+    laptop.fs.user_mkdir("A");
+    laptop.fs.user_mkdir("B");
+    laptop.fs.user_write("A/a.txt", b"A's own file");
+    laptop.fs.user_write("B/b.txt", b"B's own file");
+    laptop.fs.user_write(&format!("{from}/x.txt"), KEPT);
+    assert!(world.settle().is_some());
+    let x = world.server.files().into_iter().find(|f| f.name == "x.txt").expect("on the server").id;
+    let (src, dst) = (format!("{from}/x.txt"), format!("{to}/x.txt"));
+    laptop.fs.while_listing(listing, after, move |fs| fs.user_rename(&src, &dst));
+    let before = laptop.fs.listings_of(from);
+    world.pass(laptop);
+    assert_eq!(laptop.fs.peek(&format!("{to}/x.txt")).as_deref(), Some(KEPT), "construction: the move landed");
+    // Three listings of a folder to a look (files, directories, the check).
+    assert_eq!(laptop.fs.listings_of(from) - before, 3 * looks, "looks at the disk");
+    assert!(world.settle().is_some(), "never settled");
+    let f = world.server.files().into_iter().find(|f| f.id == x).expect("the file is still the server's");
+    assert!(!f.trashed, "the file the user moved was trashed: {f:?}");
+    let tree = world.server.tree();
+    assert_eq!(tree.get(&format!("{to}/x.txt")).cloned().flatten(), Some(jd_sim::sha256_hex(KEPT)), "{tree:?}");
+    assert_eq!(world.server.files().into_iter().filter(|f| f.name == "x.txt" && !f.trashed).count(), 1, "the file was sent again as a new one");
+    assert_converged(&world);
+}
+
+#[test]
+fn a_file_moved_into_a_folder_already_listed_is_never_deleted() {
+    // The walk lists B before A (a stack: the last child first).
+    a_file_moved_between_folders_while_the_scan_walks_them(9_862, "A", "B", "B", "b.txt", 2);
+}
+
+#[test]
+fn a_file_moved_out_of_a_folder_already_listed_is_never_sent_twice() {
+    a_file_moved_between_folders_while_the_scan_walks_them(9_863, "B", "A", "B", "b.txt", 1);
+}
+
+/// The same swap, landing while the scan checks its look against the disk
+/// (the third listing of the folder in a look): the check is torn the way
+/// any listing is, and a torn check differs from the look, so the disk is
+/// read again rather than the look let stand.
+#[test]
+fn a_swap_made_while_the_scan_checks_its_look_is_read_again() {
+    let world = World::new(9_864, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const SYNCED: &[u8] = b"the synced file, at slot-3";
+    const FRESH: &[u8] = b"a new file at slot-2, never scanned";
+    laptop.fs.user_mkdir("Swaps");
+    laptop.fs.user_write("Swaps/slot-3.dat", SYNCED);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Swaps/slot-2.dat", FRESH);
+    laptop.fs.during_listings("Swaps", "slot-2.dat", 2, 1, |fs| {
+        fs.user_rename("Swaps/slot-2.dat", "Swaps/swap.tmp");
+        fs.user_rename("Swaps/slot-3.dat", "Swaps/slot-2.dat");
+        fs.user_rename("Swaps/swap.tmp", "Swaps/slot-3.dat");
+    });
+    let before = laptop.fs.listings_of("Swaps");
+    world.pass(laptop);
+    assert_eq!(laptop.fs.peek("Swaps/slot-2.dat").as_deref(), Some(SYNCED), "construction: the swap landed");
+    assert_eq!(laptop.fs.listings_of("Swaps") - before, 6, "a torn check let the look stand");
+    assert!(world.settle().is_some(), "never settled");
+    let (synced, fresh) = (jd_sim::sha256_hex(SYNCED), jd_sim::sha256_hex(FRESH));
+    for (id, chain) in &version_chains(&world) {
+        assert!(!(chain.contains(&synced) && chain.contains(&fresh)), "file {id} holds both sides");
+    }
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Swaps/slot-2.dat").cloned().flatten(), Some(synced), "{tree:?}");
+    assert_eq!(tree.get("Swaps/slot-3.dat").cloned().flatten(), Some(fresh), "{tree:?}");
+    assert!(issues_of(laptop, jd_core::pass::UNSETTLED).is_empty());
+    assert_converged(&world);
+}
+
+/// What the user does in a folder that never holds still while it is read.
+#[derive(Clone, Copy, Debug)]
+enum WhileBusy {
+    Edit,
+    Delete,
+    Create,
+    SaveKeepingABackup,
+}
+
+/// A folder in which two files trade names during every listing of it, and
+/// the user doing `what` to another file there, beside an edit in a calm
+/// folder. Each look is torn there, so the folder is held: nothing in it is
+/// judged -- not edited, deleted, created or replaced -- and nothing is done
+/// to it, while the calm folder syncs. Held three passes running, the user
+/// is told which folder; once it holds still the pass reads it whole, what
+/// the user did goes up, and the notice is withdrawn.
+fn a_folder_that_never_holds_still(seed: u64, what: WhileBusy) {
+    let world = World::new(seed, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const CHURN_A: &[u8] = b"churn a";
+    const CHURN_B: &[u8] = b"churn b";
+    const KEPT: &[u8] = b"the synced file the user works on";
+    const NEW: &[u8] = b"what the user wrote";
+    laptop.fs.user_mkdir("Busy");
+    laptop.fs.user_mkdir("Calm");
+    laptop.fs.user_write("Busy/churn-a.dat", CHURN_A);
+    laptop.fs.user_write("Busy/churn-b.dat", CHURN_B);
+    laptop.fs.user_write("Busy/keep.txt", KEPT);
+    laptop.fs.user_write("Calm/calm.txt", b"calm, before");
+    assert!(world.settle().is_some());
+    let file = |name: &str| world.server.files().into_iter().find(|f| f.name == name && !f.trashed);
+    let keep = file("keep.txt").expect("on the server").id;
+    let versions_of = |id: i64| version_chains(&world).get(&id).cloned().unwrap_or_default();
+    let kept_versions = versions_of(keep);
+
+    match what {
+        WhileBusy::Edit => laptop.fs.user_write("Busy/keep.txt", NEW),
+        WhileBusy::Delete => laptop.fs.user_remove("Busy/keep.txt"),
+        WhileBusy::Create => laptop.fs.user_write("Busy/new.txt", NEW),
+        WhileBusy::SaveKeepingABackup => {
+            laptop.fs.user_rename("Busy/keep.txt", "Busy/keep.txt~");
+            laptop.fs.user_write("Busy/keep.txt", NEW);
+        }
+    }
+    laptop.fs.user_write("Calm/calm.txt", b"calm, after");
+    laptop.fs.during_listings("Busy", "churn-a.dat", 0, u32::MAX, |fs| {
+        fs.user_rename("Busy/churn-a.dat", "Busy/churn.tmp");
+        fs.user_rename("Busy/churn-b.dat", "Busy/churn-a.dat");
+        fs.user_rename("Busy/churn.tmp", "Busy/churn-b.dat");
+    });
+
+    for pass in 1..=3 {
+        world.pass(laptop);
+        let told = issues_of(laptop, jd_core::pass::UNSETTLED);
+        if pass < 3 {
+            assert!(told.is_empty(), "{what:?}: told after {pass} passes: {told:?}");
+        } else {
+            assert_eq!(told.len(), 1, "{what:?}: not told after {pass} held passes");
+            assert!(told[0].contains("Busy") && !told[0].contains("Calm"), "{what:?}: {told:?}");
+        }
+    }
+    // Nothing in the busy folder was judged.
+    assert_eq!(versions_of(keep), kept_versions, "{what:?}: the held file got a version");
+    assert!(file("keep.txt").is_some_and(|f| f.id == keep), "{what:?}: the held file was trashed or replaced");
+    assert!(file("new.txt").is_none() && file("keep.txt~").is_none(), "{what:?}: a held file was sent as new");
+    for name in ["churn-a.dat", "churn-b.dat"] {
+        let f = file(name).expect("the churning files stay");
+        assert_eq!(versions_of(f.id).len(), 1, "{what:?}: a trade read as an edit of {name}");
+    }
+    // The calm folder synced all along.
+    assert_eq!(
+        world.server.tree().get("Calm/calm.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"calm, after")),
+        "{what:?}: a held folder held its sibling"
+    );
+
+    laptop.fs.stop_listing_changes();
+    assert!(world.settle().is_some(), "{what:?}: never settled once still");
+    assert!(issues_of(laptop, jd_core::pass::UNSETTLED).is_empty(), "{what:?}: the notice outlived the hold");
+    let tree = world.server.tree();
+    let new = Some(jd_sim::sha256_hex(NEW));
+    match what {
+        WhileBusy::Edit => {
+            assert_eq!(tree.get("Busy/keep.txt").cloned().flatten(), new, "{tree:?}");
+            assert!(file("keep.txt").is_some_and(|f| f.id == keep));
+        }
+        WhileBusy::Delete => assert!(file("keep.txt").is_none(), "{tree:?}"),
+        WhileBusy::Create => assert_eq!(tree.get("Busy/new.txt").cloned().flatten(), new, "{tree:?}"),
+        WhileBusy::SaveKeepingABackup => {
+            assert_eq!(tree.get("Busy/keep.txt").cloned().flatten(), new, "{tree:?}");
+            assert!(file("keep.txt").is_some_and(|f| f.id == keep), "the save did not follow the original");
+            assert_eq!(tree.get("Busy/keep.txt~").cloned().flatten(), Some(jd_sim::sha256_hex(KEPT)), "{tree:?}");
+        }
+    }
+    let (a, b) = (jd_sim::sha256_hex(CHURN_A), jd_sim::sha256_hex(CHURN_B));
+    for (id, chain) in &version_chains(&world) {
+        assert!(!(chain.contains(&a) && chain.contains(&b)), "{what:?}: file {id} holds both churning files");
+    }
+    assert_converged(&world);
+}
+
+#[test]
+fn an_edit_in_a_folder_that_never_holds_still_waits_until_it_does() {
+    a_folder_that_never_holds_still(9_865, WhileBusy::Edit);
+}
+
+#[test]
+fn a_delete_in_a_folder_that_never_holds_still_waits_until_it_does() {
+    a_folder_that_never_holds_still(9_866, WhileBusy::Delete);
+}
+
+#[test]
+fn a_new_file_in_a_folder_that_never_holds_still_waits_until_it_does() {
+    a_folder_that_never_holds_still(9_867, WhileBusy::Create);
+}
+
+#[test]
+fn a_save_in_a_folder_that_never_holds_still_waits_until_it_does() {
+    a_folder_that_never_holds_still(9_868, WhileBusy::SaveKeepingABackup);
+}
+
+/// The swap lands after the scan has listed the folder and before it looks
+/// at slot-2 (`after_reads`, nothing read first): the look at each file is
+/// after the swap, and a file's change time comes from that same look, so
+/// the newcomer at slot-2 shows its own birth against the synced file's own
+/// change time and each history keeps its own. Read from the listing, the
+/// change times were the files' from before the swap, the newcomer's
+/// pairing with the synced file's rename was lost, and the swap read as a
+/// save (reviewer1's probe, seed 9 901).
+#[test]
+fn a_swap_landing_between_the_listing_and_the_look_at_a_file_keeps_each_history_its_own() {
+    swap_during_the_look(9_901, 0, 0, 1);
+}
+
+/// The same, with both files older than the pass, so that what a look hashes
+/// is cached and read back by every look after (reviewer1's R1).
+#[test]
+fn a_swap_landing_between_the_listing_and_the_look_at_older_files_keeps_each_history_its_own() {
+    swap_during_the_look(9_903, 0, 3_600, 1);
+}
+
+/// The swap lands after the scan has read slot-2's identity and before it
+/// reads its bytes. Hashed by name, the bytes were the synced file's under
+/// the newcomer's identity, and cached so: with the files older than the
+/// pass every look after read the cache back, the disk read again changed
+/// nothing, and the newcomer's bytes never went up (reviewer1's R1). Hashed
+/// through a handle that says which file it opened, the file hashed is not
+/// the file looked at, so the name is looked at again within the same look,
+/// and each history keeps its own.
+#[test]
+fn a_swap_landing_between_a_files_identity_and_its_bytes_is_looked_at_again() {
+    swap_during_the_look(9_902, 1, 0, 1);
+}
+
+#[test]
+fn a_swap_landing_between_an_older_files_identity_and_its_bytes_is_looked_at_again() {
+    swap_during_the_look(9_904, 1, 3_600, 1);
+}
+
+/// A synced file at slot-3 and a newcomer at slot-2, `age_secs` old by the
+/// pass, trade names once `reads` reads of slot-2 have passed in the scan's
+/// pass; the pass looks at the disk `looks` times.
+fn swap_during_the_look(seed: u64, reads: u32, age_secs: u64, looks: u32) {
+    let world = World::new(seed, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    const SYNCED: &[u8] = b"the synced file, at slot-3";
+    const FRESH: &[u8] = b"a new file at slot-2, never scanned";
+    laptop.fs.user_mkdir("Swaps");
+    laptop.fs.user_write("Swaps/slot-3.dat", SYNCED);
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Swaps/slot-2.dat", FRESH);
+    world.clock.advance_secs(age_secs);
+    laptop.fs.after_reads("Swaps/slot-2.dat", reads, |fs| {
+        fs.user_rename("Swaps/slot-2.dat", "Swaps/swap.tmp");
+        fs.user_rename("Swaps/slot-3.dat", "Swaps/slot-2.dat");
+        fs.user_rename("Swaps/swap.tmp", "Swaps/slot-3.dat");
+    });
+    let before = laptop.fs.listings_of("Swaps");
+    world.pass(laptop);
+    assert_eq!(laptop.fs.peek("Swaps/slot-2.dat").as_deref(), Some(SYNCED), "construction: the swap landed during the pass");
+    assert_eq!(laptop.fs.listings_of("Swaps") - before, 3 * looks, "looks at the disk");
+    assert!(world.settle().is_some(), "never settled");
+    let (synced, fresh) = (jd_sim::sha256_hex(SYNCED), jd_sim::sha256_hex(FRESH));
+    for (id, chain) in &version_chains(&world) {
+        assert!(!(chain.contains(&synced) && chain.contains(&fresh)), "file {id} holds both sides: {:?}", version_chains(&world));
+    }
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Swaps/slot-2.dat").cloned().flatten(), Some(synced), "{tree:?}");
+    assert_eq!(tree.get("Swaps/slot-3.dat").cloned().flatten(), Some(fresh), "{tree:?}");
+    assert_converged(&world);
+}
+
+/// Another device deletes a folder this one holds because it never holds
+/// still, while a file the user wrote there has not reached the server
+/// (reviewer1's N1). The server's delete still comes down: the folder goes
+/// to this computer's trash, and the unsynced file is rescued out of it
+/// first and sent. The folder's records wait for a look that holds still
+/// before they are let go, and are once the folder is quiet.
+#[test]
+fn a_server_delete_of_a_folder_that_never_holds_still_keeps_the_users_unsynced_file() {
+    let world = World::new(9_950, &["laptop", "desk"]);
+    let laptop = world.device("laptop");
+    let desk = world.device("desk");
+    const WORK: &[u8] = b"the user's work, not yet synced";
+    laptop.fs.user_mkdir("Busy");
+    laptop.fs.user_write("Busy/churn-a.dat", b"churn a");
+    laptop.fs.user_write("Busy/churn-b.dat", b"churn b");
+    laptop.fs.user_write("Busy/keep.txt", b"kept");
+    assert!(world.settle().is_some());
+    laptop.fs.user_write("Busy/new.txt", WORK);
+    laptop.fs.during_listings("Busy", "churn-a.dat", 0, u32::MAX, |fs| {
+        fs.user_rename("Busy/churn-a.dat", "Busy/churn.tmp");
+        fs.user_rename("Busy/churn-b.dat", "Busy/churn-a.dat");
+        fs.user_rename("Busy/churn.tmp", "Busy/churn-b.dat");
+    });
+    desk.fs.user_remove("Busy");
+    world.pass(desk);
+    for _ in 0..4 {
+        world.pass(laptop);
+    }
+    laptop.fs.stop_listing_changes();
+    assert!(world.settle().is_some(), "never settled once still");
+    let work = Some(jd_sim::sha256_hex(WORK));
+    assert!(
+        world.server.tree().iter().any(|(p, sha)| p.ends_with("new.txt") && *sha == work),
+        "the user's unsynced file was lost: {:?}",
+        world.server.tree()
+    );
+    assert!(!world.server.tree().keys().any(|p| p.starts_with("Busy")), "the deleted folder came back: {:?}", world.server.tree());
+    assert_converged(&world);
+}
+
+
+/// The keep-record belt asks the disk where a sealed file stands, and asks
+/// it with a look that is checked (reviewer1's R3). The sealed file's move
+/// out of a vault subfolder is in flight when the server trashes the
+/// subfolder; while the trash's look walks the vault, the user moves the
+/// file again, from a folder not yet walked into one already walked. Read
+/// unchecked, the file stood nowhere: its record was let go with the
+/// folder, and the belt never fired. Checked, the look is read again, finds
+/// the file, and the record is kept.
+#[test]
+fn a_sealed_file_moved_while_its_folders_trash_reads_the_disk_keeps_its_record() {
+    let vault = SimVault::new(9_979);
+    let mut world = World::new(9_979, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    let a = world.server.seed_encrypted_folder(Some(private), "A");
+    let b = world.server.seed_encrypted_folder(Some(private), "B");
+    world.server.seed_vault_file(Some(a), "a.txt", b"a", &vault.public_key_b64);
+    world.server.seed_vault_file(Some(b), "b.txt", b"b", &vault.public_key_b64);
+    world.server.seed_vault_file(Some(sub), "memo.txt", b"sealed, and moved while the disk is read", &vault.public_key_b64);
+    assert!(world.settle().is_some(), "it should arrive first");
+    let laptop = world.device("laptop");
+    assert!(laptop.fs.exists("Private/Sub/memo.txt"));
+
+    laptop.fs.user_rename("Private/Sub/memo.txt", "Private/A/memo.txt");
+    laptop.net.set_faults(NetFaults {
+        refuse_before: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    world.pass(laptop);
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "move_remote"),
+        "the refused move is not queued: the arming did not take"
+    );
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": sub }))
+        .unwrap();
+    // The pass's own look lists B three times; the trash's look is next.
+    laptop.fs.during_listings("Private/B", "b.txt", 3, 1, |fs| fs.user_rename("Private/A/memo.txt", "Private/B/memo.txt"));
+    world.pass(laptop);
+    assert!(laptop.fs.exists("Private/B/memo.txt"), "construction: the second move did not land");
+    let issues = laptop.store.open_issues().unwrap();
+    let kept: Vec<_> = issues.iter().filter(|i| i.kind == "sealed_record_kept").collect();
+    assert_eq!(kept.len(), 1, "the sealed file's record was let go: {issues:?}");
+    assert!(kept[0].detail.contains("memo.txt"), "{}", kept[0].detail);
+}
+
+/// Another device deletes a plain folder while an unrelated folder here never
+/// holds still (reviewer1's L2). The folder's trash and the letting go of its
+/// records do not wait on the churn: a plain child a torn look missed would be
+/// met where it stands and sent as new either way, so there is nothing to wait
+/// for, and waiting tied one folder's delete to churn anywhere on the disk.
+#[test]
+fn a_plain_folders_delete_does_not_wait_on_churn_elsewhere() {
+    let world = World::new(9_952, &["laptop", "desk"]);
+    let laptop = world.device("laptop");
+    let desk = world.device("desk");
+    laptop.fs.user_mkdir("Busy");
+    laptop.fs.user_write("Busy/churn-a.dat", b"churn a");
+    laptop.fs.user_write("Busy/churn-b.dat", b"churn b");
+    laptop.fs.user_mkdir("Gone");
+    laptop.fs.user_write("Gone/g.txt", b"plain, synced");
+    assert!(world.settle().is_some());
+    laptop.fs.during_listings("Busy", "churn-a.dat", 0, u32::MAX, |fs| {
+        fs.user_rename("Busy/churn-a.dat", "Busy/churn.tmp");
+        fs.user_rename("Busy/churn-b.dat", "Busy/churn-a.dat");
+        fs.user_rename("Busy/churn.tmp", "Busy/churn-b.dat");
+    });
+    desk.fs.user_remove("Gone");
+    world.pass(desk);
+    for _ in 0..2 {
+        world.pass(laptop);
+    }
+    assert!(!laptop.fs.exists("Gone"), "the server's delete did not come down");
+    let left: Vec<String> = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e.effective_local_name(), "Gone" | "g.txt"))
+        .map(|e| e.effective_local_name().to_string())
+        .collect();
+    assert!(left.is_empty(), "the deleted folder's records wait on churn elsewhere: {left:?}");
+    assert!(laptop.store.queued_ops().unwrap().is_empty(), "{:?}", laptop.store.queued_ops().unwrap());
+    laptop.fs.stop_listing_changes();
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+}
+
+/// A sealed file's folder is deleted on the server while the vault here never
+/// holds still (reviewer1's L5, the wait arm of R3). The folder's records
+/// wait: nothing is let go, and nothing reaches the server in the clear,
+/// while no look of the disk settles. Once it holds still the trash
+/// finishes, the sealed file's record is kept, and the belt says so.
+#[test]
+fn a_sealed_files_folder_deleted_while_its_vault_never_holds_still_waits_for_a_still_look() {
+    let vault = SimVault::new(9_980);
+    let mut world = World::new(9_980, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    let b = world.server.seed_encrypted_folder(Some(private), "B");
+    world.server.seed_vault_file(Some(b), "churn-a.dat", b"churn a", &vault.public_key_b64);
+    world.server.seed_vault_file(Some(b), "churn-b.dat", b"churn b", &vault.public_key_b64);
+    const BODY: &[u8] = b"sealed, and waited for";
+    let memo = world.server.seed_vault_file(Some(sub), "memo.txt", BODY, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "it should arrive first");
+    let laptop = world.device("laptop");
+
+    laptop.fs.user_rename("Private/Sub/memo.txt", "Private/memo.txt");
+    laptop.net.set_faults(NetFaults {
+        refuse_before: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    world.pass(laptop);
+    laptop.net.set_faults(NetFaults::none());
+    world
+        .server
+        .action("drive_trash", &serde_json::json!({ "entity_type": "folder", "entity_id": sub }))
+        .unwrap();
+    laptop.fs.during_listings("Private/B", "churn-a.dat", 0, u32::MAX, |fs| {
+        fs.user_rename("Private/B/churn-a.dat", "Private/B/churn.tmp");
+        fs.user_rename("Private/B/churn-b.dat", "Private/B/churn-a.dat");
+        fs.user_rename("Private/B/churn.tmp", "Private/B/churn-b.dat");
+    });
+    for _ in 0..3 {
+        world.pass(laptop);
+        assert!(
+            laptop.store.get_entry(jd_core::EntityId::file(memo)).unwrap().is_some(),
+            "the sealed file's record was let go while the disk would not hold still"
+        );
+        no_plaintext_of(&world, BODY);
+    }
+    assert!(
+        laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "trash_local"),
+        "the folder's trash did not wait: {:?}",
+        laptop.store.queued_ops().unwrap()
+    );
+    laptop.fs.stop_listing_changes();
+    assert!(world.settle().is_some(), "never settled once still");
+    no_plaintext_of(&world, BODY);
+    let kept: Vec<String> = laptop.store.open_issues().unwrap().into_iter().filter(|i| i.kind == "sealed_record_kept").map(|i| i.detail).collect();
+    assert!(kept.len() == 1 && kept[0].contains("memo.txt"), "the belt did not keep the record and say so: {kept:?}");
+    // The server's copy went with its folder; the file here goes up again,
+    // sealed, where it stands.
+    assert!(laptop.fs.exists("Private/memo.txt"));
+    assert!(
+        world.server.files().into_iter().any(|f| !f.trashed && f.encrypted && f.folder == Some(private) && f.id != memo),
+        "the sealed file is not back on the server, sealed: {:?}",
+        world.server.files()
+    );
+    assert_converged(&world);
 }

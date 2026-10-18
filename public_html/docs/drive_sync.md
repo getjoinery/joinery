@@ -238,7 +238,8 @@ The client is this loop, run over and over:
 2. **Absorb** what the server reports into the remote side of `entries`. An
    observation, never an agreement.
 3. **Resolve names** for this filesystem ([below](#filesystem-personalities)).
-4. **Walk the disk**, hashing what the fingerprint cache says may have changed.
+4. **Walk the disk**, hashing what the fingerprint cache says may have changed,
+   and check the walk against the disk ([below](#a-look-the-disk-was-in)).
 5. **Pair** what is on disk against what the engine believes it is called.
 6. **Decide**, per entry, through the reconciliation matrix.
 7. **Order** the decided actions into a safe sequence.
@@ -252,6 +253,57 @@ will look for again. And **deltas are measured from the last agreement, never
 from the last observation**: an edit reported once and interrupted before it
 landed is reported again next pass, and the pass after, until the bytes are
 actually here.
+
+### A look the disk was in
+
+A walk is not one moment. It lists a folder's names, then looks at each file
+by its name, reading its identity and change time in that one look; and the
+directories are a second walk. A rename landing between two of those reads is
+seen half before and half after: a file moved from a folder not yet walked
+into one already walked stands nowhere, and read that way it was deleted; a
+swap landing between two looks shows one file at both names.
+
+A file's bytes are hashed through one open handle that says which file it
+opened, and that neither follows a link nor waits on a pipe put at the name. A
+file that is not the one looked at is looked at again, up to three times.
+Where the volume shows file identities, a name that will not hold still that
+long is left out of the look. On FAT and exFAT, which show none, "the one
+looked at" means its size and time, and the last read is taken as it stands. A
+hash is cached only for the file it was read from, so a later look never reads
+back another file's bytes.
+
+So once both walks are done, every folder is listed again and checked against
+what the walks handed on, by identity only: which file and which directory
+stands at which path. Size and time are not compared — a file being written to
+never holds still, and an edit is the next pass's to read. A file seen where
+it stands, gone since, or new since and nobody's is consistent; anything else
+— one file at two paths, a file the look saw elsewhere than it stands, a file
+a record owns standing where the look did not see it — tears the folders
+holding each of those paths and the folder its record last stood in. A check
+listing torn the same way differs from the walk too, so it errs towards
+another read, never towards a walk let stand.
+
+Torn, the disk is read again, up to three times. A folder still torn after the
+third is **held** for the pass, with everything under it: no file in it is
+paired, judged edited, deleted, created or replaced, no folder in it is read
+as moved or deleted, and no local change the user made there is judged. A tear
+at the top of the sync folder holds the whole tree, since every path is under
+it. The rest of the disk is judged as read, and what the server changed still
+comes down: a download lands only on the file it was planned for, and a folder
+the server deleted still goes to this computer's trash, with any file in it
+that never reached the server rescued out first. A folder held three passes
+running raises `folder_would_not_hold_still`, naming it; the next pass that
+reads it whole syncs what changed there and withdraws the issue.
+
+The trash of a folder the server deleted asks the disk the same checked way
+before it lets the folder's records go. Where the folder holds a sealed
+record, it waits for a look that holds still; a plain folder goes on with the
+look it has, since a plain child that look missed is met where it stands and
+sent as new.
+
+On FAT and exFAT a file carries no identity, so only directories are compared,
+and only on macOS, where they keep one; elsewhere on those volumes the check
+stands aside.
 
 ### When a pass runs
 
@@ -1224,6 +1276,7 @@ tray reads from.
 | `vault_relink` | the vault key was replaced in the browser and this computer holds the old one, so it needs linking again ([Encrypted files and folders](#encrypted-files-and-folders)) | the probe's key is the one this device holds again, the account has no vault set up, or this device holds no vault key |
 | `keeps_failing` | work that keeps failing (below) | nothing is left at the backoff cap |
 | `deletes_held` | deletes the mass-delete guard holds ([The mass-delete guard](#the-mass-delete-guard)) | nothing is held |
+| `folder_would_not_hold_still` | files kept changing in these folders while this computer read them, three passes running, so nothing in them is synced yet ([A look the disk was in](#a-look-the-disk-was-in)) | every folder it names is read whole |
 
 Two event issues are withdrawn too, when what they describe is undone:
 `parked` (a copy was moved aside over a name clash) once the clash is resolved
