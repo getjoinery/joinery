@@ -19605,6 +19605,11 @@ fn a_raced_drag_out_of_a_vault_nobody_contested_is_held_not_undone() {
 /// server ends with one copy, owned by the user's own file. Folded in, the
 /// server's record kept no agreement, the download laid a second copy beside
 /// the user's file, and the user's file -- recordless -- went up again.
+///
+/// And nothing is downloaded over it (B5): the adoption knows the server
+/// holds these very bytes, so the download the feed planned stands down.
+/// Not knowing, it fetched the same bytes and renamed them over the user's
+/// file, which on a real disk is another file at the name.
 #[test]
 fn an_upload_learned_twice_is_one_file_not_two() {
     let world = World::new(11_873, &["a", "b"]);
@@ -19620,6 +19625,8 @@ fn an_upload_learned_twice_is_one_file_not_two() {
     b.fs.user_rename("x.dat", "F/c.dat");
     world.pass(b);
     let root = jd_vfs::Vfs::root(&a.fs).unwrap();
+    let mine = jd_vfs::Vfs::fingerprint(&a.fs, &root.join("F/c.dat")).unwrap().expect("a's file").identity();
+    let landed_before = a.fs.landed_since(0).len();
     a.fs.fail_next(FsOp::Rename, None, FailureKind::Io, 1);
     world.pass(a);
     a.fs.user_rename("x.dat", "x2.dat");
@@ -19644,6 +19651,8 @@ fn an_upload_learned_twice_is_one_file_not_two() {
     assert_eq!(here.len(), 1, "the user's bytes stand twice on this disk: {here:?}");
     let owner = a.store.every_entry().unwrap().into_iter().find(|e| e.own_file == Some(here[0].1));
     assert!(owner.is_some_and(|e| !e.id.is_provisional()), "the user's file is not the server file's own");
+    assert_eq!(a.fs.landed_since(landed_before), Vec::new(), "a download landed over the user's own file");
+    assert_eq!(here[0].1, mine, "the file at the name is not the user's own");
 }
 
 /// R1881, seed 9137's shape. A laptop's user moves a file into a folder they
