@@ -180,11 +180,6 @@ pub struct DirEntry {
     /// (`Personality::id_tie_break`), and 0 everywhere else. Never identity:
     /// nothing that reads a fingerprint's id reads this.
     pub tie_break_id: u64,
-    /// A file's change time, in ns since the epoch, where the volume tells a
-    /// save from a swap by it (`Personality::tells_saves_from_swaps`), and 0
-    /// everywhere else. Beside the fingerprint, never in it: a rename or a
-    /// change of permissions moves it, and neither is an edit.
-    pub change_ns: u64,
 }
 
 impl Fingerprint {
@@ -325,6 +320,15 @@ pub trait Vfs: Send + Sync {
     /// and that reading is load-bearing (`make_room`). A directory's identity
     /// is asked through [`Vfs::directory_id`] or read off its [`DirEntry`].
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>>;
+    /// The file's fingerprint (`Vfs::fingerprint`) and its change time, in ns
+    /// since the epoch, from one read of it: both are that one file's, which
+    /// a change time read in a listing and an identity read after it are
+    /// not once a rename lands between the two. The change time is 0 where
+    /// the volume does not tell a save from a swap by it
+    /// (`Personality::tells_saves_from_swaps`). Beside the fingerprint, never
+    /// in it: a rename or a change of permissions moves it, and neither is an
+    /// edit.
+    fn fingerprint_and_change_time(&self, path: &Path) -> VfsResult<Option<(Fingerprint, u64)>>;
     /// The identity of the DIRECTORY at this path -- its inode, or file index
     /// on Windows -- stable across renames and moves within a volume, exactly
     /// as a file's is. `None` for a file, a symlink, or nothing. `Some(0)`

@@ -372,9 +372,23 @@ pub fn run_pass(
     placeholders_follow_the_server(env, key_for)?;
 
     // ---- what this computer did --------------------------------------------
-    let observed = observe(env)?;
+    // Files and directories from one look, checked against the disk before
+    // anything reads them (`look_at_the_disk`). What stands in a folder that
+    // would not hold still is held: not paired, not adopted, not judged,
+    // and neither is a record that last stood there or whose own file does.
+    let look = look_at_the_disk(env)?;
+    say_which_folders_would_not_hold_still(env, &look.unsettled)?;
+    let unsettled = look.unsettled;
+    let (held_files, observed): (Vec<ObservedFile>, Vec<ObservedFile>) =
+        look.files.into_iter().partition(|o| under_unsettled(&unsettled, &o.path));
+    let held_identities: std::collections::HashSet<jd_vfs::FileIdentity> =
+        held_files.iter().map(|o| o.fingerprint.identity()).filter(|i| i.file_id != 0).collect();
     let tie_breaks = tie_breaks_for_this_pass(env, &observed)?;
-    let known = known_local(env, &tie_breaks, &observed)?;
+    let known: Vec<KnownLocal> = known_local(env, &tie_breaks, &observed)?
+        .into_iter()
+        .filter(|k| !under_unsettled(&unsettled, &k.path))
+        .filter(|k| !k.own_file.is_some_and(|o| held_identities.contains(&o)))
+        .collect();
     let strong_volume = env.vfs.personality().stable_file_identity;
     let awaiting = awaiting_bytes(env)?;
     let scan = pair_files(&known, &observed, &awaiting, strong_volume);
@@ -399,7 +413,9 @@ pub fn run_pass(
     // the loop below can treat it like any other entry. Folders first: a new
     // file inside a new folder cannot say where it lives until the folder has
     // one.
-    let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births, fat_dirs) = observed_dirs_and_tie_breaks(env)?;
+    let (dirs_on_disk, dir_identity, dir_tie_breaks, dir_births, fat_dirs) = look.dirs;
+    // A folder that would not hold still is not adopted, nor anything under it.
+    let dirs_on_disk: Vec<String> = dirs_on_disk.into_iter().filter(|d| !under_unsettled(&unsettled, d)).collect();
     // On a Mac FAT disk this reads the zero map, and returns at its
     // `stable_file_identity` gate besides: the pairs live in `fat_dirs`
     // alone. Keep both so. The pair a record holds at its remade old name,
@@ -450,6 +466,7 @@ pub fn run_pass(
         &traded_with_a_vault,
     )?;
     hold_what_a_standing_park_holds(env, &mut folders)?;
+    hold_what_would_not_hold_still(env, &mut folders, &unsettled)?;
     lapse_parked_vaults_that_stand_nowhere(env, &folders, &followed, &mut folder_ids)?;
     point_paths_at_the_folders_whose_directories_they_are(env, &dir_identity, &mut folder_ids)?;
     note_the_tie_breaks_of_the_folders(env, &folder_ids, &dir_tie_breaks, &tie_breaks)?;
@@ -3008,28 +3025,66 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
             match child.kind {
                 jd_vfs::EntryKind::Directory => queue.push((full, path)),
                 jd_vfs::EntryKind::File => {
-                    let Some(fingerprint) = env.vfs.fingerprint(&full)? else {
-                        continue;
-                    };
-                    // Without file ids the cache is kept by path, and is only
-                    // as good as the watcher that forgets it
-                    // (`Store::forget_path_hashes`).
-                    let cached = if positional {
-                        env.store.cached_hash_at(&path, fingerprint, granularity)?
-                    } else {
-                        env.store.cached_hash(fingerprint, granularity)?
-                    };
-                    let sha = match cached {
-                        Some(s) => s,
-                        None => {
-                            let s = env.vfs.hash(&full)?;
-                            if positional {
-                                env.store.cache_hash_at(&path, fingerprint, &s, now_ns)?;
-                            } else {
-                                env.store.cache_hash(fingerprint, &s, None, now_ns)?;
-                            }
-                            s
+                    // The change time from the same read as the identity:
+                    // taken from the listing, it was whatever file stood at
+                    // the name then, and a swap landing between the two gave
+                    // a newcomer the change time of the file it swapped with
+                    // (`newcomer_was_already_there`). And the bytes from the
+                    // file looked at: hashed by name after the look, they were
+                    // whatever file stood there by then, cached under the
+                    // looked-at file's key, and read back by every look after
+                    // until that file next changed -- the look read again, the
+                    // same wrong bytes. So the bytes are read through a handle
+                    // that says which file it opened (`Vfs::open_file`, which
+                    // neither follows a link nor waits on a pipe put at the
+                    // name), and a file that is not the one looked at is
+                    // looked at again. Where ids are shown, "the one looked
+                    // at" is its identity, and a name that will not hold still
+                    // for `LOOKS_AT_A_FILE` looks is left out of this look: a
+                    // file a record owns, seen nowhere, tears its folder in
+                    // the check (`tears`), which holds it. Where they are not
+                    // (FAT, exFAT), it is the whole fingerprint, and the last
+                    // read is taken as it stands, uncached: there the check
+                    // compares no files, and a file left out reads as deleted.
+                    let mut looked = None;
+                    for attempt in 1..=LOOKS_AT_A_FILE {
+                        let Some((fingerprint, change_ns)) = env.vfs.fingerprint_and_change_time(&full)? else {
+                            break;
+                        };
+                        // Without file ids the cache is kept by path, and is
+                        // only as good as the watcher that forgets it
+                        // (`Store::forget_path_hashes`).
+                        let cached = if positional {
+                            env.store.cached_hash_at(&path, fingerprint, granularity)?
+                        } else {
+                            env.store.cached_hash(fingerprint, granularity)?
+                        };
+                        if let Some(sha) = cached {
+                            looked = Some((fingerprint, change_ns, sha));
+                            break;
                         }
+                        let Some((mut reader, opened)) = env.vfs.open_file(&full)? else {
+                            continue;
+                        };
+                        let same = if positional { opened == fingerprint } else { opened.identity() == fingerprint.identity() };
+                        if !same && !(positional && attempt == LOOKS_AT_A_FILE) {
+                            continue;
+                        }
+                        let sha = crate::execute::hash_of(&mut *reader)?;
+                        // Cached only as the file it was looked at: one
+                        // written to meanwhile is hashed again next time.
+                        if opened == fingerprint {
+                            if positional {
+                                env.store.cache_hash_at(&path, fingerprint, &sha, now_ns)?;
+                            } else {
+                                env.store.cache_hash(fingerprint, &sha, None, now_ns)?;
+                            }
+                        }
+                        looked = Some((fingerprint, change_ns, sha));
+                        break;
+                    }
+                    let Some((fingerprint, change_ns, sha)) = looked else {
+                        continue;
                     };
                     // Listed inside a vault on a disk with no file identities:
                     // these bytes are sealed from now on (owner decision Q4),
@@ -3047,7 +3102,7 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                         sha256: sha,
                         tie_break_id: child.tie_break_id,
                         in_a_vault,
-                        change_ns: child.change_ns,
+                        change_ns,
                     });
                 }
                 // Symlinks are flagged and never followed: following one walks
@@ -3095,6 +3150,229 @@ pub(crate) fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     }
 
     Ok(out)
+}
+
+/// What one look at the disk saw: its files (`observe`), its directories
+/// (`observed_dirs_and_tie_breaks`), and the folders whose contents would not
+/// hold still while they were read (`unsettled`, relative paths, `""` for the
+/// root), which the pass holds rather than judges (`under_unsettled`).
+pub(crate) struct Look {
+    pub(crate) files: Vec<ObservedFile>,
+    pub(crate) dirs: DirsSeen,
+    pub(crate) unsettled: Vec<String>,
+}
+
+/// `observed_dirs_and_tie_breaks`'s answer.
+pub(crate) type DirsSeen = (Vec<String>, HashMap<String, u64>, HashMap<String, u64>, HashMap<String, u64>, FatDirectories);
+
+/// How many times a pass reads the disk before it holds what would not hold
+/// still: the first look, and two more.
+const LOOKS: usize = 3;
+
+/// How many times one look asks a name for its file before it leaves the
+/// name out of the look (`observe`).
+const LOOKS_AT_A_FILE: usize = 3;
+
+/// The disk, read so that what the pass judges is a state the disk was in.
+///
+/// A listing is not one moment: it reads a folder's names and then asks of
+/// each what stands there, and each file is looked at again and hashed by
+/// its path after that. A rename landing between two of those asks is seen
+/// half before and half after -- the file moved in at both names and the
+/// file moved out at neither -- and read that way a synced file's own file
+/// was gone with a stranger at its path, so the stranger's bytes went up as
+/// its version (soak runs 2456 and 2475), and a file moved between two
+/// folders while the walk was between them read as deleted and went to the
+/// trash on the server. So once both walks are done every folder is listed
+/// again, by identity only, and checked against what the walks handed on
+/// (`tears`): the same, and the look stands. Torn, the disk is read again;
+/// still torn after `LOOKS` reads, the folders it tore in are held for this
+/// pass (`Look::unsettled`), and the rest is judged as read.
+pub(crate) fn look_at_the_disk(env: &ExecEnv) -> Result<Look, ExecError> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let files = observe(env)?;
+        let dirs = observed_dirs_and_tie_breaks(env)?;
+        let torn = tears(env, &files, &dirs)?;
+        if torn.is_empty() || attempt >= LOOKS {
+            return Ok(Look { files, dirs, unsettled: torn });
+        }
+    }
+}
+
+/// Is `path` in a folder held this pass (`Look::unsettled`)?
+pub(crate) fn under_unsettled(unsettled: &[String], path: &str) -> bool {
+    unsettled.iter().any(|u| u.is_empty() || path == u || path.starts_with(&format!("{u}/")))
+}
+
+/// Every file and directory on the disk now, by path, with its identity --
+/// what a second listing sees, read the way the walks read: a file's name
+/// the engine reserves is left out, a directory's is kept and not walked
+/// into. Ids of 0 are no identity and are left out.
+fn identities_listed_now(env: &ExecEnv) -> Result<(HashMap<String, jd_vfs::FileIdentity>, HashMap<String, jd_vfs::FileIdentity>), ExecError> {
+    let mut files = HashMap::new();
+    let mut dirs = HashMap::new();
+    let Some(root) = env.vfs.root() else {
+        return Ok((files, dirs));
+    };
+    let personality = env.vfs.personality();
+    let fat_held = personality.positional_file_ids && personality.fat_directories_hold;
+    let mut queue = vec![(root, String::new())];
+    let mut guard = 0;
+    while let Some((dir, rel)) = queue.pop() {
+        guard += 1;
+        if guard > 100_000 {
+            return Err(ExecError::Contract("the local walk does not end".into()));
+        }
+        // Gone since the walks listed it: what stood in it is missing from
+        // this listing, which is itself the difference `tears` looks for.
+        let Ok(children) = env.vfs.read_dir_all(&dir) else {
+            continue;
+        };
+        for child in children {
+            let path = if rel.is_empty() { child.name.clone() } else { format!("{rel}/{}", child.name) };
+            let identity = child.fingerprint.map(|fp| fp.identity()).filter(|i| i.file_id != 0);
+            match child.kind {
+                jd_vfs::EntryKind::Directory => {
+                    if let Some(i) = identity.filter(|_| !personality.positional_file_ids || fat_held) {
+                        dirs.insert(path.clone(), i);
+                    }
+                    if !jd_vfs::is_internal(&child.name) {
+                        queue.push((dir.join(&child.name), path));
+                    }
+                }
+                jd_vfs::EntryKind::File if !jd_vfs::is_internal(&child.name) => {
+                    if let Some(i) = identity {
+                        files.insert(path, i);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok((files, dirs))
+}
+
+/// The folders a look tore in: compared by identity with a listing made
+/// after it, every file and directory the look handed on, at the paths it
+/// handed them on at. Size and time are not compared -- a file being written
+/// to never holds still, and an edit is the next pass's to read; a tear is
+/// about which file stands where.
+///
+/// For each identity, the paths the look saw it at against the paths it
+/// stands at now:
+/// - the same: the look is right about it;
+/// - seen by the look and standing nowhere now: deleted since, and the look
+///   was right when it was made;
+/// - standing now and not seen by the look, and nobody's: a file made
+///   since, which the next pass meets;
+/// - anything else -- one file at two names, a file a record owns standing
+///   somewhere the look did not see it, a file standing elsewhere than the
+///   look saw it -- is a look the disk was never in, or one about to read a
+///   move as something else. The folders holding each of those paths, and the
+///   folder the record that owns it last stood in, are torn.
+///
+/// What a second listing reads is torn the same way if the disk moves under
+/// it, and a torn second listing differs from the look: it errs towards
+/// another read, never towards a look let stand.
+fn tears(env: &ExecEnv, files: &[ObservedFile], dirs: &DirsSeen) -> Result<Vec<String>, ExecError> {
+    let personality = env.vfs.personality();
+    if personality.positional_file_ids && !personality.fat_directories_hold {
+        // No identities to compare on such a disk: its own limit.
+        return Ok(Vec::new());
+    }
+    let (files_now, dirs_now) = identities_listed_now(env)?;
+    // What the look handed on.
+    let mut seen_files: HashMap<jd_vfs::FileIdentity, Vec<String>> = HashMap::new();
+    if !personality.positional_file_ids {
+        for o in files {
+            let i = o.fingerprint.identity();
+            if i.file_id != 0 {
+                seen_files.entry(i).or_default().push(o.path.clone());
+            }
+        }
+    }
+    let (_, dir_identity, _, dir_births, fat) = dirs;
+    let mut seen_dirs: HashMap<jd_vfs::FileIdentity, Vec<String>> = HashMap::new();
+    if personality.positional_file_ids {
+        for (path, (id, birth)) in fat {
+            seen_dirs.entry(jd_vfs::FileIdentity { file_id: *id, birth_ns: *birth }).or_default().push(path.clone());
+        }
+    } else {
+        for (path, id) in dir_identity {
+            if *id != 0 {
+                let birth = dir_births.get(path).copied().unwrap_or(0);
+                seen_dirs.entry(jd_vfs::FileIdentity { file_id: *id, birth_ns: birth }).or_default().push(path.clone());
+            }
+        }
+    }
+    let mut stands_now_files: HashMap<jd_vfs::FileIdentity, Vec<String>> = HashMap::new();
+    if !personality.positional_file_ids {
+        for (path, i) in &files_now {
+            stands_now_files.entry(*i).or_default().push(path.clone());
+        }
+    }
+    let mut stands_now_dirs: HashMap<jd_vfs::FileIdentity, Vec<String>> = HashMap::new();
+    for (path, i) in &dirs_now {
+        // As the look keys a directory: the id, with the birth where the
+        // volume shows one.
+        let i = if dir_births.is_empty() && !personality.positional_file_ids { jd_vfs::FileIdentity { file_id: i.file_id, birth_ns: 0 } } else { *i };
+        stands_now_dirs.entry(i).or_default().push(path.clone());
+    }
+    // Each identity whose paths differ, with where the look saw it and where
+    // it stands now. A disk that held still has none, and the check is done
+    // without a read of the store.
+    let mut differing: Vec<(jd_vfs::FileIdentity, Vec<String>, Vec<String>)> = Vec::new();
+    for (seen, now) in [(&seen_files, &stands_now_files), (&seen_dirs, &stands_now_dirs)] {
+        let identities: std::collections::HashSet<&jd_vfs::FileIdentity> = seen.keys().chain(now.keys()).collect();
+        for i in identities {
+            let mut was: Vec<String> = seen.get(i).cloned().unwrap_or_default();
+            let mut is: Vec<String> = now.get(i).cloned().unwrap_or_default();
+            was.sort();
+            is.sort();
+            if was != is && !is.is_empty() {
+                differing.push((*i, was, is));
+            }
+        }
+    }
+    if differing.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Whose each identity is, and where its record last stood.
+    let mut owned: HashMap<jd_vfs::FileIdentity, Vec<String>> = HashMap::new();
+    for entry in all_entries(env)? {
+        if entry.remote_deleted || entry.status == LocalStatus::OutOfScope {
+            continue;
+        }
+        let identity = match entry.id.entity_type {
+            EntityType::File => entry.own_file.or_else(|| entry.synced_fingerprint.map(|fp| fp.identity())),
+            EntityType::Folder => entry.synced_fingerprint.map(|fp| {
+                let i = fp.identity();
+                if dir_births.is_empty() && !personality.positional_file_ids { jd_vfs::FileIdentity { file_id: i.file_id, birth_ns: 0 } } else { i }
+            }),
+        };
+        let Some(identity) = identity.filter(|i| i.file_id != 0) else {
+            continue;
+        };
+        let at = relative_path(env, &entry)?.unwrap_or_default();
+        owned.entry(identity).or_default().push(at);
+    }
+    let mut torn: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let folder_of = |path: &str| -> String { path.rsplit_once('/').map(|(f, _)| f.to_string()).unwrap_or_default() };
+    for (i, was, is) in &differing {
+        // New since and nobody's: a file made since, which the next pass meets.
+        if was.is_empty() && !owned.contains_key(i) {
+            continue;
+        }
+        for path in was.iter().chain(is.iter()) {
+            torn.insert(folder_of(path));
+        }
+        for at in owned.get(i).into_iter().flatten() {
+            torn.insert(folder_of(at));
+        }
+    }
+    Ok(torn.into_iter().collect())
 }
 
 /// Directories on disk, relative to the root.
@@ -4535,6 +4813,76 @@ fn hold_what_a_standing_park_holds(env: &ExecEnv, folders: &mut FolderScan) -> R
     }
     Ok(())
 }
+
+/// A folder that would not hold still while it was read, and every folder
+/// under it, is present and unmoved this pass, as a park holds what it holds
+/// (`hold_what_a_standing_park_holds`): its directory may have been at
+/// neither of two names the look asked. The next pass reads it again.
+fn hold_what_would_not_hold_still(env: &ExecEnv, folders: &mut FolderScan, unsettled: &[String]) -> Result<(), ExecError> {
+    if unsettled.is_empty() {
+        return Ok(());
+    }
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder {
+            continue;
+        }
+        if relative_path(env, &entry)?.is_some_and(|rel| under_unsettled(unsettled, &rel)) {
+            folders.present.insert(entry.id);
+            folders.moves.remove(&entry.id);
+        }
+    }
+    Ok(())
+}
+
+/// How many passes in a row a folder may be held before the user is told.
+const UNSETTLED_PASSES_BEFORE_SAYING: u32 = 3;
+
+/// A state: the folders held pass after pass because they would not hold
+/// still while read. Counted in store meta per folder, said once a folder
+/// has been held `UNSETTLED_PASSES_BEFORE_SAYING` passes running, withdrawn
+/// the pass it is read whole -- a hold is never silent.
+fn say_which_folders_would_not_hold_still(env: &ExecEnv, unsettled: &[String]) -> Result<(), ExecError> {
+    const META: &str = "unsettled_folders";
+    let before: HashMap<String, u32> = env
+        .store
+        .get_meta(META)?
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let now: HashMap<String, u32> = unsettled
+        .iter()
+        .map(|u| (u.clone(), before.get(u).copied().unwrap_or(0) + 1))
+        .collect();
+    if now.is_empty() {
+        if !before.is_empty() {
+            env.store.delete_meta(META)?;
+        }
+    } else {
+        env.store.set_meta(META, &serde_json::to_string(&now).unwrap_or_default())?;
+    }
+    let mut long: Vec<String> = now
+        .iter()
+        .filter(|(_, n)| **n >= UNSETTLED_PASSES_BEFORE_SAYING)
+        .map(|(u, _)| if u.is_empty() { "the sync folder itself".to_string() } else { u.clone() })
+        .collect();
+    long.sort();
+    let want = (!long.is_empty()).then(|| {
+        format!(
+            "Files kept changing while this computer read {}, so what changed there is not synced yet. It will be once the files stop changing for a moment.",
+            long.join(", ")
+        )
+    });
+    let have = env.store.open_issues()?.into_iter().find(|i| i.kind == UNSETTLED).map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues(UNSETTLED)?;
+        if let Some(detail) = want {
+            env.store.raise_issue(None, UNSETTLED, &detail, (env.now_ms)() as i64)?;
+        }
+    }
+    Ok(())
+}
+
+/// The state issue `say_which_folders_would_not_hold_still` raises.
+pub const UNSETTLED: &str = "folder_would_not_hold_still";
 
 /// What the local scan found out about folders.
 ///
@@ -7006,22 +7354,6 @@ fn detect_folder_moves(
     Ok(scan)
 }
 
-/// What the engine last recorded about each file it tracks.
-///
-/// Returned with the entries the server still has ahead of the ones it has
-/// deleted. Pairing gives each file on disk to the first entry that claims it,
-/// so where two entries name one path this decides which of them the file
-/// belongs to — and a file sitting at a path a live entry is synced at is that
-/// entry's, not a dead entry's memory of having once been there.
-/// Every inode the disk is currently showing, in one walk. Asked by the trash
-/// path before it disowns a record, because the path a record REMEMBERS cannot
-/// say whether its file is still here -- a folder-name trade moves the file
-/// without the engine knowing -- and the inode can.
-
-pub(crate) fn inodes_on_disk(env: &ExecEnv) -> Result<std::collections::HashSet<u64>, ExecError> {
-    Ok(observe(env)?.into_iter().map(|o| o.fingerprint.file_id).collect())
-}
-
 /// The paths of live FILE records with nothing of theirs on this disk yet:
 /// not provisional (a provisional was minted from a file here), never agreed
 /// here (no `synced_placement`), not trashed on the server, and going to be
@@ -7290,6 +7622,13 @@ fn bind_never_sent_own_ids(env: &ExecEnv, scan: &ScanOutcome) -> Result<(), Exec
     Ok(())
 }
 
+/// What the engine last recorded about each file it tracks.
+///
+/// Returned with the entries the server still has ahead of the ones it has
+/// deleted. Pairing gives each file on disk to the first entry that claims it,
+/// so where two entries name one path this decides which of them the file
+/// belongs to — and a file sitting at a path a live entry is synced at is that
+/// entry's, not a dead entry's memory of having once been there.
 fn known_local(
     env: &ExecEnv,
     tie_breaks: &HashMap<EntityId, u64>,

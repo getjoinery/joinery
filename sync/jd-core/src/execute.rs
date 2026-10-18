@@ -7139,7 +7139,9 @@ fn rescue_unsynced(
 /// is belt-and-braces rather than load-bearing — it costs one call and covers
 /// shapes nobody has enumerated, but a green estate is not evidence it was
 /// needed.
-fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<(), ExecError> {
+/// `None` once done; what to say while it waits where the disk would not
+/// hold still long enough to be read (`OpOutcome::Retry`).
+fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<Option<String>, ExecError> {
     let believed = env.store.subtree_ids(root)?;
     let (provisional, real): (Vec<EntityId>, Vec<EntityId>) = believed
         .into_iter()
@@ -7184,7 +7186,31 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     // sealed file with it -- sealed, recoverable from the trash, never in the
     // tree as a stranger. The record is left describing a file the trash
     // holds; it does no harm there and is not the thing that publishes.
-    let still_here = crate::pass::inodes_on_disk(env)?;
+    //
+    // Both questions below are asked of one look at the disk, checked as the
+    // pass's own is (`look_at_the_disk`): unchecked, a sealed file moved
+    // between two folders while the walk was between them stood nowhere, its
+    // record was forgotten, and the next scan published it. Where the folder
+    // holds a sealed record, a look that would not settle forgets nothing and
+    // the op is tried again. A plain folder goes on with the look it has: a
+    // plain child that look missed is met by the next scan where it stands
+    // and sent as new, as any child moved out before the delete is, and
+    // waiting would tie a folder's trash to churn anywhere on the disk.
+    let look = crate::pass::look_at_the_disk(env)?;
+    let mut holds_sealed = false;
+    for id in env.store.subtree_ids(root)? {
+        if env.store.get_entry(id)?.is_some_and(|e| e.is_encrypted) {
+            holds_sealed = true;
+            break;
+        }
+    }
+    if !look.unsettled.is_empty() && holds_sealed {
+        return Ok(Some(format!(
+            "files kept changing while this computer read {}; the folder's records are let go once they hold still",
+            look.unsettled.iter().map(|u| if u.is_empty() { "the sync folder" } else { u.as_str() }).collect::<Vec<_>>().join(", ")
+        )));
+    }
+    let still_here: std::collections::HashSet<u64> = look.files.iter().map(|o| o.fingerprint.file_id).collect();
     let keep = |id: &EntityId| -> Result<bool, ExecError> {
         Ok(env
             .store
@@ -7203,7 +7229,7 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
     // record's path, where it read as that record's edit (hostile2 74414;
     // `specs/drive_file_ownership.md`, E1b). Known by its own id, or on a
     // volume with no ids by its bytes, held by that record alone.
-    let on_disk = crate::pass::observe(env)?;
+    let on_disk = look.files;
     let positional = env.vfs.personality().positional_file_ids;
     let under = |path: &str, dir: &str| path.starts_with(&format!("{dir}/"));
     let folder_path = match env.store.get_entry(root)? {
@@ -7392,10 +7418,10 @@ fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<()
                 (env.now_ms)() as i64,
             )?;
         }
-        return Ok(());
+        return Ok(None);
     }
     env.store.forget_entry(root)?;
-    Ok(())
+    Ok(None)
 }
 
 /// A sealed file's record kept although the server deleted its folder --
@@ -7634,7 +7660,9 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // But only what the server actually took: it cascaded over what was
         // there, and this store may still believe a child is inside that has
         // already left.
-        forget_folder_the_server_confirms(env, op.entity)?;
+        if let Some(why) = forget_folder_the_server_confirms(env, op.entity)? {
+            return Ok(OpOutcome::Retry(why));
+        }
     } else {
         env.store.delete_entry(op.entity)?;
     }
@@ -7653,17 +7681,18 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // say the parent is a folder, and a file's server id can coincide with a
     // folder's -- so handing it a file id would sweep away an unrelated
     // folder's contents.
-    let forget_here = |env: &ExecEnv| -> Result<(), ExecError> {
+    // `Some`: what to say while the folder's records wait for the disk to
+    // hold still (`forget_folder_the_server_confirms`).
+    let forget_here = |env: &ExecEnv| -> Result<Option<String>, ExecError> {
         if op.entity.entity_type == EntityType::Folder {
             // Only what the server confirms went with it. Its cascade took the
             // descendants that were there; this store knows the ones it last
             // believed were there, and a child that left without this device
             // hearing of it is in the second list and not the first.
-            forget_folder_the_server_confirms(env, op.entity)?;
-        } else {
-            env.store.delete_entry(op.entity)?;
+            return forget_folder_the_server_confirms(env, op.entity);
         }
-        Ok(())
+        env.store.delete_entry(op.entity)?;
+        Ok(None)
     };
     if op.entity.is_provisional() {
         // It never reached the server. Forgetting it locally is the whole job --
@@ -7800,7 +7829,9 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     }
     // The server took the folder, and its own cascade takes what was inside it,
     // so there is nothing under here left to agree about.
-    forget_here(env)?;
+    if let Some(why) = forget_here(env)? {
+        return Ok(OpOutcome::Retry(why));
+    }
     Ok(OpOutcome::Done)
 }
 
@@ -8154,7 +8185,8 @@ fn bytes_of_another_record(env: &ExecEnv, me: EntityId, sha: &str) -> Result<boo
     Ok(owners.len() == 1 && owners[0] != me)
 }
 
-fn hash_of(reader: &mut dyn jd_vfs::ReadSeek) -> Result<String, ExecError> {
+/// The SHA-256 of what an open file reads, from its start to its end.
+pub(crate) fn hash_of(reader: &mut dyn jd_vfs::ReadSeek) -> Result<String, ExecError> {
     reader.seek(std::io::SeekFrom::Start(0))?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 256 * 1024];

@@ -1439,6 +1439,9 @@ mod tests {
         fn fingerprint(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<Fingerprint>> {
             Ok(None)
         }
+        fn fingerprint_and_change_time(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<(Fingerprint, u64)>> {
+            Ok(None)
+        }
         fn directory_id(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<u64>> {
             Ok(None)
         }

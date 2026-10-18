@@ -3107,9 +3107,10 @@ fn an_edit_uploaded_before_an_owed_move_does_not_erase_the_move() {
     world.device("laptop").fs.user_mkdir("Moved");
     assert!(world.settle().is_some(), "the report goes up");
     laptop.fs.user_write("report.txt", edited);
+    // The scan's open to hash it passes; the upload's fails.
     laptop
         .fs
-        .fail_next(jd_sim::FsOp::OpenRead, Some("report.txt"), jd_sim::FailureKind::Io, 1);
+        .fail_after(jd_sim::FsOp::OpenRead, Some("report.txt"), jd_sim::FailureKind::Io, 1, 1);
     world.pass(laptop);
     assert!(
         laptop.store.queued_ops().unwrap().iter().any(|o| o.kind == "upload_version"),

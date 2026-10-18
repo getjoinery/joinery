@@ -70,6 +70,8 @@ struct ScheduledFailure {
     path: Option<String>,
     kind: FailureKind,
     remaining: u32,
+    /// Matching ops that pass first, unfailed (`MemFs::fail_after`).
+    skip: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -152,7 +154,7 @@ struct MemFsState {
     next_file_birth: u64,
     /// Each file's change time, on the births' own clock: set when the file
     /// is made, moved on by a rename of it and by a write over it, as a
-    /// disk's ctime is (`DirEntry::change_ns`).
+    /// disk's ctime is (`Vfs::fingerprint_and_change_time`).
     file_changes: BTreeMap<String, u64>,
     /// How many of the clock's steps one shown time spans: 1 shows every
     /// step apart; more puts several on one coarse tick, as ext4's does, so
@@ -409,6 +411,25 @@ pub struct MemFs {
     /// disk does before the next (`MemFs::between_reads`, `MemFs::after_reads`).
     #[allow(clippy::type_complexity)]
     between_reads: Arc<Mutex<Option<(String, u32, Box<dyn FnOnce(&MemFs) + Send>)>>>,
+    /// The disk changes while one directory is being listed, after the entry
+    /// named and before the rest are looked at (`MemFs::while_listing`,
+    /// `MemFs::during_listings`).
+    while_listing: Arc<Mutex<Option<ListingHook>>>,
+    /// How many times each directory has been listed, by stored key
+    /// (`MemFs::listings_of`).
+    listings: Arc<Mutex<BTreeMap<String, u32>>>,
+}
+
+/// A change the disk makes during listings of one directory: the directory's
+/// stored key, the stored name of the entry it follows, the count of the
+/// directory's listings it runs after (`MemFs::listings_of`), how many it runs
+/// during (`u32::MAX`, every one), and what the disk does.
+struct ListingHook {
+    dir: String,
+    after: String,
+    after_listing: u32,
+    times: u32,
+    f: Box<dyn FnMut(&MemFs) + Send>,
 }
 
 impl std::fmt::Debug for MemFs {
@@ -491,6 +512,8 @@ impl MemFs {
             renaming: Arc::new(Mutex::new(None)),
             spool_opening: Arc::new(Mutex::new(None)),
             between_reads: Arc::new(Mutex::new(None)),
+            while_listing: Arc::new(Mutex::new(None)),
+            listings: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -509,6 +532,45 @@ impl MemFs {
     /// pass's scan has read a file and before its executor does.
     pub fn after_reads(&self, path: &str, reads: u32, f: impl FnOnce(&MemFs) + Send + 'static) {
         *self.between_reads.lock().unwrap() = Some((self.store_path(path), reads, Box::new(f)));
+    }
+
+    /// Run `f` while `dir` is being listed, once the entry `after` has been
+    /// looked at and before the entries after it are. A real listing is not
+    /// one moment: it reads the names, then asks of each name in turn what
+    /// stands there, so a rename between two of those asks is seen half
+    /// before and half after -- one file at two names, another at none (soak
+    /// runs 2456 and 2475). Entries come in the order of their names.
+    pub fn while_listing(&self, dir: &str, after: &str, f: impl FnOnce(&MemFs) + Send + 'static) {
+        let mut f = Some(f);
+        self.during_listings(dir, after, 0, 1, move |fs| {
+            if let Some(f) = f.take() {
+                f(fs)
+            }
+        });
+    }
+
+    /// As `while_listing`, during listings of `dir` after the first `skip`,
+    /// `times` of them (`u32::MAX`: every one, until `stop_listing_changes`).
+    /// For a folder that never holds still while it is read, and for a
+    /// change landing during a later listing of a pass than its first.
+    pub fn during_listings(&self, dir: &str, after: &str, skip: u32, times: u32, f: impl FnMut(&MemFs) + Send + 'static) {
+        *self.while_listing.lock().unwrap() = Some(ListingHook {
+            dir: self.store_path(dir),
+            after: self.store_name(after),
+            after_listing: self.listings_of(dir) + skip,
+            times,
+            f: Box::new(f),
+        });
+    }
+
+    /// The disk stops changing during listings.
+    pub fn stop_listing_changes(&self) {
+        *self.while_listing.lock().unwrap() = None;
+    }
+
+    /// How many times `dir` has been listed.
+    pub fn listings_of(&self, dir: &str) -> u32 {
+        self.listings.lock().unwrap().get(&self.store_path(dir)).copied().unwrap_or(0)
     }
 
     /// The hooks above, at an access to `key`: each access counts one off,
@@ -748,11 +810,19 @@ impl MemFs {
 
     /// Fail the next `times` occurrences of `op` (optionally only at `path`).
     pub fn fail_next(&self, op: FsOp, path: Option<&str>, kind: FailureKind, times: u32) {
+        self.fail_after(op, path, kind, 0, times);
+    }
+
+    /// As `fail_next`, once `skip` matching ops have passed: for a failure
+    /// meant for a later reader of a file than the scan, which opens it to
+    /// hash it first.
+    pub fn fail_after(&self, op: FsOp, path: Option<&str>, kind: FailureKind, skip: u32, times: u32) {
         self.state.lock().unwrap().failures.push(ScheduledFailure {
             op,
             path: path.map(|p| p.to_string()),
             kind,
             remaining: times,
+            skip,
         });
     }
 
@@ -1753,6 +1823,10 @@ impl MemFs {
             f.op == op && f.remaining > 0 && f.path.as_deref().map(|p| p == key).unwrap_or(true)
         });
         let Some(idx) = hit else { return Ok(()) };
+        if st.failures[idx].skip > 0 {
+            st.failures[idx].skip -= 1;
+            return Ok(());
+        }
         st.failures[idx].remaining -= 1;
         let kind = st.failures[idx].kind;
         if st.failures[idx].remaining == 0 {
@@ -1833,7 +1907,6 @@ impl MemFs {
 
 impl MemFs {
     fn list(&self, path: &Path, include_internal: bool) -> VfsResult<Vec<DirEntry>> {
-        let tells = jd_vfs::Vfs::personality(self).tells_saves_from_swaps();
         let key = self.key_for(path)?;
         self.check_failure(FsOp::ReadDir, &key, path)?;
         let st = self.state.lock().unwrap();
@@ -1849,14 +1922,34 @@ impl MemFs {
         };
         let mut out = Vec::new();
         let mut sealed_here: Vec<(String, String)> = Vec::new();
-        for (k, node) in st.nodes.iter() {
-            if k.is_empty() || !k.starts_with(&prefix) {
+        // The names first, as a real `read_dir` hands them over; then what
+        // stands at each, asked name by name (`MemFs::while_listing`). With
+        // nothing changing in between, the same answer as one look.
+        let names: Vec<String> = st
+            .nodes
+            .keys()
+            .filter(|k| !k.is_empty() && k.starts_with(&prefix))
+            .filter(|k| {
+                let rest = &k[prefix.len()..];
+                !rest.is_empty() && !rest.contains('/')
+            })
+            .cloned()
+            .collect();
+        drop(st);
+        // Which listing of this directory this is, counted from 1.
+        let this_listing = {
+            let mut listings = self.listings.lock().unwrap();
+            let n = listings.entry(key.clone()).or_insert(0);
+            *n += 1;
+            *n
+        };
+        for k in &names {
+            let st = self.state.lock().unwrap();
+            // Gone between the names and the look, as `OsVfs` skips one.
+            let Some(node) = st.nodes.get(k) else {
                 continue;
-            }
+            };
             let rest = &k[prefix.len()..];
-            if rest.is_empty() || rest.contains('/') {
-                continue;
-            }
             // `OsVfs` hides the engine's reserved names from an ordinary
             // listing, so this must too: without it the simulator hands the
             // engine files a real disk never shows it, and a recovery that can
@@ -1885,19 +1978,32 @@ impl MemFs {
                     Node::File { .. } => Self::fingerprint_of(&st, k),
                 },
                 tie_break_id: Self::tie_break_of(&st, k),
-                change_ns: match node {
-                    Node::File { .. } if tells => Self::shown_stamp(&st, st.file_changes.get(k).copied().unwrap_or(0)),
-                    _ => 0,
-                },
             });
             if let Node::File { bytes, .. } = node {
                 if Self::under_a_sealed_dir(&st, k) {
                     sealed_here.push((crate::sha256_hex(bytes), rest.to_string()));
                 }
             }
+            drop(st);
+            // Taken out while it runs, so that what it does to the disk can
+            // list; put back unless it is spent or another took its place.
+            let due = {
+                let mut hook = self.while_listing.lock().unwrap();
+                match hook.as_ref() {
+                    Some(h) if h.dir == key && h.after == rest && h.after_listing < this_listing => hook.take(),
+                    _ => None,
+                }
+            };
+            if let Some(mut h) = due {
+                (h.f)(self);
+                h.times = h.times.saturating_sub(u32::from(h.times != u32::MAX));
+                let mut hook = self.while_listing.lock().unwrap();
+                if h.times > 0 && hook.is_none() {
+                    *hook = Some(h);
+                }
+            }
         }
-        let clock = st.change_clock.clone();
-        drop(st);
+        let clock = self.state.lock().unwrap().change_clock.clone();
         let stamp = clock.map(|c| (c.0)());
         self.state.lock().unwrap().listed_in_a_vault.extend(sealed_here.into_iter().map(|(h, n)| (h, n, stamp)));
         Ok(out)
@@ -1971,6 +2077,15 @@ impl Vfs for MemFs {
         self.check_failure(FsOp::Fingerprint, &key, path)?;
         let st = self.state.lock().unwrap();
         Ok(Self::fingerprint_of(&st, &key))
+    }
+
+    fn fingerprint_and_change_time(&self, path: &Path) -> VfsResult<Option<(Fingerprint, u64)>> {
+        let tells = jd_vfs::Vfs::personality(self).tells_saves_from_swaps();
+        let key = self.key_for(path)?;
+        self.check_failure(FsOp::Fingerprint, &key, path)?;
+        let st = self.state.lock().unwrap();
+        let change = if tells { Self::shown_stamp(&st, st.file_changes.get(&key).copied().unwrap_or(0)) } else { 0 };
+        Ok(Self::fingerprint_of(&st, &key).map(|fp| (fp, change)))
     }
 
     fn directory_id(&self, path: &Path) -> VfsResult<Option<u64>> {
