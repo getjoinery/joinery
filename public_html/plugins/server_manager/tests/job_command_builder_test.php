@@ -1102,14 +1102,32 @@ $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_link
 check(($obj_config['objects'] ?? null) === true && !isset($obj_config['objects_index_url']) && !isset($obj_config['epoch_envelope_urls']),
 	'links the scheduler hands over are used as they are: an empty backup storage sends the flag and no link');
 $obj_space = (int)JobCommandBuilder::write_space($obj_node)->key;
-$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_missing' => array('space' => $obj_space,
-	'locations' => array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml', '../etc/passwd', 'epoch-x/y'))))['params'];
-check(($obj_config['objects_missing'] ?? null) === array('space' => $obj_space,
-	'locations' => array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml')),
-	'what the scheduler\'s listing proved missing rides along for the same space, a location that is not one dropped', json_encode($obj_config['objects_missing'] ?? null));
+$obj_missing = array('objects_missing' => array('space' => $obj_space,
+	'locations' => array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml', '../etc/passwd', 'epoch-x/y')));
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, $obj_missing)['params'];
+check(!isset($obj_config['objects_missing']) && !isset($obj_config['objects_missing_space']),
+	'an agent older than ' . JobCommandBuilder::BACKUP_RUN_MISSING_MIN_AGENT_VERSION . ' is not told of missing objects (it would refuse the whole run)',
+	json_encode($obj_config));
+$obj_node->set('mgn_agent_version', JobCommandBuilder::BACKUP_RUN_MISSING_MIN_AGENT_VERSION);
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, $obj_missing)['params'];
+check(($obj_config['objects_missing_space'] ?? null) === $obj_space
+	&& ($obj_config['objects_missing'] ?? null) === array('epoch-20260801_000000/beach.jpg', 'epoch-20260801_000000/mailbox/12.eml'),
+	'what the scheduler\'s listing proved missing rides along for the same space as the two parameters the agent declares, a location that is not one dropped',
+	json_encode($obj_config));
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_missing' => array('space' => $obj_space + 1000,
 	'locations' => array('epoch-20260801_000000/beach.jpg'))))['params'];
-check(!isset($obj_config['objects_missing']), 'a listing of another space proves nothing for this run, and is not sent');
+check(!isset($obj_config['objects_missing']) && !isset($obj_config['objects_missing_space']),
+	'a listing of another space proves nothing for this run, and is not sent');
+$obj_many = array();
+for ($i = 0; $i < 5000; $i++) { $obj_many[] = sprintf('epoch-20260801_000000/blob_%08d_%s.bin', $i, str_repeat('x', 20)); }
+$obj_config = JobCommandBuilder::build_backup_run($obj_node, array('objects_missing' => array('space' => $obj_space, 'locations' => $obj_many)))['params'];
+$obj_sent = (array)($obj_config['objects_missing'] ?? array());
+check($obj_sent && $obj_sent === array_slice($obj_many, 0, count($obj_sent))
+	&& count($obj_sent) <= JobCommandBuilder::BACKUP_RUN_MISSING_MAX
+	&& strlen(json_encode($obj_config)) <= ManagementJob::MAX_PARAMS_BYTES,
+	'more missing objects than fit: the first page goes and the job stays within what an agent reads',
+	count($obj_sent) . ' sent, ' . strlen(json_encode($obj_config)) . ' bytes');
+$obj_node->set('mgn_agent_version', AgentVocabulary::FLOOR);
 $obj_config = JobCommandBuilder::build_backup_run($obj_node, array('type' => 'database'))['params'];
 check(!isset($obj_config['objects']), 'a database-only run carries no object store');
 JobCommandBuilder::set_shelf_listing_for_tests(array());

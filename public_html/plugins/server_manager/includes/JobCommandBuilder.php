@@ -8,6 +8,9 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.130 - objects_missing goes as two flat parameters the agent declares (objects_missing_space and
+ *                 the list objects_missing), only to an agent at BACKUP_RUN_MISSING_MIN_AGENT_VERSION or newer
+ *                 (an older one refused the whole run), and a page of it that fits in the job
  * @version 1.129 - a backup run carries objects_missing from the scheduler: the locations its space's listing proved
  *                 absent, for the node to store again (FleetBackupRetention::check_shelf())
  * @version 1.128 - build_recreate_site: a host replaces one site's container on a fresh image of its current base
@@ -506,6 +509,18 @@ class JobCommandBuilder {
 	 * the parameter; it is refused here, naming the update.
 	 */
 	const COPY_TAKE_KEY_MIN_AGENT_VERSION = '1.68.0';
+
+	/**
+	 * The first agent whose backup_run takes the storage check's missing
+	 * objects (objects_missing_space, objects_missing). An older one refuses
+	 * any run that names them, so it is not told: the run goes ahead and the
+	 * objects stay missing, and the storage check keeps saying so, until its
+	 * agent is updated.
+	 */
+	const BACKUP_RUN_MISSING_MIN_AGENT_VERSION = '1.83.0';
+
+	/** The most missing objects one backup run names (the agent's own limit). */
+	const BACKUP_RUN_MISSING_MAX = 2000;
 
 	/**
 	 * The first agent whose decommission_moved_site proves a container held
@@ -1267,16 +1282,30 @@ class JobCommandBuilder {
 			}
 			// What the scheduler's listing of this same space proved absent
 			// (FleetBackupRetention::check_shelf()). The node applies it only
-			// to a run in that space; a run started by hand carries none.
+			// to a run in that space; a run started by hand carries none. As
+			// many as fit in the job go; the rest are still missing at the
+			// next storage check and go with a later run.
 			$missing = $params['objects_missing'] ?? null;
+			$agent = AgentVocabulary::version($node);
 			if (is_array($missing) && (int)($missing['space'] ?? 0) === (int)$space->key
-				&& is_array($missing['locations'] ?? null) && $missing['locations']) {
-				$config['objects_missing'] = array(
-					'space'     => (int)$space->key,
-					'locations' => array_values(array_filter(array_map('strval', $missing['locations']), function ($loc) {
-						return (bool)preg_match('#^epoch-\d{8}_\d{6}/[^/]+(/[^/]+)?$#', $loc);
-					})),
-				);
+				&& is_array($missing['locations'] ?? null) && $missing['locations']
+				&& $agent !== '' && version_compare($agent, self::BACKUP_RUN_MISSING_MIN_AGENT_VERSION, '>=')) {
+				$room = ManagementJob::MAX_PARAMS_BYTES - strlen(json_encode($config)) - 2048;
+				$page = array();
+				foreach (array_map('strval', $missing['locations']) as $loc) {
+					if (strlen($loc) > 300 || !preg_match('#^epoch-\d{8}_\d{6}/[^/\x00-\x1f]+(/[^/\x00-\x1f]+)?$#', $loc)) {
+						continue;
+					}
+					$room -= strlen(json_encode($loc)) + 1;
+					if ($room < 0 || count($page) >= self::BACKUP_RUN_MISSING_MAX) {
+						break;
+					}
+					$page[] = $loc;
+				}
+				if ($page) {
+					$config['objects_missing_space'] = (int)$space->key;
+					$config['objects_missing'] = $page;
+				}
 			}
 		}
 
