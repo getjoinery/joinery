@@ -3,6 +3,9 @@
 # _site_run_spec.sh - how a site's container is run, recorded once on its
 # Docker host (specs/multi_tenant_docker_hosts.md WP0).
 #
+# Version: 1.17 - on the site engine a site's container carries the hash of the system call filter it was
+#                made under (joinery.seccomp, run_spec_seccomp_hash), so the nightly replacement finds a
+#                site on an older filter (site_refresh.sh; multi_tenant_host_hardening WP3)
 # Version: 1.16 - run_spec_code_manifest: the folder in a running site holding the release manifest its
 #                code matches, the site root's or the kept copy, for a rebuild to carry (incident 7608, B6)
 # Version: 1.15 - a site whose swap is set apart from its memory is told to fix it with its own engine's
@@ -204,6 +207,17 @@ RUN_SPEC_RESTRICTIONS_DIR="/etc/joinery/host_restrictions"
 # own default, since Podman's built-in one lets a process with no CAP_SYS_ADMIN
 # make user namespaces. A Docker host's sites run under Docker's own copy of it.
 RUN_SPEC_SITE_SECCOMP="/etc/containers/joinery-site-seccomp.json"
+
+# The filter's hash, which a site's container carries as joinery.seccomp: the
+# engine reads the file once, at the container's making, so a container keeps
+# the filter it was made under, and site_refresh.sh replaces one whose label is
+# not this. Prints nothing when there is no filter.
+run_spec_seccomp_hash() {
+    local f
+    f="$(run_spec_root)${RUN_SPEC_SITE_SECCOMP}"
+    [[ -s "$f" ]] || return 1
+    sha256sum "$f" 2>/dev/null | cut -d' ' -f1
+}
 
 run_spec_root() {
     if [[ "$(id -u)" != "0" && -n "${JOINERY_SITE_STATE_ROOT:-}" ]]; then
@@ -751,12 +765,12 @@ run_spec_args() {  # SITE
     # Everything checked before anything is printed: a caller reads the
     # arguments through a pipe, which cannot see this function fail, so a
     # refusal must leave it nothing to run.
-    local idbase=""
+    local idbase="" filter=""
     if site_engine_is_podman; then
         v="$(run_spec_get "$site" idblock)"
         [[ -n "$v" ]] || { echo "run spec: ${site} has no id block (idblock=), so on the site engine it would have no ids of its own; rebuild it with install.sh site" >&2; return 1; }
         idbase="$(site_engine_idblock_base "$v")" || return 1
-        [[ -s "$(run_spec_root)${RUN_SPEC_SITE_SECCOMP}" ]] \
+        filter="$(run_spec_seccomp_hash)" && [[ -n "$filter" ]] \
             || { echo "run spec: no site system call filter at ${RUN_SPEC_SITE_SECCOMP}, so ${site} would run under the engine's own, which lets it make user namespaces; run install_tools/install_site_engine.sh converge as root" >&2; return 1; }
         # A site's database is published on loopback alone: there is no
         # DOCKER-USER chain here to drop the rest (install.sh docker's rule).
@@ -789,7 +803,7 @@ run_spec_args() {  # SITE
         # needs with the six capabilities above (D5).
         printf '%s\0' --uidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" --gidmap "0:${idbase}:${SITE_ENGINE_IDBLOCK_SIZE}" \
             --sysctl net.ipv4.ip_unprivileged_port_start=0 --security-opt "seccomp=${RUN_SPEC_SITE_SECCOMP}" \
-            --annotation "io.joinery.site=${site}"
+            --label "joinery.seccomp=${filter}" --annotation "io.joinery.site=${site}"
     fi
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -p "$v"; done < <(run_spec_list "$site" publish)
     while IFS= read -r v; do [[ -n "$v" ]] && printf '%s\0' -v "$v"; done < <(run_spec_list "$site" volume)

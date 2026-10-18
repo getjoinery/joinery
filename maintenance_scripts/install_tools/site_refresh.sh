@@ -4,6 +4,9 @@
 # security fix for something in their image (specs/multi_tenant_host_hardening.md
 # D9, B7).
 #
+# Version: 1.2 - A site is due as well when its container was made under another system call filter
+#                than the host's (joinery.seccomp, _site_run_spec.sh 1.17); the log names why each is
+#                replaced (multi_tenant_host_hardening WP3).
 # Version: 1.1 - reviewer2's WP8 review: a hold is a site's own (held/SITE), and the run goes on
 #                with the other sites; it stops only when a second site rolls back on the same base,
 #                or one is left down, so one tenant's site cannot hold every other tenant's fix (G1,
@@ -38,7 +41,10 @@
 # BASE_IMAGE_VERSION, or when this tree's server setup differs from the one the
 # base was built with (its joinery.install_sh_hash label). A site is due when
 # its image does not carry the current base's id (joinery.base_id), so a cycle
-# stopped part way is finished on a later night.
+# stopped part way is finished on a later night, and when its container was
+# made under another system call filter than the host's (joinery.seccomp): the
+# engine reads the filter only when it makes a container, so a release that
+# changes it reaches every site the night after.
 #
 # A replacement that is rolled back (recreate_site.sh 3) holds that site
 # (held/SITE, naming the base) and the run goes on with the others: one site
@@ -294,16 +300,25 @@ host_sites() {
         printf '%s\n' "$c"
     done < <(site_engine ps --format '{{.Names}}' 2>/dev/null | sort)
 }
-# Due: on an image that does not carry the current base's id. Quiet, held
-# stopped and held sites are never due.
+# Due: on an image that does not carry the current base's id, or, on the site
+# engine, made under another system call filter than the host's (its
+# joinery.seccomp label, run_spec_seccomp_hash; none on a container made before
+# the label). Quiet, held stopped and held sites are never due. DUE_WHY says
+# which.
 site_due() {
-    local site="$1" img label
+    local site="$1" img label want
+    DUE_WHY=""
     [ -e "${ETC}/joinery/sites/${site}/quiet" ] && return 1
     [ -e "${ETC}/joinery/sites/${site}/held" ] && return 1
     held_now "$site" && return 1
     img="$(site_engine inspect -f '{{.Image}}' "$site" 2>/dev/null)" || return 1
     label="$(site_engine image inspect -f '{{index .Config.Labels "joinery.base_id"}}' "$img" 2>/dev/null)"
-    [ "$label" != "$BASE_ID_FULL" ]
+    if [ "$label" != "$BASE_ID_FULL" ]; then DUE_WHY="an older base"; return 0; fi
+    site_engine_is_podman || return 1
+    want="$(run_spec_seccomp_hash)" || return 1
+    label="$(site_engine inspect -f '{{index .Config.Labels "joinery.seccomp"}}' "$site" 2>/dev/null)"
+    if [ "$label" != "$want" ]; then DUE_WHY="an older system call filter"; return 0; fi
+    return 1
 }
 count_due() {
     local s n=0 d=0
@@ -378,7 +393,7 @@ replaced=() passed=()
 outcome="nothing_due"
 while IFS= read -r site; do
     site_due "$site" || continue
-    say "replacing ${site}"
+    say "replacing ${site} (${DUE_WHY})"
     # Without this run's lock (descriptor 7): the containers it starts would
     # inherit it, and their monitors would hold it for good. Stdin is
     # /dev/null: it is this loop's list of sites, and an engine call that

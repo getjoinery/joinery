@@ -3,6 +3,9 @@
 # _plugin_installers_start.sh - run the platform's host installers: core's
 # first, then every active plugin's.
 #
+# Version: 2.40 - A --when-changed tick with nothing to converge holds the pinned kernel settings: one the
+#                running kernel no longer holds is written back within the minute, not at the next daily
+#                housekeeping run (multi_tenant_host_hardening B37).
 # Version: 2.39 - A --when-changed tick with nothing to converge runs site housekeeping alone once the
 #                site's code check (config/code_check) is an hour old: on a host that refuses unsigned code
 #                the check runs hourly, not only daily and after a change (multi_tenant_host_hardening WP7, D8).
@@ -600,6 +603,37 @@ code_check_due() {
     [[ "${MACHINE}" == "0" && -f "${f}" ]] || return 1
     at="$(stat -c %Y "${f}" 2>/dev/null)" || return 1
     (( $(date -u +%s) - at >= CODE_CHECK_MAX_AGE ))
+}
+
+# The pinned kernel and network settings, held every tick (multi_tenant_host_hardening
+# D1, B37). Host housekeeping writes them to /etc/sysctl.d and applies them, but
+# it runs on a change or once a day; a setting something else loosens between
+# runs would stay loose until then. Each tick reads the running kernel against
+# the list (_kernel_settings.sh, about 40 file reads) and writes back only a
+# setting that differs. A kernel that refuses a value costs one failed write a
+# tick; host housekeeping warns of it and the host report raises it. Root on a
+# machine's own kernel only: a container's /proc/sys is its host's to hold.
+# (A fixture's /proc/sys, JOINERY_KERNEL_SETTINGS_PROC, counts only when this
+# is not root.)
+kernel_settings_hold() {
+    local state key got want KERNEL_SETTINGS_PROC=""
+    if [[ "$(id -u)" != "0" ]]; then
+        [[ -n "${JOINERY_KERNEL_SETTINGS_PROC:-}" ]] || return 0
+        KERNEL_SETTINGS_PROC="${JOINERY_KERNEL_SETTINGS_PROC%/}"
+    fi
+    [[ -f /.dockerenv || -f /run/.containerenv ]] && return 0
+    [[ -f "${TOOLS_DIR}/_kernel_settings.sh" ]] || return 0
+    # shellcheck source=_kernel_settings.sh
+    . "${TOOLS_DIR}/_kernel_settings.sh"
+    while read -r state key got want; do
+        [[ "${state}" == drift ]] || continue
+        if [[ -n "${KERNEL_SETTINGS_PROC}" ]]; then
+            printf '%s\n' "${want}" > "${KERNEL_SETTINGS_PROC}/${key//.//}" 2>/dev/null || continue
+        else
+            sysctl -q -w "${key}=${want}" >/dev/null 2>&1 || continue
+        fi
+        echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') ${key} was ${got}; put back to ${want}"
+    done < <(kernel_settings_state)
 }
 
 record_last() {
@@ -1278,7 +1312,9 @@ if [[ "${WHEN_CHANGED}" == "1" ]]; then
        && [[ "${last_hash}" == "${CONVERGE_NOW_HASH}" ]] \
        && (( now - ${last_time:-0} < CONVERGE_MAX_AGE )); then
         # Nothing changed, nothing queued, the last run is fresh: this tick
-        # costs a hash and one directory read, and the code check once an hour.
+        # costs a hash, one directory read and the kernel settings read, and
+        # the code check once an hour.
+        kernel_settings_hold
         if code_check_due; then
             echo "host converger: $(date -u '+%Y-%m-%d %H:%M:%S') checking ${SITENAME}'s code (hourly)"
             run_core_installer site_housekeeping.sh

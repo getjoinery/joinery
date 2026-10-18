@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 300
-# covers: [maintenance_scripts/install_tools/site_refresh.sh, maintenance_scripts/sysadmin_tools/recreate_site.sh, maintenance_scripts/install_tools/Dockerfile.template, maintenance_scripts/install_tools/Dockerfile.base]
+# covers: [maintenance_scripts/install_tools/site_refresh.sh, maintenance_scripts/install_tools/_site_run_spec.sh, maintenance_scripts/sysadmin_tools/recreate_site.sh, maintenance_scripts/install_tools/Dockerfile.template, maintenance_scripts/install_tools/Dockerfile.base]
 #
 # A site container's OS is replaced when Ubuntu ships a fix
 # (specs/multi_tenant_host_hardening.md D9). recreate_site.sh replaces one
@@ -74,6 +74,7 @@ case "$1" in
       *State.Running*) [ "$(cat "$d/state")" = running ] && echo true || echo false ;;
       *State.Status*) cat "$d/state" ;;
       *Config.Env*) cat "$d/env" ;;
+      *joinery.seccomp*) cat "$d/seccomp" 2>/dev/null ;;
       *.Image*) cat "$d/image" ;;
       *) echo "" ;;
     esac ;;
@@ -138,10 +139,11 @@ case "$1" in
       exit 0
     fi
     [ -f "$S/fail_all" ] && [ -f "$S/arm_run_fail" ] && exit 125
-    name=""; envf=""; prev=""; img=""
-    for a in "$@"; do case "$prev" in --name) name="$a" ;; --env-file) envf="$a" ;; esac; prev="$a"; img="$a"; done
+    name=""; envf=""; prev=""; img=""; filter=""
+    for a in "$@"; do case "$prev" in --name) name="$a" ;; --env-file) envf="$a" ;; --label) case "$a" in joinery.seccomp=*) filter="${a#*=}" ;; esac ;; esac; prev="$a"; img="$a"; done
     id="$(resolve "$img")" || exit 125
     d="$S/containers/$name"; mkdir -p "$d"; echo "$id" > "$d/image"; echo running > "$d/state"
+    rm -f "$d/seccomp"; [ -n "$filter" ] && echo "$filter" > "$d/seccomp"
     cp "$envf" "$d/env"; stat -c %a "$envf" > "$S/envmode"
     echo "$name" >> "$S/runs" ;;
   healthcheck) id="$(cat "$S/containers/$3/image" 2>/dev/null)" || exit 1; [ -f "$S/fail_all" ] && exit 1; [ -f "$S/images/$id/fail" ] && exit 1; exit 0 ;;
@@ -192,6 +194,7 @@ site() {  # NAME IDBLOCK PORT IMAGE-ID
     echo 0.8.503 > "$STUB/volumes/${n}_code/VERSION"
     mkdir -p "$STUB/volumes/${n}_postgres/18/main"; echo 18 > "$STUB/volumes/${n}_postgres/18/main/PG_VERSION"
     echo "$4" > "$STUB/containers/$n/image"; echo running > "$STUB/containers/$n/state"
+    sha256sum "$R/etc/containers/joinery-site-seccomp.json" | cut -d' ' -f1 > "$STUB/containers/$n/seccomp"
     printf 'SITENAME=%s\nDOMAIN_NAME=%s.example.com\nPOSTGRES_PASSWORD=pw-%s\n' "$n" "$n" "$n" > "$STUB/containers/$n/env"
     mkdir -p "$STUB/fs/var/www/html/$n"
     echo "manifest $n" > "$STUB/fs/var/www/html/$n/RELEASE_MANIFEST"; echo "sig $n" > "$STUB/fs/var/www/html/$n/RELEASE_MANIFEST.sig"
@@ -451,6 +454,25 @@ rm -f "$STUB/arm_fail_all" "$STUB/fail_all"; echo exited > "$STUB/containers/sa/
 echo 'Inst curl [1] (2 Ubuntu:26.04/resolute-security [amd64])' > "$STUB/apt"
 chk "a new base: a site left down stays held (it is still down), and the run goes on with the others" \
     "$(srun run)|$(sed -n 's/^outcome=//p' "$R/var/lib/joinery/site-refresh/held/sa")|$(cat "$STUB/images/$(cimg sb)/label")" "0|down|$(tagid joinery-base:${BASE_VERSION})"
+
+echo "=== site_refresh: a site made under another system call filter is due (WP3) ==="
+reset
+: > "$STUB/apt"; echo "$BASE" > "$STUB/images/$OLD_B/label"      # both sites on the base
+FILTER_OLD="$(cat "$STUB/containers/sa/seccomp")"
+chk "both sites on the base and the host's filter: nothing due" "$(srun check)|$(st sites_due)" "0|0"
+echo '{"defaultAction":"SCMP_ACT_ERRNO","architectures":[]}' > "$R/etc/containers/joinery-site-seccomp.json"
+FILTER_NEW="$(sha256sum "$R/etc/containers/joinery-site-seccomp.json" | cut -d' ' -f1)"
+chk "the host's filter changes: both sites are due, though on the current base" "$(srun check)|$(st sites_due)|$(st base_due)" "0|2|no"
+: > "$STUB/calls"
+chk "  the run replaces both, on the same base, saying why" \
+    "$(srun run)|$(st run)|$(grep -c 'replacing s[ab] (an older system call filter)' "$T/rout")|$(grep -c -- 'Dockerfile.base' "$STUB/calls")" "0|replaced|2|0"
+chk "  each new container carries the host's filter" "$(cat "$STUB/containers/sa/seccomp")|$(cat "$STUB/containers/sb/seccomp")" "$FILTER_NEW|$FILTER_NEW"
+chk "  the next night: nothing due" "$(srun run)|$(st run)|$(st sites_due)" "0|nothing_due|0"
+rm -f "$STUB/containers/sb/seccomp"
+chk "a container made before the label: due" "$(srun check)|$(st sites_due)" "0|1"
+chk "the run arguments carry the filter's hash as joinery.seccomp" \
+    "$(bash -c ". '$TOOLS/_site_run_spec.sh'; run_spec_args sa" 2>/dev/null | tr '\0' '\n' | grep -A1 -x -- '--label' | tail -n1)" "joinery.seccomp=$FILTER_NEW"
+[ "$FILTER_OLD" != "$FILTER_NEW" ] || chk "the two filters differ" "same" "different"
 
 echo "=== site_refresh: the check ==="
 reset

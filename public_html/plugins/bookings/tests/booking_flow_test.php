@@ -651,8 +651,11 @@ $slots_m = bk_slots($type_m, $day_m);
 check(in_array($day_m . ' 10:00:00', $slots_m), 'The old time is released', json_encode($slots_m));
 check(!in_array($day_m . ' 12:00:00', $slots_m), 'The new time is held');
 // The local rendering has to be recomputed, or the invitee is emailed the old
-// wall-clock time for the new appointment.
-check(substr((string)$br->get('bkn_start_time_local'), 11, 5) === '08:00',
+// wall-clock time for the new appointment. 12:00 UTC is 08:00 in New York on
+// summer time and 07:00 on winter time, so the hour follows the day's offset.
+$ny = new DateTimeZone('America/New_York');
+$ny_hour = 12 + (int)($ny->getOffset(new DateTime($day_m . ' 12:00:00', $ny)) / 3600);
+check(substr((string)$br->get('bkn_start_time_local'), 11, 5) === sprintf('%02d:00', $ny_hour),
 	'The invitee local time was recomputed for the new slot',
 	(string)$br->get('bkn_start_time_local'));
 
