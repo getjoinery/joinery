@@ -5,7 +5,7 @@
 # env: any
 # needs: []
 # timeout: 120
-# covers: [maintenance_scripts/install_tools/_plugin_installers_start.sh, maintenance_scripts/install_tools/install_host_converger.sh]
+# covers: [maintenance_scripts/install_tools/_plugin_installers_start.sh, maintenance_scripts/install_tools/install_host_converger.sh, maintenance_scripts/install_tools/_kernel_settings.sh]
 #
 # The host installers runner holds one kernel lock for the whole of every
 # run, taken before anything changes the host (specs/agent_tier1_recipes.md,
@@ -377,6 +377,36 @@ chk "one over an hour old: site housekeeping alone runs, and says why" \
     "$rc:$(wc -l < "$T/shk.runs" 2>/dev/null):$(printf '%s\n' "$out" | grep -c "checking ${SITENAME}'s code (hourly)")" "0:1:1"
 chk "  no converge: no other installer, and neither the stamp's record nor its last run changed" \
     "$(wc -l < "$T/agent.starts"):$(printf '%s\n' "$out" | grep -c 'converging'):$( [ "$(cat "$LAST")" = "$last_before" ] && echo same)" "$agent_before:0:same"
+
+echo "== a tick with nothing to converge puts a loosened kernel setting back (B37) =="
+# A fixture /proc/sys holding every pinned value, from the one list.
+PROC="$T/proc_sys"
+(
+    . "$FT/_kernel_settings.sh"
+    for s in "${KERNEL_SETTINGS[@]}" "${NETWORK_SETTINGS[@]}"; do
+        k="${s%% =*}"; f="$PROC/${k//.//}"
+        mkdir -p "$(dirname "$f")"; printf '%s\n' "${s##*= }" > "$f"
+    done
+)
+export JOINERY_KERNEL_SETTINGS_PROC="$PROC"
+held_sum() { find "$PROC" -type f -exec cat {} + | sha256sum; }
+before_sum="$(held_sum)"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"; rc=$?
+chk "every setting held: the tick writes nothing and says nothing" \
+    "$rc:$(printf '%s\n' "$out" | grep -c 'put back to'):$( [ "$(held_sum)" = "$before_sum" ] && echo same)" "0:0:same"
+echo 0 > "$PROC/kernel/yama/ptrace_scope"
+echo 1 > "$PROC/kernel/randomize_va_space"
+agent_before="$(wc -l < "$T/agent.starts")"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"; rc=$?
+chk "two loosened: the next tick puts both back, naming each" \
+    "$rc:$(cat "$PROC/kernel/yama/ptrace_scope"):$(cat "$PROC/kernel/randomize_va_space"):$(printf '%s\n' "$out" | grep -c 'kernel.yama.ptrace_scope was 0; put back to 1'):$(printf '%s\n' "$out" | grep -c 'kernel.randomize_va_space was 1; put back to 2')" "0:1:2:1:1"
+chk "  without a converge" "$(wc -l < "$T/agent.starts"):$(printf '%s\n' "$out" | grep -c 'converging')" "$agent_before:0"
+chk "  and the fixture is whole again" "$( [ "$(held_sum)" = "$before_sum" ] && echo same)" "same"
+unset JOINERY_KERNEL_SETTINGS_PROC
+echo 0 > "$PROC/kernel/yama/ptrace_scope"
+out="$(bash "$RUNNER" --when-changed --site-root="$T" 2>&1)"
+chk "not root and no fixture named: the tick leaves the kernel to root" \
+    "$(cat "$PROC/kernel/yama/ptrace_scope"):$(printf '%s\n' "$out" | grep -c 'put back to')" "0:0"
 
 echo
 echo "host_runner_lock gate: $passed passed, $failed failed"
