@@ -522,7 +522,7 @@ An incident **needs you** when it is new, or snoozed and its time has come (`Inc
 | `plane:data_root_stopped` | the machine's latest host report, under six hours old, says its data root was stopped by hand (`data_root_stopped`, `joinery_data_root.sh stop`); evidence: when, the services stopped with it, and how to start it. On the machine only; its sites and site containers raise no `site_down` or `data_root_locked` meanwhile (`IncidentSourceDataRootStopped::stopped_for()`). A site that stops answering, or reads as locked, after its machine's last report has the machine asked for one every two minutes, for ten minutes at most (`report_wanted()`, `HOLD_SECONDS`, the uptime task's short window), and those two alarms wait for it as long, so a machine whose agent cannot answer still raises them | warning |
 | `plane:cloud_account_key` | the key of the cloud account an encrypted machine is in, which this management node reads the machine's activity log with before it opens it, does not work, has never been checked, or expires within a week; raised on each machine it covers | critical; warning when it only expires within a week |
 | `plane:backup_failed` | the last backup this management node ran of the node failed | critical |
-| `plane:backups_stopped` | backups from here are not happening (no verified recovery key, never, not landing, overdue) | critical |
+| `plane:backups_stopped` | backups from here are not happening (no verified recovery key after a node's first seven days, never, not landing, overdue) | critical |
 | `plane:backup_unverified` | a backup was taken but is not proven whole (suspiciously small, incomplete in storage, verification failed, stale or never done) | warning |
 | `plane:customer_backups` | this node only: a customer of backup storage has had no run finish here for two nights, or no run it reported verified for eight days (`IncidentSourceCustomerBackups`, the rule a site's Backups page applies to itself); one incident names every such customer | warning |
 | `plane:failed_units` | the latest host report names failed systemd units | warning |
@@ -2162,7 +2162,9 @@ whose result carries a `kind`): the last run failed (`plane:backup_failed`,
 critical, with the reason the node gave and its run); backups are not happening
 (`plane:backups_stopped`, critical: no verified recovery key on the node, never
 backed up, not landing in storage, or the last success older than the schedule
-allows); or a backup was taken but is not proven whole (`plane:backup_unverified`,
+allows; a node in its first seven days with no recovery key yet opens none, since
+only its own administrator can set one up, while its Backups tab says so from the
+first pass); or a backup was taken but is not proven whole (`plane:backup_unverified`,
 a warning: a suspiciously small run, an incomplete stored backup, or
 verification failed, stale or never done). A node the scheduler would not back
 up, or whose fleet backups somebody switched off, has none. Each clears when

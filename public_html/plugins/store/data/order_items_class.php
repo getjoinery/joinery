@@ -20,6 +20,8 @@ class OrderItemException extends SystemBaseException {}
 /**
  * OrderItem - one line of an order; a subscription line carries its billing state.
  *
+ * @version 1.3 - a cancel notice goes to each address on subscription_notification_emails whether or not it is a
+ *                user's: one that was not stopped the cancel page with a 500 after the provider had cancelled
  * @version 1.2 - cancel_subscription_by_system(): the same provider cancel for a scheduled task acting on the
  *                plane's own decision, with no signed-in user to check and no store emails
  * @version 1.1 - cancel_subscription_order_item() cancels with the provider that bills the subscription
@@ -261,6 +263,38 @@ function get_order() {
 		}
 	}
 
+	/**
+	 * Tell each address on subscription_notification_emails that this
+	 * subscription was cancelled. An address need not belong to a user here:
+	 * the notice goes to the address either way. A notice that fails to send
+	 * never undoes or hides the cancel, which the provider has already made.
+	 */
+	protected function notify_cancelled($provider_id, $order, $order_user) {
+		$list = (string)Globalvars::get_instance()->get_setting('subscription_notification_emails');
+		$body = 'Subscription '.$provider_id.' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
+		foreach (explode(',', $list) as $notify_email) {
+			$notify_email = trim($notify_email);
+			if ($notify_email === '') {
+				continue;
+			}
+			$notify_user = User::GetByEmail($notify_email);
+			try {
+				$this->send_notice($notify_email, array(
+					'subject' => 'Cancelled Subscription',
+					'body' => $body,
+					'recipient' => $notify_user ? $notify_user->export_as_array() : array('usr_email' => $notify_email),
+				));
+			} catch (Exception $e) {
+				error_log('OrderItem ' . $this->key . ': the cancel notice to ' . $notify_email . ' was not sent: ' . $e->getMessage());
+			}
+		}
+	}
+
+	/** Sends one cancel notice. A seam, so a test can stand in for it. */
+	protected function send_notice($to, array $values) {
+		EmailSender::sendTemplate(Globalvars::get_instance()->get_setting('individual_email_inner_template'), $to, $values);
+	}
+
 	/** The Stripe client a cancel uses. A seam, so a test can stand in for it. */
 	protected function stripe_helper() {
 		return new StripeHelper();
@@ -282,7 +316,6 @@ function get_order() {
 	 */
 	function cancel_subscription_order_item($send_email, $cancel_type){
 		$session = SessionControl::get_instance();
-		$settings = Globalvars::get_instance();
 
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		$order_user = new User($this->get('odi_usr_user_id'), TRUE);
@@ -291,30 +324,8 @@ function get_order() {
 
 		$provider_id = $this->cancel_with_provider($cancel_type);
 
-		//SEND NOTIFICATION
 		if($send_email){
-			if($settings->get_setting('subscription_notification_emails')){
-				$notify_emails = explode(',', $settings->get_setting('subscription_notification_emails'));
-				foreach($notify_emails as $notify_email){
-					try {
-						$notify_user = User::GetByEmail($notify_email);
-						$body = 'Subscription '.$provider_id.' (Order '. $order->key .') was cancelled for user '.$order_user->display_name().' ('.$order_user->get('usr_email').')';
-						$email_inner_template = $settings->get_setting('individual_email_inner_template');
-						EmailSender::sendTemplate($email_inner_template,
-							$notify_user->get('usr_email'),
-							[
-								'subject' => 'Cancelled Subscription',
-								'body' => $body,
-								'recipient' => $notify_user->export_as_array()
-							]
-						);
-					}
-					catch (Exception $e) {
-						//DO NOTHING
-						$error2 = "";
-					}
-				}
-			}
+			$this->notify_cancelled($provider_id, $order, $order_user);
 		}
 		return true;
 		

@@ -13,6 +13,8 @@
  * It also reports backup recovery problems on this management node
  * (backup_recovery_problems), which the dashboard shows.
  *
+ * @version 1.28 - fleet_backup_health() names its no-recovery-key verdict with reason NO_RECOVERY_KEY, so the
+ *                backups-stopped incident can give a new node time to set one up
  * @version 1.27 - an agent built without the release key is named as that, not as a node that cannot be managed (agent 1.82.0)
  * @version 1.26 - the untrusted_file health names the one-step repair and the node's own recipe (agent 1.79.0)
  * @version 1.25 - a refusal and the poll's file report are two findings, and each clears only itself: a completed
@@ -827,6 +829,9 @@ class NodeMonitorHealth {
 	 * suspiciously small run, an incomplete stored backup, or verification
 	 * failed, stale or never done), or ok.
 	 */
+	/** fleet_backup_health()'s 'reason' for a node that holds no proven recovery key of its own. */
+	const NO_RECOVERY_KEY = 'no_recovery_key';
+
 	public static function fleet_backup_health($node, array $policy): array {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 
@@ -841,8 +846,10 @@ class NodeMonitorHealth {
 		// which invites someone to wait.
 		$rk = RecoveryKeyFleet::node_state($node);
 		if ($rk['state'] !== 'n/a' && !RecoveryKeyFleet::has_own_key($rk)) {
-			return self::kind(self::result('backups', 'Cannot be backed up: no verified recovery key on the node',
+			$r = self::kind(self::result('backups', 'Cannot be backed up: no verified recovery key on the node',
 				RecoveryKeyFleet::blocker_summary($rk), $rk['state'] !== 'unknown'), 'stopped');
+			$r['reason'] = self::NO_RECOVERY_KEY;
+			return $r;
 		}
 
 		if (!$last) {

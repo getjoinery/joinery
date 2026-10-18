@@ -258,6 +258,42 @@ $p_new = $provision('operator');
 check((int)$p_new->get('cvp_oca_operator_cloud_account_id') === (int)$main->key, 'a new server of ours that names no account goes to the default');
 $p_cust = $provision('customer');
 check(!(int)$p_cust->get('cvp_oca_operator_cloud_account_id'), 'a customer\'s server is never put in one of ours');
+
+// A Managed draft: saved as the buyer's while they configure it, made ours
+// at payment, its server not yet created. It stalled before create, naming no
+// account (T-P1, 2026-10-17).
+$p_draft = new CustomerCloudProvision(NULL);
+$p_draft->set('cvp_origin', 'buyer');
+$p_draft->set('cvp_usr_user_id', $uid);
+$p_draft->set('cvp_domain', 'oca-' . $tag . '-draft.example.com');
+$p_draft->set('cvp_slug', 'oca-' . $tag . '-draft');
+$p_draft->set('cvp_status', 'draft');
+$p_draft->set('cvp_provider', 'linode');
+$p_draft->save();
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $p_draft->key);
+check(!(int)$p_draft->get('cvp_oca_operator_cloud_account_id'), 'a draft is in no account of ours');
+$p_draft->set('cvp_hosting_mode', 'operator');
+$p_draft->save();
+$p_draft->load();
+check((int)$p_draft->get('cvp_oca_operator_cloud_account_id') === (int)$main->key,
+	'a draft made ours at payment, its server not yet created, goes to the default');
+$p_old = $provision('customer');
+$p_old->set('cvp_hosting_mode', 'operator');
+$p_old->save();
+$p_old->load();
+check(!(int)$p_old->get('cvp_oca_operator_cloud_account_id'),
+	'a row whose server already exists is never given an account it was not created in');
+
+// Rows saved before that rule: the repair gives the default to each one with
+// no server yet, and to nothing else.
+$db->prepare("UPDATE cvp_customer_cloud_provisions SET cvp_oca_operator_cloud_account_id = NULL WHERE cvp_customer_cloud_provision_id = ?")
+	->execute(array((int)$p_draft->key));
+$fixed = CustomerCloudProvision::stamp_unstamped_default();
+$p_draft->load();
+$p_old->load();
+check($fixed >= 1 && (int)$p_draft->get('cvp_oca_operator_cloud_account_id') === (int)$main->key,
+	'the repair gives a stranded paid draft the default', 'fixed ' . $fixed);
+check(!(int)$p_old->get('cvp_oca_operator_cloud_account_id'), 'and leaves a row whose server exists alone');
 $said = '';
 try {
 	$p_cust->set('cvp_oca_operator_cloud_account_id', (int)$main->key);

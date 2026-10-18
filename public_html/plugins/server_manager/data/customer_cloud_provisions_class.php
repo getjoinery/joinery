@@ -39,6 +39,10 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.23 - an operator-mode row that names no account is stamped with the default until its server exists,
+ *                not only when the row is new: a Managed draft becomes operator-mode at payment, on a row saved
+ *                long before, and was never stamped, so every Managed order stalled before create (T-P1, 2026-10-17);
+ *                stamp_unstamped_default() gives such rows the default (server_manager migration sm_021)
  * @version 1.22 - data_root_line() takes what the machine reports now: a data root encrypted in place (or
  *                 decrypted) after its provision read as it was born (B44)
  * @version 1.21 - cvp_data_root_encrypted and cvp_provider_disk_encryption: one layer of encryption, never two
@@ -253,15 +257,39 @@ class CustomerCloudProvision extends SystemBase {
 	 * A new server in one of our accounts that names none goes to the
 	 * default account: a hosted order, and anything else this node creates
 	 * without asking. A form that asks sets the account first.
+	 *
+	 * New means its server is not created yet, not that the row is new: a
+	 * Managed draft is saved while the buyer configures it, and becomes a
+	 * server of ours only when payment sets the operator mode.
 	 */
 	private function stamp_account(): void {
-		if (!$this->key && ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator'
+		if ((!$this->key || !$this->get('cvp_instance_id'))
+				&& ($this->get('cvp_hosting_mode') ?: 'customer') === 'operator'
 				&& !(int)$this->get('cvp_oca_operator_cloud_account_id')) {
 			$default = OperatorCloudAccount::default_id();
 			if ($default > 0) {
 				$this->set('cvp_oca_operator_cloud_account_id', $default);
 			}
 		}
+	}
+
+	/**
+	 * Every server of ours not yet created that names no account goes to the
+	 * default, as stamp_account() does for one row as it saves. For rows saved
+	 * before that rule covered a draft made ours at payment. Returns how many;
+	 * none while no default is held.
+	 */
+	public static function stamp_unstamped_default(): int {
+		$default = OperatorCloudAccount::default_account();
+		if ($default === null) {
+			return 0;
+		}
+		$q = DbConnector::get_instance()->get_db_link()->prepare("UPDATE cvp_customer_cloud_provisions
+			SET cvp_oca_operator_cloud_account_id = ?
+			WHERE cvp_hosting_mode = 'operator' AND cvp_oca_operator_cloud_account_id IS NULL
+			AND COALESCE(cvp_instance_id, '') = '' AND cvp_delete_time IS NULL");
+		$q->execute(array((int)$default->key));
+		return $q->rowCount();
 	}
 
 	private function validate_row() {
