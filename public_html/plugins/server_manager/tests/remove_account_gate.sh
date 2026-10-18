@@ -80,6 +80,7 @@ BIN="$T/bin"; RUN="$T/run"; D="$T/docker"
 mkdir -p "$BIN" "$RUN"
 # The script under test runs from beside a stub remove_site_certificate.sh.
 cp "$SCRIPT" "$RUN/remove_account.sh"
+cp "$(dirname "$SCRIPT")/host_runner_lock.sh" "$RUN/host_runner_lock.sh"
 cat > "$RUN/remove_site_certificate.sh" <<'STUB'
 #!/bin/bash
 echo "{\"name\":\"$1\",\"letsencrypt\":\"removed\"}"
@@ -120,15 +121,30 @@ echo "systemctl \$*" >> "$D/log"
 [ "\$1" = "is-enabled" ] && { [ -f "$D/enabled" ]; exit \$?; }
 exit 0
 STUB
-printf '#!/bin/bash\necho "dropdb $*" >> "%s/log"\n' "$D" > "$BIN/dropdb"
+# Stub PostgreSQL: the databases in $D/databases. dropdb logs its arguments and
+# the password it was handed, and fails when $D/dropfail exists; psql lists the
+# databases, or fails as an unreachable server does when $D/pgdown exists.
+cat > "$BIN/dropdb" <<STUB
+#!/bin/bash
+echo "dropdb \$* pw=\${PGPASSWORD:-}" >> "$D/log"
+[ -f "$D/dropfail" ] && { echo 'dropdb: error: database removal failed: ERROR:  permission denied' >&2; exit 1; }
+db="\${@: -1}"
+grep -vxF "\$db" "$D/databases" > "$D/databases.new"; mv "$D/databases.new" "$D/databases"
+STUB
+cat > "$BIN/psql" <<STUB
+#!/bin/bash
+echo "psql pw=\${PGPASSWORD:-}" >> "$D/log"
+[ -f "$D/pgdown" ] && { echo 'psql: error: connection to server on socket failed: fe_sendauth: no password supplied' >&2; exit 2; }
+cat "$D/databases"
+STUB
 chmod +x "$BIN"/* "$RUN"/*.sh
 
 # A machine with no docker command at all: the stubs but docker, and links to
 # only the tools the script uses, so a real Docker on this box is never reached.
 NOD="$T/nodocker"; SYS="$T/sys"
 mkdir -p "$NOD" "$SYS"
-for c in a2dissite apache2ctl systemctl dropdb; do cp "$BIN/$c" "$NOD/$c"; done
-for c in bash grep sed sort tr cut dirname rm mkdir cat ls mv tail head wc timeout touch cp env; do
+for c in a2dissite apache2ctl systemctl dropdb psql; do cp "$BIN/$c" "$NOD/$c"; done
+for c in bash grep sed sort tr cut dirname rm mkdir cat ls mv tail head wc timeout touch cp env id flock date chmod; do
     ln -s "$(command -v "$c")" "$SYS/$c"
 done
 run_nodocker() { PATH="$NOD:$SYS" REMOVE_ACCOUNT_ROOT="$T/fs" bash "$RUN/remove_account.sh" "$@" -y 2>&1; }
@@ -137,7 +153,7 @@ run_nodocker() { PATH="$NOD:$SYS" REMOVE_ACCOUNT_ROOT="$T/fs" bash "$RUN/remove_
 reset() {
     rm -rf "${D:?}" "${T:?}/fs"
     mkdir -p "$D" "$T/fs/var/www/html" "$T/fs/etc/apache2/sites-available" "$T/fs/etc/joinery/sites" "$T/fs/root"
-    for f in containers volumes networks images in_use log; do : > "$D/$f"; done
+    for f in containers volumes networks images in_use log databases; do : > "$D/$f"; done
 }
 # A container site: container, its fifteen volumes, network, image, state dir,
 # host-side logs folder and proxy vhost naming its certificate.
@@ -243,11 +259,12 @@ printf '#!/bin/bash\necho "a2dissite $*" >> "%s/log"\n' "$D" > "$BIN/a2dissite"
 reset
 mkdir -p "$T/fs/var/www/html/foo/public_html" "$T/fs/var/www/html/foo_test/public_html"
 echo "DocumentRoot /var/www/html/foo/public_html" > "$T/fs/etc/apache2/sites-available/foo.conf"
+printf 'foo\nfoo_test\npostgres\n' > "$D/databases"
 out="$(run_nodocker foo)"; rc=$?
 chk "D: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED foo$')" "1"
 chk "D: web root gone" "$(there /var/www/html/foo)" "no"
 chk "D: test twin gone" "$(there /var/www/html/foo_test)" "no"
-chk "D: both databases dropped" "$(grep -cE '^dropdb -U postgres foo(_test)?$' "$D/log")" "2"
+chk "D: both databases dropped, never prompting, their connections ended" "$(grep -cE '^dropdb -w --force --if-exists -U postgres foo(_test)? ' "$D/log")" "2"
 
 # --- E: a bare-metal site whose <site>_test and <site>-le-ssl are sites of their own.
 reset
@@ -258,9 +275,136 @@ echo "DocumentRoot /var/www/html/bar-le-ssl/public_html" > "$T/fs/etc/apache2/si
 out="$(run bar)"; rc=$?
 chk "E: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED bar$')" "1"
 chk "E: site bar_test's files kept" "$(there /var/www/html/bar_test/public_html)" "yes"
-chk "E: site bar_test's database kept" "$(logged '^dropdb -U postgres bar_test$')" "0"
+chk "E: site bar_test's database kept" "$(logged '^dropdb .* bar_test ')" "0"
 chk "E: site bar-le-ssl's vhost kept" "$(there /etc/apache2/sites-available/bar-le-ssl.conf)" "yes"
 chk "E: bar-le-ssl never disabled" "$(logged 'a2dissite bar-le-ssl')" "0"
+
+# --- G (B2): a bare-metal site's databases are dropped with its own config's
+# --- password, read before the folder holding it goes; the test suite's
+# --- database (its dbname_test) too; never another's.
+bare_site() {  # NAME [DOMAIN]
+    mkdir -p "$T/fs/var/www/html/$1/public_html" "$T/fs/var/www/html/$1/config"
+    printf "<?php\n\$this->settings['dbname'] = '%s';\n\$this->settings['dbpassword'] = 's3cret-%s';\n\$this->settings['dbname_test'] = 'test_%s';\n" "$1" "$1" "$1" \
+        > "$T/fs/var/www/html/$1/config/Globalvars_site.php"
+    printf 'ServerName %s\nDocumentRoot /var/www/html/%s/public_html\n' "${2:-$1.example}" "$1" > "$T/fs/etc/apache2/sites-available/$1.conf"
+}
+reset
+bare_site gee
+printf 'gee\ntest_gee\ngee_other\ntest_gee_other\npostgres\n' > "$D/databases"
+out="$(run_nodocker gee)"; rc=$?
+chk "G: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED gee$')|$rc" "1|0"
+chk "G: dropdb is handed the site's password and never prompts" \
+    "$(grep -c '^dropdb -w --force --if-exists -U postgres gee pw=s3cret-gee$' "$D/log")" "1"
+chk "G: the test suite's database goes with it" "$(grep -cxF test_gee "$D/databases")" "0"
+chk "G: databases named like it stay" "$(grep -cE '^(test_)?gee_other$' "$D/databases")" "2"
+chk "G: the verdict asked PostgreSQL" "$(grep -c '^psql pw=s3cret-gee$' "$D/log")" "2"
+
+# --- G2: a drop that fails is said, and the site is not verified gone.
+reset
+bare_site gee
+printf 'gee\npostgres\n' > "$D/databases"
+touch "$D/dropfail"
+out="$(run_nodocker gee)"; rc=$?
+chk "G2: the failure is said" "$(echo "$out" | grep -c "database 'gee' was not removed: dropdb: error")" "1"
+chk "G2: and the verdict names it" \
+    "$(echo "$out" | grep -c 'Database still present: gee')|$(echo "$out" | grep -c '^DECOMMISSION_FAILED_VERIFY gee$')|$rc" "1|1|1"
+
+# --- G3: PostgreSQL cannot be asked: the removal goes on, the verdict says why.
+reset
+bare_site gee
+touch "$D/pgdown"
+out="$(run_nodocker gee)"; rc=$?
+chk "G3: the files go regardless" "$(there /var/www/html/gee)" "no"
+chk "G3: the verdict says the databases could not be checked, in PostgreSQL's words" \
+    "$(echo "$out" | grep -c 'could not be asked whether the databases are gone: psql: error')|$(echo "$out" | grep -c '^DECOMMISSION_FAILED_VERIFY gee$')" "1|1"
+
+# --- H (B96): a companion test site with its own vhost (_site_init.sh 3.16),
+# --- serving test.<the site's domain>, is the site's and goes with it.
+reset
+bare_site hay hay.example
+bare_site hay_test test.hay.example
+printf 'hay\nhay_test\ntest_hay\ntest_hay_test\npostgres\n' > "$D/databases"
+out="$(run_nodocker hay)"; rc=$?
+chk "H: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED hay$')|$rc" "1|0"
+chk "H: the test site's files and vhost go" "$(there /var/www/html/hay_test):$(there /etc/apache2/sites-available/hay_test.conf)" "no:no"
+chk "H: its vhost is disabled first" "$(logged '^a2dissite hay_test.conf')" "1"
+chk "H: all four databases go" "$(grep -c 'hay' "$D/databases")" "0"
+
+# --- H2: a <site>_test whose vhost serves another name is a site of its own.
+reset
+bare_site hay hay.example
+bare_site hay_test other.example
+printf 'hay\nhay_test\npostgres\n' > "$D/databases"
+out="$(run_nodocker hay)"; rc=$?
+chk "H2: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED hay$')" "1"
+chk "H2: hay_test's files, vhost and database are kept" \
+    "$(there /var/www/html/hay_test/config/Globalvars_site.php):$(there /etc/apache2/sites-available/hay_test.conf):$(grep -cxF hay_test "$D/databases")" "yes:yes:1"
+
+# --- I (B3): the removal holds the host converger's lock throughout, and a
+# --- lock already held past the wait refuses before anything goes.
+reset
+bare_site eye
+mkdir -p "$T/fs/var/www/html/eye/cache"
+printf '#!/bin/bash\nexec 8>>"%s"\nflock -n 8 && echo free >> "%s/lockseen" || echo held >> "%s/lockseen"\n' \
+    "$T/fs/var/www/html/eye/cache/host_installers.lock" "$D" "$D" > "$NOD/a2dissite"
+chmod +x "$NOD/a2dissite"
+out="$(run_nodocker eye)"; rc=$?
+chk "I: the converger's lock is held while the site goes" "$(cat "$D/lockseen" 2>/dev/null)" "held"
+cp "$BIN/a2dissite" "$NOD/a2dissite"
+reset
+bare_site eye
+mkdir -p "$T/fs/var/www/html/eye/cache"
+( exec 9>>"$T/fs/var/www/html/eye/cache/host_installers.lock"; flock 9; touch "$D/holding"; sleep 4 ) &
+HOLDER=$!
+for _ in $(seq 1 40); do [ -e "$D/holding" ] && break; sleep 0.05; done
+out="$(JOINERY_LOCK_WAIT_SECONDS=1 run_nodocker eye)"; rc=$?
+wait "$HOLDER"
+chk "I: a converger run that will not finish refuses the removal" \
+    "$rc|$(echo "$out" | grep -c 'host runner lock is held.*Nothing was removed')" "1|1"
+chk "I: and nothing was removed" "$(there /var/www/html/eye/config/Globalvars_site.php):$(logged '^a2dissite')" "yes:0"
+
+# --- J (B97): the machine's host converger, when its unit runs for this site,
+# --- goes with it; the agent's support bundle installs the machine's own.
+converger_unit() {  # SITE
+    mkdir -p "$T/fs/etc/systemd/system"
+    printf '[Service]\nType=oneshot\nExecStart=/bin/bash /usr/local/sbin/joinery-host-converger --when-changed %s /var/www/html/%s\n' "$1" "$1" \
+        > "$T/fs/etc/systemd/system/joinery-host-converger.service"
+    printf '[Timer]\nOnCalendar=*:*\n' > "$T/fs/etc/systemd/system/joinery-host-converger.timer"
+    printf '[Path]\nPathChanged=/var/www/html/%s/cache/root_requests\n' "$1" > "$T/fs/etc/systemd/system/joinery-host-converger.path"
+}
+reset
+bare_site jay
+converger_unit jay
+out="$(run_nodocker jay)"; rc=$?
+chk "J: verifies" "$(echo "$out" | grep -c '^DECOMMISSION_VERIFIED jay$')|$rc" "1|0"
+chk "J: the converger's service, timer and path go" "$(ls "$T/fs/etc/systemd/system" | grep -c joinery-host-converger)" "0"
+chk "J: stopped and disabled first, then systemd reloaded" \
+    "$(logged 'systemctl stop joinery-host-converger.timer joinery-host-converger.path joinery-host-converger.service'):$(logged 'systemctl disable joinery-host-converger.timer joinery-host-converger.path'):$(logged 'systemctl daemon-reload')" "1:1:1"
+chk "J: with no support bundle here, it says how the machine's converger comes" "$(echo "$out" | grep -c "fetches once it starts with no site")" "1"
+
+reset
+bare_site jay
+converger_unit jay
+mkdir -p "$T/fs/opt/joinery-agent/tree/maintenance_scripts/install_tools"
+printf '#!/bin/bash\necho "machine-converger $*" >> "%s/log"\n' "$D" > "$T/fs/opt/joinery-agent/tree/maintenance_scripts/install_tools/install_host_converger.sh"
+out="$(run_nodocker jay)"; rc=$?
+chk "J: the support bundle's converger is installed for the machine" "$(logged "^machine-converger --machine $T/fs/opt/joinery-agent/tree\$")" "1"
+
+reset
+bare_site jay
+converger_unit jay_other
+mkdir -p "$T/fs/etc/cron.d"
+printf '* * * * * root /bin/bash /usr/local/sbin/joinery-host-converger --when-changed jay /var/www/html/jay >> /var/www/html/jay/logs/host_converger.log 2>&1\n' \
+    > "$T/fs/etc/cron.d/joinery-host-converger"
+out="$(run_nodocker jay)"; rc=$?
+chk "J: a converger for another site is kept" "$(there /etc/systemd/system/joinery-host-converger.service):$(grep -c jay_other "$T/fs/etc/systemd/system/joinery-host-converger.service")" "yes:1"
+chk "J: the cron form for this site goes" "$(there /etc/cron.d/joinery-host-converger)" "no"
+reset
+bare_site jay
+mkdir -p "$T/fs/etc/systemd/system"
+printf '[Service]\nExecStart=/bin/bash /usr/local/sbin/joinery-host-converger --when-changed --machine --site-root=/opt/joinery-agent/tree\n' > "$T/fs/etc/systemd/system/joinery-host-converger.service"
+out="$(run_nodocker jay)"; rc=$?
+chk "J: the machine's own converger is kept" "$(there /etc/systemd/system/joinery-host-converger.service):$(logged 'stop joinery-host-converger')" "yes:0"
 
 # --- F: a re-run where only the vhost and a suspended mark are left.
 reset
