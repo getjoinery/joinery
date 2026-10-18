@@ -3397,6 +3397,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                     entity_type: EntityType::File,
                     server_id: holder.id,
                 };
+                let mut feed_row = None;
                 if let Some(real) = env.store.get_entry(target)? {
                     // A record the change feed named, with nothing of it on
                     // this disk, is this upload learned twice: the upload's
@@ -3416,9 +3417,10 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                         env.store.merge_file(entry.id, target, true)?;
                         return Ok(OpOutcome::Done);
                     }
-                    // Nothing is lost with the feed's row: the dedup answer is
-                    // the holder as of now, which the adoption below writes.
+                    // Nothing is lost with the feed's row: its date and change
+                    // id are carried into the adoption below.
                     env.store.delete_entry(target)?;
+                    feed_row = Some(real);
                 }
                 let mut adopted = entry.clone();
                 env.store.rekey_entry(entry.id, target)?;
@@ -3437,6 +3439,20 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 adopted.synced_fingerprint = Some(fingerprint);
                 adopted.own_file = Some(fingerprint.identity());
                 adopted.status = LocalStatus::Synced;
+                // The server's side as of now. Its bytes are this upload's:
+                // that is what the server's answer just matched, and the
+                // answer is fresher than anything the feed said this pass.
+                // The date and change id are the feed row's, where it named
+                // the file. Left empty, the record agreed on bytes the server
+                // held without knowing the server held them, so the download
+                // the feed had planned ran and landed over the user's own
+                // file with the same bytes (`already_holds_the_head` asks
+                // both sides; B5).
+                adopted.remote_content = adopted.synced_content.clone();
+                if let Some(row) = feed_row {
+                    adopted.remote_modified_time = row.remote_modified_time;
+                    adopted.head_change_id = row.head_change_id;
+                }
                 // The holder of a name is a live file, whatever the record it
                 // is taken as believed of the file it was (above).
                 adopted.remote_deleted = false;
