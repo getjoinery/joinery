@@ -8,6 +8,8 @@
 # the release upgrade Ubuntu last said it offers, and on a Docker host each
 # site container's state and figures.
 #
+# Version: 1.34 - kernel_warning counts a WARN() by its "WARNING: CPU:" line, not a boot notice about a CPU's
+#               mitigations, which says WARNING on every boot of every machine with that CPU
 # Version: 1.33 - site_security: the sha256 of the system call filter this host's sites are made under and the
 #               capabilities a site adds (the run spec's), which each site's own (container_inventory) is checked
 #               against from the management node (site_copy_final_test.md, the rig)
@@ -736,8 +738,11 @@ KERNEL_EVENT_IO='I/O error|Buffer I/O error|EXT4-fs error|Remounting filesystem 
 # every OOM kill report and hung-task notice prints. A BUG() prints "kernel BUG
 # at FILE:LINE!" with no colon, and on a 6.8 kernel the die header that follows
 # names no Oops ("invalid opcode: 0000 [#1]"), so it is matched by its own words
-# (reviewer2 R1).
-KERNEL_EVENT_WARNING='WARNING:|BUG:|[Kk]ernel BUG at|Oops:|general protection fault|kernel NULL pointer'
+# (reviewer2 R1). A WARN() is matched by its own line, "WARNING: CPU: N PID: N
+# at FILE:LINE": the boot notices about a CPU's mitigations ("Speculative Return
+# Stack Overflow: WARNING: See ...", "Spectre V2 : WARNING: Unprivileged eBPF
+# ...") say WARNING too, on every boot of every machine with that CPU.
+KERNEL_EVENT_WARNING='WARNING: CPU:|BUG:|[Kk]ernel BUG at|Oops:|general protection fault|kernel NULL pointer'
 
 # Whether the system journal can be read here. journalctl -g exits 1 both when
 # it cannot read the journal and when nothing matched (systemd 255 and 259),

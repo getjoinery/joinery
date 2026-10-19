@@ -71,7 +71,14 @@ echo "postfix \$*" >> "$ST/calls"; exit 0
 EOF
 cat > "$B/pgrep" <<EOF
 #!/bin/bash
-[ -s "$ST/pgrep" ] && cat "$ST/pgrep"
+case "\$*" in
+  *smtpd*) [ -s "$ST/pgrep_smtpd" ] && cat "$ST/pgrep_smtpd" ;;
+  *) [ -s "$ST/pgrep" ] && cat "$ST/pgrep" ;;
+esac
+EOF
+cat > "$B/postqueue" <<EOF
+#!/bin/bash
+[ -s "$ST/postqueue" ] && cat "$ST/postqueue"; exit 0
 EOF
 chmod +x "$B"/*
 export PATH="$B:$PATH"
@@ -129,6 +136,23 @@ out="$(bash "$Q" on 2>&1)"; rc=$?
 chk "a worker still running when the wait ends: exit 3, and named" "$rc:$(printf '%s' "$out" | grep -c 'pids 4242')" "3:1"
 chk "the site stays quiet" "$(cat "$SD/state")" "quiet switchover"
 : > "$ST/pgrep"
+
+echo "=== on waits for mail already on its way in (B4) ==="
+bash "$Q" off >/dev/null 2>&1
+sleep 60 & held_session=$!
+echo "$held_session" > "$ST/pgrep_smtpd"
+out="$(bash "$Q" on 2>&1)"; rc=$?
+chk "a session open from before the deferral is ended once its half minute (here the wait) is up: exit 0" \
+    "$rc:$(kill -0 "$held_session" 2>/dev/null && echo alive || echo ended):$(printf '%s' "$out" | grep -c "pids ${held_session}")" "0:ended:1"
+wait "$held_session" 2>/dev/null
+: > "$ST/pgrep_smtpd"
+echo '{"queue_name": "active", "queue_id": "E511B806E6B", "recipients": [{"address": "test@qsite.example"}]}' > "$ST/postqueue"
+out="$(bash "$Q" on 2>&1)"; rc=$?
+chk "a message Postfix accepted still in its active queue when the wait ends: exit 3, and said" "$rc:$(printf '%s' "$out" | grep -c 'still in its queue')" "3:1"
+echo '{"queue_name": "deferred", "queue_id": "AAAA1", "recipients": [{"address": "x@elsewhere.example"}]}' > "$ST/postqueue"
+out="$(bash "$Q" on 2>&1)"; rc=$?
+chk "a deferred message is not waited for" "$rc" "0"
+: > "$ST/postqueue"
 
 echo "=== off: everything back as it was ==="
 : > "$ST/calls"

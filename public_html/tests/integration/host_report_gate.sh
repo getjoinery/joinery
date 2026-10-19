@@ -209,6 +209,8 @@ case "$*" in
         echo "WARNING: CPU: 1 PID: 77 at net/core/dev.c:123 thing+0x1/0x2"
         echo "BUG: kernel NULL pointer dereference, address: 0000000000000008"
         echo "kernel BUG at mm/slub.c:451!"
+        echo "Speculative Return Stack Overflow: WARNING: See https://kernel.org/doc/html/latest/admin-guide/hw-vuln/srso.html for mitigation options."
+        echo "Spectre V2 : WARNING: Unprivileged eBPF is enabled with eIBRS on, data leaks possible via Spectre v2 BHB attacks!"
         ;;
     *"-u ssh"*)
         echo "Failed password for invalid user eve from 203.0.113.9 port 4444 ssh2"
@@ -447,7 +449,7 @@ chk "no host key or authorized-keys path from sshd -T reaches the object" "$(gre
 chk "the three events are counted from the system journal" "$(jv "$T/root.json" kernel_events_24h.oom)/$(jv "$T/root.json" kernel_events_24h.enospc)/$(jv "$T/root.json" kernel_events_24h.io_error)" "1/2/0"
 chk "a pattern nothing matched counts 0" "$(jv "$T/root.json" kernel_events_24h.io_error)" "0"
 chk "a pattern nothing matched (journalctl exits 1) is zero, not unknown (B35)" "$(jv "$T/root.json" kernel_events_24h type)" "object"
-chk "the kernel's own warnings are counted from its messages alone, a BUG() with no colon among them (D7, R1)" \
+chk "the kernel's own warnings are counted from its messages alone, a BUG() with no colon among them, never a boot notice about the CPU's mitigations (D7, R1)" \
     "$(jv "$T/root.json" kernel_events_24h.kernel_warning)|$(grep -c 'journal_event_count "\$KERNEL_EVENT_WARNING" _TRANSPORT=kernel' "$SCRIPT")" "3|1"
 # The rest by the functions alone, in a subshell each: a whole run per case
 # would double this gate's time.
