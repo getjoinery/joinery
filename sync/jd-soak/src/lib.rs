@@ -31,6 +31,7 @@ pub mod chaos;
 pub mod control;
 pub mod fleet;
 pub mod journal;
+pub mod mailbox;
 pub mod orchestrate;
 pub mod persona;
 pub mod remote;

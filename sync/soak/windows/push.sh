@@ -41,7 +41,7 @@ trap 'rm -rf "$work"' EXIT
 
 echo "== scripts to C:\\soak-win"
 "${VM[@]}" 'New-Item -ItemType Directory -Force C:\soak-win | Out-Null'
-for f in build.ps1 device.ps1 forever.ps1 install.ps1 provision.ps1 reset.ps1 fleet.json; do
+for f in build.ps1 device.ps1 forever.ps1 install.ps1 power.ps1 provision.ps1 reset.ps1 fleet.json; do
 	"${VM_SCP[@]}" "$HERE/$f" "joinery@$ip:C:/soak-win/$f"
 done
 [ "$scripts_only" = 1 ] && { echo "== done (scripts only)"; exit 0; }
