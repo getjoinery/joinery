@@ -18697,11 +18697,18 @@ fn a_placeholder_waits_for_a_new_parent_inside_a_vault_it_cannot_open() {
 /// follow read it before the folder scan had set it right, and the vault's
 /// record named as its folder one that never stood here -- still naming it
 /// after the server trashed it.
+///
+/// `h` holds the vault and nothing is asserted of it. On a Windows host it is
+/// a Windows device: a Linux one cannot be simulated there holding 'a:b' (a
+/// drive-shaped name is a drive: jd-sim vfs tests,
+/// a_drive_shaped_name_is_a_drive_on_a_windows_host), and a Windows `h` meets
+/// the same tie as `pc` and has to settle it too.
 #[test]
 fn a_parked_vault_followed_into_a_folder_is_placed_under_that_folder_not_a_namesake_only_named_here() {
+    let holder = if cfg!(windows) { jd_sim::scenario::Platform::Windows } else { jd_sim::scenario::Platform::Linux };
     for (label, model) in [("win", jd_sim::FileIds::DirectorySlot), ("mac", jd_sim::FileIds::DataCluster), ("linux", jd_sim::FileIds::MountSession)] {
         let vault = SimVault::new(9_994);
-        let mut world = World::of(9_994, &[("h", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+        let mut world = World::of(9_994, &[("h", holder), ("pc", jd_sim::scenario::Platform::Windows)]);
         world.give_vault("h", &vault);
         world.give_vault("pc", &vault);
         world.server.set_vault_public_key(1, &vault.public_key_b64);
@@ -21314,10 +21321,9 @@ fn a_folder_swap_whose_finish_is_refused_once_trashes_nothing_in_the_park() {
     let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let once = refused.clone();
     mac.fs.while_renaming(move |from, _| {
-        let from = from.to_string_lossy();
-        if let Some(rel) = from.strip_prefix("/sync/") {
+        if let Some(rel) = jd_vfs::relative_to(std::path::Path::new("/sync"), from) {
             if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                fs.fail_next(FsOp::Rename, Some(rel), FailureKind::Io, 1);
+                fs.fail_next(FsOp::Rename, Some(&rel), FailureKind::Io, 1);
             }
         }
     });
@@ -21364,10 +21370,9 @@ fn a_park_left_with_no_finisher_trashes_nothing_in_it() {
     let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let once = refused.clone();
     mac.fs.while_renaming(move |from, _| {
-        let from = from.to_string_lossy();
-        if let Some(rel) = from.strip_prefix("/sync/") {
+        if let Some(rel) = jd_vfs::relative_to(std::path::Path::new("/sync"), from) {
             if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                fs.fail_next(FsOp::Rename, Some(rel), FailureKind::Io, 1);
+                fs.fail_next(FsOp::Rename, Some(&rel), FailureKind::Io, 1);
             }
         }
     });
@@ -21417,8 +21422,7 @@ fn strand_a_swap_park(world: &World, dev: &jd_sim::engine::Device, peer: &jd_sim
     let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let once = refused.clone();
     dev.fs.while_renaming(move |from, _| {
-        let from = from.to_string_lossy().replace('\\', "/");
-        let rel = from.rsplit_once("/sync/").map(|(_, r)| r.to_string()).unwrap_or_default();
+        let rel = jd_vfs::relative_to(std::path::Path::new("/sync"), from).unwrap_or_default();
         if rel.starts_with(".jd-swap") && !rel.contains('/') && !once.swap(true, std::sync::atomic::Ordering::SeqCst) {
             fs.fail_next(FsOp::Rename, Some(&rel), FailureKind::Io, 1);
         }
@@ -21677,8 +21681,8 @@ fn a_rotation_stopped_after_its_first_move_loses_nothing() {
     let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
     let live = armed.clone();
     mac.fs.while_renaming(move |from, to| {
-        let (from, to) = (from.to_string_lossy().to_string(), to.to_string_lossy().to_string());
-        let (Some(f), Some(t)) = (from.strip_prefix("/sync/"), to.strip_prefix("/sync/")) else { return };
+        let sync = std::path::Path::new("/sync");
+        let (Some(f), Some(t)) = (jd_vfs::relative_to(sync, from), jd_vfs::relative_to(sync, to)) else { return };
         if f.contains('/') || t.contains('/') {
             return;
         }
@@ -21693,7 +21697,7 @@ fn a_rotation_stopped_after_its_first_move_loses_nothing() {
         if t.starts_with(".jd-swap") && !parked {
             log.push(format!("park {f}->{t}"));
         } else if parked && moved == 1 {
-            fs.fail_next(FsOp::Rename, Some(f), FailureKind::Io, 1);
+            fs.fail_next(FsOp::Rename, Some(&f), FailureKind::Io, 1);
             log.push(format!("stop {f}->{t}"));
         } else if parked {
             log.push(format!("move {f}->{t}"));

@@ -2608,6 +2608,27 @@ impl SpoolFile for MemSpool {
 
 #[cfg(test)]
 mod tests {
+    /// What a simulated Linux or Mac disk cannot hold on a Windows host. The
+    /// simulated disks are reached through the host's own paths, and a
+    /// drive-shaped name -- a letter, then a colon, `a:b` -- is, to a Windows
+    /// path, a drive: joined to a folder it does not land in that folder at
+    /// all. Any other colon is an ordinary character there (`Q3: x`). No
+    /// Windows disk holds such a name (the engine escapes it on the way down),
+    /// so the client is not what this limits; only a simulated Linux or Mac
+    /// disk inside a Windows process, which is why the tests that need one
+    /// do not run there. If this ever fails, they can.
+    #[test]
+    fn a_drive_shaped_name_is_a_drive_on_a_windows_host() {
+        let sync = std::path::Path::new("/sync");
+        let joined = sync.join("a:b");
+        if cfg!(windows) {
+            assert!(!joined.starts_with(sync), "{joined:?}");
+        } else {
+            assert_eq!(joined, std::path::Path::new("/sync/a:b"));
+        }
+        assert!(sync.join("Q3: x").starts_with(sync), "only a drive-shaped name is a drive");
+    }
+
     use super::*;
 
     fn p(s: &str) -> PathBuf {

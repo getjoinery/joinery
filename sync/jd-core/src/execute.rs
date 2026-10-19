@@ -4693,11 +4693,15 @@ fn create_local_folder(
                     // A respelling of the same slot -- a case-only rename on
                     // a folding disk -- finds the stand-in itself at the
                     // destination, which is not something in the way.
-                    let respell = same_slot(
-                        &from.to_string_lossy(),
-                        &path.to_string_lossy(),
-                        &env.vfs.personality(),
-                    );
+                    // Compared name by name, as the engine names places: a
+                    // native path's whole string is one segment on Windows.
+                    let rel = |p: &std::path::Path| {
+                        env.vfs
+                            .root()
+                            .and_then(|root| jd_vfs::relative_to(&root, p))
+                            .unwrap_or_else(|| p.to_string_lossy().to_string())
+                    };
+                    let respell = same_slot(&rel(&from), &rel(&path), &env.vfs.personality());
                     if !respell && env.vfs.read_dir(&path).is_ok() {
                         return Ok(OpOutcome::Retry(format!(
                             "{} stands where the vault's directory {} must go",
@@ -6225,7 +6229,7 @@ pub(crate) fn owner_of(
     let Some(slot) = env
         .vfs
         .root()
-        .and_then(|root| path.strip_prefix(&root).ok().map(|p| p.to_string_lossy().replace('\\', "/")))
+        .and_then(|root| jd_vfs::relative_to(&root, path))
     else {
         return Ok(Vec::new());
     };

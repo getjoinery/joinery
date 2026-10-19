@@ -55,6 +55,26 @@ pub fn canonical_root(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// `path` relative to `root`, in the form the engine speaks of every place
+/// in the drive: its names joined by `/`, whatever the operating system's
+/// own separator. `None` when `path` is not under `root`; the empty string
+/// for `root` itself.
+///
+/// Made from the path's names, never by replacing one separator with
+/// another: on Windows a path is split on both `\` and `/` (no name can
+/// hold either), while on Linux and macOS `\` is a character a name may
+/// hold, and `a\b.txt` there is one file, not `b.txt` in a folder `a`. The
+/// string of a joined path, taken whole, said `Work\doc.txt` on Windows
+/// where every other path in the engine said `Work/doc.txt`.
+pub fn relative_to(root: &Path, path: &Path) -> Option<String> {
+    let rest = path.strip_prefix(root).ok()?;
+    let names: Vec<String> = rest
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect();
+    Some(names.join("/"))
+}
+
 /// Is `path` inside `root`?
 ///
 /// Compares component by component rather than by string prefix, so that
@@ -79,6 +99,34 @@ pub fn is_inside(root: &Path, path: &Path, case_insensitive: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_relative_path_is_its_names_joined_by_slashes() {
+        let root = Path::new("/sync");
+        assert_eq!(relative_to(root, &root.join("Work").join("doc.txt")).as_deref(), Some("Work/doc.txt"));
+        assert_eq!(relative_to(root, root).as_deref(), Some(""));
+        assert_eq!(relative_to(root, Path::new("/elsewhere/doc.txt")), None);
+    }
+
+    /// On Linux and macOS a backslash is part of a name.
+    #[cfg(unix)]
+    #[test]
+    fn a_backslash_in_a_name_stays_in_the_name() {
+        let root = Path::new("/sync");
+        assert_eq!(relative_to(root, &root.join("Work").join(r"a\b.txt")).as_deref(), Some(r"Work/a\b.txt"));
+    }
+
+    /// On Windows both separators part names, and the engine still hears `/`.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_path_is_spoken_of_with_slashes() {
+        let root = Path::new(r"C:\Users\a\Joinery Drive");
+        assert_eq!(
+            relative_to(root, Path::new(r"C:\Users\a\Joinery Drive\Work\Sub/doc.txt")).as_deref(),
+            Some("Work/Sub/doc.txt")
+        );
+        assert_eq!(relative_to(Path::new("/sync"), &Path::new("/sync").join("Work").join("doc.txt")).as_deref(), Some("Work/doc.txt"));
+    }
 
     #[test]
     fn the_extended_length_prefix_comes_off_a_drive_path() {

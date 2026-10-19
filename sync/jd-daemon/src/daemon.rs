@@ -448,8 +448,7 @@ impl Daemon {
                     forget = Some(
                         set.touched()
                             .iter()
-                            .filter_map(|p| root.as_ref().and_then(|r| p.strip_prefix(r).ok()))
-                            .map(|p| p.to_string_lossy().replace('\\', "/"))
+                            .filter_map(|p| root.as_ref().and_then(|r| jd_vfs::relative_to(r, p)))
                             .collect(),
                     );
                 }
