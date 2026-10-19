@@ -228,6 +228,11 @@ const MAX_GRANTS: usize = 8;
 /// thread per connection any local process cares to open.
 const MAX_CONNECTIONS: usize = 4;
 
+/// How long a stopping daemon waits for the answers it is still writing
+/// (`ControlServer::shutdown`). An answer is a few hundred bytes to a
+/// process on this machine; this only has to outlast a slow scheduler.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+
 /// The policy every answer carries.
 ///
 /// Written for the page and harmless on JSON: scripts and styles only from the
@@ -400,6 +405,10 @@ pub struct ControlServer {
     port: u16,
     pages: &'static [Page],
     grants: std::sync::Mutex<Grants>,
+    /// Connections being served now, and the signal that one has finished.
+    in_flight: std::sync::Arc<(std::sync::Mutex<usize>, std::sync::Condvar)>,
+    /// Set by `shutdown`: a connection accepted after it is closed unanswered.
+    closing: std::sync::atomic::AtomicBool,
 }
 
 impl ControlServer {
@@ -422,6 +431,8 @@ impl ControlServer {
             port,
             pages: &[],
             grants: std::sync::Mutex::new(Grants::default()),
+            in_flight: Default::default(),
+            closing: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -458,9 +469,9 @@ impl ControlServer {
     where
         F: Fn(&Request) -> (u16, Value) + Send + Sync + 'static,
     {
-        use std::sync::{Arc, Condvar, Mutex};
+        use std::sync::Arc;
         let handle = Arc::new(handle);
-        let busy = Arc::new((Mutex::new(0usize), Condvar::new()));
+        let busy = Arc::clone(&self.in_flight);
         loop {
             {
                 let (count, freed) = &*busy;
@@ -479,6 +490,12 @@ impl ControlServer {
                     continue;
                 }
             };
+            if self.closing.load(std::sync::atomic::Ordering::SeqCst) {
+                // Stopping: the caller sees the connection close, which is
+                // what "no daemon here" is, and is true in a moment.
+                drop(stream);
+                continue;
+            }
             *busy.0.lock().unwrap_or_else(|e| e.into_inner()) += 1;
             let (server, handle, done) =
                 (Arc::clone(&self), Arc::clone(&handle), Arc::clone(&busy));
@@ -488,7 +505,10 @@ impl ControlServer {
                     let _ = server.serve_stream(stream, &mut |req| handle(req));
                     let (count, freed) = &*done;
                     *count.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
-                    freed.notify_one();
+                    // Two kinds of waiter: this loop, at the cap, and a
+                    // shutdown waiting for none. One woken alone could be
+                    // the wrong one.
+                    freed.notify_all();
                 });
             if spawned.is_err() {
                 // The stream went with the closure and is closed; the caller
@@ -546,8 +566,28 @@ impl ControlServer {
     /// A stale endpoint file is worse than none: a client reads it, connects to
     /// whatever now holds that port, and reports something that is not the
     /// daemon.
+    ///
+    /// Then wait, for a moment at most, for the answers still being written.
+    /// The process ends when this returns, and an answer cut off by it is no
+    /// answer: `joinery-drive stop` was answered "Stopping." by a daemon that
+    /// then ended before the words left, and reported that the daemon did not
+    /// answer, about the daemon it had just stopped (seen on Windows, where
+    /// the exit won that race). The request that asked for the stop is
+    /// counted before its handler runs, so its own answer is always waited
+    /// for.
     pub fn shutdown(&self) {
+        self.closing.store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::fs::remove_file(&self.endpoint_path);
+        let (count, freed) = &*self.in_flight;
+        let deadline = std::time::Instant::now() + SHUTDOWN_GRACE;
+        let mut n = count.lock().unwrap_or_else(|e| e.into_inner());
+        while *n > 0 {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            n = freed.wait_timeout(n, left).unwrap_or_else(|e| e.into_inner()).0;
+        }
     }
 
     /// Read one request and decide who is asking.
@@ -1152,6 +1192,59 @@ mod tests {
         server.shutdown();
         assert!(!path.exists());
         assert!(Endpoint::load(&path).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stop_waits_for_the_answer_it_is_still_writing() {
+        // The handler stands for `/stop`: it tells the daemon to stop, and the
+        // daemon shuts the channel down while the answer is still on its way.
+        // Shutdown returns only once that answer has gone, and the caller has it.
+        let dir = temp("stop-answer");
+        let path = dir.join("control.json");
+        let server = std::sync::Arc::new(ControlServer::bind(&path, new_token()).unwrap());
+        let endpoint = Endpoint::load(&path).unwrap();
+        let (asked, stop) = std::sync::mpsc::channel();
+        let serving = std::sync::Arc::clone(&server);
+        std::thread::spawn(move || {
+            serving.serve(move |_| {
+                let _ = asked.send(());
+                // Well inside SHUTDOWN_GRACE, and well above the floor below,
+                // so a slow box neither cuts the wait short nor fakes it.
+                std::thread::sleep(Duration::from_millis(1500));
+                (200, json!({ "ok": true }))
+            })
+        });
+        let caller = std::thread::spawn(move || ask(&endpoint, "POST", "/stop", Value::Null));
+        stop.recv().unwrap();
+        let started = std::time::Instant::now();
+        server.shutdown();
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "shutdown returned while the answer was still being written"
+        );
+        assert_eq!(caller.join().unwrap(), Some(json!({ "ok": true })));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_connection_made_after_shutdown_is_not_served() {
+        let dir = temp("after-stop");
+        let path = dir.join("control.json");
+        let server = std::sync::Arc::new(ControlServer::bind(&path, new_token()).unwrap());
+        let endpoint = Endpoint::load(&path).unwrap();
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = std::sync::Arc::clone(&served);
+        let serving = std::sync::Arc::clone(&server);
+        std::thread::spawn(move || {
+            serving.serve(move |_| {
+                seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                (200, json!({ "ok": true }))
+            })
+        });
+        server.shutdown();
+        assert_eq!(ask(&endpoint, "GET", "/status", Value::Null), None);
+        assert!(!served.load(std::sync::atomic::Ordering::SeqCst));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
