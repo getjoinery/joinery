@@ -2129,7 +2129,7 @@ Two invariants are asserted around **every pass**, not at the end of a run:
 |---|---|---|
 | `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation; the control channel's refusals and the settings page's routes, over HTTP on 127.0.0.1; and updates, end to end against a feed on 127.0.0.1 ([Updates](#updates)). |
 | `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | Both harnesses themselves — a harness with a bug in it reports a clean run rather than a problem. |
-| `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
+| `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The whole sync client, tests included, compiles for Windows and macOS. |
 | `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |
 | `tests/functional/drive/sync_contract_test.php` | db, dev-only | The server surface the client depends on. |
 | `tests/functional/sync/sync_macos_gate.sh` | live, needs `[macmini, rust]` | Built and green on a real Mac; the volume probe, NFD round trip, and Keychain persistence across processes. Run over SSH, where the login Keychain is locked, it checks that the vault key is refused rather than written to a file; the checks that two installations keep separate items and that items under the shared name move over need an open Keychain (a desktop session), and say so when they have nothing to check. |
@@ -2140,9 +2140,12 @@ The cross-build gate is what makes per-OS work verifiable from a Linux box at
 all. It does not run anything; it catches the failure that actually happens to
 code nobody builds, which is that somebody edits a shared path and the branch
 they cannot compile stops compiling — found six weeks later by whoever tries to
-cut a release. Behavior is covered instead by the simulator's per-platform
-scenarios, which run the shipping engine over macOS and Windows filesystem
-personalities on Linux.
+cut a release. The crates that build C (SQLite in `jd-core`, `ring` in
+`jd-proto`) are checked with a stand-in C compiler that writes empty objects:
+a check links nothing, so their Rust is checked for each target like the rest.
+Behavior is covered instead by the simulator's per-platform scenarios, which
+run the shipping engine over macOS and Windows filesystem personalities on
+Linux.
 
 ## The soak environment
 

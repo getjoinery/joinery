@@ -17,14 +17,19 @@
 # somebody edits the shared path and the branch nobody builds stops compiling.
 # It is found six weeks later by whoever tries to cut a release.
 #
-# Two things this does NOT claim. It does not run anything (there is no Windows
-# machine here), and it does not cover the crates that need a C cross-compiler —
-# `jd-core` bundles SQLite and `jd-proto` builds `ring`, so both need a target
-# toolchain this box does not have. Every piece of genuinely per-OS code is
-# deliberately in a crate that does not: jd-vfs (filesystem behavior), jd-platform
-# (keychain, directories, autostart, browser, control channel), and jd-shell (the
-# tray). Behavior is covered by the simulator's per-platform scenarios, which run
-# the real engine over macOS and Windows filesystem personalities on Linux.
+# Every crate of the workspace is checked, tests included. Two of them build C:
+# `jd-core` bundles SQLite and `jd-proto` builds `ring`, and this box has no C
+# compiler for either target. A check never links, so nothing reads the objects
+# a build script compiles, and a stand-in compiler that writes empty ones is
+# enough: it answers cc-rs's family probe as gcc and makes an empty file for
+# every `-o`. The Rust in those crates, and in jd-daemon above them, is then
+# checked for each target like the rest, so a broken Windows-only or macOS-only
+# branch of the engine or the daemon fails here and not on the next VM build.
+#
+# What this does NOT claim: it runs nothing (there is no Windows machine here),
+# and it says nothing about the C itself. Behavior is covered by the simulator's
+# per-platform scenarios, which run the real engine over macOS and Windows
+# filesystem personalities on Linux, and by the soak lines on real machines.
 # Shell-gate contract: exit 0 = pass, non-zero = fail.
 
 set -euo pipefail
@@ -42,8 +47,29 @@ if ! command -v cargo >/dev/null 2>&1; then
 	fi
 fi
 
-# The crates carrying per-OS code, and no others.
-CRATES="-p jd-vfs -p jd-platform -p jd-shell -p jd-crypto"
+# The host's archiver takes the stand-in's empty objects. Missing, it is a setup
+# gap, and is said as one rather than as a panic inside a build script.
+if ! command -v ar >/dev/null 2>&1; then
+	echo "FAIL: ar is not installed (the cross-build gate needs the host archiver)"
+	exit 1
+fi
+
+# The stand-in C compiler (above), written fresh for each run.
+FAKECC_DIR="$(mktemp -d)"
+trap 'rm -rf "$FAKECC_DIR"' EXIT
+cat > "$FAKECC_DIR/cc" <<'FAKECC'
+#!/bin/bash
+for a in "$@"; do [ "$a" = "-?" ] && exit 1; done
+case " $* " in *detect_compiler_family*) printf '"gcc"\n'; exit 0;; esac
+out=""; prev=""
+for a in "$@"; do
+	[ "$prev" = "-o" ] && out="$a"
+	prev="$a"
+done
+[ -n "$out" ] && : > "$out"
+exit 0
+FAKECC
+chmod +x "$FAKECC_DIR/cc"
 
 status=0
 for target in x86_64-pc-windows-gnu aarch64-apple-darwin; do
@@ -64,11 +90,15 @@ for target in x86_64-pc-windows-gnu aarch64-apple-darwin; do
 	fi
 
 	echo "--- $target ---"
-	if nice -n 19 cargo check $CRATES --all-targets --target "$target" \
+	# cc-rs reads the target's own compiler and archiver: the stand-in, and the
+	# host's ar over its empty objects.
+	triple="${target//-/_}"
+	if env "CC_$triple=$FAKECC_DIR/cc" "AR_$triple=ar" \
+		nice -n 19 cargo check --workspace --all-targets --target "$target" \
 		--manifest-path "$SYNC_DIR/Cargo.toml" --quiet; then
 		echo "ok"
 	else
-		echo "FAIL: the per-OS code no longer compiles for $target"
+		echo "FAIL: the sync client no longer compiles for $target"
 		status=1
 	fi
 done
@@ -76,4 +106,4 @@ done
 if [ "$status" -ne 0 ]; then
 	exit "$status"
 fi
-echo "sync cross-build gate: per-OS code compiles for Windows and macOS"
+echo "sync cross-build gate: the whole sync client compiles for Windows and macOS"
