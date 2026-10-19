@@ -3297,6 +3297,64 @@ fn a_second_copy_of_a_file_this_device_has_is_never_folded_into_it() {
     assert_eq!(server.tree().len(), 3, "the copy did not land beside: {:?}", server.tree());
 }
 
+/// The same second copy, with the holder's own file unreadable at the moment
+/// the upload asks about it -- a sharing violation on Windows. Whether the
+/// holder's file stands here is then unknown, and the upload waits to ask
+/// again rather than reading unknown as no: read as no, the copy was folded
+/// into the holder and left with no record. Once the file reads, the copy
+/// lands beside. RED with an unreadable answer reading as no in
+/// `holds_its_own_copy_here`.
+#[test]
+fn a_holder_that_cannot_be_read_is_never_taken_for_a_lost_record() {
+    let (clock, server, device) = world();
+    let copy = b"the same bytes, one of them locked";
+    server.seed_file(None, "c.txt", b"the server's c, another file");
+    let holder_name = "c (conflicted copy 2026-07-31 from laptop).txt";
+    let holder = EntityId::file(server.seed_file(None, holder_name, copy));
+    device.fs.user_write(holder_name, copy);
+    let root = jd_vfs::Vfs::root(&device.fs).unwrap();
+    let held = jd_vfs::Vfs::fingerprint(&device.fs, &root.join(holder_name)).unwrap().expect("the holder's file");
+    let mut h = fresh(holder, None, holder_name, LocalStatus::Synced);
+    h.synced_placement = Some(h.remote.clone());
+    h.synced_content = Some(ContentId { sha256: sha256_hex(copy), size: copy.len() as u64 });
+    h.synced_fingerprint = Some(held);
+    h.own_file = Some(held.identity());
+    h.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&h).unwrap();
+
+    device.fs.user_write("c.txt", copy);
+    let mine = jd_vfs::Vfs::fingerprint(&device.fs, &root.join("c.txt")).unwrap().expect("the new file");
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    let mut p = fresh(id, None, "c.txt", LocalStatus::PendingUpload);
+    p.own_file = Some(mine.identity());
+    p.last_seen_sha = Some(sha256_hex(copy));
+    device.store.put_entry(&p).unwrap();
+
+    device.fs.fail_next(jd_sim::FsOp::Fingerprint, Some(holder_name), jd_sim::FailureKind::PermissionDenied, 1000);
+    let report = do_one(&device, id, Action::UploadAsNew { placement: Placement { parent: None, name: "c.txt".into() } });
+    assert_eq!(report.done, 0, "the copy was taken for the holder's lost record: {report:?}");
+    assert_eq!(report.retrying, 1, "it should be waiting to ask again: {report:?}");
+    assert_eq!(device.store.get_entry(id).unwrap().map(|e| e.own_file), Some(Some(mine.identity())), "the new file lost its record");
+    assert_eq!(device.store.get_entry(holder).unwrap().unwrap().own_file, Some(held.identity()), "the holder keeps its own file");
+
+    device.fs.clear_failures();
+    clock.advance_secs(30 * 60);
+    let now = device.now();
+    let e = env(&device, &now);
+    assert_eq!(run_queued(&e).unwrap().done, 1);
+    let owners: Vec<_> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.own_file == Some(mine.identity()))
+        .collect();
+    assert_eq!(owners.len(), 1, "the new file has no record of its own: {owners:?}");
+    assert_ne!(owners[0].id, holder, "the new file was folded into the holder");
+    assert!(!owners[0].id.is_provisional(), "the new file did not go up: {owners:?}");
+    assert_eq!(server.tree().len(), 3, "the copy did not land beside: {:?}", server.tree());
+}
+
 /// The same on a disk whose ids are not identity (FAT and exFAT: ids 0 or a
 /// position), where no record has an own file to ask: the holder's own file
 /// stands here when the file at its path holds the bytes it last saw there,
