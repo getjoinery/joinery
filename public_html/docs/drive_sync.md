@@ -744,12 +744,12 @@ read it as deleted here. It waits for the park to end and arrives under its
 real name.
 A park nobody is coming back for — its operation withdrawn, or dropped after a
 kill — is put back by the next pass under the name both sides last agreed, or
-the next free one there, and said as a `reconcile` issue. It goes back into
-the agreed folder while that folder is still a live folder in this store, and
-beside where the server has it now when the agreed folder is gone. The put-back
-is a rename on the server of something the disk has not followed, so it too is
-recorded as `remote` alone, and the ordinary local move brings the directory
-along on the pass after.
+the next free one there, and said as a `reconcile` issue. It stays in the folder
+the server has it in now, and which folder it ends in is settled on the next
+pass as a move made on both sides is, against the placement both sides last
+agreed. The put-back is a rename on the server of something the disk has not
+followed, so it too is recorded as `remote` alone, and the ordinary local move
+brings the directory along on the pass after.
 
 One shape of it is the client's own bookkeeping rather than anything the user
 can act on, and is repaired without being shown. A device that creates a file or

@@ -573,6 +573,105 @@ sc_names_holder('a file moved onto it', drive_move_logic(array(
 	'entity_type' => 'file', 'entity_id' => (int)$away->key, 'parent_id' => $home)),
 	'file', $held->key, 'notes.txt~', $held_sha);
 
+// ---------------------------------------------------------------------------
+section('a move or rename decided against a placement that has since changed is refused');
+
+// A sync client says where it last saw the item (docs/drive.md, Refusal
+// reasons). A device that decided a move, then slept while another device's
+// move reached the server, would otherwise put the item back over that move
+// unseen (soak rig run 2416).
+$rA = drive_folder_create_logic(array('name' => 'MovedSinceA_' . $tag));
+$rB = drive_folder_create_logic(array('name' => 'MovedSinceB_' . $tag));
+$rC = drive_folder_create_logic(array('name' => 'MovedSinceC_' . $tag));
+$fa = (int)$rA->data['folder']['id']; $fb = (int)$rB->data['folder']['id']; $fc = (int)$rC->data['folder']['id'];
+$made_folders[] = $fa; $made_folders[] = $fb; $made_folders[] = $fc;
+$roamer = File::createFromBytes('roamer-' . $tag, 'roamer.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $fa));
+$made_files[] = $roamer->key;
+$where = function () use ($roamer) { return (int)DriveHelper::load_file((int)$roamer->key)->get('fil_fol_folder_id'); };
+$moved_since = function ($r) {
+	return $r instanceof LogicResult && $r->error !== null && ($r->data ?? null) === array('reason' => 'moved_since');
+};
+
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$roamer->key, 'parent_id' => $fb, 'from_parent_id' => $fa));
+check($r->error === null && $where() === $fb, 'a move from where the item stands lands', json_encode($r->data));
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$roamer->key, 'parent_id' => $fc, 'from_parent_id' => $fa));
+check($moved_since($r), 'a move decided while it stood in its old folder is refused as moved_since, and says nothing more', json_encode($r->data));
+check($where() === $fb, 'and the newer move stands');
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$roamer->key, 'parent_id' => $fb, 'from_parent_id' => $fa));
+check($r->error === null && !empty($r->data['unchanged']), 'a move to where it already is succeeds, whatever it last saw');
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$roamer->key, 'parent_id' => $fc));
+check($r->error === null && $where() === $fc, 'a move that names no folder it came from is carried out');
+
+$topper = File::createFromBytes('topper-' . $tag, 'topper-' . $tag . '.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $topper->key;
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$topper->key, 'parent_id' => $fa, 'from_parent_id' => 0));
+check($r->error === null, 'a move from the top of the Drive, said as 0, lands', json_encode($r->data));
+
+$session->set_api_user($grantee->key);
+$r = drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$roamer->key, 'parent_id' => $fa, 'from_parent_id' => $fa));
+$session->set_api_user($owner->key);
+check(($r->data['reason'] ?? null) === 'forbidden', 'someone who may not move it is told so, not that it moved', json_encode($r->data));
+
+$rSub = drive_folder_create_logic(array('name' => 'Sub', 'parent_id' => $fa));
+$sub = (int)$rSub->data['folder']['id']; $made_folders[] = $sub;
+check(drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $sub, 'parent_id' => $fb, 'from_parent_id' => $fa))->error === null,
+	'a folder moves from where it stands');
+check($moved_since(drive_move_logic(array('entity_type' => 'folder', 'entity_id' => $sub, 'parent_id' => $fc, 'from_parent_id' => $fa))),
+	'a folder moved since is refused the same way');
+
+// Where the move lands, under the owner's lock, the folder it leaves is read
+// again: a file's conversion runs between the first read and there.
+check(DriveHelper::parent_unless_moved_since('folder', $sub, $fb, $fc) === $fb, 'read again, the folder it stands in is returned');
+check(DriveHelper::parent_unless_moved_since('folder', $sub, null, $fc) === $fb, 'and asked nothing, it is returned too');
+check(DriveHelper::parent_unless_moved_since('folder', $sub, $fa, $fb) === $fb, 'and standing where it is going, whatever was last seen');
+$threw = false;
+try { DriveHelper::parent_unless_moved_since('folder', $sub, $fa, $fc); } catch (DriveMovedSinceException $e) { $threw = true; }
+check($threw, 'read again elsewhere than expected, it refuses');
+
+// The landing itself asks, with the entity as the request loaded it: another
+// move lands between that load and the lock.
+$stale = DriveHelper::load_file((int)$topper->key);
+check(drive_move_logic(array('entity_type' => 'file', 'entity_id' => (int)$topper->key, 'parent_id' => $fb))->error === null,
+	'another move lands after the request loaded the file');
+$threw = false;
+DriveHelper::owner_write_lock((int)$owner->key);
+try {
+	_drive_move_land('file', $stale, $fc, (int)$owner->key, (int)$owner->key, $fa);
+} catch (DriveMovedSinceException $e) {
+	$threw = true;
+} finally {
+	DriveHelper::owner_write_unlock((int)$owner->key);
+}
+check($threw, 'and the landing, asked from where the request saw it, refuses');
+check((int)DriveHelper::load_file((int)$topper->key)->get('fil_fol_folder_id') === $fb, 'and writes nothing');
+DriveHelper::owner_write_lock((int)$owner->key);
+try {
+	$landed = _drive_move_land('file', DriveHelper::load_file((int)$topper->key), $fc, (int)$owner->key, (int)$owner->key, null);
+} finally {
+	DriveHelper::owner_write_unlock((int)$owner->key);
+}
+check($landed && (int)DriveHelper::load_file((int)$topper->key)->get('fil_fol_folder_id') === $fc, 'asked nothing, the landing moves it');
+
+$renamed = File::createFromBytes('renamed-' . $tag, 'first.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $fc));
+$made_files[] = $renamed->key;
+$title = function () use ($renamed) { return (string)DriveHelper::load_file((int)$renamed->key)->get('fil_title'); };
+$r = drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$renamed->key, 'name' => 'second.txt', 'from_name' => 'first.txt'));
+check($r->error === null && $title() === 'second.txt', 'a rename from the name it has lands', json_encode($r->data));
+$r = drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$renamed->key, 'name' => 'third.txt', 'from_name' => 'first.txt'));
+check($moved_since($r), 'a rename decided under its old name is refused as moved_since', json_encode($r->data));
+check($title() === 'second.txt', 'and the newer name stands');
+check(drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$renamed->key, 'name' => 'second.txt', 'from_name' => 'first.txt'))->error === null,
+	'a rename to the name it already has succeeds, whatever it last saw');
+check(drive_rename_logic(array('entity_type' => 'file', 'entity_id' => (int)$renamed->key, 'name' => 'fourth.txt'))->error === null && $title() === 'fourth.txt',
+	'a rename that names no name it came from is carried out');
+check($moved_since(drive_rename_logic(array('entity_type' => 'folder', 'entity_id' => $sub, 'name' => 'Sub2', 'from_name' => 'Elsewhere'))),
+	'a folder renamed since is refused the same way');
+check(drive_rename_logic(array('entity_type' => 'folder', 'entity_id' => $sub, 'name' => 'Sub2', 'from_name' => 'Sub'))->error === null,
+	'and renamed from the name it has, lands');
+
 section('Range header parsing');
 
 check(File::parse_range_header(null, 1000) === null, 'no Range header means no range');

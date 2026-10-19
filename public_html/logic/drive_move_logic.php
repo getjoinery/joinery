@@ -57,6 +57,17 @@ function drive_move_logic(array $input): LogicResult {
 		));
 	}
 
+	// Where the client last saw the item: `from_parent_id`, 0 for the top. A
+	// client that decided this move before another one reached the server would
+	// otherwise put the item back over that move unseen; refused, it hears the
+	// newer move and settles the two as moves made on both sides are settled.
+	// Asked here, before any conversion's byte work, and again under the owner's
+	// lock where the move lands.
+	$from_parent = (isset($input['from_parent_id']) && $input['from_parent_id'] !== '') ? (int)$input['from_parent_id'] : null;
+	if ($from_parent !== null && $current_parent !== $from_parent) {
+		return LogicResult::error('That item has been moved since.', array('reason' => 'moved_since'));
+	}
+
 	if ($parent_id > 0) {
 		$target = DriveHelper::load_folder($parent_id);
 		if (!$target) {
@@ -202,9 +213,11 @@ function drive_move_logic(array $input): LogicResult {
 		DriveHelper::owner_write_lock($owner_id);
 		try {
 			try {
-				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id);
+				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id, $from_parent);
 			} catch (DriveDestinationTrashedException $e) {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			} catch (DriveMovedSinceException $e) {
+				return LogicResult::error('That item has been moved since.', array('reason' => 'moved_since'));
 			}
 			if (!$saved) {
 				$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $entity->get('fol_name'), $entity_id);
@@ -245,9 +258,11 @@ function drive_move_logic(array $input): LogicResult {
 		DriveHelper::owner_write_lock($owner_id);
 		try {
 			try {
-				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id);
+				$saved = _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $user_id, $from_parent);
 			} catch (DriveDestinationTrashedException $e) {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+			} catch (DriveMovedSinceException $e) {
+				return LogicResult::error('That item has been moved since.', array('reason' => 'moved_since'));
 			}
 			if (!$saved) {
 				$holder = DriveHelper::file_name_holder($owner_id, $parent_id, $entity->get('fil_title'), $entity_id);
@@ -273,13 +288,19 @@ function drive_move_logic(array $input): LogicResult {
  * owner's write lock around it, so a trash that checks what changed since a
  * cursor never reads the item placed and its rows not yet there.
  *
+ * The folder it leaves is read afresh here, under the lock: the request's own
+ * read is from before a file's conversion, and another move can land in
+ * between. Throws DriveMovedSinceException, with nothing written, when that
+ * folder is neither `$from_parent` (the client's `from_parent_id`; null asks
+ * nothing) nor the destination.
+ *
  * Returns false, with nothing written, when the destination already holds the
  * name; throws DriveDestinationTrashedException as place_into() does.
  */
-function _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $actor_id) {
+function _drive_move_land($entity_type, $entity, $parent_id, $owner_id, $actor_id, $from_parent) {
 	$parent_column = ($entity_type === DriveHelper::ENTITY_FOLDER) ? 'fol_parent_folder_id' : 'fil_fol_folder_id';
 	$entity_id = (int)$entity->key;
-	$from_id = (int)$entity->get($parent_column);
+	$from_id = DriveHelper::parent_unless_moved_since($entity_type, $entity_id, $from_parent, $parent_id);
 	return DriveHelper::place_into($parent_id, function () use ($entity_type, $entity, $entity_id, $parent_id, $owner_id, $actor_id, $parent_column, $from_id) {
 		return DriveHelper::reparent_and_tell($entity_type, $entity_id, $from_id, $parent_id, $owner_id, $actor_id,
 			function () use ($entity_type, $entity, $parent_id, $parent_column) {
@@ -302,6 +323,7 @@ function drive_move_logic_descriptor(): array {
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
 			'parent_id'   => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Destination folder id (omit or 0 for root)'),
+			'from_parent_id' => array('type' => 'int', 'required' => false, 'min' => 0, 'label' => 'Folder the item was last seen in (0 for root); refused as moved_since if it stands elsewhere now'),
 		),
 	);
 }

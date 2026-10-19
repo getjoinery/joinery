@@ -17382,6 +17382,362 @@ fn two_moves_to_different_folders_still_go_to_the_server_and_are_reported() {
     assert_converged(&world);
 }
 
+/// The live server file called `name` in the folder at `folder` (None: the top).
+fn server_file_in(world: &World, folder: Option<&str>, name: &str) -> i64 {
+    let parent = folder.map(|f| world.server.folder_id_at(f).expect("the folder"));
+    world
+        .server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.folder == parent && f.name == name)
+        .expect("the file")
+        .id
+}
+
+/// Have the server carry out `request` for a peer the moment the first move
+/// or rename `when` picks reaches it, and say whether it has.
+fn a_peer_acts_when(
+    world: &World,
+    mut when: impl FnMut(&str, &serde_json::Value) -> bool + Send + 'static,
+    request: (&'static str, serde_json::Value),
+) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = fired.clone();
+    let server = world.server.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        if !when(name, body) {
+            return false;
+        }
+        server.action(request.0, &request.1).expect("the peer's change");
+        seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        true
+    });
+    fired
+}
+
+/// Soak rig run 2416: a device decided a move, then slept, and another
+/// device's move of the same file reached the server before the first
+/// device's did. The server's move is the newer one: it stands and the device
+/// that lost is told, as when it had heard of the move before deciding.
+/// Carried out regardless, the stale move put the file back over the newer
+/// one, unseen. RED without the client saying where it last saw the file
+/// (`from_parent_id`, `moved_since`).
+#[test]
+fn a_move_decided_before_a_peers_move_landed_loses_to_it_and_says_so() {
+    let world = World::new(9_971, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    for dir in ["Projects", "A", "B"] {
+        a.fs.user_mkdir(dir);
+    }
+    a.fs.user_write("Projects/doc.txt", b"one document, moved twice");
+    assert!(world.settle().is_some());
+    let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+    let to_b = world.server.folder_id_at("B").expect("B");
+    let fired = a_peer_acts_when(
+        &world,
+        |_, _| true,
+        ("drive_move", serde_json::json!({ "entity_type": "file", "entity_id": doc, "parent_id": to_b })),
+    );
+    a.fs.user_rename("Projects/doc.txt", "A/doc.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's move landed while a's was on its way");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("B/doc.txt"), "the newer move did not stand: {tree:?}");
+    assert!(!tree.contains_key("A/doc.txt"), "the stale move reached the server: {tree:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("B/doc.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// The same for a rename: a peer's rename landed between this device deciding
+/// its own and sending it. The newer name stands, and this device is told.
+/// RED without `from_name`.
+#[test]
+fn a_rename_decided_before_a_peers_rename_landed_loses_to_it_and_says_so() {
+    let world = World::new(9_970, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_write("Projects/doc.txt", b"one document, renamed twice");
+    assert!(world.settle().is_some());
+    let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+    let fired = a_peer_acts_when(
+        &world,
+        |_, _| true,
+        ("drive_rename", serde_json::json!({ "entity_type": "file", "entity_id": doc, "name": "theirs.txt" })),
+    );
+    a.fs.user_rename("Projects/doc.txt", "Projects/mine.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's rename landed while a's was on its way");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Projects/theirs.txt"), "the newer name did not stand: {tree:?}");
+    assert!(!tree.contains_key("Projects/mine.txt"), "the stale rename reached the server: {tree:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("Projects/theirs.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// Each call asks only about the half it changes. A rename-and-move whose
+/// rename lands, while a peer's move lands before its move does, keeps this
+/// device's name in the peer's folder -- the half-by-half rule's answer -- and
+/// says the folder was lost.
+#[test]
+fn a_rename_and_move_overtaken_by_a_peers_move_keeps_its_name_in_the_peers_folder() {
+    let world = World::new(9_969, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    for dir in ["Projects", "A", "B"] {
+        a.fs.user_mkdir(dir);
+    }
+    a.fs.user_write("Projects/doc.txt", b"one document, two halves");
+    assert!(world.settle().is_some());
+    let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+    let to_b = world.server.folder_id_at("B").expect("B");
+    let fired = a_peer_acts_when(
+        &world,
+        |name, _| name == "drive_move",
+        ("drive_move", serde_json::json!({ "entity_type": "file", "entity_id": doc, "parent_id": to_b })),
+    );
+    a.fs.user_rename("Projects/doc.txt", "A/mine.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's move landed between a's rename and its move");
+
+    let tree = world.server.tree();
+    assert!(tree.contains_key("B/mine.txt"), "not this device's name in the peer's folder: {tree:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("B/mine.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// A move that stepped aside under its scratch name (both orders refused for
+/// the names they would pass through) and was then refused `moved_since`
+/// leaves the file under that scratch name in the peer's folder, with nobody
+/// coming back for it. The next pass puts it back under a real name, in the
+/// folder the server has it in, and the folder is then settled as a move made
+/// on both sides is: the peer's folder, this device's name, and this device
+/// told. Put back into the agreed folder, it overwrote the peer's move and this
+/// device's move went up unopposed, with nobody told. No scratch name stands
+/// anywhere, nothing is parked for good, nothing is lost.
+#[test]
+fn a_park_overtaken_by_a_peers_move_is_put_back_under_a_real_name() {
+    let world = World::new(9_968, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    for dir in ["Projects", "A", "C"] {
+        a.fs.user_mkdir(dir);
+    }
+    a.fs.user_write("Projects/doc.txt", b"the file that steps aside");
+    a.fs.user_write("Projects/new.txt", b"holds the new name where it was");
+    a.fs.user_write("A/doc.txt", b"holds the old name where it goes");
+    assert!(world.settle().is_some());
+    let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+    let to_c = world.server.folder_id_at("C").expect("C");
+    let mut parked = false;
+    let fired = a_peer_acts_when(
+        &world,
+        move |name, body| {
+            if name == "drive_rename" && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap")) {
+                parked = true;
+                return false;
+            }
+            parked && name == "drive_move"
+        },
+        ("drive_move", serde_json::json!({ "entity_type": "file", "entity_id": doc, "parent_id": to_c })),
+    );
+    a.fs.user_rename("Projects/doc.txt", "A/new.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "the premise: the peer's move landed after the park");
+
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-swap")), "a scratch name stands on the server: {tree:?}");
+    for device in [a, b] {
+        let disk = disk_tree(device);
+        assert!(!disk.keys().any(|p| p.contains(".jd-swap")), "{}: a scratch name stands here: {disk:?}", device.name);
+        let parked_for_good: Vec<_> = device
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .filter(|e| matches!(e.status, jd_core::model::LocalStatus::Unsyncable(_)))
+            .collect();
+        assert!(parked_for_good.is_empty(), "{}: parked for good: {parked_for_good:?}", device.name);
+    }
+    let copies = world
+        .server
+        .files()
+        .into_iter()
+        .filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(b"the file that steps aside"))
+        .count();
+    assert_eq!(copies, 1, "the file is not there once: {tree:?}");
+    assert!(tree.contains_key("C/new.txt"), "not this device's name in the peer's folder: {tree:?}");
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// The retry of a move whose park landed while its answer was lost, run after
+/// a peer moved the file, says where the op was DECIDED against, not where the
+/// retry has since heard it is: the peer's move is refused over, not carried
+/// out over. Seeded from the record instead, the retry vouched for the peer's
+/// folder, its own reparent was taken, and the peer's move was lost unseen.
+/// RED with `at` seeded from the record.
+#[test]
+fn a_retry_through_its_own_park_does_not_vouch_for_a_peers_move() {
+    let world = World::new(9_967, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    for dir in ["Projects", "A", "C"] {
+        a.fs.user_mkdir(dir);
+    }
+    a.fs.user_write("Projects/doc.txt", b"the file whose park went unheard");
+    a.fs.user_write("Projects/new.txt", b"holds the new name where it was");
+    a.fs.user_write("A/doc.txt", b"holds the old name where it goes");
+    assert!(world.settle().is_some());
+    let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+    let to_c = world.server.folder_id_at("C").expect("C");
+    let net = a.net.clone();
+    let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = lost.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        let park = name == "drive_rename"
+            && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap"));
+        if park {
+            net.set_faults(NetFaults { lose_answer_to: Some("drive_rename".into()), ..NetFaults::none() });
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        park
+    });
+    a.fs.user_rename("Projects/doc.txt", "A/new.txt");
+    world.pass(a);
+    assert!(lost.load(std::sync::atomic::Ordering::SeqCst), "the premise: the park's answer was lost");
+    assert!(world.server.tree().keys().any(|p| p.starts_with("Projects/.jd-swap")), "the premise: the park landed: {:?}", world.server.tree());
+    world
+        .server
+        .action("drive_move", &serde_json::json!({ "entity_type": "file", "entity_id": doc, "parent_id": to_c }))
+        .expect("the peer's move");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-swap")), "a scratch name stands on the server: {tree:?}");
+    assert!(tree.contains_key("C/new.txt"), "the peer's folder did not stand: {tree:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key("C/new.txt"), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// A park whose own reparent landed before its operation was withdrawn stands
+/// under its scratch name in the folder it was going to, where the name it
+/// left is held (that is why it parked). It is put back there, beside that
+/// name, and the next pass settles the halves: both sides changed the name,
+/// to different values, so the server's put-back name stands and this device
+/// is told. Chosen over putting it back in the folder it left: that put-back
+/// would also be carried out over a peer who moved it into a folder holding
+/// the name, and that loss is silent; this one is said.
+#[test]
+fn a_park_withdrawn_after_its_own_move_landed_is_put_back_where_it_went() {
+    let world = World::new(9_966, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    for dir in ["Projects", "A"] {
+        a.fs.user_mkdir(dir);
+    }
+    a.fs.user_write("Projects/doc.txt", b"the file whose rename is refused");
+    a.fs.user_write("Projects/new.txt", b"holds the new name where it was");
+    a.fs.user_write("A/doc.txt", b"holds the old name where it goes");
+    assert!(world.settle().is_some());
+    let server = world.server.clone();
+    let mut parked = false;
+    let refused = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = refused.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        if name == "drive_rename" && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap")) {
+            parked = true;
+            return false;
+        }
+        if parked && name == "drive_move" {
+            server.answer_next_because("drive_rename", 403, "forbidden");
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            return true;
+        }
+        false
+    });
+    a.fs.user_rename("Projects/doc.txt", "A/new.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    assert!(refused.load(std::sync::atomic::Ordering::SeqCst), "the premise: the rename after the park was refused");
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-swap")), "a scratch name stands on the server: {tree:?}");
+    let put_back: Vec<_> = tree.keys().filter(|p| p.starts_with("A/doc (conflicted copy")).cloned().collect();
+    assert_eq!(put_back.len(), 1, "not put back beside the name where it went: {tree:?}");
+    for device in [a, b] {
+        assert!(disk_tree(device).contains_key(&put_back[0]), "{}: did not follow: {:?}", device.name, disk_tree(device));
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "this device was not told its name lost: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// The two stale-move shapes on disks whose file ids are not identity (FAT and
+/// exFAT: 0 or a position). A file move refused as `moved_since` is dropped,
+/// and nothing re-derives a dropped file move by identity there: the peer's
+/// folder must still win, the file be there once, and this device be told.
+#[test]
+fn a_stale_move_loses_to_a_peers_move_on_a_disk_without_file_identity() {
+    for model in [jd_sim::FileIds::DirectorySlot, jd_sim::FileIds::DataCluster, jd_sim::FileIds::MountSession] {
+        for parks in [false, true] {
+            let world = World::new(9_965, &["a", "b"]);
+            let a = world.device("a");
+            let b = world.device("b");
+            a.fs.file_ids(model);
+            for dir in ["Projects", "A", "C"] {
+                a.fs.user_mkdir(dir);
+            }
+            let body: &[u8] = b"one file, two moves, no identity";
+            a.fs.user_write("Projects/doc.txt", body);
+            if parks {
+                a.fs.user_write("Projects/new.txt", b"holds the new name where it was");
+                a.fs.user_write("A/doc.txt", b"holds the old name where it goes");
+            }
+            assert!(world.settle().is_some());
+            let doc = server_file_in(&world, Some("Projects"), "doc.txt");
+            let to_c = world.server.folder_id_at("C").expect("C");
+            let mut parked = !parks;
+            let fired = a_peer_acts_when(
+                &world,
+                move |name, body| {
+                    if name == "drive_rename" && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap")) {
+                        parked = true;
+                        return false;
+                    }
+                    parked && name == "drive_move"
+                },
+                ("drive_move", serde_json::json!({ "entity_type": "file", "entity_id": doc, "parent_id": to_c })),
+            );
+            a.fs.user_rename("Projects/doc.txt", "A/new.txt");
+            assert!(world.settle().is_some(), "{model:?} parks={parks}: the devices must go quiet");
+            assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "{model:?} parks={parks}: the premise");
+
+            let tree = world.server.tree();
+            assert!(tree.contains_key("C/new.txt"), "{model:?} parks={parks}: not this name in the peer's folder: {tree:?}");
+            assert!(!tree.keys().any(|p| p.contains(".jd-swap")), "{model:?} parks={parks}: a scratch name stands: {tree:?}");
+            let copies = world.server.files().into_iter().filter(|f| !f.trashed && f.sha256 == jd_sim::sha256_hex(body)).count();
+            assert_eq!(copies, 1, "{model:?} parks={parks}: the file is not there once: {tree:?}");
+            for device in [a, b] {
+                assert!(disk_tree(device).contains_key("C/new.txt"), "{model:?} parks={parks} {}: did not follow: {:?}", device.name, disk_tree(device));
+            }
+            assert_eq!(move_races_lost(a).len(), 1, "{model:?} parks={parks}: not told: {:?}", a.store.open_issues().unwrap());
+            assert_converged(&world);
+        }
+    }
+}
+
 /// Run 1531: a save by rename whose temporary file a pass saw before the
 /// rename, while a peer edited the file. The temporary file is the file's next
 /// version, as it is when no pass sees it, so the two edits are a conflict and

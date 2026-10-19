@@ -1153,10 +1153,11 @@ pub fn run_pass(
         // silent half of the stranded-park defect, and it is the half no resume
         // can reach, because there is no operation left to resume.
         //
-        // Put it back where both sides last agreed. The agreement survives —
-        // an index walk writes `remote` and leaves `synced_placement` alone — so
-        // this restores the real name rather than inventing one. What is lost
-        // with the operation is the journey it was making; the file is not.
+        // Put it back under the name both sides last agreed. The agreement
+        // survives — an index walk writes `remote` and leaves
+        // `synced_placement` alone — so this restores the real name rather
+        // than inventing one. What is lost with the operation is the journey
+        // it was making; the file is not.
         //
         // Only a park THIS device made. A peer's park is the peer's to finish
         // or put back: with no op of its own for the entity this device cannot
@@ -1194,30 +1195,20 @@ pub fn run_pass(
                     // park is a naming verdict, and a give-up that is not about
                     // the name goes BESIDE the agreement rather than into it.
                     //
-                    // The agreed PARENT may be gone as well: trashed on the
-                    // server and forgotten here, with only this agreement
-                    // still naming it. A put-back into it cannot succeed, and
-                    // against a server that refuses in prose alone it is worse
-                    // than refused -- "that folder is in the trash" reads as
-                    // possibly-about-the-name, the move parks the folder as its
-                    // last resort, is refused again, and is withdrawn with the
-                    // park standing; every device then rescues that park into
-                    // the same trashed parent, minting a fresh scratch name
-                    // each pass. Estate seed 16062180, three devices, for
-                    // ever. So the put-back goes where the server has the
-                    // folder now, under the agreed name, when the agreed
-                    // parent is no longer a live folder in this store.
-                    let live = |p: i64| -> Result<bool, ExecError> {
-                        Ok(env
-                            .store
-                            .get_entry(EntityId::folder(p))?
-                            .is_some_and(|f| !f.remote_deleted))
-                    };
-                    let parent = match agreed.parent {
-                        None => None,
-                        Some(p) if live(p)? => Some(p),
-                        Some(_) => entry.remote.parent,
-                    };
+                    // The name alone: it stays in the folder the server has
+                    // it in now. Which folder it ends in is the question a move
+                    // made on both sides answers, measured against the
+                    // agreement on the next pass. Put back into the agreed
+                    // folder, it was carried out over a peer's move that had
+                    // overtaken the operation (`moved_since`), and this
+                    // device's own move then went up unopposed: the peer's move
+                    // was lost and nobody was told. And an agreed folder gone
+                    // since -- trashed on the server and forgotten here --
+                    // could not take it at all: against a server that refuses
+                    // in prose alone every device rescued the park into the
+                    // same trashed folder, minting a fresh scratch name each
+                    // pass (estate seed 16062180, three devices, for ever).
+                    let parent = entry.remote.parent;
                     let taken: std::collections::HashSet<String> = env
                         .store
                         .every_entry()?
@@ -1241,6 +1232,9 @@ pub fn run_pass(
                         entry.id,
                         &serde_json::json!({
                             "parent": parent, "name": wanted,
+                            // Where the server has it, said with the rename: a
+                            // peer's change landing first is not put back over.
+                            "from": { "parent": entry.remote.parent, "name": entry.remote.name },
                             // The disk has not moved; the pass brings it along.
                             "disk_follows": true,
                         })

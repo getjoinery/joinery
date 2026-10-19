@@ -55,6 +55,20 @@ function drive_rename_logic(array $input): LogicResult {
 		return LogicResult::error('A name is required.', array('reason' => 'invalid_request', 'standing' => true));
 	}
 
+	// The name the client last saw the item under (`from_name`). A client that
+	// decided this rename before another one reached the server would otherwise
+	// put its name back over that one unseen; refused, it hears the newer name
+	// and settles the two as changes made on both sides are settled. A name
+	// already the one asked for is no conflict. Plaintext names only: an
+	// encrypted file's title is its opaque placeholder whatever it is called.
+	$from_name = isset($input['from_name']) ? (string)$input['from_name'] : '';
+	if ($from_name !== '' && !$is_encrypted_file) {
+		$current_name = (string)$entity->get($entity_type === DriveHelper::ENTITY_FOLDER ? 'fol_name' : 'fil_title');
+		if ($current_name !== $from_name && $current_name !== $name) {
+			return LogicResult::error('That item has been renamed since.', array('reason' => 'moved_since'));
+		}
+	}
+
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
 		$parent_id = (int)$entity->get('fol_parent_folder_id');
 		$owner_id  = (int)$entity->get('fol_usr_user_id');
@@ -107,6 +121,7 @@ function drive_rename_logic_descriptor(): array {
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
 			'name'        => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'New name (plaintext items)'),
+			'from_name'   => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Name the item was last seen under (plaintext items); refused as moved_since if it is called something else now'),
 		),
 	);
 }

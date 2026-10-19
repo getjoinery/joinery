@@ -5092,7 +5092,7 @@ fn move_remote(
         env.store.put_entry(&entry)?;
         return Ok(OpOutcome::Done);
     }
-    if !ours_to_finish && from.is_some_and(|f| entry.remote != f) {
+    if !ours_to_finish && from.as_ref().is_some_and(|f| entry.remote != *f) {
         return Ok(OpOutcome::Overtaken(
             "the server has moved it since this was planned".into(),
         ));
@@ -5132,6 +5132,26 @@ fn move_remote(
     }
     let t = op.entity.entity_type.to_string();
 
+    // Where the server has it as this op's own steps leave it, said with every
+    // call (`from_parent_id`, `from_name`): a move or rename another device
+    // made after this one was decided is then refused as `moved_since`, not
+    // put back unseen. The guard above sees only what this device has heard,
+    // and a first attempt does not ask the server, so a peer's move landing
+    // between the pass's look and this call was overwritten (rig run 2416).
+    //
+    // Seeded from where the op was decided against, never from the record:
+    // every body is then a function of the op and its own landed steps, so a
+    // call sent again is the same request under the same key (a different one
+    // is refused as a reused key), and a retry that absorbed a peer's move into
+    // the record does not vouch for it. A park of this op's own already
+    // standing is where its name starts, the park itself then sending nothing.
+    // No `from`, nothing is said, as before.
+    let parked_already = is_this_ops_park(env, op, &entry.remote.name)?;
+    let at = std::cell::RefCell::new(from.clone().map(|f| match parked_already {
+        true => Placement { parent: f.parent, name: entry.remote.name.clone() },
+        false => f,
+    }));
+
     // Rename and reparent are separate calls, and a crash between them leaves
     // the entry renamed but not moved. That is a state the next round reads
     // correctly and finishes, which is why they do not need to be one call.
@@ -5153,11 +5173,18 @@ fn move_remote(
             Some(p) => json!(p),
             None => Value::Null,
         };
+        // 0 for the top: a null is read as nothing said.
+        if let Some(seen) = at.borrow().as_ref() {
+            body["from_parent_id"] = json!(seen.parent.unwrap_or(0));
+        }
         let key = match attempt {
             0 => format!("{}-move{stage}", key_base(op)),
             n => format!("{}-move{stage}-n{n}", key_base(op)),
         };
         env.api.action_idempotent("drive_move", body, &key)?;
+        if let Some(seen) = at.borrow_mut().as_mut() {
+            seen.parent = to.parent;
+        }
         Ok(())
     };
     // An encrypted FILE has no plaintext name to send. Its name lives inside
@@ -5210,7 +5237,7 @@ fn move_remote(
     // can land AFTER this op's rename did -- a park retried and answered too
     // late -- and the rename sent again under the key it already used is
     // replayed, not applied.
-    let out_of_its_park = is_this_ops_park(env, op, &entry.remote.name)?;
+    let out_of_its_park = parked_already;
     // `stage` names where in the sequence a call stands: empty for the first
     // order, or after the step that came before it. A rename retried after a
     // reparent is not the request that was refused before it, whatever its
@@ -5218,13 +5245,21 @@ fn move_remote(
     // so the fallback's rename asked again under the first rename's key was
     // refused for ever by an answer about a neighbour it had already left.
     let rename = |wanted: &str, attempt: u32, stage: &str| -> Result<(), ExecError> {
+        // A sealed name says nothing: the server's title for it is its
+        // placeholder, whatever it is called.
         let body = match &sealed_body {
             Some(body) => body.clone(),
-            None => json!({
-                "entity_type": t,
-                "entity_id": op.entity.server_id,
-                "name": wanted,
-            }),
+            None => {
+                let mut body = json!({
+                    "entity_type": t,
+                    "entity_id": op.entity.server_id,
+                    "name": wanted,
+                });
+                if let Some(seen) = at.borrow().as_ref() {
+                    body["from_name"] = json!(seen.name);
+                }
+                body
+            }
         };
         let step = if out_of_its_park { "unpark" } else { "rename" };
         let key = match attempt {
@@ -5232,6 +5267,9 @@ fn move_remote(
             n => format!("{}-{step}{stage}-n{n}", key_base(op)),
         };
         env.api.action_idempotent("drive_rename", body, &key)?;
+        if let Some(seen) = at.borrow_mut().as_mut() {
+            seen.name = wanted.to_string();
+        }
         Ok(())
     };
     // The way through when both intermediate states are occupied: step aside
@@ -5258,15 +5296,18 @@ fn move_remote(
             &env.store.park_tag(&op.idempotency_key)?,
             &op.idempotency_key,
         );
-        env.api.action_idempotent(
-            "drive_rename",
-            json!({
-                "entity_type": t,
-                "entity_id": op.entity.server_id,
-                "name": scratch,
-            }),
-            &format!("{}-park", key_base(op)),
-        )?;
+        let mut body = json!({
+            "entity_type": t,
+            "entity_id": op.entity.server_id,
+            "name": scratch,
+        });
+        if let Some(seen) = at.borrow().as_ref() {
+            body["from_name"] = json!(seen.name);
+        }
+        env.api.action_idempotent("drive_rename", body, &format!("{}-park", key_base(op)))?;
+        if let Some(seen) = at.borrow_mut().as_mut() {
+            seen.name = scratch;
+        }
         Ok(())
     };
 
@@ -5352,6 +5393,16 @@ fn move_remote(
     loop {
         match orders(&wanted, attempt) {
             Ok(()) => break,
+            // Moved or renamed by somebody else after this was decided, and
+            // the server said so rather than let this put it back. The next
+            // pass hears their change and settles the halves as changes made
+            // on both sides are settled: the server's value for a half both
+            // changed, said in the issues panel.
+            Err(ExecError::Proto(p)) if p.moved_since() => {
+                return Ok(OpOutcome::Overtaken(
+                    "the server has moved it since this was planned".into(),
+                ));
+            }
             Err(ExecError::Proto(p)) if p.name_taken() && !sealed_name && attempt < 1000 => {
                 if held_by_a_rename_this_device_owes(env, op.entity, &wanted, to.parent)? {
                     return waits_after_a_refusal(env, op, "the name is spoken for by something this device is renaming");
