@@ -136,13 +136,23 @@ impl Reach for Unreachable {
     }
 }
 
+/// One campaign at a time. Each runs a whole fleet -- two devices, an actor
+/// thread per persona on each, the remote user and the chaos agent -- through
+/// a one-second storm, and the tests assert what that storm did. Run together
+/// on the four-processor Windows VM they failed, the remote actor never
+/// uploading or the chaos agent never trying anything, in five of seven
+/// runs; alone, and taking turns, they pass. They take turns.
+static ONE_FLEET: Mutex<()> = Mutex::new(());
+
 struct Rig {
     dir: PathBuf,
     fleet: Fleet,
+    _turn: std::sync::MutexGuard<'static, ()>,
 }
 
 impl Rig {
     fn new(tag: &str) -> Rig {
+        let turn = ONE_FLEET.lock().unwrap_or_else(|e| e.into_inner());
         let dir =
             std::env::temp_dir().join(format!("jd-soak-campaign-{}-{}", tag, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -177,7 +187,7 @@ impl Rig {
         };
         std::fs::create_dir_all(&fleet.journal_dir).unwrap();
         std::fs::create_dir_all(&fleet.bundle_dir).unwrap();
-        Rig { dir, fleet }
+        Rig { dir, fleet, _turn: turn }
     }
 
     fn campaign(&self) -> Campaign {
@@ -194,6 +204,15 @@ impl Rig {
             stop_on_violation: true,
         }
     }
+}
+
+/// What the actors wrote, as the journal tells it.
+fn storm_commits(rig: &Rig) -> usize {
+    journal::read_dir(&rig.fleet.journal_dir)
+        .unwrap()
+        .iter()
+        .filter(|r| matches!(r, Record::ActorCommit { .. }))
+        .count()
 }
 
 impl Drop for Rig {
@@ -355,6 +374,8 @@ fn the_rolling_report_is_written_where_a_person_will_look_for_it() {
     let stop = AtomicBool::new(false);
 
     orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
+    // A storm that did nothing would pass this vacuously.
+    assert!(storm_commits(&rig) > 0, "the storm wrote nothing");
 
     let text = std::fs::read_to_string(rig.fleet.journal_dir.join("report.txt")).unwrap();
     assert!(text.contains("INVARIANT VIOLATIONS:"), "{text}");
@@ -388,6 +409,8 @@ fn the_actors_never_write_outside_the_sync_roots() {
     let stop = AtomicBool::new(false);
 
     orchestrate::run(&rig.fleet, &rig.campaign(), &api, &reach, &stop, &orchestrate::probe_fleet(&rig.fleet).unwrap()).unwrap();
+    // A storm that did nothing would pass this vacuously.
+    assert!(storm_commits(&rig) > 0, "the storm wrote nothing");
 
     let mut stray = Vec::new();
     for entry in std::fs::read_dir(&rig.dir).unwrap().flatten() {
