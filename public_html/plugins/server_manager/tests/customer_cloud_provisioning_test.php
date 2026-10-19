@@ -320,7 +320,10 @@ class CustomerCloudProvisioningTest {
 		// stripped by the driver). A dual-stack box joins a plane with AAAA
 		// records over IPv6 — keyless10, 2026-09-07 — so the plane must know
 		// both addresses as the instance.
-		$ip6 = '2600:3c02::' . dechex(random_int(0x1000, 0xffff)) . ':e6ff:fea7:' . dechex(random_int(0x1000, 0xffff));
+		// Spelled as Linode can report it, with a leading-zero group; a machine
+		// joining from it spells it canonically.
+		$ip6 = '2600:3c02::' . dechex(random_int(0x1000, 0xffff)) . ':00ff:fea7:' . dechex(random_int(0x1000, 0xffff));
+		$ip6_canonical = inet_ntop(inet_pton($ip6));
 		$fake->getInstanceResult = ['id' => '77009', 'ip' => $ip, 'ipv6' => $ip6, 'status' => 'running'];
 		$probe->probeBooting($prov);
 		$prov->load();
@@ -331,7 +334,10 @@ class CustomerCloudProvisioningTest {
 		check(CustomerCloudProvision::for_machine_address($ip) !== null
 			&& (int)CustomerCloudProvision::for_machine_address($ip)->key === (int)$prov->key,
 			'the provision is found by its instance address');
-		check((string)$prov->get('cvp_instance_ipv6') === $ip6, 'the instance\'s IPv6 is recorded at boot', (string)$prov->get('cvp_instance_ipv6'));
+		check((string)$prov->get('cvp_instance_ipv6') === $ip6_canonical, 'the instance\'s IPv6 is recorded at boot, in its canonical spelling', (string)$prov->get('cvp_instance_ipv6'));
+		check(CustomerCloudProvision::for_machine_address($ip6_canonical) !== null
+			&& (int)CustomerCloudProvision::for_machine_address($ip6_canonical)->key === (int)$prov->key,
+			'a machine joining from that IPv6 finds its provision, though the provider spelled it with leading zeros');
 		check(CustomerCloudProvision::for_machine_address(strtoupper($ip6)) !== null
 			&& (int)CustomerCloudProvision::for_machine_address(strtoupper($ip6))->key === (int)$prov->key,
 			'and the provision is found by its IPv6 in any spelling');

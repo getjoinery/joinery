@@ -177,8 +177,9 @@ In order, on every run of the matrix below:
    - During a DNS switch, a request to the old address reaches the copy
      (forwarding), and the copy's log shows the visitor's own address, not the
      source's.
-   - After a DNS, proxy or IP-swap switch, the copy's address has reverse DNS
-     naming the site.
+   - After a DNS or IP-swap switch, the copy's address has reverse DNS naming the
+     site. Not through the proxy: the site's name resolves to the proxy, and a
+     provider sets reverse DNS only to a name that resolves to the address.
 5. **Security.** Both halves of the security check run on the copy (the probes on the
    test plane only). Every row passes, and none is weaker than the baseline. The quiet
    state is present before the switch and gone after it.
@@ -193,7 +194,10 @@ In order, on every run of the matrix below:
 8. **The way back**, as the matrix's column says, checked the same way as the
    switch (data, security, and the source's layers unchanged).
    - **Mid-switch:** the address has moved but the copy has not yet taken the site.
-     It leaves the copy dormant; switch again from there.
+     It leaves the copy dormant; switch again from there. Through the proxy the copy
+     takes the site's node id seconds after the move; going back once it has (while
+     it is still starting) is the way back after the swap and discards it, so the
+     run checks both: back before the take (dormant), back after it (discarded).
    - **After take-over:** the copy is discarded (`finish_return`). Going forward
      again means a second copy: a second server, and for a from-backups copy a
      second export approval.

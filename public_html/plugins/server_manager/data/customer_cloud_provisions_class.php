@@ -39,6 +39,8 @@
  * retire_failed when the job could not prove the machine refuses it (the
  * password is kept, so the machine stays reachable).
  *
+ * @version 1.25 - the instance's addresses are stored canonical, so a join from an IPv6 the provider
+ *                reported with leading zeros finds its provision (normalize_addresses)
  * @version 1.24 - cvp_recovery_public_key: an encrypted data root in its owner's account is sealed to its site's own
  *                proven recovery key (specs/site_copy_final_test.md E1)
  * @version 1.23 - an operator-mode row that names no account is stamped with the default until its server exists,
@@ -246,6 +248,7 @@ class CustomerCloudProvision extends SystemBase {
 	);
 
 	function prepare() {
+		$this->normalize_addresses();
 		$this->stamp_account();
 		$this->validate_row();
 		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
@@ -253,6 +256,7 @@ class CustomerCloudProvision extends SystemBase {
 
 	// Validation lives in save(): prepare() is not guaranteed to run first.
 	function save($debug = false) {
+		$this->normalize_addresses();
 		$this->stamp_account();
 		$this->validate_row();
 		$this->set('cvp_update_time', gmdate('Y-m-d H:i:s'));
@@ -546,6 +550,21 @@ class CustomerCloudProvision extends SystemBase {
 		}
 		$packed = @inet_pton($ip);
 		return $packed === false ? $ip : (string)inet_ntop($packed);
+	}
+
+	/**
+	 * The instance's addresses are stored in their one canonical spelling, as
+	 * for_machine_address() looks them up: a provider may report an IPv6 with
+	 * leading zeros (Linode: 2600:...:00ff:...), which no machine joining from
+	 * it ever spells that way.
+	 */
+	private function normalize_addresses(): void {
+		foreach (['cvp_instance_ip', 'cvp_instance_ipv6'] as $col) {
+			$v = (string)$this->get($col);
+			if ($v !== '' && self::normalize_address($v) !== $v) {
+				$this->set($col, self::normalize_address($v));
+			}
+		}
 	}
 
 	/** Every address the provider has reported for this instance, normalized. */

@@ -20,6 +20,8 @@
  * The words a rollout needs from each node are declared here
  * (AgentVocabulary: one place, the standard state when a node lacks them).
  *
+ * @version 1.8 - copy_hold(): a node's step waits while a copy of its site is being made, switching over, or
+ *                switched and not yet kept, so the copy and its site keep one release
  * @version 1.7 - the page_probe gate: a rollout may name up to MAX_PROBE_PAGES pages; each node renders them before
  *                its apply and again after it passes the apply gate, and halts when a page got worse (it answers an
  *                error status it did not before, raises more PHP errors, or fails to load an asset it loaded)
@@ -79,6 +81,26 @@ class StagedRolloutRunner {
 			return (int)$u->get('upg_major_version') . '.' . (int)$u->get('upg_minor_version') . '.' . (int)$u->get('upg_patch_version');
 		}
 		return null;
+	}
+
+	/**
+	 * Why a node's update waits, or null when it need not: a copy of its site is
+	 * being made, or is switching over, or has switched and is not yet kept. The
+	 * copy installs the release the site runs and must run that release, and while
+	 * a switch-over's way back is open the old server would go back to data a
+	 * newer release wrote. A dormant or stopped copy holds nothing: a release makes
+	 * it stale, and its tab says so.
+	 */
+	public static function copy_hold($node): ?string {
+		if (!$node || !$node->key) {
+			return null;
+		}
+		$copy = SiteCopy::live_for_source((int)$node->key);
+		if (!$copy || in_array($copy->status(), array(SiteCopy::STATUS_DORMANT, SiteCopy::STATUS_HALTED), true)) {
+			return null;
+		}
+		return 'held: a copy of this site is ' . strtolower($copy->status_label())
+			. ', so its update waits until the copy is dormant or the switch-over is kept';
 	}
 
 	/**
@@ -409,6 +431,16 @@ class StagedRolloutRunner {
 		}
 
 		if (empty($step['job_id'])) {
+			$held = self::copy_hold($node);
+			if ($held !== null) {
+				if (($steps[$pos]['reason'] ?? '') !== $held) {
+					$steps[$pos]['verdict'] = 'running';
+					$steps[$pos]['reason'] = $held;
+					$rollout->set_steps($steps);
+					$rollout->save();
+				}
+				return;
+			}
 			$why = self::node_refusal($node, (bool)$rollout->probe_pages());
 			if ($why !== null) {
 				self::fail_step($rollout, $steps, $pos, $why);
