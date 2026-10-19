@@ -3,6 +3,8 @@
 # site_quiet.sh - freeze this site for a switch-over, or let it run again
 # (specs/site_copy.md WP5). The agent's site_quiet word runs this file.
 #
+# Version: 1.2 - on waits for mail already on its way in (site_state_wait_mail) before it returns: the final
+#               backup runs next (B4)
 # Version: 1.1 - forward ADDRESS: a frozen site forwards its visitors to its copy while a DNS switch settles
 #               (specs/site_copy_anything_to_anything.md D1); on stops forwarding
 # Version: 1.0
@@ -105,6 +107,11 @@ if [[ "${ACTION}" == "on" ]]; then
         [[ "${rc}" == "0" ]] && rc=3
     else
         echo "site_quiet: the web user runs no command-line PHP"
+    fi
+    if ! site_state_wait_mail "${WAIT_SECONDS}"; then
+        [[ "${rc}" == "0" ]] && rc=3
+    else
+        echo "site_quiet: no mail can still arrive but through the deferral"
     fi
     exit "${rc}"
 fi

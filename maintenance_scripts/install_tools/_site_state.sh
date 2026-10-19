@@ -3,6 +3,9 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.11 - site_state_wait_mail: a session smtpd was serving when the deferral was reloaded is waited
+#               for, then ended, and mail Postfix already accepted leaves its queue first: a reload changes
+#               no open session, so a message could arrive on a frozen source after its final backup (B4)
 # Version: 1.10 - forward: any http request but the ACME challenge is sent to https first (the vhost's own redirect
 #               never runs under a proxied path); retry=0, so a refused first request does not hold the
 #               copy off for a minute; the guarantee is stated as the one address the plane named
@@ -503,6 +506,10 @@ site_state_assert() {
         done < <(ss_smtpd_services)
         if [[ "${changed}" == "0" ]]; then
             ss_say "Postfix defers inbound mail"
+            # A reload changes no session already open: each smtpd running now
+            # finishes its client under the old rules, so it can still accept a
+            # message after this point. They are named for site_state_wait_mail.
+            SS_SMTPD_BEFORE="$(pgrep -x smtpd 2>/dev/null | tr '\n' ' ')"
             postfix status >/dev/null 2>&1 && { postfix reload >/dev/null 2>&1 || ss_warn "Postfix did not reload"; }
         fi
     fi
@@ -521,6 +528,48 @@ site_state_wait_cli_php() {
         if (( waited >= limit )); then
             ss_warn "the web user still runs command-line PHP after ${limit}s (pids ${pids% })"
             return 1
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
+
+# site_state_wait_mail SECONDS -> 0 when no mail can still arrive for the site
+# outside the deferral, 1 when some was left (said why). A switch-over's final
+# backup runs next, so a message accepted after this would stay on the old
+# server. Two things are waited for:
+#   - each smtpd that was serving a client when the deferral was reloaded
+#     (SS_SMTPD_BEFORE) ends its session; one still running after half a
+#     minute is ended (its sender retries and meets the deferral);
+#   - every message Postfix already accepted leaves its incoming and active
+#     queues, which is the site's handler taking it.
+# A message deferred in the queue is not waited for: nothing will deliver it in
+# the next minutes either way.
+site_state_wait_mail() {
+    local limit="$1" waited=0 pid alive queued sessions=30
+    command -v postconf >/dev/null 2>&1 || return 0
+    # A session is given half a minute, not the whole wait: an idle client can
+    # hold one open for smtpd's own five minutes, and the site is frozen.
+    (( limit < sessions )) && sessions="${limit}"
+    while :; do
+        alive=""
+        for pid in ${SS_SMTPD_BEFORE:-}; do
+            kill -0 "${pid}" 2>/dev/null && alive+="${pid} "
+        done
+        if [[ -n "${alive}" ]] && (( waited >= sessions )); then
+            # shellcheck disable=SC2086
+            kill -TERM ${alive} 2>/dev/null
+            ss_say "ended the smtpd sessions still open from before the deferral (pids ${alive% })"
+            SS_SMTPD_BEFORE=""; alive=""
+        fi
+        queued="$(postqueue -j 2>/dev/null | grep -c -E '"queue_name": *"(incoming|active)"')"
+        [[ -z "${alive}" && "${queued:-0}" == "0" ]] && return 0
+        if (( waited >= limit )); then
+            if [[ "${queued:-0}" != "0" ]]; then
+                ss_warn "${queued} message(s) Postfix accepted are still in its queue after ${limit}s"
+                return 1
+            fi
+            return 0
         fi
         sleep 2
         waited=$((waited + 2))

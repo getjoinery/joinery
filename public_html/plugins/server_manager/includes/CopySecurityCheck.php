@@ -7,13 +7,14 @@
  *
  * Run against a site before its copy (the baseline) and against it after the
  * switch: a row that passed before and fails after fails the run
- * (compare()). The rows that change something on the machine or act as the
- * site are check_copy_probes.sh's, on a test plane only.
+ * (compare()). The rows that act as the site are the copy_probes agent
+ * word's (JobCommandBuilder::build_copy_probes()), whose job prints them.
  *
  * Each row: key, what (in words), applies (false: not on this kind of
  * machine), pass (true, false, or null when the report does not say), and
  * evidence.
  *
+ * @version 1.2 - the rows that act as the site are the copy_probes word's
  * @version 1.1 - layers is UNKNOWN when the provider's layer is not known; the setuid row says it counts the image
  * @version 1.0
  */

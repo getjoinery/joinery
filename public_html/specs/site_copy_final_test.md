@@ -100,11 +100,19 @@ Gate for E1–E4 in `site_copy_matrix_test.php` (the encryption column) and
       the host filter's hash, its setuid count and its capabilities.
 
     It needs no login anywhere, so Part P runs it on production.
-  - **Probed on the box** (`check_copy_probes.sh`, over SSH as root, **test plane
-    only**). These are the rows that change something or act as the site: the B37
-    loosening, the filter probe as www-data, walls by id, the write attempt as
-    www-data, the old address's proxy trust. They are the rows marked ‡ below.
-    Never run on a production machine.
+  - **Probed on the box** by the `copy_probes` agent word (agent 1.84.2,
+    `maintenance_scripts/sysadmin_tools/copy_probes.sh`, a job like any other).
+    These are the rows that act as the site: the filter probe as www-data, walls
+    by id, the write attempt as www-data, the old address's proxy trust, the
+    database's listener. They are the rows marked ‡ below. Owner's decision
+    2026-10-19: a word, not a login, since a plane-made copy has root login off
+    and keys are never used; so these rows need no login and Part P may run them
+    too.
+  - **The B37 loosening alone** stays a login's (`tests/lib/check_loosen_restored.sh`,
+    over SSH as root, **test plane only**, never on a production machine): no
+    shipped script loosens a kernel setting. It runs on machines the test made by
+    hand, whose root password the test holds: the sources and brought servers.
+    The converger that puts the setting back is the same code on every machine.
 
   Each half prints one `PASS`/`FAIL` line per row with its evidence. Both run once
   against the source (the baseline) and once against the copy after the switch. A
@@ -114,13 +122,18 @@ Gate for E1–E4 in `site_copy_matrix_test.php` (the encryption column) and
   state from its host report, and the sum. For a container it is the host's data
   root, which holds the container storage (`/srv/joinery/containers/storage`).
 - **Root login on the test plane.** Plane-made servers are born with root login off
-  (`specs/implemented/root_ssh_login_and_keys.md`). The test plane's sources are
-  installed with root login opted in, by password, never a key. Its copies carry it
-  by the Copy tab's own option. Without it there are no probes.
-- **Sources born as the old machines were.** C1–C3's sources are made from Install
-  New Node on the test plane with our layer unticked, so Linode's layer is on and
-  ours off, as joinerydemo's, jeremytunnell-vps's and docker-prod's are. The rig
-  confirms Linode reports `enabled` before the run starts. That is the point of
+  (`specs/implemented/root_ssh_login_and_keys.md`), and copies keep it off. The test
+  plane's sources are made by hand in the test Linode account, with a root password
+  the test holds (never a key), installed from the release, joined to the test
+  management node and adopted there (`CloudServerAdoption`), so a swap can find their
+  instance. Only the seed, the checker and the B37 loosening use that login; the
+  probes are the word's.
+- **Sources born as the old machines were.** C1–C3's sources are made by hand
+  (above) with Linode's disk encryption on and none of ours, as joinerydemo's,
+  jeremytunnell-vps's and docker-prod's are; Install New Node cannot make one, since
+  a server it makes in our account is always born with ours (E1). The adoption
+  records Linode's answer, and the rig confirms it reads `enabled` before the run
+  starts. That is the point of
   those runs: Linode-encrypted in, ours out.
 - **A neighbour on every engine host.** Every engine host a copy lands on also
   serves one other seeded site, not the copy. "Walls by id", "a block no other site
@@ -147,7 +160,12 @@ In order, on every run of the matrix below:
    - Then a **Refresh** of the dormant copy, after more seeded writes on the source,
      as a real move does: copy Monday, switch Friday.
 3. **The data.**
-   - The census is equal; 0 dead secrets; `check_copy_target.php` is all green.
+   - The census is equal; 0 dead secrets. `check_copy_target.php` is all green on the
+     source. On a plane-made copy (root login off) it cannot run, and what it adds to
+     the census is checked from outside: the seed's public marker file, fetched from
+     the copy through its look path, is the seed's bytes; the DKIM key is proven by the
+     copy's signed mail (C1, C3). The sealed values need nothing more: each is sealed
+     to its column under the key the copy took, so one that opens is the source's.
    - The same browser signs in with its passkey and unlocks its vault on the copy.
    - No hosted-trial row was opened by the copy (B39).
 4. **The switch.**

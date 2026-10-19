@@ -8,6 +8,7 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.134 - build_copy_probes(): the copy_probes word (agent 1.84.2+), a site's walls proven by acting as it
  * @version 1.133 - a forward's or trust's address is refused in shared, protocol, benchmarking and reserved IPv4
  *                  space too (NOT_PUBLIC_V4)
  * @version 1.132 - is_cloudflare_domain reads the one Cloudflare range list (SessionControl::cloudflare_edge_ranges)
@@ -532,6 +533,8 @@ class JobCommandBuilder {
 	 * site_quiet refuses the forward action as a value it does not know.
 	 */
 	const FORWARD_MIN_AGENT_VERSION = '1.84.0';
+	/** The first agent that knows copy_probes. */
+	const COPY_PROBES_MIN_AGENT_VERSION = '1.84.2';
 
 	/**
 	 * IPv4 ranges that pass PHP's private and reserved filters and are still
@@ -2684,6 +2687,40 @@ class JobCommandBuilder {
 			throw new Exception("trust_forwarder takes trust or untrust, not '" . $action . "'.");
 		}
 		return ['primitive' => 'trust_forwarder', 'params' => $params];
+	}
+
+	/**
+	 * Probe a site's walls by acting as it, on the machine that holds it: the
+	 * rows of a copy's security check that the host report cannot carry
+	 * (specs/site_copy_final_test.md, the rig). $node is the machine whose
+	 * agent runs it (the site's own server, or the host of its container);
+	 * $neighbour another site on that host, $old_address the site's old
+	 * server. Its output is one PASS, FAIL or SKIP line per row, then RESULT:.
+	 */
+	public static function build_copy_probes($node, string $site, string $neighbour = '', string $old_address = '') {
+		$agent = (string)AgentVocabulary::version($node);
+		if ($agent === '' || version_compare($agent, self::COPY_PROBES_MIN_AGENT_VERSION, '<')) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' cannot probe a site's walls: its agent is " . ($agent !== '' ? $agent : 'of an unknown version')
+				. ', and this needs ' . self::COPY_PROBES_MIN_AGENT_VERSION . ' or newer. Update its agent.');
+		}
+		return self::build_copy_probes_primitive($site, $neighbour, $old_address);
+	}
+
+	public static function build_copy_probes_primitive(string $site = '', string $neighbour = '', string $old_address = '') {
+		if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $site)) {
+			throw new Exception("'" . $site . "' is not a site name.");
+		}
+		$params = ['site' => $site];
+		if ($neighbour !== '') {
+			if (!preg_match('/^[a-z0-9][a-z0-9_-]{0,49}$/', $neighbour) || $neighbour === $site) {
+				throw new Exception("'" . $neighbour . "' is not another site's name.");
+			}
+			$params['neighbour'] = $neighbour;
+		}
+		if ($old_address !== '') {
+			$params['old_address'] = self::public_address($old_address);
+		}
+		return ['primitive' => 'copy_probes', 'params' => $params];
 	}
 
 	private static function require_forward_agent($node, string $what): void {

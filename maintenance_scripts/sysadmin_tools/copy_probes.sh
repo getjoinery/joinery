@@ -1,42 +1,54 @@
 #!/usr/bin/env bash
 #
-# check_copy_probes.sh - the security rows that act as a site or change the
-# machine, probed on the machine itself (specs/site_copy_final_test.md, the
-# rig, rows marked ‡). TEST PLANE ONLY: the live tests copy it to a test box
-# over SSH and run it as root there. Never on a production machine: it loosens
-# a kernel setting, and acts as a site's web user.
+# copy_probes.sh - the security rows of a site copy that only acting as the
+# site can prove, probed on the machine that holds the site
+# (specs/site_copy_final_test.md, the rig: the rows marked ‡). The plane reads
+# every other row from the host report (CopySecurityCheck); these are what a
+# report cannot say, because they are the attempts themselves.
 #
-# Version: 1.1 - the trust row follows the symlinks it reads (grep -R); the namespace row asks for a capability inside one (own servers allow the
-#               namespace and give it none); the packet socket is asked with Perl, which PHP cannot
+# Run by the copy_probes agent word, as root, with an argv the agent composed
+# from validated values.
+#
 # Version: 1.0
 #
-#   check_copy_probes.sh SITE [--neighbour SITE2] [--old-address IP] [--loosen]
+#   copy_probes.sh SITE [--neighbour SITE2] [--old-address IP]
 #
 #   SITE            the site (a container on this host, or this server's own site)
 #   --neighbour     another site on this host whose files SITE's root must not read
 #   --old-address   the site's old server's address, which this machine must no
 #                   longer believe forwarded addresses from
-#   --loosen        loosen kernel.yama.ptrace_scope and see it put back within
-#                   70 seconds (B37); it is set back by hand if it is not
 #
-# One line per row: PASS, FAIL or SKIP, what, and its evidence. Exit 0 when
-# nothing failed.
+# COPY_PROBES_SITES (where sites live, /var/www/html), COPY_PROBES_ETC (/etc)
+# and COPY_PROBES_ENGINES (the container engines looked for) exist for the
+# gate's fixture; nothing in production sets them.
+#
+# One line per row: PASS, FAIL or SKIP, what, and its evidence; then
+# RESULT: PASS or RESULT: FAIL. Exit 0 whenever the rows were taken, so the
+# job carries them either way; 2 for bad usage.
+#
+# Every probe is an attempt the site must be refused. Nothing is created on
+# the way: the namespace probe mounts over /tmp inside a mount namespace of its
+# own, which ends with it; a mount the web user is let make outside one (a
+# failure) is taken down again at once; and the write to the site's code
+# appends nothing, so even a write that is let through changes no byte.
 
 set -u
 export LC_ALL=C
 
-[[ "$(id -u)" == "0" ]] || { echo "check_copy_probes: run as root" >&2; exit 2; }
+[[ "$(id -u)" == "0" ]] || { echo "copy_probes: run as root" >&2; exit 2; }
+NAME_RE='^[a-z0-9][a-z0-9_-]{0,49}$'
 SITE="${1:-}"; shift || true
-[[ "$SITE" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || { echo "usage: check_copy_probes.sh SITE [--neighbour SITE2] [--old-address IP] [--loosen]" >&2; exit 2; }
-NEIGHBOUR=""; OLD=""; LOOSEN=0
+[[ "$SITE" =~ $NAME_RE ]] || { echo "usage: copy_probes.sh SITE [--neighbour SITE2] [--old-address IP]" >&2; exit 2; }
+NEIGHBOUR=""; OLD=""
 while (( $# )); do
     case "$1" in
-        --neighbour)   NEIGHBOUR="${2:-}"; shift 2 ;;
-        --old-address) OLD="${2:-}"; shift 2 ;;
-        --loosen)      LOOSEN=1; shift ;;
-        *) echo "check_copy_probes: unknown argument $1" >&2; exit 2 ;;
+        --neighbour)   NEIGHBOUR="${2:-}"; shift 2 || shift ;;
+        --old-address) OLD="${2:-}"; shift 2 || shift ;;
+        *) echo "copy_probes: unknown argument $1" >&2; exit 2 ;;
     esac
 done
+[[ -z "$NEIGHBOUR" || "$NEIGHBOUR" =~ $NAME_RE ]] || { echo "copy_probes: --neighbour takes a site name" >&2; exit 2; }
+[[ -z "$OLD" || "$OLD" =~ ^[0-9a-fA-F:.]{2,39}$ ]] || { echo "copy_probes: --old-address takes an address" >&2; exit 2; }
 
 failed=0
 row() {  # PASS|FAIL|SKIP WHAT EVIDENCE
@@ -45,12 +57,18 @@ row() {  # PASS|FAIL|SKIP WHAT EVIDENCE
     return 0
 }
 
+SITES="${COPY_PROBES_SITES:-/var/www/html}"
+ETC="${COPY_PROBES_ETC:-/etc}"
 ENGINE=""
-for e in /usr/local/bin/podman podman docker; do
+for e in ${COPY_PROBES_ENGINES:-/usr/local/bin/podman podman docker}; do
     command -v "$e" >/dev/null 2>&1 && { ENGINE="$e"; break; }
 done
 CONTAINER=0
 if [[ -n "$ENGINE" ]] && "$ENGINE" inspect "$SITE" >/dev/null 2>&1; then CONTAINER=1; fi
+if [[ "$CONTAINER" == 0 && ! -d "${SITES}/${SITE}/public_html" ]]; then
+    echo "copy_probes: no site ${SITE} on this machine" >&2
+    exit 2
+fi
 
 # As the site's web user: inside its container, or on its own server.
 as_www() {
@@ -60,37 +78,29 @@ as_www() {
         timeout 30 runuser -u www-data -- "$@"
     fi
 }
-SITE_ROOT="/var/www/html/${SITE}"
-
-# --- A loosened kernel setting is put back within a minute (B37) ------------
-if [[ "$LOOSEN" == 1 ]]; then
-    was="$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null)"
-    sysctl -q -w kernel.yama.ptrace_scope=0 >/dev/null 2>&1
-    sleep 70
-    now="$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null)"
-    if [[ "$now" == "$was" && "$now" != 0 ]]; then
-        row PASS "A loosened kernel setting is put back within a minute" "ptrace_scope 0 for 70 s, back to ${now}"
+# As root where the site runs: inside its container, or here.
+as_root_there() {
+    if [[ "$CONTAINER" == 1 ]]; then
+        timeout 30 "$ENGINE" exec -u root "$SITE" "$@"
     else
-        row FAIL "A loosened kernel setting is put back within a minute" "ptrace_scope ${now} after 70 s (was ${was}); set back by hand"
-        sysctl -q -w "kernel.yama.ptrace_scope=${was:-1}" >/dev/null 2>&1
+        timeout 30 "$@"
     fi
-else
-    row SKIP "A loosened kernel setting is put back within a minute" "not asked (--loosen)"
-fi
+}
 
 # --- The site filter, as the web user ---------------------------------------
 # A user namespace gives the web user nothing: inside a container the site
 # filter refuses it outright; on a server of its own the kernel
 # (kernel.apparmor_restrict_unprivileged_userns) gives it no capability, so it
 # cannot even map itself to root. Either way a mount inside one is refused.
-ns="$(as_www unshare -Urm sh -c 'mkdir -p /tmp/ccp_ns && mount -t tmpfs none /tmp/ccp_ns && echo MOUNTED' 2>&1 | head -1)"
+ns="$(as_www unshare -Urm sh -c 'mount -t tmpfs none /tmp && echo MOUNTED' 2>&1 | head -1)"
 if [[ "$ns" == MOUNTED ]]; then
     row FAIL "A user namespace gives the web user no capability" "a mount inside one succeeded"
 else
     row PASS "A user namespace gives the web user no capability" "refused: ${ns:-no answer}"
 fi
-if as_www sh -c 'mkdir -p /tmp/ccp_mnt && mount -t tmpfs none /tmp/ccp_mnt' >/dev/null 2>&1; then
-    row FAIL "The web user cannot mount" "mount succeeded"
+if as_www mount -t tmpfs none /mnt >/dev/null 2>&1; then
+    as_root_there umount /mnt >/dev/null 2>&1
+    row FAIL "The web user cannot mount" "a mount on /mnt succeeded (taken down again)"
 else
     row PASS "The web user cannot mount" "mount refused"
 fi
@@ -98,8 +108,11 @@ fi
 # socket_create() refuses AF_PACKET as an argument before the kernel is asked.
 if as_www perl -e 1 >/dev/null 2>&1; then
     packet="$(as_www perl -e 'if (socket(my $s, 17, 3, 0)) { print "opened" } else { print "refused: $!" }' 2>/dev/null)"
-    [[ "$packet" == refused* ]] && row PASS "The web user cannot open a packet socket" "AF_PACKET ${packet}" \
-        || row FAIL "The web user cannot open a packet socket" "AF_PACKET ${packet:-unanswered}"
+    if [[ "$packet" == refused* ]]; then
+        row PASS "The web user cannot open a packet socket" "AF_PACKET ${packet}"
+    else
+        row FAIL "The web user cannot open a packet socket" "AF_PACKET ${packet:-unanswered}"
+    fi
 else
     row SKIP "The web user cannot open a packet socket" "no perl here to ask with"
 fi
@@ -110,7 +123,7 @@ else
 fi
 
 # --- The read-only tree -------------------------------------------------------
-target="${SITE_ROOT}/public_html/serve.php"
+target="${SITES}/${SITE}/public_html/serve.php"
 [[ "$CONTAINER" == 1 ]] && target="/var/www/html/${SITE}/public_html/serve.php"
 if as_www sh -c "printf '' >> '${target}'" >/dev/null 2>&1; then
     row FAIL "The web user cannot write the site's code" "${target} took a write"
@@ -137,7 +150,7 @@ fi
 # --- No trust left for the old address -----------------------------------------
 if [[ -n "$OLD" ]]; then
     # -R: conf-enabled and sites-enabled hold symlinks, which -r passes over.
-    if grep -Rqs -F "RemoteIPTrustedProxy ${OLD}" /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/; then
+    if grep -Rqs -F "RemoteIPTrustedProxy ${OLD}" "${ETC}/apache2/conf-enabled/" "${ETC}/apache2/sites-enabled/"; then
         row FAIL "No trust left for the old address" "RemoteIPTrustedProxy ${OLD} is enabled"
     else
         row PASS "No trust left for the old address" "no RemoteIPTrustedProxy ${OLD}"
@@ -163,4 +176,5 @@ else
     fi
 fi
 
-exit "$failed"
+if [[ "$failed" == 1 ]]; then echo "RESULT: FAIL"; else echo "RESULT: PASS"; fi
+exit 0

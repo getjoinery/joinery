@@ -1,8 +1,11 @@
 # Site Copy — Anything to Anything, and Done
 
-**Status:** Building, 2026-10-18 (one-data-root). WP0–WP5 built and gated, prepared as copy-final; no live proof yet.
-WP6's rig is written but unproven: `seed_copy_source.php`, `check_copy_target.php` and `check_copy_probes.sh`
-(plugins/server_manager/tests/lib), and `CopySecurityCheck` with `utils/copy_security_check.php`. The seed leaves
+**Status:** Building, 2026-10-18 (one-data-root). WP0–WP5 built and gated, released in 0.8.505 and 0.8.506.
+WP6's rig: `seed_copy_source.php` and `check_copy_target.php` (plugins/server_manager/tests/lib), proven on node-n
+and src1 on 2026-10-19; `CopySecurityCheck` with `utils/copy_security_check.php`; and the probes, which became the
+`copy_probes` agent word (agent 1.84.2, `sysadmin_tools/copy_probes.sh`; owner's decision 2026-10-19, since a
+plane-made copy has root login off), with the B37 loosening alone left to `tests/lib/check_loosen_restored.sh`
+over the test plane's own login. The seed leaves
 out the vault (the live test's browser makes it, with the passkey) and the custom theme (not yet seeded).
 The live test per run is not written.
 Code review by reviewer2 (2026-10-18, B1-B14) all fixed: the resolvers asked in RFC 8484 wire format on 443

@@ -40,6 +40,8 @@
  * hash of the manifest body answers "has the content changed" directly, with
  * nothing to keep in step.
  *
+ * @version 1.28 - carries copy_probes.sh, the copy_probes word on a host whose site containers a copy's security
+ *                 check probes (specs/site_copy_final_test.md, the rig)
  * @version 1.27 - carries host_runner_lock.sh, which remove_account.sh and install.sh source to hold the host
  *                 converger off a site they change: without it a bundle-run removal went unheld (B3); and
  *                 trust_forwarder.sh, the trust_forwarder word on a host fronting a copy in a container
@@ -169,6 +171,10 @@ class SupportBundlePublisher {
 		// believes the site's old server's X-Forwarded-For while its DNS moves
 		// (specs/site_copy_anything_to_anything.md D1). Sources nothing.
 		'maintenance_scripts/sysadmin_tools/trust_forwarder.sh',
+		// copy_probes: a site container's walls proven by acting as the site,
+		// for a copy's security check (specs/site_copy_final_test.md, the
+		// rig). Sources nothing.
+		'maintenance_scripts/sysadmin_tools/copy_probes.sh',
 		// remove_site_certificate, and what remove_account.sh runs as its
 		// sibling for each certificate the removed site's vhost named.
 		// Sources nothing.
