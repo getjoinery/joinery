@@ -4681,6 +4681,11 @@ fn scratch_fresh_hunt_sweep() {
 ///
 /// All of that machinery exists and no seed had ever reached it, because the
 /// ordinary name table cannot spell a name any filesystem objects to.
+///
+/// Not on a Windows host: its winname arms give a Linux and a decomposing
+/// disk names like `a:b-5.txt`, and a drive-shaped name is a drive there
+/// (jd-sim vfs tests, a_drive_shaped_name_is_a_drive_on_a_windows_host), so
+/// those disks never settle for a reason that is not the client's.
 #[test]
 #[ignore]
 fn scratch_windows_hostile_name_sweep() {
@@ -5757,6 +5762,7 @@ fn scratch_ghost_probe() {
 /// (specs/drive_file_identity.md, commit 2): the chain oracle's Defect AH
 /// pairing is gone.
 #[test]
+#[cfg_attr(windows, ignore = "a simulated Linux or Mac disk holding a drive-shaped name (a letter, then a colon): on a Windows host that name is a drive (jd-sim vfs tests, a_drive_shaped_name_is_a_drive_on_a_windows_host)")]
 fn frozen_park_onto_a_strangers_name_seed() {
     let refs: [(&str, Platform); 3] = [
         ("mac", Platform::MacOs),

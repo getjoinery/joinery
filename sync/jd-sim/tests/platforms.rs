@@ -262,15 +262,27 @@ fn renaming_a_folder_on_windows_does_not_push_the_escaped_name_to_the_server() {
     // renamed folder wears the escape on disk; judged against the server's
     // spelling the move goes up as a rename to the escaped byte-name, and the
     // escape becomes the file's real name everywhere.
-    let world = World::of(
-        16,
-        &[("pc", Platform::Linux), ("win", Platform::Windows)],
-    );
+    //
+    // The name comes from a Linux device. On a Windows host none can be
+    // simulated holding it (a drive-shaped name is a drive there: jd-sim vfs
+    // tests, a_drive_shaped_name_is_a_drive_on_a_windows_host), so there the
+    // file is on the server from the start, as a Linux device would have
+    // left it, and the Windows device -- the one under test -- is the same.
+    let world = if cfg!(windows) {
+        World::of(16, &[("win", Platform::Windows)])
+    } else {
+        World::of(16, &[("pc", Platform::Linux), ("win", Platform::Windows)])
+    };
     let mut committed = Committed::default();
 
     let body = b"a name Windows cannot spell, in a folder";
-    world.device("pc").fs.user_mkdir("Sub");
-    world.device("pc").fs.user_write("Sub/a:b.txt", body);
+    if cfg!(windows) {
+        let sub = world.server.seed_folder(None, "Sub");
+        world.server.seed_file(Some(sub), "a:b.txt", body);
+    } else {
+        world.device("pc").fs.user_mkdir("Sub");
+        world.device("pc").fs.user_write("Sub/a:b.txt", body);
+    }
     committed.note("Sub/a:b.txt", body);
     assert!(world.settle().is_some());
     let versions_before = world.server.all_versions().len();

@@ -731,10 +731,9 @@ impl World {
                 if one_in > 1 && rng.below(one_in) != 0 {
                     return;
                 }
-                let Ok(rel) = target.strip_prefix(std::path::Path::new("/sync")) else {
+                let Some(rel) = jd_vfs::relative_to(std::path::Path::new("/sync"), target) else {
                     return;
                 };
-                let rel = rel.to_string_lossy().to_string();
                 // The folder this disk is building, as the server currently
                 // names it. Absent means the server has already moved on, which
                 // is its own interesting state and not one to force.
@@ -777,10 +776,9 @@ impl World {
                     return;
                 }
                 // The path the engine is landing on, as this disk names it.
-                let Ok(rel) = target.strip_prefix(std::path::Path::new("/sync")) else {
+                let Some(rel) = jd_vfs::relative_to(std::path::Path::new("/sync"), target) else {
                     return;
                 };
-                let rel = rel.to_string_lossy().to_string();
                 // Deliberately NOT restricted to paths that still hold a file.
                 // The engine has usually just moved the old one out of the way,
                 // so by the time it commits the path is empty -- and that is

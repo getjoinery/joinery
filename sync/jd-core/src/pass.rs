@@ -4744,8 +4744,8 @@ fn park_directories(env: &ExecEnv) -> Result<Vec<(String, bool)>, ExecError> {
         if env.vfs.read_dir(&root.join(&rel)).is_ok() {
             out.push((rel, true));
         } else if let Some(at) = crate::execute::parked_directory_left_at_its_name(env, &entry)? {
-            if let Ok(rel) = at.strip_prefix(&root) {
-                out.push((rel.to_string_lossy().to_string(), false));
+            if let Some(rel) = jd_vfs::relative_to(&root, &at) {
+                out.push((rel, false));
             }
         }
     }

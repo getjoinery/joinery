@@ -95,11 +95,8 @@ fn walk_into(
         }
 
         let path = entry.path();
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
+        let relative = jd_vfs::relative_to(root, &path)
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
         let meta = match entry.metadata() {
             Ok(m) => m,
             // A file that vanished between the readdir and the stat. During a

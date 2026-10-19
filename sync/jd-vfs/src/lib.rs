@@ -36,7 +36,7 @@ pub use names::{
     resolve_siblings, to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
     land_name, landing_op, LAND_PREFIX,
 };
-pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
+pub use paths::{canonical_root, is_inside, is_verbatim, relative_to, strip_verbatim};
 pub use personality::{birth_as_seen, IdTieBreak, Personality, INDEX_ONLY_BIRTH};
 pub use real::OsVfs;
 pub use watch::{watch_root, Watcher};
