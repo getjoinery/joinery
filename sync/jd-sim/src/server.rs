@@ -425,19 +425,10 @@ fn standing(reason: &'static str, message: &'static str) -> ApiRefusal {
     }
 }
 
-/// A refusal a client can act on: the name is taken, and the marker says so in
-/// a field rather than in English. Matches what the real endpoints return, so
-/// the engine meets the same shape here as on a live server.
-fn name_taken(message: &'static str) -> ApiRefusal {
-    ApiRefusal {
-        status: 422,
-        errortype: "ActionError",
-        message: message.into(),
-        data: serde_json::json!({ "reason": "name_taken" }),
-    }
-}
-
-/// The same refusal, naming what it hit.
+/// A refusal a client can act on: the name is taken, the marker says so in a
+/// field rather than in English, and the refusal names what holds the name --
+/// the shape the platform sends (`DriveHelper::name_taken_data`), held to the
+/// example in jd-proto's `tests/fixtures/name_taken_refusal.json`.
 ///
 /// The server has the colliding row in its hand at the moment it refuses — it
 /// just looked the collision up in order to decide. Saying which entity holds
@@ -1850,10 +1841,10 @@ impl MockServer {
         // did not — so the engine was never once exercised against the refusal,
         // and a client that loops forever on it reached a live box before
         // anybody noticed. Trashed siblings do not count, exactly as there.
-        if st
+        if let Some(holder) = st
             .folders
             .values()
-            .any(|f| !f.trashed && f.parent == parent && f.name == name)
+            .find(|f| !f.trashed && f.parent == parent && f.name == name)
         {
             // The marker, like every other name collision here and like the
             // real endpoint, which has sent `reason: name_taken` from this path
@@ -1862,7 +1853,13 @@ impl MockServer {
             // withdrew the operation and planned the identical one next pass --
             // a device that never goes quiet, against a server that had told it
             // exactly what was wrong.
-            return Err(name_taken("A folder with that name already exists here."));
+            return Err(name_taken_by(
+                "A folder with that name already exists here.",
+                "folder",
+                holder.id,
+                &holder.name,
+                None,
+            ));
         }
         st.next_folder_id += 1;
         let id = st.next_folder_id;
@@ -1938,7 +1935,8 @@ impl MockServer {
                 };
                 st.folders
                     .values()
-                    .any(|f| f.id != id && !f.trashed && f.parent == parent && f.name == name)
+                    .find(|f| f.id != id && !f.trashed && f.parent == parent && f.name == name)
+                    .map(|f| ("folder", f.id, f.name.clone(), None))
             } else {
                 let folder = match st.files.get(&id) {
                     Some(f) => f.folder,
@@ -1946,10 +1944,17 @@ impl MockServer {
                 };
                 st.files
                     .values()
-                    .any(|f| f.id != id && !f.trashed && f.folder == folder && f.name == name)
+                    .find(|f| f.id != id && !f.trashed && f.folder == folder && f.name == name)
+                    .map(|f| ("file", f.id, f.name.clone(), Some(f.sha256.clone())))
             };
-            if taken {
-                return Err(name_taken("Something with that name is already here."));
+            if let Some((kind, holder_id, holder_name, sha)) = taken {
+                return Err(name_taken_by(
+                    "Something with that name is already here.",
+                    kind,
+                    holder_id,
+                    &holder_name,
+                    sha.as_deref(),
+                ));
             }
         }
 
@@ -2056,7 +2061,8 @@ impl MockServer {
             };
             st.folders
                 .values()
-                .any(|f| f.id != id && !f.trashed && f.parent == dest && f.name == name)
+                .find(|f| f.id != id && !f.trashed && f.parent == dest && f.name == name)
+                .map(|f| ("folder", f.id, f.name.clone(), None))
         } else {
             let name = match st.files.get(&id) {
                 Some(f) => f.name.clone(),
@@ -2064,11 +2070,16 @@ impl MockServer {
             };
             st.files
                 .values()
-                .any(|f| f.id != id && !f.trashed && f.folder == dest && f.name == name)
+                .find(|f| f.id != id && !f.trashed && f.folder == dest && f.name == name)
+                .map(|f| ("file", f.id, f.name.clone(), Some(f.sha256.clone())))
         };
-        if occupied {
-            return Err(name_taken(
+        if let Some((kind, holder_id, holder_name, sha)) = occupied {
+            return Err(name_taken_by(
                 "Something with that name already exists in the destination.",
+                kind,
+                holder_id,
+                &holder_name,
+                sha.as_deref(),
             ));
         }
         if t == "folder" {
@@ -3023,6 +3034,41 @@ fn parse_index_token(token: &str) -> (&'static str, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A name refusal here has the keys, and the JSON types, of the platform's
+    /// (jd-proto's `tests/fixtures/name_taken_refusal.json`, which the
+    /// platform's `drive_sync_contract` test holds the server to). The two
+    /// drifted once: only this mock named the holder, and the client's
+    /// adoption of its own upload ran nowhere else.
+    #[test]
+    fn a_name_refusal_has_the_platforms_shape() {
+        let example: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../jd-proto/tests/fixtures/name_taken_refusal.json"
+        )))
+        .unwrap();
+        let shape = |v: &Value| -> Vec<(String, &'static str)> {
+            let mut keys: Vec<(String, &'static str)> = v
+                .as_object()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| {
+                    let kind = match v {
+                        Value::String(_) => "string",
+                        Value::Number(n) if n.is_i64() => "integer",
+                        _ => "other",
+                    };
+                    (k.clone(), kind)
+                })
+                .collect();
+            keys.sort();
+            keys
+        };
+        let file = name_taken_by("taken", "file", 7, "a.txt", Some("ab"));
+        let folder = name_taken_by("taken", "folder", 8, "A", None);
+        assert_eq!(shape(&file.data), shape(&example["file"]));
+        assert_eq!(shape(&folder.data), shape(&example["folder"]));
+    }
 
     fn server() -> MockServer {
         MockServer::new(SimClock::new())

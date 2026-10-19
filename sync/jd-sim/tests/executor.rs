@@ -4345,3 +4345,80 @@ fn an_upload_paused_a_dozen_times_is_not_said_to_keep_failing() {
     assert_eq!(server.blob(&sha256_hex(&body)).unwrap(), body);
     assert_eq!(server.live_counts(), (0, 1));
 }
+
+/// An upload killed between its success path and its op being marked done.
+///
+/// The upload has landed and its answer has been written down -- the record
+/// carries the server's id -- but the op is still in flight, so the restart
+/// runs it again, and the replay asks for a new file at the name its own file
+/// already holds. The refusal names the holder, whose bytes are the upload's,
+/// and the upload finishes as that file. Soak rig run 2584 met this against a
+/// platform that named no holder: the replay landed beside under the next
+/// conflict name and moved its record there, a duplicate on the server and a
+/// device that no longer knew one of its own uploads. That the platform names
+/// the holder is `drive_sync_contract`'s to show; this keeps the client's side.
+#[test]
+fn an_upload_killed_after_it_landed_and_was_recorded_is_still_one_file() {
+    let (_clock, server, device) = world();
+    let body = b"the editor's backup, copied aside";
+    device.fs.user_write("notes.txt~", body);
+
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(id, None, "notes.txt~", LocalStatus::PendingUpload))
+        .unwrap();
+    let report = do_one(
+        &device,
+        id,
+        Action::UploadAsNew {
+            placement: Placement {
+                parent: None,
+                name: "notes.txt~".into(),
+            },
+        },
+    );
+    assert_eq!(report.done, 1);
+    let landed = server
+        .files()
+        .into_iter()
+        .find(|f| !f.trashed && f.name == "notes.txt~")
+        .expect("the upload landed")
+        .id;
+    let real = EntityId::file(landed);
+    assert!(device.store.get_entry(real).unwrap().is_some(), "and was recorded");
+
+    // The kill: the success path has run, the op was never marked done.
+    let op_id = (1..100)
+        .find(|n| {
+            device
+                .store
+                .get_op(*n)
+                .unwrap()
+                .is_some_and(|op| op.kind == "upload_new")
+        })
+        .expect("the upload's op");
+    device.store.set_op_state(op_id, OpState::InFlight).unwrap();
+
+    let now = device.now();
+    let e = env(&device, &now);
+    recover(&e).unwrap();
+    run_queued(&e).unwrap();
+
+    let on_server: Vec<String> = jd_sim::scenario::server_tree(&server)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(on_server, vec!["notes.txt~".to_string()], "one file on the server");
+    let on_disk: Vec<String> = jd_sim::scenario::disk_tree(&device)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(on_disk, vec!["notes.txt~".to_string()], "one file on the disk, at its name");
+    let entry = device
+        .store
+        .get_entry(real)
+        .unwrap()
+        .expect("the record of the server file the upload made");
+    assert_eq!(entry.status, LocalStatus::Synced);
+}

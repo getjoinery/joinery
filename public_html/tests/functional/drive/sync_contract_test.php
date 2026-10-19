@@ -25,6 +25,10 @@ require_once(PathHelper::getIncludePath('logic/drive_trash_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_changes_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_stat_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_index_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_rename_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_move_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_upload_init_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_upload_complete_logic.php'));
 require_once(PathHelper::getIncludePath('logic/vault_client_probe_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_devices_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_device_rename_logic.php'));
@@ -454,6 +458,121 @@ foreach ($after_revoke->data['devices'] as $d) { if ((int)$d['id'] === (int)$dev
 check(!$still_there, 'a revoked device leaves the list');
 
 // ---------------------------------------------------------------------------
+section('a name refusal names its holder, in the shape a sync client reads');
+
+// A client holding the same bytes as the file that holds a name knows the name
+// is held by its own upload -- an upload that landed while its answer was lost
+// -- and adopts that file rather than sending a second copy. It reads the
+// holder from the refusal (docs/drive.md, Refusal reasons). The example in
+// sync/jd-proto/tests/fixtures/name_taken_refusal.json is the shape: the
+// client's parser and jd-sim's server are tested against the same file, so
+// the three cannot drift apart again. They did: only the simulator named the
+// holder, and the adoption ran nowhere else.
+$example = json_decode((string)file_get_contents(
+	dirname(PathHelper::getBasePath()) . '/sync/jd-proto/tests/fixtures/name_taken_refusal.json'), true);
+check(is_array($example) && isset($example['file'], $example['folder']), 'the shared example is read');
+
+/** Each key of a refusal's data with its JSON type, as the client receives it. */
+function sc_shape($data) {
+	$shape = array();
+	foreach (json_decode(json_encode($data), true) as $k => $v) {
+		$shape[$k] = gettype($v);
+	}
+	ksort($shape);
+	return $shape;
+}
+
+function sc_names_holder($what, $r, $kind, $id, $name, $sha = null) {
+	global $example;
+	check($r instanceof LogicResult && $r->error !== null, "$what is refused");
+	$data = $r instanceof LogicResult ? $r->data : array();
+	check(sc_shape($data) === sc_shape($example[$kind]), "$what: the refusal has the example's keys and types",
+		json_encode(sc_shape($data)));
+	check(($data['holder_type'] ?? null) === $kind && ($data['holder_id'] ?? null) === (int)$id
+		&& ($data['holder_name'] ?? null) === $name, "$what: it names the $kind holding the name",
+		json_encode($data));
+	if ($sha !== null) {
+		check(($data['holder_sha256'] ?? null) === $sha, "$what: with the hash of the bytes the server holds");
+	}
+}
+
+$rHome = drive_folder_create_logic(array('name' => 'Holders_' . $tag));
+$home = (int)$rHome->data['folder']['id']; $made_folders[] = $home;
+
+// Folders: create, rename and move onto a taken name.
+$rTaken = drive_folder_create_logic(array('name' => 'Taken', 'parent_id' => $home));
+$taken_id = (int)$rTaken->data['folder']['id']; $made_folders[] = $taken_id;
+sc_names_holder('a second folder of that name', drive_folder_create_logic(array('name' => 'Taken', 'parent_id' => $home)),
+	'folder', $taken_id, 'Taken');
+$rOther = drive_folder_create_logic(array('name' => 'Other', 'parent_id' => $home));
+$other_id = (int)$rOther->data['folder']['id']; $made_folders[] = $other_id;
+sc_names_holder('a folder renamed onto it', drive_rename_logic(array(
+	'entity_type' => 'folder', 'entity_id' => $other_id, 'name' => 'Taken')), 'folder', $taken_id, 'Taken');
+$rStray = drive_folder_create_logic(array('name' => 'Taken'));
+$stray_id = (int)$rStray->data['folder']['id']; $made_folders[] = $stray_id;
+sc_names_holder('a folder moved onto it', drive_move_logic(array(
+	'entity_type' => 'folder', 'entity_id' => $stray_id, 'parent_id' => $home)), 'folder', $taken_id, 'Taken');
+
+// Files: an upload's start and its completion, a rename and a move.
+$held_bytes = 'held-' . bin2hex(random_bytes(8));
+$held_sha = hash('sha256', $held_bytes);
+$held = File::createFromBytes($held_bytes, 'notes.txt~', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $home));
+$made_files[] = $held->key;
+sc_names_holder('an upload to the name', drive_upload_init_logic(array(
+	'name' => 'notes.txt~', 'size_bytes' => strlen($held_bytes), 'sha256' => $held_sha, 'folder_id' => $home)),
+	'file', $held->key, 'notes.txt~', $held_sha);
+
+// Two uploads start while the name is free; the second to finish is refused
+// at completion, naming the first. This is the server's side of an upload that
+// landed while its answer was lost and was then sent again.
+$twice = 'twice-' . bin2hex(random_bytes(8));
+$starts = array();
+foreach (array(1, 2) as $n) {
+	$r = drive_upload_init_logic(array('name' => 'twice.txt', 'size_bytes' => strlen($twice),
+		'sha256' => hash('sha256', $twice), 'folder_id' => $home));
+	check(!empty($r->data['upload_token']), "upload $n of the same new name starts");
+	$up = FileUpload::load_by_token($r->data['upload_token']);
+	$part = $up->part_path();
+	if (!is_dir(dirname($part))) { @mkdir(dirname($part), 0777, true); }
+	file_put_contents($part, $twice);
+	$up->set('fup_received_bytes', strlen($twice));
+	$up->set('fup_update_time', gmdate('Y-m-d H:i:s'));
+	$up->save();
+	$starts[$n] = $r->data['upload_token'];
+}
+$first = drive_upload_complete_logic(array('upload_token' => $starts[1]));
+check(!empty($first->data['file']['id']), 'the first completes');
+if (!empty($first->data['file']['id'])) { $made_files[] = (int)$first->data['file']['id']; }
+sc_names_holder('the second completion', drive_upload_complete_logic(array('upload_token' => $starts[2])),
+	'file', (int)($first->data['file']['id'] ?? 0), 'twice.txt', hash('sha256', $twice));
+
+$beside = File::createFromBytes('beside-' . $tag, 'beside.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $home));
+$made_files[] = $beside->key;
+sc_names_holder('a file renamed onto it', drive_rename_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$beside->key, 'name' => 'notes.txt~')),
+	'file', $held->key, 'notes.txt~', $held_sha);
+
+// The holder is named only to a caller who may read it. A grantee given the
+// one file beside it, and nothing else, may rename that file onto the name --
+// the name was theirs to ask about -- but the sibling's id and hash are not.
+FileAccessGrant::sync_for_entity('file', $beside->key, array($grantee->key => 'editor'), $owner->key);
+$session->set_api_user($grantee->key);
+$rBlind = drive_rename_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$beside->key, 'name' => 'notes.txt~'));
+$session->set_api_user($owner->key);
+FileAccessGrant::sync_for_entity('file', $beside->key, array(), $owner->key);
+check($rBlind instanceof LogicResult && $rBlind->error !== null, 'a grantee of one file renaming it onto a sibling is refused');
+check(($rBlind->data ?? null) === array('reason' => 'name_taken'),
+	'and is told only that the name is taken, not what holds it', json_encode($rBlind->data ?? null));
+$away = File::createFromBytes('away-' . $tag, 'notes.txt~', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $away->key;
+sc_names_holder('a file moved onto it', drive_move_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$away->key, 'parent_id' => $home)),
+	'file', $held->key, 'notes.txt~', $held_sha);
+
 section('Range header parsing');
 
 check(File::parse_range_header(null, 1000) === null, 'no Range header means no range');

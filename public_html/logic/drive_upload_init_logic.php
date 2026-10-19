@@ -155,8 +155,9 @@ function drive_upload_init_logic(array $input): LogicResult {
 	// rather than after the whole file has crossed the wire only to be refused.
 	// The dedup branch below needs it for a second reason: it creates the file
 	// itself and never reaches the completion path at all.
-	if (!$target_file && DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
-		return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+	$holder = $target_file ? null : DriveHelper::file_name_holder($owner_id, $folder_id, $name);
+	if ($holder !== null) {
+		return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 	}
 
 	// Dedup short-circuit: identical private bytes the ACTOR already possesses
@@ -244,11 +245,12 @@ function drive_upload_init_logic(array $input): LogicResult {
 						// both reach the insert, where the partial unique index refuses the
 						// loser. Answered as the name clash it is rather than as a database
 						// fault, so a sync client retries instead of withdrawing the work.
-						if (strpos($e->getMessage(), '23505') === false
-							|| !DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+						$holder = strpos($e->getMessage(), '23505') === false
+							? null : DriveHelper::file_name_holder($owner_id, $folder_id, $name);
+						if ($holder === null) {
 							throw $e;
 						}
-						return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+						return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 					}
 					if ($file && $file->key) {
 						DriveUsage::recompute($owner_id);
