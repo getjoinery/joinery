@@ -50,7 +50,12 @@ class ScdFakeDns extends DnsDriverBase {
 		return $out;
 	}
 	public function createRecord(string $zone, DnsRecord $record): void { throw new Exception('no creates here'); }
+	// $refuse: a record id whose writes the provider refuses.
+	public static $refuse = '';
 	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {
+		if ((string)$live->provider_id === self::$refuse) {
+			throw new Exception('the provider refused the write');
+		}
 		self::$writes[] = array('id' => $live->provider_id, 'value' => $desired->value, 'ttl' => $desired->ttl);
 		self::$records[$live->provider_id]['value'] = $desired->value;
 		self::$records[$live->provider_id]['ttl'] = $desired->ttl;
@@ -68,7 +73,15 @@ class ScdFakeCloud implements CloudComputeProvider {
 	public function getInstance(string $instance_id): array { return array('id' => $instance_id, 'status' => $this->status, 'ip' => '', 'label' => '', 'disk_encryption' => null); }
 	public function rebuildInstance(string $instance_id, array $opts): array { throw new CloudComputeException('no'); }
 	public function deleteInstance(string $instance_id): void {}
-	public function shutdownInstance(string $instance_id): void { $this->shutdowns++; $this->status = 'offline'; }
+	// $fail_after_off: the provider powers the server off and then answers an error.
+	public $fail_after_off = false;
+	public function shutdownInstance(string $instance_id): void {
+		$this->shutdowns++;
+		$this->status = 'offline';
+		if ($this->fail_after_off) {
+			throw new CloudComputeException('the provider answered 500');
+		}
+	}
 	public function bootInstance(string $instance_id): void { $this->status = 'running'; }
 	public function getTransfer(): array { return array(); }
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array { return array(); }
@@ -95,15 +108,19 @@ ProxiedOriginMove::$asker = function ($url, $at = '') use ($look, $T4) {
 };
 harness_defer(function () { ProxiedOriginMove::$asker = null; ProxiedOriginMove::$sleeper = null; });
 // The public resolvers: whatever $resolve names for a name and type.
+// $down: resolvers that cannot be asked.
 $resolve = array();
-PublicResolvers::$asker = function ($url) use (&$resolve) {
-	parse_str((string)parse_url($url, PHP_URL_QUERY), $q);
-	$values = $resolve[strtolower($q['name']) . ' ' . $q['type']] ?? array();
+$down = array();
+PublicResolvers::$asker = function ($resolver, $name, $type) use (&$resolve, &$down) {
+	if (in_array($resolver, $down, true)) {
+		return null;
+	}
+	$values = $resolve[strtolower($name) . ' ' . $type] ?? array();
 	$answer = array();
 	foreach ($values as $v) {
-		$answer[] = array('type' => $q['type'] === 'A' ? 1 : 28, 'data' => $v, 'TTL' => 60);
+		$answer[] = array('type' => $type === 'A' ? 1 : 28, 'data' => $v, 'ttl' => 60);
 	}
-	return array('Status' => 0, 'Answer' => $answer);
+	return array('rcode' => 0, 'answers' => $answer);
 };
 harness_defer(function () { PublicResolvers::$asker = null; });
 SiteCopyRunner::$worker_starter = function ($id) {};
@@ -168,7 +185,8 @@ $pair = function (string $n) use ($mk_node, $domain, $S4, $S6, $T4, $T6, $words,
 		'mgn_agent_primitives' => $words, 'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'),
 		'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
 		'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
-		'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive'));
+		'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
+		'mgn_last_host_report' => json_encode(array('sites' => array('scd' . $n)))));
 	sm_test_node_space($src);
 	$sp = new CustomerCloudProvision(NULL);
 	foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => $domain, 'cvp_slug' => 'harnessscd-sp' . $n . '-' . $tag,
@@ -390,5 +408,208 @@ check($back === array('site_quiet:on@source', 'go_back@source', 'trust_forwarder
 	'the copy quieted, the rows back, the copy stops believing the old server, and the site runs again (which stops its forward)',
 	json_encode($back));
 check(($copy->switch_record()['watch']['state'] ?? '') === 'ended', 'and the watch ends');
+
+// Each later pair takes the site's addresses: the one before leaves the dashboard.
+$retire = function (ManagedNode ...$nodes) {
+	foreach ($nodes as $n) {
+		$n->load();
+		if (!$n->get('mgn_delete_time')) {
+			$n->soft_delete();
+		}
+	}
+};
+$op_list = function (SiteCopy $copy) {
+	return array_map(function ($s) { return $s['op'] . (($s['arg'] ?? '') !== '' ? ':' . $s['arg'] : '') . '@' . $s['on']; }, $copy->steps());
+};
+
+// ---------------------------------------------------------------------------
+section('The resolvers are asked in wire format');
+
+$q = PublicResolvers::query('WWW.Example.org.', 28);
+check(bin2hex($q) === '000001000001000000000000' . '03777777076578616d706c65036f726700' . '001c0001',
+	'a query: id 0, recursion desired, one question, the name lower-cased', bin2hex($q));
+check(PublicResolvers::query('a..b', 1) === null && PublicResolvers::query(str_repeat('a', 64) . '.org', 1) === null, 'no query for a name that cannot be one');
+// A response: the question, a CNAME, then an A at the name the CNAME points to (by compression pointer).
+$msg = pack('nnnnnn', 0, 0x8180, 1, 2, 0, 0) . "\3www\7example\3org\0" . pack('nn', 1, 1)
+	. "\xc0\x0c" . pack('nnNn', 5, 1, 300, 6) . "\3web\xc0\x10"
+	. "\xc0\x2d" . pack('nnNn', 1, 1, 120, 4) . inet_pton('198.51.100.9');
+$r = PublicResolvers::parse($msg);
+check($r !== null && $r['rcode'] === 0 && count($r['answers']) === 1 && $r['answers'][0]['data'] === '198.51.100.9' && $r['answers'][0]['ttl'] === 120,
+	'a response read: the A record behind a CNAME, with its TTL', json_encode($r));
+check(PublicResolvers::parse(substr($msg, 0, 40)) === null, 'a cut-off response reads as none');
+check(PublicResolvers::parse(pack('nnnnnn', 0, 0x8183, 0, 0, 0, 0))['rcode'] === 3, 'NXDOMAIN reads as an answer of none');
+
+// ---------------------------------------------------------------------------
+section('The watch ends');
+
+$plan_one = array('records' => array(array('name' => 'w.' . $domain, 'type' => 'A', 'from' => $S4, 'to' => $T4, 'ttl_was' => 300)));
+$moved = gmdate('Y-m-d H:i:s', time() - 3600);
+$resolve = array('w.' . $domain . ' A' => array($T4, '192.0.2.200'));
+$r = DnsRecordMove::settled($plan_one, $moved);
+check($r['settled'] && !$r['by_time'], 'another address the name carries, which the plan did not move, does not hold the watch up', json_encode($r));
+$resolve = array('w.' . $domain . ' A' => array($T4, $S4));
+check(!DnsRecordMove::settled($plan_one, $moved)['settled'], 'a resolver still naming the old address beside the new: not settled');
+$resolve = array('w.' . $domain . ' A' => array($T4));
+$down = array('Quad9');
+$r = DnsRecordMove::settled($plan_one, $moved);
+check(!$r['settled'] && !$r['agree'], 'one resolver that cannot be asked: not settled yet', json_encode($r));
+$r = DnsRecordMove::settled($plan_one, gmdate('Y-m-d H:i:s', time() - DnsRecordMove::MAX_WAIT - 60));
+check($r['settled'] && $r['by_time'], 'past MAX_WAIT it settles whatever the resolvers say, and says so', json_encode($r));
+$down = array();
+check(DnsRecordMove::MAX_WAIT < SiteCopyRunner::FORWARDER_TRUST_HOURS * 3600, 'the watch ends before the copy stops believing the old server');
+$kept = DnsRecordMove::keep_earlier_ttls(array(array('id' => 'r1', 'ttl_was' => 60), array('id' => 'r2', 'ttl_was' => 300)),
+	array(array('id' => 'r1', 'ttl_was' => 3600), array('id' => 'r2', 'ttl_was' => 900)));
+check($kept[0]['ttl_was'] === 3600 && $kept[1]['ttl_was'] === 300,
+	'a TTL an earlier attempt lowered and never put back keeps its original; one at any other value is the zone\'s', json_encode($kept));
+
+// ---------------------------------------------------------------------------
+section('Going back before the move puts the TTLs back');
+
+$retire($src, $cnode);
+list($src, $cnode, $copy) = $pair('c');
+$reset_zone();
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1);
+$copy->load();
+check(ScdFakeDns::$records['r1']['ttl'] === 60 && !empty($copy->switch_record()['ttl_lowered']), 'the TTLs lowered at the start');
+$threw = '';
+try { SiteCopyRunner::go_back($copy, null); } catch (Exception $e) { $threw = $e->getMessage(); }
+check(strpos($threw, 'TTL') !== false, 'going back before the move asks for the token too: the TTLs go back', $threw);
+SiteCopyRunner::go_back($copy, $dns());
+$copy->load();
+check(ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300 && ScdFakeDns::$records['r1']['value'] === $S4
+	&& empty($copy->switch_record()['ttl_lowered']), 'each record\'s old TTL again, still at the site\'s server', json_encode(ScdFakeDns::$records));
+$drive($copy, SiteCopy::STATUS_RETURNING);
+
+// ---------------------------------------------------------------------------
+section('An old agent: no forward, and the copy is still proven at its own address');
+
+$retire($src, $cnode);
+list($src, $cnode, $copy) = $pair('d');
+$src->set('mgn_agent_version', '1.83.0');
+$src->save();
+$reset_zone();
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1);
+$copy->load();
+$sw = $copy->switch_record();
+check(($sw['forward_to'] ?? 'x') === '' && strpos((string)($sw['no_forward'] ?? ''), '1.83.0') !== false && ($sw['probe_at'] ?? '') === $T4,
+	'nothing forwards, saying why, and the copy\'s address is kept for its proof', json_encode($sw));
+$drive($copy, SiteCopy::STATUS_FREEZING);
+SiteCopyRunner::move_address($copy, $dns(), 1);
+$copy->load();
+check(ScdFakeDns::$records['r1']['value'] === $T4 && ($copy->switch_record()['proof']['proven'] ?? false),
+	'proven at the copy\'s own address (the name still resolves to the frozen site), and the records moved', json_encode($copy->switch_record()['proof'] ?? null));
+list($ops, ) = $drive($copy, SiteCopy::STATUS_STARTING);
+check(!in_array('trust_forwarder:trust@source', $ops, true) && !in_array('site_quiet:forward@copy', $ops, true), 'and nothing is told to forward', json_encode($ops));
+$retire($src, $cnode);
+
+// ---------------------------------------------------------------------------
+section('An old server neither powered off nor held stops forwarding; a settle that stops');
+
+list($src, $cnode, $copy) = $pair('e');
+foreach (new MultiCustomerCloudProvision(array('cvp_mgn_managed_node_id' => (int)$src->key, 'deleted' => false)) as $sp) {
+	$sp->soft_delete();
+}
+$reset_zone();
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1);
+$copy->load();
+check(!isset($copy->switch_record()['power']), 'a server this management node did not create: nothing to power off');
+$drive($copy, SiteCopy::STATUS_FREEZING);
+SiteCopyRunner::move_address($copy, $dns(), 1);
+$copy->load();
+$drive($copy, SiteCopy::STATUS_STARTING);
+$resolve = array($domain . ' A' => array($T4), 'www.' . $domain . ' A' => array($T4), $domain . ' AAAA' => array($T6));
+$sw = $copy->switch_record();
+$sw['watch']['moved_time'] = gmdate('Y-m-d H:i:s', time() - 7200);
+$copy->set_switch_record($sw);
+$copy->save();
+SiteCopyRunner::advance_watch($copy);
+$copy->load();
+check($op_list($copy) === array('trust_forwarder:untrust@source', 'site_quiet:on@copy'),
+	'settled: the copy stops believing it, and the old server is quiet again, its maintenance page in place of the forward', json_encode($op_list($copy)));
+// The old server's agent does not answer: the settle stops.
+for ($i = 0; $i < 5 && $copy->status() === SiteCopy::STATUS_SETTLING; $i++) {
+	SiteCopyRunner::advance($copy);
+	$copy->load();
+	foreach ($copy->steps() as $st) {
+		if ($st['verdict'] === 'running' && !empty($st['job_id'])) {
+			$job = new ManagementJob((int)$st['job_id'], TRUE);
+			harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $job->key);
+			$finish($job, 'failed', null);
+			$job->set('mjb_error_message', 'the agent did not answer');
+			$job->save();
+			SiteCopyRunner::job_finished($job);
+			$copy->load();
+			break;
+		}
+	}
+}
+check($copy->status() === SiteCopy::STATUS_HALTED && ($copy->switch_record()['phase'] ?? '') === 'settle', 'the settle stopped',
+	$copy->status() . ' ' . $copy->get('scp_halt_reason'));
+SiteCopyRunner::retry_settle($copy);
+$copy->load();
+check($copy->status() === SiteCopy::STATUS_SETTLING && $op_list($copy) === array('trust_forwarder:untrust@source', 'site_quiet:on@copy'),
+	'tried again: every settle step laid again', json_encode(array($copy->status(), $op_list($copy))));
+$drive($copy, SiteCopy::STATUS_SETTLING);
+check($copy->status() === SiteCopy::STATUS_SWITCHED, 'and the old server let go', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
+// A settle that stops can also be kept as it is.
+$sw = $copy->switch_record();
+$sw['phase'] = 'settle';
+$copy->set_switch_record($sw);
+$copy->set('scp_status', SiteCopy::STATUS_HALTED);
+$copy->save();
+SiteCopyRunner::finish($copy, $dns());
+$copy->load();
+check($copy->status() === SiteCopy::STATUS_FINISHED && ScdFakeDns::$records['r1']['ttl'] === 3600, 'a settle that stopped can be kept, its TTLs put back');
+
+// ---------------------------------------------------------------------------
+section('A settle that stops inside the power-off, then the way back');
+
+$retire($src, $cnode);
+$cloud->status = 'running';
+$cloud->shutdowns = 0;
+list($src, $cnode, $copy) = $pair('f');
+$reset_zone();
+SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1);
+$copy->load();
+$drive($copy, SiteCopy::STATUS_FREEZING);
+SiteCopyRunner::move_address($copy, $dns(), 1);
+$copy->load();
+$drive($copy, SiteCopy::STATUS_STARTING);
+$resolve = array($domain . ' A' => array($T4), 'www.' . $domain . ' A' => array($T4), $domain . ' AAAA' => array($T6));
+$sw = $copy->switch_record();
+$sw['watch']['moved_time'] = gmdate('Y-m-d H:i:s', time() - 7200);
+$copy->set_switch_record($sw);
+$copy->save();
+SiteCopyRunner::advance_watch($copy);
+$copy->load();
+$cloud->fail_after_off = true;
+$drive($copy, SiteCopy::STATUS_SETTLING);
+$cloud->fail_after_off = false;
+$sw = $copy->switch_record();
+check($copy->status() === SiteCopy::STATUS_HALTED && ($sw['phase'] ?? '') === 'settle' && empty($sw['source_off']) && $cloud->status === 'offline',
+	'the old server went off, and the step that asked stopped without knowing it', json_encode(array($copy->status(), $sw['phase'] ?? null, $op_list($copy))));
+SiteCopyRunner::go_back($copy, $dns());
+$copy->load();
+$back = $op_list($copy);
+check(in_array('power_on:source@source', $back, true)
+	&& array_search('power_on:source@source', $back) < array_search('site_quiet:off@source', $back),
+	'going back powers the old server on before its site leaves quiet', json_encode($back));
+
+// ---------------------------------------------------------------------------
+section('A TTL the provider refuses to lower: the ones lowered go back');
+
+$retire($src, $cnode);
+list($src, $cnode, $copy) = $pair('g');
+$reset_zone();
+ScdFakeDns::$refuse = 'r3';
+$threw = '';
+try { SiteCopyRunner::begin_switch($copy, SiteCopyRunner::METHOD_DNS, $dns(), 1); } catch (Exception $e) { $threw = $e->getMessage(); }
+ScdFakeDns::$refuse = '';
+$copy->load();
+$src->load();
+check(strpos($threw, 'Nothing was frozen') !== false && strpos($threw, 'were put back') !== false
+	&& ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300
+	&& trim((string)$src->get('mgn_install_state')) === '' && $copy->status() === SiteCopy::STATUS_DORMANT,
+	'nothing frozen, and every TTL that reached a minute is back at its original', $threw . ' ' . json_encode(ScdFakeDns::$records));
 
 harness_finish();

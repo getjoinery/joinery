@@ -6,6 +6,8 @@
 # over SSH and run it as root there. Never on a production machine: it loosens
 # a kernel setting, and acts as a site's web user.
 #
+# Version: 1.1 - the trust row follows the symlinks it reads (grep -R); the namespace row asks for a capability inside one (own servers allow the
+#               namespace and give it none); the packet socket is asked with Perl, which PHP cannot
 # Version: 1.0
 #
 #   check_copy_probes.sh SITE [--neighbour SITE2] [--old-address IP] [--loosen]
@@ -77,22 +79,29 @@ else
 fi
 
 # --- The site filter, as the web user ---------------------------------------
-if as_www unshare -U true >/dev/null 2>&1; then
-    row FAIL "The web user cannot make a user namespace" "unshare -U succeeded"
+# A user namespace gives the web user nothing: inside a container the site
+# filter refuses it outright; on a server of its own the kernel
+# (kernel.apparmor_restrict_unprivileged_userns) gives it no capability, so it
+# cannot even map itself to root. Either way a mount inside one is refused.
+ns="$(as_www unshare -Urm sh -c 'mkdir -p /tmp/ccp_ns && mount -t tmpfs none /tmp/ccp_ns && echo MOUNTED' 2>&1 | head -1)"
+if [[ "$ns" == MOUNTED ]]; then
+    row FAIL "A user namespace gives the web user no capability" "a mount inside one succeeded"
 else
-    row PASS "The web user cannot make a user namespace" "unshare -U refused"
+    row PASS "A user namespace gives the web user no capability" "refused: ${ns:-no answer}"
 fi
 if as_www sh -c 'mkdir -p /tmp/ccp_mnt && mount -t tmpfs none /tmp/ccp_mnt' >/dev/null 2>&1; then
     row FAIL "The web user cannot mount" "mount succeeded"
 else
     row PASS "The web user cannot mount" "mount refused"
 fi
-if as_www php -r 'exit(function_exists("socket_create") ? 0 : 3);' >/dev/null 2>&1; then
-    packet="$(as_www php -r 'echo @socket_create(17, 3, 0) === false ? "refused" : "opened";' 2>/dev/null)"
-    [[ "$packet" == refused ]] && row PASS "The web user cannot open a packet socket" "AF_PACKET refused" \
+# Asked with Perl (perl-base is on every Ubuntu machine and image): PHP's
+# socket_create() refuses AF_PACKET as an argument before the kernel is asked.
+if as_www perl -e 1 >/dev/null 2>&1; then
+    packet="$(as_www perl -e 'if (socket(my $s, 17, 3, 0)) { print "opened" } else { print "refused: $!" }' 2>/dev/null)"
+    [[ "$packet" == refused* ]] && row PASS "The web user cannot open a packet socket" "AF_PACKET ${packet}" \
         || row FAIL "The web user cannot open a packet socket" "AF_PACKET ${packet:-unanswered}"
 else
-    row SKIP "The web user cannot open a packet socket" "PHP has no sockets extension here to ask with"
+    row SKIP "The web user cannot open a packet socket" "no perl here to ask with"
 fi
 if as_www php -r 'echo "ok";' 2>/dev/null | grep -q ok; then
     row PASS "The site's PHP runs as its web user" "php -r answered"
@@ -127,7 +136,8 @@ fi
 
 # --- No trust left for the old address -----------------------------------------
 if [[ -n "$OLD" ]]; then
-    if grep -rqs -F "RemoteIPTrustedProxy ${OLD}" /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/; then
+    # -R: conf-enabled and sites-enabled hold symlinks, which -r passes over.
+    if grep -Rqs -F "RemoteIPTrustedProxy ${OLD}" /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/; then
         row FAIL "No trust left for the old address" "RemoteIPTrustedProxy ${OLD} is enabled"
     else
         row PASS "No trust left for the old address" "no RemoteIPTrustedProxy ${OLD}"

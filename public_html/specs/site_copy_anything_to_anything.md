@@ -5,6 +5,12 @@ WP6's rig is written but unproven: `seed_copy_source.php`, `check_copy_target.ph
 (plugins/server_manager/tests/lib), and `CopySecurityCheck` with `utils/copy_security_check.php`. The seed leaves
 out the vault (the live test's browser makes it, with the passkey) and the custom theme (not yet seeded).
 The live test per run is not written.
+Code review by reviewer2 (2026-10-18, B1-B14) all fixed: the resolvers asked in RFC 8484 wire format on 443
+(Quad9's JSON port 5053 is closed from dev); the watch ends at MAX_WAIT whatever they say; the copy proven at
+its own address whether or not anything forwards; a halted settle can be retried or kept; TTLs lowered last
+and put back by any way back; housekeeping expires a forwarder past its end; a brought old server is quieted
+at settle; Hetzner's swap waits on each action with both servers off; the forward sends http to https;
+shared and reserved IPv4 refused as a forward address.
 
 - **WP0:** the agentless host rows are named once, together, on the Copy tab; the quiet-state
   paragraph carries the forward; `site_copy.md`'s IP swap and from-backups packages say they passed

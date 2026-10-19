@@ -44,9 +44,11 @@
 #     record install.sh keeps of how it ran the container.
 #   - security, for a container install.sh made: filter (the sha256 its
 #     joinery.seccomp label names, or null), caps (what it adds, as X, never
-#     CAP_X), drop_all, and setuid (the count of setuid-root files on its own
-#     filesystem, found through /proc/PID/root while it runs, kept per image
-#     under /run; unknown while it has never run). Nothing runs inside it.
+#     CAP_X), drop_all, and setuid (the count of setuid-root files its image
+#     ships, found through /proc/PID/root the first time a container of that
+#     image runs and kept per image under /run, so a file made setuid later in
+#     a running container's own layer or in a volume is not counted; unknown
+#     while it has never run). Nothing runs inside it.
 #   - A name that is not a plain word is listed, reduced to safe characters,
 #     and never inspected: its image, state and mounts are unknown.
 #   - Bounded: at most MAX_CONTAINERS entries and MAX_MOUNTS mounts each, every

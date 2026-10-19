@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.23 - a settle that stopped offers to try letting go of the old server again, or to keep the
+ *                 switch-over as it is
  * @version 1.22 - every way the address can move is shown for each target before the copy is made (D6); the
  *                switch by DNS records, with its watch, and by hand for a running site too (D1); a copy onto a host
  *                comes from the running site or its backups (D5), and hosts with no agent are named once together;
@@ -951,6 +953,20 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 	}
 	if ($copy_status === SiteCopy::STATUS_HALTED && $phase === 'start' && $copy_address_at_copy) {
 		$copy_plain_form('copy_retry_start', 'Try starting the copy again', 'btn-primary');
+	}
+	if ($copy_status === SiteCopy::STATUS_HALTED && $phase === 'settle') {
+		// The site runs on the copy; what stopped is letting go of the old server.
+		echo '<p>The site runs on this server, and its address has moved. Letting go of the old server stopped: until it is let go, '
+			. 'the old server may still forward visitors here, and this server believes its forwarded addresses until '
+			. SiteCopyRunner::FORWARDER_TRUST_HOURS . ' hours after the switch-over began.</p>';
+		$copy_plain_form('copy_retry_settle', 'Try letting go of the old server again', 'btn-primary');
+		echo '<p class="small text-muted mt-2">Or keep the switch-over as it is: the old server is then yours to turn off or delete at '
+			. 'its provider.</p>';
+		if ($copy_method === SiteCopyRunner::METHOD_DNS) {
+			$copy_press_form('copy_finish', 'Keep the switch-over', 'btn-outline-success', '', array(), 'records');
+		} else {
+			$copy_plain_form('copy_finish', 'Keep the switch-over', 'btn-outline-success');
+		}
 	}
 	$copy_way_back = $copy_status !== SiteCopy::STATUS_RETURNING && ($in_switch || $copy_status === SiteCopy::STATUS_SWITCHED)
 		&& !in_array($copy_status, array(SiteCopy::STATUS_STARTING, SiteCopy::STATUS_UNDOING), true)

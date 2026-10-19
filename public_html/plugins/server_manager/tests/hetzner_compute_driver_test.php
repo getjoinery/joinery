@@ -24,6 +24,7 @@
  *  - the account: added under the name typed, checked without losing it, its
  *    key replaced only by a token that reaches the same servers.
  *
+ * @version 1.1 - the swap refuses a running server and waits on each address action
  * @version 1.0
  */
 
@@ -36,7 +37,9 @@ use GuzzleHttp\Promise\Create;
 use GuzzleHttp\Psr7\Response;
 use Psr\Http\Message\RequestInterface;
 
-$api = array('seen' => array(), 'unauthorized' => false, 'ips' => array(
+// status: each server's state where a test sets one; actions: each address
+// action's polls left before it succeeds (or 'error').
+$api = array('seen' => array(), 'unauthorized' => false, 'status' => array(), 'actions' => array(), 'next_action' => 100, 'ips' => array(
 	'198.51.100.10' => array('id' => 10, 'ip' => '198.51.100.10', 'assignee_id' => 1001, 'dns_ptr' => array(array('ip' => '198.51.100.10', 'dns_ptr' => 'site.example.org'))),
 	'198.51.100.20' => array('id' => 20, 'ip' => '198.51.100.20', 'assignee_id' => 1002, 'dns_ptr' => array()),
 ));
@@ -63,7 +66,8 @@ $handler = function (RequestInterface $req, array $opts) use (&$api, $server) {
 		return $json(array('server' => $server(1003, 'initializing', '203.0.113.30'), 'root_password' => 'not-ours'), 201);
 	}
 	if ($m === 'GET' && preg_match('#^/v1/servers/(\d+)$#', $path, $mm)) {
-		return $json(array('server' => $server((int)$mm[1], (int)$mm[1] === 1002 ? 'off' : 'running', (int)$mm[1] === 1001 ? '198.51.100.10' : '198.51.100.20')));
+		$status = $api['status'][(int)$mm[1]] ?? ((int)$mm[1] === 1002 ? 'off' : 'running');
+		return $json(array('server' => $server((int)$mm[1], $status, (int)$mm[1] === 1001 ? '198.51.100.10' : '198.51.100.20')));
 	}
 	if ($m === 'GET' && $path === '/v1/servers') {
 		return $json(array('servers' => array($server(1001, 'running', '198.51.100.10', 'fsn1', 30e12), $server(1002, 'off', '198.51.100.20', 'fsn1', 5e12)),
@@ -89,12 +93,30 @@ $handler = function (RequestInterface $req, array $opts) use (&$api, $server) {
 		return $json(array('primary_ips' => $ip ? array($ip) : array()));
 	}
 	if ($m === 'POST' && preg_match('#^/v1/primary_ips/(\d+)/actions/(unassign|assign)$#', $path, $mm)) {
+		// An address under a running action is locked, as at Hetzner.
+		foreach ($api['actions'] as $a) {
+			if ($a['ip'] === (int)$mm[1] && $a['left'] !== 'error' && $a['left'] > 0) {
+				return Create::rejectionFor(new GuzzleHttp\Exception\ClientException('423', $req,
+					new Response(423, array(), json_encode(array('error' => array('code' => 'locked', 'message' => 'primary ip is locked'))))));
+			}
+		}
 		foreach ($api['ips'] as $addr => $ip) {
 			if ($ip['id'] === (int)$mm[1]) {
 				$api['ips'][$addr]['assignee_id'] = $mm[2] === 'unassign' ? null : (int)$body['assignee_id'];
 			}
 		}
-		return $json(array('action' => array('id' => 1, 'status' => 'success')), 201);
+		$id = $api['next_action']++;
+		$api['actions'][$id] = array('ip' => (int)$mm[1], 'command' => $mm[2] . '_primary_ip', 'left' => $api['polls'] ?? 2);
+		return $json(array('action' => array('id' => $id, 'command' => $mm[2] . '_primary_ip', 'status' => 'running')), 201);
+	}
+	if ($m === 'GET' && preg_match('#^/v1/primary_ips/actions/(\d+)$#', $path, $mm)) {
+		$a = &$api['actions'][(int)$mm[1]];
+		if ($a['left'] !== 'error') {
+			$a['left'] = max(0, $a['left'] - 1);
+		}
+		$status = $a['left'] === 'error' ? 'error' : ($a['left'] > 0 ? 'running' : 'success');
+		return $json(array('action' => array('id' => (int)$mm[1], 'command' => $a['command'], 'status' => $status,
+			'error' => $status === 'error' ? array('message' => 'server is running') : null)));
 	}
 	if ($m === 'PUT' && preg_match('#^/v1/primary_ips/(\d+)$#', $path)) {
 		return $json(array('primary_ip' => array()));
@@ -182,8 +204,22 @@ $r = $driver->addressReport('1001');
 check($r['ipv4_public'] === array('198.51.100.10') && $r['network_helper'] === true, 'one primary IPv4, taken up at boot by DHCP');
 check($driver->ipAddress('198.51.100.10') === array('address' => '198.51.100.10', 'instance_id' => '1001', 'rdns' => 'site.example.org'),
 	'an address names its server and its reverse DNS');
+HetznerComputeDriver::$sleeper = function ($s) {};
+harness_defer(function () { HetznerComputeDriver::$sleeper = null; });
+$refused = '';
+try {
+	$driver->assignIpv4('fsn1', array('198.51.100.10' => '1002', '198.51.100.20' => '1001'));
+} catch (CloudComputeException $e) {
+	$refused = $e->getMessage();
+}
+check(strpos($refused, 'server 1001 is running') !== false && $api['ips']['198.51.100.10']['assignee_id'] === 1001,
+	'a swap with a server still running is refused, nothing moved', $refused);
+check($driver instanceof CloudSwapWhileStopped, 'and the driver says a swap needs both servers off');
+$api['status'][1001] = 'off';
 $api['seen'] = array();
 $driver->assignIpv4('fsn1', array('198.51.100.10' => '1002', '198.51.100.20' => '1001'));
+$polls = count(array_filter($api['seen'], function ($s) { return $s[0] === 'GET' && strpos($s[1], '/v1/primary_ips/actions/') === 0; }));
+check($polls === 8, 'each of the four address actions is waited on until it has succeeded (two polls each)', (string)$polls);
 $calls = array_map(function ($s) { return $s[0] . ' ' . $s[1]; }, array_filter($api['seen'], function ($s) { return $s[0] !== 'GET'; }));
 check(array_values($calls) === array('POST /v1/primary_ips/10/actions/unassign', 'POST /v1/primary_ips/20/actions/unassign',
 	'PUT /v1/primary_ips/10', 'POST /v1/primary_ips/10/actions/assign', 'PUT /v1/primary_ips/20', 'POST /v1/primary_ips/20/actions/assign'),
@@ -191,6 +227,20 @@ check(array_values($calls) === array('POST /v1/primary_ips/10/actions/unassign',
 check($api['ips']['198.51.100.10']['assignee_id'] === 1002 && $api['ips']['198.51.100.20']['assignee_id'] === 1001
 	&& $driver->instanceForAddress('198.51.100.10') === '1002', 'swapped');
 check($driver->instanceForAddress('192.0.2.1') === '', 'an address no server here holds names none');
+$api['actions'] = array();
+$api['polls'] = 'error';
+$failed = '';
+try {
+	$driver->assignIpv4('fsn1', array('198.51.100.10' => '1001', '198.51.100.20' => '1002'));
+} catch (CloudComputeException $e) {
+	$failed = $e->getMessage();
+}
+check(strpos($failed, 'unassign_primary_ip failed: server is running') !== false, 'an action that fails stops the swap, saying why', $failed);
+unset($api['polls']);
+$api['actions'] = array();
+foreach (array('198.51.100.10' => 1002, '198.51.100.20' => 1001) as $addr => $owner) {
+	$api['ips'][$addr]['assignee_id'] = $owner;
+}
 check($driver->instanceFirewalls('1001') === array('77' => 'web-only'), 'its firewalls by name');
 
 // ---------------------------------------------------------------------------

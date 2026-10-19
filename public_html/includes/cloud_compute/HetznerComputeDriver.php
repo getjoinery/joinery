@@ -18,11 +18,12 @@
  *     nothing to turn off; asked 'enabled', the create is refused.
  *   - Status 'off' is reported as 'offline', the platform's word.
  *   - An address swap moves the two servers' primary IPv4 addresses, both
- *     servers off. IPv6 is not moved: Hetzner writes a server's IPv6 into its
+ *     servers off (CloudSwapWhileStopped), each move waited on. IPv6 is not moved: Hetzner writes a server's IPv6 into its
  *     own network configuration at first boot, so a moved IPv6 would not be
  *     taken up.
  *   - Its activity log is the server's actions, by Hetzner's own command names.
  *
+ * @version 1.1 - the swap waits on each Hetzner action and refuses unless both servers are off
  * @version 1.0
  */
 
@@ -33,10 +34,21 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\Exception\RequestException;
 
-class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, CloudMachineTransfer, CloudRegionFacts,
-		CloudProviderEvents, CloudInstanceTypes, CloudKeyExpiry {
+class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, CloudSwapWhileStopped, CloudMachineTransfer,
+		CloudRegionFacts, CloudProviderEvents, CloudInstanceTypes, CloudKeyExpiry {
 
 	const API_BASE = 'https://api.hetzner.cloud/v1/';
+
+	/** The longest an action (an address unassigned or assigned) is waited on, in seconds. */
+	const ACTION_SECONDS = 120;
+
+	/**
+	 * Waits between asking after an action: fn(int $seconds). Null sleeps. A
+	 * variable only so a test does not wait; nothing in production sets it.
+	 *
+	 * @var callable|null
+	 */
+	public static $sleeper = null;
 
 	/** Where and from what a form starts. */
 	const DEFAULT_REGION = 'fsn1';
@@ -244,10 +256,12 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 	}
 
 	/**
-	 * Move primary IPv4 addresses between servers of this project, every
-	 * server named off (Hetzner moves a primary IP only to and from a stopped
-	 * server): each is unassigned, then assigned to its new server, and kept
-	 * when either server is later deleted.
+	 * Move primary IPv4 addresses between servers of this project. Hetzner
+	 * moves a primary IP only to and from a stopped server, so every server
+	 * named must be off (CloudSwapWhileStopped). Each address is unassigned,
+	 * then assigned to its new server and kept when either server is later
+	 * deleted; each is an action at Hetzner, waited on until it has succeeded,
+	 * since an address under a running action is locked.
 	 */
 	public function assignIpv4(string $region, array $assignments): void {
 		$ids = array();
@@ -258,16 +272,56 @@ class HetznerComputeDriver implements CloudComputeProvider, CloudAddressSwap, Cl
 				unset($ids[(string)$address]);
 			}
 		}
+		$servers = array();
+		foreach ($ids as $address => $id) {
+			$servers[(string)$assignments[$address]] = true;
+			$ip = $this->primaryIp($address);
+			if (!empty($ip['assignee_id'])) {
+				$servers[(string)$ip['assignee_id']] = true;
+			}
+		}
+		foreach (array_keys($servers) as $server_id) {
+			$status = (string)$this->getInstance((string)$server_id)['status'];
+			if ($status !== 'offline') {
+				throw new CloudComputeException("Hetzner moves an address only between stopped servers, and server {$server_id} is {$status}.");
+			}
+		}
 		foreach ($ids as $address => $id) {
 			$ip = $this->primaryIp($address);
 			if (!empty($ip['assignee_id'])) {
-				$this->request('POST', 'primary_ips/' . $id . '/actions/unassign');
+				$this->waitFor($this->request('POST', 'primary_ips/' . $id . '/actions/unassign'));
 			}
 		}
 		foreach ($ids as $address => $id) {
 			$this->request('PUT', 'primary_ips/' . $id, array('auto_delete' => false));
-			$this->request('POST', 'primary_ips/' . $id . '/actions/assign',
-				array('assignee_id' => (int)$assignments[$address], 'assignee_type' => 'server'));
+			$this->waitFor($this->request('POST', 'primary_ips/' . $id . '/actions/assign',
+				array('assignee_id' => (int)$assignments[$address], 'assignee_type' => 'server')));
+		}
+	}
+
+	/**
+	 * Wait for the primary IP action a request started to succeed, asked at
+	 * the resource's own actions endpoint. Throws when it fails, or is still
+	 * running after ACTION_SECONDS.
+	 */
+	private function waitFor(array $response): void {
+		$action = (array)($response['action'] ?? array());
+		$started = time();
+		for (;;) {
+			$status = (string)($action['status'] ?? '');
+			if ($status === 'success' || !isset($action['id'])) {
+				return;
+			}
+			if ($status === 'error') {
+				throw new CloudComputeException('Hetzner action ' . (string)($action['command'] ?? $action['id']) . ' failed: '
+					. (string)($action['error']['message'] ?? 'no reason given'));
+			}
+			if (time() - $started > self::ACTION_SECONDS) {
+				throw new CloudComputeException('Hetzner action ' . (string)($action['command'] ?? $action['id']) . ' is still running after '
+					. self::ACTION_SECONDS . ' seconds');
+			}
+			self::$sleeper ? (self::$sleeper)(2) : sleep(2);
+			$action = (array)($this->request('GET', 'primary_ips/actions/' . (int)$action['id'])['action'] ?? array());
 		}
 	}
 

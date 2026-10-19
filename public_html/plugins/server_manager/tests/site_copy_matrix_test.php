@@ -76,7 +76,7 @@ $base = array('mgn_site_url' => 'https://scm.example.org', 'mgn_agent_public_key
 	'mgn_agent_primitives' => 'backup_run,copy_export,site_census,site_quiet,copy_vouch,check_status',
 	'mgn_agent_last_poll' => gmdate('Y-m-d H:i:s'), 'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION,
 	'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')), 'mgn_backup_recovery_fpr' => str_repeat('cd', 32),
-	'mgn_agent_server_manager' => 'inactive');
+	'mgn_agent_server_manager' => 'inactive', 'mgn_last_host_report' => json_encode(array('sites' => array())));
 
 // The sources. A container's host has an agent with the words that freeze it and hold it.
 $hnode = $mk_node('hostagent', array('mgn_host' => '192.0.2.150', 'mgn_agent_public_key' => base64_encode(random_bytes(32)),
@@ -200,6 +200,11 @@ $shared->set('mgn_last_host_report', json_encode(array('sites' => array('scmown'
 $why = implode(' | ', SiteCopyRunner::source_refusals($shared, true, SiteCopy::FROM_BACKUPS));
 check(strpos($why, 'neighbour') !== false, 'a machine that also serves another site is refused, from its backups too: its power-off is machine-wide', $why);
 $shared->set('mgn_last_host_report', null);
+$why = implode(' | ', SiteCopyRunner::source_refusals($shared, true, SiteCopy::FROM_SOURCE));
+check(strpos($why, 'Run a status check') !== false, 'a running machine whose report does not list its sites is asked for one', $why);
+check(strpos(implode(' | ', SiteCopyRunner::source_refusals($shared, true, SiteCopy::FROM_BACKUPS)), 'Run a status check') === false,
+	'a dead one is not: its last report is all there is');
+$shared->set('mgn_last_host_report', json_encode(array('sites' => array())));
 $mk_node('sibling', array('mgn_host' => '192.0.2.151', 'mgn_web_root' => '/var/www/html/scmsibling/public_html'));
 $why = implode(' | ', SiteCopyRunner::source_refusals($shared, true, SiteCopy::FROM_SOURCE));
 check(strpos($why, 'scmsibling') !== false, 'a node on the same address is another site on the machine', $why);

@@ -163,8 +163,9 @@ out="$(bash "$Q" forward 198.51.100.9 2>&1)"; rc=$?
 chk "a frozen site forwards: exit 0, the address recorded" "$rc:$(cat "$SD/forward")" "0:198.51.100.9"
 chk "the web user may reach that one address on 80 and 443, before the reject" "$(grep -c 'ip daddr 198.51.100.9 tcp dport { 80, 443 } accept' "$ST/nft_loaded"):$(( $(grep -n -m1 'ip daddr 198.51.100.9' "$ST/nft_loaded" | cut -d: -f1) < $(grep -n -m1 'reject' "$ST/nft_loaded" | cut -d: -f1) ))" "1:1"
 chk "every request is proxied to the copy over https" "$(grep -c 'ProxyPass "https://198.51.100.9/"' "$CONF"):$(grep -c 'ProxyPreserveHost On' "$CONF")" "1:2"
-chk "only to a server holding the site's own certificate" "$(grep -c -e '^SSLProxyVerify require$' -e '^SSLProxyCheckPeerName on$' -e '^SSLProxyCheckPeerExpire on$' "$CONF")" "3"
+chk "its certificate checked against the site's own name" "$(grep -c -e '^SSLProxyVerify require$' -e '^SSLProxyCheckPeerName on$' -e '^SSLProxyCheckPeerExpire on$' "$CONF")" "3"
 chk "the ACME challenge goes over http, so the copy can be issued one" "$(grep -c 'ProxyPass "http://198.51.100.9/.well-known/acme-challenge/"' "$CONF")" "1"
+chk "any other http request goes to https first, and a refused request does not hold the copy off" "$(grep -c "If \"%{HTTPS} != 'on' && ! %{REQUEST_URI} =~ m#^/\\\\.well-known/acme-challenge/#\"" "$CONF"):$(grep -c 'Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"' "$CONF"):$(grep -c 'retry=0$' "$CONF")" "1:1:2"
 chk "no maintenance page while forwarding" "$(grep -c 'Redirect 503' "$CONF")" "0"
 chk "the proxy modules are enabled, and Apache reloaded" "$(grep -c -e 'a2enmod -q proxy$' -e 'a2enmod -q proxy_http$' -e 'a2enmod -q ssl$' "$ST/calls"):$(grep -c 'systemctl reload apache2' "$ST/calls")" "3:1"
 out="$(bash "$Q" forward '198.51.100.9;reboot' 2>&1)"; rc=$?

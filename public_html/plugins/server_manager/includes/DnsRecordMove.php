@@ -21,9 +21,10 @@
  *                 (or gone back).
  *   manual_plan() the same names, read from public DNS, for an owner who
  *                 changes them at their DNS host: what to change, and to what.
- *   settled()     the move is done when the public resolvers agree on the
- *                 copy's addresses for every name, and one old TTL has passed
- *                 since the change, so no cache anywhere still holds the old.
+ *   settled()     the move is done when every public resolver names the
+ *                 copy's addresses for every name and none the old, and one
+ *                 old TTL has passed since the change, so no cache anywhere
+ *                 still holds the old; or, whatever they say, MAX_WAIT after it.
  *
  * Until it settles, the frozen source forwards every visitor whose resolver
  * still names it to the copy (site_quiet forward), and the copy believes the
@@ -31,6 +32,8 @@
  *
  * The DNS credential lives for one request, as ProxiedOriginMove's does.
  *
+ * @version 1.1 - settled: each resolver names the copy and none the old (other addresses do not hold it up), and
+ *                MAX_WAIT ends the watch whatever they say; keep_earlier_ttls
  * @version 1.0
  */
 
@@ -42,9 +45,11 @@ class DnsRecordMove {
 	const TTL = 60;
 
 	/**
-	 * The longest a watch waits on an old TTL, in seconds: a record with a
-	 * week's TTL is still forwarded for two days, and the forwarding covers
-	 * any cache older than that.
+	 * The longest a watch waits, in seconds, on an old TTL or on the resolvers:
+	 * a record with a week's TTL is still forwarded for two days, and the
+	 * forwarding covers any cache older than that. Below the forwarder's trust
+	 * (SiteCopyRunner::FORWARDER_TRUST_HOURS), so the old server is let go
+	 * while the copy still believes it.
 	 */
 	const MAX_WAIT = 172800;
 
@@ -231,32 +236,86 @@ class DnsRecordMove {
 	}
 
 	/**
-	 * Is the move done? Every planned name and type answered by the public
-	 * resolvers as the copy's address alone ($at 'to'; 'from' for a move back),
-	 * and the old TTL (or MAX_WAIT, the lesser) passed since $moved_utc.
+	 * Is the move done? Every public resolver names the copy's address for
+	 * each planned name and type ($at 'to'; 'from' for a move back) and none
+	 * still names the other side's, and the old TTL (or MAX_WAIT, the lesser)
+	 * has passed since $moved_utc. Other addresses the name carries (a record
+	 * the plan did not move) do not hold it up. Past MAX_WAIT it is done
+	 * whatever the resolvers say (by_time): one that cannot be asked, or an
+	 * answer that varies, must not keep the old server forwarding for good,
+	 * and the forward has covered every cache that long.
 	 *
-	 * @return array{settled:bool, agree:bool, wait_until:int, waiting_on:string}
+	 * @return array{settled:bool, agree:bool, by_time:bool, wait_until:int, waiting_on:string}
 	 */
 	public static function settled(array $plan, string $moved_utc, string $at = 'to', ?int $now = null): array {
 		$now = $now ?? time();
+		$other = $at === 'to' ? 'from' : 'to';
 		$wait = 0;
 		$expect = array();
 		foreach ((array)$plan['records'] as $rec) {
 			$wait = max($wait, (int)($rec['ttl_was'] ?? 3600));
-			$expect[$rec['name'] . ' ' . $rec['type']][] = (string)$rec[$at];
+			$key = $rec['name'] . ' ' . $rec['type'];
+			$expect[$key]['want'][] = (string)$rec[$at];
+			$expect[$key]['gone'][] = (string)$rec[$other];
 		}
 		$moved = strtotime($moved_utc . ' UTC') ?: $now;
 		$until = $moved + min($wait, self::MAX_WAIT);
 		$waiting_on = '';
-		foreach ($expect as $key => $values) {
+		foreach ($expect as $key => $e) {
 			list($name, $type) = explode(' ', $key, 2);
-			if ($values === array('') || !PublicResolvers::agree($name, $type, $values)) {
+			if (!self::resolvers_moved($name, $type, $e['want'], $e['gone'])) {
 				$waiting_on = "{$name} ({$type})";
 				break;
 			}
 		}
 		$agree = $waiting_on === '';
-		return array('settled' => $agree && $now >= $until, 'agree' => $agree, 'wait_until' => $until, 'waiting_on' => $waiting_on);
+		$by_time = !($agree && $now >= $until) && $now >= $moved + self::MAX_WAIT;
+		return array('settled' => ($agree && $now >= $until) || $by_time, 'agree' => $agree, 'by_time' => $by_time,
+			'wait_until' => $until, 'waiting_on' => $waiting_on);
+	}
+
+	/** Does every public resolver name each of $want for the name, and none of $gone? */
+	private static function resolvers_moved(string $name, string $type, array $want, array $gone): bool {
+		if (in_array('', $want, true)) {
+			return false;
+		}
+		$gone = array_values(array_filter($gone, function ($a) use ($want) { return $a !== '' && !self::among($a, $want); }));
+		foreach (PublicResolvers::answers($name, $type) as $answer) {
+			if (!$answer['ok']) {
+				return false;
+			}
+			foreach ($want as $a) {
+				if (!self::among($a, $answer['values'])) {
+					return false;
+				}
+			}
+			foreach ($gone as $a) {
+				if (self::among($a, $answer['values'])) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * A fresh plan's records, each keeping the TTL an earlier attempt's plan
+	 * recorded for it when the zone still carries the TTL that attempt
+	 * lowered it to (its TTLs were never put back): the original is not lost.
+	 */
+	public static function keep_earlier_ttls(array $records, array $earlier): array {
+		$was = array();
+		foreach ($earlier as $rec) {
+			if (isset($rec['id']) && ($rec['ttl_was'] ?? null) !== null && (int)$rec['ttl_was'] !== self::TTL) {
+				$was[(string)$rec['id']] = (int)$rec['ttl_was'];
+			}
+		}
+		foreach ($records as $i => $rec) {
+			if ((int)($rec['ttl_was'] ?? 0) === self::TTL && isset($was[(string)$rec['id']])) {
+				$records[$i]['ttl_was'] = $was[(string)$rec['id']];
+			}
+		}
+		return $records;
 	}
 
 	/** The zone's records by provider id. */

@@ -19,6 +19,7 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.65 - copy_retry_settle: let go of the old server again after a DNS switch's settle stopped
  * @version 1.64 - recreate_site: replace one site's container on its host with a new one on the host's current
  *                base image (specs/multi_tenant_host_hardening.md D9)
  * @version 1.63 - repair_release_files: every differing deployment file put back in one job (agent 1.79.0)
@@ -240,6 +241,7 @@ class NodeDetailActions {
 		'copy_switch'              => 'copy',
 		'copy_move'                => 'copy',
 		'copy_retry_start'         => 'copy',
+		'copy_retry_settle'        => 'copy',
 		'copy_go_back'             => 'copy',
 		'copy_finish'              => 'copy',
 	];
@@ -1018,6 +1020,7 @@ class NodeDetailActions {
 			case 'copy_switch':
 			case 'copy_move':
 			case 'copy_retry_start':
+			case 'copy_retry_settle':
 			case 'copy_go_back':
 			case 'copy_finish': {
 				if ($session->get_permission() < 10) {
@@ -1113,6 +1116,10 @@ class NodeDetailActions {
 				}
 				if ($action === 'copy_retry_start') {
 					SiteCopyRunner::retry_start($site_copy);
+					return $copy_url;
+				}
+				if ($action === 'copy_retry_settle') {
+					SiteCopyRunner::retry_settle($site_copy);
 					return $copy_url;
 				}
 				if ($action === 'copy_go_back') {

@@ -36,6 +36,7 @@
  * management node (the operator's token, or the connected account's grant):
  * the same one that created the servers and sets their reverse DNS.
  *
+ * @version 1.8 - the plan says whether the copy is powered off for the swap too (both_off, CloudSwapWhileStopped)
  * @version 1.7 - any provider whose driver swaps addresses (CloudAddressSwap), both servers at the same one; the plan
  *                names the provider; powering a machine on or off needs only its driver, so a dead source at any
  *                provider is powered off (specs/site_copy_anything_to_anything.md D2)
@@ -274,6 +275,9 @@ class IpSwapMove {
 		}
 		return array(
 			'provider' => (string)$sp->get('cvp_provider'),
+			// Hetzner moves an address only between stopped servers: the copy
+			// is powered off before the swap too, and on again after.
+			'both_off' => $driver instanceof CloudSwapWhileStopped,
 			'region'   => (string)$s['region'],
 			'domain'   => $domain,
 			'source'   => array('provision_id' => (int)$sp->key, 'instance_id' => (string)$sp->get('cvp_instance_id'),

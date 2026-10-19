@@ -50,6 +50,15 @@ echo "=== untrust ==="
 out="$(tf $((1000000 + 2 * 3600 + 2)) untrust 203.0.113.9 2>&1)"; rc=$?
 chk "exit 0, and nothing left believed: the file and its link are gone" "$rc:$([ -e "$CONF" ] && echo conf || echo none):$([ -L "$LINK" ] && echo link || echo none)" "0:none:none"
 
+echo "=== expire: what housekeeping runs every tick ==="
+tf 2000000 trust 198.51.100.8 1 >/dev/null 2>&1
+out="$(tf 2000100 expire 2>&1)"; rc=$?
+chk "before its end: kept" "$rc:$(grep -c '198.51.100.8' "$CONF")" "0:1"
+out="$(tf $((2000000 + 3601)) expire 2>&1)"; rc=$?
+chk "past its end: gone, the file and its link with it, though nobody untrusted it" "$rc:$([ -e "$CONF" ] && echo conf || echo none):$([ -L "$LINK" ] && echo link || echo none):$([ -s "$T/etc/joinery/forwarders" ] && echo some || echo none)" "0:none:none:none"
+out="$(tf $((2000000 + 3602)) expire 2>&1)"; rc=$?
+chk "with nothing believed, expire does nothing and passes" "$rc:$([ -e "$CONF" ] && echo conf || echo none)" "0:none"
+
 echo "=== refusals ==="
 tf 1 trust '203.0.113.0/24' 2 >/dev/null 2>&1; chk "a range: 2" "$?" "2"
 tf 1 trust '1.2.3.4;reboot' 2 >/dev/null 2>&1; chk "anything but an address: 2" "$?" "2"

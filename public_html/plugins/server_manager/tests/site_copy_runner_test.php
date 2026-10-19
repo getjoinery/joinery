@@ -241,7 +241,7 @@ $source_cols = array('mgn_web_root' => '/var/www/html/scpsite/public_html', 'mgn
 	'mgn_last_status_data' => $src_status, 'mgn_backup_recovery_fpr' => str_repeat('ab', 32),
 	'mgn_agent_server_manager' => 'inactive',
 	'mgn_last_host_report' => json_encode(array('memory' => array('total_bytes' => 1000000000),
-		'disk' => array('avail_bytes' => 9000000000))));
+		'disk' => array('avail_bytes' => 9000000000), 'sites' => array('scpsite'))));
 $src = $mk_node('src', $source_cols);
 // Its backups, on a target of the test's own.
 sm_test_node_space($src);

@@ -167,6 +167,20 @@ class IpSwapTestDriver implements CloudComputeProvider, CloudAddressSwap {
 	public function getTransfer(): array { return array(); }
 }
 
+/** A provider that moves an address only between stopped servers (Hetzner). */
+class IpSwapTestStoppedDriver extends IpSwapTestDriver implements CloudSwapWhileStopped {
+	public function assignIpv4(string $region, array $assignments): void {
+		foreach ($assignments as $ip => $inst) {
+			foreach (array((string)$inst, (string)($this->owner[$ip] ?? '')) as $id) {
+				if ($id !== '' && $this->status[$id] !== 'offline') {
+					throw new CloudComputeException("server {$id} is {$this->status[$id]}");
+				}
+			}
+		}
+		parent::assignIpv4($region, $assignments);
+	}
+}
+
 $fake = new IpSwapTestDriver();
 $fake_reset = function () use ($fake, $S4, $T4) {
 	$fake->status = array('11' => 'running', '12' => 'running');
@@ -242,7 +256,8 @@ $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scisite/public_htm
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.54.0',
 	'mgn_agent_primitives' => 'copy_export,copy_vouch,site_census,site_quiet,backup_run,check_status',
 	'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
-	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive'));
+	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
+	'mgn_last_host_report' => json_encode(array('sites' => array('scisite')))));
 // Its backups, on a target of the test's own.
 sm_test_node_space($src);
 $cnode = $mk_node('copy', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
@@ -544,6 +559,45 @@ $drive($copy2, array(SiteCopy::STATUS_RETURNING));
 $src->load();
 check($copy2->status() === SiteCopy::STATUS_DORMANT && trim((string)$src->get('mgn_install_state')) === '',
 	'going back from there: the site runs, and the copy stays dormant', $copy2->status() . ' ' . $copy2->get('scp_halt_reason'));
+
+// ---------------------------------------------------------------------------
+section('A provider that moves an address only between stopped servers');
+
+SiteCopyRunner::discard($copy2);
+$stopped = new IpSwapTestStoppedDriver();
+$fake_reset();
+foreach (get_object_vars($fake) as $k => $v) {
+	$stopped->$k = $v;
+}
+IpSwapMove::$driver_for = function ($p) use ($stopped) { return $stopped; };
+ProxiedOriginMove::$asker = function ($url) use ($stopped, $S4, $look) {
+	return ($stopped->owner[$S4] === '12' && $stopped->status['12'] === 'running')
+		? array('status' => 303, 'set_cookie' => 'joinery_look=' . substr($look, 15) . '; Path=/', 'error' => '')
+		: array('status' => 0, 'set_cookie' => '', 'error' => 'connection refused');
+};
+$cnode3 = $mk_node('copy3', array('mgn_web_root' => '/var/www/html/scisite/public_html', 'mgn_site_url' => 'https://sci.example.org',
+	'mgn_host' => $T4, 'mgn_agent_public_key' => base64_encode(random_bytes(32)), 'mgn_agent_version' => '1.54.0',
+	'mgn_agent_primitives' => 'host_report,copy_import,copy_take_vouch,copy_stage,copy_restore,site_census,take_node_id,site_quiet',
+	'mgn_install_state' => 'copy', 'mgn_copy_of_node_id' => (int)$src->key));
+$mk_prov('c3', $cnode3, '12', $T4);
+$copy3 = $mk_copy($cnode3);
+SiteCopyRunner::begin_switch($copy3, SiteCopyRunner::METHOD_IP_SWAP, null, null);
+$copy3->load();
+check(!empty($copy3->switch_record()['swap']['both_off']), 'the plan says the copy is powered off for the swap too');
+$drive($copy3, array(SiteCopy::STATUS_FREEZING));
+SiteCopyRunner::move_address($copy3, null, null);
+$copy3->load();
+$drive($copy3, array(SiteCopy::STATUS_STARTING));
+check($copy3->status() === SiteCopy::STATUS_SWITCHED && array_slice($stopped->calls, 0, 4) === array('shutdown 11', 'shutdown 12',
+	'assign {"' . $S4 . '":"12","' . $T4 . '":"11"}', 'boot 12'),
+	'both servers off, the swap, then the copy on again at its new address', $copy3->status() . ' ' . json_encode($stopped->calls));
+$stopped->calls = array();
+SiteCopyRunner::go_back($copy3, null);
+$copy3->load();
+$drive($copy3, array(SiteCopy::STATUS_RETURNING));
+check($stopped->owner[$S4] === '11' && in_array('shutdown 12', $stopped->calls, true)
+	&& array_search('shutdown 12', $stopped->calls) < array_search('assign {"' . $S4 . '":"11","' . $T4 . '":"12"}', $stopped->calls),
+	'the way back powers the copy off before swapping back', json_encode($stopped->calls));
 
 SiteCopyRunner::$chain_lister = null;
 SiteCopyRunner::$stage_builder = null;
