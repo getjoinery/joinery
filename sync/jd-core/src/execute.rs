@@ -3324,6 +3324,16 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 env.api.upload(&params, &mut Heeding { inner: &mut source, stand_down: env.stand_down })
             }
         };
+        // Whether a holder of these very bytes is a file this device already
+        // has, with its own file standing here (`holds_its_own_copy_here`).
+        // Asked once, of the answer, before the arms below read it.
+        let own_copy = match &sent {
+            Err(e) => e
+                .name_holder()
+                .filter(|h| h.entity_type == "file" && h.sha256.as_deref() == Some(params.sha256.as_str()))
+                .map(|h| holds_its_own_copy_here(env, h.id, &path)),
+            Ok(_) => None,
+        };
         match sent {
             Ok(out) => break out,
             // Asked to stand down between two chunks. The upload the server
@@ -3384,14 +3394,20 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // holder and was folded in again, every pass, while the record
             // parked at the name it stood on never came back (plat3 75417). A
             // second copy is a file of its own, and it lands beside.
-            Err(ref e)
-                if e.name_taken()
-                    && e.name_holder().is_some_and(|h| {
-                        h.entity_type == "file"
-                            && h.sha256.as_deref() == Some(params.sha256.as_str())
-                            && !holds_its_own_copy_here(env, h.id, &path)
-                    }) =>
-            {
+            //
+            // A record or a disk that cannot be read here answers neither way,
+            // and the upload waits to ask again. Read as no, a sharing
+            // violation on the holder's file folded a genuine second copy into
+            // it, and the copy was left with no record.
+            Err(_) if matches!(own_copy, Some(Err(_))) => {
+                let why = own_copy.as_ref().and_then(|r| r.as_ref().err()).expect("just matched");
+                return waits_after_a_refusal(
+                    env,
+                    op,
+                    &format!("could not tell whether the file holding the name is a copy this device already has: {why}"),
+                );
+            }
+            Err(ref e) if matches!(own_copy, Some(Ok(false))) => {
                 let holder = e.name_holder().expect("just matched");
                 let target = EntityId {
                     entity_type: EntityType::File,
@@ -8063,14 +8079,14 @@ pub fn recover(env: &ExecEnv) -> Result<ExecReport, ExecError> {
 /// not be handed over either, and would be left with no record the same way.
 /// An adoption that cannot hand the file over is not one; the upload lands
 /// beside. No record here answers no: the server's file is a lost record and
-/// is adopted. A store or disk that cannot be read answers no, which keeps the
-/// adoption the upload would have made anyway. `uploaded_from` is where the
-/// bytes going up were read (`takes_the_uploaded_file`).
-fn holds_its_own_copy_here(env: &ExecEnv, server_id: i64, uploaded_from: &std::path::Path) -> bool {
-    let Ok(Some(real)) = env.store.get_entry(EntityId { entity_type: EntityType::File, server_id }) else {
-        return false;
+/// is adopted. A store or disk that cannot be read is no answer, and is
+/// returned as the error it is. `uploaded_from` is where the bytes going up
+/// were read (`takes_the_uploaded_file`).
+fn holds_its_own_copy_here(env: &ExecEnv, server_id: i64, uploaded_from: &std::path::Path) -> Result<bool, ExecError> {
+    let Some(real) = env.store.get_entry(EntityId { entity_type: EntityType::File, server_id })? else {
+        return Ok(false);
     };
-    takes_the_uploaded_file(env, &real, uploaded_from).is_ok_and(|takes| !takes)
+    Ok(!takes_the_uploaded_file(env, &real, uploaded_from)?)
 }
 
 /// Does the real entry an upload turned out to be take the uploaded file as
