@@ -317,12 +317,17 @@
                         // return here to retry (specs/mailbox_security_levels.md § 5.5).
                         // Halt the chain with a never-resolving promise — the page is
                         // navigating away, so no caller's catch should fire an alert.
-                        if (json.data && json.data.second_factor_required) {
-                            window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
-                            return new Promise(function () {});
+                        // withSecondFactor() takes the flag back to try a passkey here first.
+                        if (json.data && json.data.second_factor_required && !options.stepUpHere) {
+                            return goVerifyStepUp();
                         }
                         return json;
                     });
+                }
+
+                function goVerifyStepUp() {
+                    window.location = '/verify-stepup?return=' + encodeURIComponent('/profile/security');
+                    return new Promise(function () {});
                 }
 
                 // Vault activation state for the badge column. null = no vault
@@ -471,21 +476,32 @@
                 async function revokePasskey(passkey) {
                     if (!await JoineryModal.confirmAsync('Revoke "' + (passkey.pkc_label || 'this passkey') + '"? It will no longer be able to sign in to this account.', { confirmLabel: 'Revoke' })) return;
                     try {
-                        // Revoking is a sensitive action — re-confirm the second factor
-                        // first (the server also enforces this).
-                        await stepUp();
-                        await apiFetch('/api/v1/action/passkey_revoke', {
-                            method: 'POST',
-                            body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }),
-                        });
+                        // Revoking is a sensitive action: the server asks for a fresh
+                        // second-factor confirmation.
+                        await withSecondFactor('/api/v1/action/passkey_revoke',
+                            JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }));
                         await loadPasskeys();
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not revoke passkey.');
                     }
                 }
 
-                async function stepUp() {
-                    await JoineryPasskeys.stepUp();
+                // Run an action the server answers with second_factor_required until
+                // a step-up is fresh. A passkey on this device confirms it right here;
+                // when none answers (the one being replaced or revoked may be the
+                // lost one), /verify-stepup takes the authenticator app instead and
+                // comes back, and the next try needs no confirmation.
+                async function withSecondFactor(url, body, hint) {
+                    var json = await apiFetch(url, { method: 'POST', body: body, stepUpHere: true });
+                    if (!(json.data && json.data.second_factor_required)) return json;
+                    if (credentialCount === 0) return goVerifyStepUp();
+                    if (hint) showFlowHint(hint);
+                    try {
+                        await JoineryPasskeys.stepUp();
+                    } catch (e) {
+                        return goVerifyStepUp();
+                    }
+                    return apiFetch(url, { method: 'POST', body: body });
                 }
 
                 // Wrap the vault key under one named passkey (an unlock-capable
@@ -574,11 +590,8 @@
                     if (!await JoineryModal.confirmAsync('Deactivate "' + (passkey.pkc_label || 'this passkey') + '" for your vault? It will still sign you in, but can no longer unlock your sealed content.', { confirmLabel: 'Deactivate' })) return;
                     try {
                         // Sensitive: the server demands a recent step-up.
-                        await stepUp();
-                        await apiFetch('/api/v1/action/vault_passkey_deactivate', {
-                            method: 'POST',
-                            body: JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }),
-                        });
+                        await withSecondFactor('/api/v1/action/vault_passkey_deactivate',
+                            JSON.stringify({ credential_id: passkey.pkc_passkey_credential_id }));
                         document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
                     } catch (e) {
                         JoineryModal.alert(e.message || 'Could not deactivate this passkey for your vault.');
@@ -603,14 +616,13 @@
                     if (label === null) return;
                     addBtn.disabled = true;
                     try {
-                        if (credentialCount > 0) {
-                            showFlowHint('Step 1 of 2 — Confirm it\'s you with a passkey you already have. The prompt to create the new one comes next.');
-                            await stepUp();
-                            showFlowHint('Step 2 of 2 — Now create the new passkey. This is where you pick a security key or another device.');
-                        }
                         var body = {};
                         if (currentPassword) body.current_password = currentPassword;
-                        var options = await apiFetch('/api/v1/action/passkey_register_options', { method: 'POST', body: JSON.stringify(body) });
+                        var options = await withSecondFactor('/api/v1/action/passkey_register_options', JSON.stringify(body),
+                            'Step 1 of 2 — Confirm it\'s you with a passkey you already have. The prompt to create the new one comes next.');
+                        if (credentialCount > 0) {
+                            showFlowHint('Step 2 of 2 — Now create the new passkey. This is where you pick a security key or another device.');
+                        }
                         var credential = await JoineryPasskeys.register(options.data.options);
                         // Vault-active by default: the creation just derived the
                         // vault key, and the same request can write its wrapping

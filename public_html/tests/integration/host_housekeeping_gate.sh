@@ -337,7 +337,21 @@ chk "render_vhost.sh no longer defines or runs its own copy of the rule" "$(grep
 
 echo "=== The kernel loads nothing a site can ask for (gvisor_site_sandbox_trial B2) ==="
 RK="$T/kernel"
-mkdir -p "$RK/etc/modprobe.d" "$RK/etc/sysctl.d"
+mkdir -p "$RK/etc/modprobe.d" "$RK/etc/sysctl.d" "$RK/etc/ufw"
+# UFW's own sysctl file as Ubuntu ships it (its active lines, one commented).
+cat > "$RK/etc/ufw/sysctl.conf" <<'UFW'
+# Uncomment this to turn off ipv6 autoconfiguration
+#net/ipv4/conf/all/log_martians=0
+net/ipv4/conf/all/accept_redirects=0
+net/ipv4/conf/default/accept_redirects=0
+net/ipv6/conf/all/accept_redirects=0
+net/ipv6/conf/default/accept_redirects=0
+net/ipv4/icmp_echo_ignore_broadcasts=1
+net/ipv4/icmp_ignore_bogus_error_responses=1
+net/ipv4/icmp_echo_ignore_all=0
+net/ipv4/conf/all/log_martians=0
+net/ipv4/conf/default/log_martians=0
+UFW
 out="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"; rc=$?
 MP="$RK/etc/modprobe.d/joinery-rare-modules.conf"; SC="$RK/etc/sysctl.d/90-joinery-kernel.conf"
 KM="$RK/etc/modprobe.d/blacklist-rare-network.conf"
@@ -362,6 +376,13 @@ chk "the network settings are written on every machine: spoofing, redirects, sou
 chk "each setting once, in one file or the other" \
     "$(cat "$SC" "$SN" | grep -v '^#' | awk -F' = ' '{print $1}' | sort | uniq -d | wc -l)" "0"
 chk "kmod's own file is not made where there is none" "$([ -e "$KM" ] && echo made || echo none)" "none"
+UF="$RK/etc/ufw/sysctl.conf"
+chk "UFW's sysctl file, applied at every firewall start, holds the pinned log_martians" \
+    "$(grep -cxE 'net/ipv4/conf/(all|default)/log_martians=1' "$UF")|$(grep -cE '^net/.*log_martians=0' "$UF")" "2|0"
+chk "and is otherwise as UFW shipped it: its other lines, and the commented one, untouched" \
+    "$(grep -cx 'net/ipv4/icmp_ignore_bogus_error_responses=1' "$UF")|$(grep -cx '#net/ipv4/conf/all/log_martians=0' "$UF")|$(wc -l < "$UF")" "1|1|11"
+out2="$(JOINERY_HOUSEKEEPING_ROOT="$RK" bash "$SCRIPT" 2>&1)"
+chk "a second run leaves it alone" "$(grep -c 'pinned values into' <<< "$out2")" "0"
 # The two files hold the one list the host report and multi_tenant_host.sh
 # check read (_kernel_settings.sh), line for line (WP1).
 ( . "$SITE_ROOT/maintenance_scripts/install_tools/_kernel_settings.sh"

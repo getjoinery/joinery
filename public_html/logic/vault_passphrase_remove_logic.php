@@ -24,7 +24,10 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 	}
 
 	if ($session->step_up_outstanding($user)) {
-		return LogicResult::error('Please re-confirm with an existing passkey before removing your bypass phrase.');
+		// The flag sends the page to the step-up, which takes a passkey or an
+		// authenticator code; it then comes back and the action is tried again.
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
 	}
 
 	$existing = new MultiUserEncryptionWrapping(['vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSPHRASE]);
@@ -66,6 +69,7 @@ function vault_passphrase_remove_logic(array $input): LogicResult {
 	return LogicResult::render(['removed' => true]);
 }
 
+// @version 1.2 - a missing step-up answers second_factor_required, which the step-up page satisfies with either factor
 // @version 1.1 - removes the root vault's half of the phrase too
 function vault_passphrase_remove_logic_descriptor() {
 	return [

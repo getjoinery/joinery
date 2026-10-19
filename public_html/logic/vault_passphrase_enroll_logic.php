@@ -33,7 +33,10 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	}
 
 	if ($session->step_up_outstanding($user)) {
-		return LogicResult::error('Please re-confirm with an existing passkey before changing your passphrase.');
+		// The flag sends the page to the step-up, which takes a passkey or an
+		// authenticator code; it then comes back and the action is tried again.
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
 	}
 
 	// The browser ran the slow derivation; only the account half of the
@@ -99,6 +102,7 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	return LogicResult::render(['enrolled' => true]);
 }
 
+// @version 1.2 - a missing step-up answers second_factor_required, which the step-up page satisfies with either factor
 // @version 1.1 - R8 gate; the browser's KEK; the root vault's half replaced with it
 function vault_passphrase_enroll_logic_descriptor() {
 	return [

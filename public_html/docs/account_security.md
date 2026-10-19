@@ -277,7 +277,11 @@ Adding a credential is itself a sensitive action — a session thief must not
 be able to quietly enroll their own key:
 
 - **First passkey** on an account: requires the account password re-entered.
-- **Additional passkeys**: require a recent step-up with an existing passkey.
+- **Additional passkeys**: require a recent step-up, by a passkey or the
+  authenticator app. Someone replacing a lost passkey holds only the app, so
+  the security page tries a passkey on this device first and otherwise sends
+  them to `/verify-stepup`. Revoking a passkey and deactivating one for the
+  vault work the same way, which is how the lost one is taken off the account.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
   a passphrase): require an open unlock window, and code regeneration and
   passphrase changes additionally require a recent step-up. When the window
