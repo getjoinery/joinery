@@ -12,6 +12,8 @@
 //! operations and executed none of them. Nothing crashed and nothing was
 //! reported — it simply stopped syncing and looked healthy doing it.
 
+mod common;
+
 use std::io::Read;
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
@@ -69,8 +71,7 @@ fn a_slow_but_talking_server_is_not_cut_off() {
     let body_len = 8usize;
     std::thread::spawn(move || {
         if let Ok((mut sock, _)) = listener.accept() {
-            let mut buf = [0u8; 4096];
-            let _ = sock.read(&mut buf);
+            common::read_request(&mut sock);
 
             use std::io::Write;
             let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {body_len}\r\n\r\n");
