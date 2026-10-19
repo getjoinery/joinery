@@ -292,6 +292,8 @@ struct ServerState {
 
 /// Code a scenario runs inside one of the server's calls.
 type ServerHook = Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>;
+/// Shown each move or rename as it arrives, until it answers true.
+type MoveHook = Arc<Mutex<Option<Box<dyn FnMut(&str, &Value) -> bool + Send>>>>;
 
 /// The server. Cloning shares it — two simulated devices hold the same one.
 #[derive(Clone)]
@@ -311,6 +313,9 @@ pub struct MockServer {
     /// Run when a download asks for its link: the operation has started and
     /// no byte has moved. See [`MockServer::while_minting_a_download`].
     minting_a_download: ServerHook,
+    /// Run when a move or rename arrives, before the server reads it. See
+    /// [`MockServer::when_a_move_arrives`].
+    move_arrives: MoveHook,
     /// Refuse in English only: every refusal leaves without the machine-readable
     /// marker that says WHY.
     ///
@@ -587,6 +592,7 @@ impl MockServer {
             clock,
             during_upload: Arc::new(Mutex::new(None)),
             minting_a_download: Arc::new(Mutex::new(None)),
+            move_arrives: Arc::new(Mutex::new(None)),
             plain_refusals: Arc::new(Mutex::new(false)),
             ignores_unchanged_since: Arc::new(Mutex::new(false)),
             ignores_scope: Arc::new(Mutex::new(false)),
@@ -721,6 +727,19 @@ impl MockServer {
     /// flight.
     pub fn while_minting_a_download(&self, f: impl FnMut() + Send + 'static) {
         *self.minting_a_download.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Show each move or rename (`drive_move`, `drive_rename`) to `f` as it
+    /// arrives, before the server reads it, until `f` answers true.
+    ///
+    /// That instant is the one between a device deciding a move against what
+    /// it last heard and the server carrying it out. A peer's move landing now
+    /// is one the deciding device cannot have heard of: a device that slept
+    /// between the two put a file back over another device's newer move (soak
+    /// rig run 2416). `f` is taken out while it runs, so it can change the
+    /// server through the server's own calls.
+    pub fn when_a_move_arrives(&self, f: impl FnMut(&str, &Value) -> bool + Send + 'static) {
+        *self.move_arrives.lock().unwrap() = Some(Box::new(f));
     }
 
     /// Answer every refusal from here on in prose alone, with no marker saying
@@ -1479,6 +1498,17 @@ impl MockServer {
     }
 
     fn dispatch(&self, name: &str, body: &Value) -> ServerResult {
+        if name == "drive_move" || name == "drive_rename" {
+            let hook = self.move_arrives.lock().unwrap().take();
+            if let Some(mut f) = hook {
+                if !f(name, body) {
+                    let mut slot = self.move_arrives.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(f);
+                    }
+                }
+            }
+        }
         {
             let mut st = self.state.lock().unwrap();
             if name == "drive_trash" {
@@ -1919,6 +1949,21 @@ impl MockServer {
             return Err(refused("invalid_request", "A name is required."));
         }
 
+        // The name the client last saw it under (`from_name`), as the platform
+        // asks it: an item called something else now was renamed after this
+        // rename was decided. A rename to the name it has asks nothing, and an
+        // encrypted file's stored title is its placeholder whatever it is called.
+        if let Some(seen) = body.get("from_name").and_then(Value::as_str).filter(|n| !n.is_empty() && !encrypted_file) {
+            let now = if t == "folder" {
+                st.folders.get(&id).map(|f| f.name.clone())
+            } else {
+                st.files.get(&id).map(|f| f.name.clone())
+            };
+            if now.is_some_and(|now| now != seen && now != name) {
+                return Err(refused("moved_since", "That item has been renamed since."));
+            }
+        }
+
         // Renaming onto a name a live sibling already holds is refused, exactly
         // as the real server's partial unique index refuses it. The mock checked
         // this when things were CREATED and not when they were renamed, so the
@@ -1998,6 +2043,21 @@ impl MockServer {
         // The top level is the owner's.
         if dest.is_none() && Self::is_shared_in(&st, t, id) {
             return Err(standing("forbidden", "Only the owner can move this to the top of their Drive."));
+        }
+        // Where the client last saw it (`from_parent_id`, 0 for the top), as
+        // the platform asks it: an item standing in another folder now was
+        // moved after this move was decided, and carried out, it would put the
+        // item back over that move unseen. A move to where it already is asks
+        // nothing.
+        if let Some(seen) = body.get("from_parent_id").and_then(Value::as_i64) {
+            let now = if t == "folder" {
+                st.folders.get(&id).map(|f| f.parent)
+            } else {
+                st.files.get(&id).map(|f| f.folder)
+            };
+            if now.is_some_and(|now| now != dest && now.unwrap_or(0) != seen) {
+                return Err(refused("moved_since", "That item has been moved since."));
+            }
         }
         if let Some(d) = dest {
             match st.folders.get(&d) {

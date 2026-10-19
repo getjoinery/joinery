@@ -720,6 +720,7 @@ on the message, which is prose for people.
 | `parent_trashed` | the destination folder is in the trash |
 | `file_trashed` | the file is in the trash |
 | `changed_since` | something in it changed after the client's cursor |
+| `moved_since` | the item stands in another folder, or under another name, than the move or rename was decided against |
 | `upload_incomplete` | the upload's bytes are missing, the wrong size or fail their checksum |
 | `quota`, `file_too_large` | the account's storage or per-file limit |
 | `no_room` | the server's disk is short of space |
@@ -764,6 +765,21 @@ refusal is made (the loser of an insert race asks again) also leaves the bare
 `sync/jd-proto/tests/fixtures/name_taken_refusal.json`; the platform's
 `drive_sync_contract` test, the client's parser and jd-sim's server are all
 tested against that file.
+
+A move or rename can say where the client last saw the item: `drive_move`
+takes `from_parent_id` (0 for the top of the Drive) and `drive_rename` takes
+`from_name`. Where the item stands somewhere else now, the request is refused
+with `moved_since` and changes nothing, so a client that decided a move before
+another device's move reached the server cannot put the item back over it
+unseen. Each asks only about the half it changes: a rename elsewhere does not
+refuse a move, and a move elsewhere does not refuse a rename. A move to where
+the item already is, and a rename to the name it already has, succeed whatever
+they say. `drive_move` asks again under the owner's write lock where the move
+lands; `drive_rename` asks once, so two requests a few milliseconds apart can
+still both land. `from_name` is read for plaintext names only: an encrypted
+file's title is its opaque placeholder. A request that names neither is
+carried out wherever the item stands, as the Drive pages' own moves and
+renames are.
 
 A request the API's own input schema refuses, before the logic runs, comes
 back as a `ValidationError` instead.

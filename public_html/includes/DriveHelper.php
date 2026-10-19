@@ -10,6 +10,12 @@ require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 class DriveDestinationTrashedException extends RuntimeException {}
 
 /**
+ * The item a move was decided for stands somewhere else now (`from_parent_id`).
+ * Raised by drive_move's landing, under the owner's lock.
+ */
+class DriveMovedSinceException extends RuntimeException {}
+
+/**
  * DriveHelper — shared tree + access logic for the member Drive.
  *
  * The drive_* action logic files stay thin by delegating here: entity loading,
@@ -87,6 +93,27 @@ class DriveHelper {
 			return null;
 		}
 		return $f;
+	}
+
+	/**
+	 * The folder an item stands in now, read from its row (0 for the top), for
+	 * a caller holding the owner's write lock. Throws DriveMovedSinceException
+	 * when that is neither `$expected` (null asks nothing) nor `$destination`:
+	 * the item was moved after the caller last saw it, and not to where the
+	 * caller is taking it -- a move to where it already is succeeds whatever
+	 * the caller last saw.
+	 */
+	public static function parent_unless_moved_since($entity_type, $id, $expected, $destination) {
+		$sql = ($entity_type === self::ENTITY_FOLDER)
+			? 'SELECT fol_parent_folder_id FROM fol_folders WHERE fol_folder_id = ?'
+			: 'SELECT fil_fol_folder_id FROM fil_files WHERE fil_file_id = ?';
+		$q = DbConnector::get_instance()->get_db_link()->prepare($sql);
+		$q->execute(array((int)$id));
+		$parent = (int)$q->fetchColumn();
+		if ($expected !== null && $parent !== (int)$expected && $parent !== (int)$destination) {
+			throw new DriveMovedSinceException();
+		}
+		return $parent;
 	}
 
 	/** Load either entity type into a model, or null. */
