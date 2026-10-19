@@ -17738,6 +17738,103 @@ fn a_stale_move_loses_to_a_peers_move_on_a_disk_without_file_identity() {
     }
 }
 
+/// A swap of two names goes up through a park: one file steps aside under a
+/// scratch name, the other takes its name, and the first takes the other's.
+/// A peer's rename of the parked file landing before the park is the newer
+/// name: it stands and this device is told, as for any other rename. Sent with
+/// no name to ask about, the park renamed over it unseen, and the swap went
+/// up as if the peer had never acted. RED without the park's `from`.
+#[test]
+fn a_park_decided_before_a_peers_rename_landed_loses_to_it_and_says_so() {
+    let world = World::new(9_965, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_write("Projects/x.txt", b"x, renamed by the peer");
+    a.fs.user_write("Projects/y.txt", b"y, takes the free name");
+    assert!(world.settle().is_some());
+    let server = world.server.clone();
+    let fired = std::sync::Arc::new(std::sync::Mutex::new(None::<i64>));
+    let seen = fired.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        let park = name == "drive_rename"
+            && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap"));
+        if park {
+            let parked = body.get("entity_id").and_then(serde_json::Value::as_i64).expect("the parked file");
+            server
+                .action("drive_rename", &serde_json::json!({ "entity_type": "file", "entity_id": parked, "name": "theirs.txt" }))
+                .expect("the peer's rename");
+            *seen.lock().unwrap() = Some(parked);
+        }
+        park
+    });
+    a.fs.user_rename("Projects/x.txt", "Projects/swap.tmp");
+    a.fs.user_rename("Projects/y.txt", "Projects/x.txt");
+    a.fs.user_rename("Projects/swap.tmp", "Projects/y.txt");
+    assert!(world.settle().is_some(), "the devices must go quiet");
+    let parked = fired.lock().unwrap().expect("the premise: the peer's rename landed while the park was on its way");
+
+    let tree = world.server.tree();
+    assert!(!tree.keys().any(|p| p.contains(".jd-swap")), "a scratch name stands on the server: {tree:?}");
+    let live: Vec<_> = world.server.files().into_iter().filter(|f| !f.trashed).collect();
+    assert_eq!(live.len(), 2, "not the two files: {tree:?}");
+    let theirs = live.iter().find(|f| f.id == parked).expect("the parked file");
+    assert_eq!(theirs.name, "theirs.txt", "the newer name did not stand: {tree:?}");
+    for device in [a, b] {
+        assert_eq!(
+            disk_tree(device).get("Projects/theirs.txt"),
+            Some(&Some(theirs.sha256.clone())),
+            "{}: did not follow: {:?}",
+            device.name,
+            disk_tree(device)
+        );
+    }
+    assert_eq!(move_races_lost(a).len(), 1, "the losing device was not told: {:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
+/// A swap whose park landed with its answer lost, its finisher run in the same
+/// round: the finisher asks the server where the file is, finds its own park,
+/// and the swap finishes, with nobody told of a race that did not happen.
+/// Sent from the name the park had already taken away, the finish was refused
+/// as moved since, and the swap was left half done: one file under a conflict
+/// name. RED without the first attempt asking.
+#[test]
+fn a_park_whose_answer_was_lost_is_finished_as_its_own() {
+    let world = World::new(9_964, &["a", "b"]);
+    let a = world.device("a");
+    let b = world.device("b");
+    a.fs.user_write("Projects/x.txt", b"x, the first of the swap");
+    a.fs.user_write("Projects/y.txt", b"y, the second of the swap");
+    assert!(world.settle().is_some());
+    let net = a.net.clone();
+    let lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = lost.clone();
+    world.server.when_a_move_arrives(move |name, body| {
+        let park = name == "drive_rename"
+            && body.get("name").and_then(serde_json::Value::as_str).is_some_and(|n| n.starts_with(".jd-swap"));
+        if park {
+            net.set_faults(NetFaults { lose_answer_to: Some("drive_rename".into()), ..NetFaults::none() });
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        park
+    });
+    a.fs.user_rename("Projects/x.txt", "Projects/swap.tmp");
+    a.fs.user_rename("Projects/y.txt", "Projects/x.txt");
+    a.fs.user_rename("Projects/swap.tmp", "Projects/y.txt");
+    world.pass(a);
+    assert!(lost.load(std::sync::atomic::Ordering::SeqCst), "the premise: the park's answer was lost");
+    a.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "the devices must go quiet");
+
+    let tree = world.server.tree();
+    assert_eq!(tree.get("Projects/x.txt"), Some(&Some(jd_sim::sha256_hex(b"y, the second of the swap"))), "{tree:?}");
+    assert_eq!(tree.get("Projects/y.txt"), Some(&Some(jd_sim::sha256_hex(b"x, the first of the swap"))), "{tree:?}");
+    assert_eq!(tree.len(), 3, "{tree:?}");
+    assert!(move_races_lost(a).is_empty(), "a race was reported: {:?}", a.store.open_issues().unwrap());
+    assert!(a.store.open_issues().unwrap().is_empty(), "{:?}", a.store.open_issues().unwrap());
+    assert_converged(&world);
+}
+
 /// Run 1531: a save by rename whose temporary file a pass saw before the
 /// rename, while a peer edited the file. The temporary file is the file's next
 /// version, as it is when no pass sees it, so the two edits are a conflict and
