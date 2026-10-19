@@ -738,6 +738,33 @@ on the message, which is prose for people.
 | `idempotency_key_reused` | the key was spent on a different request |
 | `action_failed` | the action itself broke (an exception, for any action) |
 
+A `name_taken` refusal names what holds the name, from every action that
+refuses one (`DriveHelper::name_taken_data()`): its type, its id, its name as
+the server stores it, and for a file the hash of the bytes the server holds
+(the `content_sha256` `drive_index` reports; for an encrypted file, of the
+ciphertext). A sync client that holds those same bytes knows the name is held
+by its own upload, one that landed while its answer was lost, and adopts that
+file instead of sending a second copy.
+
+```json
+{
+  "reason": "name_taken",
+  "holder_type": "file",
+  "holder_id": 1963621,
+  "holder_name": "notes.txt~",
+  "holder_sha256": "833be3070c2f9a6a1f0de7c3d2b1a4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f"
+}
+```
+
+A folder holder has no `holder_sha256`. The holder is named only to a caller
+who can read it: a user granted one file alone may rename it onto a sibling's
+name, and is told only that the name is taken. A holder already gone when the
+refusal is made (the loser of an insert race asks again) also leaves the bare
+`reason`. This example, and a folder's, is
+`sync/jd-proto/tests/fixtures/name_taken_refusal.json`; the platform's
+`drive_sync_contract` test, the client's parser and jd-sim's server are all
+tested against that file.
+
 A request the API's own input schema refuses, before the logic runs, comes
 back as a `ValidationError` instead.
 

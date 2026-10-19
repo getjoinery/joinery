@@ -205,9 +205,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	// A new file cannot take a name a live sibling already holds. Asked before
 	// any bytes are admitted, so the cheap answer costs nothing; the save below
 	// re-asks it, because this check is a fast path and not a guarantee.
-	if (!$target_file && DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+	$holder = $target_file ? null : DriveHelper::file_name_holder($owner_id, $folder_id, $name);
+	if ($holder !== null) {
 		$up->discard();
-		return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+		return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 	}
 
 	// Quota is enforced HERE, where bytes are admitted to storage — the init
@@ -414,12 +415,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			// fault — a sync client knows what to do with the first and retries
 			// the second forever. Anything else is somebody else's problem and
 			// travels on untouched.
-			if (strpos($e->getMessage(), '23505') === false
-				|| !DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+			$holder = strpos($e->getMessage(), '23505') === false
+				? null : DriveHelper::file_name_holder($owner_id, $folder_id, $name);
+			if ($holder === null) {
 				throw $e;
 			}
 			$up->discard();
-			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+			return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		if (!$file || !$file->key) {
 			$up->discard();

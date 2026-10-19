@@ -85,8 +85,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 		}
 	}
 
-	if (DriveHelper::folder_name_taken($owner_id, $parent_id, $name)) {
-		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
+	$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $name);
+	if ($holder !== null) {
+		return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 	}
 
 	// The parent-trashed check above is a fast fail; the vault lookup and name
@@ -112,7 +113,8 @@ function drive_folder_create_logic(array $input): LogicResult {
 		return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 	}
 	if ($folder === null) {
-		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
+		$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $name);
+		return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 	}
 
 	FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FOLDER, $folder->key, $owner_id, $user_id);

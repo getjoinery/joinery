@@ -186,8 +186,9 @@ function drive_move_logic(array $input): LogicResult {
 			return LogicResult::error('That move would exceed the maximum folder depth.', array('reason' => 'too_deep', 'standing' => true));
 		}
 		$owner_id = (int)$entity->get('fol_usr_user_id');
-		if (DriveHelper::folder_name_taken($owner_id, $parent_id, $entity->get('fol_name'), $entity_id)) {
-			return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
+		$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $entity->get('fol_name'), $entity_id);
+		if ($holder !== null) {
+			return LogicResult::error('A folder with that name already exists in the destination.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		// Held against the destination going to the trash between the check at the
 		// top and the write here — the depth, cycle and name checks all run in
@@ -206,7 +207,8 @@ function drive_move_logic(array $input): LogicResult {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 			}
 			if (!$saved) {
-				return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
+				$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $entity->get('fol_name'), $entity_id);
+				return LogicResult::error('A folder with that name already exists in the destination.', DriveHelper::name_taken_data($holder, $user_id));
 			}
 		} finally {
 			DriveHelper::owner_write_unlock($owner_id);
@@ -216,8 +218,9 @@ function drive_move_logic(array $input): LogicResult {
 		// Asked before any conversion runs. Sealing or unsealing a file is byte
 		// work, and doing it only to refuse the move afterwards would spend it
 		// for nothing.
-		if (DriveHelper::file_name_taken($owner_id, $parent_id, $entity->get('fil_title'), $entity_id)) {
-			return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
+		$holder = DriveHelper::file_name_holder($owner_id, $parent_id, $entity->get('fil_title'), $entity_id);
+		if ($holder !== null) {
+			return LogicResult::error('A file with that name already exists in the destination.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		// Convert before the move lands, so a failure leaves the file where it was
 		// at the level it was, rather than in a folder whose promise it breaks.
@@ -247,7 +250,8 @@ function drive_move_logic(array $input): LogicResult {
 				return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 			}
 			if (!$saved) {
-				return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
+				$holder = DriveHelper::file_name_holder($owner_id, $parent_id, $entity->get('fil_title'), $entity_id);
+				return LogicResult::error('A file with that name already exists in the destination.', DriveHelper::name_taken_data($holder, $user_id));
 			}
 		} finally {
 			DriveHelper::owner_write_unlock($owner_id);

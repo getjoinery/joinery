@@ -1146,9 +1146,17 @@ class DriveHelper {
 	 * index is the backstop; this returns a clean error instead of a DB throw.
 	 */
 	public static function folder_name_taken($user_id, $parent_id, $name, $exclude_id = 0) {
+		return self::folder_name_holder($user_id, $parent_id, $name, $exclude_id) !== null;
+	}
+
+	/**
+	 * The live sibling folder folder_name_taken() finds, as a name_taken refusal
+	 * names it (name_taken_data()), or null.
+	 */
+	public static function folder_name_holder($user_id, $parent_id, $name, $exclude_id = 0) {
 		self::require_classes();
 		$dblink = DbConnector::get_instance()->get_db_link();
-		$sql = "SELECT fol_folder_id FROM fol_folders
+		$sql = "SELECT fol_folder_id, fol_name FROM fol_folders
 		         WHERE fol_usr_user_id = :uid
 		           AND COALESCE(fol_parent_folder_id, 0) = :pid
 		           AND fol_name = :name
@@ -1162,7 +1170,15 @@ class DriveHelper {
 			':name'    => $name,
 			':exclude' => (int)$exclude_id,
 		));
-		return $q->fetchColumn() !== false;
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if ($row === false) {
+			return null;
+		}
+		return array(
+			'holder_type' => self::ENTITY_FOLDER,
+			'holder_id'   => (int)$row['fol_folder_id'],
+			'holder_name' => (string)$row['fol_name'],
+		);
 	}
 
 	/**
@@ -1212,9 +1228,38 @@ class DriveHelper {
 	 * entitled to duplicate titles.
 	 */
 	public static function file_name_taken($user_id, $folder_id, $title, $exclude_id = 0) {
+		return self::live_file_titled($user_id, $folder_id, $title, $exclude_id) !== null;
+	}
+
+	/**
+	 * The live sibling file file_name_taken() finds, as a name_taken refusal
+	 * names it (name_taken_data()), or null. Its hash is the one drive_index
+	 * reports as the file's content_sha256: a client holding the same bytes
+	 * knows the name is held by its own upload, and adopts it rather than
+	 * sending a second copy (docs/drive.md, Refusal reasons).
+	 */
+	public static function file_name_holder($user_id, $folder_id, $title, $exclude_id = 0) {
+		$row = self::live_file_titled($user_id, $folder_id, $title, $exclude_id);
+		if ($row === null) {
+			return null;
+		}
+		$holder = array(
+			'holder_type' => self::ENTITY_FILE,
+			'holder_id'   => (int)$row['fil_file_id'],
+			'holder_name' => (string)$row['fil_title'],
+		);
+		$sha = self::sync_meta_for($holder['holder_id'])['content_sha256'];
+		if ($sha !== null) {
+			$holder['holder_sha256'] = $sha;
+		}
+		return $holder;
+	}
+
+	/** The id and title of the live drive file file_name_taken() asks about, or null. */
+	private static function live_file_titled($user_id, $folder_id, $title, $exclude_id) {
 		self::require_classes();
 		$dblink = DbConnector::get_instance()->get_db_link();
-		$sql = "SELECT fil_file_id FROM fil_files
+		$sql = "SELECT fil_file_id, fil_title FROM fil_files
 		         WHERE fil_usr_user_id = :uid
 		           AND COALESCE(fil_fol_folder_id, 0) = :fid
 		           AND fil_title = :title
@@ -1229,7 +1274,29 @@ class DriveHelper {
 			':title'   => $title,
 			':exclude' => (int)$exclude_id,
 		));
-		return $q->fetchColumn() !== false;
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		return $row === false ? null : $row;
+	}
+
+	/**
+	 * The data of a name_taken refusal: the reason, and the holder when there
+	 * still is one and $user_id may read it (docs/drive.md, Refusal reasons).
+	 * A caller granted one file alone can rename it onto the name of a sibling
+	 * nobody shared with them; the name was theirs to ask about, the sibling's
+	 * id and hash are not. A holder already gone by the time it is asked for --
+	 * the insert race's loser asks again -- or one the caller cannot read
+	 * leaves the bare reason, which a client reads as a name it cannot adopt.
+	 */
+	public static function name_taken_data($holder, $user_id) {
+		$data = array('reason' => 'name_taken');
+		if (!is_array($holder)) {
+			return $data;
+		}
+		$entity = self::load_entity($holder['holder_type'], $holder['holder_id']);
+		if (!$entity || !self::can_read($holder['holder_type'], $entity, (int)$user_id)) {
+			return $data;
+		}
+		return $data + $holder;
 	}
 
 	/**

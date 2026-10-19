@@ -1,0 +1,15 @@
+{
+  "file": {
+    "reason": "name_taken",
+    "holder_type": "file",
+    "holder_id": 1963621,
+    "holder_name": "notes.txt~",
+    "holder_sha256": "833be3070c2f9a6a1f0de7c3d2b1a4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f"
+  },
+  "folder": {
+    "reason": "name_taken",
+    "holder_type": "folder",
+    "holder_id": 455809,
+    "holder_name": "Projects"
+  }
+}

@@ -75,13 +75,32 @@ foreach ($actions as $action) {
 	foreach (rr_error_calls($source) as $call) {
 		list($line, $text) = $call;
 		$total++;
-		if (strpos($text, "'reason'") === false) {
+		if (strpos($text, "'reason'") === false && strpos($text, 'DriveHelper::name_taken_data(') === false) {
 			$missing[] = "line $line";
 		}
 	}
 	check(empty($missing), "$action: every refusal names its reason", implode(', ', $missing));
 }
 check($total > 80, 'the scan found the refusals it reads', "$total calls");
+
+section('Every name refusal names its holder');
+
+// A client that holds the same bytes as the file holding the name knows it is
+// its own upload, and adopts it rather than sending a second copy. It can only
+// know that from the holder, so a name_taken that skips the builder breaks it
+// with nothing else failing: for months only the simulator named the holder,
+// and the adoption ran nowhere but there.
+foreach ($actions as $action) {
+	$source = file_get_contents(PathHelper::getIncludePath('logic/' . $action . '_logic.php'));
+	$bare = array();
+	preg_match_all('/([\'"])name_taken\1/', $source, $hits, PREG_OFFSET_CAPTURE);
+	foreach ($hits[0] as $hit) {
+		$bare[] = 'line ' . (substr_count(substr($source, 0, $hit[1]), "\n") + 1);
+	}
+	check(empty($bare), "$action: every name_taken goes through DriveHelper::name_taken_data()", implode(', ', $bare));
+}
+check(DriveHelper::name_taken_data(null, 0) === array('reason' => 'name_taken'),
+	'a holder gone by the time it is asked for leaves the bare reason');
 
 section('The feed says refusals are reasoned');
 

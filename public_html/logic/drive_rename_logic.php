@@ -58,12 +58,14 @@ function drive_rename_logic(array $input): LogicResult {
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
 		$parent_id = (int)$entity->get('fol_parent_folder_id');
 		$owner_id  = (int)$entity->get('fol_usr_user_id');
-		if (DriveHelper::folder_name_taken($owner_id, $parent_id, $name, (int)$entity->get('fol_folder_id'))) {
-			return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
+		$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $name, (int)$entity->get('fol_folder_id'));
+		if ($holder !== null) {
+			return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$entity->set('fol_name', $name);
 		if (!DriveHelper::save_folder_unless_name_taken($entity)) {
-			return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
+			$holder = DriveHelper::folder_name_holder($owner_id, $parent_id, $name, (int)$entity->get('fol_folder_id'));
+			return LogicResult::error('A folder with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$owner = $owner_id;
 	} elseif ($is_encrypted_file) {
@@ -73,12 +75,14 @@ function drive_rename_logic(array $input): LogicResult {
 	} else {
 		$folder_id = (int)$entity->get('fil_fol_folder_id');
 		$owner_id  = (int)$entity->get('fil_usr_user_id');
-		if (DriveHelper::file_name_taken($owner_id, $folder_id, $name, (int)$entity->key)) {
-			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+		$holder = DriveHelper::file_name_holder($owner_id, $folder_id, $name, (int)$entity->key);
+		if ($holder !== null) {
+			return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$entity->set('fil_title', $name);
 		if (!DriveHelper::save_file_unless_name_taken($entity)) {
-			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+			$holder = DriveHelper::file_name_holder($owner_id, $folder_id, $name, (int)$entity->key);
+			return LogicResult::error('A file with that name already exists here.', DriveHelper::name_taken_data($holder, $user_id));
 		}
 		$owner = $owner_id;
 	}
