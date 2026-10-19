@@ -11,6 +11,7 @@
  *
  * A container's data is its host's: its layers are its host's.
  *
+ * @version 1.1 - record_provider_layer reads the one instance's provisions, not every provision
  * @version 1.0
  */
 
@@ -66,9 +67,8 @@ class DataRootLayers {
 			return 0;
 		}
 		$n = 0;
-		foreach (new MultiCustomerCloudProvision(array('deleted' => false)) as $p) {
-			if ((string)$p->get('cvp_instance_id') === $instance_id && (string)$p->get('cvp_provider') === $provider
-					&& trim((string)$p->get('cvp_provider_disk_encryption')) === '') {
+		foreach (new MultiCustomerCloudProvision(array('cvp_instance_id' => $instance_id, 'cvp_provider' => $provider, 'deleted' => false)) as $p) {
+			if (trim((string)$p->get('cvp_provider_disk_encryption')) === '') {
 				$p->set('cvp_provider_disk_encryption', $layer);
 				$p->save();
 				$n++;

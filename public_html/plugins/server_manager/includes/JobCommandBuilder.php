@@ -8,6 +8,8 @@
  * the two bootstrap jobs, which the plane runs itself before the machine has an
  * agent to dispatch to.
  *
+ * @version 1.133 - a forward's or trust's address is refused in shared, protocol, benchmarking and reserved IPv4
+ *                  space too (NOT_PUBLIC_V4)
  * @version 1.132 - is_cloudflare_domain reads the one Cloudflare range list (SessionControl::cloudflare_edge_ranges)
  *                over A and AAAA records, matched by IpAddress::inPrefix; its own fetched and baked list is gone
  * @version 1.131 - build_site_quiet_forward, build_site_quiet_host_forward and build_trust_forwarder: a frozen site
@@ -530,6 +532,15 @@ class JobCommandBuilder {
 	 * site_quiet refuses the forward action as a value it does not know.
 	 */
 	const FORWARD_MIN_AGENT_VERSION = '1.84.0';
+
+	/**
+	 * IPv4 ranges that pass PHP's private and reserved filters and are still
+	 * nobody's public address: shared address space (100.64.0.0/10, where a
+	 * tailnet lives), IETF protocol assignments, benchmarking, and the
+	 * reserved block. A forward or a trust never names one. The agent refuses
+	 * the same list (forwardAddress).
+	 */
+	const NOT_PUBLIC_V4 = array('100.64.0.0/10', '192.0.0.0/24', '198.18.0.0/15', '240.0.0.0/4');
 
 	/** The most missing objects one backup run names (the agent's own limit). */
 	const BACKUP_RUN_MISSING_MAX = 2000;
@@ -2686,7 +2697,11 @@ class JobCommandBuilder {
 	/** A public address, as the agent takes it, or an exception. */
 	private static function public_address(string $address): string {
 		$address = trim($address);
-		if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+		$shared = false;
+		foreach (self::NOT_PUBLIC_V4 as $range) {
+			$shared = $shared || IpAddress::inPrefix($address, $range);
+		}
+		if ($shared || filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
 			throw new Exception("'" . $address . "' is not a public address.");
 		}
 		return inet_ntop(inet_pton($address));

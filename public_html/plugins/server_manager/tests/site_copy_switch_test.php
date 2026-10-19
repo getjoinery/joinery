@@ -137,7 +137,8 @@ $src = $mk_node('src', array('mgn_web_root' => '/var/www/html/scwsite/public_htm
 	'mgn_host' => $S4, 'mgn_agent_public_key' => $source_key, 'mgn_agent_version' => '1.53.0',
 	'mgn_agent_primitives' => 'copy_export,copy_vouch,site_census,site_quiet,backup_run,check_status',
 	'mgn_joinery_version' => JobCommandBuilder::BROKER_MIN_CORE_VERSION, 'mgn_last_status_data' => json_encode(array('backup_recovery_state' => 'proven')),
-	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive'));
+	'mgn_backup_recovery_fpr' => str_repeat('ab', 32), 'mgn_agent_server_manager' => 'inactive',
+	'mgn_last_host_report' => json_encode(array('sites' => array('scwsite')))));
 // Its backups, on a target of the test's own.
 sm_test_node_space($src);
 $cnode = $mk_node('copy', array('mgn_web_root' => '/var/www/html/scwsite/public_html', 'mgn_site_url' => 'https://scp.example.org',

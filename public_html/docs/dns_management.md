@@ -391,16 +391,21 @@ AAAA record in the zone naming the old server's address is pointed at the new
 server's address of its family, through each driver's ordinary
 `listRecords()` and `updateRecord()`. At the switch's start each such record's
 TTL goes to 60 seconds and its old TTL is kept; once the change has settled the
-old TTLs go back, and going back puts the values and TTLs back. A record someone
+old TTLs go back, and going back, from anywhere in the switch-over, puts the
+values and TTLs back. A record a stopped attempt left at 60 seconds keeps its
+original TTL on the next attempt. A record someone
 has since pointed elsewhere is left alone and named. As with the proxied move,
 the owner presses for each step with a token typed for that press, nothing is
 kept, and nothing is recorded in `dnr_managed_dns_records`.
 
 Whether the change has settled is read from three public resolvers over
 DNS-over-HTTPS (`PublicResolvers`: Cloudflare, Google, Quad9), each its own
-cache: settled when every one answers the new address alone and one old TTL has
-passed since the change. A resolver that cannot be asked never counts as
-agreeing.
+cache, each asked in RFC 8484 wire format on port 443: settled when every one
+names the new address and none the old (another address the name carries does
+not hold it up), and one old TTL has passed since the change. A resolver that
+cannot be asked never counts as agreeing. Two days after the change
+(`DnsRecordMove::MAX_WAIT`) the change counts as settled whatever the
+resolvers say, and the switch-over records that it settled by time.
 
 ## Cutovers
 

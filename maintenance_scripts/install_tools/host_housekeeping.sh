@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.24 - Every run drops any forwarder past its end (trust_forwarder.sh expire), so a trust a
+#                switch-over never took back ends on time (specs/site_copy_anything_to_anything.md D1)
 # Version: 1.23 - On a host with the site container engine, every run installs the nightly replacement of
 #                its site containers (site_refresh.sh install: joinery-site-refresh.timer), which replaces
 #                them when Ubuntu ships a security fix (specs/multi_tenant_host_hardening.md D9).
@@ -975,6 +977,21 @@ if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${SQH}" ]] \
         FAILED=1
     else
         printf '%s\n' "${SQH_OUT}" | sed '/^$/d; s/^/housekeeping: /'
+    fi
+fi
+
+# --- 10b2. A forwarder is believed only until its end ------------------------
+# While a site's DNS moves to this machine, its old server forwards visitors
+# here and this Apache believes the old server's X-Forwarded-For
+# (trust_forwarder.sh). The switch-over takes that back once the move settles;
+# every run here drops any address past its end anyway, so a trust nobody took
+# back (a settle that stopped, a management node gone) does not outlive it.
+TFW="${SCRIPT_DIR}/../sysadmin_tools/trust_forwarder.sh"
+if [[ "${IN_CONTAINER}" == 0 && "${RUN_SYSTEM}" == 1 && -f "${TFW}" ]] \
+        && [[ -e /etc/joinery/forwarders || -e /etc/apache2/conf-available/joinery-forwarders.conf ]]; then
+    if ! TFW_OUT="$(bash "${TFW}" expire 2>&1)"; then
+        warn "the forwarders this machine believes: $(printf '%s' "${TFW_OUT}" | tail -3 | tr '\n' ' ')"
+        FAILED=1
     fi
 fi
 

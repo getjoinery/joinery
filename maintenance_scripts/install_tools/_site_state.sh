@@ -3,13 +3,16 @@
 # _site_state.sh - the quiet state: a site that runs nothing and sends nothing,
 # enforced by the machine, never by the site's code (specs/site_copy.md WP5).
 #
+# Version: 1.10 - forward: any http request but the ACME challenge is sent to https first (the vhost's own redirect
+#               never runs under a proxied path); retry=0, so a refused first request does not hold the
+#               copy off for a minute; the guarantee is stated as the one address the plane named
 # Version: 1.9 - forward: a frozen site whose address is moving by DNS forwards its visitors to its copy
 #               until resolvers let go of it (specs/site_copy_anything_to_anything.md D1). {state dir}/forward
-#               names the copy's address; the web drop-in proxies every request there over https, the
-#               certificate checked against the site's own name, so a visitor's request reaches only a
-#               server that holds the site's certificate, and the ACME challenge path over http, so the
-#               copy can be issued one; the firewall rule lets the web user reach that address on 80 and
-#               443. Apache adds X-Forwarded-For, which the copy is told to believe (trust_forwarder).
+#               names the copy's address; the web drop-in proxies every request to that one address over
+#               https, the certificate checked against the site's own name, and the ACME challenge path
+#               over http, so the copy can be issued one; any other http request is sent to https first.
+#               The firewall rule lets the web user reach that address on 80 and 443. Apache adds
+#               X-Forwarded-For, which the copy is told to believe (trust_forwarder).
 # Version: 1.8 - the look paths answer with one Location, https://HOST/...: 1.7's relative one went out
 #               beside the absolute http one Redirect adds, and a browser refuses a response with
 #               two (net::ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION, found by WP5d's run 2). A Host that
@@ -310,11 +313,16 @@ ss_render_apache() {
 ErrorDocument 503 "<!doctype html><title>Not open</title><h1>Not open</h1><p>This server holds a copy of a site. It is not open to visitors.</p>"
 EOF
     elif [[ -n "${3:-}" ]]; then
-        # Forwarding while a DNS switch settles. Over https, the copy's
-        # certificate checked against the name asked for, so a visitor's
-        # request and its cookies reach only a server holding the site's own
-        # certificate. The ACME challenge goes over http, so the copy can be
-        # issued one before it holds it.
+        # Forwarding while a DNS switch settles, to the one address the
+        # management node named: over https, the copy's certificate checked
+        # against the name asked for. The ACME challenge goes over http, so the
+        # copy can be issued one before it holds it (which is also why the
+        # check is no stronger than the address: whoever answers there can be
+        # issued the site's certificate through this forward). Any other
+        # request over http is sent to https first, as the site's own vhost
+        # would: a proxied path is never rewritten, and a visitor's secure
+        # cookies go only over https. retry=0, so the first request after the
+        # copy has its certificate is proxied, not refused for a minute.
         local addr="$3" url
         url="${addr}"
         [[ "${addr}" == *:* ]] && url="[${addr}]"
@@ -326,12 +334,15 @@ SSLProxyCheckPeerExpire on
 SSLProxyCACertificateFile /etc/ssl/certs/ca-certificates.crt
 <Location "/">
     ProxyPreserveHost On
-    ProxyPass "https://${url}/"
+    ProxyPass "https://${url}/" retry=0
     ProxyPassReverse "https://${url}/"
+    <If "%{HTTPS} != 'on' && ! %{REQUEST_URI} =~ m#^/\\.well-known/acme-challenge/#">
+        Redirect 301 "https://%{HTTP_HOST}%{REQUEST_URI}"
+    </If>
 </Location>
 <Location "/.well-known/acme-challenge/">
     ProxyPreserveHost On
-    ProxyPass "http://${url}/.well-known/acme-challenge/"
+    ProxyPass "http://${url}/.well-known/acme-challenge/" retry=0
 </Location>
 ErrorDocument 502 "<!doctype html><title>Moving</title><h1>Back in a few minutes</h1><p>This site is moving to a new server. Please try again in a few minutes.</p>"
 EOF

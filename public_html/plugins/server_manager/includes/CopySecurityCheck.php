@@ -14,6 +14,7 @@
  * machine), pass (true, false, or null when the report does not say), and
  * evidence.
  *
+ * @version 1.1 - layers is UNKNOWN when the provider's layer is not known; the setuid row says it counts the image
  * @version 1.0
  */
 
@@ -77,9 +78,10 @@ class CopySecurityCheck {
 		$layers = DataRootLayers::of($node);
 		$escrow = DataRootEscrow::for_node((int)$machine->key);
 		$enrolled = $escrow && (string)$escrow->get('dre_status') === 'enrolled';
-		$one = $layers['count'] === 1 || ($layers['ours'] === false && $layers['provider'] === 'unknown');
+		// Not known (ours not reported, or the provider's layer unknown) is
+		// UNKNOWN: a machine with none of ours may have no layer at all.
 		$add('layers', 'One layer of encryption, its key held for an unattended boot', true,
-			$layers['count'] === null && $layers['ours'] === null ? null : ($one && (!$layers['ours'] || $enrolled)),
+			$layers['count'] === null ? null : ($layers['count'] === 1 && (!$layers['ours'] || $enrolled)),
 			$layers['line'] . ($layers['ours'] ? ($enrolled ? '; escrow enrolled' : '; escrow NOT enrolled') : ''));
 
 		// ── The site ──
@@ -98,7 +100,9 @@ class CopySecurityCheck {
 			is_array($sec) && $want_caps ? ($sec['drop_all'] && $caps === $want_caps) : null,
 			is_array($sec) ? 'adds ' . implode(',', (array)$caps) . ($sec['drop_all'] ? ', drops all else' : ', does NOT drop all else')
 				. '; run spec ' . implode(',', $want_caps) : 'not inventoried');
-		$add('setuid', 'No setuid file but the jail\'s launcher', $container,
+		// Counted in the site's image, once per image: a file made setuid in
+		// the running container's own layer, or in a volume, is not counted.
+		$add('setuid', 'No setuid file in the site\'s image but the jail\'s launcher', $container,
 			is_array($sec) && is_int($sec['setuid']) ? $sec['setuid'] <= 1 : null,
 			'setuid ' . json_encode(is_array($sec) ? $sec['setuid'] : null));
 		$code = is_array($entry) ? ($entry['code_check'] ?? null) : null;

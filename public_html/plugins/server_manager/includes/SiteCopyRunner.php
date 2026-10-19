@@ -98,6 +98,11 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.28 - review of 1.27 (B2-B9, B12): the copy is proven at its own address whether or not anything
+ *                 forwards; a forward needs a shared address family, or the switch notes why not; TTLs are lowered
+ *                 last and put back by any way back; a settle that stops can be retried or kept; any old server
+ *                 not powered off or held is quieted at settle; a swap that needs both servers off powers the
+ *                 copy off too; a running machine whose report does not list its sites is asked for one
  * @version 1.27 - alive or dead is the source's, for every target (D5); the ways the address can move are
  *                 SiteCopyMethods' (D6), the switch by DNS record with its forward and watch among them (D1); a
  *                 bare-metal source whose machine serves anything else is refused (D8); the copy's encryption is
@@ -412,7 +417,7 @@ class SiteCopyRunner {
 			$why[] = 'Its agent\'s key is not on record, and the copy is installed as the copy of that agent. Connect its agent '
 				. 'first.';
 		}
-		$why = array_merge($why, self::machine_wide_refusals($source));
+		$why = array_merge($why, self::machine_wide_refusals($source, !$backups));
 		// A running container site is frozen from outside by its host, and its
 		// old container held stopped there once the copy has the site, whatever
 		// the target (D4). A dead site's host is asked only at the switch-over,
@@ -498,13 +503,20 @@ class SiteCopyRunner {
 	 * A site on a server of its own, which the quiet state, the power-off and
 	 * an address swap act on whole (D8): refused when the machine serves
 	 * anything else. Its own test twin (<site>_test) is not another site.
+	 * A running machine whose last report does not list its sites (none yet,
+	 * or older than host_report 1.32) is asked for one first; a dead one's
+	 * last report is all there is.
 	 */
-	public static function machine_wide_refusals(ManagedNode $source): array {
+	public static function machine_wide_refusals(ManagedNode $source, bool $alive = true): array {
 		if (trim((string)$source->get('mgn_container_name')) !== '') {
 			return array();
 		}
 		$why = array();
 		$report = json_decode((string)$source->get('mgn_last_host_report'), true);
+		if ($alive && !(is_array($report) && is_array($report['sites'] ?? null))) {
+			$why[] = 'Its server\'s last status report does not say what else it serves, and freezing the site, powering its server '
+				. 'off or moving its address acts on the whole machine. Run a status check on it, then try again.';
+		}
 		$containers = (is_array($report) && is_array($report['containers'] ?? null)) ? $report['containers'] : array();
 		if ($containers) {
 			$why[] = 'Its server also runs ' . count($containers) . ' site container(s), and freezing the site, powering its server '
@@ -2408,9 +2420,9 @@ class SiteCopyRunner {
 						throw new SiteCopyException('Enter the DNS token.');
 					}
 					$plan = DnsRecordMove::plan($driver, $domain, $source, $node);
-					// Lowered now, before anything is frozen: a resolver that asks
-					// again after this waits a minute, and so does a move back.
-					DnsRecordMove::lower_ttl($driver, $plan);
+					// A record whose TTL an earlier attempt lowered and did not put
+					// back keeps the TTL it had before that attempt.
+					$plan['records'] = DnsRecordMove::keep_earlier_ttls($plan['records'], (array)($copy->switch_record()['records'] ?? array()));
 					$record['provider'] = $driver::getKey();
 					$record['zone'] = $plan['zone'];
 					$record['records'] = $plan['records'];
@@ -2437,10 +2449,15 @@ class SiteCopyRunner {
 			}
 			if (in_array($method, array(self::METHOD_DNS, self::METHOD_MANUAL), true)) {
 				$record = array_merge($record, self::forward_plan($source, $node, $hold));
-				// A machine whose agent cannot forward: the move goes ahead
-				// without, and visitors whose resolvers still name the old server
-				// get its maintenance page until their caches let go.
+				// A machine whose agent cannot forward, or two machines with no
+				// address family in common: the move goes ahead without, and
+				// visitors whose resolvers still name the old server get its
+				// maintenance page until their caches let go.
 				$why = $copy->source_alive() ? self::forward_refusals($copy, $source, $node) : array();
+				if ($copy->source_alive() && !$why && ($record['forward_to'] === '' || $record['forward_from'] === '')) {
+					$why[] = 'The old server and the copy have no public address of the same family (IPv4 or IPv6) on record, so '
+						. 'the old one cannot forward to the copy.';
+				}
 				if ($why) {
 					$record['forward_to'] = '';
 					$record['forward_from'] = '';
@@ -2483,6 +2500,31 @@ class SiteCopyRunner {
 					$template[] = array('op' => 'power_off', 'on' => 'source', 'arg' => 'source');
 				}
 			}
+			if ($method === self::METHOD_DNS) {
+				// Lowered last, once nothing else can refuse, before anything
+				// is frozen: a resolver that asks again after this waits a
+				// minute, and so does a move back.
+				$plan = array('zone' => $record['zone'], 'records' => $record['records']);
+				try {
+					DnsRecordMove::lower_ttl($driver, $plan);
+				} catch (Exception $e) {
+					// Some records may have reached a minute: their TTLs go back
+					// now, or, when that fails too, the page names each original.
+					$put_back = '';
+					try {
+						DnsRecordMove::restore_ttl($driver, $plan, 'from');
+						$put_back = ' The TTLs already lowered were put back.';
+					} catch (Exception $e2) {
+						$was = array();
+						foreach ($plan['records'] as $rec) {
+							$was[] = "{$rec['name']} ({$rec['type']}) " . (int)$rec['ttl_was'] . ' s';
+						}
+						$put_back = ' Putting back the TTLs already lowered failed too; set them back by hand: ' . implode(', ', $was) . '.';
+					}
+					throw new SiteCopyException('Nothing was ' . ($copy->from_backups() ? 'changed' : 'frozen') . ': ' . $e->getMessage() . $put_back);
+				}
+				$record['ttl_lowered'] = true;
+			}
 			$source->set('mgn_install_state', 'switching');
 			$source->save();
 			$copy->set_switch_record($record);
@@ -2512,21 +2554,29 @@ class SiteCopyRunner {
 	/**
 	 * Where a frozen site forwards while its address moves by DNS, and the
 	 * address its forwarded requests arrive from: forward_to, the copy's
-	 * machine's public address (IPv4 where it has one), and forward_from, the
-	 * old site's own machine's address of that family (its host's, for a
-	 * container). Empty strings where either is not known: nothing forwards.
+	 * machine's public address, and forward_from, the old site's own machine's
+	 * address of the same family (its host's, for a container): IPv4 where
+	 * both have one, else IPv6. Empty strings where they share no family:
+	 * nothing forwards. probe_at, the copy's address its proof asks at, is
+	 * kept whether or not anything forwards.
 	 */
 	private static function forward_plan(ManagedNode $source, ManagedNode $node, ?array $hold): array {
 		$to = ProxiedOriginMove::machine_addresses($node);
-		$forward_to = (string)($to[4][0] ?? ($to[6][0] ?? ''));
 		$from_node = $source;
 		if ($hold) {
 			$host = new ManagedNode((int)$hold['host_node_id'], TRUE);
 			$from_node = $host->key ? $host : $source;
 		}
 		$from = ProxiedOriginMove::machine_addresses($from_node);
-		$family = strpos($forward_to, ':') !== false ? 6 : 4;
-		return array('forward_to' => $forward_to, 'forward_from' => $forward_to !== '' ? (string)($from[$family][0] ?? '') : '');
+		$out = array('probe_at' => (string)($to[4][0] ?? ($to[6][0] ?? '')), 'forward_to' => '', 'forward_from' => '');
+		foreach (array(4, 6) as $family) {
+			if (!empty($to[$family][0]) && !empty($from[$family][0])) {
+				$out['forward_to'] = (string)$to[$family][0];
+				$out['forward_from'] = (string)$from[$family][0];
+				break;
+			}
+		}
+		return $out;
 	}
 
 	/**
@@ -2608,8 +2658,10 @@ class SiteCopyRunner {
 	/**
 	 * Once a DNS move has settled: the copy's machine stops believing the old
 	 * server, whose address goes back to its provider when it is deleted, and
-	 * the old server is powered off when this management node created it, or
-	 * an old container held stopped on its host.
+	 * the old server stops forwarding: powered off when this management node
+	 * created it, an old container held stopped on its host, and any other
+	 * old server (one brought, or transferred to its owner) quiet again, its
+	 * maintenance page back in place of the forward.
 	 */
 	private static function settle_steps(SiteCopy $copy): array {
 		$switch = $copy->switch_record();
@@ -2623,6 +2675,8 @@ class SiteCopyRunner {
 			}
 		} elseif ($copy->source_alive() && is_array($switch['power'] ?? null)) {
 			$steps[] = array('op' => 'power_off', 'on' => 'copy', 'arg' => 'source');
+		} elseif (self::forwards($copy)) {
+			$steps[] = array('op' => 'site_quiet', 'on' => 'copy', 'arg' => 'on');
 		}
 		return $steps;
 	}
@@ -2653,6 +2707,7 @@ class SiteCopyRunner {
 			if ($r['settled']) {
 				$watch['state'] = 'settled';
 				$watch['settled_time'] = gmdate('Y-m-d H:i:s');
+				$watch['by_time'] = $r['by_time'];
 			}
 			$switch['watch'] = $watch;
 			$copy->set_switch_record($switch);
@@ -2798,12 +2853,13 @@ class SiteCopyRunner {
 			$switch['moved_back_notes'] = array();
 			$switch['aaaa_left'] = null;
 			if ($method === self::METHOD_IP_SWAP) {
-				$template = array(
-					array('op' => 'power_off',   'on' => 'source', 'arg' => 'source'),
-					array('op' => 'ip_swap',     'on' => 'source', 'arg' => 'over'),
-					array('op' => 'power_cycle', 'on' => 'copy',   'arg' => 'copy'),
-					array('op' => 'probe',       'on' => 'copy'),
-				);
+				$template = array(array('op' => 'power_off', 'on' => 'source', 'arg' => 'source'));
+				if (!empty($switch['swap']['both_off'])) {
+					$template[] = array('op' => 'power_off', 'on' => 'source', 'arg' => 'copy');
+				}
+				$template[] = array('op' => 'ip_swap',     'on' => 'source', 'arg' => 'over');
+				$template[] = array('op' => 'power_cycle', 'on' => 'copy',   'arg' => 'copy');
+				$template[] = array('op' => 'probe',       'on' => 'copy');
 				$switch['moved_time'] = gmdate('Y-m-d H:i:s');
 				$copy->set_switch_record($switch);
 				self::lay_steps($copy, array_merge($template, self::start_steps($copy, $node)), SiteCopy::STATUS_STARTING, 'start');
@@ -2814,8 +2870,14 @@ class SiteCopyRunner {
 				// The copy answers at its own address under the site's name
 				// first: nothing moves toward a copy that does not.
 				$domain = self::site_domain($source);
+				if ((string)($switch['probe_at'] ?? ($switch['forward_to'] ?? '')) === '') {
+					throw new SiteCopyException('The copy has no public address on record to be proven at, so nothing moved. Run a status '
+						. 'check on it, or go back.');
+				}
+				// At the copy's own address, whether or not anything forwards:
+				// the name still resolves to the frozen site.
 				$proof = ProxiedOriginMove::prove($domain, (string)$copy->get('scp_look_path'), null,
-					self::copy_carries_certificate($copy), (string)($switch['forward_to'] ?? ''));
+					self::copy_carries_certificate($copy), (string)($switch['probe_at'] ?? ($switch['forward_to'] ?? '')));
 				$switch['proof'] = $proof;
 				if (!$proof['proven']) {
 					$copy->set_switch_record($switch);
@@ -2919,6 +2981,31 @@ class SiteCopyRunner {
 	}
 
 	/**
+	 * Let go of the old server again after the settle stopped (an agent that
+	 * did not answer, a provider that refused the power-off): every settle
+	 * step again, each of which passes when already done.
+	 */
+	public static function retry_settle(SiteCopy $copy): void {
+		if (!self::lock()) {
+			throw new SiteCopyException('This copy is being moved along right now; try again in a moment.');
+		}
+		$template = array();
+		try {
+			$copy->load();
+			$switch = $copy->switch_record();
+			if ($copy->status() !== SiteCopy::STATUS_HALTED || ($switch['phase'] ?? '') !== 'settle') {
+				throw new SiteCopyException('Only a letting-go of the old server that stopped is tried again.');
+			}
+			$template = self::settle_steps($copy);
+			self::lay_steps($copy, $template, SiteCopy::STATUS_SETTLING, 'settle');
+			self::advance_locked($copy);
+		} finally {
+			self::unlock();
+		}
+		self::start_worker_for($copy, $template);
+	}
+
+	/**
 	 * The way back, from anywhere in a switch-over: the address back to the
 	 * site's server (with the owner's token, when it moved through the proxy;
 	 * by swapping back, when the addresses swapped), and the site running
@@ -2967,6 +3054,9 @@ class SiteCopyRunner {
 			}
 			$switch = $copy->switch_record();
 			$method = (string)($switch['method'] ?? self::METHOD_PROXIED);
+			// Read before the watch is ended below: a settle that began asked for
+			// the old server's power-off, whether or not it finished.
+			$settle_began = !empty($switch['watch']['settled_time']);
 			if ($method === self::METHOD_PROXIED && ($switch['address_at'] ?? 'source') === 'copy') {
 				if (!$driver) {
 					throw new SiteCopyException('The address points at the copy, and going back moves it back: enter the DNS token.');
@@ -2980,20 +3070,26 @@ class SiteCopyRunner {
 				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
 				$switch['moved_back_notes'] = $left;
 			}
-			if ($method === self::METHOD_DNS && ($switch['address_at'] ?? 'source') === 'copy') {
+			if ($method === self::METHOD_DNS && (($switch['address_at'] ?? 'source') === 'copy' || !empty($switch['ttl_lowered']))) {
+				// The records back at the site's server, and their TTLs back, from
+				// wherever the switch-over stopped.
 				if (!$driver) {
-					throw new SiteCopyException('The site\'s records name the copy, and going back changes them back: enter the DNS token.');
+					throw new SiteCopyException(($switch['address_at'] ?? 'source') === 'copy'
+						? 'The site\'s records name the copy, and going back changes them back: enter the DNS token.'
+						: 'The site\'s records carry a one-minute TTL for the switch-over, and going back puts their TTLs back: enter the DNS token.');
 				}
 				$plan = array('zone' => $switch['zone'] ?? '', 'records' => $switch['records'] ?? array());
 				try {
-					$left = DnsRecordMove::move_back($driver, $plan);
+					if (($switch['address_at'] ?? 'source') === 'copy') {
+						$switch['moved_back_notes'] = DnsRecordMove::move_back($driver, $plan);
+						$switch['address_at'] = 'source';
+						$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
+					}
 					DnsRecordMove::restore_ttl($driver, $plan, 'from');
+					$switch['ttl_lowered'] = false;
 				} catch (Exception $e) {
 					throw new SiteCopyException('The records did not move back, and nothing else was done. ' . $e->getMessage());
 				}
-				$switch['address_at'] = 'source';
-				$switch['moved_back_time'] = gmdate('Y-m-d H:i:s');
-				$switch['moved_back_notes'] = $left;
 			} elseif ($method === self::METHOD_MANUAL && ($switch['address_at'] ?? 'source') === 'copy') {
 				// The owner changes the records back at their DNS host; the tab
 				// names them.
@@ -3015,6 +3111,9 @@ class SiteCopyRunner {
 				$template[] = array('op' => 'go_back',    'on' => 'source');
 			}
 			if ($method === self::METHOD_IP_SWAP && (!empty($switch['moved_time']) || ($switch['address_at'] ?? '') === 'copy')) {
+				if (!empty($switch['swap']['both_off'])) {
+					$template[] = array('op' => 'power_off',   'on' => 'source', 'arg' => 'copy');
+				}
 				$template[] = array('op' => 'ip_swap',     'on' => 'source', 'arg' => 'back');
 				$template[] = array('op' => 'power_cycle', 'on' => 'copy',   'arg' => 'copy');
 			}
@@ -3029,7 +3128,10 @@ class SiteCopyRunner {
 				// held stopped starts; a container's host lets its network go
 				// while it still shows its maintenance page; then it leaves its
 				// own quiet, and stops forwarding.
-				if ($method === self::METHOD_IP_SWAP || !empty($switch['source_off'])) {
+				// After a settle that asked for the power-off too, whether or not it
+				// finished: powering on a running server is a step that passes.
+				if ($method === self::METHOD_IP_SWAP || !empty($switch['source_off'])
+						|| ($settle_began && is_array($switch['power']['source'] ?? null))) {
 					$template[] = array('op' => 'power_on', 'on' => 'source', 'arg' => 'source');
 				}
 				if (is_array($switch['hold'] ?? null) && !empty($switch['held'])) {
@@ -3109,10 +3211,13 @@ class SiteCopyRunner {
 		}
 		try {
 			$copy->load();
-			if ($copy->status() !== SiteCopy::STATUS_SWITCHED) {
+			$switch = $copy->switch_record();
+			// A settle that stopped has moved the site already: it can be kept,
+			// and the tab names what of the old server was not let go.
+			$settle_halted = $copy->status() === SiteCopy::STATUS_HALTED && ($switch['phase'] ?? '') === 'settle';
+			if ($copy->status() !== SiteCopy::STATUS_SWITCHED && !$settle_halted) {
 				throw new SiteCopyException('Only a finished switch-over is kept; this copy is ' . strtolower($copy->status_label()) . '.');
 			}
-			$switch = $copy->switch_record();
 			$watch = (string)($switch['watch']['state'] ?? '');
 			if ($watch === 'watching') {
 				throw new SiteCopyException('The site\'s address is still moving: the old server forwards the visitors whose resolvers '
@@ -3242,7 +3347,13 @@ class SiteCopyRunner {
 		}
 		$copy->set_switch_record($switch);
 		$undo = array();
-		if ($op !== 'power_off') {
+		if ($op === 'power_off' && (string)($steps[$pos]['arg'] ?? '') === 'copy') {
+			// The copy, powered off for the swap (both_off), on again.
+			$undo[] = array('op' => 'power_on', 'on' => 'source', 'arg' => 'copy');
+		} elseif ($op !== 'power_off') {
+			if (!empty($switch['swap']['both_off'])) {
+				$undo[] = array('op' => 'power_off', 'on' => 'source', 'arg' => 'copy');
+			}
 			$undo[] = array('op' => 'ip_swap',     'on' => 'source', 'arg' => 'back');
 			$undo[] = array('op' => 'power_cycle', 'on' => 'copy',   'arg' => 'copy');
 		}

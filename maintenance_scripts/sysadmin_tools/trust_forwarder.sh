@@ -4,6 +4,7 @@
 # (specs/site_copy_anything_to_anything.md D1). The agent's trust_forwarder
 # word runs this file.
 #
+# Version: 1.1 - expire: drop every address past its end; housekeeping runs it on every tick
 # Version: 1.0
 #
 # While a site's address moves by DNS, its old server forwards every visitor
@@ -15,6 +16,8 @@
 #
 #   trust_forwarder.sh trust ADDRESS HOURS   believe ADDRESS for HOURS (1-168)
 #   trust_forwarder.sh untrust ADDRESS       stop believing it
+#   trust_forwarder.sh expire                drop every address past its end (housekeeping
+#                                            runs this on every converge tick)
 #   trust_forwarder.sh show                  each address believed, with when it ends
 #
 # The record is /etc/joinery/forwarders (one line: ADDRESS END_EPOCH); the
@@ -135,11 +138,14 @@ case "${1:-}" in
         apply || exit 1
         echo "trust_forwarder: X-Forwarded-For from ${addr} is not believed"
         ;;
+    expire)
+        apply || exit 1
+        ;;
     show)
         live_lines | while read -r a end; do
             echo "${a} until $(date -u -d "@${end}" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || echo "${end}")"
         done
         ;;
-    *) echo "usage: trust_forwarder.sh trust ADDRESS HOURS | untrust ADDRESS | show" >&2; exit 2 ;;
+    *) echo "usage: trust_forwarder.sh trust ADDRESS HOURS | untrust ADDRESS | expire | show" >&2; exit 2 ;;
 esac
 exit 0

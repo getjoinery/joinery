@@ -17,6 +17,7 @@
  *                    instance, 'enabled' or 'disabled'; null when the provider
  *                    does not say (unknown, never read as on)
  *
+ * @version 1.13 - CloudSwapWhileStopped: a swap that needs both servers off
  * @version 1.12 - CloudInstanceTypes: a provider's plans and its default region and plan; CloudTokenScopes: what a
  *                credential may do, for a provider whose tokens carry scopes. A driver is chosen by its account's
  *                provider through ComputeDriverRegistry (specs/site_copy_anything_to_anything.md D2)
@@ -216,6 +217,14 @@ interface CloudInstanceTransfers {
 	 * @throws CloudComputeException on any API failure.
 	 */
 	public function cancelTransfer(string $token): void;
+}
+
+/**
+ * Marker capability: a CloudAddressSwap whose provider moves an address only
+ * between stopped servers, so a swap powers both servers off first and the
+ * copy on again after. Without it only the site's server is powered off.
+ */
+interface CloudSwapWhileStopped {
 }
 
 /**
