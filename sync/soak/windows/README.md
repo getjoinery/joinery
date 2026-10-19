@@ -14,6 +14,7 @@ actor pace, at most one run every two hours, seeds from 29001.
 | | |
 |---|---|
 | `install.ps1` | One-time setup in the VM: `C:\soak-win\`, the device accounts `soak-a` and `soak-b`, and the scheduled tasks the line runs as. Turns off automatic Windows updates. |
+| `power.ps1` | Whether the computer slept during a run, and keeping it awake while one runs; dot-sourced by `forever.ps1` and `run_tests.ps1`. |
 | `forever.ps1` | Runs campaigns back to back (task `SoakWin-Forever`, which also starts with the VM) and writes one line per run to `C:\soak-win\ledger.txt`. |
 | `reset.ps1` | Stops the devices, archives the last run to `C:\soak-win\evidence\`, wipes, provisions the next account and starts the devices. Called by `forever.ps1`. |
 | `device.ps1` | One device's supervisor (tasks `SoakWin-device-a`, `SoakWin-device-b`, as `soak-a` and `soak-b`): runs its daemon and starts it again whenever it exits. |
@@ -22,6 +23,13 @@ actor pace, at most one run every two hours, seeds from 29001.
 | `fleet.json` | The fleet: two devices, each with its own copy of the program. |
 | `push.sh` | From the dev box: copies these scripts into the VM, sends it a source tree (the repo's HEAD by default) and starts a build. |
 | `soak_win_pool.sh` | From the dev box: makes the next `soak-mac-win-N` accounts on the rig, adds them to the VM's `accounts.txt`, and writes the VM's `soak.env` if it has none. |
+| `make_pc_kit.sh` | From the dev box: makes the kit that runs this line on a person's own x64 Windows computer (see below). |
+| `kit_build.ps1` | Run in the VM by `make_pc_kit.sh`: builds the kit's x64 programs and test programs. |
+| `install.cmd`, `install_pc.ps1` | The kit's installer: checks the computer, copies the kit to `C:\soak-win`, runs `install.ps1 -PersonalComputer` and starts it. |
+| `run_tests.ps1` | The kit's first job: every test program, once (task `SoakWin-Tests`, as `soak-a`). |
+| `uninstall.cmd`, `uninstall.ps1` | Takes the kit off the computer again. |
+| `read_mailbox.sh` | From the dev box: fetches what the kit's computer has sent. |
+| `kit_readme.txt` | The kit's `README.txt`, for the person installing it. |
 
 ## Shape
 
@@ -127,3 +135,50 @@ never started (see `reset.log`, `forever.log`).
   resume.
 - **More accounts:** `bash soak_win_pool.sh [count]`. The line stops with
   `pool used up` in the ledger when it runs out.
+
+## On a person's own computer
+
+A computer nobody can reach runs the same line from a kit. `make_pc_kit.sh`
+makes it: the x64 client and orchestrator and every test program, built in
+the VM; this folder's scripts; a pool of `soak-rig-pc-N` accounts (240 by
+default, twenty days at a run every two hours); and two passwords, the soak
+accounts' and the mailbox's. The person unzips it and double-clicks
+`install.cmd`. `install_pc.ps1` changes nothing unless the computer has an
+x64 processor, an NTFS `C:` with 15 GB free and no line installed; then it
+copies the kit to `C:\soak-win`, keeps the passwords readable by that
+account only and removes them from the kit's folder, and runs `install.ps1
+-PersonalComputer`. That leaves automatic updates alone, registers no build
+task, hides `soak-a` and `soak-b` from the sign-in screen, and registers
+`SoakWin-Tests`.
+
+The test suite runs first, once, as `soak-a`, so that what a test recycles or
+stores goes into that account's Recycle Bin and Credential Manager. The two
+tests that start the client find it at the path it was compiled at, so the
+kit's test programs are compiled at `C:\soak-win\tests\target` in the VM and
+the client is installed there. `forever.ps1` waits for the suite, and then
+runs the line with `line.env`'s seeds (39001 on).
+
+Nobody can read that computer's ledger, so it sends it. With a `report.env`,
+`forever.ps1` sends each ledger line, with the run's report, to the mailbox
+(`soak-mailbox@getjoinery.com` on the soak instance, through `jd-soak send`),
+and the evidence of every run that is not green. `install_pc.ps1` says when
+it is in, and `uninstall.ps1` sends the whole ledger before it removes
+everything. Read it from the dev box:
+
+```bash
+bash sync/soak/windows/read_mailbox.sh       # into ~/drive-work/soak-mailbox
+```
+
+A person's computer sleeps and restarts. A run in flight keeps it awake (a
+request held by the loop, which the computer's settings never see; `power.ps1`),
+and a run it went to sleep in anyway is ledgered `INTERRUPTED`, as is one it
+restarted in (`run\IN-FLIGHT`, read when the loop starts again). Neither
+counts, but what one found is still ledgered and its evidence still sent: a
+sleep breaks no invariant. The test suite is kept awake the same way, and one
+the computer slept through or restarted in is run again, three times at most.
+A message that does not reach the mailbox leaves `logs\RESEND-LEDGER`, and the
+next one that does takes the whole ledger with it; the suite's summary is sent
+again at every turn until it goes.
+
+`C:\soak-win` is writable by SYSTEM and Administrators only: the tasks run its
+scripts elevated.

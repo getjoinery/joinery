@@ -27,7 +27,7 @@ use jd_proto::{Client, Credentials};
 use jd_soak::chaos::{Chaos, Fault, RealReach};
 use jd_soak::fleet::{Device, Fleet};
 use jd_soak::orchestrate::{self, Campaign};
-use jd_soak::{journal, persona, report, server, verify};
+use jd_soak::{journal, mailbox, persona, report, server, verify};
 
 const USAGE: &str = "\
 usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
@@ -40,9 +40,13 @@ usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
                                         [--pace-ms N] [--fault-seconds N]
                                         [--stop-on-violation]
        jd-soak report <fleet.json>
+       jd-soak send <file> --server URL [--name NAME]
+       jd-soak fetch <dir> --server URL
 
 An ordinary account on the soak instance, from JD_SOAK_ACCOUNT (its sign-in
-identifier) and JD_SOAK_PASSWORD. Nothing here sends mail.";
+identifier) and JD_SOAK_PASSWORD. send and fetch use the line's mailbox
+account instead, from JD_REPORT_ACCOUNT and JD_REPORT_PASSWORD. Nothing here
+sends mail.";
 
 /// Let the group write everything this process creates.
 ///
@@ -81,6 +85,8 @@ fn main() -> ExitCode {
         "verify" => cmd_verify(&rest),
         "orchestrate" => cmd_orchestrate(&rest),
         "report" => cmd_report(&rest),
+        "send" => cmd_send(&rest),
+        "fetch" => cmd_fetch(&rest),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -432,6 +438,59 @@ fn cmd_report(rest: &[String]) -> Result<bool, String> {
     let summary = report::summarize(&records);
     print!("{}", report::render(&summary));
     Ok(summary.violations.is_empty())
+}
+
+/// Leave a file in the line's mailbox (`mailbox.rs`), under its own name or
+/// `--name`.
+fn cmd_send(rest: &[String]) -> Result<bool, String> {
+    let args = Args::parse(rest)?;
+    let path = args.first_path("send needs the path of the file to send")?;
+    let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let name = match args.flag("name") {
+        Some(n) => n,
+        None => path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("the file to send has no name")?
+            .to_string(),
+    };
+    let id = with_the_mailbox(&args, |api| mailbox::send(api, &name, &bytes))?;
+    println!("sent {name} ({} bytes) as file {id}", bytes.len());
+    Ok(true)
+}
+
+/// Copy the messages the mailbox holds that `<dir>` does not.
+fn cmd_fetch(rest: &[String]) -> Result<bool, String> {
+    let args = Args::parse(rest)?;
+    let dir = args.first_path("fetch needs the folder to copy messages into")?;
+    let fetched = with_the_mailbox(&args, |api| mailbox::fetch(api, &dir))?;
+    for name in &fetched {
+        println!("{name}");
+    }
+    println!("{} new message(s) in {}", fetched.len(), dir.display());
+    Ok(true)
+}
+
+/// Sign in to the mailbox account, do `work`, and sign out again whatever it
+/// did: a line sends a dozen messages a day, and each sign-in mints a session
+/// the server keeps until it is ended.
+fn with_the_mailbox<T>(
+    args: &Args,
+    work: impl FnOnce(&Client) -> Result<T, String>,
+) -> Result<T, String> {
+    let server = args.flag("server").ok_or("this command needs --server URL")?;
+    let email = std::env::var("JD_REPORT_ACCOUNT").map_err(|_| "JD_REPORT_ACCOUNT is not set")?;
+    let password =
+        std::env::var("JD_REPORT_PASSWORD").map_err(|_| "JD_REPORT_PASSWORD is not set")?;
+    let mut client = Client::new(&server);
+    client
+        .login(&email, &password, "jd-soak mailbox")
+        .map_err(|e| format!("the mailbox would not sign in: {e}"))?;
+    let outcome = work(&client);
+    if let Err(e) = client.logout() {
+        eprintln!("warning: the mailbox session was not ended: {e}");
+    }
+    outcome
 }
 
 // ---------------------------------------------------------------------------

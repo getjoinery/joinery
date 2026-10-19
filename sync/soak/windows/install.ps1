@@ -21,7 +21,16 @@
 # on the account, handed to the Task Scheduler and written nowhere; running
 # this again makes a new one.
 #
+# On a person's own computer (-PersonalComputer, from the kit's
+# install_pc.ps1) three things differ. Automatic updates stay on: it is their
+# computer, and a run an update restarts is ledgered INTERRUPTED. There is no
+# build task: the kit brings its programs built. And the test suite gets its
+# task, as soak-a (run_tests.ps1 says why that account). The two device
+# accounts are also kept off the sign-in screen, where nobody is meant to
+# choose them.
+#
 # Run elevated, from the line's folder:  powershell -File C:\soak-win\install.ps1
+param([switch]$PersonalComputer)
 $ErrorActionPreference = 'Stop'
 $S = 'C:\soak-win'
 $Devices = 'a', 'b'
@@ -63,14 +72,32 @@ foreach ($d in $Devices) {
             -Description "Joinery Drive soak device $d" | Out-Null
         "created account $name"
     }
-    if (-not (Get-LocalGroupMember Administrators | Where-Object { $_.Name -like "*\$name" })) {
-        Add-LocalGroupMember Administrators $name
-    }
+    # Added and told "already", rather than looked up first: listing the
+    # group throws on a member whose account is gone (a computer once in a
+    # domain or Azure AD keeps such entries), and the install would stop there.
+    try { Add-LocalGroupMember Administrators $name -ErrorAction Stop }
+    catch { if ($_.FullyQualifiedErrorId -notlike 'MemberExists*') { throw } }
     Register-Line "SoakWin-device-$d" device.ps1 $d -User $name -Password $plain
     # Linking runs as the device's account too, so the credential lands in
     # that account's Credential Manager, where its daemon will look.
     Register-Line "SoakWin-provision-$d" provision.ps1 $d -User $name -Password $plain
+    if ($PersonalComputer -and $d -eq 'a') {
+        Register-Line SoakWin-Tests run_tests.ps1 -User $name -Password $plain
+        New-Item -ItemType Directory -Force "$S\tests" | Out-Null
+        icacls "$S\tests" /grant "$($name):(OI)(CI)M" | Out-Null
+    }
+    if ($PersonalComputer) {
+        $hide = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\SpecialAccounts\UserList'
+        # Made only when missing: New-Item -Force over a key that exists
+        # empties it, and this one may hold another program's entries.
+        if (-not (Test-Path $hide)) { New-Item $hide -Force | Out-Null }
+        Set-ItemProperty $hide $name 0 -Type DWord
+    }
     $plain = $null
+}
+if ($PersonalComputer) {
+    'automatic updates left as they are; no build task'
+    exit 0
 }
 # Below normal: a build should not slow a run in flight.
 Register-Line SoakWin-Build build.ps1 -Priority 7
