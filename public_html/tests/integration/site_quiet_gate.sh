@@ -203,14 +203,15 @@ bash "$Q" off >/dev/null 2>&1
 chk "off: the forward goes with everything else" "$([ -e "$SD/forward" ] && echo file || echo none):$([ -e "$SD" ] && echo dir || echo nodir)" "none:nodir"
 rm -f "$B/a2enmod"
 
-echo "=== quiet copy: set by the installer, never by on, never cleared by a bare off ==="
+echo "=== quiet copy: set by the installer, never replaced by on, never cleared by a bare off ==="
 . "$TOOLS/_site_state.sh"
 site_state_init qsite
 QKEY="$(printf 'k%.0s' $(seq 32) | base64)"
 site_state_write copy 417 "$QKEY"
 site_state_assert copy >/dev/null 2>&1
 out="$(bash "$Q" on 2>&1)"; rc=$?
-chk "on over a copy: refused" "$rc:$(cat "$SD/state")" "2:quiet copy"
+chk "on over a copy: quiet already, so it passes and the copy state stays (a way back that reached it before it started)" \
+    "$rc:$(cat "$SD/state"):$(grep -c 'quiet already' <<< "$out")" "0:quiet copy:1"
 out="$(bash "$Q" off 2>&1)"; rc=$?
 chk "off over a copy: refused" "$rc:$(cat "$SD/state")" "2:quiet copy"
 chk "the copy remembers its source's node id" "$(cat "$SD/copy_of")" "417"

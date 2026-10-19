@@ -41,7 +41,11 @@ only that the site arrived:
 
 - **Q1 — The Hetzner Cloud project** (`site_copy_anything_to_anything.md` Q1). C5
   and C6 need it, and Done when needs C5 and C6. Without it, copy is not declared
-  complete.
+  complete. **Answered 2026-10-19:** the owner made a Hetzner test project; its
+  token is on dev at `config/hetzner_test_token`.
+- **Cloudflare zone for the proxy runs (answered 2026-10-19).** The owner registered
+  joinerytest2.com on Cloudflare for C2, C4b, C14, C15 and C19; a token scoped to
+  that zone alone is on dev at `config/cloudflare_test_token`.
 - **Q2 — A second Linode account for C15**, granted to the test plane by OAuth as a
   customer's own account. C15 needs it.
 

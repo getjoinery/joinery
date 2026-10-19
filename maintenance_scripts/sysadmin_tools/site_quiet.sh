@@ -3,6 +3,8 @@
 # site_quiet.sh - freeze this site for a switch-over, or let it run again
 # (specs/site_copy.md WP5). The agent's site_quiet word runs this file.
 #
+# Version: 1.3 - on, on a dormant copy, holds its quiet and passes instead of refusing: a way back that
+#                reached a copy before it started as the site stopped there
 # Version: 1.2 - on waits for mail already on its way in (site_state_wait_mail) before it returns: the final
 #               backup runs next (B4)
 # Version: 1.1 - forward ADDRESS: a frozen site forwards its visitors to its copy while a DNS switch settles
@@ -25,7 +27,8 @@
 # sets or removes the state file and asserts or clears the measures at once,
 # rather than at the converger's next tick.
 #
-# `on` never sets `quiet copy`: only the installer does, at a dormant install.
+# `on` never sets `quiet copy`: only the installer does, at a dormant install. On a
+# copy, `on` leaves that state as it is and holds its measures.
 # And a copy is never cleared by a bare `off`, so a copy can never go live
 # beside its source.
 #
@@ -95,8 +98,13 @@ fi
 
 if [[ "${ACTION}" == "on" ]]; then
     if [[ "${REASON}" == "copy" ]]; then
-        echo "site_quiet: ${SITENAME} is a copy (quiet copy); only the installer sets that state, and on does not replace it - refused" >&2
-        exit 2
+        # A dormant copy is already quiet, and more so than a switch-over freeze.
+        # Its state is never written over (only the installer sets it), so on
+        # holds its measures and passes: a way back that reaches a copy which
+        # holds the site's node id but never started as the site asks for this.
+        echo "site_quiet: ${SITENAME} is a copy (quiet copy), quiet already; left as it is"
+        site_state_assert copy || exit 1
+        exit 0
     fi
     site_state_write switchover || { echo "site_quiet: cannot write ${SS_STATE}" >&2; exit 1; }
     site_state_set_forward ""

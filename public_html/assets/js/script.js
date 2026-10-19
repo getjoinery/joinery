@@ -129,7 +129,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== Smooth scroll for anchor links =====
     document.querySelectorAll('a[href^="#"]').forEach(a => {
         a.addEventListener('click', (e) => {
-            const target = document.querySelector(a.getAttribute('href'));
+            // Read at click time: a script may have pointed the link elsewhere
+            // since (a download's blob: address), and a bare "#" names nothing.
+            const href = a.getAttribute('href') || '';
+            if (href.length < 2 || href.charAt(0) !== '#') return;
+            let target = null;
+            try { target = document.getElementById(decodeURIComponent(href.slice(1))); } catch (err) { return; }
             if (target) {
                 e.preventDefault();
                 target.scrollIntoView({ behavior: 'smooth', block: 'start' });
