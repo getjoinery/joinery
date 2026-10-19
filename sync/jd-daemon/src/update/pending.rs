@@ -206,7 +206,7 @@ pub fn confirm(path: &Path, running: &str) -> Option<String> {
     if pending.phase != Phase::Swapped || pending.to != running {
         return None;
     }
-    let _ = std::fs::remove_dir_all(&pending.staging);
+    super::remove_staging(&pending.staging);
     let _ = std::fs::remove_file(path);
     Some(pending.from)
 }
@@ -218,7 +218,7 @@ pub fn take_rollback(path: &Path, running: &str) -> Option<(String, String)> {
     if pending.phase != Phase::RolledBack || pending.from != running {
         return None;
     }
-    let _ = std::fs::remove_dir_all(&pending.staging);
+    super::remove_staging(&pending.staging);
     let _ = std::fs::remove_file(path);
     Some((
         pending.to,

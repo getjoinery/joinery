@@ -561,6 +561,24 @@ pub struct Staged {
 /// update that was interrupted can be found and removed.
 pub const STAGING_PREFIX: &str = ".jd-update-";
 
+/// How long `remove_staging` keeps trying.
+const STAGING_REMOVAL: Duration = Duration::from_secs(2);
+
+/// Remove a staging folder, trying again for a moment when it will not go.
+///
+/// On Windows a program that has just exited stays locked for a moment after
+/// it ends, and so does one the virus scanner is still reading: the folder of
+/// an update refused straight after its new program answered `--version`
+/// would not delete, and stood next to the install until the next check's
+/// sweep (seen in the Windows VM). Anything still locked after the moment is
+/// left to that sweep, as before.
+pub(crate) fn remove_staging(dir: &Path) {
+    let deadline = Instant::now() + STAGING_REMOVAL;
+    while std::fs::remove_dir_all(dir).is_err() && dir.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Unpack a downloaded payload next to the live copy and check it.
 ///
 /// `daemon` is the running daemon's own path, which says where inside the
@@ -575,7 +593,7 @@ pub fn stage(
         .staging_parent()
         .ok_or_else(|| UpdateError::Local(format!("this copy is {}", install.describe())))?;
     let staging = parent.join(format!("{STAGING_PREFIX}{version}"));
-    let _ = std::fs::remove_dir_all(&staging);
+    remove_staging(&staging);
     let staged = (|| {
         let file =
             std::fs::File::open(archive).map_err(|e| local("cannot open the download", e))?;
@@ -592,7 +610,7 @@ pub fn stage(
         })
     })();
     if staged.is_err() {
-        let _ = std::fs::remove_dir_all(&staging);
+        remove_staging(&staging);
     }
     staged
 }
@@ -1405,6 +1423,40 @@ pub fn on_start(paths: &jd_platform::Paths) -> pending::Start {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_staging_folder_is_removed_with_what_it_holds() {
+        let dir = std::env::temp_dir().join(format!("jd-staging-rm-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("previous")).unwrap();
+        std::fs::write(dir.join("previous").join("joinery-drive"), b"old").unwrap();
+        remove_staging(&dir);
+        assert!(!dir.exists());
+    }
+
+    /// A folder that cannot be removed is given up on after the moment, not
+    /// waited on for ever: the sweep is there for it.
+    #[cfg(unix)]
+    #[test]
+    fn a_staging_folder_that_will_not_go_is_left_after_a_moment() {
+        use std::os::unix::fs::PermissionsExt;
+        let parent = std::env::temp_dir().join(format!("jd-staging-stuck-{}", std::process::id()));
+        let dir = parent.join(".jd-update-9.9.9");
+        std::fs::create_dir_all(dir.join("previous")).unwrap();
+        std::fs::write(dir.join("previous").join("joinery-drive"), b"old").unwrap();
+        // `previous` cannot be removed from a folder that is not writable
+        // (the file inside it can: `previous` itself still is).
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let started = Instant::now();
+        remove_staging(&dir);
+        let took = started.elapsed();
+        let stuck = dir.join("previous").exists();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::remove_dir_all(&parent);
+        if stuck {
+            // As root nothing is refused, and this asks nothing then.
+            assert!(took >= STAGING_REMOVAL && took < STAGING_REMOVAL * 3, "{took:?}");
+        }
+    }
 
     fn newer(artifact: bool) -> Decision {
         Decision::Newer {
