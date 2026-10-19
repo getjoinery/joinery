@@ -6,6 +6,9 @@
  * It works in conjunction with RouteHelper to cache and serve static HTML versions
  * of public pages, dramatically improving performance for anonymous users.
  *
+ * @version 1.5 - the sign-in and password-reset steps are excluded paths: a visitor halfway through
+ *                one is not signed in, so /verify-totp was cached with one account's factor choices
+ *                and served to every later sign-in
  * @version 1.4 - skipThisRequest(): a page that must never be cached (a route's
  *                'static_cache' => false, or the view itself) leaves no file and
  *                no index entry — a search page would otherwise add one per query
@@ -316,6 +319,20 @@ class StaticPageCache {
             '/logout',
             '/register',
             '/reset-password',
+            // The steps of a sign-in or a password reset. A visitor halfway
+            // through one is not signed in, so nothing else keeps these pages
+            // out of the cache, and each renders that visitor's own pending
+            // state: which second factors their account holds, the reset their
+            // emailed link opened. One copy served to the next visitor offers
+            // them the wrong factors, and can leave them no way to finish.
+            '/verify-totp',
+            '/verify-stepup',
+            '/password-reset-1',
+            '/password-reset-2',
+            '/password-reset-2fa',
+            '/password-reset-totp',
+            '/password-set',
+            '/recovery-verify',
             '/ajax',
             '/api',
             '/admin',

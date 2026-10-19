@@ -121,6 +121,21 @@ check(StaticPageCache::checkCache('/list', ['a' => ['1']]) === 'nostatic',
 check(StaticPageCache::checkCache('/list', ['a' => ['2']]) === 'nostatic',
     'so ?a[]=1 and ?a[]=2 can never share a file');
 
+section('the steps of a sign-in or a password reset are never cached or served');
+
+// A visitor halfway through a sign-in is not signed in, so only the excluded
+// list keeps these pages out. /verify-totp cached with one account's factor
+// choices (passkey only) was served to every later sign-in, and an account
+// that proves itself with an authenticator app was offered no way to finish.
+foreach (array('/verify-totp', '/verify-stepup', '/password-reset-1', '/password-reset-2', '/password-reset-2fa',
+        '/password-reset-totp', '/password-set', '/recovery-verify') as $step) {
+    check(StaticPageCache::shouldCache($step, [], $html) === false && StaticPageCache::shouldIgnore($step, []),
+        "{$step} is not cached, and no verdict is written down for it");
+}
+check(StaticPageCache::createCache('/verify-totp', [], $html) !== false, 'an entry made before the path was excluded');
+check(StaticPageCache::checkCache('/verify-totp', []) === 'nostatic', 'is never served');
+check(StaticPageCache::getCacheMetadata('/verify-totp', []) === null, 'and is dropped from the index');
+
 section('/_config cannot reach the config entry');
 
 check(StaticPageCache::CONFIG_KEY !== '_config' && strpos(StaticPageCache::CONFIG_KEY, '.') !== false,

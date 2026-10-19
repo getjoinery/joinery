@@ -19,27 +19,27 @@ function passkey_register_options_logic(array $input): LogicResult {
 
 	// A session thief must not be able to add a persistent passkey quietly -
 	// enrollment always demands proof beyond the session cookie. With at
-	// least one credential enrolled, that proof is a fresh step-up assertion;
-	// for the very first passkey (nothing to step up with yet) it is the
-	// account password. Accounts with no password at all (e.g. OAuth-only)
-	// have only the session as an anchor for the bootstrap enrollment.
-	if (count($service->listCredentials($user)) > 0) {
-		if (!$service->hasRecentStepUp()) {
-			return LogicResult::error('Please re-confirm with an existing passkey before adding a new one.');
-		}
-	} elseif ($user->get('usr_password')) {
+	// least one credential enrolled, that proof is a fresh second-factor
+	// confirmation (below); for the very first passkey (nothing to step up
+	// with yet) it is the account password. Accounts with no password at all
+	// (e.g. OAuth-only) have only the session as an anchor for the bootstrap
+	// enrollment.
+	$has_credentials = count($service->listCredentials($user)) > 0;
+	if (!$has_credentials && $user->get('usr_password')) {
 		$current_password = isset($input['current_password']) ? (string)$input['current_password'] : '';
 		if ($current_password === '' || !$user->check_password($current_password)) {
 			return LogicResult::error('Please confirm your current password to add your first passkey.');
 		}
 	}
 
-	// Beyond the per-case proof above, an account that already holds a second
-	// factor (e.g. a TOTP user enrolling their FIRST passkey) must have a recent
-	// second-factor step-up (specs/mailbox_security_levels.md § 5.5). Returning
-	// the flag before the WebAuthn dialog means the prompt precedes the ceremony
-	// rather than rejecting it after. A no-op when no factor is enrolled.
-	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
+	// An account that already holds a passkey or another second factor (e.g. a
+	// TOTP user enrolling their FIRST passkey) must have a recent second-factor
+	// step-up (specs/mailbox_security_levels.md § 5.5). Either factor confirms
+	// it: someone replacing a lost passkey has only their authenticator app.
+	// Returning the flag before the WebAuthn dialog means the prompt precedes
+	// the ceremony rather than rejecting it after. A no-op when no factor is
+	// enrolled.
+	if (($has_credentials || $session->user_has_second_factor($user)) && !$session->has_recent_second_factor()) {
 		return LogicResult::render(['second_factor_required' => true,
 			'error' => 'Confirm your identity with your second factor, then try again.']);
 	}

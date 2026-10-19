@@ -11,6 +11,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  * old codes stay live until the new set is stored, so one of them can be the
  * unlocker that replaces them all.
  *
+ * @version 2.1 - a missing step-up answers second_factor_required, which the step-up page satisfies with either factor
  * @version 2.0
  */
 function vault_regenerate_codes_logic(array $input): LogicResult {
@@ -34,7 +35,10 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 	}
 
 	if ($session->step_up_outstanding($user)) {
-		return LogicResult::error('Please re-confirm with an existing passkey before regenerating your recovery codes.');
+		// The flag sends the page to the step-up, which takes a passkey or an
+		// authenticator code; it then comes back and the action is tried again.
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
 	}
 
 	// A wrapping must be tagged with a single truthful generation, and in a

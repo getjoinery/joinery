@@ -24,7 +24,10 @@ function vault_passkey_deactivate_logic(array $input): LogicResult {
 	}
 
 	if ($session->step_up_outstanding($user)) {
-		return LogicResult::error('Please re-confirm with an existing passkey before deactivating one for your vault.');
+		// The flag sends the page to the step-up, which takes a passkey or an
+		// authenticator code; it then comes back and the action is tried again.
+		return LogicResult::render(['second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.']);
 	}
 
 	$credential_id = isset($input['credential_id']) ? intval($input['credential_id']) : 0;

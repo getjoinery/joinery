@@ -4,6 +4,8 @@
 # configured and RUNNING, and Apache logging the real client, so that a ban
 # lands on an attacker and never on a proxy.
 #
+# Version: 1.25 - The pinned kernel and network settings are written into UFW's own sysctl file too, which
+#                set log_martians back to 0 at every firewall start (every boot) until the next converger run
 # Version: 1.24 - Every run drops any forwarder past its end (trust_forwarder.sh expire), so a trust a
 #                switch-over never took back ends on time (specs/site_copy_anything_to_anything.md D1)
 # Version: 1.23 - On a host with the site container engine, every run installs the nightly replacement of
@@ -1157,6 +1159,27 @@ write_sysctl_file() {
     # -e: a setting this kernel does not have is passed over, not an error.
     sysctl -e -q -p "${file}" >/dev/null 2>&1 || true
 }
+# UFW applies a sysctl file of its own each time the firewall starts (every
+# boot, every ufw reload), after the files above were applied, and Ubuntu's copy
+# sets log_martians to 0. A pinned setting that file also names is written there
+# with the pinned value, so starting the firewall never loosens one. Its other
+# lines, and the file where UFW is not installed, are left as they are.
+UFW_SYSCTL_CONF="${FS_ROOT}/etc/ufw/sysctl.conf"
+align_ufw_sysctl() {
+    local candidate line key
+    [[ -f "${UFW_SYSCTL_CONF}" ]] || return 0
+    candidate="$(mktemp)"
+    cp "${UFW_SYSCTL_CONF}" "${candidate}"
+    for line in "${KERNEL_SETTINGS[@]}" "${NETWORK_SETTINGS[@]}"; do
+        key="${line%% = *}"
+        # UFW spells a key with slashes: net/ipv4/conf/all/log_martians.
+        sed -i -E "s|^([[:space:]]*)${key//./\/}[[:space:]]*=.*$|\1${key//./\/}=${line#* = }|" "${candidate}"
+    done
+    if install_file "${UFW_SYSCTL_CONF}" "${candidate}"; then
+        say "wrote the pinned values into ${UFW_SYSCTL_CONF}"
+    fi
+    rm -f "${candidate}"
+}
 if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
     if [[ ${#KERNEL_SETTINGS[@]} -eq 0 ]]; then
         # Never an empty file in place of the settings.
@@ -1165,6 +1188,7 @@ if [[ "${IN_CONTAINER}" == 0 && -d "${FS_ROOT}/etc/sysctl.d" ]]; then
     else
         write_sysctl_file "${KERNEL_SYSCTL_CONF}" "What an unprivileged process may reach of the kernel, and the inotify instances every site's www-data shares." "${KERNEL_SETTINGS[@]}"
         write_sysctl_file "${NETWORK_SYSCTL_CONF}" "No spoofed source, redirect or source route accepted; SYN floods met with cookies." "${NETWORK_SETTINGS[@]}"
+        align_ufw_sysctl
         # Each value read back from the running kernel.
         if [[ "${RUN_SYSTEM}" == 1 ]]; then
             while read -r state key got want; do
