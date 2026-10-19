@@ -706,4 +706,28 @@ return [
 			error_log('sm_022: ' . (int)$n . ' copy(ies) onto a host now say their source is a running site.');
 		},
 	],
+	[
+		// A provision's instance addresses are stored canonical
+		// (customer_cloud_provisions 1.25); one saved as the provider spelled it
+		// (an IPv6 with leading zeros) is rewritten, so its machine's join is
+		// found and approved.
+		'id' => 'sm_023_instance_addresses_canonical',
+		'version' => '1.30.87',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$rows = $dblink->query("SELECT cvp_customer_cloud_provision_id, cvp_instance_ip, cvp_instance_ipv6 FROM cvp_customer_cloud_provisions
+				WHERE coalesce(cvp_instance_ip, '') <> '' OR coalesce(cvp_instance_ipv6, '') <> ''")->fetchAll(PDO::FETCH_ASSOC);
+			$set = $dblink->prepare('UPDATE cvp_customer_cloud_provisions SET cvp_instance_ip = ?, cvp_instance_ipv6 = ? WHERE cvp_customer_cloud_provision_id = ?');
+			$n = 0;
+			foreach ($rows as $r) {
+				$ip = $r['cvp_instance_ip'] !== null ? CustomerCloudProvision::normalize_address((string)$r['cvp_instance_ip']) : null;
+				$ip6 = $r['cvp_instance_ipv6'] !== null ? CustomerCloudProvision::normalize_address((string)$r['cvp_instance_ipv6']) : null;
+				if ($ip !== $r['cvp_instance_ip'] || $ip6 !== $r['cvp_instance_ipv6']) {
+					$set->execute(array($ip, $ip6, (int)$r['cvp_customer_cloud_provision_id']));
+					$n++;
+				}
+			}
+			error_log('sm_023: ' . $n . ' provision(s) now hold their instance addresses canonical.');
+		},
+	],
 ];

@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.29 - stale_release(): a copy made at an older release than its site's is refused by the Refresh
+ *                before anything moves and named on its tab; the switch-over asks the site its release first
  * @version 1.28 - review of 1.27 (B2-B9, B12): the copy is proven at its own address whether or not anything
  *                 forwards; a forward needs a shared address family, or the switch notes why not; TTLs are lowered
  *                 last and put back by any way back; a settle that stops can be retried or kept; any old server
@@ -1342,6 +1344,14 @@ class SiteCopyRunner {
 			if (!self::copy_row($copy, false)) {
 				throw new SiteCopyException('This copy has no server yet. Discard it and start again.');
 			}
+			// Asked before anything moves: a site that took a release since the
+			// copy was made is refused here, with the copy left as it was.
+			$source = self::source_row($copy);
+			self::confirm_source_release($source);
+			$stale = self::stale_release($copy, $source);
+			if ($stale !== null) {
+				throw new SiteCopyException($stale);
+			}
 			self::begin_run($copy);
 			// Its first step goes now, not at the next task tick (B52).
 			self::advance_locked($copy);
@@ -1609,6 +1619,31 @@ class SiteCopyRunner {
 	}
 
 	/**
+	 * Why this copy can no longer be refreshed or switched to, or null: it runs
+	 * the release it was installed at, and its site has since taken a newer one
+	 * (a copy must run its source's exact release). The site's release on record
+	 * is what is compared; the Refresh and the switch-over ask the site itself
+	 * first.
+	 */
+	public static function stale_release(SiteCopy $copy, ?ManagedNode $source = null): ?string {
+		$release = (string)$copy->get('scp_release');
+		if ($release === '') {
+			return null;
+		}
+		try {
+			$source = $source ?: self::source_row($copy);
+		} catch (Exception $e) {
+			return null;
+		}
+		$version = (string)$source->get('mgn_joinery_version');
+		if ($version === '' || $version === $release) {
+			return null;
+		}
+		return "The site now runs release {$version}, and this copy was made at {$release}. A copy must run its "
+			. 'site\'s exact release, so it can no longer be refreshed or switched to: discard it and copy again.';
+	}
+
+	/**
 	 * The copy installs its source's exact release, so the release on record
 	 * is asked of the site itself first: one upgraded outside this node is on
 	 * record at its old release until a status check (B48). A site that does
@@ -1631,10 +1666,9 @@ class SiteCopyRunner {
 			if ($why) {
 				throw new SiteCopyException('The source cannot be copied now: ' . implode(' ', $why));
 			}
-			$version = (string)$source->get('mgn_joinery_version');
-			if ($version !== (string)$copy->get('scp_release')) {
-				throw new SiteCopyException("The source now runs release {$version}, and this copy was installed at "
-					. $copy->get('scp_release') . '. A copy must run its source\'s exact release; discard it and copy again.');
+			$stale = self::stale_release($copy, $source);
+			if ($stale !== null) {
+				throw new SiteCopyException($stale);
 			}
 			$node = self::copy_row($copy, true);
 			if (!$node || trim((string)$node->get('mgn_install_state')) !== 'copy') {
@@ -2315,9 +2349,9 @@ class SiteCopyRunner {
 			$why[] = 'The copy: ' . AgentVocabulary::needs_newer_agent_text($node, $missing);
 		}
 		$why = array_merge($why, self::host_word_refusals($copy, $source));
-		if ((string)$source->get('mgn_joinery_version') !== (string)$copy->get('scp_release')) {
-			$why[] = 'The site now runs release ' . $source->get('mgn_joinery_version') . ', and the copy was installed at '
-				. $copy->get('scp_release') . '. Discard the copy and copy again.';
+		$stale = self::stale_release($copy, $source);
+		if ($stale !== null) {
+			$why[] = $stale;
 		}
 		if (!preg_match('#^/\.joinery-look/[0-9a-f]{32}$#', (string)$copy->get('scp_look_path'))) {
 			$why[] = 'The copy reported no look path. The switch-over asks for it at the site\'s name, because only the '
@@ -2388,6 +2422,13 @@ class SiteCopyRunner {
 		$template = array();
 		try {
 			$copy->load();
+			// The site's release as it answers now: one upgraded outside this
+			// node is on record at its old release until a status check.
+			try {
+				self::confirm_source_release(self::source_row($copy));
+			} catch (Exception $e) {
+				// switch_refusals() names a source that is gone.
+			}
 			$why = self::switch_refusals($copy);
 			if ($why) {
 				throw new SiteCopyException('This copy cannot switch over yet: ' . implode(' ', $why));

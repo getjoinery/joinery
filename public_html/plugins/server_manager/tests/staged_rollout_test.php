@@ -417,4 +417,41 @@ check((string)$pr->get('srl_status') === StagedRollout::STATUS_HALTED
 	&& strpos((string)$pr->get('srl_halt_reason'), '/admin/admin_users (as admin) answers 500') !== false,
 	'a page that answers an error it did not before halts the rollout at that node', (string)$pr->get('srl_halt_reason'));
 
+section('A copy being made holds its site\'s update');
+
+// The copy installs the release its site runs and must run that release; an
+// update under it would leave it stale before it is used. The node's step
+// waits, never fails, and goes ahead once the copy is dormant.
+$held_copy = new SiteCopy(NULL);
+$held_copy->set('scp_source_node_id', (int)$a1->key);
+$held_copy->set('scp_release', '0.8.472');
+$held_copy->set('scp_status', SiteCopy::STATUS_COPYING);
+$held_copy->save();
+harness_register_row('scp_site_copies', 'scp_site_copy_id', $held_copy->key);
+check(strpos((string)StagedRolloutRunner::copy_hold($a1), 'held: a copy of this site is copying') === 0, 'a site whose copy is copying is held',
+	(string)StagedRolloutRunner::copy_hold($a1));
+$h = StagedRolloutRunner::start(array($a1->key), null);
+harness_register_row('srl_staged_rollouts', 'srl_staged_rollout_id', $h->key);
+StagedRolloutRunner::advance($h); $h->load();
+$hs = $h->steps()[0];
+check(empty($hs['job_id']) && $hs['verdict'] === 'running' && strpos((string)$hs['reason'], 'held:') === 0 && $h->is_running(),
+	'its step waits with no apply queued, and says why; the rollout does not halt', var_export($hs, true));
+$held_copy->set('scp_status', SiteCopy::STATUS_DORMANT);
+$held_copy->save();
+check(StagedRolloutRunner::copy_hold($a1) === null, 'a dormant copy holds nothing');
+StagedRolloutRunner::advance($h); $h->load();
+check(!empty($h->steps()[0]['job_id']), 'once the copy is dormant the apply is queued');
+harness_register_row('mjb_management_jobs', 'mjb_management_job_id', $h->steps()[0]['job_id']);
+StagedRolloutRunner::stop($h, null);
+foreach (array(SiteCopy::STATUS_HALTED => null, SiteCopy::STATUS_SWITCHED => 'held:', SiteCopy::STATUS_SETTLING => 'held:') as $st => $want) {
+	$held_copy->set('scp_status', $st);
+	$held_copy->save();
+	$got = StagedRolloutRunner::copy_hold($a1);
+	check($want === null ? $got === null : strpos((string)$got, $want) === 0,
+		"a copy that is {$st}: " . ($want === null ? 'holds nothing' : 'holds the update, the way back still open'), (string)$got);
+}
+$held_copy->set('scp_status', SiteCopy::STATUS_DISCARDED);
+$held_copy->save();
+
+
 harness_finish();

@@ -530,12 +530,24 @@ check(strpos($why, 'of memory') !== false, 'a 1 GB copy of a 4 GB bare-metal ser
 $big->set('mgn_container_name', 'scpsite');
 check(SiteCopyRunner::fit_refusal($copy, $big, $small) === null, 'a 1 GB copy of a container site on a 4 GB shared server is not');
 
-// The source moved to another release: the copy cannot follow.
+// The source moved to another release: the copy cannot follow. The Refresh
+// is refused before anything moves, and the copy is left as it was.
 $src->set('mgn_joinery_version', '0.8.473');
 $src->save();
-SiteCopyRunner::copy_again($copy, null); $copy->load();
-check($copy->status() === SiteCopy::STATUS_HALTED && strpos((string)$copy->get('scp_halt_reason'), 'exact release') !== false,
-	'a source on another release than its copy\'s stops the run: discard and copy again', (string)$copy->get('scp_halt_reason'));
+$before = array($copy->status(), (string)$copy->get('scp_halt_reason'), json_encode($copy->steps()));
+$refused = '';
+try { SiteCopyRunner::copy_again($copy, null); } catch (SiteCopyException $e) { $refused = $e->getMessage(); }
+$copy->load();
+check(strpos($refused, 'exact release') !== false && strpos($refused, '0.8.473') !== false && strpos($refused, '0.8.472') !== false,
+	'a Refresh of a copy made at an older release than its site\'s is refused, naming both releases', $refused);
+check(array($copy->status(), (string)$copy->get('scp_halt_reason'), json_encode($copy->steps())) === $before,
+	'and the copy is left exactly as it was');
+check(SiteCopyRunner::stale_release($copy) === $refused, 'its tab says the same, from the same rule');
+$src->set('mgn_joinery_version', '0.8.472');
+$src->save();
+check(SiteCopyRunner::stale_release($copy) === null, 'a copy at its site\'s release is not stale');
+$src->set('mgn_joinery_version', '0.8.473');
+$src->save();
 
 // Discard while the source waits for its owner to approve the export (B42):
 // the export job is cancelled, and the source, asking whether the job is still

@@ -18,6 +18,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.24 - a dormant copy made at an older release than its site's says so at once (stale_release)
  * @version 1.23 - a settle that stopped offers to try letting go of the old server again, or to keep the
  *                 switch-over as it is
  * @version 1.22 - every way the address can move is shown for each target before the copy is made (D6); the
@@ -509,6 +510,12 @@ if ($site_copy->get('scp_last_copied_time')) {
 }
 if ($copy_status === SiteCopy::STATUS_HALTED && $site_copy->get('scp_halt_reason')) {
 	echo '<div class="alert alert-warning"><strong>Stopped.</strong> ' . $copy_h($site_copy->get('scp_halt_reason')) . '</div>';
+}
+// A site that took a release since its copy was made: said as soon as it is
+// known, not first at the Refresh or the switch-over.
+$copy_stale = $copy_status === SiteCopy::STATUS_DORMANT ? SiteCopyRunner::stale_release($site_copy) : null;
+if ($copy_stale !== null) {
+	echo '<div class="alert alert-warning"><strong>This copy is out of date.</strong> ' . $copy_h($copy_stale) . '</div>';
 }
 
 if ($copy_status === SiteCopy::STATUS_WAITING) {
