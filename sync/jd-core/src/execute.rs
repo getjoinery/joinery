@@ -255,12 +255,28 @@ pub fn journal(
         // Tagged with this device, so a peer never takes the park for one
         // nobody is coming back for (see `order::tagged_swap_name`).
         let scratch = crate::order::tagged_swap_name(&store.park_tag(&token)?, &token);
-        ids.push(store.queue_op(
-            side,
-            *entity,
-            &json!({ "name": scratch }).to_string(),
-            &key_for(),
-        )?);
+        let mut params = json!({ "name": scratch });
+        // A server park is its finisher's first call, so it starts where the
+        // finisher was decided against and says so as the finisher does: a
+        // peer's rename landing before the park is then refused over, not
+        // renamed over unseen. A disk park renames what is on the disk now.
+        //
+        // Except from a scratch name there: that is a step inside another
+        // operation, not a placement anybody chose, so the park starts from
+        // it. A plain move against an entry wearing one waits for the park to
+        // end (`waiting_on_a_park`); a cycle's park cannot wait, being what
+        // breaks the cycle. Asked about the scratch name, a peer that has
+        // since given the entry a real name still refuses it.
+        if side == "park_remote" {
+            if let Some(from) = &ordered[finisher].from {
+                let start = match store.get_entry(*entity)? {
+                    Some(e) if e.remote.parent == from.parent && e.remote.name.starts_with(crate::order::SWAP_PREFIX) => e.remote,
+                    _ => from.clone(),
+                };
+                params["from"] = place(&start);
+            }
+        }
+        ids.push(store.queue_op(side, *entity, &params.to_string(), &key_for())?);
     }
 
     for (op, key) in ordered.iter().zip(keys) {
@@ -993,9 +1009,11 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 parent: entry.remote.parent,
                 name: read_place(&params)?.name,
             };
-            // No recorded starting point, and none wanted: parking builds its
-            // target from where the entry is right now, so it cannot be stale.
-            move_remote(env, op, to, None)
+            // Where its finisher was decided against (`journal`), asked of the
+            // server with the rename. A park journaled before it was recorded
+            // says nothing.
+            let from = params.get("from").and_then(|v| read_place(v).ok());
+            move_remote(env, op, to, from)
         }
         "park_local" => {
             let entry = match env.store.get_entry(op.entity)? {
@@ -4971,6 +4989,22 @@ fn is_this_ops_park(env: &ExecEnv, op: &Op, name: &str) -> Result<bool, ExecErro
         .is_some_and(|tag| name == crate::order::tagged_swap_name(&tag, &op.idempotency_key)))
 }
 
+/// Is the planner's park for this move still queued, unanswered? It may have
+/// landed all the same.
+fn its_park_is_unanswered(env: &ExecEnv, op: &Op) -> Result<bool, ExecError> {
+    for raw in env.store.queued_params_of("park_remote", op.entity, op.op_id)? {
+        let name = serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|p| p.get("name").and_then(Value::as_str).map(str::to_owned));
+        if let Some(name) = name {
+            if is_this_ops_park(env, op, &name)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Apply this computer's move to the server.
 fn move_remote(
     env: &ExecEnv,
@@ -4994,8 +5028,11 @@ fn move_remote(
     // last walk saw it. Read from the record, a park that landed unheard
     // after this op's own rename had landed looked like that rename, half
     // done: the move finished with the reparent alone and left the file under
-    // the scratch name for good (hidden kill2 75122).
-    if op.attempts > 0 {
+    // the scratch name for good (hidden kill2 75122). And a first attempt
+    // whose park is still queued asks too: the park ran this round and its
+    // answer was lost, so this move would say it starts at a name the server
+    // no longer has, and be refused as overtaken by its own park.
+    if op.attempts > 0 || its_park_is_unanswered(env, op)? {
         if let Some((_, state)) = crate::pass::stat_all(env, &[op.entity])?.into_iter().next() {
             crate::pass::absorb_remote(env, op.entity, &state)?;
             if let Some(fresh) = env.store.get_entry(op.entity)? {

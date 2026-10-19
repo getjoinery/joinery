@@ -726,6 +726,14 @@ operation, never a placement anyone agreed on. The planner mints one to break a
 rename cycle and a remote move mints one as its last resort when both orders of
 rename-and-reparent are refused; the operation that minted it knows its own park
 by its key and finishes from there, and the park is recorded as `remote` alone.
+The planner's park says where its finisher was decided against, as the
+finisher does, so a peer's rename that reached the server first refuses it
+with `moved_since`. An entry standing under another operation's scratch name
+in that folder is parked from that name, since nobody chose it; a peer that
+has since moved it on still refuses the park. A finisher whose park is still
+unanswered asks the server where the entry is before its first call: the park
+may have landed with its answer lost, and the finisher then starts from the
+scratch name.
 A move is two calls, rename and reparent, and an op retried between them
 recognises its own half-done work the same way: the new name in the old folder,
 or the old name in the new one, is its own and it finishes from there rather
