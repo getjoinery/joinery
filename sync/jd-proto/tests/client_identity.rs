@@ -6,7 +6,9 @@
 //! itself as `joinery-sync-linux` could only be stopped by stopping every Linux
 //! machine with it, so the identifier is decided by the compile target.
 
-use std::io::{Read, Write};
+mod common;
+
+use std::io::Write;
 use std::net::TcpListener;
 
 /// Accept one request, hand its raw head back, and refuse it the way the
@@ -20,15 +22,7 @@ fn a_gate_that_refuses_and_reports_the_request() -> (String, std::sync::mpsc::Re
         let Ok((mut sock, _)) = listener.accept() else {
             return;
         };
-        let mut head = Vec::new();
-        let mut buf = [0u8; 4096];
-        while !head.windows(4).any(|w| w == b"\r\n\r\n") {
-            match sock.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => head.extend_from_slice(&buf[..n]),
-            }
-        }
-        let _ = tx.send(String::from_utf8_lossy(&head).to_string());
+        let _ = tx.send(common::read_request(&mut sock));
 
         // The envelope api/apiv1.php's api_error() writes for the gate.
         let body = r#"{"api_version":"1.0","errortype":"UpgradeRequired","error":"A newer version of this app is required.","data":{}}"#;
