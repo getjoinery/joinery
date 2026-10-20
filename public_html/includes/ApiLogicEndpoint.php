@@ -30,7 +30,10 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.8.1
+ * @version 1.8.2
+ * @changelog 1.8.2 - A sessionless action presented with a key is metered by address here:
+ *   apiv1.php defers a keyed action request's metering until its key authenticates,
+ *   which a sessionless action never waits for.
  * @changelog 1.8.1 - actionCatalog() swallows what a logic file prints on include, so a page or a
  *   JSON answer that reads the catalog does not start with it.
  * @changelog 1.8.0 - actionCatalog() (moved here from apiv1.php's GET actions
@@ -286,7 +289,32 @@ class ApiLogicEndpoint {
 			api_error($action_label . ' is not available to an app credential', 'AuthenticationError', 403);
 		}
 
+		// apiv1.php meters a keyed action request after its key authenticates,
+		// which a sessionless action never waits for. A key header must not
+		// switch the address limit off for one, so it is metered here instead.
+		if (self::presentsKey()) {
+			$settings = Globalvars::get_instance();
+			$limit  = (int)($settings->get_setting('api_rate_limit_requests') ?: 1000);
+			$window = (int)($settings->get_setting('api_rate_limit_window') ?: 3600);
+			$state = RequestLogger::address_rate_limit_state('api', $limit, $window);
+			if (!$state['allowed']) {
+				api_rate_limited($state, 'This address', $limit, $window);
+			}
+		}
+
 		self::executeAction($action_label, $meta, $logic_function, NULL);
+	}
+
+	/**
+	 * Whether the request carries both key headers: apiv1.php's key-shaped
+	 * request, and ApiAuth's own test for a key request.
+	 */
+	protected static function presentsKey(): bool {
+		$found = array();
+		foreach (getallheaders() as $name => $value) {
+			$found[str_replace('-', '_', strtolower($name))] = $value;
+		}
+		return !empty($found['public_key']) && !empty($found['secret_key']);
 	}
 
 	/** Whether the request carries the app-access headers (ApiAuth § App credentials). */

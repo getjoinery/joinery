@@ -826,8 +826,9 @@ Who is counted depends on the credential:
 
 | Limit | Counted per | Threshold | Window | Setting |
 |-------|-------------|-----------|--------|---------|
-| General requests (key-based and keyless) | IP address | 1,000 | Per hour | `api_rate_limit_requests` / `_window` |
+| General requests (machine keys and keyless) | IP address | 1,000 | Per hour | `api_rate_limit_requests` / `_window` |
 | Requests from a signed-in browser session | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
+| Requests on a session key (a linked desktop, a phone app), on every route | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
 | Failed auth attempts | IP address | 10 | Per 15 minutes | `api_auth_rate_limit_requests` / `_window` |
 | Requests on an app credential | User | 5,000 | Per hour | `api_session_rate_limit_requests` / `_window` |
 | Failed app sign-ins (`app_access_auth`) | Source network (IPv4 address, IPv6 /64); and username | 60; 600 | Per 15 minutes | — |
@@ -837,7 +838,9 @@ An app password is 256 random bits, so the app sign-in limits bound load, not gu
 
 The general, failed-auth, agent, device-link and upload limits count each address separately, IPv6 included: servers in one data center share an IPv6 /64, and counting them as one caller would let one busy server use up the others' allowance. The limits that guard an account on the website (sign-in, second factor, password reset, sign-up and the like) count by network instead: an IPv4 address, or an IPv6 /64 (see [Account Security § Sign-in limits](account_security.md#sign-in-limits)), as the app sign-in limit does.
 
-A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. Key-based and keyless traffic is metered by address before authentication.
+A request shaped like the browser-session credential (no key headers, a session cookie, an `X-Joinery-Csrf` header) is metered **after** it authenticates, against its user — a person's own pages, the mail reader, the vault presence beacon and its background work are one caller, and several people behind one address are several. The anonymous browser principal, having no user, is metered by address. A request on a session key — a person's own device: a linked desktop, a phone app — is metered the same way on every route, after its key authenticates, against the same per-user budget as that person's browser; an action request on a machine key is metered by address once its key authenticates. A key request is both key headers; a public key alone is not one, and a request that authenticates with no user (the anonymous browser principal, a guest) is metered by address whatever headers it came with. A key header switches no limiter off before authentication: a sessionless action, which runs before any key is checked, meters a keyed request by address, and every other route meters keyed and keyless traffic by address before authentication.
+
+An address's count leaves out the traffic metered per person (browser sessions, session keys, app credentials), on every route the general limit guards: it counts machine keys, keyless and guest requests, and every request that failed or presented no credential. A household's own devices never fill their address's budget, and the person's own budget bounds them instead.
 
 A failed auth attempt is a credential that did not verify: a wrong password, an unknown, expired or revoked key, a bad CSRF token. A request that presents no credential at all (no key headers, and either no session cookie or a signed-out one with no `X-Joinery-Csrf` header) gets the same 400 but guessed nothing, so it counts against the general address limit, not the failed-auth one.
 

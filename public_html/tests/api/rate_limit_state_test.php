@@ -20,11 +20,14 @@
  *    Every row log() writes records its network.
  *  - apiv1.php meters a browser-shaped request per user after authentication,
  *    not per address before it, and every 429 carries Retry-After and the
- *    numbers.
+ *    numbers. A keyed action request (both key headers) is metered after
+ *    authentication too, and a principal with no user by address.
+ *  - address_rate_limit_state() leaves per-person traffic (browser, session,
+ *    app_password rows) out of an address's count.
  *
  * Run: php tests/run.php db --filter=rate_limit_state
  *
- * @version 1.1
+ * @version 1.2 - address_rate_limit_state; keyed action requests
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -39,10 +42,10 @@ $other_ip = '203.0.113.' . random_int(1, 254);
 $_SERVER['REMOTE_ADDR'] = $ip;
 
 /** One log row, $age seconds old, for $feature, carrying its network as log() writes it. */
-$row = function (string $addr, int $age, ?int $user_id = null, ?string $row_feature = null) use ($db, $feature) {
-	$stmt = $db->prepare('INSERT INTO rql_request_logs (rql_feature, rql_action, rql_ip_address, rql_ip_network, rql_usr_user_id, rql_was_success, rql_create_time)
-		VALUES (?, ?, ?, ?, ?, true, NOW() - (? || \' seconds\')::interval) RETURNING rql_request_log_id');
-	$stmt->execute(array($row_feature ?? $feature, 'test', $addr, IpAddress::network($addr), $user_id, $age));
+$row = function (string $addr, int $age, ?int $user_id = null, ?string $row_feature = null, ?string $key_type = null) use ($db, $feature) {
+	$stmt = $db->prepare('INSERT INTO rql_request_logs (rql_feature, rql_action, rql_ip_address, rql_ip_network, rql_usr_user_id, rql_api_key_type, rql_was_success, rql_create_time)
+		VALUES (?, ?, ?, ?, ?, ?, true, NOW() - (? || \' seconds\')::interval) RETURNING rql_request_log_id');
+	$stmt->execute(array($row_feature ?? $feature, 'test', $addr, IpAddress::network($addr), $user_id, $key_type, $age));
 	harness_register_row('rql_request_logs', 'rql_request_log_id', (int)$stmt->fetchColumn());
 };
 
@@ -89,6 +92,24 @@ $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u1);
 check(!$s['allowed'] && $s['count'] === 2, "a user's count spans addresses and excludes other users", json_encode($s));
 $s = RequestLogger::rate_limit_state($feature, 2, 600, null, $u2);
 check($s['allowed'] && $s['count'] === 1, 'the other user has their own count', json_encode($s));
+
+// ---------------------------------------------------------------------------
+section('An address\'s count leaves out per-person traffic');
+// ---------------------------------------------------------------------------
+
+$addr_feature = $feature . '_a';
+foreach (array('browser', 'session', 'app_password') as $per_person) {
+	$row($ip, 10, $u1, $addr_feature, $per_person);
+}
+$s = RequestLogger::address_rate_limit_state($addr_feature, 2, 600);
+check($s['allowed'] && $s['count'] === 0, 'browser, session and app-credential rows do not count against the address', json_encode($s));
+foreach (array('machine', 'guest', null) as $counted) {
+	$row($ip, 10, null, $addr_feature, $counted);
+}
+$s = RequestLogger::address_rate_limit_state($addr_feature, 3, 600);
+check(!$s['allowed'] && $s['count'] === 3, 'machine, guest and untyped (failed, no credential) rows do', json_encode($s));
+$s = RequestLogger::rate_limit_state($addr_feature, 10, 600);
+check($s['count'] === 6, 'rate_limit_state() still counts every row from the address', json_encode($s));
 
 // ---------------------------------------------------------------------------
 section('Attempt limits count by network; capacity limits by address');
@@ -145,13 +166,18 @@ section('apiv1.php meters browser sessions per user, and every 429 says when');
 
 $api = file_get_contents(PathHelper::getIncludePath('api/apiv1.php'));
 check(strpos($api, '$browser_shaped = empty($headers[\'public_key\'])') !== false
-	&& strpos($api, 'if (!$browser_shaped && !$app_shaped) {') !== false,
+	&& strpos($api, 'if (!$browser_shaped && !$app_shaped && !$key_shaped) {') !== false,
 	'a browser-shaped request skips the per-address check before authentication');
+check(strpos($api, "\$key_shaped = \$action_route && !empty(\$headers['public_key']) && !empty(\$headers['secret_key']);") !== false,
+	'a keyed ACTION request is one with both key headers, as ApiAuth reads a key request');
+check(substr_count($api, "RequestLogger::address_rate_limit_state('api'") === 3
+	&& strpos($api, "RequestLogger::rate_limit_state('api', \$api_rate_limit") === false,
+	'every general address check leaves per-person traffic out of the count');
 check(strpos($api, '$app_shaped = isset($headers[\'x_joinery_app_secret\'])') !== false
 	&& strpos($api, '$api_entry === null || $api_entry->is_app_credential()') !== false,
 	'an app credential is metered per person after authentication, like a browser session');
-$at = strpos($api, "\$app_shaped = isset(\$headers['x_joinery_app_secret'])");
-check($at !== false && strpos(substr($api, $at, 300), "=== 'action';") !== false,
+check(strpos($api, "\$action_route = strtolower(explode('/', trim((string)parse_url(\$_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'action';") !== false
+	&& strpos($api, "\$app_shaped = isset(\$headers['x_joinery_app_secret']) && \$action_route;") !== false,
 	'only an ACTION request can be app-shaped: the headers switch no limiter off on auth/login or forms');
 check(strpos($api, "rate_limit_state('api', \$session_limit, \$session_window, null, intval(\$api_user->key))") !== false,
 	'a signed-in browser session is metered per user after authentication');
