@@ -41,6 +41,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.51 - a machine of a live switch-over that signs as the node with the key of the copy's row (the
+ *                 old machine after the take-over, the copy's after going back) is that row's (moved_machine(),
+ *                 B14); a body's node_id is compared with the id signed as
  * @version 1.50 - release_archive: a release's whole core archive, streamed, for a host installing a site
  *                 from it (site_install, specs/site_container_engine.md D9); metered as a body
  * @version 1.49 - escrow: /api/v1/agent/escrow/* goes to EscrowEndpoint, signed by an encrypted data
@@ -297,6 +300,12 @@ class AgentChannelEndpoint {
 
 	/** The node this request's signature proved, once it has; 0 before. */
 	private static $signed_node = 0;
+	/**
+	 * The node id a request was signed as (its X-Joinery-Agent-Node). The node
+	 * the signature proves is the same row, except for a machine whose row
+	 * moved under it (moved_machine()); a body's node_id is compared with this.
+	 */
+	private static $stated_node = 0;
 	/** The address's bucket: false until asked, then its state when over its limit, else null. */
 	private static $address_over = false;
 	/** True when the proved node's own bucket refused this request. */
@@ -318,6 +327,7 @@ class AgentChannelEndpoint {
 	public static function dispatchPreAuth($url_segments) {
 		$endpoint = strtolower($url_segments[3] ?? '');
 		self::$signed_node = 0;
+		self::$stated_node = 0;
 		self::$node_over = false;
 		// The address's bucket is asked only where it decides something: a
 		// request that proves no node. A signed request's own bucket is its
@@ -1032,8 +1042,9 @@ class AgentChannelEndpoint {
 	 *
 	 * What comes back is the node the SIGNATURE proves, and that is the only
 	 * identity anything downstream uses. A node_id in the body exists solely to
-	 * be compared against this one; job selection never reads it, so a claim is
-	 * structurally unable to return another node's work.
+	 * be compared against the id the request was signed as; job selection never
+	 * reads it, so a claim is structurally unable to return another node's work.
+	 * The two differ only for a switch-over's old machine (moved_machine()).
 	 */
 	private static function authenticate_node($path, $raw_body_hash) {
 		$headers = [];
@@ -1085,8 +1096,13 @@ class AgentChannelEndpoint {
 
 		$message = "joinery-agent-v1\nPOST\n{$path}\n{$node_id}\n{$timestamp}\n{$nonce}\n{$raw_body_hash}";
 		if (!sodium_crypto_sign_verify_detached($signature, $message, $public_key)) {
-			self::refuse_unsigned('That request did not verify against this node\'s agent key.');
+			$moved = self::moved_machine($node, $signature, $message);
+			if (!$moved) {
+				self::refuse_unsigned('That request did not verify against this node\'s agent key.');
+			}
+			$node = $moved;
 		}
+		self::$stated_node = $node_id;
 
 		// The signature proves the node: its requests count toward its own
 		// bucket, never its address's.
@@ -1099,6 +1115,41 @@ class AgentChannelEndpoint {
 		}
 
 		return $node;
+	}
+
+	/**
+	 * The machine whose row moved under it. At a switch-over's take-over the
+	 * copy's machine takes the node's id, and the old machine's key moves to
+	 * the copy's row, now retired (SiteCopySwap); going back after it swaps
+	 * them again, and the copy's machine, which took the node's id, holds the
+	 * copy's row's key. Neither machine is told, and each goes on signing as
+	 * the node while the switch-over still has work for it (a DNS move's
+	 * forward and its quiet once settled; the copy's untrust on the way
+	 * back). So a request that fails against the node it names is tried once
+	 * more against the key of that node's live copy's row, and is that row's
+	 * when it verifies: the key proves the machine, and the row whose key it
+	 * is is the identity everything downstream uses. No other row and no other
+	 * key is tried; once the switch-over is kept or discarded, nothing is.
+	 */
+	private static function moved_machine(ManagedNode $named, string $signature, string $message): ?ManagedNode {
+		$copy = SiteCopy::live_for_source((int)$named->key);
+		$id = $copy ? (int)$copy->get('scp_copy_node_id') : 0;
+		if ($id <= 0 || $id === (int)$named->key) {
+			return null;
+		}
+		try {
+			$row = new ManagedNode($id, TRUE);
+		} catch (Exception $e) {
+			return null;
+		}
+		if ($row->get('mgn_delete_time')) {
+			return null;
+		}
+		$key = base64_decode((string)$row->get('mgn_agent_public_key'), true);
+		if ($key === false || strlen($key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+			return null;
+		}
+		return sodium_crypto_sign_verify_detached($signature, $message, $key) ? $row : null;
 	}
 
 	/** The body hash the node signed. Recomputed from exactly what arrived. */
@@ -1218,7 +1269,7 @@ class AgentChannelEndpoint {
 		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
 
 		$in = self::validate(self::known_claim_fields($body), self::claim_request_spec());
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 
@@ -1562,7 +1613,7 @@ class AgentChannelEndpoint {
 			'refusal_reason'  => ['type' => 'string', 'max' => 2048],
 		]);
 
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 		if (!in_array($in['status'], ManagementJob::AGENT_OUTCOMES, true)) {
@@ -2228,7 +2279,7 @@ class AgentChannelEndpoint {
 		$node = self::authenticate_node('/api/v1/agent/artifact', self::body_hash());
 
 		$in = self::validate($body, self::artifact_request_spec());
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 
@@ -2581,7 +2632,7 @@ class AgentChannelEndpoint {
 		$node = self::authenticate_node('/api/v1/agent/leave', self::body_hash());
 
 		$in = self::validate($body, ['node_id' => ['type' => 'int', 'required' => true]]);
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 
@@ -2615,7 +2666,7 @@ class AgentChannelEndpoint {
 			'node_id'    => ['type' => 'int', 'required' => true],
 			'quiet_time' => ['type' => 'string', 'max' => 32],
 		]);
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 
@@ -2652,7 +2703,7 @@ class AgentChannelEndpoint {
 			'node_id' => ['type' => 'int', 'required' => true],
 			'job_id'  => ['type' => 'int', 'required' => true],
 		]);
-		if ((int)$in['node_id'] !== (int)$node->key) {
+		if ((int)$in['node_id'] !== self::$stated_node) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
 		$answer = self::job_status_answer((int)$node->key, (int)$in['job_id']);

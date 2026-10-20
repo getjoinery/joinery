@@ -6,7 +6,9 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - An account whose second factor must be confirmed first is
+ *   taken to /verify-stepup and brought back, not left at a message.
  * @changelog 1.5 - The authenticator-app copy names extra mail protection as
  *   what requires it.
  * @changelog 1.4 - Renders once the step is green too: an existing passkey shows
@@ -153,8 +155,10 @@ document.addEventListener('DOMContentLoaded', function () {
 			if (pw) { body.current_password = pw.value; }
 			var opts = await joineryApi.post('passkey_register_options', body);
 			if (opts.second_factor_required) {
-				hint.textContent = opts.error || 'Please re-confirm with an existing passkey on the security page first.';
-				btn.disabled = false;
+				// Confirm with the second factor this account has (its
+				// authenticator app, before any passkey), then come back here.
+				hint.textContent = 'Taking you to confirm with your second factor…';
+				window.location = '/verify-stepup?return=' + encodeURIComponent('/setup?step=signin_security');
 				return;
 			}
 			var credential = await JoineryPasskeys.register(opts.options);

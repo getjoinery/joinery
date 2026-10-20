@@ -18,6 +18,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.25 - each way the address can move lists what would still name this server's address after it
+ *                (SiteCopyAddressFacts); the switch-over shows the list it started with and the copy's reverse DNS
  * @version 1.24 - a dormant copy made at an older release than its site's says so at once (stale_release)
  * @version 1.23 - a settle that stopped offers to try letting go of the old server again, or to keep the
  *                 switch-over as it is
@@ -765,7 +767,20 @@ $copy_plain_form = function ($action, $button, $btn_class) use ($base_url, $copy
 	echo '<input type="hidden" name="action" value="' . $copy_h($action) . '">' . SmAdminCsrf::field();
 	echo '<button type="submit" class="btn ' . $copy_h($btn_class) . '">' . $copy_h($button) . '</button></form>';
 };
-$copy_records_list = function () use ($copy_switch, $copy_h, $copy_swap_at, $copy_method) {
+// What still names the old server's address once the site has the copy's
+// (SiteCopyAddressFacts): before the switch-over, for each way the address
+// can move, and the list the switch-over started with during it.
+$copy_facts_list = function (array $facts, string $title) use ($copy_h) {
+	if (!$facts) {
+		return;
+	}
+	echo '<p class="small mb-1"><strong>' . $copy_h($title) . '</strong></p><ul class="small">';
+	foreach ($facts as $fact) {
+		echo '<li>' . $copy_h($fact) . '</li>';
+	}
+	echo '</ul>';
+};
+$copy_records_list = function () use ($copy_switch, $copy_h, $copy_swap_at, $copy_method, $copy_facts_list) {
 	if (!empty($copy_switch['records'])) {
 		echo '<ul class="small">';
 		foreach ((array)$copy_switch['records'] as $r) {
@@ -787,6 +802,10 @@ $copy_records_list = function () use ($copy_switch, $copy_h, $copy_swap_at, $cop
 			echo '<li>' . $copy_h($v6) . '</li>';
 		}
 		echo '</ul>';
+	}
+	$copy_facts_list((array)($copy_switch['address_facts'] ?? array()), 'Still naming the old server\'s address:');
+	if ((string)($copy_switch['rdns_note'] ?? '') !== '') {
+		echo '<p class="small">' . $copy_h($copy_switch['rdns_note']) . '</p>';
 	}
 };
 
@@ -833,6 +852,7 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 					: 'I have turned the old server off. Switch over: anything written to it after the backup is lost.'))
 			: 'Freeze this site now. Visitors see the maintenance page until the switch-over finishes or I go back.';
 		$any = false;
+		$copy_facts_row = SiteCopyRunner::copy_row($site_copy, false);
 		foreach (SiteCopyRunner::switch_methods($site_copy) as $method => $method_why) {
 			echo '<hr><h6>Move the address ' . $copy_h($copy_method_names[$method]) . '</h6>';
 			if ($method_why) {
@@ -840,6 +860,8 @@ if ($copy_status === SiteCopy::STATUS_DORMANT && !$in_switch) {
 				continue;
 			}
 			$any = true;
+			$copy_facts_list(SiteCopyAddressFacts::for_switch($node, $copy_domain, $method, $copy_facts_row, $site_copy->on_host()),
+				'After this move, still naming this server\'s address:');
 			if ($method === SiteCopyRunner::METHOD_PROXIED) {
 				echo '<p class="small">Visitors follow within seconds. Every record pointing at this server must be proxied; the records '
 					. 'are checked first, and nothing changes if they do not qualify. If this server only lets the proxy\'s addresses in, '
