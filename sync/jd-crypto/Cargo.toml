@@ -2,6 +2,7 @@
 name = "jd-crypto"
 description = "Native reimplementation of VaultCrypto + DriveCrypto (client-custody browser crypto). Must byte-match assets/js/vault-crypto.js and drive-crypto.js — parity enforced by tests/functional/drive/sync_crypto_parity_gate.sh."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

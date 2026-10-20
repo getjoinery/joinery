@@ -1666,6 +1666,30 @@ falling back to defaults would point a client that had been syncing one folder
 at another, and the first pass would read that as everything having been
 deleted.
 
+One `daemon` runs per home. It takes an exclusive lock on `daemon.lock` in its
+state folder before anything else, and writes its process id beside it in
+`daemon.pid` (a Windows lock keeps other handles from reading the locked file).
+A second `daemon` on the same home — one started by hand beside autostart's, a
+user's own restart loop, a copy that relaunched itself when its program file
+was replaced — waits up to ten seconds for the holder to exit, then prints that
+joinery-drive is already running (with the holder's process id) and exits with
+success, so neither launchd nor systemd starts it again. Two daemons on one home
+would drive one folder from two stores, each reading the other's work as a
+change, and turn files into conflicted copies of themselves. The lock is the
+operating system's, so it goes with the process, a crash included. Where the
+state folder cannot be locked at all, the daemon says so and runs unguarded.
+A daemon relaunching itself (an update, a replaced program file) lets go of the
+lock only after its control endpoint is gone, and the copy watching an update
+come up does not read a new copy that stood down for a running daemon as a
+failed update.
+
+A supervisor that restarts the daemon after every exit, success included (s6,
+runit, a container's restart policy), restarts a copy that stood down every ten
+seconds or so for as long as the other one runs; launchd and systemd as
+installed here do not. The other side of that: when autostart's copy is the one
+that stood down (a daemon was already running by hand), quitting the hand-run
+one leaves nothing syncing until autostart runs again, at the next login.
+
 `unlink` revokes the device's key on the server *before* forgetting it locally —
 the other order leaves a live credential nothing on this machine can name, which
 is exactly the key a lost laptop carries. It then removes every copy of the three

@@ -2,6 +2,7 @@
 name = "jd-soak"
 description = "The soak and chaos rig for the sync client (specs/drive_sync_soak.md): persona actors reproducing sync-hostile application write patterns, a fault agent, an independent verifier that never trusts the daemon's own green, and the conductor that alternates storm and settle segments for weeks."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

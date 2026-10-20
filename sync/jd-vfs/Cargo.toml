@@ -2,6 +2,7 @@
 name = "jd-vfs"
 description = "Filesystem adaptation for the sync engine: the Vfs trait jd-core is written against, a real OS implementation, and the per-OS name/case/normalization rules that keep the engine's view of the tree clean."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

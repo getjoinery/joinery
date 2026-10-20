@@ -2,6 +2,7 @@
 name = "jd-shell"
 description = "The Joinery Drive tray icon. Draws what the daemon reports and turns clicks back into requests; every judgement about what a state means lives in view.rs, as a pure function tested on every platform."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true

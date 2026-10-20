@@ -2,6 +2,7 @@
 name = "jd-platform"
 description = "Everything about a sync client that differs by operating system and is not the filesystem: where secrets live, where files belong, how the daemon starts at login, and how a browser gets opened."
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
