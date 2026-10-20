@@ -236,9 +236,9 @@ impl ProtoError {
     }
 
     /// Whether the server refused a move or rename because the item stands in
-    /// another folder, or under another name, than the one the client said it
-    /// last saw (`from_parent_id`, `from_name`). Read off the marker, as
-    /// `parent_trashed` is.
+    /// another folder, or under another name or metadata blob, than the one the
+    /// client said it last saw (`from_parent_id`, `from_name`,
+    /// `from_metadata_sha256`). Read off the marker, as `parent_trashed` is.
     pub fn moved_since(&self) -> bool {
         match self {
             ProtoError::Api { data, .. } => {

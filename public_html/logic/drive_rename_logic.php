@@ -68,6 +68,20 @@ function drive_rename_logic(array $input): LogicResult {
 			return LogicResult::error('That item has been renamed since.', array('reason' => 'moved_since'));
 		}
 	}
+	// The same for an encrypted file, asked of its metadata blob
+	// (`from_metadata_sha256`): the server cannot read the name, but a blob that
+	// is not the one the new blob was sealed from was rewritten since, by
+	// another rename or a new version. The blob asked for already is no conflict.
+	$from_metadata = isset($input['from_metadata_sha256']) ? strtolower((string)$input['from_metadata_sha256']) : '';
+	if ($from_metadata !== '' && $is_encrypted_file && !preg_match('/^[0-9a-f]{64}$/', $from_metadata)) {
+		return LogicResult::error('That is not a SHA-256 hash.', array('reason' => 'invalid_request', 'standing' => true));
+	}
+	if ($from_metadata !== '' && $is_encrypted_file) {
+		$current_blob = (string)$entity->get('fil_encrypted_metadata');
+		if (!hash_equals(hash('sha256', $current_blob), $from_metadata) && $current_blob !== $enc_metadata) {
+			return LogicResult::error('That item has been renamed since.', array('reason' => 'moved_since'));
+		}
+	}
 
 	if ($entity_type === DriveHelper::ENTITY_FOLDER) {
 		$parent_id = (int)$entity->get('fol_parent_folder_id');
@@ -122,6 +136,7 @@ function drive_rename_logic_descriptor(): array {
 			'entity_id'   => array('type' => 'int', 'required' => true, 'label' => 'Entity id'),
 			'name'        => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'New name (plaintext items)'),
 			'from_name'   => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'Name the item was last seen under (plaintext items); refused as moved_since if it is called something else now'),
+			'from_metadata_sha256' => array('type' => 'string', 'required' => false, 'max_length' => 64, 'label' => 'SHA-256 (hex) of the metadata blob the new one was sealed from (encrypted files); refused as moved_since if the stored blob is another'),
 		),
 	);
 }

@@ -720,7 +720,7 @@ on the message, which is prose for people.
 | `parent_trashed` | the destination folder is in the trash |
 | `file_trashed` | the file is in the trash |
 | `changed_since` | something in it changed after the client's cursor |
-| `moved_since` | the item stands in another folder, or under another name, than the move or rename was decided against |
+| `moved_since` | the item stands in another folder, or under another name (for an encrypted file, another metadata blob), than the move or rename was decided against |
 | `upload_incomplete` | the upload's bytes are missing, the wrong size or fail their checksum |
 | `quota`, `file_too_large` | the account's storage or per-file limit |
 | `no_room` | the server's disk is short of space |
@@ -773,12 +773,15 @@ with `moved_since` and changes nothing, so a client that decided a move before
 another device's move reached the server cannot put the item back over it
 unseen. Each asks only about the half it changes: a rename elsewhere does not
 refuse a move, and a move elsewhere does not refuse a rename. A move to where
-the item already is, and a rename to the name it already has, succeed whatever
-they say. `drive_move` asks again under the owner's write lock where the move
+the item already is, a rename to the name it already has, and a rename to the
+blob it already holds succeed whatever they say. `drive_move` asks again under the owner's write lock where the move
 lands; `drive_rename` asks once, so two requests a few milliseconds apart can
 still both land. `from_name` is read for plaintext names only: an encrypted
-file's title is its opaque placeholder. A request that names neither is
-carried out wherever the item stands, as the Drive pages' own moves and
+file's title is its opaque placeholder. An encrypted file's rename takes
+`from_metadata_sha256` instead, the SHA-256 (hex) of the metadata blob the new
+one was sealed from; a stored blob that is another, rewritten by a rename or a
+new version since, is refused the same way. A request that says none of these
+is carried out wherever the item stands, as the Drive pages' own moves and
 renames are.
 
 A request the API's own input schema refuses, before the logic runs, comes

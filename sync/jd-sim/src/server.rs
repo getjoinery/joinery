@@ -1963,6 +1963,16 @@ impl MockServer {
                 return Err(refused("moved_since", "That item has been renamed since."));
             }
         }
+        // The same for an encrypted file, asked of its blob
+        // (`from_metadata_sha256`): one that is not the blob the new one was
+        // sealed from was rewritten since, by a rename or a version. The blob
+        // asked for already is no conflict.
+        if let Some(seen) = body.get("from_metadata_sha256").and_then(Value::as_str).filter(|h| !h.is_empty() && encrypted_file) {
+            let now = st.files.get(&id).and_then(|f| f.encrypted_metadata.clone()).unwrap_or_default();
+            if sha256_hex(now.as_bytes()) != seen && now != enc_metadata {
+                return Err(refused("moved_since", "That item has been renamed since."));
+            }
+        }
 
         // Renaming onto a name a live sibling already holds is refused, exactly
         // as the real server's partial unique index refuses it. The mock checked

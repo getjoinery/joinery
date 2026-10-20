@@ -3777,11 +3777,19 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
 /// changed any of them since this one last looked. Building a fresh blob from
 /// what this device happens to remember would silently discard whatever it did
 /// not know about, which is a data loss that looks exactly like a rename.
+///
+/// `seen` is the name the rename was decided against. A blob that names
+/// something else was renamed by somebody else since, and resealing it would
+/// put this name over theirs unseen. Returned beside the new blob is the hash
+/// of the one it was built from, for the server to ask about
+/// (`from_metadata_sha256`): the new blob is sent again on every retry, and
+/// another rename or version can land in between.
 fn reseal_metadata(
     env: &ExecEnv,
     entry: &Entry,
     new_name: &str,
-) -> Result<Result<String, OpOutcome>, ExecError> {
+    seen: Option<&str>,
+) -> Result<Result<(String, String), OpOutcome>, ExecError> {
     let (Some(vault), Some(wrapped)) = (env.vault, entry.wrapped_file_key.as_deref()) else {
         return Ok(Err(OpOutcome::Retry(
             "waiting for a key for this encrypted file".into(),
@@ -3805,11 +3813,16 @@ fn reseal_metadata(
         Ok(m) => m,
         Err(e) => return Ok(Err(OpOutcome::Retry(e.to_string()))),
     };
+    if seen.is_some_and(|seen| meta.name != seen && meta.name != new_name) {
+        return Ok(Err(OpOutcome::Overtaken(
+            "the server has moved it since this was planned".into(),
+        )));
+    }
+    let base = hex(&Sha256::digest(blob.as_bytes()));
     meta.name = new_name.to_string();
-    Ok(Ok(jd_crypto::drive::encrypt_metadata(&meta, &file_key)
-        .map_err(|e| {
-            ExecError::Contract(format!("sealing file metadata: {e}"))
-        })?))
+    let sealed = jd_crypto::drive::encrypt_metadata(&meta, &file_key)
+        .map_err(|e| ExecError::Contract(format!("sealing file metadata: {e}")))?;
+    Ok(Ok((sealed, base)))
 }
 
 /// An encrypted upload, ready to send.
@@ -5240,29 +5253,42 @@ fn move_remote(
     // is refused identically every time after, so the op retries for as long as
     // the computer is on. Any transport hiccup during a vault rename was enough
     // to trigger it.
+    //
+    // Only for a rename: a move alone sends no name, and resealing for it asked
+    // the blob about a name the move does not change.
+    //
+    // Where the op was decided against, it says so as a plaintext rename does,
+    // but of the blob: the server cannot read the name, so it is asked whether
+    // the blob it holds is the one this was sealed from.
     let sealed_name = entry.is_encrypted && op.entity.entity_type == EntityType::File;
-    let sealed_body = if sealed_name {
-        let stored: Option<String> = serde_json::from_str::<Value>(&op.params)
-            .ok()
-            .and_then(|p| p.get("sealed_name").and_then(Value::as_str).map(str::to_owned));
-        let blob = match stored {
-            Some(blob) => blob,
-            None => match reseal_metadata(env, &entry, &to.name)? {
-                Ok(blob) => {
-                    let mut params: Value =
-                        serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
-                    params["sealed_name"] = json!(blob);
-                    env.store.set_op_params(op.op_id, &params.to_string())?;
-                    blob
+    let sealed_body = if sealed_name && entry.remote.name != to.name {
+        let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+        let stored = params.get("sealed_name").and_then(Value::as_str).map(str::to_owned);
+        let (blob, base) = match stored {
+            Some(blob) => (blob, params.get("sealed_from").and_then(Value::as_str).map(str::to_owned)),
+            None => {
+                let seen = at.borrow().as_ref().map(|seen| seen.name.clone());
+                match reseal_metadata(env, &entry, &to.name, seen.as_deref())? {
+                    Ok((blob, base)) => {
+                        let mut params = params;
+                        params["sealed_name"] = json!(blob);
+                        params["sealed_from"] = json!(base);
+                        env.store.set_op_params(op.op_id, &params.to_string())?;
+                        (blob, Some(base))
+                    }
+                    Err(why) => return Ok(why),
                 }
-                Err(why) => return Ok(why),
-            },
+            }
         };
-        Some(json!({
+        let mut body = json!({
             "entity_type": t,
             "entity_id": op.entity.server_id,
             "encrypted_metadata": blob,
-        }))
+        });
+        if let (Some(base), true) = (base, at.borrow().is_some()) {
+            body["from_metadata_sha256"] = json!(base);
+        }
+        Some(body)
     } else {
         None
     };
@@ -5286,6 +5312,9 @@ fn move_remote(
         // placeholder, whatever it is called.
         let body = match &sealed_body {
             Some(body) => body.clone(),
+            None if sealed_name => {
+                return Err(ExecError::Contract("an encrypted file's rename was not sealed".into()));
+            }
             None => {
                 let mut body = json!({
                     "entity_type": t,
