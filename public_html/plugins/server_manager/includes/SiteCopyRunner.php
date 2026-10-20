@@ -98,6 +98,8 @@
  * that keeps advancing the copy until it waits on an agent job or stops, so a
  * machine's reboot is followed in seconds rather than at the next task tick.
  *
+ * @version 1.30 - a way back before the copy took the node asks it no untrust (B13); a switch-over records what still names the old server's address (SiteCopyAddressFacts, D1's
+ *                IP-bound list), and once a move by DNS settles sets the copy's reverse DNS on a server made here
  * @version 1.29 - stale_release(): a copy made at an older release than its site's is refused by the Refresh
  *                before anything moves and named on its tab; the switch-over asks the site its release first
  * @version 1.28 - review of 1.27 (B2-B9, B12): the copy is proven at its own address whether or not anything
@@ -2477,6 +2479,7 @@ class SiteCopyRunner {
 			} catch (Exception $e) {
 				throw new SiteCopyException('Nothing was ' . ($copy->from_backups() ? 'changed' : 'frozen') . ': ' . $e->getMessage());
 			}
+			$record['address_facts'] = SiteCopyAddressFacts::for_switch($source, $domain, $method, $node, $copy->on_host());
 			// A container source's old container, and the hosts a freeze or a
 			// copy onto a host act through, are recorded now, before the rows
 			// swap: after, the site's row is the copy's.
@@ -2749,6 +2752,7 @@ class SiteCopyRunner {
 				$watch['state'] = 'settled';
 				$watch['settled_time'] = gmdate('Y-m-d H:i:s');
 				$watch['by_time'] = $r['by_time'];
+				$switch['rdns_note'] = self::settle_reverse_dns($copy, !empty($r['agree']));
 			}
 			$switch['watch'] = $watch;
 			$copy->set_switch_record($switch);
@@ -2766,6 +2770,34 @@ class SiteCopyRunner {
 			self::unlock();
 		}
 		self::start_worker_for($copy, $template);
+	}
+
+	/**
+	 * Once a move by DNS has settled, the copy's server answers the site's
+	 * name in reverse DNS too, when this management node made it: a provider
+	 * takes only a name that resolves to the address, so not before. After
+	 * the take-over the site's row is the copy's server. A container's
+	 * address is its host's, and so is its reverse DNS. When the public
+	 * resolvers agree, this machine's own resolver is not asked again (it may
+	 * hold the old answer a little longer); the provider checks the name
+	 * itself. Never throws: what happened is a line for the Copy tab.
+	 */
+	private static function settle_reverse_dns(SiteCopy $copy, bool $resolvers_agree): string {
+		try {
+			if ($copy->on_host()) {
+				return '';
+			}
+			$node = self::source_row($copy);
+			if (!SiteCopyAddressFacts::made_here($node)) {
+				return '';
+			}
+			$p = NodeReverseDns::provisionForNode($node);
+			$driver = IpSwapMove::$driver_for ? (IpSwapMove::$driver_for)($p) : null;
+			$r = NodeReverseDns::setQuietly($node, self::site_domain($node), $driver, $resolvers_agree);
+			return $r['ok'] ? 'Reverse DNS: ' . $r['message'] . '.' : 'Reverse DNS was not set: ' . $r['message'];
+		} catch (Exception $e) {
+			return 'Reverse DNS was not set: ' . $e->getMessage();
+		}
 	}
 
 	/**
@@ -3160,7 +3192,10 @@ class SiteCopyRunner {
 			}
 			// The copy's machine stops believing the old server's forwarded
 			// addresses (after the swap back, the copy's row is the copy's).
-			if (self::forwards($copy)) {
+			// It was told to only as it took the node (dns_start_steps()); a
+			// copy that never took it believes nothing, and as a dormant copy
+			// refuses the word.
+			if (self::forwards($copy) && $swapped) {
 				$template[] = array('op' => 'trust_forwarder', 'on' => $copy->on_host() ? 'copy_host' : 'copy', 'arg' => 'untrust');
 			}
 			if (!$backups) {

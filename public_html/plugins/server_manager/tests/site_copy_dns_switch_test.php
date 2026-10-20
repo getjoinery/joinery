@@ -23,8 +23,13 @@
  *    resolver names the copy and one old TTL has passed; then the copy stops
  *    believing the old server and the old server is powered off;
  *  - Keep puts the TTLs back; the way back during the watch puts the records
- *    and their TTLs back, and the copy stops believing the old server.
+ *    and their TTLs back, and the copy stops believing the old server;
+ *  - what still names the old server's address (SiteCopyAddressFacts): the
+ *    SPF entries covering it, listed before the switch and kept by it, and
+ *    the copy's reverse DNS set once the move settles on a server made here.
  *
+ * @version 1.2 - a way back before the copy took the node asks it no untrust (B13)
+ * @version 1.1 - the IP-bound list and the reverse DNS at settle
  * @version 1.0
  */
 
@@ -84,7 +89,11 @@ class ScdFakeCloud implements CloudComputeProvider {
 	}
 	public function bootInstance(string $instance_id): void { $this->status = 'running'; }
 	public function getTransfer(): array { return array(); }
-	public function setReverseDns(string $instance_id, string $ip, string $hostname): array { return array(); }
+	public $rdns = array();
+	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {
+		$this->rdns[] = array($instance_id, $ip, $hostname);
+		return array('ip' => $ip, 'rdns' => $hostname);
+	}
 }
 $cloud = new ScdFakeCloud();
 IpSwapMove::$driver_for = function ($p) use ($cloud) { return $cloud; };
@@ -118,7 +127,7 @@ PublicResolvers::$asker = function ($resolver, $name, $type) use (&$resolve, &$d
 	$values = $resolve[strtolower($name) . ' ' . $type] ?? array();
 	$answer = array();
 	foreach ($values as $v) {
-		$answer[] = array('type' => $type === 'A' ? 1 : 28, 'data' => $v, 'ttl' => 60);
+		$answer[] = array('type' => $type === 'A' ? 1 : ($type === 'TXT' ? 16 : 28), 'data' => $v, 'ttl' => 60);
 	}
 	return array('rcode' => 0, 'answers' => $answer);
 };
@@ -216,6 +225,18 @@ $pair = function (string $n) use ($mk_node, $domain, $S4, $S6, $T4, $T6, $words,
 	}
 	$c->save();
 	harness_register_row('scp_site_copies', 'scp_site_copy_id', $c->key);
+	if ($n === 'a') {
+		// This copy's server was made here, so its reverse DNS is set from here.
+		$cp = new CustomerCloudProvision(NULL);
+		foreach (array('cvp_origin' => 'admin', 'cvp_usr_user_id' => 1, 'cvp_domain' => $domain, 'cvp_slug' => 'harnessscd-cp' . $n . '-' . $tag,
+				'cvp_status' => 'done', 'cvp_docker_mode' => 'bare-metal', 'cvp_provider' => 'linode', 'cvp_hosting_mode' => 'operator',
+				'cvp_instance_id' => '7200' . $n, 'cvp_instance_ip' => $T4, 'cvp_instance_ipv6' => $T6, 'cvp_region' => 'us-central',
+				'cvp_mgn_managed_node_id' => (int)$cnode->key) as $k => $v) {
+			$cp->set($k, $v);
+		}
+		$cp->save();
+		harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cp->key);
+	}
 	return array($src, $cnode, $c);
 };
 
@@ -299,6 +320,33 @@ check(count($plan['records']) === 3 && $by[$domain . ' A']['to'] === $T4 && $by[
 check(ScdFakeDns::$writes === array(), 'planning writes nothing');
 
 // ---------------------------------------------------------------------------
+section('What still names the old server\'s address');
+
+$resolve[$domain . ' TXT'] = array('v=spf1 ip4:' . $S4 . ' ip4:192.0.2.0/24 ip6:2001:db8:71::/48 include:_spf.example.net -all',
+	'note ip4:203.0.113.0/24');
+check(SiteCopyAddressFacts::spf_entries($domain, array($S4, $S6)) === array('ip4:' . $S4, 'ip6:2001:db8:71::/48'),
+	'the SPF entries covering the old server\'s addresses, an address or a block, and no other record',
+	json_encode(SiteCopyAddressFacts::spf_entries($domain, array($S4, $S6))));
+check(SiteCopyAddressFacts::covers('203.0.113.0/25', $S4) && !SiteCopyAddressFacts::covers('203.0.113.128/25', $S4)
+	&& !SiteCopyAddressFacts::covers('203.0.113.70', $S4) && !SiteCopyAddressFacts::covers('2001:db8::/32', $S4)
+	&& SiteCopyAddressFacts::covers('2001:db8:70::/46', $S6),
+	'a block covers what its prefix covers, of its own family only');
+$facts = SiteCopyAddressFacts::for_switch($src, $domain, SiteCopyRunner::METHOD_DNS, $cnode);
+$text = implode("\n", $facts);
+check(strpos($text, 'names ip4:' . $S4) !== false && strpos($text, 'names ip6:2001:db8:71::/48') !== false
+	&& strpos($text, 'this management node sets the copy\'s address') !== false && strpos($text, $S4 . ', ' . $S6) !== false,
+	'by DNS: each SPF entry, reverse DNS set from here (the copy\'s server was made here), and the allow-lists naming both addresses', $text);
+$text = implode("\n", SiteCopyAddressFacts::for_switch($src, $domain, SiteCopyRunner::METHOD_MANUAL, $mk_node('brought', array('mgn_host' => '198.51.100.99'))));
+check(strpos($text, 'at its provider') !== false, 'by hand onto a server brought here: its reverse DNS is the owner\'s to set', $text);
+$text = implode("\n", SiteCopyAddressFacts::for_switch($src, $domain, SiteCopyRunner::METHOD_PROXIED, $cnode));
+check(strpos($text, 'names ip4:') !== false && strpos($text, 'Reverse DNS') === false,
+	'through the proxy: the SPF entries, and no reverse DNS (the name resolves to the proxy)', $text);
+check(strpos(implode(' ', SiteCopyAddressFacts::for_switch($src, $domain, SiteCopyRunner::METHOD_DNS, $cnode, true)), 'its host\'s') !== false,
+	'onto a host: the reverse DNS is the host\'s');
+check(SiteCopyAddressFacts::for_switch($src, $domain, SiteCopyRunner::METHOD_IP_SWAP, $cnode) === array(),
+	'an IP swap moves the address itself: nothing listed');
+
+// ---------------------------------------------------------------------------
 section('The switch: TTLs first, then the freeze');
 
 $reset_zone();
@@ -311,6 +359,8 @@ $sw = $copy->switch_record();
 check($copy->status() === SiteCopy::STATUS_FREEZING && $sw['method'] === 'dns' && $sw['forward_to'] === $T4 && $sw['forward_from'] === $S4
 	&& isset($sw['power']['source']), 'frozen: it forwards to the copy\'s address, from its own, and its server is powered off once settled',
 	json_encode($sw));
+check(strpos(implode(' ', (array)($sw['address_facts'] ?? array())), 'names ip4:' . $S4) !== false,
+	'the switch-over keeps the list of what still names the old address', json_encode($sw['address_facts'] ?? null));
 $drive($copy, SiteCopy::STATUS_FREEZING);
 check($copy->status() === SiteCopy::STATUS_READY, 'the final copy matches', $copy->status() . ' ' . $copy->get('scp_halt_reason'));
 
@@ -370,6 +420,8 @@ $sw = $copy->switch_record();
 check(in_array('trust_forwarder:untrust@source', $ops, true) && $cloud->shutdowns === 1 && $copy->status() === SiteCopy::STATUS_SWITCHED
 	&& ($sw['watch']['state'] ?? '') === 'settled' && !empty($sw['source_off']),
 	'the copy stops believing the old server, and the old server is powered off', json_encode(array($ops, $cloud->shutdowns, $copy->status(), $sw['watch'] ?? null)));
+check($cloud->rdns === array(array('7200a', $T4, $domain)) && strpos((string)($sw['rdns_note'] ?? ''), $T4 . ' now answers ' . $domain) !== false,
+	'once settled, the copy\'s server (made here) answers the site\'s name in reverse DNS', json_encode(array($cloud->rdns, $sw['rdns_note'] ?? null)));
 
 // ---------------------------------------------------------------------------
 section('Keep puts the TTLs back');
@@ -438,6 +490,17 @@ check($r !== null && $r['rcode'] === 0 && count($r['answers']) === 1 && $r['answ
 	'a response read: the A record behind a CNAME, with its TTL', json_encode($r));
 check(PublicResolvers::parse(substr($msg, 0, 40)) === null, 'a cut-off response reads as none');
 check(PublicResolvers::parse(pack('nnnnnn', 0, 0x8183, 0, 0, 0, 0))['rcode'] === 3, 'NXDOMAIN reads as an answer of none');
+// A TXT answer split into two character-strings, as a long SPF record is.
+$txt = "\x0fv=spf1 ip4:1.2.\x083.4 -all";
+$msg = pack('nnnnnn', 0, 0x8180, 1, 1, 0, 0) . "\7example\3org\0" . pack('nn', 16, 1)
+	. "\xc0\x0c" . pack('nnNn', 16, 1, 300, strlen($txt)) . $txt;
+$r = PublicResolvers::parse($msg);
+check($r !== null && count($r['answers']) === 1 && $r['answers'][0]['type'] === 16 && $r['answers'][0]['data'] === 'v=spf1 ip4:1.2.3.4 -all',
+	'a TXT record read: its strings joined, as written', json_encode($r));
+$bad = "\x40v=spf1";
+$msg = pack('nnnnnn', 0, 0x8180, 1, 1, 0, 0) . "\7example\3org\0" . pack('nn', 16, 1)
+	. "\xc0\x0c" . pack('nnNn', 16, 1, 300, strlen($bad)) . $bad;
+check(PublicResolvers::parse($msg)['answers'] === array(), 'a TXT string longer than its record reads as nothing');
 
 // ---------------------------------------------------------------------------
 section('The watch ends');
@@ -478,7 +541,11 @@ SiteCopyRunner::go_back($copy, $dns());
 $copy->load();
 check(ScdFakeDns::$records['r1']['ttl'] === 3600 && ScdFakeDns::$records['r2']['ttl'] === 300 && ScdFakeDns::$records['r1']['value'] === $S4
 	&& empty($copy->switch_record()['ttl_lowered']), 'each record\'s old TTL again, still at the site\'s server', json_encode(ScdFakeDns::$records));
-$drive($copy, SiteCopy::STATUS_RETURNING);
+list($ops) = $drive($copy, SiteCopy::STATUS_RETURNING);
+$copy->load();
+check($ops === array('site_quiet:off@source'),
+	'nothing asks the copy to stop believing a server it was never told to believe (a dormant copy refuses it): the site just starts',
+	json_encode(array($ops, $copy->status(), $copy->get('scp_halt_reason'))));
 
 // ---------------------------------------------------------------------------
 section('An old agent: no forward, and the copy is still proven at its own address');

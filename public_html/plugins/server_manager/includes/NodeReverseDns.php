@@ -25,6 +25,8 @@
  * their own Cloud Manager. That is said plainly, with no reconnect: there is
  * no grant to reconnect.
  *
+ * @version 1.5 - the forward check is skipped by a caller that has seen the public resolvers agree (a settled
+ *               site copy move by DNS), not only by tests
  * @version 1.4 - the driver is the provision's provider's (ComputeDriverRegistry), any provider with a driver
  *               (site_copy_anything_to_anything D2)
  * @version 1.3 - a server in one of our accounts uses that account's credential (cloud_accounts_list)
@@ -104,7 +106,9 @@ class NodeReverseDns {
 	 * @param ManagedNode $node
 	 * @param string $hostname   FQDN the IP should reverse-resolve to.
 	 * @param CloudComputeProvider|null $driver  Injectable for tests.
-	 * @param bool $skip_forward_check           Tests only.
+	 * @param bool $skip_forward_check           True when the caller has seen the public resolvers name the
+	 *                                           address already (a settled site copy move), so this machine's
+	 *                                           own resolver, which may lag, is not asked; the provider checks.
 	 * @return array {ip, rdns}
 	 * @throws NodeReverseDnsException with an operator-actionable message.
 	 */

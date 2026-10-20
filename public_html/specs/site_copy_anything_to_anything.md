@@ -27,8 +27,10 @@ shared and reserved IPv4 refused as a forward address.
   region refused before the copy's server is made. Gate: `site_copy_matrix_test.php`.
 - **WP3:** `DnsRecordMove`, `PublicResolvers` (DNS-over-HTTPS), the watch and the settle phase
   (`settling`); the forward (`site_quiet forward`, `site_quiet_host forward`) and `trust_forwarder`
-  (agent 1.84.0). Gates: `site_copy_dns_switch_test.php`, `site_quiet_gate.sh`,
-  `site_quiet_host_gate.sh`, `trust_forwarder_gate.sh`.
+  (agent 1.84.0). The IP-bound list (`SiteCopyAddressFacts`, found missing in the final test's C3
+  and built then) and the copy's reverse DNS set once a move settles. Gates:
+  `site_copy_dns_switch_test.php`, `site_quiet_gate.sh`, `site_quiet_host_gate.sh`,
+  `trust_forwarder_gate.sh`.
 - **WP4:** a running container copies anywhere, frozen through its host; the way back after
   take-over on a host (B7). Gates: the site copy suites, updated.
 - **WP5:** `HetznerComputeDriver`; a Hetzner account on the Hosting tab. Gate:

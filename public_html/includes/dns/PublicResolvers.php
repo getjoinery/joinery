@@ -14,6 +14,7 @@
  * Read-only and credential-free. A resolver that cannot be asked answers
  * nothing, which is never read as agreement.
  *
+ * @version 1.2 - TXT records, for the SPF entries a switch-over leaves naming the old server (SiteCopyAddressFacts)
  * @version 1.1 - every resolver asked in RFC 8484 wire format on 443 (Quad9's JSON port 5053 is unreachable from
  *                some networks); agree() is gone, its one caller judges the answers itself
  * @version 1.0
@@ -28,7 +29,7 @@ class PublicResolvers {
 		'Quad9'      => 'https://dns.quad9.net/dns-query',
 	);
 
-	const TYPE_NUMBERS = array('A' => 1, 'AAAA' => 28);
+	const TYPE_NUMBERS = array('A' => 1, 'AAAA' => 28, 'TXT' => 16);
 
 	/**
 	 * Asks one resolver: fn(string $resolver, string $name, string $type): ?array,
@@ -42,9 +43,10 @@ class PublicResolvers {
 	public static $asker = null;
 
 	/**
-	 * Each resolver's answer for one name and type (A or AAAA):
+	 * Each resolver's answer for one name and type (A, AAAA or TXT):
 	 * [resolver => ['ok' => bool, 'values' => string[], 'ttl' => int]].
-	 * NXDOMAIN is an answer (no values); any other failure is not ok.
+	 * NXDOMAIN is an answer (no values); any other failure is not ok. An
+	 * address is lowercased; a TXT record is its strings joined, as written.
 	 */
 	public static function answers(string $name, string $type): array {
 		$out = array();
@@ -59,7 +61,7 @@ class PublicResolvers {
 			$ttl = 0;
 			foreach ((array)($r['answers'] ?? array()) as $a) {
 				if ((int)($a['type'] ?? 0) === $want && isset($a['data'])) {
-					$values[] = strtolower(trim((string)$a['data']));
+					$values[] = $want === 16 ? (string)$a['data'] : strtolower(trim((string)$a['data']));
 					$ttl = max($ttl, (int)($a['ttl'] ?? 0));
 				}
 			}
@@ -121,12 +123,30 @@ class PublicResolvers {
 			$data = null;
 			if (($rr['type'] === 1 && $rr['len'] === 4) || ($rr['type'] === 28 && $rr['len'] === 16)) {
 				$data = inet_ntop($rdata);
+			} elseif ($rr['type'] === 16) {
+				$data = self::txt_strings($rdata);
 			}
 			$answers[] = array('type' => $rr['type'], 'ttl' => $rr['ttl'] & 0x7fffffff, 'data' => $data);
 		}
 		return array('rcode' => $h['flags'] & 0x0f, 'answers' => array_values(array_filter($answers, function ($a) {
 			return $a['data'] !== null;
 		})));
+	}
+
+	/** A TXT record's character-strings (RFC 1035 3.3.14) joined, or null when they overrun it. */
+	private static function txt_strings(string $rdata): ?string {
+		$out = '';
+		$pos = 0;
+		$n = strlen($rdata);
+		while ($pos < $n) {
+			$len = ord($rdata[$pos]);
+			if ($pos + 1 + $len > $n) {
+				return null;
+			}
+			$out .= substr($rdata, $pos + 1, $len);
+			$pos += 1 + $len;
+		}
+		return $out;
 	}
 
 	/** The offset past the name at $pos (labels, or a pointer that ends it), or null. */

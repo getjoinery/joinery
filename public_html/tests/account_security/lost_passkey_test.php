@@ -17,7 +17,8 @@
  * where the authenticator app is offered, rather than a dead-end error.
  *
  * The four vault actions behind the same confirmation answer with that flag
- * too (checked in their source: each needs a vault and a ceremony to reach).
+ * too (checked in their source: each needs a vault and a ceremony to reach),
+ * and the setup wizard's Add a passkey follows it to /verify-stepup.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -79,6 +80,13 @@ foreach (array('vault_regenerate_codes', 'vault_passphrase_enroll', 'vault_passp
 	check(strpos($src, "'second_factor_required' => true") !== false && strpos($src, 'with an existing passkey') === false,
 		"{$action} asks with the step-up flag, not for an existing passkey");
 }
+
+section('The setup wizard sends the step-up, not a dead end');
+$src = file_get_contents(PathHelper::getIncludePath('includes/setup_steps/signin_security.php'));
+$at = strpos($src, 'if (opts.second_factor_required)');
+$branch = $at === false ? '' : substr($src, $at, 400);
+check(strpos($branch, "'/verify-stepup?return='") !== false,
+	'its Add a passkey goes to /verify-stepup when a second factor is owed');
 
 $_SESSION = array();
 harness_finish();

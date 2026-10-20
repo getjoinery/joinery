@@ -293,7 +293,10 @@ be able to quietly enroll their own key:
 **The `/setup` wizard mounts these same ceremonies.** The first-login setup
 wizard's sign-in and encryption-key steps drive the identical API actions
 (`passkey_register_*`, the TOTP enrollment actions, `vault_setup_*`), so every
-guard above applies there unchanged. `/setup` is exempt from the admin and
+guard above applies there unchanged. When an action answers that a second
+factor must be confirmed first (an account with an authenticator app adding its
+first passkey), the wizard sends the person to `/verify-stepup` and back to the
+step, as the security page does. `/setup` is exempt from the admin and
 vault 2FA navigation gates for the same reason `/profile/security` is: it
 is a place where the required factor gets enrolled.
 
