@@ -919,7 +919,15 @@ impl Vfs for OsVfs {
         // problem and deserves exactly the same broom.
         let name = format!(".jd-tmp-{}", (self.next_token)());
         let path = self.spool_dir.join(name);
-        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
+        // Readable as well as writable: `finish` hands this same handle back
+        // to be read from the start, and a handle opened only to write
+        // refuses every read (EBADF on Unix, access denied on Windows).
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| io_err(&path, e))?;
         Ok(Box::new(OsScratchFile {
             file: Some(file),
             path,
@@ -1450,6 +1458,28 @@ mod tests {
         let root = dir.path().join("root");
         fs::create_dir_all(&root).unwrap();
         OsVfs::new(root, dir.path().join("spool")).unwrap()
+    }
+
+    /// A finished scratch file reads back what was written to it, from its
+    /// start, and is gone once the reader is dropped. An encrypted upload
+    /// sends its ciphertext this way; a write-only handle failed every one.
+    #[test]
+    fn a_finished_scratch_file_reads_back_what_was_written() {
+        let d = TempDir::new("scratch");
+        let v = vfs(&d);
+        let mut w = v.scratch().unwrap();
+        w.write_all(b"the ciphertext an upload sends").unwrap();
+        let mut r = w.finish().unwrap();
+        let mut read = Vec::new();
+        r.read_to_end(&mut read).unwrap();
+        assert_eq!(read, b"the ciphertext an upload sends");
+        r.seek(SeekFrom::Start(4)).unwrap();
+        read.clear();
+        r.read_to_end(&mut read).unwrap();
+        assert_eq!(read, b"ciphertext an upload sends", "a resumed upload seeks within it");
+        drop(r);
+        let left: Vec<_> = fs::read_dir(d.path().join("spool")).unwrap().collect();
+        assert!(left.is_empty(), "the scratch file outlived its reader");
     }
 
     /// An opened file is the file it opened: its fingerprint is read from
